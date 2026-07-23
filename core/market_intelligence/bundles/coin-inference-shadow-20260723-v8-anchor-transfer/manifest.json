@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "bundle_version": "coin-inference-shadow-00f8ccdf84d2-820e9d3ba2-66f3f517a5",
+  "status": "SHADOW_NOT_PROMOTED",
+  "created_at_utc": "2026-07-23T13:24:28Z",
+  "source_model": {
+    "sha256": "00f8ccdf84d2784af3bccef632f1646b88fd1236f4becd4f29496db82f8a02fd",
+    "schema_version": 5,
+    "model_kind": "QUALITY_FILTERED_RECENT_TRADE_AND_BOOK_BAND_THEN_ROBUST_HYBRID_INTRINSIC_PLUS_EMPIRICAL_BUBBLE",
+    "is_llm": false
+  },
+  "ranker_policy_version": "COMMODITY_RANKER_SHADOW_V4_COIN_ANCHOR_TRANSFER_20260723",
+  "feature_schema_version": "COIN_INFERENCE_FEATURES_V4_COIN_ANCHOR_TRANSFER_20260723",
+  "interval_policy_version": "MARKET_BAND_INTERVAL_V1_20260723",
+  "minimum_compatible_code_version": "COIN_INTELLIGENCE_SHADOW_V4_COIN_ANCHOR_TRANSFER",
+  "anchor_transfer_policy_sha256": "66f3f517a5f6fee168c329dc7458e2c091fb9ea27fe51e26a962aa210aebcd09",
+  "anchor_transfer_enabled": true,
+  "training_payload_embedded": false,
+  "absolute_machine_paths_embedded": false,
+  "files": {
+    "coin_range_model.json": {
+      "sha256": "82cec0fe7cda1877c3f40124ea70e848cd95c5d0eca0c79c87a2b4396d47204e",
+      "size_bytes": 69717
+    },
+    "commodity_ranker_policy.json": {
+      "sha256": "dba3dc03f1ea2e473e3d6202b1f66fca994217be2032c821cf2d3b9b6abc847e",
+      "size_bytes": 5139
+    },
+    "feature_schema.json": {
+      "sha256": "3bb03825ed4f262dbd91f1a9e2200ccfeed48971d6d62af0e0e428064e50d8de",
+      "size_bytes": 4613
+    },
+    "interval_policy.json": {
+      "sha256": "d27dd4f4a7befdbbbd263a6d454beef27d014a27285b4b8910f8f5a7cc716031",
+      "size_bytes": 992
+    },
+    "pipeline_policy.json": {
+      "sha256": "6705b15ae275f0263d65f570fb0e88ef38023b2af1dd4a35419e5f7a0e42c31f",
+      "size_bytes": 3008
+    },
+    "commodity_catalog.json": {
+      "sha256": "f036cf7c060267d22ec38e2ac3f7fca6dc2fecc8dc5ac44ac672d058a8360370",
+      "size_bytes": 917
+    },
+    "ranker_validation_summary.json": {
+      "sha256": "e679a479232b7756cff6cb2955fddba4093cf53795cf75e0426fdc17ca0c0607",
+      "size_bytes": 1247
+    },
+    "coin_anchor_transfer_policy.json": {
+      "sha256": "66f3f517a5f6fee168c329dc7458e2c091fb9ea27fe51e26a962aa210aebcd09",
+      "size_bytes": 27740
+    },
+    "coin_anchor_transfer_validation_summary.json": {
+      "sha256": "d2dd61ed7f509f6c503d62ab2148817465961a9c9f6f1104f82122e5f9fedd85",
+      "size_bytes": 12414
+    }
+  }
+}

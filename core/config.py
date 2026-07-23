@@ -123,6 +123,13 @@ class Settings(BaseSettings):
     release_sha: str | None = None
     log_level: str = "INFO"
     log_format: str = "json"
+    # Coin intelligence starts in observation-only Shadow mode. Enabling this
+    # flag must never alter the parsed offer or persisted commodity.
+    coin_intelligence_shadow_enabled: bool = False
+    # Optional operator-supplied paths. The bundle defaults to the verified
+    # repository artifact; a live range snapshot has no implicit default.
+    coin_intelligence_bundle_path: str | None = None
+    coin_intelligence_snapshot_path: str | None = None
     error_tracking_dsn: str | None = None
     error_tracking_sample_rate: float = 1.0
     error_tracking_rate_limit_window_seconds: int = 60

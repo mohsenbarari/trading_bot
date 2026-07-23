@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "catalog_version": "commodity-5d0a7370a1498671",
+  "commodities": [
+    {
+      "id": 1,
+      "name": "امام",
+      "coefficient": 2.253,
+      "low_date": false
+    },
+    {
+      "id": 2,
+      "name": "بهار",
+      "coefficient": 2.253,
+      "low_date": true
+    },
+    {
+      "id": 3,
+      "name": "ربع بهار",
+      "coefficient": 0.56325,
+      "low_date": false
+    },
+    {
+      "id": 4,
+      "name": "نیم بهار",
+      "coefficient": 1.1265,
+      "low_date": false
+    },
+    {
+      "id": 5,
+      "name": "ربع تاریخ پایین",
+      "coefficient": 0.56325,
+      "low_date": true
+    },
+    {
+      "id": 6,
+      "name": "نیم تاریخ پایین",
+      "coefficient": 1.1265,
+      "low_date": true
+    },
+    {
+      "id": 7,
+      "name": "یک گرمی",
+      "coefficient": 0.27712177121771214,
+      "low_date": false
+    }
+  ]
+}

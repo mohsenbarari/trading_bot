@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "policy_version": "MARKET_BAND_INTERVAL_V1_20260723",
+  "locked_at_utc": "2026-07-23T08:41:45Z",
+  "selection_basis": "POST_AUDIT_POLICY_LOCKED_FOR_FUTURE_UNSEEN_TESTS",
+  "calibration": {
+    "method": "SPLIT_CONFORMAL_RELATIVE_NONCONFORMITY_WITH_OPERATIONAL_FLOOR",
+    "target_coverage": 0.95,
+    "quantization_step": 0.001,
+    "minimum_relative_half_width": 0.005,
+    "maximum_relative_half_width": 0.05
+  },
+  "fresh_test": {
+    "strictly_after_utc": "2026-07-23T08:41:45Z",
+    "previous_export_last_message_utc": "2026-07-21T12:44:20Z",
+    "minimum_confirmed_trade_holdout": 50,
+    "reuse_of_prelock_test_for_promotion": "FORBIDDEN"
+  },
+  "notes": [
+    "The 0.5 percent floor is an operational range-safety floor, not a point-price adjustment.",
+    "All observations at or before locked_at_utc are research-only for this policy.",
+    "The first promotion-grade evaluation must use a globally chronological test beginning after locked_at_utc."
+  ]
+}

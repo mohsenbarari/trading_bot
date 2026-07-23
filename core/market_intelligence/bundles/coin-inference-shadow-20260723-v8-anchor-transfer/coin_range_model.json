@@ -1,0 +1,1750 @@
+{
+  "schema_version": 5,
+  "model_kind": "QUALITY_FILTERED_RECENT_TRADE_AND_BOOK_BAND_THEN_ROBUST_HYBRID_INTRINSIC_PLUS_EMPIRICAL_BUBBLE",
+  "is_llm": false,
+  "trained_at_utc": "2026-07-21T18:08:13Z",
+  "group_offer_source": "CONVERSATION_DATABASE_OFFERS_TABLE",
+  "project_labels_enabled": false,
+  "training_data_policy": {
+    "telegram_group_offers": "ACTIVE_5M_MARKET_BAND_FULL_LIVE_WEIGHT_TIMEOUT_HISTORICAL_ONE_THIRD",
+    "telegram_group_confirmed_trades": "ENABLED_HIGH_WEIGHT_LABEL",
+    "project_database": "DISABLED_EXPERIMENTAL_ACTIVITY",
+    "semantic_llm_outputs": "REVIEW_REQUIRED_NEVER_AUTO_TRAIN"
+  },
+  "market_form_policy_version": "EXPLICIT_CASH_MARKET_FORMS_V3",
+  "calibration_recency_policy": {
+    "method": "EXPONENTIAL_EVENT_TIME_DECAY",
+    "half_life_days": 1.0,
+    "reference": "LATEST_LABEL_IN_CALIBRATION_SLICE"
+  },
+  "offer_lifecycle_policy": {
+    "live_ttl_seconds": 300,
+    "active_live_range_weight": 1.0,
+    "early_expired_weight": 0.5,
+    "timeout_historical_training_weight": 0.3333333333333333,
+    "post_ttl_live_range_weight": 0.0,
+    "post_ttl_role": "HISTORICAL_BUBBLE_TRAINING_ONLY"
+  },
+  "training_weight_hierarchy": {
+    "project_completed_trade": 2.0,
+    "confirmed_group_trade": 1.5,
+    "timed_out_offer": 0.3333333333333333,
+    "maximum_offer_share_when_trades_exist": 0.4
+  },
+  "market_regime_policy": {
+    "states": [
+      "RANGE",
+      "UP",
+      "DOWN",
+      "SHOCK",
+      "UNKNOWN"
+    ],
+    "inputs": [
+      "MELTED_GOLD",
+      "USD_HERAT",
+      "USDT_IRT",
+      "XAUUSD",
+      "IME_GOLD_BAR"
+    ],
+    "coin_offers_used_as_regime_input": false,
+    "usdt_nominal_weight": 0.75,
+    "ime_nominal_weight": 0.25,
+    "crossed_range_offer_and_linked_trade": "EXCLUDED",
+    "normal_market_outlier_rule": "SELL_BELOW_LOWEST_ACTIVE_BUY_OR_BUY_ABOVE_HIGHEST_ACTIVE_SELL",
+    "opposite_book_reference": "OUTER_EXTREME_OF_ACTIVE_OPPOSITE_BOOK"
+  },
+  "market_form_policy": {
+    "usd_physical": "EXPLICIT_NAGHDI_OR_NAGHD_ONLY",
+    "melted_physical": "EXPLICIT_NAGHDI_OR_RASMI_ONLY",
+    "herat_today_tomorrow": "PAPER",
+    "other_melted_quotes": "PAPER"
+  },
+  "project_price_multiplier_to_toman": 1000,
+  "training_trade_count_total": 0,
+  "training_trade_count_with_market_context": 0,
+  "training_trade_count_accepted": 0,
+  "training_trade_count_rejected": 0,
+  "group_confirmed_trade_count_with_market_context": 281,
+  "group_confirmed_trade_count_accepted": 281,
+  "group_confirmed_trade_count_rejected": 0,
+  "group_human_reviewed_trade_count_with_market_context": 0,
+  "group_human_reviewed_trade_count_accepted": 0,
+  "group_human_reviewed_trade_count_rejected": 0,
+  "group_offer_import": {
+    "offers_total": 5546,
+    "below_confidence_threshold": 740,
+    "duplicates_removed": 20,
+    "labels_retained": 4786,
+    "market_quality_available": true,
+    "market_quality_counts": {
+      "ELIGIBLE": 4877,
+      "CROSSED_OFFER_IN_NORMAL_MARKET": 3,
+      "CROSSED_OFFER_WITHOUT_MATCHING_UNDERLYING_REGIME": 153,
+      "SUPERSEDED_BY_CONFIRMED_TRADE": 513
+    }
+  },
+  "group_offer_count_with_market_context": 623,
+  "group_offer_count_accepted": 623,
+  "group_offer_count_rejected": 0,
+  "combined_training_count_accepted": 904,
+  "combined_training_effective_weight": 493.4613781888329,
+  "melted_training_reference_counts": {
+    "TRAINING_ONLY_SAME_MINUTE_PAPER_REFERENCE": 220,
+    "SAME_MINUTE_PAPER_REFERENCE_FALLBACK": 62,
+    "PRIMARY": 621,
+    "SAME_MINUTE_PHYSICAL_UNDERLYING_FALLBACK": 1
+  },
+  "combined_all_three_market_inputs_observed": 428,
+  "training_window_seconds": 60,
+  "historical_usd_feature_window_seconds": 600,
+  "order_flow_window_seconds": 600,
+  "paper_flow_weight": 0.5,
+  "unknown_settlement_paper_flow_weight": 0.25,
+  "flow_tolerance_expansion_max": 0.75,
+  "order_flow_point_adjustment_enabled": true,
+  "order_flow_point_adjustment_gate": {
+    "minimum_completed_trade_holdout": 50,
+    "requires_positive_error_reduction": true,
+    "current_completed_trade_holdout": 54,
+    "current_relative_error_reduction_percent": 0.9991819862667725
+  },
+  "conformal_tolerance": {
+    "status": "CALIBRATED",
+    "method": "SPLIT_CONFORMAL_ABSOLUTE_RELATIVE_ERROR_60_20_20",
+    "target_coverage_percent": 80.0,
+    "train_count": 546,
+    "calibration_count": 124,
+    "calibration_prediction_count": 124,
+    "test_count": 125,
+    "test_prediction_count": 124,
+    "calibration_start_utc": "2026-07-14T09:23:10Z",
+    "test_start_utc": "2026-07-20T08:03:52Z",
+    "global_relative_error_qhat": 0.0182954079884464,
+    "per_commodity_relative_error_qhat": {
+      "امام": 0.0182954079884464,
+      "نیم بهار": 0.032832245521455375,
+      "ربع بهار": 0.05797522431696737,
+      "ربع تاریخ پایین": 0.0182954079884464,
+      "نیم تاریخ پایین": 0.0182954079884464,
+      "بهار": 0.0182954079884464
+    },
+    "test_mape_percent": 1.079932187096185,
+    "test_coverage_percent": 98.38709677419355,
+    "test_mean_interval_width_percent": 4.719203035318887,
+    "per_commodity_test": {
+      "امام": {
+        "test_count": 100,
+        "prediction_count": 100,
+        "relative_error_qhat": 0.0182954079884464,
+        "mape_percent": 0.5039940816410405,
+        "coverage_percent": 99.0
+      },
+      "بهار": {
+        "test_count": 2,
+        "prediction_count": 2,
+        "relative_error_qhat": 0.0182954079884464,
+        "mape_percent": 0.7825596879926922,
+        "coverage_percent": 100
+      },
+      "ربع بهار": {
+        "test_count": 14,
+        "prediction_count": 14,
+        "relative_error_qhat": 0.05797522431696737,
+        "mape_percent": 4.120311721162812,
+        "coverage_percent": 100
+      },
+      "نیم تاریخ پایین": {
+        "test_count": 1,
+        "prediction_count": 1,
+        "relative_error_qhat": 0.0182954079884464,
+        "mape_percent": 8.289669222256999,
+        "coverage_percent": 0
+      },
+      "یک گرمی": {
+        "test_count": 1,
+        "prediction_count": 0,
+        "relative_error_qhat": 0.0182954079884464,
+        "mape_percent": null,
+        "coverage_percent": null
+      },
+      "نیم بهار": {
+        "test_count": 7,
+        "prediction_count": 7,
+        "relative_error_qhat": 0.032832245521455375,
+        "mape_percent": 2.2818614773287376,
+        "coverage_percent": 100
+      }
+    }
+  },
+  "group_offer_source_weight": 0.3333333333333333,
+  "confirmed_trade_source_weight": 1.5,
+  "project_completed_trade_source_weight": 2.0,
+  "maximum_offer_training_share_with_trades": 0.4,
+  "group_min_extraction_confidence": 0.8,
+  "outlier_guard_bubble_ratio": [
+    -0.15,
+    2.0
+  ],
+  "settlement_input_policy": {
+    "CASH": {
+      "settlement_term": "TODAY",
+      "trade_form": "PHYSICAL",
+      "melted_market_label": "آبشده نقدی",
+      "melted_candidates": [
+        [
+          "آبشده نقدی",
+          "PHYSICAL",
+          "PRIMARY"
+        ],
+        [
+          "آبشده رسمی",
+          "PHYSICAL",
+          "SAME_MINUTE_PHYSICAL_UNDERLYING_FALLBACK"
+        ]
+      ],
+      "coin_market_label": "سکه نقدی",
+      "usd_candidates": [
+        [
+          "TODAY",
+          "PHYSICAL"
+        ],
+        [
+          "UNKNOWN",
+          "PHYSICAL"
+        ]
+      ]
+    },
+    "TOMORROW": {
+      "settlement_term": "TOMORROW",
+      "trade_form": "PHYSICAL",
+      "melted_market_label": "آبشده فردایی",
+      "melted_candidates": [
+        [
+          "آبشده فردایی",
+          "PAPER",
+          "SAME_MINUTE_PAPER_REFERENCE_FALLBACK"
+        ],
+        [
+          "آبشده امروزی",
+          "PAPER",
+          "SAME_MINUTE_PAPER_REFERENCE_FALLBACK"
+        ],
+        [
+          "آبشده نقدی",
+          "PHYSICAL",
+          "SAME_MINUTE_PHYSICAL_UNDERLYING_FALLBACK"
+        ],
+        [
+          "آبشده رسمی",
+          "PHYSICAL",
+          "SAME_MINUTE_PHYSICAL_UNDERLYING_FALLBACK"
+        ],
+        [
+          "آبشده حواله",
+          "PAPER",
+          "SAME_MINUTE_PAPER_REFERENCE_FALLBACK"
+        ],
+        [
+          "آبشده غیررسمی",
+          "PAPER",
+          "SAME_MINUTE_PAPER_REFERENCE_FALLBACK"
+        ]
+      ],
+      "coin_market_label": "سکه فردایی",
+      "usd_candidates": [
+        [
+          "TOMORROW",
+          "PHYSICAL"
+        ]
+      ]
+    }
+  },
+  "commodities": [
+    {
+      "id": 1,
+      "name": "امام",
+      "status": "SUPPORTED",
+      "coefficient": 2.253,
+      "low_date": false,
+      "accepted_training_samples": 748,
+      "rejected_training_samples": 0,
+      "settlements": {
+        "CASH": {
+          "source": "WEIGHTED_TRUSTED_TRADES_PLUS_GROUP_OFFERS_PHYSICAL_SETTLEMENT",
+          "sample_count": 700,
+          "effective_sample_weight": 50.61047299275044,
+          "trusted_trade_effective_weight_before_offer_cap": 30.36628379565026,
+          "offer_effective_weight_before_cap": 28.99504075051544,
+          "offer_weight_scale_for_hierarchical_cap": 0.6981948868873481,
+          "maximum_offer_training_share_with_trades": 0.4,
+          "recency_half_life_days": 1.0,
+          "bubble_ratio_median": 0.0311845849569532,
+          "bubble_ratio_q10": 0.019844856382637,
+          "bubble_ratio_q90": 0.03887660385100422,
+          "source_counts": {
+            "TELEGRAM_GROUP_CONFIRMED_TRADE": 241,
+            "TELEGRAM_GROUP_OFFER": 459
+          },
+          "global_feature_sample_count": 336,
+          "melted_vs_global_center": -0.007347763043207562,
+          "melted_vs_global_slope": -0.40217063669357084,
+          "market_pressure_sample_count": 598,
+          "market_pressure_center": -0.04716677378629879,
+          "market_pressure_slope": 0.0,
+          "confidence": "MEDIUM",
+          "direct_settlement_sample_count": 700,
+          "trade_form": "PHYSICAL"
+        },
+        "TOMORROW": {
+          "source": "WEIGHTED_TRUSTED_TRADES_PLUS_GROUP_OFFERS_PHYSICAL_SETTLEMENT",
+          "sample_count": 48,
+          "effective_sample_weight": 0.0005126190826369078,
+          "trusted_trade_effective_weight_before_offer_cap": 0.0003075714495821447,
+          "offer_effective_weight_before_cap": 0.46347790617394546,
+          "offer_weight_scale_for_hierarchical_cap": 0.00044241080388804507,
+          "maximum_offer_training_share_with_trades": 0.4,
+          "recency_half_life_days": 1.0,
+          "bubble_ratio_median": 0.024313097649987014,
+          "bubble_ratio_q10": -0.0015931801064528184,
+          "bubble_ratio_q90": 0.024313097649987014,
+          "source_counts": {
+            "TELEGRAM_GROUP_CONFIRMED_TRADE": 1,
+            "TELEGRAM_GROUP_OFFER": 47
+          },
+          "global_feature_sample_count": 24,
+          "melted_vs_global_center": 0.008623067259853928,
+          "melted_vs_global_slope": 0.4289325420278846,
+          "market_pressure_sample_count": 47,
+          "market_pressure_center": 0.036248024163089726,
+          "market_pressure_slope": 0.011467189658775011,
+          "confidence": "MEDIUM",
+          "direct_settlement_sample_count": 48,
+          "trade_form": "PHYSICAL"
+        }
+      },
+      "market_forms": {
+        "CASH": {
+          "PHYSICAL": {
+            "source": "WEIGHTED_TRUSTED_TRADES_PLUS_GROUP_OFFERS_PHYSICAL_SETTLEMENT",
+            "sample_count": 700,
+            "effective_sample_weight": 50.61047299275044,
+            "trusted_trade_effective_weight_before_offer_cap": 30.36628379565026,
+            "offer_effective_weight_before_cap": 28.99504075051544,
+            "offer_weight_scale_for_hierarchical_cap": 0.6981948868873481,
+            "maximum_offer_training_share_with_trades": 0.4,
+            "recency_half_life_days": 1.0,
+            "bubble_ratio_median": 0.0311845849569532,
+            "bubble_ratio_q10": 0.019844856382637,
+            "bubble_ratio_q90": 0.03887660385100422,
+            "source_counts": {
+              "TELEGRAM_GROUP_CONFIRMED_TRADE": 241,
+              "TELEGRAM_GROUP_OFFER": 459
+            },
+            "global_feature_sample_count": 336,
+            "melted_vs_global_center": -0.007347763043207562,
+            "melted_vs_global_slope": -0.40217063669357084,
+            "market_pressure_sample_count": 598,
+            "market_pressure_center": -0.04716677378629879,
+            "market_pressure_slope": 0.0,
+            "confidence": "MEDIUM",
+            "direct_settlement_sample_count": 700,
+            "trade_form": "PHYSICAL"
+          },
+          "PAPER": {
+            "source": "NO_TRAINING_LABEL",
+            "sample_count": 0,
+            "effective_sample_weight": 0.0,
+            "bubble_ratio_median": null,
+            "bubble_ratio_q10": null,
+            "bubble_ratio_q90": null,
+            "source_counts": {},
+            "global_feature_sample_count": 0,
+            "melted_vs_global_center": null,
+            "melted_vs_global_slope": 0.0,
+            "market_pressure_sample_count": 0,
+            "market_pressure_center": null,
+            "market_pressure_slope": 0.0,
+            "confidence": "VERY_LOW",
+            "direct_settlement_sample_count": 0,
+            "trade_form": "PAPER"
+          }
+        },
+        "TOMORROW": {
+          "PHYSICAL": {
+            "source": "WEIGHTED_TRUSTED_TRADES_PLUS_GROUP_OFFERS_PHYSICAL_SETTLEMENT",
+            "sample_count": 48,
+            "effective_sample_weight": 0.0005126190826369078,
+            "trusted_trade_effective_weight_before_offer_cap": 0.0003075714495821447,
+            "offer_effective_weight_before_cap": 0.46347790617394546,
+            "offer_weight_scale_for_hierarchical_cap": 0.00044241080388804507,
+            "maximum_offer_training_share_with_trades": 0.4,
+            "recency_half_life_days": 1.0,
+            "bubble_ratio_median": 0.024313097649987014,
+            "bubble_ratio_q10": -0.0015931801064528184,
+            "bubble_ratio_q90": 0.024313097649987014,
+            "source_counts": {
+              "TELEGRAM_GROUP_CONFIRMED_TRADE": 1,
+              "TELEGRAM_GROUP_OFFER": 47
+            },
+            "global_feature_sample_count": 24,
+            "melted_vs_global_center": 0.008623067259853928,
+            "melted_vs_global_slope": 0.4289325420278846,
+            "market_pressure_sample_count": 47,
+            "market_pressure_center": 0.036248024163089726,
+            "market_pressure_slope": 0.011467189658775011,
+            "confidence": "MEDIUM",
+            "direct_settlement_sample_count": 48,
+            "trade_form": "PHYSICAL"
+          },
+          "PAPER": {
+            "source": "NO_TRAINING_LABEL",
+            "sample_count": 0,
+            "effective_sample_weight": 0.0,
+            "bubble_ratio_median": null,
+            "bubble_ratio_q10": null,
+            "bubble_ratio_q90": null,
+            "source_counts": {},
+            "global_feature_sample_count": 0,
+            "melted_vs_global_center": null,
+            "melted_vs_global_slope": 0.0,
+            "market_pressure_sample_count": 0,
+            "market_pressure_center": null,
+            "market_pressure_slope": 0.0,
+            "confidence": "VERY_LOW",
+            "direct_settlement_sample_count": 0,
+            "trade_form": "PAPER"
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "name": "بهار",
+      "status": "SUPPORTED",
+      "coefficient": 2.253,
+      "low_date": true,
+      "accepted_training_samples": 11,
+      "rejected_training_samples": 0,
+      "settlements": {
+        "CASH": {
+          "source": "WEIGHTED_TRUSTED_TRADES_PLUS_GROUP_OFFERS_PHYSICAL_SETTLEMENT",
+          "sample_count": 11,
+          "effective_sample_weight": 8.442577719252574e-07,
+          "trusted_trade_effective_weight_before_offer_cap": 5.065546631551544e-07,
+          "offer_effective_weight_before_cap": 1.6083001014058977,
+          "offer_weight_scale_for_hierarchical_cap": 2.0997518340942674e-07,
+          "maximum_offer_training_share_with_trades": 0.4,
+          "recency_half_life_days": 1.0,
+          "bubble_ratio_median": 0.0011211280934180223,
+          "bubble_ratio_q10": -0.006216728498968482,
+          "bubble_ratio_q90": 0.0059709935530938285,
+          "source_counts": {
+            "TELEGRAM_GROUP_CONFIRMED_TRADE": 1,
+            "TELEGRAM_GROUP_OFFER": 10
+          },
+          "global_feature_sample_count": 4,
+          "melted_vs_global_center": null,
+          "melted_vs_global_slope": 0.0,
+          "market_pressure_sample_count": 10,
+          "market_pressure_center": -0.09037692760886708,
+          "market_pressure_slope": 0.0,
+          "confidence": "LOW",
+          "direct_settlement_sample_count": 11,
+          "trade_form": "PHYSICAL"
+        },
+        "TOMORROW": {
+          "source": "WEIGHTED_PHYSICAL_POOLED_FALLBACK",
+          "sample_count": 11,
+          "effective_sample_weight": 8.442577719252574e-07,
+          "trusted_trade_effective_weight_before_offer_cap": 5.065546631551544e-07,
+          "offer_effective_weight_before_cap": 1.6083001014058977,
+          "offer_weight_scale_for_hierarchical_cap": 2.0997518340942674e-07,
+          "maximum_offer_training_share_with_trades": 0.4,
+          "recency_half_life_days": 1.0,
+          "bubble_ratio_median": 0.0011211280934180223,
+          "bubble_ratio_q10": -0.006216728498968482,
+          "bubble_ratio_q90": 0.0059709935530938285,
+          "source_counts": {
+            "TELEGRAM_GROUP_CONFIRMED_TRADE": 1,
+            "TELEGRAM_GROUP_OFFER": 10
+          },
+          "global_feature_sample_count": 4,
+          "melted_vs_global_center": null,
+          "melted_vs_global_slope": 0.0,
+          "market_pressure_sample_count": 10,
+          "market_pressure_center": -0.09037692760886708,
+          "market_pressure_slope": 0.0,
+          "confidence": "VERY_LOW",
+          "direct_settlement_sample_count": 0,
+          "trade_form": "PHYSICAL"
+        }
+      },
+      "market_forms": {
+        "CASH": {
+          "PHYSICAL": {
+            "source": "WEIGHTED_TRUSTED_TRADES_PLUS_GROUP_OFFERS_PHYSICAL_SETTLEMENT",
+            "sample_count": 11,
+            "effective_sample_weight": 8.442577719252574e-07,
+            "trusted_trade_effective_weight_before_offer_cap": 5.065546631551544e-07,
+            "offer_effective_weight_before_cap": 1.6083001014058977,
+            "offer_weight_scale_for_hierarchical_cap": 2.0997518340942674e-07,
+            "maximum_offer_training_share_with_trades": 0.4,
+            "recency_half_life_days": 1.0,
+            "bubble_ratio_median": 0.0011211280934180223,
+            "bubble_ratio_q10": -0.006216728498968482,
+            "bubble_ratio_q90": 0.0059709935530938285,
+            "source_counts": {
+              "TELEGRAM_GROUP_CONFIRMED_TRADE": 1,
+              "TELEGRAM_GROUP_OFFER": 10
+            },
+            "global_feature_sample_count": 4,
+            "melted_vs_global_center": null,
+            "melted_vs_global_slope": 0.0,
+            "market_pressure_sample_count": 10,
+            "market_pressure_center": -0.09037692760886708,
+            "market_pressure_slope": 0.0,
+            "confidence": "LOW",
+            "direct_settlement_sample_count": 11,
+            "trade_form": "PHYSICAL"
+          },
+          "PAPER": {
+            "source": "LOW_DATE_ZERO_BUBBLE_DOMAIN_FALLBACK",
+            "sample_count": 0,
+            "effective_sample_weight": 0.0,
+            "bubble_ratio_median": 0.0,
+            "bubble_ratio_q10": null,
+            "bubble_ratio_q90": null,
+            "source_counts": {},
+            "global_feature_sample_count": 0,
+            "melted_vs_global_center": null,
+            "melted_vs_global_slope": 0.0,
+            "market_pressure_sample_count": 0,
+            "market_pressure_center": null,
+            "market_pressure_slope": 0.0,
+            "confidence": "VERY_LOW",
+            "direct_settlement_sample_count": 0,
+            "trade_form": "PAPER"
+          }
+        },
+        "TOMORROW": {
+          "PHYSICAL": {
+            "source": "WEIGHTED_PHYSICAL_POOLED_FALLBACK",
+            "sample_count": 11,
+            "effective_sample_weight": 8.442577719252574e-07,
+            "trusted_trade_effective_weight_before_offer_cap": 5.065546631551544e-07,
+            "offer_effective_weight_before_cap": 1.6083001014058977,
+            "offer_weight_scale_for_hierarchical_cap": 2.0997518340942674e-07,
+            "maximum_offer_training_share_with_trades": 0.4,
+            "recency_half_life_days": 1.0,
+            "bubble_ratio_median": 0.0011211280934180223,
+            "bubble_ratio_q10": -0.006216728498968482,
+            "bubble_ratio_q90": 0.0059709935530938285,
+            "source_counts": {
+              "TELEGRAM_GROUP_CONFIRMED_TRADE": 1,
+              "TELEGRAM_GROUP_OFFER": 10
+            },
+            "global_feature_sample_count": 4,
+            "melted_vs_global_center": null,
+            "melted_vs_global_slope": 0.0,
+            "market_pressure_sample_count": 10,
+            "market_pressure_center": -0.09037692760886708,
+            "market_pressure_slope": 0.0,
+            "confidence": "VERY_LOW",
+            "direct_settlement_sample_count": 0,
+            "trade_form": "PHYSICAL"
+          },
+          "PAPER": {
+            "source": "LOW_DATE_ZERO_BUBBLE_DOMAIN_FALLBACK",
+            "sample_count": 0,
+            "effective_sample_weight": 0.0,
+            "bubble_ratio_median": 0.0,
+            "bubble_ratio_q10": null,
+            "bubble_ratio_q90": null,
+            "source_counts": {},
+            "global_feature_sample_count": 0,
+            "melted_vs_global_center": null,
+            "melted_vs_global_slope": 0.0,
+            "market_pressure_sample_count": 0,
+            "market_pressure_center": null,
+            "market_pressure_slope": 0.0,
+            "confidence": "VERY_LOW",
+            "direct_settlement_sample_count": 0,
+            "trade_form": "PAPER"
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "name": "ربع بهار",
+      "status": "SUPPORTED",
+      "coefficient": 0.56325,
+      "low_date": false,
+      "accepted_training_samples": 89,
+      "rejected_training_samples": 0,
+      "settlements": {
+        "CASH": {
+          "source": "WEIGHTED_TRUSTED_TRADES_PLUS_GROUP_OFFERS_PHYSICAL_SETTLEMENT",
+          "sample_count": 77,
+          "effective_sample_weight": 2.778012945286337,
+          "trusted_trade_effective_weight_before_offer_cap": 1.6668077671718022,
+          "offer_effective_weight_before_cap": 5.104377107554397,
+          "offer_weight_scale_for_hierarchical_cap": 0.21769652882228646,
+          "maximum_offer_training_share_with_trades": 0.4,
+          "recency_half_life_days": 1.0,
+          "bubble_ratio_median": 0.14561568471246344,
+          "bubble_ratio_q10": 0.13518779200345143,
+          "bubble_ratio_q90": 0.1610552180511351,
+          "source_counts": {
+            "TELEGRAM_GROUP_CONFIRMED_TRADE": 18,
+            "TELEGRAM_GROUP_OFFER": 59
+          },
+          "global_feature_sample_count": 41,
+          "melted_vs_global_center": -0.00787975377444235,
+          "melted_vs_global_slope": 0.10362959741432684,
+          "market_pressure_sample_count": 65,
+          "market_pressure_center": 0.007702936878198186,
+          "market_pressure_slope": 0.0,
+          "confidence": "MEDIUM",
+          "direct_settlement_sample_count": 77,
+          "trade_form": "PHYSICAL"
+        },
+        "TOMORROW": {
+          "source": "WEIGHTED_TRUSTED_TRADES_PLUS_GROUP_OFFERS_PHYSICAL_SETTLEMENT",
+          "sample_count": 12,
+          "effective_sample_weight": 2.0010466529862843e-07,
+          "trusted_trade_effective_weight_before_offer_cap": 1.2006279917917705e-07,
+          "offer_effective_weight_before_cap": 0.9386380725909227,
+          "offer_weight_scale_for_hierarchical_cap": 8.527447208540328e-08,
+          "maximum_offer_training_share_with_trades": 0.4,
+          "recency_half_life_days": 1.0,
+          "bubble_ratio_median": 0.2062497820141167,
+          "bubble_ratio_q10": 0.17202814849958292,
+          "bubble_ratio_q90": 0.2062497820141167,
+          "source_counts": {
+            "TELEGRAM_GROUP_CONFIRMED_TRADE": 1,
+            "TELEGRAM_GROUP_OFFER": 11
+          },
+          "global_feature_sample_count": 5,
+          "melted_vs_global_center": null,
+          "melted_vs_global_slope": 0.0,
+          "market_pressure_sample_count": 12,
+          "market_pressure_center": 0.017210928318444545,
+          "market_pressure_slope": 0.029314810638912038,
+          "confidence": "LOW",
+          "direct_settlement_sample_count": 12,
+          "trade_form": "PHYSICAL"
+        }
+      },
+      "market_forms": {
+        "CASH": {
+          "PHYSICAL": {
+            "source": "WEIGHTED_TRUSTED_TRADES_PLUS_GROUP_OFFERS_PHYSICAL_SETTLEMENT",
+            "sample_count": 77,
+            "effective_sample_weight": 2.778012945286337,
+            "trusted_trade_effective_weight_before_offer_cap": 1.6668077671718022,
+            "offer_effective_weight_before_cap": 5.104377107554397,
+            "offer_weight_scale_for_hierarchical_cap": 0.21769652882228646,
+            "maximum_offer_training_share_with_trades": 0.4,
+            "recency_half_life_days": 1.0,
+            "bubble_ratio_median": 0.14561568471246344,
+            "bubble_ratio_q10": 0.13518779200345143,
+            "bubble_ratio_q90": 0.1610552180511351,
+            "source_counts": {
+              "TELEGRAM_GROUP_CONFIRMED_TRADE": 18,
+              "TELEGRAM_GROUP_OFFER": 59
+            },
+            "global_feature_sample_count": 41,
+            "melted_vs_global_center": -0.00787975377444235,
+            "melted_vs_global_slope": 0.10362959741432684,
+            "market_pressure_sample_count": 65,
+            "market_pressure_center": 0.007702936878198186,
+            "market_pressure_slope": 0.0,
+            "confidence": "MEDIUM",
+            "direct_settlement_sample_count": 77,
+            "trade_form": "PHYSICAL"
+          },
+          "PAPER": {
+            "source": "NO_TRAINING_LABEL",
+            "sample_count": 0,
+            "effective_sample_weight": 0.0,
+            "bubble_ratio_median": null,
+            "bubble_ratio_q10": null,
+            "bubble_ratio_q90": null,
+            "source_counts": {},
+            "global_feature_sample_count": 0,
+            "melted_vs_global_center": null,
+            "melted_vs_global_slope": 0.0,
+            "market_pressure_sample_count": 0,
+            "market_pressure_center": null,
+            "market_pressure_slope": 0.0,
+            "confidence": "VERY_LOW",
+            "direct_settlement_sample_count": 0,
+            "trade_form": "PAPER"
+          }
+        },
+        "TOMORROW": {
+          "PHYSICAL": {
+            "source": "WEIGHTED_TRUSTED_TRADES_PLUS_GROUP_OFFERS_PHYSICAL_SETTLEMENT",
+            "sample_count": 12,
+            "effective_sample_weight": 2.0010466529862843e-07,
+            "trusted_trade_effective_weight_before_offer_cap": 1.2006279917917705e-07,
+            "offer_effective_weight_before_cap": 0.9386380725909227,
+            "offer_weight_scale_for_hierarchical_cap": 8.527447208540328e-08,
+            "maximum_offer_training_share_with_trades": 0.4,
+            "recency_half_life_days": 1.0,
+            "bubble_ratio_median": 0.2062497820141167,
+            "bubble_ratio_q10": 0.17202814849958292,
+            "bubble_ratio_q90": 0.2062497820141167,
+            "source_counts": {
+              "TELEGRAM_GROUP_CONFIRMED_TRADE": 1,
+              "TELEGRAM_GROUP_OFFER": 11
+            },
+            "global_feature_sample_count": 5,
+            "melted_vs_global_center": null,
+            "melted_vs_global_slope": 0.0,
+            "market_pressure_sample_count": 12,
+            "market_pressure_center": 0.017210928318444545,
+            "market_pressure_slope": 0.029314810638912038,
+            "confidence": "LOW",
+            "direct_settlement_sample_count": 12,
+            "trade_form": "PHYSICAL"
+          },
+          "PAPER": {
+            "source": "NO_TRAINING_LABEL",
+            "sample_count": 0,
+            "effective_sample_weight": 0.0,
+            "bubble_ratio_median": null,
+            "bubble_ratio_q10": null,
+            "bubble_ratio_q90": null,
+            "source_counts": {},
+            "global_feature_sample_count": 0,
+            "melted_vs_global_center": null,
+            "melted_vs_global_slope": 0.0,
+            "market_pressure_sample_count": 0,
+            "market_pressure_center": null,
+            "market_pressure_slope": 0.0,
+            "confidence": "VERY_LOW",
+            "direct_settlement_sample_count": 0,
+            "trade_form": "PAPER"
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "name": "نیم بهار",
+      "status": "SUPPORTED",
+      "coefficient": 1.1265,
+      "low_date": false,
+      "accepted_training_samples": 46,
+      "rejected_training_samples": 0,
+      "settlements": {
+        "CASH": {
+          "source": "WEIGHTED_TRUSTED_TRADES_PLUS_GROUP_OFFERS_PHYSICAL_SETTLEMENT",
+          "sample_count": 45,
+          "effective_sample_weight": 2.0876707373309653,
+          "trusted_trade_effective_weight_before_offer_cap": 1.2526024423985793,
+          "offer_effective_weight_before_cap": 3.078757274939607,
+          "offer_weight_scale_for_hierarchical_cap": 0.2712355084727382,
+          "maximum_offer_training_share_with_trades": 0.4,
+          "recency_half_life_days": 1.0,
+          "bubble_ratio_median": 0.040191773128889,
+          "bubble_ratio_q10": 0.035400166891077944,
+          "bubble_ratio_q90": 0.05234660563056348,
+          "source_counts": {
+            "TELEGRAM_GROUP_CONFIRMED_TRADE": 17,
+            "TELEGRAM_GROUP_OFFER": 28
+          },
+          "global_feature_sample_count": 15,
+          "melted_vs_global_center": -0.0060967843775866,
+          "melted_vs_global_slope": 0.160762880221006,
+          "market_pressure_sample_count": 37,
+          "market_pressure_center": 0.026549254099770134,
+          "market_pressure_slope": 0.0,
+          "confidence": "MEDIUM",
+          "direct_settlement_sample_count": 45,
+          "trade_form": "PHYSICAL"
+        },
+        "TOMORROW": {
+          "source": "WEIGHTED_PHYSICAL_POOLED_FALLBACK",
+          "sample_count": 46,
+          "effective_sample_weight": 2.0876707373309658,
+          "trusted_trade_effective_weight_before_offer_cap": 1.2526024423985793,
+          "offer_effective_weight_before_cap": 3.1141286355612405,
+          "offer_weight_scale_for_hierarchical_cap": 0.26815472084115977,
+          "maximum_offer_training_share_with_trades": 0.4,
+          "recency_half_life_days": 1.0,
+          "bubble_ratio_median": 0.040191773128889,
+          "bubble_ratio_q10": 0.035400166891077944,
+          "bubble_ratio_q90": 0.05234660563056348,
+          "source_counts": {
+            "TELEGRAM_GROUP_CONFIRMED_TRADE": 17,
+            "TELEGRAM_GROUP_OFFER": 29
+          },
+          "global_feature_sample_count": 16,
+          "melted_vs_global_center": -0.0061335458303903865,
+          "melted_vs_global_slope": 0.16641061249195915,
+          "market_pressure_sample_count": 38,
+          "market_pressure_center": 0.026977831794815076,
+          "market_pressure_slope": 0.0,
+          "confidence": "VERY_LOW",
+          "direct_settlement_sample_count": 1,
+          "trade_form": "PHYSICAL"
+        }
+      },
+      "market_forms": {
+        "CASH": {
+          "PHYSICAL": {
+            "source": "WEIGHTED_TRUSTED_TRADES_PLUS_GROUP_OFFERS_PHYSICAL_SETTLEMENT",
+            "sample_count": 45,
+            "effective_sample_weight": 2.0876707373309653,
+            "trusted_trade_effective_weight_before_offer_cap": 1.2526024423985793,
+            "offer_effective_weight_before_cap": 3.078757274939607,
+            "offer_weight_scale_for_hierarchical_cap": 0.2712355084727382,
+            "maximum_offer_training_share_with_trades": 0.4,
+            "recency_half_life_days": 1.0,
+            "bubble_ratio_median": 0.040191773128889,
+            "bubble_ratio_q10": 0.035400166891077944,
+            "bubble_ratio_q90": 0.05234660563056348,
+            "source_counts": {
+              "TELEGRAM_GROUP_CONFIRMED_TRADE": 17,
+              "TELEGRAM_GROUP_OFFER": 28
+            },
+            "global_feature_sample_count": 15,
+            "melted_vs_global_center": -0.0060967843775866,
+            "melted_vs_global_slope": 0.160762880221006,
+            "market_pressure_sample_count": 37,
+            "market_pressure_center": 0.026549254099770134,
+            "market_pressure_slope": 0.0,
+            "confidence": "MEDIUM",
+            "direct_settlement_sample_count": 45,
+            "trade_form": "PHYSICAL"
+          },
+          "PAPER": {
+            "source": "NO_TRAINING_LABEL",
+            "sample_count": 0,
+            "effective_sample_weight": 0.0,
+            "bubble_ratio_median": null,
+            "bubble_ratio_q10": null,
+            "bubble_ratio_q90": null,
+            "source_counts": {},
+            "global_feature_sample_count": 0,
+            "melted_vs_global_center": null,
+            "melted_vs_global_slope": 0.0,
+            "market_pressure_sample_count": 0,
+            "market_pressure_center": null,
+            "market_pressure_slope": 0.0,
+            "confidence": "VERY_LOW",
+            "direct_settlement_sample_count": 0,
+            "trade_form": "PAPER"
+          }
+        },
+        "TOMORROW": {
+          "PHYSICAL": {
+            "source": "WEIGHTED_PHYSICAL_POOLED_FALLBACK",
+            "sample_count": 46,
+            "effective_sample_weight": 2.0876707373309658,
+            "trusted_trade_effective_weight_before_offer_cap": 1.2526024423985793,
+            "offer_effective_weight_before_cap": 3.1141286355612405,
+            "offer_weight_scale_for_hierarchical_cap": 0.26815472084115977,
+            "maximum_offer_training_share_with_trades": 0.4,
+            "recency_half_life_days": 1.0,
+            "bubble_ratio_median": 0.040191773128889,
+            "bubble_ratio_q10": 0.035400166891077944,
+            "bubble_ratio_q90": 0.05234660563056348,
+            "source_counts": {
+              "TELEGRAM_GROUP_CONFIRMED_TRADE": 17,
+              "TELEGRAM_GROUP_OFFER": 29
+            },
+            "global_feature_sample_count": 16,
+            "melted_vs_global_center": -0.0061335458303903865,
+            "melted_vs_global_slope": 0.16641061249195915,
+            "market_pressure_sample_count": 38,
+            "market_pressure_center": 0.026977831794815076,
+            "market_pressure_slope": 0.0,
+            "confidence": "VERY_LOW",
+            "direct_settlement_sample_count": 1,
+            "trade_form": "PHYSICAL"
+          },
+          "PAPER": {
+            "source": "NO_TRAINING_LABEL",
+            "sample_count": 0,
+            "effective_sample_weight": 0.0,
+            "bubble_ratio_median": null,
+            "bubble_ratio_q10": null,
+            "bubble_ratio_q90": null,
+            "source_counts": {},
+            "global_feature_sample_count": 0,
+            "melted_vs_global_center": null,
+            "melted_vs_global_slope": 0.0,
+            "market_pressure_sample_count": 0,
+            "market_pressure_center": null,
+            "market_pressure_slope": 0.0,
+            "confidence": "VERY_LOW",
+            "direct_settlement_sample_count": 0,
+            "trade_form": "PAPER"
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "name": "ربع تاریخ پایین",
+      "status": "SUPPORTED",
+      "coefficient": 0.56325,
+      "low_date": true,
+      "accepted_training_samples": 4,
+      "rejected_training_samples": 0,
+      "settlements": {
+        "CASH": {
+          "source": "WEIGHTED_PHYSICAL_POOLED_FALLBACK",
+          "sample_count": 4,
+          "effective_sample_weight": 0.04157472376418401,
+          "trusted_trade_effective_weight_before_offer_cap": 0.024944834258510407,
+          "offer_effective_weight_before_cap": 0.33020071797516976,
+          "offer_weight_scale_for_hierarchical_cap": 0.05036297197550046,
+          "maximum_offer_training_share_with_trades": 0.4,
+          "recency_half_life_days": 1.0,
+          "bubble_ratio_median": 0.019217175453305035,
+          "bubble_ratio_q10": 0.017321145085353207,
+          "bubble_ratio_q90": 0.019217175453305035,
+          "source_counts": {
+            "TELEGRAM_GROUP_CONFIRMED_TRADE": 1,
+            "TELEGRAM_GROUP_OFFER": 3
+          },
+          "global_feature_sample_count": 1,
+          "melted_vs_global_center": null,
+          "melted_vs_global_slope": 0.0,
+          "market_pressure_sample_count": 4,
+          "market_pressure_center": null,
+          "market_pressure_slope": 0.0,
+          "confidence": "VERY_LOW",
+          "direct_settlement_sample_count": 2,
+          "trade_form": "PHYSICAL"
+        },
+        "TOMORROW": {
+          "source": "WEIGHTED_PHYSICAL_POOLED_FALLBACK",
+          "sample_count": 4,
+          "effective_sample_weight": 0.04157472376418401,
+          "trusted_trade_effective_weight_before_offer_cap": 0.024944834258510407,
+          "offer_effective_weight_before_cap": 0.33020071797516976,
+          "offer_weight_scale_for_hierarchical_cap": 0.05036297197550046,
+          "maximum_offer_training_share_with_trades": 0.4,
+          "recency_half_life_days": 1.0,
+          "bubble_ratio_median": 0.019217175453305035,
+          "bubble_ratio_q10": 0.017321145085353207,
+          "bubble_ratio_q90": 0.019217175453305035,
+          "source_counts": {
+            "TELEGRAM_GROUP_CONFIRMED_TRADE": 1,
+            "TELEGRAM_GROUP_OFFER": 3
+          },
+          "global_feature_sample_count": 1,
+          "melted_vs_global_center": null,
+          "melted_vs_global_slope": 0.0,
+          "market_pressure_sample_count": 4,
+          "market_pressure_center": null,
+          "market_pressure_slope": 0.0,
+          "confidence": "VERY_LOW",
+          "direct_settlement_sample_count": 2,
+          "trade_form": "PHYSICAL"
+        }
+      },
+      "market_forms": {
+        "CASH": {
+          "PHYSICAL": {
+            "source": "WEIGHTED_PHYSICAL_POOLED_FALLBACK",
+            "sample_count": 4,
+            "effective_sample_weight": 0.04157472376418401,
+            "trusted_trade_effective_weight_before_offer_cap": 0.024944834258510407,
+            "offer_effective_weight_before_cap": 0.33020071797516976,
+            "offer_weight_scale_for_hierarchical_cap": 0.05036297197550046,
+            "maximum_offer_training_share_with_trades": 0.4,
+            "recency_half_life_days": 1.0,
+            "bubble_ratio_median": 0.019217175453305035,
+            "bubble_ratio_q10": 0.017321145085353207,
+            "bubble_ratio_q90": 0.019217175453305035,
+            "source_counts": {
+              "TELEGRAM_GROUP_CONFIRMED_TRADE": 1,
+              "TELEGRAM_GROUP_OFFER": 3
+            },
+            "global_feature_sample_count": 1,
+            "melted_vs_global_center": null,
+            "melted_vs_global_slope": 0.0,
+            "market_pressure_sample_count": 4,
+            "market_pressure_center": null,
+            "market_pressure_slope": 0.0,
+            "confidence": "VERY_LOW",
+            "direct_settlement_sample_count": 2,
+            "trade_form": "PHYSICAL"
+          },
+          "PAPER": {
+            "source": "LOW_DATE_ZERO_BUBBLE_DOMAIN_FALLBACK",
+            "sample_count": 0,
+            "effective_sample_weight": 0.0,
+            "bubble_ratio_median": 0.0,
+            "bubble_ratio_q10": null,
+            "bubble_ratio_q90": null,
+            "source_counts": {},
+            "global_feature_sample_count": 0,
+            "melted_vs_global_center": null,
+            "melted_vs_global_slope": 0.0,
+            "market_pressure_sample_count": 0,
+            "market_pressure_center": null,
+            "market_pressure_slope": 0.0,
+            "confidence": "VERY_LOW",
+            "direct_settlement_sample_count": 0,
+            "trade_form": "PAPER"
+          }
+        },
+        "TOMORROW": {
+          "PHYSICAL": {
+            "source": "WEIGHTED_PHYSICAL_POOLED_FALLBACK",
+            "sample_count": 4,
+            "effective_sample_weight": 0.04157472376418401,
+            "trusted_trade_effective_weight_before_offer_cap": 0.024944834258510407,
+            "offer_effective_weight_before_cap": 0.33020071797516976,
+            "offer_weight_scale_for_hierarchical_cap": 0.05036297197550046,
+            "maximum_offer_training_share_with_trades": 0.4,
+            "recency_half_life_days": 1.0,
+            "bubble_ratio_median": 0.019217175453305035,
+            "bubble_ratio_q10": 0.017321145085353207,
+            "bubble_ratio_q90": 0.019217175453305035,
+            "source_counts": {
+              "TELEGRAM_GROUP_CONFIRMED_TRADE": 1,
+              "TELEGRAM_GROUP_OFFER": 3
+            },
+            "global_feature_sample_count": 1,
+            "melted_vs_global_center": null,
+            "melted_vs_global_slope": 0.0,
+            "market_pressure_sample_count": 4,
+            "market_pressure_center": null,
+            "market_pressure_slope": 0.0,
+            "confidence": "VERY_LOW",
+            "direct_settlement_sample_count": 2,
+            "trade_form": "PHYSICAL"
+          },
+          "PAPER": {
+            "source": "LOW_DATE_ZERO_BUBBLE_DOMAIN_FALLBACK",
+            "sample_count": 0,
+            "effective_sample_weight": 0.0,
+            "bubble_ratio_median": 0.0,
+            "bubble_ratio_q10": null,
+            "bubble_ratio_q90": null,
+            "source_counts": {},
+            "global_feature_sample_count": 0,
+            "melted_vs_global_center": null,
+            "melted_vs_global_slope": 0.0,
+            "market_pressure_sample_count": 0,
+            "market_pressure_center": null,
+            "market_pressure_slope": 0.0,
+            "confidence": "VERY_LOW",
+            "direct_settlement_sample_count": 0,
+            "trade_form": "PAPER"
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "name": "نیم تاریخ پایین",
+      "status": "SUPPORTED",
+      "coefficient": 1.1265,
+      "low_date": true,
+      "accepted_training_samples": 5,
+      "rejected_training_samples": 0,
+      "settlements": {
+        "CASH": {
+          "source": "WEIGHTED_TRUSTED_TRADES_PLUS_GROUP_OFFERS_PHYSICAL_SETTLEMENT",
+          "sample_count": 5,
+          "effective_sample_weight": 1.811908301411842e-07,
+          "trusted_trade_effective_weight_before_offer_cap": 1.0871449808471052e-07,
+          "offer_effective_weight_before_cap": 0.7735359111447705,
+          "offer_weight_scale_for_hierarchical_cap": 9.369485115334152e-08,
+          "maximum_offer_training_share_with_trades": 0.4,
+          "recency_half_life_days": 1.0,
+          "bubble_ratio_median": 0.0008992493193229478,
+          "bubble_ratio_q10": -0.07572046668177834,
+          "bubble_ratio_q90": 0.003714288363841911,
+          "source_counts": {
+            "TELEGRAM_GROUP_CONFIRMED_TRADE": 1,
+            "TELEGRAM_GROUP_OFFER": 4
+          },
+          "global_feature_sample_count": 0,
+          "melted_vs_global_center": null,
+          "melted_vs_global_slope": 0.0,
+          "market_pressure_sample_count": 4,
+          "market_pressure_center": null,
+          "market_pressure_slope": 0.0,
+          "confidence": "VERY_LOW",
+          "direct_settlement_sample_count": 5,
+          "trade_form": "PHYSICAL"
+        },
+        "TOMORROW": {
+          "source": "WEIGHTED_PHYSICAL_POOLED_FALLBACK",
+          "sample_count": 5,
+          "effective_sample_weight": 1.811908301411842e-07,
+          "trusted_trade_effective_weight_before_offer_cap": 1.0871449808471052e-07,
+          "offer_effective_weight_before_cap": 0.7735359111447705,
+          "offer_weight_scale_for_hierarchical_cap": 9.369485115334152e-08,
+          "maximum_offer_training_share_with_trades": 0.4,
+          "recency_half_life_days": 1.0,
+          "bubble_ratio_median": 0.0008992493193229478,
+          "bubble_ratio_q10": -0.07572046668177834,
+          "bubble_ratio_q90": 0.003714288363841911,
+          "source_counts": {
+            "TELEGRAM_GROUP_CONFIRMED_TRADE": 1,
+            "TELEGRAM_GROUP_OFFER": 4
+          },
+          "global_feature_sample_count": 0,
+          "melted_vs_global_center": null,
+          "melted_vs_global_slope": 0.0,
+          "market_pressure_sample_count": 4,
+          "market_pressure_center": null,
+          "market_pressure_slope": 0.0,
+          "confidence": "VERY_LOW",
+          "direct_settlement_sample_count": 0,
+          "trade_form": "PHYSICAL"
+        }
+      },
+      "market_forms": {
+        "CASH": {
+          "PHYSICAL": {
+            "source": "WEIGHTED_TRUSTED_TRADES_PLUS_GROUP_OFFERS_PHYSICAL_SETTLEMENT",
+            "sample_count": 5,
+            "effective_sample_weight": 1.811908301411842e-07,
+            "trusted_trade_effective_weight_before_offer_cap": 1.0871449808471052e-07,
+            "offer_effective_weight_before_cap": 0.7735359111447705,
+            "offer_weight_scale_for_hierarchical_cap": 9.369485115334152e-08,
+            "maximum_offer_training_share_with_trades": 0.4,
+            "recency_half_life_days": 1.0,
+            "bubble_ratio_median": 0.0008992493193229478,
+            "bubble_ratio_q10": -0.07572046668177834,
+            "bubble_ratio_q90": 0.003714288363841911,
+            "source_counts": {
+              "TELEGRAM_GROUP_CONFIRMED_TRADE": 1,
+              "TELEGRAM_GROUP_OFFER": 4
+            },
+            "global_feature_sample_count": 0,
+            "melted_vs_global_center": null,
+            "melted_vs_global_slope": 0.0,
+            "market_pressure_sample_count": 4,
+            "market_pressure_center": null,
+            "market_pressure_slope": 0.0,
+            "confidence": "VERY_LOW",
+            "direct_settlement_sample_count": 5,
+            "trade_form": "PHYSICAL"
+          },
+          "PAPER": {
+            "source": "LOW_DATE_ZERO_BUBBLE_DOMAIN_FALLBACK",
+            "sample_count": 0,
+            "effective_sample_weight": 0.0,
+            "bubble_ratio_median": 0.0,
+            "bubble_ratio_q10": null,
+            "bubble_ratio_q90": null,
+            "source_counts": {},
+            "global_feature_sample_count": 0,
+            "melted_vs_global_center": null,
+            "melted_vs_global_slope": 0.0,
+            "market_pressure_sample_count": 0,
+            "market_pressure_center": null,
+            "market_pressure_slope": 0.0,
+            "confidence": "VERY_LOW",
+            "direct_settlement_sample_count": 0,
+            "trade_form": "PAPER"
+          }
+        },
+        "TOMORROW": {
+          "PHYSICAL": {
+            "source": "WEIGHTED_PHYSICAL_POOLED_FALLBACK",
+            "sample_count": 5,
+            "effective_sample_weight": 1.811908301411842e-07,
+            "trusted_trade_effective_weight_before_offer_cap": 1.0871449808471052e-07,
+            "offer_effective_weight_before_cap": 0.7735359111447705,
+            "offer_weight_scale_for_hierarchical_cap": 9.369485115334152e-08,
+            "maximum_offer_training_share_with_trades": 0.4,
+            "recency_half_life_days": 1.0,
+            "bubble_ratio_median": 0.0008992493193229478,
+            "bubble_ratio_q10": -0.07572046668177834,
+            "bubble_ratio_q90": 0.003714288363841911,
+            "source_counts": {
+              "TELEGRAM_GROUP_CONFIRMED_TRADE": 1,
+              "TELEGRAM_GROUP_OFFER": 4
+            },
+            "global_feature_sample_count": 0,
+            "melted_vs_global_center": null,
+            "melted_vs_global_slope": 0.0,
+            "market_pressure_sample_count": 4,
+            "market_pressure_center": null,
+            "market_pressure_slope": 0.0,
+            "confidence": "VERY_LOW",
+            "direct_settlement_sample_count": 0,
+            "trade_form": "PHYSICAL"
+          },
+          "PAPER": {
+            "source": "LOW_DATE_ZERO_BUBBLE_DOMAIN_FALLBACK",
+            "sample_count": 0,
+            "effective_sample_weight": 0.0,
+            "bubble_ratio_median": 0.0,
+            "bubble_ratio_q10": null,
+            "bubble_ratio_q90": null,
+            "source_counts": {},
+            "global_feature_sample_count": 0,
+            "melted_vs_global_center": null,
+            "melted_vs_global_slope": 0.0,
+            "market_pressure_sample_count": 0,
+            "market_pressure_center": null,
+            "market_pressure_slope": 0.0,
+            "confidence": "VERY_LOW",
+            "direct_settlement_sample_count": 0,
+            "trade_form": "PAPER"
+          }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "name": "یک گرمی",
+      "status": "SUPPORTED",
+      "coefficient": 0.27712177121771214,
+      "low_date": false,
+      "accepted_training_samples": 1,
+      "rejected_training_samples": 0,
+      "settlements": {
+        "CASH": {
+          "source": "WEIGHTED_PHYSICAL_POOLED_FALLBACK",
+          "sample_count": 1,
+          "effective_sample_weight": 0.3189519174409622,
+          "trusted_trade_effective_weight_before_offer_cap": 0,
+          "offer_effective_weight_before_cap": 0.3189519174409622,
+          "offer_weight_scale_for_hierarchical_cap": 1.0,
+          "maximum_offer_training_share_with_trades": 0.4,
+          "recency_half_life_days": 1.0,
+          "bubble_ratio_median": 0.2956990918153415,
+          "bubble_ratio_q10": 0.2956990918153415,
+          "bubble_ratio_q90": 0.2956990918153415,
+          "source_counts": {
+            "TELEGRAM_GROUP_OFFER": 1
+          },
+          "global_feature_sample_count": 1,
+          "melted_vs_global_center": null,
+          "melted_vs_global_slope": 0.0,
+          "market_pressure_sample_count": 1,
+          "market_pressure_center": null,
+          "market_pressure_slope": 0.0,
+          "confidence": "VERY_LOW",
+          "direct_settlement_sample_count": 1,
+          "trade_form": "PHYSICAL"
+        },
+        "TOMORROW": {
+          "source": "WEIGHTED_PHYSICAL_POOLED_FALLBACK",
+          "sample_count": 1,
+          "effective_sample_weight": 0.3189519174409622,
+          "trusted_trade_effective_weight_before_offer_cap": 0,
+          "offer_effective_weight_before_cap": 0.3189519174409622,
+          "offer_weight_scale_for_hierarchical_cap": 1.0,
+          "maximum_offer_training_share_with_trades": 0.4,
+          "recency_half_life_days": 1.0,
+          "bubble_ratio_median": 0.2956990918153415,
+          "bubble_ratio_q10": 0.2956990918153415,
+          "bubble_ratio_q90": 0.2956990918153415,
+          "source_counts": {
+            "TELEGRAM_GROUP_OFFER": 1
+          },
+          "global_feature_sample_count": 1,
+          "melted_vs_global_center": null,
+          "melted_vs_global_slope": 0.0,
+          "market_pressure_sample_count": 1,
+          "market_pressure_center": null,
+          "market_pressure_slope": 0.0,
+          "confidence": "VERY_LOW",
+          "direct_settlement_sample_count": 0,
+          "trade_form": "PHYSICAL"
+        }
+      },
+      "market_forms": {
+        "CASH": {
+          "PHYSICAL": {
+            "source": "WEIGHTED_PHYSICAL_POOLED_FALLBACK",
+            "sample_count": 1,
+            "effective_sample_weight": 0.3189519174409622,
+            "trusted_trade_effective_weight_before_offer_cap": 0,
+            "offer_effective_weight_before_cap": 0.3189519174409622,
+            "offer_weight_scale_for_hierarchical_cap": 1.0,
+            "maximum_offer_training_share_with_trades": 0.4,
+            "recency_half_life_days": 1.0,
+            "bubble_ratio_median": 0.2956990918153415,
+            "bubble_ratio_q10": 0.2956990918153415,
+            "bubble_ratio_q90": 0.2956990918153415,
+            "source_counts": {
+              "TELEGRAM_GROUP_OFFER": 1
+            },
+            "global_feature_sample_count": 1,
+            "melted_vs_global_center": null,
+            "melted_vs_global_slope": 0.0,
+            "market_pressure_sample_count": 1,
+            "market_pressure_center": null,
+            "market_pressure_slope": 0.0,
+            "confidence": "VERY_LOW",
+            "direct_settlement_sample_count": 1,
+            "trade_form": "PHYSICAL"
+          },
+          "PAPER": {
+            "source": "NO_TRAINING_LABEL",
+            "sample_count": 0,
+            "effective_sample_weight": 0.0,
+            "bubble_ratio_median": null,
+            "bubble_ratio_q10": null,
+            "bubble_ratio_q90": null,
+            "source_counts": {},
+            "global_feature_sample_count": 0,
+            "melted_vs_global_center": null,
+            "melted_vs_global_slope": 0.0,
+            "market_pressure_sample_count": 0,
+            "market_pressure_center": null,
+            "market_pressure_slope": 0.0,
+            "confidence": "VERY_LOW",
+            "direct_settlement_sample_count": 0,
+            "trade_form": "PAPER"
+          }
+        },
+        "TOMORROW": {
+          "PHYSICAL": {
+            "source": "WEIGHTED_PHYSICAL_POOLED_FALLBACK",
+            "sample_count": 1,
+            "effective_sample_weight": 0.3189519174409622,
+            "trusted_trade_effective_weight_before_offer_cap": 0,
+            "offer_effective_weight_before_cap": 0.3189519174409622,
+            "offer_weight_scale_for_hierarchical_cap": 1.0,
+            "maximum_offer_training_share_with_trades": 0.4,
+            "recency_half_life_days": 1.0,
+            "bubble_ratio_median": 0.2956990918153415,
+            "bubble_ratio_q10": 0.2956990918153415,
+            "bubble_ratio_q90": 0.2956990918153415,
+            "source_counts": {
+              "TELEGRAM_GROUP_OFFER": 1
+            },
+            "global_feature_sample_count": 1,
+            "melted_vs_global_center": null,
+            "melted_vs_global_slope": 0.0,
+            "market_pressure_sample_count": 1,
+            "market_pressure_center": null,
+            "market_pressure_slope": 0.0,
+            "confidence": "VERY_LOW",
+            "direct_settlement_sample_count": 0,
+            "trade_form": "PHYSICAL"
+          },
+          "PAPER": {
+            "source": "NO_TRAINING_LABEL",
+            "sample_count": 0,
+            "effective_sample_weight": 0.0,
+            "bubble_ratio_median": null,
+            "bubble_ratio_q10": null,
+            "bubble_ratio_q90": null,
+            "source_counts": {},
+            "global_feature_sample_count": 0,
+            "melted_vs_global_center": null,
+            "melted_vs_global_slope": 0.0,
+            "market_pressure_sample_count": 0,
+            "market_pressure_center": null,
+            "market_pressure_slope": 0.0,
+            "confidence": "VERY_LOW",
+            "direct_settlement_sample_count": 0,
+            "trade_form": "PAPER"
+          }
+        }
+      }
+    }
+  ],
+  "validation": {
+    "project_completed_trade_baseline": {
+      "status": "DISABLED_EXPERIMENTAL_ACTIVITY",
+      "sample_count": 0
+    },
+    "telegram_only_walk_forward": {
+      "method": "chronological_last_20_percent_telegram_offer_proxy_strict_no_future_labels",
+      "warning": "Offer prices are proxy labels; confirmed trades remain the preferred promotion metric when their holdout is large enough.",
+      "prediction_count": 122,
+      "mape_percent": 0.4768808051093569,
+      "interval_80_coverage_percent": 36.0655737704918,
+      "mean_interval_width_percent": 1.307895172638627,
+      "per_commodity": {
+        "امام": {
+          "status": "EVALUATED",
+          "train_cutoff_utc": "2026-07-20T08:02:04Z",
+          "training_count": 748,
+          "test_count": 101,
+          "prediction_count": 101,
+          "mape_percent": 0.46108418621600256,
+          "interval_80_coverage_percent": 24.752475247524753,
+          "mean_interval_width_percent": 0.9877195572462003
+        },
+        "ربع بهار": {
+          "status": "EVALUATED",
+          "train_cutoff_utc": "2026-07-20T09:09:26Z",
+          "training_count": 779,
+          "test_count": 14,
+          "prediction_count": 14,
+          "mape_percent": 0.42520836519288696,
+          "interval_80_coverage_percent": 100,
+          "mean_interval_width_percent": 3.165043881177454
+        },
+        "ربع تاریخ پایین": {
+          "status": "INSUFFICIENT_FOR_HOLDOUT",
+          "sample_count": 3
+        },
+        "نیم بهار": {
+          "status": "EVALUATED",
+          "train_cutoff_utc": "2026-07-21T09:22:33Z",
+          "training_count": 894,
+          "test_count": 5,
+          "prediction_count": 5,
+          "mape_percent": 0.8183837853678951,
+          "interval_80_coverage_percent": 100,
+          "mean_interval_width_percent": 2.8076930756342207
+        },
+        "بهار": {
+          "status": "EVALUATED",
+          "train_cutoff_utc": "2026-07-20T08:36:10Z",
+          "training_count": 767,
+          "test_count": 2,
+          "prediction_count": 2,
+          "mape_percent": 0.7825596879926922,
+          "interval_80_coverage_percent": 0,
+          "mean_interval_width_percent": 0.7272280326954055
+        },
+        "نیم تاریخ پایین": {
+          "status": "INSUFFICIENT_FOR_HOLDOUT",
+          "sample_count": 4
+        },
+        "یک گرمی": {
+          "status": "INSUFFICIENT_FOR_HOLDOUT",
+          "sample_count": 1
+        }
+      }
+    },
+    "group_offer_holdout_comparison": {
+      "method": "chronological_last_20_percent_holdout_no_future_labels_flow_point_enabled",
+      "holdout_source": "TELEGRAM_GROUP_OFFER",
+      "comparable_count": 122,
+      "baseline_mape_percent": 0.5377395695956781,
+      "augmented_mape_percent": 0.4768808051093569,
+      "relative_error_reduction_percent": 11.317516494477143,
+      "relative_error_reduction_bootstrap_95pct": [
+        3.9566127263282223,
+        18.235420637673815
+      ],
+      "per_commodity": {
+        "امام": {
+          "status": "EVALUATED",
+          "train_cutoff_utc": "2026-07-20T08:02:04Z",
+          "test_count": 101,
+          "comparable_count": 101,
+          "baseline_coverage_count": 101,
+          "augmented_coverage_count": 101,
+          "baseline_mape_percent": 0.5252720201652992,
+          "augmented_mape_percent": 0.46108418621600256,
+          "relative_error_reduction_percent": 12.219922532537938
+        },
+        "ربع بهار": {
+          "status": "EVALUATED",
+          "train_cutoff_utc": "2026-07-20T09:09:26Z",
+          "test_count": 14,
+          "comparable_count": 14,
+          "baseline_coverage_count": 14,
+          "augmented_coverage_count": 14,
+          "baseline_mape_percent": 0.5699993529705804,
+          "augmented_mape_percent": 0.42520836519288696,
+          "relative_error_reduction_percent": 25.401956515057055
+        },
+        "ربع تاریخ پایین": {
+          "status": "INSUFFICIENT_FOR_HOLDOUT",
+          "sample_count": 3
+        },
+        "نیم بهار": {
+          "status": "EVALUATED",
+          "train_cutoff_utc": "2026-07-21T09:22:33Z",
+          "test_count": 5,
+          "comparable_count": 5,
+          "baseline_coverage_count": 5,
+          "augmented_coverage_count": 5,
+          "baseline_mape_percent": 0.6013286272808032,
+          "augmented_mape_percent": 0.8183837853678951,
+          "relative_error_reduction_percent": -36.09592961981726
+        },
+        "بهار": {
+          "status": "EVALUATED",
+          "train_cutoff_utc": "2026-07-20T08:36:10Z",
+          "test_count": 2,
+          "comparable_count": 2,
+          "baseline_coverage_count": 2,
+          "augmented_coverage_count": 2,
+          "baseline_mape_percent": 0.7825596879926922,
+          "augmented_mape_percent": 0.7825596879926922,
+          "relative_error_reduction_percent": 0.0
+        },
+        "نیم تاریخ پایین": {
+          "status": "INSUFFICIENT_FOR_HOLDOUT",
+          "sample_count": 4
+        },
+        "یک گرمی": {
+          "status": "INSUFFICIENT_FOR_HOLDOUT",
+          "sample_count": 1
+        }
+      }
+    },
+    "trusted_trade_holdout_comparison": {
+      "method": "chronological_last_20_percent_holdout_no_future_labels_flow_point_enabled",
+      "holdout_source": "TRUSTED_CONFIRMED_TRADE",
+      "comparable_count": 54,
+      "baseline_mape_percent": 0.5340953618786788,
+      "augmented_mape_percent": 0.5225732095348266,
+      "relative_error_reduction_percent": 2.157321176376274,
+      "relative_error_reduction_bootstrap_95pct": [
+        -0.2011586928859605,
+        5.010023003950475
+      ],
+      "per_commodity": {
+        "امام": {
+          "status": "EVALUATED",
+          "train_cutoff_utc": "2026-07-18T15:56:26Z",
+          "test_count": 48,
+          "comparable_count": 48,
+          "baseline_coverage_count": 48,
+          "augmented_coverage_count": 48,
+          "baseline_mape_percent": 0.5549856390130862,
+          "augmented_mape_percent": 0.5431621781318319,
+          "relative_error_reduction_percent": 2.1304084376452685
+        },
+        "نیم بهار": {
+          "status": "EVALUATED",
+          "train_cutoff_utc": "2026-07-18T09:36:31Z",
+          "test_count": 3,
+          "comparable_count": 3,
+          "baseline_coverage_count": 3,
+          "augmented_coverage_count": 3,
+          "baseline_mape_percent": 0.33964284898330854,
+          "augmented_mape_percent": 0.2696497787482284,
+          "relative_error_reduction_percent": 20.607844518027793
+        },
+        "ربع بهار": {
+          "status": "EVALUATED",
+          "train_cutoff_utc": "2026-07-19T13:48:44Z",
+          "test_count": 3,
+          "comparable_count": 3,
+          "baseline_coverage_count": 3,
+          "augmented_coverage_count": 3,
+          "baseline_mape_percent": 0.3943034406235317,
+          "augmented_mape_percent": 0.4460731427693395,
+          "relative_error_reduction_percent": -13.129406647819716
+        },
+        "نیم تاریخ پایین": {
+          "status": "INSUFFICIENT_FOR_HOLDOUT",
+          "sample_count": 1
+        },
+        "بهار": {
+          "status": "INSUFFICIENT_FOR_HOLDOUT",
+          "sample_count": 1
+        },
+        "ربع تاریخ پایین": {
+          "status": "INSUFFICIENT_FOR_HOLDOUT",
+          "sample_count": 1
+        }
+      }
+    },
+    "group_offer_order_flow_ablation": {
+      "method": "chronological_holdout_same_training_flow_feature_ablation",
+      "holdout_source": "TELEGRAM_GROUP_OFFER",
+      "comparable_count": 122,
+      "without_flow_mape_percent": 0.47869748900807785,
+      "with_flow_mape_percent": 0.4768808051093569,
+      "relative_error_reduction_percent": 0.3795056252510061,
+      "per_commodity": {
+        "امام": {
+          "status": "EVALUATED",
+          "comparable_count": 101,
+          "without_flow_mape_percent": 0.4611091233369138,
+          "with_flow_mape_percent": 0.46108418621600256,
+          "relative_error_reduction_percent": 0.005408073631414051
+        },
+        "ربع بهار": {
+          "status": "EVALUATED",
+          "comparable_count": 14,
+          "without_flow_mape_percent": 0.44085956422373923,
+          "with_flow_mape_percent": 0.42520836519288696,
+          "relative_error_reduction_percent": 3.5501552650696677
+        },
+        "ربع تاریخ پایین": {
+          "status": "INSUFFICIENT_FOR_HOLDOUT",
+          "sample_count": 3
+        },
+        "نیم بهار": {
+          "status": "EVALUATED",
+          "comparable_count": 5,
+          "without_flow_mape_percent": 0.8183837853678951,
+          "with_flow_mape_percent": 0.8183837853678951,
+          "relative_error_reduction_percent": 0.0
+        },
+        "بهار": {
+          "status": "EVALUATED",
+          "comparable_count": 2,
+          "without_flow_mape_percent": 0.7825596879926922,
+          "with_flow_mape_percent": 0.7825596879926922,
+          "relative_error_reduction_percent": 0.0
+        },
+        "نیم تاریخ پایین": {
+          "status": "INSUFFICIENT_FOR_HOLDOUT",
+          "sample_count": 4
+        },
+        "یک گرمی": {
+          "status": "INSUFFICIENT_FOR_HOLDOUT",
+          "sample_count": 1
+        }
+      }
+    },
+    "completed_trade_order_flow_ablation": {
+      "method": "chronological_holdout_same_training_flow_feature_ablation",
+      "holdout_source": "TRUSTED_CONFIRMED_TRADE",
+      "comparable_count": 54,
+      "without_flow_mape_percent": 0.527847365324129,
+      "with_flow_mape_percent": 0.5225732095348266,
+      "relative_error_reduction_percent": 0.9991819862667725,
+      "per_commodity": {
+        "امام": {
+          "status": "EVALUATED",
+          "comparable_count": 48,
+          "without_flow_mape_percent": 0.5431621781318319,
+          "with_flow_mape_percent": 0.5431621781318319,
+          "relative_error_reduction_percent": 0.0
+        },
+        "نیم بهار": {
+          "status": "EVALUATED",
+          "comparable_count": 3,
+          "without_flow_mape_percent": 0.3747898479257631,
+          "with_flow_mape_percent": 0.2696497787482284,
+          "relative_error_reduction_percent": 28.05307287788661
+        },
+        "ربع بهار": {
+          "status": "EVALUATED",
+          "comparable_count": 3,
+          "without_flow_mape_percent": 0.4358678777992487,
+          "with_flow_mape_percent": 0.4460731427693395,
+          "relative_error_reduction_percent": -2.3413666135753086
+        },
+        "نیم تاریخ پایین": {
+          "status": "INSUFFICIENT_FOR_HOLDOUT",
+          "sample_count": 1
+        },
+        "بهار": {
+          "status": "INSUFFICIENT_FOR_HOLDOUT",
+          "sample_count": 1
+        },
+        "ربع تاریخ پایین": {
+          "status": "INSUFFICIENT_FOR_HOLDOUT",
+          "sample_count": 1
+        }
+      }
+    },
+    "group_offer_anchor": {
+      "selection_source": "DOMAIN_FIXED_FIVE_MINUTE_TTL_VALIDATED_ON_PREVIOUS_20_PERCENT",
+      "test_was_untouched_during_selection": true,
+      "strictly_prior": true,
+      "selected_window_minutes": 5,
+      "validation": {
+        "status": "PAIRED_SHARED_CONFIRMED_TRADE_HOLDOUT_GROUP_ANCHOR",
+        "comparable_count": 54,
+        "market_band_used_count": 46,
+        "structural_fallback_used_count": 8,
+        "active_mape_percent": 0.5863659203702245,
+        "candidate_mape_percent": 0.17432659847620277,
+        "candidate_relative_improvement_percent": 70.26999823486756,
+        "relative_improvement_bootstrap_95pct": [
+          56.129410122325,
+          81.91095274091884
+        ],
+        "non_worse": true,
+        "per_commodity": {
+          "امام": {
+            "count": 48,
+            "active_mape_percent": 0.4618061034190678,
+            "anchor_mape_percent": 0.1125026190928481,
+            "relative_improvement_percent": 75.6385595036718
+          },
+          "نیم بهار": {
+            "count": 3,
+            "active_mape_percent": 2.007834201609214,
+            "anchor_mape_percent": 0.8515645657775742,
+            "relative_improvement_percent": 57.587904165838346
+          },
+          "ربع بهار": {
+            "count": 3,
+            "active_mape_percent": 1.1578547103497419,
+            "anchor_mape_percent": 0.4862723013085059,
+            "relative_improvement_percent": 58.00230400568803
+          }
+        }
+      },
+      "test_paired_vs_active": {
+        "status": "PAIRED_SHARED_CONFIRMED_TRADE_HOLDOUT_GROUP_ANCHOR",
+        "comparable_count": 54,
+        "market_band_used_count": 46,
+        "structural_fallback_used_count": 8,
+        "active_mape_percent": 0.5259497147649687,
+        "candidate_mape_percent": 0.34905300934520683,
+        "candidate_relative_improvement_percent": 33.63376772602904,
+        "relative_improvement_bootstrap_95pct": [
+          10.106943118251284,
+          59.91267219990952
+        ],
+        "non_worse": true,
+        "per_commodity": {
+          "امام": {
+            "count": 48,
+            "active_mape_percent": 0.5443441848316944,
+            "anchor_mape_percent": 0.37242959530795877,
+            "relative_improvement_percent": 31.581964924800264
+          },
+          "نیم بهار": {
+            "count": 3,
+            "active_mape_percent": 0.2994506978737508,
+            "anchor_mape_percent": 0.19232833762103374,
+            "relative_improvement_percent": 35.77295394979514
+          },
+          "ربع بهار": {
+            "count": 3,
+            "active_mape_percent": 0.4581372105885742,
+            "anchor_mape_percent": 0.13175230566534912,
+            "relative_improvement_percent": 71.24173661945395
+          }
+        }
+      },
+      "validation_relative_error_qhat_raw": 0.002863403716517451,
+      "deployed_relative_error_qhat": 0.003,
+      "test_interval_coverage_percent": 80.43478260869566,
+      "offer_anchor_test_count": 46,
+      "offer_anchor_validation_count": 46
+    }
+  },
+  "group_offer_anchor": {
+    "enabled": true,
+    "selection": "RECENT_CONFIRMED_TRADE_THEN_ACTIVE_TWO_SIDED_BOOK_BAND",
+    "point_policy": "NEVER_USE_LATEST_OFFER_AS_DIRECT_PRICE",
+    "window_seconds": 300,
+    "minimum_confidence": 0.8,
+    "relative_error_qhat": 0.003,
+    "fallback": "QUALITY_FILTERED_HIERARCHICAL_STRUCTURAL_MODEL",
+    "no_forward_fill": true,
+    "quality_table_required": true,
+    "crossed_normal_offer_and_linked_trade": "EXCLUDED",
+    "normal_market_outlier_rule": "SELL_BELOW_LOWEST_ACTIVE_BUY_OR_BUY_ABOVE_HIGHEST_ACTIVE_SELL",
+    "opposite_book_reference": "OUTER_EXTREME_OF_ACTIVE_OPPOSITE_BOOK",
+    "validated_candidate_database_sha256": "e97c5ce865138aefcb8fba9f3981b9ec37f1b32c0884bb475a57753795a3387e"
+  },
+  "full_month_research_candidate": {
+    "sha256": "e197fcf5297e6e7bd4d88df13822b7110413a9274bad4aeb2adbff3e9ab46884",
+    "accepted_examples": 904,
+    "promotion_status": "INTEGRATED_AS_STRUCTURAL_FALLBACK_AND_TRAINING_SOURCE",
+    "reuse": "QUALITY_FILTERED_TRAINING_PLUS_STRICTLY_PRIOR_MARKET_BAND"
+  },
+  "structural_fallback_sha256": "e197fcf5297e6e7bd4d88df13822b7110413a9274bad4aeb2adbff3e9ab46884"
+}

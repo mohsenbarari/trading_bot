@@ -95,6 +95,7 @@ Rules:
 | `candidate/trading-production-grade` | Production-grade trade/offer hardening and market notification work validated through staging before any production promotion. | Allowed after staging validation and explicit approval |
 | `candidate/web-push-notifications` | Web Push notification work that should be merged to `main` only at the correct release point after staging validation and explicit approval. | Allowed after approval |
 | `candidate/market-traded-history` | Release-candidate work for two-day read-only market history that distinguishes pure expired offers from fully or partially traded offers before production promotion. | Allowed after staging validation and explicit approval |
+| `candidate/coin-price-intelligence` | Gradual, fail-closed introduction of versioned coin price-range and commodity-inference models, beginning with non-mutating Shadow observation on the existing offer parser. | Allowed only after local and staging validation plus explicit approval |
 | `staging/user-switcher` | Staging-only user-switcher/reference branch. | Not allowed |
 | `staging/web-push-user-switcher` | Active staging branch for Web Push/user-switcher validation and staging guardrail work. | Not allowed as-is; promote through `candidate/*` only if explicitly approved |
 
@@ -130,6 +131,7 @@ For production-grade application changes:
 
 | Date | Assistant | Description |
 | :--- | :--- | :--- |
+| 2026-07-23 | Codex | Registered `candidate/coin-price-intelligence`, branched from `main` commit `5af8edb6`, for a feature-flagged Shadow-only first slice that cannot change offer parsing or creation results. |
 | 2026-06-16 | Codex | Added the staging frontend artifact guardrail: staging builds into `mini_app_dist_staging`, staging Nginx serves that isolated directory, the staging Docker build copies that same artifact, and regression coverage rejects sharing production `mini_app_dist`. |
 | 2026-06-16 | Codex | Updated the `candidate/trading-production-grade` registry entry to include market notification work after Web Push and market-offer push changes moved onto that production-candidate branch for staging validation. |
 | 2026-06-16 | Codex | Added the staging guardrail document to `candidate/trading-production-grade` so the production-grade trading roadmap can proceed from a compliant candidate branch instead of a staging-only branch. |

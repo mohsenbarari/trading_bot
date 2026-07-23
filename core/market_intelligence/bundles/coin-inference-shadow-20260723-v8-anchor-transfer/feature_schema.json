@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "feature_schema_version": "COIN_INFERENCE_FEATURES_V4_COIN_ANCHOR_TRANSFER_20260723",
+  "status": "SHADOW_NOT_PRODUCTION",
+  "price_unit": {
+    "canonical": "PROJECT_THOUSAND_TOMAN",
+    "full_toman_multiplier": 1000,
+    "numeric_type": "positive_integer"
+  },
+  "request": {
+    "required": [
+      "normalized_price",
+      "price_unit",
+      "settlement",
+      "trade_form",
+      "requested_at_utc"
+    ],
+    "optional": [
+      "allowed_commodities",
+      "price_normalization_method",
+      "price_normalization_confidence"
+    ],
+    "settlement_values": [
+      "CASH",
+      "TOMORROW"
+    ],
+    "trade_form_values": [
+      "PHYSICAL",
+      "PAPER"
+    ]
+  },
+  "range_snapshot": {
+    "required": [
+      "generated_at_utc",
+      "settlement",
+      "trade_form",
+      "model_version",
+      "feature_schema_version",
+      "snapshot_version",
+      "rates"
+    ],
+    "optional": [
+      "low_date_physical_reference"
+    ],
+    "rate_required": [
+      "commodity_name",
+      "status",
+      "estimated_project_price",
+      "confidence",
+      "tolerance"
+    ],
+    "no_hidden_forward_fill": true,
+    "staleness_must_be_reported": true
+  },
+  "low_date_physical_reference": {
+    "required_when_observed": [
+      "status",
+      "average_price_toman",
+      "lower_price_toman",
+      "upper_price_toman",
+      "sample_count",
+      "last_event_utc",
+      "age_seconds",
+      "trade_form",
+      "price_unit",
+      "selection",
+      "maximum_age_seconds"
+    ],
+    "status_values": [
+      "OBSERVED",
+      "BRIDGED",
+      "NO_DATA"
+    ],
+    "required_trade_form": "PHYSICAL",
+    "required_price_unit": "IRT_PER_MESGHAL_750",
+    "paper_fallback": "FORBIDDEN",
+    "paper_delta_bridge": {
+      "allowed_status": "BRIDGED",
+      "formula": "PHYSICAL_LAST+(SAME_LABEL_PAPER_NOW-SAME_LABEL_PAPER_THEN)",
+      "same_paper_label_required": true,
+      "uncertainty_must_be_reported": true
+    },
+    "future_observation": "FORBIDDEN",
+    "formula": {
+      "بهار": "MELTED_PHYSICAL*2.253",
+      "نیم تاریخ پایین": "MELTED_PHYSICAL*2.253/2",
+      "ربع تاریخ پایین": "MELTED_PHYSICAL*2.253/4"
+    }
+  },
+  "low_date_multi_signal_range": {
+    "center_priority": [
+      "CONFIRMED_LIVE_COIN_TRADE",
+      "TRUSTWORTHY_TWO_SIDED_LIVE_COIN_BOOK",
+      "PHYSICAL_MELTED_INTRINSIC_OR_VALIDATED_BRIDGE"
+    ],
+    "supporting_regime_components": [
+      "MELTED_GOLD",
+      "USD_HERAT",
+      "USDT_IRT",
+      "XAUUSD",
+      "IME_GOLD_AND_COIN_WHEN_AVAILABLE"
+    ],
+    "premium_sibling_center": "REQUIRED_FOR_DYNAMIC_FAMILY_BOUNDARY",
+    "component_disagreement": "WIDENS_BOTH_INTERVAL_SIDES",
+    "positive_direction": "WIDENS_POSITIVE_INTERVAL_SIDE",
+    "negative_direction": "WIDENS_NEGATIVE_INTERVAL_SIDE",
+    "anti_double_counting": "DOLLAR_AND_XAU_SUPPORT_REGIME_BUT_ARE_NOT_REAPPLIED_TO_A_CURRENT_PHYSICAL_MELTED_CENTER",
+    "calendar_and_seasonality": "RESERVED_UNTIL_TRADE_LABEL_COVERAGE_IS_SUFFICIENT"
+  },
+  "coin_anchor_transfer": {
+    "objective": "NARROW_RANGE_FROM_LAST_TRUSTED_COIN_ANCHOR",
+    "center_priority": [
+      "RECENT_CONFIRMED_PROJECT_TRADE",
+      "TRUSTWORTHY_TWO_SIDED_PROJECT_BOOK",
+      "CURRENT_GENERIC_IMAM_REFERENCE",
+      "LAST_EXPLICIT_COIN_ANCHOR_TRANSFER"
+    ],
+    "formula": "ANCHOR_PRICE+COMMODITY_COEFFICIENT*MELTED_DELTA+REGIME_BETA*IMAM_BUBBLE_DELTA",
+    "cash_generic_imam_label": "سکه نقدی",
+    "tomorrow_generic_imam_proxy_label": "سکه حواله",
+    "melted_cash": "EXPLICIT_PHYSICAL_OR_VALIDATED_PHYSICAL_PLUS_PAPER_DELTA",
+    "melted_tomorrow": "EXPLICIT_PAPER_REFERENCE",
+    "cross_checks": [
+      "USD_HERAT",
+      "USDT_IRT",
+      "XAUUSD",
+      "IME_GOLD_BAR",
+      "IME_GOLD_COIN_IMAM"
+    ],
+    "same_timestamp_anchor": "FORBIDDEN",
+    "training_labels": "EXPLICIT_COMMODITY_ONLY",
+    "status": "SHADOW_NOT_PROMOTED"
+  },
+  "response": {
+    "required": [
+      "status",
+      "normalized_price",
+      "inferred_commodity",
+      "commodity_confidence",
+      "alternative_commodities",
+      "candidates",
+      "requires_user_confirmation",
+      "decision_reason",
+      "model_version",
+      "feature_schema_version",
+      "input_snapshot_version",
+      "input_freshness_seconds"
+    ],
+    "status_values": [
+      "INFERRED",
+      "AMBIGUOUS",
+      "NO_MARKET_DATA",
+      "INVALID_PRICE",
+      "STALE_INPUT",
+      "UNSUPPORTED_MARKET_DIMENSION"
+    ]
+  },
+  "legacy_market_regime_translation": {
+    "RANGE": "NORMAL",
+    "UP": "UP",
+    "DOWN": "DOWN",
+    "SHOCK": "VOLATILE",
+    "UNKNOWN": "UNKNOWN"
+  }
+}

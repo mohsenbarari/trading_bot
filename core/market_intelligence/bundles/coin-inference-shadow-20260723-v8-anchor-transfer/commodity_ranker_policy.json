@@ -1,0 +1,155 @@
+{
+  "schema_version": 1,
+  "policy_version": "COMMODITY_RANKER_SHADOW_V4_COIN_ANCHOR_TRANSFER_20260723",
+  "status": "SHADOW_RESEARCH_NOT_PROMOTED",
+  "automatic_decision": {
+    "minimum_probability": 0.97,
+    "minimum_probability_margin": 0.5,
+    "minimum_decision_confidence": 0.8,
+    "maximum_relative_outside": 0.02,
+    "maximum_candidate_relative_outside": 0.12,
+    "maximum_snapshot_age_seconds": 43200,
+    "overlap_requires_confirmation": true
+  },
+  "scoring": {
+    "softmax_temperature": 0.55,
+    "center_distance_weight": 1.0,
+    "outside_distance_weight": 2.5,
+    "reliability_penalty_weight": 0.5,
+    "minimum_scale_relative": 0.0075,
+    "minimum_scale_absolute": 250
+  },
+  "confidence_reliability": {
+    "HIGH_OBSERVED_TRADE": 1.0,
+    "HIGH_DIRECT_MARKET_REFERENCE": 0.95,
+    "MEDIUM_DIRECT_PAPER_REFERENCE": 0.85,
+    "ANCHOR_TRANSFER": 0.75,
+    "INTRINSIC_PHYSICAL_ANCHOR": 0.9,
+    "INTRINSIC_BRIDGED_PHYSICAL_ANCHOR": 0.8,
+    "MEDIUM_OBSERVED_BOOK": 0.85,
+    "HIGH": 0.9,
+    "MEDIUM": 0.75,
+    "LOW": 0.55,
+    "VERY_LOW": 0.35,
+    "NONE": 0.0
+  },
+  "dynamic_family_boundaries": {
+    "enabled": true,
+    "require_low_date_physical_anchor": true,
+    "guard_band_relative": 0.003,
+    "guard_band_absolute": 250,
+    "pairs": [
+      {
+        "low_date_commodity": "بهار",
+        "premium_commodity": "امام",
+        "reason": "FULL_COIN_DYNAMIC_INTRINSIC_BOUNDARY"
+      },
+      {
+        "low_date_commodity": "نیم تاریخ پایین",
+        "premium_commodity": "نیم بهار",
+        "reason": "HALF_COIN_DYNAMIC_INTRINSIC_BOUNDARY"
+      },
+      {
+        "low_date_commodity": "ربع تاریخ پایین",
+        "premium_commodity": "ربع بهار",
+        "reason": "QUARTER_COIN_DYNAMIC_INTRINSIC_BOUNDARY"
+      }
+    ]
+  },
+  "hard_price_ambiguity_zones": [
+    {
+      "commodities": [
+        "امام",
+        "بهار"
+      ],
+      "lower_project_price": 135000,
+      "upper_project_price": 250000,
+      "reason": "PHYSICAL_MELTED_ANCHOR_MISSING_FOR_FULL_COIN_BOUNDARY"
+    },
+    {
+      "commodities": [
+        "نیم بهار",
+        "نیم تاریخ پایین"
+      ],
+      "lower_project_price": 82000,
+      "upper_project_price": 100000,
+      "reason": "PHYSICAL_MELTED_ANCHOR_MISSING_FOR_HALF_COIN_BOUNDARY"
+    },
+    {
+      "commodities": [
+        "ربع بهار",
+        "ربع تاریخ پایین"
+      ],
+      "lower_project_price": 44000,
+      "upper_project_price": 52000,
+      "reason": "PHYSICAL_MELTED_ANCHOR_MISSING_FOR_QUARTER_COIN_BOUNDARY"
+    }
+  ],
+  "low_date_intrinsic_policy": {
+    "melted_trade_form": "PHYSICAL",
+    "accepted_market_labels": [
+      "آبشده نقدی",
+      "آبشده رسمی"
+    ],
+    "paper_fallback": "FORBIDDEN",
+    "maximum_reference_age_seconds": 900,
+    "paper_delta_bridge": {
+      "enabled": true,
+      "maximum_physical_base_age_seconds": 345600,
+      "paper_labels_must_match_at_both_endpoints": true,
+      "paper_label_priority": [
+        "آبشده حواله",
+        "آبشده غیررسمی",
+        "آبشده امروزی"
+      ],
+      "window_seconds_per_endpoint": 300,
+      "minimum_samples_per_endpoint": 3,
+      "maximum_current_paper_age_seconds": 120,
+      "maximum_delta_relative_to_physical_base": 0.25,
+      "formula": "PHYSICAL_LAST+(PAPER_NOW-PAPER_AT_PHYSICAL_TIME)",
+      "direct_paper_price_as_physical": "FORBIDDEN"
+    },
+    "robust_average_window_seconds": 300,
+    "fallback_relative_tolerance": 0.006,
+    "multi_signal_range": {
+      "objective": "ESTIMATE_A_SAFE_RANGE_NOT_A_SINGLE_CERTAIN_PRICE",
+      "direct_center_priority": [
+        "CONFIRMED_LIVE_LOW_DATE_COIN_TRADE",
+        "TRUSTWORTHY_TWO_SIDED_LIVE_LOW_DATE_BOOK",
+        "EXPLICIT_PHYSICAL_MELTED_INTRINSIC",
+        "PHYSICAL_BASE_PLUS_SAME_PAPER_LABEL_DELTA"
+      ],
+      "regime_supporting_signals": [
+        "MELTED_GOLD",
+        "USD_HERAT",
+        "USDT_IRT",
+        "XAUUSD",
+        "IME_GOLD_AND_COIN_WHEN_AVAILABLE"
+      ],
+      "premium_sibling_center_role": "DYNAMIC_LOW_DATE_VS_PREMIUM_FAMILY_BOUNDARY",
+      "supporting_signals_are_not_reapplied_to_intrinsic_center": true,
+      "anti_double_counting_reason": "PHYSICAL_MELTED_ALREADY_EMBEDS_DOLLAR_AND_GLOBAL_GOLD",
+      "maximum_regime_extra": 0.012,
+      "maximum_signal_disagreement_extra": 0.006,
+      "maximum_directional_skew": 0.006,
+      "maximum_total_tolerance": 0.04,
+      "up_market_behavior": "WIDEN_POSITIVE_SIDE",
+      "down_market_behavior": "WIDEN_NEGATIVE_SIDE",
+      "conflicting_signal_behavior": "WIDEN_BOTH_SIDES_AND_REDUCE_CERTAINTY"
+    },
+    "formula": {
+      "بهار": "MELTED_PHYSICAL*2.253",
+      "نیم تاریخ پایین": "MELTED_PHYSICAL*2.253/2",
+      "ربع تاریخ پایین": "MELTED_PHYSICAL*2.253/4"
+    },
+    "formula_is_bypassed_when": {
+      "confirmed_live_coin_trade_count_gte": 1,
+      "two_sided_live_offer_count_gte": 4
+    }
+  },
+  "promotion_policy": {
+    "status": "NOT_EVALUATED_NOT_PROMOTED",
+    "minimum_precision_percent": 99.0,
+    "strictly_prior_evaluation_required": true
+  }
+}

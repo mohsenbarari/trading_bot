@@ -25,6 +25,8 @@ class ParsedOffer:
     lot_sizes: Optional[List[int]]
     notes: Optional[str]
     settlement_type: str = SettlementType.CASH.value
+    # Internal provenance only. It is not part of the offer-create contract.
+    commodity_was_explicit: bool = True
 
 
 @dataclass 
@@ -431,12 +433,16 @@ async def parse_offer_text(text: str) -> Tuple[Optional[ParsedOffer], Optional[P
     if error:
         return None, ParseError(error)
     
-    # پیدا کردن کالا
+    # پیدا کردن کالا. نبود نام کالا عمداً از قانون محصول موجود پیروی می‌کند
+    # و به امام پیش‌فرض می‌شود؛ مدل Shadow فقط این تصمیم را مشاهده می‌کند.
+    commodity_was_explicit = bool(
+        _extract_residual_commodity_text(clean_text)
+    )
     commodity_id, commodity_name = await find_commodity(clean_text)
     if commodity_id is None:
         return None, ParseError("❌ کالا یافت نشد")
-    
-    return ParsedOffer(
+
+    parsed_offer = ParsedOffer(
         trade_type=trade_type,
         commodity_id=commodity_id,
         commodity_name=commodity_name,
@@ -446,4 +452,17 @@ async def parse_offer_text(text: str) -> Tuple[Optional[ParsedOffer], Optional[P
         lot_sizes=lot_sizes,
         notes=notes,
         settlement_type=settlement_type or SettlementType.CASH.value,
-    ), None
+        commodity_was_explicit=commodity_was_explicit,
+    )
+    if not commodity_was_explicit:
+        from core.market_intelligence.shadow import (
+            observe_implicit_commodity_shadow,
+        )
+
+        await observe_implicit_commodity_shadow(
+            price=price,
+            settlement=parsed_offer.settlement_type,
+            current_commodity=commodity_name,
+        )
+
+    return parsed_offer, None

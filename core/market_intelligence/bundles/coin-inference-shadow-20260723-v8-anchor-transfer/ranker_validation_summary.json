@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "evaluation_kind": "STRICTLY_PRIOR_LOW_DATE_PHYSICAL_INTRINSIC_BOUNDARY",
+  "generated_at_utc": "2026-07-23T13:24:21Z",
+  "no_future_leakage": true,
+  "same_timestamp_group_excluded_from_own_range": true,
+  "history_label_policy": "EXPLICIT_COMMODITY_ONLY",
+  "threshold_selection_partition": "UNCHANGED_FROM_PRIOR_VALIDATION; DOMAIN_BOUNDARY_FIXED",
+  "price_inferred_labels": "EXCLUDED",
+  "partition_counts": {
+    "validation": 238,
+    "test": 238,
+    "anchored_validation_family": 95,
+    "anchored_test_family": 70,
+    "anchored_test_family_confirmed_trades": 2
+  },
+  "low_date_confirmed_trade_evidence_sufficient": false,
+  "confirmed_trade_evidence_caveat": "The anchored boundary cohort contains two confirmed trades, both premium siblings; there is no confirmed low-date trade.",
+  "validation_gate_passed": true,
+  "untouched_test_gate_passed": true,
+  "promotion_status": "SHADOW_TEST_PASSED_NOT_PROMOTED",
+  "limitations": [
+    "The physical melted feed is intermittent.",
+    "Only a strictly-prior direct physical reference or a validated physical-base-plus-same-paper-label delta bridge activates the dynamic boundary.",
+    "The model remains shadow-only and does not persist project offers."
+  ]
+}

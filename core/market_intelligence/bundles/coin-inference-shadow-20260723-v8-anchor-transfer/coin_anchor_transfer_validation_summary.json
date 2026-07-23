@@ -1,0 +1,289 @@
+{
+  "schema_version": 1,
+  "evaluation_kind": "STRICTLY_PRIOR_MULTI_SIGNAL_COIN_ANCHOR_TRANSFER",
+  "generated_at_utc": "2026-07-23T13:24:05Z",
+  "no_future_leakage": true,
+  "same_timestamp_anchor_forbidden": true,
+  "label_policy": "EXPLICIT_COMMODITY_ONLY",
+  "raw_event_count": 1188,
+  "market_enriched_event_count": 443,
+  "prediction_count": 436,
+  "train_cutoff_utc": "2026-07-14T11:30:19Z",
+  "test_cutoff_utc": "2026-07-16T17:22:17Z",
+  "validation": {
+    "overall": {
+      "count": 89,
+      "candidate_mape_percent": 0.7240646946976207,
+      "candidate_median_ape_percent": 0.5690329050195229,
+      "candidate_p90_ape_percent": 1.495796992689524,
+      "stale_anchor_mape_percent": 0.7539752410043656,
+      "relative_mape_improvement_percent": 3.967046221159895,
+      "interval_coverage_percent": 82.02247191011236,
+      "mean_interval_width_percent": 2.452725382897203
+    },
+    "trades_only": {
+      "count": 8,
+      "candidate_mape_percent": 0.6687436907175313,
+      "candidate_median_ape_percent": 0.45268985114159216,
+      "candidate_p90_ape_percent": 1.6823145673000948,
+      "stale_anchor_mape_percent": 0.6012300324468811,
+      "relative_mape_improvement_percent": -11.229255796801027,
+      "interval_coverage_percent": 75.0,
+      "mean_interval_width_percent": 2.5335482180998437
+    },
+    "per_commodity": {
+      "امام": {
+        "count": 3,
+        "candidate_mape_percent": 0.7494669168984434,
+        "candidate_median_ape_percent": 0.6685236768802229,
+        "candidate_p90_ape_percent": 1.1358833846135175,
+        "stale_anchor_mape_percent": 0.9664232621886202,
+        "relative_mape_improvement_percent": 22.44941256886186,
+        "interval_coverage_percent": 33.33333333333333,
+        "mean_interval_width_percent": 1.2
+      },
+      "بهار": {
+        "count": 1,
+        "candidate_mape_percent": 0.2264658647098521,
+        "candidate_median_ape_percent": 0.2264658647098521,
+        "candidate_p90_ape_percent": 0.2264658647098521,
+        "stale_anchor_mape_percent": 3.9664804469273744,
+        "relative_mape_improvement_percent": 94.29050848125866,
+        "interval_coverage_percent": 100,
+        "mean_interval_width_percent": 2.273166412411198
+      },
+      "نیم بهار": {
+        "count": 31,
+        "candidate_mape_percent": 0.49534680302018547,
+        "candidate_median_ape_percent": 0.36457856612077466,
+        "candidate_p90_ape_percent": 1.2007585592947625,
+        "stale_anchor_mape_percent": 0.5502654906194361,
+        "relative_mape_improvement_percent": 9.98039828691209,
+        "interval_coverage_percent": 87.09677419354838,
+        "mean_interval_width_percent": 2.0445232264180566
+      },
+      "نیم تاریخ پایین": {
+        "count": 1,
+        "candidate_mape_percent": 0.30760384683758024,
+        "candidate_median_ape_percent": 0.30760384683758024,
+        "candidate_p90_ape_percent": 0.30760384683758024,
+        "stale_anchor_mape_percent": 3.3707865168539324,
+        "relative_mape_improvement_percent": 90.87441921048512,
+        "interval_coverage_percent": 100,
+        "mean_interval_width_percent": 2.285649178892387
+      },
+      "ربع بهار": {
+        "count": 47,
+        "candidate_mape_percent": 0.8617727524318162,
+        "candidate_median_ape_percent": 0.6447809445901912,
+        "candidate_p90_ape_percent": 1.7008333008394592,
+        "stale_anchor_mape_percent": 0.7195256997624411,
+        "relative_mape_improvement_percent": -19.7695582960191,
+        "interval_coverage_percent": 80.85106382978722,
+        "mean_interval_width_percent": 2.696556548660439
+      },
+      "ربع تاریخ پایین": {
+        "count": 6,
+        "candidate_mape_percent": 0.966702851320729,
+        "candidate_median_ape_percent": 0.9088155423744627,
+        "candidate_p90_ape_percent": 1.7719523109677768,
+        "stale_anchor_mape_percent": 0.9985536001673548,
+        "relative_mape_improvement_percent": 3.1896884495021287,
+        "interval_coverage_percent": 83.33333333333334,
+        "mean_interval_width_percent": 3.335894280091177
+      },
+      "یک گرمی": {
+        "count": 0,
+        "candidate_mape_percent": null,
+        "stale_anchor_mape_percent": null,
+        "interval_coverage_percent": null,
+        "mean_interval_width_percent": null
+      }
+    },
+    "gap_cohorts": {
+      "gap_gte_10m": {
+        "count": 64,
+        "candidate_mape_percent": 0.8185366390824184,
+        "candidate_median_ape_percent": 0.6396301471342126,
+        "candidate_p90_ape_percent": 1.5953483249096376,
+        "stale_anchor_mape_percent": 0.8671236963281395,
+        "relative_mape_improvement_percent": 5.603244087488836,
+        "interval_coverage_percent": 78.125,
+        "mean_interval_width_percent": 2.479735081691385
+      },
+      "gap_gte_30m": {
+        "count": 39,
+        "candidate_mape_percent": 0.7454710714049296,
+        "candidate_median_ape_percent": 0.569296084197621,
+        "candidate_p90_ape_percent": 1.495796992689524,
+        "stale_anchor_mape_percent": 0.9725294552796481,
+        "relative_mape_improvement_percent": 23.347198652140413,
+        "interval_coverage_percent": 79.48717948717949,
+        "mean_interval_width_percent": 2.4581041117498974
+      },
+      "gap_gte_6h": {
+        "count": 9,
+        "candidate_mape_percent": 0.8784403944941099,
+        "candidate_median_ape_percent": 0.9543508513151762,
+        "candidate_p90_ape_percent": 1.6003729317897806,
+        "stale_anchor_mape_percent": 2.1740413147846334,
+        "relative_mape_improvement_percent": 59.594125993823134,
+        "interval_coverage_percent": 66.66666666666666,
+        "mean_interval_width_percent": 2.43475152240477
+      },
+      "gap_gte_24h": {
+        "count": 2,
+        "candidate_mape_percent": 0.26703485577371616,
+        "candidate_median_ape_percent": 0.26703485577371616,
+        "candidate_p90_ape_percent": 0.29949004862480744,
+        "stale_anchor_mape_percent": 3.6686334818906534,
+        "relative_mape_improvement_percent": 92.72113561924704,
+        "interval_coverage_percent": 100,
+        "mean_interval_width_percent": 2.2794077956517924
+      }
+    }
+  },
+  "test": {
+    "overall": {
+      "count": 88,
+      "candidate_mape_percent": 0.7232354909839489,
+      "candidate_median_ape_percent": 0.5550845020060832,
+      "candidate_p90_ape_percent": 1.4523348334635682,
+      "stale_anchor_mape_percent": 0.7234373835416192,
+      "relative_mape_improvement_percent": 0.0279073990732902,
+      "interval_coverage_percent": 81.81818181818183,
+      "mean_interval_width_percent": 2.424175347863125
+    },
+    "trades_only": {
+      "count": 4,
+      "candidate_mape_percent": 0.18672070141656938,
+      "candidate_median_ape_percent": 0.1990963334125228,
+      "candidate_p90_ape_percent": 0.3056599378600538,
+      "stale_anchor_mape_percent": 0.21168640366435837,
+      "relative_mape_improvement_percent": 11.793720246376147,
+      "interval_coverage_percent": 100,
+      "mean_interval_width_percent": 2.207531556978652
+    },
+    "per_commodity": {
+      "امام": {
+        "count": 2,
+        "candidate_mape_percent": 0.29873611078345796,
+        "candidate_median_ape_percent": 0.29873611078345796,
+        "candidate_p90_ape_percent": 0.36409504824364813,
+        "stale_anchor_mape_percent": 0.3256888579584326,
+        "relative_mape_improvement_percent": 8.275612295712795,
+        "interval_coverage_percent": 100,
+        "mean_interval_width_percent": 1.2
+      },
+      "بهار": {
+        "count": 9,
+        "candidate_mape_percent": 0.6227124798990985,
+        "candidate_median_ape_percent": 0.551720541959385,
+        "candidate_p90_ape_percent": 1.201167591210892,
+        "stale_anchor_mape_percent": 0.9482603272371998,
+        "relative_mape_improvement_percent": 34.33106268260742,
+        "interval_coverage_percent": 77.77777777777779,
+        "mean_interval_width_percent": 2.273166412411198
+      },
+      "نیم بهار": {
+        "count": 25,
+        "candidate_mape_percent": 0.5171227874026283,
+        "candidate_median_ape_percent": 0.3803550137457668,
+        "candidate_p90_ape_percent": 1.2405653672511083,
+        "stale_anchor_mape_percent": 0.5629406503551718,
+        "relative_mape_improvement_percent": 8.139021924182597,
+        "interval_coverage_percent": 88.0,
+        "mean_interval_width_percent": 2.0445232264180566
+      },
+      "نیم تاریخ پایین": {
+        "count": 3,
+        "candidate_mape_percent": 0.9122196596710125,
+        "candidate_median_ape_percent": 1.1697614455792622,
+        "candidate_p90_ape_percent": 1.2569953520055088,
+        "stale_anchor_mape_percent": 0.5524861878453038,
+        "relative_mape_improvement_percent": -65.11175840045327,
+        "interval_coverage_percent": 33.33333333333333,
+        "mean_interval_width_percent": 2.285649178892387
+      },
+      "ربع بهار": {
+        "count": 47,
+        "candidate_mape_percent": 0.7723422007357603,
+        "candidate_median_ape_percent": 0.5825242718446602,
+        "candidate_p90_ape_percent": 1.4687488621350726,
+        "stale_anchor_mape_percent": 0.7768221655368968,
+        "relative_mape_improvement_percent": 0.5767040385672039,
+        "interval_coverage_percent": 85.1063829787234,
+        "mean_interval_width_percent": 2.696556548660439
+      },
+      "ربع تاریخ پایین": {
+        "count": 1,
+        "candidate_mape_percent": 1.7373796890925826,
+        "candidate_median_ape_percent": 1.7373796890925826,
+        "candidate_p90_ape_percent": 1.7373796890925826,
+        "stale_anchor_mape_percent": 0.44943820224719105,
+        "relative_mape_improvement_percent": -286.5669808230996,
+        "interval_coverage_percent": 0,
+        "mean_interval_width_percent": 3.335894280091177
+      },
+      "یک گرمی": {
+        "count": 1,
+        "candidate_mape_percent": 3.7406468781766353,
+        "candidate_median_ape_percent": 3.7406468781766353,
+        "candidate_p90_ape_percent": 3.7406468781766353,
+        "stale_anchor_mape_percent": 1.7857142857142856,
+        "relative_mape_improvement_percent": -109.47622517789158,
+        "interval_coverage_percent": 0,
+        "mean_interval_width_percent": 2.4248526359938225
+      }
+    },
+    "gap_cohorts": {
+      "gap_gte_10m": {
+        "count": 52,
+        "candidate_mape_percent": 0.8452954592030582,
+        "candidate_median_ape_percent": 0.650330103239992,
+        "candidate_p90_ape_percent": 1.5704671613165042,
+        "stale_anchor_mape_percent": 0.8198244505226123,
+        "relative_mape_improvement_percent": -3.106885707569322,
+        "interval_coverage_percent": 75.0,
+        "mean_interval_width_percent": 2.3601028669304767
+      },
+      "gap_gte_30m": {
+        "count": 30,
+        "candidate_mape_percent": 0.9400058752650953,
+        "candidate_median_ape_percent": 0.6556353380575394,
+        "candidate_p90_ape_percent": 1.7373244062436677,
+        "stale_anchor_mape_percent": 0.9677340832232517,
+        "relative_mape_improvement_percent": 2.8652714044958993,
+        "interval_coverage_percent": 66.66666666666666,
+        "mean_interval_width_percent": 2.323093168209527
+      },
+      "gap_gte_6h": {
+        "count": 11,
+        "candidate_mape_percent": 1.2957752658686932,
+        "candidate_median_ape_percent": 1.2788038286120704,
+        "candidate_p90_ape_percent": 1.7373796890925826,
+        "stale_anchor_mape_percent": 0.916748153982412,
+        "relative_mape_improvement_percent": -41.34473685491085,
+        "interval_coverage_percent": 36.36363636363637,
+        "mean_interval_width_percent": 2.323685240804469
+      },
+      "gap_gte_24h": {
+        "count": 7,
+        "candidate_mape_percent": 1.559448066666222,
+        "candidate_median_ape_percent": 1.4939103617507064,
+        "candidate_p90_ape_percent": 2.5386865647262042,
+        "stale_anchor_mape_percent": 0.8524958161777535,
+        "relative_mape_improvement_percent": -82.92735718729465,
+        "interval_coverage_percent": 28.57142857142857,
+        "mean_interval_width_percent": 2.322948897495297
+      }
+    }
+  },
+  "promotion_status": "SHADOW_NOT_PROMOTED",
+  "limitations": [
+    "Evaluation remains offer-heavy even with explicit labels.",
+    "Tomorrow-settlement labels are sparse for several commodities.",
+    "IME history currently covers only a short sub-period.",
+    "Calendar residuals are not learned at this evidence level."
+  ]
+}

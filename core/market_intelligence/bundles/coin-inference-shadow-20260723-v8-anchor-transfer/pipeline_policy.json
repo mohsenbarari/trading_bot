@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "market_data_policy": {
+    "version": "EXPLICIT_CASH_MARKET_FORMS_V3",
+    "usd_physical_rule": "Only text explicitly containing نقدی or نقد is physical; Herat today/tomorrow is paper.",
+    "melted_physical_rule": "Only آبشده نقدی or آبشده رسمی is physical; all other melted quotes are paper."
+  },
+  "training_sources": {
+    "project_database": {
+      "enabled": false,
+      "reason": "Project offers and trades are currently experimental, not reliable market labels."
+    },
+    "telegram_group_offers": {
+      "enabled": true,
+      "weight_policy": "LIFECYCLE_V1",
+      "active_live_range_weight": 1.0,
+      "early_expired_weight": 0.5,
+      "timeout_historical_training_weight": 0.3333333333333333,
+      "live_ttl_seconds": 300,
+      "post_ttl_online_half_life_seconds": 300,
+      "minimum_confidence": 0.8
+    },
+    "telegram_group_confirmed_trades": {
+      "enabled": true,
+      "base_weight": 1.5,
+      "minimum_confidence": 0.85
+    }
+  },
+  "market_quality": {
+    "version": "REGIME_AND_OUTER_BOOK_FILTER_V2",
+    "crossed_offer_in_range_market": "EXCLUDE_OFFER_AND_LINKED_TRADE_FROM_LIVE_AND_TRAINING",
+    "normal_market_outlier_rule": "SELL_BELOW_LOWEST_ACTIVE_BUY_OR_BUY_ABOVE_HIGHEST_ACTIVE_SELL",
+    "opposite_book_reference": "OUTER_EXTREME_OF_ACTIVE_OPPOSITE_BOOK",
+    "extreme_local_discontinuity": {
+      "action": "EXCLUDE_OFFER_AND_LINKED_TRADE_NO_AUTO_CORRECTION",
+      "strictly_prior_only": true,
+      "lookback_seconds": 1200,
+      "minimum_references": 3,
+      "minimum_relative_deviation": 0.05,
+      "underlying_volatility_multiplier": 8.0
+    },
+    "directional_cross_requires_matching_underlying_regime": true,
+    "regime_states": [
+      "RANGE",
+      "UP",
+      "DOWN",
+      "SHOCK",
+      "UNKNOWN"
+    ],
+    "regime_inputs": [
+      "MELTED_GOLD",
+      "USD_HERAT",
+      "USDT_IRT",
+      "XAUUSD",
+      "IME_GOLD_BAR"
+    ],
+    "coin_offers_are_not_regime_inputs": true,
+    "usdt_nominal_weight": 0.75,
+    "ime_nominal_weight": 0.25
+  },
+  "text_extraction": {
+    "strategy": "RULES_THEN_LOCAL_LLM_THEN_REVIEW",
+    "local_llm": {
+      "enabled": false,
+      "recommended_model": "Qwen/Qwen3-0.6B-GGUF",
+      "endpoint": "http://127.0.0.1:30487/v1/chat/completions",
+      "model": "qwen3-0.6b",
+      "temperature": 0.0,
+      "maximum_context_messages": 8
+    },
+    "never_self_train_unreviewed_llm_output": true
+  },
+  "interval_policy": {
+    "version": "MARKET_BAND_INTERVAL_V1_20260723",
+    "sha256": "bf22a6ca1994133f625008c8969841b4a93085f925459ae7b68b6e61c35f771f",
+    "locked_at_utc": "2026-07-23T08:41:45Z",
+    "fresh_test_strictly_after_utc": "2026-07-23T08:41:45Z",
+    "target_coverage": 0.95
+  },
+  "promotion_gate": {
+    "walk_forward_only": true,
+    "minimum_offer_holdout": 100,
+    "minimum_confirmed_trade_holdout": 50,
+    "require_non_worse_confirmed_trade_mape": true,
+    "require_interval_coverage": true,
+    "target_interval_coverage": 0.95
+  }
+}

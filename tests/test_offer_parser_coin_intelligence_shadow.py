@@ -1,0 +1,81 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+import unittest
+from unittest.mock import AsyncMock, patch
+
+from bot.utils import offer_parser
+
+
+TRADING_SETTINGS = SimpleNamespace(
+    offer_min_quantity=5,
+    offer_max_quantity=75,
+    lot_min_size=5,
+    lot_max_count=4,
+)
+
+
+class OfferParserCoinIntelligenceShadowTests(
+    unittest.IsolatedAsyncioTestCase
+):
+    async def test_implicit_imam_rule_is_preserved_and_shadow_observed(
+        self,
+    ) -> None:
+        observer = AsyncMock()
+        with patch.object(
+            offer_parser,
+            "get_trading_settings",
+            return_value=TRADING_SETTINGS,
+        ), patch.object(
+            offer_parser,
+            "find_commodity",
+            new=AsyncMock(return_value=(41, "امام")),
+        ), patch(
+            "core.market_intelligence.shadow."
+            "observe_implicit_commodity_shadow",
+            new=observer,
+        ):
+            parsed, error = await offer_parser.parse_offer_text(
+                "خ ن 30تا 75800"
+            )
+
+        self.assertIsNone(error)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.commodity_id, 41)
+        self.assertEqual(parsed.commodity_name, "امام")
+        self.assertFalse(parsed.commodity_was_explicit)
+        observer.assert_awaited_once_with(
+            price=75800,
+            settlement="cash",
+            current_commodity="امام",
+        )
+
+    async def test_explicit_commodity_does_not_enter_implicit_shadow(
+        self,
+    ) -> None:
+        observer = AsyncMock()
+        with patch.object(
+            offer_parser,
+            "get_trading_settings",
+            return_value=TRADING_SETTINGS,
+        ), patch.object(
+            offer_parser,
+            "find_commodity",
+            new=AsyncMock(return_value=(41, "امام")),
+        ), patch(
+            "core.market_intelligence.shadow."
+            "observe_implicit_commodity_shadow",
+            new=observer,
+        ):
+            parsed, error = await offer_parser.parse_offer_text(
+                "خ ن امام 30تا 75800"
+            )
+
+        self.assertIsNone(error)
+        self.assertIsNotNone(parsed)
+        self.assertTrue(parsed.commodity_was_explicit)
+        observer.assert_not_awaited()
+
+
+if __name__ == "__main__":
+    unittest.main()
