@@ -37,10 +37,11 @@ preview, persisted `commodity_id`, or user-visible flow.
 
 ## Telegram collector boundary
 
-The production Telegram extraction path must ultimately be versioned in the
-repository because its source classification, parsing, normalization,
-deduplication, and schema contract are part of the model input pipeline. It
-will be introduced as a separate reviewed slice after the offline producer.
+The production Telegram extraction source is repository-owned because its
+source classification, parsing, normalization, deduplication, and schema
+contract are part of the model input pipeline. Its current CLI is an explicit
+Shadow-only operator tool; it is not installed in the default application
+image, scheduled, deployed, or started by any application process.
 
 Only executable source adapters, parsers, normalized event contracts, fixture
 messages, tests, and non-secret configuration templates belong in Git.
@@ -50,10 +51,25 @@ Credentials must be injected by the deployment secret mechanism; session and
 checkpoint state must live in a protected runtime volume. Test fixtures must
 be synthetic or irreversibly minimized.
 
-The future collector must write the same normalized observation contract
-consumed by the producer and retain source event time. Collector execution
-must be idempotent and restart-safe. Adding it to the repository does not
-authorize enabling it on any server.
+The collector writes the same normalized `price_events` contract consumed by
+the producer and retains source event time. The model table contains neither
+raw text, Telegram message ID, channel name, nor source code. A separate
+four-row checkpoint table retains only the latest message ID per public source
+for restart safety. A 16-byte opaque message key makes edits and retries
+idempotent without exposing the public message ID to the model.
+
+The public source catalog currently contains `abshdh`, `NaghdP`,
+`ToofanHarirodOfficial`, and `qheimat_ounce`. Melted-gold gram prices and
+hourly open/high/low summaries are ignored. Cash/physical and
+today/tomorrow remain independent axes. Only explicit cash/official
+melted-gold and explicit cash dollar quotes are PHYSICAL; other melted-gold
+and Herat forms are PAPER. NaghdP trades are linked only to a strictly earlier
+same-price, same-settlement offer inside a bounded window.
+
+Collector execution is idempotent and restart-safe. The ounce source is
+compacted to its newest quote per minute; melted-gold and dollar order flow is
+not averaged away. Adding the source to the repository does not authorize
+enabling it on any server.
 
 ## Commodity identity
 
@@ -135,6 +151,8 @@ This market-intelligence plane does not change the fixed business topology:
 - deterministic offline range snapshot producer;
 - low-date physical-melted and strictly-prior coin-anchor runtime overlays;
 - atomic snapshot builder CLI with explicit input and output paths;
+- data-minimized Telegram parsers and normalized SQLite writer;
+- explicit, unscheduled Shadow Telegram CLI with optional Telethon dependency;
 - feature flags disabled by default;
 - Shadow observation only for intentionally implicit-commodity offers;
 - low-cardinality metrics with no raw message, price, user ID, or personal data;
@@ -170,5 +188,14 @@ This market-intelligence plane does not change the fixed business topology:
 - `COIN_INTELLIGENCE_BUNDLE_PATH` optionally overrides the repository bundle.
 - `COIN_INTELLIGENCE_SNAPSHOT_PATH` is required before Shadow observation can
   run.
+
+The Telegram CLI reads credentials only from
+`COIN_MARKET_TELEGRAM_API_ID`, `COIN_MARKET_TELEGRAM_API_HASH`, and
+`COIN_MARKET_TELEGRAM_PHONE`. Database and session paths are required through
+CLI arguments or the corresponding template variables, must be outside the
+repository checkout, and must not overlap. The blank template is
+`config/coin-market-telegram.env.example`. Telethon remains in
+`requirements-market-intelligence.txt`, outside the default application
+requirements.
 
 Enabling Shadow does not authorize staging or production deployment.

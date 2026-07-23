@@ -169,7 +169,11 @@ def detect_market_regime(
         start=start,
         end=end,
         instrument="MELTED_GOLD",
-        settlement_terms=("TOMORROW", "UNKNOWN") if tomorrow else ("TODAY",),
+        settlement_terms=(
+            ("TOMORROW",)
+            if tomorrow
+            else ("TODAY", "UNKNOWN")
+        ),
         trade_forms=("PAPER",) if tomorrow else ("PHYSICAL",),
     )
     if not melted_primary:
@@ -199,7 +203,11 @@ def detect_market_regime(
         start=start,
         end=end,
         instrument="USD_HERAT",
-        settlement_terms=("TOMORROW",) if tomorrow else ("TODAY",),
+        settlement_terms=(
+            ("TOMORROW",)
+            if tomorrow
+            else ("TODAY", "UNKNOWN")
+        ),
         trade_forms=("PAPER",) if tomorrow else ("PHYSICAL",),
     )
     if not usd_rows and not tomorrow:
@@ -208,7 +216,7 @@ def detect_market_regime(
             start=start,
             end=end,
             instrument="USD_HERAT",
-            settlement_terms=("TODAY",),
+            settlement_terms=("TODAY", "UNKNOWN"),
             trade_forms=("PAPER",),
         )
         usd_reliability = 0.65

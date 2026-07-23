@@ -50,3 +50,8 @@ map_data/
 /.coverage.*
 .deploy_count
 deploy/production/online.env
+
+# Market-intelligence runtime secrets and local state
+*.session
+*.session-journal
+/runtime/market-intelligence/
