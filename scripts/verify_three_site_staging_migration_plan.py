@@ -24,10 +24,7 @@ from scripts.verify_three_site_staging_inventory import (
     load_inventory,
     verify_approved_inventory,
 )
-from scripts.verify_three_site_staging_image_inventory import (
-    LOCAL_RELEASE_IMAGE_PREFIXES,
-    verify_image_document,
-)
+from scripts.verify_three_site_staging_image_inventory import verify_image_document
 
 
 SOURCE_ROLES = ("bot_fi", "webapp_fi")
@@ -353,7 +350,6 @@ def verify_migration_plan(
     if not isinstance(image_rows, list) or len(image_rows) != len(TARGET_SEED_MAP):
         raise MigrationPlanError("migration requires four image inventories")
     observed_content_identities: dict[str, str] = {}
-    observed_repo_digests: dict[str, tuple[str, ...]] = {}
     image_inventory_hashes: dict[str, str] = {}
     seen_image_roles: set[str] = set()
     for row in image_rows:
@@ -390,14 +386,13 @@ def verify_migration_plan(
                 raise MigrationPlanError(
                     "same image reference resolves to different bytes across roles"
                 )
-        for item in document["images"]:
-            reference = str(item["reference"])
-            if reference.startswith(LOCAL_RELEASE_IMAGE_PREFIXES):
-                continue
-            digests = tuple(item["repo_digests"])
-            previous = observed_repo_digests.setdefault(reference, digests)
-            if previous != digests:
-                raise MigrationPlanError("same image reference has different provider digests across roles")
+        # Provider RepoDigests remain mandatory and document-bound for every
+        # third-party image, but they are store-local provenance rather than a
+        # cross-store content identity. A classic Docker image store retains
+        # the registry's multi-architecture index digest, while containerd can
+        # report the selected platform-manifest digest after an exact
+        # save/load. Cross-host equality is therefore enforced above through
+        # the canonical config/rootfs content identity.
         seen_image_roles.add(role)
         image_inventory_hashes[role] = str(row["document_sha256"])
     if seen_image_roles != set(TARGET_SEED_MAP) or set(image_inventories) != set(TARGET_SEED_MAP):

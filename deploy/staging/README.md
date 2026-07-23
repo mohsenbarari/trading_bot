@@ -246,7 +246,11 @@ content identity instead binds the architecture, OS, creation timestamp,
 canonical runtime-config hash, and ordered rootfs diff IDs. Cross-host equality
 uses this recomputable identity; the local ID is still retained and checked
 against containers on that same host. Third-party images additionally require
-stable provider repository digests.
+at least one repository digest on every host, and each host's digest remains
+bound into its inventory document. Those provider digests are not compared
+across legacy and containerd stores because one can retain the registry
+multi-architecture index while the other reports the selected platform
+manifest for the same verified content.
 
 First freeze the legacy Compose project. The evidence records exactly which
 services were running so rollback cannot accidentally start an unrecorded

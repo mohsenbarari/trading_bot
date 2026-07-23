@@ -419,6 +419,30 @@ class ThreeSiteStagingMigrationPlanTests(unittest.TestCase):
         with self.assertRaisesRegex(MigrationPlanError, "human approval is invalid"):
             self._verify(documents)
 
+    def test_store_local_provider_digest_may_differ_when_content_is_identical(self):
+        documents = self._documents()
+        images = documents[7]
+        plan = documents[-2]
+        document = images["webapp_ir"]
+        third_party = next(
+            item
+            for item in document["images"]
+            if not item["reference"].startswith(
+                (
+                    "trading_bot_three_site_staging:",
+                    "trading_bot_postgres_boottime:",
+                )
+            )
+        )
+        third_party["repo_digests"] = ["redis@sha256:" + "5" * 64]
+        next(
+            row for row in plan["image_inventories"] if row["role"] == "webapp_ir"
+        )["document_sha256"] = hashlib.sha256(
+            _canonical_bytes(document)
+        ).hexdigest()
+        with self.assertRaisesRegex(MigrationPlanError, "human approval is invalid"):
+            self._verify(documents)
+
 
 if __name__ == "__main__":
     unittest.main()
