@@ -45,8 +45,11 @@ class LoadedRuntimeBundle:
     root: Path
     manifest: Mapping[str, Any]
     ranker_policy: RankerPolicy
+    ranker_policy_payload: Mapping[str, Any]
     feature_schema: Mapping[str, Any]
     commodity_catalog: Mapping[str, Any]
+    range_model: Mapping[str, Any]
+    anchor_transfer_policy: Mapping[str, Any]
 
     @property
     def bundle_version(self) -> str:
@@ -243,6 +246,11 @@ def load_runtime_bundle(
         or promotion_policy.get("status") != "NOT_EVALUATED_NOT_PROMOTED"
     ):
         raise BundleValidationError("bundle_ranker_promotion_policy_invalid")
+    if not isinstance(
+        ranker_payload.get("low_date_intrinsic_policy"),
+        dict,
+    ):
+        raise BundleValidationError("bundle_low_date_policy_invalid")
     if (
         payloads["ranker_validation_summary.json"].get("promotion_status")
         != "SHADOW_TEST_PASSED_NOT_PROMOTED"
@@ -255,6 +263,19 @@ def load_runtime_bundle(
         != "SHADOW_NOT_PROMOTED"
     ):
         raise BundleValidationError("bundle_anchor_evidence_not_shadow")
+    anchor_transfer_policy = payloads["coin_anchor_transfer_policy.json"]
+    if (
+        int(anchor_transfer_policy.get("schema_version") or 0) != 1
+        or anchor_transfer_policy.get("status") != "SHADOW_NOT_PROMOTED"
+        or anchor_transfer_policy.get("future_market_data_forbidden")
+        is not True
+        or anchor_transfer_policy.get("same_timestamp_anchor_forbidden")
+        is not True
+    ):
+        raise BundleValidationError("bundle_anchor_policy_invalid")
+    runtime_anchors = anchor_transfer_policy.get("runtime_anchors")
+    if not isinstance(runtime_anchors, list) or not runtime_anchors:
+        raise BundleValidationError("bundle_anchor_policy_empty")
     commodity_catalog = payloads["commodity_catalog.json"]
     _validate_commodity_catalog(commodity_catalog)
     try:
@@ -267,6 +288,9 @@ def load_runtime_bundle(
         root=resolved,
         manifest=manifest,
         ranker_policy=policy,
+        ranker_policy_payload=ranker_payload,
         feature_schema=feature_schema,
         commodity_catalog=commodity_catalog,
+        range_model=runtime_model,
+        anchor_transfer_policy=anchor_transfer_policy,
     )

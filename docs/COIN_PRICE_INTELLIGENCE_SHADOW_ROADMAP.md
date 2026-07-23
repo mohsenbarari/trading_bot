@@ -26,9 +26,34 @@ preview, persisted `commodity_id`, or user-visible flow.
 - Live market inputs are supplied through a local, atomically replaced,
   versioned JSON snapshot. No absolute `/tmp` path is embedded in code or the
   bundle.
-- The numerical range model is carried for version/provenance validation, but
-  range generation still happens in the external snapshot producer during this
-  first slice. The snapshot producer and live collectors are not yet migrated.
+- The deterministic range snapshot producer is repository-owned. It reads a
+  normalized SQLite observation database read-only, enforces a strict source
+  cutoff, applies the verified base model, low-date physical-melted policy, and
+  coin-anchor transfer policy, then replaces the JSON snapshot atomically.
+- `scripts/build_coin_intelligence_snapshot.py` is an offline Shadow entry
+  point only. No scheduler, live collector, deployment, or user-facing
+  activation is introduced by this slice.
+- Live collectors are not yet migrated.
+
+## Telegram collector boundary
+
+The production Telegram extraction path must ultimately be versioned in the
+repository because its source classification, parsing, normalization,
+deduplication, and schema contract are part of the model input pipeline. It
+will be introduced as a separate reviewed slice after the offline producer.
+
+Only executable source adapters, parsers, normalized event contracts, fixture
+messages, tests, and non-secret configuration templates belong in Git.
+Telegram API credentials, phone numbers, bot tokens, session files, raw chat
+exports, raw-message databases, and generated training datasets do not.
+Credentials must be injected by the deployment secret mechanism; session and
+checkpoint state must live in a protected runtime volume. Test fixtures must
+be synthetic or irreversibly minimized.
+
+The future collector must write the same normalized observation contract
+consumed by the producer and retain source event time. Collector execution
+must be idempotent and restart-safe. Adding it to the repository does not
+authorize enabling it on any server.
 
 ## Commodity identity
 
@@ -107,6 +132,9 @@ This market-intelligence plane does not change the fixed business topology:
 - data-minimized Shadow bundle with no raw/training payload or machine path;
 - deterministic price-to-commodity ranker;
 - bounded local snapshot provider;
+- deterministic offline range snapshot producer;
+- low-date physical-melted and strictly-prior coin-anchor runtime overlays;
+- atomic snapshot builder CLI with explicit input and output paths;
 - feature flags disabled by default;
 - Shadow observation only for intentionally implicit-commodity offers;
 - low-cardinality metrics with no raw message, price, user ID, or personal data;
@@ -118,7 +146,8 @@ This market-intelligence plane does not change the fixed business topology:
 - automatic or suggested commodity selection;
 - WebApp or bot ambiguity UI;
 - PostgreSQL market-intelligence schema or cross-site synchronization;
-- Telegram, USDT, ounce, IME, dollar, or melted-gold collectors;
+- live Telegram, USDT, ounce, IME, dollar, or melted-gold collectors and their
+  schedulers;
 - model training and promotion;
 - raw exports, SQLite datasets, Telegram sessions, API credentials, or personal
   data;
