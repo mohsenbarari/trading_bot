@@ -495,7 +495,7 @@ services:
   webapp_fi_writer_control:
     profiles: [webapp-fi]
     <<: *app
-    command: [python, scripts/run_writer_control_agent.py]
+    command: [python, -m, scripts.run_writer_control_agent]
     environment:
       <<: *webapp_fi_control_env
       TRADING_BOT_SERVICE: writer_control_agent
@@ -536,7 +536,7 @@ services:
   webapp_fi_effects:
     profiles: [webapp-fi]
     <<: *app
-    command: [python, scripts/run_dr_effect_worker.py]
+    command: [python, -m, scripts.run_dr_effect_worker]
     environment:
       <<: *webapp_fi_app_env
       TRADING_BOT_SERVICE: dr_effect_worker
@@ -721,7 +721,7 @@ services:
   webapp_ir_writer_control:
     profiles: [webapp-ir]
     <<: *app
-    command: [python, scripts/run_writer_control_agent.py]
+    command: [python, -m, scripts.run_writer_control_agent]
     environment:
       <<: *webapp_ir_control_env
       TRADING_BOT_SERVICE: writer_control_agent
@@ -761,7 +761,7 @@ services:
   webapp_ir_effects:
     profiles: [webapp-ir]
     <<: *app
-    command: [python, scripts/run_dr_effect_worker.py]
+    command: [python, -m, scripts.run_dr_effect_worker]
     environment:
       <<: *webapp_ir_app_env
       TRADING_BOT_SERVICE: dr_effect_worker

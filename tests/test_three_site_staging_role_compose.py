@@ -98,6 +98,25 @@ class ThreeSiteStagingRoleComposeTests(unittest.TestCase):
         with self.assertRaisesRegex(RoleComposeError, "cross-role"):
             render_role_compose(payload, role="bot-fi")
 
+    def test_project_importing_python_services_use_module_entrypoints(self):
+        expected = {
+            "webapp_fi_writer_control": [
+                "python", "-m", "scripts.run_writer_control_agent"
+            ],
+            "webapp_fi_effects": [
+                "python", "-m", "scripts.run_dr_effect_worker"
+            ],
+            "webapp_ir_writer_control": [
+                "python", "-m", "scripts.run_writer_control_agent"
+            ],
+            "webapp_ir_effects": [
+                "python", "-m", "scripts.run_dr_effect_worker"
+            ],
+        }
+        for service, command in expected.items():
+            with self.subTest(service=service):
+                self.assertEqual(self.payload["services"][service]["command"], command)
+
 
 if __name__ == "__main__":
     unittest.main()
