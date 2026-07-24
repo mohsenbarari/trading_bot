@@ -155,9 +155,26 @@ class ThreeSiteStagingRoleMigrationTests(unittest.TestCase):
 
         backend._psql.reset_mock()
         backend._psql.return_value = "1"
-        with patch.object(role_migration, "_run", side_effect=fake_run):
-            with self.assertRaisesRegex(RoleMigrationError, "zero other client sessions"):
+        with patch.object(role_migration, "_run", side_effect=fake_run), patch.object(
+            role_migration.time, "sleep"
+        ):
+            with self.assertRaisesRegex(RoleMigrationError, "three consecutive zero-client"):
                 backend._assert_database_migration_quiescent()
+
+    def test_database_migration_quiescence_tolerates_transient_restore_client(self):
+        backend = self._local_backend()
+
+        def fake_run(arguments, **_kwargs):
+            if arguments[-2:] == ["config", "--services"]:
+                return "webapp_fi_db\nwebapp_fi_redis\nwebapp_fi_api\nwebapp_fi_migration"
+            return ""
+
+        backend._psql.side_effect = ["1", "0", "0", "0"]
+        with patch.object(role_migration, "_run", side_effect=fake_run), patch.object(
+            role_migration.time, "sleep"
+        ):
+            backend._assert_database_migration_quiescent()
+        self.assertEqual(backend._psql.call_count, 4)
 
     def test_private_start_waits_for_app_release_and_tls_health_on_every_role(self):
         for role in ("bot_fi", "webapp_fi", "webapp_ir", "witness"):

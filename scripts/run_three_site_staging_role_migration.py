@@ -307,17 +307,28 @@ class LocalRoleBackend:
                 raise RoleMigrationError(
                     f"database migration requires the application service to be stopped: {service}"
                 )
-        for _sample in range(3):
+        # A just-finished restore can leave a short-lived PostgreSQL client
+        # connection visible for a moment.  Do not mistake that harmless tail
+        # for an application writer: require three consecutive quiescent
+        # samples, while still failing closed if the target never becomes
+        # quiescent within this bounded window.
+        consecutive_quiescent_samples = 0
+        for _sample in range(30):
             active_clients = self._psql(
                 "SELECT count(*) FROM pg_stat_activity "
                 "WHERE datname=current_database() AND pid<>pg_backend_pid() "
                 "AND backend_type='client backend'"
             )
-            if active_clients != "0":
-                raise RoleMigrationError(
-                    "database migration requires zero other client sessions"
-                )
-            time.sleep(0.2)
+            if active_clients == "0":
+                consecutive_quiescent_samples += 1
+                if consecutive_quiescent_samples == 3:
+                    return
+            else:
+                consecutive_quiescent_samples = 0
+            time.sleep(0.5)
+        raise RoleMigrationError(
+            "database migration requires three consecutive zero-client samples"
+        )
 
     def _wait_services_ready(
         self,
