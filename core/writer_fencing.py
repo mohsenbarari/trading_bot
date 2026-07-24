@@ -366,6 +366,13 @@ def _enforce_writer_fence_before_commit(session: Session) -> None:
             raise WriterFenceError("WebApp commit lacks an explicit writer/projection capability")
     if context is None:
         return
+    # This application-side check is an early stale-context guard only.  The
+    # database triggers remain the authoritative write barrier and take the
+    # SECURITY DEFINER row lock on webapp_writer_state for every protected DML
+    # statement.  Taking FOR SHARE here would require granting the runtime app
+    # role UPDATE-class privileges on the control table in PostgreSQL, which
+    # weakens the closed role boundary without adding protection beyond the
+    # trigger-held transaction lock.
     row = session.connection().execute(
         text(
             """
@@ -374,7 +381,6 @@ def _enforce_writer_fence_before_commit(session: Session) -> None:
                    witness_local_boot_id, witness_local_boottime_deadline
             FROM webapp_writer_state
             WHERE authority = 'webapp'
-            FOR SHARE
             """
         )
     ).mappings().one_or_none()

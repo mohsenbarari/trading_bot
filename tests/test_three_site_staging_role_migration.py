@@ -176,6 +176,30 @@ class ThreeSiteStagingRoleMigrationTests(unittest.TestCase):
                     role_migration.ROLE_PRIVATE[role][-1:]
                 )
 
+    def test_public_start_brings_redis_up_before_application_services(self):
+        for role in ("bot_fi", "webapp_fi", "webapp_ir"):
+            with self.subTest(role=role):
+                backend = object.__new__(LocalRoleBackend)
+                backend.role = role
+                backend.prefix = ["docker", "compose"]
+                backend._wait_services_ready = MagicMock()
+                calls: list[list[str]] = []
+
+                def fake_run(arguments, **_kwargs):
+                    calls.append(arguments)
+                    return ""
+
+                with patch.object(role_migration, "_run", side_effect=fake_run):
+                    backend.start_public()
+                self.assertEqual(
+                    [arguments[-1] for arguments in calls],
+                    list(role_migration.ROLE_PUBLIC[role]),
+                )
+                self.assertTrue(calls[0][-1].endswith("_redis"))
+                backend._wait_services_ready.assert_called_once_with(
+                    role_migration.ROLE_PUBLIC[role]
+                )
+
     def test_service_readiness_reads_role_specific_runtime_release_from_container(self):
         cases = (
             ("webapp_fi", "webapp_fi_dr_receiver", "RELEASE_SHA"),

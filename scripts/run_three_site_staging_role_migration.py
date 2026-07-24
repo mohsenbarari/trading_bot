@@ -71,9 +71,9 @@ ROLE_WORKERS = {
     "webapp_ir": ("webapp_ir_writer_control", "webapp_ir_dr_delivery", "webapp_ir_blobs"),
 }
 ROLE_PUBLIC = {
-    "bot_fi": ("bot_fi_api", "bot_fi_bot"),
-    "webapp_fi": ("webapp_fi_api", "webapp_fi_effects"),
-    "webapp_ir": ("webapp_ir_api", "webapp_ir_effects"),
+    "bot_fi": ("bot_fi_redis", "bot_fi_api", "bot_fi_bot"),
+    "webapp_fi": ("webapp_fi_redis", "webapp_fi_api", "webapp_fi_effects"),
+    "webapp_ir": ("webapp_ir_redis", "webapp_ir_api", "webapp_ir_effects"),
 }
 
 
