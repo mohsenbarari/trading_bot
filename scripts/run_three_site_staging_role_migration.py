@@ -469,6 +469,26 @@ class LocalRoleBackend:
             + ",".join(services)
         )
 
+    def _start_services(self, services: tuple[str, ...]) -> None:
+        """Start each service with a small bounded retry for Compose races.
+
+        Docker Compose can transiently reject a create/start request while a
+        just-stopped container or its network is being reconciled.  A retry is
+        safe here because every request is scoped to this exact role Compose
+        project and the subsequent readiness checks remain mandatory.  A
+        persistent failure still propagates unchanged and rolls the journal
+        back.
+        """
+        for service in services:
+            for attempt in range(3):
+                try:
+                    _run([*self.prefix, "up", "-d", "--no-deps", service], timeout=180)
+                    break
+                except RoleMigrationError:
+                    if attempt == 2:
+                        raise
+                    time.sleep(2)
+
     def restore_seed(self) -> None:
         _run([*self.prefix, "up", "-d", "--no-deps", self.db_service], timeout=180)
         self._wait_db()
@@ -566,8 +586,7 @@ class LocalRoleBackend:
             raise RoleMigrationError("PostgreSQL cluster identity changed during configuration")
 
     def start_private(self) -> None:
-        for service in ROLE_PRIVATE[self.role]:
-            _run([*self.prefix, "up", "-d", "--no-deps", service], timeout=180)
+        self._start_services(ROLE_PRIVATE[self.role])
         app_services = ROLE_PRIVATE[self.role][:-1]
         infrastructure_services = ROLE_PRIVATE[self.role][-1:]
         self._wait_services_ready(app_services)
@@ -576,8 +595,7 @@ class LocalRoleBackend:
     def start_workers(self) -> None:
         if self.role == "witness":
             raise RoleMigrationError("Witness has no product worker phase")
-        for service in ROLE_WORKERS[self.role]:
-            _run([*self.prefix, "up", "-d", "--no-deps", service], timeout=180)
+        self._start_services(ROLE_WORKERS[self.role])
         self._wait_services_ready(ROLE_WORKERS[self.role])
 
     def attest_writer_state(self) -> dict[str, Any]:
@@ -668,8 +686,7 @@ class LocalRoleBackend:
     def start_public(self) -> None:
         if self.role == "witness":
             raise RoleMigrationError("Witness has no public application phase")
-        for service in ROLE_PUBLIC[self.role]:
-            _run([*self.prefix, "up", "-d", "--no-deps", service], timeout=180)
+        self._start_services(ROLE_PUBLIC[self.role])
         # Redis is deliberately consumed from the upstream immutable image rather
         # than from the application release image, so it cannot carry the exact
         # RELEASE_SHA that _wait_services_ready verifies.  Keep the release

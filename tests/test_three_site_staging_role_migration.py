@@ -221,6 +221,18 @@ class ThreeSiteStagingRoleMigrationTests(unittest.TestCase):
                     role_migration.ROLE_PUBLIC[role][:1]
                 )
 
+    def test_service_start_retries_a_transient_compose_failure(self):
+        backend = object.__new__(LocalRoleBackend)
+        backend.prefix = ["docker", "compose"]
+        with patch.object(
+            role_migration,
+            "_run",
+            side_effect=[role_migration.RoleMigrationError("transient"), ""],
+        ) as run, patch.object(role_migration.time, "sleep") as sleep:
+            backend._start_services(("webapp_ir_api",))
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(2)
+
     def test_service_readiness_reads_role_specific_runtime_release_from_container(self):
         cases = (
             ("webapp_fi", "webapp_fi_dr_receiver", "RELEASE_SHA"),
