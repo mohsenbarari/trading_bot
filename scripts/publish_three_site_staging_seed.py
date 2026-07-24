@@ -20,7 +20,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import boto3
+try:
+    import boto3
+except ModuleNotFoundError:  # Empty-seed target roles do not require the SDK.
+    boto3 = None
 
 from core.secure_file_io import read_secure_text, sha256_secure_file
 from scripts.render_three_site_staging_role_compose import _atomic_write
@@ -92,6 +95,8 @@ def _age_material(recipient_path: Path, identity_path: Path) -> tuple[str, str]:
 
 
 def _client(*, access_key: str, secret_key: str):  # noqa: ANN001
+    if boto3 is None:
+        raise SeedPublicationError("boto3 is required for Object Storage seed transfer")
     return boto3.client(
         "s3",
         endpoint_url=ARVAN_ENDPOINT,
