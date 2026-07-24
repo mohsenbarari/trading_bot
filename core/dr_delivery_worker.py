@@ -182,7 +182,7 @@ async def claim_delivery_batch(*, local_site: str) -> ClaimedDeliveryBatch | Non
                     DrEvent.producer_epoch,
                     DrEvent.producer_sequence,
                 )
-                .with_for_update(skip_locked=True)
+                .with_for_update(of=DrEventDelivery, skip_locked=True)
                 .limit(1)
             )
             if first is None:
@@ -206,7 +206,7 @@ async def claim_delivery_batch(*, local_site: str) -> ClaimedDeliveryBatch | Non
                         or_(DrEventDelivery.next_attempt_at.is_(None), DrEventDelivery.next_attempt_at <= now),
                     )
                     .order_by(DrEvent.producer_sequence)
-                    .with_for_update(skip_locked=True)
+                    .with_for_update(of=DrEventDelivery, skip_locked=True)
                     .limit(limit)
                 )
             ).all()

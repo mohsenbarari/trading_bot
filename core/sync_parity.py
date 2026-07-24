@@ -303,12 +303,13 @@ def _parity_select_for_table(table_name: str, table):
     if table_name == "offers":
         commodities = Base.metadata.tables["commodities"]
         republished = table.alias("parity_republished_offer")
-        return (
-            select(
-                table,
-                commodities.c.name.label("commodity_name"),
-                republished.c.offer_public_id.label("republished_offer_public_id"),
+        columns = [table, commodities.c.name.label("commodity_name")]
+        if "republished_offer_public_id" not in table.c:
+            columns.append(
+                republished.c.offer_public_id.label("republished_offer_public_id")
             )
+        return (
+            select(*columns)
             .select_from(
                 table
                 .outerjoin(commodities, commodities.c.id == table.c.commodity_id)

@@ -46,11 +46,14 @@ BOT_PRODUCT_TABLES = frozenset(
 BOT_LOCAL_APPLICATION_TABLES = frozenset(
     {
         "change_log",
+        "chat_members",
+        "chats",
         "market_channel_notice_receipts",
         "sync_apply_watermarks",
         "sync_blocks",
         "telegram_registration_intents",
         "user_counter_event_receipts",
+        "user_sessions",
     }
 )
 # Site-local Telegram execution state is deliberately absent from every DR
