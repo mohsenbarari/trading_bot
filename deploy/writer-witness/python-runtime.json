@@ -736,10 +736,6 @@
   "executable_sha256": "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118",
   "implementation": "CPython",
   "loader": {
-    "cache_path": "/etc/ld.so.cache",
-    "cache_sha256": "e00c2093715be17ac23ee730e26d5c13d6a48626bc4db8b347fe99eccab813f1",
-    "configuration_entry_count": 4,
-    "configuration_sha256": "e7b45e670771af7291093d746346587d00112314229bfa3af33c6b7715ee96c8",
     "preload_path": "/etc/ld.so.preload",
     "preload_sha256": null
   },
