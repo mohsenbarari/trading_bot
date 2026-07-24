@@ -15,6 +15,9 @@ WITNESS_AUTH_VERSION = 1
 WITNESS_TRANSITION_PATH = "/v1/writer-witness/transitions"
 WITNESS_STATUS_PATH = "/v1/writer-witness/status"
 WITNESS_OPERATION_PATH = "/v1/writer-witness/failover-operations"
+WITNESS_HUMAN_APPROVAL_RELAY_PATH = "/v1/human-approval/relay"
+WITNESS_RELAY_ORCHESTRATOR_SITE = "orchestrator"
+WITNESS_AUTH_SITES = frozenset({*WEBAPP_SITES, WITNESS_RELAY_ORCHESTRATOR_SITE})
 HEADER_KEY_ID = "X-Writer-Witness-Key-Id"
 HEADER_SITE = "X-Writer-Witness-Site"
 HEADER_TIMESTAMP = "X-Writer-Witness-Timestamp"
@@ -95,7 +98,7 @@ def sign_witness_request(
     request_id = request_id.strip()
     if not key_id or len(key_id) > 64:
         raise WitnessAuthenticationError("witness key id is invalid")
-    if site not in WEBAPP_SITES:
+    if site not in WITNESS_AUTH_SITES:
         raise WitnessAuthenticationError("witness credential site is invalid")
     if not request_id or len(request_id) > 64:
         raise WitnessAuthenticationError("witness request id is invalid")
@@ -143,7 +146,7 @@ def verify_witness_request(
         headers.get(HEADER_TIMESTAMP.lower()) or headers.get(HEADER_TIMESTAMP) or ""
     ).strip()
     credential = credentials.get(key_id)
-    if credential is None or credential.site != site or site not in WEBAPP_SITES:
+    if credential is None or credential.site != site or site not in WITNESS_AUTH_SITES:
         raise WitnessAuthenticationError("unknown witness client credential")
     current = _utc(now)
     if MATRIX_CREDENTIAL_PATTERN.fullmatch(credential.key_id):

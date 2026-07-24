@@ -777,7 +777,7 @@ def remote_check_specs(
                 "receipts=$(runuser -u postgres -- psql -XAt -d writer_witness -c "
                 "\"SELECT count(*) FROM webapp_writer_witness_receipts;\"); test \"$receipts\" = 0; "
                 "test \"$(runuser -u postgres -- psql -XAt -d writer_witness -c "
-                "\"SELECT version_num FROM writer_witness_schema_version;\")\" = 002; "
+                "\"SELECT version_num FROM writer_witness_schema_version;\")\" = 003; "
                 "test -L /opt/trading-bot-witness/active; "
                 "activation=$(readlink -f /opt/trading-bot-witness/active); "
                 "case \"$activation\" in /opt/trading-bot-witness/activations/*) ;; *) exit 50;; esac; "

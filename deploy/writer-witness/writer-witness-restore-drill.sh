@@ -40,6 +40,16 @@ fi
 
 version="$(runuser -u postgres -- psql -XAtqc \
     'SELECT version_num FROM writer_witness_schema_version' "$drill_database")"
+if [[ "$version" == "002" ]]; then
+    migration=/srv/trading-bot-witness/current/deploy/writer-witness/003_human_approval_relay.sql
+    [[ -f "$migration" && ! -L "$migration" ]] || {
+        echo "current Writer Witness relay migration is unavailable" >&2
+        exit 1
+    }
+    runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 "$drill_database" -f "$migration"
+    version="$(runuser -u postgres -- psql -XAtqc \
+        'SELECT version_num FROM writer_witness_schema_version' "$drill_database")"
+fi
 state="$(runuser -u postgres -- psql -XAtqc \
     "SELECT authority || ':' || writer_epoch || ':' || lease_status FROM webapp_writer_witness_state" \
     "$drill_database")"
@@ -48,7 +58,7 @@ receipt_count="$(runuser -u postgres -- psql -XAtqc \
 operation_count="$(runuser -u postgres -- psql -XAtqc \
     'SELECT count(*) FROM dr_failover_operation_ledger' "$drill_database")"
 
-[[ "$version" == "002" ]]
+[[ "$version" == "003" ]]
 [[ "$state" == webapp:* ]]
 [[ "$receipt_count" =~ ^[0-9]+$ ]]
 [[ "$operation_count" =~ ^[0-9]+$ ]]

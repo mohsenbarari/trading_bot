@@ -533,16 +533,25 @@ python3 scripts/build_three_site_staging_full_matrix_campaign.py prepare \
   --approval-request-output /root/secure/matrix/approval-request.json
 ```
 
-The prepare step writes the exact approval subject. Transfer it through the
-private versioned Object Storage path and issue one `start_full_matrix` token
-on the Witness with `manage_three_site_human_approval.py`. Assemble and
-cryptographically verify the final campaign without manually editing it:
+The prepare step writes the exact approval subject. Keep the one 48-hour
+release-bound operations session on the Witness; use its private relay to
+derive one `start_full_matrix` receipt for this exact subject without another
+TOTP prompt. Assemble and cryptographically verify the final campaign without
+manually editing it:
 
 ```text
+# Run this command from the root-owned staging control runtime on WA-FL.
+python3 scripts/request_three_site_human_approval_relay.py \
+  --action start_full_matrix \
+  --subject /root/secure/matrix/approval-request.json \
+  --policy /etc/trading-bot/security/human-approval/human-approval-policy.json \
+  --credentials /root/secure/three-site/human-approval-relay.env \
+  --output /root/secure/matrix/start-full-matrix-receipt.json
+
 python3 scripts/build_three_site_staging_full_matrix_campaign.py finalize \
   --draft /root/secure/matrix/campaign.draft.json \
   --approver-policy /etc/trading-bot/security/human-approval/human-approval-policy.json \
-  --approval /root/secure/matrix/start-full-matrix-token.json \
+  --approval /root/secure/matrix/start-full-matrix-receipt.json \
   --output /root/secure/matrix/campaign.approved.json
 ```
 

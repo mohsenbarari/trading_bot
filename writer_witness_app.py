@@ -27,10 +27,18 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from core.runtime_sites import AUTHORITY_WEBAPP, SITE_WEBAPP_IR
+from core.human_approval import (
+    HumanApprovalError,
+    issue_human_approval_relay_receipt,
+    parse_human_approval_relay_command,
+)
+from core.runtime_sites import AUTHORITY_WEBAPP, SITE_WEBAPP_IR, WEBAPP_SITES
+from core.secure_file_io import SecureFileError, read_secure_text
 from core.writer_witness_auth import (
+    WITNESS_HUMAN_APPROVAL_RELAY_PATH,
     WITNESS_STATUS_PATH,
     WITNESS_OPERATION_PATH,
+    WITNESS_RELAY_ORCHESTRATOR_SITE,
     WITNESS_TRANSITION_PATH,
     WitnessAuthenticationError,
     WitnessClientCredential,
@@ -50,7 +58,7 @@ from core.writer_witness_control import (
 
 TRANSITION_PATH = WITNESS_TRANSITION_PATH
 STATUS_PATH = WITNESS_STATUS_PATH
-WITNESS_SCHEMA_VERSION = "002"
+WITNESS_SCHEMA_VERSION = "003"
 logger = logging.getLogger("writer_witness")
 
 
@@ -90,6 +98,9 @@ class WriterWitnessServiceRuntime:
     auth_max_future_skew_seconds: int = 5
     clock: Callable[[AsyncSession], Awaitable[datetime]] = database_clock
     database_user: str | None = None
+    human_approval_relay_enabled: bool = False
+    human_approval_relay_session_file: str | None = None
+    human_approval_relay_policy_file: str | None = None
 
 
 async def verify_witness_runtime_database_role(
@@ -114,6 +125,8 @@ async def verify_witness_runtime_database_role(
                 "(has_table_privilege(current_user, 'dr_failover_operation_ledger', 'SELECT') "
                 " AND has_table_privilege(current_user, 'dr_failover_operation_ledger', 'INSERT') "
                 " AND has_table_privilege(current_user, 'dr_failover_operation_ledger', 'UPDATE')) AS ledger_dml, "
+                "(has_table_privilege(current_user, 'human_approval_relay_receipts', 'SELECT') "
+                " AND has_table_privilege(current_user, 'human_approval_relay_receipts', 'INSERT')) AS relay_dml, "
                 "(SELECT count(*) FROM pg_class object "
                 " JOIN pg_namespace namespace ON namespace.oid=object.relnamespace "
                 " JOIN pg_roles owner ON owner.oid=object.relowner "
@@ -133,7 +146,9 @@ async def verify_witness_runtime_database_role(
         or int(row["owned_objects"] or 0) != 0
         or not all(
             row[name]
-            for name in ("schema_read", "state_dml", "receipt_dml", "ledger_dml")
+            for name in (
+                "schema_read", "state_dml", "receipt_dml", "ledger_dml", "relay_dml"
+            )
         )
     ):
         raise WitnessServiceConfigurationError(
@@ -189,6 +204,11 @@ class WriterWitnessServiceSettings(BaseSettings):
     writer_witness_service_webapp_ir_previous_secret: str | None = None
     writer_witness_service_webapp_ir_not_after: str | None = None
     writer_witness_service_webapp_ir_previous_not_after: str | None = None
+    human_approval_relay_enabled: bool = False
+    human_approval_relay_session_file: str | None = None
+    human_approval_relay_policy_file: str | None = None
+    human_approval_relay_orchestrator_key_id: str | None = None
+    human_approval_relay_orchestrator_secret: str | None = None
     writer_witness_lease_duration_seconds: int = 180
     writer_witness_renew_interval_seconds: int = 30
     writer_witness_safety_margin_seconds: int = 15
@@ -378,6 +398,32 @@ def _read_private_key(path_value: str | None, public_key_base64: str | None) -> 
     return private_value
 
 
+def _relay_document_path(path_value: str | None, *, label: str) -> str:
+    """Require an owner-only, regular JSON document mounted into the service."""
+
+    path = Path(str(path_value or ""))
+    if not path.is_absolute():
+        raise WitnessServiceConfigurationError(f"{label} must be an absolute path")
+    try:
+        value = json.loads(read_secure_text(path, label=label, max_size=1024 * 1024))
+    except (SecureFileError, OSError, ValueError, json.JSONDecodeError) as exc:
+        raise WitnessServiceConfigurationError(f"{label} is unavailable or invalid") from exc
+    if not isinstance(value, dict):
+        raise WitnessServiceConfigurationError(f"{label} must be a JSON object")
+    return str(path)
+
+
+def _load_relay_document(path_value: str | None, *, label: str) -> dict[str, Any]:
+    path = Path(str(path_value or ""))
+    try:
+        value = json.loads(read_secure_text(path, label=label, max_size=1024 * 1024))
+    except (SecureFileError, OSError, ValueError, json.JSONDecodeError) as exc:
+        raise WitnessServiceConfigurationError(f"{label} is unavailable or invalid") from exc
+    if not isinstance(value, dict):
+        raise WitnessServiceConfigurationError(f"{label} must be a JSON object")
+    return value
+
+
 def _service_credentials(
     service_settings: WriterWitnessServiceSettings,
 ) -> dict[str, WitnessClientCredential]:
@@ -481,6 +527,24 @@ def _service_credentials(
             not_after=not_after,
         )
         used_secrets.add(secret)
+    if service_settings.human_approval_relay_enabled:
+        key_id = str(service_settings.human_approval_relay_orchestrator_key_id or "").strip()
+        secret = str(service_settings.human_approval_relay_orchestrator_secret or "")
+        if (
+            not key_id
+            or len(key_id) > 64
+            or len(secret.encode("utf-8")) < 32
+            or key_id in result
+            or secret in used_secrets
+        ):
+            raise WitnessServiceConfigurationError(
+                "dedicated human approval relay credential is missing or unsafe"
+            )
+        result[key_id] = WitnessClientCredential(
+            key_id=key_id,
+            site=WITNESS_RELAY_ORCHESTRATOR_SITE,
+            secret=secret,
+        )
     return result
 
 
@@ -531,6 +595,17 @@ def _build_runtime_from_settings(
         configured.writer_witness_private_key_file,
         configured.writer_witness_public_key,
     )
+    relay_session_file: str | None = None
+    relay_policy_file: str | None = None
+    if configured.human_approval_relay_enabled:
+        relay_session_file = _relay_document_path(
+            configured.human_approval_relay_session_file,
+            label="human approval relay session",
+        )
+        relay_policy_file = _relay_document_path(
+            configured.human_approval_relay_policy_file,
+            label="human approval relay policy",
+        )
     credentials = _service_credentials(configured)
     engine = create_async_engine(
         database_url,
@@ -553,6 +628,9 @@ def _build_runtime_from_settings(
         auth_max_age_seconds=configured.writer_witness_auth_max_age_seconds,
         auth_max_future_skew_seconds=configured.writer_witness_max_clock_skew_seconds,
         database_user=str(parsed_database_url.username),
+        human_approval_relay_enabled=configured.human_approval_relay_enabled,
+        human_approval_relay_session_file=relay_session_file,
+        human_approval_relay_policy_file=relay_policy_file,
     )
     return runtime, engine
 
@@ -607,6 +685,8 @@ def create_writer_witness_app(
         service_runtime: WriterWitnessServiceRuntime,
         session: AsyncSession,
         raw_body: bytes,
+        *,
+        allowed_sites: frozenset[str] = WEBAPP_SITES,
     ):
         witness_now = await service_runtime.clock(session)
         caller = verify_witness_request(
@@ -619,6 +699,8 @@ def create_writer_witness_app(
             max_age_seconds=service_runtime.auth_max_age_seconds,
             max_future_skew_seconds=service_runtime.auth_max_future_skew_seconds,
         )
+        if caller.site not in allowed_sites:
+            raise WitnessAuthenticationError("witness caller is not authorized for this endpoint")
         return caller, witness_now
 
     @app.get("/health/live")
@@ -818,6 +900,114 @@ def create_writer_witness_app(
             ),
             200,
         )
+
+    @app.post(WITNESS_HUMAN_APPROVAL_RELAY_PATH)
+    async def human_approval_relay(request: Request):
+        """Issue one exact, Witness-signed receipt from the local 48-hour session.
+
+        The issuer-signed session remains mounted read-only on the Witness.
+        A controller proves only its dedicated pairwise HMAC identity and gets
+        back a receipt bound to the signed request id, action and subject.
+        """
+
+        service_runtime = active_runtime(request)
+        raw_body = await request.body()
+        if not service_runtime.human_approval_relay_enabled:
+            return _json_response(
+                {"accepted": False, "code": "human_approval_relay_disabled"}, 404
+            )
+        try:
+            async with service_runtime.session_factory() as session:
+                caller, witness_now = await authenticate(
+                    request,
+                    service_runtime,
+                    session,
+                    raw_body,
+                    allowed_sites=frozenset({WITNESS_RELAY_ORCHESTRATOR_SITE}),
+                )
+                command = parse_human_approval_relay_command(json.loads(raw_body))
+                if command.request_id != caller.request_id:
+                    raise WitnessAuthenticationError(
+                        "signed request id does not match the approval relay command"
+                    )
+                request_hash = hashlib.sha256(raw_body).hexdigest()
+                row = (
+                    await session.execute(
+                        text(
+                            "SELECT request_sha256, receipt FROM human_approval_relay_receipts "
+                            "WHERE request_id = :request_id FOR UPDATE"
+                        ),
+                        {"request_id": command.request_id},
+                    )
+                ).mappings().one_or_none()
+                if row is not None:
+                    if row["request_sha256"] != request_hash:
+                        raise HumanApprovalError(
+                            "human approval relay request id was consumed by another command"
+                        )
+                    receipt = row["receipt"]
+                    if not isinstance(receipt, dict):
+                        raise WitnessServiceConfigurationError(
+                            "stored human approval relay receipt is invalid"
+                        )
+                else:
+                    session_token = _load_relay_document(
+                        service_runtime.human_approval_relay_session_file,
+                        label="human approval relay session",
+                    )
+                    policy = _load_relay_document(
+                        service_runtime.human_approval_relay_policy_file,
+                        label="human approval relay policy",
+                    )
+                    private = Ed25519PrivateKey.from_private_bytes(
+                        base64.b64decode(service_runtime.private_key_base64, validate=True)
+                    )
+                    receipt = issue_human_approval_relay_receipt(
+                        session_token,
+                        policy_payload=policy,
+                        command=command,
+                        witness_private_key=private,
+                        now=witness_now,
+                        receipt_id=str(uuid4()),
+                    )
+                    await session.execute(
+                        text(
+                            "INSERT INTO human_approval_relay_receipts "
+                            "(request_id, request_sha256, approval_id, action, subject_sha256, "
+                            "session_token_sha256, expires_at, receipt) VALUES "
+                            "(:request_id, :request_sha256, :approval_id, :action, "
+                            ":subject_sha256, :session_token_sha256, :expires_at, "
+                            "CAST(:receipt AS jsonb))"
+                        ),
+                        {
+                            "request_id": command.request_id,
+                            "request_sha256": request_hash,
+                            "approval_id": receipt["approval_id"],
+                            "action": command.action,
+                            "subject_sha256": hashlib.sha256(
+                                _canonical_json_bytes(command.subject)
+                            ).hexdigest(),
+                            "session_token_sha256": receipt["session_token_sha256"],
+                            "expires_at": receipt["expires_at"],
+                            "receipt": json.dumps(receipt, sort_keys=True, separators=(",", ":")),
+                        },
+                    )
+                    await session.commit()
+        except WitnessAuthenticationError as exc:
+            return _json_response({"accepted": False, "code": exc.code}, 401)
+        except (HumanApprovalError, json.JSONDecodeError):
+            return _json_response(
+                {"accepted": False, "code": "human_approval_relay_rejected"}, 409
+            )
+        except Exception:
+            logger.exception(
+                "Witness human approval relay failed closed",
+                extra={"event": "writer_witness.human_approval_relay.error"},
+            )
+            return _json_response(
+                {"accepted": False, "code": "human_approval_relay_unavailable"}, 503
+            )
+        return _json_response(receipt, 200)
 
     @app.post(TRANSITION_PATH)
     async def witness_transition(request: Request):

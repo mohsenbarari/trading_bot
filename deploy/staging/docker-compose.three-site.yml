@@ -885,9 +885,16 @@ services:
       WRITER_WITNESS_SERVICE_WEBAPP_FI_SECRET: ${WEBAPP_FI_WITNESS_SECRET:?required}
       WRITER_WITNESS_SERVICE_WEBAPP_IR_KEY_ID: ${WEBAPP_IR_WITNESS_KEY_ID:?required}
       WRITER_WITNESS_SERVICE_WEBAPP_IR_SECRET: ${WEBAPP_IR_WITNESS_SECRET:?required}
+      HUMAN_APPROVAL_RELAY_ENABLED: ${STAGING_HUMAN_APPROVAL_RELAY_ENABLED:-false}
+      HUMAN_APPROVAL_RELAY_SESSION_FILE: /run/human-approval/session.json
+      HUMAN_APPROVAL_RELAY_POLICY_FILE: /run/human-approval/policy.json
+      HUMAN_APPROVAL_RELAY_ORCHESTRATOR_KEY_ID: ${STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_KEY_ID:-}
+      HUMAN_APPROVAL_RELAY_ORCHESTRATOR_SECRET: ${STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_SECRET:-}
     volumes:
       - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
       - ${STAGING_WITNESS_SIGNING_KEY:?required}:/run/witness-signing/private.key:ro
+      - ${STAGING_HUMAN_APPROVAL_RELAY_SESSION_FILE:-/dev/null}:/run/human-approval/session.json:ro
+      - ${STAGING_HUMAN_APPROVAL_RELAY_POLICY_FILE:-/dev/null}:/run/human-approval/policy.json:ro
       - witness_audit:/app/audit_trail
     ports: ["127.0.0.1:8214:8000"]
     depends_on: {witness_migration: {condition: service_completed_successfully}}

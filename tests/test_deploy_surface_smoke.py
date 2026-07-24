@@ -478,6 +478,11 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
             './deploy/writer-witness/002_failover_operation_ledger.sql',
             dockerfile,
         )
+        self.assertIn(
+            'COPY deploy/writer-witness/003_human_approval_relay.sql '
+            './deploy/writer-witness/003_human_approval_relay.sql',
+            dockerfile,
+        )
 
         three_site_compose = (
             REPO_ROOT / 'deploy/staging/docker-compose.three-site.yml'

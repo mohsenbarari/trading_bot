@@ -7,9 +7,14 @@ import tempfile
 from pathlib import Path
 import unittest
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
 from core.human_approval import (
     HumanApprovalError,
     approval_subject,
+    issue_human_approval_relay_receipt,
+    parse_human_approval_relay_command,
     verify_human_approval,
 )
 from core.human_approval_issuer import (
@@ -346,6 +351,81 @@ class HumanApprovalTests(unittest.TestCase):
                 ttl_seconds=(48 * 60 * 60) + 1,
                 now=NOW,
             )
+
+    def test_witness_relay_receipt_keeps_session_private_and_is_exactly_bound(self):
+        session, _state, _audit = authenticate_and_issue_session(
+            secrets_payload=self.enrollment.secrets_payload,
+            state_payload=copy.deepcopy(self.enrollment.state_payload),
+            policy_payload=self.enrollment.policy_payload,
+            private_key_envelope=self.enrollment.private_key_envelope,
+            password=PASSWORD,
+            totp=totp_code(self.enrollment.totp_secret, at=NOW)[1],
+            recovery_code=None,
+            release_sha="b" * 40,
+            allowed_actions=["approve_inventory", "approve_migration"],
+            ttl_seconds=48 * 60 * 60,
+            now=NOW,
+        )
+        witness_private = Ed25519PrivateKey.generate()
+        witness_public = base64.b64encode(
+            witness_private.public_key().public_bytes(
+                serialization.Encoding.Raw,
+                serialization.PublicFormat.Raw,
+            )
+        ).decode("ascii")
+        command = parse_human_approval_relay_command(
+            {
+                "schema": "three-site-human-approval-witness-relay-command-v1",
+                "action": "approve_inventory",
+                "environment": "staging",
+                "subject": self.subject,
+                "request_id": "relay-inventory-001",
+            }
+        )
+        receipt = issue_human_approval_relay_receipt(
+            session,
+            policy_payload=self.enrollment.policy_payload,
+            command=command,
+            witness_private_key=witness_private,
+            now=NOW + timedelta(minutes=1),
+            receipt_id="11111111-1111-4111-8111-111111111111",
+        )
+        self.assertNotIn("signature", receipt)
+        self.assertNotIn("allowed_actions", receipt)
+        self.assertNotIn(session["signature"], str(receipt))
+        verified = verify_human_approval(
+            receipt,
+            policy_payload=self.enrollment.policy_payload,
+            expected_action="approve_inventory",
+            expected_environment="staging",
+            expected_subject=self.subject,
+            now=NOW + timedelta(minutes=2),
+            witness_relay_public_key=witness_public,
+        )
+        self.assertEqual(verified.approval_id, session["approval_id"])
+        self.assertEqual(verified.authentication_methods, ("password", "totp"))
+
+        changed_subject = copy.deepcopy(self.subject)
+        changed_subject["artifact_sha256"] = "c" * 64
+        tampered = copy.deepcopy(receipt)
+        tampered["action"] = "approve_migration"
+        for value, action, subject, public_key in (
+            (receipt, "approve_migration", self.subject, witness_public),
+            (receipt, "approve_inventory", changed_subject, witness_public),
+            (tampered, "approve_migration", self.subject, witness_public),
+            (receipt, "approve_inventory", self.subject, "A" * 44),
+        ):
+            with self.subTest(action=action, subject=subject, public_key=public_key):
+                with self.assertRaises(HumanApprovalError):
+                    verify_human_approval(
+                        value,
+                        policy_payload=self.enrollment.policy_payload,
+                        expected_action=action,
+                        expected_environment="staging",
+                        expected_subject=subject,
+                        now=NOW + timedelta(minutes=2),
+                        witness_relay_public_key=public_key,
+                    )
 
     def test_enrollment_files_are_owner_only_and_cannot_be_overwritten(self):
         with tempfile.TemporaryDirectory() as temporary:

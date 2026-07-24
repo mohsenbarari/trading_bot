@@ -1692,6 +1692,9 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         ):
             self.assertIn(f"maybe_fail {failpoint}", restore)
         self.assertIn("writer-witness-state-manifest", restore)
+        self.assertIn("failed its source manifest guard", restore)
+        self.assertIn("expected_promoted_manifest", restore)
+        self.assertIn("003_human_approval_relay.sql", restore)
         self.assertIn("database_exists", restore)
         self.assertIn("writer_witness_(candidate|rollback|failed)", restore)
         self.assertIn("WRITER_WITNESS_RESTORE_OPERATION_TAG", restore)

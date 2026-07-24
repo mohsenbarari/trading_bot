@@ -966,13 +966,47 @@ maybe_fail candidate_restored
 
 candidate_version="$(runuser -u postgres -- psql -XAt "$candidate_database" -c \
     'SELECT version_num FROM writer_witness_schema_version')"
-if [[ "$candidate_version" != "002" \
-    || "$(state_value "$candidate_database")" != "$expected_state" \
-    || "$(receipt_count "$candidate_database")" != "$expected_receipts" \
-    || "$(manifest_hash "$candidate_database")" != "$expected_manifest" ]]; then
-    echo "restored writer witness candidate failed full manifest guard" >&2
+if [[ "$candidate_version" != "002" && "$candidate_version" != "003" ]]; then
+    echo "restored writer witness candidate has an unsupported schema version" >&2
     exit 1
 fi
+# The external expected manifest describes the exact backup bytes before any
+# controlled schema migration.  Verify it first.  A 002 backup then receives
+# only the reviewed 003 migration; the resulting 003 manifest is separately
+# pinned for the promote/post-promote checks below.  This keeps old backups
+# restorable without weakening their byte-derived state guard.
+if [[ "$(state_value "$candidate_database")" != "$expected_state" \
+    || "$(receipt_count "$candidate_database")" != "$expected_receipts" \
+    || "$(manifest_hash "$candidate_database")" != "$expected_manifest" ]]; then
+    echo "restored writer witness candidate failed its source manifest guard" >&2
+    exit 1
+fi
+if [[ "$candidate_version" == "002" ]]; then
+    migration=/srv/trading-bot-witness/current/deploy/writer-witness/003_human_approval_relay.sql
+    [[ -f "$migration" && ! -L "$migration" ]] || {
+        echo "current Writer Witness relay migration is unavailable" >&2
+        exit 1
+    }
+    PGPASSWORD="$WITNESS_DB_MIGRATOR_PASSWORD" psql \
+        -Xv ON_ERROR_STOP=1 \
+        -h 127.0.0.1 \
+        -U writer_witness_migrator \
+        -d "$candidate_database" \
+        -f "$migration"
+    candidate_version="$(runuser -u postgres -- psql -XAt "$candidate_database" -c \
+        'SELECT version_num FROM writer_witness_schema_version')"
+fi
+if [[ "$candidate_version" != "003" \
+    || "$(state_value "$candidate_database")" != "$expected_state" \
+    || "$(receipt_count "$candidate_database")" != "$expected_receipts" ]]; then
+    echo "restored writer witness candidate failed post-migration state guard" >&2
+    exit 1
+fi
+expected_promoted_manifest="$(manifest_hash "$candidate_database")"
+[[ "$expected_promoted_manifest" =~ ^[0-9a-f]{64}$ ]] || {
+    echo "restored writer witness candidate manifest is invalid after migration" >&2
+    exit 1
+}
 write_journal candidate_validated
 maybe_fail candidate_validated
 
@@ -983,6 +1017,7 @@ GRANT SELECT ON writer_witness_schema_version TO writer_witness_runtime;
 GRANT SELECT, UPDATE ON webapp_writer_witness_state TO writer_witness_runtime;
 GRANT SELECT, INSERT ON webapp_writer_witness_receipts TO writer_witness_runtime;
 GRANT SELECT, INSERT, UPDATE ON dr_failover_operation_ledger TO writer_witness_runtime;
+GRANT SELECT, INSERT ON human_approval_relay_receipts TO writer_witness_runtime;
 SQL
 runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 postgres -v candidate="$candidate_database" <<'SQL'
 REVOKE ALL ON DATABASE :"candidate" FROM PUBLIC;
@@ -1031,7 +1066,7 @@ live_receipts="$(receipt_count writer_witness)"
 live_manifest="$(manifest_hash writer_witness)"
 if [[ "$live_state" != "$expected_state" \
     || "$live_receipts" != "$expected_receipts" \
-    || "$live_manifest" != "$expected_manifest" ]]; then
+    || "$live_manifest" != "$expected_promoted_manifest" ]]; then
     echo "live writer witness failed post-restore full manifest guard" >&2
     exit 1
 fi

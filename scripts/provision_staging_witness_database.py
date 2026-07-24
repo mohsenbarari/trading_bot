@@ -25,6 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_FILES = (
     REPO_ROOT / "deploy/writer-witness/001_initial.sql",
     REPO_ROOT / "deploy/writer-witness/002_failover_operation_ledger.sql",
+    REPO_ROOT / "deploy/writer-witness/003_human_approval_relay.sql",
 )
 
 
@@ -180,7 +181,10 @@ def _apply_schema(cursor) -> str:  # noqa: ANN001
     if version == "001":
         cursor.execute(SCHEMA_FILES[1].read_text(encoding="utf-8"))
         version = "002"
-    if version != "002":
+    if version == "002":
+        cursor.execute(SCHEMA_FILES[2].read_text(encoding="utf-8"))
+        version = "003"
+    if version != "003":
         raise StagingWitnessProvisionError(
             f"unsupported Writer-Witness schema version: {version}"
         )
@@ -215,6 +219,7 @@ def migrate_and_grant() -> dict[str, object]:
                 ("SELECT, UPDATE", "webapp_writer_witness_state"),
                 ("SELECT, INSERT", "webapp_writer_witness_receipts"),
                 ("SELECT, INSERT, UPDATE", "dr_failover_operation_ledger"),
+                ("SELECT, INSERT", "human_approval_relay_receipts"),
             )
             for privileges, table in grants:
                 cursor.execute(

@@ -21,6 +21,9 @@ SECRET_REFERENCES = {
     "BOT_FI_JWT_SECRET_KEY": lambda service: service == "bot_fi_api",
     "WEBAPP_JWT_SECRET_KEY": lambda service: service in {"webapp_fi_api", "webapp_ir_api"},
     "STAGING_WITNESS_SIGNING_KEY": lambda service: service == "witness_api",
+    "STAGING_HUMAN_APPROVAL_RELAY_SESSION_FILE": lambda service: service == "witness_api",
+    "STAGING_HUMAN_APPROVAL_RELAY_POLICY_FILE": lambda service: service == "witness_api",
+    "STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_SECRET": lambda service: service == "witness_api",
     "STAGING_DR_BLOB_CREDENTIALS_FILE": lambda service: service.endswith("_blobs"),
     "STAGING_DR_BLOB_ENCRYPTION_KEYRING_FILE": lambda service: service.endswith("_blobs"),
     "WEBAPP_FI_WITNESS_SECRET": lambda service: service in {

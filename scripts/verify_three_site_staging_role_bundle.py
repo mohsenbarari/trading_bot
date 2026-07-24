@@ -81,6 +81,8 @@ PRIVATE_FILE_KEYS = frozenset(
         "STAGING_WEBAPP_IR_TLS_KEY",
         "STAGING_WITNESS_TLS_KEY",
         "STAGING_WITNESS_SIGNING_KEY",
+        "STAGING_HUMAN_APPROVAL_RELAY_SESSION_FILE",
+        "STAGING_HUMAN_APPROVAL_RELAY_POLICY_FILE",
         "STAGING_DR_BLOB_CREDENTIALS_FILE",
         "STAGING_DR_BLOB_ENCRYPTION_KEYRING_FILE",
     }
@@ -195,6 +197,34 @@ def _verify_file(path_value: str, *, private: bool) -> None:
         raise RoleBundleError(f"required role file is empty: {path}")
 
 
+def _verify_human_approval_relay(values: dict[str, str], *, role: str) -> None:
+    """Keep the reusable session isolated to the Witness role only."""
+
+    if role != "witness":
+        return
+    enabled = values.get("STAGING_HUMAN_APPROVAL_RELAY_ENABLED")
+    session_path = values.get("STAGING_HUMAN_APPROVAL_RELAY_SESSION_FILE")
+    policy_path = values.get("STAGING_HUMAN_APPROVAL_RELAY_POLICY_FILE")
+    key_id = values.get("STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_KEY_ID")
+    secret = values.get("STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_SECRET")
+    if enabled == "false":
+        if (session_path, policy_path, key_id, secret) != ("/dev/null", "/dev/null", "", ""):
+            raise RoleBundleError("disabled human approval relay retains active material")
+        return
+    if enabled != "true":
+        raise RoleBundleError("human approval relay enabled flag is invalid")
+    if (
+        not key_id
+        or len(key_id) > 64
+        or len(secret.encode("utf-8")) < 32
+        or not session_path
+        or not policy_path
+        or session_path == "/dev/null"
+        or policy_path == "/dev/null"
+    ):
+        raise RoleBundleError("human approval relay material is incomplete")
+
+
 def _verify_bundle_source(path: Path, *, expected_mode: int) -> bytes:
     try:
         metadata = path.lstat()
@@ -305,6 +335,7 @@ def verify_role_bundle(
             or values["DR_BLOB_REQUIRE_VERSIONING"] != "true"
         ):
             raise RoleBundleError("role Object Storage settings differ from approved inventory")
+    _verify_human_approval_relay(values, role=role)
     _verify_transport(values, role=role)
     database_passwords = {
         value
@@ -319,6 +350,14 @@ def verify_role_bundle(
         raise RoleBundleError("database credentials are reused inside one role bundle")
     if verify_files:
         for name in sorted(PRIVATE_FILE_KEYS & set(values)):
+            if (
+                name in {
+                    "STAGING_HUMAN_APPROVAL_RELAY_SESSION_FILE",
+                    "STAGING_HUMAN_APPROVAL_RELAY_POLICY_FILE",
+                }
+                and values.get("STAGING_HUMAN_APPROVAL_RELAY_ENABLED") != "true"
+            ):
+                continue
             _verify_file(values[name], private=True)
         for name in sorted(PUBLIC_FILE_KEYS & set(values)):
             _verify_file(values[name], private=False)

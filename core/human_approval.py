@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import json
+import os
 import re
 from typing import Any
 from uuid import UUID
@@ -28,8 +29,11 @@ from core.canonical_json import canonical_json_bytes
 POLICY_SCHEMA = "three-site-human-approval-policy-v1"
 TOKEN_SCHEMA = "three-site-human-approval-token-v1"
 SESSION_TOKEN_SCHEMA = "three-site-human-approval-session-token-v1"
+RELAY_RECEIPT_SCHEMA = "three-site-human-approval-witness-relay-receipt-v1"
+RELAY_COMMAND_SCHEMA = "three-site-human-approval-witness-relay-command-v1"
 SESSION_MAX_TTL_SECONDS = 48 * 60 * 60
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+RELAY_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
 ALLOWED_AUTHENTICATION_METHODS = {
     ("password", "totp"),
     ("password", "recovery_code"),
@@ -70,6 +74,16 @@ class VerifiedHumanApproval:
     expires_at: datetime
     authentication_methods: tuple[str, str]
     token_hash: str
+
+
+@dataclass(frozen=True)
+class HumanApprovalRelayCommand:
+    """One exact staging action requested from the isolated approval relay."""
+
+    action: str
+    environment: str
+    subject: dict[str, Any]
+    request_id: str
 
 
 def _utc(value: Any, *, label: str) -> datetime:
@@ -217,6 +231,232 @@ def validate_approval_subject(payload: Any) -> dict[str, Any]:
     )
 
 
+def parse_human_approval_relay_command(payload: Any) -> HumanApprovalRelayCommand:
+    """Parse the closed request accepted by the Witness approval relay.
+
+    The caller submits no session token, password, TOTP code, or generic
+    capability.  The private relay session stays on the Witness and this
+    command carries only the action-specific public subject.
+    """
+
+    fields = {"schema", "action", "environment", "subject", "request_id"}
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != fields
+        or payload.get("schema") != RELAY_COMMAND_SCHEMA
+    ):
+        raise HumanApprovalError("human approval relay command fields/schema are invalid")
+    action = payload.get("action")
+    environment = payload.get("environment")
+    request_id = payload.get("request_id")
+    if (
+        not isinstance(action, str)
+        or not action
+        or action != action.strip()
+        or not isinstance(environment, str)
+        or environment != "staging"
+        or not isinstance(request_id, str)
+        or RELAY_REQUEST_ID_RE.fullmatch(request_id) is None
+    ):
+        raise HumanApprovalError("human approval relay command values are invalid")
+    try:
+        subject = validate_approval_subject(payload.get("subject"))
+    except (TypeError, ValueError, HumanApprovalError) as exc:
+        raise HumanApprovalError("human approval relay command subject is invalid") from exc
+    return HumanApprovalRelayCommand(
+        action=action,
+        environment=environment,
+        subject=subject,
+        request_id=request_id,
+    )
+
+
+def human_approval_relay_command_bytes(command: HumanApprovalRelayCommand) -> bytes:
+    """Return the exact authenticated request bytes for a relay command."""
+
+    return canonical_json_bytes(
+        {
+            "schema": RELAY_COMMAND_SCHEMA,
+            "action": command.action,
+            "environment": command.environment,
+            "subject": command.subject,
+            "request_id": command.request_id,
+        }
+    )
+
+
+def issue_human_approval_relay_receipt(
+    session_token: dict[str, Any],
+    *,
+    policy_payload: dict[str, Any],
+    command: HumanApprovalRelayCommand,
+    witness_private_key: Ed25519PrivateKey,
+    now: datetime,
+    receipt_id: str,
+) -> dict[str, Any]:
+    """Use a private staging session to attest exactly one requested action.
+
+    Only the Witness calls this function.  It verifies the issuer-signed
+    session locally, then signs a short-lived, action-bound receipt with the
+    already pinned Witness signing key.  The returned document never contains
+    the session token or any authentication secret.
+    """
+
+    try:
+        normalized_receipt_id = str(UUID(str(receipt_id)))
+    except ValueError as exc:
+        raise HumanApprovalError("human approval relay receipt id is invalid") from exc
+    current = _current_utc(now)
+    policy = load_human_approval_policy(policy_payload)
+    verified = verify_human_approval(
+        session_token,
+        policy_payload=policy_payload,
+        expected_action=command.action,
+        expected_environment=command.environment,
+        expected_subject=command.subject,
+        now=current,
+        require_fresh=True,
+    )
+    unsigned = {
+        "schema": RELAY_RECEIPT_SCHEMA,
+        "receipt_id": normalized_receipt_id,
+        "approval_id": verified.approval_id,
+        "policy_id": policy.policy_id,
+        "policy_hash": approval_policy_hash(policy_payload),
+        "issuer_id": policy.issuer_id,
+        "key_id": policy.key_id,
+        "operator": verified.operator,
+        "authenticator_id": policy.authenticator_id,
+        "action": command.action,
+        "environment": command.environment,
+        "subject": command.subject,
+        "request_id": command.request_id,
+        "session_token_sha256": verified.token_hash,
+        "issued_at": current.isoformat(),
+        "expires_at": verified.expires_at.isoformat(),
+        "authentication": {"methods": list(verified.authentication_methods)},
+    }
+    return {
+        **unsigned,
+        "witness_signature": base64.b64encode(
+            witness_private_key.sign(canonical_json_bytes(unsigned))
+        ).decode("ascii"),
+    }
+
+
+def verify_human_approval_relay_receipt(
+    receipt: Any,
+    *,
+    policy_payload: dict[str, Any],
+    witness_public_key_base64: str,
+    expected_action: str,
+    expected_environment: str,
+    expected_subject: dict[str, Any],
+    now: datetime | None = None,
+    require_fresh: bool = True,
+) -> VerifiedHumanApproval:
+    """Verify a Witness-signed, session-derived staging approval receipt."""
+
+    fields = {
+        "schema", "receipt_id", "approval_id", "policy_id", "policy_hash",
+        "issuer_id", "key_id", "operator", "authenticator_id", "action",
+        "environment", "subject", "request_id", "session_token_sha256",
+        "issued_at", "expires_at", "authentication", "witness_signature",
+    }
+    if (
+        not isinstance(receipt, dict)
+        or set(receipt) != fields
+        or receipt.get("schema") != RELAY_RECEIPT_SCHEMA
+    ):
+        raise HumanApprovalError("human approval relay receipt fields/schema are invalid")
+    try:
+        receipt_id = str(UUID(str(receipt["receipt_id"])))
+        approval_id = str(UUID(str(receipt["approval_id"])))
+    except ValueError as exc:
+        raise HumanApprovalError("human approval relay receipt id is invalid") from exc
+    if receipt_id == approval_id:
+        raise HumanApprovalError("human approval relay receipt identity is unsafe")
+    policy = load_human_approval_policy(policy_payload)
+    if (
+        receipt.get("policy_id") != policy.policy_id
+        or receipt.get("policy_hash") != policy.policy_hash
+        or receipt.get("issuer_id") != policy.issuer_id
+        or receipt.get("key_id") != policy.key_id
+        or receipt.get("operator") != policy.operator
+        or receipt.get("authenticator_id") != policy.authenticator_id
+    ):
+        raise HumanApprovalError("human approval relay receipt is not bound to its issuer policy")
+    action = receipt.get("action")
+    environment = receipt.get("environment")
+    action_policy = policy.actions.get(str(action))
+    if (
+        not isinstance(action, str)
+        or action != expected_action
+        or action_policy is None
+        or not isinstance(environment, str)
+        or environment != expected_environment
+        or environment != "staging"
+        or environment not in action_policy.environments
+    ):
+        raise HumanApprovalError("human approval relay action/environment is not authorized")
+    request_id = receipt.get("request_id")
+    if not isinstance(request_id, str) or RELAY_REQUEST_ID_RE.fullmatch(request_id) is None:
+        raise HumanApprovalError("human approval relay receipt request id is invalid")
+    if SHA256_RE.fullmatch(str(receipt.get("session_token_sha256") or "")) is None:
+        raise HumanApprovalError("human approval relay receipt session binding is invalid")
+    try:
+        normalized_expected_subject = validate_approval_subject(expected_subject)
+        normalized_actual_subject = validate_approval_subject(receipt.get("subject"))
+        expected_subject_bytes = canonical_json_bytes(normalized_expected_subject)
+        actual_subject_bytes = canonical_json_bytes(normalized_actual_subject)
+    except (TypeError, ValueError, HumanApprovalError) as exc:
+        raise HumanApprovalError("human approval relay receipt subject is invalid") from exc
+    if not hmac.compare_digest(actual_subject_bytes, expected_subject_bytes):
+        raise HumanApprovalError("human approval relay receipt is bound to a different subject")
+    authentication = receipt.get("authentication")
+    if not isinstance(authentication, dict) or set(authentication) != {"methods"}:
+        raise HumanApprovalError("human approval relay authentication evidence is invalid")
+    methods = authentication.get("methods")
+    if not isinstance(methods, list) or tuple(methods) not in ALLOWED_AUTHENTICATION_METHODS:
+        raise HumanApprovalError(
+            "human approval relay did not use password plus a possession factor"
+        )
+    issued = _utc(receipt["issued_at"], label="human approval relay issued_at")
+    expires = _utc(receipt["expires_at"], label="human approval relay expires_at")
+    if (
+        expires <= issued
+        or expires - issued > timedelta(seconds=SESSION_MAX_TTL_SECONDS)
+    ):
+        raise HumanApprovalError("human approval relay receipt lifetime exceeds session policy")
+    current = _current_utc(now)
+    if issued > current + timedelta(seconds=30):
+        raise HumanApprovalError("human approval relay receipt is future-dated")
+    if require_fresh and current >= expires:
+        raise HumanApprovalError("human approval relay receipt has expired")
+    try:
+        witness_public_key = base64.b64decode(witness_public_key_base64, validate=True)
+        signature = base64.b64decode(str(receipt["witness_signature"]), validate=True)
+        if len(witness_public_key) != 32:
+            raise ValueError("invalid witness key length")
+        unsigned = {key: value for key, value in receipt.items() if key != "witness_signature"}
+        Ed25519PublicKey.from_public_bytes(witness_public_key).verify(
+            signature, canonical_json_bytes(unsigned)
+        )
+    except (ValueError, TypeError, binascii.Error, InvalidSignature) as exc:
+        raise HumanApprovalError("human approval relay receipt signature is invalid") from exc
+    return VerifiedHumanApproval(
+        approval_id=approval_id,
+        operator=policy.operator,
+        action=action,
+        environment=environment,
+        subject=json.loads(actual_subject_bytes),
+        issued_at=issued,
+        expires_at=expires,
+        authentication_methods=tuple(methods),
+        token_hash=hashlib.sha256(canonical_json_bytes(receipt)).hexdigest(),
+    )
+
+
 def verify_human_approval(
     token: Any,
     *,
@@ -226,6 +466,7 @@ def verify_human_approval(
     expected_subject: dict[str, Any],
     now: datetime | None = None,
     require_fresh: bool = True,
+    witness_relay_public_key: str | None = None,
 ) -> VerifiedHumanApproval:
     """Verify an exact token or a release-bound staging operator session.
 
@@ -234,6 +475,25 @@ def verify_human_approval(
     may use ``require_fresh=False``; the signature, subject, action, policy and
     original bounded lifetime are still verified.
     """
+
+    if isinstance(token, dict) and token.get("schema") == RELAY_RECEIPT_SCHEMA:
+        public_key = str(
+            witness_relay_public_key
+            if witness_relay_public_key is not None
+            else os.environ.get("WRITER_WITNESS_PUBLIC_KEY", "")
+        ).strip()
+        if not public_key:
+            raise HumanApprovalError("human approval relay trust key is not configured")
+        return verify_human_approval_relay_receipt(
+            token,
+            policy_payload=policy_payload,
+            witness_public_key_base64=public_key,
+            expected_action=expected_action,
+            expected_environment=expected_environment,
+            expected_subject=expected_subject,
+            now=now,
+            require_fresh=require_fresh,
+        )
 
     policy = load_human_approval_policy(policy_payload)
     if isinstance(token, dict) and token.get("schema") == SESSION_TOKEN_SCHEMA:

@@ -117,6 +117,22 @@ def _verify_witness_contract(role_values: dict[str, dict[str, str]]) -> set[str]
             raise CampaignBundleError("Witness credentials are reused between WebApp sites")
         witness_key_ids.add(str(key_id))
         witness_secrets.add(str(secret))
+    relay_enabled = witness.get("STAGING_HUMAN_APPROVAL_RELAY_ENABLED")
+    relay_key_id = witness.get("STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_KEY_ID", "")
+    relay_secret = witness.get("STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_SECRET", "")
+    if relay_enabled == "true":
+        if (
+            not relay_key_id
+            or len(relay_key_id) > 64
+            or len(relay_secret.encode("utf-8")) < 32
+            or relay_key_id in witness_key_ids
+            or relay_secret in witness_secrets
+        ):
+            raise CampaignBundleError("human approval relay credential is unsafe")
+        witness_key_ids.add(relay_key_id)
+        witness_secrets.add(relay_secret)
+    elif relay_enabled != "false" or relay_key_id or relay_secret:
+        raise CampaignBundleError("disabled human approval relay retains credential material")
     return witness_secrets
 
 

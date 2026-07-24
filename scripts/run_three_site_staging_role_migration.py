@@ -576,8 +576,8 @@ class LocalRoleBackend:
             self._compose_run("witness_role_bootstrap")
             self._compose_run("witness_migration")
         if self.role == "witness":
-            if self._psql("SELECT version_num FROM writer_witness_schema_version") != "002":
-                raise RoleMigrationError("Witness schema did not reach version 002")
+            if self._psql("SELECT version_num FROM writer_witness_schema_version") != "003":
+                raise RoleMigrationError("Witness schema did not reach version 003")
         elif self._psql("SELECT version_num FROM alembic_version") != EXPECTED_HEAD:
             raise RoleMigrationError("product database did not reach the integration migration head")
         if self._psql("SELECT system_identifier FROM pg_control_system()") != str(

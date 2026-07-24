@@ -627,7 +627,7 @@ def collect_role(args: argparse.Namespace) -> dict[str, Any]:
             ]
         )
     )
-    expected_revision = "002" if args.role == "witness" else args.expected_head
+    expected_revision = "003" if args.role == "witness" else args.expected_head
     if database.get("revision") != expected_revision:
         raise ObservationError("database is not at the exact migration revision")
     services = []

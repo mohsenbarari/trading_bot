@@ -15,11 +15,18 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 import httpx
 
 from core.writer_witness_auth import (
+    WITNESS_HUMAN_APPROVAL_RELAY_PATH,
     WITNESS_TRANSITION_PATH,
     WitnessAuthenticationError,
     WitnessClientCredential,
     sign_witness_request,
     verify_witness_request,
+)
+from core.human_approval import approval_subject, verify_human_approval
+from core.human_approval_issuer import (
+    authenticate_and_issue_session,
+    create_enrollment,
+    totp_code,
 )
 from core.writer_witness_client import WriterWitnessClient, WriterWitnessClientConfig
 from models.webapp_writer_state import WebappWriterWitnessReceipt
@@ -43,6 +50,11 @@ IR_CREDENTIAL = WitnessClientCredential(
     key_id="ir-control-v1",
     site="webapp_ir",
     secret="ir-secret-0123456789abcdef-0123456789abcdef",
+)
+RELAY_CREDENTIAL = WitnessClientCredential(
+    key_id="approval-relay-v1",
+    site="orchestrator",
+    secret="approval-relay-secret-0123456789abcdef-0123456789abcdef",
 )
 FI_PREVIOUS_CREDENTIAL = WitnessClientCredential(
     key_id="fi-control-v0",
@@ -150,6 +162,51 @@ class SharedSessionFactory:
 
     def __call__(self):
         return SharedFakeSession(self.receipts)
+
+
+class _RelayMappingResult:
+    def __init__(self, row):
+        self.row = row
+
+    def mappings(self):
+        return self
+
+    def one_or_none(self):
+        return self.row
+
+
+class RelaySession:
+    def __init__(self, receipts):
+        self.receipts = receipts
+        self.commit = AsyncMock()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    async def execute(self, statement, parameters=None):
+        source = str(statement)
+        parameters = parameters or {}
+        if "SELECT request_sha256, receipt FROM human_approval_relay_receipts" in source:
+            receipt = self.receipts.get(parameters["request_id"])
+            return _RelayMappingResult(receipt)
+        if "INSERT INTO human_approval_relay_receipts" in source:
+            self.receipts[parameters["request_id"]] = {
+                "request_sha256": parameters["request_sha256"],
+                "receipt": json.loads(parameters["receipt"]),
+            }
+            return _RelayMappingResult(None)
+        raise AssertionError(f"unexpected relay SQL: {source}")
+
+
+class RelaySessionFactory:
+    def __init__(self):
+        self.receipts = {}
+
+    def __call__(self):
+        return RelaySession(self.receipts)
 
 
 class WriterWitnessAuthenticationTests(unittest.TestCase):
@@ -574,6 +631,124 @@ class WriterWitnessServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sessions.receipts, {})
         self.assertEqual(self.state.writer_epoch, 0)
         self.assertIsNone(self.state.holder_site)
+
+    async def test_human_approval_relay_keeps_session_on_witness_and_replays_exact_request(self):
+        approval_now = NOW
+        enrollment = create_enrollment(
+            operator="mohsen",
+            password="correct horse battery staple",
+            now=approval_now,
+            scrypt_n=2**14,
+        )
+        subject = approval_subject(
+            artifact_type="three-site-staging-inventory-v3",
+            artifact_sha256="a" * 64,
+            release_sha="b" * 40,
+            bindings={"campaign_id": "campaign-1", "inventory_stage": "provisioned"},
+        )
+        session_token, _state, _audit = authenticate_and_issue_session(
+            secrets_payload=enrollment.secrets_payload,
+            state_payload=enrollment.state_payload,
+            policy_payload=enrollment.policy_payload,
+            private_key_envelope=enrollment.private_key_envelope,
+            password="correct horse battery staple",
+            totp=totp_code(enrollment.totp_secret, at=approval_now)[1],
+            recovery_code=None,
+            release_sha="b" * 40,
+            allowed_actions=["approve_inventory"],
+            ttl_seconds=48 * 60 * 60,
+            now=approval_now,
+        )
+        relay_sessions = RelaySessionFactory()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            session_path = root / "session.json"
+            policy_path = root / "policy.json"
+            session_path.write_text(json.dumps(session_token), encoding="utf-8")
+            policy_path.write_text(json.dumps(enrollment.policy_payload), encoding="utf-8")
+            session_path.chmod(0o600)
+            policy_path.chmod(0o600)
+            runtime = WriterWitnessServiceRuntime(
+                session_factory=relay_sessions,
+                private_key_base64=self.private_key,
+                credentials={RELAY_CREDENTIAL.key_id: RELAY_CREDENTIAL},
+                clock=MutableClock(approval_now + timedelta(minutes=1)),
+                human_approval_relay_enabled=True,
+                human_approval_relay_session_file=str(session_path),
+                human_approval_relay_policy_file=str(policy_path),
+            )
+            app = create_writer_witness_app(runtime)
+            body = json.dumps(
+                {
+                    "schema": "three-site-human-approval-witness-relay-command-v1",
+                    "action": "approve_inventory",
+                    "environment": "staging",
+                    "subject": subject,
+                    "request_id": "relay-inventory-001",
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            headers = sign_witness_request(
+                credential=RELAY_CREDENTIAL,
+                method="POST",
+                path=WITNESS_HUMAN_APPROVAL_RELAY_PATH,
+                body=body,
+                request_id="relay-inventory-001",
+                timestamp=int((approval_now + timedelta(minutes=1)).timestamp()),
+            )
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport, base_url="http://witness.test"
+            ) as client:
+                first = await client.post(
+                    WITNESS_HUMAN_APPROVAL_RELAY_PATH,
+                    content=body,
+                    headers=headers,
+                )
+                replay = await client.post(
+                    WITNESS_HUMAN_APPROVAL_RELAY_PATH,
+                    content=body,
+                    headers=headers,
+                )
+                altered = body.replace(b"approve_inventory", b"approve_migration")
+                altered_headers = sign_witness_request(
+                    credential=RELAY_CREDENTIAL,
+                    method="POST",
+                    path=WITNESS_HUMAN_APPROVAL_RELAY_PATH,
+                    body=altered,
+                    request_id="relay-inventory-001",
+                    timestamp=int((approval_now + timedelta(minutes=1)).timestamp()),
+                )
+                conflicting = await client.post(
+                    WITNESS_HUMAN_APPROVAL_RELAY_PATH,
+                    content=altered,
+                    headers=altered_headers,
+                )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(replay.json(), first.json())
+        self.assertEqual(conflicting.status_code, 409)
+        receipt = first.json()
+        self.assertNotIn(session_token["signature"], str(receipt))
+        verify_human_approval(
+            receipt,
+            policy_payload=enrollment.policy_payload,
+            expected_action="approve_inventory",
+            expected_environment="staging",
+            expected_subject=subject,
+            now=approval_now + timedelta(minutes=2),
+            witness_relay_public_key=base64.b64encode(
+                Ed25519PrivateKey.from_private_bytes(
+                    base64.b64decode(self.private_key)
+                ).public_key().public_bytes(
+                    serialization.Encoding.Raw,
+                    serialization.PublicFormat.Raw,
+                )
+            ).decode("ascii"),
+        )
 
 
 if __name__ == "__main__":

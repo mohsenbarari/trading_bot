@@ -53,6 +53,7 @@ python_sources=( \
     core/secure_file_io.py \
     scripts/hold_writer_witness_package_locks.py \
     scripts/manage_three_site_human_approval.py \
+    scripts/request_three_site_human_approval_relay.py \
     scripts/plan_writer_witness_real_host_matrix.py \
     scripts/publish_wa_ir_object_storage_preflight.py \
     scripts/publish_wa_ir_object_storage_transfer.py \
@@ -115,6 +116,7 @@ PY
 unit_modules=( \
     tests.test_human_approval \
     tests.test_manage_three_site_human_approval \
+    tests.test_request_three_site_human_approval_relay \
     tests.test_writer_witness \
     tests.test_writer_witness_client \
     tests.test_writer_witness_deployment \

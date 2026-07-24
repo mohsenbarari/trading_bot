@@ -107,7 +107,10 @@ for source in \
     enums.py \
     offer_identity.py \
     registration_identity.py \
+    canonical_json.py \
+    human_approval.py \
     runtime_sites.py \
+    secure_file_io.py \
     writer_lease_clock.py \
     writer_witness_auth.py \
     writer_witness_contract.py \
@@ -126,6 +129,7 @@ done
 for source in \
     001_initial.sql \
     002_failover_operation_ledger.sql \
+    003_human_approval_relay.sql \
     requirements.txt \
     requirements.lock \
     python-runtime.json \
