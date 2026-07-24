@@ -563,6 +563,7 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         self.assertIn("deny all;", config)
         self.assertIn("location = /v1/writer-witness/status", config)
         self.assertIn("location = /v1/writer-witness/transitions", config)
+        self.assertIn("location = /v1/human-approval/relay", config)
         self.assertIn("client_max_body_size 16k;", config)
         self.assertNotIn("Access-Control-Allow-Origin", config)
 
