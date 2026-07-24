@@ -566,6 +566,11 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         self.assertIn("location = /v1/human-approval/relay", config)
         self.assertIn("client_max_body_size 16k;", config)
         self.assertNotIn("Access-Control-Allow-Origin", config)
+        service = (ROOT / "deploy/writer-witness/writer-witness.service").read_text()
+        self.assertIn(
+            "EnvironmentFile=-/etc/trading-bot-witness/human-approval-relay.env",
+            service,
+        )
 
     def test_activation_rejects_unit_states_that_rollback_cannot_restore(self):
         parse_unit_states = ACTIVATION_MODULE["_parse_unit_states"]

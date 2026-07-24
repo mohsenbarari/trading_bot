@@ -200,6 +200,26 @@ immutable artifact. This is not a new authorization: it is a Witness-audited
 derivation from the one active session. The result is an owner-only receipt,
 never a reusable session, and remains usable only until that session expires.
 
+### First relay bootstrap on the standalone Witness
+
+Before the three-site Compose role is up, the standalone Writer-Witness
+service may provide the same private relay. Its optional host-local
+`/etc/trading-bot-witness/human-approval-relay.env` is read only by systemd
+and the `writer-witness` service. It must be `root:writer-witness`, mode
+`0640`, and contain exactly the relay enable flag, the one local session path,
+the public policy-copy path, and the dedicated controller HMAC key id/secret.
+It must never be placed in `runtime.env`, a role bundle, Git, or Object
+Storage.
+
+Keep the sole session file on the Witness under
+`/var/lib/trading-bot/human-approvals/`; make only that file and its parent
+directory traversable by the `writer-witness` service group
+(`root:writer-witness`, `0640` for the file and `0750` for the directory).
+The issuer remains root-only. The policy copy is public trust material but is
+still installed on the Witness as `root:writer-witness`, mode `0640`. Source
+and receipt payloads still use the approved Object Storage or Finland-local
+transport rules; only bounded SSH commands operate this local Witness bootstrap.
+
 To restrict the session further, pass an explicit allowlist:
 
 ```bash
