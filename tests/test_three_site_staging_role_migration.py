@@ -183,6 +183,7 @@ class ThreeSiteStagingRoleMigrationTests(unittest.TestCase):
                 backend.role = role
                 backend.prefix = ["docker", "compose"]
                 backend._wait_services_ready = MagicMock()
+                backend._wait_infrastructure_ready = MagicMock()
                 calls: list[list[str]] = []
 
                 def fake_run(arguments, **_kwargs):
@@ -197,7 +198,10 @@ class ThreeSiteStagingRoleMigrationTests(unittest.TestCase):
                 )
                 self.assertTrue(calls[0][-1].endswith("_redis"))
                 backend._wait_services_ready.assert_called_once_with(
-                    role_migration.ROLE_PUBLIC[role]
+                    role_migration.ROLE_PUBLIC[role][1:]
+                )
+                backend._wait_infrastructure_ready.assert_called_once_with(
+                    role_migration.ROLE_PUBLIC[role][:1]
                 )
 
     def test_service_readiness_reads_role_specific_runtime_release_from_container(self):

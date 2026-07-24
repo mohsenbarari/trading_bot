@@ -659,7 +659,16 @@ class LocalRoleBackend:
             raise RoleMigrationError("Witness has no public application phase")
         for service in ROLE_PUBLIC[self.role]:
             _run([*self.prefix, "up", "-d", "--no-deps", service], timeout=180)
-        self._wait_services_ready(ROLE_PUBLIC[self.role])
+        # Redis is deliberately consumed from the upstream immutable image rather
+        # than from the application release image, so it cannot carry the exact
+        # RELEASE_SHA that _wait_services_ready verifies.  Keep the release
+        # identity check on all public application services, while checking the
+        # Redis infrastructure service only for running/healthy state.  This is
+        # the same split already used by start_private().
+        app_services = ROLE_PUBLIC[self.role][1:]
+        infrastructure_services = ROLE_PUBLIC[self.role][:1]
+        self._wait_services_ready(app_services)
+        self._wait_infrastructure_ready(infrastructure_services)
 
     def rollback_stop(self) -> None:
         # Preserve every target byte for forensics; rollback of user access is
