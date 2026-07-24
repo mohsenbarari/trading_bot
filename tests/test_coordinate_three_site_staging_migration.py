@@ -117,11 +117,18 @@ def _routing(root: Path, *, observed_at: str) -> Path:
                     "target_site": target,
                     "table_set_sha256": "2" * 64,
                     "source_fingerprint_sha256": "3" * 64,
-                    "target_fingerprint_sha256": "3" * 64,
+                    "target_fingerprint_sha256": "4" * 64,
+                    "source_business_fingerprint_sha256": "5" * 64,
+                    "target_business_fingerprint_sha256": "5" * 64,
                     "source_row_count": 10,
                     "target_row_count": 10,
                     "table_count": 2,
-                    "difference_count": 0,
+                    "difference_count": 1,
+                    "business_drift_count": 0,
+                    "critical_drift_count": 0,
+                    "incomplete_count": 0,
+                    "local_only_difference_count": 1,
+                    "volatile_difference_count": 0,
                 }
                 for scope, source, target in comparisons
             ],
@@ -144,7 +151,10 @@ def _routing(root: Path, *, observed_at: str) -> Path:
                     "target_object_count": 2,
                     "readback_sample_count": 1,
                 }
-                for scope, source, target in comparisons
+                for scope, source, target in (
+                    ("webapp-authority", "webapp_fi", "webapp_ir"),
+                    ("webapp-authority", "webapp_ir", "webapp_fi"),
+                )
             ],
         },
     }

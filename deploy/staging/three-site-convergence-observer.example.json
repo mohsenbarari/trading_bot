@@ -1,0 +1,52 @@
+{
+  "schema": "three-site-staging-convergence-observer-config-v1",
+  "campaign_id": "11111111-1111-4111-8111-111111111111",
+  "release_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "plan_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "production_forbidden": true,
+  "artifact_root": "/root/secure/matrix/evidence",
+  "inventory": {
+    "path": "/root/secure/matrix/provisioned-inventory.json",
+    "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "ssh": {
+    "binary": "/usr/bin/ssh",
+    "identity_file": "/root/.ssh/three-site-staging",
+    "known_hosts_file": "/root/.ssh/three-site-staging-known-hosts",
+    "connect_timeout_seconds": 10
+  },
+  "sites": {
+    "bot_fi": {
+      "host": "192.0.2.11",
+      "port": 22,
+      "user": "root",
+      "repo_root": "/srv/trading-bot-three-site/current",
+      "compose_file": "/srv/trading-bot-three-site/current/deploy/staging/docker-compose.three-site.yml",
+      "env_file": "/srv/trading-bot-three-site/runtime/bot-fi.env"
+    },
+    "webapp_fi": {
+      "host": "192.0.2.12",
+      "port": 22,
+      "user": "root",
+      "repo_root": "/srv/trading-bot-three-site/current",
+      "compose_file": "/srv/trading-bot-three-site/current/deploy/staging/docker-compose.three-site.yml",
+      "env_file": "/srv/trading-bot-three-site/runtime/webapp-fi.env"
+    },
+    "webapp_ir": {
+      "host": "192.0.2.13",
+      "port": 22,
+      "user": "root",
+      "repo_root": "/srv/trading-bot-three-site/current",
+      "compose_file": "/srv/trading-bot-three-site/current/deploy/staging/docker-compose.three-site.yml",
+      "env_file": "/srv/trading-bot-three-site/runtime/webapp-ir.env"
+    }
+  },
+  "object_storage": {
+    "transport_config": "/root/secure/matrix/wa-ir-object-storage-transport.env"
+  },
+  "limits": {
+    "command_timeout_seconds": 300,
+    "max_rows_per_table": 10000,
+    "url_ttl_seconds": 300
+  }
+}

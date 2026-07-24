@@ -463,6 +463,12 @@ services:
     restart: "no"
     command: [python, -c, "raise SystemExit('invoke with docker compose run')"]
     environment: *webapp_fi_observer_env
+    # The convergence observer hashes local CAS files but has no Blob Object
+    # Storage credential, no writable mount and no egress network.  It can
+    # therefore prove a local read-back without becoming a transfer worker.
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - webapp_fi_uploads:/app/uploads:ro
     depends_on: {webapp_fi_db_fencing: {condition: service_completed_successfully}}
     networks: [webapp_fi]
 
@@ -689,8 +695,28 @@ services:
     restart: "no"
     command: [python, -c, "raise SystemExit('invoke with docker compose run')"]
     environment: *webapp_ir_observer_env
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - webapp_ir_uploads:/app/uploads:ro
     depends_on: {webapp_ir_db_fencing: {condition: service_completed_successfully}}
     networks: [webapp_ir]
+
+  # This is not the observer.  It is a one-shot, explicitly invoked export
+  # service used only to send a redacted convergence snapshot to a short-lived
+  # presigned Object Storage URL.  It has no static Object Storage credential,
+  # no writable application mount and no public listener.  Keeping it separate
+  # prevents the least-privilege observer from acquiring outbound capability.
+  webapp_ir_convergence_exporter:
+    profiles: [webapp-ir]
+    <<: *app
+    restart: "no"
+    command: [python, -c, "raise SystemExit('invoke with docker compose run')"]
+    environment: *webapp_ir_observer_env
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - webapp_ir_uploads:/app/uploads:ro
+    depends_on: {webapp_ir_db_fencing: {condition: service_completed_successfully}}
+    networks: [webapp_ir, webapp_ir_egress]
 
   webapp_ir_api:
     profiles: [webapp-ir]

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, datetime, time
 from decimal import Decimal
@@ -24,7 +25,6 @@ from core.sync_field_policy import (
     SyncFieldPolicyEntry,
     get_sync_field_policy_entry,
 )
-from core.sync_registry import SyncPolicy, sync_registry_entries
 from models.database import Base
 
 
@@ -273,11 +273,94 @@ def build_table_parity_snapshot(
                 for record in records
             ]
         ),
+        # The complete records hash intentionally includes local execution and
+        # volatile fields.  It is valuable for diagnosis, but it must never be
+        # used as a claim that two independently-running sites have the same
+        # business state.  This companion hash is the canonical, redacted
+        # business-only value used by the three-site convergence gate.
+        "business_records_hash": _hash_payload(
+            [
+                {
+                    "identity_hash": record["identity_hash"],
+                    "business_hash": record["business_hash"],
+                }
+                for record in records
+            ]
+        ),
         "records": records,
     }
 
 
+def business_snapshot_fingerprint(snapshot: Mapping[str, Any]) -> str:
+    """Return the deterministic business-only fingerprint for a parity snapshot.
+
+    The function deliberately refuses malformed/truncated input.  A local
+    runtime field (for example a Telegram message id or a worker lease) is
+    allowed to differ between physical sites, while an omitted row, duplicate
+    natural identity, or changed business value is not.  Callers must still
+    use :func:`compare_parity_snapshots` for the detailed mismatch counts.
+    """
+
+    tables = snapshot.get("tables") if isinstance(snapshot, Mapping) else None
+    if not isinstance(tables, Mapping) or not tables:
+        raise ValueError("parity snapshot has no tables")
+    normalized: list[dict[str, Any]] = []
+    for table_name in sorted(str(name) for name in tables):
+        table = tables.get(table_name)
+        if not isinstance(table, Mapping) or bool(table.get("truncated")):
+            raise ValueError("parity snapshot is incomplete")
+        records = table.get("records")
+        if not isinstance(records, list):
+            raise ValueError("parity table records are invalid")
+        row_count = table.get("row_count")
+        if type(row_count) is not int or row_count != len(records):
+            raise ValueError("parity table row count is invalid")
+        duplicate_count = table.get("duplicate_identity_count")
+        if type(duplicate_count) is not int or duplicate_count != 0:
+            raise ValueError("parity snapshot has duplicate identities")
+        entries: list[dict[str, str]] = []
+        for record in records:
+            if not isinstance(record, Mapping):
+                raise ValueError("parity record is invalid")
+            identity_hash = str(record.get("identity_hash") or "")
+            business_hash = str(record.get("business_hash") or "")
+            if not re.fullmatch(r"[0-9a-f]{64}", identity_hash) or not re.fullmatch(
+                r"[0-9a-f]{64}", business_hash
+            ):
+                raise ValueError("parity record hash is invalid")
+            entries.append(
+                {"identity_hash": identity_hash, "business_hash": business_hash}
+            )
+        entries.sort(key=lambda item: item["identity_hash"])
+        if len({item["identity_hash"] for item in entries}) != len(entries):
+            raise ValueError("parity snapshot has duplicate identities")
+        full_entries = [
+            {
+                "identity_hash": str(record.get("identity_hash") or ""),
+                "business_hash": str(record.get("business_hash") or ""),
+                "local_only_hash": str(record.get("local_only_hash") or ""),
+                "volatile_hash": str(record.get("volatile_hash") or ""),
+            }
+            for record in records
+        ]
+        if any(
+            not re.fullmatch(r"[0-9a-f]{64}", item[field])
+            for item in full_entries
+            for field in item
+        ) or table.get("records_hash") != _hash_payload(full_entries):
+            raise ValueError("parity table record fingerprint is invalid")
+        if table.get("business_records_hash") != _hash_payload(entries):
+            raise ValueError("parity table business fingerprint is invalid")
+        normalized.append({"table": table_name, "records": entries})
+    return _hash_payload(normalized)
+
+
 def synced_parity_table_names(mode: str = "quick") -> tuple[str, ...]:
+    # Keep redacted snapshot comparison usable from an offline controller.
+    # Importing the registry reads runtime settings, while a comparison of two
+    # already-collected snapshots needs neither credentials nor a database.
+    from core.sync_registry import SyncPolicy, sync_registry_entries
+
     normalized = str(mode or "quick").strip().lower()
     synced = {
         table_name

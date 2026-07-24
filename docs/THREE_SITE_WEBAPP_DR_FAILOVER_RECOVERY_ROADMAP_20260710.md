@@ -4057,6 +4057,27 @@ does not authorize a `main` merge.
   checkpoint, database parity, Blob parity, and unchanged-Arvan observations;
   no role can finish without one global document proving all four journals had
   committed.
+- The routing-hold evidence path now has a concrete read-only convergence
+  driver: each site emits a redacted repeatable-read snapshot; a closed builder
+  proves all six directed event checkpoints, full deep business parity, and
+  the WebApp-FI/WebApp-IR content-addressed Blob plane. Raw hashes remain in
+  the artifact for diagnosis, but only a separate business-normalized
+  fingerprint is required to match: Telegram message ids, leases and retry
+  timestamps must not create a false parity failure. Missing rows, duplicate
+  identities, truncation, business drift, unresolved conflicts and invalid
+  local Blob read-back fail closed. Bot-FI is intentionally excluded from Blob
+  scopes because it has no Blob worker/CAS. The observer is a separate
+  read-only database role with no Object Storage credential or egress network;
+  WebApp observer mounts the upload CAS read-only solely to recompute local
+  hashes. Any WebApp-IR snapshot transfer remains private/versioned Object
+  Storage only, never SSH payload transport.
+  A separate one-shot WebApp-IR exporter owns that one outbound action. It has
+  the same read-only observer database role and read-only CAS mount, no static
+  Object Storage credential, no public listener, and no writable application
+  volume. The controller must read the exact returned Object Storage version
+  back and verify its hash/size against the Iran-side receipt before it builds
+  the three routing artifacts; an SSH/SCP snapshot or a latest-object read is
+  never an acceptable substitute.
 - The later Queue activation is mechanically constrained to one direct child
   commit and one exact `False` -> `True` line. Any other parent, path, byte, or
   dirty checkout invalidates the Full Matrix transition evidence.
@@ -4469,13 +4490,18 @@ Host attestation now also blocks Bot-FI/WebApp-FI/WebApp-IR when neither
 only after the campaign starts.
 
 Each site now has a separate `*_sync_observer` login and one-shot Compose
-service. The login receives SELECT only on the migration version, runtime
-identity, event, delivery, and receipt tables. It receives no DML, role
-membership, sequence, function, business, Queue, Telegram, Writer, Blob, or
-effect permission. `scripts/run_three_site_sync_timing_observer.py` binds its
-SSH targets to the exact provisioned staging inventory, uses strict known-host
-verification, and concurrently queries all three roles through those observer
-containers.
+service. Its closed, SELECT-only surface includes the migration/runtime/event
+tables used by timing plus the synchronized product rows and DR cursors needed
+by the initial convergence proof. Timing collection never emits those product
+values; convergence snapshots emit only canonical hashes. The role receives no
+DML, role membership, sequence, function, Queue, Telegram execution, Writer,
+Blob Object Storage credential, or effect permission. The ordinary observer
+has no egress network. `scripts/run_three_site_sync_timing_observer.py` binds
+its SSH targets to the exact provisioned staging inventory, uses strict
+known-host verification, and concurrently queries all three roles through
+those observer containers. The one-off WebApp-IR convergence exporter is the
+sole exception to the no-egress topology and is mechanically restricted to a
+short-lived, validated Object Storage PUT descriptor with no static credential.
 
 For recovery profiles, the observer samples pending rows and oldest age while
 the backlog drains, calculates ingress/apply rates from successive snapshots,

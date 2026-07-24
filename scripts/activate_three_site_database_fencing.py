@@ -32,6 +32,45 @@ SYNC_OBSERVER_TABLES = frozenset(
         "dr_event_receipts",
     }
 )
+# The observer is a separate LOGIN NOINHERIT role.  Its convergence-only
+# read surface is deliberately enumerated here instead of borrowing the
+# WebApp application role, control role, Blob credentials, or Writer power.
+CONVERGENCE_PRODUCT_TABLES = frozenset(
+    {
+        "accountant_relations",
+        "admin_broadcast_messages",
+        "admin_market_messages",
+        "commodities",
+        "commodity_aliases",
+        "customer_relations",
+        "invitations",
+        "market_runtime_state",
+        "market_schedule_overrides",
+        "notifications",
+        "offer_publication_states",
+        "offer_requests",
+        "offers",
+        "trades",
+        "trade_delivery_receipts",
+        "telegram_link_tokens",
+        "telegram_admin_broadcasts",
+        "telegram_admin_broadcast_receipts",
+        "telegram_notification_outbox",
+        "trading_settings",
+        "user_blocks",
+        "user_notification_preferences",
+        "users",
+    }
+)
+CONVERGENCE_OBSERVER_TABLES = CONVERGENCE_PRODUCT_TABLES | SYNC_OBSERVER_TABLES | frozenset(
+    {
+        "dr_producer_cursors",
+        "dr_destination_cursors",
+        "dr_stream_checkpoints",
+        "dr_conflict_quarantine",
+        "dr_blob_manifests",
+    }
+)
 APPLICATION_INTERNAL_GRANTS = {
     "dr_destination_cursors": "SELECT, INSERT, UPDATE",
     "dr_producer_cursors": "SELECT, INSERT, UPDATE",
@@ -294,7 +333,7 @@ def build_statements(
         f"GRANT SELECT ON ALL TABLES IN SCHEMA public TO {application_role}",
         f"GRANT SELECT ON TABLE public.dr_database_runtime, public.dr_durability_state, public.webapp_writer_state, public.webapp_writer_transitions TO {control_role}",
         "GRANT SELECT ON TABLE "
-        + ", ".join(f"public.{table}" for table in sorted(SYNC_OBSERVER_TABLES))
+        + ", ".join(f"public.{table}" for table in sorted(CONVERGENCE_OBSERVER_TABLES))
         + f" TO {_ident(observer_role)}",
         f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {application_role}, {projection_role}",
     ]

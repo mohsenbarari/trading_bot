@@ -609,9 +609,11 @@ Migration head `b986c7d8e0f1` retains the first delivery attempt, rejects any
 cursor whose retained DR history is not exactly contiguous, and takes a
 write-excluding stream-table lock before its final history validation. Each role
 bundle now contains a dedicated `*_sync_observer` database identity. That
-identity can only read `alembic_version`, `dr_database_runtime`, `dr_events`,
-`dr_event_deliveries`, and `dr_event_receipts`; it has no business, Writer,
-Queue, Telegram, Blob, effect, function, or sequence authority.
+identity has one closed SELECT-only convergence surface: the migration/runtime
+and DR ledgers plus the synchronized product tables required to calculate a
+redacted business hash. It has no DML, Writer, Queue, Telegram execution,
+Blob Object Storage credential, effect, function, or sequence authority. The
+ordinary observer service has no egress network.
 
 Bot-FI, WebApp-FI, and WebApp-IR hosts must have `chronyc` (preferred) or
 `ntpq` installed and synchronized before host attestation. `timedatectl`
@@ -648,6 +650,18 @@ reconnect/catch-up, and one-hour backlog
 scenarios use the same raw verifier. Missing routes, reused event evidence,
 unsynchronized/stale clocks, forged percentiles, a backlog not observed before
 drain, no live ingress during recovery, or a non-zero final backlog all fail.
+
+Initial routing-hold convergence uses the separate
+`scripts/run_three_site_staging_convergence_observer.py` and the owner-only
+shape in `deploy/staging/three-site-convergence-observer.example.json`. It
+binds the same signed inventory, release and plan, and writes all raw and final
+evidence below one owner-only artifact root. Bot-FI and WebApp-FI return only
+redacted snapshots through the Finland command path. WebApp-IR instead runs a
+one-shot exporter with a short-lived presigned PUT URL; it has no static Object
+Storage credential and SSH returns only its hash/byte receipt. The controller
+must fetch the exact Object Storage version back and verify the receipt before
+building event, business-parity and Blob-parity artifacts. The Object Storage
+transport config is owner-only and is never copied to WebApp-IR.
 
 Every backend invocation is preceded by a hash-journaled intent carrying a
 deterministic operation ID. Scenario and recovery invocations also receive a

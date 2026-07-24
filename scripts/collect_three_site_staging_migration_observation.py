@@ -113,7 +113,15 @@ PARITY_COMPARISONS = frozenset(
         ("webapp-authority", "webapp_fi", "webapp_ir"),
     }
 )
-BLOB_SCOPES = PARITY_COMPARISONS
+# Blob replication is a WebApp-only content-addressed plane.  Bot-FI has no
+# blob worker/CAS and must not be represented as an empty blob replica merely
+# because the initial seed happens to contain no attachments.
+BLOB_SCOPES = frozenset(
+    {
+        ("webapp-authority", "webapp_fi", "webapp_ir"),
+        ("webapp-authority", "webapp_ir", "webapp_fi"),
+    }
+)
 
 
 def _fresh_timestamp(value: Any, *, label: str, now: datetime) -> None:
@@ -211,7 +219,11 @@ def validate_convergence_artifact(
             fields = {
                 "scope", "source_site", "target_site", "table_set_sha256",
                 "source_fingerprint_sha256", "target_fingerprint_sha256",
-                "source_row_count", "target_row_count", "table_count", "difference_count",
+                "source_business_fingerprint_sha256", "target_business_fingerprint_sha256",
+                "source_row_count", "target_row_count",
+                "table_count", "difference_count", "business_drift_count",
+                "critical_drift_count", "incomplete_count",
+                "local_only_difference_count", "volatile_difference_count",
             }
             identity = (
                 str(row.get("scope", "")), str(row.get("source_site", "")),
@@ -219,17 +231,39 @@ def validate_convergence_artifact(
             ) if isinstance(row, dict) else ("", "", "")
             if (
                 not isinstance(row, dict) or set(row) != fields or identity not in PARITY_COMPARISONS
-                or identity in seen or row.get("difference_count") != 0
+                or identity in seen
                 or any(HASH_RE.fullmatch(str(row.get(key, ""))) is None for key in (
-                    "table_set_sha256", "source_fingerprint_sha256", "target_fingerprint_sha256"
+                    "table_set_sha256", "source_fingerprint_sha256", "target_fingerprint_sha256",
+                    "source_business_fingerprint_sha256", "target_business_fingerprint_sha256",
                 ))
-                or row["source_fingerprint_sha256"] != row["target_fingerprint_sha256"]
                 or type(row.get("source_row_count")) is not int
                 or row["source_row_count"] < 0
                 or row.get("target_row_count") != row["source_row_count"]
                 or type(row.get("table_count")) is not int or row["table_count"] < 1
+                or any(
+                    type(row.get(key)) is not int or row[key] < 0
+                    for key in (
+                        "difference_count", "business_drift_count", "critical_drift_count",
+                        "incomplete_count", "local_only_difference_count",
+                        "volatile_difference_count",
+                    )
+                )
+                # A raw fingerprint may legitimately differ: channel message
+                # ids, leases and retry timestamps are site-local execution
+                # evidence.  The business-normalized fingerprint must remain
+                # exact, and every harmful category must be zero.
+                or row["business_drift_count"] != 0
+                or row["critical_drift_count"] != 0
+                or row["incomplete_count"] != 0
+                or row["source_business_fingerprint_sha256"]
+                != row["target_business_fingerprint_sha256"]
+                or row["source_business_fingerprint_sha256"] == "0" * 64
+                or row["difference_count"] != (
+                    row["local_only_difference_count"]
+                    + row["volatile_difference_count"]
+                )
             ):
-                raise ObservationError("database parity comparison is not exact")
+                raise ObservationError("database parity comparison is not business-exact")
             seen.add(identity)
         if seen != PARITY_COMPARISONS:
             raise ObservationError("database parity does not cover every authority target")

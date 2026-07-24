@@ -134,6 +134,29 @@ networks:
         self.assertIn("inbound_surface_forbidden", message)
         self.assertIn("public_egress_forbidden", message)
 
+    def test_convergence_exporter_is_one_shot_and_cannot_receive_storage_credentials(self):
+        source = """
+services:
+  webapp_ir_convergence_exporter:
+    image: test
+    profiles: [webapp-ir]
+    ports: ["8000:8000"]
+    networks: [webapp_ir_egress]
+    environment:
+      ARVAN_S3_SECRET_KEY: literal
+networks:
+  webapp_ir_egress: {}
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "compose.yml"
+            path.write_text(source, encoding="utf-8")
+            with self.assertRaises(SecretBoundaryError) as captured:
+                verify_compose(path)
+        message = str(captured.exception)
+        self.assertIn("inbound_surface_forbidden", message)
+        self.assertIn("closed_egress_topology_missing", message)
+        self.assertIn("object_storage_credential_forbidden:ARVAN_S3_SECRET_KEY", message)
+
     def test_role_service_requires_one_exact_host_profile(self):
         source = """
 services:
