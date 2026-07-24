@@ -654,9 +654,23 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
 
         await market_transition_service._acquire_market_runtime_lock(db)
 
-        stmt, params = db.execute.await_args.args
+        stmt = db.execute.await_args.args[0]
         self.assertIn("pg_advisory_xact_lock", str(stmt))
-        self.assertEqual(params, {"lock_key": market_transition_service.MARKET_RUNTIME_ADVISORY_LOCK_KEY})
+        self.assertNotIn("TextClause", type(stmt).__name__)
+
+    async def test_acquire_market_runtime_lock_uses_typed_select_for_lock_timeout(self):
+        db = SimpleNamespace(execute=AsyncMock())
+
+        await market_transition_service._acquire_market_runtime_lock(
+            db, lock_timeout_ms=750
+        )
+
+        self.assertEqual(db.execute.await_count, 2)
+        timeout_stmt, lock_stmt = [call.args[0] for call in db.execute.await_args_list]
+        self.assertIn("set_config", str(timeout_stmt))
+        self.assertIn("pg_advisory_xact_lock", str(lock_stmt))
+        self.assertNotIn("TextClause", type(timeout_stmt).__name__)
+        self.assertNotIn("TextClause", type(lock_stmt).__name__)
 
     async def test_offer_admission_fence_locks_before_final_open_evaluation(self):
         events = []
