@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from scripts.restore_three_site_staging_sources import (
     SourceRestoreError,
+    _legacy_prefix,
     _load_legacy_restore_bundle,
     confirmation_phrase,
     execute,
@@ -121,6 +122,15 @@ class RestoreThreeSiteStagingSourcesTests(unittest.TestCase):
                 release_sha=evidence["target_release_sha"],
                 project_name="trading_bot_staging_iran",
             )
+
+    def test_bot_restore_reapplies_the_freeze_profile(self):
+        prefix = _legacy_prefix(
+            project_name="trading_bot_staging",
+            compose_path=Path("/secure/compose.yml"),
+            source_roles=["bot_fi"],
+        )
+        self.assertIn("--profile", prefix)
+        self.assertEqual(prefix[prefix.index("--profile") + 1], "staging-bot")
 
     def test_evidence_can_record_a_verified_noop_stop_without_restarting_it(self):
         evidence = _evidence()

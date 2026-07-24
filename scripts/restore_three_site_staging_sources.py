@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.freeze_three_site_staging_sources import DATA_SERVICES, DOCKER, _run
+from scripts.freeze_three_site_staging_sources import DATA_SERVICES, DOCKER, ROLE_PROFILE, _run
 from core.three_site_staging_source_contract import (
     LEGACY_STAGING_PROJECTS,
     legacy_staging_project_allowed,
@@ -115,6 +115,7 @@ def verify_restore_input(
         raise SourceRestoreError("legacy source-freeze evidence cannot authorize restore")
     return {
         "evidence_sha256": _canonical_hash(evidence),
+        "source_roles": sorted(source_roles),
         "previously_running_services": sorted(previous),
         "services_to_start": sorted(expected_stopped),
         "legacy_restore_bundle": dict(evidence["legacy_restore_bundle"]),
@@ -185,10 +186,19 @@ def _load_legacy_restore_bundle(
     return manifest, compose_path
 
 
-def _legacy_prefix(*, project_name: str, compose_path: Path) -> list[str]:
+def _legacy_prefix(
+    *, project_name: str, compose_path: Path, source_roles: list[str]
+) -> list[str]:
     if project_name not in LEGACY_STAGING_PROJECTS:
         raise SourceRestoreError("legacy restore project is outside the closed allowlist")
-    return [DOCKER, "compose", "-p", project_name, "-f", str(compose_path)]
+    prefix = [DOCKER, "compose", "-p", project_name, "-f", str(compose_path)]
+    for role in sorted(set(source_roles)):
+        if role not in ROLE_PROFILE:
+            raise SourceRestoreError("legacy restore source role is unknown")
+        profile = ROLE_PROFILE[role]
+        if profile:
+            prefix.extend(("--profile", profile))
+    return prefix
 
 
 def _verify_local_images(service_images: dict[str, str]) -> None:
@@ -232,7 +242,11 @@ def execute(
     manifest, compose_path = _load_legacy_restore_bundle(
         verified["legacy_restore_bundle"], evidence=evidence
     )
-    prefix = _legacy_prefix(project_name=args.project_name, compose_path=compose_path)
+    prefix = _legacy_prefix(
+        project_name=args.project_name,
+        compose_path=compose_path,
+        source_roles=list(verified["source_roles"]),
+    )
     _run([*prefix, "config", "--quiet"])
     configured = {
         value for value in _run([*prefix, "config", "--services"]).splitlines() if value
