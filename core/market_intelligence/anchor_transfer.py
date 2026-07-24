@@ -398,16 +398,24 @@ def read_market_context(
                 instrument="GOLD_COIN",
                 market_labels=("سکه نقدی",),
                 trade_forms=("PHYSICAL",),
-                settlement_terms=("TODAY",),
+                # The source label explicitly establishes the physical/cash
+                # form. The Telegram feed often leaves the independent
+                # settlement axis UNKNOWN, so rejecting UNKNOWN silently
+                # discards the entire real cash series.
+                settlement_terms=("TODAY", "UNKNOWN"),
                 maximum_age_seconds=maximum_primary_age_seconds,
             )
             usd = _market_point(
                 connection,
                 as_of=observed_at,
                 instrument="USD_HERAT",
-                market_labels=("دلار هرات امروزی فیزیکی",),
+                market_labels=(
+                    "دلار هرات امروزی فیزیکی",
+                    "دلار هرات نامشخص فیزیکی",
+                    "دلار هرات نقدی",
+                ),
                 trade_forms=("PHYSICAL",),
-                settlement_terms=("TODAY",),
+                settlement_terms=("TODAY", "UNKNOWN"),
                 maximum_age_seconds=max(
                     1_800,
                     maximum_primary_age_seconds,
@@ -440,9 +448,11 @@ def read_market_context(
                 connection,
                 as_of=observed_at,
                 instrument="GOLD_COIN",
-                market_labels=("سکه نقدی",),
-                trade_forms=("PHYSICAL",),
-                settlement_terms=("TOMORROW",),
+                # The public feed exposes tomorrow as the paper/havale proxy.
+                # Do not invent a physical tomorrow quote from cash coin data.
+                market_labels=("سکه حواله",),
+                trade_forms=("PAPER",),
+                settlement_terms=("TOMORROW", "UNKNOWN"),
                 maximum_age_seconds=maximum_primary_age_seconds,
             )
             usd = _market_point(
@@ -932,7 +942,7 @@ def apply_coin_anchor_transfer_overlay(
                 method = (
                     "DIRECT_GENERIC_IMAM_CASH_ROBUST"
                     if settlement == "CASH"
-                    else "DIRECT_GENERIC_IMAM_TOMORROW_PHYSICAL_ROBUST"
+                    else "DIRECT_GENERIC_IMAM_TOMORROW_PAPER_PROXY"
                 )
                 base_qhat = float(
                     calibration.get(
@@ -1076,7 +1086,7 @@ def apply_coin_anchor_transfer_overlay(
                         "HIGH_DIRECT_MARKET_REFERENCE"
                         if direct_imam and settlement == "CASH"
                         else (
-                            "HIGH_DIRECT_MARKET_REFERENCE"
+                            "MEDIUM_DIRECT_MARKET_PROXY"
                             if direct_imam
                             else "ANCHOR_TRANSFER"
                         )

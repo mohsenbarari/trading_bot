@@ -102,10 +102,84 @@ melted-gold and explicit cash dollar quotes are PHYSICAL; other melted-gold
 and Herat forms are PAPER. NaghdP trades are linked only to a strictly earlier
 same-price, same-settlement offer inside a bounded window.
 
+Normalized source consumers must preserve the same two-axis contract:
+
+- `سکه نقدی` with `PHYSICAL` form is the cash generic-Imam reference. Its
+  independent settlement may legitimately be `UNKNOWN` because the source
+  label describes delivery form, not a separate today/tomorrow term.
+- `سکه حواله` with `PAPER` form is the explicitly named tomorrow proxy. It may
+  have `TOMORROW` or `UNKNOWN` settlement, remains lower-confidence, and must
+  never be relabelled as a physical tomorrow observation.
+- an explicitly cash Herat quote may likewise be `PHYSICAL` with `UNKNOWN`
+  settlement. Consumers must not discard that series or silently replace it
+  with USDT merely because the independent settlement field is absent.
+
 Collector execution is idempotent and restart-safe. The ounce source is
 compacted to its newest quote per minute; melted-gold and dollar order flow is
 not averaged away. Adding the source to the repository does not authorize
 enabling it on any server.
+
+## Temporal self-audit and controlled learning
+
+The estimator must be evaluated as it would have existed at a historical
+cutoff. A score obtained by fitting and testing on the same complete month is
+invalid even when the feature rows themselves look chronological.
+
+The research cycle therefore uses multiple global, non-overlapping future
+folds. For every fold:
+
+1. transfer coefficients are fit strictly before the fold's validation
+   window;
+2. point-policy selection and interval calibration use only that validation
+   window;
+3. the later test window is scored without refitting;
+4. all events at the same timestamp are predicted before any becomes an
+   anchor;
+5. test residuals are recorded as diagnostic hypotheses and cannot mutate or
+   promote the evaluated artifact.
+
+Two scenarios are mandatory:
+
+- `ONLINE_PRIOR` simulates ordinary operation, where each newly observed coin
+  frame may anchor only later frames;
+- `FROZEN_COIN_ANCHOR` freezes coin evidence at the test origin while allowing
+  later underlying observations. This measures market reopening, overnight or
+  holiday gaps, and 10–30 minute periods without a coin offer.
+
+Diagnostics are broken down by canonical commodity, market regime,
+cash/tomorrow settlement, offer/book/trade evidence, anchor-age cohort,
+elapsed future horizon, input-coverage signature, and selected method. The
+audit additionally records:
+
+- the observed coin-to-intrinsic-gold ratio and bubble distribution per
+  commodity and regime;
+- coefficient and effective-pair stability across folds;
+- interval misses above and below the range;
+- residual correlation with melted gold, generic Imam, Herat/USDT, ounce, and
+  standardized IME inputs;
+- sparse cells that must remain Shadow or abstain.
+
+Prediction evidence lives in a separate normalized research ledger without
+raw text, Telegram identifiers, sender identity, or source links. A future
+candidate may be motivated by this ledger, but it must be calibrated on
+training/validation evidence and judged on a genuinely later fold. The system
+must never learn from its own predictions as if they were ground truth.
+
+The 2026-07-24 multi-origin diagnostic has 644 five-minute market frames and
+259 non-overlapping future predictions in each scenario. It found:
+
+- about `0.772%` online MAPE and `0.799%` frozen-anchor MAPE;
+- only about `81.9%` and `78.8%` interval coverage, below the locked 95%
+  promotion target;
+- strong under-coverage after 6–24 hour and multi-day anchor gaps;
+- only one one-gram and two tomorrow observations in the future folds;
+- 16 trade frames, which perform better than offer/book frames but remain too
+  few for broad promotion claims.
+
+This evidence does not authorize test-driven widening or promotion. The next
+interval candidate must use conditional calibration by evidence strength,
+regime, and anchor-age on validation only, then wait for a later untouched
+cohort.
 
 ## Commodity identity
 

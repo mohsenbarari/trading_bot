@@ -89,6 +89,12 @@ SETTLEMENT_CONFIG = {
                 "PHYSICAL",
                 "EXACT_TODAY_PHYSICAL",
             ),
+            (
+                "سکه نقدی",
+                "UNKNOWN",
+                "PHYSICAL",
+                "CASH_PHYSICAL_UNKNOWN_SETTLEMENT",
+            ),
         ),
         "usd_candidates": (
             ("TODAY", "PHYSICAL"),
@@ -133,15 +139,21 @@ SETTLEMENT_CONFIG = {
                 "SAME_MINUTE_PAPER_REFERENCE_FALLBACK",
             ),
         ),
-        # Coin form and settlement are independent. A paper/havale coin quote
-        # is not a direct replacement for a physical tomorrow project offer.
-        "coin_market_label": "سکه نقدی",
+        # The available tomorrow reference is explicitly paper/havale. It is
+        # a named proxy with lower confidence, never relabelled as physical.
+        "coin_market_label": "سکه حواله",
         "coin_candidates": (
             (
-                "سکه نقدی",
+                "سکه حواله",
                 "TOMORROW",
-                "PHYSICAL",
-                "EXACT_TOMORROW_PHYSICAL",
+                "PAPER",
+                "TOMORROW_PAPER_PROXY",
+            ),
+            (
+                "سکه حواله",
+                "UNKNOWN",
+                "PAPER",
+                "TOMORROW_PAPER_PROXY_UNKNOWN_SETTLEMENT",
             ),
         ),
         "usd_candidates": (("TOMORROW", "PAPER"),),

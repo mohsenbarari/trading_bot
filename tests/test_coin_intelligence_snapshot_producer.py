@@ -78,8 +78,8 @@ def _create_market_database(path: Path) -> None:
             ),
             (
                 "USD_HERAT",
-                "دلار هرات نقدی",
-                "TODAY",
+                "دلار هرات نامشخص فیزیکی",
+                "UNKNOWN",
                 "PHYSICAL",
                 100_000,
                 100_200,
@@ -103,16 +103,16 @@ def _create_market_database(path: Path) -> None:
             (
                 "GOLD_COIN",
                 "سکه نقدی",
-                "TODAY",
+                "UNKNOWN",
                 "PHYSICAL",
                 184_800_000,
                 185_000_000,
             ),
             (
                 "GOLD_COIN",
-                "سکه نقدی",
-                "TOMORROW",
-                "PHYSICAL",
+                "سکه حواله",
+                "UNKNOWN",
+                "PAPER",
                 186_800_000,
                 187_000_000,
             ),
@@ -213,6 +213,22 @@ class CoinSnapshotProducerTests(unittest.TestCase):
         )
         self.assertEqual(
             tomorrow["inputs"]["melted_gold"]["selected_trade_form"],
+            "PAPER",
+        )
+        self.assertEqual(
+            cash["inputs"]["generic_coin"]["selected_market_label"],
+            "سکه نقدی",
+        )
+        self.assertEqual(
+            cash["inputs"]["generic_coin"]["selected_settlement_term"],
+            "UNKNOWN",
+        )
+        self.assertEqual(
+            tomorrow["inputs"]["generic_coin"]["selected_market_label"],
+            "سکه حواله",
+        )
+        self.assertEqual(
+            tomorrow["inputs"]["generic_coin"]["selected_trade_form"],
             "PAPER",
         )
         self.assertEqual(
