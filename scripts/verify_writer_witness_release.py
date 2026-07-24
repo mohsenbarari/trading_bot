@@ -25,6 +25,7 @@ REGULAR_FILE_MODE = 0o644
 # until provisioning installs selected helpers into their final locations.
 EXECUTABLE_RELEASE_PATHS = frozenset(
     {
+        "scripts/provision_writer_witness_host.sh",
         "scripts/run_writer_witness_clock_jump_probe.py",
         "scripts/smoke_writer_witness_client.py",
         "scripts/verify_writer_witness_nftables.py",

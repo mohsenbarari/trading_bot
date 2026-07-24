@@ -232,11 +232,20 @@ class WriterWitnessHostToolchainTests(unittest.TestCase):
 
     def test_provisioner_uses_one_cgroup_main_pid_for_locks_and_mutation(self):
         source = (ROOT / "scripts/provision_writer_witness_host.sh").read_text()
+        builder = (ROOT / "scripts/build_writer_witness_release.sh").read_text()
         helper = (ROOT / "scripts/hold_writer_witness_package_locks.py").read_text()
         self.assertNotIn("coproc WRITER_WITNESS_PACKAGE_LOCK_HOLDER", source)
         self.assertIn("--property=KillMode=control-group", source)
         self.assertIn("--assert-parent-locks", source)
         self.assertIn("--exec /bin/bash", source)
+        self.assertIn(
+            '"$SOURCE_DIR/scripts/provision_writer_witness_host.sh"',
+            source,
+        )
+        self.assertIn(
+            '"$ROOT_DIR/scripts/provision_writer_witness_host.sh"',
+            builder,
+        )
         self.assertIn('SYSTEMD_EXEC_PID:-}" == "$$"', source)
         self.assertIn("os.execve", helper)
         self.assertGreaterEqual(source.count("attest_host_toolchain"), 5)

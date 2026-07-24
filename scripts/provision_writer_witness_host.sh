@@ -386,6 +386,7 @@ ASSET_DIR="$SOURCE_DIR/deploy/writer-witness"
 for required in \
     "$SOURCE_DIR/release-manifest.json" \
     "$SOURCE_DIR/writer_witness_app.py" \
+    "$SOURCE_DIR/scripts/provision_writer_witness_host.sh" \
     "$ASSET_DIR/001_initial.sql" \
     "$ASSET_DIR/002_failover_operation_ledger.sql" \
     "$ASSET_DIR/003_human_approval_relay.sql" \

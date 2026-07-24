@@ -74,6 +74,9 @@ install -m 0755 \
 install -m 0755 \
     "$ROOT_DIR/scripts/run_writer_witness_clock_jump_probe.py" \
     "$DESTINATION/scripts/run_writer_witness_clock_jump_probe.py"
+install -m 0755 \
+    "$ROOT_DIR/scripts/provision_writer_witness_host.sh" \
+    "$DESTINATION/scripts/provision_writer_witness_host.sh"
 install -m 0644 \
     "$ROOT_DIR/scripts/hold_writer_witness_package_locks.py" \
     "$DESTINATION/scripts/hold_writer_witness_package_locks.py"
