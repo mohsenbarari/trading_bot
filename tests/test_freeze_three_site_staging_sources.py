@@ -30,6 +30,17 @@ class FreezeThreeSiteStagingSourcesTests(unittest.TestCase):
         with self.assertRaisesRegex(SourceFreezeError, "not approved"):
             _compose(args)
 
+    def test_bot_source_enables_reviewed_staging_bot_profile(self):
+        args = argparse.Namespace(
+            project_name="trading_bot_staging",
+            source_role=["bot_fi"],
+            compose=Path("/secure/compose.yml"),
+            env_file=Path("/secure/staging.env"),
+        )
+        prefix = _compose(args)
+        self.assertIn("--profile", prefix)
+        self.assertEqual(prefix[prefix.index("--profile") + 1], "staging-bot")
+
     def test_plan_excludes_database_and_redis_from_stop_set(self):
         plan = build_plan(
             campaign_id="11111111-1111-4111-8111-111111111111",

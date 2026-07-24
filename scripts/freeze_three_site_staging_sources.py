@@ -38,6 +38,7 @@ from scripts.verify_three_site_staging_inventory import (
 
 
 ROLE_APP_SERVICE = {"bot_fi": "foreign_app", "webapp_fi": "app"}
+ROLE_PROFILE = {"bot_fi": "staging-bot", "webapp_fi": None}
 SOURCE_ROLES = tuple(ROLE_APP_SERVICE)
 DATA_SERVICES = frozenset({"db", "redis"})
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -71,10 +72,15 @@ def _compose(args: argparse.Namespace) -> list[str]:
         raise SourceFreezeError(
             "source freeze project is not approved for every selected source role"
         )
-    return [
+    result = [
         DOCKER, "compose", "-p", args.project_name,
         "-f", str(args.compose), "--env-file", str(args.env_file),
     ]
+    for role in args.source_role:
+        profile = ROLE_PROFILE[role]
+        if profile:
+            result.extend(("--profile", profile))
+    return result
 
 
 def _secure_bundle_directory(path: Path) -> Path:
