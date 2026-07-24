@@ -15,6 +15,7 @@ from core.human_approval import (
 from core.human_approval_issuer import (
     HumanApprovalIssuerError,
     authenticate_and_issue,
+    authenticate_and_issue_session,
     create_enrollment,
     decrypt_private_key,
     issuer_paths,
@@ -242,6 +243,107 @@ class HumanApprovalTests(unittest.TestCase):
                 environment="production",
                 subject=self.subject,
                 ttl_seconds=600,
+                now=NOW,
+            )
+
+    def test_release_bound_staging_session_authorizes_multiple_actions_for_48_hours(self):
+        actions = [
+            "approve_inventory",
+            "approve_migration",
+            "start_full_matrix",
+        ]
+        token, state, audit = authenticate_and_issue_session(
+            secrets_payload=self.enrollment.secrets_payload,
+            state_payload=copy.deepcopy(self.enrollment.state_payload),
+            policy_payload=self.enrollment.policy_payload,
+            private_key_envelope=self.enrollment.private_key_envelope,
+            password=PASSWORD,
+            totp=totp_code(self.enrollment.totp_secret, at=NOW)[1],
+            recovery_code=None,
+            release_sha="b" * 40,
+            allowed_actions=actions,
+            ttl_seconds=48 * 60 * 60,
+            now=NOW,
+        )
+        self.assertEqual(token["allowed_actions"], sorted(actions))
+        self.assertEqual(state["issued_sequence"], 1)
+        self.assertEqual(audit["action"], "authorize_staging_session")
+        for action in actions:
+            verified = verify_human_approval(
+                token,
+                policy_payload=self.enrollment.policy_payload,
+                expected_action=action,
+                expected_environment="staging",
+                expected_subject=self.subject,
+                now=NOW + timedelta(hours=47, minutes=59),
+            )
+            self.assertEqual(verified.action, action)
+            self.assertEqual(verified.subject, self.subject)
+
+    def test_staging_session_rejects_production_other_release_action_expiry_and_tampering(self):
+        token, _state, _audit = authenticate_and_issue_session(
+            secrets_payload=self.enrollment.secrets_payload,
+            state_payload=copy.deepcopy(self.enrollment.state_payload),
+            policy_payload=self.enrollment.policy_payload,
+            private_key_envelope=self.enrollment.private_key_envelope,
+            password=PASSWORD,
+            totp=totp_code(self.enrollment.totp_secret, at=NOW)[1],
+            recovery_code=None,
+            release_sha="b" * 40,
+            allowed_actions=["approve_inventory", "start_full_matrix"],
+            ttl_seconds=48 * 60 * 60,
+            now=NOW,
+        )
+        other_release = copy.deepcopy(self.subject)
+        other_release["release_sha"] = "c" * 40
+        cases = (
+            ("approve_inventory", "production", self.subject, NOW),
+            ("approve_migration", "staging", self.subject, NOW),
+            ("approve_inventory", "staging", other_release, NOW),
+            (
+                "approve_inventory",
+                "staging",
+                self.subject,
+                NOW + timedelta(hours=48),
+            ),
+        )
+        for action, environment, subject, at in cases:
+            with self.subTest(action=action, environment=environment, at=at):
+                with self.assertRaises(HumanApprovalError):
+                    verify_human_approval(
+                        token,
+                        policy_payload=self.enrollment.policy_payload,
+                        expected_action=action,
+                        expected_environment=environment,
+                        expected_subject=subject,
+                        now=at,
+                    )
+        tampered = copy.deepcopy(token)
+        tampered["allowed_actions"].append("approve_migration")
+        tampered["allowed_actions"].sort()
+        with self.assertRaisesRegex(HumanApprovalError, "signature"):
+            verify_human_approval(
+                tampered,
+                policy_payload=self.enrollment.policy_payload,
+                expected_action="approve_migration",
+                expected_environment="staging",
+                expected_subject=self.subject,
+                now=NOW,
+            )
+
+    def test_staging_session_rejects_more_than_48_hours(self):
+        with self.assertRaisesRegex(HumanApprovalIssuerError, "48 hours"):
+            authenticate_and_issue_session(
+                secrets_payload=self.enrollment.secrets_payload,
+                state_payload=copy.deepcopy(self.enrollment.state_payload),
+                policy_payload=self.enrollment.policy_payload,
+                private_key_envelope=self.enrollment.private_key_envelope,
+                password=PASSWORD,
+                totp=totp_code(self.enrollment.totp_secret, at=NOW)[1],
+                recovery_code=None,
+                release_sha="b" * 40,
+                allowed_actions=["approve_inventory"],
+                ttl_seconds=(48 * 60 * 60) + 1,
                 now=NOW,
             )
 

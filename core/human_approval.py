@@ -27,6 +27,8 @@ from core.canonical_json import canonical_json_bytes
 
 POLICY_SCHEMA = "three-site-human-approval-policy-v1"
 TOKEN_SCHEMA = "three-site-human-approval-token-v1"
+SESSION_TOKEN_SCHEMA = "three-site-human-approval-session-token-v1"
+SESSION_MAX_TTL_SECONDS = 48 * 60 * 60
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 ALLOWED_AUTHENTICATION_METHODS = {
     ("password", "totp"),
@@ -225,7 +227,7 @@ def verify_human_approval(
     now: datetime | None = None,
     require_fresh: bool = True,
 ) -> VerifiedHumanApproval:
-    """Verify one exact action-bound token and optionally enforce its start window.
+    """Verify an exact token or a release-bound staging operator session.
 
     Long-running operations call this with ``require_fresh=True`` before their
     first journal entry.  Historical evidence and an idempotent journal resume
@@ -234,6 +236,17 @@ def verify_human_approval(
     """
 
     policy = load_human_approval_policy(policy_payload)
+    if isinstance(token, dict) and token.get("schema") == SESSION_TOKEN_SCHEMA:
+        return _verify_staging_session(
+            token,
+            policy=policy,
+            expected_action=expected_action,
+            expected_environment=expected_environment,
+            expected_subject=expected_subject,
+            now=now,
+            require_fresh=require_fresh,
+        )
+
     fields = {
         "schema", "approval_id", "policy_id", "policy_hash", "issuer_id",
         "key_id", "operator", "authenticator_id", "action", "environment",
@@ -313,6 +326,120 @@ def verify_human_approval(
         action=action,
         environment=environment,
         subject=json.loads(actual_subject_bytes),
+        issued_at=issued,
+        expires_at=expires,
+        authentication_methods=tuple(methods),
+        token_hash=hashlib.sha256(canonical_json_bytes(token)).hexdigest(),
+    )
+
+
+def _verify_staging_session(
+    token: dict[str, Any],
+    *,
+    policy: HumanApprovalPolicy,
+    expected_action: str,
+    expected_environment: str,
+    expected_subject: dict[str, Any],
+    now: datetime | None,
+    require_fresh: bool,
+) -> VerifiedHumanApproval:
+    """Verify one 48-hour, release-bound staging operations session.
+
+    A session deliberately replaces repeated password+TOTP prompts during one
+    staging release campaign.  It never authorizes production and cannot cross
+    a release SHA boundary.  The action-specific verifier still supplies the
+    exact subject, so every downstream journal retains the artifact it used.
+    """
+
+    fields = {
+        "schema", "approval_id", "policy_id", "policy_hash", "issuer_id",
+        "key_id", "operator", "authenticator_id", "environment",
+        "release_sha", "allowed_actions", "issued_at", "expires_at",
+        "authentication", "signature",
+    }
+    if set(token) != fields:
+        raise HumanApprovalError("human approval session fields/schema are invalid")
+    try:
+        approval_id = str(UUID(str(token["approval_id"])))
+    except ValueError as exc:
+        raise HumanApprovalError("human approval session id is invalid") from exc
+    if (
+        token.get("policy_id") != policy.policy_id
+        or token.get("policy_hash") != policy.policy_hash
+        or token.get("issuer_id") != policy.issuer_id
+        or token.get("key_id") != policy.key_id
+        or token.get("operator") != policy.operator
+        or token.get("authenticator_id") != policy.authenticator_id
+    ):
+        raise HumanApprovalError("human approval session is not bound to its issuer policy")
+
+    environment = str(token.get("environment"))
+    if environment != "staging" or expected_environment != "staging":
+        raise HumanApprovalError("human approval session cannot authorize production")
+    actions = token.get("allowed_actions")
+    if (
+        not isinstance(actions, list)
+        or not actions
+        or any(not isinstance(action, str) or not action for action in actions)
+        or actions != sorted(set(actions))
+        or expected_action not in actions
+    ):
+        raise HumanApprovalError("human approval session does not authorize this action")
+    for action in actions:
+        action_policy = policy.actions.get(action)
+        if action_policy is None or "staging" not in action_policy.environments:
+            raise HumanApprovalError("human approval session contains an unauthorized action")
+
+    try:
+        normalized_subject = validate_approval_subject(expected_subject)
+    except (TypeError, ValueError, HumanApprovalError) as exc:
+        raise HumanApprovalError("human approval subject is not canonical JSON") from exc
+    release_sha = str(token.get("release_sha")).lower()
+    if (
+        re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", release_sha) is None
+        or not hmac.compare_digest(
+            release_sha.encode("ascii"),
+            normalized_subject["release_sha"].encode("ascii"),
+        )
+    ):
+        raise HumanApprovalError("human approval session is bound to a different release")
+
+    authentication = token.get("authentication")
+    if not isinstance(authentication, dict) or set(authentication) != {"methods"}:
+        raise HumanApprovalError("human approval session authentication evidence is invalid")
+    methods = authentication.get("methods")
+    if not isinstance(methods, list) or tuple(methods) not in ALLOWED_AUTHENTICATION_METHODS:
+        raise HumanApprovalError(
+            "human approval session did not use password plus a possession factor"
+        )
+
+    issued = _utc(token["issued_at"], label="human approval session issued_at")
+    expires = _utc(token["expires_at"], label="human approval session expires_at")
+    if (
+        expires <= issued
+        or expires - issued > timedelta(seconds=SESSION_MAX_TTL_SECONDS)
+    ):
+        raise HumanApprovalError("human approval session lifetime exceeds 48 hours")
+    current = _current_utc(now)
+    if issued > current + timedelta(seconds=30):
+        raise HumanApprovalError("human approval session is future-dated")
+    if require_fresh and current >= expires:
+        raise HumanApprovalError("human approval session has expired")
+
+    unsigned = {key: value for key, value in token.items() if key != "signature"}
+    try:
+        signature = base64.b64decode(str(token["signature"]), validate=True)
+        Ed25519PublicKey.from_public_bytes(policy.public_key).verify(
+            signature, canonical_json_bytes(unsigned)
+        )
+    except (ValueError, binascii.Error, InvalidSignature) as exc:
+        raise HumanApprovalError("human approval session signature is invalid") from exc
+    return VerifiedHumanApproval(
+        approval_id=approval_id,
+        operator=policy.operator,
+        action=expected_action,
+        environment=environment,
+        subject=json.loads(canonical_json_bytes(normalized_subject)),
         issued_at=issued,
         expires_at=expires,
         authentication_methods=tuple(methods),
