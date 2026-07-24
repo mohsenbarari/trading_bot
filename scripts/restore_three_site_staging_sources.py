@@ -68,6 +68,17 @@ def verify_restore_input(
         for row in source_rows
         if isinstance(row, dict)
     ] if isinstance(source_rows, list) else []
+    previous_set = (
+        set(previous)
+        if isinstance(previous, list) and all(isinstance(value, str) for value in previous)
+        else set()
+    )
+    observed_stopped = (
+        set(stopped)
+        if isinstance(stopped, list) and all(isinstance(value, str) for value in stopped)
+        else set()
+    )
+    expected_stopped = previous_set - DATA_SERVICES
     if (
         not isinstance(evidence, dict)
         or set(evidence) != expected_fields
@@ -79,10 +90,19 @@ def verify_restore_input(
         or not legacy_staging_project_allowed(project_name, source_roles)
         or evidence.get("running_services") != ["db", "redis"]
         or not isinstance(previous, list)
-        or len(previous) != len(set(previous))
-        or not DATA_SERVICES.issubset(previous)
+        or len(previous) != len(previous_set)
+        or not DATA_SERVICES.issubset(previous_set)
         or not isinstance(stopped, list)
-        or set(stopped) != set(previous) - DATA_SERVICES
+        or len(stopped) != len(observed_stopped)
+        or bool(observed_stopped & DATA_SERVICES)
+        # Freeze issues a closed stop request for every configured mutating
+        # service. Docker treats requests for already-stopped services as
+        # harmless no-ops, so historical evidence can include services that
+        # were not in the pre-freeze running set. Restore never starts from
+        # this field: it derives its exact start set from
+        # previously_running_services. Every actually-running mutating
+        # service must still have been in the stop request.
+        or not expected_stopped.issubset(observed_stopped)
         or not isinstance(evidence.get("legacy_restore_bundle"), dict)
         or set(evidence["legacy_restore_bundle"]) != {"schema", "path", "sha256", "size"}
         or evidence["legacy_restore_bundle"].get("schema")
@@ -96,7 +116,7 @@ def verify_restore_input(
     return {
         "evidence_sha256": _canonical_hash(evidence),
         "previously_running_services": sorted(previous),
-        "services_to_start": sorted(set(previous) - DATA_SERVICES),
+        "services_to_start": sorted(expected_stopped),
         "legacy_restore_bundle": dict(evidence["legacy_restore_bundle"]),
     }
 

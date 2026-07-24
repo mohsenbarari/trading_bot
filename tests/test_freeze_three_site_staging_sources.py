@@ -131,6 +131,10 @@ class FreezeThreeSiteStagingSourcesTests(unittest.TestCase):
             self.assertEqual(result["status"], "frozen")
             evidence = json.loads(output.read_text(encoding="utf-8"))
             self.assertEqual(evidence["running_services"], ["db", "redis"])
+            self.assertEqual(
+                evidence["stopped_services"],
+                ["app", "bot", "foreign_app", "sync_worker"],
+            )
             self.assertEqual(evidence["postgres"]["system_id"], "8000000000000000001")
             self.assertFalse(evidence["redis_observation"]["restore"])
             self.assertIn("bot", evidence["previously_running_services"])
