@@ -1208,6 +1208,12 @@ def source_manifest_sha256(manifest: dict[str, str] | None = None) -> str:
 def witness_release_manifest_sha256() -> str:
     with tempfile.TemporaryDirectory(prefix="writer-witness-matrix-release-") as parent:
         destination = Path(parent) / "release"
+        environment = controller_runtime.clean_environment()
+        # The Witness runtime is intentionally pinned to the dedicated target,
+        # so the controller derives only the deterministic source-release
+        # manifest here.  Deployable releases still require target-runtime
+        # attestation and are built canonically on the Witness host.
+        environment["WRITER_WITNESS_RELEASE_MANIFEST_DERIVATION_ONLY"] = "true"
         subprocess.check_call(
             (
                 controller_runtime.executable("bash"),
@@ -1215,7 +1221,7 @@ def witness_release_manifest_sha256() -> str:
                 str(destination),
             ),
             cwd=ROOT,
-            env=controller_runtime.clean_environment(),
+            env=environment,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )

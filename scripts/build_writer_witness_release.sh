@@ -3,12 +3,17 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DESTINATION="${1:-}"
+MANIFEST_DERIVATION_ONLY="${WRITER_WITNESS_RELEASE_MANIFEST_DERIVATION_ONLY:-false}"
 if [[ -z "$DESTINATION" || "$DESTINATION" == "/" ]]; then
     echo "usage: $0 /absolute/empty/destination" >&2
     exit 2
 fi
 if [[ "$DESTINATION" != /* ]]; then
     echo "destination must be absolute" >&2
+    exit 2
+fi
+if [[ "$MANIFEST_DERIVATION_ONLY" != true && "$MANIFEST_DERIVATION_ONLY" != false ]]; then
+    echo "WRITER_WITNESS_RELEASE_MANIFEST_DERIVATION_ONLY must be true or false" >&2
     exit 2
 fi
 if [[ -e "$DESTINATION" && -n "$(find "$DESTINATION" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
@@ -24,19 +29,25 @@ expected_system_python="$(sed -n 's/^  "executable_path": "\([^"]*\)",$/\1/p' "$
     echo "release-bound system runtime manifest identity is invalid" >&2
     exit 2
 }
-/usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
-    "$expected_system_python" -I -S -B -X utf8 -X pycache_prefix=/dev/null \
-    "$ROOT_DIR/scripts/verify_writer_witness_runtime.py" \
-    --system-only \
-    --system-runtime-manifest "$system_runtime_manifest" \
-    --expected-system-runtime-manifest-sha256 "$system_runtime_manifest_sha256" \
-    --expected-lock-uid 0 \
-    >/dev/null
+if [[ "$MANIFEST_DERIVATION_ONLY" == false ]]; then
+    /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+        "$expected_system_python" -I -S -B -X utf8 -X pycache_prefix=/dev/null \
+        "$ROOT_DIR/scripts/verify_writer_witness_runtime.py" \
+        --system-only \
+        --system-runtime-manifest "$system_runtime_manifest" \
+        --expected-system-runtime-manifest-sha256 "$system_runtime_manifest_sha256" \
+        --expected-lock-uid 0 \
+        >/dev/null
+fi
 
 # Canonical builders additionally regenerate the manifest from the already
 # verified wheelhouse. Ordinary reproducible release builds still require the
 # exact approved host manifest above, but never self-approve a changed one.
 if [[ -n "${WRITER_WITNESS_CANONICAL_WHEELHOUSE:-}" ]]; then
+    [[ "$MANIFEST_DERIVATION_ONLY" == false ]] || {
+        echo "canonical release construction cannot use manifest-derivation mode" >&2
+        exit 2
+    }
     canonical_wheelhouse="$WRITER_WITNESS_CANONICAL_WHEELHOUSE"
     /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
         "$expected_system_python" -I -S -B -X utf8 -X pycache_prefix=/dev/null \
