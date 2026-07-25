@@ -687,13 +687,28 @@ def latest_anchors(
     *,
     as_of: datetime | str,
 ) -> dict[tuple[str, str], EnrichedCoinEvent]:
-    cutoff = iso_utc(parse_time(as_of))
+    cutoff = parse_time(as_of)
     output: dict[tuple[str, str], EnrichedCoinEvent] = {}
-    for row in events:
-        if row.event.event_time_utc >= cutoff:
-            break
+    for row in sorted(events, key=lambda item: parse_time(item.event.event_time_utc)):
+        if parse_time(row.event.event_time_utc) >= cutoff:
+            continue
         output[(row.event.commodity, row.event.settlement)] = row
     return output
+
+
+def _abstain_rate(rate: dict[str, Any], reason: str) -> None:
+    rate.update(
+        {
+            "status": "NO_DATA",
+            "llm_value": "<NO_DATA_THIS_MINUTE>",
+            "estimated_price_toman": None,
+            "estimated_project_price": None,
+            "confidence": "NONE",
+            "reason": reason,
+            "method": "ABSTAINED_UNSAFE_COIN_ANCHOR_STATE",
+        }
+    )
+    rate.pop("tolerance", None)
 def _market_point_from_mapping(
     payload: Mapping[str, Any],
 ) -> MarketPoint:
@@ -866,6 +881,24 @@ def apply_coin_anchor_transfer_overlay(
 ) -> dict[str, Any]:
     output = deepcopy(dict(state))
     generated = str(output["generated_at_utc"])
+    generated_at = parse_time(generated)
+    runtime_safety = calibration.get("runtime_safety") or {}
+    if not isinstance(runtime_safety, Mapping):
+        raise ValueError("anchor_runtime_safety_invalid")
+    same_settlement_max_age = int(
+        runtime_safety.get("maximum_same_settlement_anchor_age_seconds", 0)
+    )
+    cross_settlement_max_age = int(
+        runtime_safety.get("maximum_cross_settlement_anchor_age_seconds", 0)
+    )
+    allow_cross_settlement = bool(
+        runtime_safety.get("allow_cross_settlement_transfer", False)
+    )
+    require_observed_context = bool(
+        runtime_safety.get("require_observed_market_context", True)
+    )
+    if same_settlement_max_age <= 0 or cross_settlement_max_age <= 0:
+        raise ValueError("anchor_runtime_safety_age_invalid")
     anchors = latest_anchors(enriched_events, as_of=generated)
     contexts = {
         settlement: read_market_context(
@@ -900,14 +933,38 @@ def apply_coin_anchor_transfer_overlay(
             commodity = str(rate.get("commodity_name") or "")
             if commodity not in COMMODITY_COEFFICIENTS:
                 continue
+            if require_observed_context and context.status != "OBSERVED":
+                _abstain_rate(rate, "NO_FRESH_EXACT_COIN_CONTEXT")
+                continue
+            direct_imam_available = (
+                commodity == "امام"
+                and context.generic_imam.status == "OBSERVED"
+                and context.generic_imam.value is not None
+            )
             anchor = anchors.get((commodity, settlement))
             anchor_selection = "SAME_SETTLEMENT"
-            if anchor is None:
+            if anchor is None and allow_cross_settlement:
                 alternate = (
                     "TOMORROW" if settlement == "CASH" else "CASH"
                 )
                 anchor = anchors.get((commodity, alternate))
                 anchor_selection = "EXPLICIT_CROSS_SETTLEMENT_FALLBACK"
+            if anchor is None and not direct_imam_available:
+                _abstain_rate(rate, "NO_SAFE_SAME_SETTLEMENT_COIN_ANCHOR")
+                continue
+            if anchor is not None and not direct_imam_available:
+                anchor_age_seconds = max(
+                    0.0,
+                    (generated_at - parse_time(anchor.event.event_time_utc)).total_seconds(),
+                )
+                maximum_anchor_age = (
+                    same_settlement_max_age
+                    if anchor_selection == "SAME_SETTLEMENT"
+                    else cross_settlement_max_age
+                )
+                if anchor_age_seconds > maximum_anchor_age:
+                    _abstain_rate(rate, "COIN_ANCHOR_STALE")
+                    continue
             movement_context = context
             movement_reference_settlement = settlement
             if (
@@ -932,11 +989,7 @@ def apply_coin_anchor_transfer_overlay(
                 if anchor is not None
                 else None
             )
-            direct_imam = (
-                commodity == "امام"
-                and context.generic_imam.status == "OBSERVED"
-                and context.generic_imam.value is not None
-            )
+            direct_imam = direct_imam_available
             if direct_imam:
                 estimate = float(context.generic_imam.value)
                 method = (
@@ -957,8 +1010,8 @@ def apply_coin_anchor_transfer_overlay(
             elif transfer is not None and anchor is not None:
                 settlement_basis_adjustment = 0.0
                 if (
-                    anchor.event.settlement != settlement
-                    and contexts[anchor.event.settlement].melted.value is not None
+                    movement_reference_settlement != settlement
+                    and contexts[movement_reference_settlement].melted.value is not None
                     and context.melted.value is not None
                 ):
                     settlement_basis_adjustment = (
@@ -966,9 +1019,7 @@ def apply_coin_anchor_transfer_overlay(
                         * (
                             float(context.melted.value)
                             - float(
-                                contexts[
-                                    anchor.event.settlement
-                                ].melted.value
+                                contexts[movement_reference_settlement].melted.value
                             )
                         )
                     )

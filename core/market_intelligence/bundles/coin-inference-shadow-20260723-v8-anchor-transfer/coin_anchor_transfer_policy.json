@@ -1,6 +1,13 @@
 {
   "schema_version": 1,
   "model_kind": "STRICTLY_PRIOR_COIN_ANCHOR_TRANSFER",
+  "runtime_safety": {
+    "maximum_same_settlement_anchor_age_seconds": 345600,
+    "maximum_cross_settlement_anchor_age_seconds": 900,
+    "allow_cross_settlement_transfer": false,
+    "require_observed_market_context": true,
+    "policy": "ABSTAIN_PER_COMMODITY_WHEN_DIRECT_OR_SAFE_RECENT_TRANSFER_EVIDENCE_IS_UNAVAILABLE"
+  },
   "train_cutoff_utc": "2026-07-14T11:30:19Z",
   "commodities": {
     "امام": {

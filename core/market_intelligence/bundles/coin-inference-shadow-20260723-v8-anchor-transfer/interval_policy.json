@@ -1,14 +1,16 @@
 {
   "schema_version": 1,
-  "policy_version": "MARKET_BAND_INTERVAL_V1_20260723",
+  "policy_version": "MARKET_BAND_INTERVAL_V2_DUAL_BAND_SHADOW_20260725",
   "locked_at_utc": "2026-07-23T08:41:45Z",
   "selection_basis": "POST_AUDIT_POLICY_LOCKED_FOR_FUTURE_UNSEEN_TESTS",
   "calibration": {
-    "method": "SPLIT_CONFORMAL_RELATIVE_NONCONFORMITY_WITH_OPERATIONAL_FLOOR",
-    "target_coverage": 0.95,
+    "method": "OPERATIONAL_BAND_WITH_SEPARATE_AUDIT_ENVELOPE",
+    "operational_target_coverage": 0.8,
+    "audit_target_coverage": 0.95,
     "quantization_step": 0.001,
     "minimum_relative_half_width": 0.005,
-    "maximum_relative_half_width": 0.05
+    "maximum_relative_half_width": 0.05,
+    "audit_envelope_available": false
   },
   "fresh_test": {
     "strictly_after_utc": "2026-07-23T08:41:45Z",
@@ -17,6 +19,8 @@
     "reuse_of_prelock_test_for_promotion": "FORBIDDEN"
   },
   "notes": [
+    "The emitted runtime band is an 80 percent operational Shadow band, not a 95 percent audit envelope.",
+    "No user-facing 95 percent claim is permitted until an independently calibrated audit envelope exists.",
     "The 0.5 percent floor is an operational range-safety floor, not a point-price adjustment.",
     "All observations at or before locked_at_utc are research-only for this policy.",
     "The first promotion-grade evaluation must use a globally chronological test beginning after locked_at_utc."

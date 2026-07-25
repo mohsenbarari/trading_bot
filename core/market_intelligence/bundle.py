@@ -50,6 +50,8 @@ class LoadedRuntimeBundle:
     commodity_catalog: Mapping[str, Any]
     range_model: Mapping[str, Any]
     anchor_transfer_policy: Mapping[str, Any]
+    interval_policy: Mapping[str, Any]
+    pipeline_policy: Mapping[str, Any]
 
     @property
     def bundle_version(self) -> str:
@@ -147,6 +149,45 @@ def _validate_commodity_catalog(payload: Mapping[str, Any]) -> None:
         raise BundleValidationError(
             "bundle_commodity_catalog_name_duplicate"
         )
+
+
+def _validate_interval_contract(
+    *,
+    interval_policy: Mapping[str, Any],
+    pipeline_policy: Mapping[str, Any],
+    range_model: Mapping[str, Any],
+    anchor_transfer_policy: Mapping[str, Any],
+) -> None:
+    """Prevent an operational band from being misrepresented as a 95% band."""
+
+    calibration = interval_policy.get("calibration")
+    promotion_gate = pipeline_policy.get("promotion_gate")
+    range_calibration = range_model.get("conformal_tolerance")
+    anchor_calibration = anchor_transfer_policy.get("interval_calibration")
+    if not all(
+        isinstance(value, Mapping)
+        for value in (
+            calibration,
+            promotion_gate,
+            range_calibration,
+            anchor_calibration,
+        )
+    ):
+        raise BundleValidationError("bundle_interval_contract_missing")
+    try:
+        operational_target = float(calibration["operational_target_coverage"])
+        audit_target = float(calibration["audit_target_coverage"])
+        range_target = float(range_calibration["target_coverage_percent"]) / 100.0
+        anchor_target = float(anchor_calibration["target_coverage"])
+        gate_target = float(promotion_gate["target_interval_coverage"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise BundleValidationError("bundle_interval_contract_invalid") from exc
+    if not 0.0 < operational_target < audit_target <= 1.0:
+        raise BundleValidationError("bundle_interval_targets_invalid")
+    if abs(range_target - operational_target) > 1e-9 or abs(anchor_target - operational_target) > 1e-9:
+        raise BundleValidationError("bundle_operational_interval_target_mismatch")
+    if abs(gate_target - audit_target) > 1e-9:
+        raise BundleValidationError("bundle_audit_interval_target_mismatch")
 
 
 def load_runtime_bundle(
@@ -276,6 +317,22 @@ def load_runtime_bundle(
     runtime_anchors = anchor_transfer_policy.get("runtime_anchors")
     if not isinstance(runtime_anchors, list) or not runtime_anchors:
         raise BundleValidationError("bundle_anchor_policy_empty")
+    runtime_safety = anchor_transfer_policy.get("runtime_safety")
+    if not isinstance(runtime_safety, Mapping):
+        raise BundleValidationError("bundle_anchor_runtime_safety_missing")
+    try:
+        if int(runtime_safety["maximum_same_settlement_anchor_age_seconds"]) <= 0:
+            raise ValueError
+        if int(runtime_safety["maximum_cross_settlement_anchor_age_seconds"]) <= 0:
+            raise ValueError
+    except (KeyError, TypeError, ValueError) as exc:
+        raise BundleValidationError("bundle_anchor_runtime_safety_invalid") from exc
+    _validate_interval_contract(
+        interval_policy=payloads["interval_policy.json"],
+        pipeline_policy=payloads["pipeline_policy.json"],
+        range_model=runtime_model,
+        anchor_transfer_policy=anchor_transfer_policy,
+    )
     commodity_catalog = payloads["commodity_catalog.json"]
     _validate_commodity_catalog(commodity_catalog)
     try:
@@ -293,4 +350,6 @@ def load_runtime_bundle(
         commodity_catalog=commodity_catalog,
         range_model=runtime_model,
         anchor_transfer_policy=anchor_transfer_policy,
+        interval_policy=payloads["interval_policy.json"],
+        pipeline_policy=payloads["pipeline_policy.json"],
     )

@@ -48,7 +48,7 @@ class CoinIntelligenceBundleTests(unittest.TestCase):
         )
         self.assertEqual(
             bundle.bundle_version,
-            "coin-inference-shadow-00f8ccdf84d2-820e9d3ba2-66f3f517a5",
+            "coin-inference-shadow-20260725-v9-safety-gated",
         )
 
     def test_checksum_tampering_is_rejected(self) -> None:
@@ -131,6 +131,47 @@ class CoinIntelligenceBundleTests(unittest.TestCase):
         )
         self.assertIn("امام", bundle.canonical_commodity_names)
         self.assertFalse(hasattr(bundle, "commodity_database_id"))
+
+    def test_interval_contract_mismatch_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            copied = Path(directory) / "bundle"
+            shutil.copytree(DEFAULT_BUNDLE_DIRECTORY, copied)
+            interval_path = copied / "interval_policy.json"
+            interval = json.loads(interval_path.read_text(encoding="utf-8"))
+            interval["calibration"]["operational_target_coverage"] = 0.9
+            interval_path.write_text(
+                json.dumps(interval, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            self._refresh_member_metadata(copied, "interval_policy.json")
+
+            with self.assertRaisesRegex(
+                BundleValidationError,
+                "bundle_operational_interval_target_mismatch",
+            ):
+                load_runtime_bundle(copied)
+
+    def test_missing_anchor_runtime_safety_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            copied = Path(directory) / "bundle"
+            shutil.copytree(DEFAULT_BUNDLE_DIRECTORY, copied)
+            policy_path = copied / "coin_anchor_transfer_policy.json"
+            policy = json.loads(policy_path.read_text(encoding="utf-8"))
+            policy.pop("runtime_safety")
+            policy_path.write_text(
+                json.dumps(policy, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            self._refresh_member_metadata(
+                copied,
+                "coin_anchor_transfer_policy.json",
+            )
+
+            with self.assertRaisesRegex(
+                BundleValidationError,
+                "bundle_anchor_runtime_safety_missing",
+            ):
+                load_runtime_bundle(copied)
 
     def test_catalog_alias_metadata_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

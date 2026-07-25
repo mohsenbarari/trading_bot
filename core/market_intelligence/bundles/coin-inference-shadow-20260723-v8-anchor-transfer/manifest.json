@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "bundle_version": "coin-inference-shadow-00f8ccdf84d2-820e9d3ba2-66f3f517a5",
+  "bundle_version": "coin-inference-shadow-20260725-v9-safety-gated",
   "status": "SHADOW_NOT_PROMOTED",
   "created_at_utc": "2026-07-23T13:24:28Z",
   "source_model": {
@@ -31,12 +31,12 @@
       "size_bytes": 4613
     },
     "interval_policy.json": {
-      "sha256": "d27dd4f4a7befdbbbd263a6d454beef27d014a27285b4b8910f8f5a7cc716031",
-      "size_bytes": 992
+      "sha256": "d10db5ca28721f71982949a3dad19069c2bffbd5d0d79ed9bcf3b2415722efb7",
+      "size_bytes": 1295
     },
     "pipeline_policy.json": {
-      "sha256": "6705b15ae275f0263d65f570fb0e88ef38023b2af1dd4a35419e5f7a0e42c31f",
-      "size_bytes": 3008
+      "sha256": "53d4cf48eaf82e3c85b436b6fd90c95d83c942ebbe96516effa3e7a0010fc7a0",
+      "size_bytes": 3026
     },
     "commodity_catalog.json": {
       "sha256": "f036cf7c060267d22ec38e2ac3f7fca6dc2fecc8dc5ac44ac672d058a8360370",
@@ -47,8 +47,8 @@
       "size_bytes": 1247
     },
     "coin_anchor_transfer_policy.json": {
-      "sha256": "66f3f517a5f6fee168c329dc7458e2c091fb9ea27fe51e26a962aa210aebcd09",
-      "size_bytes": 27740
+      "sha256": "089e0a200e17241e57e1cb2222ced33525c57bc6bccd6a9af81191d39e590b28",
+      "size_bytes": 28071
     },
     "coin_anchor_transfer_validation_summary.json": {
       "sha256": "d2dd61ed7f509f6c503d62ab2148817465961a9c9f6f1104f82122e5f9fedd85",

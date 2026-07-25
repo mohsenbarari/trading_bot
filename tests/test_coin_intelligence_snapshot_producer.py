@@ -205,6 +205,15 @@ class CoinSnapshotProducerTests(unittest.TestCase):
             first["bundle_version"],
             self.bundle.bundle_version,
         )
+        self.assertEqual(
+            first["interval_contract"],
+            {
+                "status": "SHADOW_OPERATIONAL_BAND_ONLY",
+                "operational_target_coverage": 0.8,
+                "audit_target_coverage": 0.95,
+                "audit_envelope_available": False,
+            },
+        )
         cash = first["settlements"]["CASH"]
         tomorrow = first["settlements"]["TOMORROW"]
         self.assertEqual(
@@ -268,6 +277,8 @@ class CoinSnapshotProducerTests(unittest.TestCase):
             "LAST_TRUSTED_COIN_ANCHOR",
             one_gram["method"],
         )
+        self.assertEqual(one_gram["status"], "ESTIMATED")
+        self.assertIsNotNone(one_gram["estimated_project_price"])
 
     def test_strict_cutoff_ignores_future_observations(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -350,10 +361,10 @@ class CoinSnapshotProducerTests(unittest.TestCase):
                 market_db=market_db,
                 as_of=CUTOFF,
             )
-        one_gram = next(
+        imam = next(
             row
             for row in snapshot["settlements"]["CASH"]["rates"]
-            if row["commodity_name"] == "یک گرمی"
+            if row["commodity_name"] == "امام"
         )
         service = CoinIntelligenceShadowService(
             snapshot_provider=StaticProvider(snapshot),
@@ -361,7 +372,7 @@ class CoinSnapshotProducerTests(unittest.TestCase):
         )
 
         observation = service.observe_implicit_commodity(
-            price=one_gram["estimated_project_price"],
+            price=imam["estimated_project_price"],
             settlement="cash",
             current_commodity="امام",
             now=CUTOFF + timedelta(days=1),

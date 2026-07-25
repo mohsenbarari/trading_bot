@@ -209,6 +209,40 @@ class CoinIntelligenceShadowPipelineTests(unittest.TestCase):
             "INSUFFICIENT",
         )
 
+    def test_missing_fresh_coin_signal_degrades_and_abstains(self) -> None:
+        _create_market_database(self.market_db)
+        connection = sqlite3.connect(self.market_db)
+        try:
+            connection.execute(
+                "DELETE FROM price_events WHERE instrument = 'GOLD_COIN'"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        result = self.pipeline.run(
+            market_db=self.market_db,
+            snapshot_path=self.snapshot,
+            health_path=self.health,
+            lock_path=self.lock,
+            as_of=CUTOFF,
+        )
+
+        self.assertEqual(
+            result.health["input_quality"]["reason"],
+            "NO_FRESH_COIN_ANCHOR",
+        )
+        one_gram = next(
+            row
+            for row in result.snapshot["settlements"]["CASH"]["rates"]
+            if row["commodity_name"] == "یک گرمی"
+        )
+        self.assertEqual(one_gram["status"], "NO_DATA")
+        self.assertEqual(
+            one_gram["reason"],
+            "NO_FRESH_EXACT_COIN_CONTEXT",
+        )
+
     def test_overlapping_paths_fail_before_any_write(self) -> None:
         _create_market_database(self.market_db)
 
@@ -295,7 +329,7 @@ class CandidateSnapshotQualityTests(unittest.TestCase):
         ):
             inspect_candidate_snapshot(inverted, previous=None)
 
-    def test_no_data_rate_is_rejected_without_numeric_exception(
+    def test_no_data_rate_is_a_safe_partial_snapshot_warning(
         self,
     ) -> None:
         candidate = _minimal_snapshot(
@@ -313,10 +347,10 @@ class CandidateSnapshotQualityTests(unittest.TestCase):
             previous=None,
         )
 
-        self.assertEqual(result["status"], "REJECTED")
+        self.assertEqual(result["status"], "PASSED")
         self.assertEqual(
-            result["rejections"][0]["kind"],
-            "RATE_NO_DATA",
+            result["warnings"][0]["kind"],
+            "RATE_ABSTAINED",
         )
 
     def test_required_rate_matrix_must_be_complete(self) -> None:

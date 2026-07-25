@@ -111,32 +111,17 @@ SETTLEMENT_CONFIG = {
             (
                 "آبشده فردایی",
                 "PAPER",
-                "SAME_MINUTE_PAPER_REFERENCE_FALLBACK",
-            ),
-            (
-                "آبشده امروزی",
-                "PAPER",
-                "SAME_MINUTE_PAPER_REFERENCE_FALLBACK",
-            ),
-            (
-                "آبشده نقدی",
-                "PHYSICAL",
-                "SAME_MINUTE_PHYSICAL_UNDERLYING_FALLBACK",
-            ),
-            (
-                "آبشده رسمی",
-                "PHYSICAL",
-                "SAME_MINUTE_PHYSICAL_UNDERLYING_FALLBACK",
+                "EXACT_TOMORROW_PAPER_REFERENCE",
             ),
             (
                 "آبشده حواله",
                 "PAPER",
-                "SAME_MINUTE_PAPER_REFERENCE_FALLBACK",
+                "PAPER_TOMORROW_PROXY_UNKNOWN_SETTLEMENT",
             ),
             (
                 "آبشده غیررسمی",
                 "PAPER",
-                "SAME_MINUTE_PAPER_REFERENCE_FALLBACK",
+                "PAPER_TOMORROW_PROXY_UNKNOWN_SETTLEMENT",
             ),
         ),
         # The available tomorrow reference is explicitly paper/havale. It is
@@ -506,18 +491,8 @@ def select_melted_average(
             value["selected_market_label"] = str(label)
             value["selected_trade_form"] = str(trade_form)
             return value
-    exchange = average_external_market_value(
-        connection,
-        end=end,
-        instrument_code="IME_GOLD_BAR",
-        quote_kinds=("LAST", "CLOSE", "MID"),
-    )
-    if exchange["status"] == "OBSERVED":
-        exchange["selection"] = "IME_STANDARDIZED_MESGHAL_750_FALLBACK"
-        exchange["selected_market_label"] = "بورس کالا شمش 995 تبدیل‌شده"
-        exchange["selected_trade_form"] = "EXCHANGE_CERTIFICATE"
-        return exchange
     value["selection"] = "NO_DATA"
+    value["excluded_fallback"] = "IME_CORROBORATION_ONLY_NOT_DIRECT_MELTED_INPUT"
     value["selected_market_label"] = None
     value["selected_trade_form"] = None
     return value
@@ -563,18 +538,9 @@ def select_generic_coin_average(
             "IME_CASH_CERTIFICATE_NOT_VALID_TOMORROW_DIRECT_ANCHOR"
         )
         return telegram
-    exchange = average_external_market_value(
-        connection,
-        end=end,
-        instrument_code="IME_GOLD_COIN_IMAM",
-        quote_kinds=("LAST", "CLOSE", "MID"),
-    )
-    exchange["selection"] = (
-        "IME_IMAM_CERTIFICATE_FALLBACK"
-        if exchange["status"] == "OBSERVED"
-        else "NO_DATA"
-    )
-    return exchange
+    telegram["selection"] = "NO_DATA"
+    telegram["excluded_fallback"] = "IME_CORROBORATION_ONLY_NOT_DIRECT_COIN_INPUT"
+    return telegram
 
 
 def select_group_offer_anchor(
@@ -1643,6 +1609,26 @@ class CoinSnapshotProducer:
             snapshot=snapshot,
             market_db=market_db,
         )
+        calibration = self.bundle.interval_policy.get("calibration")
+        if not isinstance(calibration, Mapping):
+            raise SnapshotProducerError("bundle_interval_calibration_missing")
+        try:
+            snapshot["interval_contract"] = {
+                "status": "SHADOW_OPERATIONAL_BAND_ONLY",
+                "operational_target_coverage": float(
+                    calibration["operational_target_coverage"]
+                ),
+                "audit_target_coverage": float(
+                    calibration["audit_target_coverage"]
+                ),
+                "audit_envelope_available": bool(
+                    calibration.get("audit_envelope_available", False)
+                ),
+            }
+        except (KeyError, TypeError, ValueError) as exc:
+            raise SnapshotProducerError(
+                "bundle_interval_calibration_invalid"
+            ) from exc
         allowed = set(self.bundle.canonical_commodity_names)
         observed_names: set[str] = set()
         for settlement in ("CASH", "TOMORROW"):

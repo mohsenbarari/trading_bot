@@ -165,6 +165,49 @@ class CoinIntelligenceShadowServiceTests(unittest.TestCase):
             "UNSUPPORTED_MARKET_DIMENSION",
         )
 
+    def test_paper_form_is_not_scored_against_physical_rate_bands(self) -> None:
+        service = CoinIntelligenceShadowService(
+            snapshot_provider=StaticProvider(_state())
+        )
+
+        observation = service.observe_implicit_commodity(
+            price=54_200,
+            settlement="cash",
+            trade_form="paper",
+            current_commodity="امام",
+            now=NOW,
+        )
+
+        self.assertEqual(observation.status, "NO_MARKET_DATA")
+        self.assertIsNone(observation.inferred_commodity)
+        self.assertEqual(
+            observation.decision_reason,
+            "PAPER_RATE_SNAPSHOT_NOT_AVAILABLE",
+        )
+
+    def test_unknown_trade_form_abstains_before_loading_bundle(self) -> None:
+        service = CoinIntelligenceShadowService(
+            snapshot_provider=UnavailableProvider(),
+            bundle_path="/does/not/exist",
+        )
+
+        observation = service.observe_implicit_commodity(
+            price=54_200,
+            settlement="cash",
+            trade_form="forward",
+            current_commodity="امام",
+            now=NOW,
+        )
+
+        self.assertEqual(
+            observation.status,
+            "UNSUPPORTED_MARKET_DIMENSION",
+        )
+        self.assertEqual(
+            observation.decision_reason,
+            "UNSUPPORTED_TRADE_FORM",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

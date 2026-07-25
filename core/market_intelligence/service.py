@@ -53,6 +53,7 @@ class CoinIntelligenceShadowService:
         *,
         price: int,
         settlement: str,
+        trade_form: str = "PHYSICAL",
         current_commodity: str,
         now: datetime | None = None,
     ) -> ShadowObservation:
@@ -66,6 +67,34 @@ class CoinIntelligenceShadowService:
                 agrees_with_current=None,
                 requires_user_confirmation=True,
                 decision_reason="UNSUPPORTED_SETTLEMENT",
+                bundle_version=None,
+                snapshot_version=None,
+            )
+        normalized_trade_form = str(trade_form).upper()
+        if normalized_trade_form not in {"PHYSICAL", "PAPER"}:
+            return ShadowObservation(
+                status="UNSUPPORTED_MARKET_DIMENSION",
+                settlement=model_settlement,
+                current_commodity=current_commodity,
+                inferred_commodity=None,
+                agrees_with_current=None,
+                requires_user_confirmation=True,
+                decision_reason="UNSUPPORTED_TRADE_FORM",
+                bundle_version=None,
+                snapshot_version=None,
+            )
+        # The currently published rate bands are explicitly physical.  Keep
+        # the request dimension so a future paper model can use it, but never
+        # score a paper offer against a physical band in the meantime.
+        if normalized_trade_form == "PAPER":
+            return ShadowObservation(
+                status="NO_MARKET_DATA",
+                settlement=model_settlement,
+                current_commodity=current_commodity,
+                inferred_commodity=None,
+                agrees_with_current=None,
+                requires_user_confirmation=True,
+                decision_reason="PAPER_RATE_SNAPSHOT_NOT_AVAILABLE",
                 bundle_version=None,
                 snapshot_version=None,
             )
@@ -88,13 +117,13 @@ class CoinIntelligenceShadowService:
             snapshot = estimator_state_snapshot(
                 state,
                 settlement=model_settlement,
-                trade_form="PHYSICAL",
+                trade_form=normalized_trade_form,
                 model_version=bundle.model_sha256,
                 feature_schema_version=bundle.feature_schema_version,
                 snapshot_version=(
                     f"{bundle.bundle_version}:"
                     f"{state.get('generated_at_utc')}:"
-                    f"{model_settlement}:PHYSICAL"
+                    f"{model_settlement}:{normalized_trade_form}"
                 ),
             )
         except (SnapshotUnavailableError, TypeError, ValueError, KeyError):
@@ -113,7 +142,7 @@ class CoinIntelligenceShadowService:
             price,
             price_unit="PROJECT_THOUSAND_TOMAN",
             settlement=model_settlement,
-            trade_form="PHYSICAL",
+            trade_form=normalized_trade_form,
             snapshot=snapshot,
             now=now or datetime.now(timezone.utc),
             allowed_commodities=bundle.canonical_commodity_names,

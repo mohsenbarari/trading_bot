@@ -268,14 +268,26 @@ def inspect_source_freshness(
         for row in signals
         if row["status"] == "REFERENCE_ONLY"
     ]
+    coin_signal = next(
+        (row for row in signals if row["name"] == "GOLD_COIN"), None
+    )
     if not fresh_current:
         quality = "INSUFFICIENT"
         eligible = False
         reason = "NO_FRESH_CURRENT_PRICE_ANCHOR"
-    elif len(fresh_current) >= 2 and fresh_supporting:
+    elif (
+        len(fresh_current) >= 2
+        and fresh_supporting
+        and coin_signal is not None
+        and coin_signal["status"] == "FRESH"
+    ):
         quality = "HEALTHY"
         eligible = True
         reason = "MULTI_SIGNAL_CURRENT_INPUT"
+    elif coin_signal is not None and coin_signal["status"] != "FRESH":
+        quality = "DEGRADED"
+        eligible = True
+        reason = "NO_FRESH_COIN_ANCHOR"
     else:
         quality = "DEGRADED"
         eligible = True
@@ -363,9 +375,9 @@ def inspect_candidate_snapshot(
             )
     for (settlement, commodity), rate in candidate_rates.items():
         if rate.get("status") != "ESTIMATED":
-            rejected.append(
+            warnings.append(
                 {
-                    "kind": "RATE_NO_DATA",
+                    "kind": "RATE_ABSTAINED",
                     "settlement": settlement,
                     "commodity": commodity,
                     "relative_value": None,

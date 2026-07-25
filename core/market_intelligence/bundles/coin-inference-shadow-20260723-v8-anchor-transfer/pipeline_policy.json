@@ -71,8 +71,8 @@
     "never_self_train_unreviewed_llm_output": true
   },
   "interval_policy": {
-    "version": "MARKET_BAND_INTERVAL_V1_20260723",
-    "sha256": "bf22a6ca1994133f625008c8969841b4a93085f925459ae7b68b6e61c35f771f",
+    "version": "MARKET_BAND_INTERVAL_V2_DUAL_BAND_SHADOW_20260725",
+    "sha256": "d10db5ca28721f71982949a3dad19069c2bffbd5d0d79ed9bcf3b2415722efb7",
     "locked_at_utc": "2026-07-23T08:41:45Z",
     "fresh_test_strictly_after_utc": "2026-07-23T08:41:45Z",
     "target_coverage": 0.95
