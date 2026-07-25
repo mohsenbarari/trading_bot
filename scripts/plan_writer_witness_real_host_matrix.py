@@ -34,7 +34,10 @@ WEBAPP_IR = "95.38.164.29"
 WEBAPP_IR_SSH_PORT = 22
 WEBAPP_IR_SSH_USER = "ubuntu"
 WEBAPP_IR_SSH_IDENTITY = "/root/.ssh/id_ed25519_iran"
-MATRIX_WITNESS = "185.206.95.94"
+# Dedicated bare-host Witness provisioned for the real-host Matrix.  The
+# previous candidate was shared with Docker state and therefore failed the
+# mandatory dark-host isolation contract.
+MATRIX_WITNESS = "37.152.191.11"
 ROLLBACK_WITNESS = "185.231.182.6"
 CONTROL_SSH_SOURCE = "65.109.216.187"
 SCHEMA_VERSION = "writer_witness_real_host_matrix_preflight_v1"

@@ -132,7 +132,7 @@ HOSTS = {
     "webapp_ir": Host(
         "webapp_ir", "95.38.164.29", 22, "ubuntu", "/root/.ssh/id_ed25519_iran"
     ),
-    "matrix_witness": Host("matrix_witness", "185.206.95.94"),
+    "matrix_witness": Host("matrix_witness", "37.152.191.11"),
     "rollback_witness": Host("rollback_witness", "185.231.182.6"),
 }
 
