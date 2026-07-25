@@ -542,7 +542,7 @@ class WriterWitnessRealHostMatrixRunnerTests(unittest.TestCase):
         def transfer_from(_role, remote_path, local_path, _name):
             if remote_path.endswith(".env"):
                 local_path.write_text(
-                    "WRITER_WITNESS_INTERNAL_URL=https://185.206.95.94\n"
+                    "WRITER_WITNESS_INTERNAL_URL=https://37.152.191.11\n"
                     "WRITER_WITNESS_CLIENT_KEY_ID=matrix-wwm_0123456789ab-fi\n"
                     f"WRITER_WITNESS_CLIENT_SECRET={'s' * 64}\n",
                     encoding="utf-8",
