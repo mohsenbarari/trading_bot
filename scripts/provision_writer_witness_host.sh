@@ -1393,7 +1393,7 @@ GRANT SELECT ON writer_witness_schema_version TO writer_witness_runtime;
 GRANT SELECT, UPDATE ON webapp_writer_witness_state TO writer_witness_runtime;
 GRANT SELECT, INSERT ON webapp_writer_witness_receipts TO writer_witness_runtime;
 GRANT SELECT, INSERT, UPDATE ON dr_failover_operation_ledger TO writer_witness_runtime;
-GRANT SELECT, INSERT ON human_approval_relay_receipts TO writer_witness_runtime;
+GRANT SELECT, INSERT, UPDATE ON human_approval_relay_receipts TO writer_witness_runtime;
 SQL
 
 private_key_file=/etc/trading-bot-witness/writer-witness-ed25519

@@ -126,7 +126,8 @@ async def verify_witness_runtime_database_role(
                 " AND has_table_privilege(current_user, 'dr_failover_operation_ledger', 'INSERT') "
                 " AND has_table_privilege(current_user, 'dr_failover_operation_ledger', 'UPDATE')) AS ledger_dml, "
                 "(has_table_privilege(current_user, 'human_approval_relay_receipts', 'SELECT') "
-                " AND has_table_privilege(current_user, 'human_approval_relay_receipts', 'INSERT')) AS relay_dml, "
+                " AND has_table_privilege(current_user, 'human_approval_relay_receipts', 'INSERT') "
+                " AND has_table_privilege(current_user, 'human_approval_relay_receipts', 'UPDATE')) AS relay_dml, "
                 "(SELECT count(*) FROM pg_class object "
                 " JOIN pg_namespace namespace ON namespace.oid=object.relnamespace "
                 " JOIN pg_roles owner ON owner.oid=object.relowner "
@@ -970,6 +971,11 @@ def create_writer_witness_app(
                         now=witness_now,
                         receipt_id=str(uuid4()),
                     )
+                    expires_at = datetime.fromisoformat(str(receipt["expires_at"]))
+                    if expires_at.tzinfo is None:
+                        raise WitnessServiceConfigurationError(
+                            "human approval relay receipt expiry lacks timezone"
+                        )
                     await session.execute(
                         text(
                             "INSERT INTO human_approval_relay_receipts "
@@ -988,7 +994,7 @@ def create_writer_witness_app(
                                 _canonical_json_bytes(command.subject)
                             ).hexdigest(),
                             "session_token_sha256": receipt["session_token_sha256"],
-                            "expires_at": receipt["expires_at"],
+                            "expires_at": expires_at,
                             "receipt": json.dumps(receipt, sort_keys=True, separators=(",", ":")),
                         },
                     )

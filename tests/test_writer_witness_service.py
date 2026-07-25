@@ -193,6 +193,13 @@ class RelaySession:
             receipt = self.receipts.get(parameters["request_id"])
             return _RelayMappingResult(receipt)
         if "INSERT INTO human_approval_relay_receipts" in source:
+            if (
+                not isinstance(parameters["expires_at"], datetime)
+                or parameters["expires_at"].tzinfo is None
+            ):
+                raise AssertionError(
+                    "relay receipt expiry must be a timezone-aware datetime"
+                )
             self.receipts[parameters["request_id"]] = {
                 "request_sha256": parameters["request_sha256"],
                 "receipt": json.loads(parameters["receipt"]),

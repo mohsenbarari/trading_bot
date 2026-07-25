@@ -749,6 +749,10 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         )
         self.assertIn("GRANT SELECT, UPDATE ON webapp_writer_witness_state", script)
         self.assertIn("GRANT SELECT, INSERT ON webapp_writer_witness_receipts", script)
+        self.assertIn(
+            "GRANT SELECT, INSERT, UPDATE ON human_approval_relay_receipts",
+            script,
+        )
         self.assertNotIn("ufw allow from", script)
         self.assertIn("Firewall mutation is intentionally outside release activation", script)
         self.assertNotIn("ufw allow OpenSSH", script)

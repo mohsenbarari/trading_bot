@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from scripts.provision_staging_witness_database import (
     StagingWitnessProvisionError,
@@ -7,6 +8,17 @@ from scripts.provision_staging_witness_database import (
 
 
 class StagingWitnessBootstrapIdentityTests(unittest.TestCase):
+    def test_relay_ledger_grant_supports_select_for_update(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "scripts"
+            / "provision_staging_witness_database.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            '("SELECT, INSERT, UPDATE", "human_approval_relay_receipts")',
+            source,
+        )
+
     def test_initial_database_owner_is_allowed(self):
         _validate_bootstrap_identity(
             current_user="postgres_initializer",

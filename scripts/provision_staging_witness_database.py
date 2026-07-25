@@ -219,7 +219,7 @@ def migrate_and_grant() -> dict[str, object]:
                 ("SELECT, UPDATE", "webapp_writer_witness_state"),
                 ("SELECT, INSERT", "webapp_writer_witness_receipts"),
                 ("SELECT, INSERT, UPDATE", "dr_failover_operation_ledger"),
-                ("SELECT, INSERT", "human_approval_relay_receipts"),
+                ("SELECT, INSERT, UPDATE", "human_approval_relay_receipts"),
             )
             for privileges, table in grants:
                 cursor.execute(
