@@ -284,6 +284,12 @@ def verify_role_bundle(
         raise RoleBundleError("role environment is not the exact closed variable set")
     if any("change_me" in value.lower() for value in values.values()):
         raise RoleBundleError("role environment still contains template placeholders")
+    if values.get("STAGING_STORAGE_NAMESPACE") != inventory.get(
+        "compose_project_namespace", "trading-bot-three-site-staging"
+    ):
+        raise RoleBundleError(
+            "role storage namespace differs from the signed campaign namespace"
+        )
     required = frozenset(REQUIRED_REFERENCE_RE.findall(expected_compose.decode("utf-8")))
     if any(not values.get(name) for name in required):
         raise RoleBundleError("role environment has an empty required value")

@@ -136,6 +136,7 @@ def derive_campaign_material(
     verified = verify_inventory(result, host_destructive=None)
 
     values["STAGING_RELEASE_SHA"] = release
+    values["STAGING_STORAGE_NAMESPACE"] = namespace
     values["DR_BLOB_OBJECT_PREFIX"] = f"{prefix}blobs/sha256"
     rendered_env = canonical_role_env_bytes(values, required_names=frozenset(values))
     digest = hashlib.sha256(_canonical_bytes(result)).hexdigest()

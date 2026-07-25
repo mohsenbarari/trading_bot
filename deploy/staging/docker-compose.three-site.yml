@@ -1022,43 +1022,43 @@ networks:
 volumes:
   bot_fi_postgres:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/bot_fi/postgres"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/bot_fi/postgres"}
   bot_fi_redis:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/bot_fi/redis"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/bot_fi/redis"}
   bot_fi_uploads:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/bot_fi/uploads"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/bot_fi/uploads"}
   bot_fi_audit:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/bot_fi/audit"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/bot_fi/audit"}
   webapp_fi_postgres:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_fi/postgres"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_fi/postgres"}
   webapp_fi_redis:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_fi/redis"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_fi/redis"}
   webapp_fi_uploads:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_fi/uploads"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_fi/uploads"}
   webapp_fi_audit:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_fi/audit"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_fi/audit"}
   webapp_ir_postgres:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_ir/postgres"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_ir/postgres"}
   webapp_ir_redis:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_ir/redis"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_ir/redis"}
   webapp_ir_uploads:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_ir/uploads"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_ir/uploads"}
   webapp_ir_audit:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_ir/audit"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_ir/audit"}
   witness_postgres:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/witness/postgres"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/witness/postgres"}
   witness_audit:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/witness/audit"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/witness/audit"}
