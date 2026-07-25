@@ -118,10 +118,21 @@ def derive_campaign_material(
     result["release_sha"] = release
     result["deployment_id"] = deployment
     result["object_storage"]["prefix"] = prefix
+    namespace = f"three-site-{campaign.replace('-', '')[:12]}"
+    result["compose_project_namespace"] = namespace
     for role in result["roles"]:
         role["postgres_system_id"] = None
         role["release_sha"] = release
         role["deployment_id"] = deployment
+        project = f"{namespace}-{role['role'].replace('_', '-')}"
+        for field, logical in (
+            ("postgres_volume_id", f"{role['role']}_postgres"),
+            ("redis_volume_id", f"{role['role']}_redis"),
+            ("uploads_volume_id", f"{role['role']}_uploads"),
+            ("audit_root_id", f"{role['role']}_audit"),
+        ):
+            if role.get(field) is not None:
+                role[field] = f"{project}_{logical}"
     verified = verify_inventory(result, host_destructive=None)
 
     values["STAGING_RELEASE_SHA"] = release

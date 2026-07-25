@@ -115,7 +115,8 @@ def verify_inventory(
         "deployment_id", "object_storage", "roles", "credential_scope",
         "production_boundaries",
     }
-    if set(payload) != required or payload["schema"] != "three-site-staging-inventory-v3":
+    allowed = required | {"compose_project_namespace"}
+    if set(payload) != required and set(payload) != allowed or payload["schema"] != "three-site-staging-inventory-v3":
         raise InventoryError("inventory fields/schema are invalid")
     def contains_placeholder(value: Any) -> bool:
         if isinstance(value, str):
@@ -198,6 +199,9 @@ def verify_inventory(
     if object_storage["versioning"] is not True or object_storage["private"] is not True:
         raise InventoryError("staging Object Storage must be private and versioned")
 
+    namespace = payload.get("compose_project_namespace", "trading-bot-three-site-staging")
+    if not isinstance(namespace, str) or re.fullmatch(r"[a-z0-9][a-z0-9-]{2,80}", namespace) is None:
+        raise InventoryError("compose project namespace is invalid")
     roles = payload["roles"]
     if not isinstance(roles, list) or len(roles) != len(ROLES):
         raise InventoryError("exactly four role records are required")
@@ -270,7 +274,8 @@ def verify_inventory(
         elif not re.fullmatch(r"[0-9]{10,20}", str(role["postgres_system_id"])):
             raise InventoryError(f"{name} postgres_system_id is malformed")
         for field, logical_name in ROLE_VOLUME_LOGICAL_NAMES[name].items():
-            expected_volume = f"{ROLE_COMPOSE_PROJECT[name]}_{logical_name}"
+            project = f"{namespace}-{name.replace('_', '-')}"
+            expected_volume = f"{project}_{logical_name}"
             if role[field] != expected_volume:
                 raise InventoryError(
                     f"{name} {field} differs from deterministic role Compose volume"

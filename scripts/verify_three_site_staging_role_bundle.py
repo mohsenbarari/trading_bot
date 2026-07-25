@@ -267,7 +267,11 @@ def verify_role_bundle(
         raise RoleBundleError(
             f"role bundle requires a signed {required_inventory_stage} inventory"
         )
-    role_payload = render_role_compose(canonical_compose, role=role)
+    role_payload = render_role_compose(
+        canonical_compose,
+        role=role,
+        project_namespace=inventory.get("compose_project_namespace"),
+    )
     expected_compose = canonical_role_compose_bytes(role_payload)
     if role_compose_bytes != expected_compose:
         raise RoleBundleError("role Compose bytes differ from the canonical renderer")
