@@ -195,6 +195,42 @@ fallback and must not participate in model-result-to-database mapping. A
 missing or non-unique canonical-name match must fail closed and require user or
 operator resolution. Shadow mode records no replacement ID.
 
+## Offer attributes and explicit mint years
+
+An offer can carry material market attributes without creating a new canonical
+commodity. The first such attribute is the coin mint year. `ربع ۱۴۰۳`,
+`ربع ۱۴۰۴`, `نیم ۱۴۰۴`, and `امام ۱۴۰۳/۱۴۰۴` remain respectively `ربع بهار`,
+`نیم بهار`, and `امام` in the project catalog. A future parser must preserve
+the stated year as structured offer metadata rather than create a commodity,
+alias, or PostgreSQL identity for it.
+
+The canonical attribute contract is documented in
+[`COIN_PRICE_INTELLIGENCE_OFFER_ATTRIBUTE_CONTRACT.md`](COIN_PRICE_INTELLIGENCE_OFFER_ATTRIBUTE_CONTRACT.md).
+Its key rule is that an omitted year is `UNSPECIFIED`, not a claim that the
+coin is a non-year variant. Explicit years are parsed by deterministic,
+context-aware rules first; a constrained local LLM may later handle only
+ambiguous text and cannot create an authoritative label by itself.
+
+The 2026-07-24 research cohort found that explicit years are materially
+different conditional price modes: quarter 1403 and 1404 were approximately
+4.77% and 3.00% below nearby unspecified quarter observations, and half 1404
+was approximately 1.56% below nearby unspecified half observations. Blindly
+merging them into a single range is therefore invalid, but deleting them is
+also invalid because it degraded reopening/frozen-anchor evidence.
+
+The approved future direction is conditional modeling: canonical commodity,
+mint year, and mint-year status are separate fields. Explicit-year observations
+may become a strictly-prior auxiliary direction or range-tail signal only if a
+future holdout demonstrates benefit; they must never override a fresh
+canonical anchor. No runtime behavior changes in this phase.
+
+The same research identified a positive, but test-touched, data-quality
+hypothesis: widening the strictly-prior discontinuity reference window from
+20 to 30 minutes removed four isolated observations from 5,959 offers and
+reduced both online and frozen-anchor point error while narrowing the measured
+mean range. It is deliberately not promoted. It needs a later untouched cohort
+before it can change any quality gate.
+
 ## Three-site placement and data flows
 
 The project has three physical sites but only two business authorities. Market
@@ -291,7 +327,10 @@ This market-intelligence plane does not change the fixed business topology:
 3. Promotion evidence uses chronological, dependence-aware holdouts with enough
    distinct days and non-Imam confirmed trades.
 4. Stale, missing, mismatched, or ambiguous data always abstains.
-5. The next user-facing phase requires explicit owner approval and mandatory
+5. Explicit offer attributes are schema-validated, extracted without
+   fabricating missing values, and evaluated separately for `EXPLICIT`,
+   `INFERRED`, and `UNSPECIFIED` cohorts.
+6. The next user-facing phase requires explicit owner approval and mandatory
    user confirmation before persistence.
 
 ## Configuration
