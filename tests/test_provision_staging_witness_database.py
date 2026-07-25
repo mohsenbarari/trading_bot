@@ -4,7 +4,22 @@ from pathlib import Path
 from scripts.provision_staging_witness_database import (
     StagingWitnessProvisionError,
     _validate_bootstrap_identity,
+    _validate_runtime_grants,
 )
+
+
+class _GrantCursor:
+    def __init__(self, row):
+        self.row = row
+        self.statement = None
+        self.parameters = None
+
+    def execute(self, statement, parameters):
+        self.statement = statement
+        self.parameters = parameters
+
+    def fetchone(self):
+        return self.row
 
 
 class StagingWitnessBootstrapIdentityTests(unittest.TestCase):
@@ -18,6 +33,31 @@ class StagingWitnessBootstrapIdentityTests(unittest.TestCase):
             '("SELECT, INSERT, UPDATE", "human_approval_relay_receipts")',
             source,
         )
+
+    def test_migrator_receives_schema_delegation_for_noinherit_role(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "scripts"
+            / "provision_staging_witness_database.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "GRANT USAGE, CREATE ON SCHEMA public TO {} WITH GRANT OPTION",
+            source,
+        )
+
+    def test_runtime_grant_validation_accepts_complete_surface(self):
+        cursor = _GrantCursor((True, True, True, True, True, True))
+        _validate_runtime_grants(cursor, "writer_witness_runtime")
+        self.assertIn("has_schema_privilege", cursor.statement)
+        self.assertEqual(
+            cursor.parameters,
+            ("writer_witness_runtime",) * 6,
+        )
+
+    def test_runtime_grant_validation_rejects_missing_schema_usage(self):
+        cursor = _GrantCursor((False, True, True, True, True, True))
+        with self.assertRaises(StagingWitnessProvisionError):
+            _validate_runtime_grants(cursor, "writer_witness_runtime")
 
     def test_initial_database_owner_is_allowed(self):
         _validate_bootstrap_identity(
