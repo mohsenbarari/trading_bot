@@ -1198,6 +1198,10 @@ system_runtime_attestation="$(
     exit 2
 }
 
+# The service account must be able to traverse and read its immutable runtime.
+# Keep the provisioner's restrictive umask for secrets, but use normal release
+# modes while creating the venv and installing its public dependency bytes.
+umask 022
 /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
     "$expected_python_path" -I -S -B -X utf8 -X pycache_prefix=/dev/null \
     -m venv --without-pip "$venv_dir"
@@ -1229,6 +1233,7 @@ pip_arguments=(
     "$pip_bootstrap_wheel" \
     --isolated \
     "${pip_arguments[@]}"
+umask 077
 attest_writer_witness_runtime() {
     /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
         "$venv_dir/bin/python" -I -S -B -X utf8 -X pycache_prefix=/dev/null \
