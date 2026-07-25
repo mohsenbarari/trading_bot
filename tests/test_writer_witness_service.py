@@ -365,7 +365,7 @@ class WriterWitnessAuthenticationTests(unittest.TestCase):
             key_path.write_text(private_key, encoding="utf-8")
             key_path.chmod(0o600)
             common = dict(
-                physical_site="webapp_ir",
+                physical_site="witness",
                 writer_witness_service_enabled=True,
                 writer_witness_database_url=(
                     "postgresql+asyncpg://witness_runtime:secret@db/writer_witness"
@@ -392,6 +392,11 @@ class WriterWitnessAuthenticationTests(unittest.TestCase):
             self.assertIs(engine, fake_engine)
             self.assertIs(runtime.session_factory, fake_sessions)
             self.assertEqual(runtime.credentials[FI_CREDENTIAL.key_id].site, "webapp_fi")
+
+            with self.assertRaisesRegex(WitnessServiceConfigurationError, "PHYSICAL_SITE=witness"):
+                _build_runtime_from_settings(
+                    WriterWitnessServiceSettings(**{**common, "physical_site": "webapp_ir"})
+                )
 
             with self.assertRaises(WitnessServiceConfigurationError):
                 _build_runtime_from_settings(

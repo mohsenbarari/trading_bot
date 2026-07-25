@@ -28,11 +28,10 @@ from core.three_site_execution_safety import (
     EXECUTION_CLASSES as HOST_SAFETY_MODES,
     SHARED_HOST_SAFE,
 )
+from core.three_site_topology import PRODUCTION_BOUNDARY_HOSTS
 
 
-PRODUCTION_IPS = frozenset(
-    {"65.109.216.187", "65.109.220.59", "95.38.164.29", "185.206.95.94", "185.231.182.6"}
-)
+PRODUCTION_IPS = PRODUCTION_BOUNDARY_HOSTS
 PRODUCTION_DOMAINS = frozenset({"gold-trade.ir", "coin.gold-trade.ir"})
 PRODUCTION_BUCKETS = frozenset({"production-sync-coin"})
 ROLES = frozenset({"bot_fi", "webapp_fi", "webapp_ir", "witness"})

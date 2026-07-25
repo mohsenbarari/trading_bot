@@ -17,7 +17,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from core.config import settings
 from core.db import AsyncSessionLocal
-from core.runtime_identity import SITE_WEBAPP_IR, resolve_runtime_identity
+from core.runtime_identity import WEBAPP_SITES, resolve_runtime_identity
 from core.writer_witness_control import (
     ACTION_ACQUIRE,
     ACTION_DRAIN,
@@ -91,13 +91,13 @@ async def run(args: argparse.Namespace) -> dict:
     identity = resolve_runtime_identity(settings)
     configured_site = str(getattr(settings, "physical_site", None) or "").strip()
     authoritative_site = str(settings.writer_witness_authoritative_site or "").strip()
-    if authoritative_site != SITE_WEBAPP_IR:
+    if authoritative_site not in WEBAPP_SITES:
         raise WriterWitnessError(
-            "this implementation supports only WRITER_WITNESS_AUTHORITATIVE_SITE=webapp_ir"
+            "WRITER_WITNESS_AUTHORITATIVE_SITE must name webapp_fi or webapp_ir"
         )
     if configured_site != authoritative_site or identity.physical_site != authoritative_site:
         raise WriterWitnessError(
-            "witness commands require explicit PHYSICAL_SITE=webapp_ir on the witness host"
+            "writer-control commands require the configured authoritative WebApp site"
         )
     async with AsyncSessionLocal() as session:
         before = await load_witness_snapshot(session)

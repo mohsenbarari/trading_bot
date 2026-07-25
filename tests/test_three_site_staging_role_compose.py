@@ -117,6 +117,18 @@ class ThreeSiteStagingRoleComposeTests(unittest.TestCase):
             with self.subTest(service=service):
                 self.assertEqual(self.payload["services"][service]["command"], command)
 
+    def test_witness_is_an_independent_role_and_fi_is_the_normal_writer(self):
+        witness = self.payload["services"]["witness_api"]["environment"]
+        fi_control = self.payload["services"]["webapp_fi_writer_control"]["environment"]
+        ir_control = self.payload["services"]["webapp_ir_writer_control"]["environment"]
+
+        self.assertEqual(witness["PHYSICAL_SITE"], "witness")
+        self.assertEqual(witness["WRITER_WITNESS_AUTHORITATIVE_SITE"], "webapp_fi")
+        self.assertEqual(fi_control["PHYSICAL_SITE"], "webapp_fi")
+        self.assertEqual(ir_control["PHYSICAL_SITE"], "webapp_ir")
+        self.assertEqual(fi_control["WRITER_WITNESS_REQUIRED"], "true")
+        self.assertEqual(ir_control["WRITER_WITNESS_REQUIRED"], "true")
+
 
 if __name__ == "__main__":
     unittest.main()

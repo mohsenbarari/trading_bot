@@ -14,6 +14,7 @@ from core.runtime_sites import (
     SITE_BOT_FI,
     SITE_WEBAPP_FI,
     SITE_WEBAPP_IR,
+    SITE_WITNESS,
     WEBAPP_SITES,
 )
 LEGACY_SERVER_ALIASES = frozenset({"germany", "de", "foreign", "german", "iran", "ir"})
@@ -42,6 +43,10 @@ class RuntimeIdentity:
     @property
     def is_bot_site(self) -> bool:
         return self.physical_site == SITE_BOT_FI
+
+    @property
+    def is_witness_site(self) -> bool:
+        return self.physical_site == SITE_WITNESS
 
 
 def _clean(value: object) -> str | None:
@@ -87,6 +92,8 @@ def resolve_runtime_identity(settings_obj=settings) -> RuntimeIdentity:
         raise RuntimeIdentityError("bot_fi can host only foreign logical authority")
     if physical_site in WEBAPP_SITES and logical_authority != AUTHORITY_WEBAPP:
         raise RuntimeIdentityError("webapp_fi/webapp_ir can host only WebApp logical authority")
+    if physical_site == SITE_WITNESS and logical_authority != AUTHORITY_WEBAPP:
+        raise RuntimeIdentityError("witness can host only WebApp control-plane authority")
 
     return RuntimeIdentity(
         logical_authority=logical_authority,

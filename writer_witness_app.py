@@ -32,7 +32,7 @@ from core.human_approval import (
     issue_human_approval_relay_receipt,
     parse_human_approval_relay_command,
 )
-from core.runtime_sites import AUTHORITY_WEBAPP, SITE_WEBAPP_IR, WEBAPP_SITES
+from core.runtime_sites import AUTHORITY_WEBAPP, SITE_WEBAPP_FI, SITE_WITNESS, WEBAPP_SITES
 from core.secure_file_io import SecureFileError, read_secure_text
 from core.writer_witness_auth import (
     WITNESS_HUMAN_APPROVAL_RELAY_PATH,
@@ -215,7 +215,7 @@ class WriterWitnessServiceSettings(BaseSettings):
     writer_witness_safety_margin_seconds: int = 15
     writer_witness_max_clock_skew_seconds: int = 5
     writer_witness_auth_max_age_seconds: int = 15
-    writer_witness_authoritative_site: str = SITE_WEBAPP_IR
+    writer_witness_authoritative_site: str = SITE_WEBAPP_FI
 
     class Config:
         extra = "ignore"
@@ -557,12 +557,13 @@ def _build_runtime_from_settings(
         raise WitnessServiceConfigurationError("WRITER_WITNESS_SERVICE_ENABLED must be true")
     configured_site = str(configured.physical_site or "").strip().lower()
     if (
-        configured_site != SITE_WEBAPP_IR
+        configured_site != SITE_WITNESS
         or str(configured.logical_authority).strip().lower() != AUTHORITY_WEBAPP
-        or configured.writer_witness_authoritative_site != SITE_WEBAPP_IR
+        or str(configured.writer_witness_authoritative_site).strip().lower()
+        not in WEBAPP_SITES
     ):
         raise WitnessServiceConfigurationError(
-            "the witness service requires explicit PHYSICAL_SITE=webapp_ir"
+            "the witness service requires PHYSICAL_SITE=witness and a WebApp writer site"
         )
     database_url = str(configured.writer_witness_database_url or "").strip()
     if not database_url:
