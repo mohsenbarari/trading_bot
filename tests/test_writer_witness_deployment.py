@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -969,6 +970,47 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
             self.assertEqual(repeated.returncode, 0, repeated.stderr)
             self.assertIn("activation_recovered=no", repeated.stdout)
             self.assertEqual(active.resolve(), paths["activation"].resolve())
+
+    def test_activation_accepts_root_owned_read_only_parent_with_distinct_group(self):
+        with tempfile.TemporaryDirectory(
+            prefix="writer-witness-activation-parent-group-"
+        ) as directory:
+            runtime_parent = Path(directory) / "etc/trading-bot-witness"
+            runtime_parent.mkdir(parents=True, mode=0o750)
+            runtime_parent.chmod(0o750)
+            ensure_directory = ACTIVATION_MODULE["_ensure_directory"]
+            activation_os = ensure_directory.__globals__["os"]
+            distinct_gid = os.getegid() + 1
+
+            with mock.patch.object(
+                activation_os,
+                "getegid",
+                return_value=distinct_gid,
+            ):
+                ensure_directory(
+                    runtime_parent,
+                    0o750,
+                    allow_read_only_group=True,
+                )
+
+    def test_activation_rejects_group_writable_destination_parent(self):
+        with tempfile.TemporaryDirectory(
+            prefix="writer-witness-activation-writable-parent-"
+        ) as directory:
+            root = Path(directory)
+            release_id = "writable-parent"
+            self._prepare_activation_host(root, release_id)
+            runtime_parent = root / "etc/trading-bot-witness"
+            runtime_parent.chmod(0o770)
+
+            self._begin_and_stage_activation(root, release_id)
+            published = self._activation_run(root, "publish", release_id=release_id)
+
+            self.assertNotEqual(published.returncode, 0)
+            self.assertIn(
+                "activation destination parent mode is unsafe",
+                published.stderr,
+            )
 
     def test_activation_fresh_install_sigkill_rolls_back_to_no_generation_and_retries(self):
         with tempfile.TemporaryDirectory(prefix="writer-witness-activation-fresh-") as directory:

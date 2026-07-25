@@ -258,6 +258,10 @@ class WriterWitnessHostToolchainTests(unittest.TestCase):
             '"$ROOT_DIR/scripts/provision_writer_witness_host.sh"',
             builder,
         )
+        self.assertIn(
+            '"$release_dir/scripts/provision_writer_witness_host.sh"',
+            source,
+        )
         self.assertIn('SYSTEMD_EXEC_PID:-}" == "$$"', source)
         self.assertIn("os.execve", helper)
         self.assertGreaterEqual(source.count("attest_host_toolchain"), 5)

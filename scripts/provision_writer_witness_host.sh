@@ -1117,6 +1117,7 @@ cp -a "$SOURCE_DIR/." "$release_dir/"
 find "$release_dir" -type d -exec chmod 0755 {} +
 find "$release_dir" -type f -exec chmod 0644 {} +
 chmod 0755 \
+    "$release_dir/scripts/provision_writer_witness_host.sh" \
     "$release_dir/scripts/run_writer_witness_clock_jump_probe.py" \
     "$release_dir/scripts/smoke_writer_witness_client.py" \
     "$release_dir/scripts/verify_writer_witness_nftables.py" \

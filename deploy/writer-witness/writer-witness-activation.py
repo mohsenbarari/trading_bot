@@ -172,6 +172,7 @@ PACKAGE_MANAGER_LOCK_PATHS = (
 )
 SCHEMA = "writer_witness_activation_v3"
 ACTIVATION_PROTOCOL = "writer_witness_activation_protocol_v2"
+ATOMIC_PARENT_MODES = frozenset({0o700, 0o750, 0o755})
 MANAGED_UNITS = (
     "nginx",
     "writer-witness.service",
@@ -276,7 +277,12 @@ def _fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
-def _ensure_directory(path: Path, mode: int = 0o700) -> None:
+def _ensure_directory(
+    path: Path,
+    mode: int = 0o700,
+    *,
+    allow_read_only_group: bool = False,
+) -> None:
     created = False
     try:
         path.mkdir(mode=mode)
@@ -286,7 +292,10 @@ def _ensure_directory(path: Path, mode: int = 0o700) -> None:
     metadata = path.lstat()
     if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
         raise ActivationError(f"activation directory is unsafe: {path}")
-    if metadata.st_uid != os.geteuid() or metadata.st_gid != os.getegid():
+    group_is_safe = metadata.st_gid == os.getegid() or (
+        allow_read_only_group and not (stat.S_IMODE(metadata.st_mode) & 0o022)
+    )
+    if metadata.st_uid != os.geteuid() or not group_is_safe:
         raise ActivationError(f"activation directory ownership is unsafe: {path}")
     if stat.S_IMODE(metadata.st_mode) != mode:
         raise ActivationError(f"activation directory mode is unsafe: {path}")
@@ -345,7 +354,16 @@ def _atomic_write(
     gid: int,
     token: str | None = None,
 ) -> None:
-    _ensure_directory(destination.parent, stat.S_IMODE(destination.parent.lstat().st_mode))
+    parent_mode = stat.S_IMODE(destination.parent.lstat().st_mode)
+    if parent_mode not in ATOMIC_PARENT_MODES:
+        raise ActivationError(
+            f"activation destination parent mode is unsafe: {destination.parent}"
+        )
+    _ensure_directory(
+        destination.parent,
+        parent_mode,
+        allow_read_only_group=True,
+    )
     token_part = f"{token}-" if token is not None else ""
     temporary = destination.parent / (
         f".{destination.name}.activation-{token_part}{uuid.uuid4().hex}"
