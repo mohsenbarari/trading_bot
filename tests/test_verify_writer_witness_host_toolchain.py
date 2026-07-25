@@ -234,8 +234,20 @@ class WriterWitnessHostToolchainTests(unittest.TestCase):
         source = (ROOT / "scripts/provision_writer_witness_host.sh").read_text()
         builder = (ROOT / "scripts/build_writer_witness_release.sh").read_text()
         helper = (ROOT / "scripts/hold_writer_witness_package_locks.py").read_text()
+        transaction = source.split("exec /usr/bin/systemd-run", 1)[1].split(
+            "\nfi\n", 1
+        )[0]
         self.assertNotIn("coproc WRITER_WITNESS_PACKAGE_LOCK_HOLDER", source)
+        self.assertNotIn("/usr/bin/env -i", transaction)
         self.assertIn("--property=KillMode=control-group", source)
+        self.assertIn(
+            "--setenv=WRITER_WITNESS_PROVISION_TRANSACTION_UNIT=",
+            source,
+        )
+        self.assertIn(
+            "--setenv=WRITER_WITNESS_EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256=",
+            source,
+        )
         self.assertIn("--assert-parent-locks", source)
         self.assertIn("--exec /bin/bash", source)
         self.assertIn(

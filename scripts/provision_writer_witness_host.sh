@@ -736,6 +736,10 @@ print(hashlib.sha256(sys.argv[1].encode()).hexdigest()[:20])
 PY
 )"
     transaction_unit="writer-witness-provision-$transaction_suffix.service"
+    # systemd injects INVOCATION_ID and SYSTEMD_EXEC_PID into the direct
+    # ExecStart process.  Do not interpose `env -i` here: it would erase the
+    # cgroup identity that is verified below.  The package-lock helper replaces
+    # itself with the provisioner using its own closed environment allowlist.
     exec /usr/bin/systemd-run \
         --wait \
         --collect \
@@ -744,22 +748,21 @@ PY
         --service-type=exec \
         --property=KillMode=control-group \
         --unit="$transaction_unit" \
-        /usr/bin/env -i \
-        PATH=/usr/sbin:/usr/bin:/sbin:/bin \
-        WRITER_WITNESS_PROVISION_TRANSACTION_UNIT="$transaction_unit" \
-        WRITER_WITNESS_SOURCE_DIR="$SOURCE_DIR" \
-        WRITER_WITNESS_PUBLIC_IP="$WITNESS_PUBLIC_IP" \
-        WRITER_WITNESS_WEBAPP_FI_SOURCE_IP="$WEBAPP_FI_SOURCE_IP" \
-        WRITER_WITNESS_WEBAPP_IR_SOURCE_IP="$WEBAPP_IR_SOURCE_IP" \
-        WRITER_WITNESS_SSH_SOURCE_IP="$SSH_SOURCE_IP" \
-        WRITER_WITNESS_RELEASE_ID="$RELEASE_ID" \
-        WRITER_WITNESS_HARDEN_SSH="$HARDEN_SSH" \
-        WRITER_WITNESS_SSH_KEY_SOURCE_USER="$SSH_KEY_SOURCE_USER" \
-        WRITER_WITNESS_WHEELHOUSE="$WHEELHOUSE" \
-        WRITER_WITNESS_ROTATE_TLS="$ROTATE_TLS" \
-        WRITER_WITNESS_ALLOW_LEGACY_ACTIVATION_RECOVERY="$ALLOW_LEGACY_ACTIVATION_RECOVERY" \
-        WRITER_WITNESS_EXPECTED_MANIFEST_SHA256="$EXPECTED_MANIFEST_SHA256" \
-        WRITER_WITNESS_EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256="$EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256" \
+        --setenv=PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+        --setenv=WRITER_WITNESS_PROVISION_TRANSACTION_UNIT="$transaction_unit" \
+        --setenv=WRITER_WITNESS_SOURCE_DIR="$SOURCE_DIR" \
+        --setenv=WRITER_WITNESS_PUBLIC_IP="$WITNESS_PUBLIC_IP" \
+        --setenv=WRITER_WITNESS_WEBAPP_FI_SOURCE_IP="$WEBAPP_FI_SOURCE_IP" \
+        --setenv=WRITER_WITNESS_WEBAPP_IR_SOURCE_IP="$WEBAPP_IR_SOURCE_IP" \
+        --setenv=WRITER_WITNESS_SSH_SOURCE_IP="$SSH_SOURCE_IP" \
+        --setenv=WRITER_WITNESS_RELEASE_ID="$RELEASE_ID" \
+        --setenv=WRITER_WITNESS_HARDEN_SSH="$HARDEN_SSH" \
+        --setenv=WRITER_WITNESS_SSH_KEY_SOURCE_USER="$SSH_KEY_SOURCE_USER" \
+        --setenv=WRITER_WITNESS_WHEELHOUSE="$WHEELHOUSE" \
+        --setenv=WRITER_WITNESS_ROTATE_TLS="$ROTATE_TLS" \
+        --setenv=WRITER_WITNESS_ALLOW_LEGACY_ACTIVATION_RECOVERY="$ALLOW_LEGACY_ACTIVATION_RECOVERY" \
+        --setenv=WRITER_WITNESS_EXPECTED_MANIFEST_SHA256="$EXPECTED_MANIFEST_SHA256" \
+        --setenv=WRITER_WITNESS_EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256="$EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256" \
         "$WRITER_WITNESS_SYSTEM_PYTHON" \
         -I -S -B -X utf8 -X pycache_prefix=/dev/null \
         "$SOURCE_DIR/scripts/hold_writer_witness_package_locks.py" \
