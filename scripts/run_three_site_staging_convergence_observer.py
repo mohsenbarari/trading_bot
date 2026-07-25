@@ -243,11 +243,12 @@ def _finland_snapshot(config: dict[str, Any], site: str) -> dict[str, Any]:
 
 def _put_descriptor(config: dict[str, Any], *, client, bucket: str, key: str) -> str:  # noqa: ANN001
     try:
-        url = client.generate_presigned_url(
-            "put_object",
-            Params={"Bucket": bucket, "Key": key, "ContentType": "application/json"},
+        post = client.generate_presigned_post(
+            bucket,
+            key,
+            Fields={"Content-Type": "application/json"},
+            Conditions=[{"Content-Type": "application/json"}],
             ExpiresIn=int(config["limits"]["url_ttl_seconds"]),
-            HttpMethod="PUT",
         )
     except Exception as exc:
         raise ConvergenceObserverError("cannot issue the short-lived WebApp-IR upload URL") from exc
@@ -257,9 +258,10 @@ def _put_descriptor(config: dict[str, Any], *, client, bucket: str, key: str) ->
         "release_sha": config["release_sha"],
         "plan_sha256": config["plan_sha256"],
         "upload": {
-            "url": url,
-            "method": "PUT",
-            "headers": {"Content-Type": "application/json"},
+            "url": post["url"],
+            "method": "POST",
+            "headers": {},
+            "form_fields": post["fields"],
             "expected_status": [200, 201],
         },
     }
