@@ -16,6 +16,7 @@ from typing import Any
 import urllib.error
 import urllib.parse
 import urllib.request
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -32,6 +33,7 @@ from core.dr_failover_orchestrator import (
     verify_human_failover_approval,
 )
 from core.secure_file_io import read_secure_text, write_secure_atomic_bytes
+from core.webapp_writer_control import WriterControlError, validate_readiness_evidence
 from scripts.render_three_site_staging_role_compose import parse_env_values
 from scripts.run_three_site_staging_source_backup import DOCKER, SAFE_ENV
 from scripts.verify_three_site_staging_role_bundle import _verify_bundle_source
@@ -114,19 +116,29 @@ def _psql(args: argparse.Namespace, env: dict[str, str], sql: str) -> str:
 def _common(args: argparse.Namespace):  # noqa: ANN202
     plan = parse_plan(_strict_json(args.plan, label="failover plan"))
     policy = load_approver_policy(args.approver_policy)
+    compose_bytes = _verify_bundle_source(args.role_compose, expected_mode=0o640)
+    env_bytes = _verify_bundle_source(args.env_file, expected_mode=0o600)
+    env = parse_env_values(env_bytes.decode("utf-8"))
+    if (
+        env.get("STAGING_RELEASE_SHA") != plan.release_sha
+        or env.get("PHYSICAL_SITE") not in {None, args.role}
+    ):
+        raise StagingSiteOperationError("role bundle release/site differs from the approved plan")
+    # Relay receipts are signed by the Witness, rather than by the issuer.
+    # The public key must therefore come from this release-bound role bundle;
+    # relying on a process environment would reject legitimate session-derived
+    # receipts and makes a caller-controlled environment part of the trust
+    # boundary.
+    witness_public_key = str(env.get("WRITER_WITNESS_PUBLIC_KEY") or "").strip()
     verify_human_failover_approval(
         plan,
         policy,
         require_fresh=args.action != "safe-fence",
+        witness_relay_public_key=witness_public_key or None,
     )
     if args.action != "safe-fence":
         validate_plan_freshness(plan)
     load_typed_operation_manifest(args.command_manifest, plan=plan)
-    compose_bytes = _verify_bundle_source(args.role_compose, expected_mode=0o640)
-    env_bytes = _verify_bundle_source(args.env_file, expected_mode=0o600)
-    env = parse_env_values(env_bytes.decode("utf-8"))
-    if env.get("STAGING_RELEASE_SHA") != plan.release_sha or env.get("PHYSICAL_SITE") not in {None, args.role}:
-        raise StagingSiteOperationError("role bundle release/site differs from the approved plan")
     if args.action in {"source-fenced", "source-connections-drained"}:
         if args.role != plan.source_site:
             raise StagingSiteOperationError("source operation is running on the wrong role")
@@ -161,6 +173,42 @@ def _with_evidence_hash(payload: dict[str, Any]) -> dict[str, Any]:
         **payload,
         "evidence_hash": hashlib.sha256(canonical_json_bytes(payload)).hexdigest(),
     }
+
+
+def _validate_fresh_readiness_evidence(
+    payload: Any,
+    *,
+    plan,
+    expected_hash: Any,
+) -> None:  # noqa: ANN001
+    """Bind the dynamic local evidence to the signed static plan commitment."""
+
+    if (
+        not isinstance(payload, dict)
+        or payload.get("readiness_commitment") != plan.readiness_commitment
+        or re.fullmatch(r"[0-9a-f]{64}", str(expected_hash or "")) is None
+    ):
+        raise StagingSiteOperationError("target readiness evidence is not commitment-bound")
+    try:
+        validated = validate_readiness_evidence(
+            payload,
+            target_site=plan.target_site,
+            writer_epoch=plan.target_epoch,
+        )
+    except WriterControlError as exc:
+        raise StagingSiteOperationError("target readiness evidence is invalid or stale") from exc
+    if validated.content_hash != expected_hash:
+        raise StagingSiteOperationError("target readiness evidence hash differs")
+
+
+def _command_json(raw: str, *, label: str) -> dict[str, Any]:
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise StagingSiteOperationError(f"{label} returned invalid JSON") from exc
+    if not isinstance(value, dict):
+        raise StagingSiteOperationError(f"{label} returned an invalid object")
+    return value
 
 
 def source_fenced(args: argparse.Namespace, plan, env: dict[str, str]) -> dict[str, Any]:  # noqa: ANN001
@@ -288,6 +336,56 @@ def source_fenced(args: argparse.Namespace, plan, env: dict[str, str]) -> dict[s
     )
 
 
+def source_drained_and_fenced(
+    args: argparse.Namespace,
+    plan,
+    env: dict[str, str],
+) -> dict[str, Any]:  # noqa: ANN001
+    """Drain WA-IR's Witness lease and fence it without controller-side SSH."""
+
+    writer_control = f"{args.role}_writer_control"
+    _run(
+        [*_compose(args), "stop", "--timeout", "30", writer_control],
+        timeout=180,
+    )
+    request_id = str(uuid5(NAMESPACE_URL, f"{plan.operation_id}:source-drain"))
+    drain = _command_json(
+        _run(
+            [
+                *_compose(args), "run", "--rm", "--no-deps", "-T",
+                writer_control,
+                "python", "scripts/drain_three_site_staging_writer_lease.py",
+                "--operation-id", plan.operation_id,
+                "--request-id", request_id,
+                "--expected-epoch", str(plan.expected_epoch),
+                "--expected-release-sha", plan.release_sha,
+                "--apply", "--confirm",
+                f"drain-writer:{plan.operation_id}:{request_id}:{plan.expected_epoch}",
+            ],
+            timeout=420,
+        ),
+        label="source Witness drain",
+    )
+    if (
+        drain.get("status") != "draining"
+        or drain.get("operation_id") != plan.operation_id
+        or drain.get("request_id") != request_id
+        or drain.get("source_site") != args.role
+        or drain.get("writer_epoch") != plan.expected_epoch
+        or re.fullmatch(
+            r"[0-9a-f]{64}", str(drain.get("witness_receipt_hash") or "")
+        ) is None
+    ):
+        raise StagingSiteOperationError("source Witness drain evidence differs")
+    fenced = source_fenced(args, plan, env)
+    payload = {
+        **{key: value for key, value in fenced.items() if key != "evidence_hash"},
+        "witness_drain_request_id": request_id,
+        "witness_drain_receipt_hash": drain["witness_receipt_hash"],
+    }
+    return _with_evidence_hash(payload)
+
+
 def source_connections_drained(args: argparse.Namespace, plan, env: dict[str, str]) -> dict[str, Any]:  # noqa: ANN001
     for service in ROLE_PUBLIC[args.role]:
         if _run([*_compose(args), "ps", "--status", "running", "-q", service]):
@@ -320,6 +418,7 @@ def _readiness_url(plan, boundary: dict[str, Any], recovery: dict[str, Any] | No
     query: dict[str, str] = {
         "action": plan.action,
         "expected_writer_epoch": str(plan.target_epoch),
+        "readiness_commitment": plan.readiness_commitment,
         "source_tail_mode": str(boundary["mode"]),
         "source_tail_origin_site": str(boundary["origin_site"]),
         "source_tail_producer_epoch": str(boundary["producer_epoch"]),
@@ -391,18 +490,25 @@ def target_ready(args: argparse.Namespace, plan, env: dict[str, str]) -> dict[st
         or result.get("promotion_ready") is not True
         or result.get("physical_site") != plan.target_site
         or result.get("expected_writer_epoch") != plan.target_epoch
-        or result.get("readiness_hash") != plan.readiness_hash
+        or result.get("readiness_commitment") != plan.readiness_commitment
+        or re.fullmatch(r"[0-9a-f]{64}", str(result.get("readiness_hash") or "")) is None
         or not isinstance(result.get("readiness_evidence"), dict)
         or result.get("source_tail_boundary") != boundary
     ):
         raise StagingSiteOperationError("target did not prove approved promotion readiness")
+    _validate_fresh_readiness_evidence(
+        result["readiness_evidence"],
+        plan=plan,
+        expected_hash=result["readiness_hash"],
+    )
     return _with_evidence_hash(
         {
             "schema": "three-site-staging-target-readiness-v1",
             "status": "ok", "operation_id": plan.operation_id,
             "release_sha": plan.release_sha, "target_site": plan.target_site,
             "target_epoch": plan.target_epoch,
-            "readiness_hash": plan.readiness_hash,
+            "readiness_commitment": plan.readiness_commitment,
+            "readiness_evidence_hash": result["readiness_hash"],
             "source_tail_boundary_hash": boundary["boundary_hash"],
             "target_applied_sequence": result["target_applied_sequence"],
             "target_applied_through_boundary": True,
@@ -457,6 +563,118 @@ def target_term_attested(
     raise StagingSiteOperationError(
         "target Writer control agent did not prove a post-acquisition renewal"
     )
+
+
+def _derived_id(plan, label: str) -> str:  # noqa: ANN001
+    return str(uuid5(NAMESPACE_URL, f"{plan.operation_id}:{label}"))
+
+
+def _inspect_witness(args: argparse.Namespace, plan) -> dict[str, Any]:  # noqa: ANN001
+    raw = _run(
+        [
+            *_compose(args), "run", "--rm", "--no-deps", "-T",
+            f"{args.role}_writer_control",
+            "python", "scripts/inspect_three_site_staging_writer_witness.py",
+            "--request-id", str(uuid4()),
+            "--expected-release-sha", plan.release_sha,
+        ],
+        timeout=120,
+    )
+    return _command_json(raw, label="target Witness inspection")
+
+
+def target_term_acquired(
+    args: argparse.Namespace,
+    plan,
+    env: dict[str, str],
+) -> dict[str, Any]:  # noqa: ANN001
+    """Acquire and renew the target term entirely on the target host.
+
+    This is used by WA-IR's pull agent so the controller never has to open an
+    SSH/control channel from Finland to Iran.  The caller supplies the already
+    approved target-readiness document; all commands, service names, mount
+    paths and confirmation phrases remain source-owned here.
+    """
+
+    if args.readiness_evidence is None:
+        raise StagingSiteOperationError("target acquisition requires target-readiness evidence")
+    readiness = _strict_json(args.readiness_evidence, label="target-readiness evidence")
+    if (
+        readiness.get("schema") != "three-site-staging-target-readiness-v1"
+        or readiness.get("status") != "ok"
+        or readiness.get("operation_id") != plan.operation_id
+        or readiness.get("release_sha") != plan.release_sha
+        or readiness.get("target_site") != args.role
+        or readiness.get("target_epoch") != plan.target_epoch
+        or readiness.get("readiness_commitment") != plan.readiness_commitment
+        or re.fullmatch(
+            r"[0-9a-f]{64}", str(readiness.get("readiness_evidence_hash") or "")
+        ) is None
+        or re.fullmatch(r"[0-9a-f]{64}", str(readiness.get("evidence_hash") or "")) is None
+    ):
+        raise StagingSiteOperationError("target acquisition readiness evidence differs")
+    _validate_fresh_readiness_evidence(
+        readiness.get("readiness_evidence"),
+        plan=plan,
+        expected_hash=readiness.get("readiness_evidence_hash"),
+    )
+    deadline = time.monotonic() + 300.0
+    while True:
+        status = _inspect_witness(args, plan)
+        if status.get("lease_live") is False:
+            break
+        if time.monotonic() >= deadline:
+            raise StagingSiteOperationError("predecessor Witness lease did not expire")
+        time.sleep(2)
+    status_id = _derived_id(plan, "target-status")
+    acquire_id = _derived_id(plan, "target-acquire")
+    activation_raw = _run(
+        [
+            *_compose(args), "run", "--rm", "--no-deps", "-T",
+            "-v", f"{args.readiness_evidence}:/run/failover/readiness.json:ro",
+            f"{args.role}_writer_control",
+            "python", "scripts/activate_three_site_staging_failover_target.py",
+            "--operation-id", plan.operation_id,
+            "--status-request-id", status_id,
+            "--acquire-request-id", acquire_id,
+            "--target-epoch", str(plan.target_epoch),
+            "--expected-release-sha", plan.release_sha,
+            "--readiness-evidence", "/run/failover/readiness.json",
+            "--apply", "--confirm",
+            f"activate-target:{plan.operation_id}:{acquire_id}:{plan.target_epoch}",
+        ],
+        timeout=420,
+    )
+    activated = _command_json(activation_raw, label="target term acquisition")
+    if (
+        activated.get("status") not in {"ok", "passed"}
+        or activated.get("operation_id") != plan.operation_id
+        or activated.get("writer_epoch") != plan.target_epoch
+        or re.fullmatch(r"[0-9a-f]{64}", str(activated.get("proof_hash") or "")) is None
+    ):
+        raise StagingSiteOperationError("target term acquisition proof differs")
+    _run(
+        [
+            *_compose(args), "up", "-d", "--no-deps",
+            f"{args.role}_writer_control",
+        ],
+        timeout=300,
+    )
+    attestation_args = argparse.Namespace(**vars(args))
+    attestation_args.previous_proof_hash = activated["proof_hash"]
+    attested = target_term_attested(attestation_args, plan, env)
+    payload = {
+        "status": "ok", "operation_id": plan.operation_id,
+        "holder_site": attested["holder_site"],
+        "writer_epoch": attested["writer_epoch"],
+        "lease_id": attested["lease_id"],
+        "proof_hash": attested["proof_hash"],
+        "control_agent_running": True,
+        "lease_seconds_remaining": attested["lease_seconds_remaining"],
+        "acquisition_proof_hash": activated["proof_hash"],
+        "renewal_evidence_hash": attested["evidence_hash"],
+    }
+    return _with_evidence_hash(payload)
 
 
 def safe_fence(args: argparse.Namespace, plan, env: dict[str, str]) -> dict[str, Any]:  # noqa: ANN001
@@ -515,8 +733,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "action", choices=(
-            "source-fenced", "source-connections-drained", "target-ready",
-            "target-term-attested", "safe-fence"
+            "source-fenced", "source-drained-and-fenced",
+            "source-connections-drained", "target-ready",
+            "target-term-attested", "target-term-acquired", "safe-fence"
         )
     )
     parser.add_argument("--role", choices=tuple(ROLE_DB), required=True)
@@ -527,6 +746,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--env-file", type=Path, required=True)
     parser.add_argument("--source-tail", type=Path)
     parser.add_argument("--source-tail-json")
+    parser.add_argument("--readiness-evidence", type=Path)
     parser.add_argument("--recovery-input", type=Path)
     parser.add_argument("--previous-proof-hash")
     parser.add_argument("--output", type=Path, required=True)
@@ -548,9 +768,11 @@ def main(argv: list[str] | None = None) -> int:
                 raise StagingSiteOperationError("site operation confirmation mismatch")
             operation = {
                 "source-fenced": source_fenced,
+                "source-drained-and-fenced": source_drained_and_fenced,
                 "source-connections-drained": source_connections_drained,
                 "target-ready": target_ready,
                 "target-term-attested": target_term_attested,
+                "target-term-acquired": target_term_acquired,
                 "safe-fence": safe_fence,
             }[args.action]
             result = operation(args, plan, env)

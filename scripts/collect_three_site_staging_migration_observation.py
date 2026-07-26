@@ -85,6 +85,7 @@ ROLE_API = {
 }
 ROLE_API_SERVICE = {
     "bot_fi": "bot_fi_api",
+    "witness": "witness_api",
 }
 ROLE_TLS = {
     "bot_fi": ("BOT_FI_DR_BIND_ADDRESS", 8443, "bot-fi-dr.staging.internal"),
@@ -473,10 +474,15 @@ def _service_observation(
         raise ObservationError(f"required service emitted errors in the five-minute window: {service}")
     observed_release = None
     if not service.endswith(("_tls", "_redis")):
+        release_expression = (
+            "import os; print(str(os.environ.get('WRITER_WITNESS_RELEASE_SHA') or ''))"
+            if service == "witness_api"
+            else "from core.config import settings; print(str(settings.release_sha or ''))"
+        )
         observed_release = _run(
             [
                 *_compose(args), "exec", "-T", service, "python", "-c",
-                "from core.config import settings; print(str(settings.release_sha or ''))",
+                release_expression,
             ],
             timeout=30,
         )
@@ -707,7 +713,7 @@ def collect_role(args: argparse.Namespace) -> dict[str, Any]:
         "signed_runtime_bundle": {
             "role_compose_sha256": compose_hash,
             "role_env_sha256": env_hash,
-            "image_inventory_sha256": hashlib.sha256(image_raw).hexdigest(),
+            "image_inventory_sha256": image_result["document_sha256"],
         },
     }
     checks = {

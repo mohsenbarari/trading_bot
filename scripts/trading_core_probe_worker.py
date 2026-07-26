@@ -16,6 +16,7 @@ import hmac
 import json
 import math
 import os
+import re
 import sys
 import time
 import uuid
@@ -2172,6 +2173,52 @@ async def create_load_fixture_users(prefix: str, *, user_count: int) -> list[Loa
     ) from last_error
 
 
+async def create_or_reuse_load_fixture_users(
+    prefix: str,
+    *,
+    user_count: int,
+) -> list[LoadUserRef]:
+    """Return one bounded fixture pool without growing it on repeated probes.
+
+    A long-running Full Matrix scenario invokes a small real workload many
+    times.  Recreating its user pool on every interval would measure fixture
+    leakage rather than the system under test.  We search every bounded salt
+    namespace used by :func:`create_load_fixture_users`; only a complete exact
+    pool can be reused, otherwise the normal collision-safe creator owns the
+    first allocation.
+    """
+
+    if user_count < 3:
+        raise TradingProbeError("mixed load requires at least 3 synthetic users")
+    for salt in range(LOAD_FIXTURE_IDENTITY_RETRY_ATTEMPTS):
+        expected = build_load_fixture_users(prefix, user_count=user_count, salt=salt)
+        expected_by_mobile = {str(item.mobile_number): item for item in expected}
+        async with AsyncSessionLocal() as db:
+            rows = list(
+                (
+                    await db.execute(
+                        select(User).where(User.mobile_number.in_(expected_by_mobile))
+                    )
+                ).scalars().all()
+            )
+            if len(rows) != user_count:
+                continue
+            if any(
+                str(row.mobile_number) not in expected_by_mobile
+                or row.account_name
+                != expected_by_mobile[str(row.mobile_number)].account_name
+                or int(row.telegram_id)
+                != int(expected_by_mobile[str(row.mobile_number)].telegram_id)
+                for row in rows
+            ):
+                continue
+            return [
+                LoadUserRef(user_id=int(row.id), telegram_id=int(row.telegram_id))
+                for row in sorted(rows, key=lambda item: str(item.mobile_number))
+            ]
+    return await create_load_fixture_users(prefix, user_count=user_count)
+
+
 def build_dual_role_users_artifact(prefix: str, users: list[LoadUserRef]) -> dict[str, Any]:
     normalized_prefix = validate_cleanup_prefix(prefix)
     if len(users) < 3:
@@ -2666,11 +2713,23 @@ async def create_offer_for_user(
     channel_message_id: int | None = None,
     time_limit_buffer_minutes: int | None = None,
     source_surface: OfferSourceSurface | str = OfferSourceSurface.WEBAPP,
+    idempotency_key: str | None = None,
 ) -> int:
     async with AsyncSessionLocal() as db:
         user = await load_user(db, user_id)
         normalized_lot_sizes = list(lot_sizes) if lot_sizes else None
         normalized_source_surface = normalize_offer_source_surface(source_surface)
+        resolved_idempotency_key = validate_probe_offer_idempotency_key(
+            idempotency_key
+            or build_probe_offer_idempotency_key(
+                prefix=prefix,
+                user_id=user_id,
+                index=index,
+                offer_type=offer_type,
+                quantity=quantity,
+                price=price,
+            )
+        )
         if normalized_source_surface == OfferSourceSurface.WEBAPP:
             response = await offers_router.create_offer(
                 offers_router.OfferCreate(
@@ -2682,6 +2741,7 @@ async def create_offer_for_user(
                     lot_sizes=normalized_lot_sizes,
                     notes=f"{prefix} offer {index}",
                     warning_acknowledged=True,
+                    idempotency_key=resolved_idempotency_key,
                 ),
                 db=db,
                 current_user=user,
@@ -2707,6 +2767,7 @@ async def create_offer_for_user(
                     lot_sizes=normalized_lot_sizes,
                     original_lot_sizes=normalized_lot_sizes,
                     notes=f"{prefix} offer {index}",
+                    idempotency_key=resolved_idempotency_key,
                     status=OfferStatus.ACTIVE,
                 ),
             )
@@ -2719,6 +2780,46 @@ async def create_offer_for_user(
                 time_limit_buffer_minutes=time_limit_buffer_minutes,
             )
         return offer_id
+
+
+def build_probe_offer_idempotency_key(
+    *,
+    prefix: str,
+    user_id: int,
+    index: int,
+    offer_type: str,
+    quantity: int,
+    price: int,
+) -> str:
+    safe_prefix = "".join(
+        character
+        for character in str(prefix)
+        if character.isalnum() or character in ":._-"
+    )[:28]
+    if not safe_prefix or not safe_prefix[0].isalnum():
+        safe_prefix = "FMX"
+    material = (
+        f"{prefix}|{int(user_id)}|{int(index)}|{offer_type}|"
+        f"{int(quantity)}|{int(price)}"
+    )
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:20]
+    value = f"{safe_prefix}:offer:{digest}"
+    return validate_probe_offer_idempotency_key(value)
+
+
+def validate_probe_offer_idempotency_key(value: str) -> str:
+    """Keep synthetic calls on the public OfferCreate idempotency contract.
+
+    Matrix timing probes intentionally supply their own correlation key so the
+    observer can find the exact business event.  It must still meet the same
+    contract as a real webapp request, and bot-originated commands use the
+    identical key to retain route-independent tracing.
+    """
+
+    normalized = str(value).strip()
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9:._-]{7,63}", normalized) is None:
+        raise TradingProbeError("synthetic offer idempotency key is outside API bounds")
+    return normalized
 
 
 async def expire_offer_for_user(*, user_id: int, offer_id: int) -> None:

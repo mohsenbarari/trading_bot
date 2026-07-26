@@ -11,7 +11,9 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import re
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import and_, case, exists, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
@@ -66,6 +68,19 @@ from models.telegram_delivery_runtime_gate import TelegramDeliveryRuntimeGate
 TELEGRAM_DELIVERY_QUEUE_WORKER_ID = "telegram-delivery-queue-v1"
 TELEGRAM_PRIMARY_BOT_IDENTITY = "primary"
 TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY = "channel_editor"
+FULL_MATRIX_TELEGRAM_TEST_RUN_ID_PREFIX = "full-matrix:"
+_FULL_MATRIX_TELEGRAM_TEST_SCENARIO_RE = re.compile(r"[a-z0-9][a-z0-9_-]{2,95}")
+_FULL_MATRIX_TELEGRAM_TEST_NONCE_RE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{7,95}")
+TELEGRAM_DELIVERY_CLAIM_SCOPE_ALL = "all"
+TELEGRAM_DELIVERY_CLAIM_SCOPE_OPERATIONAL = "operational"
+TELEGRAM_DELIVERY_CLAIM_SCOPE_FULL_MATRIX = "full-matrix"
+_TELEGRAM_DELIVERY_CLAIM_SCOPES = frozenset(
+    {
+        TELEGRAM_DELIVERY_CLAIM_SCOPE_ALL,
+        TELEGRAM_DELIVERY_CLAIM_SCOPE_OPERATIONAL,
+        TELEGRAM_DELIVERY_CLAIM_SCOPE_FULL_MATRIX,
+    }
+)
 SUPPORTED_TELEGRAM_BOT_IDENTITIES = frozenset(
     {TELEGRAM_PRIMARY_BOT_IDENTITY, TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY}
 )
@@ -119,6 +134,130 @@ class TelegramDeliveryDispatchDeferredError(RuntimeError):
         self.cooldown_until = cooldown_until
         self.scope = str(scope or "destination")
         super().__init__(self.reason)
+
+
+def build_full_matrix_telegram_test_run_id(
+    *,
+    campaign_id: str,
+    scenario_id: str,
+    nonce: str,
+) -> str:
+    """Build the reserved run identity for an isolated Full Matrix queue lane.
+
+    Full Matrix may exercise durable queue transitions with a fake provider,
+    but the ordinary Bot-FI worker must never be able to claim that work.
+    Binding the lane to the campaign UUID, scenario and a one-time nonce also
+    prevents one campaign invocation from consuming another's fixture.
+    """
+
+    try:
+        normalized_campaign_id = str(UUID(str(campaign_id)))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise TelegramDeliveryQueueValidationError(
+            "full_matrix_test_campaign_id_invalid"
+        ) from exc
+    normalized_scenario_id = str(scenario_id or "").strip()
+    normalized_nonce = str(nonce or "").strip()
+    if _FULL_MATRIX_TELEGRAM_TEST_SCENARIO_RE.fullmatch(normalized_scenario_id) is None:
+        raise TelegramDeliveryQueueValidationError("full_matrix_test_scenario_id_invalid")
+    if _FULL_MATRIX_TELEGRAM_TEST_NONCE_RE.fullmatch(normalized_nonce) is None:
+        raise TelegramDeliveryQueueValidationError("full_matrix_test_nonce_invalid")
+    return (
+        f"{FULL_MATRIX_TELEGRAM_TEST_RUN_ID_PREFIX}{normalized_campaign_id}:"
+        f"{normalized_scenario_id}:{normalized_nonce}"
+    )
+
+
+def _validate_telegram_delivery_claim_scope(
+    *,
+    claim_scope: str,
+    full_matrix_campaign_id: str | None,
+    full_matrix_run_id: str | None,
+) -> tuple[str, str | None, str | None]:
+    """Validate a queue claim lane before it can touch a row.
+
+    ``all`` is intentionally retained for repository-level migration tests and
+    direct maintenance tools.  Long-running operational workers must use
+    ``operational``; only an exact, reserved campaign/run pair may use the
+    Full Matrix lane.
+    """
+
+    normalized_scope = str(claim_scope or "").strip().lower()
+    if normalized_scope not in _TELEGRAM_DELIVERY_CLAIM_SCOPES:
+        raise TelegramDeliveryQueueValidationError("telegram_delivery_claim_scope_invalid")
+    campaign = str(full_matrix_campaign_id or "").strip() or None
+    run = str(full_matrix_run_id or "").strip() or None
+    if normalized_scope != TELEGRAM_DELIVERY_CLAIM_SCOPE_FULL_MATRIX:
+        if campaign is not None or run is not None:
+            raise TelegramDeliveryQueueValidationError(
+                "telegram_delivery_non_full_matrix_scope_has_lane_identity"
+            )
+        return normalized_scope, None, None
+    if campaign is None or run is None:
+        raise TelegramDeliveryQueueValidationError(
+            "full_matrix_test_lane_identity_required"
+        )
+    # Rebuild the prefix from the concrete campaign rather than accepting a
+    # merely similar string.  The final nonce is opaque to this layer but must
+    # have the shape emitted by the constructor above.
+    try:
+        normalized_campaign = str(UUID(campaign))
+    except ValueError as exc:
+        raise TelegramDeliveryQueueValidationError(
+            "full_matrix_test_campaign_id_invalid"
+        ) from exc
+    prefix = f"{FULL_MATRIX_TELEGRAM_TEST_RUN_ID_PREFIX}{normalized_campaign}:"
+    if not run.startswith(prefix):
+        raise TelegramDeliveryQueueValidationError("full_matrix_test_run_campaign_mismatch")
+    suffix = run[len(prefix) :]
+    scenario, separator, nonce = suffix.rpartition(":")
+    if (
+        not separator
+        or _FULL_MATRIX_TELEGRAM_TEST_SCENARIO_RE.fullmatch(scenario) is None
+        or _FULL_MATRIX_TELEGRAM_TEST_NONCE_RE.fullmatch(nonce) is None
+        or build_full_matrix_telegram_test_run_id(
+            campaign_id=normalized_campaign,
+            scenario_id=scenario,
+            nonce=nonce,
+        ) != run
+    ):
+        raise TelegramDeliveryQueueValidationError("full_matrix_test_run_id_invalid")
+    return normalized_scope, normalized_campaign, run
+
+
+def telegram_delivery_claim_scope_filters(
+    *,
+    claim_scope: str,
+    full_matrix_campaign_id: str | None = None,
+    full_matrix_run_id: str | None = None,
+) -> tuple[Any, ...]:
+    """Return the durable row predicate for a claim/recovery/reconcile lane.
+
+    This is deliberately shared by each background path that can alter a job;
+    filtering only the primary claimant would leave an ambiguity or recovery
+    path able to consume a Full Matrix fixture.
+    """
+
+    normalized_scope, campaign_id, run_id = _validate_telegram_delivery_claim_scope(
+        claim_scope=claim_scope,
+        full_matrix_campaign_id=full_matrix_campaign_id,
+        full_matrix_run_id=full_matrix_run_id,
+    )
+    if normalized_scope == TELEGRAM_DELIVERY_CLAIM_SCOPE_OPERATIONAL:
+        return (
+            or_(
+                TelegramDeliveryJobRecord.run_id.is_(None),
+                ~TelegramDeliveryJobRecord.run_id.startswith(
+                    FULL_MATRIX_TELEGRAM_TEST_RUN_ID_PREFIX
+                ),
+            ),
+        )
+    if normalized_scope == TELEGRAM_DELIVERY_CLAIM_SCOPE_FULL_MATRIX:
+        return (
+            TelegramDeliveryJobRecord.campaign_id == campaign_id,
+            TelegramDeliveryJobRecord.run_id == run_id,
+        )
+    return ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1052,9 +1191,17 @@ async def claim_next_telegram_delivery_job(
     lease_seconds: float,
     allowed_destination_classes: set[TelegramDestinationClass] | None = None,
     maximum_effective_priority: int | None = None,
+    claim_scope: str = TELEGRAM_DELIVERY_CLAIM_SCOPE_ALL,
+    full_matrix_campaign_id: str | None = None,
+    full_matrix_run_id: str | None = None,
     now: datetime | None = None,
 ) -> TelegramDeliveryJobRecord | None:
     _require_foreign(current_server)
+    scope_filters = telegram_delivery_claim_scope_filters(
+        claim_scope=claim_scope,
+        full_matrix_campaign_id=full_matrix_campaign_id,
+        full_matrix_run_id=full_matrix_run_id,
+    )
     lane_identity = str(bot_identity or "").strip()
     if lane_identity not in SUPPORTED_TELEGRAM_BOT_IDENTITIES:
         raise TelegramDeliveryQueueValidationError("telegram_bot_identity_not_allowlisted")
@@ -1252,6 +1399,7 @@ async def claim_next_telegram_delivery_job(
                 "maximum_effective_priority_invalid"
             )
         claim_filters.append(effective_priority <= normalized_maximum_priority)
+    claim_filters.extend(scope_filters)
     stmt = (
         select(TelegramDeliveryJobRecord)
         .where(*claim_filters)
@@ -1926,25 +2074,35 @@ async def recover_expired_telegram_delivery_leases(
     *,
     current_server: str,
     max_rows: int,
+    claim_scope: str = TELEGRAM_DELIVERY_CLAIM_SCOPE_ALL,
+    full_matrix_campaign_id: str | None = None,
+    full_matrix_run_id: str | None = None,
     now: datetime | None = None,
 ) -> TelegramDeliveryLeaseRecoveryReport:
     _require_foreign(current_server)
+    scope_filters = telegram_delivery_claim_scope_filters(
+        claim_scope=claim_scope,
+        full_matrix_campaign_id=full_matrix_campaign_id,
+        full_matrix_run_id=full_matrix_run_id,
+    )
     current_time = await _transition_time(db, now)
+    recovery_filters: list[Any] = [
+        TelegramDeliveryJobRecord.state == TelegramDeliveryState.LEASED,
+        TelegramDeliveryJobRecord.lease_until.is_not(None),
+        TelegramDeliveryJobRecord.lease_until <= current_time,
+        ~exists(
+            select(TelegramDeliveryProviderOutcomeRecord.id).where(
+                TelegramDeliveryProviderOutcomeRecord.job_id
+                == TelegramDeliveryJobRecord.id,
+                TelegramDeliveryProviderOutcomeRecord.apply_state
+                == TELEGRAM_PROVIDER_OUTCOME_PENDING,
+            )
+        ),
+    ]
+    recovery_filters.extend(scope_filters)
     stmt = (
         select(TelegramDeliveryJobRecord)
-        .where(
-            TelegramDeliveryJobRecord.state == TelegramDeliveryState.LEASED,
-            TelegramDeliveryJobRecord.lease_until.is_not(None),
-            TelegramDeliveryJobRecord.lease_until <= current_time,
-            ~exists(
-                select(TelegramDeliveryProviderOutcomeRecord.id).where(
-                    TelegramDeliveryProviderOutcomeRecord.job_id
-                    == TelegramDeliveryJobRecord.id,
-                    TelegramDeliveryProviderOutcomeRecord.apply_state
-                    == TELEGRAM_PROVIDER_OUTCOME_PENDING,
-                )
-            ),
-        )
+        .where(*recovery_filters)
         .order_by(TelegramDeliveryJobRecord.lease_until.asc(), TelegramDeliveryJobRecord.id.asc())
         .with_for_update(skip_locked=True)
         .limit(max(1, int(max_rows)))

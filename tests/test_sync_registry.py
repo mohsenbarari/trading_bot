@@ -44,7 +44,7 @@ class SyncRegistryTests(unittest.TestCase):
             with self.subTest(table_name=table_name):
                 self.assertEqual(get_sync_registry_entry(table_name).policy, SyncPolicy.NO_SYNC)
 
-    def test_runtime_session_tables_are_no_sync(self):
+    def test_runtime_session_tables_are_private_webapp_replica_no_sync(self):
         for table_name in {
             "user_sessions",
             "session_login_requests",
@@ -54,7 +54,7 @@ class SyncRegistryTests(unittest.TestCase):
             with self.subTest(table_name=table_name):
                 entry = get_sync_registry_entry(table_name)
                 self.assertEqual(entry.policy, SyncPolicy.NO_SYNC)
-                self.assertIn("local", entry.authority)
+                self.assertIn("private WebApp", entry.authority)
 
     def test_telegram_execution_tables_are_foreign_local_no_sync(self):
         for table_name in {

@@ -15,6 +15,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
+from core.dr_effect_policy import effect_epoch_decision
 from core.db import (
     AsyncSessionLocal,
     DrProjectionSessionLocal,
@@ -271,6 +272,13 @@ async def claim_next_effect() -> str | None:
                 )
             ).scalars().all()
             for row in stale:
+                decision = effect_epoch_decision(
+                    effect_writer_epoch=row.writer_epoch,
+                    current_writer_epoch=snapshot.writer_epoch,
+                    status=str(row.status),
+                )
+                if decision != "cancel_stale_epoch":
+                    raise DrEffectError("stale effect selection violated Writer-term policy")
                 row.status = "cancelled_stale_epoch"
                 row.last_error_code = "writer_epoch_changed"
 
@@ -289,6 +297,15 @@ async def claim_next_effect() -> str | None:
             if effect is None:
                 await session.commit()
                 return None
+            if (
+                effect_epoch_decision(
+                    effect_writer_epoch=effect.writer_epoch,
+                    current_writer_epoch=snapshot.writer_epoch,
+                    status=str(effect.status),
+                )
+                != "claim_current_epoch"
+            ):
+                raise DrEffectError("effect claim violated Writer-term policy")
             effect.status = "inflight"
             effect.attempt_count = int(effect.attempt_count or 0) + 1
             effect.claimed_by = str(uuid4())

@@ -12,7 +12,8 @@ import secrets
 from typing import Any, Protocol
 from uuid import UUID
 
-from core.dr_event_protocol import canonical_json_bytes
+from core.canonical_json import canonical_json_bytes
+from core.dr_failover_recovery_policy import expired_plan_recovery_decision
 from core.human_approval import approval_subject, load_human_approval_policy, verify_human_approval
 from core.runtime_sites import SITE_WEBAPP_FI, SITE_WEBAPP_IR
 from core.secure_file_io import append_hash_chained_jsonl, read_secure_text, verify_hash_chained_jsonl
@@ -59,7 +60,7 @@ class FailoverPlan:
     target_ip: str
     classification: dict[str, Any]
     rpo_policy: dict[str, Any]
-    readiness_hash: str
+    readiness_commitment: str
     command_manifest_hash: str
     approver_policy_hash: str
     approvals: tuple[dict[str, Any], ...]
@@ -93,12 +94,54 @@ class OperationLedger(Protocol):
     async def finalize(self, plan: FailoverPlan, *, outcome: str, evidence_hash: str) -> dict[str, Any]: ...
 
 
+def failover_readiness_commitment(
+    *,
+    operation_id: str,
+    operation_nonce: str,
+    action: str,
+    source_site: str,
+    target_site: str,
+    expected_epoch: int,
+    target_epoch: int,
+    release_sha: str,
+    domain: str,
+    record: str,
+    command_manifest_hash: str,
+) -> str:
+    """Commit static readiness inputs before an unpredictable source tail.
+
+    The evidence hash is deliberately not pre-approved: target readiness is
+    issued after source fencing, contains a fresh tail and timestamp, and is
+    therefore impossible to know when the human action receipt is created.
+    """
+
+    return hashlib.sha256(
+        canonical_json_bytes(
+            {
+                "schema": "three-site-failover-readiness-commitment-v1",
+                "operation_id": operation_id,
+                "operation_nonce": operation_nonce,
+                "action": action,
+                "source_site": source_site,
+                "target_site": target_site,
+                "expected_epoch": expected_epoch,
+                "target_epoch": target_epoch,
+                "release_sha": release_sha,
+                "domain": domain,
+                "record": record,
+                "command_manifest_hash": command_manifest_hash,
+            }
+        )
+    ).hexdigest()
+
+
 def parse_plan(payload: Any, *, require_approval: bool = True) -> FailoverPlan:
     expected = {
         "schema", "operation_id", "operation_nonce", "generated_at", "expires_at",
         "action", "source_site", "target_site",
         "expected_epoch", "target_epoch", "release_sha", "domain", "record",
-        "expected_current_ip", "target_ip", "classification", "rpo_policy", "readiness_hash",
+        "expected_current_ip", "target_ip", "classification", "rpo_policy",
+        "readiness_commitment",
         "command_manifest_hash", "approver_policy_hash", "approvals",
     }
     if not isinstance(payload, dict) or set(payload) != expected or payload["schema"] != ORCHESTRATION_SCHEMA:
@@ -182,15 +225,31 @@ def parse_plan(payload: Any, *, require_approval: bool = True) -> FailoverPlan:
         raise DrOrchestrationError("RPO policy is invalid")
     if max_unreplicated != 0 or reason is not None or ticket is not None:
         raise DrOrchestrationError("zero-loss RPO policy cannot authorize residual loss")
-    readiness_hash = str(payload["readiness_hash"])
-    if not re.fullmatch(r"[0-9a-f]{64}", readiness_hash):
-        raise DrOrchestrationError("readiness evidence hash is malformed")
     command_manifest_hash = str(payload["command_manifest_hash"])
     if not re.fullmatch(r"[0-9a-f]{64}", command_manifest_hash):
         raise DrOrchestrationError("command manifest hash is malformed")
     approver_policy_hash = str(payload["approver_policy_hash"])
     if not re.fullmatch(r"[0-9a-f]{64}", approver_policy_hash):
         raise DrOrchestrationError("approver policy hash is malformed")
+    readiness_commitment = str(payload["readiness_commitment"])
+    if (
+        not re.fullmatch(r"[0-9a-f]{64}", readiness_commitment)
+        or readiness_commitment
+        != failover_readiness_commitment(
+            operation_id=operation_id,
+            operation_nonce=operation_nonce,
+            action=action,
+            source_site=source,
+            target_site=target,
+            expected_epoch=expected_epoch,
+            target_epoch=target_epoch,
+            release_sha=release_sha,
+            domain=str(payload["domain"]),
+            record=str(payload["record"]),
+            command_manifest_hash=command_manifest_hash,
+        )
+    ):
+        raise DrOrchestrationError("readiness commitment is malformed or differs")
     approvals = payload["approvals"]
     expected_approval_count = 1 if require_approval else 0
     if not isinstance(approvals, list) or len(approvals) != expected_approval_count:
@@ -216,7 +275,7 @@ def parse_plan(payload: Any, *, require_approval: bool = True) -> FailoverPlan:
         target_ip=target_ip,
         classification=dict(classification),
         rpo_policy=dict(rpo_policy),
-        readiness_hash=readiness_hash,
+        readiness_commitment=readiness_commitment,
         command_manifest_hash=command_manifest_hash,
         approver_policy_hash=approver_policy_hash,
         approvals=tuple(dict(item) for item in approvals),
@@ -256,7 +315,7 @@ def failover_approval_subject(plan: FailoverPlan) -> dict[str, Any]:
             "target_site": plan.target_site,
             "expected_epoch": plan.expected_epoch,
             "target_epoch": plan.target_epoch,
-            "readiness_hash": plan.readiness_hash,
+            "readiness_commitment": plan.readiness_commitment,
             "command_manifest_hash": plan.command_manifest_hash,
         },
     )
@@ -286,6 +345,7 @@ def verify_human_failover_approval(
     *,
     now: datetime | None = None,
     require_fresh: bool = True,
+    witness_relay_public_key: str | None = None,
 ) -> None:
     try:
         policy = load_human_approval_policy(policy_payload)
@@ -303,6 +363,7 @@ def verify_human_failover_approval(
             expected_subject=subject,
             now=now,
             require_fresh=require_fresh,
+            witness_relay_public_key=witness_relay_public_key,
         )
     except Exception as exc:
         raise DrOrchestrationError("failover human approval is invalid") from exc
@@ -595,12 +656,15 @@ async def _finish_expired_operation(
     started: set[str] | None = None,
 ) -> dict[str, Any]:
     """Stop an expired saga without permitting another forward mutation."""
-    completed_steps = tuple(step for step in STEPS[:-1] if step in completed)
-    ambiguous_started = set(started or ()) - set(completed)
-    mutating_steps = (
-        set(completed_steps) | ambiguous_started
-    ) - {"classification_verified"}
-    if mutating_steps:
+    recovery = expired_plan_recovery_decision(
+        completed=completed,
+        started=started or (),
+    )
+    if recovery["decision"] == "fail_closed_unknown_step":
+        raise DrOrchestrationError("expired saga contains an unknown forward step")
+    completed_steps = tuple(recovery["completed_steps"])
+    ambiguous_started = set(recovery["ambiguous_started_steps"])
+    if recovery["decision"] == "rollback_to_safe_fenced":
         result = await _rollback_after_failure(
             plan,
             adapter=adapter,
@@ -652,7 +716,20 @@ async def run_orchestration(
     adapter: OrchestrationAdapter,
     ledger: OperationLedger,
     journal_path: Path,
+    pause_after_step: str | None = None,
 ) -> dict[str, Any]:
+    """Run or resume one closed failover saga.
+
+    ``pause_after_step`` is intentionally a single internal, non-mutating
+    cutpoint used by the dedicated-host power-loss drill.  It permits a
+    controller to durably stop after the source has both been fenced and had
+    its accepted connections drained, but before target readiness/term
+    acquisition.  It is not a generic callback or arbitrary-step facility;
+    completion still requires a later invocation with the same plan/journal.
+    """
+
+    if pause_after_step not in {None, "source_connections_drained"}:
+        raise DrOrchestrationError("orchestration pause cutpoint is invalid")
     records = verify_hash_chained_jsonl(journal_path, label="failover journal") if journal_path.exists() else []
     operation_records = [record for record in records if record.get("operation_id") == plan.operation_id]
     freshness_error: DrOrchestrationError | None = None
@@ -726,6 +803,20 @@ async def run_orchestration(
             source_boundary_records[-1].get("source_tail_boundary"),
             plan=plan,
         )
+    target_readiness_evidence: dict[str, Any] | None = None
+    target_readiness_records = [
+        record
+        for record in operation_records
+        if record.get("event") == "dr.orchestration.step_completed"
+        and record.get("step") == "target_ready"
+    ]
+    if target_readiness_records:
+        retained = target_readiness_records[-1].get("target_readiness_evidence")
+        if not isinstance(retained, dict):
+            raise DrOrchestrationError(
+                "completed target readiness has no retained typed evidence"
+            )
+        target_readiness_evidence = dict(retained)
     completion_records = [
         record
         for record in operation_records
@@ -853,11 +944,20 @@ async def run_orchestration(
         )
         started.add(step)
         try:
-            raw_result = (
-                await method(plan, source_tail_boundary=source_tail_boundary)
-                if step == "target_ready"
-                else await method(plan)
-            )
+            if step == "target_ready":
+                raw_result = await method(
+                    plan,
+                    source_tail_boundary=source_tail_boundary,
+                )
+            elif step == "target_term_acquired" and hasattr(
+                adapter, "target_term_acquired_with_readiness"
+            ):
+                raw_result = await adapter.target_term_acquired_with_readiness(
+                    plan,
+                    target_readiness=target_readiness_evidence,
+                )
+            else:
+                raw_result = await method(plan)
             result = _validate_step_result(
                 step,
                 raw_result,
@@ -896,12 +996,14 @@ async def run_orchestration(
             )
             record_fields["source_tail_boundary"] = source_tail_boundary
         if step == "target_ready":
+            target_readiness_evidence = dict(result)
             record_fields.update(
                 source_tail_boundary_hash=result["source_tail_boundary_hash"],
                 target_applied_sequence=result["target_applied_sequence"],
                 target_applied_through_boundary=result[
                     "target_applied_through_boundary"
                 ],
+                target_readiness_evidence=target_readiness_evidence,
             )
         _append_operation_record(
             journal_path,
@@ -912,6 +1014,20 @@ async def run_orchestration(
             **record_fields,
         )
         completed.add(step)
+        if step == pause_after_step:
+            _append_operation_record(
+                journal_path,
+                plan,
+                event="dr.orchestration.paused",
+                step=step,
+                reason="dedicated_power_loss_cutpoint",
+            )
+            return {
+                "status": "paused",
+                "operation_id": plan.operation_id,
+                "plan_hash": plan.plan_hash,
+                "paused_after_step": step,
+            }
     try:
         validate_plan_freshness(plan)
     except DrOrchestrationError:

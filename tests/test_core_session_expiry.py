@@ -38,10 +38,13 @@ class CoreSessionExpiryTests(unittest.IsolatedAsyncioTestCase):
     async def test_expire_stale_sessions_returns_zero_when_nothing_matches(self):
         session = AsyncMock()
         session.execute = AsyncMock(return_value=_ExecuteResult([]))
-        with patch.object(session_expiry, 'AsyncSessionLocal', return_value=_AsyncSessionContext(session)):
+        with patch.object(session_expiry, 'assert_background_job_authority') as authorize, patch.object(
+            session_expiry, 'AsyncSessionLocal', return_value=_AsyncSessionContext(session)
+        ):
             result = await session_expiry.expire_stale_sessions()
 
         self.assertEqual(result, 0)
+        authorize.assert_called_once_with(session_expiry.JOB_SESSION_EXPIRY)
         session.commit.assert_not_awaited()
 
     async def test_expire_stale_sessions_deactivates_and_promotes(self):
@@ -50,7 +53,9 @@ class CoreSessionExpiryTests(unittest.IsolatedAsyncioTestCase):
         session = AsyncMock()
         session.execute = AsyncMock(return_value=_ExecuteResult([primary, secondary]))
 
-        with patch.object(session_expiry, 'AsyncSessionLocal', return_value=_AsyncSessionContext(session)), patch(
+        with patch.object(session_expiry, 'assert_background_job_authority') as authorize, patch.object(
+            session_expiry, 'AsyncSessionLocal', return_value=_AsyncSessionContext(session)
+        ), patch(
             'core.session_expiry.deactivate_session', AsyncMock()
         ) as deactivate_session, patch(
             'core.session_expiry.promote_next_primary', AsyncMock()
@@ -58,6 +63,7 @@ class CoreSessionExpiryTests(unittest.IsolatedAsyncioTestCase):
             result = await session_expiry.expire_stale_sessions()
 
         self.assertEqual(result, 2)
+        authorize.assert_called_once_with(session_expiry.JOB_SESSION_EXPIRY)
         self.assertEqual(deactivate_session.await_count, 2)
         promote_next_primary.assert_awaited_once_with(session, 1)
         session.commit.assert_awaited_once()

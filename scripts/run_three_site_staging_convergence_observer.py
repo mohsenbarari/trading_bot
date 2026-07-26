@@ -47,12 +47,11 @@ from scripts.run_three_site_sync_timing_observer import (
     SITE_SERVICE,
     _run_json,
     _secure_regular_file,
-    _ssh_base,
 )
 from scripts.verify_three_site_staging_inventory import verify_inventory
 
 
-CONFIG_SCHEMA = "three-site-staging-convergence-observer-config-v1"
+CONFIG_SCHEMA = "three-site-staging-convergence-observer-config-v2"
 EXPORT_SCHEMA = "three-site-staging-convergence-snapshot-export-v1"
 WEBAPP_IR = "webapp_ir"
 MAX_REMOTE_SNAPSHOT_BYTES = 16 * 1024 * 1024
@@ -138,21 +137,45 @@ def _validate_sites(value: Any, *, inventory: dict[str, Any]) -> dict[str, dict[
     for site in SITES:
         item = value[site]
         if not isinstance(item, dict) or set(item) != {
-            "host", "port", "user", "repo_root", "compose_file", "env_file"
+            "transport", "host", "port", "user", "identity_file", "sudo",
+            "repo_root", "compose_file", "compose_sha256", "env_file",
+            "env_sha256",
         }:
             raise ConvergenceObserverError(f"{site} observer site config is invalid")
         if str(item["host"]) != inventory_hosts.get(site):
             raise ConvergenceObserverError(f"{site} observer host differs from signed inventory")
-        if type(item["port"]) is not int or not 1 <= item["port"] <= 65535:
-            raise ConvergenceObserverError(f"{site} observer SSH port is invalid")
-        if SAFE_NAME.fullmatch(str(item["user"])) is None:
-            raise ConvergenceObserverError(f"{site} observer SSH user is invalid")
+        expected_transport = "local" if site == "bot_fi" else "ssh"
+        if item["transport"] != expected_transport or type(item["sudo"]) is not bool:
+            raise ConvergenceObserverError(f"{site} observer transport is invalid")
+        if expected_transport == "ssh":
+            if (
+                type(item["port"]) is not int
+                or not 1 <= item["port"] <= 65535
+                or SAFE_NAME.fullmatch(str(item["user"])) is None
+                or not item["identity_file"]
+            ):
+                raise ConvergenceObserverError(f"{site} observer SSH access is invalid")
+            _secure_regular_file(
+                Path(str(item["identity_file"])),
+                private=True,
+                label=f"{site} SSH identity",
+            )
+        elif (
+            item["port"] != 0
+            or item["user"] != ""
+            or item["identity_file"] != ""
+            or item["sudo"] is not False
+        ):
+            raise ConvergenceObserverError("local Bot-FI observer has SSH access material")
         repo_root = str(item["repo_root"]).rstrip("/")
         for key in ("repo_root", "compose_file", "env_file"):
             if SAFE_PATH.fullmatch(str(item[key])) is None or ".." in Path(str(item[key])).parts:
                 raise ConvergenceObserverError(f"{site} observer remote path is unsafe")
-        if str(item["compose_file"]) != f"{repo_root}/deploy/staging/docker-compose.three-site.yml":
-            raise ConvergenceObserverError(f"{site} observer Compose path is not canonical")
+        if (
+            SHA256.fullmatch(str(item["compose_sha256"])) is None
+            or SHA256.fullmatch(str(item["env_sha256"])) is None
+        ):
+            raise ConvergenceObserverError(f"{site} observer role bundle hash is invalid")
         output[site] = dict(item)
     return output
 
@@ -179,13 +202,12 @@ def load_config(path: Path, *, campaign_id: str, release_sha: str, plan_sha256: 
     config["sites"] = _validate_sites(config["sites"], inventory=inventory)
     ssh = config["ssh"]
     if not isinstance(ssh, dict) or set(ssh) != {
-        "binary", "identity_file", "known_hosts_file", "connect_timeout_seconds"
+        "binary", "known_hosts_file", "connect_timeout_seconds"
     }:
         raise ConvergenceObserverError("convergence observer SSH config is invalid")
     if ssh["binary"] != "/usr/bin/ssh":
         raise ConvergenceObserverError("convergence observer requires the fixed OpenSSH client")
     _secure_regular_file(Path(ssh["binary"]), private=False, label="OpenSSH client")
-    _secure_regular_file(Path(ssh["identity_file"]), private=True, label="SSH identity")
     _secure_regular_file(Path(ssh["known_hosts_file"]), private=False, label="known_hosts")
     if type(ssh["connect_timeout_seconds"]) is not int or not 1 <= ssh["connect_timeout_seconds"] <= 30:
         raise ConvergenceObserverError("convergence observer SSH timeout is invalid")
@@ -210,13 +232,62 @@ def load_config(path: Path, *, campaign_id: str, release_sha: str, plan_sha256: 
     return config
 
 
+def _site_prefix(config: dict[str, Any], site: str) -> list[str]:
+    remote = config["sites"][site]
+    if remote["transport"] == "local":
+        return []
+    ssh = config["ssh"]
+    return [
+        ssh["binary"], "-F", "/dev/null", "-i", remote["identity_file"],
+        "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes",
+        "-o", "StrictHostKeyChecking=yes",
+        "-o", f"UserKnownHostsFile={ssh['known_hosts_file']}",
+        "-o", f"ConnectTimeout={ssh['connect_timeout_seconds']}",
+        "-p", str(remote["port"]), "--", f"{remote['user']}@{remote['host']}",
+    ]
+
+
+def _site_command(config: dict[str, Any], site: str, command: list[str]) -> list[str]:
+    remote = config["sites"][site]
+    privileged = ["sudo", "-n", "--", *command] if remote["sudo"] else command
+    return [*_site_prefix(config, site), *privileged]
+
+
+def _verify_role_bundle(config: dict[str, Any], site: str) -> None:
+    remote = config["sites"][site]
+    value = _run_json(
+        _site_command(
+            config,
+            site,
+            [
+                "/usr/bin/python3", "-I", "-B", "-c",
+                (
+                    "import hashlib,json,pathlib,sys;"
+                    "items={'compose':(pathlib.Path(sys.argv[1]),sys.argv[2]),"
+                    "'env':(pathlib.Path(sys.argv[3]),sys.argv[4])};"
+                    "actual={k:hashlib.sha256(p.read_bytes()).hexdigest() "
+                    "for k,(p,_e) in items.items()};"
+                    "expected={k:e for k,(_p,e) in items.items()};"
+                    "print(json.dumps({'status':'passed' if actual==expected else 'failed',"
+                    "'actual':actual},sort_keys=True))"
+                ),
+                str(remote["compose_file"]), str(remote["compose_sha256"]),
+                str(remote["env_file"]), str(remote["env_sha256"]),
+            ],
+        ),
+        timeout=30,
+        label=f"{site} role bundle binding",
+    )
+    if value.get("status") != "passed":
+        raise ConvergenceObserverError(f"{site} role bundle differs from observer config")
+
+
 def _remote_command(config: dict[str, Any], site: str, script: str, *arguments: str) -> list[str]:
     remote = config["sites"][site]
     service = (
         "webapp_ir_convergence_exporter" if site == WEBAPP_IR else SITE_SERVICE[site]
     )
-    return [
-        *_ssh_base(config, site),
+    return _site_command(config, site, [
         "/usr/bin/docker", "compose",
         "--project-directory", str(remote["repo_root"]),
         "-f", str(remote["compose_file"]),
@@ -224,7 +295,7 @@ def _remote_command(config: dict[str, Any], site: str, script: str, *arguments: 
         "--profile", SITE_PROFILE[site],
         "run", "--rm", "--no-deps", "-T", service,
         "python", script, *arguments,
-    ]
+    ])
 
 
 def _finland_snapshot(config: dict[str, Any], site: str) -> dict[str, Any]:
@@ -243,12 +314,15 @@ def _finland_snapshot(config: dict[str, Any], site: str) -> dict[str, Any]:
 
 def _put_descriptor(config: dict[str, Any], *, client, bucket: str, key: str) -> str:  # noqa: ANN001
     try:
-        post = client.generate_presigned_post(
-            bucket,
-            key,
-            Fields={"Content-Type": "application/json"},
-            Conditions=[{"Content-Type": "application/json"}],
+        url = client.generate_presigned_url(
+            "put_object",
+            Params={
+                "Bucket": bucket,
+                "Key": key,
+                "ContentType": "application/json",
+            },
             ExpiresIn=int(config["limits"]["url_ttl_seconds"]),
+            HttpMethod="PUT",
         )
     except Exception as exc:
         raise ConvergenceObserverError("cannot issue the short-lived WebApp-IR upload URL") from exc
@@ -258,11 +332,10 @@ def _put_descriptor(config: dict[str, Any], *, client, bucket: str, key: str) ->
         "release_sha": config["release_sha"],
         "plan_sha256": config["plan_sha256"],
         "upload": {
-            "url": post["url"],
-            "method": "POST",
-            "headers": {},
-            "form_fields": post["fields"],
-            "expected_status": [200, 201],
+            "url": url,
+            "method": "PUT",
+            "headers": {"Content-Type": "application/json"},
+            "expected_status": [200],
         },
     }
     return base64.urlsafe_b64encode(
@@ -339,6 +412,8 @@ def _write_snapshot(root: Path, site: str, snapshot: dict[str, Any]) -> Path:
 
 
 def observe(*, config: dict[str, Any], output: Path) -> dict[str, Any]:
+    for site in SITES:
+        _verify_role_bundle(config, site)
     values = object_storage_config(Path(str(config["object_storage"]["transport_config"])))
     credentials = (
         values["ARVAN_S3_ACCESS_KEY"], values["ARVAN_S3_SECRET_KEY"],

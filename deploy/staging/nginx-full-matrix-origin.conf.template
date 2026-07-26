@@ -1,0 +1,164 @@
+# Release-owned origin vhost for the isolated Full Matrix domain.
+#
+# This file is intentionally independent from every production vhost.  The
+# renderer accepts only app.gold-trading.ir and the two closed WebApp
+# loopback ports.  Dev-login is disabled at the proxy boundary so no
+# application secret is ever rendered into Nginx configuration.
+
+map $http_authorization $full_matrix_basic_realm {
+    default "Trading Bot Full Matrix";
+    ~*^Bearer[[:space:]]+ off;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name __FULL_MATRIX_HOST__;
+    access_log off;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name __FULL_MATRIX_HOST__;
+
+    ssl_certificate __TLS_CERTIFICATE__;
+    ssl_certificate_key __TLS_CERTIFICATE_KEY__;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    root __FRONTEND_ROOT__;
+    index index.html;
+    client_max_body_size 50M;
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "same-origin" always;
+    add_header X-Robots-Tag "noindex, nofollow, noarchive" always;
+
+    auth_basic "Trading Bot Full Matrix";
+    auth_basic_user_file __BASIC_AUTH_FILE__;
+
+    location = /_full_matrix_origin_health {
+        auth_basic off;
+        access_log off;
+        add_header Cache-Control "no-store, max-age=0" always;
+        return 204;
+    }
+
+    location = /metrics {
+        deny all;
+        return 404;
+    }
+
+    location = /api/auth/dev-login {
+        access_log off;
+        return 404;
+    }
+
+    location /api/realtime/ws {
+        proxy_pass http://127.0.0.1:__APP_PORT__;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_connect_timeout 15s;
+        proxy_send_timeout 7d;
+        proxy_read_timeout 7d;
+        proxy_buffering off;
+    }
+
+    # These endpoints have their own signed DR/service authentication.  Basic
+    # Auth would consume the Authorization header before those protocols can
+    # validate it.
+    location ~ ^/api/(sync|sessions/internal|trades/internal|offers/internal|auth/internal|invitations/internal|customers/internal)(/|$) {
+        auth_basic off;
+        proxy_pass http://127.0.0.1:__APP_PORT__;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        add_header Cache-Control "no-store, max-age=0" always;
+    }
+
+    location /api/ {
+        auth_basic $full_matrix_basic_realm;
+        auth_basic_user_file __BASIC_AUTH_FILE__;
+        proxy_pass http://127.0.0.1:__APP_PORT__;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        add_header Cache-Control "no-store, max-age=0" always;
+        add_header Pragma "no-cache" always;
+    }
+
+    location /uploads/ {
+        proxy_pass http://127.0.0.1:__APP_PORT__;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        add_header Cache-Control "private, no-store, max-age=0" always;
+    }
+
+    location /assets/ {
+        try_files $uri =404;
+        access_log off;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Static-Delivery "nginx-full-matrix" always;
+    }
+
+    location = /manifest.webmanifest {
+        try_files $uri =404;
+        default_type application/manifest+json;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+    }
+
+    location = /sw.js {
+        try_files $uri =404;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        add_header Service-Worker-Allowed "/" always;
+    }
+
+    location = /share-target-sw.js {
+        try_files $uri =404;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        add_header Service-Worker-Allowed "/" always;
+    }
+
+    location = /push-notifications-sw.js {
+        try_files $uri =404;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        add_header Service-Worker-Allowed "/" always;
+    }
+
+    location ~ ^/workbox-[A-Za-z0-9_-]+\.js$ {
+        try_files $uri =404;
+        access_log off;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+    }
+
+    location ~ ^/(register(?:/|$)|i/) {
+        access_log off;
+        try_files /index.html =404;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header Referrer-Policy "no-referrer" always;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header X-Static-Delivery "nginx-full-matrix" always;
+    }
+}

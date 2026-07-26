@@ -78,6 +78,7 @@ from core.writer_fencing import (
     writer_fence_scope,
 )
 from core.writer_witness_contract import witness_public_key_is_valid
+from core.full_matrix_capacity_guard import capacity_guard_reasons
 
 # -------------------------------------------------------
 # 📋 تنظیمات اولیه
@@ -706,6 +707,24 @@ async def enforce_webapp_writer_fence(request: Request, call_next):
             },
         )
         return _writer_fenced_response(reasons)
+    capacity_reasons = capacity_guard_reasons(
+        marker_file=settings.full_matrix_capacity_guard_file,
+        release_sha=settings.release_sha,
+        physical_site=RUNTIME_IDENTITY.physical_site,
+        three_site_enabled=settings.three_site_dr_enabled,
+    )
+    if capacity_reasons:
+        logger.warning(
+            "Blocked mutation while the Full Matrix capacity interlock is active",
+            extra={
+                "event": "full_matrix.capacity.writer_fenced",
+                "path": request.url.path,
+                "method": request.method,
+                "physical_site": RUNTIME_IDENTITY.physical_site,
+                "reasons": list(capacity_reasons),
+            },
+        )
+        return _writer_fenced_response(capacity_reasons)
     try:
         with writer_fence_scope(
             RUNTIME_IDENTITY,
@@ -798,18 +817,13 @@ async def _three_site_origin_readiness_reasons(
 ) -> tuple[str, ...]:
     if not settings.three_site_dr_enabled:
         return ()
-    reasons: list[str] = []
-    if not settings.dr_event_protocol_enabled or not settings.dr_event_protocol_strict:
-        reasons.append("dr_event_protocol_not_strict")
-    if settings.dark_standby_mode:
-        reasons.append("dark_standby_mode_active")
     try:
+        from core.dr_readiness_policy import data_plane_readiness_reasons
+
         unresolved_conflicts = int(
             await db.scalar(text("SELECT count(*) FROM dr_conflict_quarantine WHERE resolved_at IS NULL"))
             or 0
         )
-        if unresolved_conflicts:
-            reasons.append("dr_conflicts_unresolved")
         unapplied = int(
             await db.scalar(
                 text(
@@ -821,8 +835,6 @@ async def _three_site_origin_readiness_reasons(
             )
             or 0
         )
-        if unapplied:
-            reasons.append("dr_projection_checkpoint_incomplete")
         blocked_receipts = int(
             await db.scalar(
                 text(
@@ -833,8 +845,6 @@ async def _three_site_origin_readiness_reasons(
             )
             or 0
         )
-        if blocked_receipts:
-            reasons.append("dr_receipt_gap_or_quarantine")
         ambiguous_effects = int(
             await db.scalar(
                 text(
@@ -845,8 +855,7 @@ async def _three_site_origin_readiness_reasons(
             )
             or 0
         )
-        if ambiguous_effects:
-            reasons.append("dr_effects_ambiguous")
+        undelivered = 0
         if require_global_convergence:
             undelivered = int(
                 await db.scalar(
@@ -857,14 +866,14 @@ async def _three_site_origin_readiness_reasons(
                 )
                 or 0
             )
-            if undelivered:
-                reasons.append("dr_destination_delivery_incomplete")
         from core.dr_blob_plane import DrBlobPlaneError, assert_blob_promotion_ready
 
+        blob_parity_ready = True
         try:
             await assert_blob_promotion_ready(db)
         except DrBlobPlaneError:
-            reasons.append("dr_blob_parity_incomplete")
+            blob_parity_ready = False
+        manifest_current = not settings.origin_readiness_require_recovery_manifest
         if settings.origin_readiness_require_recovery_manifest:
             from core.dr_blob_plane import current_verified_recovery_manifest_exists
 
@@ -875,11 +884,24 @@ async def _three_site_origin_readiness_reasons(
                 release_sha=str(settings.release_sha or ""),
                 manifest_kind=manifest_kind,
             )
-            if not manifest_current:
-                reasons.append("dr_recovery_manifest_missing_or_stale")
+        return data_plane_readiness_reasons(
+            protocol_enabled=bool(settings.dr_event_protocol_enabled),
+            protocol_strict=bool(settings.dr_event_protocol_strict),
+            dark_standby=bool(settings.dark_standby_mode),
+            unresolved_conflicts=unresolved_conflicts,
+            unapplied_checkpoints=unapplied,
+            blocked_receipts=blocked_receipts,
+            ambiguous_effects=ambiguous_effects,
+            undelivered_deliveries=undelivered,
+            require_global_convergence=require_global_convergence,
+            blob_parity_ready=blob_parity_ready,
+            recovery_manifest_required=bool(
+                settings.origin_readiness_require_recovery_manifest
+            ),
+            recovery_manifest_current=manifest_current,
+        )
     except Exception:
-        reasons.append("dr_readiness_evidence_unavailable")
-    return tuple(dict.fromkeys(reasons))
+        return ("dr_readiness_evidence_unavailable",)
 
 
 def _origin_readiness_request_allowed(request: Request) -> bool:
@@ -974,15 +996,15 @@ async def _promotion_source_tail_reasons(
         ).mappings().one_or_none()
     except Exception:
         return ("source_tail_checkpoint_unavailable",), boundary, None
+    from core.dr_readiness_policy import source_tail_application_reasons
+
+    observation = dict(row) if row is not None else None
     applied_sequence = int(row["contiguous_applied_sequence"]) if row is not None else -1
-    if (
-        row is None
-        or applied_sequence < final_sequence
-        or row["receipt_status"] != "applied"
-        or row["transaction_hash"] != boundary["final_transaction_hash"]
-    ):
-        return ("source_tail_not_applied",), boundary, applied_sequence
-    return (), boundary, applied_sequence
+    reasons = source_tail_application_reasons(
+        boundary=boundary,
+        target_observation=observation,
+    )
+    return reasons, boundary, applied_sequence
 
 
 @app.get("/health/live")
@@ -1138,6 +1160,11 @@ async def get_health_promotion_ready(
     except (TypeError, ValueError):
         expected_epoch = 0
         reasons.append("expected_writer_epoch_invalid")
+    readiness_commitment = str(
+        request.query_params.get("readiness_commitment") or ""
+    ).lower()
+    if re.fullmatch(r"[0-9a-f]{64}", readiness_commitment) is None:
+        reasons.append("readiness_commitment_invalid")
 
     if not settings.three_site_dr_enabled:
         reasons.append("three_site_dr_disabled")
@@ -1278,6 +1305,7 @@ async def get_health_promotion_ready(
             "source_tail_boundary_hash": source_tail_boundary["boundary_hash"],
             "target_applied_sequence": target_applied_sequence,
             "target_applied_through_boundary": True,
+            "readiness_commitment": readiness_commitment,
         }
         evidence_hash = validate_readiness_evidence(
             evidence,
@@ -1297,6 +1325,7 @@ async def get_health_promotion_ready(
         "redis_ok": redis_ok,
         "readiness_evidence": evidence,
         "readiness_hash": evidence_hash,
+        "readiness_commitment": readiness_commitment or None,
         "source_tail_boundary": source_tail_boundary,
         "target_applied_sequence": target_applied_sequence,
         "reasons": reasons,

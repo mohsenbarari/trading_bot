@@ -63,10 +63,13 @@ from core.services.telegram_offer_channel_service import (
     build_offer_channel_reply_markup,
 )
 from core.services.telegram_delivery_queue_service import (
+    TELEGRAM_DELIVERY_CLAIM_SCOPE_FULL_MATRIX,
+    TELEGRAM_DELIVERY_CLAIM_SCOPE_OPERATIONAL,
     TelegramDeliveryDispatchDeferredError,
     TelegramDeliveryQueueValidationError,
     TelegramDeliveryQueueSurfaceError,
     apply_telegram_delivery_freshness_result as _apply_telegram_delivery_freshness_result,
+    build_full_matrix_telegram_test_run_id,
     claim_next_telegram_delivery_job,
     defer_unstarted_telegram_delivery_lease,
     enqueue_telegram_delivery_job,
@@ -1877,6 +1880,113 @@ class TelegramDeliveryQueuePostgresTests(unittest.IsolatedAsyncioTestCase):
                     lease_seconds=30,
                 )
             await db.rollback()
+
+    async def test_full_matrix_lane_is_invisible_to_operational_claims(self):
+        campaign_id = "11111111-1111-4111-8111-111111111111"
+        full_matrix_run_id = build_full_matrix_telegram_test_run_id(
+            campaign_id=campaign_id,
+            scenario_id="queue_publication_edit_callback_private",
+            nonce="claim-lane-20260726",
+        )
+        full_matrix = await self._enqueue(
+            "full-matrix-isolated",
+            campaign_id=campaign_id,
+            run_id=full_matrix_run_id,
+            destination="private:full-matrix-isolated",
+        )
+        operational = await self._enqueue(
+            "operational-visible",
+            campaign_id="market-notice-campaign",
+            run_id="market-notice-run",
+            destination="private:operational-visible",
+        )
+        now = utc_now()
+        async with self.Session() as db:
+            claimed_operational = await claim_next_telegram_delivery_job(
+                db,
+                current_server="foreign",
+                bot_identity="primary",
+                worker_id="operational-worker",
+                request_timeout_seconds=10,
+                lease_seconds=30,
+                claim_scope=TELEGRAM_DELIVERY_CLAIM_SCOPE_OPERATIONAL,
+                now=now,
+            )
+            await db.commit()
+        self.assertEqual(claimed_operational.id, operational.job.id)
+
+        async with self.Session() as db:
+            claimed_matrix = await claim_next_telegram_delivery_job(
+                db,
+                current_server="foreign",
+                bot_identity="primary",
+                worker_id="full-matrix-worker",
+                request_timeout_seconds=10,
+                lease_seconds=30,
+                claim_scope=TELEGRAM_DELIVERY_CLAIM_SCOPE_FULL_MATRIX,
+                full_matrix_campaign_id=campaign_id,
+                full_matrix_run_id=full_matrix_run_id,
+                now=now,
+            )
+            await db.commit()
+        self.assertEqual(claimed_matrix.id, full_matrix.job.id)
+
+    async def test_full_matrix_claim_requires_exact_campaign_run_binding(self):
+        async with self.Session() as db:
+            with self.assertRaisesRegex(
+                TelegramDeliveryQueueValidationError,
+                "full_matrix_test_run_campaign_mismatch",
+            ):
+                await claim_next_telegram_delivery_job(
+                    db,
+                    current_server="foreign",
+                    bot_identity="primary",
+                    worker_id="full-matrix-invalid-binding",
+                    request_timeout_seconds=10,
+                    lease_seconds=30,
+                    claim_scope=TELEGRAM_DELIVERY_CLAIM_SCOPE_FULL_MATRIX,
+                    full_matrix_campaign_id="11111111-1111-4111-8111-111111111111",
+                    full_matrix_run_id=(
+                        "full-matrix:22222222-2222-4222-8222-222222222222:"
+                        "queue_publication_edit_callback_private:claim-lane-20260726"
+                    ),
+                )
+            await db.rollback()
+
+    async def test_operational_reconciliation_cannot_consume_full_matrix_lane(self):
+        campaign_id = "11111111-1111-4111-8111-111111111111"
+        full_matrix_run_id = build_full_matrix_telegram_test_run_id(
+            campaign_id=campaign_id,
+            scenario_id="queue_publication_edit_callback_private",
+            nonce="reconcile-lane-20260726",
+        )
+        enqueued = await self._enqueue(
+            "full-matrix-reconcile-isolated",
+            campaign_id=campaign_id,
+            run_id=full_matrix_run_id,
+        )
+        now = utc_now()
+        async with self.Session() as db:
+            record = await db.get(TelegramDeliveryJobRecord, enqueued.job.id)
+            self.assertIsNotNone(record)
+            record.state = TelegramDeliveryState.PENDING_RECONCILE
+            record.updated_at = now
+            await db.commit()
+        async with self.Session() as db:
+            report = await reconcile_telegram_delivery_jobs(
+                db,
+                current_server="foreign",
+                freshness_validators={},
+                freshness_feedbacks={},
+                result_feedbacks={},
+                claim_scope=TELEGRAM_DELIVERY_CLAIM_SCOPE_OPERATIONAL,
+                now=now,
+            )
+            await db.commit()
+        self.assertEqual(report.inspected_count, 0)
+        async with self.Session() as db:
+            persisted = await db.get(TelegramDeliveryJobRecord, enqueued.job.id)
+        self.assertEqual(persisted.state, TelegramDeliveryState.PENDING_RECONCILE)
 
     async def test_editor_claim_lane_progresses_with_300_primary_and_100_editor_jobs(self):
         async with self.Session() as db:

@@ -93,13 +93,14 @@ class BackgroundJobAuthorityTests(unittest.TestCase):
         for job_name in {
             JOB_OFFER_EXPIRY,
             JOB_MARKET_SCHEDULE,
-            JOB_SESSION_EXPIRY,
             JOB_SYNC_WORKER,
         }:
             with self.subTest(job_name=job_name):
                 self.assertTrue(check_background_job_authority(job_name, server_mode="foreign").ok)
                 self.assertTrue(check_background_job_authority(job_name, server_mode="iran").ok)
 
+        self.assertFalse(check_background_job_authority(JOB_SESSION_EXPIRY, server_mode="foreign").ok)
+        self.assertTrue(check_background_job_authority(JOB_SESSION_EXPIRY, server_mode="iran").ok)
         self.assertTrue(check_background_job_authority(JOB_USER_ACCOUNT_STATUS, server_mode="iran").ok)
         self.assertTrue(check_background_job_authority(JOB_CONNECTIVITY_MONITOR, server_mode="iran").ok)
         self.assertTrue(check_background_job_authority(JOB_TRADE_WEBAPP_DELIVERY, server_mode="iran").ok)
@@ -136,15 +137,16 @@ class BackgroundJobAuthorityTests(unittest.TestCase):
                 self.assertEqual(entry.shared_authoritative_command, "expire_offers_authoritatively")
                 self.assertIn("offer_home_server", entry.authority_rule)
 
-    def test_local_runtime_jobs_remain_no_sync_or_internal(self):
+    def test_session_expiry_is_private_webapp_replication_not_local_runtime(self):
         entries = background_job_authority_entries()
         session_expiry = entries[JOB_SESSION_EXPIRY]
         connectivity = entries[JOB_CONNECTIVITY_MONITOR]
         sync_worker = entries[JOB_SYNC_WORKER]
 
-        self.assertTrue(session_expiry.local_runtime)
+        self.assertFalse(session_expiry.local_runtime)
+        self.assertEqual(session_expiry.allowed_servers, ("iran",))
         self.assertEqual(get_sync_registry_entry("user_sessions").policy, SyncPolicy.NO_SYNC)
-        self.assertIn("no-sync", session_expiry.sync_outbox_behavior)
+        self.assertIn("private WebApp-to-WebApp", session_expiry.sync_outbox_behavior)
 
         self.assertTrue(connectivity.local_runtime)
         self.assertEqual(connectivity.mutated_tables, ())
@@ -210,14 +212,14 @@ class BackgroundJobAuthorityTests(unittest.TestCase):
         self.assertFalse(decision.ok)
         self.assertEqual(decision.current_server, "foreign")
 
-    def test_webapp_standby_runs_only_local_runtime_jobs(self):
+    def test_webapp_standby_rejects_session_expiry_but_keeps_transport_workers(self):
         authoritative = check_background_job_authority(
             JOB_OFFER_EXPIRY,
             server_mode="iran",
             physical_site="webapp_ir",
             runtime_role="standby",
         )
-        local_session = check_background_job_authority(
+        standby_session = check_background_job_authority(
             JOB_SESSION_EXPIRY,
             server_mode="iran",
             physical_site="webapp_ir",
@@ -232,7 +234,8 @@ class BackgroundJobAuthorityTests(unittest.TestCase):
 
         self.assertFalse(authoritative.ok)
         self.assertEqual(authoritative.reason, "webapp_writer_not_active")
-        self.assertTrue(local_session.ok)
+        self.assertFalse(standby_session.ok)
+        self.assertEqual(standby_session.reason, "webapp_writer_not_active")
         self.assertTrue(local_sync.ok)
 
     def test_webapp_active_site_keeps_authoritative_jobs(self):

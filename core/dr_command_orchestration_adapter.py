@@ -109,12 +109,36 @@ class TypedOrchestrationAdapter:
             plan,
             source_tail_boundary=source_tail_boundary,
         )
-        if result.get("readiness_hash") != plan.readiness_hash:
-            raise DrOrchestrationError("target readiness hash differs from the approved plan")
+        if result.get("readiness_commitment") != plan.readiness_commitment:
+            raise DrOrchestrationError(
+                "target readiness commitment differs from the approved plan"
+            )
+        evidence_hash = str(result.get("readiness_evidence_hash") or "")
+        if len(evidence_hash) != 64 or any(char not in "0123456789abcdef" for char in evidence_hash):
+            raise DrOrchestrationError("target readiness lacks a fresh evidence hash")
         return result
 
     async def target_term_acquired(self, plan: FailoverPlan) -> dict[str, Any]:
         return await self.backend.target_term_acquired(plan)
+
+    async def target_term_acquired_with_readiness(
+        self,
+        plan: FailoverPlan,
+        *,
+        target_readiness: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Pass retained target readiness only to a backend that needs it.
+
+        The original typed backend keeps readiness on its target host.  A
+        pull-only WA-IR backend cannot rely on controller-side paths, so it
+        receives the already journaled, operation-bound evidence explicitly.
+        Older reviewed backends keep their existing closed method unchanged.
+        """
+
+        method = getattr(self.backend, "target_term_acquired_with_readiness", None)
+        if not callable(method):
+            return await self.backend.target_term_acquired(plan)
+        return await method(plan, target_readiness=target_readiness)
 
     async def source_connections_drained(self, plan: FailoverPlan) -> dict[str, Any]:
         return await self.backend.source_connections_drained(plan)

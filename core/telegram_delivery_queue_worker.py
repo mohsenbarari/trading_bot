@@ -33,6 +33,8 @@ from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.server_routing import current_server
 from core.services.telegram_delivery_queue_service import (
     SUPPORTED_TELEGRAM_BOT_IDENTITIES,
+    TELEGRAM_DELIVERY_CLAIM_SCOPE_FULL_MATRIX,
+    TELEGRAM_DELIVERY_CLAIM_SCOPE_OPERATIONAL,
     TELEGRAM_CHANNEL_EDITOR_BOT_IDENTITY,
     TELEGRAM_DELIVERY_QUEUE_WORKER_ID,
     TELEGRAM_PRIMARY_BOT_IDENTITY,
@@ -666,7 +668,12 @@ async def rehydrate_telegram_delivery_limiter_state(
     )
 
 
-async def _recover_expired_leases() -> int:
+async def _recover_expired_leases(
+    *,
+    claim_scope: str = TELEGRAM_DELIVERY_CLAIM_SCOPE_OPERATIONAL,
+    full_matrix_campaign_id: str | None = None,
+    full_matrix_run_id: str | None = None,
+) -> int:
     if _provider_outcome_persistence_barriers:
         return 0
     async with AsyncSessionLocal() as db:
@@ -674,6 +681,9 @@ async def _recover_expired_leases() -> int:
             db,
             current_server=current_server(),
             max_rows=_recover_limit(),
+            claim_scope=claim_scope,
+            full_matrix_campaign_id=full_matrix_campaign_id,
+            full_matrix_run_id=full_matrix_run_id,
         )
         if report.job_ids:
             await db.commit()
@@ -932,6 +942,9 @@ async def run_telegram_delivery_queue_cycle(
     recover_leases: bool = True,
     allowed_destination_classes: set[TelegramDestinationClass] | None = None,
     maximum_effective_priority: int | None = None,
+    claim_scope: str = TELEGRAM_DELIVERY_CLAIM_SCOPE_OPERATIONAL,
+    full_matrix_campaign_id: str | None = None,
+    full_matrix_run_id: str | None = None,
 ) -> TelegramDeliveryQueueCycleReport:
     """Run a bounded testable cycle without holding a DB transaction over HTTP."""
     assert_background_job_authority(JOB_TELEGRAM_DELIVERY_QUEUE)
@@ -978,7 +991,25 @@ async def run_telegram_delivery_queue_cycle(
     status_counts: dict[str, int] = {}
     stale_fence_count = 0
     processed_count = 0
-    recovered_count = await _recover_expired_leases() if recover_leases else 0
+    if (
+        claim_scope == TELEGRAM_DELIVERY_CLAIM_SCOPE_FULL_MATRIX
+        and recover_leases
+    ):
+        # A campaign fixture never asks the background recovery lane to alter
+        # unrelated work.  It either recovers its exact lane explicitly or
+        # executes a fresh job with recovery disabled.
+        raise TelegramDeliveryQueueImplementationIncompleteError(
+            "full_matrix_queue_cycle_requires_explicit_lane_recovery"
+        )
+    recovered_count = (
+        await _recover_expired_leases(
+            claim_scope=claim_scope,
+            full_matrix_campaign_id=full_matrix_campaign_id,
+            full_matrix_run_id=full_matrix_run_id,
+        )
+        if recover_leases
+        else 0
+    )
 
     if _role_provider_fact_blocked(lane_identity):
         return TelegramDeliveryQueueCycleReport(
@@ -1000,6 +1031,9 @@ async def run_telegram_delivery_queue_cycle(
                 lease_seconds=_lease_seconds(),
                 allowed_destination_classes=allowed_destination_classes,
                 maximum_effective_priority=maximum_effective_priority,
+                claim_scope=claim_scope,
+                full_matrix_campaign_id=full_matrix_campaign_id,
+                full_matrix_run_id=full_matrix_run_id,
             )
             if job is None:
                 await db.rollback()
@@ -1783,6 +1817,7 @@ async def telegram_delivery_reconciliation_loop(
                     ),
                 ),
                 max_rows=_recover_limit(),
+                claim_scope=TELEGRAM_DELIVERY_CLAIM_SCOPE_OPERATIONAL,
             )
             await db.commit()
         if report.unresolved_count or report.configuration_blocked_count:

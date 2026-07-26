@@ -17,7 +17,7 @@ from uuid import UUID
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-from core.dr_event_protocol import canonical_json_bytes
+from core.canonical_json import canonical_json_bytes
 from core.secure_file_io import read_secure_text
 
 

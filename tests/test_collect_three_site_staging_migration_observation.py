@@ -144,6 +144,21 @@ class MigrationObservationCollectorTests(unittest.TestCase):
     def _runner(*, wrong_release: bool = False):
         def run(arguments, **_kwargs):
             joined = " ".join(arguments)
+            if " config --format json" in f" {joined} ":
+                return json.dumps(
+                    {
+                        "services": {
+                            service: {
+                                "image": (
+                                    "nginx:1.27-alpine"
+                                    if service.endswith("_tls")
+                                    else f"trading_bot_three_site_staging:{RELEASE_SHA}"
+                                )
+                            }
+                            for service in ROLE_SERVICES["bot_fi"]
+                        }
+                    }
+                )
             if "psql" in arguments:
                 return json.dumps(
                     {"database": "bot", "user": "bot", "revision": "b986c7d8e0f1"}
@@ -160,6 +175,8 @@ class MigrationObservationCollectorTests(unittest.TestCase):
                 return ""
             if "settings.release_sha" in joined:
                 return "d" * 40 if wrong_release else RELEASE_SHA
+            if "urllib.request.urlopen" in joined:
+                return '200\n{"bot_username":"staging_bot"}'
             raise AssertionError(arguments)
 
         return run
@@ -191,7 +208,7 @@ class MigrationObservationCollectorTests(unittest.TestCase):
             all(
                 item["release_sha"] == RELEASE_SHA
                 for item in services
-                if not item["service"].endswith("_tls")
+                if not item["service"].endswith(("_tls", "_redis"))
             )
         )
 

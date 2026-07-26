@@ -22,6 +22,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 from core.dr_connectivity_classifier import classify_connectivity, load_connectivity_policy
 from core.dr_event_protocol import canonical_json_bytes
 from core.dr_failover_orchestrator import FailoverPlan, DrOrchestrationError, validate_plan_freshness
+from core.dr_failover_fault_policy import provider_mutation_recovery
 from core.secure_file_io import read_secure_text
 from core.writer_witness_auth import WitnessClientCredential
 from core.writer_witness_client import WriterWitnessClientConfig
@@ -317,22 +318,21 @@ class StagingTypedOperationBackend:
                 "failover plan differs from the signed staging topology"
             )
 
-    def preflight(self, plan: FailoverPlan) -> None:
-        self.validate_plan_scope(plan)
+    def _fresh_classification(self) -> dict[str, Any]:
         policy = load_connectivity_policy(self.config.connectivity_policy)
         classification = classify_connectivity(
             load_rounds(self.config.connectivity_evidence), policy=policy
         )
-        if any(
-            getattr(classification, key) != plan.classification[key]
-            for key in (
-                "mode", "confidence", "consecutive_rounds", "evidence_hash",
-                "campaign_id", "policy_hash",
-            )
-        ):
-            raise StagingOperationBackendError(
-                "fresh connectivity evidence differs from the signed failover plan"
-            )
+        return {
+            "mode": classification.mode,
+            "confidence": classification.confidence,
+            "consecutive_rounds": classification.consecutive_rounds,
+            "evidence_hash": classification.evidence_hash,
+            "campaign_id": classification.campaign_id,
+            "policy_hash": classification.policy_hash,
+        }
+
+    def _validate_static_credentials(self) -> None:
         load_token(self.config.arvan_token_file)
         readiness_key = read_secure_text(
             self.config.origin_readiness_key_file,
@@ -341,6 +341,34 @@ class StagingTypedOperationBackend:
         ).strip()
         if len(readiness_key.encode()) < 32:
             raise StagingOperationBackendError("origin readiness key is too short")
+
+    def preflight_static(self) -> dict[str, Any]:
+        """Validate local mutable credentials and fresh link evidence only.
+
+        This deliberately opens no SSH connection, invokes no Object-Storage
+        agent, and makes no provider request.  Full Matrix uses it before the
+        campaign starts to prove that a future JIT transition can be built
+        without minting a receipt or changing either Writer.
+        """
+
+        classification = self._fresh_classification()
+        self._validate_static_credentials()
+        return classification
+
+    def preflight(self, plan: FailoverPlan) -> None:
+        self.validate_plan_scope(plan)
+        classification = self._fresh_classification()
+        if any(
+            classification[key] != plan.classification[key]
+            for key in (
+                "mode", "confidence", "consecutive_rounds", "evidence_hash",
+                "campaign_id", "policy_hash",
+            )
+        ):
+            raise StagingOperationBackendError(
+                "fresh connectivity evidence differs from the signed failover plan"
+            )
+        self._validate_static_credentials()
 
     def _ssh(self, host: StagingHost, command: list[str], *, timeout: int = 300) -> dict[str, Any]:
         result = self._ssh_raw(host, command, timeout=timeout)
@@ -592,7 +620,13 @@ class StagingTypedOperationBackend:
             apply=True,
             confirmation=arvan_confirmation_phrase(plan.domain, plan.record, plan.target_ip),
         )
-        if result.get("after", {}).get("origin_ip") != plan.target_ip:
+        provider_decision = provider_mutation_recovery(
+            before_ip=str(result.get("before", {}).get("origin_ip") or ""),
+            target_ip=plan.target_ip,
+            put_response_observed=result.get("applied") is True,
+            readback_ip=str(result.get("after", {}).get("origin_ip") or ""),
+        )
+        if provider_decision != "completed_without_replay":
             raise StagingOperationBackendError("Arvan readback did not retain the target origin")
         append_audit_event(
             self.config.arvan_audit_log,
@@ -607,6 +641,7 @@ class StagingTypedOperationBackend:
             "status": "ok", "operation_id": plan.operation_id,
             "origin_ip": plan.target_ip, "domain": plan.domain, "record": plan.record,
             "provider_result_sha256": _result_hash(result),
+            "provider_recovery_decision": provider_decision,
         }
         return {**payload, "evidence_hash": _result_hash(payload)}
 

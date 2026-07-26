@@ -18,6 +18,8 @@ from core.config import settings
 from core.dark_standby import assert_not_dark_standby
 from core.db import DrProjectionSessionLocal, verify_three_site_database_role_bindings
 from core.dr_data_policy import WEBAPP_DR_REPLICA_TABLES, WEBAPP_SITES
+from core.dr_projection_policy import projection_version_decision
+from core.dr_transaction_policy import decide_transaction_group
 from core.runtime_identity import resolve_runtime_identity
 from core.runtime_sites import SITE_WEBAPP_FI, SITE_WEBAPP_IR
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
@@ -67,30 +69,6 @@ def projection_mode(*, table_name: str, origin_site: str, destination_site: str)
     ):
         return "generic"
     return "noop"
-
-
-def projection_version_decision(
-    *,
-    stored_epoch: int | None,
-    stored_sequence: int | None,
-    stored_origin_site: str | None,
-    incoming_epoch: int,
-    incoming_sequence: int,
-    incoming_origin_site: str,
-) -> str:
-    """Apply a newer authority term, suppress stale terms, quarantine split brain."""
-
-    if stored_epoch is None:
-        return "apply"
-    if incoming_epoch < stored_epoch:
-        return "stale"
-    if incoming_epoch > stored_epoch:
-        return "apply"
-    if stored_origin_site != incoming_origin_site:
-        return "conflict"
-    if incoming_sequence <= int(stored_sequence or 0):
-        return "stale"
-    return "apply"
 
 
 async def _locked_projection_version(session, event: DrEvent, destination_site: str):  # noqa: ANN001
@@ -184,7 +162,6 @@ class _ProjectionRejected(RuntimeError):
 
 async def _load_complete_transaction_group(session, checkpoint, destination_site: str):  # noqa: ANN001
     from core.dr_delivery_worker import event_envelope
-    from core.dr_event_protocol import destination_transaction_hash
 
     next_sequence = int(checkpoint.contiguous_applied_sequence) + 1
     first_receipt = await session.scalar(
@@ -207,9 +184,6 @@ async def _load_complete_transaction_group(session, checkpoint, destination_site
         first_stream = dict(first_event.destination_streams[destination_site])
     except (KeyError, TypeError, ValueError) as exc:
         raise _ProjectionRejected("destination_transaction_metadata_missing") from exc
-    if int(first_stream.get("transaction_position") or 0) != 1:
-        raise _ProjectionRejected("transaction_group_does_not_start_at_position_one")
-    expected_size = int(first_stream.get("transaction_size") or 0)
     transaction_id = str(first_stream.get("transaction_id") or "")
     rows = (
         await session.execute(
@@ -225,32 +199,36 @@ async def _load_complete_transaction_group(session, checkpoint, destination_site
             .with_for_update(of=DrEventReceipt)
         )
     ).all()
-    if len(rows) < expected_size:
-        raise _ProjectionDeferred()
-    if len(rows) != expected_size:
-        raise _ProjectionRejected("transaction_group_cardinality_mismatch")
     try:
-        rows = sorted(
-            rows,
-            key=lambda row: int(row[1].destination_streams[destination_site]["transaction_position"]),
-        )
-        streams = [event.destination_streams[destination_site] for _receipt, event in rows]
+        observations = []
+        by_event_id = {}
+        for receipt, event in rows:
+            stream = event.destination_streams[destination_site]
+            envelope = event_envelope(event)
+            observations.append(
+                {
+                    "event_id": event.event_id,
+                    "sequence": int(receipt.producer_sequence),
+                    "transaction_id": stream["transaction_id"],
+                    "transaction_position": stream["transaction_position"],
+                    "transaction_size": stream["transaction_size"],
+                    "transaction_hash": stream["transaction_hash"],
+                    "envelope": envelope,
+                }
+            )
+            by_event_id[event.event_id] = (receipt, event)
     except (KeyError, TypeError, ValueError) as exc:
         raise _ProjectionRejected("destination_transaction_metadata_missing") from exc
-    positions = [int(stream["transaction_position"]) for stream in streams]
-    sequences = [int(receipt.producer_sequence) for receipt, _event in rows]
-    signed_sequences = [int(stream["sequence"]) for stream in streams]
-    if positions != list(range(1, expected_size + 1)) or sequences != list(
-        range(next_sequence, next_sequence + expected_size)
-    ) or signed_sequences != sequences:
-        raise _ProjectionRejected("transaction_group_order_mismatch")
-    envelopes = [event_envelope(event) for _receipt, event in rows]
-    group_hash = destination_transaction_hash(
-        envelopes, destination_site=destination_site
+    decision = decide_transaction_group(
+        observations,
+        destination_site=destination_site,
+        next_sequence=next_sequence,
     )
-    if any(stream["transaction_hash"] != group_hash for stream in streams):
-        raise _ProjectionRejected("transaction_group_hash_mismatch")
-    return rows
+    if decision.action == "deferred":
+        raise _ProjectionDeferred()
+    if decision.action != "ready":
+        raise _ProjectionRejected(str(decision.reason or "transaction_group_rejected"))
+    return [by_event_id[event_id] for event_id in decision.ordered_event_ids]
 
 
 async def _apply_projection_event(session, event: DrEvent, destination_site: str) -> str:

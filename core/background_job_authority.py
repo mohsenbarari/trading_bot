@@ -161,11 +161,19 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
     JOB_SESSION_EXPIRY: BackgroundJobAuthorityEntry(
         job_name=JOB_SESSION_EXPIRY,
         mutated_tables=("user_sessions",),
-        allowed_servers=(SERVER_FOREIGN, SERVER_IRAN),
-        authority_rule="local auth/runtime surface only; sessions are not product data and must not be cross-server merged",
-        outage_behavior="continue local stale-session cleanup independently; peer outage does not change session authority",
-        sync_outbox_behavior="no-sync local runtime table; do not create cross-server outbox items for session expiry",
-        local_runtime=True,
+        allowed_servers=(SERVER_IRAN,),
+        authority_rule=(
+            "active WebApp Writer only; session rows are private WebApp FI/IR "
+            "replica data and must never be projected to Bot-FI"
+        ),
+        outage_behavior=(
+            "the Witness-leased WA-IR Writer may continue expiry during a "
+            "national cutoff; fenced WA-FI never performs a concurrent expiry pass"
+        ),
+        sync_outbox_behavior=(
+            "emit private WebApp-to-WebApp DR events only; never create a Bot-FI "
+            "session projection or a local-only competing mutation"
+        ),
     ),
     JOB_USER_ACCOUNT_STATUS: BackgroundJobAuthorityEntry(
         job_name=JOB_USER_ACCOUNT_STATUS,
@@ -181,9 +189,9 @@ BACKGROUND_JOB_AUTHORITY: dict[str, BackgroundJobAuthorityEntry] = {
         ),
         sync_outbox_behavior=(
             "users and notifications are sync tables and must flow through durable outbox/change_log; "
-            "user_sessions remains no-sync local runtime"
+            "user_sessions flows only through the private WebApp FI/IR replica stream"
         ),
-        side_effects=("user/accountant notifications", "local session revocation", "optional Telegram notification via foreign-safe gateway path"),
+        side_effects=("user/accountant notifications", "replicated session revocation", "optional Telegram notification via foreign-safe gateway path"),
     ),
     JOB_CONNECTIVITY_MONITOR: BackgroundJobAuthorityEntry(
         job_name=JOB_CONNECTIVITY_MONITOR,

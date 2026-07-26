@@ -35,11 +35,13 @@ from models.telegram_delivery_reconciliation_evidence import (
 )
 
 from .telegram_delivery_queue_service import (
+    TELEGRAM_DELIVERY_CLAIM_SCOPE_ALL,
     TelegramDeliveryQueueValidationError,
     _enum_value,
     _record_to_contract,
     _require_foreign,
     _transition_time,
+    telegram_delivery_claim_scope_filters,
 )
 
 
@@ -330,9 +332,17 @@ async def reconcile_telegram_delivery_jobs(
     ambiguous_observer: TelegramAmbiguousObserver = default_telegram_ambiguous_observer,
     ambiguity_grace_seconds: float = 30.0,
     max_rows: int = 100,
+    claim_scope: str = TELEGRAM_DELIVERY_CLAIM_SCOPE_ALL,
+    full_matrix_campaign_id: str | None = None,
+    full_matrix_run_id: str | None = None,
     now: datetime | None = None,
 ) -> TelegramDeliveryReconciliationReport:
     _require_foreign(current_server)
+    scope_filters = telegram_delivery_claim_scope_filters(
+        claim_scope=claim_scope,
+        full_matrix_campaign_id=full_matrix_campaign_id,
+        full_matrix_run_id=full_matrix_run_id,
+    )
     current_time = await _transition_time(db, now)
     ambiguous_cutoff = current_time - timedelta(
         seconds=max(1.0, float(ambiguity_grace_seconds))
@@ -358,6 +368,7 @@ async def reconcile_telegram_delivery_jobs(
                         == TELEGRAM_PROVIDER_OUTCOME_PENDING,
                     )
                     .exists(),
+                    *scope_filters,
                 )
                 .order_by(TelegramDeliveryJobRecord.updated_at.asc(), TelegramDeliveryJobRecord.id.asc())
                 .with_for_update(skip_locked=True)

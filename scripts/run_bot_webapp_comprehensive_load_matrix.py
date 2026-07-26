@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import asynccontextmanager
 import json
 import os
 import sys
@@ -25,8 +26,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.db import engine
+from core.config import settings
 from core.redis import close_redis
+from core.runtime_identity import resolve_runtime_identity
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, override_current_server
+from core.webapp_writer_control import load_writer_snapshot, snapshot_is_local_active
+from core.writer_fencing import writer_fence_scope
 from models.offer import OfferStatus
 from scripts import trading_core_probe_worker as worker
 
@@ -1186,46 +1191,60 @@ async def run_matrix(args: argparse.Namespace) -> int:
 
     worker.setup_event_listeners()
     prefix = args.prefix
-    worker.assert_production_full_matrix_allowed(prefix, allow_flag=bool(args.allow_production_execution))
-    if worker.is_production_runtime():
-        worker.allow_production_cleanup_hard_delete(prefix, allow_flag=bool(args.allow_production_cleanup))
-    await worker.cleanup_prefix(prefix)
-    commodity_id, commodity_name = await worker.resolve_commodity()
-    attempts_per_scenario = scenario_attempt_count(args.attempts_per_scenario)
-    started = time.perf_counter()
-    scenario_reports: list[dict[str, Any]] = []
-    async with worker.patched_trading_boundaries():
-        users = await worker.create_load_fixture_users(prefix, user_count=args.user_count)
-        for scenario in selected:
-            scenario_reports.append(
-                await run_scenario(
-                    scenario=scenario,
-                    users=users,
-                    commodity_id=commodity_id,
-                    commodity_name=commodity_name,
-                    attempts_per_scenario=attempts_per_scenario,
-                    telegram_ratio=args.telegram_ratio,
-                    target_rps=args.target_rps,
-                    run_prefix=prefix,
-                    write_max_concurrency=args.write_max_concurrency,
-                    read_view_max_concurrency=args.read_view_max_concurrency,
-                )
+    async with _three_site_writer_capability(
+        required=bool(args.three_site_writer_fence),
+    ):
+        worker.assert_production_full_matrix_allowed(
+            prefix,
+            allow_flag=bool(args.allow_production_execution),
+        )
+        if worker.is_production_runtime():
+            worker.allow_production_cleanup_hard_delete(
+                prefix,
+                allow_flag=bool(args.allow_production_cleanup),
             )
+        await worker.cleanup_prefix(prefix)
+        commodity_id, commodity_name = await worker.resolve_commodity()
+        attempts_per_scenario = scenario_attempt_count(args.attempts_per_scenario)
+        started = time.perf_counter()
+        started_epoch = time.time()
+        scenario_reports: list[dict[str, Any]] = []
+        async with worker.patched_trading_boundaries():
+            users = await worker.create_load_fixture_users(prefix, user_count=args.user_count)
+            for scenario in selected:
+                scenario_reports.append(
+                    await run_scenario(
+                        scenario=scenario,
+                        users=users,
+                        commodity_id=commodity_id,
+                        commodity_name=commodity_name,
+                        attempts_per_scenario=attempts_per_scenario,
+                        telegram_ratio=args.telegram_ratio,
+                        target_rps=args.target_rps,
+                        run_prefix=prefix,
+                        write_max_concurrency=args.write_max_concurrency,
+                        read_view_max_concurrency=args.read_view_max_concurrency,
+                    )
+                )
 
-    elapsed = time.perf_counter() - started
-    total_attempts = sum(int((report.get("summary") or {}).get("total") or 0) for report in scenario_reports)
-    scenario_attempt_start_rps = [
-        float((report.get("summary") or {}).get("attempt_start_rps"))
-        for report in scenario_reports
-        if (report.get("summary") or {}).get("attempt_start_rps") is not None
-    ]
-    failed = [report for report in scenario_reports if report["status"] != "ok"]
-    family_counts: dict[str, int] = {}
-    for scenario in selected:
-        family_counts[scenario.family] = family_counts.get(scenario.family, 0) + 1
-    cleanup_report = None
-    if not args.keep_data:
-        cleanup_report = await worker.cleanup_prefix(prefix)
+        elapsed = time.perf_counter() - started
+        finished_epoch = time.time()
+        total_attempts = sum(
+            int((report.get("summary") or {}).get("total") or 0)
+            for report in scenario_reports
+        )
+        scenario_attempt_start_rps = [
+            float((report.get("summary") or {}).get("attempt_start_rps"))
+            for report in scenario_reports
+            if (report.get("summary") or {}).get("attempt_start_rps") is not None
+        ]
+        failed = [report for report in scenario_reports if report["status"] != "ok"]
+        family_counts: dict[str, int] = {}
+        for scenario in selected:
+            family_counts[scenario.family] = family_counts.get(scenario.family, 0) + 1
+        cleanup_report = None
+        if not args.keep_data:
+            cleanup_report = await worker.cleanup_prefix(prefix)
 
     payload = {
         "schema_version": MATRIX_SCHEMA_VERSION,
@@ -1241,6 +1260,8 @@ async def run_matrix(args: argparse.Namespace) -> int:
         "family_counts": dict(sorted(family_counts.items())),
         "total_business_requests": total_attempts,
         "elapsed_seconds": round(elapsed, 3),
+        "started_epoch": round(started_epoch, 6),
+        "finished_epoch": round(finished_epoch, 6),
         "aggregate_business_request_rps": round(total_attempts / max(elapsed, 0.001), 3),
         "min_attempt_start_rps": round(min(scenario_attempt_start_rps), 3) if scenario_attempt_start_rps else None,
         "failed_scenarios": [
@@ -1261,6 +1282,7 @@ async def run_matrix(args: argparse.Namespace) -> int:
                 else "Comprehensive load evidence is staging-only and does not authorize production by itself."
             ),
         },
+        "three_site_writer_fence": bool(args.three_site_writer_fence),
     }
     if args.output:
         worker.write_json_artifact(Path(args.output), payload)
@@ -1301,6 +1323,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output")
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--keep-data", action="store_true")
+    parser.add_argument(
+        "--three-site-writer-fence",
+        action="store_true",
+        help=(
+            "Require the live WebApp Writer state and Witness lease, then bind every "
+            "mutation/cleanup commit to that exact Writer epoch."
+        ),
+    )
     parser.add_argument("--list", action="store_true")
     parser.add_argument(
         "--allow-production-execution",
@@ -1313,6 +1343,42 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow production market matrix cleanup only with the cleanup confirmation env.",
     )
     return parser
+
+
+@asynccontextmanager
+async def _three_site_writer_capability(*, required: bool):
+    if not required:
+        yield None
+        return
+    if worker.is_production_runtime():
+        raise worker.TradingProbeError(
+            "the staging Full Matrix Writer capability is forbidden in production"
+        )
+    identity = resolve_runtime_identity(settings)
+    if not identity.is_webapp_authority or not identity.is_webapp_site:
+        raise worker.TradingProbeError(
+            "the three-site Writer capability requires an explicit WebApp site identity"
+        )
+    async with worker.AsyncSessionLocal() as db:
+        snapshot = await load_writer_snapshot(db)
+        await db.rollback()
+    active, reasons = snapshot_is_local_active(
+        identity,
+        snapshot,
+        require_witness_lease=True,
+    )
+    if not active:
+        raise worker.TradingProbeError(
+            "the Full Matrix workload target is not the live Writer: "
+            + ",".join(reasons)
+        )
+    with writer_fence_scope(
+        identity,
+        snapshot,
+        source="three_site_full_matrix_workload",
+        require_witness_lease=True,
+    ) as capability:
+        yield capability
 
 
 def stdout_payload_for_matrix(payload: dict[str, Any], *, output_path: str | None) -> dict[str, Any]:

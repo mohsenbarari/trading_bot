@@ -17,6 +17,7 @@ from core.canonical_json import (
     canonical_json_bytes as _canonical_json_bytes,
 )
 from core.config import settings
+from core.dr_receipt_policy import ReceiptDecision, decide_receipt_sequence
 from core.runtime_identity import resolve_runtime_identity
 from core.runtime_sites import PHYSICAL_SITES, SITE_BOT_FI, SITE_WEBAPP_FI, SITE_WEBAPP_IR
 from core.sync_metadata import build_sync_metadata
@@ -98,14 +99,6 @@ class ValidatedDrEnvelope:
         if not isinstance(stream, dict):
             raise DrEventProtocolError("DR event is not authorized for this destination")
         return dict(stream)
-
-
-@dataclass(frozen=True)
-class ReceiptDecision:
-    action: str
-    missing_from: int | None = None
-    missing_to: int | None = None
-    reason: str | None = None
 
 
 def canonical_json_bytes(payload: Any) -> bytes:
@@ -292,18 +285,13 @@ def decide_receipt(
     incoming_sequence: int | None = None,
 ) -> ReceiptDecision:
     sequence = incoming.producer_sequence if incoming_sequence is None else int(incoming_sequence)
-    if existing_event_hash is not None:
-        if existing_event_hash == incoming.envelope_hash:
-            return ReceiptDecision("duplicate")
-        return ReceiptDecision("quarantine", reason="same_event_id_different_hash")
-    if existing_sequence_hash is not None and existing_sequence_hash != incoming.envelope_hash:
-        return ReceiptDecision("quarantine", reason="same_sequence_different_hash")
-    expected = int(contiguous_sequence) + 1
-    if sequence < expected:
-        return ReceiptDecision("quarantine", reason="sequence_rewind_without_receipt")
-    if sequence > expected:
-        return ReceiptDecision("blocked_gap", missing_from=expected, missing_to=sequence - 1)
-    return ReceiptDecision("apply")
+    return decide_receipt_sequence(
+        contiguous_sequence=contiguous_sequence,
+        incoming_sequence=sequence,
+        incoming_hash=incoming.envelope_hash,
+        existing_event_hash=existing_event_hash,
+        existing_sequence_hash=existing_sequence_hash,
+    )
 
 
 def transport_peers(local_site: str) -> tuple[str, ...]:

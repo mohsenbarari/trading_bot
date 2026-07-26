@@ -21,6 +21,7 @@ from core.human_approval_issuer import (
 )
 from core.dr_failover_orchestrator import (
     DrOrchestrationError,
+    failover_readiness_commitment,
     parse_plan,
     load_approver_policy,
     run_orchestration,
@@ -82,13 +83,25 @@ def approved_plan(*, manifest_payload=None, rpo_policy=None):
             "approval_reason": None,
             "approval_ticket": None,
         },
-        "readiness_hash": "c" * 64,
         "command_manifest_hash": hashlib.sha256(
             canonical_json_bytes(manifest_payload)
         ).hexdigest(),
         "approver_policy_hash": policy_hash,
         "approvals": [],
     }
+    payload["readiness_commitment"] = failover_readiness_commitment(
+        operation_id=payload["operation_id"],
+        operation_nonce=payload["operation_nonce"],
+        action=payload["action"],
+        source_site=payload["source_site"],
+        target_site=payload["target_site"],
+        expected_epoch=payload["expected_epoch"],
+        target_epoch=payload["target_epoch"],
+        release_sha=payload["release_sha"],
+        domain=payload["domain"],
+        record=payload["record"],
+        command_manifest_hash=payload["command_manifest_hash"],
+    )
     plan_hash = hashlib.sha256(
         canonical_json_bytes({key: value for key, value in payload.items() if key != "approvals"})
     ).hexdigest()
@@ -103,7 +116,7 @@ def approved_plan(*, manifest_payload=None, rpo_policy=None):
             "target_site": payload["target_site"],
             "expected_epoch": payload["expected_epoch"],
             "target_epoch": payload["target_epoch"],
-            "readiness_hash": payload["readiness_hash"],
+            "readiness_commitment": payload["readiness_commitment"],
             "command_manifest_hash": payload["command_manifest_hash"],
         },
     )
@@ -230,7 +243,8 @@ class FakeAdapter:
         result = await self._result("target_ready", plan)
         result.update(
             target_site=plan.target_site,
-            readiness_hash=plan.readiness_hash,
+            readiness_commitment=plan.readiness_commitment,
+            readiness_evidence_hash="c" * 64,
             source_tail_boundary_hash=source_tail_boundary["boundary_hash"],
             target_applied_sequence=source_tail_boundary["final_sequence"],
             target_applied_through_boundary=True,
@@ -250,6 +264,16 @@ class LostRouteResponseAdapter(FakeAdapter):
         del plan
         self.calls.append("public_route_verified")
         raise TimeoutError("provider response lost")
+
+
+class ReadinessAwareAdapter(FakeAdapter):
+    def __init__(self):
+        super().__init__()
+        self.retained_readiness = None
+
+    async def target_term_acquired_with_readiness(self, plan, *, target_readiness):
+        self.retained_readiness = target_readiness
+        return await self._result("target_term_acquired", plan)
 
 
 class SourceUnavailableAdapter(FakeAdapter):
@@ -282,7 +306,8 @@ class SourceUnavailableAdapter(FakeAdapter):
         result = await self._result("target_ready", plan)
         result.update(
             target_site=plan.target_site,
-            readiness_hash=plan.readiness_hash,
+            readiness_commitment=plan.readiness_commitment,
+            readiness_evidence_hash="c" * 64,
             source_tail_boundary_hash=source_tail_boundary["boundary_hash"],
             target_applied_sequence=source_tail_boundary["final_sequence"],
             target_applied_through_boundary=True,
@@ -396,6 +421,80 @@ class DrFailoverOrchestratorTests(unittest.IsolatedAsyncioTestCase):
                     ledger=ledger,
                     journal_path=Path(directory) / "lost-journal.jsonl",
                 )
+
+    async def test_dedicated_power_loss_cutpoint_is_durable_and_resumes_same_plan_only(self):
+        raw, policy = approved_plan()
+        plan = parse_plan(raw)
+        verify_human_failover_approval(plan, policy)
+        ledger = FakeOperationLedger()
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory) / "failover.jsonl"
+            first = FakeAdapter()
+            paused = await run_orchestration(
+                plan,
+                adapter=first,
+                ledger=ledger,
+                journal_path=journal,
+                pause_after_step="source_connections_drained",
+            )
+            self.assertEqual(paused["status"], "paused")
+            self.assertEqual(paused["paused_after_step"], "source_connections_drained")
+            self.assertEqual(
+                first.calls,
+                ["classification_verified", "source_fenced", "source_connections_drained"],
+            )
+            records = verify_hash_chained_jsonl(journal)
+            self.assertEqual(records[-1]["event"], "dr.orchestration.paused")
+            self.assertEqual(records[-1]["step"], "source_connections_drained")
+            self.assertIsNone(ledger.outcome)
+
+            resumed = FakeAdapter()
+            completed = await run_orchestration(
+                plan, adapter=resumed, ledger=ledger, journal_path=journal
+            )
+        self.assertEqual(completed["status"], "completed")
+        self.assertEqual(
+            resumed.calls,
+            ["target_ready", "target_term_acquired", "route_switched", "public_route_verified"],
+        )
+        self.assertEqual(ledger.outcome, "completed")
+
+    async def test_only_the_closed_power_loss_cutpoint_is_accepted(self):
+        raw, _policy = approved_plan()
+        plan = parse_plan(raw)
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(DrOrchestrationError, "pause cutpoint"):
+                await run_orchestration(
+                    plan,
+                    adapter=FakeAdapter(),
+                    ledger=FakeOperationLedger(),
+                    journal_path=Path(directory) / "failover.jsonl",
+                    pause_after_step="target_term_acquired",
+                )
+
+    async def test_readiness_aware_target_receives_journaled_target_evidence(self):
+        raw, _policy = approved_plan()
+        plan = parse_plan(raw)
+        adapter = ReadinessAwareAdapter()
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory) / "failover.jsonl"
+            result = await run_orchestration(
+                plan,
+                adapter=adapter,
+                ledger=FakeOperationLedger(),
+                journal_path=journal,
+            )
+            records = verify_hash_chained_jsonl(journal)
+        self.assertEqual(result["status"], "completed")
+        self.assertIsInstance(adapter.retained_readiness, dict)
+        self.assertEqual(adapter.retained_readiness["target_site"], plan.target_site)
+        retained = next(
+            record["target_readiness_evidence"]
+            for record in records
+            if record.get("event") == "dr.orchestration.step_completed"
+            and record.get("step") == "target_ready"
+        )
+        self.assertEqual(retained, adapter.retained_readiness)
 
     async def test_lost_route_response_rolls_back_and_resume_never_replays_forward_steps(self):
         raw, _ = approved_plan()

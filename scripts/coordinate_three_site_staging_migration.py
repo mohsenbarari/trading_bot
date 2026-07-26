@@ -272,7 +272,9 @@ def _acceptance_observations(
                 or row.get("unexpected_log_lines") != 0
                 or re.fullmatch(r"[0-9a-f]{64}", str(row.get("log_sha256", ""))) is None
                 or (
-                    not str(row.get("service", "")).endswith("_tls")
+                    not str(row.get("service", "")).endswith(
+                        ("_tls", "_redis")
+                    )
                     and row.get("release_sha") != identity["release_sha"]
                 )
                 for row in services

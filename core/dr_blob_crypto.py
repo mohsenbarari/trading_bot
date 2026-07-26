@@ -23,7 +23,7 @@ from typing import Any, BinaryIO
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-from core.dr_event_protocol import canonical_json_bytes
+from core.canonical_json import canonical_json_bytes
 from core.secure_file_io import read_secure_text
 
 

@@ -20,13 +20,14 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.config import settings
-from core.db import AsyncSessionLocal
+from core.db import engine
 from core.dr_blob_plane import _hash_file
 from core.runtime_identity import resolve_runtime_identity
 from core.sync_parity import build_database_parity_snapshot
@@ -45,6 +46,15 @@ WEBAPP_SITES = frozenset({"webapp_fi", "webapp_ir"})
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SCHEMA = "three-site-staging-convergence-site-snapshot-v1"
+ObserverSessionLocal = async_sessionmaker(
+    engine.execution_options(
+        isolation_level="REPEATABLE READ",
+        postgresql_readonly=True,
+    ),
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autoflush=False,
+)
 
 
 class ConvergenceSnapshotError(RuntimeError):
@@ -250,8 +260,7 @@ async def collect(*, campaign_id: str, release_sha: str, plan_sha256: str, max_r
         raise ConvergenceSnapshotError("runtime identity/release differs from the convergence campaign")
     if max_rows_per_table < 1:
         raise ConvergenceSnapshotError("max rows per table is invalid")
-    async with AsyncSessionLocal() as db:
-        await db.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"))
+    async with ObserverSessionLocal() as db:
         try:
             producer_epoch = int(settings.dr_producer_epoch)
             if producer_epoch < 1:

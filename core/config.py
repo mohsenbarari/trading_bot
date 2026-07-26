@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     physical_site: str | None = None
     topology_schema_version: str | None = None
     three_site_dr_enabled: bool = False
+    # Optional, read-only marker for the disposable dedicated-host capacity
+    # drill.  It is unset in every normal/production deployment.
+    full_matrix_capacity_guard_file: str | None = None
     dark_standby_mode: bool = False
     dr_event_protocol_enabled: bool = False
     dr_event_protocol_strict: bool = False

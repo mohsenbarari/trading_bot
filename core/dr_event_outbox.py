@@ -29,6 +29,7 @@ from core.dr_event_protocol import (
     canonical_json_bytes,
     finalize_local_dr_transaction,
 )
+from core.dr_outbox_commit_policy import outbox_commit_action
 from core.dr_data_policy import canonical_dr_row_payload
 from core.sync_outbox_guard import raw_sql_is_provably_read_only, statement_write_target_table
 from core.sync_registry import SyncPolicy, get_sync_registry_entry, sync_registry_entries
@@ -303,13 +304,24 @@ def _guard_bulk_or_raw_write(orm_execute_state: Any) -> None:
 
 
 def _finalize_transaction_before_commit(session: Session) -> None:
-    if not _enabled() or session.in_nested_transaction():
+    if not _enabled():
+        return
+    if outbox_commit_action(
+        nested_transaction=session.in_nested_transaction(),
+        event_count=0,
+        already_finalized=False,
+    ) == "defer":
         return
     # before_commit runs before SQLAlchemy's implicit final flush.  Force it so
     # every mapper mutation is known before the transaction envelope is sealed.
     session.flush()
     transaction = session.info.get(_DR_TRANSACTION_KEY)
-    if not transaction or transaction.get("finalized"):
+    action = outbox_commit_action(
+        nested_transaction=False,
+        event_count=len((transaction or {}).get("event_ids") or ()),
+        already_finalized=bool((transaction or {}).get("finalized")),
+    )
+    if action != "finalize":
         return
     event_ids = list(transaction.get("event_ids") or [])
     if not event_ids:

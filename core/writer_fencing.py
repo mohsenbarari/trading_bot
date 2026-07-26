@@ -14,6 +14,7 @@ from sqlalchemy.sql.elements import TextClause
 
 from core.runtime_identity import RuntimeIdentity
 from core.config import settings
+from core.full_matrix_capacity_guard import capacity_guard_reasons
 from core.webapp_writer_control import WriterStateSnapshot, snapshot_is_local_active
 from core.writer_lease_clock import lease_clock_reasons
 from core.sync_field_policy import SyncFieldAction, sync_field_policy_entries
@@ -366,6 +367,16 @@ def _enforce_writer_fence_before_commit(session: Session) -> None:
             raise WriterFenceError("WebApp commit lacks an explicit writer/projection capability")
     if context is None:
         return
+    capacity_reasons = capacity_guard_reasons(
+        marker_file=settings.full_matrix_capacity_guard_file,
+        release_sha=settings.release_sha,
+        physical_site=context.physical_site,
+        three_site_enabled=settings.three_site_dr_enabled,
+    )
+    if capacity_reasons:
+        raise WriterFenceError(
+            "Full Matrix capacity guard blocks commit: " + ",".join(capacity_reasons)
+        )
     # This application-side check is an early stale-context guard only.  The
     # database triggers remain the authoritative write barrier and take the
     # SECURITY DEFINER row lock on webapp_writer_state for every protected DML

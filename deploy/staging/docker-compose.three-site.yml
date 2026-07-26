@@ -35,6 +35,9 @@ x-three-site: &three_site
   DR_SYNC_VERIFY_TLS: "true"
   DR_SYNC_CA_BUNDLE: /run/staging-dr-ca/ca.crt
   RELEASE_SHA: ${STAGING_RELEASE_SHA:?exact release SHA required}
+  # This path is inactive unless the closed capacity-fault agent creates its
+  # release-bound marker on the dedicated role storage filesystem.
+  FULL_MATRIX_CAPACITY_GUARD_FILE: /run/full-matrix-capacity/guard.json
 
 x-postgres: &postgres
   image: trading_bot_postgres_boottime:15-${STAGING_RELEASE_SHA:?exact release SHA required}
@@ -490,6 +493,7 @@ services:
       WEB_PUSH_VAPID_PUBLIC_KEY: ${WEB_PUSH_VAPID_PUBLIC_KEY:-}
     volumes:
       - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - ${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_fi/capacity-guard:/run/full-matrix-capacity:ro
       - webapp_fi_uploads:/app/uploads
       - webapp_fi_audit:/app/audit_trail
     ports: ["127.0.0.1:8212:8000"]
@@ -736,6 +740,7 @@ services:
       WEB_PUSH_VAPID_PUBLIC_KEY: ${WEB_PUSH_VAPID_PUBLIC_KEY:-}
     volumes:
       - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - ${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_ir/capacity-guard:/run/full-matrix-capacity:ro
       - webapp_ir_uploads:/app/uploads
       - webapp_ir_audit:/app/audit_trail
     ports: ["127.0.0.1:8213:8000"]

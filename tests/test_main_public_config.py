@@ -224,6 +224,7 @@ class MainPublicConfigTests(unittest.IsolatedAsyncioTestCase):
                     "/health/promotion-ready",
                     query_string=(
                         "action=promote_ir&expected_writer_epoch=5&"
+                        "readiness_commitment=" + "a" * 64 + "&"
                         + source_tail_query(action="promote_ir", target_epoch=5)
                     ),
                 ),
@@ -235,6 +236,7 @@ class MainPublicConfigTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["readiness_evidence"]["writer_epoch"], 5)
         self.assertEqual(payload["readiness_evidence"]["action"], "promote_ir")
         self.assertEqual(len(payload["readiness_hash"]), 64)
+        self.assertEqual(payload["readiness_commitment"], "a" * 64)
 
     async def test_failback_readiness_binds_origin_and_target_parity(self):
         fenced = WriterStateSnapshot(
@@ -254,6 +256,7 @@ class MainPublicConfigTests(unittest.IsolatedAsyncioTestCase):
         }
         query = (
             "action=failback_fi&expected_writer_epoch=5&"
+            "readiness_commitment=" + "a" * 64 + "&"
             f"expected_database_fingerprint_hash={database_hash}&"
             "expected_database_row_count=123&"
             f"expected_blob_set_hash={blob_hash}&expected_blob_count=7&"
@@ -314,6 +317,7 @@ class MainPublicConfigTests(unittest.IsolatedAsyncioTestCase):
                     "/health/promotion-ready",
                     query_string=(
                         "action=failback_fi&expected_writer_epoch=3&"
+                        "readiness_commitment=" + "a" * 64 + "&"
                         + source_tail_query(action="failback_fi", target_epoch=3)
                     ),
                 ),
@@ -396,6 +400,24 @@ class MainPublicConfigTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.status_code, 503)
         self.assertIn("writer_term_changed", response.body.decode("utf-8"))
+
+    async def test_capacity_guard_fences_an_otherwise_valid_writer(self):
+        downstream = AsyncMock(return_value=Response(status_code=204))
+        with patch.object(main, "RUNTIME_IDENTITY", webapp_identity()), patch(
+            "main._load_runtime_writer_snapshot",
+            new=AsyncMock(return_value=writer_snapshot()),
+        ), patch(
+            "main.capacity_guard_reasons",
+            return_value=("full_matrix_capacity_hard_limit",),
+        ):
+            response = await main.enforce_webapp_writer_fence(
+                request("POST", "/api/offers"),
+                downstream,
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("full_matrix_capacity_hard_limit", response.body.decode("utf-8"))
+        downstream.assert_not_awaited()
 
     async def test_sync_projection_and_safe_reads_are_not_writer_fenced(self):
         downstream = AsyncMock(return_value=Response(status_code=204))

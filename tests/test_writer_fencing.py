@@ -128,6 +128,16 @@ class WriterFenceTests(unittest.TestCase):
                     with self.assertRaises(WriterFenceError):
                         _enforce_writer_fence_before_commit(FakeSession(changed))
 
+    def test_capacity_guard_blocks_scoped_background_commit_before_database_write(self):
+        with writer_fence_scope(identity(), snapshot(), source="background_worker"), patch(
+            "core.writer_fencing.capacity_guard_reasons",
+            return_value=("full_matrix_capacity_hard_limit",),
+        ):
+            session = FakeSession({"unexpected": "database query must not occur"})
+            with self.assertRaisesRegex(WriterFenceError, "capacity guard"):
+                _enforce_writer_fence_before_commit(session)
+        self.assertEqual(session.statements, [])
+
     def test_unscoped_authoritative_orm_commit_is_rejected(self):
         engine = create_engine("sqlite:///:memory:")
         with Session(engine) as session, self._strict_settings():

@@ -508,8 +508,27 @@ The Queue-enabled activation SHA must be one direct commit above the reviewed
 baseline and may change only the code-owned readiness constant. The
 provisioned inventory must then be re-attested at that activation SHA; evidence
 from the baseline deployment and activation release cannot be mixed. Generate
-the transition evidence first, then prepare an unapproved campaign/approval
-request with the builder:
+the transition evidence first.  Before the campaign is prepared, build the
+secret-free JIT failover control reference.  It binds the exact backend,
+Witness-relay credential reference, Witness public key, and a new empty
+owner-only journal root; it contains no credential value.  Its hash is itself
+bound into the campaign approval, so a path or relay-identity change requires
+a new approval rather than being silently accepted at runtime:
+
+```text
+python3 scripts/build_three_site_full_matrix_failover_control.py \
+  --campaign-id EXACT_CAMPAIGN_UUID_FROM_REATTESTED_INVENTORY \
+  --gate-group-id ONE_GATE_D_GROUP_UUID \
+  --execution-class shared-host-safe \
+  --release-sha ACTIVATION_40_HEX \
+  --backend-config /root/secure/matrix/failover-backend.json \
+  --relay-credentials /root/secure/three-site/human-approval-relay.env \
+  --witness-relay-public-key-file /root/secure/three-site/witness-relay.pub \
+  --journal-root /root/secure/matrix/jit/EXACT_CAMPAIGN_UUID \
+  --output /root/secure/matrix/failover-control.json
+```
+
+Then prepare an unapproved campaign/approval request with the builder:
 
 ```text
 python3 scripts/build_three_site_staging_full_matrix_campaign.py prepare \
@@ -528,6 +547,7 @@ python3 scripts/build_three_site_staging_full_matrix_campaign.py prepare \
   --bound-artifact campaign_bundle=/root/secure/matrix/campaign-bundle.json \
   --bound-artifact queue_activation_transition=/root/secure/matrix/queue-transition.json \
   --bound-artifact failover_backend_config=/root/secure/matrix/failover-backend.json \
+  --bound-artifact failover_control_config=/root/secure/matrix/failover-control.json \
   --bound-artifact full_matrix_backend_config=/root/secure/matrix/full-matrix-backend.json \
   --draft-output /root/secure/matrix/campaign.draft.json \
   --approval-request-output /root/secure/matrix/approval-request.json

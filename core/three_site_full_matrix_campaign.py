@@ -216,6 +216,12 @@ PHASE_SCENARIOS: dict[str, tuple[str, ...]] = {
         "object_storage_interruption",
         "arvan_control_failure_rate_limit",
         "fi_host_loss_without_national_cutoff",
+        # This is the actual FI→IR transition drill with FI powered off only
+        # after the durable source-fence/drain cutpoint and before target
+        # enable.  The ordinary Iran-cutoff lifecycle below then reuses its
+        # recorded IR-active checkpoint instead of attempting a second
+        # promotion while IR is already the sole Writer.
+        "power_loss_between_fence_and_enable",
         "iran_international_cutoff_promotes_ir",
         "simultaneous_promotion_attempt_single_epoch",
         "controller_restart_each_failover_cutpoint",
@@ -227,7 +233,6 @@ PHASE_SCENARIOS: dict[str, tuple[str, ...]] = {
         "deployment_or_migration_during_transition_rejected",
         "permanent_fi_recovery_hub_loss",
         "ir_only_active_origin_loss_is_safe_unavailable",
-        "power_loss_between_fence_and_enable",
         "duplicate_operator_commands_race",
         "controller_restart_mid_arvan_mutation",
     ),
@@ -237,6 +242,10 @@ PHASE_SCENARIOS: dict[str, tuple[str, ...]] = {
         "ir_remains_active_during_recovery",
         "customer_actor_matrix_recovery_ir_routed",
         "reconnect_flap_and_bounded_catchup",
+        # This is a real IR-Writer recovery test. It must run before the
+        # schedule-bound FI failback; otherwise its IR-origin routes would be
+        # impossible without violating the single-writer fence.
+        "one_hour_backlog_with_live_traffic",
         "applied_checkpoint_conflict_effect_gates",
         "database_and_blob_final_parity",
         "final_write_barrier_with_live_arrivals",
@@ -266,7 +275,6 @@ PHASE_SCENARIOS: dict[str, tuple[str, ...]] = {
         "batch_flush_inflight_boundaries",
         "database_redis_blob_storage_watermarks",
         "dpi_request_byte_budget_enforced",
-        "one_hour_backlog_with_live_traffic",
         "recovery_eta_and_non_starvation",
         "twenty_four_hour_endurance_no_growth",
         "healthy_link_never_accumulates_backlog",
@@ -478,6 +486,7 @@ BOUND_ARTIFACTS = frozenset(
         "campaign_bundle",
         "queue_activation_transition",
         "failover_backend_config",
+        "failover_control_config",
         "full_matrix_backend_config",
     }
 )

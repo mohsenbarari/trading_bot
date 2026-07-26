@@ -11,6 +11,8 @@ from scripts.trading_core_probe_worker import (
     assert_race_barrier_lateness,
     assert_race_acceptance,
     build_bot_offer_text,
+    build_probe_offer_idempotency_key,
+    validate_probe_offer_idempotency_key,
     run_manual_expiry_race_command,
     set_prepare_barrier_command,
     run_time_expiry_race_command,
@@ -19,6 +21,44 @@ from scripts.trading_core_probe_worker import (
 
 
 class TradingCoreProbeWorkerTests(unittest.TestCase):
+    def test_probe_offer_idempotency_is_deterministic_api_safe_and_scoped(self) -> None:
+        first = build_probe_offer_idempotency_key(
+            prefix="FMX_operation_role_scenario_with_a_very_long_suffix_",
+            user_id=17,
+            index=9,
+            offer_type="sell",
+            quantity=5,
+            price=100000,
+        )
+        replay = build_probe_offer_idempotency_key(
+            prefix="FMX_operation_role_scenario_with_a_very_long_suffix_",
+            user_id=17,
+            index=9,
+            offer_type="sell",
+            quantity=5,
+            price=100000,
+        )
+        changed = build_probe_offer_idempotency_key(
+            prefix="FMX_operation_role_scenario_with_a_very_long_suffix_",
+            user_id=17,
+            index=10,
+            offer_type="sell",
+            quantity=5,
+            price=100000,
+        )
+        self.assertEqual(first, replay)
+        self.assertNotEqual(first, changed)
+        self.assertGreaterEqual(len(first), 8)
+        self.assertLessEqual(len(first), 64)
+        self.assertRegex(first, r"^[A-Za-z0-9][A-Za-z0-9:._-]+$")
+
+    def test_probe_offer_explicit_correlation_key_uses_the_public_contract(self) -> None:
+        value = "fmxtiming:steady:bot_fi_to_webapp_fi:0001"
+
+        self.assertEqual(validate_probe_offer_idempotency_key(value), value)
+        with self.assertRaises(TradingProbeError):
+            validate_probe_offer_idempotency_key("bad key")
+
     def test_bot_offer_matrix_uses_current_cash_settlement_prefix(self) -> None:
         buy_text, buy_marker = build_bot_offer_text(
             owner_user_id=17,
