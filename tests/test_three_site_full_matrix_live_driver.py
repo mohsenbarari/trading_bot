@@ -536,12 +536,12 @@ class ThreeSiteFullMatrixLiveDriverTests(unittest.TestCase):
                     runner_ref=runner_ref,
                     oracle_ref=oracle_ref,
                 )
-    def test_disabled_baseline_keeps_queue_gate_off(self):
+    def test_activation_release_enables_queue_capability_only_after_source_review(self):
         source = (
             REPO_ROOT / "core/telegram_delivery_runtime_policy.py"
         ).read_text(encoding="utf-8")
         self.assertIn(
-            "TELEGRAM_DELIVERY_QUEUE_IMPLEMENTATION_READY = False",
+            "TELEGRAM_DELIVERY_QUEUE_IMPLEMENTATION_READY = True",
             source,
         )
 
