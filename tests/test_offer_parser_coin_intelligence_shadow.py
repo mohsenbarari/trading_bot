@@ -34,7 +34,10 @@ class OfferParserCoinIntelligenceShadowTests(
             "core.market_intelligence.shadow."
             "schedule_implicit_commodity_shadow",
             new=observer,
-        ):
+        ), patch(
+            "core.market_intelligence.shadow.schedule_gemma_parser_shadow",
+            new=Mock(return_value=True),
+        ) as gemma:
             parsed, error = await offer_parser.parse_offer_text(
                 "خ ن 30تا 75800"
             )
@@ -49,6 +52,7 @@ class OfferParserCoinIntelligenceShadowTests(
             settlement="cash",
             current_commodity="امام",
         )
+        gemma.assert_called_once()
 
     async def test_explicit_commodity_does_not_enter_implicit_shadow(
         self,
@@ -66,7 +70,10 @@ class OfferParserCoinIntelligenceShadowTests(
             "core.market_intelligence.shadow."
             "schedule_implicit_commodity_shadow",
             new=observer,
-        ):
+        ), patch(
+            "core.market_intelligence.shadow.schedule_gemma_parser_shadow",
+            new=Mock(return_value=True),
+        ) as gemma:
             parsed, error = await offer_parser.parse_offer_text(
                 "خ ن امام 30تا 75800"
             )
@@ -75,6 +82,14 @@ class OfferParserCoinIntelligenceShadowTests(
         self.assertIsNotNone(parsed)
         self.assertTrue(parsed.commodity_was_explicit)
         observer.assert_not_called()
+        gemma.assert_called_once_with(
+            text="خ ن امام 30تا 75800",
+            side="buy",
+            settlement="cash",
+            quantity=30,
+            price=75800,
+            current_commodity="امام",
+        )
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ import json
 from typing import Callable, Sequence
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from core.config import settings
@@ -22,7 +22,14 @@ from models.coin_intelligence_shadow import (
     CoinIntelligenceShadowOutcome,
     CoinIntelligenceShadowParserResult,
     CoinIntelligenceShadowPrediction,
+    CoinIntelligenceShadowQualityDecision,
+    CoinIntelligenceShadowReview,
     CoinIntelligenceShadowRun,
+)
+from core.market_intelligence.quality import (
+    QUALITY_POLICY_VERSION,
+    REVIEW_ACTIONS,
+    QualityDecision,
 )
 
 
@@ -122,6 +129,9 @@ async def persist_parser_observation(
     subject_kind: str | None = None,
     subject_fingerprint: str | None = None,
     idempotency_material: str | None = None,
+    component: str = "COMMODITY_RANKER",
+    candidate_payload: dict | None = None,
+    disagreement_fields: Sequence[str] | None = None,
     session_factory: Callable = AsyncSessionLocal,
 ) -> str:
     """Append one parser comparison in an independent transaction."""
@@ -136,7 +146,7 @@ async def persist_parser_observation(
     run = CoinIntelligenceShadowRun(
         id=run_id,
         idempotency_key=idempotency_key,
-        component="COMMODITY_RANKER",
+        component=str(component).upper()[:64],
         status=str(observation.status)[:40],
         source_surface=str(source_surface)[:32],
         subject_kind=(
@@ -170,9 +180,15 @@ async def persist_parser_observation(
         decision_reason=str(observation.decision_reason)[:160],
         validator_status=str(observation.status)[:40],
         disagreement_fields=(
-            ["commodity"] if observation.agrees_with_current is False else []
+            [str(item)[:32] for item in disagreement_fields]
+            if disagreement_fields is not None
+            else (
+                ["commodity"]
+                if observation.agrees_with_current is False
+                else []
+            )
         ),
-        candidate_payload={},
+        candidate_payload=dict(candidate_payload or {}),
     )
     async with session_factory() as session:
         existing = await _existing_run_id(session, idempotency_key)
@@ -205,6 +221,7 @@ async def persist_rate_prediction(
     observed_project_price: int | None = None,
     latency_ms: int | None = None,
     candidate_predictions: Sequence[RateShadowPrediction] = (),
+    quality_decision: QualityDecision | None = None,
     session_factory: Callable = AsyncSessionLocal,
 ) -> str:
     """Append one current-range observation for later outcome scoring."""
@@ -284,11 +301,17 @@ async def persist_rate_prediction(
     )
     candidate_rows = []
     for candidate in candidate_predictions:
-        candidate_name = (
-            "HYBRID_V2"
-            if str(candidate.method or "").startswith("HYBRID_V2")
-            else str(candidate.bundle_version or "UNNAMED_CANDIDATE")[:64]
-        )
+        method = str(candidate.method or "")
+        if method.startswith("HYBRID_V2"):
+            candidate_name = "HYBRID_V2"
+        elif method.startswith("LOW_DATE_"):
+            candidate_name = "LOW_DATE_PHYSICAL_V2"
+        elif method.startswith("CASH_TOMORROW_BASIS_"):
+            candidate_name = "CASH_TOMORROW_BASIS_V2"
+        else:
+            candidate_name = str(
+                candidate.bundle_version or "UNNAMED_CANDIDATE"
+            )[:64]
         candidate_rows.append(
             CoinIntelligenceShadowPrediction(
                 run_id=run_id,
@@ -350,12 +373,25 @@ async def persist_rate_prediction(
                 for name, value in sources.items()
                 if isinstance(value, dict)
             },
-            missing_fields=[
-                str(name)
-                for name, value in sources.items()
-                if not isinstance(value, dict)
-                or str(value.get("status") or "NO_DATA") != "OBSERVED"
-            ],
+            missing_fields=(
+                [
+                    str(name)
+                    for name in prediction.evidence.get(
+                        "missing_fields_v2"
+                    )
+                ]
+                if isinstance(
+                    prediction.evidence.get("missing_fields_v2"),
+                    list,
+                )
+                else [
+                    str(name)
+                    for name, value in sources.items()
+                    if not isinstance(value, dict)
+                    or str(value.get("status") or "NO_DATA")
+                    != "OBSERVED"
+                ]
+            ),
             source_vintages={
                 str(name): {
                     "selection": value.get("selection"),
@@ -365,6 +401,26 @@ async def persist_rate_prediction(
                 for name, value in sources.items()
                 if isinstance(value, dict)
             },
+        )
+    quality_row = None
+    if quality_decision is not None:
+        quality_row = CoinIntelligenceShadowQualityDecision(
+            run_id=run_id,
+            policy_version=QUALITY_POLICY_VERSION,
+            decision=str(quality_decision.decision)[:32],
+            reason_codes=[
+                str(item)[:96] for item in quality_decision.reason_codes
+            ],
+            realtime_weight=max(
+                0.0,
+                min(1.0, float(quality_decision.realtime_weight)),
+            ),
+            training_weight=max(
+                0.0,
+                min(1.0, float(quality_decision.training_weight)),
+            ),
+            review_required=bool(quality_decision.review_required),
+            context=dict(quality_decision.context),
         )
     async with session_factory() as session:
         existing = await _existing_run_id(session, idempotency_key)
@@ -382,6 +438,8 @@ async def persist_rate_prediction(
             session.add(candidate_row)
         if feature_row is not None:
             session.add(feature_row)
+        if quality_row is not None:
+            session.add(quality_row)
         return await _commit_run_idempotently(
             session,
             run_id=run_id,
@@ -492,3 +550,70 @@ async def attach_confirmed_trade_outcomes(
         if created:
             await session.commit()
         return created
+
+
+async def append_outcome_review(
+    *,
+    outcome_id: int,
+    action: str,
+    reviewer_stable_identifier: str,
+    reason_code: str,
+    corrected_project_price: int | None = None,
+    note_code: str | None = None,
+    session_factory: Callable = AsyncSessionLocal,
+) -> int:
+    """Append coded review evidence without mutating the outcome or run."""
+
+    normalized_action = str(action).strip().upper()
+    if normalized_action not in REVIEW_ACTIONS:
+        raise ValueError("unsupported shadow review action")
+    normalized_reason = str(reason_code).strip().upper()
+    if not normalized_reason:
+        raise ValueError("shadow review reason is required")
+    corrected = (
+        int(corrected_project_price)
+        if corrected_project_price is not None
+        else None
+    )
+    if normalized_action == "ACCEPT_CORRECTION":
+        if corrected is None or corrected <= 0:
+            raise ValueError("correction review requires positive price")
+    elif corrected is not None:
+        raise ValueError("corrected price only valid for correction review")
+    reviewer = shadow_subject_fingerprint(
+        "SHADOW_REVIEWER",
+        reviewer_stable_identifier,
+    )
+    async with session_factory() as session:
+        existing_outcome = await session.scalar(
+            select(CoinIntelligenceShadowOutcome.id).where(
+                CoinIntelligenceShadowOutcome.id == int(outcome_id)
+            ).with_for_update()
+        )
+        if existing_outcome is None:
+            raise ValueError("shadow outcome not found")
+        current_version = await session.scalar(
+            select(
+                func.max(CoinIntelligenceShadowReview.review_version)
+            ).where(
+                CoinIntelligenceShadowReview.outcome_id == int(outcome_id)
+            )
+        )
+        version = int(current_version or 0) + 1
+        session.add(
+            CoinIntelligenceShadowReview(
+                outcome_id=int(outcome_id),
+                review_version=version,
+                action=normalized_action,
+                reviewer_fingerprint=reviewer,
+                corrected_project_price=corrected,
+                reason_code=normalized_reason[:96],
+                note_code=(
+                    str(note_code).strip().upper()[:96]
+                    if note_code
+                    else None
+                ),
+            )
+        )
+        await session.commit()
+        return version

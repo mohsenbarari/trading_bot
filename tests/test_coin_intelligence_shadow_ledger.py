@@ -221,9 +221,12 @@ class CoinIntelligenceShadowLedgerTests(
         for name in {
             "coin_intelligence_shadow_runs",
             "coin_intelligence_shadow_feature_snapshots",
+            "coin_intelligence_shadow_jobs",
             "coin_intelligence_shadow_predictions",
             "coin_intelligence_shadow_parser_results",
             "coin_intelligence_shadow_outcomes",
+            "coin_intelligence_shadow_quality_decisions",
+            "coin_intelligence_shadow_reviews",
         }:
             with self.subTest(name=name):
                 self.assertEqual(

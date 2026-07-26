@@ -1,8 +1,9 @@
 """Post-commit project-event adapter for local Shadow evaluation.
 
 The listener captures only opaque local row identities while the transaction
-is in progress.  Model execution and Shadow persistence happen after commit in
-an independent task, so they cannot alter or roll back a business transaction.
+is in progress. After commit, a bounded adapter enqueues that identity in the
+local durable Shadow queue; model work is owned by the independent worker and
+cannot alter or roll back a business transaction.
 """
 
 from __future__ import annotations

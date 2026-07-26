@@ -137,9 +137,22 @@ class Settings(BaseSettings):
     coin_intelligence_shadow_persist_enabled: bool = False
     coin_intelligence_shadow_project_events_enabled: bool = False
     coin_intelligence_shadow_numeric_v2_enabled: bool = False
+    coin_intelligence_shadow_feature_v2_enabled: bool = False
+    coin_intelligence_shadow_quality_gate_enabled: bool = False
+    coin_intelligence_shadow_low_date_v2_enabled: bool = False
+    coin_intelligence_shadow_basis_v2_enabled: bool = False
+    coin_intelligence_shadow_durable_worker_enabled: bool = False
+    coin_intelligence_shadow_gemma_parser_enabled: bool = False
     coin_intelligence_shadow_timeout_seconds: float = 1.0
     coin_intelligence_shadow_max_inflight: int = 16
     coin_intelligence_shadow_sample_rate: float = 1.0
+    coin_intelligence_shadow_worker_poll_seconds: float = 1.0
+    coin_intelligence_shadow_worker_lease_seconds: int = 60
+    coin_intelligence_shadow_worker_max_attempts: int = 5
+    coin_intelligence_shadow_gemma_endpoint: str = (
+        "http://coin_intelligence_gemma_server:18123/v1/chat/completions"
+    )
+    coin_intelligence_shadow_gemma_timeout_seconds: float = 90.0
     error_tracking_dsn: str | None = None
     error_tracking_sample_rate: float = 1.0
     error_tracking_rate_limit_window_seconds: int = 60
@@ -339,6 +352,12 @@ class Settings(BaseSettings):
             self.coin_intelligence_shadow_persist_enabled
             or self.coin_intelligence_shadow_project_events_enabled
             or self.coin_intelligence_shadow_numeric_v2_enabled
+            or self.coin_intelligence_shadow_feature_v2_enabled
+            or self.coin_intelligence_shadow_quality_gate_enabled
+            or self.coin_intelligence_shadow_low_date_v2_enabled
+            or self.coin_intelligence_shadow_basis_v2_enabled
+            or self.coin_intelligence_shadow_durable_worker_enabled
+            or self.coin_intelligence_shadow_gemma_parser_enabled
         ) and not self.coin_intelligence_shadow_enabled:
             raise ValueError(
                 "coin_intelligence_shadow_subfeatures_require_shadow_enabled"
@@ -351,11 +370,80 @@ class Settings(BaseSettings):
                 "coin_intelligence_shadow_project_events_require_persistence"
             )
         if (
+            self.coin_intelligence_shadow_project_events_enabled
+            and not self.coin_intelligence_shadow_durable_worker_enabled
+        ):
+            raise ValueError(
+                "coin_intelligence_shadow_project_events_require_durable_worker"
+            )
+        if (
             self.coin_intelligence_shadow_numeric_v2_enabled
             and not self.coin_intelligence_shadow_project_events_enabled
         ):
             raise ValueError(
                 "coin_intelligence_shadow_numeric_v2_requires_project_events"
+            )
+        if (
+            self.coin_intelligence_shadow_feature_v2_enabled
+            and not self.coin_intelligence_shadow_project_events_enabled
+        ):
+            raise ValueError(
+                "coin_intelligence_shadow_feature_v2_requires_project_events"
+            )
+        for enabled, reason in (
+            (
+                self.coin_intelligence_shadow_quality_gate_enabled,
+                "coin_intelligence_shadow_quality_gate_requires_feature_v2",
+            ),
+            (
+                self.coin_intelligence_shadow_low_date_v2_enabled,
+                "coin_intelligence_shadow_low_date_v2_requires_feature_v2",
+            ),
+            (
+                self.coin_intelligence_shadow_basis_v2_enabled,
+                "coin_intelligence_shadow_basis_v2_requires_feature_v2",
+            ),
+        ):
+            if enabled and not self.coin_intelligence_shadow_feature_v2_enabled:
+                raise ValueError(reason)
+        if (
+            self.coin_intelligence_shadow_gemma_parser_enabled
+            and not self.coin_intelligence_shadow_persist_enabled
+        ):
+            raise ValueError(
+                "coin_intelligence_shadow_gemma_requires_persistence"
+            )
+        poll = float(self.coin_intelligence_shadow_worker_poll_seconds)
+        if not math.isfinite(poll) or poll < 0.05 or poll > 60:
+            raise ValueError("coin_intelligence_shadow_worker_poll_invalid")
+        if not 5 <= int(
+            self.coin_intelligence_shadow_worker_lease_seconds
+        ) <= 3600:
+            raise ValueError("coin_intelligence_shadow_worker_lease_invalid")
+        if not 1 <= int(
+            self.coin_intelligence_shadow_worker_max_attempts
+        ) <= 20:
+            raise ValueError(
+                "coin_intelligence_shadow_worker_max_attempts_invalid"
+            )
+        gemma_timeout = float(
+            self.coin_intelligence_shadow_gemma_timeout_seconds
+        )
+        if (
+            not math.isfinite(gemma_timeout)
+            or gemma_timeout <= 0
+            or gemma_timeout > 180
+        ):
+            raise ValueError(
+                "coin_intelligence_shadow_gemma_timeout_invalid"
+            )
+        if self.coin_intelligence_shadow_gemma_parser_enabled:
+            from core.market_intelligence.gemma_parser import (
+                validate_local_gemma_endpoint,
+            )
+
+            validate_local_gemma_endpoint(
+                self.coin_intelligence_shadow_gemma_endpoint
             )
         return self
 

@@ -465,4 +465,19 @@ async def parse_offer_text(text: str) -> Tuple[Optional[ParsedOffer], Optional[P
             current_commodity=commodity_name,
         )
 
+    # A separately gated local Gemma candidate sees every successful parse.
+    # Its output is evaluation-only and can never mutate ParsedOffer.
+    from core.market_intelligence.shadow import (
+        schedule_gemma_parser_shadow,
+    )
+
+    schedule_gemma_parser_shadow(
+        text=text,
+        side=trade_type,
+        settlement=parsed_offer.settlement_type,
+        quantity=quantity,
+        price=price,
+        current_commodity=commodity_name,
+    )
+
     return parsed_offer, None

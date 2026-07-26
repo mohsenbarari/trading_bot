@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from functools import lru_cache
 import logging
 import random
@@ -22,6 +23,7 @@ from core.market_intelligence.snapshot import AtomicJsonSnapshotProvider
 
 logger = logging.getLogger(__name__)
 _BACKGROUND_TASKS: set[asyncio.Task] = set()
+_GEMMA_TASKS: set[asyncio.Task] = set()
 
 
 @lru_cache(maxsize=1)
@@ -39,7 +41,14 @@ def _configured_service() -> CoinIntelligenceShadowService | None:
 
 
 def _task_finished(task: asyncio.Task) -> None:
-    _BACKGROUND_TASKS.discard(task)
+    _finish_scoped_task(task, _BACKGROUND_TASKS)
+
+
+def _finish_scoped_task(
+    task: asyncio.Task,
+    collection: set[asyncio.Task],
+) -> None:
+    collection.discard(task)
     try:
         task.result()
     except asyncio.CancelledError:
@@ -54,9 +63,22 @@ def _task_finished(task: asyncio.Task) -> None:
 
 
 def _schedule(coro: Coroutine, *, component: str) -> bool:
-    if len(_BACKGROUND_TASKS) >= int(
-        settings.coin_intelligence_shadow_max_inflight
-    ):
+    return _schedule_scoped(
+        coro,
+        component=component,
+        collection=_BACKGROUND_TASKS,
+        limit=int(settings.coin_intelligence_shadow_max_inflight),
+    )
+
+
+def _schedule_scoped(
+    coro: Coroutine,
+    *,
+    component: str,
+    collection: set[asyncio.Task],
+    limit: int,
+) -> bool:
+    if len(collection) >= int(limit):
         coro.close()
         record_shadow_runtime_event(
             component=component,
@@ -72,8 +94,10 @@ def _schedule(coro: Coroutine, *, component: str) -> bool:
             status="no_event_loop",
         )
         return False
-    _BACKGROUND_TASKS.add(task)
-    task.add_done_callback(_task_finished)
+    collection.add(task)
+    task.add_done_callback(
+        lambda completed: _finish_scoped_task(completed, collection)
+    )
     record_shadow_runtime_event(component=component, status="scheduled")
     return True
 
@@ -95,17 +119,19 @@ async def _infer_implicit_commodity(
     if service is None:
         raise RuntimeError("shadow service is not configured")
     started = time.monotonic()
-    observation = await asyncio.wait_for(
-        asyncio.to_thread(
-            service.observe_implicit_commodity,
-            price=price,
-            settlement=settlement,
-            current_commodity=current_commodity,
-            now=requested_at,
-        ),
-        timeout=float(settings.coin_intelligence_shadow_timeout_seconds),
+    # The deterministic ranker is bounded local CPU work. Running it directly
+    # avoids a timed-out Python thread surviving process shutdown.
+    observation = service.observe_implicit_commodity(
+        price=price,
+        settlement=settlement,
+        current_commodity=current_commodity,
+        now=requested_at,
     )
     latency_ms = max(0, int((time.monotonic() - started) * 1000))
+    if latency_ms > int(
+        float(settings.coin_intelligence_shadow_timeout_seconds) * 1000
+    ):
+        raise asyncio.TimeoutError
     return observation, latency_ms
 
 
@@ -211,6 +237,129 @@ def schedule_implicit_commodity_shadow(
     )
 
 
+async def _observe_gemma_parser_candidate(
+    *,
+    text: str,
+    side: str,
+    settlement: str,
+    quantity: int,
+    price: int,
+    current_commodity: str,
+) -> None:
+    """Query the bounded local sidecar; raw text never reaches persistence."""
+
+    from core.market_intelligence.gemma_parser import (
+        GEMMA_PARSER_VERSION,
+        infer_gemma_parser_candidate,
+    )
+    from core.market_intelligence.ledger import persist_parser_observation
+
+    service = _configured_service()
+    if service is None:
+        return
+    try:
+        bundle = service._loaded_bundle()
+        candidate = await asyncio.to_thread(
+            infer_gemma_parser_candidate,
+            text,
+            endpoint=str(
+                settings.coin_intelligence_shadow_gemma_endpoint
+            ),
+            canonical_commodities=bundle.canonical_commodity_names,
+            timeout_seconds=float(
+                settings.coin_intelligence_shadow_gemma_timeout_seconds
+            ),
+        )
+        normalized = candidate.to_dict()
+        expected = {
+            "side": str(side).upper(),
+            "settlement": str(settlement).upper(),
+            "quantity": int(quantity),
+            "price": int(price),
+            "commodity": str(current_commodity),
+        }
+        disagreement = [
+            name
+            for name, value in expected.items()
+            if normalized.get(name) != value
+        ]
+        observation = ShadowObservation(
+            status="AMBIGUOUS" if candidate.abstain else "INFERRED",
+            settlement=str(settlement).upper(),
+            current_commodity=str(current_commodity),
+            inferred_commodity=candidate.commodity,
+            agrees_with_current=(
+                candidate.commodity == current_commodity
+                if candidate.commodity is not None
+                else None
+            ),
+            requires_user_confirmation=bool(
+                candidate.abstain or disagreement
+            ),
+            decision_reason=str(candidate.reason_code),
+            bundle_version=GEMMA_PARSER_VERSION,
+            snapshot_version=None,
+        )
+        await persist_parser_observation(
+            observation,
+            requested_at=datetime.now(timezone.utc),
+            source_surface="offer_parser_gemma",
+            component="GEMMA_PARSER_CANDIDATE",
+            candidate_payload=normalized,
+            disagreement_fields=disagreement,
+        )
+        record_shadow_runtime_event(
+            component="gemma_parser",
+            status="completed",
+        )
+    except (TimeoutError, asyncio.TimeoutError):
+        record_shadow_runtime_event(
+            component="gemma_parser",
+            status="timeout",
+        )
+    except Exception:
+        # No exception message is logged because a third-party runtime may
+        # include the prompt in it.
+        record_shadow_runtime_event(
+            component="gemma_parser",
+            status="runtime_error",
+        )
+
+
+def schedule_gemma_parser_shadow(
+    *,
+    text: str,
+    side: str,
+    settlement: str,
+    quantity: int,
+    price: int,
+    current_commodity: str,
+) -> bool:
+    if not (
+        settings.coin_intelligence_shadow_enabled
+        and settings.coin_intelligence_shadow_persist_enabled
+        and settings.coin_intelligence_shadow_gemma_parser_enabled
+        and settings.coin_intelligence_shadow_gemma_endpoint
+        and _configured_service() is not None
+    ):
+        return False
+    if not _sampled_in():
+        return False
+    return _schedule_scoped(
+        _observe_gemma_parser_candidate(
+            text=text,
+            side=side,
+            settlement=settlement,
+            quantity=quantity,
+            price=price,
+            current_commodity=current_commodity,
+        ),
+        component="gemma_parser",
+        collection=_GEMMA_TASKS,
+        limit=1,
+    )
+
+
 def _as_utc(value: datetime | None) -> datetime:
     result = value or datetime.now(timezone.utc)
     if result.tzinfo is None:
@@ -223,16 +372,25 @@ async def _process_project_offer(
     *,
     requested_at: datetime,
 ) -> None:
-    from sqlalchemy import select
+    from sqlalchemy import case, func, or_, select
 
     from core.db import AsyncSessionLocal
+    from core.market_intelligence.basis_v2 import evaluate_basis_v2
+    from core.market_intelligence.feature_store_v2 import (
+        load_feature_context_v2,
+    )
+    from core.market_intelligence.features_v2 import (
+        build_feature_snapshot_v2,
+    )
+    from core.market_intelligence.hybrid_v2 import evaluate_hybrid_v2
     from core.market_intelligence.ledger import (
         persist_rate_prediction,
         shadow_subject_fingerprint,
     )
-    from core.market_intelligence.hybrid_v2 import evaluate_hybrid_v2
+    from core.market_intelligence.low_date_v2 import evaluate_low_date_v2
+    from core.market_intelligence.quality import evaluate_offer_quality
     from models.commodity import Commodity
-    from models.offer import Offer
+    from models.offer import Offer, OfferStatus, OfferType
 
     async with AsyncSessionLocal() as session:
         row = (
@@ -242,9 +400,41 @@ async def _process_project_offer(
                 .where(Offer.id == int(local_id))
             )
         ).one_or_none()
-    if row is None:
-        return
-    offer, commodity_name = row
+        if row is None:
+            return
+        offer, commodity_name = row
+        book = (
+            await session.execute(
+                select(
+                    func.min(
+                        case(
+                            (Offer.offer_type == OfferType.BUY, Offer.price),
+                            else_=None,
+                        )
+                    ),
+                    func.max(
+                        case(
+                            (Offer.offer_type == OfferType.SELL, Offer.price),
+                            else_=None,
+                        )
+                    ),
+                ).where(
+                    Offer.id != int(local_id),
+                    Offer.commodity_id == int(offer.commodity_id),
+                    Offer.settlement_type == offer.settlement_type,
+                    or_(
+                        Offer.status == OfferStatus.ACTIVE,
+                        func.coalesce(
+                            Offer.expired_at,
+                            Offer.updated_at,
+                        )
+                        >= requested_at,
+                    ),
+                    Offer.exclude_from_competitive_price.is_(False),
+                    Offer.created_at < requested_at,
+                )
+            )
+        ).one()
     offer_public_id = str(offer.offer_public_id or "").strip()
     if not offer_public_id:
         return
@@ -252,28 +442,88 @@ async def _process_project_offer(
     if service is None:
         return
     started = time.monotonic()
-    prediction = await asyncio.wait_for(
-        asyncio.to_thread(
-            service.estimate_canonical_rate,
-            commodity=str(commodity_name),
-            settlement=str(
-                getattr(
-                    offer.settlement_type,
-                    "value",
-                    offer.settlement_type,
-                )
-            ),
-            trade_form="PHYSICAL",
-            now=requested_at,
-        ),
-        timeout=float(settings.coin_intelligence_shadow_timeout_seconds),
+    settlement = str(
+        getattr(
+            offer.settlement_type,
+            "value",
+            offer.settlement_type,
+        )
+    )
+    prediction = service.estimate_canonical_rate(
+        commodity=str(commodity_name),
+        settlement=settlement,
+        trade_form="PHYSICAL",
+        now=requested_at,
     )
     latency_ms = max(0, int((time.monotonic() - started) * 1000))
-    candidates = (
-        [evaluate_hybrid_v2(prediction, as_of_utc=requested_at)]
-        if settings.coin_intelligence_shadow_numeric_v2_enabled
-        else []
-    )
+    if latency_ms > int(
+        float(settings.coin_intelligence_shadow_timeout_seconds) * 1000
+    ):
+        raise asyncio.TimeoutError
+
+    if settings.coin_intelligence_shadow_feature_v2_enabled:
+        context = await load_feature_context_v2(
+            commodity_id=int(offer.commodity_id),
+            settlement=settlement,
+            trade_form="PHYSICAL",
+            cutoff_utc=requested_at,
+        )
+        evidence_v2 = build_feature_snapshot_v2(
+            prediction.evidence,
+            as_of_utc=requested_at,
+            same_market_history=context["same_market_history"],
+            settlement_basis=context["settlement_basis"],
+            previous_regime_label=context["previous_regime_label"],
+        )
+        prediction = replace(
+            prediction,
+            feature_schema_version=str(
+                evidence_v2["schema_version"]
+            ),
+            evidence=evidence_v2,
+        )
+
+    quality_decision = None
+    if settings.coin_intelligence_shadow_quality_gate_enabled:
+        quality_decision = evaluate_offer_quality(
+            side=str(
+                getattr(offer.offer_type, "value", offer.offer_type)
+            ).upper(),
+            price_project=int(offer.price),
+            lowest_active_buy=book[0],
+            highest_active_sell=book[1],
+            regime_v2=(
+                prediction.evidence.get("market_regime_v2") or {}
+            ),
+            structural_reference_project=prediction.center_project_price,
+        )
+        evidence = dict(prediction.evidence)
+        evidence["quality"] = {
+            "policy_version": quality_decision.context.get(
+                "policy_version"
+            ),
+            "decision": quality_decision.decision,
+            "reason_codes": list(quality_decision.reason_codes),
+            "realtime_weight": quality_decision.realtime_weight,
+            "training_weight": quality_decision.training_weight,
+            "review_required": quality_decision.review_required,
+            "context": dict(quality_decision.context),
+        }
+        prediction = replace(prediction, evidence=evidence)
+
+    candidates = []
+    if settings.coin_intelligence_shadow_numeric_v2_enabled:
+        candidates.append(
+            evaluate_hybrid_v2(prediction, as_of_utc=requested_at)
+        )
+    if settings.coin_intelligence_shadow_low_date_v2_enabled:
+        candidates.append(
+            evaluate_low_date_v2(prediction, as_of_utc=requested_at)
+        )
+    if settings.coin_intelligence_shadow_basis_v2_enabled:
+        candidates.append(
+            evaluate_basis_v2(prediction, as_of_utc=requested_at)
+        )
     await persist_rate_prediction(
         prediction,
         commodity_id=int(offer.commodity_id),
@@ -288,6 +538,7 @@ async def _process_project_offer(
         observed_project_price=int(offer.price),
         latency_ms=latency_ms,
         candidate_predictions=candidates,
+        quality_decision=quality_decision,
     )
 
 
@@ -338,60 +589,62 @@ async def _process_project_trade(local_id: int) -> int:
     )
 
 
-async def _observe_project_market_event(event) -> None:
+async def _enqueue_project_market_event(event) -> None:
     component = (
         "project_offer" if str(event.kind).upper() == "OFFER"
         else "project_trade"
     )
     try:
-        if component == "project_offer":
-            requested_at = _as_utc(
+        from core.market_intelligence.job_queue import enqueue_project_job
+
+        await enqueue_project_job(
+            kind=str(event.kind),
+            local_id=int(event.local_id),
+            requested_at_utc=_as_utc(
                 getattr(event, "observed_after_commit_at_utc", None)
-            )
-            await _process_project_offer(
-                int(event.local_id),
-                requested_at=requested_at,
-            )
-        else:
-            created = 0
-            # An immediately executed trade can commit while the independent
-            # offer prediction is still running.  Bounded retries preserve
-            # ordering without delaying either business transaction.
-            for delay in (0.0, 0.20, 0.50, 1.0):
-                if delay:
-                    await asyncio.sleep(delay)
-                created = await _process_project_trade(int(event.local_id))
-                if created:
-                    break
-            if not created:
-                record_shadow_runtime_event(
-                    component=component,
-                    status="no_prior_prediction",
-                )
-        record_shadow_runtime_event(component=component, status="completed")
-    except asyncio.TimeoutError:
-        record_shadow_runtime_event(component=component, status="timeout")
+            ),
+        )
+        record_shadow_runtime_event(component=component, status="enqueued")
     except Exception:
         record_shadow_runtime_event(
             component=component,
-            status="persistence_error",
+            status="enqueue_error",
         )
         logger.exception(
-            "Project market event Shadow observation failed",
+            "Project market event Shadow enqueue failed",
             extra={
-                "event": "coin_intelligence.project_event_failed",
+                "event": "coin_intelligence.project_event_enqueue_failed",
                 "event_kind": str(getattr(event, "kind", "UNKNOWN"))[:24],
             },
         )
 
 
+async def process_durable_project_job(job) -> None:
+    """Worker handler. Raising leaves retry/lease policy to the queue."""
+
+    kind = str(job.job_kind).upper()
+    if kind == "PROJECT_OFFER":
+        await _process_project_offer(
+            int(job.local_id),
+            requested_at=_as_utc(job.requested_at_utc),
+        )
+        return
+    if kind == "PROJECT_TRADE":
+        created = await _process_project_trade(int(job.local_id))
+        if not created:
+            raise RuntimeError("STRICTLY_PRIOR_PREDICTION_NOT_AVAILABLE")
+        return
+    raise ValueError("UNSUPPORTED_SHADOW_JOB_KIND")
+
+
 def schedule_project_market_event(event) -> bool:
-    """Schedule a committed project event without retaining raw user data."""
+    """Enqueue a committed project event without retaining raw user data."""
 
     if not (
         settings.coin_intelligence_shadow_enabled
         and settings.coin_intelligence_shadow_project_events_enabled
         and settings.coin_intelligence_shadow_persist_enabled
+        and settings.coin_intelligence_shadow_durable_worker_enabled
         and _configured_service() is not None
     ):
         return False
@@ -400,13 +653,7 @@ def schedule_project_market_event(event) -> bool:
         if str(getattr(event, "kind", "")).upper() == "OFFER"
         else "project_trade"
     )
-    if not _sampled_in():
-        record_shadow_runtime_event(
-            component=component,
-            status="sampled_out",
-        )
-        return False
     return _schedule(
-        _observe_project_market_event(event),
+        _enqueue_project_market_event(event),
         component=component,
     )

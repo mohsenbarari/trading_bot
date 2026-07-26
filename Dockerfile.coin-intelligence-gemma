@@ -1,0 +1,15 @@
+ARG BASE_IMAGE=trading_bot_base
+FROM ${BASE_IMAGE} AS application_dependencies
+
+FROM python:3.11-slim-bookworm
+RUN apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+        libmagic1 \
+        libpq5 \
+        libgomp1 \
+        util-linux \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=application_dependencies \
+    /usr/local/lib/python3.11/site-packages \
+    /usr/local/lib/python3.11/site-packages
+WORKDIR /app

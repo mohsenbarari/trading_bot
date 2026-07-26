@@ -41,9 +41,12 @@ from .offer_publication_state import (
 from .trade import Trade, TradeType, TradeStatus
 from .coin_intelligence_shadow import (
     CoinIntelligenceShadowFeatureSnapshot,
+    CoinIntelligenceShadowJob,
     CoinIntelligenceShadowOutcome,
     CoinIntelligenceShadowParserResult,
     CoinIntelligenceShadowPrediction,
+    CoinIntelligenceShadowQualityDecision,
+    CoinIntelligenceShadowReview,
     CoinIntelligenceShadowRun,
 )
 from core.enums import SettlementType
@@ -168,9 +171,12 @@ __all__ = [
     "TradeType",
     "TradeStatus",
     "CoinIntelligenceShadowFeatureSnapshot",
+    "CoinIntelligenceShadowJob",
     "CoinIntelligenceShadowOutcome",
     "CoinIntelligenceShadowParserResult",
     "CoinIntelligenceShadowPrediction",
+    "CoinIntelligenceShadowQualityDecision",
+    "CoinIntelligenceShadowReview",
     "CoinIntelligenceShadowRun",
     "TERMINAL_TRADE_DELIVERY_RECEIPT_STATUSES",
     "TradeDeliveryChannel",

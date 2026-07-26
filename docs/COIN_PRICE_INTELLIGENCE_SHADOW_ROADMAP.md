@@ -322,10 +322,14 @@ This market-intelligence plane does not change the fixed business topology:
   data;
 - production or staging enablement.
 
-Phase 2 now adds a disabled-by-default local PostgreSQL evaluation ledger,
-post-commit offer/trade observation, a gated Hybrid-v2 research candidate, and
-an aggregate evaluation command. These additions remain non-authoritative and
-are not a production/staging activation.
+Phase 2 now adds the disabled local PostgreSQL evaluation/review ledger,
+durable project-event worker, Feature Snapshot/Regime v2, quality quarantine,
+Hybrid/low-date/cash-tomorrow candidates, strict local Gemma parser second
+opinion, and aggregate evaluation. These additions remain non-authoritative
+and are not a production/staging activation. Deferred items 7–11
+(operator UI, three-site data plane, retention, promotion, and legacy clean
+bootstrap repair) are enumerated in
+[`COIN_PRICE_INTELLIGENCE_SHADOW_V2.md`](COIN_PRICE_INTELLIGENCE_SHADOW_V2.md).
 
 ## Activation gates
 
@@ -352,6 +356,8 @@ are not a production/staging activation.
 - `COIN_INTELLIGENCE_SHADOW_PROJECT_EVENTS_ENABLED=false` keeps post-commit
   project observation disabled.
 - `COIN_INTELLIGENCE_SHADOW_NUMERIC_V2_ENABLED=false` keeps Hybrid-v2 disabled.
+- Feature-v2, quality, durable-worker, low-date-v2, basis-v2 and Gemma each
+  have an independent false-by-default gate.
 - bounded timeout, in-flight, and sampling settings are listed in
   `config/coin-intelligence-shadow.env.example`.
 

@@ -295,3 +295,179 @@ class CoinIntelligenceShadowOutcome(Base):
         nullable=False,
         server_default=func.now(),
     )
+
+
+class CoinIntelligenceShadowJob(Base):
+    """Local durable work item; payloads contain normalized IDs only."""
+
+    __tablename__ = "coin_intelligence_shadow_jobs"
+    __table_args__ = (
+        UniqueConstraint(
+            "idempotency_key",
+            name="uq_coin_intelligence_shadow_jobs_idempotency_key",
+        ),
+        CheckConstraint(
+            "status IN ('PENDING','PROCESSING','COMPLETE','FAILED')",
+            name="ck_coin_intelligence_shadow_jobs_status",
+        ),
+        CheckConstraint(
+            "attempts >= 0 AND max_attempts > 0",
+            name="ck_coin_intelligence_shadow_jobs_attempts",
+        ),
+        CheckConstraint(
+            "job_kind IN ('PROJECT_OFFER','PROJECT_TRADE')",
+            name="ck_coin_intelligence_shadow_jobs_kind",
+        ),
+        CheckConstraint(
+            "local_id > 0",
+            name="ck_coin_intelligence_shadow_jobs_local_id_positive",
+        ),
+        Index(
+            "ix_coin_intelligence_shadow_jobs_claim",
+            "status",
+            "available_at",
+            "lease_expires_at",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True)
+    idempotency_key = Column(String(64), nullable=False)
+    job_kind = Column(String(32), nullable=False)
+    local_id = Column(Integer, nullable=False)
+    # Normalized bounded fields only. Raw offer text is forbidden.
+    payload = Column(JSON, nullable=False, default=dict)
+    requested_at_utc = Column(DateTime(timezone=True), nullable=False)
+    status = Column(
+        String(16),
+        nullable=False,
+        default="PENDING",
+        server_default="PENDING",
+    )
+    attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    max_attempts = Column(
+        Integer,
+        nullable=False,
+        default=5,
+        server_default="5",
+    )
+    available_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True)
+    worker_token = Column(String(64), nullable=True)
+    error_code = Column(String(96), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class CoinIntelligenceShadowQualityDecision(Base):
+    """Immutable quality decision made at the prediction cutoff."""
+
+    __tablename__ = "coin_intelligence_shadow_quality_decisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            name="uq_coin_intelligence_shadow_quality_run_id",
+        ),
+        CheckConstraint(
+            "decision IN "
+            "('EXCLUDE','REVIEW_REQUIRED','INCLUDE_SHADOW')",
+            name="ck_coin_intelligence_shadow_quality_decision",
+        ),
+        CheckConstraint(
+            "realtime_weight >= 0 AND realtime_weight <= 1 "
+            "AND training_weight >= 0 AND training_weight <= 1",
+            name="ck_coin_intelligence_shadow_quality_weights",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(
+        String(36),
+        ForeignKey("coin_intelligence_shadow_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    policy_version = Column(String(80), nullable=False)
+    decision = Column(String(32), nullable=False)
+    reason_codes = Column(JSON, nullable=False, default=list)
+    realtime_weight = Column(Float, nullable=False)
+    training_weight = Column(Float, nullable=False)
+    review_required = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+    context = Column(JSON, nullable=False, default=dict)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class CoinIntelligenceShadowReview(Base):
+    """Append-only human decision over one immutable outcome."""
+
+    __tablename__ = "coin_intelligence_shadow_reviews"
+    __table_args__ = (
+        UniqueConstraint(
+            "outcome_id",
+            "review_version",
+            name="uq_coin_intelligence_shadow_reviews_version",
+        ),
+        CheckConstraint(
+            "review_version > 0",
+            name="ck_coin_intelligence_shadow_reviews_version_positive",
+        ),
+        CheckConstraint(
+            "corrected_project_price IS NULL "
+            "OR corrected_project_price > 0",
+            name="ck_coin_intelligence_shadow_reviews_price_positive",
+        ),
+        CheckConstraint(
+            "action IN "
+            "('ACCEPT_ORIGINAL','ACCEPT_CORRECTION','REJECT_LABEL',"
+            "'KEEP_UNREVIEWED','AMBIGUOUS')",
+            name="ck_coin_intelligence_shadow_reviews_action",
+        ),
+        CheckConstraint(
+            "(action = 'ACCEPT_CORRECTION' "
+            "AND corrected_project_price IS NOT NULL) "
+            "OR (action <> 'ACCEPT_CORRECTION' "
+            "AND corrected_project_price IS NULL)",
+            name="ck_coin_intelligence_shadow_reviews_correction_shape",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    outcome_id = Column(
+        Integer,
+        ForeignKey("coin_intelligence_shadow_outcomes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    review_version = Column(Integer, nullable=False)
+    action = Column(String(32), nullable=False)
+    reviewer_fingerprint = Column(String(64), nullable=False)
+    corrected_project_price = Column(BigInteger, nullable=True)
+    reason_code = Column(String(96), nullable=False)
+    # Coded/bounded metadata only; no raw offer text or free-form user data.
+    note_code = Column(String(96), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )

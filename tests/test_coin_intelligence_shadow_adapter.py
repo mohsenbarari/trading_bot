@@ -48,17 +48,10 @@ class CoinIntelligenceShadowAdapterTests(
     ) -> None:
         recorded = []
 
-        async def fail_inference(*_args, **_kwargs):
-            raise RuntimeError("must not reach the parser")
-
         with patch.object(
             shadow,
             "_configured_service",
             return_value=FailingService(),
-        ), patch.object(
-            shadow.asyncio,
-            "to_thread",
-            side_effect=fail_inference,
         ), patch.object(
             shadow,
             "record_shadow_observation",
@@ -82,17 +75,20 @@ class CoinIntelligenceShadowAdapterTests(
             local_id=41,
             observed_after_commit_at_utc=cutoff,
         )
-        with patch.object(
-            shadow,
-            "_process_project_offer",
+        with patch(
+            "core.market_intelligence.job_queue.enqueue_project_job",
             new=AsyncMock(),
-        ) as process, patch.object(
+        ) as enqueue, patch.object(
             shadow,
             "record_shadow_runtime_event",
         ):
-            await shadow._observe_project_market_event(event)
+            await shadow._enqueue_project_market_event(event)
 
-        process.assert_awaited_once_with(41, requested_at=cutoff)
+        enqueue.assert_awaited_once_with(
+            kind="OFFER",
+            local_id=41,
+            requested_at_utc=cutoff,
+        )
 
 
 class CoinIntelligenceShadowSettingsTests(unittest.TestCase):
@@ -120,6 +116,12 @@ class CoinIntelligenceShadowSettingsTests(unittest.TestCase):
             "coin_intelligence_shadow_persist_enabled",
             "coin_intelligence_shadow_project_events_enabled",
             "coin_intelligence_shadow_numeric_v2_enabled",
+            "coin_intelligence_shadow_feature_v2_enabled",
+            "coin_intelligence_shadow_quality_gate_enabled",
+            "coin_intelligence_shadow_low_date_v2_enabled",
+            "coin_intelligence_shadow_basis_v2_enabled",
+            "coin_intelligence_shadow_durable_worker_enabled",
+            "coin_intelligence_shadow_gemma_parser_enabled",
         ):
             with self.subTest(field=field), self.assertRaises(
                 ValidationError
@@ -134,6 +136,10 @@ class CoinIntelligenceShadowSettingsTests(unittest.TestCase):
             {"coin_intelligence_shadow_max_inflight": 1025},
             {"coin_intelligence_shadow_sample_rate": -0.01},
             {"coin_intelligence_shadow_sample_rate": 1.01},
+            {"coin_intelligence_shadow_worker_poll_seconds": 0},
+            {"coin_intelligence_shadow_worker_lease_seconds": 4},
+            {"coin_intelligence_shadow_worker_max_attempts": 21},
+            {"coin_intelligence_shadow_gemma_timeout_seconds": 181},
         ):
             with self.subTest(values=values), self.assertRaises(
                 ValidationError
@@ -156,7 +162,12 @@ class CoinIntelligenceShadowSettingsTests(unittest.TestCase):
             coin_intelligence_shadow_enabled=True,
             coin_intelligence_shadow_persist_enabled=True,
             coin_intelligence_shadow_project_events_enabled=True,
+            coin_intelligence_shadow_durable_worker_enabled=True,
             coin_intelligence_shadow_numeric_v2_enabled=True,
+            coin_intelligence_shadow_feature_v2_enabled=True,
+            coin_intelligence_shadow_quality_gate_enabled=True,
+            coin_intelligence_shadow_low_date_v2_enabled=True,
+            coin_intelligence_shadow_basis_v2_enabled=True,
         )
         self.assertTrue(enabled.coin_intelligence_shadow_numeric_v2_enabled)
 

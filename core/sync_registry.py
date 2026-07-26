@@ -178,6 +178,14 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         "immutable run-local feature evidence; never cross-site business sync",
         "non-authoritative model evaluation only",
     ),
+    "coin_intelligence_shadow_jobs": _entry(
+        "coin_intelligence_shadow_jobs",
+        SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("coin_intelligence_shadow_worker",),
+        "local physical site",
+        "lease and retry state is local; never cross-site business sync",
+        "non-authoritative execution bookkeeping only",
+    ),
     "coin_intelligence_shadow_outcomes": _entry(
         "coin_intelligence_shadow_outcomes",
         SyncPolicy.INTERNAL_BOOKKEEPING,
@@ -201,6 +209,22 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         "local physical site",
         "one immutable role/candidate prediction per run",
         "non-authoritative model evaluation only",
+    ),
+    "coin_intelligence_shadow_quality_decisions": _entry(
+        "coin_intelligence_shadow_quality_decisions",
+        SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("coin_intelligence_shadow",),
+        "local physical site",
+        "immutable decision-cutoff quality evidence",
+        "non-authoritative quarantine evaluation only",
+    ),
+    "coin_intelligence_shadow_reviews": _entry(
+        "coin_intelligence_shadow_reviews",
+        SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("operator_review",),
+        "local physical site",
+        "append-only coded review evidence; never business sync",
+        "future label governance only",
     ),
     "coin_intelligence_shadow_runs": _entry(
         "coin_intelligence_shadow_runs",

@@ -363,6 +363,54 @@ class CoinIntelligenceShadowService:
             }
         regime = settlement_payload.get("market_regime") or {}
         flow = settlement_payload.get("market_pressure") or {}
+        compact_components = []
+        for component in regime.get("components") or ():
+            if not isinstance(component, dict):
+                continue
+            compact_components.append(
+                {
+                    "name": component.get("name"),
+                    "sample_count": component.get("sample_count"),
+                    "last_observed_utc": component.get(
+                        "last_observed_utc"
+                    ),
+                    "return_percent": component.get("return_percent"),
+                    "volatility_percent": component.get(
+                        "volatility_percent"
+                    ),
+                    "direction_strength": component.get(
+                        "direction_strength"
+                    ),
+                    "reliability": component.get("reliability"),
+                }
+            )
+        market_matrix = {}
+        for matrix_settlement in ("CASH", "TOMORROW"):
+            matrix_payload = (
+                (state.get("settlements") or {}).get(matrix_settlement)
+                or {}
+            )
+            matrix_inputs = matrix_payload.get("inputs") or {}
+            market_matrix[matrix_settlement] = {
+                source_name: {
+                    "status": (
+                        matrix_inputs.get(source_name) or {}
+                    ).get("status"),
+                    "average_price": (
+                        matrix_inputs.get(source_name) or {}
+                    ).get("average_price"),
+                    "last_event_utc": (
+                        matrix_inputs.get(source_name) or {}
+                    ).get("last_event_utc"),
+                    "selection": (
+                        matrix_inputs.get(source_name) or {}
+                    ).get("selection"),
+                    "trade_form": (
+                        matrix_inputs.get(source_name) or {}
+                    ).get("selected_trade_form"),
+                }
+                for source_name in ("melted_gold", "usd", "generic_coin")
+            }
         evidence = {
             "schema_version": "COIN_SHADOW_FEATURE_EVIDENCE_V1",
             "as_of_utc": requested_at.isoformat(),
@@ -377,11 +425,23 @@ class CoinIntelligenceShadowService:
                 "direction_score": regime.get("direction_score"),
                 "confidence": regime.get("confidence"),
                 "volatility_percent": regime.get("volatility_percent"),
+                "components": compact_components,
             },
             "order_flow": {
                 "status": flow.get("status"),
                 "direction": flow.get("direction"),
                 "estimator_score": flow.get("estimator_score"),
+                "event_count": flow.get("event_count"),
+                "offer_count": flow.get("offer_count"),
+                "trade_count": flow.get("trade_count"),
+                "buy_offer_count": flow.get("buy_offer_count"),
+                "sell_offer_count": flow.get("sell_offer_count"),
+                "latest_offer_streak_side": flow.get(
+                    "latest_offer_streak_side"
+                ),
+                "latest_offer_streak_count": flow.get(
+                    "latest_offer_streak_count"
+                ),
             },
             "rate": {
                 "intrinsic_toman": rate.get("intrinsic_toman"),
@@ -389,7 +449,14 @@ class CoinIntelligenceShadowService:
                 "market_pressure_score": rate.get(
                     "market_pressure_score"
                 ),
+                "low_date_intrinsic_anchor": rate.get(
+                    "low_date_intrinsic_anchor"
+                ),
             },
+            "underlying_market_matrix": market_matrix,
+            "low_date_physical_reference": state.get(
+                "low_date_physical_reference"
+            ),
         }
         return RateShadowPrediction(
             status="ESTIMATED",

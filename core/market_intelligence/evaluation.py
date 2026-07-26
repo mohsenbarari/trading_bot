@@ -8,17 +8,20 @@ import math
 from statistics import mean, median
 from typing import Iterable, Mapping
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import and_, create_engine, func, select
+from sqlalchemy.orm import aliased
 
 from models.coin_intelligence_shadow import (
     CoinIntelligenceShadowOutcome,
     CoinIntelligenceShadowPrediction,
+    CoinIntelligenceShadowQualityDecision,
+    CoinIntelligenceShadowReview,
     CoinIntelligenceShadowRun,
 )
 
 
 PROMOTION_LABEL_STATUSES = frozenset({"REVIEWED", "TRUSTED"})
-REPORT_SCHEMA_VERSION = "COIN_SHADOW_EVALUATION_REPORT_V1"
+REPORT_SCHEMA_VERSION = "COIN_SHADOW_EVALUATION_REPORT_V2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -293,6 +296,17 @@ def load_shadow_score_records(
 ) -> list[ShadowScoreRecord]:
     """Load immutable outcome rows through the synchronous read path."""
 
+    latest_review_version = (
+        select(
+            CoinIntelligenceShadowReview.outcome_id.label("outcome_id"),
+            func.max(
+                CoinIntelligenceShadowReview.review_version
+            ).label("review_version"),
+        )
+        .group_by(CoinIntelligenceShadowReview.outcome_id)
+        .subquery()
+    )
+    latest_review = aliased(CoinIntelligenceShadowReview)
     statement = (
         select(
             CoinIntelligenceShadowPrediction.run_id,
@@ -310,6 +324,9 @@ def load_shadow_score_records(
             CoinIntelligenceShadowOutcome.interval_covered,
             CoinIntelligenceShadowOutcome.label_status,
             CoinIntelligenceShadowRun.training_eligible,
+            latest_review.action.label("review_action"),
+            latest_review.corrected_project_price,
+            CoinIntelligenceShadowQualityDecision.training_weight,
         )
         .join(
             CoinIntelligenceShadowRun,
@@ -320,6 +337,25 @@ def load_shadow_score_records(
             CoinIntelligenceShadowOutcome,
             CoinIntelligenceShadowOutcome.prediction_id
             == CoinIntelligenceShadowPrediction.id,
+        )
+        .outerjoin(
+            latest_review_version,
+            latest_review_version.c.outcome_id
+            == CoinIntelligenceShadowOutcome.id,
+        )
+        .outerjoin(
+            latest_review,
+            and_(
+                latest_review.outcome_id
+                == latest_review_version.c.outcome_id,
+                latest_review.review_version
+                == latest_review_version.c.review_version,
+            ),
+        )
+        .outerjoin(
+            CoinIntelligenceShadowQualityDecision,
+            CoinIntelligenceShadowQualityDecision.run_id
+            == CoinIntelligenceShadowRun.id,
         )
         .where(
             CoinIntelligenceShadowRun.mode == "shadow",
@@ -342,26 +378,82 @@ def load_shadow_score_records(
             rows: Iterable[Mapping] = connection.execute(
                 statement
             ).mappings()
-            return [
-                ShadowScoreRecord(
-                    run_id=str(row["run_id"]),
-                    model_role=str(row["model_role"]),
-                    candidate_name=str(row["candidate_name"]),
-                    commodity=str(row["canonical_commodity"] or "UNKNOWN"),
-                    settlement=str(row["settlement"]),
-                    trade_form=str(row["trade_form"]),
-                    center_project_price=row["center_project_price"],
-                    lower_project_price=row["lower_project_price"],
-                    upper_project_price=row["upper_project_price"],
-                    actual_project_price=int(row["actual_project_price"]),
-                    absolute_percent_error=row["absolute_percent_error"],
-                    signed_percent_error=row["signed_percent_error"],
-                    interval_covered=row["interval_covered"],
-                    label_status=str(row["label_status"]),
-                    training_eligible=bool(row["training_eligible"]),
+            output = []
+            for row in rows:
+                action = str(row["review_action"] or "").upper()
+                accepted = action in {
+                    "ACCEPT_ORIGINAL",
+                    "ACCEPT_CORRECTION",
+                }
+                actual = (
+                    int(row["corrected_project_price"])
+                    if action == "ACCEPT_CORRECTION"
+                    and row["corrected_project_price"] is not None
+                    else int(row["actual_project_price"])
                 )
-                for row in rows
-            ]
+                center = row["center_project_price"]
+                signed_error = (
+                    (float(center) - actual) / actual * 100.0
+                    if center is not None
+                    else None
+                )
+                lower = row["lower_project_price"]
+                upper = row["upper_project_price"]
+                covered = (
+                    int(lower) <= actual <= int(upper)
+                    if lower is not None and upper is not None
+                    else None
+                )
+                quality_weight = row["training_weight"]
+                quality_allowed = (
+                    quality_weight is not None
+                    and float(quality_weight) > 0
+                )
+                has_review = bool(action)
+                if accepted:
+                    label_status = "REVIEWED"
+                elif action == "REJECT_LABEL":
+                    label_status = "REJECTED"
+                elif action == "AMBIGUOUS":
+                    label_status = "AMBIGUOUS"
+                elif has_review:
+                    label_status = "UNREVIEWED"
+                else:
+                    label_status = str(row["label_status"])
+                training_eligible = bool(
+                    quality_allowed
+                    and (
+                        accepted
+                        if has_review
+                        else row["training_eligible"]
+                    )
+                )
+                output.append(
+                    ShadowScoreRecord(
+                        run_id=str(row["run_id"]),
+                        model_role=str(row["model_role"]),
+                        candidate_name=str(row["candidate_name"]),
+                        commodity=str(
+                            row["canonical_commodity"] or "UNKNOWN"
+                        ),
+                        settlement=str(row["settlement"]),
+                        trade_form=str(row["trade_form"]),
+                        center_project_price=row["center_project_price"],
+                        lower_project_price=row["lower_project_price"],
+                        upper_project_price=row["upper_project_price"],
+                        actual_project_price=actual,
+                        absolute_percent_error=(
+                            abs(signed_error)
+                            if signed_error is not None
+                            else None
+                        ),
+                        signed_percent_error=signed_error,
+                        interval_covered=covered,
+                        label_status=label_status,
+                        training_eligible=training_eligible,
+                    )
+                )
+            return output
     finally:
         engine.dispose()
 

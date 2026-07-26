@@ -116,6 +116,99 @@ services:
     networks:
       - trading_net
 
+  coin_intelligence_shadow_worker:
+    image: trading_bot_base
+    profiles: ["coin-intelligence-shadow"]
+    logging: *default_logging
+    container_name: trading_bot_coin_intelligence_shadow_worker
+    restart: unless-stopped
+    command:
+      - python
+      - scripts/run_coin_intelligence_shadow_worker.py
+      - --acknowledge-shadow-only
+    environment:
+      TZ: UTC
+      TRADING_BOT_SERVICE: coin_intelligence_shadow_worker
+      TRADING_BOT_METRICS_BACKEND: ${TRADING_BOT_METRICS_BACKEND:-memory}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-2}
+      DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
+    volumes:
+      - .:/app
+    env_file:
+      - path: .env.coin-intelligence-shadow
+        required: false
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+    networks:
+      - trading_net
+
+  coin_intelligence_gemma_server:
+    image: trading_bot_coin_intelligence_gemma
+    build:
+      context: .
+      dockerfile: Dockerfile.coin-intelligence-gemma
+    profiles: ["coin-intelligence-shadow"]
+    logging: *default_logging
+    container_name: trading_bot_coin_intelligence_gemma_server
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - >-
+        mkdir -p /tmp/coin-intelligence-llama-runtime
+        && cp
+        /models/llama.cpp-b10107/llama-b10107/llama-server
+        /models/llama.cpp-b10107/llama-b10107/lib*.so*
+        /tmp/coin-intelligence-llama-runtime/
+        && chmod 0555
+        /tmp/coin-intelligence-llama-runtime/llama-server
+        && exec /tmp/coin-intelligence-llama-runtime/llama-server
+        --model
+        /models/gemma-4-E4B-it-q4_0/gemma-4-E4B_q4_0-it.gguf
+        --host 0.0.0.0
+        --port 18123
+        --ctx-size 2048
+        --threads 4
+        --threads-batch 4
+        --parallel 1
+        --log-verbosity 1
+        --jinja
+        --no-webui
+    environment:
+      TZ: UTC
+      LD_LIBRARY_PATH: /tmp/coin-intelligence-llama-runtime
+    volumes:
+      - ${COIN_INTELLIGENCE_MODEL_HOST_PATH:-/srv/trading-bot-three-site-staging-data/ai-models}:/models:ro
+    expose:
+      - "18123"
+    mem_limit: 10g
+    cpus: 4.0
+    pids_limit: 128
+    read_only: true
+    tmpfs:
+      - /tmp:rw,exec,nosuid,nodev,size=256m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen(
+          'http://127.0.0.1:18123/health', timeout=2).read(4096)
+      interval: 10s
+      timeout: 3s
+      retries: 18
+      start_period: 30s
+    networks:
+      - trading_net
+
   migration:
     image: trading_bot_base
     logging: *default_logging
