@@ -17,7 +17,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.db import AsyncSessionLocal
 from core.sync_parity import build_database_parity_snapshot, compare_parity_snapshots
 from core.sync_parity_observability import infer_parity_comparison_mode, summarize_parity_comparison
 
@@ -112,6 +111,11 @@ def _build_artifact_metadata(
 
 
 async def _snapshot(args: argparse.Namespace) -> int:
+    # Database configuration is required only for a live capture.  Keeping
+    # this import local allows an offline controller to compare redacted JSON
+    # snapshots without inheriting any site database credentials.
+    from core.db import AsyncSessionLocal
+
     async with AsyncSessionLocal() as db:
         payload = await build_database_parity_snapshot(
             db,

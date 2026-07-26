@@ -9,22 +9,32 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
-from core.secure_file_io import SecureFileError, read_secure_bytes, read_secure_text, sha256_secure_file
-
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from core.secure_file_io import SecureFileError, read_secure_bytes, read_secure_text, sha256_secure_file
+from core.three_site_topology import (
+    BOT_FI_HOST,
+    PRODUCTION_WITNESS_HOST,
+    ROLLBACK_WITNESS_HOST,
+    WEBAPP_FI_HOST,
+    WEBAPP_IR_HOST,
+)
+
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 TRUE_VALUES = {"1", "true", "yes", "on"}
 EXPECTED_TOPOLOGY = {
-    "BOT_FI_HOST": "65.109.216.187",
-    "WEBAPP_FI_HOST": "65.109.220.59",
-    "WA_IR_HOST": "95.38.164.29",
-    "WRITER_WITNESS_HOST": "185.206.95.94",
-    "TRANSITIONAL_WRITER_WITNESS_HOST": "185.231.182.6",
+    "BOT_FI_HOST": BOT_FI_HOST,
+    "WEBAPP_FI_HOST": WEBAPP_FI_HOST,
+    "WA_IR_HOST": WEBAPP_IR_HOST,
+    "WRITER_WITNESS_HOST": PRODUCTION_WITNESS_HOST,
+    "TRANSITIONAL_WRITER_WITNESS_HOST": ROLLBACK_WITNESS_HOST,
 }
 GIT_EXECUTABLE = "/usr/bin/git"
 GIT_ENVIRONMENT = {
@@ -41,6 +51,7 @@ GIT_ENVIRONMENT = {
 
 REQUIRED_VALUES = {
     "DARK_STANDBY_MODE": "1",
+    "DARK_STANDBY_PROFILE": "legacy-data-only-v1",
     "TOPOLOGY_SCHEMA_VERSION": "three-site-dr-v1",
     "SERVER_TIMEZONE": "UTC",
     "USER_DISPLAY_TIMEZONE": "Asia/Tehran",

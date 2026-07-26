@@ -211,22 +211,61 @@ class WaIrObjectStoragePreflightAgentTests(unittest.TestCase):
             ),
             stderr="",
         )
-        with patch(
-            "scripts.wa_ir_object_storage_preflight_agent.subprocess.run",
-            return_value=completed,
-        ) as run:
-            result = run_preflight(
-                release_dir=Path("/srv/trading-bot-three-site/releases/46b"),
-                secure_dir=Path("/root/secure-envs/trading-bot/three-site-staging-46b1d672"),
-                output=Path("/root/secure-envs/trading-bot/three-site-staging-46b1d672/webapp-ir-fresh-preflight.json"),
+        with tempfile.TemporaryDirectory() as raw:
+            secure_dir = Path(raw)
+            role_env = secure_dir / "roles" / "webapp-ir.env"
+            role_env.parent.mkdir()
+            role_env.write_text(
+                "WRITER_WITNESS_PUBLIC_KEY="
+                + base64.b64encode(b"w" * 32).decode()
+                + "\n",
+                encoding="utf-8",
             )
+            with patch(
+                "scripts.wa_ir_object_storage_preflight_agent.subprocess.run",
+                return_value=completed,
+            ) as run:
+                result = run_preflight(
+                    release_dir=Path("/srv/trading-bot-three-site/releases/46b"),
+                    secure_dir=secure_dir,
+                    output=secure_dir / "webapp-ir-fresh-preflight.json",
+                )
         command = run.call_args.args[0]
+        environment = run.call_args.kwargs["env"]
         self.assertIn("--role", command)
         self.assertIn("webapp-ir", command)
         self.assertIn("--stage", command)
         self.assertIn("fresh-preflight", command)
         self.assertIn("webapp-ir.compose.yml", " ".join(command))
+        self.assertEqual(
+            environment["WRITER_WITNESS_PUBLIC_KEY"],
+            base64.b64encode(b"w" * 32).decode(),
+        )
         self.assertEqual(result["status"], "verified")
+
+    def test_preflight_fails_closed_without_one_valid_witness_relay_key(self):
+        with tempfile.TemporaryDirectory() as raw:
+            secure_dir = Path(raw)
+            role_env = secure_dir / "roles" / "webapp-ir.env"
+            role_env.parent.mkdir()
+            role_env.write_text("OTHER=value\n", encoding="utf-8")
+            with self.assertRaisesRegex(AgentError, "relay trust key"):
+                run_preflight(
+                    release_dir=Path("/srv/trading-bot-three-site/releases/46b"),
+                    secure_dir=secure_dir,
+                    output=secure_dir / "webapp-ir-fresh-preflight.json",
+                )
+
+            role_env.write_text(
+                "WRITER_WITNESS_PUBLIC_KEY=not-base64\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(AgentError, "malformed"):
+                run_preflight(
+                    release_dir=Path("/srv/trading-bot-three-site/releases/46b"),
+                    secure_dir=secure_dir,
+                    output=secure_dir / "webapp-ir-fresh-preflight.json",
+                )
 
     def test_evidence_upload_uses_presigned_request_and_checks_status(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -252,6 +291,40 @@ class WaIrObjectStoragePreflightAgentTests(unittest.TestCase):
             self.assertEqual(request.get_method(), "PUT")
             self.assertEqual(result["status"], "uploaded")
             self.assertEqual(result["bytes"], evidence.stat().st_size)
+
+    def test_evidence_upload_posts_exact_presigned_form(self):
+        with tempfile.TemporaryDirectory() as raw:
+            evidence = Path(raw) / "evidence.json"
+            evidence.write_text('{"status":"verified"}', encoding="utf-8")
+            response = Mock(status=201)
+            response.__enter__ = Mock(return_value=response)
+            response.__exit__ = Mock(return_value=None)
+            response.read = Mock(return_value=b"")
+            upload = {
+                "url": "https://s3.ir-thr-at1.arvanstorage.ir/private/evidence",
+                "method": "POST",
+                "headers": {},
+                "form_fields": {
+                    "key": "private/evidence",
+                    "policy": "policy",
+                    "x-amz-algorithm": "AWS4-HMAC-SHA256",
+                    "x-amz-credential": "temporary-credential",
+                    "x-amz-date": "20260725T000000Z",
+                    "x-amz-signature": "signature",
+                    "Content-Type": "application/json",
+                },
+                "expected_status": [201],
+            }
+            with patch(
+                "scripts.wa_ir_object_storage_preflight_agent.urllib.request.urlopen",
+                return_value=response,
+            ) as urlopen:
+                result = upload_evidence(upload, evidence)
+            request = urlopen.call_args.args[0]
+            self.assertEqual(request.get_method(), "POST")
+            self.assertIn(b'name="file"', request.data)
+            self.assertIn(b"policy", request.data)
+            self.assertEqual(result["http_status"], 201)
 
     def test_evidence_upload_rejects_non_arvan_urls_and_auth_headers(self):
         with tempfile.TemporaryDirectory() as raw:

@@ -86,7 +86,7 @@ TOOL_NAMES = (
     "umount",
     "wc",
 )
-EXTRA_PACKAGES = ("ca-certificates", "libfaketime", "python3-venv")
+EXTRA_PACKAGES = ("ca-certificates", "libfaketime")
 SEARCH_PATHS = (Path("/usr/sbin"), Path("/usr/bin"), Path("/sbin"), Path("/bin"))
 HEX64_RE = re.compile(r"[0-9a-f]{64}")
 POSTGRESQL_SERVER_BINARIES = frozenset({"initdb", "pg_ctl", "postgres"})
@@ -373,13 +373,52 @@ def _linked_native_paths(executable: Path, payload: bytes) -> set[Path]:
     return paths
 
 
-def _package_owner(path: Path) -> str:
-    output = _clean_run(["/usr/bin/dpkg-query", "-S", str(path)])
-    owners = {
-        line.split(":", 1)[0].split(",", 1)[0]
-        for line in output.splitlines()
-        if ":" in line
+def _parse_package_owners(output: str) -> set[str]:
+    owners: set[str] = set()
+    for line in output.splitlines():
+        # dpkg-query reports diversions before the actual owning package.  The
+        # diversion records describe path routing, not additional owners.
+        if line.startswith("diversion by ") or ":" not in line:
+            continue
+        package = line.split(":", 1)[0].split(",", 1)[0]
+        if package:
+            owners.add(package)
+    return owners
+
+
+def _package_owner_paths(path: Path) -> tuple[Path, ...]:
+    candidates = [path]
+    aliases = {
+        "/usr/bin": "/bin",
+        "/usr/sbin": "/sbin",
+        "/usr/lib": "/lib",
+        "/usr/lib64": "/lib64",
     }
+    parent = path.parent.as_posix()
+    if parent in aliases:
+        candidates.append(Path(aliases[parent]) / path.name)
+    return tuple(candidates)
+
+
+def _package_owner(path: Path) -> str:
+    owners: set[str] = set()
+    for candidate in _package_owner_paths(path):
+        completed = subprocess.run(
+            ["/usr/bin/dpkg-query", "-S", str(candidate)],
+            env={"LC_ALL": "C", "PATH": "/usr/sbin:/usr/bin:/sbin:/bin"},
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if completed.returncode == 0:
+            owners.update(_parse_package_owners(completed.stdout))
+            continue
+        detail = completed.stderr.strip() or completed.stdout.strip()
+        if detail.startswith("dpkg-query: no path found matching pattern "):
+            continue
+        raise ToolchainError(f"host package query failed: {detail}")
     if len(owners) != 1:
         raise ToolchainError(f"host executable has ambiguous package ownership: {path}")
     return owners.pop()

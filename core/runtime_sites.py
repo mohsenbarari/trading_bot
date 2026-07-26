@@ -6,7 +6,10 @@ AUTHORITY_WEBAPP = "webapp"
 SITE_BOT_FI = "bot_fi"
 SITE_WEBAPP_FI = "webapp_fi"
 SITE_WEBAPP_IR = "webapp_ir"
+SITE_WITNESS = "witness"
 
 WEBAPP_SITES = frozenset({SITE_WEBAPP_FI, SITE_WEBAPP_IR})
-PHYSICAL_SITES = frozenset({SITE_BOT_FI, *WEBAPP_SITES})
+# The Witness is an independent physical role.  It has WebApp control-plane
+# authority but must never impersonate either WebApp deployment identity.
+PHYSICAL_SITES = frozenset({SITE_BOT_FI, SITE_WITNESS, *WEBAPP_SITES})
 LOGICAL_AUTHORITIES = frozenset({AUTHORITY_FOREIGN, AUTHORITY_WEBAPP})

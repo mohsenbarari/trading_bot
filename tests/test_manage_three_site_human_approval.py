@@ -18,6 +18,8 @@ from core.human_approval_issuer import (
     issuer_paths,
     secure_json,
     totp_code,
+    verify_bootstrap_receipt,
+    verify_issuer_audit,
     write_enrollment,
 )
 from core.secure_file_io import verify_hash_chained_jsonl
@@ -108,6 +110,93 @@ class ManageHumanApprovalTests(unittest.TestCase):
                 self.assertRaisesRegex(HumanApprovalIssuerError, "clock"),
             ):
                 manager._assert_synchronized_clock()
+
+    def test_issue_session_authenticates_once_and_persists_reusable_release_scope(self) -> None:
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        password = "correct horse battery staple"
+        artifacts = create_enrollment(
+            operator="mohsen",
+            password=password,
+            now=now,
+            scrypt_n=2**14,
+        )
+        release_sha = "b" * 40
+        subject = approval_subject(
+            artifact_type="three-site-staging-inventory-v3",
+            artifact_sha256="a" * 64,
+            release_sha=release_sha,
+            bindings={"campaign_id": "campaign-1"},
+        )
+
+        class FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):  # noqa: ANN001, ANN206
+                return now if tz is not None else now.replace(tzinfo=None)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            issuer = root / "issuer"
+            write_enrollment(issuer, artifacts)
+            output = root / "staging-session.json"
+            actions = ["approve_inventory", "start_full_matrix"]
+            args = SimpleNamespace(
+                directory=issuer,
+                release_sha=release_sha,
+                actions=actions,
+                ttl_seconds=48 * 60 * 60,
+                use_recovery_code=False,
+                output=output,
+            )
+            with (
+                mock.patch.object(manager.sys.stdin, "isatty", return_value=True),
+                mock.patch.object(manager.sys.stderr, "isatty", return_value=True),
+                mock.patch.object(manager, "_assert_synchronized_clock"),
+                mock.patch.object(manager, "datetime", FixedDateTime),
+                mock.patch(
+                    "builtins.input",
+                    return_value=f"AUTHORIZE STAGING {release_sha[:12]} 48H",
+                ),
+                mock.patch.object(
+                    manager.getpass,
+                    "getpass",
+                    side_effect=[
+                        password,
+                        totp_code(artifacts.totp_secret, at=now)[1],
+                    ],
+                ),
+            ):
+                result = manager._issue_session(args)
+            self.assertEqual(result["status"], "session-authorized")
+            token = secure_json(output, label="staging session")
+            for action in actions:
+                verified = verify_human_approval(
+                    token,
+                    policy_payload=artifacts.policy_payload,
+                    expected_action=action,
+                    expected_environment="staging",
+                    expected_subject=subject,
+                    now=now,
+                )
+                self.assertEqual(verified.action, action)
+            audit = verify_hash_chained_jsonl(issuer_paths(issuer)["audit"])
+            self.assertEqual(audit[-1]["event"], "human_approval_issued")
+            self.assertEqual(audit[-1]["action"], "authorize_staging_session")
+            receipt = verify_bootstrap_receipt(
+                secure_json(
+                    issuer_paths(issuer)["receipt"],
+                    label="approval bootstrap receipt",
+                ),
+                policy_payload=artifacts.policy_payload,
+            )
+            verify_issuer_audit(
+                audit,
+                bootstrap_receipt=receipt,
+                policy_payload=artifacts.policy_payload,
+                state_payload=secure_json(
+                    issuer_paths(issuer)["state"],
+                    label="issuer state",
+                ),
+            )
 
     def test_issuer_directory_must_be_real_owner_only_0700(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

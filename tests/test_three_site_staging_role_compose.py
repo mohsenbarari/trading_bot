@@ -98,6 +98,37 @@ class ThreeSiteStagingRoleComposeTests(unittest.TestCase):
         with self.assertRaisesRegex(RoleComposeError, "cross-role"):
             render_role_compose(payload, role="bot-fi")
 
+    def test_project_importing_python_services_use_module_entrypoints(self):
+        expected = {
+            "webapp_fi_writer_control": [
+                "python", "-m", "scripts.run_writer_control_agent"
+            ],
+            "webapp_fi_effects": [
+                "python", "-m", "scripts.run_dr_effect_worker"
+            ],
+            "webapp_ir_writer_control": [
+                "python", "-m", "scripts.run_writer_control_agent"
+            ],
+            "webapp_ir_effects": [
+                "python", "-m", "scripts.run_dr_effect_worker"
+            ],
+        }
+        for service, command in expected.items():
+            with self.subTest(service=service):
+                self.assertEqual(self.payload["services"][service]["command"], command)
+
+    def test_witness_is_an_independent_role_and_fi_is_the_normal_writer(self):
+        witness = self.payload["services"]["witness_api"]["environment"]
+        fi_control = self.payload["services"]["webapp_fi_writer_control"]["environment"]
+        ir_control = self.payload["services"]["webapp_ir_writer_control"]["environment"]
+
+        self.assertEqual(witness["PHYSICAL_SITE"], "witness")
+        self.assertEqual(witness["WRITER_WITNESS_AUTHORITATIVE_SITE"], "webapp_fi")
+        self.assertEqual(fi_control["PHYSICAL_SITE"], "webapp_fi")
+        self.assertEqual(ir_control["PHYSICAL_SITE"], "webapp_ir")
+        self.assertEqual(fi_control["WRITER_WITNESS_REQUIRED"], "true")
+        self.assertEqual(ir_control["WRITER_WITNESS_REQUIRED"], "true")
+
 
 if __name__ == "__main__":
     unittest.main()

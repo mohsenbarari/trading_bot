@@ -386,8 +386,10 @@ ASSET_DIR="$SOURCE_DIR/deploy/writer-witness"
 for required in \
     "$SOURCE_DIR/release-manifest.json" \
     "$SOURCE_DIR/writer_witness_app.py" \
+    "$SOURCE_DIR/scripts/provision_writer_witness_host.sh" \
     "$ASSET_DIR/001_initial.sql" \
     "$ASSET_DIR/002_failover_operation_ledger.sql" \
+    "$ASSET_DIR/003_human_approval_relay.sql" \
     "$ASSET_DIR/requirements.txt" \
     "$ASSET_DIR/requirements.lock" \
     "$ASSET_DIR/python-runtime.json" \
@@ -734,6 +736,10 @@ print(hashlib.sha256(sys.argv[1].encode()).hexdigest()[:20])
 PY
 )"
     transaction_unit="writer-witness-provision-$transaction_suffix.service"
+    # systemd injects INVOCATION_ID and SYSTEMD_EXEC_PID into the direct
+    # ExecStart process.  Do not interpose `env -i` here: it would erase the
+    # cgroup identity that is verified below.  The package-lock helper replaces
+    # itself with the provisioner using its own closed environment allowlist.
     exec /usr/bin/systemd-run \
         --wait \
         --collect \
@@ -742,22 +748,21 @@ PY
         --service-type=exec \
         --property=KillMode=control-group \
         --unit="$transaction_unit" \
-        /usr/bin/env -i \
-        PATH=/usr/sbin:/usr/bin:/sbin:/bin \
-        WRITER_WITNESS_PROVISION_TRANSACTION_UNIT="$transaction_unit" \
-        WRITER_WITNESS_SOURCE_DIR="$SOURCE_DIR" \
-        WRITER_WITNESS_PUBLIC_IP="$WITNESS_PUBLIC_IP" \
-        WRITER_WITNESS_WEBAPP_FI_SOURCE_IP="$WEBAPP_FI_SOURCE_IP" \
-        WRITER_WITNESS_WEBAPP_IR_SOURCE_IP="$WEBAPP_IR_SOURCE_IP" \
-        WRITER_WITNESS_SSH_SOURCE_IP="$SSH_SOURCE_IP" \
-        WRITER_WITNESS_RELEASE_ID="$RELEASE_ID" \
-        WRITER_WITNESS_HARDEN_SSH="$HARDEN_SSH" \
-        WRITER_WITNESS_SSH_KEY_SOURCE_USER="$SSH_KEY_SOURCE_USER" \
-        WRITER_WITNESS_WHEELHOUSE="$WHEELHOUSE" \
-        WRITER_WITNESS_ROTATE_TLS="$ROTATE_TLS" \
-        WRITER_WITNESS_ALLOW_LEGACY_ACTIVATION_RECOVERY="$ALLOW_LEGACY_ACTIVATION_RECOVERY" \
-        WRITER_WITNESS_EXPECTED_MANIFEST_SHA256="$EXPECTED_MANIFEST_SHA256" \
-        WRITER_WITNESS_EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256="$EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256" \
+        --setenv=PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+        --setenv=WRITER_WITNESS_PROVISION_TRANSACTION_UNIT="$transaction_unit" \
+        --setenv=WRITER_WITNESS_SOURCE_DIR="$SOURCE_DIR" \
+        --setenv=WRITER_WITNESS_PUBLIC_IP="$WITNESS_PUBLIC_IP" \
+        --setenv=WRITER_WITNESS_WEBAPP_FI_SOURCE_IP="$WEBAPP_FI_SOURCE_IP" \
+        --setenv=WRITER_WITNESS_WEBAPP_IR_SOURCE_IP="$WEBAPP_IR_SOURCE_IP" \
+        --setenv=WRITER_WITNESS_SSH_SOURCE_IP="$SSH_SOURCE_IP" \
+        --setenv=WRITER_WITNESS_RELEASE_ID="$RELEASE_ID" \
+        --setenv=WRITER_WITNESS_HARDEN_SSH="$HARDEN_SSH" \
+        --setenv=WRITER_WITNESS_SSH_KEY_SOURCE_USER="$SSH_KEY_SOURCE_USER" \
+        --setenv=WRITER_WITNESS_WHEELHOUSE="$WHEELHOUSE" \
+        --setenv=WRITER_WITNESS_ROTATE_TLS="$ROTATE_TLS" \
+        --setenv=WRITER_WITNESS_ALLOW_LEGACY_ACTIVATION_RECOVERY="$ALLOW_LEGACY_ACTIVATION_RECOVERY" \
+        --setenv=WRITER_WITNESS_EXPECTED_MANIFEST_SHA256="$EXPECTED_MANIFEST_SHA256" \
+        --setenv=WRITER_WITNESS_EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256="$EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256" \
         "$WRITER_WITNESS_SYSTEM_PYTHON" \
         -I -S -B -X utf8 -X pycache_prefix=/dev/null \
         "$SOURCE_DIR/scripts/hold_writer_witness_package_locks.py" \
@@ -1112,6 +1117,7 @@ cp -a "$SOURCE_DIR/." "$release_dir/"
 find "$release_dir" -type d -exec chmod 0755 {} +
 find "$release_dir" -type f -exec chmod 0644 {} +
 chmod 0755 \
+    "$release_dir/scripts/provision_writer_witness_host.sh" \
     "$release_dir/scripts/run_writer_witness_clock_jump_probe.py" \
     "$release_dir/scripts/smoke_writer_witness_client.py" \
     "$release_dir/scripts/verify_writer_witness_nftables.py" \
@@ -1192,6 +1198,10 @@ system_runtime_attestation="$(
     exit 2
 }
 
+# The service account must be able to traverse and read its immutable runtime.
+# Keep the provisioner's restrictive umask for secrets, but use normal release
+# modes while creating the venv and installing its public dependency bytes.
+umask 022
 /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
     "$expected_python_path" -I -S -B -X utf8 -X pycache_prefix=/dev/null \
     -m venv --without-pip "$venv_dir"
@@ -1223,6 +1233,7 @@ pip_arguments=(
     "$pip_bootstrap_wheel" \
     --isolated \
     "${pip_arguments[@]}"
+umask 077
 attest_writer_witness_runtime() {
     /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
         "$venv_dir/bin/python" -I -S -B -X utf8 -X pycache_prefix=/dev/null \
@@ -1370,6 +1381,14 @@ if [[ "$(runuser -u postgres -- psql -XAtqc 'SELECT version_num FROM writer_witn
         -d writer_witness \
         -f "$ASSET_DIR/002_failover_operation_ledger.sql"
 fi
+if [[ "$(runuser -u postgres -- psql -XAtqc 'SELECT version_num FROM writer_witness_schema_version' writer_witness)" == "002" ]]; then
+    PGPASSWORD="$WITNESS_DB_MIGRATOR_PASSWORD" psql \
+        -Xv ON_ERROR_STOP=1 \
+        -h 127.0.0.1 \
+        -U writer_witness_migrator \
+        -d writer_witness \
+        -f "$ASSET_DIR/003_human_approval_relay.sql"
+fi
 runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 writer_witness <<'SQL'
 REVOKE ALL ON DATABASE writer_witness FROM PUBLIC;
 GRANT CONNECT ON DATABASE writer_witness TO writer_witness_migrator, writer_witness_runtime;
@@ -1379,6 +1398,7 @@ GRANT SELECT ON writer_witness_schema_version TO writer_witness_runtime;
 GRANT SELECT, UPDATE ON webapp_writer_witness_state TO writer_witness_runtime;
 GRANT SELECT, INSERT ON webapp_writer_witness_receipts TO writer_witness_runtime;
 GRANT SELECT, INSERT, UPDATE ON dr_failover_operation_ledger TO writer_witness_runtime;
+GRANT SELECT, INSERT, UPDATE ON human_approval_relay_receipts TO writer_witness_runtime;
 SQL
 
 private_key_file=/etc/trading-bot-witness/writer-witness-ed25519

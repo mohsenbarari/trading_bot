@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -563,8 +564,14 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         self.assertIn("deny all;", config)
         self.assertIn("location = /v1/writer-witness/status", config)
         self.assertIn("location = /v1/writer-witness/transitions", config)
+        self.assertIn("location = /v1/human-approval/relay", config)
         self.assertIn("client_max_body_size 16k;", config)
         self.assertNotIn("Access-Control-Allow-Origin", config)
+        service = (ROOT / "deploy/writer-witness/writer-witness.service").read_text()
+        self.assertIn(
+            "EnvironmentFile=-/etc/trading-bot-witness/human-approval-relay.env",
+            service,
+        )
 
     def test_activation_rejects_unit_states_that_rollback_cannot_restore(self):
         parse_unit_states = ACTIVATION_MODULE["_parse_unit_states"]
@@ -742,6 +749,10 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         )
         self.assertIn("GRANT SELECT, UPDATE ON webapp_writer_witness_state", script)
         self.assertIn("GRANT SELECT, INSERT ON webapp_writer_witness_receipts", script)
+        self.assertIn(
+            "GRANT SELECT, INSERT, UPDATE ON human_approval_relay_receipts",
+            script,
+        )
         self.assertNotIn("ufw allow from", script)
         self.assertIn("Firewall mutation is intentionally outside release activation", script)
         self.assertNotIn("ufw allow OpenSSH", script)
@@ -963,6 +974,47 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
             self.assertEqual(repeated.returncode, 0, repeated.stderr)
             self.assertIn("activation_recovered=no", repeated.stdout)
             self.assertEqual(active.resolve(), paths["activation"].resolve())
+
+    def test_activation_accepts_root_owned_read_only_parent_with_distinct_group(self):
+        with tempfile.TemporaryDirectory(
+            prefix="writer-witness-activation-parent-group-"
+        ) as directory:
+            runtime_parent = Path(directory) / "etc/trading-bot-witness"
+            runtime_parent.mkdir(parents=True, mode=0o750)
+            runtime_parent.chmod(0o750)
+            ensure_directory = ACTIVATION_MODULE["_ensure_directory"]
+            activation_os = ensure_directory.__globals__["os"]
+            distinct_gid = os.getegid() + 1
+
+            with mock.patch.object(
+                activation_os,
+                "getegid",
+                return_value=distinct_gid,
+            ):
+                ensure_directory(
+                    runtime_parent,
+                    0o750,
+                    allow_read_only_group=True,
+                )
+
+    def test_activation_rejects_group_writable_destination_parent(self):
+        with tempfile.TemporaryDirectory(
+            prefix="writer-witness-activation-writable-parent-"
+        ) as directory:
+            root = Path(directory)
+            release_id = "writable-parent"
+            self._prepare_activation_host(root, release_id)
+            runtime_parent = root / "etc/trading-bot-witness"
+            runtime_parent.chmod(0o770)
+
+            self._begin_and_stage_activation(root, release_id)
+            published = self._activation_run(root, "publish", release_id=release_id)
+
+            self.assertNotEqual(published.returncode, 0)
+            self.assertIn(
+                "activation destination parent mode is unsafe",
+                published.stderr,
+            )
 
     def test_activation_fresh_install_sigkill_rolls_back_to_no_generation_and_retries(self):
         with tempfile.TemporaryDirectory(prefix="writer-witness-activation-fresh-") as directory:
@@ -1692,6 +1744,9 @@ class WriterWitnessDeploymentTests(unittest.TestCase):
         ):
             self.assertIn(f"maybe_fail {failpoint}", restore)
         self.assertIn("writer-witness-state-manifest", restore)
+        self.assertIn("failed its source manifest guard", restore)
+        self.assertIn("expected_promoted_manifest", restore)
+        self.assertIn("003_human_approval_relay.sql", restore)
         self.assertIn("database_exists", restore)
         self.assertIn("writer_witness_(candidate|rollback|failed)", restore)
         self.assertIn("WRITER_WITNESS_RESTORE_OPERATION_TAG", restore)

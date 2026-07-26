@@ -35,6 +35,7 @@ def _least_privilege_row(**overrides):
         "state_dml": True,
         "receipt_dml": True,
         "ledger_dml": True,
+        "relay_dml": True,
         "owned_objects": 0,
     }
     row.update(overrides)
@@ -55,6 +56,7 @@ class WriterWitnessDatabaseRoleTests(unittest.IsolatedAsyncioTestCase):
             {"schema_create": True},
             {"owned_objects": 1},
             {"ledger_dml": False},
+            {"relay_dml": False},
         )
         for overrides in unsafe:
             with self.subTest(overrides=overrides), self.assertRaises(

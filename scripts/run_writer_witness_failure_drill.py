@@ -239,6 +239,8 @@ async def _bootstrap(urls: dict[str, URL]) -> None:
         encoding="utf-8"
     ) + (ROOT / "deploy/writer-witness/002_failover_operation_ledger.sql").read_text(
         encoding="utf-8"
+    ) + (ROOT / "deploy/writer-witness/003_human_approval_relay.sql").read_text(
+        encoding="utf-8"
     )
     await asyncio.gather(
         _raw_execute(urls["webapp_fi"], local_schema),

@@ -99,6 +99,29 @@ class RuntimeIdentityTests(unittest.TestCase):
         self.assertEqual(identity.physical_site, "webapp_ir")
         self.assertFalse(identity.compatibility_inferred)
 
+    def test_three_site_runtime_accepts_independent_witness_identity(self):
+        identity = resolve_runtime_identity(
+            SimpleNamespace(
+                server_mode="iran",
+                logical_authority="webapp",
+                physical_site="witness",
+                three_site_dr_enabled=True,
+                topology_schema_version="three-site-dr-v1",
+            )
+        )
+        self.assertTrue(identity.is_witness_site)
+        self.assertFalse(identity.is_webapp_site)
+
+    def test_witness_cannot_claim_foreign_authority(self):
+        with self.assertRaises(RuntimeIdentityError):
+            resolve_runtime_identity(
+                SimpleNamespace(
+                    server_mode="iran",
+                    logical_authority="foreign",
+                    physical_site="witness",
+                )
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -76,7 +76,9 @@ class Settings(BaseSettings):
     writer_witness_safety_margin_seconds: int = 15
     writer_witness_max_clock_skew_seconds: int = 5
     writer_witness_boot_id_file: str = "/proc/sys/kernel/random/boot_id"
-    writer_witness_authoritative_site: str = "webapp_ir"
+    # Normal operation is FI writer / IR fenced standby.  A failover acquires
+    # the next Witness epoch for IR; it never changes this deployment default.
+    writer_witness_authoritative_site: str = "webapp_fi"
     # Dedicated witness service and renewal transport. All remain disabled and
     # unset until the three-site rollout gate is explicitly approved.
     writer_witness_service_enabled: bool = False

@@ -84,6 +84,35 @@ SELECT json_build_object(
 FROM dr_failover_operation_ledger
 ORDER BY operation_id;
 SQL
+
+    # Keep the byte stream for a legacy schema-002 backup exactly unchanged.
+    # That permits a guarded restore to prove the backup before it applies the
+    # reviewed schema-003 migration.  Schema-003 manifests additionally bind
+    # the relay receipt ledger below.
+    local relay_table
+    relay_table="$(runuser -u postgres -- psql -XAt -d "$database_name" -c \
+        "SELECT to_regclass('public.human_approval_relay_receipts') IS NOT NULL")"
+    if [[ "$relay_table" == "t" ]]; then
+        LC_ALL=C runuser -u postgres -- psql -XAt -v ON_ERROR_STOP=1 -d "$database_name" <<'SQL'
+-- Relay receipts are security-relevant durable evidence.  Include only their
+-- immutable identifiers and digests, never a full approval subject or any
+-- private session material.
+SELECT json_build_object(
+    'record', 'human_approval_relay_receipt',
+    'request_id', request_id,
+    'request_sha256', request_sha256,
+    'approval_id', approval_id,
+    'action', action,
+    'subject_sha256', subject_sha256,
+    'session_token_sha256', session_token_sha256,
+    'receipt_sha256', encode(sha256(convert_to(receipt::text, 'UTF8')), 'hex'),
+    'expires_at', to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+    'created_at', to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+)::text
+FROM human_approval_relay_receipts
+ORDER BY request_id;
+SQL
+    fi
 }
 
 # PostgreSQL 15 supplies sha256(bytea), so the receipt body is represented only

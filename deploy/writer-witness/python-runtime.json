@@ -482,7 +482,7 @@
       "needed": [],
       "package": "libc6:amd64",
       "path": "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2",
-      "sha256": "1cd555ac46b7887edeaf3c42aac5408c8135e52f6b37870da2cf82d5fe14e829",
+      "sha256": "854a9eb45875e00f48e1e89d40251317931d2d82555ab612d6090beba0c9f972",
       "soname": "ld-linux-x86-64.so.2"
     },
     {
@@ -502,7 +502,7 @@
       ],
       "package": "libc6:amd64",
       "path": "/usr/lib/x86_64-linux-gnu/libc.so.6",
-      "sha256": "d8db8739a1633c972cec6a4fe0566bdcec6fd088f98723492ab0361f66238f75",
+      "sha256": "c1e50a701d3245c8c45a1ba40151efe414ac41d2c9ae604087b4875e0d85c4fb",
       "soname": "libc.so.6"
     },
     {
@@ -542,7 +542,7 @@
       ],
       "package": "libc6:amd64",
       "path": "/usr/lib/x86_64-linux-gnu/libdl.so.2",
-      "sha256": "850b46fd4f4478060fc106f4d1dc4aa35c969eb5c9bd98aaf64dc6cb3d6a5e32",
+      "sha256": "c2024b16d346ee5da48759262179e6215f54b470aa190e734d8f098328e38e38",
       "soname": "libdl.so.2"
     },
     {
@@ -552,7 +552,7 @@
       ],
       "package": "libexpat1:amd64",
       "path": "/usr/lib/x86_64-linux-gnu/libexpat.so.1.9.1",
-      "sha256": "c42ff317838b4b4639e2ea801905f0317177c6df7e31b2f0d0240e3c3ac0cfde",
+      "sha256": "87b6e395abf586e668e29c309dffbee57394cee0be40981cb30f4fc6576096d0",
       "soname": "libexpat.so.1"
     },
     {
@@ -573,7 +573,7 @@
       ],
       "package": "libgcc-s1:amd64",
       "path": "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
-      "sha256": "d93224d2b0dab4247598be683adca02f5cf00586f99c187579cd7e92058fb7cb",
+      "sha256": "4f502dd464a54d841973a22d6f2585ec548c1950507ab1c89e3efae4f542b2cd",
       "soname": "libgcc_s.so.1"
     },
     {
@@ -594,7 +594,7 @@
       ],
       "package": "liblzma5:amd64",
       "path": "/usr/lib/x86_64-linux-gnu/liblzma.so.5.4.5",
-      "sha256": "696e868dd0700a19a6d65fc01608ec2d70d3cb91f65710e89180cd2e688f30cb",
+      "sha256": "5f41e9df11310aeb8506b2ef675300f1a6cb260f4cf1bd635acda227c4acf914",
       "soname": "liblzma.so.5"
     },
     {
@@ -605,7 +605,7 @@
       ],
       "package": "libc6:amd64",
       "path": "/usr/lib/x86_64-linux-gnu/libm.so.6",
-      "sha256": "1b87a1a50b496cfead2b0ad134c2ff536705c82608db240c7e8aa48d6c0e4217",
+      "sha256": "3a51627ed6b9bf776b69103c82ece3a32099db77821c9d92d5270a76c2aeaf58",
       "soname": "libm.so.6"
     },
     {
@@ -616,7 +616,7 @@
       ],
       "package": "libncursesw6:amd64",
       "path": "/usr/lib/x86_64-linux-gnu/libncursesw.so.6.4",
-      "sha256": "32cab5fb18c4f844e2f86aa175ed88943577233c2a588296ceee70580a68a0bf",
+      "sha256": "a7d7897c415473e5a4e393fe1a6faf5828c73e06ed2eb6d11648a2cef4ea3552",
       "soname": "libncursesw.so.6"
     },
     {
@@ -628,7 +628,7 @@
       ],
       "package": "libncursesw6:amd64",
       "path": "/usr/lib/x86_64-linux-gnu/libpanelw.so.6.4",
-      "sha256": "1c45b8b3a503458a93888e38760d9effde3ce220881897c9997e7f66c8ab1a13",
+      "sha256": "ee3f34c61c4b1e628fb7b5ca70bc8e7a53a95e563d08d12cf1828ef20325073a",
       "soname": "libpanelw.so.6"
     },
     {
@@ -638,7 +638,7 @@
       ],
       "package": "libc6:amd64",
       "path": "/usr/lib/x86_64-linux-gnu/libpthread.so.0",
-      "sha256": "92dcea07a5b11d939c22a96131d3fbb995e0a84a4d02db7d799bf357689cd794",
+      "sha256": "7be9d6c69565533dd8bd19e7661b2ecec6a441773643f77099ee50f6545329b1",
       "soname": "libpthread.so.0"
     },
     {
@@ -673,7 +673,7 @@
       ],
       "package": "libc6:amd64",
       "path": "/usr/lib/x86_64-linux-gnu/librt.so.1",
-      "sha256": "9d1cefae4c0e4995cc35ea3195f805454b2d59a27ad15397a1096e735d341faf",
+      "sha256": "fa51eedc34cef6ec33bbad72af2064504ce75b3a8ef009c42e38b34daf5d0a27",
       "soname": "librt.so.1"
     },
     {
@@ -684,7 +684,7 @@
       ],
       "package": "libsqlite3-0:amd64",
       "path": "/usr/lib/x86_64-linux-gnu/libsqlite3.so.0.8.6",
-      "sha256": "f2cd05de8b6f71ea9d0495a6f9ff9cae844b15d9c45b7ef49ee0af0f81658cc7",
+      "sha256": "e28687d6bcda2a6075718526349f902dbafacc14d71d0724f15979fd1509c973",
       "soname": "libsqlite3.so.0"
     },
     {
@@ -708,7 +708,7 @@
       ],
       "package": "libstdc++6:amd64",
       "path": "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.33",
-      "sha256": "1fd75fe70354a416d75aef22bcae68c47bd25d20e2d0568c30b1a9838cf62f11",
+      "sha256": "f7a4a80945521165ee52c335f04205dd930c46157b24e8e8689e0089326151f7",
       "soname": "libstdc++.so.6"
     },
     {
@@ -718,7 +718,7 @@
       ],
       "package": "libtinfo6:amd64",
       "path": "/usr/lib/x86_64-linux-gnu/libtinfo.so.6.4",
-      "sha256": "28ab8e2e29d46dc8f7222025ca2d61e0b898364c6426cc631bf4ecc7c7f5ac52",
+      "sha256": "61f693cd7f8e55ad3ab518b20a00c01adb46ef829cf90773c97615a73f99e09b",
       "soname": "libtinfo.so.6"
     },
     {
@@ -736,10 +736,6 @@
   "executable_sha256": "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118",
   "implementation": "CPython",
   "loader": {
-    "cache_path": "/etc/ld.so.cache",
-    "cache_sha256": "e00c2093715be17ac23ee730e26d5c13d6a48626bc4db8b347fe99eccab813f1",
-    "configuration_entry_count": 4,
-    "configuration_sha256": "e7b45e670771af7291093d746346587d00112314229bfa3af33c6b7715ee96c8",
     "preload_path": "/etc/ld.so.preload",
     "preload_sha256": null
   },
@@ -747,7 +743,7 @@
     "alias_target": "../usr/lib/os-release",
     "id": "ubuntu",
     "path": "/usr/lib/os-release",
-    "sha256": "01af466feb100306498c86aa6bad1815e33036019aa34d4362c20f374ea5c829",
+    "sha256": "bb2b5ec7a2c36a131b8b7cde2f7983f0a4d3ea24b24d3e775b4c8ad5a673d74c",
     "version_id": "24.04"
   },
   "packages": [
@@ -765,13 +761,13 @@
     {
       "architecture": "amd64",
       "info_stem": "libc6:amd64",
-      "list_sha256": "6e43aaff6356615627dc6fc391701c2ff845c60974690d55fd2d3ee91201b4b7",
-      "md5_verified_file_count": 283,
-      "md5_verified_paths_sha256": "082a54652801faf1cbe100ca43a679227e9781f7c6ade98e684df3613711c7b6",
-      "md5sums_sha256": "6fc713c46de4b3b094f230ff097cb06269e703617a3a8facf91a3f6d9d0b5f7a",
+      "list_sha256": "5a8d475cefac4d88b69f4a1ae062f9f48ad349a4da2d0cf610c3f921121050bd",
+      "md5_verified_file_count": 284,
+      "md5_verified_paths_sha256": "57c89ffaaf99e985c880851a0c0c07d45a0d32999ba8dad7d642e98b6627cb52",
+      "md5sums_sha256": "14a45ad4b7c23ccc90875b3abcc26518654ab736033034caa28a7299b56d78ad",
       "name": "libc6",
       "status": "install ok installed",
-      "version": "2.39-0ubuntu8.7"
+      "version": "2.39-0ubuntu8.3"
     },
     {
       "architecture": "amd64",
@@ -801,10 +797,10 @@
       "list_sha256": "037cbf4c23aed3fb788e519262743d1d987b0dbd0fdc02107c2e636f4bc4f741",
       "md5_verified_file_count": 5,
       "md5_verified_paths_sha256": "b74bbc116fa04ec3539a429f3e271f43aae2d05f83a8d2fa84dd9a137473b3e4",
-      "md5sums_sha256": "1c13080220c08497c3272f8743ebb3d51a64daa0a6346903de353df0777950f0",
+      "md5sums_sha256": "f88213adcae27f6b92b2af25000eee92b97ed4aa35b397fe60bd0531386e613e",
       "name": "libexpat1",
       "status": "install ok installed",
-      "version": "2.6.1-2ubuntu0.4"
+      "version": "2.6.1-2ubuntu0.1"
     },
     {
       "architecture": "amd64",
@@ -823,10 +819,10 @@
       "list_sha256": "15e8c970d00f276c85a094d7199d01eb9f5268fc59ca02b43ff8921b8f845ee0",
       "md5_verified_file_count": 2,
       "md5_verified_paths_sha256": "964f1e24e596aa30ab7b711302f6547978155295aaefc8df93d9accdba52542e",
-      "md5sums_sha256": "e7999063f02a17db54d37e5854ceb4131bae46f08a3f4150dedd63db49c7e8e7",
+      "md5sums_sha256": "8636b73ea6efefa873084831ff31ed56e9cc5055b743a76d3be930718f918595",
       "name": "libgcc-s1",
       "status": "install ok installed",
-      "version": "14.2.0-4ubuntu2~24.04.1"
+      "version": "14-20240412-0ubuntu1"
     },
     {
       "architecture": "amd64",
@@ -845,10 +841,10 @@
       "list_sha256": "bfd9b6264d5271a2df7de30cd29374e775969982bf1ef3d2f7910317b20aad9b",
       "md5_verified_file_count": 6,
       "md5_verified_paths_sha256": "d00f1252894a12b866d218784df506698271853c2d7d15e82878ed454d891be0",
-      "md5sums_sha256": "2f106872d62a4515721ab89f2a49dc69f6fe62498b219b3e294ba5b629c46f05",
+      "md5sums_sha256": "ccbb2e756094129a2b91b2f7cf83d9fdfb8c1b06e57780133e9f72273f42de5a",
       "name": "liblzma5",
       "status": "install ok installed",
-      "version": "5.6.1+really5.4.5-1ubuntu0.3"
+      "version": "5.6.1+really5.4.5-1build0.1"
     },
     {
       "architecture": "amd64",
@@ -856,21 +852,10 @@
       "list_sha256": "3b1075c7492a318413dadc6c25f7f85bd4061d01a2233e6e968b45d1081e6619",
       "md5_verified_file_count": 4,
       "md5_verified_paths_sha256": "eefcb4af0ef03c118bd55c08244bf6e8e17cbbda76196369f174c26d89807f95",
-      "md5sums_sha256": "346fc1265d7bc817c8c459c21a100e15df29420aadc141b1d29f3f6a9fcb49a6",
+      "md5sums_sha256": "ee84073c045636e8bd94f7e539a943937c139d977e39e84386621c6c07dd5f59",
       "name": "libncursesw6",
       "status": "install ok installed",
-      "version": "6.4+20240113-1ubuntu2.1"
-    },
-    {
-      "architecture": "amd64",
-      "info_stem": "libpython3.12-dev:amd64",
-      "list_sha256": "410fbaadd7066874e2db283d37b2571539053bfb51ec3185b3d25df18f9c330c",
-      "md5_verified_file_count": 235,
-      "md5_verified_paths_sha256": "b436f901e87ba04974150fc0c45201b3ac8fe6bfa8ef792d6506dc2864d42a4b",
-      "md5sums_sha256": "e7c52d836872f7358233809c2d24f6e786a26d51088db5eeb63142c2d7f38956",
-      "name": "libpython3.12-dev",
-      "status": "install ok installed",
-      "version": "3.12.3-1ubuntu0.15"
+      "version": "6.4+20240113-1ubuntu2"
     },
     {
       "architecture": "amd64",
@@ -922,10 +907,10 @@
       "list_sha256": "283429da68b3ccfd524a5b8709a49eff5ddbcbb683455730d472beea5f8a078b",
       "md5_verified_file_count": 4,
       "md5_verified_paths_sha256": "062ab06f5a0bf4681ac33f888e44dbace971d41201d577bc23345768ec4e5448",
-      "md5sums_sha256": "33359a816ba72892215e80eae83daba2f28e51346d67e122e2f8010ac510b258",
+      "md5sums_sha256": "406979ef8b5f06d08074768cffe64612d9589f343c10e5dc759cafeacca20a17",
       "name": "libsqlite3-0",
       "status": "install ok installed",
-      "version": "3.45.1-1ubuntu2.7"
+      "version": "3.45.1-1ubuntu2"
     },
     {
       "architecture": "amd64",
@@ -944,10 +929,10 @@
       "list_sha256": "0b72f87262071aaa401ec50cf990de9e6bfc493fcb2ca08a34573abf2b33e2a8",
       "md5_verified_file_count": 6,
       "md5_verified_paths_sha256": "4515bd11ceeab4fb083a83cd085d95058aef9913433025ca6949d386204c4d57",
-      "md5sums_sha256": "5ab6317e5efc2c7d1f0bebcc2cfe3dcf0541e81457e4040e535c966bb59d5731",
+      "md5sums_sha256": "695d18223c0d23972e0578510c67ece2dcdd84570b9a47ae71d89a9f48cfcdc6",
       "name": "libstdc++6",
       "status": "install ok installed",
-      "version": "14.2.0-4ubuntu2~24.04.1"
+      "version": "14-20240412-0ubuntu1"
     },
     {
       "architecture": "amd64",
@@ -955,10 +940,10 @@
       "list_sha256": "e4585a2caa1f8c2d9d5a4ed63d8932e5204999a141dd8dc21c377753fffd5136",
       "md5_verified_file_count": 4,
       "md5_verified_paths_sha256": "6ee8944f231a1649a3896a4fb0419491db28410a89ffa6b91410716e7b90c25a",
-      "md5sums_sha256": "b7b3a785615878572d4b6d8ba6ebba17e43ca0f3ccc8795cf52a68c48342d2cb",
+      "md5sums_sha256": "08a1569c0d03bffc84b0da9c5ef45b7f4e5f3d41db8598d8f6f54a80d4702b0f",
       "name": "libtinfo6",
       "status": "install ok installed",
-      "version": "6.4+20240113-1ubuntu2.1"
+      "version": "6.4+20240113-1ubuntu2"
     },
     {
       "architecture": "amd64",
@@ -984,6 +969,17 @@
     },
     {
       "architecture": "amd64",
+      "info_stem": "python3.12-venv",
+      "list_sha256": "2290df28fb4148a181f604ff8301aefd3731aaae38750eb854c2c24808f43f51",
+      "md5_verified_file_count": 4,
+      "md5_verified_paths_sha256": "860102d279e5614ae156a0545152ef3573eb199dd383425caea1ff8262281b3a",
+      "md5sums_sha256": "1a16eae7143d363f28df6ede1a1ce1dd4acba875d021355d9eb8b2aa282868dc",
+      "name": "python3.12-venv",
+      "status": "install ok installed",
+      "version": "3.12.3-1ubuntu0.15"
+    },
+    {
+      "architecture": "amd64",
       "info_stem": "zlib1g:amd64",
       "list_sha256": "246b7c43dfeeaa138ec9f96f65ad20dfb927809f69e863b7bc591f0bfa2c487b",
       "md5_verified_file_count": 3,
@@ -997,7 +993,7 @@
   "python_version": "3.12.3",
   "schema_version": "writer_witness_system_runtime_v2",
   "stdlib": {
-    "entry_count": 688,
+    "entry_count": 679,
     "external_files": [
       {
         "path": "/etc/python3.12/sitecustomize.py",
@@ -1008,16 +1004,16 @@
         "sha256": "a4c35494d197a92f08a9d0a94975d9558e7a50880c42947484f01b720b68d423"
       }
     ],
-    "file_count": 637,
+    "file_count": 627,
     "inactive_import_paths": [
       "/usr/lib/python312.zip"
     ],
     "packages": [
-      "libpython3.12-dev:amd64",
       "libpython3.12-minimal:amd64",
       "libpython3.12-stdlib:amd64",
       "libpython3.12t64:amd64",
-      "python3-gdbm:amd64"
+      "python3-gdbm:amd64",
+      "python3.12-venv"
     ],
     "path": "/usr/lib/python3.12",
     "python_path": [
@@ -1026,7 +1022,7 @@
       "/usr/lib/python3.12/lib-dynload"
     ],
     "symlink_count": 3,
-    "tree_sha256": "89d60b2b07b9c0e1666308d15f8c6d84a09360c28715e86d04f14b27805fa74b"
+    "tree_sha256": "2f0bc3b606429ad6ab0b3d95831c75a85f7c9eb5adc494e44f5095861ec5e70f"
   },
   "venv_elf_system_roots": [
     "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2",

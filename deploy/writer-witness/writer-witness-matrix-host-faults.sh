@@ -211,6 +211,9 @@ runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 -h "$socket_dir" -p "$port" post
     -f /srv/trading-bot-witness/current/deploy/writer-witness/001_initial.sql >/dev/null
 runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 -h "$socket_dir" -p "$port" postgres \
     -f /srv/trading-bot-witness/current/deploy/writer-witness/002_failover_operation_ledger.sql >/dev/null
+test -f /srv/trading-bot-witness/current/deploy/writer-witness/003_human_approval_relay.sql >/dev/null
+runuser -u postgres -- psql -Xv ON_ERROR_STOP=1 -h "$socket_dir" -p "$port" postgres \
+    -f /srv/trading-bot-witness/current/deploy/writer-witness/003_human_approval_relay.sql >/dev/null
 state_helper update --tag "$tag" --kind "$suffix" --helper-pid "$$" \
     --phase running --postgres-pid "$postgres_pid"
 

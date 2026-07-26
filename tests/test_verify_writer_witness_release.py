@@ -19,6 +19,7 @@ SPEC.loader.exec_module(release_verifier)
 
 
 EXPECTED_EXECUTABLE_PATHS = {
+    "scripts/provision_writer_witness_host.sh",
     "scripts/run_writer_witness_clock_jump_probe.py",
     "scripts/smoke_writer_witness_client.py",
     "scripts/verify_writer_witness_nftables.py",
@@ -98,6 +99,11 @@ class WriterWitnessReleaseMetadataTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="writer-witness-release-metadata-") as value:
             release, manifest_sha256 = self._build_release(Path(value))
             manifest = json.loads((release / "release-manifest.json").read_text())
+            self.assertIn("scripts/provision_writer_witness_host.sh", manifest)
+            self.assertTrue(
+                (release / "scripts/provision_writer_witness_host.sh").stat().st_mode
+                & stat.S_IXUSR
+            )
             observed_executables = {
                 relative
                 for relative in manifest
@@ -120,7 +126,7 @@ class WriterWitnessReleaseMetadataTests(unittest.TestCase):
             self.assertIn("release_metadata_attested=yes", verified.stdout)
             self.assertIn(f"release_expected_uid={os.geteuid()}", verified.stdout)
             self.assertIn(f"release_expected_gid={os.getegid()}", verified.stdout)
-            self.assertIn("release_executable_entries=9", verified.stdout)
+            self.assertIn("release_executable_entries=10", verified.stdout)
 
     def test_release_rejects_an_owner_binding_mismatch(self):
         with tempfile.TemporaryDirectory(prefix="writer-witness-release-owner-") as value:

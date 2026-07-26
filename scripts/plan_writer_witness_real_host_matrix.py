@@ -28,17 +28,23 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from scripts import writer_witness_controller_runtime as controller_runtime
+from core.three_site_topology import (
+    PRODUCTION_WITNESS_HOST,
+    ROLLBACK_WITNESS_HOST,
+    WEBAPP_FI_HOST,
+    WEBAPP_IR_HOST,
+)
 EXPECTED_BRANCH = "main"
-WEBAPP_FI = "65.109.220.59"
-WEBAPP_IR = "95.38.164.29"
+WEBAPP_FI = WEBAPP_FI_HOST
+WEBAPP_IR = WEBAPP_IR_HOST
 WEBAPP_IR_SSH_PORT = 22
 WEBAPP_IR_SSH_USER = "ubuntu"
 WEBAPP_IR_SSH_IDENTITY = "/root/.ssh/id_ed25519_iran"
 # Dedicated bare-host Witness provisioned for the real-host Matrix.  The
 # previous candidate was shared with Docker state and therefore failed the
 # mandatory dark-host isolation contract.
-MATRIX_WITNESS = "37.152.191.11"
-ROLLBACK_WITNESS = "185.231.182.6"
+MATRIX_WITNESS = PRODUCTION_WITNESS_HOST
+ROLLBACK_WITNESS = ROLLBACK_WITNESS_HOST
 CONTROL_SSH_SOURCE = "65.109.216.187"
 SCHEMA_VERSION = "writer_witness_real_host_matrix_preflight_v1"
 # The rollback Witness deliberately remains outside this feature deployment.
@@ -56,6 +62,7 @@ PINNED_SOURCE_PATHS = (
     "core/human_approval.py",
     "core/human_approval_issuer.py",
     "core/secure_file_io.py",
+    "core/three_site_topology.py",
     "scripts/build_writer_witness_release.sh",
     "scripts/build_writer_witness_wheelhouse.sh",
     "scripts/generate_writer_witness_command_surfaces.py",
@@ -83,6 +90,7 @@ PINNED_SOURCE_PATHS = (
     "scripts/verify_writer_witness_runtime_provenance.py",
     "scripts/verify_writer_witness_process_maps.py",
     "scripts/verify_writer_witness_wheelhouse.py",
+    "scripts/verify_three_site_topology_contract.py",
     "scripts/verify_writer_witness_nftables.py",
     "scripts/writer_witness_matrix_client.py",
     "scripts/wa_ir_object_storage_preflight_agent.py",
@@ -780,7 +788,7 @@ def remote_check_specs(
                 "receipts=$(runuser -u postgres -- psql -XAt -d writer_witness -c "
                 "\"SELECT count(*) FROM webapp_writer_witness_receipts;\"); test \"$receipts\" = 0; "
                 "test \"$(runuser -u postgres -- psql -XAt -d writer_witness -c "
-                "\"SELECT version_num FROM writer_witness_schema_version;\")\" = 002; "
+                "\"SELECT version_num FROM writer_witness_schema_version;\")\" = 003; "
                 "test -L /opt/trading-bot-witness/active; "
                 "activation=$(readlink -f /opt/trading-bot-witness/active); "
                 "case \"$activation\" in /opt/trading-bot-witness/activations/*) ;; *) exit 50;; esac; "
@@ -1208,6 +1216,12 @@ def source_manifest_sha256(manifest: dict[str, str] | None = None) -> str:
 def witness_release_manifest_sha256() -> str:
     with tempfile.TemporaryDirectory(prefix="writer-witness-matrix-release-") as parent:
         destination = Path(parent) / "release"
+        environment = controller_runtime.clean_environment()
+        # The Witness runtime is intentionally pinned to the dedicated target,
+        # so the controller derives only the deterministic source-release
+        # manifest here.  Deployable releases still require target-runtime
+        # attestation and are built canonically on the Witness host.
+        environment["WRITER_WITNESS_RELEASE_MANIFEST_DERIVATION_ONLY"] = "true"
         subprocess.check_call(
             (
                 controller_runtime.executable("bash"),
@@ -1215,7 +1229,7 @@ def witness_release_manifest_sha256() -> str:
                 str(destination),
             ),
             cwd=ROOT,
-            env=controller_runtime.clean_environment(),
+            env=environment,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )

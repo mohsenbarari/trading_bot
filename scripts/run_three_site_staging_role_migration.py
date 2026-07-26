@@ -71,9 +71,9 @@ ROLE_WORKERS = {
     "webapp_ir": ("webapp_ir_writer_control", "webapp_ir_dr_delivery", "webapp_ir_blobs"),
 }
 ROLE_PUBLIC = {
-    "bot_fi": ("bot_fi_api", "bot_fi_bot"),
-    "webapp_fi": ("webapp_fi_api", "webapp_fi_effects"),
-    "webapp_ir": ("webapp_ir_api", "webapp_ir_effects"),
+    "bot_fi": ("bot_fi_redis", "bot_fi_api", "bot_fi_bot"),
+    "webapp_fi": ("webapp_fi_redis", "webapp_fi_api", "webapp_fi_effects"),
+    "webapp_ir": ("webapp_ir_redis", "webapp_ir_api", "webapp_ir_effects"),
 }
 
 
@@ -307,17 +307,28 @@ class LocalRoleBackend:
                 raise RoleMigrationError(
                     f"database migration requires the application service to be stopped: {service}"
                 )
-        for _sample in range(3):
+        # A just-finished restore can leave a short-lived PostgreSQL client
+        # connection visible for a moment.  Do not mistake that harmless tail
+        # for an application writer: require three consecutive quiescent
+        # samples, while still failing closed if the target never becomes
+        # quiescent within this bounded window.
+        consecutive_quiescent_samples = 0
+        for _sample in range(30):
             active_clients = self._psql(
                 "SELECT count(*) FROM pg_stat_activity "
                 "WHERE datname=current_database() AND pid<>pg_backend_pid() "
                 "AND backend_type='client backend'"
             )
-            if active_clients != "0":
-                raise RoleMigrationError(
-                    "database migration requires zero other client sessions"
-                )
-            time.sleep(0.2)
+            if active_clients == "0":
+                consecutive_quiescent_samples += 1
+                if consecutive_quiescent_samples == 3:
+                    return
+            else:
+                consecutive_quiescent_samples = 0
+            time.sleep(0.5)
+        raise RoleMigrationError(
+            "database migration requires three consecutive zero-client samples"
+        )
 
     def _wait_services_ready(
         self,
@@ -356,19 +367,42 @@ class LocalRoleBackend:
                 if health is not None and health != "healthy":
                     all_ready = False
                     break
-                observed_release = _run(
+                environment_raw = _run(
                     [
-                        *self.prefix,
-                        "exec",
-                        "-T",
-                        service,
-                        "python",
-                        "-c",
-                        "from core.config import settings; "
-                        "print(str(settings.release_sha or ''))",
-                    ],
-                    timeout=30,
+                        DOCKER,
+                        "inspect",
+                        "--format",
+                        "{{json .Config.Env}}",
+                        container,
+                    ]
                 )
+                try:
+                    environment_rows = json.loads(environment_raw)
+                except json.JSONDecodeError as exc:
+                    raise RoleMigrationError(
+                        f"service environment is unreadable: {service}"
+                    ) from exc
+                if not isinstance(environment_rows, list) or any(
+                    not isinstance(row, str) or "=" not in row
+                    for row in environment_rows
+                ):
+                    raise RoleMigrationError(
+                        f"service environment is malformed: {service}"
+                    )
+                environment: dict[str, str] = {}
+                for row in environment_rows:
+                    key, _separator, value = row.partition("=")
+                    if not key or key in environment:
+                        raise RoleMigrationError(
+                            f"service environment is ambiguous: {service}"
+                        )
+                    environment[key] = value
+                release_key = (
+                    "WRITER_WITNESS_RELEASE_SHA"
+                    if self.role == "witness" and service == "witness_api"
+                    else "RELEASE_SHA"
+                )
+                observed_release = environment.get(release_key, "")
                 if observed_release != self.context["verified_plan"]["release_sha"]:
                     raise RoleMigrationError(
                         f"service release identity mismatch: {service}"
@@ -434,6 +468,26 @@ class LocalRoleBackend:
             "infrastructure services did not retain running/healthy state: "
             + ",".join(services)
         )
+
+    def _start_services(self, services: tuple[str, ...]) -> None:
+        """Start each service with a small bounded retry for Compose races.
+
+        Docker Compose can transiently reject a create/start request while a
+        just-stopped container or its network is being reconciled.  A retry is
+        safe here because every request is scoped to this exact role Compose
+        project and the subsequent readiness checks remain mandatory.  A
+        persistent failure still propagates unchanged and rolls the journal
+        back.
+        """
+        for service in services:
+            for attempt in range(3):
+                try:
+                    _run([*self.prefix, "up", "-d", "--no-deps", service], timeout=180)
+                    break
+                except RoleMigrationError:
+                    if attempt == 2:
+                        raise
+                    time.sleep(2)
 
     def restore_seed(self) -> None:
         _run([*self.prefix, "up", "-d", "--no-deps", self.db_service], timeout=180)
@@ -522,8 +576,8 @@ class LocalRoleBackend:
             self._compose_run("witness_role_bootstrap")
             self._compose_run("witness_migration")
         if self.role == "witness":
-            if self._psql("SELECT version_num FROM writer_witness_schema_version") != "002":
-                raise RoleMigrationError("Witness schema did not reach version 002")
+            if self._psql("SELECT version_num FROM writer_witness_schema_version") != "003":
+                raise RoleMigrationError("Witness schema did not reach version 003")
         elif self._psql("SELECT version_num FROM alembic_version") != EXPECTED_HEAD:
             raise RoleMigrationError("product database did not reach the integration migration head")
         if self._psql("SELECT system_identifier FROM pg_control_system()") != str(
@@ -532,8 +586,7 @@ class LocalRoleBackend:
             raise RoleMigrationError("PostgreSQL cluster identity changed during configuration")
 
     def start_private(self) -> None:
-        for service in ROLE_PRIVATE[self.role]:
-            _run([*self.prefix, "up", "-d", "--no-deps", service], timeout=180)
+        self._start_services(ROLE_PRIVATE[self.role])
         app_services = ROLE_PRIVATE[self.role][:-1]
         infrastructure_services = ROLE_PRIVATE[self.role][-1:]
         self._wait_services_ready(app_services)
@@ -542,8 +595,7 @@ class LocalRoleBackend:
     def start_workers(self) -> None:
         if self.role == "witness":
             raise RoleMigrationError("Witness has no product worker phase")
-        for service in ROLE_WORKERS[self.role]:
-            _run([*self.prefix, "up", "-d", "--no-deps", service], timeout=180)
+        self._start_services(ROLE_WORKERS[self.role])
         self._wait_services_ready(ROLE_WORKERS[self.role])
 
     def attest_writer_state(self) -> dict[str, Any]:
@@ -634,9 +686,17 @@ class LocalRoleBackend:
     def start_public(self) -> None:
         if self.role == "witness":
             raise RoleMigrationError("Witness has no public application phase")
-        for service in ROLE_PUBLIC[self.role]:
-            _run([*self.prefix, "up", "-d", "--no-deps", service], timeout=180)
-        self._wait_services_ready(ROLE_PUBLIC[self.role])
+        self._start_services(ROLE_PUBLIC[self.role])
+        # Redis is deliberately consumed from the upstream immutable image rather
+        # than from the application release image, so it cannot carry the exact
+        # RELEASE_SHA that _wait_services_ready verifies.  Keep the release
+        # identity check on all public application services, while checking the
+        # Redis infrastructure service only for running/healthy state.  This is
+        # the same split already used by start_private().
+        app_services = ROLE_PUBLIC[self.role][1:]
+        infrastructure_services = ROLE_PUBLIC[self.role][:1]
+        self._wait_services_ready(app_services)
+        self._wait_infrastructure_ready(infrastructure_services)
 
     def rollback_stop(self) -> None:
         # Preserve every target byte for forensics; rollback of user access is

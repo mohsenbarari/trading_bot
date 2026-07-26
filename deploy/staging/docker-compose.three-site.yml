@@ -463,6 +463,12 @@ services:
     restart: "no"
     command: [python, -c, "raise SystemExit('invoke with docker compose run')"]
     environment: *webapp_fi_observer_env
+    # The convergence observer hashes local CAS files but has no Blob Object
+    # Storage credential, no writable mount and no egress network.  It can
+    # therefore prove a local read-back without becoming a transfer worker.
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - webapp_fi_uploads:/app/uploads:ro
     depends_on: {webapp_fi_db_fencing: {condition: service_completed_successfully}}
     networks: [webapp_fi]
 
@@ -495,7 +501,7 @@ services:
   webapp_fi_writer_control:
     profiles: [webapp-fi]
     <<: *app
-    command: [python, scripts/run_writer_control_agent.py]
+    command: [python, -m, scripts.run_writer_control_agent]
     environment:
       <<: *webapp_fi_control_env
       TRADING_BOT_SERVICE: writer_control_agent
@@ -536,7 +542,7 @@ services:
   webapp_fi_effects:
     profiles: [webapp-fi]
     <<: *app
-    command: [python, scripts/run_dr_effect_worker.py]
+    command: [python, -m, scripts.run_dr_effect_worker]
     environment:
       <<: *webapp_fi_app_env
       TRADING_BOT_SERVICE: dr_effect_worker
@@ -689,8 +695,28 @@ services:
     restart: "no"
     command: [python, -c, "raise SystemExit('invoke with docker compose run')"]
     environment: *webapp_ir_observer_env
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - webapp_ir_uploads:/app/uploads:ro
     depends_on: {webapp_ir_db_fencing: {condition: service_completed_successfully}}
     networks: [webapp_ir]
+
+  # This is not the observer.  It is a one-shot, explicitly invoked export
+  # service used only to send a redacted convergence snapshot to a short-lived
+  # presigned Object Storage URL.  It has no static Object Storage credential,
+  # no writable application mount and no public listener.  Keeping it separate
+  # prevents the least-privilege observer from acquiring outbound capability.
+  webapp_ir_convergence_exporter:
+    profiles: [webapp-ir]
+    <<: *app
+    restart: "no"
+    command: [python, -c, "raise SystemExit('invoke with docker compose run')"]
+    environment: *webapp_ir_observer_env
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - webapp_ir_uploads:/app/uploads:ro
+    depends_on: {webapp_ir_db_fencing: {condition: service_completed_successfully}}
+    networks: [webapp_ir, webapp_ir_egress]
 
   webapp_ir_api:
     profiles: [webapp-ir]
@@ -721,7 +747,7 @@ services:
   webapp_ir_writer_control:
     profiles: [webapp-ir]
     <<: *app
-    command: [python, scripts/run_writer_control_agent.py]
+    command: [python, -m, scripts.run_writer_control_agent]
     environment:
       <<: *webapp_ir_control_env
       TRADING_BOT_SERVICE: writer_control_agent
@@ -761,7 +787,7 @@ services:
   webapp_ir_effects:
     profiles: [webapp-ir]
     <<: *app
-    command: [python, scripts/run_dr_effect_worker.py]
+    command: [python, -m, scripts.run_dr_effect_worker]
     environment:
       <<: *webapp_ir_app_env
       TRADING_BOT_SERVICE: dr_effect_worker
@@ -847,21 +873,28 @@ services:
       TZ: UTC
       ENVIRONMENT: staging
       LOGICAL_AUTHORITY: webapp
-      PHYSICAL_SITE: webapp_ir
+      PHYSICAL_SITE: witness
       WRITER_WITNESS_DATABASE_URL: postgresql+asyncpg://${WITNESS_RUNTIME_DB_USER:-writer_witness_runtime}:${WITNESS_RUNTIME_DB_PASSWORD:?required}@witness_db/${WITNESS_POSTGRES_DB}
-      WRITER_WITNESS_PRODUCT_DATABASE_USER: webapp_ir_app
+      WRITER_WITNESS_PRODUCT_DATABASE_USER: webapp_fi_app
       WRITER_WITNESS_RELEASE_SHA: ${STAGING_RELEASE_SHA}
       WRITER_WITNESS_SERVICE_ENABLED: "true"
       WRITER_WITNESS_PRIVATE_KEY_FILE: /run/witness-signing/private.key
       WRITER_WITNESS_PUBLIC_KEY: ${WRITER_WITNESS_PUBLIC_KEY:?required}
-      WRITER_WITNESS_AUTHORITATIVE_SITE: webapp_ir
+      WRITER_WITNESS_AUTHORITATIVE_SITE: webapp_fi
       WRITER_WITNESS_SERVICE_WEBAPP_FI_KEY_ID: ${WEBAPP_FI_WITNESS_KEY_ID:?required}
       WRITER_WITNESS_SERVICE_WEBAPP_FI_SECRET: ${WEBAPP_FI_WITNESS_SECRET:?required}
       WRITER_WITNESS_SERVICE_WEBAPP_IR_KEY_ID: ${WEBAPP_IR_WITNESS_KEY_ID:?required}
       WRITER_WITNESS_SERVICE_WEBAPP_IR_SECRET: ${WEBAPP_IR_WITNESS_SECRET:?required}
+      HUMAN_APPROVAL_RELAY_ENABLED: ${STAGING_HUMAN_APPROVAL_RELAY_ENABLED:-false}
+      HUMAN_APPROVAL_RELAY_SESSION_FILE: /run/human-approval/session.json
+      HUMAN_APPROVAL_RELAY_POLICY_FILE: /run/human-approval/policy.json
+      HUMAN_APPROVAL_RELAY_ORCHESTRATOR_KEY_ID: ${STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_KEY_ID:-}
+      HUMAN_APPROVAL_RELAY_ORCHESTRATOR_SECRET: ${STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_SECRET:-}
     volumes:
       - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
       - ${STAGING_WITNESS_SIGNING_KEY:?required}:/run/witness-signing/private.key:ro
+      - ${STAGING_HUMAN_APPROVAL_RELAY_SESSION_FILE:-/dev/null}:/run/human-approval/session.json:ro
+      - ${STAGING_HUMAN_APPROVAL_RELAY_POLICY_FILE:-/dev/null}:/run/human-approval/policy.json:ro
       - witness_audit:/app/audit_trail
     ports: ["127.0.0.1:8214:8000"]
     depends_on: {witness_migration: {condition: service_completed_successfully}}
@@ -989,43 +1022,43 @@ networks:
 volumes:
   bot_fi_postgres:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/bot_fi/postgres"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/bot_fi/postgres"}
   bot_fi_redis:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/bot_fi/redis"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/bot_fi/redis"}
   bot_fi_uploads:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/bot_fi/uploads"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/bot_fi/uploads"}
   bot_fi_audit:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/bot_fi/audit"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/bot_fi/audit"}
   webapp_fi_postgres:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_fi/postgres"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_fi/postgres"}
   webapp_fi_redis:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_fi/redis"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_fi/redis"}
   webapp_fi_uploads:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_fi/uploads"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_fi/uploads"}
   webapp_fi_audit:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_fi/audit"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_fi/audit"}
   webapp_ir_postgres:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_ir/postgres"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_ir/postgres"}
   webapp_ir_redis:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_ir/redis"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_ir/redis"}
   webapp_ir_uploads:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_ir/uploads"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_ir/uploads"}
   webapp_ir_audit:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/webapp_ir/audit"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_ir/audit"}
   witness_postgres:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/witness/postgres"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/witness/postgres"}
   witness_audit:
     driver: local
-    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/witness/audit"}
+    driver_opts: {type: none, o: bind, device: "${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/witness/audit"}

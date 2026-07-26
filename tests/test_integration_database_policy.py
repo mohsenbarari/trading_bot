@@ -11,14 +11,17 @@ from core.dr_database_roles import (
     projection_database_role_suffix_for_service,
     projection_scope_for_service,
 )
+from core.sync_parity import synced_parity_table_names
 from scripts.activate_three_site_database_fencing import (
     BOT_LOCAL_EXECUTION_TABLES,
+    CONVERGENCE_OBSERVER_TABLES as WEBAPP_CONVERGENCE_OBSERVER_TABLES,
     DR_SERVICE_INTERNAL_GRANTS,
     SYNC_OBSERVER_TABLES as WEBAPP_SYNC_OBSERVER_TABLES,
 )
 from scripts.provision_bot_database_roles import (
     BOT_DR_SERVICE_GRANTS,
     BOT_LOCAL_QUEUE_APPLICATION_GRANTS,
+    CONVERGENCE_OBSERVER_TABLES as BOT_CONVERGENCE_OBSERVER_TABLES,
     SYNC_OBSERVER_TABLES as BOT_SYNC_OBSERVER_TABLES,
 )
 
@@ -80,6 +83,24 @@ class IntegrationDatabasePolicyTests(unittest.TestCase):
         )
         self.assertEqual(BOT_SYNC_OBSERVER_TABLES, expected)
         self.assertEqual(WEBAPP_SYNC_OBSERVER_TABLES, expected)
+
+    def test_convergence_observer_is_explicitly_broader_but_read_only(self):
+        transport = {
+            "dr_producer_cursors", "dr_destination_cursors", "dr_stream_checkpoints",
+            "dr_conflict_quarantine", "dr_blob_manifests",
+        }
+        self.assertTrue(transport <= BOT_CONVERGENCE_OBSERVER_TABLES)
+        self.assertTrue(transport <= WEBAPP_CONVERGENCE_OBSERVER_TABLES)
+        self.assertTrue(BOT_SYNC_OBSERVER_TABLES < BOT_CONVERGENCE_OBSERVER_TABLES)
+        self.assertTrue(WEBAPP_SYNC_OBSERVER_TABLES < WEBAPP_CONVERGENCE_OBSERVER_TABLES)
+
+    def test_convergence_observer_tracks_the_exact_deep_product_contract(self):
+        # A newly synchronized product table must not silently be omitted from
+        # the read-only convergence proof.  The Bot and WebApp projection
+        # contracts intentionally contain the same cross-authority data set.
+        expected = frozenset(synced_parity_table_names("deep"))
+        self.assertEqual(BOT_CONVERGENCE_OBSERVER_TABLES & expected, expected)
+        self.assertEqual(WEBAPP_CONVERGENCE_OBSERVER_TABLES & expected, expected)
 
     def test_remote_event_insert_omits_source_local_xid(self):
         payload = {

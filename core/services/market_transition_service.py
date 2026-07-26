@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -212,12 +212,16 @@ async def _acquire_market_runtime_lock(
 ) -> None:
     if lock_timeout_ms is not None:
         await db.execute(
-            text("SELECT set_config('lock_timeout', :lock_timeout, true)"),
-            {"lock_timeout": f"{max(1, int(lock_timeout_ms))}ms"},
+            select(
+                func.set_config(
+                    "lock_timeout",
+                    f"{max(1, int(lock_timeout_ms))}ms",
+                    True,
+                )
+            )
         )
     await db.execute(
-        text("SELECT pg_advisory_xact_lock(:lock_key)"),
-        {"lock_key": MARKET_RUNTIME_ADVISORY_LOCK_KEY},
+        select(func.pg_advisory_xact_lock(MARKET_RUNTIME_ADVISORY_LOCK_KEY))
     )
 
 

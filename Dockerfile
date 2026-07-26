@@ -35,5 +35,6 @@ COPY seed_fake_data.py .
 COPY scripts/ ./scripts/
 COPY deploy/writer-witness/001_initial.sql ./deploy/writer-witness/001_initial.sql
 COPY deploy/writer-witness/002_failover_operation_ledger.sql ./deploy/writer-witness/002_failover_operation_ledger.sql
+COPY deploy/writer-witness/003_human_approval_relay.sql ./deploy/writer-witness/003_human_approval_relay.sql
 
 COPY ${FRONTEND_DIST_DIR}/ /app/mini_app_dist/

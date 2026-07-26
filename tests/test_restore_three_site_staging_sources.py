@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from scripts.restore_three_site_staging_sources import (
     SourceRestoreError,
+    _legacy_prefix,
     _load_legacy_restore_bundle,
     confirmation_phrase,
     execute,
@@ -122,9 +123,49 @@ class RestoreThreeSiteStagingSourcesTests(unittest.TestCase):
                 project_name="trading_bot_staging_iran",
             )
 
-    def test_evidence_cannot_restart_an_unrecorded_service(self):
+    def test_bot_restore_reapplies_the_freeze_profile(self):
+        prefix = _legacy_prefix(
+            project_name="trading_bot_staging",
+            compose_path=Path("/secure/compose.yml"),
+            source_roles=["bot_fi"],
+        )
+        self.assertIn("--profile", prefix)
+        self.assertEqual(prefix[prefix.index("--profile") + 1], "staging-bot")
+
+    def test_evidence_can_record_a_verified_noop_stop_without_restarting_it(self):
         evidence = _evidence()
         evidence["stopped_services"].append("bot")
+        result = verify_restore_input(
+            evidence,
+            campaign_id=evidence["campaign_id"],
+            release_sha=evidence["target_release_sha"],
+            project_name="trading_bot_staging",
+        )
+        self.assertEqual(result["services_to_start"], ["app", "sync_worker"])
+
+    def test_evidence_rejects_missing_actual_stop_or_data_service_stop(self):
+        evidence = _evidence()
+        evidence["stopped_services"] = ["app"]
+        with self.assertRaisesRegex(SourceRestoreError, "cannot authorize"):
+            verify_restore_input(
+                evidence,
+                campaign_id=evidence["campaign_id"],
+                release_sha=evidence["target_release_sha"],
+                project_name="trading_bot_staging",
+            )
+
+    def test_malformed_service_evidence_fails_closed(self):
+        evidence = _evidence()
+        evidence["previously_running_services"] = [{"service": "app"}]
+        with self.assertRaisesRegex(SourceRestoreError, "cannot authorize"):
+            verify_restore_input(
+                evidence,
+                campaign_id=evidence["campaign_id"],
+                release_sha=evidence["target_release_sha"],
+                project_name="trading_bot_staging",
+            )
+        evidence = _evidence()
+        evidence["stopped_services"].append("db")
         with self.assertRaisesRegex(SourceRestoreError, "cannot authorize"):
             verify_restore_input(
                 evidence,

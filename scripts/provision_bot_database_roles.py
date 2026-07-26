@@ -46,11 +46,14 @@ BOT_PRODUCT_TABLES = frozenset(
 BOT_LOCAL_APPLICATION_TABLES = frozenset(
     {
         "change_log",
+        "chat_members",
+        "chats",
         "market_channel_notice_receipts",
         "sync_apply_watermarks",
         "sync_blocks",
         "telegram_registration_intents",
         "user_counter_event_receipts",
+        "user_sessions",
     }
 )
 # Site-local Telegram execution state is deliberately absent from every DR
@@ -76,6 +79,20 @@ SYNC_OBSERVER_TABLES = frozenset(
         "dr_events",
         "dr_event_deliveries",
         "dr_event_receipts",
+    }
+)
+# A convergence observation is a bounded, redacted, read-only audit that is
+# intentionally broader than the timing observer.  It needs every synced
+# product table plus only the immutable/local DR ledgers required to prove an
+# exact source-to-destination checkpoint.  Keep it as a named closed surface;
+# do not reuse the application or migration owner credentials for this job.
+CONVERGENCE_OBSERVER_TABLES = frozenset(BOT_PRODUCT_TABLES) | SYNC_OBSERVER_TABLES | frozenset(
+    {
+        "dr_producer_cursors",
+        "dr_destination_cursors",
+        "dr_stream_checkpoints",
+        "dr_conflict_quarantine",
+        "dr_blob_manifests",
     }
 )
 BOT_APPLICATION_INTERNAL_GRANTS = {
@@ -252,7 +269,7 @@ def main() -> int:
                 # application role.  This exposes metadata only, never DDL.
                 f"GRANT SELECT ON TABLE public.alembic_version TO {app_role}",
                 "GRANT SELECT ON TABLE "
-                + ", ".join(f"public.{table}" for table in sorted(SYNC_OBSERVER_TABLES))
+                + ", ".join(f"public.{table}" for table in sorted(CONVERGENCE_OBSERVER_TABLES))
                 + f" TO {observer_role}",
                 f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {app_role}, {projection_role}",
                 f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner} IN SCHEMA public REVOKE ALL ON TABLES FROM {role_list}",

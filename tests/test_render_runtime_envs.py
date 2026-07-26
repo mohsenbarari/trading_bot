@@ -39,7 +39,7 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             "WRITER_WITNESS_RENEW_INTERVAL_SECONDS": "30",
             "WRITER_WITNESS_SAFETY_MARGIN_SECONDS": "15",
             "WRITER_WITNESS_MAX_CLOCK_SKEW_SECONDS": "5",
-            "WRITER_WITNESS_AUTHORITATIVE_SITE": "webapp_ir",
+            "WRITER_WITNESS_AUTHORITATIVE_SITE": "webapp_fi",
             "WRITER_WITNESS_HTTP_TIMEOUT_SECONDS": "3.0",
             "WRITER_WITNESS_AUTH_MAX_AGE_SECONDS": "15",
             "IRAN_WRITER_WITNESS_INTERNAL_URL": "https://witness.internal",

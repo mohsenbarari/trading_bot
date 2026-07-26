@@ -102,7 +102,7 @@ class WriterWitnessHostToolchainTests(unittest.TestCase):
     def test_extra_non_executable_bootstrap_packages_remain_bound(self):
         self.assertEqual(
             set(MODULE["EXTRA_PACKAGES"]),
-            {"ca-certificates", "libfaketime", "python3-venv"},
+            {"ca-certificates", "libfaketime"},
         )
 
     def test_postgresql_wrappers_and_selected_server_binaries_are_both_closed(self):
@@ -113,6 +113,37 @@ class WriterWitnessHostToolchainTests(unittest.TestCase):
         self.assertEqual(
             set(MODULE["POSTGRESQL_SERVER_BINARIES"]),
             {"initdb", "pg_ctl", "postgres"},
+        )
+
+    def test_dpkg_diversion_records_are_not_treated_as_package_owners(self):
+        output = "\n".join(
+            (
+                "diversion by postgresql-common from: /usr/bin/pg_config",
+                "diversion by postgresql-common to: /usr/bin/pg_config.libpq-dev",
+                "postgresql-common: /usr/bin/pg_config",
+            )
+        )
+        self.assertEqual(
+            MODULE["_parse_package_owners"](output),
+            {"postgresql-common"},
+        )
+
+    def test_package_owner_parser_remains_fail_closed_for_real_ambiguity(self):
+        self.assertEqual(
+            MODULE["_parse_package_owners"](
+                "package-one: /usr/bin/tool\npackage-two: /usr/bin/tool\n"
+            ),
+            {"package-one", "package-two"},
+        )
+
+    def test_package_owner_paths_include_only_the_usrmerge_alias(self):
+        self.assertEqual(
+            MODULE["_package_owner_paths"](Path("/usr/bin/ss")),
+            (Path("/usr/bin/ss"), Path("/bin/ss")),
+        )
+        self.assertEqual(
+            MODULE["_package_owner_paths"](Path("/usr/share/tool")),
+            (Path("/usr/share/tool"),),
         )
 
     def test_native_package_lock_excludes_a_second_process(self):
@@ -201,11 +232,36 @@ class WriterWitnessHostToolchainTests(unittest.TestCase):
 
     def test_provisioner_uses_one_cgroup_main_pid_for_locks_and_mutation(self):
         source = (ROOT / "scripts/provision_writer_witness_host.sh").read_text()
+        builder = (ROOT / "scripts/build_writer_witness_release.sh").read_text()
         helper = (ROOT / "scripts/hold_writer_witness_package_locks.py").read_text()
+        transaction = source.split("exec /usr/bin/systemd-run", 1)[1].split(
+            "\nfi\n", 1
+        )[0]
         self.assertNotIn("coproc WRITER_WITNESS_PACKAGE_LOCK_HOLDER", source)
+        self.assertNotIn("/usr/bin/env -i", transaction)
         self.assertIn("--property=KillMode=control-group", source)
+        self.assertIn(
+            "--setenv=WRITER_WITNESS_PROVISION_TRANSACTION_UNIT=",
+            source,
+        )
+        self.assertIn(
+            "--setenv=WRITER_WITNESS_EXPECTED_HOST_TOOLCHAIN_INVENTORY_SHA256=",
+            source,
+        )
         self.assertIn("--assert-parent-locks", source)
         self.assertIn("--exec /bin/bash", source)
+        self.assertIn(
+            '"$SOURCE_DIR/scripts/provision_writer_witness_host.sh"',
+            source,
+        )
+        self.assertIn(
+            '"$ROOT_DIR/scripts/provision_writer_witness_host.sh"',
+            builder,
+        )
+        self.assertIn(
+            '"$release_dir/scripts/provision_writer_witness_host.sh"',
+            source,
+        )
         self.assertIn('SYSTEMD_EXEC_PID:-}" == "$$"', source)
         self.assertIn("os.execve", helper)
         self.assertGreaterEqual(source.count("attest_host_toolchain"), 5)

@@ -28,6 +28,7 @@ from typing import Any
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 
 
 SCHEMA = "three-site-wa-ir-object-storage-preflight-v1"
@@ -408,7 +409,33 @@ def install_role_materials(archive_path: Path, *, secure_dir: Path) -> None:
         os.close(directory_fd)
 
 
+def _writer_witness_public_key(env_file: Path) -> str:
+    """Read the relay trust key without importing the deployed repository."""
+    try:
+        lines = env_file.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise AgentError("WA-IR role environment is unavailable") from exc
+    matches = [
+        line.partition("=")[2]
+        for raw in lines
+        if (line := raw.strip()).startswith("WRITER_WITNESS_PUBLIC_KEY=")
+    ]
+    if len(matches) != 1:
+        raise AgentError("WA-IR role environment lacks one Witness relay trust key")
+    value = matches[0].strip()
+    try:
+        decoded = base64.b64decode(value, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise AgentError("WA-IR Witness relay trust key is malformed") from exc
+    if len(decoded) != 32:
+        raise AgentError("WA-IR Witness relay trust key is malformed")
+    return value
+
+
 def run_preflight(*, release_dir: Path, secure_dir: Path, output: Path) -> dict[str, Any]:
+    witness_public_key = _writer_witness_public_key(
+        secure_dir / "roles" / "webapp-ir.env"
+    )
     command = [
         "python3",
         str(release_dir / "scripts" / "verify_three_site_staging_host_identity.py"),
@@ -430,7 +457,13 @@ def run_preflight(*, release_dir: Path, secure_dir: Path, output: Path) -> dict[
         stderr=subprocess.PIPE,
         check=False,
         timeout=120,
-        env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "HOME": "/nonexistent", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"},
+        env={
+            "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
+            "HOME": "/nonexistent",
+            "LANG": "C.UTF-8",
+            "LC_ALL": "C.UTF-8",
+            "WRITER_WITNESS_PUBLIC_KEY": witness_public_key,
+        },
     )
     if result.returncode != 0:
         raise AgentError(f"WA-IR fresh preflight failed: {result.stdout.strip() or result.stderr.strip()}")
@@ -446,10 +479,17 @@ def run_preflight(*, release_dir: Path, secure_dir: Path, output: Path) -> dict[
 def upload_evidence(upload: Any, source: Path) -> dict[str, Any] | None:
     if upload is None:
         return None
-    if not isinstance(upload, dict) or set(upload) != {"url", "method", "headers", "expected_status"}:
+    if not isinstance(upload, dict):
+        raise AgentError("evidence_upload fields are invalid")
+    method = str(upload.get("method", ""))
+    expected_fields = (
+        {"url", "method", "headers", "expected_status"}
+        if method == "PUT"
+        else {"url", "method", "headers", "form_fields", "expected_status"}
+    )
+    if set(upload) != expected_fields:
         raise AgentError("evidence_upload fields are invalid")
     _validate_object_storage_url(str(upload["url"]), label="evidence upload")
-    method = str(upload["method"])
     if method not in {"PUT", "POST"}:
         raise AgentError("evidence upload method must be PUT or POST")
     headers = upload["headers"]
@@ -465,6 +505,18 @@ def upload_evidence(upload: Any, source: Path) -> dict[str, Any] | None:
         raise AgentError("evidence upload expected_status is invalid")
     digest, size = _sha256(source, max_bytes=16 * 1024 * 1024)
     body = source.read_bytes()
+    if method == "POST":
+        fields = upload["form_fields"]
+        required = {"key", "policy", "x-amz-algorithm", "x-amz-credential", "x-amz-date", "x-amz-signature", "Content-Type"}
+        if not isinstance(fields, dict) or set(fields) != required or not all(isinstance(k, str) and isinstance(v, str) and v for k, v in fields.items()):
+            raise AgentError("evidence upload form_fields are invalid")
+        boundary = "----three-site-" + uuid.uuid4().hex
+        chunks: list[bytes] = []
+        for key, value in fields.items():
+            chunks.extend((f"--{boundary}\r\n".encode(), f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode(), value.encode(), b"\r\n"))
+        chunks.extend((f"--{boundary}\r\n".encode(), b'Content-Disposition: form-data; name="file"; filename="evidence.json"\r\n', b"Content-Type: application/json\r\n\r\n", body, b"\r\n", f"--{boundary}--\r\n".encode()))
+        body = b"".join(chunks)
+        headers = {**headers, "Content-Type": f"multipart/form-data; boundary={boundary}"}
     request = urllib.request.Request(str(upload["url"]), data=body, headers=headers, method=method)
     try:
         with urllib.request.urlopen(request, timeout=120) as response:

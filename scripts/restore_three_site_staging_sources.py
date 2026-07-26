@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.freeze_three_site_staging_sources import DATA_SERVICES, DOCKER, _run
+from scripts.freeze_three_site_staging_sources import DATA_SERVICES, DOCKER, ROLE_PROFILE, _run
 from core.three_site_staging_source_contract import (
     LEGACY_STAGING_PROJECTS,
     legacy_staging_project_allowed,
@@ -68,6 +68,17 @@ def verify_restore_input(
         for row in source_rows
         if isinstance(row, dict)
     ] if isinstance(source_rows, list) else []
+    previous_set = (
+        set(previous)
+        if isinstance(previous, list) and all(isinstance(value, str) for value in previous)
+        else set()
+    )
+    observed_stopped = (
+        set(stopped)
+        if isinstance(stopped, list) and all(isinstance(value, str) for value in stopped)
+        else set()
+    )
+    expected_stopped = previous_set - DATA_SERVICES
     if (
         not isinstance(evidence, dict)
         or set(evidence) != expected_fields
@@ -79,10 +90,19 @@ def verify_restore_input(
         or not legacy_staging_project_allowed(project_name, source_roles)
         or evidence.get("running_services") != ["db", "redis"]
         or not isinstance(previous, list)
-        or len(previous) != len(set(previous))
-        or not DATA_SERVICES.issubset(previous)
+        or len(previous) != len(previous_set)
+        or not DATA_SERVICES.issubset(previous_set)
         or not isinstance(stopped, list)
-        or set(stopped) != set(previous) - DATA_SERVICES
+        or len(stopped) != len(observed_stopped)
+        or bool(observed_stopped & DATA_SERVICES)
+        # Freeze issues a closed stop request for every configured mutating
+        # service. Docker treats requests for already-stopped services as
+        # harmless no-ops, so historical evidence can include services that
+        # were not in the pre-freeze running set. Restore never starts from
+        # this field: it derives its exact start set from
+        # previously_running_services. Every actually-running mutating
+        # service must still have been in the stop request.
+        or not expected_stopped.issubset(observed_stopped)
         or not isinstance(evidence.get("legacy_restore_bundle"), dict)
         or set(evidence["legacy_restore_bundle"]) != {"schema", "path", "sha256", "size"}
         or evidence["legacy_restore_bundle"].get("schema")
@@ -95,8 +115,9 @@ def verify_restore_input(
         raise SourceRestoreError("legacy source-freeze evidence cannot authorize restore")
     return {
         "evidence_sha256": _canonical_hash(evidence),
+        "source_roles": sorted(source_roles),
         "previously_running_services": sorted(previous),
-        "services_to_start": sorted(set(previous) - DATA_SERVICES),
+        "services_to_start": sorted(expected_stopped),
         "legacy_restore_bundle": dict(evidence["legacy_restore_bundle"]),
     }
 
@@ -165,10 +186,19 @@ def _load_legacy_restore_bundle(
     return manifest, compose_path
 
 
-def _legacy_prefix(*, project_name: str, compose_path: Path) -> list[str]:
+def _legacy_prefix(
+    *, project_name: str, compose_path: Path, source_roles: list[str]
+) -> list[str]:
     if project_name not in LEGACY_STAGING_PROJECTS:
         raise SourceRestoreError("legacy restore project is outside the closed allowlist")
-    return [DOCKER, "compose", "-p", project_name, "-f", str(compose_path)]
+    prefix = [DOCKER, "compose", "-p", project_name, "-f", str(compose_path)]
+    for role in sorted(set(source_roles)):
+        if role not in ROLE_PROFILE:
+            raise SourceRestoreError("legacy restore source role is unknown")
+        profile = ROLE_PROFILE[role]
+        if profile:
+            prefix.extend(("--profile", profile))
+    return prefix
 
 
 def _verify_local_images(service_images: dict[str, str]) -> None:
@@ -212,7 +242,11 @@ def execute(
     manifest, compose_path = _load_legacy_restore_bundle(
         verified["legacy_restore_bundle"], evidence=evidence
     )
-    prefix = _legacy_prefix(project_name=args.project_name, compose_path=compose_path)
+    prefix = _legacy_prefix(
+        project_name=args.project_name,
+        compose_path=compose_path,
+        source_roles=list(verified["source_roles"]),
+    )
     _run([*prefix, "config", "--quiet"])
     configured = {
         value for value in _run([*prefix, "config", "--services"]).splitlines() if value

@@ -419,6 +419,41 @@ def _scratch_psql(container: str, sql: str) -> str:
     )
 
 
+def _wait_for_scratch_database(container: str, *, attempts: int = 30) -> None:
+    """Wait until the initialized scratch database, not merely PostgreSQL, is usable.
+
+    The official PostgreSQL image can accept socket connections while its entrypoint
+    is still creating ``POSTGRES_DB``.  ``pg_isready`` alone therefore races with
+    the first ``pg_restore``.  A successful query against the exact restore
+    database is the readiness condition required by the restore drill.
+    """
+    for _attempt in range(attempts):
+        ready = subprocess.run(
+            [DOCKER, "exec", container, "pg_isready", "-U", "restore", "-d", "restore"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=5,
+            env=SAFE_ENV,
+        )
+        if ready.returncode == 0:
+            probe = subprocess.run(
+                [
+                    DOCKER, "exec", container, "psql", "-v", "ON_ERROR_STOP=1",
+                    "-U", "restore", "-d", "restore", "-Atqc", "SELECT 1",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=5,
+                env=SAFE_ENV,
+            )
+            if probe.returncode == 0 and probe.stdout.strip() == "1":
+                return
+        time.sleep(1)
+    raise StagingBackupError("scratch PostgreSQL restore database did not become ready")
+
+
 def _database_fingerprint(query) -> tuple[str, int, int]:  # noqa: ANN001
     tables = [
         value for value in query(
@@ -463,22 +498,7 @@ def _restore_drill(dump_path: Path, *, container: str) -> dict[str, object]:
         timeout=60,
     )
     try:
-        ready = False
-        for _attempt in range(30):
-            result = subprocess.run(
-                [DOCKER, "exec", container, "pg_isready", "-U", "restore", "-d", "restore"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                timeout=5,
-                env=SAFE_ENV,
-            )
-            if result.returncode == 0:
-                ready = True
-                break
-            time.sleep(1)
-        if not ready:
-            raise StagingBackupError("scratch PostgreSQL did not become ready")
+        _wait_for_scratch_database(container)
         with dump_path.open("rb") as source:
             result = subprocess.run(
                 [

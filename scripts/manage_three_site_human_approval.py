@@ -20,11 +20,18 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.canonical_json import canonical_json_bytes
-from core.human_approval import verify_human_approval
+from core.human_approval import (
+    SESSION_TOKEN_SCHEMA,
+    approval_subject,
+    verify_human_approval,
+)
 from core.human_approval_issuer import (
+    DEFAULT_SESSION_TTL_SECONDS,
+    DEFAULT_STAGING_SESSION_ACTIONS,
     DEFAULT_TOKEN_TTL_SECONDS,
     HumanApprovalIssuerError,
     authenticate_and_issue,
+    authenticate_and_issue_session,
     create_enrollment,
     issuer_paths,
     match_totp,
@@ -284,6 +291,142 @@ def _verify(args: argparse.Namespace) -> dict:
     }
 
 
+def _issue_session(args: argparse.Namespace) -> dict:
+    """Authenticate once and create a release-bound 48-hour staging session."""
+
+    if not sys.stdin.isatty() or not sys.stderr.isatty():
+        raise HumanApprovalIssuerError("session issuance requires an interactive TTY")
+    _assert_synchronized_clock()
+    _assert_secure_issuer_directory(args.directory)
+    paths = issuer_paths(args.directory)
+    issuer_root = args.directory.resolve(strict=True)
+    output = args.output.resolve(strict=False)
+    try:
+        output.relative_to(issuer_root)
+    except ValueError:
+        pass
+    else:
+        raise HumanApprovalIssuerError(
+            "approval session output must be outside the issuer secret directory"
+        )
+    if output.exists() or output.is_symlink():
+        raise HumanApprovalIssuerError(
+            "approval session output already exists; use a new owner-controlled path"
+        )
+
+    actions = sorted(set(args.actions))
+    hours = args.ttl_seconds / 3600
+    print(
+        json.dumps(
+            {
+                "authorization": "staging operations session",
+                "environment": "staging",
+                "release_sha": args.release_sha.lower(),
+                "allowed_actions": actions,
+                "ttl_seconds": args.ttl_seconds,
+                "ttl_hours": hours,
+                "production_authorized": False,
+            },
+            sort_keys=True,
+            indent=2,
+        ),
+        file=sys.stderr,
+    )
+    confirmation = (
+        f"AUTHORIZE STAGING {args.release_sha.lower()[:12]} "
+        f"{args.ttl_seconds // 3600}H"
+    )
+    if input(f"Type {confirmation!r} to continue: ") != confirmation:
+        raise HumanApprovalIssuerError("staging session intent was not confirmed")
+    password = getpass.getpass("Approval passphrase: ")
+    if args.use_recovery_code:
+        totp = None
+        recovery_code = getpass.getpass("One-use recovery code: ")
+    else:
+        totp = getpass.getpass("Authenticator code: ")
+        recovery_code = None
+
+    descriptor = _secure_lock(paths["lock"])
+    try:
+        policy = secure_json(paths["policy"], label="human approval policy")
+        receipt = secure_json(paths["receipt"], label="approval bootstrap receipt")
+        verify_bootstrap_receipt(receipt, policy_payload=policy)
+        state = secure_json(paths["state"], label="human approval state")
+        audit_records = verify_hash_chained_jsonl(
+            paths["audit"], label="human approval audit log"
+        )
+        verify_issuer_audit(
+            audit_records,
+            bootstrap_receipt=receipt,
+            policy_payload=policy,
+            state_payload=state,
+        )
+        secrets_payload = secure_json(paths["secrets"], label="human approval secrets")
+        private_key_envelope = secure_json(
+            paths["key"], label="encrypted human approval issuer private key"
+        )
+        token, new_state, audit = authenticate_and_issue_session(
+            secrets_payload=secrets_payload,
+            state_payload=state,
+            policy_payload=policy,
+            private_key_envelope=private_key_envelope,
+            password=password,
+            totp=totp,
+            recovery_code=recovery_code,
+            release_sha=args.release_sha,
+            allowed_actions=actions,
+            ttl_seconds=args.ttl_seconds,
+            now=datetime.now(timezone.utc),
+        )
+        write_secure_atomic_bytes(
+            paths["state"],
+            (json.dumps(new_state, sort_keys=True, indent=2) + "\n").encode(),
+            label="human approval state",
+            mode=0o600,
+        )
+        append_hash_chained_jsonl(paths["audit"], audit)
+        if not token:
+            raise HumanApprovalIssuerError("password or possession factor is invalid")
+        probe_subject = approval_subject(
+            artifact_type=SESSION_TOKEN_SCHEMA,
+            artifact_sha256=hashlib.sha256(
+                canonical_json_bytes(
+                    {
+                        "release_sha": args.release_sha.lower(),
+                        "allowed_actions": actions,
+                    }
+                )
+            ).hexdigest(),
+            release_sha=args.release_sha,
+            bindings={},
+        )
+        verify_human_approval(
+            token,
+            policy_payload=policy,
+            expected_action=actions[0],
+            expected_environment="staging",
+            expected_subject=probe_subject,
+        )
+        write_secure_new_bytes(
+            output,
+            (json.dumps(token, sort_keys=True, indent=2) + "\n").encode(),
+            label="human approval session",
+            mode=0o600,
+        )
+        return {
+            "status": "session-authorized",
+            "approval_id": token["approval_id"],
+            "environment": token["environment"],
+            "release_sha": token["release_sha"],
+            "allowed_actions": token["allowed_actions"],
+            "expires_at": token["expires_at"],
+            "output": str(output),
+        }
+    finally:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -301,6 +444,23 @@ def main(argv: list[str] | None = None) -> int:
     issue.add_argument("--use-recovery-code", action="store_true")
     issue.add_argument("--output", type=Path, required=True)
     issue.set_defaults(handler=_issue)
+
+    issue_session = subparsers.add_parser("issue-session")
+    issue_session.add_argument("--directory", type=Path, default=DEFAULT_DIRECTORY)
+    issue_session.add_argument("--release-sha", required=True)
+    issue_session.add_argument(
+        "--actions",
+        nargs="+",
+        default=list(DEFAULT_STAGING_SESSION_ACTIONS),
+    )
+    issue_session.add_argument(
+        "--ttl-seconds",
+        type=int,
+        default=DEFAULT_SESSION_TTL_SECONDS,
+    )
+    issue_session.add_argument("--use-recovery-code", action="store_true")
+    issue_session.add_argument("--output", type=Path, required=True)
+    issue_session.set_defaults(handler=_issue_session)
 
     verify = subparsers.add_parser("verify")
     verify.add_argument("--policy", type=Path, required=True)

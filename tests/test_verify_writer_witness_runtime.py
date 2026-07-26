@@ -847,6 +847,33 @@ class SystemRuntimeManifestTests(unittest.TestCase):
             with self.assertRaisesRegex(runtime.RuntimeAttestationError, "identity drifted"):
                 self.attest()
 
+    def test_loader_manifest_excludes_host_global_cache_and_configuration(self) -> None:
+        self.assertEqual(
+            self.document["loader"],
+            {"preload_path": "/etc/ld.so.preload", "preload_sha256": None},
+        )
+        legacy = json.loads(json.dumps(self.document))
+        legacy["loader"]["cache_sha256"] = "0" * 64
+        self.write_manifest(legacy)
+        with self.assertRaisesRegex(runtime.RuntimeAttestationError, "unsupported schema"):
+            self.attest()
+
+    def test_dynamic_loader_preload_remains_fail_closed(self) -> None:
+        original_exists = Path.exists
+
+        def preload_present(path: Path) -> bool:
+            if path == Path("/etc/ld.so.preload"):
+                return True
+            return original_exists(path)
+
+        with mock.patch.object(runtime.Path, "exists", new=preload_present):
+            with self.assertRaisesRegex(runtime.RuntimeAttestationError, "preload"):
+                runtime.observe_system_runtime_manifest(
+                    stdlib_path=self.stdlib,
+                    expected_uid=None,
+                    require_stdlib_package_ownership=False,
+                )
+
 
 class IsolatedCliIntegrationTests(unittest.TestCase):
     @classmethod

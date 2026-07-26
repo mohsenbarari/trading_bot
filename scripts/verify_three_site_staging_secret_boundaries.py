@@ -21,6 +21,9 @@ SECRET_REFERENCES = {
     "BOT_FI_JWT_SECRET_KEY": lambda service: service == "bot_fi_api",
     "WEBAPP_JWT_SECRET_KEY": lambda service: service in {"webapp_fi_api", "webapp_ir_api"},
     "STAGING_WITNESS_SIGNING_KEY": lambda service: service == "witness_api",
+    "STAGING_HUMAN_APPROVAL_RELAY_SESSION_FILE": lambda service: service == "witness_api",
+    "STAGING_HUMAN_APPROVAL_RELAY_POLICY_FILE": lambda service: service == "witness_api",
+    "STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_SECRET": lambda service: service == "witness_api",
     "STAGING_DR_BLOB_CREDENTIALS_FILE": lambda service: service.endswith("_blobs"),
     "STAGING_DR_BLOB_ENCRYPTION_KEYRING_FILE": lambda service: service.endswith("_blobs"),
     "WEBAPP_FI_WITNESS_SECRET": lambda service: service in {
@@ -60,7 +63,7 @@ SECRET_REFERENCES = {
         "webapp_fi_db_roles", "webapp_fi_sync_observer",
     },
     "WEBAPP_IR_OBSERVER_DB_PASSWORD": lambda service: service in {
-        "webapp_ir_db_roles", "webapp_ir_sync_observer",
+        "webapp_ir_db_roles", "webapp_ir_sync_observer", "webapp_ir_convergence_exporter",
     },
     "WEBAPP_FI_RECEIVER_DB_PASSWORD": lambda service: service in {
         "webapp_fi_db_roles", "webapp_fi_dr_receiver",
@@ -138,7 +141,10 @@ MANAGED_NETWORK_MEMBERS = {
     "witness_ingress": {"witness_dr_tls"},
     "bot_fi_egress": {"bot_fi_api", "bot_fi_bot"},
     "webapp_fi_egress": {"webapp_fi_api", "webapp_fi_blobs", "webapp_fi_effects"},
-    "webapp_ir_egress": {"webapp_ir_api", "webapp_ir_blobs", "webapp_ir_effects"},
+    "webapp_ir_egress": {
+        "webapp_ir_api", "webapp_ir_blobs", "webapp_ir_effects",
+        "webapp_ir_convergence_exporter",
+    },
 }
 WRITER_CONTROL_SERVICES = {
     "webapp_fi_writer_control",
@@ -152,6 +158,11 @@ WRITER_CONTROL_ONLY_ENV_KEYS = {
 }
 GENERAL_EGRESS_NETWORKS = {
     "bot_fi_egress", "webapp_fi_egress", "webapp_ir_egress",
+}
+CONVERGENCE_EXPORTER_SERVICES = {"webapp_ir_convergence_exporter"}
+CONVERGENCE_EXPORTER_FORBIDDEN_ENV = {
+    "ARVAN_S3_ACCESS_KEY", "ARVAN_S3_SECRET_KEY", "ARVAN_S3_ENDPOINT", "ARVAN_S3_REGION",
+    "STAGING_DR_BLOB_CREDENTIALS_FILE", "STAGING_DR_BLOB_ENCRYPTION_KEYRING_FILE",
 }
 EXPECTED_TLS_PORTS = {
     "bot_fi_dr_tls": "${BOT_FI_DR_BIND_ADDRESS:?required}:8443:443",
@@ -253,6 +264,14 @@ def verify_compose(path: Path) -> dict[str, object]:
                 violations.append(f"{service}:public_egress_forbidden")
             if "writer_witness_egress" not in service_networks:
                 violations.append(f"{service}:witness_egress_missing")
+        if str(service) in CONVERGENCE_EXPORTER_SERVICES:
+            if config.get("ports") or config.get("expose"):
+                violations.append(f"{service}:inbound_surface_forbidden")
+            if service_networks != {"webapp_ir", "webapp_ir_egress"}:
+                violations.append(f"{service}:closed_egress_topology_missing")
+            if isinstance(environment, dict):
+                for key in sorted(set(environment) & CONVERGENCE_EXPORTER_FORBIDDEN_ENV):
+                    violations.append(f"{service}:object_storage_credential_forbidden:{key}")
         if str(service) in EXPECTED_TLS_PORTS:
             if config.get("ports") != [EXPECTED_TLS_PORTS[str(service)]]:
                 violations.append(f"{service}:fixed_inventory_bound_port_missing")

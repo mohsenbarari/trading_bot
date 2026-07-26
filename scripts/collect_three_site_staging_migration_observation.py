@@ -28,7 +28,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.dr_event_protocol import canonical_json_bytes
 from core.secure_file_io import read_secure_bytes, write_secure_atomic_bytes
 from scripts.arvan_origin_switch import inspect_or_switch, load_token
 from scripts.render_three_site_staging_role_compose import parse_env_values
@@ -43,6 +42,15 @@ SAFE_ENV = {
     "LANG": "C.UTF-8",
     "LC_ALL": "C.UTF-8",
 }
+
+
+def canonical_json_bytes(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
 ROLE_DB = {
     "bot_fi": ("bot_fi_db", "BOT_FI_POSTGRES_USER", "BOT_FI_POSTGRES_DB"),
     "webapp_fi": ("webapp_fi_db", "WEBAPP_FI_POSTGRES_USER", "WEBAPP_FI_POSTGRES_DB"),
@@ -53,16 +61,19 @@ ROLE_SERVICES = {
     "bot_fi": (
         "bot_fi_api", "bot_fi_bot", "bot_fi_dr_receiver",
         "bot_fi_dr_projection", "bot_fi_dr_delivery", "bot_fi_dr_tls",
+        "bot_fi_redis",
     ),
     "webapp_fi": (
         "webapp_fi_api", "webapp_fi_writer_control", "webapp_fi_effects",
         "webapp_fi_dr_receiver", "webapp_fi_dr_projection",
         "webapp_fi_dr_delivery", "webapp_fi_blobs", "webapp_fi_dr_tls",
+        "webapp_fi_redis",
     ),
     "webapp_ir": (
         "webapp_ir_api", "webapp_ir_writer_control", "webapp_ir_effects",
         "webapp_ir_dr_receiver", "webapp_ir_dr_projection",
         "webapp_ir_dr_delivery", "webapp_ir_blobs", "webapp_ir_dr_tls",
+        "webapp_ir_redis",
     ),
     "witness": ("witness_api", "witness_dr_tls"),
 }
@@ -71,6 +82,9 @@ ROLE_API = {
     "webapp_fi": (8212, "/api/config"),
     "webapp_ir": (8213, "/api/config"),
     "witness": (8214, "/health/ready"),
+}
+ROLE_API_SERVICE = {
+    "bot_fi": "bot_fi_api",
 }
 ROLE_TLS = {
     "bot_fi": ("BOT_FI_DR_BIND_ADDRESS", 8443, "bot-fi-dr.staging.internal"),
@@ -99,7 +113,15 @@ PARITY_COMPARISONS = frozenset(
         ("webapp-authority", "webapp_fi", "webapp_ir"),
     }
 )
-BLOB_SCOPES = PARITY_COMPARISONS
+# Blob replication is a WebApp-only content-addressed plane.  Bot-FI has no
+# blob worker/CAS and must not be represented as an empty blob replica merely
+# because the initial seed happens to contain no attachments.
+BLOB_SCOPES = frozenset(
+    {
+        ("webapp-authority", "webapp_fi", "webapp_ir"),
+        ("webapp-authority", "webapp_ir", "webapp_fi"),
+    }
+)
 
 
 def _fresh_timestamp(value: Any, *, label: str, now: datetime) -> None:
@@ -197,7 +219,11 @@ def validate_convergence_artifact(
             fields = {
                 "scope", "source_site", "target_site", "table_set_sha256",
                 "source_fingerprint_sha256", "target_fingerprint_sha256",
-                "source_row_count", "target_row_count", "table_count", "difference_count",
+                "source_business_fingerprint_sha256", "target_business_fingerprint_sha256",
+                "source_row_count", "target_row_count",
+                "table_count", "difference_count", "business_drift_count",
+                "critical_drift_count", "incomplete_count",
+                "local_only_difference_count", "volatile_difference_count",
             }
             identity = (
                 str(row.get("scope", "")), str(row.get("source_site", "")),
@@ -205,17 +231,39 @@ def validate_convergence_artifact(
             ) if isinstance(row, dict) else ("", "", "")
             if (
                 not isinstance(row, dict) or set(row) != fields or identity not in PARITY_COMPARISONS
-                or identity in seen or row.get("difference_count") != 0
+                or identity in seen
                 or any(HASH_RE.fullmatch(str(row.get(key, ""))) is None for key in (
-                    "table_set_sha256", "source_fingerprint_sha256", "target_fingerprint_sha256"
+                    "table_set_sha256", "source_fingerprint_sha256", "target_fingerprint_sha256",
+                    "source_business_fingerprint_sha256", "target_business_fingerprint_sha256",
                 ))
-                or row["source_fingerprint_sha256"] != row["target_fingerprint_sha256"]
                 or type(row.get("source_row_count")) is not int
                 or row["source_row_count"] < 0
                 or row.get("target_row_count") != row["source_row_count"]
                 or type(row.get("table_count")) is not int or row["table_count"] < 1
+                or any(
+                    type(row.get(key)) is not int or row[key] < 0
+                    for key in (
+                        "difference_count", "business_drift_count", "critical_drift_count",
+                        "incomplete_count", "local_only_difference_count",
+                        "volatile_difference_count",
+                    )
+                )
+                # A raw fingerprint may legitimately differ: channel message
+                # ids, leases and retry timestamps are site-local execution
+                # evidence.  The business-normalized fingerprint must remain
+                # exact, and every harmful category must be zero.
+                or row["business_drift_count"] != 0
+                or row["critical_drift_count"] != 0
+                or row["incomplete_count"] != 0
+                or row["source_business_fingerprint_sha256"]
+                != row["target_business_fingerprint_sha256"]
+                or row["source_business_fingerprint_sha256"] == "0" * 64
+                or row["difference_count"] != (
+                    row["local_only_difference_count"]
+                    + row["volatile_difference_count"]
+                )
             ):
-                raise ObservationError("database parity comparison is not exact")
+                raise ObservationError("database parity comparison is not business-exact")
             seen.add(identity)
         if seen != PARITY_COMPARISONS:
             raise ObservationError("database parity does not cover every authority target")
@@ -424,7 +472,7 @@ def _service_observation(
     if unexpected_log_lines:
         raise ObservationError(f"required service emitted errors in the five-minute window: {service}")
     observed_release = None
-    if not service.endswith("_tls"):
+    if not service.endswith(("_tls", "_redis")):
         observed_release = _run(
             [
                 *_compose(args), "exec", "-T", service, "python", "-c",
@@ -448,6 +496,43 @@ def _service_observation(
         "log_sha256": hashlib.sha256(logs.encode()).hexdigest(),
         "unexpected_log_lines": unexpected_log_lines,
     }
+
+
+def _direct_origin_http_observation(
+    args: argparse.Namespace,
+    *,
+    port: int,
+    path: str,
+) -> tuple[int, bytes, str]:
+    """Probe the role origin without weakening runtime surface guards."""
+
+    service = ROLE_API_SERVICE.get(args.role)
+    if service:
+        output = _run(
+            [
+                *_compose(args), "exec", "-T", service, "python", "-c",
+                (
+                    "import sys, urllib.request; "
+                    f"r=urllib.request.urlopen('http://127.0.0.1:8000{path}', timeout=10); "
+                    "sys.stdout.buffer.write(str(r.status).encode()+b'\\n'+r.read())"
+                ),
+            ],
+            timeout=15,
+        ).encode()
+        status_raw, separator, body = output.partition(b"\n")
+        if not separator:
+            raise ObservationError("direct origin container probe returned no body")
+        try:
+            status_code = int(status_raw.decode("ascii"))
+        except ValueError as exc:
+            raise ObservationError("direct origin container probe returned invalid status") from exc
+        return status_code, body, f"container://{service}:8000{path}"
+
+    with urllib.request.urlopen(
+        f"http://127.0.0.1:{port}{path}", timeout=10
+    ) as response:
+        body = response.read(1024 * 1024)
+        return response.status, body, f"http://127.0.0.1:{port}{path}"
 
 
 def _tls_observation(*, role: str, env: dict[str, str]) -> dict[str, Any]:
@@ -496,6 +581,18 @@ def collect_role(args: argparse.Namespace) -> dict[str, Any]:
     compose_document = yaml.safe_load(compose_bytes)
     if not isinstance(compose_document, dict) or not isinstance(compose_document.get("services"), dict):
         raise ObservationError("role Compose is invalid")
+    try:
+        resolved_compose_document = json.loads(
+            _run([*_compose(args), "config", "--format", "json"], timeout=60)
+        )
+    except (json.JSONDecodeError, ObservationError) as exc:
+        raise ObservationError("resolved role Compose is invalid") from exc
+    if (
+        not isinstance(resolved_compose_document, dict)
+        or not isinstance(resolved_compose_document.get("services"), dict)
+    ):
+        raise ObservationError("resolved role Compose is invalid")
+    resolved_services = resolved_compose_document["services"]
     image_raw = read_secure_bytes(
         args.image_inventory, label="role image inventory", max_size=4 * 1024 * 1024
     )
@@ -530,12 +627,12 @@ def collect_role(args: argparse.Namespace) -> dict[str, Any]:
             ]
         )
     )
-    expected_revision = "002" if args.role == "witness" else args.expected_head
+    expected_revision = "003" if args.role == "witness" else args.expected_head
     if database.get("revision") != expected_revision:
         raise ObservationError("database is not at the exact migration revision")
     services = []
     for service in ROLE_SERVICES[args.role]:
-        service_config = compose_document["services"].get(service)
+        service_config = resolved_services.get(service)
         reference = str(service_config.get("image", "")) if isinstance(service_config, dict) else ""
         expected_image_id = image_result["image_ids"].get(reference)
         if not reference or expected_image_id is None:
@@ -548,11 +645,9 @@ def collect_role(args: argparse.Namespace) -> dict[str, Any]:
             )
         )
     port, path = ROLE_API[args.role]
-    with urllib.request.urlopen(
-        f"http://127.0.0.1:{port}{path}", timeout=10
-    ) as response:
-        body = response.read(1024 * 1024)
-        status_code = response.status
+    status_code, body, direct_url = _direct_origin_http_observation(
+        args, port=port, path=path
+    )
     if status_code != 200:
         raise ObservationError("direct origin HTTP observation failed")
     try:
@@ -587,7 +682,7 @@ def collect_role(args: argparse.Namespace) -> dict[str, Any]:
         },
         "service_health": {"services": services},
         "direct_origin_http": {
-            "url": f"http://127.0.0.1:{port}{path}",
+            "url": direct_url,
             "status_code": status_code,
             "response_sha256": hashlib.sha256(body).hexdigest(),
         },

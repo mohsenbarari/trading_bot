@@ -64,11 +64,13 @@ class FakeMappingResult:
 class FakeSession:
     def __init__(self, row):
         self.row = row
+        self.statements = []
 
     def connection(self):
         return self
 
-    def execute(self, _statement):
+    def execute(self, statement):
+        self.statements.append(str(statement))
         return FakeMappingResult(self.row)
 
 
@@ -111,7 +113,9 @@ class WriterFenceTests(unittest.TestCase):
             "transition_id": "transition-current",
         }
         with writer_fence_scope(identity(), snapshot(), source="test"):
-            _enforce_writer_fence_before_commit(FakeSession(valid_row))
+            session = FakeSession(valid_row)
+            _enforce_writer_fence_before_commit(session)
+            self.assertNotIn("FOR SHARE", session.statements[-1].upper())
 
             for changed in (
                 {**valid_row, "active_site": "webapp_ir"},

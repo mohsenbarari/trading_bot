@@ -25,6 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_FILES = (
     REPO_ROOT / "deploy/writer-witness/001_initial.sql",
     REPO_ROOT / "deploy/writer-witness/002_failover_operation_ledger.sql",
+    REPO_ROOT / "deploy/writer-witness/003_human_approval_relay.sql",
 )
 
 
@@ -108,6 +109,30 @@ def _validate_bootstrap_identity(
         )
 
 
+def _validate_runtime_grants(cursor, runtime: str) -> None:  # noqa: ANN001
+    """Fail closed unless the runtime can see every required schema/table surface."""
+
+    cursor.execute(
+        "SELECT "
+        "has_schema_privilege(%s, 'public', 'USAGE'), "
+        "has_table_privilege(%s, 'public.writer_witness_schema_version', 'SELECT'), "
+        "has_table_privilege(%s, 'public.webapp_writer_witness_state', 'SELECT,UPDATE'), "
+        "has_table_privilege(%s, 'public.webapp_writer_witness_receipts', 'SELECT,INSERT'), "
+        "has_table_privilege(%s, 'public.dr_failover_operation_ledger', 'SELECT,INSERT,UPDATE'), "
+        "has_table_privilege(%s, 'public.human_approval_relay_receipts', 'SELECT,INSERT,UPDATE')",
+        (runtime, runtime, runtime, runtime, runtime, runtime),
+    )
+    observed = cursor.fetchone()
+    if (
+        not isinstance(observed, tuple)
+        or len(observed) != 6
+        or any(value is not True for value in observed)
+    ):
+        raise StagingWitnessProvisionError(
+            "Witness runtime schema/table grants are incomplete"
+        )
+
+
 def bootstrap_roles() -> dict[str, object]:
     owner_dsn = _sync_dsn("WRITER_WITNESS_BOOTSTRAP_DATABASE_URL")
     migrator = _role("WRITER_WITNESS_MIGRATOR_DB_USER")
@@ -157,9 +182,14 @@ def bootstrap_roles() -> dict[str, object]:
             )
             # Some hardened PostgreSQL templates revoke PUBLIC CREATE on the
             # public schema. Database ownership alone does not restore that
-            # ACL, so grant it explicitly only to the dedicated migrator.
+            # ACL. The migrator is deliberately NOINHERIT, so implicit
+            # pg_database_owner membership cannot be relied upon to delegate
+            # runtime USAGE later; give only these two schema privileges with
+            # grant option to the dedicated migrator.
             cursor.execute(
-                sql.SQL("GRANT USAGE, CREATE ON SCHEMA public TO {}").format(
+                sql.SQL(
+                    "GRANT USAGE, CREATE ON SCHEMA public TO {} WITH GRANT OPTION"
+                ).format(
                     sql.Identifier(migrator)
                 )
             )
@@ -180,7 +210,10 @@ def _apply_schema(cursor) -> str:  # noqa: ANN001
     if version == "001":
         cursor.execute(SCHEMA_FILES[1].read_text(encoding="utf-8"))
         version = "002"
-    if version != "002":
+    if version == "002":
+        cursor.execute(SCHEMA_FILES[2].read_text(encoding="utf-8"))
+        version = "003"
+    if version != "003":
         raise StagingWitnessProvisionError(
             f"unsupported Writer-Witness schema version: {version}"
         )
@@ -215,6 +248,7 @@ def migrate_and_grant() -> dict[str, object]:
                 ("SELECT, UPDATE", "webapp_writer_witness_state"),
                 ("SELECT, INSERT", "webapp_writer_witness_receipts"),
                 ("SELECT, INSERT, UPDATE", "dr_failover_operation_ledger"),
+                ("SELECT, INSERT, UPDATE", "human_approval_relay_receipts"),
             )
             for privileges, table in grants:
                 cursor.execute(
@@ -234,6 +268,7 @@ def migrate_and_grant() -> dict[str, object]:
                     "FROM PUBLIC, {}"
                 ).format(sql.Identifier(migrator), sql.Identifier(runtime))
             )
+            _validate_runtime_grants(cursor, runtime)
     return {
         "status": "migrated",
         "database": str(database),

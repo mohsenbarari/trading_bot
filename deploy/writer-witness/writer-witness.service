@@ -10,6 +10,9 @@ User=writer-witness
 Group=writer-witness
 WorkingDirectory=/opt/trading-bot-witness/active/release
 EnvironmentFile=/etc/trading-bot-witness/runtime.env
+# This optional, host-local file enables the staging-only approval relay. It
+# is deliberately not rendered into runtime.env or any WebApp client file.
+EnvironmentFile=-/etc/trading-bot-witness/human-approval-relay.env
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONPYCACHEPREFIX=/dev/null
 Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin

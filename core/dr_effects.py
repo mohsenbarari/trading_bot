@@ -125,7 +125,6 @@ async def execute_claimed_inline_effect(
         state = await session.scalar(
             select(WebappWriterState)
             .where(WebappWriterState.authority == "webapp")
-            .with_for_update(read=True)
         )
         if state is None:
             raise DrEffectError("writer state is missing at claimed inline effect execution")
@@ -307,7 +306,6 @@ async def expand_next_effect_fanout() -> str:
         state = await session.scalar(
             select(WebappWriterState)
             .where(WebappWriterState.authority == "webapp")
-            .with_for_update(read=True)
         )
         if state is None:
             raise DrEffectError("writer state is missing while expanding effect fanout")
@@ -462,13 +460,9 @@ async def execute_claimed_effect(effect_id: str, handlers: dict[tuple[str, str],
     # for transport/apply bookkeeping and cannot impersonate a Writer at the
     # database trigger boundary.
     async with AsyncSessionLocal() as session:
-        # FOR SHARE prevents a Writer transition from racing between the final
-        # authority check and provider call. Other effect transactions may read
-        # the row, while transition_writer_state (FOR UPDATE) must wait.
         state = await session.scalar(
             select(WebappWriterState)
             .where(WebappWriterState.authority == "webapp")
-            .with_for_update(read=True)
         )
         if state is None:
             raise DrEffectError("writer state is missing at effect execution")

@@ -2,11 +2,16 @@
 """Attest the exact host and venv Python runtime for Writer Witness.
 
 The release-bound system manifest closes CPython, active stdlib/lib-dynload,
-ELF/shared-library dependencies, loader state and Ubuntu package identity. The
-lock is authoritative for the venv. Package names and versions alone are
-insufficient: all active host bytes, every RECORD-listed file, and every venv
-node feed deterministic digests. Production invocation is accepted only from
-an empty environment with ``-I -S -B -X utf8 -X pycache_prefix=/dev/null``.
+and every ELF/shared-library dependency actually resolved for that runtime,
+plus Ubuntu package identity. The system-wide linker cache and unrelated
+configuration entries are intentionally not bound: they differ legitimately
+between dedicated hosts and cannot affect a runtime whose resolved ELF closure
+is already exact. ``ld.so.preload`` remains an unconditional fail-closed
+global-injection boundary. The lock is authoritative for the venv. Package
+names and versions alone are insufficient: all active host bytes, every
+RECORD-listed file, and every venv node feed deterministic digests. Production
+invocation is accepted only from an empty environment with ``-I -S -B -X utf8
+-X pycache_prefix=/dev/null``.
 """
 
 from __future__ import annotations
@@ -90,10 +95,6 @@ SYSTEM_OS_RELEASE_FIELDS = frozenset(
 )
 SYSTEM_LOADER_FIELDS = frozenset(
     {
-        "cache_path",
-        "cache_sha256",
-        "configuration_entry_count",
-        "configuration_sha256",
         "preload_path",
         "preload_sha256",
     }
@@ -1165,39 +1166,6 @@ def _parse_os_release(value: bytes) -> Mapping[str, str]:
     return fields
 
 
-def _loader_configuration_identity(*, expected_uid: int | None) -> tuple[str, int]:
-    paths = [Path("/etc/ld.so.conf")]
-    directory = Path("/etc/ld.so.conf.d")
-    try:
-        paths.extend(sorted(directory.glob("*"), key=os.fspath))
-    except OSError as exc:
-        raise RuntimeAttestationError("cannot enumerate dynamic-loader configuration") from exc
-    records: list[Mapping[str, object]] = []
-    for path in paths:
-        try:
-            metadata = path.lstat()
-        except OSError as exc:
-            raise RuntimeAttestationError("cannot inspect dynamic-loader configuration") from exc
-        if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
-            raise RuntimeAttestationError("dynamic-loader configuration has an unsafe file type")
-        digest, size = _stable_hash_file(
-            path,
-            expected_uid=expected_uid,
-            require_single_link=True,
-            subject="dynamic-loader configuration",
-        )
-        records.append(
-            {
-                "mode": stat.S_IMODE(metadata.st_mode),
-                "path": path.as_posix(),
-                "sha256": digest,
-                "size": size,
-                "uid": metadata.st_uid,
-            }
-        )
-    return _canonical_json_sha256(records), len(records)
-
-
 def observe_system_runtime_manifest(
     *,
     stdlib_path: Path | None = None,
@@ -1296,16 +1264,10 @@ def observe_system_runtime_manifest(
     if os_fields.get("ID") != "ubuntu" or os_fields.get("VERSION_ID") != "24.04":
         raise RuntimeAttestationError("system runtime requires Ubuntu 24.04")
 
-    cache_path = Path("/etc/ld.so.cache")
-    cache_sha256, _ = _stable_hash_file(
-        cache_path,
-        expected_uid=expected_uid,
-        require_single_link=True,
-        subject="dynamic-loader cache",
-    )
-    configuration_sha256, configuration_count = _loader_configuration_identity(
-        expected_uid=expected_uid
-    )
+    # A host-wide linker cache can contain entries for entirely unrelated
+    # packages. Security-relevant resolution is already represented by the
+    # exact ELF closure above. Preload is different: it injects into every
+    # dynamically linked process, so it must always be absent.
     preload_path = Path("/etc/ld.so.preload")
     if preload_path.exists() or preload_path.is_symlink():
         raise RuntimeAttestationError("dynamic-loader preload configuration is forbidden")
@@ -1318,10 +1280,6 @@ def observe_system_runtime_manifest(
         "executable_sha256": executable_sha256,
         "implementation": identity.public_implementation,
         "loader": {
-            "cache_path": cache_path.as_posix(),
-            "cache_sha256": cache_sha256,
-            "configuration_entry_count": configuration_count,
-            "configuration_sha256": configuration_sha256,
             "preload_path": preload_path.as_posix(),
             "preload_sha256": preload_sha256,
         },

@@ -7,10 +7,12 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 from scripts.run_three_site_staging_source_backup import (
     StagingBackupError,
     _compose_base,
+    _wait_for_scratch_database,
     build_plan,
     confirmation_phrase,
     verify_backup_manifest,
@@ -19,6 +21,18 @@ from scripts.run_three_site_staging_source_backup import (
 
 
 class ThreeSiteStagingSourceBackupTests(unittest.TestCase):
+    def test_restore_drill_waits_for_exact_database_not_socket_readiness(self):
+        socket_ready = SimpleNamespace(returncode=0)
+        database_missing = SimpleNamespace(returncode=2, stdout="")
+        database_ready = SimpleNamespace(returncode=0, stdout="1\n")
+        with patch(
+            "scripts.run_three_site_staging_source_backup.subprocess.run",
+            side_effect=[socket_ready, database_missing, socket_ready, database_ready],
+        ) as run, patch("scripts.run_three_site_staging_source_backup.time.sleep") as sleep:
+            _wait_for_scratch_database("scratch", attempts=2)
+        self.assertEqual(run.call_count, 4)
+        self.assertEqual(sleep.call_count, 1)
+
     def test_webapp_backup_accepts_exact_iran_staging_project_only(self):
         prefix = _compose_base(
             Path("/secure/compose.yml"),

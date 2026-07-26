@@ -155,9 +155,26 @@ class ThreeSiteStagingRoleMigrationTests(unittest.TestCase):
 
         backend._psql.reset_mock()
         backend._psql.return_value = "1"
-        with patch.object(role_migration, "_run", side_effect=fake_run):
-            with self.assertRaisesRegex(RoleMigrationError, "zero other client sessions"):
+        with patch.object(role_migration, "_run", side_effect=fake_run), patch.object(
+            role_migration.time, "sleep"
+        ):
+            with self.assertRaisesRegex(RoleMigrationError, "three consecutive zero-client"):
                 backend._assert_database_migration_quiescent()
+
+    def test_database_migration_quiescence_tolerates_transient_restore_client(self):
+        backend = self._local_backend()
+
+        def fake_run(arguments, **_kwargs):
+            if arguments[-2:] == ["config", "--services"]:
+                return "webapp_fi_db\nwebapp_fi_redis\nwebapp_fi_api\nwebapp_fi_migration"
+            return ""
+
+        backend._psql.side_effect = ["1", "0", "0", "0"]
+        with patch.object(role_migration, "_run", side_effect=fake_run), patch.object(
+            role_migration.time, "sleep"
+        ):
+            backend._assert_database_migration_quiescent()
+        self.assertEqual(backend._psql.call_count, 4)
 
     def test_private_start_waits_for_app_release_and_tls_health_on_every_role(self):
         for role in ("bot_fi", "webapp_fi", "webapp_ir", "witness"):
@@ -175,6 +192,97 @@ class ThreeSiteStagingRoleMigrationTests(unittest.TestCase):
                 backend._wait_infrastructure_ready.assert_called_once_with(
                     role_migration.ROLE_PRIVATE[role][-1:]
                 )
+
+    def test_public_start_brings_redis_up_before_application_services(self):
+        for role in ("bot_fi", "webapp_fi", "webapp_ir"):
+            with self.subTest(role=role):
+                backend = object.__new__(LocalRoleBackend)
+                backend.role = role
+                backend.prefix = ["docker", "compose"]
+                backend._wait_services_ready = MagicMock()
+                backend._wait_infrastructure_ready = MagicMock()
+                calls: list[list[str]] = []
+
+                def fake_run(arguments, **_kwargs):
+                    calls.append(arguments)
+                    return ""
+
+                with patch.object(role_migration, "_run", side_effect=fake_run):
+                    backend.start_public()
+                self.assertEqual(
+                    [arguments[-1] for arguments in calls],
+                    list(role_migration.ROLE_PUBLIC[role]),
+                )
+                self.assertTrue(calls[0][-1].endswith("_redis"))
+                backend._wait_services_ready.assert_called_once_with(
+                    role_migration.ROLE_PUBLIC[role][1:]
+                )
+                backend._wait_infrastructure_ready.assert_called_once_with(
+                    role_migration.ROLE_PUBLIC[role][:1]
+                )
+
+    def test_service_start_retries_a_transient_compose_failure(self):
+        backend = object.__new__(LocalRoleBackend)
+        backend.prefix = ["docker", "compose"]
+        with patch.object(
+            role_migration,
+            "_run",
+            side_effect=[role_migration.RoleMigrationError("transient"), ""],
+        ) as run, patch.object(role_migration.time, "sleep") as sleep:
+            backend._start_services(("webapp_ir_api",))
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(2)
+
+    def test_service_readiness_reads_role_specific_runtime_release_from_container(self):
+        cases = (
+            ("webapp_fi", "webapp_fi_dr_receiver", "RELEASE_SHA"),
+            ("witness", "witness_api", "WRITER_WITNESS_RELEASE_SHA"),
+        )
+        for role, service, release_key in cases:
+            with self.subTest(role=role):
+                backend = object.__new__(LocalRoleBackend)
+                backend.role = role
+                backend.prefix = ["docker", "compose"]
+                backend.context = {"verified_plan": {"release_sha": RELEASE_SHA}}
+                calls: list[list[str]] = []
+
+                def fake_run(arguments, **_kwargs):
+                    calls.append(arguments)
+                    if arguments[-3:] == ["ps", "-q", service]:
+                        return "container-id"
+                    if arguments[-1] == "container-id" and "{{json .State}}" in arguments:
+                        return json.dumps(
+                            {"Running": True, "Health": {"Status": "healthy"}}
+                        )
+                    if arguments[-1] == "container-id" and "{{json .Config.Env}}" in arguments:
+                        return json.dumps([f"{release_key}={RELEASE_SHA}", "TZ=UTC"])
+                    raise AssertionError(arguments)
+
+                with patch.object(role_migration, "_run", side_effect=fake_run):
+                    backend._wait_services_ready((service,), stable_seconds=0)
+                self.assertFalse(
+                    any("exec" in arguments for arguments in calls),
+                    "readiness must not import application settings inside the container",
+                )
+
+    def test_witness_readiness_rejects_missing_witness_release_identity(self):
+        backend = object.__new__(LocalRoleBackend)
+        backend.role = "witness"
+        backend.prefix = ["docker", "compose"]
+        backend.context = {"verified_plan": {"release_sha": RELEASE_SHA}}
+
+        def fake_run(arguments, **_kwargs):
+            if arguments[-3:] == ["ps", "-q", "witness_api"]:
+                return "container-id"
+            if "{{json .State}}" in arguments:
+                return json.dumps({"Running": True, "Health": {"Status": "healthy"}})
+            if "{{json .Config.Env}}" in arguments:
+                return json.dumps([f"RELEASE_SHA={RELEASE_SHA}", "TZ=UTC"])
+            raise AssertionError(arguments)
+
+        with patch.object(role_migration, "_run", side_effect=fake_run):
+            with self.assertRaisesRegex(RoleMigrationError, "release identity mismatch"):
+                backend._wait_services_ready(("witness_api",), stable_seconds=0)
 
     def test_webapp_role_requires_ordered_external_barriers_and_commits(self):
         with tempfile.TemporaryDirectory() as directory:

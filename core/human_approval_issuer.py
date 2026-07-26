@@ -31,8 +31,11 @@ from core.canonical_json import canonical_json_bytes
 from core.human_approval import (
     ALLOWED_AUTHENTICATION_METHODS,
     POLICY_SCHEMA,
+    SESSION_MAX_TTL_SECONDS,
+    SESSION_TOKEN_SCHEMA,
     TOKEN_SCHEMA,
     HumanApprovalError,
+    approval_subject,
     approval_policy_hash,
     load_human_approval_policy,
     validate_approval_subject,
@@ -53,6 +56,8 @@ DEFAULT_SCRYPT_R = 8
 DEFAULT_SCRYPT_P = 1
 DEFAULT_SCRYPT_MAXMEM = 256 * 1024 * 1024
 DEFAULT_TOKEN_TTL_SECONDS = 600
+DEFAULT_SESSION_TTL_SECONDS = SESSION_MAX_TTL_SECONDS
+SESSION_AUDIT_ACTION = "authorize_staging_session"
 TOTP_PERIOD_SECONDS = 30
 TOTP_DIGITS = 6
 TOTP_DRIFT_STEPS = 1
@@ -66,6 +71,13 @@ DEFAULT_ACTIONS = (
     {"action": "run_writer_witness_matrix", "environments": ["staging"], "max_ttl_seconds": 600},
     {"action": "promote_ir", "environments": ["staging", "production"], "max_ttl_seconds": 600},
     {"action": "failback_fi", "environments": ["staging", "production"], "max_ttl_seconds": 600},
+)
+DEFAULT_STAGING_SESSION_ACTIONS = tuple(
+    sorted(
+        value["action"]
+        for value in DEFAULT_ACTIONS
+        if "staging" in value["environments"]
+    )
 )
 
 
@@ -622,9 +634,19 @@ def verify_issuer_audit(
             if (
                 set(record) != expected_fields
                 or record.get("operator") != policy.operator
-                or record.get("action") not in policy.actions
-                or record.get("environment")
-                not in policy.actions[record["action"]].environments
+                or (
+                    record.get("action") != SESSION_AUDIT_ACTION
+                    and record.get("action") not in policy.actions
+                )
+                or (
+                    record.get("action") == SESSION_AUDIT_ACTION
+                    and record.get("environment") != "staging"
+                )
+                or (
+                    record.get("action") != SESSION_AUDIT_ACTION
+                    and record.get("environment")
+                    not in policy.actions[record["action"]].environments
+                )
                 or record.get("failed_attempts") != consecutive_failures
             ):
                 raise HumanApprovalIssuerError(
@@ -650,9 +672,19 @@ def verify_issuer_audit(
                 set(record) != expected_fields
                 or approval_id in approval_ids
                 or record.get("operator") != policy.operator
-                or record.get("action") not in policy.actions
-                or record.get("environment")
-                not in policy.actions[record["action"]].environments
+                or (
+                    record.get("action") != SESSION_AUDIT_ACTION
+                    and record.get("action") not in policy.actions
+                )
+                or (
+                    record.get("action") == SESSION_AUDIT_ACTION
+                    and record.get("environment") != "staging"
+                )
+                or (
+                    record.get("action") != SESSION_AUDIT_ACTION
+                    and record.get("environment")
+                    not in policy.actions[record["action"]].environments
+                )
                 or re.fullmatch(r"[0-9a-f]{64}", str(record.get("subject_sha256"))) is None
                 or re.fullmatch(r"[0-9a-f]{64}", str(record.get("token_sha256"))) is None
                 or not isinstance(methods, list)
@@ -828,6 +860,125 @@ def authenticate_and_issue(
         "token_sha256": hashlib.sha256(canonical_json_bytes(token)).hexdigest(),
         "authentication_methods": list(methods),
         "issued_sequence": new_state["issued_sequence"],
+    }
+
+
+def authenticate_and_issue_session(
+    *,
+    secrets_payload: dict[str, Any],
+    state_payload: dict[str, Any],
+    policy_payload: dict[str, Any],
+    private_key_envelope: dict[str, Any],
+    password: str,
+    totp: str | None,
+    recovery_code: str | None,
+    release_sha: str,
+    allowed_actions: list[str] | tuple[str, ...],
+    ttl_seconds: int,
+    now: datetime,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Issue one reusable, release-bound staging operations session."""
+
+    if now.tzinfo is None:
+        raise HumanApprovalIssuerError("approval issuance time must include a timezone")
+    release_sha = str(release_sha).strip().lower()
+    if re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", release_sha) is None:
+        raise HumanApprovalIssuerError("staging session release SHA is invalid")
+    if (
+        not isinstance(allowed_actions, (list, tuple))
+        or not allowed_actions
+        or any(not isinstance(action, str) or not action.strip() for action in allowed_actions)
+    ):
+        raise HumanApprovalIssuerError("staging session actions are invalid")
+    normalized_actions = sorted({action.strip() for action in allowed_actions})
+    parsed_policy = load_human_approval_policy(policy_payload)
+    for action in normalized_actions:
+        action_policy = parsed_policy.actions.get(action)
+        if action_policy is None or "staging" not in action_policy.environments:
+            raise HumanApprovalIssuerError(
+                "staging session contains an unauthorized action"
+            )
+    if (
+        type(ttl_seconds) is not int
+        or not 30 <= ttl_seconds <= SESSION_MAX_TTL_SECONDS
+    ):
+        raise HumanApprovalIssuerError(
+            "staging session lifetime must be between 30 seconds and 48 hours"
+        )
+
+    scope = {
+        "environment": "staging",
+        "release_sha": release_sha,
+        "allowed_actions": normalized_actions,
+    }
+    authentication_subject = approval_subject(
+        artifact_type=SESSION_TOKEN_SCHEMA,
+        artifact_sha256=hashlib.sha256(canonical_json_bytes(scope)).hexdigest(),
+        release_sha=release_sha,
+        bindings={
+            "environment": "staging",
+            "allowed_actions": normalized_actions,
+        },
+    )
+    # Reuse the hardened password/TOTP, replay, lockout, private-key and state
+    # transition path.  The short internal token is discarded; only the
+    # release-scoped session below is persisted and audited.
+    _discarded, new_state, audit = authenticate_and_issue(
+        secrets_payload=secrets_payload,
+        state_payload=state_payload,
+        policy_payload=policy_payload,
+        private_key_envelope=private_key_envelope,
+        password=password,
+        totp=totp,
+        recovery_code=recovery_code,
+        action="approve_inventory",
+        environment="staging",
+        subject=authentication_subject,
+        ttl_seconds=DEFAULT_TOKEN_TTL_SECONDS,
+        now=now,
+    )
+    if not _discarded:
+        return {}, new_state, {**audit, "action": SESSION_AUDIT_ACTION}
+
+    private_key_raw = decrypt_private_key(
+        private_key_envelope,
+        password=password,
+        policy_payload=policy_payload,
+    )
+    private = Ed25519PrivateKey.from_private_bytes(private_key_raw)
+    issued = now.astimezone(timezone.utc)
+    token_unsigned = {
+        "schema": SESSION_TOKEN_SCHEMA,
+        "approval_id": str(uuid4()),
+        "policy_id": parsed_policy.policy_id,
+        "policy_hash": parsed_policy.policy_hash,
+        "issuer_id": parsed_policy.issuer_id,
+        "key_id": parsed_policy.key_id,
+        "operator": parsed_policy.operator,
+        "authenticator_id": parsed_policy.authenticator_id,
+        "environment": "staging",
+        "release_sha": release_sha,
+        "allowed_actions": normalized_actions,
+        "issued_at": utc_iso(issued),
+        "expires_at": utc_iso(issued + timedelta(seconds=ttl_seconds)),
+        "authentication": {
+            "methods": list(_discarded["authentication"]["methods"])
+        },
+    }
+    token = {
+        **token_unsigned,
+        "signature": base64.b64encode(
+            private.sign(canonical_json_bytes(token_unsigned))
+        ).decode(),
+    }
+    return token, new_state, {
+        **audit,
+        "approval_id": token["approval_id"],
+        "action": SESSION_AUDIT_ACTION,
+        "subject_sha256": hashlib.sha256(
+            canonical_json_bytes(authentication_subject)
+        ).hexdigest(),
+        "token_sha256": hashlib.sha256(canonical_json_bytes(token)).hexdigest(),
     }
 
 

@@ -791,7 +791,7 @@ def render_credentials(
         "\n".join(
             (
                 "LOGICAL_AUTHORITY=webapp",
-                "PHYSICAL_SITE=webapp_ir",
+                "PHYSICAL_SITE=witness",
                 "WRITER_WITNESS_SERVICE_ENABLED=true",
                 "WRITER_WITNESS_DATABASE_URL=postgresql+asyncpg://writer_witness_runtime:"
                 f"{bootstrap['WITNESS_DB_RUNTIME_PASSWORD']}@127.0.0.1:5432/writer_witness",
@@ -810,7 +810,7 @@ def render_credentials(
                 "WRITER_WITNESS_SAFETY_MARGIN_SECONDS=15",
                 "WRITER_WITNESS_MAX_CLOCK_SKEW_SECONDS=5",
                 "WRITER_WITNESS_AUTH_MAX_AGE_SECONDS=15",
-                "WRITER_WITNESS_AUTHORITATIVE_SITE=webapp_ir",
+                "WRITER_WITNESS_AUTHORITATIVE_SITE=webapp_fi",
                 "",
             )
         )

@@ -53,7 +53,7 @@ def _named_volume(value: Any) -> str | None:
     return None
 
 
-def render_role_compose(payload: dict[str, Any], *, role: str) -> dict[str, Any]:
+def render_role_compose(payload: dict[str, Any], *, role: str, project_namespace: str | None = None) -> dict[str, Any]:
     if role not in ROLE_PREFIXES:
         raise RoleComposeError("unknown three-site staging role")
     if not isinstance(payload, dict) or not isinstance(payload.get("services"), dict):
@@ -113,8 +113,11 @@ def render_role_compose(payload: dict[str, Any], *, role: str) -> dict[str, Any]
         or referenced_volumes - set(canonical_volumes)
     ):
         raise RoleComposeError("role Compose references an undeclared network or volume")
+    namespace = project_namespace or "trading-bot-three-site-staging"
+    if re.fullmatch(r"[a-z0-9][a-z0-9-]{2,80}", namespace) is None:
+        raise RoleComposeError("project namespace is invalid")
     result: dict[str, Any] = {
-        "name": f"trading-bot-three-site-staging-{role}",
+        "name": f"{namespace}-{role}",
         "services": selected,
     }
     if referenced_networks:
@@ -213,12 +216,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--env-source", type=Path)
     parser.add_argument("--env-output", type=Path)
+    parser.add_argument("--project-namespace")
     args = parser.parse_args(argv)
     try:
         if (args.env_source is None) != (args.env_output is None):
             raise RoleComposeError("--env-source and --env-output must be supplied together")
         source = yaml.safe_load(args.compose.read_text(encoding="utf-8"))
-        role_payload = render_role_compose(source, role=args.role)
+        role_payload = render_role_compose(source, role=args.role, project_namespace=args.project_namespace)
         rendered = canonical_role_compose_bytes(role_payload)
         _atomic_write(args.output, rendered, mode=0o640)
         env_rendered = None
