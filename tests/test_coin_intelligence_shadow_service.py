@@ -73,6 +73,57 @@ class UnavailableProvider:
 
 
 class CoinIntelligenceShadowServiceTests(unittest.TestCase):
+    def test_canonical_rate_is_exposed_as_non_authoritative_range(self) -> None:
+        service = CoinIntelligenceShadowService(
+            snapshot_provider=StaticProvider(_state())
+        )
+
+        prediction = service.estimate_canonical_rate(
+            commodity="ربع بهار",
+            settlement="cash",
+            now=NOW,
+        )
+
+        self.assertEqual(prediction.status, "ESTIMATED")
+        self.assertEqual(prediction.center_project_price, 54_000)
+        self.assertEqual(prediction.lower_project_price, 52_500)
+        self.assertEqual(prediction.upper_project_price, 56_000)
+        self.assertEqual(prediction.commodity, "ربع بهار")
+        self.assertEqual(prediction.settlement, "CASH")
+
+    def test_canonical_rate_rejects_stale_snapshot(self) -> None:
+        service = CoinIntelligenceShadowService(
+            snapshot_provider=StaticProvider(
+                _state(generated_at=NOW - timedelta(days=1))
+            )
+        )
+
+        prediction = service.estimate_canonical_rate(
+            commodity="امام",
+            settlement="cash",
+            now=NOW,
+        )
+
+        self.assertEqual(prediction.status, "STALE_INPUT")
+        self.assertIsNone(prediction.center_project_price)
+
+    def test_canonical_rate_does_not_map_alias_to_output(self) -> None:
+        service = CoinIntelligenceShadowService(
+            snapshot_provider=StaticProvider(_state())
+        )
+
+        prediction = service.estimate_canonical_rate(
+            commodity="امامی",
+            settlement="cash",
+            now=NOW,
+        )
+
+        self.assertEqual(prediction.status, "NO_MARKET_DATA")
+        self.assertEqual(
+            prediction.decision_reason,
+            "NON_CANONICAL_COMMODITY",
+        )
+
     def test_unique_price_is_observed_without_returning_database_id(
         self,
     ) -> None:

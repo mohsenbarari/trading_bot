@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import field
 from typing import Any, Mapping, Protocol
 
 
@@ -17,6 +18,9 @@ SUPPORTED_SHADOW_OUTCOMES = frozenset(
         "UNSUPPORTED_MARKET_DIMENSION",
         "BUNDLE_UNAVAILABLE",
         "SNAPSHOT_UNAVAILABLE",
+        "TIMEOUT",
+        "QUEUE_FULL",
+        "PERSISTENCE_ERROR",
         "RUNTIME_ERROR",
     }
 )
@@ -46,3 +50,25 @@ class ShadowObservation:
     decision_reason: str
     bundle_version: str | None
     snapshot_version: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class RateShadowPrediction:
+    """Validated, non-authoritative range for one canonical market."""
+
+    status: str
+    commodity: str
+    settlement: str
+    trade_form: str
+    center_project_price: int | None
+    lower_project_price: int | None
+    upper_project_price: int | None
+    confidence_label: str | None
+    method: str | None
+    decision_reason: str
+    anchor_kind: str | None
+    anchor_age_seconds: int | None
+    bundle_version: str | None
+    feature_schema_version: str | None
+    snapshot_version: str | None
+    evidence: Mapping[str, Any] = field(default_factory=dict)

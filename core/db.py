@@ -89,9 +89,13 @@ DrControlSessionLocal = _auxiliary_session_factory(
 # importing main.py for enforcement.
 from core.writer_fencing import register_writer_fence_listener  # noqa: E402
 from core.dr_event_outbox import register_dr_event_outbox_listener  # noqa: E402
+from core.market_intelligence.project_events import (  # noqa: E402
+    register_project_market_event_listeners,
+)
 
 register_writer_fence_listener()
 register_dr_event_outbox_listener()
+register_project_market_event_listeners()
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

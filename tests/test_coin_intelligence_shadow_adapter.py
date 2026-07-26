@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
+
+from pydantic import ValidationError
 
 from core.config import Settings
 from core.market_intelligence import shadow
@@ -43,10 +47,18 @@ class CoinIntelligenceShadowAdapterTests(
         self,
     ) -> None:
         recorded = []
+
+        async def fail_inference(*_args, **_kwargs):
+            raise RuntimeError("must not reach the parser")
+
         with patch.object(
             shadow,
             "_configured_service",
             return_value=FailingService(),
+        ), patch.object(
+            shadow.asyncio,
+            "to_thread",
+            side_effect=fail_inference,
         ), patch.object(
             shadow,
             "record_shadow_observation",
@@ -62,6 +74,91 @@ class CoinIntelligenceShadowAdapterTests(
         self.assertEqual(recorded[0].status, "RUNTIME_ERROR")
         self.assertEqual(recorded[0].current_commodity, "امام")
         self.assertIsNone(recorded[0].inferred_commodity)
+
+    async def test_project_offer_uses_post_commit_cutoff(self) -> None:
+        cutoff = datetime(2026, 7, 26, 9, 0, tzinfo=timezone.utc)
+        event = SimpleNamespace(
+            kind="OFFER",
+            local_id=41,
+            observed_after_commit_at_utc=cutoff,
+        )
+        with patch.object(
+            shadow,
+            "_process_project_offer",
+            new=AsyncMock(),
+        ) as process, patch.object(
+            shadow,
+            "record_shadow_runtime_event",
+        ):
+            await shadow._observe_project_market_event(event)
+
+        process.assert_awaited_once_with(41, requested_at=cutoff)
+
+
+class CoinIntelligenceShadowSettingsTests(unittest.TestCase):
+    @staticmethod
+    def _settings(**overrides) -> Settings:
+        values = {
+            "database_url": (
+                "postgresql+asyncpg://test:test@127.0.0.1/test"
+            ),
+            "sync_database_url": (
+                "postgresql+psycopg2://test:test@127.0.0.1/test"
+            ),
+            "postgres_db": "test",
+            "postgres_user": "test",
+            "postgres_password": "test",
+            "frontend_url": "http://localhost:3000",
+            "redis_url": "redis://127.0.0.1:6379/15",
+            "jwt_secret_key": "test-only-not-production",
+        }
+        values.update(overrides)
+        return Settings(**values)
+
+    def test_subfeature_cannot_start_without_top_level_shadow(self) -> None:
+        for field in (
+            "coin_intelligence_shadow_persist_enabled",
+            "coin_intelligence_shadow_project_events_enabled",
+            "coin_intelligence_shadow_numeric_v2_enabled",
+        ):
+            with self.subTest(field=field), self.assertRaises(
+                ValidationError
+            ):
+                self._settings(**{field: True})
+
+    def test_runtime_bounds_fail_closed(self) -> None:
+        for values in (
+            {"coin_intelligence_shadow_timeout_seconds": 0},
+            {"coin_intelligence_shadow_timeout_seconds": 31},
+            {"coin_intelligence_shadow_max_inflight": 0},
+            {"coin_intelligence_shadow_max_inflight": 1025},
+            {"coin_intelligence_shadow_sample_rate": -0.01},
+            {"coin_intelligence_shadow_sample_rate": 1.01},
+        ):
+            with self.subTest(values=values), self.assertRaises(
+                ValidationError
+            ):
+                self._settings(**values)
+
+    def test_project_event_feature_dependencies_are_atomic(self) -> None:
+        with self.assertRaises(ValidationError):
+            self._settings(
+                coin_intelligence_shadow_enabled=True,
+                coin_intelligence_shadow_project_events_enabled=True,
+            )
+        with self.assertRaises(ValidationError):
+            self._settings(
+                coin_intelligence_shadow_enabled=True,
+                coin_intelligence_shadow_persist_enabled=True,
+                coin_intelligence_shadow_numeric_v2_enabled=True,
+            )
+        enabled = self._settings(
+            coin_intelligence_shadow_enabled=True,
+            coin_intelligence_shadow_persist_enabled=True,
+            coin_intelligence_shadow_project_events_enabled=True,
+            coin_intelligence_shadow_numeric_v2_enabled=True,
+        )
+        self.assertTrue(enabled.coin_intelligence_shadow_numeric_v2_enabled)
 
 
 if __name__ == "__main__":

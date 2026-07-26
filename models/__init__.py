@@ -39,6 +39,13 @@ from .offer_publication_state import (
     OfferPublicationSurface,
 )
 from .trade import Trade, TradeType, TradeStatus
+from .coin_intelligence_shadow import (
+    CoinIntelligenceShadowFeatureSnapshot,
+    CoinIntelligenceShadowOutcome,
+    CoinIntelligenceShadowParserResult,
+    CoinIntelligenceShadowPrediction,
+    CoinIntelligenceShadowRun,
+)
 from core.enums import SettlementType
 from .trade_delivery_receipt import (
     TERMINAL_TRADE_DELIVERY_RECEIPT_STATUSES,
@@ -160,6 +167,11 @@ __all__ = [
     "Trade",
     "TradeType",
     "TradeStatus",
+    "CoinIntelligenceShadowFeatureSnapshot",
+    "CoinIntelligenceShadowOutcome",
+    "CoinIntelligenceShadowParserResult",
+    "CoinIntelligenceShadowPrediction",
+    "CoinIntelligenceShadowRun",
     "TERMINAL_TRADE_DELIVERY_RECEIPT_STATUSES",
     "TradeDeliveryChannel",
     "TradeDeliveryReceipt",

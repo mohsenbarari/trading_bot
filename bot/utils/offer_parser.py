@@ -456,10 +456,10 @@ async def parse_offer_text(text: str) -> Tuple[Optional[ParsedOffer], Optional[P
     )
     if not commodity_was_explicit:
         from core.market_intelligence.shadow import (
-            observe_implicit_commodity_shadow,
+            schedule_implicit_commodity_shadow,
         )
 
-        await observe_implicit_commodity_shadow(
+        schedule_implicit_commodity_shadow(
             price=price,
             settlement=parsed_offer.settlement_type,
             current_commodity=commodity_name,

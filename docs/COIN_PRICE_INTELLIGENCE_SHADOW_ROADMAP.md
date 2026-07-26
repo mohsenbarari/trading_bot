@@ -4,7 +4,10 @@
 
 Branch: `candidate/coin-price-intelligence`
 
-Base: `main` at `5af8edb6de08886c72f3a47516ab5e03b15a9caa`
+The branch has since been rebased through a merge with the current three-site
+`main` architecture. Phase 1 remains the immutable offline foundation. The
+project-integrated Shadow-v2 slice is documented in
+[`COIN_PRICE_INTELLIGENCE_SHADOW_V2.md`](COIN_PRICE_INTELLIGENCE_SHADOW_V2.md).
 
 The first repository slice is observation-only Shadow mode. It must not change
 the existing intentional product rule that an offer without an explicit
@@ -319,6 +322,11 @@ This market-intelligence plane does not change the fixed business topology:
   data;
 - production or staging enablement.
 
+Phase 2 now adds a disabled-by-default local PostgreSQL evaluation ledger,
+post-commit offer/trade observation, a gated Hybrid-v2 research candidate, and
+an aggregate evaluation command. These additions remain non-authoritative and
+are not a production/staging activation.
+
 ## Activation gates
 
 1. Shadow metrics demonstrate precision separately for each commodity,
@@ -339,6 +347,13 @@ This market-intelligence plane does not change the fixed business topology:
 - `COIN_INTELLIGENCE_BUNDLE_PATH` optionally overrides the repository bundle.
 - `COIN_INTELLIGENCE_SNAPSHOT_PATH` is required before Shadow observation can
   run.
+- `COIN_INTELLIGENCE_SHADOW_PERSIST_ENABLED=false` keeps PostgreSQL writes
+  disabled.
+- `COIN_INTELLIGENCE_SHADOW_PROJECT_EVENTS_ENABLED=false` keeps post-commit
+  project observation disabled.
+- `COIN_INTELLIGENCE_SHADOW_NUMERIC_V2_ENABLED=false` keeps Hybrid-v2 disabled.
+- bounded timeout, in-flight, and sampling settings are listed in
+  `config/coin-intelligence-shadow.env.example`.
 
 The Telegram CLI reads credentials only from
 `COIN_MARKET_TELEGRAM_API_ID`, `COIN_MARKET_TELEGRAM_API_HASH`, and

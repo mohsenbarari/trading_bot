@@ -72,3 +72,35 @@ def record_shadow_observation(observation: ShadowObservation) -> None:
             "bundle_version": observation.bundle_version,
         },
     )
+
+
+def record_shadow_runtime_event(*, component: str, status: str) -> None:
+    """Record bounded queue/runtime health without prices or identifiers."""
+
+    bounded_component = (
+        component
+        if component in {"commodity_ranker", "project_offer", "project_trade"}
+        else "other"
+    )
+    bounded_status = (
+        status
+        if status
+        in {
+            "scheduled",
+            "sampled_out",
+            "queue_full",
+            "no_event_loop",
+            "completed",
+            "timeout",
+            "persistence_error",
+            "runtime_error",
+            "no_prior_prediction",
+        }
+        else "runtime_error"
+    )
+    registry.counter(
+        "trading_bot_coin_intelligence_shadow_runtime_total",
+        "Bounded Shadow task and persistence outcomes.",
+        component=bounded_component,
+        status=bounded_status,
+    )

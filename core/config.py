@@ -132,6 +132,14 @@ class Settings(BaseSettings):
     # repository artifact; a live range snapshot has no implicit default.
     coin_intelligence_bundle_path: str | None = None
     coin_intelligence_snapshot_path: str | None = None
+    # Persistence and project-event collection are separate gates.  Turning on
+    # inference alone must not create database rows or observe project events.
+    coin_intelligence_shadow_persist_enabled: bool = False
+    coin_intelligence_shadow_project_events_enabled: bool = False
+    coin_intelligence_shadow_numeric_v2_enabled: bool = False
+    coin_intelligence_shadow_timeout_seconds: float = 1.0
+    coin_intelligence_shadow_max_inflight: int = 16
+    coin_intelligence_shadow_sample_rate: float = 1.0
     error_tracking_dsn: str | None = None
     error_tracking_sample_rate: float = 1.0
     error_tracking_rate_limit_window_seconds: int = 60
@@ -305,6 +313,50 @@ class Settings(BaseSettings):
             raise ValueError("dr_sync_request_max_age_seconds_must_be_positive")
         if int(self.dr_replay_nonce_retention_seconds) <= 0:
             raise ValueError("dr_replay_nonce_retention_seconds_must_be_positive")
+        return self
+
+    @model_validator(mode="after")
+    def validate_coin_intelligence_shadow_settings(self):
+        timeout = float(self.coin_intelligence_shadow_timeout_seconds)
+        if not math.isfinite(timeout) or timeout <= 0 or timeout > 30:
+            raise ValueError(
+                "coin_intelligence_shadow_timeout_seconds_invalid"
+            )
+        if (
+            isinstance(self.coin_intelligence_shadow_max_inflight, bool)
+            or int(self.coin_intelligence_shadow_max_inflight) <= 0
+            or int(self.coin_intelligence_shadow_max_inflight) > 1024
+        ):
+            raise ValueError("coin_intelligence_shadow_max_inflight_invalid")
+        sample_rate = float(self.coin_intelligence_shadow_sample_rate)
+        if (
+            not math.isfinite(sample_rate)
+            or sample_rate < 0
+            or sample_rate > 1
+        ):
+            raise ValueError("coin_intelligence_shadow_sample_rate_invalid")
+        if (
+            self.coin_intelligence_shadow_persist_enabled
+            or self.coin_intelligence_shadow_project_events_enabled
+            or self.coin_intelligence_shadow_numeric_v2_enabled
+        ) and not self.coin_intelligence_shadow_enabled:
+            raise ValueError(
+                "coin_intelligence_shadow_subfeatures_require_shadow_enabled"
+            )
+        if (
+            self.coin_intelligence_shadow_project_events_enabled
+            and not self.coin_intelligence_shadow_persist_enabled
+        ):
+            raise ValueError(
+                "coin_intelligence_shadow_project_events_require_persistence"
+            )
+        if (
+            self.coin_intelligence_shadow_numeric_v2_enabled
+            and not self.coin_intelligence_shadow_project_events_enabled
+        ):
+            raise ValueError(
+                "coin_intelligence_shadow_numeric_v2_requires_project_events"
+            )
         return self
 
     @model_validator(mode="after")
