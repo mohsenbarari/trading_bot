@@ -321,13 +321,28 @@ items are explicitly deferred:
 8. **Three-site data plane:** Shadow tables stay local. Telegram, IME, USDT,
    snapshots, model bundles, and evaluation aggregates require the separately
    verified Object Storage/direct-Finland distribution design; business sync
-   is forbidden for these payloads. The implementation slice must define
-   origin authority, cutoff/watermark, schema and bundle versions, hashes,
-   replay/idempotency, maximum staleness and fail-closed behavior for every
-   object. Iran-bound objects follow the existing encrypted Object Storage
-   boundary; Finland-local projection uses the approved direct path.
-   `webapp_ir` remains dark standby and receives no application writer or
-   background-job authority merely because market artifacts are present.
+   is forbidden for these payloads. This slice documents the contract but
+   deliberately implements none of it while the three-site architecture is
+   incomplete. `webapp_ir`/`wa-ir` owns future approved Iranian exchange/IME
+   gold-and-coin feeds and selected USDT extraction; `bot_fi`/`bot-fl` is the
+   logical consumer through encrypted Object Storage and the `webapp_fi`
+   relay, not through a new direct dependency. The reverse recovery path
+   checks model manifests and transfers compact required input
+   deltas/snapshots to `webapp_ir` at least three scheduled windows per Tehran
+   day, plus after an approved model release. Unchanged model objects are not
+   recopied.
+
+   The implementation slice must define origin authority, cutoff/watermark,
+   schema/bundle/application compatibility, hashes, atomic activation,
+   previous-known-good rollback, replay/idempotency, missed-window alerting,
+   maximum staleness and fail-closed behavior for every object. During an
+   Iranian international outage, a separately promoted `webapp_ir` may use
+   only its last verified compatible recovery package plus fresh local
+   exchange/IME and USDT data; stale international inputs keep their real age,
+   confidence is degraded/widened or inference abstains, and isolated
+   training/promotion is forbidden. `webapp_ir` remains dark standby and
+   receives no application writer or background-job authority merely because
+   market artifacts are present.
 9. **Retention:** operational feature snapshots and completed/failed jobs need
    a reviewed retention and sampling worker before high-volume enablement.
    High-frequency offer/trade sequences cannot be destructively replaced by

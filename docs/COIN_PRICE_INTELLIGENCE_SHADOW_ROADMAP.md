@@ -236,6 +236,12 @@ before it can change any quality gate.
 
 ## Three-site placement and data flows
 
+This section is a **design contract only**. The three-site architecture is not
+complete, so this feature must not add a collector, scheduler, sync worker,
+Object Storage transfer, runtime role, deployment unit, network route, or
+activation flag for that architecture yet. In project terminology,
+`wa-ir` means `webapp_ir` and `bot-fl` means the Finland bot site `bot_fi`.
+
 The project has three physical sites but only two business authorities. Market
 intelligence must respect those existing boundaries:
 
@@ -243,13 +249,15 @@ intelligence must respect those existing boundaries:
 | --- | --- | --- |
 | `bot_fi` | permanent Telegram/foreign writer | live Telegram collection and local bot inference |
 | `webapp_fi` | normal WebApp writer and Finland relay hub | local WebApp inference and verified Finland market-data projection |
-| `webapp_ir` | fenced/dark WebApp standby | verified standby artifacts plus a future isolated Iran-only IME/USDT collector |
+| `webapp_ir` (`wa-ir`) | fenced/dark WebApp standby | planned Iran feed owner and verified model/data standby |
 
 The current production dark-standby path on `webapp_ir` is DB-only and does
-not yet authorize that collector. The future Iran collector must be a separate,
-non-authoritative process with no application writer lease, no business
-database write credential, no public API, and no ability to start WebApp jobs.
-Adding that process requires its own deployment and safety review.
+not yet authorize the collector or any market-intelligence sync process. The
+future Iran collector must be a separate, non-authoritative process with no
+application writer lease, no business database write credential, no public
+API, and no ability to start WebApp jobs. Adding it requires its own
+implementation, deployment and safety review after the three-site foundation
+is complete.
 
 Market data and model artifacts form a separate distribution plane. They must
 not be inserted into the product-sync change log or the WebApp DR business
@@ -258,14 +266,58 @@ event stream:
 1. Telegram observations originate on `bot_fi`, are projected directly to
    `webapp_fi` inside Finland, and are periodically delivered to `webapp_ir` as
    verified standby deltas or compact feature snapshots.
-2. IME and the selected Iran-accessible USDT feed originate in the isolated
-   collector on `webapp_ir`. Immutable micro-batches are spooled locally,
-   encrypted, published through private versioned Object Storage, verified by
-   `webapp_fi`, and then made available to `bot_fi` through the Finland-local
-   data path.
+2. Approved Iranian exchange/IME gold-and-coin instruments and the selected
+   Iran-accessible USDT feed originate in the isolated collector on
+   `webapp_ir`. The logical consumer is `bot_fi` (`bot-fl`).
+   This does not require or authorize a direct `webapp_ir -> bot_fi` network
+   link: immutable micro-batches are spooled locally, encrypted, published
+   through private versioned Object Storage, verified/relayed by `webapp_fi`,
+   and then made available to `bot_fi` through the Finland-local data path.
 3. Promoted model bundles originate from one Finland training/promotion
    authority. The exact immutable version is delivered to `bot_fi` and
    `webapp_fi`, then copied to `webapp_ir` as a standby artifact.
+
+When connectivity is available, exchange/IME and USDT projection from
+`webapp_ir` to the logical `bot_fi` consumer is a near-realtime market-data
+flow. Its design target is delay measured in tens of seconds, with an explicit
+source watermark. Failure queues immutable local micro-batches for replay;
+reconnect must preserve source event time and must not collapse
+sequence/order-flow information into a misleading average.
+
+The reverse resilience flow from Finland to `webapp_ir` is periodic rather
+than synchronous:
+
+- schedule at least three reconciliation windows per Tehran day (before the
+  main market opens, mid-session, and after the main session); exact times
+  remain deployment configuration;
+- transfer a model payload only when its immutable version changes, but verify
+  its manifest and local availability in every reconciliation window;
+- transfer compact normalized market-data deltas and a full recovery snapshot
+  needed to restart inference at every window;
+- trigger an additional delivery after an explicitly approved model/bundle
+  release rather than waiting for the next window;
+- alert on missed windows and record the age of the last **verified**
+  checkpoint; an attempted or downloaded-but-unverified transfer is not a
+  successful checkpoint.
+
+The minimum recovery package on `webapp_ir` is versioned and self-contained:
+
+- every locally enabled deterministic range/commodity bundle and, only if
+  separately approved, its compatible local language-model artifact;
+- feature schema, canonical commodity names, parser/normalization contract,
+  required application-version range, and content hashes;
+- latest compact CASH/TOMORROW feature snapshots, Telegram-derived melted
+  gold/dollar/XAU inputs, coin anchors, qualified offer/trade order-flow
+  features, low-date physical references, basis history, calendar features,
+  source cutoffs and missingness;
+- local exchange/IME and USDT watermarks plus enough retained normalized
+  observations to resume sequence features without using predictions as
+  labels.
+
+Raw Telegram text, channel identifiers, user identifiers, sessions,
+credentials and unreviewed training exports are not part of this package.
+The full model is not copied repeatedly when unchanged: content-addressed
+objects and immutable manifests make the three daily checks inexpensive.
 
 Every market-data batch is append-only and identified by origin, dataset
 family, UTC partition, sequence, schema version, and payload SHA-256. Ingest is
@@ -282,10 +334,21 @@ Object Storage.
 
 During an Iranian international outage, `bot_fi` remains active and
 `webapp_fi` remains its Finland peer. If `webapp_ir` is promoted, its inference
-uses the last verified Telegram/model snapshots plus any locally available
-Iran feeds. It must expose per-source freshness, reduce confidence, widen the
-range when justified, or abstain; it must never silently forward-fill missing
-international inputs.
+uses only its last atomically activated, verified compatible model/recovery
+snapshot plus newly collected local exchange/IME and USDT data. It retains
+the previous known-good artifact for rollback and never trains or promotes a
+new bundle while isolated. International inputs continue aging from their
+original source timestamps. The estimator must expose per-source freshness,
+reduce confidence, widen the range when justified, or abstain; it must never
+silently forward-fill missing international inputs or claim the same
+confidence as a fully connected site.
+
+After connectivity returns, both directions replay from their last contiguous
+watermark. A source has exactly one origin authority (`webapp_ir` for approved
+exchange/IME and USDT observations, `bot_fi` for Telegram observations, and
+the Finland promotion authority for bundles), so conflict resolution never
+chooses the newest transport timestamp. No model/data artifact changes
+business writer authority or enters the product-sync change log.
 
 This market-intelligence plane does not change the fixed business topology:
 `bot_fi <-> webapp_fi <-> webapp_ir`. It adds no direct
