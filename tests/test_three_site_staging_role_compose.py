@@ -129,6 +129,24 @@ class ThreeSiteStagingRoleComposeTests(unittest.TestCase):
         self.assertEqual(fi_control["WRITER_WITNESS_REQUIRED"], "true")
         self.assertEqual(ir_control["WRITER_WITNESS_REQUIRED"], "true")
 
+    def test_capacity_guard_reaches_every_webapp_fi_write_capable_service(self):
+        marker = "/run/full-matrix-capacity:ro"
+        # The reserve-file drill must turn every local write path into the
+        # same controlled writer-fenced result, rather than leaving a worker
+        # to fail later with a raw filesystem/Redis/PostgreSQL error.
+        for service in (
+            "webapp_fi_api",
+            "webapp_fi_writer_control",
+            "webapp_fi_dr_delivery",
+            "webapp_fi_dr_projection",
+            "webapp_fi_effects",
+            "webapp_fi_blobs",
+            "webapp_fi_dr_receiver",
+        ):
+            with self.subTest(service=service):
+                volumes = self.payload["services"][service].get("volumes", [])
+                self.assertTrue(any(marker in value for value in volumes))
+
 
 if __name__ == "__main__":
     unittest.main()

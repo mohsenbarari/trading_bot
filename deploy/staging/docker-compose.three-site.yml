@@ -509,6 +509,12 @@ services:
     environment:
       <<: *webapp_fi_control_env
       TRADING_BOT_SERVICE: writer_control_agent
+    # The capacity marker is an application write fence, not merely an HTTP
+    # fence.  Every FI process that can acquire/renew authority or write a
+    # replicated record must see the same root-owned, read-only marker.
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - ${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_fi/capacity-guard:/run/full-matrix-capacity:ro
     depends_on:
       webapp_fi_db_fencing: {condition: service_completed_successfully}
     extra_hosts:
@@ -529,6 +535,9 @@ services:
       POSTGRES_PASSWORD: ${WEBAPP_FI_DELIVERY_DB_PASSWORD}
       DR_SYNC_PEER_URLS_JSON: ${WEBAPP_FI_DR_PEERS_JSON:?required}
       DR_SYNC_PAIRWISE_KEYS_JSON: ${WEBAPP_FI_DR_PAIRWISE_KEYS_JSON:?required}
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - ${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_fi/capacity-guard:/run/full-matrix-capacity:ro
     depends_on: {webapp_fi_dr_receiver: {condition: service_healthy}}
     extra_hosts:
       - "bot-fi-dr.staging.internal:${WEBAPP_FI_PEER_BOT_FI_IP:?required}"
@@ -540,6 +549,9 @@ services:
     <<: *app
     command: [python, -m, core.dr_projection_worker]
     environment: {<<: *webapp_fi_projection_env, TRADING_BOT_SERVICE: dr_projection_worker}
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - ${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_fi/capacity-guard:/run/full-matrix-capacity:ro
     depends_on: {webapp_fi_dr_receiver: {condition: service_healthy}}
     networks: [webapp_fi]
 
@@ -557,6 +569,9 @@ services:
       WEB_PUSH_VAPID_PUBLIC_KEY: ${WEB_PUSH_VAPID_PUBLIC_KEY:-}
       WEB_PUSH_VAPID_PRIVATE_KEY: ${WEB_PUSH_VAPID_PRIVATE_KEY:-}
       WEB_PUSH_VAPID_SUBJECT: ${WEB_PUSH_VAPID_SUBJECT:-}
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - ${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_fi/capacity-guard:/run/full-matrix-capacity:ro
     depends_on: {webapp_fi_api: {condition: service_started}}
     networks: [webapp_fi, webapp_fi_egress]
 
@@ -583,6 +598,7 @@ services:
       DR_BLOB_ENCRYPTION_KEYRING_FILE: /run/secrets/dr-blob-keyring.json
     volumes:
       - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - ${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_fi/capacity-guard:/run/full-matrix-capacity:ro
       - webapp_fi_uploads:/app/uploads
       - ${STAGING_DR_BLOB_CREDENTIALS_FILE:?required}:/run/secrets/dr-blob-s3.json:ro
       - ${STAGING_DR_BLOB_ENCRYPTION_KEYRING_FILE:?required}:/run/secrets/dr-blob-keyring.json:ro
@@ -606,6 +622,9 @@ services:
       POSTGRES_PASSWORD: ${WEBAPP_FI_RECEIVER_DB_PASSWORD}
       DR_SYNC_PAIRWISE_KEYS_JSON: ${WEBAPP_FI_DR_PAIRWISE_KEYS_JSON:?required}
       ORIGIN_EXPECTED_MIGRATION_REVISION: ${ORIGIN_EXPECTED_MIGRATION_REVISION:?required}
+    volumes:
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
+      - ${STAGING_DATA_ROOT:?dedicated staging data mount required}/${STAGING_STORAGE_NAMESPACE:?campaign storage namespace required}/webapp_fi/capacity-guard:/run/full-matrix-capacity:ro
     depends_on: {webapp_fi_db_fencing: {condition: service_completed_successfully}}
     networks: [webapp_fi]
     healthcheck:
