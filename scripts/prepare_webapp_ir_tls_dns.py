@@ -54,6 +54,10 @@ from core.secure_file_io import (
     write_secure_atomic_bytes,
     write_secure_new_bytes,
 )
+from core.docker_image_identity import (
+    DockerImageIdentityError,
+    verify_content_descriptor,
+)
 
 
 SCHEMA_PREFIX = "trading-bot.webapp-ir-public-tls"
@@ -163,9 +167,12 @@ CUTOVER_DEPLOYMENT_FIELDS = {
 }
 CUTOVER_ARTIFACT_FIELDS = {
     "release_bundle_sha256",
-    "role_material_sha256",
-    "app_image_id",
-    "postgres_image_id",
+    "release_bundle_bytes",
+    "role_materials",
+    "image_artifacts",
+    "role_runtime_image_ids",
+    "postgres_runtime_uid",
+    "postgres_runtime_gid",
     "postgres_image_ref",
     "legacy_bot_rollback_sha256",
     "legacy_webapp_rollback_sha256",
@@ -181,6 +188,16 @@ CUTOVER_ARTIFACT_FIELDS = {
     "host_agent_contract_sha256",
     "phase_evidence_verifier_sha256",
 }
+IMAGE_KINDS = ("app", "postgres", "redis", "nginx")
+DOCKER_RUNTIME_ROLES = ("bot_fi", "webapp_fi", "webapp_ir")
+IMAGE_ARTIFACT_FIELDS = {
+    "archive_sha256",
+    "archive_bytes",
+    "config_digest",
+    "content_descriptor",
+    "content_identity",
+}
+ROLE_MATERIAL_FIELDS = {"sha256", "bytes", "transport", "format"}
 CUTOVER_POLICY_FIELDS = {
     "plan_only_default",
     "write_block_required",
@@ -721,11 +738,14 @@ def validate_exact_release_runtime(
     validate_executable(git_bin, label="git")
     worker_relative = Path("scripts/prepare_webapp_ir_tls_dns.py")
     secure_io_relative = Path("core/secure_file_io.py")
+    docker_identity_relative = Path("core/docker_image_identity.py")
     worker_path = REPOSITORY_ROOT / worker_relative
     secure_io_path = REPOSITORY_ROOT / secure_io_relative
+    docker_identity_path = REPOSITORY_ROOT / docker_identity_relative
     for path, label in (
         (worker_path, "TLS worker source"),
         (secure_io_path, "secure file helper source"),
+        (docker_identity_path, "Docker image identity helper source"),
     ):
         validate_trusted_regular_file(path, label=label)
     top = _run(
@@ -749,6 +769,7 @@ def validate_exact_release_runtime(
             "--error-unmatch",
             worker_relative,
             secure_io_relative,
+            docker_identity_relative,
         ],
         run_fn=run_fn,
     )
@@ -763,6 +784,7 @@ def validate_exact_release_runtime(
             "--",
             worker_relative,
             secure_io_relative,
+            docker_identity_relative,
         ],
         run_fn=run_fn,
     )
@@ -782,6 +804,11 @@ def validate_exact_release_runtime(
         "secure_file_helper_sha256": _hash_trusted_code_file(
             secure_io_path,
             label="secure file helper source",
+        ),
+        "docker_image_identity_helper_path": str(docker_identity_relative),
+        "docker_image_identity_helper_sha256": _hash_trusted_code_file(
+            docker_identity_path,
+            label="Docker image identity helper source",
         ),
         "tracked_files_clean": True,
     }
@@ -4276,21 +4303,180 @@ def _validate_cutover_manifest_source(
         CUTOVER_ARTIFACT_FIELDS,
         label="cutover artifacts",
     )
-    for field, value in artifacts.items():
-        if field in {"app_image_id", "postgres_image_id"}:
-            if (
+    digest_fields = CUTOVER_ARTIFACT_FIELDS - {
+        "release_bundle_bytes",
+        "role_materials",
+        "image_artifacts",
+        "role_runtime_image_ids",
+        "postgres_runtime_uid",
+        "postgres_runtime_gid",
+        "postgres_image_ref",
+    }
+    for field in sorted(digest_fields):
+        if not isinstance(artifacts[field], str):
+            raise WebAppIrTlsError(
+                f"cutover artifact {field} is not a string digest"
+            )
+        digest = validate_sha256(
+            artifacts[field],
+            label=f"artifacts.{field}",
+        )
+        if digest == "0" * 64:
+            raise WebAppIrTlsError(f"cutover artifact {field} is zero")
+    if (
+        isinstance(artifacts["release_bundle_bytes"], bool)
+        or not isinstance(artifacts["release_bundle_bytes"], int)
+        or not 1
+        <= artifacts["release_bundle_bytes"]
+        <= 64 * 1024 * 1024 * 1024
+    ):
+        raise WebAppIrTlsError("cutover release bundle size is invalid")
+
+    role_materials = _require_exact_fields(
+        artifacts["role_materials"],
+        set(EXPECTED_CUTOVER_TOPOLOGY),
+        label="cutover role materials",
+    )
+    role_material_digests: set[str] = set()
+    for role, topology_entry in EXPECTED_CUTOVER_TOPOLOGY.items():
+        material = _require_exact_fields(
+            role_materials[role],
+            ROLE_MATERIAL_FIELDS,
+            label=f"cutover role material {role}",
+        )
+        if not isinstance(material["sha256"], str):
+            raise WebAppIrTlsError(
+                f"cutover role material {role} digest is invalid"
+            )
+        digest = validate_sha256(
+            material["sha256"],
+            label=f"artifacts.role_materials.{role}.sha256",
+        )
+        expected_format = (
+            "production-shadow-witness-material-tar"
+            if role == "witness"
+            else "production-shadow-role-material-tar"
+        )
+        if (
+            digest == "0" * 64
+            or isinstance(material["bytes"], bool)
+            or not isinstance(material["bytes"], int)
+            or not 1 <= material["bytes"] <= 64 * 1024 * 1024 * 1024
+            or material["transport"] != topology_entry["transport"]
+            or material["format"] != expected_format
+        ):
+            raise WebAppIrTlsError(
+                f"cutover role material {role} is invalid"
+            )
+        role_material_digests.add(digest)
+    if len(role_material_digests) != len(EXPECTED_CUTOVER_TOPOLOGY):
+        raise WebAppIrTlsError("cutover role material digests are not distinct")
+
+    image_artifacts = _require_exact_fields(
+        artifacts["image_artifacts"],
+        set(IMAGE_KINDS),
+        label="cutover image artifacts",
+    )
+    distinct_image_fields: dict[str, set[str]] = {
+        "archive_sha256": set(),
+        "config_digest": set(),
+        "content_identity": set(),
+    }
+    for kind in IMAGE_KINDS:
+        image = _require_exact_fields(
+            image_artifacts[kind],
+            IMAGE_ARTIFACT_FIELDS,
+            label=f"cutover image artifact {kind}",
+        )
+        if not isinstance(image["archive_sha256"], str):
+            raise WebAppIrTlsError(
+                f"cutover image artifact {kind} archive digest is invalid"
+            )
+        archive_sha256 = validate_sha256(
+            image["archive_sha256"],
+            label=f"artifacts.image_artifacts.{kind}.archive_sha256",
+        )
+        if (
+            archive_sha256 == "0" * 64
+            or isinstance(image["archive_bytes"], bool)
+            or not isinstance(image["archive_bytes"], int)
+            or not 1 <= image["archive_bytes"] <= 64 * 1024 * 1024 * 1024
+            or not isinstance(image["config_digest"], str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", image["config_digest"])
+            is None
+            or image["config_digest"] == f"sha256:{'0' * 64}"
+            or not isinstance(image["content_identity"], str)
+            or re.fullmatch(
+                r"sha256:[0-9a-f]{64}",
+                image["content_identity"],
+            )
+            is None
+            or image["content_identity"] == f"sha256:{'0' * 64}"
+        ):
+            raise WebAppIrTlsError(
+                f"cutover image artifact {kind} identity is invalid"
+            )
+        try:
+            observed_content_identity = verify_content_descriptor(
+                image["content_descriptor"]
+            )
+        except DockerImageIdentityError as exc:
+            raise WebAppIrTlsError(
+                f"cutover image artifact {kind} descriptor is invalid"
+            ) from exc
+        if (
+            image["content_descriptor"]["architecture"] != "amd64"
+            or image["content_descriptor"]["os"] != "linux"
+            or observed_content_identity != image["content_identity"]
+        ):
+            raise WebAppIrTlsError(
+                f"cutover image artifact {kind} content identity differs"
+            )
+        distinct_image_fields["archive_sha256"].add(archive_sha256)
+        distinct_image_fields["config_digest"].add(image["config_digest"])
+        distinct_image_fields["content_identity"].add(
+            image["content_identity"]
+        )
+    if any(
+        len(values) != len(IMAGE_KINDS)
+        for values in distinct_image_fields.values()
+    ):
+        raise WebAppIrTlsError("cutover image artifact identities are not distinct")
+
+    runtime_inventory = _require_exact_fields(
+        artifacts["role_runtime_image_ids"],
+        set(DOCKER_RUNTIME_ROLES),
+        label="cutover runtime image inventory",
+    )
+    for role in DOCKER_RUNTIME_ROLES:
+        role_inventory = _require_exact_fields(
+            runtime_inventory[role],
+            set(IMAGE_KINDS),
+            label=f"cutover runtime image inventory {role}",
+        )
+        values = list(role_inventory.values())
+        if (
+            any(
                 not isinstance(value, str)
                 or re.fullmatch(r"sha256:[0-9a-f]{64}", value) is None
                 or value == f"sha256:{'0' * 64}"
-            ):
-                raise WebAppIrTlsError(f"cutover artifact {field} is invalid")
-        elif field == "postgres_image_ref":
-            if value != f"trading_bot_postgres_boottime:15-{release_sha}":
-                raise WebAppIrTlsError("cutover PostgreSQL image ref is invalid")
-        else:
-            digest = validate_sha256(str(value), label=f"artifacts.{field}")
-            if digest == "0" * 64:
-                raise WebAppIrTlsError(f"cutover artifact {field} is zero")
+                for value in values
+            )
+            or len(set(values)) != len(IMAGE_KINDS)
+        ):
+            raise WebAppIrTlsError(
+                f"cutover runtime image inventory {role} is invalid"
+            )
+    if (
+        artifacts["postgres_runtime_uid"] != 70
+        or artifacts["postgres_runtime_gid"] != 70
+    ):
+        raise WebAppIrTlsError("cutover PostgreSQL runtime owner is invalid")
+    if (
+        artifacts["postgres_image_ref"]
+        != f"trading_bot_postgres_boottime:15-{release_sha}"
+    ):
+        raise WebAppIrTlsError("cutover PostgreSQL image ref is invalid")
     policy = _require_exact_fields(
         manifest.get("policy"),
         CUTOVER_POLICY_FIELDS,
@@ -4471,13 +4657,20 @@ def build_activation_documents(
         or runtime_source_binding.get("tracked_files_clean") is not True
     ):
         raise WebAppIrTlsError("TLS worker runtime source is not exact-release bound")
-    for field in ("worker_sha256", "secure_file_helper_sha256", "repository_root_sha256"):
+    for field in (
+        "worker_sha256",
+        "secure_file_helper_sha256",
+        "docker_image_identity_helper_sha256",
+        "repository_root_sha256",
+    ):
         validate_sha256(str(runtime_source_binding.get(field, "")), label=field)
     if (
         runtime_source_binding.get("worker_path")
         != "scripts/prepare_webapp_ir_tls_dns.py"
         or runtime_source_binding.get("secure_file_helper_path")
         != "core/secure_file_io.py"
+        or runtime_source_binding.get("docker_image_identity_helper_path")
+        != "core/docker_image_identity.py"
     ):
         raise WebAppIrTlsError("TLS worker runtime source paths are not canonical")
     expected_schemas = {

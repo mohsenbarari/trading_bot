@@ -107,6 +107,8 @@ def runtime_source_binding() -> dict:
         "worker_sha256": "b" * 64,
         "secure_file_helper_path": "core/secure_file_io.py",
         "secure_file_helper_sha256": "c" * 64,
+        "docker_image_identity_helper_path": "core/docker_image_identity.py",
+        "docker_image_identity_helper_sha256": "d" * 64,
         "tracked_files_clean": True,
     }
 
@@ -1189,12 +1191,71 @@ class ActivationDocumentTests(unittest.TestCase):
             name: chr(97 + index % 6) * 64
             for index, name in enumerate(worker.CUTOVER_ARTIFACT_FIELDS)
             if name
-            not in {"app_image_id", "postgres_image_id", "postgres_image_ref"}
+            not in {
+                "release_bundle_bytes",
+                "role_materials",
+                "image_artifacts",
+                "role_runtime_image_ids",
+                "postgres_runtime_uid",
+                "postgres_runtime_gid",
+                "postgres_image_ref",
+            }
+        }
+        image_artifacts = {}
+        for index, kind in enumerate(worker.IMAGE_KINDS, 1):
+            descriptor = {
+                "architecture": "amd64",
+                "os": "linux",
+                "created": f"2026-07-2{index}T00:00:00Z",
+                "config_sha256": "sha256:" + str(index) * 64,
+                "rootfs_type": "layers",
+                "rootfs_layers": ["sha256:" + str(index + 4) * 64],
+            }
+            image_artifacts[kind] = {
+                "archive_sha256": str(index + 1) * 64,
+                "archive_bytes": 1024 + index,
+                "config_digest": "sha256:" + str(index + 1) * 64,
+                "content_descriptor": descriptor,
+                "content_identity": (
+                    "sha256:" + worker._sha256_json(descriptor)
+                ),
+            }
+        runtime_inventory = {
+            role: {
+                kind: (
+                    "sha256:"
+                    + format(role_index * 4 + kind_index, "064x")
+                )
+                for kind_index, kind in enumerate(worker.IMAGE_KINDS, 1)
+            }
+            for role_index, role in enumerate(
+                worker.DOCKER_RUNTIME_ROLES,
+                1,
+            )
         }
         artifacts.update(
             {
-                "app_image_id": "sha256:" + "1" * 64,
-                "postgres_image_id": "sha256:" + "2" * 64,
+                "release_bundle_bytes": 4096,
+                "role_materials": {
+                    role: {
+                        "sha256": str(index + 1) * 64,
+                        "bytes": 2048 + index,
+                        "transport": topology["transport"],
+                        "format": (
+                            "production-shadow-witness-material-tar"
+                            if role == "witness"
+                            else "production-shadow-role-material-tar"
+                        ),
+                    }
+                    for index, (role, topology) in enumerate(
+                        worker.EXPECTED_CUTOVER_TOPOLOGY.items(),
+                        1,
+                    )
+                },
+                "image_artifacts": image_artifacts,
+                "role_runtime_image_ids": runtime_inventory,
+                "postgres_runtime_uid": 70,
+                "postgres_runtime_gid": 70,
                 "postgres_image_ref": (
                     f"trading_bot_postgres_boottime:15-{RELEASE_SHA}"
                 ),
@@ -1317,6 +1378,46 @@ class ActivationDocumentTests(unittest.TestCase):
             )
             self.assertNotIn("PRIVATE KEY", manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(stat.S_IMODE(manifest_path.stat().st_mode), 0o600)
+
+    def test_cutover_manifest_rejects_witness_runtime_image_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = private_dir(Path(tmp) / "documents")
+            documents = self._documents(root)
+            cutover = json.loads(
+                documents["cutover"].read_text(encoding="utf-8")
+            )
+            cutover["artifacts"]["role_runtime_image_ids"]["witness"] = {}
+            with self.assertRaisesRegex(
+                worker.WebAppIrTlsError,
+                "runtime image inventory",
+            ):
+                worker._validate_cutover_manifest_source(
+                    cutover,
+                    campaign_id=CAMPAIGN_ID,
+                    operation_id=OPERATION_ID,
+                    release_sha=RELEASE_SHA,
+                )
+
+    def test_cutover_manifest_rejects_forged_image_content_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = private_dir(Path(tmp) / "documents")
+            documents = self._documents(root)
+            cutover = json.loads(
+                documents["cutover"].read_text(encoding="utf-8")
+            )
+            cutover["artifacts"]["image_artifacts"]["app"][
+                "content_identity"
+            ] = "sha256:" + "f" * 64
+            with self.assertRaisesRegex(
+                worker.WebAppIrTlsError,
+                "content identity differs",
+            ):
+                worker._validate_cutover_manifest_source(
+                    cutover,
+                    campaign_id=CAMPAIGN_ID,
+                    operation_id=OPERATION_ID,
+                    release_sha=RELEASE_SHA,
+                )
 
     def test_finalization_rejects_enabled_jobs_or_effects(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
