@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import fcntl
 import hashlib
 import json
 import os
@@ -74,6 +76,90 @@ class BackupIdentity:
 
 def confirmation_phrase(operation_id: str, release_sha: str) -> str:
     return f"attest-wa-ir-source-backup:{operation_id}:{release_sha}"
+
+
+@contextmanager
+def _source_operation_lock(
+    operation_id: str,
+    *,
+    lock_root: Path = Path("/run"),
+    required_uid: int = 0,
+):  # noqa: ANN202
+    if type(required_uid) is not int or required_uid < 0:
+        raise SourceDatabaseAttestationError(
+            "source backup operation lock owner is invalid"
+        )
+    try:
+        operation_id = validate_operation_id(operation_id)
+        root_metadata = lock_root.stat(follow_symlinks=False)
+    except (OSError, ProductionTransportError) as exc:
+        raise SourceDatabaseAttestationError(
+            "source backup operation lock root is unavailable"
+        ) from exc
+    if (
+        not lock_root.is_absolute()
+        or not stat.S_ISDIR(root_metadata.st_mode)
+        or root_metadata.st_uid != required_uid
+        or stat.S_IMODE(root_metadata.st_mode) & 0o022
+    ):
+        raise SourceDatabaseAttestationError(
+            "source backup operation lock root is unsafe"
+        )
+    path = lock_root / (
+        f"trading-bot-wa-ir-source-backup-{operation_id}.lock"
+    )
+    descriptor = -1
+    directory_descriptor = -1
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDWR
+            | os.O_CREAT
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != required_uid
+            or metadata.st_nlink != 1
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+        ):
+            raise SourceDatabaseAttestationError(
+                "source backup operation lock is unsafe"
+            )
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise SourceDatabaseAttestationError(
+                "another source backup restore drill is already active"
+            ) from exc
+        os.fsync(descriptor)
+        directory_descriptor = os.open(
+            lock_root,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        os.fsync(directory_descriptor)
+        yield
+    except SourceDatabaseAttestationError:
+        raise
+    except OSError as exc:
+        raise SourceDatabaseAttestationError(
+            "source backup operation lock is unavailable"
+        ) from exc
+    finally:
+        if directory_descriptor >= 0:
+            os.close(directory_descriptor)
+        if descriptor >= 0:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            os.close(descriptor)
 
 
 def _run(arguments: list[str], *, timeout: int = 60) -> str:
@@ -861,30 +947,31 @@ def main(argv: list[str] | None = None) -> int:
                 raise SourceDatabaseAttestationError(
                     "source backup attestation must run as root"
                 )
-            descriptor = -1
-            try:
-                descriptor, backup_identity = _open_stable_backup(
-                    args.database_backup
-                )
-                object_key, version_id = _verified_publication(
-                    args.database_backup_publication_journal,
-                    operation_id=operation_id,
-                    release_sha=args.release_sha,
-                    backup_identity=backup_identity,
-                )
-                result = _restore_and_attest(
-                    operation_id=operation_id,
-                    release_sha=args.release_sha,
-                    backup=args.database_backup,
-                    backup_descriptor=descriptor,
-                    backup_identity=backup_identity,
-                    backup_object_key=object_key,
-                    backup_version_id=version_id,
-                    postgres_image_id=args.postgres_image_id,
-                )
-            finally:
-                if descriptor >= 0:
-                    os.close(descriptor)
+            with _source_operation_lock(operation_id):
+                descriptor = -1
+                try:
+                    descriptor, backup_identity = _open_stable_backup(
+                        args.database_backup
+                    )
+                    object_key, version_id = _verified_publication(
+                        args.database_backup_publication_journal,
+                        operation_id=operation_id,
+                        release_sha=args.release_sha,
+                        backup_identity=backup_identity,
+                    )
+                    result = _restore_and_attest(
+                        operation_id=operation_id,
+                        release_sha=args.release_sha,
+                        backup=args.database_backup,
+                        backup_descriptor=descriptor,
+                        backup_identity=backup_identity,
+                        backup_object_key=object_key,
+                        backup_version_id=version_id,
+                        postgres_image_id=args.postgres_image_id,
+                    )
+                finally:
+                    if descriptor >= 0:
+                        os.close(descriptor)
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0
     except (ProductionOperationError, SourceDatabaseAttestationError) as exc:

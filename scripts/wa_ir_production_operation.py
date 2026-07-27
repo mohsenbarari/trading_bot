@@ -43,18 +43,25 @@ MANIFEST_SCHEMA = "wa-ir-production-operation-v1"
 ATTESTATION_SCHEMA = "wa-ir-production-operation-attestation-v1"
 STATE_SCHEMA = "wa-ir-production-operation-state-v1"
 OPERATIONS_ROOT = Path("/srv/trading-bot/dark-standby/operations")
+PROJECT_ROOT_PREFIX = Path("/srv/trading-bot-three-site-production-shadow")
+DATA_ROOT_PREFIX = Path("/srv/trading-bot-three-site-production-shadow-data")
+SECRET_ROOT_PREFIX = Path(
+    "/root/secure-envs/trading-bot/three-site-production-shadow"
+)
 ROLE_COMPOSE_RELATIVE_PATH = Path("rendered/webapp-ir/docker-compose.yml")
 ROLE_ENV_RELATIVE_PATH = Path("secrets/webapp-ir/runtime.env.role")
+ROLE_CA_RELATIVE_PATH = Path("secrets/tls/ca.crt")
 EXPECTED_RUNTIME_DESTINATIONS = {
     ROLE_COMPOSE_RELATIVE_PATH.as_posix(),
     ROLE_ENV_RELATIVE_PATH.as_posix(),
-    "secrets/tls/ca.crt",
+    ROLE_CA_RELATIVE_PATH.as_posix(),
 }
 DOCKER = "/usr/bin/docker"
 MAX_MANIFEST_BYTES = 256 * 1024
 MAX_ARCHIVE_MEMBERS = 200_000
 MAX_COMMAND_OUTPUT_BYTES = 2 * 1024 * 1024
 MAX_BOOTSTRAP_BYTES = 4 * 1024 * 1024
+MAX_STATE_BYTES = 256 * 1024
 BOOTSTRAP_RELATIVE_PATH = Path("bootstrap/wa-ir-production-agent.pyz")
 _MATERIALIZING_PREFIX = ".wa-ir-materialize-"
 DATABASE_FINGERPRINT_ALGORITHM = (
@@ -266,6 +273,22 @@ class OperationManifest:
 
 
 @dataclass(frozen=True)
+class CanonicalOperationPaths:
+    project_root: Path
+    release_root: Path
+    data_root: Path
+    secret_root: Path
+    compose: Path
+    runtime_env: Path
+    ca: Path
+    restore_dump: Path
+    postgres: Path
+    redis: Path
+    uploads: Path
+    audit: Path
+
+
+@dataclass(frozen=True)
 class MigrationGraph:
     parents: Mapping[str, tuple[str, ...]]
     sources: Mapping[str, Path]
@@ -289,6 +312,52 @@ def _strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 def _canonical_json(value: Any) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _project_base(operation_id: str) -> str:
+    return f"tb3p-{operation_id.replace('-', '')}"
+
+
+def _canonical_operation_paths(
+    manifest: OperationManifest,
+) -> CanonicalOperationPaths:
+    project_root = PROJECT_ROOT_PREFIX / manifest.operation_id
+    data_root = DATA_ROOT_PREFIX / manifest.operation_id
+    secret_root = SECRET_ROOT_PREFIX / manifest.operation_id
+    return CanonicalOperationPaths(
+        project_root=project_root,
+        release_root=project_root / "releases" / manifest.release_sha,
+        data_root=data_root,
+        secret_root=secret_root,
+        compose=project_root / ROLE_COMPOSE_RELATIVE_PATH,
+        runtime_env=secret_root / "webapp-ir" / "runtime.env.role",
+        ca=secret_root / "tls" / "ca.crt",
+        restore_dump=data_root
+        / "restore-input"
+        / "webapp-ir"
+        / "database.dump",
+        postgres=data_root / "webapp-ir" / "postgres",
+        redis=data_root / "webapp-ir" / "redis",
+        uploads=data_root / "webapp-ir" / "uploads",
+        audit=data_root / "webapp-ir" / "audit",
+    )
+
+
+def _runtime_destination_path(
+    paths: CanonicalOperationPaths,
+    destination: str,
+) -> Path:
+    destinations = {
+        ROLE_COMPOSE_RELATIVE_PATH.as_posix(): paths.compose,
+        ROLE_ENV_RELATIVE_PATH.as_posix(): paths.runtime_env,
+        ROLE_CA_RELATIVE_PATH.as_posix(): paths.ca,
+    }
+    try:
+        return destinations[destination]
+    except KeyError as exc:
+        raise ProductionOperationError(
+            "runtime destination is outside the canonical role roots"
+        ) from exc
 
 
 def _state_path(operation_root: Path) -> Path:
@@ -336,11 +405,60 @@ def _operation_lock(operation_root: Path, *, required_uid: int):
             os.close(descriptor)
 
 
+def _reconcile_state_temporaries(path: Path) -> None:
+    expected = f".{path.name}.materializing"
+    legacy = re.compile(rf"^\.{re.escape(path.name)}\.[1-9][0-9]{{0,19}}\.tmp$")
+    candidates: list[Path] = []
+    try:
+        with os.scandir(path.parent) as entries:
+            for entry in entries:
+                if entry.name == expected or legacy.fullmatch(entry.name):
+                    candidates.append(path.parent / entry.name)
+                    if len(candidates) > 1024:
+                        raise ProductionOperationError(
+                            "operation state temporary inventory is excessive"
+                        )
+    except ProductionOperationError:
+        raise
+    except OSError as exc:
+        raise ProductionOperationError(
+            "operation state temporary inventory is unavailable"
+        ) from exc
+    removed = False
+    for candidate in candidates:
+        try:
+            metadata = candidate.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise ProductionOperationError(
+                "operation state temporary is unsafe"
+            ) from exc
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_nlink != 1
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or not 0 <= metadata.st_size <= MAX_STATE_BYTES
+        ):
+            raise ProductionOperationError(
+                "operation state temporary is unsafe"
+            )
+        try:
+            candidate.unlink()
+        except OSError as exc:
+            raise ProductionOperationError(
+                "operation state temporary could not be reconciled"
+            ) from exc
+        removed = True
+    if removed:
+        _fsync_directory(path.parent)
+
+
 def _write_state(path: Path, state: Mapping[str, Any]) -> None:
     payload = _canonical_json(dict(state)) + b"\n"
-    if len(payload) > 256 * 1024:
+    if len(payload) > MAX_STATE_BYTES:
         raise ProductionOperationError("operation state is oversized")
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    _reconcile_state_temporaries(path)
+    temporary = path.with_name(f".{path.name}.materializing")
     descriptor = -1
     try:
         descriptor = os.open(
@@ -379,10 +497,7 @@ def _write_state(path: Path, state: Mapping[str, Any]) -> None:
     finally:
         if descriptor >= 0:
             os.close(descriptor)
-        try:
-            temporary.unlink()
-        except FileNotFoundError:
-            pass
+        _reconcile_state_temporaries(path)
 
 
 def _load_or_create_state(
@@ -391,6 +506,7 @@ def _load_or_create_state(
     operation_root: Path,
 ) -> dict[str, Any]:
     path = _state_path(operation_root)
+    _reconcile_state_temporaries(path)
     if not path.exists() and not path.is_symlink():
         state: dict[str, Any] = {
             "schema": STATE_SCHEMA,
@@ -420,15 +536,15 @@ def _load_or_create_state(
             or metadata.st_uid != os.geteuid()
             or metadata.st_nlink != 1
             or stat.S_IMODE(metadata.st_mode) != 0o600
-            or not 1 <= metadata.st_size <= 256 * 1024
+            or not 1 <= metadata.st_size <= MAX_STATE_BYTES
         ):
             raise ProductionOperationError("operation state file is unsafe")
         chunks: list[bytes] = []
         observed_size = 0
-        while observed_size <= 256 * 1024:
+        while observed_size <= MAX_STATE_BYTES:
             chunk = os.read(
                 descriptor,
-                min(64 * 1024, 256 * 1024 + 1 - observed_size),
+                min(64 * 1024, MAX_STATE_BYTES + 1 - observed_size),
             )
             if not chunk:
                 break
@@ -711,7 +827,7 @@ def _load_manifest_bytes(payload: bytes) -> OperationManifest:
     compose = document.get("compose")
     if not isinstance(compose, dict) or set(compose) != _COMPOSE_FIELDS:
         raise ProductionOperationError("operation Compose binding is invalid")
-    project_base = f"trading-bot-wa-ir-{operation_id.replace('-', '')}"
+    project_base = _project_base(operation_id)
     project_name = f"{project_base}-webapp-ir"
     if (
         compose.get("relative_path") != ROLE_COMPOSE_RELATIVE_PATH.as_posix()
@@ -1005,6 +1121,33 @@ def _ensure_secure_directory(path: Path, *, required_uid: int) -> None:
         raise ProductionOperationError("operation directory could not be created") from exc
 
 
+def _require_real_owned_directory_chain(
+    path: Path,
+    *,
+    required_uid: int,
+) -> None:
+    if not path.is_absolute() or ".." in path.parts:
+        raise ProductionOperationError(
+            "canonical production directory chain is invalid"
+        )
+    current = Path(path.anchor)
+    for component in path.parts[1:]:
+        current /= component
+        try:
+            metadata = current.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise ProductionOperationError(
+                "canonical production directory ancestor is unavailable"
+            ) from exc
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid not in {0, required_uid}
+        ):
+            raise ProductionOperationError(
+                "canonical production directory ancestor is unsafe"
+            )
+
+
 def _require_empty_secure_directory(path: Path, *, required_uid: int, label: str) -> None:
     _ensure_secure_directory(path, required_uid=required_uid)
     try:
@@ -1273,6 +1416,61 @@ def _extract_archive_create_only(
         raise ProductionOperationError("archive materialization failed") from exc
 
 
+def _extract_runtime_archive_create_only(
+    archive_path: Path,
+    paths: CanonicalOperationPaths,
+    *,
+    required_uid: int,
+    expected_entries: Mapping[str, RuntimeEntry],
+) -> None:
+    expected_files = {
+        entry.archive_path: (entry.sha256, entry.bytes)
+        for entry in expected_entries.values()
+    }
+    try:
+        with tarfile.open(archive_path, mode="r:") as archive:
+            members = _validate_tar_members(
+                archive,
+                expected_files=expected_files,
+            )
+            for member in members:
+                if member.isdir():
+                    continue
+                archive_name = PurePosixPath(
+                    member.name.rstrip("/")
+                ).as_posix()
+                entry = expected_entries[archive_name]
+                destination = _runtime_destination_path(
+                    paths,
+                    entry.destination,
+                )
+                _ensure_secure_directory(
+                    destination.parent,
+                    required_uid=required_uid,
+                )
+                source = archive.extractfile(member)
+                if source is None:
+                    raise ProductionOperationError(
+                        "runtime archive regular member is unreadable"
+                    )
+                try:
+                    _write_or_verify_file(
+                        destination,
+                        source,
+                        expected_sha256=entry.sha256,
+                        expected_bytes=entry.bytes,
+                        required_uid=required_uid,
+                    )
+                finally:
+                    source.close()
+    except ProductionOperationError:
+        raise
+    except (OSError, EOFError, KeyError, tarfile.TarError) as exc:
+        raise ProductionOperationError(
+            "runtime archive materialization failed"
+        ) from exc
+
+
 def _attest_extracted_archive_tree(
     archive_path: Path,
     destination_root: Path,
@@ -1514,22 +1712,27 @@ def _docker_archive_identity(
 
 def _runtime_expected_values(
     manifest: OperationManifest,
-    *,
-    operation_root: Path,
 ) -> Mapping[str, str]:
     image_by_role = {image.role: image.image_id for image in manifest.images}
-    project_base = f"trading-bot-wa-ir-{manifest.operation_id.replace('-', '')}"
+    ca_sha256 = next(
+        entry.sha256
+        for entry in manifest.runtime_entries
+        if entry.destination == ROLE_CA_RELATIVE_PATH.as_posix()
+    )
+    project_base = _project_base(manifest.operation_id)
+    paths = _canonical_operation_paths(manifest)
     return {
         "PRODUCTION_SHADOW_OPERATION_ID": manifest.operation_id,
         "PRODUCTION_SHADOW_PROJECT": project_base,
         "PRODUCTION_SHADOW_CGROUP_PARENT": project_base,
-        "PRODUCTION_SHADOW_PROJECT_ROOT": str(operation_root),
-        "PRODUCTION_SHADOW_RELEASE_ROOT": str(operation_root / "release"),
-        "PRODUCTION_SHADOW_DATA_ROOT": str(operation_root / "data"),
-        "PRODUCTION_SHADOW_SECRET_ROOT": str(operation_root / "secrets"),
+        "PRODUCTION_SHADOW_PROJECT_ROOT": str(paths.project_root),
+        "PRODUCTION_SHADOW_RELEASE_ROOT": str(paths.release_root),
+        "PRODUCTION_SHADOW_DATA_ROOT": str(paths.data_root),
+        "PRODUCTION_SHADOW_SECRET_ROOT": str(paths.secret_root),
         "PRODUCTION_SHADOW_RELEASE_SHA": manifest.release_sha,
         "PRODUCTION_SHADOW_APP_IMAGE_ID": image_by_role["app"],
         "PRODUCTION_SHADOW_POSTGRES_IMAGE_ID": image_by_role["postgres"],
+        "PRODUCTION_SHADOW_DR_CA_SHA256": ca_sha256,
     }
 
 
@@ -1572,6 +1775,59 @@ def _validate_role_local_environment_closure(
         )
 
 
+def _ensure_canonical_operation_directories(
+    paths: CanonicalOperationPaths,
+    *,
+    required_uid: int,
+) -> None:
+    for prefix in (
+        PROJECT_ROOT_PREFIX,
+        DATA_ROOT_PREFIX,
+        SECRET_ROOT_PREFIX,
+    ):
+        if not prefix.is_absolute() or ".." in prefix.parts:
+            raise ProductionOperationError(
+                "canonical production root is not absolute and normalized"
+            )
+        _require_real_owned_directory_chain(
+            prefix.parent,
+            required_uid=required_uid,
+        )
+        _ensure_secure_directory(prefix, required_uid=required_uid)
+        _require_real_owned_directory_chain(
+            prefix,
+            required_uid=required_uid,
+        )
+    for root in (
+        paths.project_root,
+        paths.data_root,
+        paths.secret_root,
+    ):
+        _ensure_secure_directory(root, required_uid=required_uid)
+    for root, relative in (
+        (paths.project_root, PurePosixPath("releases")),
+        (
+            paths.project_root,
+            PurePosixPath("rendered/webapp-ir"),
+        ),
+        (
+            paths.data_root,
+            PurePosixPath("restore-input/webapp-ir"),
+        ),
+        (paths.data_root, PurePosixPath("webapp-ir/postgres")),
+        (paths.data_root, PurePosixPath("webapp-ir/redis")),
+        (paths.data_root, PurePosixPath("webapp-ir/uploads")),
+        (paths.data_root, PurePosixPath("webapp-ir/audit")),
+        (paths.secret_root, PurePosixPath("webapp-ir")),
+        (paths.secret_root, PurePosixPath("tls")),
+    ):
+        _ensure_directory_tree(
+            root,
+            relative,
+            required_uid=required_uid,
+        )
+
+
 def materialize(
     manifest: OperationManifest,
     paths: Mapping[str, Path],
@@ -1579,52 +1835,34 @@ def materialize(
     operation_root: Path,
     required_uid: int,
 ) -> Mapping[str, Any]:
-    release_root = operation_root / "release"
-    secrets_root = operation_root / "secrets"
-    data_root = operation_root / "data"
-    restore_root = data_root / "restore-input" / "webapp-ir"
-    for directory in (release_root, secrets_root, data_root):
-        _ensure_secure_directory(directory, required_uid=required_uid)
-    _ensure_directory_tree(
-        data_root,
-        PurePosixPath("restore-input/webapp-ir"),
+    canonical = _canonical_operation_paths(manifest)
+    _ensure_canonical_operation_directories(
+        canonical,
         required_uid=required_uid,
     )
-    for relative in (
-        "webapp-ir/postgres",
-        "webapp-ir/redis",
-        "webapp-ir/uploads",
-        "webapp-ir/audit",
-    ):
-        _ensure_directory_tree(
-            data_root,
-            PurePosixPath(relative),
-            required_uid=required_uid,
-        )
     _require_empty_secure_directory(
-        data_root / "webapp-ir" / "redis",
+        canonical.redis,
         required_uid=required_uid,
         label="WA-IR Redis directory",
     )
 
     _materialize_release_bundle(
         paths["release-archive"],
-        release_root,
+        canonical.release_root,
         manifest=manifest,
         required_uid=required_uid,
     )
     runtime_by_archive = {
         entry.archive_path: entry for entry in manifest.runtime_entries
     }
-    _extract_archive_create_only(
+    _extract_runtime_archive_create_only(
         paths["runtime-material"],
-        operation_root,
-        mode="r:",
+        canonical,
         required_uid=required_uid,
         expected_entries=runtime_by_archive,
     )
-    compose = operation_root / ROLE_COMPOSE_RELATIVE_PATH
-    env_path = operation_root / ROLE_ENV_RELATIVE_PATH
+    compose = canonical.compose
+    env_path = canonical.runtime_env
     env_payload = env_path.read_bytes()
     env = parse_safe_dotenv(env_payload)
     if set(env) != set(manifest.required_env_keys):
@@ -1632,20 +1870,20 @@ def materialize(
             "runtime environment key set differs from the role-local closure"
         )
     _validate_role_local_environment_closure(compose, env)
-    expected_values = _runtime_expected_values(manifest, operation_root=operation_root)
+    expected_values = _runtime_expected_values(manifest)
     if any(env.get(key) != value for key, value in expected_values.items()):
         raise ProductionOperationError("runtime environment operation binding differs")
 
     _copy_create_only(
         paths["database-backup"],
-        restore_root / "database.dump",
+        canonical.restore_dump,
         artifact=manifest.artifacts["database-backup"],
         required_uid=required_uid,
     )
     archive_trees: dict[str, Mapping[str, Any]] = {}
     for kind, target in (
-        ("uploads-archive", data_root / "webapp-ir" / "uploads"),
-        ("audit-archive", data_root / "webapp-ir" / "audit"),
+        ("uploads-archive", canonical.uploads),
+        ("audit-archive", canonical.audit),
     ):
         _extract_archive_create_only(
             paths[kind],
@@ -1678,9 +1916,9 @@ def materialize(
                 release_sha=manifest.release_sha,
             )
     return {
-        "release_root": str(release_root),
-        "secrets_root": str(secrets_root),
-        "data_root": str(data_root),
+        "release_root": str(canonical.release_root),
+        "secrets_root": str(canonical.secret_root),
+        "data_root": str(canonical.data_root),
         "runtime_env": str(env_path),
         "compose": str(compose),
         "uploads_tree": dict(archive_trees["uploads-archive"]),
@@ -2269,15 +2507,16 @@ def _concurrent_index_names(
 
 
 def _compose_base(manifest: OperationManifest, *, operation_root: Path) -> list[str]:
+    canonical = _canonical_operation_paths(manifest)
     return [
         DOCKER,
         "compose",
         "--project-name",
         manifest.project_name,
         "--env-file",
-        str(operation_root / ROLE_ENV_RELATIVE_PATH),
+        str(canonical.runtime_env),
         "--file",
-        str(operation_root / ROLE_COMPOSE_RELATIVE_PATH),
+        str(canonical.compose),
     ]
 
 
@@ -2359,7 +2598,7 @@ def _validate_oneoff_for_cleanup(
             "refusing to remove a container outside the exact operation"
         )
 
-    expected_ca_source = str(operation_root / "secrets" / "tls" / "ca.crt")
+    expected_ca_source = str(_canonical_operation_paths(manifest).ca)
     observed_ca = False
     observed_anonymous_pgdata = False
     anonymous_volumes: list[str] = []
@@ -2469,10 +2708,11 @@ def _compose_one_shot(
         env_path = Path(prefix[prefix.index("--env-file") + 1])
     except (ValueError, IndexError) as exc:
         raise ProductionOperationError("Compose command prefix is invalid") from exc
-    operation_root = compose_path.parents[2]
+    canonical = _canonical_operation_paths(manifest)
+    operation_root = canonical.project_root
     if (
-        compose_path != operation_root / ROLE_COMPOSE_RELATIVE_PATH
-        or env_path != operation_root / ROLE_ENV_RELATIVE_PATH
+        compose_path != canonical.compose
+        or env_path != canonical.runtime_env
     ):
         raise ProductionOperationError("Compose command prefix escaped its operation")
     if _oneoff_ids(manifest):
@@ -2523,10 +2763,11 @@ def _compose_streaming_copy_sha256(
         env_path = Path(prefix[prefix.index("--env-file") + 1])
     except (ValueError, IndexError) as exc:
         raise ProductionOperationError("Compose command prefix is invalid") from exc
-    operation_root = compose_path.parents[2]
+    canonical = _canonical_operation_paths(manifest)
+    operation_root = canonical.project_root
     if (
-        compose_path != operation_root / ROLE_COMPOSE_RELATIVE_PATH
-        or env_path != operation_root / ROLE_ENV_RELATIVE_PATH
+        compose_path != canonical.compose
+        or env_path != canonical.runtime_env
     ):
         raise ProductionOperationError("Compose command prefix escaped its operation")
     if _oneoff_ids(manifest):
@@ -2635,6 +2876,7 @@ def _validate_compose_config(
     *,
     operation_root: Path,
 ) -> Mapping[str, Any]:
+    canonical = _canonical_operation_paths(manifest)
     output = _run(
         [
             *_compose_base(manifest, operation_root=operation_root),
@@ -2648,7 +2890,7 @@ def _validate_compose_config(
     )
     try:
         runtime_env = parse_safe_dotenv(
-            (operation_root / ROLE_ENV_RELATIVE_PATH).read_bytes()
+            canonical.runtime_env.read_bytes()
         )
     except OSError as exc:
         raise ProductionOperationError(
@@ -2665,12 +2907,34 @@ def _validate_compose_config(
     services = config.get("services") if isinstance(config, dict) else None
     networks = config.get("networks") if isinstance(config, dict) else None
     volumes = config.get("volumes") if isinstance(config, dict) else None
+    operation = (
+        config.get("x-production-shadow-operation")
+        if isinstance(config, dict)
+        else None
+    )
     expected_service_names = set(manifest.services.values())
     expected_volume_devices = {
-        "webapp_ir_postgres": str(operation_root / "data" / "webapp-ir" / "postgres"),
+        "webapp_ir_postgres": str(canonical.postgres),
+    }
+    expected_operation = {
+        "operation_id": manifest.operation_id,
+        "project_root": str(canonical.project_root),
+        "release_root": str(canonical.release_root),
+        "data_root": str(canonical.data_root),
+        "secret_root": str(canonical.secret_root),
+        "dr_ca_sha256": runtime_env.get(
+            "PRODUCTION_SHADOW_DR_CA_SHA256"
+        ),
+        "dr_tls_attestation_sha256": runtime_env.get(
+            "PRODUCTION_SHADOW_DR_TLS_ATTESTATION_SHA256"
+        ),
+        "dr_tls_attested_at_epoch": runtime_env.get(
+            "PRODUCTION_SHADOW_DR_TLS_ATTESTED_AT_EPOCH"
+        ),
     }
     if (
         config.get("name") != manifest.project_name
+        or operation != expected_operation
         or not isinstance(services, dict)
         or set(services) != expected_service_names
         or not isinstance(networks, dict)
@@ -2985,7 +3249,7 @@ def _validate_compose_config(
             "WRITER_WITNESS_AUTO_RENEW_ENABLED": "false",
         },
     }
-    ca_source = str(operation_root / "secrets" / "tls" / "ca.crt")
+    ca_source = str(canonical.ca)
     expected_mounts = {
         manifest.services["database"]: {
             ("volume", "webapp_ir_postgres", "/var/lib/postgresql/data", False),
@@ -3030,7 +3294,7 @@ def _validate_compose_config(
             or service.get("pull_policy") != "never"
             or "build" in service
             or service.get("cgroup_parent")
-            != f"trading-bot-wa-ir-{manifest.operation_id.replace('-', '')}"
+            != _project_base(manifest.operation_id)
             or service.get("cpus") != (2 if postgres_service else 1)
             or service.get("mem_limit")
             != ("2147483648" if postgres_service else "805306368")
@@ -3475,6 +3739,7 @@ def prepare_database(
 ) -> Mapping[str, Any]:
     completed = set(completed_phases or ())
     cleanup_evidence: list[Mapping[str, Any]] = []
+    canonical = _canonical_operation_paths(manifest)
 
     def mark(phase: str, evidence: Mapping[str, Any]) -> None:
         if phase not in completed:
@@ -3483,7 +3748,7 @@ def prepare_database(
             completed.add(phase)
 
     _validate_compose_config(manifest, operation_root=operation_root)
-    migration_graph = _load_migration_graph(operation_root / "release")
+    migration_graph = _load_migration_graph(canonical.release_root)
     migration_corridor = _migration_corridor(
         migration_graph,
         source_revision=str(manifest.source_database["alembic_revision"]),
@@ -3500,13 +3765,13 @@ def prepare_database(
         cleanup_evidence=cleanup_evidence,
     )
     runtime_env = parse_safe_dotenv(
-        (operation_root / ROLE_ENV_RELATIVE_PATH).read_bytes()
+        canonical.runtime_env.read_bytes()
     )
     database_name = runtime_env.get("WEBAPP_IR_POSTGRES_DB", "")
     if not re.fullmatch(r"^[a-z_][a-z0-9_]{0,62}$", database_name):
         raise ProductionOperationError("WA-IR database name is invalid")
 
-    postgres_root = operation_root / "data" / "webapp-ir" / "postgres"
+    postgres_root = canonical.postgres
     try:
         nonempty_postgres = next(postgres_root.iterdir(), None) is not None
     except OSError as exc:
@@ -3602,7 +3867,7 @@ def prepare_database(
     if not public_table_count.isdigit():
         raise ProductionOperationError("operation database table count is invalid")
 
-    restore_input = operation_root / "data" / "restore-input" / "webapp-ir"
+    restore_input = canonical.restore_dump.parent
     expected_writer_state = {
         "active_site": None,
         "writer_epoch": 1,
@@ -3945,6 +4210,7 @@ def execute(
     required_uid: int,
     confirm: str,
 ) -> Mapping[str, Any]:
+    canonical = _canonical_operation_paths(manifest)
     planned = plan(
         manifest,
         operation_root=operation_root,
@@ -3952,6 +4218,10 @@ def execute(
     )
     if confirm != confirmation_phrase(manifest):
         raise ProductionOperationError("operation confirmation phrase differs")
+    _ensure_canonical_operation_directories(
+        canonical,
+        required_uid=required_uid,
+    )
     paths = verify_incoming(
         manifest,
         operation_root=operation_root,
@@ -3997,12 +4267,15 @@ def execute(
     else:
         _materialize_release_bundle(
             paths["release-archive"],
-            operation_root / "release",
+            canonical.release_root,
             manifest=manifest,
             required_uid=required_uid,
         )
         for entry in manifest.runtime_entries:
-            destination = operation_root / entry.destination
+            destination = _runtime_destination_path(
+                canonical,
+                entry.destination,
+            )
             if _hash_regular_file(
                 destination,
                 expected_uid=required_uid,
@@ -4013,11 +4286,7 @@ def execute(
                 )
         dump_artifact = manifest.artifacts["database-backup"]
         if _hash_regular_file(
-            operation_root
-            / "data"
-            / "restore-input"
-            / "webapp-ir"
-            / "database.dump",
+            canonical.restore_dump,
             expected_uid=required_uid,
             maximum=dump_artifact.bytes,
         ) != (dump_artifact.sha256, dump_artifact.bytes):
@@ -4027,13 +4296,13 @@ def execute(
         materialized_evidence = state["evidence"]["materialized"]
         uploads_tree = _attest_extracted_archive_tree(
             paths["uploads-archive"],
-            operation_root / "data" / "webapp-ir" / "uploads",
+            canonical.uploads,
             mode="r:gz",
             required_uid=required_uid,
         )
         audit_tree = _attest_extracted_archive_tree(
             paths["audit-archive"],
-            operation_root / "data" / "webapp-ir" / "audit",
+            canonical.audit,
             mode="r:gz",
             required_uid=required_uid,
         )
@@ -4049,16 +4318,16 @@ def execute(
                 "persisted materialization evidence differs"
             )
         _require_empty_secure_directory(
-            operation_root / "data" / "webapp-ir" / "redis",
+            canonical.redis,
             required_uid=required_uid,
             label="WA-IR Redis directory",
         )
         materialized = {
-            "release_root": str(operation_root / "release"),
-            "secrets_root": str(operation_root / "secrets"),
-            "data_root": str(operation_root / "data"),
-            "runtime_env": str(operation_root / ROLE_ENV_RELATIVE_PATH),
-            "compose": str(operation_root / ROLE_COMPOSE_RELATIVE_PATH),
+            "release_root": str(canonical.release_root),
+            "secrets_root": str(canonical.secret_root),
+            "data_root": str(canonical.data_root),
+            "runtime_env": str(canonical.runtime_env),
+            "compose": str(canonical.compose),
             "uploads_tree": dict(uploads_tree),
             "audit_tree": dict(audit_tree),
         }

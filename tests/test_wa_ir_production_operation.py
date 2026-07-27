@@ -114,6 +114,18 @@ class OperationFixture:
         self.root = root
         self.operation_root = root / OPERATION_ID
         self.incoming = self.operation_root / "incoming"
+        self.project_prefix = root / "canonical-projects"
+        self.data_prefix = root / "canonical-data"
+        self.secret_prefix = root / "canonical-secrets"
+        MODULE.PROJECT_ROOT_PREFIX = self.project_prefix
+        MODULE.DATA_ROOT_PREFIX = self.data_prefix
+        MODULE.SECRET_ROOT_PREFIX = self.secret_prefix
+        ORCHESTRATOR.REMOTE_PROJECT_ROOT_PREFIX = self.project_prefix
+        ORCHESTRATOR.REMOTE_DATA_ROOT_PREFIX = self.data_prefix
+        ORCHESTRATOR.REMOTE_SECRET_ROOT_PREFIX = self.secret_prefix
+        self.project_root = self.project_prefix / OPERATION_ID
+        self.data_root = self.data_prefix / OPERATION_ID
+        self.secret_root = self.secret_prefix / OPERATION_ID
         self.operation_root.mkdir(mode=0o700)
         self.incoming.mkdir(mode=0o700)
         self.release_bundle, self.release_sha, self.release_tree_sha = (
@@ -129,6 +141,7 @@ class OperationFixture:
         bootstrap_path.unlink()
         self.app_archive, self.app_id = docker_archive("app", self.release_sha)
         self.db_archive, self.db_id = docker_archive("postgres", self.release_sha)
+        self.ca = b"test-only-ca\n"
         self.runtime_env = self._runtime_env()
         references = "\n".join(
             f"  {key.lower()}: ${{{key}:?required}}"
@@ -143,7 +156,6 @@ class OperationFixture:
             f"{references}\n"
             "services: {}\n"
         ).encode()
-        self.ca = b"test-only-ca\n"
         self.runtime_archive = tar_bytes(
             {
                 "role-compose.yml": self.role_compose,
@@ -250,21 +262,25 @@ class OperationFixture:
         return payload, release_sha, tree_sha
 
     def _runtime_env(self) -> bytes:
-        project = f"trading-bot-wa-ir-{OPERATION_ID.replace('-', '')}"
+        project = f"tb3p-{OPERATION_ID.replace('-', '')}"
         values = {
             "PRODUCTION_SHADOW_APP_IMAGE_ID": self.app_id,
             "PRODUCTION_SHADOW_CGROUP_PARENT": project,
-            "PRODUCTION_SHADOW_DATA_ROOT": str(self.operation_root / "data"),
-            "PRODUCTION_SHADOW_DR_CA_SHA256": "1" * 64,
+            "PRODUCTION_SHADOW_DATA_ROOT": str(self.data_root),
+            "PRODUCTION_SHADOW_DR_CA_SHA256": hashlib.sha256(
+                self.ca
+            ).hexdigest(),
             "PRODUCTION_SHADOW_DR_TLS_ATTESTATION_SHA256": "2" * 64,
             "PRODUCTION_SHADOW_DR_TLS_ATTESTED_AT_EPOCH": "1785170000",
             "PRODUCTION_SHADOW_OPERATION_ID": OPERATION_ID,
             "PRODUCTION_SHADOW_POSTGRES_IMAGE_ID": self.db_id,
             "PRODUCTION_SHADOW_PROJECT": project,
-            "PRODUCTION_SHADOW_PROJECT_ROOT": str(self.operation_root),
-            "PRODUCTION_SHADOW_RELEASE_ROOT": str(self.operation_root / "release"),
+            "PRODUCTION_SHADOW_PROJECT_ROOT": str(self.project_root),
+            "PRODUCTION_SHADOW_RELEASE_ROOT": str(
+                self.project_root / "releases" / self.release_sha
+            ),
             "PRODUCTION_SHADOW_RELEASE_SHA": self.release_sha,
-            "PRODUCTION_SHADOW_SECRET_ROOT": str(self.operation_root / "secrets"),
+            "PRODUCTION_SHADOW_SECRET_ROOT": str(self.secret_root),
             "WEBAPP_IR_APP_DB_PASSWORD": "app-password",
             "WEBAPP_IR_BLOB_DB_PASSWORD": "blob-password",
             "WEBAPP_IR_CONTROL_DB_PASSWORD": "control-password",
@@ -371,7 +387,7 @@ class OperationFixture:
             "compose": {
                 "relative_path": MODULE.ROLE_COMPOSE_RELATIVE_PATH.as_posix(),
                 "project_name": (
-                    f"trading-bot-wa-ir-{OPERATION_ID.replace('-', '')}-webapp-ir"
+                    f"tb3p-{OPERATION_ID.replace('-', '')}-webapp-ir"
                 ),
                 "services": dict(MODULE.EXPECTED_SERVICES),
             },
@@ -382,7 +398,7 @@ class OperationFixture:
 def valid_compose_config(fixture: OperationFixture) -> dict[str, object]:
     manifest = fixture.manifest
     runtime = MODULE.parse_safe_dotenv(fixture.runtime_env)
-    project_base = f"trading-bot-wa-ir-{OPERATION_ID.replace('-', '')}"
+    project_base = f"tb3p-{OPERATION_ID.replace('-', '')}"
     database_name = runtime["WEBAPP_IR_POSTGRES_DB"]
     owner_user = runtime["WEBAPP_IR_POSTGRES_USER"]
     owner_password = runtime["WEBAPP_IR_POSTGRES_PASSWORD"]
@@ -536,7 +552,7 @@ def valid_compose_config(fixture: OperationFixture) -> dict[str, object]:
     }
     ca_mount = {
         "type": "bind",
-        "source": str(fixture.operation_root / "secrets" / "tls" / "ca.crt"),
+        "source": str(fixture.secret_root / "tls" / "ca.crt"),
         "target": "/run/production-dr-ca/ca.crt",
         "read_only": True,
     }
@@ -639,6 +655,20 @@ def valid_compose_config(fixture: OperationFixture) -> dict[str, object]:
         services[name] = service
     return {
         "name": manifest.project_name,
+        "x-production-shadow-operation": {
+            "operation_id": OPERATION_ID,
+            "project_root": str(fixture.project_root),
+            "release_root": str(
+                fixture.project_root / "releases" / fixture.release_sha
+            ),
+            "data_root": str(fixture.data_root),
+            "secret_root": str(fixture.secret_root),
+            "dr_ca_sha256": runtime[
+                "PRODUCTION_SHADOW_DR_CA_SHA256"
+            ],
+            "dr_tls_attestation_sha256": "2" * 64,
+            "dr_tls_attested_at_epoch": "1785170000",
+        },
         "services": services,
         "networks": {
             "webapp_ir": {
@@ -653,7 +683,7 @@ def valid_compose_config(fixture: OperationFixture) -> dict[str, object]:
                     "type": "none",
                     "o": "bind",
                     "device": str(
-                        fixture.operation_root / "data" / "webapp-ir" / "postgres"
+                        fixture.data_root / "webapp-ir" / "postgres"
                     ),
                 },
                 "name": f"{manifest.project_name}_webapp_ir_postgres",
@@ -672,6 +702,37 @@ class ProductionOperationTests(unittest.TestCase):
                         self.fail("a concurrent invocation acquired the operation lock")
             with MODULE._operation_lock(root, required_uid=os.geteuid()):
                 pass
+
+    def test_state_startup_reconciles_only_exact_stale_temporaries(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = OperationFixture(Path(raw))
+            state_path = fixture.operation_root / "operation-state.json"
+            legacy = fixture.operation_root / ".operation-state.json.4242.tmp"
+            current = fixture.operation_root / ".operation-state.json.materializing"
+            secure_file(legacy, b"legacy partial")
+            secure_file(current, b"current partial")
+            state = MODULE._load_or_create_state(
+                fixture.manifest,
+                operation_root=fixture.operation_root,
+            )
+            self.assertEqual(state["completed_phases"], ["received"])
+            self.assertFalse(legacy.exists())
+            self.assertFalse(current.exists())
+            self.assertTrue(state_path.is_file())
+
+            ambiguous = (
+                fixture.operation_root / ".operation-state.json.5151.tmp"
+            )
+            foreign_link = fixture.operation_root / "foreign-state-link"
+            secure_file(ambiguous, b"ambiguous")
+            os.link(ambiguous, foreign_link)
+            with self.assertRaises(MODULE.ProductionOperationError):
+                MODULE._load_or_create_state(
+                    fixture.manifest,
+                    operation_root=fixture.operation_root,
+                )
+            self.assertTrue(ambiguous.exists())
+            self.assertTrue(foreign_link.exists())
 
     def test_file_materialization_reconciles_only_exact_crash_residue(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -730,8 +791,13 @@ class ProductionOperationTests(unittest.TestCase):
     def test_release_materialization_rebuilds_scoped_partial_directory(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             fixture = OperationFixture(Path(raw))
-            release = fixture.operation_root / "release"
-            temporary = fixture.operation_root / ".release.materializing"
+            canonical = MODULE._canonical_operation_paths(fixture.manifest)
+            MODULE._ensure_canonical_operation_directories(
+                canonical,
+                required_uid=os.geteuid(),
+            )
+            release = canonical.release_root
+            temporary = release.with_name(f".{release.name}.materializing")
             temporary.mkdir(mode=0o700)
             secure_file(temporary / "partial", b"incomplete clone")
 
@@ -803,7 +869,38 @@ class ProductionOperationTests(unittest.TestCase):
                 required_uid=os.geteuid(),
             )
             self.assertTrue(Path(materialized["compose"]).is_file())
-            runtime = fixture.operation_root / MODULE.ROLE_ENV_RELATIVE_PATH
+            self.assertEqual(
+                materialized["release_root"],
+                str(
+                    fixture.project_root
+                    / "releases"
+                    / fixture.release_sha
+                ),
+            )
+            self.assertEqual(
+                materialized["data_root"],
+                str(fixture.data_root),
+            )
+            self.assertEqual(
+                materialized["secrets_root"],
+                str(fixture.secret_root),
+            )
+            self.assertFalse((fixture.operation_root / "release").exists())
+            self.assertFalse((fixture.operation_root / "data").exists())
+            self.assertFalse((fixture.operation_root / "secrets").exists())
+            self.assertFalse((fixture.operation_root / "rendered").exists())
+            for directory in (
+                fixture.project_prefix,
+                fixture.project_root,
+                fixture.data_prefix,
+                fixture.data_root,
+                fixture.secret_prefix,
+                fixture.secret_root,
+            ):
+                metadata = directory.stat(follow_symlinks=False)
+                self.assertTrue(stat.S_ISDIR(metadata.st_mode))
+                self.assertEqual(stat.S_IMODE(metadata.st_mode), 0o700)
+            runtime = fixture.secret_root / "webapp-ir" / "runtime.env.role"
             self.assertEqual(stat.S_IMODE(runtime.stat().st_mode), 0o600)
             self.assertEqual(runtime.read_bytes(), fixture.runtime_env)
             # A lost attestation can be retried without replacing a file.
@@ -814,7 +911,12 @@ class ProductionOperationTests(unittest.TestCase):
                 required_uid=os.geteuid(),
             )
             self.assertEqual(repeated, materialized)
-            (fixture.operation_root / "release" / "untracked").write_text(
+            (
+                fixture.project_root
+                / "releases"
+                / fixture.release_sha
+                / "untracked"
+            ).write_text(
                 "drift\n",
                 encoding="ascii",
             )
@@ -826,6 +928,53 @@ class ProductionOperationTests(unittest.TestCase):
                     required_uid=os.geteuid(),
                 )
 
+    def test_materialization_rejects_symlinked_canonical_root(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = OperationFixture(Path(raw))
+            foreign = fixture.root / "foreign-projects"
+            foreign.mkdir(mode=0o700)
+            fixture.project_prefix.symlink_to(
+                foreign,
+                target_is_directory=True,
+            )
+            paths = MODULE.verify_incoming(
+                fixture.manifest,
+                operation_root=fixture.operation_root,
+                required_uid=os.geteuid(),
+            )
+            with self.assertRaises(MODULE.ProductionOperationError):
+                MODULE.materialize(
+                    fixture.manifest,
+                    paths,
+                    operation_root=fixture.operation_root,
+                    required_uid=os.geteuid(),
+                )
+            self.assertEqual(list(foreign.iterdir()), [])
+
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = OperationFixture(Path(raw))
+            foreign = fixture.root / "foreign-parent"
+            foreign.mkdir(mode=0o700)
+            linked_parent = fixture.root / "linked-parent"
+            linked_parent.symlink_to(
+                foreign,
+                target_is_directory=True,
+            )
+            MODULE.PROJECT_ROOT_PREFIX = linked_parent / "canonical-projects"
+            paths = MODULE.verify_incoming(
+                fixture.manifest,
+                operation_root=fixture.operation_root,
+                required_uid=os.geteuid(),
+            )
+            with self.assertRaises(MODULE.ProductionOperationError):
+                MODULE.materialize(
+                    fixture.manifest,
+                    paths,
+                    operation_root=fixture.operation_root,
+                    required_uid=os.geteuid(),
+                )
+            self.assertEqual(list(foreign.iterdir()), [])
+
     def test_materialization_requires_fresh_empty_redis_directory(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             fixture = OperationFixture(Path(raw))
@@ -834,7 +983,8 @@ class ProductionOperationTests(unittest.TestCase):
                 operation_root=fixture.operation_root,
                 required_uid=os.geteuid(),
             )
-            data = fixture.operation_root / "data"
+            data = fixture.data_root
+            fixture.data_prefix.mkdir(mode=0o700)
             data.mkdir(mode=0o700)
             role_data = data / "webapp-ir"
             role_data.mkdir(mode=0o700)
@@ -866,6 +1016,16 @@ class ProductionOperationTests(unittest.TestCase):
             traversal["runtime"]["entries"][0]["destination"] = "../runtime.env"
             with self.assertRaises(MODULE.ProductionOperationError):
                 MODULE._load_manifest_bytes(json.dumps(traversal).encode())
+
+            legacy_project = json.loads(json.dumps(fixture.document))
+            legacy_project["compose"]["project_name"] = (
+                f"trading-bot-wa-ir-{OPERATION_ID.replace('-', '')}"
+                "-webapp-ir"
+            )
+            with self.assertRaises(MODULE.ProductionOperationError):
+                MODULE._load_manifest_bytes(
+                    json.dumps(legacy_project).encode()
+                )
 
     def test_compose_validator_accepts_only_exact_prepare_contract(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -919,6 +1079,11 @@ class ProductionOperationTests(unittest.TestCase):
                 "writer:fence:webapp_ir:2:1"
             )
             mutations.append(wrong_fence)
+            wrong_operation_root = json.loads(json.dumps(baseline))
+            wrong_operation_root["x-production-shadow-operation"][
+                "project_root"
+            ] = str(fixture.operation_root)
+            mutations.append(wrong_operation_root)
             for mutation in mutations:
                 with self.subTest(mutation=mutations.index(mutation)):
                     with (
@@ -1474,7 +1639,9 @@ class ProductionOperationTests(unittest.TestCase):
                 operation_root=fixture.operation_root,
                 required_uid=os.geteuid(),
             )
-            graph = MODULE._load_migration_graph(fixture.operation_root / "release")
+            graph = MODULE._load_migration_graph(
+                fixture.project_root / "releases" / fixture.release_sha
+            )
             corridor = MODULE._migration_corridor(
                 graph,
                 source_revision=SOURCE_REVISION,

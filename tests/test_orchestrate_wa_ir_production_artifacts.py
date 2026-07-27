@@ -185,7 +185,13 @@ def operation_plan(fixture: OperationFixture) -> dict[str, object]:
 
 def operation_apply(fixture: OperationFixture) -> dict[str, object]:
     result = operation_plan(fixture)
-    root = MODULE.REMOTE_OPERATIONS_ROOT / fixture.manifest.operation_id
+    project_root = (
+        MODULE.REMOTE_PROJECT_ROOT_PREFIX / fixture.manifest.operation_id
+    )
+    data_root = MODULE.REMOTE_DATA_ROOT_PREFIX / fixture.manifest.operation_id
+    secret_root = (
+        MODULE.REMOTE_SECRET_ROOT_PREFIX / fixture.manifest.operation_id
+    )
     writer_state = {
         "active_site": None,
         "writer_epoch": 1,
@@ -204,7 +210,7 @@ def operation_apply(fixture: OperationFixture) -> dict[str, object]:
         "volume_name": (
             f"{fixture.manifest.project_name}_webapp_ir_postgres"
         ),
-        "data_path": str(root / "data" / "webapp-ir" / "postgres"),
+        "data_path": str(data_root / "webapp-ir" / "postgres"),
     }
     result.update(
         {
@@ -212,14 +218,18 @@ def operation_apply(fixture: OperationFixture) -> dict[str, object]:
             "required_confirmation": None,
             "database_container_started": True,
             "materialized": {
-                "release_root": str(root / "release"),
-                "secrets_root": str(root / "secrets"),
-                "data_root": str(root / "data"),
+                "release_root": str(
+                    project_root
+                    / "releases"
+                    / fixture.manifest.release_sha
+                ),
+                "secrets_root": str(secret_root),
+                "data_root": str(data_root),
                 "runtime_env": str(
-                    root / "secrets" / "webapp-ir" / "runtime.env.role"
+                    secret_root / "webapp-ir" / "runtime.env.role"
                 ),
                 "compose": str(
-                    root
+                    project_root
                     / "rendered"
                     / "webapp-ir"
                     / "docker-compose.yml"
@@ -291,6 +301,10 @@ class ProductionArtifactOrchestratorTests(unittest.TestCase):
             work = fixture.root / "work"
             work.mkdir(mode=0o700)
             output = work / MODULE.BOOTSTRAP_DESTINATION_NAME
+            secure_file(
+                output.with_name(f".{output.name}.materializing"),
+                b"partial zipapp",
+            )
             observed = MODULE._build_bound_bootstrap_agent(
                 fixture.manifest,
                 fixture.incoming / "release.bundle",
@@ -303,6 +317,29 @@ class ProductionArtifactOrchestratorTests(unittest.TestCase):
                     fixture.manifest.bootstrap_sha256,
                     fixture.manifest.bootstrap_bytes,
                 ),
+            )
+            os.link(
+                output,
+                output.with_name(f".{output.name}.materializing"),
+            )
+            secure_file(
+                work / ".wa-ir-production-agent.candidate.pyz",
+                b"stale candidate",
+            )
+            self.assertEqual(
+                MODULE._build_bound_bootstrap_agent(
+                    fixture.manifest,
+                    fixture.incoming / "release.bundle",
+                    work_directory=work,
+                    output=output,
+                ),
+                observed,
+            )
+            self.assertFalse(
+                output.with_name(f".{output.name}.materializing").exists()
+            )
+            self.assertFalse(
+                (work / ".wa-ir-production-agent.candidate.pyz").exists()
             )
             wrong = json.loads(json.dumps(fixture.document))
             wrong["bootstrap"]["sha256"] = "0" * 64
@@ -318,6 +355,97 @@ class ProductionArtifactOrchestratorTests(unittest.TestCase):
                     work_directory=second,
                     output=second / MODULE.BOOTSTRAP_DESTINATION_NAME,
                 )
+
+    def test_orchestrator_lock_rejects_parallel_transfer_or_finalizer(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            journal = Path(raw)
+            with MODULE._orchestrator_lock(journal):
+                with self.assertRaises(MODULE.ProductionOrchestratorError):
+                    with MODULE._orchestrator_lock(journal):
+                        self.fail("parallel orchestrator invocation acquired the lock")
+            with MODULE._orchestrator_lock(journal):
+                pass
+
+    def test_source_backup_prepublish_uses_transfer_journal_and_no_ssh(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = OperationFixture(Path(raw))
+            journal = fixture.root / "journal"
+            journal.mkdir(mode=0o700)
+            recipient = fixture.root / "recipient"
+            credentials = fixture.root / "credentials"
+            for path in (recipient, credentials):
+                secure_file(path, b"private-fixture")
+            artifact = MODULE.LocalArtifact(
+                "database-backup",
+                "database.dump",
+                fixture.incoming / "database.dump",
+            )
+            published = published_object(fixture, artifact)
+            with (
+                patch.object(MODULE, "load_secure_credentials", return_value=Mock()),
+                patch.object(MODULE, "build_client", return_value=Mock()),
+                patch.object(
+                    MODULE,
+                    "publish_one",
+                    return_value=published,
+                ) as publish,
+                patch.object(MODULE, "_run_ssh") as ssh,
+            ):
+                result = MODULE.publish_source_backup(
+                    fixture.incoming / "database.dump",
+                    operation_id=fixture.manifest.operation_id,
+                    release_sha=fixture.manifest.release_sha,
+                    recipient_file=recipient,
+                    credentials_file=credentials,
+                    journal_directory=journal,
+                )
+            self.assertEqual(
+                result["status"],
+                "source-backup-published-and-verified",
+            )
+            call = publish.call_args
+            self.assertEqual(call.args[0], artifact)
+            self.assertEqual(
+                call.kwargs["journal_path"],
+                journal / "publish-database-backup.json",
+            )
+            self.assertEqual(result["object"], published.evidence())
+            self.assertFalse(result["presigned_url_persisted"])
+            self.assertFalse(result["payload_bytes_over_ssh"])
+            ssh.assert_not_called()
+
+    def test_transfer_blocks_before_publish_without_exact_source_object(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = OperationFixture(Path(raw))
+            journal = fixture.root / "journal"
+            journal.mkdir(mode=0o700)
+            source = fixture.root / "source-attestation.json"
+            identity = fixture.root / "ssh"
+            source_attestation(fixture, source)
+            secure_file(identity, b"private-fixture")
+            with (
+                patch.object(
+                    MODULE,
+                    "_verified_source_backup_publication",
+                    side_effect=MODULE.ProductionOrchestratorError(
+                        "source object differs"
+                    ),
+                ),
+                patch.object(MODULE, "publish_one") as publish,
+                patch.object(MODULE, "load_secure_credentials") as credentials,
+                self.assertRaises(MODULE.ProductionOrchestratorError),
+            ):
+                MODULE.transfer_operation(
+                    fixture.incoming / "operation-manifest.json",
+                    fixture.incoming,
+                    source_database_attestation=source,
+                    recipient_file=fixture.root / "recipient",
+                    credentials_file=fixture.root / "credentials",
+                    journal_directory=journal,
+                    ssh_identity=identity,
+                )
+            publish.assert_not_called()
+            credentials.assert_not_called()
 
     def test_descriptor_and_ssh_delivery_are_control_only(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -471,6 +599,26 @@ class ProductionArtifactOrchestratorTests(unittest.TestCase):
             )
             self.assertTrue(applied["database_container_started"])
 
+            legacy_materialized = operation_apply(fixture)
+            legacy_root = (
+                MODULE.REMOTE_OPERATIONS_ROOT
+                / fixture.manifest.operation_id
+            )
+            legacy_materialized["materialized"]["release_root"] = str(
+                legacy_root / "release"
+            )
+            with self.assertRaises(MODULE.ProductionOrchestratorError):
+                MODULE.run_remote_operation(
+                    manifest=fixture.manifest,
+                    ssh_identity=identity,
+                    apply=True,
+                    confirm=(
+                        f"prepare-wa-ir:{fixture.manifest.operation_id}:"
+                        f"{fixture.manifest.release_sha}"
+                    ),
+                    runner=runner_for(legacy_materialized),
+                )
+
             extra = operation_plan(fixture)
             extra["unexpected"] = "value"
             with self.assertRaises(MODULE.ProductionOrchestratorError):
@@ -504,6 +652,15 @@ class ProductionArtifactOrchestratorTests(unittest.TestCase):
                 secure_file(path, b"private-fixture")
             source_attestation(fixture, source)
             published_kinds: list[str] = []
+            database_artifact = MODULE.LocalArtifact(
+                "database-backup",
+                "database.dump",
+                fixture.incoming / "database.dump",
+            )
+            source_backup_publication = published_object(
+                fixture,
+                database_artifact,
+            )
 
             def publish(artifact, **_kwargs):  # noqa: ANN001
                 published_kinds.append(artifact.kind)
@@ -539,6 +696,11 @@ class ProductionArtifactOrchestratorTests(unittest.TestCase):
             with (
                 patch.object(MODULE, "load_secure_credentials", return_value=Mock()),
                 patch.object(MODULE, "build_client", return_value=Mock()),
+                patch.object(
+                    MODULE,
+                    "_verified_source_backup_publication",
+                    return_value=source_backup_publication,
+                ) as verified_source,
                 patch.object(MODULE, "publish_one", side_effect=publish) as publish_mock,
                 patch.object(MODULE, "presign_exact_get", side_effect=presign),
                 patch.object(MODULE, "deliver_received_artifact", side_effect=deliver),
@@ -554,6 +716,19 @@ class ProductionArtifactOrchestratorTests(unittest.TestCase):
                     ssh_identity=identity,
                 )
                 self.assertEqual(result["object_count"], 9)
+                self.assertEqual(
+                    verified_source.call_args.args[0],
+                    journal / "publish-database-backup.json",
+                )
+                database_publish_call = next(
+                    call
+                    for call in publish_mock.call_args_list
+                    if call.args[0].kind == "database-backup"
+                )
+                self.assertEqual(
+                    database_publish_call.kwargs["journal_path"],
+                    journal / "publish-database-backup.json",
+                )
                 self.assertEqual(
                     set(published_kinds),
                     set(MODULE.EXPECTED_ARTIFACTS)
