@@ -15,7 +15,6 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import json
-import os
 import re
 from typing import Any
 from uuid import UUID
@@ -477,13 +476,11 @@ def verify_human_approval(
     """
 
     if isinstance(token, dict) and token.get("schema") == RELAY_RECEIPT_SCHEMA:
-        public_key = str(
-            witness_relay_public_key
-            if witness_relay_public_key is not None
-            else os.environ.get("WRITER_WITNESS_PUBLIC_KEY", "")
-        ).strip()
+        public_key = str(witness_relay_public_key or "").strip()
         if not public_key:
-            raise HumanApprovalError("human approval relay trust key is not configured")
+            raise HumanApprovalError(
+                "human approval relay trust key was not supplied explicitly"
+            )
         return verify_human_approval_relay_receipt(
             token,
             policy_payload=policy_payload,
