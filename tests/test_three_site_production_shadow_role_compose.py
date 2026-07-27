@@ -159,6 +159,18 @@ class ThreeSiteProductionShadowRoleComposeTests(unittest.TestCase):
                 )
                 self.assertEqual(set(rendered["services"]), expected_services)
                 self.assertEqual(set(rendered["networks"]), {role.replace("-", "_")})
+                self.assertEqual(
+                    set(rendered["volumes"]),
+                    (
+                        {
+                            "webapp_fi_postgres",
+                            "webapp_fi_uploads",
+                            "webapp_fi_audit",
+                        }
+                        if role == "webapp-fi"
+                        else {"webapp_ir_postgres"}
+                    ),
+                )
                 self.assertNotIn("PRODUCTION_SHADOW_WITNESS_URL", json.dumps(rendered))
                 self.assertNotIn("ports", json.dumps(rendered["services"]))
                 for service in rendered["services"].values():

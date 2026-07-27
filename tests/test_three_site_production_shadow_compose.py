@@ -69,9 +69,13 @@ class ThreeSiteProductionShadowComposeTests(unittest.TestCase):
                 "BOT_FI_SHADOW_DR_PORT": "9442",
                 "WEBAPP_FI_SHADOW_DR_PORT": "9443",
                 "WEBAPP_IR_SHADOW_DR_PORT": "9444",
-                "BOT_FI_SHADOW_DR_BIND_ADDRESS": "203.0.113.5",
-                "WEBAPP_FI_SHADOW_DR_BIND_ADDRESS": "203.0.113.10",
-                "WEBAPP_IR_SHADOW_DR_BIND_ADDRESS": "203.0.113.20",
+                "BOT_FI_SHADOW_DR_BIND_ADDRESS": "65.109.216.187",
+                "WEBAPP_FI_SHADOW_DR_BIND_ADDRESS": "65.109.220.59",
+                "WEBAPP_IR_SHADOW_DR_BIND_ADDRESS": "95.38.164.29",
+                "BOT_FI_PEER_WEBAPP_FI_IP": "65.109.220.59",
+                "WEBAPP_FI_PEER_BOT_FI_IP": "65.109.216.187",
+                "WEBAPP_FI_PEER_WEBAPP_IR_IP": "95.38.164.29",
+                "WEBAPP_IR_PEER_WEBAPP_FI_IP": "65.109.220.59",
                 "BOT_FI_PUBLIC_WEBAPP_URL": "https://bot-fi.example.invalid",
                 "WEBAPP_FI_PUBLIC_WEBAPP_URL": "https://webapp-fi.example.invalid",
                 "WEBAPP_IR_PUBLIC_WEBAPP_URL": "https://webapp-ir.example.invalid",
@@ -103,8 +107,22 @@ class ThreeSiteProductionShadowComposeTests(unittest.TestCase):
                 "WEBAPP_IR_WITNESS_KEY_ID": "webapp-ir-operation-key",
                 "WEBAPP_FI_WITNESS_SECRET": "f" * 32,
                 "WEBAPP_IR_WITNESS_SECRET": "i" * 32,
-                "DR_BLOB_OBJECT_ENDPOINT": "https://objects.example.invalid",
+                "DR_BLOB_OBJECT_ENDPOINT": (
+                    "https://s3.ir-thr-at1.arvanstorage.ir"
+                ),
+                "DR_BLOB_OBJECT_REGION": "ir-thr-at1",
+                "DR_BLOB_OBJECT_BUCKET": "production-sync-coin",
                 "DR_BLOB_OBJECT_PREFIX": f"production-shadow/{OPERATION_ID}/blobs",
+                "DR_BLOB_POLICY_ATTESTATION_SHA256": "a" * 64,
+                "DR_BLOB_POLICY_ATTESTED_AT_EPOCH": str(int(time.time())),
+                "DR_BLOB_COMPATIBILITY_ATTESTATION_SHA256": "b" * 64,
+                "DR_BLOB_COMPATIBILITY_ATTESTED_AT_EPOCH": str(
+                    int(time.time())
+                ),
+                "PRODUCTION_SHADOW_DR_TLS_ATTESTATION_SHA256": "c" * 64,
+                "PRODUCTION_SHADOW_DR_TLS_ATTESTED_AT_EPOCH": str(
+                    int(time.time())
+                ),
                 "BOT_FI_DR_PEERS_JSON": json.dumps(
                     [
                         {
@@ -297,7 +315,10 @@ class ThreeSiteProductionShadowComposeTests(unittest.TestCase):
         self.assertEqual(summary["service_count"], 49)
         self.assertEqual(summary["profile_count"], 24)
         self.assertTrue(summary["full_product_topology"])
-        self.assertEqual(summary["witness_mode"], "external-canonical-attested")
+        self.assertEqual(
+            summary["witness_mode"],
+            "external-canonical-attestation-values-bound-only",
+        )
 
     def test_docker_compose_config_accepts_all_profiles_and_data_ready_is_store_only(self):
         values = self.valid_environment()
@@ -613,6 +634,18 @@ class ThreeSiteProductionShadowComposeTests(unittest.TestCase):
         self.assertIn("DR_BLOB_OBJECT_PREFIX", failures)
         self.assertIn("WEBAPP_IR_PUBLIC_WEBAPP_URL", failures)
 
+        values = self.valid_environment()
+        values["DR_BLOB_OBJECT_ENDPOINT"] = "https://objects.example.invalid"
+        values["WEBAPP_FI_PEER_WEBAPP_IR_IP"] = "203.0.113.99"
+        failures = "\n".join(
+            collect_environment_failures(values, self.source_text)
+        )
+        self.assertIn("exact reviewed private/versioned Arvan", failures)
+        self.assertIn(
+            "WEBAPP_FI_PEER_WEBAPP_IR_IP must match the canonical",
+            failures,
+        )
+
     def test_dr_configuration_uses_runtime_list_shapes_and_exact_pairs(self):
         values = self.valid_environment()
         values["WEBAPP_FI_DR_PEERS_JSON"] = (
@@ -722,9 +755,21 @@ class ThreeSiteProductionShadowComposeTests(unittest.TestCase):
             root = Path(tmpdir)
             values["PRODUCTION_SHADOW_DATA_ROOT"] = str(root)
             for role in ("bot-fi", "webapp-fi", "webapp-ir"):
-                target = root / role / "redis"
-                target.mkdir(parents=True, mode=0o700)
+                role_root = root / role
+                role_root.mkdir(mode=0o700)
+                role_root.chmod(0o700)
+                target = role_root / "redis"
+                target.mkdir(mode=0o700)
+                target.chmod(0o700)
             validate_pristine_redis_targets(values)
+
+            target.chmod(0o750)
+            with self.assertRaisesRegex(
+                ProductionShadowComposeError,
+                "mode-0700",
+            ):
+                validate_pristine_redis_targets(values)
+            target.chmod(0o700)
 
             legacy = root / "webapp-ir/redis/dump.rdb"
             legacy.write_bytes(b"legacy")
@@ -733,6 +778,28 @@ class ThreeSiteProductionShadowComposeTests(unittest.TestCase):
                 "rollback evidence only",
             ):
                 validate_pristine_redis_targets(values)
+
+            real_root = root / "real-operation"
+            real_root.mkdir(mode=0o700)
+            real_root.chmod(0o700)
+            linked_root = root / "linked-operation"
+            linked_root.symlink_to(real_root, target_is_directory=True)
+            values["PRODUCTION_SHADOW_DATA_ROOT"] = str(linked_root)
+            with self.assertRaisesRegex(
+                ProductionShadowComposeError,
+                "without following symlinks",
+            ):
+                validate_pristine_redis_targets(values)
+
+    def test_webapp_ir_restore_tool_is_stdin_only(self):
+        document = copy.deepcopy(self.document)
+        document["services"]["webapp_ir_restore_tool"]["volumes"] = [
+            "webapp_ir_uploads:/run/restore-target/uploads"
+        ]
+        self.assert_source_failure(
+            document,
+            "accept PostgreSQL restore only over stdin",
+        )
 
 
 if __name__ == "__main__":
