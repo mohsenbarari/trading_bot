@@ -66,6 +66,11 @@ RECOVERY_CODE_COUNT = 10
 DEFAULT_ACTIONS = (
     {"action": "approve_inventory", "environments": ["staging"], "max_ttl_seconds": 86400},
     {"action": "approve_migration", "environments": ["staging"], "max_ttl_seconds": 14400},
+    {
+        "action": "approve_seed_publication",
+        "environments": ["staging"],
+        "max_ttl_seconds": 3600,
+    },
     {"action": "start_full_matrix", "environments": ["staging"], "max_ttl_seconds": 600},
     {"action": "approve_gate_d", "environments": ["staging"], "max_ttl_seconds": 600},
     {"action": "run_writer_witness_matrix", "environments": ["staging"], "max_ttl_seconds": 600},

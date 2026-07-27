@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import unittest
+from unittest.mock import patch
 
 from core.human_approval import approval_subject
 from core.human_approval_issuer import (
@@ -348,6 +349,46 @@ class ThreeSiteStagingMigrationPlanTests(unittest.TestCase):
         result = self._verify(self._documents())
         self.assertEqual(result["status"], "approved")
         self.assertEqual(result["source_roles"], ["bot_fi", "webapp_fi"])
+
+    def test_v2_distinct_target_recipient_map_is_consumer_verified(self):
+        documents = self._documents()
+        seeds = documents[6]
+        plan = documents[-2]
+        for role, manifest in seeds.items():
+            targets = (
+                ("bot_fi",)
+                if role == "bot_fi"
+                else ("webapp_fi", "webapp_ir")
+            )
+            fingerprints = {
+                target: hashlib.sha256(f"recipient-{target}".encode()).hexdigest()
+                for target in targets
+            }
+            manifest["schema"] = "three-site-staging-seed-manifest-v2"
+            manifest["encryption"] = "age-x25519-multi-recipient"
+            manifest["recipient_fingerprints"] = fingerprints
+            del manifest["recipient_fingerprint"]
+            for item in manifest["objects"]:
+                item["publication_intent"] = hashlib.sha256(
+                    f"intent-{role}-{item['kind']}".encode()
+                ).hexdigest()
+            row = next(
+                value
+                for value in plan["seed_bundles"]
+                if value["source_role"] == role
+            )
+            row["encryption"] = "age-x25519-multi-recipient"
+            row["recipient_fingerprints"] = fingerprints
+            del row["recipient_fingerprint"]
+            row["manifest_sha256"] = hashlib.sha256(
+                _canonical_bytes(manifest)
+            ).hexdigest()
+        with patch(
+            "scripts.verify_three_site_staging_migration_plan._verify_approval",
+            return_value={"approval_id": "test"},
+        ):
+            result = self._verify(documents)
+        self.assertEqual(result["status"], "approved")
 
     def test_migration_policy_or_token_tampering_is_rejected(self):
         documents = self._documents()
