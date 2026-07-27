@@ -184,6 +184,7 @@ def manifest_payload() -> dict:
             "legacy_webapp_redis_rollback_sha256": "7" * 64,
             "shadow_compose_sha256": "4" * 64,
             "cutover_approval_sha256": "5" * 64,
+            "human_approval_policy_sha256": "e" * 64,
             "nginx_freeze_generation_sha256": "8" * 64,
             "nginx_rollback_generation_sha256": "9" * 64,
             "postcommit_executor_contract_sha256": "a" * 64,
@@ -705,6 +706,8 @@ class ProductionShadowManifestTests(unittest.TestCase):
                 "/root/evidence.json",
                 "--approval",
                 "/root/approval.json",
+                "--approval-policy",
+                "/root/human-approval-policy.json",
                 "--apply",
                 "--confirm",
                 APPLY_CONFIRMATION,
@@ -719,6 +722,9 @@ class ProductionShadowManifestTests(unittest.TestCase):
                     return_value=(token, receipt),
                 ) as verifier,
                 mock.patch(
+                    "scripts.production_shadow_cutover_controller._verify_runtime_authorization"
+                ) as authorization,
+                mock.patch(
                     "scripts.production_shadow_cutover_controller._persist_phase_verification_receipt",
                     return_value=Path("/root/receipt.json"),
                 ) as persist,
@@ -728,6 +734,11 @@ class ProductionShadowManifestTests(unittest.TestCase):
                 self.assertEqual(main(), 0)
             self.assertEqual(json.loads(output.getvalue())["status"], "active")
             verifier.assert_called_once()
+            self.assertEqual(
+                verifier.call_args.kwargs["approval_policy_path"],
+                Path("/root/human-approval-policy.json"),
+            )
+            authorization.assert_called_once()
             persist.assert_called_once()
             journal.complete_phase.assert_called_once_with(
                 PHASES[0],
@@ -761,6 +772,70 @@ class ProductionShadowManifestTests(unittest.TestCase):
             blocked = json.loads(blocked_output.getvalue())
             self.assertEqual(blocked["status"], "blocked")
             self.assertIn("never accepts", blocked["error"])
+
+    @unittest.skipUnless(os.geteuid() == 0, "production CLI is intentionally root-only")
+    def test_applied_journal_creation_verifies_authorization_before_mutation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+            path.write_text(json.dumps(manifest_payload()), encoding="utf-8")
+            path.chmod(0o600)
+            journal = mock.Mock(unsafe=True)
+            journal.create.return_value = {
+                "status": "active",
+                "completed_phases": [],
+            }
+            base = [
+                "production-shadow-cutover-controller",
+                "--manifest",
+                str(path),
+                "--action",
+                "create-journal",
+                "--apply",
+                "--confirm",
+                APPLY_CONFIRMATION,
+            ]
+
+            blocked_output = io.StringIO()
+            with (
+                mock.patch(
+                    "scripts.production_shadow_cutover_controller.ProductionCutoverJournal",
+                    return_value=journal,
+                ),
+                mock.patch("sys.argv", base),
+                redirect_stdout(blocked_output),
+            ):
+                self.assertEqual(main(), 2)
+            journal.create.assert_not_called()
+            self.assertIn(
+                "--approval and --approval-policy",
+                json.loads(blocked_output.getvalue())["error"],
+            )
+
+            output = io.StringIO()
+            with (
+                mock.patch(
+                    "scripts.production_shadow_cutover_controller.ProductionCutoverJournal",
+                    return_value=journal,
+                ),
+                mock.patch(
+                    "scripts.production_shadow_cutover_controller._verify_runtime_authorization"
+                ) as authorization,
+                mock.patch(
+                    "sys.argv",
+                    [
+                        *base,
+                        "--approval",
+                        "/root/approval.json",
+                        "--approval-policy",
+                        "/root/human-approval-policy.json",
+                    ],
+                ),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(main(), 0)
+            authorization.assert_called_once()
+            journal.create.assert_called_once()
+            self.assertEqual(json.loads(output.getvalue())["status"], "active")
 
     @unittest.skipUnless(os.geteuid() == 0, "verification receipt is root-only")
     def test_verifier_result_bindings_and_receipt_are_exact(self):

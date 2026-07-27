@@ -69,6 +69,11 @@ DEFAULT_ACTIONS = (
     {"action": "start_full_matrix", "environments": ["staging"], "max_ttl_seconds": 600},
     {"action": "approve_gate_d", "environments": ["staging"], "max_ttl_seconds": 600},
     {"action": "run_writer_witness_matrix", "environments": ["staging"], "max_ttl_seconds": 600},
+    {
+        "action": "deploy_three_site_production",
+        "environments": ["production"],
+        "max_ttl_seconds": 86400,
+    },
     {"action": "promote_ir", "environments": ["staging", "production"], "max_ttl_seconds": 600},
     {"action": "failback_fi", "environments": ["staging", "production"], "max_ttl_seconds": 600},
 )

@@ -31,11 +31,14 @@ if str(REPO_ROOT) not in sys.path:
 from core.secure_file_io import (  # noqa: E402
     SecureFileError,
     read_secure_bytes,
-    sha256_secure_file,
 )
 from core.docker_image_identity import (  # noqa: E402
     DockerImageIdentityError,
     verify_content_descriptor,
+)
+from core.production_shadow_authorization import (  # noqa: E402
+    ProductionShadowAuthorizationError,
+    verify_authorization_documents,
 )
 from scripts.production_shadow_cutover_controller import (  # noqa: E402
     ARTIFACT_FIELDS,
@@ -662,6 +665,7 @@ def _validate_manifest_artifacts(
         "legacy_webapp_redis_rollback_sha256",
         "shadow_compose_sha256",
         "cutover_approval_sha256",
+        "human_approval_policy_sha256",
         "nginx_freeze_generation_sha256",
         "nginx_rollback_generation_sha256",
         "postcommit_executor_contract_sha256",
@@ -1632,6 +1636,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--approval", type=Path, required=True)
+    parser.add_argument("--approval-policy", type=Path, required=True)
     parser.add_argument("--expected-phase", required=True)
     parser.add_argument("--role-validation", action="append", default=[])
     parser.add_argument("--claim-source", action="append", default=[])
@@ -1646,16 +1651,30 @@ def main(argv: list[str] | None = None) -> int:
             manifest_sha256=manifest_sha256,
             manifest_path=args.manifest,
         )
-        approval_sha256, _ = sha256_secure_file(
+        approval_bytes = read_secure_bytes(
             args.approval,
             label="production cutover approval",
             owner_uid=0,
             max_size=16 * 1024 * 1024,
         )
-        if approval_sha256 != manifest["artifacts"]["cutover_approval_sha256"]:
-            raise PhaseEvidenceError(
-                "approval file differs from the manifest artifact"
+        policy_bytes = read_secure_bytes(
+            args.approval_policy,
+            label="production human approval policy",
+            owner_uid=0,
+            max_size=4 * 1024 * 1024,
+        )
+        try:
+            verified_approval = verify_authorization_documents(
+                manifest,
+                approval_bytes=approval_bytes,
+                policy_bytes=policy_bytes,
+                require_fresh=True,
             )
+        except ProductionShadowAuthorizationError as exc:
+            raise PhaseEvidenceError(
+                "production cutover approval is invalid or expired"
+            ) from exc
+        approval_sha256 = verified_approval.token_hash
         verifier_sha256 = hash_release_verifier(Path(__file__).resolve())
         if (
             verifier_sha256

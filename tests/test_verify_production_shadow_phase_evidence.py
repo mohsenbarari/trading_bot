@@ -786,10 +786,20 @@ class ProductionShadowPhaseEvidenceTests(unittest.TestCase):
                 "/root/manifest.json",
                 "--approval",
                 "/root/approval.json",
+                "--approval-policy",
+                "/root/human-approval-policy.json",
             ]
             output = io.StringIO()
             journal = mock.Mock(unsafe=True)
             journal.assert_bindings.return_value = journal_state
+
+            def secure_read(source, **_kwargs):
+                if Path(source) == Path("/root/approval.json"):
+                    return b"approval"
+                if Path(source) == Path("/root/human-approval-policy.json"):
+                    return b"policy"
+                return Path(source).read_bytes()
+
             with (
                 mock.patch(
                     "scripts.verify_production_shadow_phase_evidence.read_root_only_manifest",
@@ -800,8 +810,12 @@ class ProductionShadowPhaseEvidenceTests(unittest.TestCase):
                     return_value={"plan_sha256": PLAN_SHA256},
                 ),
                 mock.patch(
-                    "scripts.verify_production_shadow_phase_evidence.sha256_secure_file",
-                    return_value=(APPROVAL_SHA256, 1),
+                    "scripts.verify_production_shadow_phase_evidence.read_secure_bytes",
+                    side_effect=secure_read,
+                ),
+                mock.patch(
+                    "scripts.verify_production_shadow_phase_evidence.verify_authorization_documents",
+                    return_value=mock.Mock(token_hash=APPROVAL_SHA256),
                 ),
                 mock.patch(
                     "scripts.verify_production_shadow_phase_evidence.hash_release_verifier",

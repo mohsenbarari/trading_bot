@@ -180,6 +180,7 @@ CUTOVER_ARTIFACT_FIELDS = {
     "legacy_webapp_redis_rollback_sha256",
     "shadow_compose_sha256",
     "cutover_approval_sha256",
+    "human_approval_policy_sha256",
     "nginx_freeze_generation_sha256",
     "nginx_rollback_generation_sha256",
     "postcommit_executor_contract_sha256",

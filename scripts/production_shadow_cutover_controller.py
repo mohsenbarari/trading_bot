@@ -42,6 +42,10 @@ from core.docker_image_identity import (  # noqa: E402
     DockerImageIdentityError,
     verify_content_descriptor,
 )
+from core.production_shadow_authorization import (  # noqa: E402
+    ProductionShadowAuthorizationError,
+    verify_authorization_documents,
+)
 from core.three_site_topology import (  # noqa: E402
     BOT_FI_HOST,
     PRODUCTION_WITNESS_HOST,
@@ -163,6 +167,7 @@ ARTIFACT_FIELDS = frozenset(
         "legacy_webapp_redis_rollback_sha256",
         "shadow_compose_sha256",
         "cutover_approval_sha256",
+        "human_approval_policy_sha256",
         "nginx_freeze_generation_sha256",
         "nginx_rollback_generation_sha256",
         "postcommit_executor_contract_sha256",
@@ -925,6 +930,7 @@ def validate_manifest(document: Any) -> dict[str, Any]:
         "legacy_webapp_redis_rollback_sha256",
         "shadow_compose_sha256",
         "cutover_approval_sha256",
+        "human_approval_policy_sha256",
         "nginx_freeze_generation_sha256",
         "nginx_rollback_generation_sha256",
         "postcommit_executor_contract_sha256",
@@ -1696,6 +1702,7 @@ def _run_release_phase_verifier(
     plan: dict[str, Any],
     manifest_path: Path,
     approval_path: Path,
+    approval_policy_path: Path,
     evidence_path: Path,
     role_validation: list[str],
     claim_source: list[str],
@@ -1704,6 +1711,7 @@ def _run_release_phase_verifier(
     for path, label in (
         (manifest_path, "manifest"),
         (approval_path, "approval"),
+        (approval_policy_path, "approval policy"),
         (evidence_path, "evidence"),
     ):
         if not path.is_absolute() or ".." in path.parts:
@@ -1731,6 +1739,8 @@ def _run_release_phase_verifier(
         str(manifest_path),
         "--approval",
         str(approval_path),
+        "--approval-policy",
+        str(approval_policy_path),
         "--expected-phase",
         phase,
     ]
@@ -2431,6 +2441,44 @@ MUTATING_ACTIONS = {
     "commit-first-business-write",
 }
 
+AUTHORIZATION_REQUIRED_ACTIONS = {
+    "create-journal",
+    "begin-phase",
+    "complete-phase",
+    "commit-first-business-write",
+}
+
+
+def _verify_runtime_authorization(
+    manifest: dict[str, Any],
+    *,
+    approval_path: Path,
+    approval_policy_path: Path,
+) -> None:
+    try:
+        approval_bytes = read_secure_bytes(
+            approval_path,
+            label="production cutover approval",
+            owner_uid=0,
+            max_size=16 * 1024 * 1024,
+        )
+        policy_bytes = read_secure_bytes(
+            approval_policy_path,
+            label="production human approval policy",
+            owner_uid=0,
+            max_size=4 * 1024 * 1024,
+        )
+        verify_authorization_documents(
+            manifest,
+            approval_bytes=approval_bytes,
+            policy_bytes=policy_bytes,
+            require_fresh=True,
+        )
+    except (SecureFileError, ProductionShadowAuthorizationError) as exc:
+        raise CutoverContractError(
+            "production cutover authorization is invalid or expired"
+        ) from exc
+
 
 def _planned_transition(args: argparse.Namespace) -> dict[str, Any]:
     return {
@@ -2461,11 +2509,21 @@ def _require_action_arguments(args: argparse.Namespace) -> None:
             raise CutoverContractError(
                 "complete-phase never accepts a caller-supplied evidence SHA-256"
             )
-        if args.evidence is None or args.approval is None:
+        if (
+            args.evidence is None
+            or args.approval is None
+            or args.approval_policy is None
+        ):
             raise CutoverContractError(
-                "complete-phase requires --evidence and --approval for the "
-                "release-bound verifier"
+                "complete-phase requires --evidence, --approval and "
+                "--approval-policy for the release-bound verifier"
             )
+    if args.apply and args.action in AUTHORIZATION_REQUIRED_ACTIONS and (
+        args.approval is None or args.approval_policy is None
+    ):
+        raise CutoverContractError(
+            f"{args.action} requires --approval and --approval-policy"
+        )
     if args.action in {
         "record-rollback",
         "commit-first-business-write",
@@ -2495,6 +2553,7 @@ def main() -> int:
     parser.add_argument("--evidence-sha256")
     parser.add_argument("--evidence", type=Path)
     parser.add_argument("--approval", type=Path)
+    parser.add_argument("--approval-policy", type=Path)
     parser.add_argument("--role-validation", action="append", default=[])
     parser.add_argument("--claim-source", action="append", default=[])
     parser.add_argument("--prior-phase-evidence", action="append", default=[])
@@ -2538,6 +2597,12 @@ def main() -> int:
         else:
             if args.confirm != APPLY_CONFIRMATION:
                 raise CutoverContractError(f"--apply requires --confirm {APPLY_CONFIRMATION}")
+            if args.action in AUTHORIZATION_REQUIRED_ACTIONS:
+                _verify_runtime_authorization(
+                    manifest,
+                    approval_path=Path(args.approval),
+                    approval_policy_path=Path(args.approval_policy),
+                )
             if args.action == "create-journal":
                 state = journal.create(
                     manifest_sha256=manifest_sha256,
@@ -2566,6 +2631,7 @@ def main() -> int:
                         plan=plan,
                         manifest_path=args.manifest,
                         approval_path=Path(args.approval),
+                        approval_policy_path=Path(args.approval_policy),
                         evidence_path=Path(args.evidence),
                         role_validation=list(args.role_validation),
                         claim_source=list(args.claim_source),
