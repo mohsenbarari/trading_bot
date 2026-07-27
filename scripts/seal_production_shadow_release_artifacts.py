@@ -14,7 +14,7 @@ import fcntl
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import stat
 import subprocess
@@ -33,18 +33,15 @@ from core.secure_file_io import (  # noqa: E402
     write_secure_atomic_bytes,
     write_secure_new_bytes,
 )
-from scripts.wa_ir_production_operation import (  # noqa: E402
-    Image,
-    ProductionOperationError,
-    _docker_archive_identity,
+from core.docker_image_identity import (  # noqa: E402
+    DockerImageIdentityError,
+    image_content_descriptor,
+    image_content_descriptor_from_archive_config,
+    verify_content_descriptor,
 )
 from scripts.wa_ir_production_transport_contract import (  # noqa: E402
     ProductionTransportError,
     validate_operation_id,
-)
-from scripts.verify_three_site_staging_image_inventory import (  # noqa: E402
-    ImageInventoryError,
-    image_content_descriptor,
 )
 
 
@@ -53,14 +50,17 @@ ARTIFACT_ROOT = Path(
 )
 GIT = "/usr/bin/git"
 DOCKER = "/usr/bin/docker"
-JOURNAL_SCHEMA = "production-shadow-release-artifact-journal-v1"
-CLOSURE_SCHEMA = "production-shadow-release-artifact-closure-v1"
+JOURNAL_SCHEMA = "production-shadow-release-artifact-journal-v2"
+CLOSURE_SCHEMA = "production-shadow-release-artifact-closure-v2"
 PLAN_SCHEMA = "production-shadow-release-artifact-plan-v1"
 ZERO_SHA256 = "0" * 64
 MAX_JOURNAL_BYTES = 1024 * 1024
 MAX_MANIFEST_BYTES = 1024 * 1024
 MAX_COMMAND_OUTPUT_BYTES = 2 * 1024 * 1024
 MAX_ARTIFACT_BYTES = 64 * 1024 * 1024 * 1024
+MAX_ARCHIVE_MEMBERS = 250_000
+MAX_ARCHIVE_CONFIG_BYTES = 16 * 1024 * 1024
+MAX_ARCHIVE_MANIFEST_BYTES = 1024 * 1024
 RELEASE_RE = re.compile(r"^[0-9a-f]{40}$")
 IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 CONTENT_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -118,7 +118,16 @@ EXPECTED_ARTIFACT_RECORDS = {
     "closure_manifest": ("closure-manifest.json", "json-manifest", False),
 }
 ARTIFACT_RECORD_FIELDS = frozenset(
-    {"filename", "sha256", "bytes", "kind", "image_id", "content_identity"}
+    {
+        "filename",
+        "sha256",
+        "bytes",
+        "kind",
+        "source_engine_id",
+        "config_digest",
+        "content_descriptor",
+        "content_identity",
+    }
 )
 JOURNAL_FIELDS = frozenset(
     {
@@ -566,29 +575,66 @@ def _artifact_record(
     digest: str,
     size: int,
     kind: str,
-    image_id: str | None,
+    source_engine_id: str | None,
+    config_digest: str | None,
+    content_descriptor: Mapping[str, Any] | None,
     content_identity: str | None,
 ) -> dict[str, Any]:
+    is_image = source_engine_id is not None
+    metadata_values = (
+        config_digest,
+        content_descriptor,
+        content_identity,
+    )
+    metadata_shape_valid = (
+        all(value is not None for value in metadata_values)
+        if is_image
+        else all(value is None for value in metadata_values)
+    )
     if (
         not filename
         or "/" in filename
         or SHA256_RE.fullmatch(digest) is None
         or not 1 <= size <= MAX_ARTIFACT_BYTES
         or kind not in {"git-bundle", "docker-archive", "json-manifest"}
-        or (image_id is not None and IMAGE_ID_RE.fullmatch(image_id) is None)
+        or (
+            source_engine_id is not None
+            and IMAGE_ID_RE.fullmatch(source_engine_id) is None
+        )
+        or (
+            config_digest is not None
+            and CONTENT_ID_RE.fullmatch(config_digest) is None
+        )
         or (
             content_identity is not None
             and CONTENT_ID_RE.fullmatch(content_identity) is None
         )
-        or (image_id is None) != (content_identity is None)
+        or not metadata_shape_valid
     ):
         raise ReleaseArtifactError("artifact journal record is invalid")
+    if is_image:
+        try:
+            expected_identity = verify_content_descriptor(content_descriptor)
+        except DockerImageIdentityError as exc:
+            raise ReleaseArtifactError(
+                "artifact journal image descriptor is invalid"
+            ) from exc
+        if expected_identity != content_identity:
+            raise ReleaseArtifactError(
+                "artifact journal image content identity differs"
+            )
     return {
         "filename": filename,
         "sha256": digest,
         "bytes": size,
         "kind": kind,
-        "image_id": image_id,
+        "source_engine_id": source_engine_id,
+        "config_digest": config_digest,
+        "content_descriptor": (
+            dict(content_descriptor)
+            if content_descriptor is not None
+            else None
+        ),
         "content_identity": content_identity,
     }
 
@@ -661,7 +707,9 @@ def _validate_journal(journal: Any) -> dict[str, Any]:
             digest=record["sha256"],
             size=record["bytes"],
             kind=record["kind"],
-            image_id=record["image_id"],
+            source_engine_id=record["source_engine_id"],
+            config_digest=record["config_digest"],
+            content_descriptor=record["content_descriptor"],
             content_identity=record["content_identity"],
         )
         expected_filename, expected_kind, expects_image = (
@@ -670,7 +718,7 @@ def _validate_journal(journal: Any) -> dict[str, Any]:
         if (
             record["filename"] != expected_filename
             or record["kind"] != expected_kind
-            or (record["image_id"] is not None) != expects_image
+            or (record["source_engine_id"] is not None) != expects_image
         ):
             raise ReleaseArtifactError(
                 "artifact journal record does not match its exact phase"
@@ -958,7 +1006,9 @@ def _seal_bundle(
             digest=digest,
             size=size,
             kind="git-bundle",
-            image_id=None,
+            source_engine_id=None,
+            config_digest=None,
+            content_descriptor=None,
             content_identity=None,
         )
     temporary = _temporary_path(destination)
@@ -1002,7 +1052,9 @@ def _seal_bundle(
         digest=digest,
         size=size,
         kind="git-bundle",
-        image_id=None,
+        source_engine_id=None,
+        config_digest=None,
+        content_descriptor=None,
         content_identity=None,
     )
 
@@ -1012,7 +1064,7 @@ def _inspect_image(
     image_id: str,
     *,
     release_sha: str,
-) -> str:
+) -> tuple[dict[str, Any], str]:
     try:
         raw = json.loads(
             _run_text(
@@ -1053,112 +1105,185 @@ def _inspect_image(
             "postgres image lacks the exact runtime UID/GID contract labels"
         )
     try:
-        _descriptor, content_identity = image_content_descriptor(image)
-    except ImageInventoryError as exc:
+        descriptor, content_identity = image_content_descriptor(image)
+    except DockerImageIdentityError as exc:
         raise ReleaseArtifactError(
             "Docker image lacks a canonical semantic content identity"
         ) from exc
-    return content_identity
+    return descriptor, content_identity
 
 
-def _archive_config_document(path: Path) -> tuple[dict[str, Any], str]:
+def _safe_archive_path(raw: Any, *, label: str) -> str:
+    if not isinstance(raw, str) or not raw or "\\" in raw or "\x00" in raw:
+        raise ReleaseArtifactError(f"{label} is invalid")
+    path = PurePosixPath(raw)
+    if (
+        path.is_absolute()
+        or raw != path.as_posix()
+        or any(part in {"", ".", ".."} for part in path.parts)
+    ):
+        raise ReleaseArtifactError(f"{label} is outside the archive")
+    return raw
+
+
+def _archive_members(
+    archive: tarfile.TarFile,
+) -> dict[str, tarfile.TarInfo]:
+    regular: dict[str, tarfile.TarInfo] = {}
+    names: set[str] = set()
+    total = 0
+    count = 0
+    for member in archive:
+        count += 1
+        if count > MAX_ARCHIVE_MEMBERS:
+            raise ReleaseArtifactError("Docker archive has too many members")
+        name = _safe_archive_path(
+            member.name.rstrip("/"),
+            label="Docker archive member",
+        )
+        if name in names:
+            raise ReleaseArtifactError("Docker archive contains a duplicate member")
+        names.add(name)
+        if member.isdir():
+            if member.size != 0:
+                raise ReleaseArtifactError(
+                    "Docker archive directory contains data"
+                )
+            continue
+        if not member.isreg():
+            raise ReleaseArtifactError(
+                "Docker archive contains a link, sparse, or special member"
+            )
+        if member.size < 0 or member.size > MAX_ARTIFACT_BYTES:
+            raise ReleaseArtifactError("Docker archive member size is invalid")
+        total += member.size
+        if total > MAX_ARTIFACT_BYTES:
+            raise ReleaseArtifactError("Docker archive expanded size is oversized")
+        regular[name] = member
+    if not names:
+        raise ReleaseArtifactError("Docker archive is empty")
+    return regular
+
+
+def _read_archive_member(
+    archive: tarfile.TarFile,
+    member: tarfile.TarInfo,
+    *,
+    maximum: int,
+    label: str,
+) -> bytes:
+    if not 1 <= member.size <= maximum:
+        raise ReleaseArtifactError(f"{label} is empty or oversized")
+    source = archive.extractfile(member)
+    if source is None:
+        raise ReleaseArtifactError(f"{label} is unreadable")
+    try:
+        payload = source.read(maximum + 1)
+    finally:
+        source.close()
+    if len(payload) != member.size:
+        raise ReleaseArtifactError(f"{label} size differs")
+    return payload
+
+
+def _archive_image_identity(
+    path: Path,
+    *,
+    role: str,
+    release_sha: str,
+) -> tuple[str, dict[str, Any], str]:
     try:
         with tarfile.open(path, mode="r:") as archive:
-            manifest_source = archive.extractfile("manifest.json")
-            if manifest_source is None:
-                raise ReleaseArtifactError("Docker archive manifest is unreadable")
+            regular = _archive_members(archive)
+            manifest_member = regular.get("manifest.json")
+            if manifest_member is None:
+                raise ReleaseArtifactError("Docker archive manifest is missing")
+            manifest_payload = _read_archive_member(
+                archive,
+                manifest_member,
+                maximum=MAX_ARCHIVE_MANIFEST_BYTES,
+                label="Docker archive manifest",
+            )
             manifest = json.loads(
-                manifest_source.read(1024 * 1024 + 1).decode("utf-8"),
+                manifest_payload.decode("utf-8"),
                 object_pairs_hook=_strict_object,
             )
             if not isinstance(manifest, list) or len(manifest) != 1:
-                raise ReleaseArtifactError("Docker archive image count differs")
-            config_name = manifest[0].get("Config") if isinstance(manifest[0], dict) else None
-            if not isinstance(config_name, str):
-                raise ReleaseArtifactError("Docker archive config path is invalid")
-            config_source = archive.extractfile(config_name)
-            if config_source is None:
-                raise ReleaseArtifactError("Docker archive config is unreadable")
-            config_payload = config_source.read(16 * 1024 * 1024 + 1)
+                raise ReleaseArtifactError(
+                    "Docker archive must contain exactly one image"
+                )
+            entry = manifest[0]
+            if (
+                not isinstance(entry, dict)
+                or set(entry) - {"Config", "RepoTags", "Layers", "LayerSources"}
+                or not {"Config", "Layers"} <= set(entry)
+                or not isinstance(entry["Config"], str)
+                or not isinstance(entry["Layers"], list)
+                or not entry["Layers"]
+                or any(not isinstance(layer, str) for layer in entry["Layers"])
+                or len(entry["Layers"]) != len(set(entry["Layers"]))
+                or (
+                    "LayerSources" in entry
+                    and not isinstance(entry["LayerSources"], dict)
+                )
+            ):
+                raise ReleaseArtifactError(
+                    "Docker archive manifest entry is invalid"
+                )
+            tags = entry.get("RepoTags")
+            if tags not in (None, []):
+                raise ReleaseArtifactError("Docker archive must be tagless")
+            config_name = _safe_archive_path(
+                entry["Config"],
+                label="Docker archive config path",
+            )
+            config_member = regular.get(config_name)
+            if config_member is None:
+                raise ReleaseArtifactError("Docker archive config is missing")
+            config_payload = _read_archive_member(
+                archive,
+                config_member,
+                maximum=MAX_ARCHIVE_CONFIG_BYTES,
+                label="Docker archive config",
+            )
+            for layer in entry["Layers"]:
+                layer_name = _safe_archive_path(
+                    layer,
+                    label="Docker archive layer path",
+                )
+                if layer_name not in regular:
+                    raise ReleaseArtifactError("Docker archive layer is missing")
             config = json.loads(
                 config_payload.decode("utf-8"),
                 object_pairs_hook=_strict_object,
             )
     except ReleaseArtifactError:
         raise
-    except (OSError, UnicodeError, ValueError, json.JSONDecodeError, tarfile.TarError) as exc:
-        raise ReleaseArtifactError("Docker archive config validation failed") from exc
+    except (
+        OSError,
+        UnicodeError,
+        ValueError,
+        json.JSONDecodeError,
+        tarfile.TarError,
+    ) as exc:
+        raise ReleaseArtifactError("Docker archive validation failed") from exc
     if not isinstance(config, dict):
         raise ReleaseArtifactError("Docker archive config document is invalid")
-    return config, "sha256:" + hashlib.sha256(config_payload).hexdigest()
-
-
-def _archive_content_identity(config: Mapping[str, Any]) -> str:
-    rootfs = config.get("rootfs")
-    config_values = config.get("config")
-    if not isinstance(rootfs, dict) or not isinstance(config_values, dict):
-        raise ReleaseArtifactError("Docker archive lacks canonical image metadata")
-    synthetic_inspect = {
-        "Architecture": config.get("architecture"),
-        "Os": config.get("os"),
-        "Created": config.get("created"),
-        "Config": config_values,
-        "RootFS": {
-            "Type": rootfs.get("type"),
-            "Layers": rootfs.get("diff_ids"),
-        },
-    }
     try:
-        _descriptor, content_identity = image_content_descriptor(synthetic_inspect)
-    except ImageInventoryError as exc:
+        descriptor, content_identity = (
+            image_content_descriptor_from_archive_config(config)
+        )
+    except DockerImageIdentityError as exc:
         raise ReleaseArtifactError(
             "Docker archive lacks a canonical semantic content identity"
         ) from exc
-    return content_identity
-
-
-def _verify_image_archive(
-    path: Path,
-    *,
-    role: str,
-    image_id: str,
-    expected_content_identity: str,
-    release_sha: str,
-    owner_uid: int,
-) -> tuple[str, int, str]:
-    if (
-        IMAGE_ID_RE.fullmatch(image_id) is None
-        or CONTENT_ID_RE.fullmatch(expected_content_identity) is None
-    ):
-        raise ReleaseArtifactError("Docker archive identity binding is invalid")
-    digest, size = _hash_regular_file(path, owner_uid=owner_uid)
-    config, archive_config_digest = _archive_config_document(path)
-    image = Image(
-        role=role,
-        artifact_kind=None,
-        image_id=archive_config_digest,
-        repo_tags=(),
-        os="linux",
-        architecture="amd64",
-    )
-    try:
-        _docker_archive_identity(path, image, release_sha=release_sha)
-    except ProductionOperationError as exc:
-        raise ReleaseArtifactError(
-            "Docker archive semantic identity validation failed"
-        ) from exc
-    content_identity = _archive_content_identity(config)
-    if content_identity != expected_content_identity:
-        raise ReleaseArtifactError(
-            "Docker archive semantic content differs from the inspected image ID"
-        )
     config_values = config.get("config")
     labels = (
         config_values.get("Labels")
         if isinstance(config_values, dict)
         else None
     )
-    if config.get("os") != "linux" or config.get("architecture") != "amd64":
+    if descriptor["os"] != "linux" or descriptor["architecture"] != "amd64":
         raise ReleaseArtifactError("Docker archive platform differs")
     if role in RELEASE_BOUND_IMAGE_ROLES and (
         not isinstance(labels, dict)
@@ -1177,7 +1302,51 @@ def _verify_image_archive(
         raise ReleaseArtifactError(
             "postgres archive lacks the exact runtime UID/GID contract labels"
         )
-    return digest, size, content_identity
+    config_digest = "sha256:" + hashlib.sha256(config_payload).hexdigest()
+    return config_digest, descriptor, content_identity
+
+
+def _verify_image_archive(
+    path: Path,
+    *,
+    role: str,
+    image_id: str,
+    expected_content_descriptor: Mapping[str, Any],
+    expected_content_identity: str,
+    release_sha: str,
+    owner_uid: int,
+) -> tuple[str, int, str, dict[str, Any], str]:
+    if (
+        IMAGE_ID_RE.fullmatch(image_id) is None
+        or CONTENT_ID_RE.fullmatch(expected_content_identity) is None
+    ):
+        raise ReleaseArtifactError("Docker archive identity binding is invalid")
+    try:
+        inspected_identity = verify_content_descriptor(
+            expected_content_descriptor
+        )
+    except DockerImageIdentityError as exc:
+        raise ReleaseArtifactError(
+            "Docker inspected content descriptor is invalid"
+        ) from exc
+    if inspected_identity != expected_content_identity:
+        raise ReleaseArtifactError(
+            "Docker inspected content identity differs from its descriptor"
+        )
+    digest, size = _hash_regular_file(path, owner_uid=owner_uid)
+    config_digest, descriptor, content_identity = _archive_image_identity(
+        path,
+        role=role,
+        release_sha=release_sha,
+    )
+    if (
+        descriptor != dict(expected_content_descriptor)
+        or content_identity != expected_content_identity
+    ):
+        raise ReleaseArtifactError(
+            "Docker archive semantic content differs from the inspected image ID"
+        )
+    return digest, size, config_digest, descriptor, content_identity
 
 
 def _seal_image(
@@ -1191,16 +1360,23 @@ def _seal_image(
 ) -> dict[str, Any]:
     phase = f"seal-{role}-image"
     _reconcile_temporary(destination, owner_uid=owner_uid)
-    expected_content_identity = _inspect_image(
+    expected_content_descriptor, expected_content_identity = _inspect_image(
         role,
         image_id,
         release_sha=release_sha,
     )
     if destination.exists() or destination.is_symlink():
-        digest, size, content_identity = _verify_image_archive(
+        (
+            digest,
+            size,
+            config_digest,
+            content_descriptor,
+            content_identity,
+        ) = _verify_image_archive(
             destination,
             role=role,
             image_id=image_id,
+            expected_content_descriptor=expected_content_descriptor,
             expected_content_identity=expected_content_identity,
             release_sha=release_sha,
             owner_uid=owner_uid,
@@ -1210,7 +1386,9 @@ def _seal_image(
             digest=digest,
             size=size,
             kind="docker-archive",
-            image_id=image_id,
+            source_engine_id=image_id,
+            config_digest=config_digest,
+            content_descriptor=content_descriptor,
             content_identity=content_identity,
         )
     temporary = _temporary_path(destination)
@@ -1236,19 +1414,37 @@ def _seal_image(
         temporary,
         role=role,
         image_id=image_id,
+        expected_content_descriptor=expected_content_descriptor,
         expected_content_identity=expected_content_identity,
         release_sha=release_sha,
         owner_uid=owner_uid,
     )
-    digest, size = _publish_temporary(destination, owner_uid=owner_uid)
+    _publish_temporary(destination, owner_uid=owner_uid)
     checkpoint(f"after-publish:{phase}")
+    (
+        digest,
+        size,
+        config_digest,
+        content_descriptor,
+        content_identity,
+    ) = _verify_image_archive(
+        destination,
+        role=role,
+        image_id=image_id,
+        expected_content_descriptor=expected_content_descriptor,
+        expected_content_identity=expected_content_identity,
+        release_sha=release_sha,
+        owner_uid=owner_uid,
+    )
     return _artifact_record(
         filename=destination.name,
         digest=digest,
         size=size,
         kind="docker-archive",
-        image_id=image_id,
-        content_identity=expected_content_identity,
+        source_engine_id=image_id,
+        config_digest=config_digest,
+        content_descriptor=content_descriptor,
+        content_identity=content_identity,
     )
 
 
@@ -1262,13 +1458,25 @@ def _closure_document(
     release = artifacts["release_bundle"]
     images = {
         role: {
-            "image_id": artifacts[f"{role}_image"]["image_id"],
+            "archive_sha256": artifacts[f"{role}_image"]["sha256"],
+            "archive_bytes": artifacts[f"{role}_image"]["bytes"],
+            "config_digest": artifacts[f"{role}_image"]["config_digest"],
+            "content_descriptor": artifacts[f"{role}_image"][
+                "content_descriptor"
+            ],
             "content_identity": artifacts[f"{role}_image"]["content_identity"],
-            "archive": {
-                "filename": artifacts[f"{role}_image"]["filename"],
-                "sha256": artifacts[f"{role}_image"]["sha256"],
-                "bytes": artifacts[f"{role}_image"]["bytes"],
-            },
+        }
+        for role in IMAGE_ROLES
+    }
+    source_engine_observations = {
+        role: {
+            "image_id": artifacts[f"{role}_image"]["source_engine_id"],
+            "informational_only": True,
+        }
+        for role in IMAGE_ROLES
+    }
+    verified_image_contracts = {
+        role: {
             "os": "linux",
             "architecture": "amd64",
             "repo_tags": [],
@@ -1278,7 +1486,7 @@ def _closure_document(
         }
         for role in IMAGE_ROLES
     }
-    images["postgres"]["runtime_user"] = {
+    verified_image_contracts["postgres"]["runtime_user"] = {
         "uid": EXPECTED_POSTGRES_RUNTIME_UID,
         "gid": EXPECTED_POSTGRES_RUNTIME_GID,
         "uid_label": POSTGRES_RUNTIME_UID_LABEL,
@@ -1297,6 +1505,8 @@ def _closure_document(
             },
         },
         "images": images,
+        "source_engine_observations": source_engine_observations,
+        "verified_image_contracts": verified_image_contracts,
         "constraints": {
             "source_backup_included": False,
             "role_material_included": False,
@@ -1386,7 +1596,9 @@ def _seal_closure(
         digest=digest,
         size=size,
         kind="json-manifest",
-        image_id=None,
+        source_engine_id=None,
+        config_digest=None,
+        content_descriptor=None,
         content_identity=None,
     )
 
@@ -1413,17 +1625,28 @@ def _verify_record(
         )
     elif key.endswith("_image"):
         role = key.removesuffix("_image")
-        digest, size, content_identity = _verify_image_archive(
+        (
+            digest,
+            size,
+            config_digest,
+            content_descriptor,
+            content_identity,
+        ) = _verify_image_archive(
             path,
             role=role,
-            image_id=str(record["image_id"]),
+            image_id=str(record["source_engine_id"]),
+            expected_content_descriptor=record["content_descriptor"],
             expected_content_identity=str(record["content_identity"]),
             release_sha=release_sha,
             owner_uid=owner_uid,
         )
-        if content_identity != record["content_identity"]:
+        if (
+            config_digest != record["config_digest"]
+            or content_descriptor != record["content_descriptor"]
+            or content_identity != record["content_identity"]
+        ):
             raise ReleaseArtifactError(
-                "sealed image content identity differs from its journal record"
+                "sealed image identity differs from its journal record"
             )
         observed = (digest, size)
     elif key == "closure_manifest":
@@ -1509,7 +1732,9 @@ def seal_release_artifacts(
                     if artifact_key.endswith("_image"):
                         role = artifact_key.removesuffix("_image")
                         if (
-                            journal["artifacts"][artifact_key]["image_id"]
+                            journal["artifacts"][artifact_key][
+                                "source_engine_id"
+                            ]
                             != image_ids[role]
                         ):
                             raise ReleaseArtifactError(
