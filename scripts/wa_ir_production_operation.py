@@ -32,6 +32,12 @@ import tempfile
 import time
 from typing import Any, BinaryIO, Callable, Mapping
 
+from core.docker_image_identity import (
+    DockerImageIdentityError,
+    image_content_descriptor,
+    image_content_descriptor_from_archive_config,
+    verify_content_descriptor,
+)
 from scripts.wa_ir_production_transport_contract import (
     MAX_PAYLOAD_BYTES,
     ProductionTransportError,
@@ -40,9 +46,11 @@ from scripts.wa_ir_production_transport_contract import (
 )
 
 
-MANIFEST_SCHEMA = "wa-ir-production-operation-v1"
-ATTESTATION_SCHEMA = "wa-ir-production-operation-attestation-v1"
-STATE_SCHEMA = "wa-ir-production-operation-state-v1"
+MANIFEST_SCHEMA = "wa-ir-production-operation-v2"
+ATTESTATION_SCHEMA = "wa-ir-production-operation-attestation-v2"
+STATE_SCHEMA = "wa-ir-production-operation-state-v2"
+IMAGE_STAGE_ATTESTATION_SCHEMA = "wa-ir-production-image-stage-attestation-v1"
+FINAL_PREPARE_MANIFEST_SCHEMA = "wa-ir-production-final-prepare-material-v1"
 OPERATIONS_ROOT = Path("/srv/trading-bot/dark-standby/operations")
 PROJECT_ROOT_PREFIX = Path("/srv/trading-bot-three-site-production-shadow")
 DATA_ROOT_PREFIX = Path("/srv/trading-bot-three-site-production-shadow-data")
@@ -56,6 +64,21 @@ EXPECTED_RUNTIME_DESTINATIONS = {
     ROLE_COMPOSE_RELATIVE_PATH.as_posix(),
     ROLE_ENV_RELATIVE_PATH.as_posix(),
     ROLE_CA_RELATIVE_PATH.as_posix(),
+}
+EXPECTED_FINAL_PREPARE_ARCHIVE_PATHS = {
+    ROLE_COMPOSE_RELATIVE_PATH.as_posix(): "role-compose.yml",
+    ROLE_ENV_RELATIVE_PATH.as_posix(): "runtime.env.role",
+    ROLE_CA_RELATIVE_PATH.as_posix(): "ca.crt",
+}
+FINAL_PREPARE_ARTIFACT_KIND = "final-prepare-material"
+FINAL_PREPARE_DESTINATION_NAME = "final-prepare-material.tar"
+FINAL_PREPARE_MANIFEST_NAME = "final-prepare-manifest.json"
+IMAGE_ROLES = ("app", "postgres", "redis", "nginx")
+IMAGE_ARTIFACT_KINDS = {
+    "app": "app-image-archive",
+    "postgres": "postgres-image-archive",
+    "redis": "redis-image-archive",
+    "nginx": "nginx-image-archive",
 }
 DOCKER = "/usr/bin/docker"
 MAX_MANIFEST_BYTES = 256 * 1024
@@ -83,15 +106,17 @@ DATABASE_FINGERPRINT_PGOPTIONS = " ".join(
 )
 DATABASE_FINGERPRINT_CLIENT_ENCODING = "UTF8"
 EXPECTED_ARTIFACTS = {
-    "release-archive": ("release.bundle", "git-bundle"),
+    "release-bundle": ("release.bundle", "git-bundle"),
     "app-image-archive": ("app-image.tar", "docker-archive"),
-    "db-image-archive": ("db-image.tar", "docker-archive"),
+    "postgres-image-archive": (
+        "postgres-image.tar",
+        "docker-archive",
+    ),
     "redis-image-archive": ("redis-image.tar", "docker-archive"),
     "nginx-image-archive": ("nginx-image.tar", "docker-archive"),
     "database-backup": ("database.dump", "postgres-custom"),
     "uploads-archive": ("uploads.tar.gz", "tar-gzip"),
     "audit-archive": ("audit.tar.gz", "tar-gzip"),
-    "runtime-material": ("runtime-material.tar", "tar"),
 }
 EXPECTED_SERVICES = {
     "database": "webapp_ir_db",
@@ -120,8 +145,9 @@ _MANIFEST_FIELDS = {
     "expected_migration_revision",
     "source_database",
     "artifacts",
-    "images",
-    "runtime",
+    "image_artifacts",
+    "postgres_runtime_uid",
+    "postgres_runtime_gid",
     "compose",
     "safety",
 }
@@ -135,25 +161,30 @@ _BOOTSTRAP_FIELDS = {
     "source_release_tree_sha",
 }
 _ARTIFACT_FIELDS = {"kind", "destination_name", "sha256", "bytes", "format"}
-_IMAGE_FIELDS = {
-    "role",
-    "artifact_kind",
-    "image_id",
-    "repo_tags",
-    "os",
-    "architecture",
+_IMAGE_ARTIFACT_FIELDS = {
+    "archive_sha256",
+    "archive_bytes",
+    "config_digest",
+    "content_descriptor",
+    "content_identity",
 }
-_POSTGRES_IMAGE_RUNTIME_FIELDS = {
-    "runtime_uid",
-    "runtime_gid",
-}
-_RUNTIME_FIELDS = {"artifact_kind", "role", "entries", "required_env_keys"}
 _RUNTIME_ENTRY_FIELDS = {
     "archive_path",
     "destination",
     "sha256",
     "bytes",
     "mode",
+}
+_FINAL_PREPARE_MANIFEST_FIELDS = {
+    "schema",
+    "operation_id",
+    "release_sha",
+    "operation_manifest_sha256",
+    "stage_attestation_sha256",
+    "role",
+    "runtime_image_ids",
+    "entries",
+    "required_env_keys",
 }
 _COMPOSE_FIELDS = {"relative_path", "project_name", "services"}
 _SOURCE_DATABASE_FIELDS = {
@@ -167,6 +198,7 @@ _PHASES = (
     "received",
     "materialized",
     "images-loaded",
+    "final-material-installed",
     "database-started",
     "database-restored",
     "database-migrated",
@@ -245,7 +277,20 @@ class Artifact:
 
 
 @dataclass(frozen=True)
+class ImageArtifact:
+    role: str
+    artifact_kind: str
+    archive_sha256: str
+    archive_bytes: int
+    config_digest: str
+    content_descriptor: Mapping[str, Any]
+    content_identity: str
+
+
+@dataclass(frozen=True)
 class Image:
+    """Compatibility input for the release sealer's archive validator."""
+
     role: str
     artifact_kind: str | None
     image_id: str
@@ -266,6 +311,18 @@ class RuntimeEntry:
 
 
 @dataclass(frozen=True)
+class FinalPrepareManifest:
+    operation_id: str
+    release_sha: str
+    operation_manifest_sha256: str
+    stage_attestation_sha256: str
+    runtime_image_ids: Mapping[str, str]
+    entries: tuple[RuntimeEntry, ...]
+    required_env_keys: tuple[str, ...]
+    canonical_sha256: str
+
+
+@dataclass(frozen=True)
 class OperationManifest:
     operation_id: str
     release_sha: str
@@ -275,12 +332,40 @@ class OperationManifest:
     expected_migration_revision: str
     source_database: Mapping[str, Any]
     artifacts: Mapping[str, Artifact]
-    images: tuple[Image, ...]
-    runtime_entries: tuple[RuntimeEntry, ...]
-    required_env_keys: tuple[str, ...]
+    image_artifacts: Mapping[str, ImageArtifact]
+    postgres_runtime_uid: int
+    postgres_runtime_gid: int
     project_name: str
     services: Mapping[str, str]
     canonical_sha256: str
+
+    @property
+    def images(self) -> tuple[Image, ...]:
+        """Compatibility view for release validators that expect archive IDs."""
+
+        return tuple(
+            Image(
+                role=role,
+                artifact_kind=image.artifact_kind,
+                image_id=image.config_digest,
+                repo_tags=(),
+                os=str(image.content_descriptor["os"]),
+                architecture=str(
+                    image.content_descriptor["architecture"]
+                ),
+                runtime_uid=(
+                    self.postgres_runtime_uid
+                    if role == "postgres"
+                    else None
+                ),
+                runtime_gid=(
+                    self.postgres_runtime_gid
+                    if role == "postgres"
+                    else None
+                ),
+            )
+            for role, image in self.image_artifacts.items()
+        )
 
 
 @dataclass(frozen=True)
@@ -734,128 +819,79 @@ def _load_manifest_bytes(payload: bytes) -> OperationManifest:
     if set(artifacts) != set(EXPECTED_ARTIFACTS):
         raise ProductionOperationError("operation artifact inventory is incomplete")
 
-    raw_images = document.get("images")
-    if not isinstance(raw_images, list) or len(raw_images) != 4:
+    raw_images = document.get("image_artifacts")
+    if (
+        not isinstance(raw_images, dict)
+        or set(raw_images) != set(IMAGE_ROLES)
+    ):
         raise ProductionOperationError("operation image inventory is incomplete")
-    images: list[Image] = []
-    roles: set[str] = set()
-    image_ids: set[str] = set()
-    expected_image_artifacts = {
-        "app": "app-image-archive",
-        "postgres": "db-image-archive",
-        "redis": "redis-image-archive",
-        "nginx": "nginx-image-archive",
-    }
-    for raw in raw_images:
-        if not isinstance(raw, dict):
-            raise ProductionOperationError("operation image entry is invalid")
-        role = raw.get("role")
-        expected_fields = (
-            _IMAGE_FIELDS | _POSTGRES_IMAGE_RUNTIME_FIELDS
-            if role == "postgres"
-            else _IMAGE_FIELDS
-        )
-        if set(raw) != expected_fields:
-            raise ProductionOperationError("operation image entry is invalid")
-        artifact_kind = raw.get("artifact_kind")
-        image_id = raw.get("image_id")
-        tags = raw.get("repo_tags")
-        runtime_uid = raw.get("runtime_uid")
-        runtime_gid = raw.get("runtime_gid")
+    image_artifacts: dict[str, ImageArtifact] = {}
+    config_digests: set[str] = set()
+    content_identities: set[str] = set()
+    for role in IMAGE_ROLES:
+        raw = raw_images[role]
         if (
-            not isinstance(role, str)
-            or role not in expected_image_artifacts
-            or role in roles
-            or artifact_kind != expected_image_artifacts[role]
-            or not isinstance(image_id, str)
-            or not _IMAGE_ID_RE.fullmatch(image_id)
-            or image_id in image_ids
-            or not isinstance(tags, list)
-            or tags != []
-            or raw.get("os") != "linux"
-            or raw.get("architecture") != "amd64"
-            or (
-                role == "postgres"
-                and (
-                    type(runtime_uid) is not int
-                    or not 1 <= runtime_uid <= 65535
-                    or type(runtime_gid) is not int
-                    or not 1 <= runtime_gid <= 65535
-                )
+            not isinstance(raw, dict)
+            or set(raw) != _IMAGE_ARTIFACT_FIELDS
+        ):
+            raise ProductionOperationError("operation image entry is invalid")
+        artifact_kind = IMAGE_ARTIFACT_KINDS[role]
+        archive = artifacts[artifact_kind]
+        archive_sha256 = raw.get("archive_sha256")
+        archive_bytes = raw.get("archive_bytes")
+        config_digest = raw.get("config_digest")
+        content_descriptor = raw.get("content_descriptor")
+        content_identity = raw.get("content_identity")
+        try:
+            verified_content_identity = verify_content_descriptor(
+                content_descriptor
             )
+        except DockerImageIdentityError as exc:
+            raise ProductionOperationError(
+                "operation image content descriptor is invalid"
+            ) from exc
+        if (
+            archive_sha256 != archive.sha256
+            or archive_bytes != archive.bytes
+            or not isinstance(config_digest, str)
+            or not _IMAGE_ID_RE.fullmatch(config_digest)
+            or config_digest in config_digests
+            or not isinstance(content_identity, str)
+            or not _IMAGE_ID_RE.fullmatch(content_identity)
+            or content_identity != verified_content_identity
+            or content_identity in content_identities
+            or content_identity == config_digest
+            or content_descriptor.get("architecture") != "amd64"
+            or content_descriptor.get("os") != "linux"
         ):
             raise ProductionOperationError("operation image binding is invalid")
-        images.append(
-            Image(
-                role=role,
-                artifact_kind=artifact_kind,
-                image_id=image_id,
-                repo_tags=tuple(tags),
-                os="linux",
-                architecture="amd64",
-                runtime_uid=runtime_uid if role == "postgres" else None,
-                runtime_gid=runtime_gid if role == "postgres" else None,
-            )
+        image_artifacts[role] = ImageArtifact(
+            role=role,
+            artifact_kind=artifact_kind,
+            archive_sha256=archive_sha256,
+            archive_bytes=archive_bytes,
+            config_digest=config_digest,
+            content_descriptor=dict(content_descriptor),
+            content_identity=content_identity,
         )
-        roles.add(role)
-        image_ids.add(image_id)
-    if roles != set(expected_image_artifacts):
-        raise ProductionOperationError("operation image roles are incomplete")
-
-    runtime = document.get("runtime")
-    if not isinstance(runtime, dict) or set(runtime) != _RUNTIME_FIELDS:
-        raise ProductionOperationError("runtime material manifest is invalid")
-    if (
-        runtime.get("artifact_kind") != "runtime-material"
-        or runtime.get("role") != "webapp-ir"
-    ):
-        raise ProductionOperationError("runtime material artifact binding is invalid")
-    raw_entries = runtime.get("entries")
-    raw_required_keys = runtime.get("required_env_keys")
-    if (
-        not isinstance(raw_entries, list)
-        or not 1 <= len(raw_entries) <= 256
-        or not isinstance(raw_required_keys, list)
-        or not raw_required_keys
-        or len(raw_required_keys) > 256
-        or any(not isinstance(key, str) or not _ENV_NAME_RE.fullmatch(key) for key in raw_required_keys)
-        or raw_required_keys != sorted(set(raw_required_keys))
-    ):
-        raise ProductionOperationError("runtime material inventory is invalid")
-    runtime_entries: list[RuntimeEntry] = []
-    archive_paths: set[str] = set()
-    destinations_seen: set[str] = set()
-    for raw in raw_entries:
-        if not isinstance(raw, dict) or set(raw) != _RUNTIME_ENTRY_FIELDS:
-            raise ProductionOperationError("runtime material entry is invalid")
-        archive_path = _safe_relative_path(raw.get("archive_path"), label="runtime archive path")
-        destination = _safe_relative_path(raw.get("destination"), label="runtime destination")
-        digest = raw.get("sha256")
-        mode_text = raw.get("mode")
-        if (
-            archive_path in archive_paths
-            or destination in destinations_seen
-            or not isinstance(digest, str)
-            or not SHA256_RE.fullmatch(digest)
-            or mode_text != "0600"
-            or destination not in EXPECTED_RUNTIME_DESTINATIONS
-        ):
-            raise ProductionOperationError("runtime material entry binding is invalid")
-        size = _bounded_int(
-            raw.get("bytes"),
-            minimum=1,
-            maximum=16 * 1024 * 1024,
-            label="runtime material entry size",
-        )
-        runtime_entries.append(
-            RuntimeEntry(archive_path, destination, digest, size, 0o600)
-        )
-        archive_paths.add(archive_path)
-        destinations_seen.add(destination)
-    if destinations_seen != EXPECTED_RUNTIME_DESTINATIONS:
+        config_digests.add(config_digest)
+        content_identities.add(content_identity)
+    if config_digests & content_identities:
         raise ProductionOperationError(
-            "runtime material destination set is not the exact prepare closure"
+            "operation image config and content identities overlap"
         )
+    postgres_runtime_uid = _bounded_int(
+        document.get("postgres_runtime_uid"),
+        minimum=1,
+        maximum=65535,
+        label="PostgreSQL runtime uid",
+    )
+    postgres_runtime_gid = _bounded_int(
+        document.get("postgres_runtime_gid"),
+        minimum=1,
+        maximum=65535,
+        label="PostgreSQL runtime gid",
+    )
 
     compose = document.get("compose")
     if not isinstance(compose, dict) or set(compose) != _COMPOSE_FIELDS:
@@ -904,9 +940,9 @@ def _load_manifest_bytes(payload: bytes) -> OperationManifest:
         expected_migration_revision=revision,
         source_database=dict(source_database),
         artifacts=artifacts,
-        images=tuple(sorted(images, key=lambda item: item.role)),
-        runtime_entries=tuple(runtime_entries),
-        required_env_keys=tuple(raw_required_keys),
+        image_artifacts=image_artifacts,
+        postgres_runtime_uid=postgres_runtime_uid,
+        postgres_runtime_gid=postgres_runtime_gid,
         project_name=project_name,
         services=dict(EXPECTED_SERVICES),
         canonical_sha256=hashlib.sha256(_canonical_json(document)).hexdigest(),
@@ -949,6 +985,134 @@ def load_manifest(path: Path, *, required_uid: int) -> OperationManifest:
         if descriptor >= 0:
             os.close(descriptor)
     return _load_manifest_bytes(payload)
+
+
+def _load_final_prepare_manifest_bytes(
+    payload: bytes,
+    *,
+    manifest: OperationManifest,
+    expected_stage_attestation_sha256: str,
+) -> FinalPrepareManifest:
+    if not 1 <= len(payload) <= MAX_MANIFEST_BYTES:
+        raise ProductionOperationError(
+            "final prepare manifest is empty or oversized"
+        )
+    try:
+        document = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=_strict_json_object,
+        )
+    except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        raise ProductionOperationError(
+            "final prepare manifest is invalid JSON"
+        ) from exc
+    runtime_image_ids = (
+        document.get("runtime_image_ids")
+        if isinstance(document, dict)
+        else None
+    )
+    if (
+        not isinstance(document, dict)
+        or set(document) != _FINAL_PREPARE_MANIFEST_FIELDS
+        or document.get("schema") != FINAL_PREPARE_MANIFEST_SCHEMA
+        or document.get("operation_id") != manifest.operation_id
+        or document.get("release_sha") != manifest.release_sha
+        or document.get("operation_manifest_sha256")
+        != manifest.canonical_sha256
+        or document.get("stage_attestation_sha256")
+        != expected_stage_attestation_sha256
+        or document.get("role") != "webapp_ir"
+        or not isinstance(runtime_image_ids, dict)
+        or set(runtime_image_ids) != set(IMAGE_ROLES)
+        or any(
+            not isinstance(value, str)
+            or not _IMAGE_ID_RE.fullmatch(value)
+            for value in runtime_image_ids.values()
+        )
+        or len(set(runtime_image_ids.values())) != len(IMAGE_ROLES)
+    ):
+        raise ProductionOperationError(
+            "final prepare manifest identity binding is invalid"
+        )
+
+    raw_entries = document.get("entries")
+    raw_required_keys = document.get("required_env_keys")
+    if (
+        not isinstance(raw_entries, list)
+        or len(raw_entries) != len(EXPECTED_RUNTIME_DESTINATIONS)
+        or not isinstance(raw_required_keys, list)
+        or not raw_required_keys
+        or len(raw_required_keys) > 256
+        or any(
+            not isinstance(key, str)
+            or not _ENV_NAME_RE.fullmatch(key)
+            for key in raw_required_keys
+        )
+        or raw_required_keys != sorted(set(raw_required_keys))
+    ):
+        raise ProductionOperationError(
+            "final prepare material inventory is invalid"
+        )
+    runtime_entries: list[RuntimeEntry] = []
+    archive_paths: set[str] = set()
+    destinations: set[str] = set()
+    for raw in raw_entries:
+        if not isinstance(raw, dict) or set(raw) != _RUNTIME_ENTRY_FIELDS:
+            raise ProductionOperationError(
+                "final prepare material entry is invalid"
+            )
+        archive_path = _safe_relative_path(
+            raw.get("archive_path"),
+            label="final prepare archive path",
+        )
+        destination = _safe_relative_path(
+            raw.get("destination"),
+            label="final prepare destination",
+        )
+        digest = raw.get("sha256")
+        if (
+            archive_path in archive_paths
+            or destination in destinations
+            or destination not in EXPECTED_RUNTIME_DESTINATIONS
+            or archive_path
+            != EXPECTED_FINAL_PREPARE_ARCHIVE_PATHS[destination]
+            or not isinstance(digest, str)
+            or not SHA256_RE.fullmatch(digest)
+            or raw.get("mode") != "0600"
+        ):
+            raise ProductionOperationError(
+                "final prepare material entry binding is invalid"
+            )
+        size = _bounded_int(
+            raw.get("bytes"),
+            minimum=1,
+            maximum=16 * 1024 * 1024,
+            label="final prepare material entry size",
+        )
+        runtime_entries.append(
+            RuntimeEntry(archive_path, destination, digest, size, 0o600)
+        )
+        archive_paths.add(archive_path)
+        destinations.add(destination)
+    if destinations != EXPECTED_RUNTIME_DESTINATIONS:
+        raise ProductionOperationError(
+            "final prepare material destination set is incomplete"
+        )
+    return FinalPrepareManifest(
+        operation_id=manifest.operation_id,
+        release_sha=manifest.release_sha,
+        operation_manifest_sha256=manifest.canonical_sha256,
+        stage_attestation_sha256=expected_stage_attestation_sha256,
+        runtime_image_ids={
+            role: str(runtime_image_ids[role])
+            for role in IMAGE_ROLES
+        },
+        entries=tuple(
+            sorted(runtime_entries, key=lambda entry: entry.destination)
+        ),
+        required_env_keys=tuple(raw_required_keys),
+        canonical_sha256=hashlib.sha256(_canonical_json(document)).hexdigest(),
+    )
 
 
 def parse_safe_dotenv(payload: bytes) -> dict[str, str]:
@@ -1036,6 +1200,7 @@ def verify_incoming(
     *,
     operation_root: Path,
     required_uid: int,
+    allow_final_prepare: bool = False,
 ) -> Mapping[str, Path]:
     incoming = operation_root / "incoming"
     try:
@@ -1051,6 +1216,8 @@ def verify_incoming(
     expected_names = {
         artifact.destination_name for artifact in manifest.artifacts.values()
     } | {"operation-manifest.json"}
+    if allow_final_prepare:
+        expected_names.add(FINAL_PREPARE_DESTINATION_NAME)
     try:
         observed_names = {entry.name for entry in os.scandir(incoming)}
     except OSError as exc:
@@ -1504,6 +1671,227 @@ def _extract_runtime_archive_create_only(
         ) from exc
 
 
+def _load_final_prepare_archive(
+    archive_path: Path,
+    *,
+    manifest: OperationManifest,
+    expected_stage_attestation_sha256: str,
+    required_uid: int,
+) -> FinalPrepareManifest:
+    _hash_regular_file(
+        archive_path,
+        expected_uid=required_uid,
+        maximum=MAX_PAYLOAD_BYTES,
+    )
+    try:
+        with tarfile.open(archive_path, mode="r:") as archive:
+            members = _validate_tar_members(archive)
+            if any(member.isdir() for member in members):
+                raise ProductionOperationError(
+                    "final prepare archive must contain only regular files"
+                )
+            if any(
+                member.uid != 0
+                or member.gid != 0
+                or member.mtime != 0
+                or stat.S_IMODE(member.mode) != 0o600
+                for member in members
+            ):
+                raise ProductionOperationError(
+                    "final prepare archive member metadata is not canonical"
+                )
+            by_name = {
+                PurePosixPath(member.name.rstrip("/")).as_posix(): member
+                for member in members
+            }
+            manifest_member = by_name.get(FINAL_PREPARE_MANIFEST_NAME)
+            if (
+                manifest_member is None
+                or not 1 <= manifest_member.size <= MAX_MANIFEST_BYTES
+            ):
+                raise ProductionOperationError(
+                    "final prepare archive manifest is missing or oversized"
+                )
+            source = archive.extractfile(manifest_member)
+            if source is None:
+                raise ProductionOperationError(
+                    "final prepare archive manifest is unreadable"
+                )
+            try:
+                final_manifest = _load_final_prepare_manifest_bytes(
+                    source.read(MAX_MANIFEST_BYTES + 1),
+                    manifest=manifest,
+                    expected_stage_attestation_sha256=(
+                        expected_stage_attestation_sha256
+                    ),
+                )
+            finally:
+                source.close()
+            expected = {
+                FINAL_PREPARE_MANIFEST_NAME,
+                *(entry.archive_path for entry in final_manifest.entries),
+            }
+            if set(by_name) != expected:
+                raise ProductionOperationError(
+                    "final prepare archive member set differs"
+                )
+            for entry in final_manifest.entries:
+                member = by_name[entry.archive_path]
+                if (
+                    member.size != entry.bytes
+                    or stat.S_IMODE(member.mode) != entry.mode
+                ):
+                    raise ProductionOperationError(
+                        "final prepare archive member metadata differs"
+                    )
+                source = archive.extractfile(member)
+                if source is None:
+                    raise ProductionOperationError(
+                        "final prepare archive member is unreadable"
+                    )
+                try:
+                    digest = hashlib.sha256()
+                    observed = 0
+                    while observed <= entry.bytes:
+                        chunk = source.read(
+                            min(1024 * 1024, entry.bytes + 1 - observed)
+                        )
+                        if not chunk:
+                            break
+                        digest.update(chunk)
+                        observed += len(chunk)
+                finally:
+                    source.close()
+                if (
+                    observed != entry.bytes
+                    or digest.hexdigest() != entry.sha256
+                ):
+                    raise ProductionOperationError(
+                        "final prepare archive member identity differs"
+                    )
+            return final_manifest
+    except ProductionOperationError:
+        raise
+    except (OSError, EOFError, KeyError, tarfile.TarError) as exc:
+        raise ProductionOperationError(
+            "final prepare archive validation failed"
+        ) from exc
+
+
+def install_final_prepare_material(
+    manifest: OperationManifest,
+    archive_path: Path,
+    *,
+    operation_root: Path,
+    expected_stage_attestation_sha256: str,
+    expected_runtime_image_ids: Mapping[str, str],
+    required_uid: int,
+) -> Mapping[str, Any]:
+    final_manifest = _load_final_prepare_archive(
+        archive_path,
+        manifest=manifest,
+        expected_stage_attestation_sha256=(
+            expected_stage_attestation_sha256
+        ),
+        required_uid=required_uid,
+    )
+    if dict(final_manifest.runtime_image_ids) != dict(
+        expected_runtime_image_ids
+    ):
+        raise ProductionOperationError(
+            "final prepare runtime image IDs differ from stage evidence"
+        )
+    canonical = _canonical_operation_paths(manifest)
+    _ensure_canonical_operation_directories(
+        canonical,
+        required_uid=required_uid,
+        postgres_runtime_identity=(
+            manifest.postgres_runtime_uid,
+            manifest.postgres_runtime_gid,
+        ),
+    )
+    entries_by_archive = {
+        entry.archive_path: entry for entry in final_manifest.entries
+    }
+    try:
+        with tarfile.open(archive_path, mode="r:") as archive:
+            by_name = {
+                PurePosixPath(member.name.rstrip("/")).as_posix(): member
+                for member in _validate_tar_members(archive)
+                if member.isreg()
+            }
+            for archive_name, entry in entries_by_archive.items():
+                source = archive.extractfile(by_name[archive_name])
+                if source is None:
+                    raise ProductionOperationError(
+                        "final prepare archive member is unreadable"
+                    )
+                try:
+                    _write_or_verify_file(
+                        _runtime_destination_path(
+                            canonical,
+                            entry.destination,
+                        ),
+                        source,
+                        expected_sha256=entry.sha256,
+                        expected_bytes=entry.bytes,
+                        required_uid=required_uid,
+                    )
+                finally:
+                    source.close()
+    except ProductionOperationError:
+        raise
+    except (OSError, EOFError, KeyError, tarfile.TarError) as exc:
+        raise ProductionOperationError(
+            "final prepare material installation failed"
+        ) from exc
+
+    env = parse_safe_dotenv(canonical.runtime_env.read_bytes())
+    if set(env) != set(final_manifest.required_env_keys):
+        raise ProductionOperationError(
+            "runtime environment key set differs from final prepare closure"
+        )
+    _validate_role_local_environment_closure(canonical.compose, env)
+    ca_sha256 = next(
+        entry.sha256
+        for entry in final_manifest.entries
+        if entry.destination == ROLE_CA_RELATIVE_PATH.as_posix()
+    )
+    expected_values = _runtime_expected_values(
+        manifest,
+        runtime_image_ids=final_manifest.runtime_image_ids,
+        ca_sha256=ca_sha256,
+    )
+    if any(env.get(key) != value for key, value in expected_values.items()):
+        raise ProductionOperationError(
+            "runtime environment final operation binding differs"
+        )
+    _validate_runtime_image_set(
+        manifest,
+        final_manifest.runtime_image_ids,
+    )
+    return {
+        "final_prepare_manifest_sha256": final_manifest.canonical_sha256,
+        "stage_attestation_sha256": (
+            final_manifest.stage_attestation_sha256
+        ),
+        "role_compose_sha256": next(
+            entry.sha256
+            for entry in final_manifest.entries
+            if entry.destination == ROLE_COMPOSE_RELATIVE_PATH.as_posix()
+        ),
+        "role_env_sha256": next(
+            entry.sha256
+            for entry in final_manifest.entries
+            if entry.destination == ROLE_ENV_RELATIVE_PATH.as_posix()
+        ),
+        "ca_sha256": ca_sha256,
+        "runtime_image_ids": dict(final_manifest.runtime_image_ids),
+        "runtime_env": str(canonical.runtime_env),
+        "compose": str(canonical.compose),
+    }
+
+
 def _attest_extracted_archive_tree(
     archive_path: Path,
     destination_root: Path,
@@ -1652,12 +2040,64 @@ def _copy_create_only(
         os.close(descriptor)
 
 
-def _docker_archive_identity(
-    path: Path,
-    image: Image,
+def _validate_image_labels(
+    role: str,
+    labels: Any,
     *,
     release_sha: str,
+    postgres_runtime_uid: int | None,
+    postgres_runtime_gid: int | None,
 ) -> None:
+    if role in {"app", "postgres"} and (
+        not isinstance(labels, dict)
+        or labels.get("org.opencontainers.image.revision") != release_sha
+    ):
+        raise ProductionOperationError(
+            f"{role} image lacks the exact OCI release revision"
+        )
+    if role == "postgres" and postgres_runtime_uid is not None and (
+        not isinstance(labels, dict)
+        or labels.get(POSTGRES_RUNTIME_UID_LABEL)
+        != str(postgres_runtime_uid)
+        or labels.get(POSTGRES_RUNTIME_GID_LABEL)
+        != str(postgres_runtime_gid)
+    ):
+        raise ProductionOperationError(
+            "PostgreSQL image runtime ownership labels differ"
+        )
+
+
+def _docker_archive_identity(
+    path: Path,
+    image: ImageArtifact | Image,
+    *,
+    release_sha: str,
+    postgres_runtime_uid: int | None = None,
+    postgres_runtime_gid: int | None = None,
+) -> Mapping[str, Any]:
+    legacy = isinstance(image, Image)
+    if legacy:
+        expected_config_digest = image.image_id
+        expected_tags = list(image.repo_tags)
+        expected_content_descriptor = None
+        expected_content_identity = None
+        if postgres_runtime_uid is None:
+            postgres_runtime_uid = image.runtime_uid
+        if postgres_runtime_gid is None:
+            postgres_runtime_gid = image.runtime_gid
+    else:
+        expected_config_digest = image.config_digest
+        expected_tags = []
+        expected_content_descriptor = image.content_descriptor
+        expected_content_identity = image.content_identity
+        if _hash_regular_file(
+            path,
+            expected_uid=os.geteuid(),
+            maximum=image.archive_bytes,
+        ) != (image.archive_sha256, image.archive_bytes):
+            raise ProductionOperationError(
+                "Docker archive hash or size differs from its image binding"
+            )
     try:
         with tarfile.open(path, mode="r:") as archive:
             members = _validate_tar_members(archive)
@@ -1699,8 +2139,17 @@ def _docker_archive_identity(
                 config_payload = config_source.read(16 * 1024 * 1024 + 1)
             finally:
                 config_source.close()
-            if hashlib.sha256(config_payload).hexdigest() != image.image_id.removeprefix("sha256:"):
-                raise ProductionOperationError("Docker image config hash differs from expected ID")
+            observed_config_digest = (
+                "sha256:" + hashlib.sha256(config_payload).hexdigest()
+            )
+            if (
+                observed_config_digest != expected_config_digest
+                or config_name
+                != f"{expected_config_digest.removeprefix('sha256:')}.json"
+            ):
+                raise ProductionOperationError(
+                    "Docker image config digest differs from its archive binding"
+                )
             try:
                 config_document = json.loads(
                     config_payload.decode("utf-8"),
@@ -1718,35 +2167,52 @@ def _docker_archive_identity(
                 if isinstance(config_values, dict)
                 else None
             )
-            if image.role == "app" and (
-                not isinstance(labels, dict)
-                or labels.get("org.opencontainers.image.revision") != release_sha
-            ):
-                raise ProductionOperationError(
-                    "application image lacks the exact OCI release revision"
-                )
-            if image.role == "postgres" and (
-                not isinstance(labels, dict)
-                or labels.get(POSTGRES_RUNTIME_UID_LABEL)
-                != str(image.runtime_uid)
-                or labels.get(POSTGRES_RUNTIME_GID_LABEL)
-                != str(image.runtime_gid)
-            ):
-                raise ProductionOperationError(
-                    "PostgreSQL archive runtime ownership labels differ"
-                )
+            _validate_image_labels(
+                image.role,
+                labels,
+                release_sha=release_sha,
+                postgres_runtime_uid=postgres_runtime_uid,
+                postgres_runtime_gid=postgres_runtime_gid,
+            )
             tags = entry.get("RepoTags")
             tags = [] if tags is None else tags
-            if (
-                not isinstance(tags, list)
-                or any(not isinstance(tag, str) for tag in tags)
-                or sorted(tags) != sorted(image.repo_tags)
-            ):
+            if tags != expected_tags:
                 raise ProductionOperationError("Docker archive tag set differs")
             for layer in entry["Layers"]:
                 layer_name = _safe_relative_path(layer, label="Docker layer path")
                 if layer_name not in by_name:
                     raise ProductionOperationError("Docker archive layer is missing")
+            try:
+                descriptor, content_identity = (
+                    image_content_descriptor_from_archive_config(
+                        config_document
+                    )
+                )
+            except DockerImageIdentityError as exc:
+                raise ProductionOperationError(
+                    "Docker archive semantic content identity is invalid"
+                ) from exc
+            if (
+                legacy
+                and (
+                    descriptor["architecture"] != image.architecture
+                    or descriptor["os"] != image.os
+                )
+            ):
+                raise ProductionOperationError(
+                    "Docker archive platform differs from its image binding"
+                )
+            if (
+                expected_content_descriptor is not None
+                and (
+                    descriptor != expected_content_descriptor
+                    or content_identity != expected_content_identity
+                )
+            ):
+                raise ProductionOperationError(
+                    "Docker archive semantic content identity differs"
+                )
+            return descriptor
     except ProductionOperationError:
         raise
     except (OSError, UnicodeError, ValueError, json.JSONDecodeError, tarfile.TarError) as exc:
@@ -1755,13 +2221,10 @@ def _docker_archive_identity(
 
 def _runtime_expected_values(
     manifest: OperationManifest,
+    *,
+    runtime_image_ids: Mapping[str, str],
+    ca_sha256: str,
 ) -> Mapping[str, str]:
-    image_by_role = {image.role: image.image_id for image in manifest.images}
-    ca_sha256 = next(
-        entry.sha256
-        for entry in manifest.runtime_entries
-        if entry.destination == ROLE_CA_RELATIVE_PATH.as_posix()
-    )
     project_base = _project_base(manifest.operation_id)
     paths = _canonical_operation_paths(manifest)
     return {
@@ -1773,12 +2236,44 @@ def _runtime_expected_values(
         "PRODUCTION_SHADOW_DATA_ROOT": str(paths.data_root),
         "PRODUCTION_SHADOW_SECRET_ROOT": str(paths.secret_root),
         "PRODUCTION_SHADOW_RELEASE_SHA": manifest.release_sha,
-        "PRODUCTION_SHADOW_APP_IMAGE_ID": image_by_role["app"],
-        "PRODUCTION_SHADOW_POSTGRES_IMAGE_ID": image_by_role["postgres"],
-        "PRODUCTION_SHADOW_REDIS_IMAGE_ID": image_by_role["redis"],
-        "PRODUCTION_SHADOW_NGINX_IMAGE_ID": image_by_role["nginx"],
+        "PRODUCTION_SHADOW_APP_IMAGE_ID": runtime_image_ids["app"],
+        "PRODUCTION_SHADOW_POSTGRES_IMAGE_ID": runtime_image_ids["postgres"],
+        "PRODUCTION_SHADOW_REDIS_IMAGE_ID": runtime_image_ids["redis"],
+        "PRODUCTION_SHADOW_NGINX_IMAGE_ID": runtime_image_ids["nginx"],
         "PRODUCTION_SHADOW_DR_CA_SHA256": ca_sha256,
     }
+
+
+def _runtime_image_ids_from_env_values(
+    values: Mapping[str, str],
+) -> Mapping[str, str]:
+    result = {
+        "app": values.get("PRODUCTION_SHADOW_APP_IMAGE_ID", ""),
+        "postgres": values.get("PRODUCTION_SHADOW_POSTGRES_IMAGE_ID", ""),
+        "redis": values.get("PRODUCTION_SHADOW_REDIS_IMAGE_ID", ""),
+        "nginx": values.get("PRODUCTION_SHADOW_NGINX_IMAGE_ID", ""),
+    }
+    if (
+        any(not _IMAGE_ID_RE.fullmatch(value) for value in result.values())
+        or len(set(result.values())) != len(IMAGE_ROLES)
+    ):
+        raise ProductionOperationError(
+            "runtime environment image IDs are invalid or ambiguous"
+        )
+    return result
+
+
+def _installed_runtime_image_ids(
+    manifest: OperationManifest,
+) -> Mapping[str, str]:
+    runtime_env = _canonical_operation_paths(manifest).runtime_env
+    try:
+        payload = runtime_env.read_bytes()
+    except OSError as exc:
+        raise ProductionOperationError(
+            "final prepare runtime environment is unavailable"
+        ) from exc
+    return _runtime_image_ids_from_env_values(parse_safe_dotenv(payload))
 
 
 def _validate_role_local_environment_closure(
@@ -1905,7 +2400,7 @@ def _ensure_canonical_operation_directories(
         )
 
 
-def materialize(
+def materialize_stage(
     manifest: OperationManifest,
     paths: Mapping[str, Path],
     *,
@@ -1924,33 +2419,11 @@ def materialize(
     )
 
     _materialize_release_bundle(
-        paths["release-archive"],
+        paths["release-bundle"],
         canonical.release_root,
         manifest=manifest,
         required_uid=required_uid,
     )
-    runtime_by_archive = {
-        entry.archive_path: entry for entry in manifest.runtime_entries
-    }
-    _extract_runtime_archive_create_only(
-        paths["runtime-material"],
-        canonical,
-        required_uid=required_uid,
-        expected_entries=runtime_by_archive,
-    )
-    compose = canonical.compose
-    env_path = canonical.runtime_env
-    env_payload = env_path.read_bytes()
-    env = parse_safe_dotenv(env_payload)
-    if set(env) != set(manifest.required_env_keys):
-        raise ProductionOperationError(
-            "runtime environment key set differs from the role-local closure"
-        )
-    _validate_role_local_environment_closure(compose, env)
-    expected_values = _runtime_expected_values(manifest)
-    if any(env.get(key) != value for key, value in expected_values.items()):
-        raise ProductionOperationError("runtime environment operation binding differs")
-
     _copy_create_only(
         paths["database-backup"],
         canonical.restore_dump,
@@ -1985,19 +2458,19 @@ def materialize(
             mode="r:gz",
             required_uid=required_uid,
         )
-    for image in manifest.images:
-        if image.artifact_kind:
-            _docker_archive_identity(
-                paths[image.artifact_kind],
-                image,
-                release_sha=manifest.release_sha,
-            )
+    for image in manifest.image_artifacts.values():
+        _docker_archive_identity(
+            paths[image.artifact_kind],
+            image,
+            release_sha=manifest.release_sha,
+            postgres_runtime_uid=manifest.postgres_runtime_uid,
+            postgres_runtime_gid=manifest.postgres_runtime_gid,
+        )
     return {
         "release_root": str(canonical.release_root),
         "secrets_root": str(canonical.secret_root),
         "data_root": str(canonical.data_root),
-        "runtime_env": str(env_path),
-        "compose": str(compose),
+        "runtime_material_installed": False,
         "uploads_tree": dict(archive_trees["uploads-archive"]),
         "audit_tree": dict(archive_trees["audit-archive"]),
     }
@@ -2730,12 +3203,16 @@ def _validate_oneoff_for_cleanup(
     allowed_services = set(manifest.services.values()) - {
         manifest.services["database"],
     }
-    expected_image = next(
-        image.image_id
-        for image in manifest.images
-        if image.role
-        == ("postgres" if service == manifest.services["restore"] else "app")
-    ) if service in allowed_services else None
+    runtime_image_ids = _installed_runtime_image_ids(manifest)
+    expected_image = (
+        runtime_image_ids[
+            "postgres"
+            if service == manifest.services["restore"]
+            else "app"
+        ]
+        if service in allowed_services
+        else None
+    )
     if (
         not isinstance(document.get("Id"), str)
         or not document["Id"].startswith(identifier)
@@ -2978,71 +3455,235 @@ def _compose_streaming_copy_sha256(
     return result
 
 
-def _validate_loaded_image(image: Image, *, release_sha: str) -> None:
-    output = _run(
-        [DOCKER, "image", "inspect", image.image_id],
-        timeout=60,
-    )
+def _inspect_local_image(runtime_image_id: str) -> Mapping[str, Any]:
+    if not _IMAGE_ID_RE.fullmatch(runtime_image_id):
+        raise ProductionOperationError("local Docker image ID is invalid")
+    output = _run([DOCKER, "image", "inspect", runtime_image_id], timeout=60)
     try:
-        document = json.loads(output, object_pairs_hook=_strict_json_object)
+        documents = json.loads(output, object_pairs_hook=_strict_json_object)
     except (ValueError, json.JSONDecodeError) as exc:
         raise ProductionOperationError("Docker image attestation is invalid") from exc
-    labels = (
-        document[0].get("Config", {}).get("Labels")
-        if isinstance(document, list)
-        and len(document) == 1
-        and isinstance(document[0], dict)
-        and isinstance(document[0].get("Config"), dict)
-        else None
-    )
     if (
-        not isinstance(document, list)
-        or len(document) != 1
-        or not isinstance(document[0], dict)
-        or document[0].get("Id") != image.image_id
-        or document[0].get("Os") != image.os
-        or document[0].get("Architecture") != image.architecture
-        or (
-            image.role == "app"
-            and (
-                not isinstance(labels, dict)
-                or labels.get("org.opencontainers.image.revision") != release_sha
-            )
-        )
-        or (
-            image.role == "postgres"
-            and (
-                not isinstance(labels, dict)
-                or labels.get(POSTGRES_RUNTIME_UID_LABEL)
-                != str(image.runtime_uid)
-                or labels.get(POSTGRES_RUNTIME_GID_LABEL)
-                != str(image.runtime_gid)
-            )
-        )
+        not isinstance(documents, list)
+        or len(documents) != 1
+        or not isinstance(documents[0], dict)
+        or documents[0].get("Id") != runtime_image_id
     ):
         raise ProductionOperationError("Docker image identity or platform differs")
+    return documents[0]
+
+
+def _local_image_semantic_evidence(
+    document: Mapping[str, Any],
+    *,
+    image: ImageArtifact,
+    manifest: OperationManifest,
+) -> Mapping[str, Any]:
+    config = document.get("Config")
+    labels = config.get("Labels") if isinstance(config, dict) else None
+    _validate_image_labels(
+        image.role,
+        labels,
+        release_sha=manifest.release_sha,
+        postgres_runtime_uid=manifest.postgres_runtime_uid,
+        postgres_runtime_gid=manifest.postgres_runtime_gid,
+    )
+    try:
+        descriptor, content_identity = image_content_descriptor(document)
+    except DockerImageIdentityError as exc:
+        raise ProductionOperationError(
+            "role-local Docker image content identity is invalid"
+        ) from exc
+    return {
+        "content_descriptor": dict(descriptor),
+        "content_identity": content_identity,
+    }
+
+
+def _enumerate_local_images(
+    manifest: OperationManifest,
+) -> Mapping[str, tuple[Mapping[str, Any], ...]]:
+    output = _run(
+        [DOCKER, "image", "ls", "--all", "--quiet", "--no-trunc"],
+        timeout=120,
+    )
+    observed_runtime_ids = [
+        line.strip() for line in output.splitlines() if line.strip()
+    ]
+    if any(
+        not _IMAGE_ID_RE.fullmatch(value)
+        for value in observed_runtime_ids
+    ):
+        raise ProductionOperationError(
+            "local Docker image inventory is invalid or ambiguous"
+        )
+    runtime_ids = sorted(set(observed_runtime_ids))
+    expected_by_content = {
+        image.content_identity: image
+        for image in manifest.image_artifacts.values()
+    }
+    matches: dict[str, list[Mapping[str, Any]]] = {
+        content_identity: []
+        for content_identity in expected_by_content
+    }
+    for runtime_id in runtime_ids:
+        document = _inspect_local_image(runtime_id)
+        try:
+            descriptor, content_identity = image_content_descriptor(
+                document
+            )
+        except DockerImageIdentityError:
+            continue
+        if content_identity in matches:
+            matches[content_identity].append(
+                {
+                    "runtime_image_id": runtime_id,
+                    "content_descriptor": dict(descriptor),
+                    "content_identity": content_identity,
+                    "document": document,
+                }
+            )
+    return {
+        content_identity: tuple(values)
+        for content_identity, values in matches.items()
+    }
+
+
+def _validate_runtime_image_set(
+    manifest: OperationManifest,
+    runtime_image_ids: Mapping[str, str],
+) -> list[Mapping[str, Any]]:
+    if (
+        set(runtime_image_ids) != set(IMAGE_ROLES)
+        or any(
+            not isinstance(value, str)
+            or not _IMAGE_ID_RE.fullmatch(value)
+            for value in runtime_image_ids.values()
+        )
+        or len(set(runtime_image_ids.values())) != len(IMAGE_ROLES)
+    ):
+        raise ProductionOperationError(
+            "role-local runtime image ID set is invalid"
+        )
+    evidence: list[Mapping[str, Any]] = []
+    for role in IMAGE_ROLES:
+        image = manifest.image_artifacts[role]
+        runtime_image_id = runtime_image_ids[role]
+        document = _inspect_local_image(runtime_image_id)
+        semantic = _local_image_semantic_evidence(
+            document,
+            image=image,
+            manifest=manifest,
+        )
+        if (
+            semantic["content_descriptor"] != image.content_descriptor
+            or semantic["content_identity"] != image.content_identity
+        ):
+            raise ProductionOperationError(
+                "role-local Docker image semantic identity differs"
+            )
+        evidence.append(
+            {
+                "role": role,
+                "runtime_image_id": runtime_image_id,
+                "config_digest": image.config_digest,
+                "content_descriptor": semantic["content_descriptor"],
+                "content_identity": image.content_identity,
+                "source": "object-storage-archive",
+            }
+        )
+    return evidence
 
 
 def load_images(
     manifest: OperationManifest,
     paths: Mapping[str, Path],
-) -> list[Mapping[str, str]]:
-    attestations: list[Mapping[str, str]] = []
-    for image in manifest.images:
-        if image.artifact_kind:
-            _run(
-                [DOCKER, "load", "--input", str(paths[image.artifact_kind])],
-                timeout=3600,
-            )
-        _validate_loaded_image(image, release_sha=manifest.release_sha)
-        attestations.append(
-            {
-                "role": image.role,
-                "image_id": image.image_id,
-                "source": "object-storage-archive" if image.artifact_kind else "preexisting-local",
-            }
+) -> list[Mapping[str, Any]]:
+    for image in manifest.image_artifacts.values():
+        _docker_archive_identity(
+            paths[image.artifact_kind],
+            image,
+            release_sha=manifest.release_sha,
+            postgres_runtime_uid=manifest.postgres_runtime_uid,
+            postgres_runtime_gid=manifest.postgres_runtime_gid,
         )
-    return attestations
+    before = _enumerate_local_images(manifest)
+    if any(before.values()):
+        raise ProductionOperationError(
+            "an unjournaled preexisting image matches the staged content"
+        )
+    for role in IMAGE_ROLES:
+        image = manifest.image_artifacts[role]
+        _run(
+            [DOCKER, "load", "--input", str(paths[image.artifact_kind])],
+            timeout=3600,
+        )
+    after = _enumerate_local_images(manifest)
+    runtime_image_ids: dict[str, str] = {}
+    for role in IMAGE_ROLES:
+        image = manifest.image_artifacts[role]
+        matches = after[image.content_identity]
+        if len(matches) != 1:
+            raise ProductionOperationError(
+                "loaded Docker image semantic match is absent or ambiguous"
+            )
+        runtime_image_id = str(matches[0]["runtime_image_id"])
+        if runtime_image_id in runtime_image_ids.values():
+            raise ProductionOperationError(
+                "loaded Docker image roles resolve to a shared runtime ID"
+            )
+        runtime_image_ids[role] = runtime_image_id
+    return _validate_runtime_image_set(manifest, runtime_image_ids)
+
+
+def _image_artifact_bindings(
+    manifest: OperationManifest,
+) -> Mapping[str, Mapping[str, Any]]:
+    return {
+        role: {
+            "archive_sha256": image.archive_sha256,
+            "archive_bytes": image.archive_bytes,
+            "config_digest": image.config_digest,
+            "content_descriptor": dict(image.content_descriptor),
+            "content_identity": image.content_identity,
+        }
+        for role, image in sorted(manifest.image_artifacts.items())
+    }
+
+
+def _image_stage_attestation(
+    manifest: OperationManifest,
+    images: list[Mapping[str, Any]],
+) -> tuple[Mapping[str, Any], str]:
+    if (
+        len(images) != len(IMAGE_ROLES)
+        or {item.get("role") for item in images} != set(IMAGE_ROLES)
+    ):
+        raise ProductionOperationError(
+            "image stage evidence is incomplete"
+        )
+    by_role = {str(item["role"]): item for item in images}
+    runtime_image_ids = {
+        role: str(by_role[role].get("runtime_image_id", ""))
+        for role in IMAGE_ROLES
+    }
+    _validate_runtime_image_set(manifest, runtime_image_ids)
+    document = {
+        "schema": IMAGE_STAGE_ATTESTATION_SCHEMA,
+        "operation_id": manifest.operation_id,
+        "release_sha": manifest.release_sha,
+        "operation_manifest_sha256": manifest.canonical_sha256,
+        "role": "webapp_ir",
+        "image_artifacts": _image_artifact_bindings(manifest),
+        "runtime_image_ids": runtime_image_ids,
+        "images": [
+            dict(by_role[role])
+            for role in IMAGE_ROLES
+        ],
+        "containers_started": False,
+        "services_started": False,
+    }
+    return document, hashlib.sha256(_canonical_json(document)).hexdigest()
 
 
 def _validate_compose_config(
@@ -3086,6 +3727,12 @@ def _validate_compose_config(
         if isinstance(config, dict)
         else None
     )
+    runtime_image_binding = (
+        config.get("x-production-shadow-runtime-image-ids")
+        if isinstance(config, dict)
+        else None
+    )
+    image_by_role = _runtime_image_ids_from_env_values(runtime_env)
     expected_service_names = set(manifest.services.values())
     expected_operation = {
         "operation_id": manifest.operation_id,
@@ -3106,6 +3753,7 @@ def _validate_compose_config(
     if (
         config.get("name") != manifest.project_name
         or operation != expected_operation
+        or runtime_image_binding != image_by_role
         or not isinstance(services, dict)
         or set(services) != expected_service_names
         or not isinstance(networks, dict)
@@ -3122,7 +3770,6 @@ def _validate_compose_config(
         or volumes not in (None, {})
     ):
         raise ProductionOperationError("rendered production shadow Compose scope differs")
-    image_by_role = {image.role: image.image_id for image in manifest.images}
 
     expected_commands = {
         manifest.services["restore"]: [
@@ -3801,14 +4448,7 @@ def _validate_operation_network(
 def _postgres_runtime_identity(
     manifest: OperationManifest,
 ) -> tuple[int, int]:
-    image = next(
-        image for image in manifest.images if image.role == "postgres"
-    )
-    if image.runtime_uid is None or image.runtime_gid is None:
-        raise ProductionOperationError(
-            "PostgreSQL runtime ownership binding is absent"
-        )
-    return image.runtime_uid, image.runtime_gid
+    return manifest.postgres_runtime_uid, manifest.postgres_runtime_gid
 
 
 def _validate_postgres_bind_source(
@@ -3874,9 +4514,7 @@ def _validate_database_container(
         if isinstance(network_settings, dict)
         else None
     )
-    postgres_image = next(
-        image.image_id for image in manifest.images if image.role == "postgres"
-    )
+    postgres_image = _installed_runtime_image_ids(manifest)["postgres"]
     expected_network = f"{manifest.project_name}_webapp_ir"
     restart_policy = (
         host_config.get("RestartPolicy")
@@ -4570,9 +5208,7 @@ def prepare_database(
         operation_root=operation_root,
         cleanup_evidence=cleanup_evidence,
     )
-    postgres_image_id = next(
-        image.image_id for image in manifest.images if image.role == "postgres"
-    )
+    postgres_image_id = _installed_runtime_image_ids(manifest)["postgres"]
     postgres_runtime_uid, postgres_runtime_gid = _postgres_runtime_identity(
         manifest
     )
@@ -4612,19 +5248,25 @@ def confirmation_phrase(manifest: OperationManifest) -> str:
     return f"prepare-wa-ir:{manifest.operation_id}:{manifest.release_sha}"
 
 
+def stage_confirmation_phrase(manifest: OperationManifest) -> str:
+    return f"stage-wa-ir-images:{manifest.operation_id}:{manifest.release_sha}"
+
+
 def plan(
     manifest: OperationManifest,
     *,
     operation_root: Path,
     required_uid: int,
+    allow_final_prepare: bool = False,
 ) -> Mapping[str, Any]:
     paths = verify_incoming(
         manifest,
         operation_root=operation_root,
         required_uid=required_uid,
+        allow_final_prepare=allow_final_prepare,
     )
     bundle_heads = _run(
-        [GIT, "bundle", "list-heads", str(paths["release-archive"])],
+        [GIT, "bundle", "list-heads", str(paths["release-bundle"])],
         timeout=60,
         env=_SAFE_GIT_ENV,
     )
@@ -4636,29 +5278,21 @@ def plan(
         raise ProductionOperationError("Git bundle lacks the exact release commit")
     verify_tar_archive(paths["uploads-archive"], mode="r:gz")
     verify_tar_archive(paths["audit-archive"], mode="r:gz")
-    expected_runtime = {
-        entry.archive_path: (entry.sha256, entry.bytes)
-        for entry in manifest.runtime_entries
-    }
-    verify_tar_archive(
-        paths["runtime-material"],
-        mode="r:",
-        expected_files=expected_runtime,
-    )
-    for image in manifest.images:
-        if image.artifact_kind:
-            _docker_archive_identity(
-                paths[image.artifact_kind],
-                image,
-                release_sha=manifest.release_sha,
-            )
+    for image in manifest.image_artifacts.values():
+        _docker_archive_identity(
+            paths[image.artifact_kind],
+            image,
+            release_sha=manifest.release_sha,
+            postgres_runtime_uid=manifest.postgres_runtime_uid,
+            postgres_runtime_gid=manifest.postgres_runtime_gid,
+        )
     return {
         "schema": ATTESTATION_SCHEMA,
         "status": "planned",
         "operation_id": manifest.operation_id,
         "release_sha": manifest.release_sha,
         "manifest_sha256": manifest.canonical_sha256,
-        "required_confirmation": confirmation_phrase(manifest),
+        "required_confirmation": stage_confirmation_phrase(manifest),
         "artifact_count": len(paths),
         "database_container_started": False,
         "public_app_started": False,
@@ -4671,7 +5305,117 @@ def plan(
     }
 
 
-def execute(
+def _reattest_materialized_stage(
+    manifest: OperationManifest,
+    paths: Mapping[str, Path],
+    state: Mapping[str, Any],
+    *,
+    required_uid: int,
+) -> Mapping[str, Any]:
+    canonical = _canonical_operation_paths(manifest)
+    _materialize_release_bundle(
+        paths["release-bundle"],
+        canonical.release_root,
+        manifest=manifest,
+        required_uid=required_uid,
+    )
+    dump_artifact = manifest.artifacts["database-backup"]
+    if _hash_regular_file(
+        canonical.restore_dump,
+        expected_uid=required_uid,
+        maximum=dump_artifact.bytes,
+    ) != (dump_artifact.sha256, dump_artifact.bytes):
+        raise ProductionOperationError(
+            "persisted database dump identity drifted"
+        )
+    materialized_evidence = state["evidence"]["materialized"]
+    uploads_tree = _attest_extracted_archive_tree(
+        paths["uploads-archive"],
+        canonical.uploads,
+        mode="r:gz",
+        required_uid=required_uid,
+    )
+    audit_tree = _attest_extracted_archive_tree(
+        paths["audit-archive"],
+        canonical.audit,
+        mode="r:gz",
+        required_uid=required_uid,
+    )
+    if (
+        materialized_evidence.get("database_dump_sha256")
+        != dump_artifact.sha256
+        or materialized_evidence.get("uploads_tree_sha256")
+        != uploads_tree["tree_sha256"]
+        or materialized_evidence.get("audit_tree_sha256")
+        != audit_tree["tree_sha256"]
+        or materialized_evidence.get("runtime_material_installed")
+        is not False
+    ):
+        raise ProductionOperationError(
+            "persisted materialization evidence differs"
+        )
+    _require_empty_secure_directory(
+        canonical.redis,
+        required_uid=required_uid,
+        label="WA-IR Redis directory",
+    )
+    return {
+        "release_root": str(canonical.release_root),
+        "secrets_root": str(canonical.secret_root),
+        "data_root": str(canonical.data_root),
+        "runtime_material_installed": False,
+        "uploads_tree": dict(uploads_tree),
+        "audit_tree": dict(audit_tree),
+    }
+
+
+def _stage_images_from_state(
+    manifest: OperationManifest,
+    state: Mapping[str, Any],
+) -> tuple[list[Mapping[str, Any]], Mapping[str, Any], str]:
+    evidence = state["evidence"].get("images-loaded")
+    if (
+        not isinstance(evidence, dict)
+        or set(evidence)
+        != {
+            "image_stage",
+            "stage_attestation_sha256",
+            "tagless_archives",
+        }
+        or evidence.get("tagless_archives") is not True
+        or not isinstance(evidence.get("image_stage"), dict)
+        or not isinstance(evidence.get("stage_attestation_sha256"), str)
+        or not SHA256_RE.fullmatch(evidence["stage_attestation_sha256"])
+    ):
+        raise ProductionOperationError(
+            "persisted image stage evidence is invalid"
+        )
+    stage = evidence["image_stage"]
+    runtime_ids = (
+        stage.get("runtime_image_ids")
+        if isinstance(stage, dict)
+        else None
+    )
+    if not isinstance(runtime_ids, dict):
+        raise ProductionOperationError(
+            "persisted image stage runtime IDs are invalid"
+        )
+    images = _validate_runtime_image_set(manifest, runtime_ids)
+    observed_stage, observed_sha256 = _image_stage_attestation(
+        manifest,
+        images,
+    )
+    if (
+        observed_stage != stage
+        or observed_sha256 != evidence["stage_attestation_sha256"]
+    ):
+        raise ProductionOperationError(
+            "persisted image stage evidence differs"
+        )
+    return images, stage, observed_sha256
+
+
+def execute_stage(
     manifest: OperationManifest,
     *,
     operation_root: Path,
@@ -4684,12 +5428,13 @@ def execute(
         operation_root=operation_root,
         required_uid=required_uid,
     )
-    if confirm != confirmation_phrase(manifest):
-        raise ProductionOperationError("operation confirmation phrase differs")
+    if confirm != stage_confirmation_phrase(manifest):
+        raise ProductionOperationError(
+            "image stage confirmation phrase differs"
+        )
     _ensure_canonical_operation_directories(
         canonical,
         required_uid=required_uid,
-        postgres_runtime_identity=_postgres_runtime_identity(manifest),
     )
     paths = verify_incoming(
         manifest,
@@ -4699,7 +5444,7 @@ def execute(
     state = _load_or_create_state(manifest, operation_root=operation_root)
     completed = set(state["completed_phases"])
     if "materialized" not in completed:
-        materialized = materialize(
+        materialized = materialize_stage(
             manifest,
             paths,
             operation_root=operation_root,
@@ -4711,16 +5456,7 @@ def execute(
             {
                 "release_sha": manifest.release_sha,
                 "release_tree_sha": manifest.release_tree_sha,
-                "role_compose_sha256": next(
-                    entry.sha256
-                    for entry in manifest.runtime_entries
-                    if entry.destination == ROLE_COMPOSE_RELATIVE_PATH.as_posix()
-                ),
-                "role_env_sha256": next(
-                    entry.sha256
-                    for entry in manifest.runtime_entries
-                    if entry.destination == ROLE_ENV_RELATIVE_PATH.as_posix()
-                ),
+                "runtime_material_installed": False,
                 "redis_fresh_empty": True,
                 "database_dump_sha256": manifest.artifacts[
                     "database-backup"
@@ -4734,100 +5470,136 @@ def execute(
         )
         completed.add("materialized")
     else:
-        _materialize_release_bundle(
-            paths["release-archive"],
-            canonical.release_root,
-            manifest=manifest,
+        materialized = _reattest_materialized_stage(
+            manifest,
+            paths,
+            state,
             required_uid=required_uid,
         )
-        for entry in manifest.runtime_entries:
-            destination = _runtime_destination_path(
-                canonical,
-                entry.destination,
-            )
-            if _hash_regular_file(
-                destination,
-                expected_uid=required_uid,
-                maximum=16 * 1024 * 1024,
-            ) != (entry.sha256, entry.bytes):
-                raise ProductionOperationError(
-                    "persisted runtime material identity drifted"
-                )
-        dump_artifact = manifest.artifacts["database-backup"]
-        if _hash_regular_file(
-            canonical.restore_dump,
-            expected_uid=required_uid,
-            maximum=dump_artifact.bytes,
-        ) != (dump_artifact.sha256, dump_artifact.bytes):
-            raise ProductionOperationError(
-                "persisted database dump identity drifted"
-            )
-        materialized_evidence = state["evidence"]["materialized"]
-        uploads_tree = _attest_extracted_archive_tree(
-            paths["uploads-archive"],
-            canonical.uploads,
-            mode="r:gz",
-            required_uid=required_uid,
-        )
-        audit_tree = _attest_extracted_archive_tree(
-            paths["audit-archive"],
-            canonical.audit,
-            mode="r:gz",
-            required_uid=required_uid,
-        )
-        if (
-            materialized_evidence.get("database_dump_sha256")
-            != dump_artifact.sha256
-            or materialized_evidence.get("uploads_tree_sha256")
-            != uploads_tree["tree_sha256"]
-            or materialized_evidence.get("audit_tree_sha256")
-            != audit_tree["tree_sha256"]
-        ):
-            raise ProductionOperationError(
-                "persisted materialization evidence differs"
-            )
-        _require_empty_secure_directory(
-            canonical.redis,
-            required_uid=required_uid,
-            label="WA-IR Redis directory",
-        )
-        materialized = {
-            "release_root": str(canonical.release_root),
-            "secrets_root": str(canonical.secret_root),
-            "data_root": str(canonical.data_root),
-            "runtime_env": str(canonical.runtime_env),
-            "compose": str(canonical.compose),
-            "uploads_tree": dict(uploads_tree),
-            "audit_tree": dict(audit_tree),
-        }
 
     if "images-loaded" not in completed:
         image_attestations = load_images(manifest, paths)
+        image_stage, stage_attestation_sha256 = _image_stage_attestation(
+            manifest,
+            image_attestations,
+        )
         _advance_state(
             state,
             "images-loaded",
             {
-                "images": list(image_attestations),
+                "image_stage": dict(image_stage),
+                "stage_attestation_sha256": stage_attestation_sha256,
                 "tagless_archives": True,
             },
             operation_root=operation_root,
         )
-        completed.add("images-loaded")
     else:
-        image_attestations = []
-        for image in manifest.images:
-            _validate_loaded_image(image, release_sha=manifest.release_sha)
-            image_attestations.append(
-                {
-                    "role": image.role,
-                    "image_id": image.image_id,
-                    "source": (
-                        "object-storage-archive"
-                        if image.artifact_kind
-                        else "preexisting-local"
-                    ),
-                }
-            )
+        (
+            image_attestations,
+            image_stage,
+            stage_attestation_sha256,
+        ) = _stage_images_from_state(manifest, state)
+
+    return {
+        **planned,
+        "status": "wa-ir-images-staged",
+        "required_confirmation": None,
+        "materialized": materialized,
+        "images": list(image_attestations),
+        "image_stage": dict(image_stage),
+        "stage_attestation_sha256": stage_attestation_sha256,
+        "database_container_started": False,
+        "private_dr_workers_started": False,
+        "persistent_resource_cleanup_performed": False,
+        "bounded_ephemeral_oneoff_cleanup_performed": False,
+        "removed_ephemeral_resources": [],
+        "presigned_url_persisted": False,
+        "legacy_resources_mutated": False,
+        "completed_phases": list(state["completed_phases"]),
+        "operation_state_sha256": hashlib.sha256(
+            _canonical_json(state)
+        ).hexdigest(),
+        "cleanup_policy": (
+            "retain only create-only staged release/data and loaded tagless "
+            "images; never start a container or service"
+        ),
+        "functional_boundary": (
+            "image stage only; final prepare material and every database "
+            "operation require a separate controller step"
+        ),
+    }
+
+
+def execute(
+    manifest: OperationManifest,
+    *,
+    operation_root: Path,
+    required_uid: int,
+    confirm: str,
+) -> Mapping[str, Any]:
+    planned = plan(
+        manifest,
+        operation_root=operation_root,
+        required_uid=required_uid,
+        allow_final_prepare=True,
+    )
+    if confirm != confirmation_phrase(manifest):
+        raise ProductionOperationError("operation confirmation phrase differs")
+    paths = verify_incoming(
+        manifest,
+        operation_root=operation_root,
+        required_uid=required_uid,
+        allow_final_prepare=True,
+    )
+    state = _load_or_create_state(manifest, operation_root=operation_root)
+    if "images-loaded" not in state["completed_phases"]:
+        raise ProductionOperationError(
+            "database prepare requires a completed image stage"
+        )
+    (
+        image_attestations,
+        image_stage,
+        stage_attestation_sha256,
+    ) = _stage_images_from_state(manifest, state)
+    runtime_image_ids = image_stage["runtime_image_ids"]
+    final_archive = (
+        operation_root / "incoming" / FINAL_PREPARE_DESTINATION_NAME
+    )
+    if not final_archive.exists() or final_archive.is_symlink():
+        raise ProductionOperationError(
+            "database prepare requires final prepare material"
+        )
+    final_material = install_final_prepare_material(
+        manifest,
+        final_archive,
+        operation_root=operation_root,
+        expected_stage_attestation_sha256=stage_attestation_sha256,
+        expected_runtime_image_ids=runtime_image_ids,
+        required_uid=required_uid,
+    )
+    if "final-material-installed" not in state["completed_phases"]:
+        _advance_state(
+            state,
+            "final-material-installed",
+            dict(final_material),
+            operation_root=operation_root,
+        )
+    elif state["evidence"]["final-material-installed"] != final_material:
+        raise ProductionOperationError(
+            "persisted final prepare material evidence differs"
+        )
+    canonical = _canonical_operation_paths(manifest)
+    materialized = {
+        **_reattest_materialized_stage(
+            manifest,
+            paths,
+            state,
+            required_uid=required_uid,
+        ),
+        "runtime_material_installed": True,
+        "runtime_env": str(canonical.runtime_env),
+        "compose": str(canonical.compose),
+    }
 
     def phase_done(phase: str, evidence: Mapping[str, Any]) -> None:
         _advance_state(
@@ -4868,7 +5640,10 @@ def execute(
         "status": "wa-ir-shadow-data-ready-fenced",
         "required_confirmation": None,
         "materialized": materialized,
-        "images": image_attestations,
+        "images": list(image_attestations),
+        "image_stage": dict(image_stage),
+        "stage_attestation_sha256": stage_attestation_sha256,
+        "final_prepare_material": dict(final_material),
         "database": database,
         "database_container_started": True,
         "private_dr_workers_started": False,
@@ -4951,7 +5726,9 @@ def _verify_executing_bootstrap(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--operation-id", required=True)
-    parser.add_argument("--apply", action="store_true")
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument("--stage-only", action="store_true")
+    action.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")
     args = parser.parse_args(argv)
     try:
@@ -4970,7 +5747,14 @@ def main(argv: list[str] | None = None) -> int:
                 operation_root=root,
                 required_uid=0,
             )
-            if args.apply:
+            if args.stage_only:
+                result = execute_stage(
+                    manifest,
+                    operation_root=root,
+                    required_uid=0,
+                    confirm=str(args.confirm or ""),
+                )
+            elif args.apply:
                 result = execute(
                     manifest,
                     operation_root=root,
@@ -4980,7 +5764,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 if args.confirm is not None:
                     raise ProductionOperationError(
-                        "--confirm is valid only with --apply"
+                        "--confirm is valid only with --stage-only or --apply"
                     )
                 result = plan(manifest, operation_root=root, required_uid=0)
             result = {
