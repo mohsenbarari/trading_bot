@@ -1215,10 +1215,11 @@ class ActivationDocumentTests(unittest.TestCase):
                 "production_hostname": worker.PRODUCTION_HOSTNAME,
                 "legacy_compose_project": "trading_bot",
                 "shadow_compose_project": (
-                    f"tb_prod_{CAMPAIGN_ID.replace('-', '')[:16]}"
+                    f"tb3p-{OPERATION_ID.replace('-', '')}"
                 ),
                 "shadow_root": (
-                    f"/srv/trading-bot-production-shadow/{CAMPAIGN_ID}"
+                    "/srv/trading-bot-three-site-production-shadow/"
+                    f"{OPERATION_ID}"
                 ),
                 "controller_journal_path": (
                     "/root/secure-envs/trading-bot/production-cutover/"
