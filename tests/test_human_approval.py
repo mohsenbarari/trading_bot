@@ -16,6 +16,7 @@ from core.human_approval import (
     approval_subject,
     issue_human_approval_relay_receipt,
     parse_human_approval_relay_command,
+    staging_session_scope_sha256,
     verify_human_approval,
 )
 from core.human_approval_issuer import (
@@ -409,6 +410,13 @@ class HumanApprovalTests(unittest.TestCase):
         self.assertNotIn("signature", receipt)
         self.assertNotIn("allowed_actions", receipt)
         self.assertNotIn(session["signature"], str(receipt))
+        self.assertEqual(
+            receipt["session_scope_sha256"],
+            staging_session_scope_sha256(
+                release_sha="b" * 40,
+                allowed_actions=session["allowed_actions"],
+            ),
+        )
         with patch.dict(
             "os.environ",
             {"WRITER_WITNESS_PUBLIC_KEY": witness_public},
@@ -442,10 +450,13 @@ class HumanApprovalTests(unittest.TestCase):
         changed_subject["artifact_sha256"] = "c" * 64
         tampered = copy.deepcopy(receipt)
         tampered["action"] = "approve_migration"
+        tampered_scope = copy.deepcopy(receipt)
+        tampered_scope["session_scope_sha256"] = "d" * 64
         for value, action, subject, public_key in (
             (receipt, "approve_migration", self.subject, witness_public),
             (receipt, "approve_inventory", changed_subject, witness_public),
             (tampered, "approve_migration", self.subject, witness_public),
+            (tampered_scope, "approve_inventory", self.subject, witness_public),
             (receipt, "approve_inventory", self.subject, "A" * 44),
         ):
             with self.subTest(action=action, subject=subject, public_key=public_key):
