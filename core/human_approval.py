@@ -28,7 +28,7 @@ from core.canonical_json import canonical_json_bytes
 POLICY_SCHEMA = "three-site-human-approval-policy-v1"
 TOKEN_SCHEMA = "three-site-human-approval-token-v1"
 SESSION_TOKEN_SCHEMA = "three-site-human-approval-session-token-v1"
-RELAY_RECEIPT_SCHEMA = "three-site-human-approval-witness-relay-receipt-v1"
+RELAY_RECEIPT_SCHEMA = "three-site-human-approval-witness-relay-receipt-v2"
 RELAY_COMMAND_SCHEMA = "three-site-human-approval-witness-relay-command-v1"
 SESSION_MAX_TTL_SECONDS = 48 * 60 * 60
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -284,6 +284,29 @@ def human_approval_relay_command_bytes(command: HumanApprovalRelayCommand) -> by
     )
 
 
+def staging_session_scope_sha256(
+    *,
+    release_sha: str,
+    allowed_actions: list[str] | tuple[str, ...],
+) -> str:
+    """Return the nonsecret commitment exposed by a relay receipt."""
+
+    release = str(release_sha).lower()
+    actions = list(allowed_actions)
+    if (
+        re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", release) is None
+        or not actions
+        or any(not isinstance(action, str) or not action for action in actions)
+        or actions != sorted(set(actions))
+    ):
+        raise HumanApprovalError("human approval session scope is invalid")
+    return hashlib.sha256(
+        canonical_json_bytes(
+            {"release_sha": release, "allowed_actions": actions}
+        )
+    ).hexdigest()
+
+
 def issue_human_approval_relay_receipt(
     session_token: dict[str, Any],
     *,
@@ -332,6 +355,10 @@ def issue_human_approval_relay_receipt(
         "subject": command.subject,
         "request_id": command.request_id,
         "session_token_sha256": verified.token_hash,
+        "session_scope_sha256": staging_session_scope_sha256(
+            release_sha=str(session_token.get("release_sha", "")),
+            allowed_actions=session_token.get("allowed_actions", []),
+        ),
         "issued_at": current.isoformat(),
         "expires_at": verified.expires_at.isoformat(),
         "authentication": {"methods": list(verified.authentication_methods)},
@@ -361,7 +388,8 @@ def verify_human_approval_relay_receipt(
         "schema", "receipt_id", "approval_id", "policy_id", "policy_hash",
         "issuer_id", "key_id", "operator", "authenticator_id", "action",
         "environment", "subject", "request_id", "session_token_sha256",
-        "issued_at", "expires_at", "authentication", "witness_signature",
+        "session_scope_sha256", "issued_at", "expires_at", "authentication",
+        "witness_signature",
     }
     if (
         not isinstance(receipt, dict)
@@ -402,7 +430,13 @@ def verify_human_approval_relay_receipt(
     request_id = receipt.get("request_id")
     if not isinstance(request_id, str) or RELAY_REQUEST_ID_RE.fullmatch(request_id) is None:
         raise HumanApprovalError("human approval relay receipt request id is invalid")
-    if SHA256_RE.fullmatch(str(receipt.get("session_token_sha256") or "")) is None:
+    if (
+        SHA256_RE.fullmatch(str(receipt.get("session_token_sha256") or "")) is None
+        or SHA256_RE.fullmatch(
+            str(receipt.get("session_scope_sha256") or "")
+        )
+        is None
+    ):
         raise HumanApprovalError("human approval relay receipt session binding is invalid")
     try:
         normalized_expected_subject = validate_approval_subject(expected_subject)
