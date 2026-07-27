@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from scripts import produce_production_shadow_dr_ca as MODULE
+from scripts import produce_production_shadow_prepare_material as PREPARE
 
 
 OPERATION_ID = "123e4567-e89b-42d3-a456-426614174000"
@@ -163,6 +164,34 @@ class ProductionShadowDrCaTests(unittest.TestCase):
         self.assertEqual(first["certificate_sha256"], second["certificate_sha256"])
         for name, expected in bytes_before.items():
             self.assertEqual(paths[name].read_bytes(), expected)
+
+    def test_real_outputs_satisfy_prepare_material_consumer_contract(
+        self,
+    ) -> None:
+        result = self.generate()
+        paths = self.paths()
+        certificate_bytes = paths["certificate"].read_bytes()
+        certificate = PREPARE._validate_ca_certificate(
+            certificate_bytes,
+            operation_id=OPERATION_ID,
+            now=NOW,
+        )
+        attestation, raw = PREPARE._read_json_secure(
+            paths["attestation"],
+            label="operation CA attestation",
+            required_uid=self.owner_uid,
+        )
+        digest, epoch = PREPARE._validate_dr_ca_attestation(
+            attestation,
+            raw,
+            operation_id=OPERATION_ID,
+            release_sha=RELEASE_SHA,
+            ca_bytes=certificate_bytes,
+            certificate=certificate,
+            now=NOW,
+        )
+        self.assertEqual(digest, result["attestation_sha256"])
+        self.assertEqual(epoch, int(NOW.timestamp()))
 
     def test_crash_after_key_resumes_from_bound_state_without_old_material(
         self,
