@@ -315,6 +315,7 @@ def issue_human_approval_relay_receipt(
         expected_subject=command.subject,
         now=current,
         require_fresh=True,
+        allow_session=True,
     )
     unsigned = {
         "schema": RELAY_RECEIPT_SCHEMA,
@@ -466,6 +467,7 @@ def verify_human_approval(
     now: datetime | None = None,
     require_fresh: bool = True,
     witness_relay_public_key: str | None = None,
+    allow_session: bool = False,
 ) -> VerifiedHumanApproval:
     """Verify an exact token or a release-bound staging operator session.
 
@@ -474,6 +476,9 @@ def verify_human_approval(
     may use ``require_fresh=False``; the signature, subject, action, policy and
     original bounded lifetime are still verified.
     """
+
+    if type(allow_session) is not bool:
+        raise HumanApprovalError("human approval session setting is invalid")
 
     if isinstance(token, dict) and token.get("schema") == RELAY_RECEIPT_SCHEMA:
         public_key = str(witness_relay_public_key or "").strip()
@@ -494,6 +499,10 @@ def verify_human_approval(
 
     policy = load_human_approval_policy(policy_payload)
     if isinstance(token, dict) and token.get("schema") == SESSION_TOKEN_SCHEMA:
+        if not allow_session:
+            raise HumanApprovalError(
+                "reusable human approval session is not accepted by this verifier"
+            )
         return _verify_staging_session(
             token,
             policy=policy,

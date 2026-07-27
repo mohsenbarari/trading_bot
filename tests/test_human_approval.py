@@ -274,6 +274,18 @@ class HumanApprovalTests(unittest.TestCase):
         self.assertEqual(token["allowed_actions"], sorted(actions))
         self.assertEqual(state["issued_sequence"], 1)
         self.assertEqual(audit["action"], "authorize_staging_session")
+        with self.assertRaisesRegex(
+            HumanApprovalError,
+            "session is not accepted",
+        ):
+            verify_human_approval(
+                token,
+                policy_payload=self.enrollment.policy_payload,
+                expected_action=actions[0],
+                expected_environment="staging",
+                expected_subject=self.subject,
+                now=NOW,
+            )
         for action in actions:
             verified = verify_human_approval(
                 token,
@@ -282,6 +294,7 @@ class HumanApprovalTests(unittest.TestCase):
                 expected_environment="staging",
                 expected_subject=self.subject,
                 now=NOW + timedelta(hours=47, minutes=59),
+                allow_session=True,
             )
             self.assertEqual(verified.action, action)
             self.assertEqual(verified.subject, self.subject)
@@ -323,6 +336,7 @@ class HumanApprovalTests(unittest.TestCase):
                         expected_environment=environment,
                         expected_subject=subject,
                         now=at,
+                        allow_session=True,
                     )
         tampered = copy.deepcopy(token)
         tampered["allowed_actions"].append("approve_migration")
@@ -335,6 +349,7 @@ class HumanApprovalTests(unittest.TestCase):
                 expected_environment="staging",
                 expected_subject=self.subject,
                 now=NOW,
+                allow_session=True,
             )
 
     def test_staging_session_rejects_more_than_48_hours(self):
