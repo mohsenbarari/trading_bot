@@ -24,6 +24,12 @@ x-production-shadow-operation:
   witness_health_attestation_sha256: ${PRODUCTION_SHADOW_WITNESS_HEALTH_ATTESTATION_SHA256:?required}
   witness_health_attested_at_epoch: ${PRODUCTION_SHADOW_WITNESS_HEALTH_ATTESTED_AT_EPOCH:?required}
   webapp_provider_config_sha256: ${WEBAPP_PROVIDER_CONFIG_SHA256:?required}
+  blob_policy_attestation_sha256: ${DR_BLOB_POLICY_ATTESTATION_SHA256:?required}
+  blob_policy_attested_at_epoch: ${DR_BLOB_POLICY_ATTESTED_AT_EPOCH:?required}
+  blob_compatibility_attestation_sha256: ${DR_BLOB_COMPATIBILITY_ATTESTATION_SHA256:?required}
+  blob_compatibility_attested_at_epoch: ${DR_BLOB_COMPATIBILITY_ATTESTED_AT_EPOCH:?required}
+  dr_tls_attestation_sha256: ${PRODUCTION_SHADOW_DR_TLS_ATTESTATION_SHA256:?required}
+  dr_tls_attested_at_epoch: ${PRODUCTION_SHADOW_DR_TLS_ATTESTED_AT_EPOCH:?required}
 
 x-logging: &logging
   driver: json-file
@@ -935,10 +941,6 @@ services:
       PGUSER: ${WEBAPP_IR_POSTGRES_USER:?required}
       PGPASSWORD: ${WEBAPP_IR_POSTGRES_PASSWORD:?required}
       PGDATABASE: ${WEBAPP_IR_POSTGRES_DB:?required}
-    volumes:
-      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/restore-input/webapp-ir:/run/restore-input:ro
-      - webapp_ir_uploads:/run/restore-target/uploads
-      - webapp_ir_audit:/run/restore-target/audit
     depends_on: {webapp_ir_db: {condition: service_healthy}}
     networks: [webapp_ir]
 

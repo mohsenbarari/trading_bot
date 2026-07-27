@@ -39,6 +39,8 @@ COMMON_OPERATION_KEYS = frozenset(
         "data_root",
         "secret_root",
         "dr_ca_sha256",
+        "dr_tls_attestation_sha256",
+        "dr_tls_attested_at_epoch",
     }
 )
 ROLE_OPERATION_KEYS = {
@@ -55,6 +57,10 @@ ROLE_OPERATION_KEYS = {
         "witness_health_attestation_sha256",
         "witness_health_attested_at_epoch",
         "webapp_provider_config_sha256",
+        "blob_policy_attestation_sha256",
+        "blob_policy_attested_at_epoch",
+        "blob_compatibility_attestation_sha256",
+        "blob_compatibility_attested_at_epoch",
     },
     "webapp-ir": COMMON_OPERATION_KEYS
     | {
@@ -68,6 +74,10 @@ ROLE_OPERATION_KEYS = {
         "witness_health_attestation_sha256",
         "witness_health_attested_at_epoch",
         "webapp_provider_config_sha256",
+        "blob_policy_attestation_sha256",
+        "blob_policy_attested_at_epoch",
+        "blob_compatibility_attestation_sha256",
+        "blob_compatibility_attested_at_epoch",
     },
 }
 ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")

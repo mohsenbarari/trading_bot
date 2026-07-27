@@ -7,7 +7,6 @@ import argparse
 import base64
 from functools import lru_cache
 import hashlib
-import ipaddress
 import json
 import os
 import re
@@ -28,6 +27,11 @@ if str(REPO_ROOT) not in sys.path:
 
 from core.secure_file_io import SecureFileError, read_secure_text, sha256_secure_file
 from core.dr_sync_auth import DrSyncAuthError, PairwiseDrKey, parse_pairwise_keys
+from core.three_site_topology import (
+    BOT_FI_HOST,
+    WEBAPP_FI_HOST,
+    WEBAPP_IR_HOST,
+)
 
 
 DEFAULT_COMPOSE = REPO_ROOT / "deploy/production/docker-compose.three-site-shadow.yml"
@@ -86,11 +90,18 @@ PORT_KEYS = (
     "WEBAPP_FI_SHADOW_DR_PORT",
     "WEBAPP_IR_SHADOW_DR_PORT",
 )
-DR_BIND_KEYS = (
-    "BOT_FI_SHADOW_DR_BIND_ADDRESS",
-    "WEBAPP_FI_SHADOW_DR_BIND_ADDRESS",
-    "WEBAPP_IR_SHADOW_DR_BIND_ADDRESS",
-)
+EXPECTED_DR_ADDRESSES = {
+    "BOT_FI_SHADOW_DR_BIND_ADDRESS": BOT_FI_HOST,
+    "WEBAPP_FI_SHADOW_DR_BIND_ADDRESS": WEBAPP_FI_HOST,
+    "WEBAPP_IR_SHADOW_DR_BIND_ADDRESS": WEBAPP_IR_HOST,
+    "BOT_FI_PEER_WEBAPP_FI_IP": WEBAPP_FI_HOST,
+    "WEBAPP_FI_PEER_BOT_FI_IP": BOT_FI_HOST,
+    "WEBAPP_FI_PEER_WEBAPP_IR_IP": WEBAPP_IR_HOST,
+    "WEBAPP_IR_PEER_WEBAPP_FI_IP": WEBAPP_FI_HOST,
+}
+ARVAN_BLOB_ENDPOINT = "https://s3.ir-thr-at1.arvanstorage.ir"
+ARVAN_BLOB_REGION = "ir-thr-at1"
+ARVAN_BLOB_BUCKET = "production-sync-coin"
 ROLE_API_ENV_FILES = {
     "bot_fi": "bot-fi/runtime.env.api",
     "webapp_fi": "webapp-fi/runtime.env.api",
@@ -790,6 +801,11 @@ def collect_source_failures(
             rendered_command = json.dumps(service.get("command", []))
             if "explicit restore command" not in rendered_command or "exit 64" not in rendered_command:
                 failures.append(f"{name} default command must fail closed")
+            if name == "webapp_ir_restore_tool" and _service_volumes(service):
+                failures.append(
+                    "webapp_ir_restore_tool must accept PostgreSQL restore "
+                    "only over stdin and mount no restore/upload/audit path"
+                )
         if name.endswith(
             (
                 "_db_roles",
@@ -1274,30 +1290,54 @@ def collect_environment_failures(
     if len(ports) == len(PORT_KEYS) and len(set(ports)) != len(ports):
         failures.append("all shadow host ports must be distinct")
 
-    for key in DR_BIND_KEYS:
-        raw = values.get(key, "")
-        try:
-            address = ipaddress.ip_address(raw)
-        except ValueError:
-            address = None
-        if (
-            address is None
-            or address.version != 4
-            or address.is_loopback
-            or address.is_unspecified
-            or address.is_multicast
-        ):
-            failures.append(f"{key} must be a specific non-loopback IPv4 address")
+    for key, expected_address in EXPECTED_DR_ADDRESSES.items():
+        if values.get(key) != expected_address:
+            failures.append(
+                f"{key} must match the canonical production topology address"
+            )
 
     for key in (
         "BOT_FI_PUBLIC_WEBAPP_URL",
         "WEBAPP_FI_PUBLIC_WEBAPP_URL",
         "WEBAPP_IR_PUBLIC_WEBAPP_URL",
-        "DR_BLOB_OBJECT_ENDPOINT",
     ):
         value = values.get(key, "")
         if not _valid_https_url(value) or "staging" in value.lower():
             failures.append(f"{key} must be a production HTTPS URL")
+    if (
+        values.get("DR_BLOB_OBJECT_ENDPOINT") != ARVAN_BLOB_ENDPOINT
+        or values.get("DR_BLOB_OBJECT_REGION") != ARVAN_BLOB_REGION
+        or values.get("DR_BLOB_OBJECT_BUCKET") != ARVAN_BLOB_BUCKET
+    ):
+        failures.append(
+            "DR blob storage must use the exact reviewed private/versioned "
+            "Arvan endpoint, region, and bucket"
+        )
+    for digest_key, epoch_key, label in (
+        (
+            "DR_BLOB_POLICY_ATTESTATION_SHA256",
+            "DR_BLOB_POLICY_ATTESTED_AT_EPOCH",
+            "DR blob private/versioning readback",
+        ),
+        (
+            "DR_BLOB_COMPATIBILITY_ATTESTATION_SHA256",
+            "DR_BLOB_COMPATIBILITY_ATTESTED_AT_EPOCH",
+            "cross-site blob keyring/version round-trip",
+        ),
+        (
+            "PRODUCTION_SHADOW_DR_TLS_ATTESTATION_SHA256",
+            "PRODUCTION_SHADOW_DR_TLS_ATTESTED_AT_EPOCH",
+            "three-site DR TLS certificate and handshake",
+        ),
+    ):
+        if not re.fullmatch(r"[0-9a-f]{64}", values.get(digest_key, "")):
+            failures.append(f"{digest_key} must bind {label} evidence")
+        try:
+            attested_at = int(values.get(epoch_key, ""))
+        except ValueError:
+            attested_at = 0
+        if abs(int(time.time()) - attested_at) > 300:
+            failures.append(f"{label} evidence must be at most 300 seconds old")
 
     background_values = {
         "bot_fi": values.get("BOT_FI_BACKGROUND_JOBS_ENABLED", "").lower(),
@@ -1514,7 +1554,7 @@ def verify_contract(
         "project": values["PRODUCTION_SHADOW_PROJECT"],
         "topology_scope": "three-product-sites-with-external-canonical-witness",
         "full_product_topology": True,
-        "witness_mode": "external-canonical-attested",
+        "witness_mode": "external-canonical-attestation-values-bound-only",
         "activation_status": (
             "blocked_until_exact-release-role-artifacts-route-transaction-and-commit"
         ),
@@ -1783,28 +1823,94 @@ def validate_ca_material(values: Mapping[str, str]) -> None:
 
 def validate_pristine_redis_targets(values: Mapping[str, str]) -> None:
     data_root = Path(values.get("PRODUCTION_SHADOW_DATA_ROOT", ""))
-    for role_path in ("bot-fi", "webapp-fi", "webapp-ir"):
-        target = data_root / role_path / "redis"
-        try:
-            metadata = target.lstat()
-        except FileNotFoundError as exc:
-            raise ProductionShadowComposeError(
-                f"{role_path} Redis target must already exist and be empty"
-            ) from exc
+    if not data_root.is_absolute() or ".." in data_root.parts:
+        raise ProductionShadowComposeError(
+            "Redis operation data root must be an absolute normalized path"
+        )
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    descriptor = os.open("/", flags)
+    try:
+        for component in data_root.parts[1:]:
+            child = os.open(component, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        data_metadata = os.fstat(descriptor)
         if (
-            not stat.S_ISDIR(metadata.st_mode)
-            or metadata.st_uid != 0
-            or stat.S_IMODE(metadata.st_mode) & 0o022
+            not stat.S_ISDIR(data_metadata.st_mode)
+            or data_metadata.st_uid != 0
+            or stat.S_IMODE(data_metadata.st_mode) != 0o700
+            or data_metadata.st_nlink < 2
         ):
             raise ProductionShadowComposeError(
-                f"{role_path} Redis target must be a real root-owned "
-                "non-writable-by-others directory"
+                "Redis operation data root must be a real root-owned "
+                "mode-0700 directory"
             )
-        if any(target.iterdir()):
-            raise ProductionShadowComposeError(
-                f"{role_path} Redis target must be pristine-empty; "
-                "legacy RDB/AOF state is rollback evidence only"
-            )
+        for role_path in ("bot-fi", "webapp-fi", "webapp-ir"):
+            role_descriptor = -1
+            target_descriptor = -1
+            try:
+                role_descriptor = os.open(
+                    role_path,
+                    flags,
+                    dir_fd=descriptor,
+                )
+                target_descriptor = os.open(
+                    "redis",
+                    flags,
+                    dir_fd=role_descriptor,
+                )
+                for candidate in (role_descriptor, target_descriptor):
+                    metadata = os.fstat(candidate)
+                    if (
+                        not stat.S_ISDIR(metadata.st_mode)
+                        or metadata.st_uid != 0
+                        or stat.S_IMODE(metadata.st_mode) != 0o700
+                        or metadata.st_nlink < 2
+                    ):
+                        raise ProductionShadowComposeError(
+                            f"{role_path} Redis operation directory chain "
+                            "must use real root-owned mode-0700 directories"
+                        )
+                before = os.fstat(target_descriptor)
+                entries = os.listdir(target_descriptor)
+                after = os.fstat(target_descriptor)
+                stable_fields = (
+                    "st_dev",
+                    "st_ino",
+                    "st_mode",
+                    "st_uid",
+                    "st_gid",
+                    "st_nlink",
+                )
+                if any(
+                    getattr(before, field) != getattr(after, field)
+                    for field in stable_fields
+                ):
+                    raise ProductionShadowComposeError(
+                        f"{role_path} Redis target changed during inspection"
+                    )
+                if entries:
+                    raise ProductionShadowComposeError(
+                        f"{role_path} Redis target must be pristine-empty; "
+                        "legacy RDB/AOF state is rollback evidence only"
+                    )
+            finally:
+                if target_descriptor >= 0:
+                    os.close(target_descriptor)
+                if role_descriptor >= 0:
+                    os.close(role_descriptor)
+    except OSError as exc:
+        raise ProductionShadowComposeError(
+            "Redis operation directory chain cannot be opened without "
+            "following symlinks"
+        ) from exc
+    finally:
+        os.close(descriptor)
 
 
 def _validate_env_location(path: Path, values: Mapping[str, str]) -> None:
