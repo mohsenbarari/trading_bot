@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from contextlib import redirect_stdout
+import hashlib
 import io
 import json
+from pathlib import Path
+import tempfile
 from unittest import mock
 import unittest
 
+from scripts import production_shadow_host_agent as HOST_MODULE
 from scripts.production_shadow_cutover_controller import (
     POSTCOMMIT_JOURNAL_STATUS,
     PRECOMMIT_JOURNAL_STATUS,
@@ -21,6 +25,7 @@ from scripts.production_shadow_host_agent import (
     FIXED_CONTRACT_PATH,
     HostAgentError,
     contract_sha256,
+    execute_precommit_request,
     main,
     parse_request_argv,
     request_sha256,
@@ -46,22 +51,171 @@ def rendered_phases() -> list[dict]:
     ]
 
 
+def rendered_preparation() -> list[dict]:
+    plan = render_plan(
+        validate_manifest(manifest_payload()),
+        manifest_sha256="4" * 64,
+    )
+    return list(plan["reversible_preparation"]["phases"])
+
+
 def agent_argv(command: dict) -> list[str]:
     argv = command["argv"]
     return argv[argv.index(REMOTE_AGENT_PATH) + 1 :]
 
 
 class ProductionShadowHostAgentTests(unittest.TestCase):
+    def installed_precommit_manifest(
+        self,
+        root: Path,
+        request: dict,
+    ) -> tuple[dict, Path, Path]:
+        role_path = request["role"].replace("_", "-")
+        worker = (
+            root
+            / "project"
+            / request["operation_id"]
+            / "releases"
+            / request["release_sha"]
+            / "scripts"
+            / "production_shadow_precommit_worker.py"
+        )
+        producer = worker.with_name(
+            "produce_production_shadow_readonly_acceptance.py"
+        )
+        worker.parent.mkdir(parents=True, mode=0o700)
+        worker.write_bytes(b"fixed-worker\n")
+        producer.write_bytes(b"fixed-producer\n")
+        worker.chmod(0o644)
+        producer.chmod(0o644)
+
+        manifest_path = (
+            root
+            / "secret"
+            / request["operation_id"]
+            / role_path
+            / "precommit-operation.json"
+        )
+        manifest_path.parent.mkdir(parents=True, mode=0o700)
+        document = {
+            "schema": HOST_MODULE.PRECOMMIT_MANIFEST_SCHEMA,
+            "operation_id": request["operation_id"],
+            "role": request["role"],
+            "release_sha": request["release_sha"],
+            "release_tree_sha": "a" * 40,
+            "controller_manifest_sha256": request["manifest_sha256"],
+            "approval_sha256": request["approval_sha256"],
+            "role_material_sha256": request["role_material_sha256"],
+            "canonical_compose_sha256": request[
+                "shadow_compose_sha256"
+            ],
+            "role_compose_sha256": "b" * 64,
+            "environment_sha256": "c" * 64,
+            "worker_sha256": hashlib.sha256(
+                worker.read_bytes()
+            ).hexdigest(),
+            "acceptance_producer_sha256": hashlib.sha256(
+                producer.read_bytes()
+            ).hexdigest(),
+            "image_artifacts": request["image_artifacts"],
+            "runtime_image_ids": request["runtime_image_ids"],
+            "artifacts": {
+                "release-bundle": {
+                    "sha256": request["release_bundle_sha256"],
+                    "bytes": request["release_bundle_bytes"],
+                    "restored_tree_sha256": None,
+                },
+                "role-material": {
+                    "sha256": request["role_material_sha256"],
+                    "bytes": request["role_material_bytes"],
+                    "restored_tree_sha256": None,
+                },
+                "app-image-archive": {
+                    "sha256": request["image_artifacts"]["app"][
+                        "archive_sha256"
+                    ],
+                    "bytes": request["image_artifacts"]["app"][
+                        "archive_bytes"
+                    ],
+                    "restored_tree_sha256": None,
+                },
+                "postgres-image-archive": {
+                    "sha256": request[
+                        "image_artifacts"
+                    ]["postgres"]["archive_sha256"],
+                    "bytes": request[
+                        "image_artifacts"
+                    ]["postgres"]["archive_bytes"],
+                    "restored_tree_sha256": None,
+                },
+                "redis-image-archive": {
+                    "sha256": request["image_artifacts"]["redis"][
+                        "archive_sha256"
+                    ],
+                    "bytes": request["image_artifacts"]["redis"][
+                        "archive_bytes"
+                    ],
+                    "restored_tree_sha256": None,
+                },
+                "nginx-image-archive": {
+                    "sha256": request["image_artifacts"]["nginx"][
+                        "archive_sha256"
+                    ],
+                    "bytes": request["image_artifacts"]["nginx"][
+                        "archive_bytes"
+                    ],
+                    "restored_tree_sha256": None,
+                },
+                "database-backup": {
+                    "sha256": "d" * 64,
+                    "bytes": 10,
+                    "restored_tree_sha256": None,
+                },
+                "uploads-archive": {
+                    "sha256": "e" * 64,
+                    "bytes": 11,
+                    "restored_tree_sha256": "f" * 64,
+                },
+                "audit-archive": {
+                    "sha256": "1" * 64,
+                    "bytes": 12,
+                    "restored_tree_sha256": "2" * 64,
+                },
+            },
+            "source_database": {
+                "alembic_revision": "source_1",
+                "fingerprint_algorithm": (
+                    "pg-copy-jsonl-sha256-canonical-session-v1"
+                ),
+                "database_fingerprint_sha256": "3" * 64,
+                "row_count": 100,
+                "table_count": 10,
+            },
+            "target_migration_revision": "source_1",
+            "postgres_runtime_uid": 70,
+            "postgres_runtime_gid": 70,
+        }
+        manifest_path.write_bytes(
+            json.dumps(
+                document,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            + b"\n"
+        )
+        manifest_path.chmod(0o600)
+        return document, manifest_path, worker
+
     def test_every_controller_rendered_request_matches_agent_contract(self):
         seen_operations: set[str] = set()
-        for phase in rendered_phases():
+        for phase in [*rendered_preparation(), *rendered_phases()]:
             for command in phase["commands"]:
                 request, execute = parse_request_argv(
                     agent_argv(command),
                     contract=CONTRACT,
                     observed_agent_sha256=AGENT_SHA256,
                 )
-                self.assertFalse(execute)
+                self.assertEqual(execute, phase["execution_supported"])
                 self.assertEqual(request["operation"], command["argv"][
                     command["argv"].index("--operation") + 1
                 ])
@@ -89,7 +243,110 @@ class ProductionShadowHostAgentTests(unittest.TestCase):
                     64,
                 )
                 seen_operations.add(request["operation"])
-        self.assertEqual(len(seen_operations), 35)
+        self.assertEqual(len(seen_operations), 40)
+
+    def test_only_reversible_precommit_operation_invokes_fixed_worker_argv(self):
+        command = rendered_preparation()[0]["commands"][0]
+        request, execute = parse_request_argv(
+            agent_argv(command),
+            contract=CONTRACT,
+            observed_agent_sha256=AGENT_SHA256,
+        )
+        self.assertTrue(execute)
+        manifest = {
+            "operation_id": request["operation_id"],
+            "role": request["role"],
+            "release_sha": request["release_sha"],
+        }
+        worker_result = {
+            "status": "completed",
+            "action": request["operation"],
+            "operation_id": request["operation_id"],
+            "role": request["role"],
+        }
+        completed = mock.Mock(
+            returncode=0,
+            stdout=json.dumps(worker_result).encode("utf-8"),
+            stderr=b"",
+        )
+        with (
+            mock.patch(
+                "scripts.production_shadow_host_agent._load_precommit_manifest",
+                return_value=manifest,
+            ),
+            mock.patch(
+                "scripts.production_shadow_host_agent.subprocess.run",
+                return_value=completed,
+            ) as run,
+        ):
+            result = execute_precommit_request(request)
+        self.assertEqual(result["status"], "executed-precommit")
+        argv = run.call_args.args[0]
+        self.assertEqual(argv[0], "/usr/bin/python3")
+        self.assertNotIn("sh", argv)
+        self.assertNotIn("bash", argv)
+        self.assertEqual(
+            argv[argv.index("--action") + 1],
+            "verify-installation",
+        )
+        self.assertIn(
+            (
+                f"prepare-precommit:{request['operation_id']}:{request['role']}:"
+                f"verify-installation:{request['release_sha']}"
+            ),
+            argv,
+        )
+
+    def test_fixed_precommit_manifest_and_release_worker_are_hash_bound(self):
+        command = rendered_preparation()[0]["commands"][0]
+        request, _execute = parse_request_argv(
+            agent_argv(command),
+            contract=CONTRACT,
+            observed_agent_sha256=AGENT_SHA256,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            document, manifest_path, worker = (
+                self.installed_precommit_manifest(root, request)
+            )
+            with mock.patch.multiple(
+                HOST_MODULE,
+                PRECOMMIT_SECRET_ROOT=root / "secret",
+                PRECOMMIT_PROJECT_ROOT=root / "project",
+            ):
+                observed = HOST_MODULE._load_precommit_manifest(request)
+                self.assertEqual(observed, document)
+
+                changed = dict(document)
+                changed["controller_manifest_sha256"] = "9" * 64
+                manifest_path.write_bytes(
+                    json.dumps(
+                        changed,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                    + b"\n"
+                )
+                with self.assertRaisesRegex(
+                    HostAgentError,
+                    "differs from the request",
+                ):
+                    HOST_MODULE._load_precommit_manifest(request)
+
+                manifest_path.write_bytes(
+                    json.dumps(
+                        document,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                    + b"\n"
+                )
+                worker.write_bytes(b"changed-worker\n")
+                with self.assertRaisesRegex(
+                    HostAgentError,
+                    "differs from the fixed manifest",
+                ):
+                    HOST_MODULE._load_precommit_manifest(request)
 
     def test_postcommit_and_precommit_journal_bindings_are_distinct(self):
         phases = rendered_phases()
@@ -141,6 +398,29 @@ class ProductionShadowHostAgentTests(unittest.TestCase):
                         observed_agent_sha256=AGENT_SHA256,
                     )
 
+        campaign_project = dict(request)
+        campaign_project["shadow_project"] = (
+            f"tb3p-{request['campaign_id'].replace('-', '')}"
+        )
+        with self.assertRaisesRegex(HostAgentError, "operation-derived"):
+            validate_request(
+                campaign_project,
+                contract=CONTRACT,
+                observed_agent_sha256=AGENT_SHA256,
+            )
+
+        campaign_root = dict(request)
+        campaign_root["shadow_root"] = (
+            "/srv/trading-bot-three-site-production-shadow/"
+            f"{request['campaign_id']}"
+        )
+        with self.assertRaisesRegex(HostAgentError, "operation-derived"):
+            validate_request(
+                campaign_root,
+                contract=CONTRACT,
+                observed_agent_sha256=AGENT_SHA256,
+            )
+
     def test_artifact_vhost_and_request_shape_tampering_fail_closed(self):
         command = rendered_phases()[0]["commands"][0]
         request, _ = parse_request_argv(
@@ -158,11 +438,44 @@ class ProductionShadowHostAgentTests(unittest.TestCase):
                 observed_agent_sha256=AGENT_SHA256,
             )
 
-        wrong_image = dict(request)
-        wrong_image["app_image_id"] = "latest"
-        with self.assertRaisesRegex(HostAgentError, "immutable"):
+        wrong_image = json.loads(json.dumps(request))
+        wrong_image["runtime_image_ids"]["app"] = "latest"
+        with self.assertRaisesRegex(HostAgentError, "runtime image"):
             validate_request(
                 wrong_image,
+                contract=CONTRACT,
+                observed_agent_sha256=AGENT_SHA256,
+            )
+
+        duplicate_image = json.loads(json.dumps(request))
+        duplicate_image["runtime_image_ids"]["nginx"] = (
+            duplicate_image["runtime_image_ids"]["redis"]
+        )
+        with self.assertRaisesRegex(HostAgentError, "runtime image"):
+            validate_request(
+                duplicate_image,
+                contract=CONTRACT,
+                observed_agent_sha256=AGENT_SHA256,
+            )
+
+        duplicate_archive = json.loads(json.dumps(request))
+        duplicate_archive["image_artifacts"]["nginx"]["archive_sha256"] = (
+            duplicate_archive["image_artifacts"]["redis"]["archive_sha256"]
+        )
+        with self.assertRaisesRegex(HostAgentError, "archive_sha256"):
+            validate_request(
+                duplicate_archive,
+                contract=CONTRACT,
+                observed_agent_sha256=AGENT_SHA256,
+            )
+
+        wrong_material_format = dict(request)
+        wrong_material_format["role_material_format"] = (
+            "production-shadow-witness-material-tar"
+        )
+        with self.assertRaisesRegex(HostAgentError, "material format"):
+            validate_request(
+                wrong_material_format,
                 contract=CONTRACT,
                 observed_agent_sha256=AGENT_SHA256,
             )

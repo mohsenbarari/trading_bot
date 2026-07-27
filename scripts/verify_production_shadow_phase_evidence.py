@@ -33,9 +33,16 @@ from core.secure_file_io import (  # noqa: E402
     read_secure_bytes,
     sha256_secure_file,
 )
+from core.docker_image_identity import (  # noqa: E402
+    DockerImageIdentityError,
+    verify_content_descriptor,
+)
 from scripts.production_shadow_cutover_controller import (  # noqa: E402
     ARTIFACT_FIELDS,
+    DOCKER_RUNTIME_ROLES,
     EXPECTED_TOPOLOGY,
+    IMAGE_ARTIFACT_FIELDS,
+    IMAGE_KINDS,
     PHASES,
     PHASE_SPECS,
     PRECOMMIT_JOURNAL_STATUS,
@@ -206,10 +213,31 @@ NONEMPTY_STRING = ClaimRule("nonempty-string")
 PHASE_CLAIM_RULES: dict[str, dict[str, ClaimRule]] = {
     "pre_freeze_evidence": {
         "release_bundle_sha256": HASH,
-        "role_material_sha256": HASH,
+        "bot_fi_role_material_sha256": HASH,
+        "webapp_fi_role_material_sha256": HASH,
+        "webapp_ir_role_material_sha256": HASH,
+        "witness_role_material_sha256": HASH,
         "shadow_compose_sha256": HASH,
-        "app_image_id": IMAGE_ID,
-        "postgres_image_id": IMAGE_ID,
+        "app_image_config_digest": IMAGE_ID,
+        "postgres_image_config_digest": IMAGE_ID,
+        "redis_image_config_digest": IMAGE_ID,
+        "nginx_image_config_digest": IMAGE_ID,
+        "app_image_content_identity": IMAGE_ID,
+        "postgres_image_content_identity": IMAGE_ID,
+        "redis_image_content_identity": IMAGE_ID,
+        "nginx_image_content_identity": IMAGE_ID,
+        "bot_fi_app_runtime_image_id": IMAGE_ID,
+        "bot_fi_postgres_runtime_image_id": IMAGE_ID,
+        "bot_fi_redis_runtime_image_id": IMAGE_ID,
+        "bot_fi_nginx_runtime_image_id": IMAGE_ID,
+        "webapp_fi_app_runtime_image_id": IMAGE_ID,
+        "webapp_fi_postgres_runtime_image_id": IMAGE_ID,
+        "webapp_fi_redis_runtime_image_id": IMAGE_ID,
+        "webapp_fi_nginx_runtime_image_id": IMAGE_ID,
+        "webapp_ir_app_runtime_image_id": IMAGE_ID,
+        "webapp_ir_postgres_runtime_image_id": IMAGE_ID,
+        "webapp_ir_redis_runtime_image_id": IMAGE_ID,
+        "webapp_ir_nginx_runtime_image_id": IMAGE_ID,
         "postgres_image_ref": NONEMPTY_STRING,
         "legacy_bot_rollback_sha256": HASH,
         "legacy_webapp_rollback_sha256": HASH,
@@ -250,11 +278,13 @@ PHASE_CLAIM_RULES: dict[str, dict[str, ClaimRule]] = {
     "stop_legacy_writers": {
         "legacy_writer_process_count": exact(0),
         "legacy_writer_database_client_count": exact(0),
+        "legacy_file_mutator_process_count": exact(0),
     },
     "zero_writer_surface_readback": {
         "write_capable_route_count": exact(0),
         "legacy_writer_process_count": exact(0),
         "writer_database_client_count": exact(0),
+        "file_mutator_process_count": exact(0),
         "externally_read_vhost_count": exact(3),
     },
     "final_snapshot_hashes": {
@@ -263,6 +293,9 @@ PHASE_CLAIM_RULES: dict[str, dict[str, ClaimRule]] = {
         "legacy_redis_sealed_set_sha256": HASH,
         "legacy_redis_restore_member_count": exact(0),
         "frozen_writer_delta_count": exact(0),
+        "file_mutator_process_count": exact(0),
+        "file_snapshot_pre_post_stat_stable": exact(True),
+        "file_snapshot_tree_hash_stable": exact(True),
     },
     "pristine_shadow_redis": {
         "redis_target_count": POSITIVE_INT,
@@ -382,10 +415,63 @@ PHASE_CLAIM_RULES: dict[str, dict[str, ClaimRule]] = {
 PHASE_MANIFEST_CLAIM_BINDINGS = {
     "pre_freeze_evidence": {
         "release_bundle_sha256": "release_bundle_sha256",
-        "role_material_sha256": "role_material_sha256",
+        "bot_fi_role_material_sha256": "role_materials.bot_fi.sha256",
+        "webapp_fi_role_material_sha256": "role_materials.webapp_fi.sha256",
+        "webapp_ir_role_material_sha256": "role_materials.webapp_ir.sha256",
+        "witness_role_material_sha256": "role_materials.witness.sha256",
         "shadow_compose_sha256": "shadow_compose_sha256",
-        "app_image_id": "app_image_id",
-        "postgres_image_id": "postgres_image_id",
+        "app_image_config_digest": "image_artifacts.app.config_digest",
+        "postgres_image_config_digest": (
+            "image_artifacts.postgres.config_digest"
+        ),
+        "redis_image_config_digest": "image_artifacts.redis.config_digest",
+        "nginx_image_config_digest": "image_artifacts.nginx.config_digest",
+        "app_image_content_identity": "image_artifacts.app.content_identity",
+        "postgres_image_content_identity": (
+            "image_artifacts.postgres.content_identity"
+        ),
+        "redis_image_content_identity": (
+            "image_artifacts.redis.content_identity"
+        ),
+        "nginx_image_content_identity": (
+            "image_artifacts.nginx.content_identity"
+        ),
+        "bot_fi_app_runtime_image_id": (
+            "role_runtime_image_ids.bot_fi.app"
+        ),
+        "bot_fi_postgres_runtime_image_id": (
+            "role_runtime_image_ids.bot_fi.postgres"
+        ),
+        "bot_fi_redis_runtime_image_id": (
+            "role_runtime_image_ids.bot_fi.redis"
+        ),
+        "bot_fi_nginx_runtime_image_id": (
+            "role_runtime_image_ids.bot_fi.nginx"
+        ),
+        "webapp_fi_app_runtime_image_id": (
+            "role_runtime_image_ids.webapp_fi.app"
+        ),
+        "webapp_fi_postgres_runtime_image_id": (
+            "role_runtime_image_ids.webapp_fi.postgres"
+        ),
+        "webapp_fi_redis_runtime_image_id": (
+            "role_runtime_image_ids.webapp_fi.redis"
+        ),
+        "webapp_fi_nginx_runtime_image_id": (
+            "role_runtime_image_ids.webapp_fi.nginx"
+        ),
+        "webapp_ir_app_runtime_image_id": (
+            "role_runtime_image_ids.webapp_ir.app"
+        ),
+        "webapp_ir_postgres_runtime_image_id": (
+            "role_runtime_image_ids.webapp_ir.postgres"
+        ),
+        "webapp_ir_redis_runtime_image_id": (
+            "role_runtime_image_ids.webapp_ir.redis"
+        ),
+        "webapp_ir_nginx_runtime_image_id": (
+            "role_runtime_image_ids.webapp_ir.nginx"
+        ),
         "postgres_image_ref": "postgres_image_ref",
         "legacy_bot_rollback_sha256": "legacy_bot_rollback_sha256",
         "legacy_webapp_rollback_sha256": "legacy_webapp_rollback_sha256",
@@ -568,28 +654,193 @@ def _validate_manifest_artifacts(
 ) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != set(ARTIFACT_FIELDS):
         raise PhaseEvidenceError("manifest artifact binding fields are not exact")
-    hash_fields = set(ARTIFACT_FIELDS) - {
-        "app_image_id",
-        "postgres_image_id",
-        "postgres_image_ref",
+    hash_fields = {
+        "release_bundle_sha256",
+        "legacy_bot_rollback_sha256",
+        "legacy_webapp_rollback_sha256",
+        "legacy_bot_redis_rollback_sha256",
+        "legacy_webapp_redis_rollback_sha256",
+        "shadow_compose_sha256",
+        "cutover_approval_sha256",
+        "nginx_freeze_generation_sha256",
+        "nginx_rollback_generation_sha256",
+        "postcommit_executor_contract_sha256",
+        "phase_evidence_schema_sha256",
+        "host_agent_sha256",
+        "host_agent_contract_sha256",
+        "phase_evidence_verifier_sha256",
     }
     for field in hash_fields:
         _nonzero_sha256(value[field], label=f"manifest artifact {field}")
-    for field in ("app_image_id", "postgres_image_id"):
+    for field in (
+        "release_bundle_bytes",
+    ):
         observed = value[field]
         if (
-            not isinstance(observed, str)
-            or IMAGE_ID_RE.fullmatch(observed) is None
-            or observed == "sha256:" + "0" * 64
+            isinstance(observed, bool)
+            or not isinstance(observed, int)
+            or not 1 <= observed <= 64 * 1024 * 1024 * 1024
         ):
             raise PhaseEvidenceError(
-                f"manifest artifact {field} is not an immutable image ID"
+                f"manifest artifact {field} is outside its size bound"
             )
+    role_materials = value["role_materials"]
+    if (
+        not isinstance(role_materials, dict)
+        or set(role_materials) != set(EXPECTED_TOPOLOGY)
+    ):
+        raise PhaseEvidenceError("manifest role material roles are not exact")
+    role_digests: set[str] = set()
+    for role, topology in EXPECTED_TOPOLOGY.items():
+        row = role_materials[role]
+        if (
+            not isinstance(row, dict)
+            or set(row) != {"sha256", "bytes", "transport", "format"}
+        ):
+            raise PhaseEvidenceError(
+                f"manifest role material {role} fields are not exact"
+            )
+        digest = _nonzero_sha256(
+            row["sha256"],
+            label=f"manifest role material {role}",
+        )
+        observed_bytes = row["bytes"]
+        expected_format = (
+            "production-shadow-witness-material-tar"
+            if role == "witness"
+            else "production-shadow-role-material-tar"
+        )
+        if (
+            isinstance(observed_bytes, bool)
+            or not isinstance(observed_bytes, int)
+            or not 1 <= observed_bytes <= 64 * 1024 * 1024 * 1024
+            or row["transport"] != topology["transport"]
+            or row["format"] != expected_format
+        ):
+            raise PhaseEvidenceError(
+                f"manifest role material {role} is invalid"
+            )
+        role_digests.add(digest)
+    if len(role_digests) != len(EXPECTED_TOPOLOGY):
+        raise PhaseEvidenceError(
+            "manifest role material digests must be distinct"
+        )
+
+    image_artifacts = value["image_artifacts"]
+    if (
+        not isinstance(image_artifacts, dict)
+        or set(image_artifacts) != set(IMAGE_KINDS)
+    ):
+        raise PhaseEvidenceError(
+            "manifest image artifact inventory is not exact"
+        )
+    for kind in IMAGE_KINDS:
+        row = image_artifacts[kind]
+        if (
+            not isinstance(row, dict)
+            or set(row) != set(IMAGE_ARTIFACT_FIELDS)
+        ):
+            raise PhaseEvidenceError(
+                f"manifest image artifact {kind} fields are not exact"
+            )
+        _nonzero_sha256(
+            row["archive_sha256"],
+            label=f"manifest image artifact {kind} archive",
+        )
+        _nonzero_sha256(
+            row["content_identity"].removeprefix("sha256:")
+            if isinstance(row["content_identity"], str)
+            else row["content_identity"],
+            label=f"manifest image artifact {kind} content identity",
+        )
+        if (
+            isinstance(row["archive_bytes"], bool)
+            or not isinstance(row["archive_bytes"], int)
+            or not 1 <= row["archive_bytes"] <= 64 * 1024 * 1024 * 1024
+            or not isinstance(row["config_digest"], str)
+            or IMAGE_ID_RE.fullmatch(row["config_digest"]) is None
+            or row["config_digest"] == "sha256:" + "0" * 64
+            or not isinstance(row["content_identity"], str)
+            or IMAGE_ID_RE.fullmatch(row["content_identity"]) is None
+            or row["content_identity"] == "sha256:" + "0" * 64
+        ):
+            raise PhaseEvidenceError(
+                f"manifest image artifact {kind} identity is invalid"
+            )
+        try:
+            observed_identity = verify_content_descriptor(
+                row["content_descriptor"]
+            )
+        except DockerImageIdentityError as exc:
+            raise PhaseEvidenceError(
+                f"manifest image artifact {kind} descriptor is invalid"
+            ) from exc
+        if (
+            row["content_descriptor"]["architecture"] != "amd64"
+            or row["content_descriptor"]["os"] != "linux"
+            or observed_identity != row["content_identity"]
+        ):
+            raise PhaseEvidenceError(
+                f"manifest image artifact {kind} content identity differs"
+            )
+    for field in ("archive_sha256", "config_digest", "content_identity"):
+        if len(
+            {image_artifacts[kind][field] for kind in IMAGE_KINDS}
+        ) != len(IMAGE_KINDS):
+            raise PhaseEvidenceError(
+                f"manifest image {field} values must be distinct"
+            )
+
+    runtime_ids = value["role_runtime_image_ids"]
+    if (
+        not isinstance(runtime_ids, dict)
+        or set(runtime_ids) != set(DOCKER_RUNTIME_ROLES)
+    ):
+        raise PhaseEvidenceError(
+            "manifest runtime image roles are not exact"
+        )
+    for role in DOCKER_RUNTIME_ROLES:
+        role_ids = runtime_ids[role]
+        if (
+            not isinstance(role_ids, dict)
+            or set(role_ids) != set(IMAGE_KINDS)
+            or any(
+                not isinstance(observed, str)
+                or IMAGE_ID_RE.fullmatch(observed) is None
+                or observed == "sha256:" + "0" * 64
+                for observed in role_ids.values()
+            )
+            or len(set(role_ids.values())) != len(IMAGE_KINDS)
+        ):
+            raise PhaseEvidenceError(
+                f"manifest runtime image inventory for {role} is invalid"
+            )
+    if (
+        value["postgres_runtime_uid"] != 70
+        or value["postgres_runtime_gid"] != 70
+    ):
+        raise PhaseEvidenceError(
+            "manifest PostgreSQL runtime UID/GID is invalid"
+        )
     if value["postgres_image_ref"] != (
         f"trading_bot_postgres_boottime:15-{release_sha}"
     ):
         raise PhaseEvidenceError("manifest PostgreSQL image ref is invalid")
     return dict(value)
+
+
+def _manifest_artifact_binding_value(
+    artifacts: dict[str, Any],
+    binding: str,
+) -> Any:
+    current: Any = artifacts
+    for component in binding.split("."):
+        if not isinstance(current, dict) or component not in current:
+            raise PhaseEvidenceError(
+                f"manifest artifact binding {binding} is invalid"
+            )
+        current = current[component]
+    return current
 
 
 def _timestamp(value: Any, *, label: str) -> datetime:
@@ -1068,7 +1319,10 @@ def verify_phase_evidence(
         spec.phase,
         {},
     ).items():
-        if claims[claim_name]["value"] != manifest_artifacts[artifact_name]:
+        if claims[claim_name]["value"] != _manifest_artifact_binding_value(
+            manifest_artifacts,
+            artifact_name,
+        ):
             raise PhaseEvidenceError(
                 f"claim {claim_name} differs from manifest artifact {artifact_name}"
             )

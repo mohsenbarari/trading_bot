@@ -41,7 +41,6 @@ SAFE_ENV = {
     "LC_ALL": "C.UTF-8",
 }
 IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
-CONTENT_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 LOCAL_RELEASE_IMAGE_PREFIXES = (
     "trading_bot_three_site_staging:",
     "trading_bot_postgres_boottime:",
