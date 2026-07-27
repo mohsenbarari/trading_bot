@@ -27,6 +27,12 @@ from scripts import manage_three_site_human_approval as manager
 
 
 class ManageHumanApprovalTests(unittest.TestCase):
+    def test_default_session_scope_is_only_live_full_matrix_actions(self) -> None:
+        self.assertEqual(
+            manager.DEFAULT_STAGING_SESSION_ACTIONS,
+            ("failback_fi", "promote_ir", "start_full_matrix"),
+        )
+
     def test_issue_flow_persists_state_audit_and_non_overwriting_token(self) -> None:
         now = datetime.now(timezone.utc).replace(microsecond=0)
         password = "correct horse battery staple"

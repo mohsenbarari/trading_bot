@@ -72,12 +72,10 @@ DEFAULT_ACTIONS = (
     {"action": "promote_ir", "environments": ["staging", "production"], "max_ttl_seconds": 600},
     {"action": "failback_fi", "environments": ["staging", "production"], "max_ttl_seconds": 600},
 )
-DEFAULT_STAGING_SESSION_ACTIONS = tuple(
-    sorted(
-        value["action"]
-        for value in DEFAULT_ACTIONS
-        if "staging" in value["environments"]
-    )
+DEFAULT_STAGING_SESSION_ACTIONS = (
+    "failback_fi",
+    "promote_ir",
+    "start_full_matrix",
 )
 
 
