@@ -917,8 +917,7 @@ services:
     volumes:
       - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
       - ${STAGING_WITNESS_SIGNING_KEY:?required}:/run/witness-signing/private.key:ro
-      - ${STAGING_HUMAN_APPROVAL_RELAY_SESSION_FILE:-/dev/null}:/run/human-approval/session.json:ro
-      - ${STAGING_HUMAN_APPROVAL_RELAY_POLICY_FILE:-/dev/null}:/run/human-approval/policy.json:ro
+      - ${STAGING_HUMAN_APPROVAL_RELAY_MATERIAL_DIR:-/dev/null}:/run/human-approval:ro
       - witness_audit:/app/audit_trail
     ports: ["127.0.0.1:8214:8000"]
     depends_on: {witness_migration: {condition: service_completed_successfully}}

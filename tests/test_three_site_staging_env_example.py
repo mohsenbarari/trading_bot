@@ -58,6 +58,21 @@ class ThreeSiteStagingEnvExampleTests(unittest.TestCase):
         self.assertEqual(values["TELEGRAM_DELIVERY_QUEUE_CUTOVER_READY"], "false")
         self.assertTrue(values["DR_BLOB_OBJECT_PREFIX"].startswith("staging/"))
 
+    def test_human_approval_relay_baseline_is_one_inert_directory(self):
+        values = _values()
+        self.assertEqual(values["STAGING_HUMAN_APPROVAL_RELAY_ENABLED"], "false")
+        self.assertEqual(
+            values["STAGING_HUMAN_APPROVAL_RELAY_MATERIAL_DIR"], "/dev/null"
+        )
+        self.assertEqual(
+            values["STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_KEY_ID"], ""
+        )
+        self.assertEqual(
+            values["STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_SECRET"], ""
+        )
+        self.assertNotIn("STAGING_HUMAN_APPROVAL_RELAY_SESSION_FILE", values)
+        self.assertNotIn("STAGING_HUMAN_APPROVAL_RELAY_POLICY_FILE", values)
+
 
 if __name__ == "__main__":
     unittest.main()

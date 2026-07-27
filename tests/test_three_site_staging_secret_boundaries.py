@@ -21,6 +21,35 @@ class ThreeSiteStagingSecretBoundaryTests(unittest.TestCase):
         self.assertGreaterEqual(result["service_count"], 37)
         self.assertEqual(result["managed_network_count"], 11)
 
+    def test_witness_relay_requires_one_directory_bind_and_rejects_file_binds(self):
+        canonical = yaml.safe_load(
+            (ROOT / "deploy/staging/docker-compose.three-site.yml").read_text()
+        )
+        witness = canonical["services"]["witness_api"]
+        self.assertIn(
+            "${STAGING_HUMAN_APPROVAL_RELAY_MATERIAL_DIR:-/dev/null}:"
+            "/run/human-approval:ro",
+            witness["volumes"],
+        )
+        unsafe = copy.deepcopy(canonical)
+        volumes = unsafe["services"]["witness_api"]["volumes"]
+        volumes[:] = [
+            item for item in volumes if "/run/human-approval" not in str(item)
+        ]
+        volumes.extend(
+            [
+                "/root/session.json:/run/human-approval/session.json:ro",
+                "/root/policy.json:/run/human-approval/policy.json:ro",
+            ]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "compose.yml"
+            path.write_text(yaml.safe_dump(unsafe), encoding="utf-8")
+            with self.assertRaisesRegex(
+                SecretBoundaryError, "exact_relay_directory_bind_missing"
+            ):
+                verify_compose(path)
+
     def test_global_env_file_and_cross_role_secret_are_rejected(self):
         source = """
 services:

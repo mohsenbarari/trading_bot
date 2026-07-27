@@ -21,8 +21,7 @@ SECRET_REFERENCES = {
     "BOT_FI_JWT_SECRET_KEY": lambda service: service == "bot_fi_api",
     "WEBAPP_JWT_SECRET_KEY": lambda service: service in {"webapp_fi_api", "webapp_ir_api"},
     "STAGING_WITNESS_SIGNING_KEY": lambda service: service == "witness_api",
-    "STAGING_HUMAN_APPROVAL_RELAY_SESSION_FILE": lambda service: service == "witness_api",
-    "STAGING_HUMAN_APPROVAL_RELAY_POLICY_FILE": lambda service: service == "witness_api",
+    "STAGING_HUMAN_APPROVAL_RELAY_MATERIAL_DIR": lambda service: service == "witness_api",
     "STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_SECRET": lambda service: service == "witness_api",
     "STAGING_DR_BLOB_CREDENTIALS_FILE": lambda service: service.endswith("_blobs"),
     "STAGING_DR_BLOB_ENCRYPTION_KEYRING_FILE": lambda service: service.endswith("_blobs"),
@@ -201,6 +200,11 @@ ROLE_PROFILE_PREFIXES = {
     "webapp_ir_": "webapp-ir",
     "witness_": "witness",
 }
+RELAY_CONTAINER_DIRECTORY = "/run/human-approval"
+RELAY_DIRECTORY_BIND = (
+    "${STAGING_HUMAN_APPROVAL_RELAY_MATERIAL_DIR:-/dev/null}:"
+    f"{RELAY_CONTAINER_DIRECTORY}:ro"
+)
 
 
 def _service_networks(config: dict[str, object]) -> set[str]:
@@ -257,6 +261,31 @@ def verify_compose(path: Path) -> dict[str, object]:
             )
             for key in sorted(forbidden_control_keys):
                 violations.append(f"{service}:writer_control_environment_forbidden:{key}")
+        if str(service) == "witness_api":
+            volumes = config.get("volumes", [])
+            relay_mounts = [
+                value
+                for value in volumes
+                if isinstance(value, str)
+                and (
+                    f":{RELAY_CONTAINER_DIRECTORY}:" in value
+                    or f":{RELAY_CONTAINER_DIRECTORY}/" in value
+                )
+            ] if isinstance(volumes, list) else []
+            if relay_mounts != [RELAY_DIRECTORY_BIND]:
+                violations.append("witness_api:exact_relay_directory_bind_missing")
+            if not isinstance(environment, dict) or (
+                environment.get("HUMAN_APPROVAL_RELAY_SESSION_FILE")
+                != f"{RELAY_CONTAINER_DIRECTORY}/session.json"
+                or environment.get("HUMAN_APPROVAL_RELAY_POLICY_FILE")
+                != f"{RELAY_CONTAINER_DIRECTORY}/policy.json"
+            ):
+                violations.append("witness_api:relay_container_paths_changed")
+            if (
+                "STAGING_HUMAN_APPROVAL_RELAY_SESSION_FILE" in material
+                or "STAGING_HUMAN_APPROVAL_RELAY_POLICY_FILE" in material
+            ):
+                violations.append("witness_api:relay_file_bind_forbidden")
         if str(service) in WRITER_CONTROL_SERVICES:
             if config.get("ports") or config.get("expose"):
                 violations.append(f"{service}:inbound_surface_forbidden")

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+import tempfile
 import unittest
+from unittest import mock
 
 import yaml
 
+from scripts import verify_three_site_staging_role_bundle as role_verifier
 from scripts.render_three_site_staging_role_compose import (
     canonical_role_compose_bytes,
     canonical_role_env_bytes,
@@ -16,6 +19,7 @@ from scripts.render_three_site_staging_role_compose import (
 from scripts.verify_three_site_staging_role_bundle import (
     RoleBundleError,
     _verify_bundle_source,
+    _verify_relay_material_directory,
     verify_role_bundle,
 )
 from tests.test_three_site_staging_signed_inventory import (
@@ -174,8 +178,6 @@ class ThreeSiteStagingRoleBundleTests(unittest.TestCase):
             )
 
     def test_cli_bundle_sources_require_exact_modes_and_no_links(self):
-        import tempfile
-
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             env = root / "role.env"
@@ -189,6 +191,85 @@ class ThreeSiteStagingRoleBundleTests(unittest.TestCase):
             link.symlink_to(env)
             with self.assertRaises(RoleBundleError):
                 _verify_bundle_source(link, expected_mode=0o600)
+
+    def test_enabled_relay_directory_requires_exact_root_only_active_files(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            active = Path(directory) / "active"
+            active.mkdir(mode=0o700)
+            for name in ("session.json", "policy.json"):
+                path = active / name
+                path.write_text("{}\n", encoding="utf-8")
+                path.chmod(0o600)
+            _verify_relay_material_directory(str(active))
+            (active / "session.json").chmod(0o640)
+            with self.assertRaisesRegex(RoleBundleError, "mode-0600"):
+                _verify_relay_material_directory(str(active))
+            (active / "session.json").chmod(0o600)
+            extra = active / "unexpected"
+            extra.write_text("x", encoding="utf-8")
+            extra.chmod(0o600)
+            with self.assertRaisesRegex(RoleBundleError, "exactly"):
+                _verify_relay_material_directory(str(active))
+            real = Path(directory) / "real"
+            linked_active = real / "active"
+            linked_active.mkdir(mode=0o700, parents=True)
+            for name in ("session.json", "policy.json"):
+                path = linked_active / name
+                path.write_text("{}\n", encoding="utf-8")
+                path.chmod(0o600)
+            alias = Path(directory) / "alias"
+            alias.symlink_to(real, target_is_directory=True)
+            with self.assertRaisesRegex(RoleBundleError, "root-owned"):
+                _verify_relay_material_directory(str(alias / "active"))
+
+    def test_enabled_relay_file_attestation_reaches_exact_directory_check(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            active = (
+                root
+                / self.inventory["campaign_id"]
+                / self.inventory["deployment_id"]
+                / "material-revisions"
+                / "relay-attestation-r001"
+                / "active"
+            )
+            active.mkdir(mode=0o700, parents=True)
+            active.chmod(0o700)
+            for name in ("session.json", "policy.json"):
+                path = active / name
+                path.write_text("{}\n", encoding="utf-8")
+                path.chmod(0o600)
+            values = dict(self.values)
+            values.update(
+                STAGING_HUMAN_APPROVAL_RELAY_ENABLED="true",
+                STAGING_HUMAN_APPROVAL_RELAY_MATERIAL_DIR=str(active),
+                STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_KEY_ID=(
+                    "relay-attestation-key"
+                ),
+                STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_SECRET=(
+                    "relay-attestation-secret-that-is-at-least-32-bytes"
+                ),
+            )
+            role_payload = render_role_compose(self.canonical, role="witness")
+            compose_bytes = canonical_role_compose_bytes(role_payload)
+            env_bytes = canonical_role_env_bytes(
+                values,
+                required_names=referenced_environment_names(role_payload),
+            )
+            with mock.patch.object(role_verifier, "_verify_file"):
+                result = verify_role_bundle(
+                    role="witness",
+                    canonical_compose=self.canonical,
+                    role_compose_bytes=compose_bytes,
+                    env_bytes=env_bytes,
+                    inventory=self.inventory,
+                    approval=self.approval,
+                    approval_policy=self.policy,
+                    verify_files=True,
+                )
+            self.assertTrue(result["file_attestation"])
 
 if __name__ == "__main__":
     unittest.main()

@@ -118,11 +118,14 @@ def _verify_witness_contract(role_values: dict[str, dict[str, str]]) -> set[str]
         witness_key_ids.add(str(key_id))
         witness_secrets.add(str(secret))
     relay_enabled = witness.get("STAGING_HUMAN_APPROVAL_RELAY_ENABLED")
+    relay_material_dir = witness.get("STAGING_HUMAN_APPROVAL_RELAY_MATERIAL_DIR", "")
     relay_key_id = witness.get("STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_KEY_ID", "")
     relay_secret = witness.get("STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_SECRET", "")
     if relay_enabled == "true":
         if (
-            not relay_key_id
+            not relay_material_dir
+            or relay_material_dir == "/dev/null"
+            or not relay_key_id
             or len(relay_key_id) > 64
             or len(relay_secret.encode("utf-8")) < 32
             or relay_key_id in witness_key_ids
@@ -131,7 +134,12 @@ def _verify_witness_contract(role_values: dict[str, dict[str, str]]) -> set[str]
             raise CampaignBundleError("human approval relay credential is unsafe")
         witness_key_ids.add(relay_key_id)
         witness_secrets.add(relay_secret)
-    elif relay_enabled != "false" or relay_key_id or relay_secret:
+    elif (
+        relay_enabled != "false"
+        or relay_material_dir != "/dev/null"
+        or relay_key_id
+        or relay_secret
+    ):
         raise CampaignBundleError("disabled human approval relay retains credential material")
     return witness_secrets
 
@@ -182,6 +190,7 @@ def verify_campaign_bundle(
     approval: dict[str, Any],
     approval_policy: dict[str, Any],
     verify_files: bool,
+    witness_relay_public_key: str | None = None,
 ) -> dict[str, Any]:
     if set(bundles) != set(ROLES):
         raise CampaignBundleError("campaign requires exactly one bundle for every role")
@@ -199,6 +208,7 @@ def verify_campaign_bundle(
                 approval=approval,
                 approval_policy=approval_policy,
                 verify_files=verify_files,
+                witness_relay_public_key=witness_relay_public_key,
             )
             role_values[role] = parse_env_values(env_bytes.decode("utf-8"))
         except (RoleBundleError, UnicodeDecodeError) as exc:
@@ -268,6 +278,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--approval-policy", type=Path, required=True)
     parser.add_argument("--bundle", action="append", required=True)
     parser.add_argument("--skip-file-attestation", action="store_true")
+    parser.add_argument("--witness-relay-public-key-file", type=Path)
     args = parser.parse_args(argv)
     try:
         parsed = [_parse_bundle(value) for value in args.bundle]
@@ -289,6 +300,15 @@ def main(argv: list[str] | None = None) -> int:
             approval=load_inventory(args.approval),
             approval_policy=load_inventory(args.approval_policy),
             verify_files=not args.skip_file_attestation,
+            witness_relay_public_key=(
+                _verify_bundle_source(
+                    args.witness_relay_public_key_file, expected_mode=0o600
+                )
+                .decode("utf-8")
+                .strip()
+                if args.witness_relay_public_key_file is not None
+                else None
+            ),
         )
     except Exception as exc:
         print(

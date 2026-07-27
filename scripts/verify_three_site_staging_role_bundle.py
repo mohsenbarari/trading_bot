@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import stat
@@ -74,6 +75,7 @@ ENV_PREFIX = {
     "webapp-ir": "WEBAPP_IR",
 }
 REQUIRED_REFERENCE_RE = re.compile(r"(?<!\$)\$\{([A-Z][A-Z0-9_]*):\?")
+RELAY_REVISION_RE = re.compile(r"^[a-z0-9][a-z0-9.-]{7,79}$")
 PRIVATE_FILE_KEYS = frozenset(
     {
         "STAGING_BOT_FI_TLS_KEY",
@@ -81,8 +83,6 @@ PRIVATE_FILE_KEYS = frozenset(
         "STAGING_WEBAPP_IR_TLS_KEY",
         "STAGING_WITNESS_TLS_KEY",
         "STAGING_WITNESS_SIGNING_KEY",
-        "STAGING_HUMAN_APPROVAL_RELAY_SESSION_FILE",
-        "STAGING_HUMAN_APPROVAL_RELAY_POLICY_FILE",
         "STAGING_DR_BLOB_CREDENTIALS_FILE",
         "STAGING_DR_BLOB_ENCRYPTION_KEYRING_FILE",
     }
@@ -197,18 +197,83 @@ def _verify_file(path_value: str, *, private: bool) -> None:
         raise RoleBundleError(f"required role file is empty: {path}")
 
 
-def _verify_human_approval_relay(values: dict[str, str], *, role: str) -> None:
+def _verify_relay_material_directory(path_value: str) -> None:
+    path = Path(path_value)
+    if (
+        not path.is_absolute()
+        or ".." in path.parts
+        or str(path) != os.path.normpath(str(path))
+        or path.name != "active"
+    ):
+        raise RoleBundleError(
+            "human approval relay material directory must be an absolute active path"
+        )
+    try:
+        metadata = path.lstat()
+        resolved = path.resolve(strict=True)
+    except OSError as exc:
+        raise RoleBundleError(
+            f"human approval relay material directory is unavailable: {path}"
+        ) from exc
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or resolved != path
+        or metadata.st_uid != 0
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+    ):
+        raise RoleBundleError(
+            "human approval relay material directory must be root-owned mode-0700"
+        )
+    try:
+        entries = {entry.name for entry in path.iterdir()}
+    except OSError as exc:
+        raise RoleBundleError(
+            "human approval relay material directory cannot be enumerated"
+        ) from exc
+    if entries != {"session.json", "policy.json"}:
+        raise RoleBundleError(
+            "human approval relay active directory must contain exactly session.json "
+            "and policy.json"
+        )
+    for name in ("session.json", "policy.json"):
+        child = path / name
+        try:
+            child_metadata = child.lstat()
+        except OSError as exc:
+            raise RoleBundleError(
+                f"human approval relay material file is unavailable: {child}"
+            ) from exc
+        if (
+            not stat.S_ISREG(child_metadata.st_mode)
+            or stat.S_ISLNK(child_metadata.st_mode)
+            or child_metadata.st_uid != 0
+            or child_metadata.st_nlink != 1
+            or stat.S_IMODE(child_metadata.st_mode) != 0o600
+            or child_metadata.st_size <= 0
+        ):
+            raise RoleBundleError(
+                "human approval relay material files must be root-owned, "
+                "single-link mode-0600 regular files"
+            )
+
+
+def _verify_human_approval_relay(
+    values: dict[str, str],
+    *,
+    role: str,
+    inventory: dict[str, Any],
+) -> None:
     """Keep the reusable session isolated to the Witness role only."""
 
     if role != "witness":
         return
     enabled = values.get("STAGING_HUMAN_APPROVAL_RELAY_ENABLED")
-    session_path = values.get("STAGING_HUMAN_APPROVAL_RELAY_SESSION_FILE")
-    policy_path = values.get("STAGING_HUMAN_APPROVAL_RELAY_POLICY_FILE")
+    material_dir = values.get("STAGING_HUMAN_APPROVAL_RELAY_MATERIAL_DIR")
     key_id = values.get("STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_KEY_ID")
     secret = values.get("STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_SECRET")
     if enabled == "false":
-        if (session_path, policy_path, key_id, secret) != ("/dev/null", "/dev/null", "", ""):
+        if (material_dir, key_id, secret) != ("/dev/null", "", ""):
             raise RoleBundleError("disabled human approval relay retains active material")
         return
     if enabled != "true":
@@ -217,12 +282,26 @@ def _verify_human_approval_relay(values: dict[str, str], *, role: str) -> None:
         not key_id
         or len(key_id) > 64
         or len(secret.encode("utf-8")) < 32
-        or not session_path
-        or not policy_path
-        or session_path == "/dev/null"
-        or policy_path == "/dev/null"
+        or not material_dir
+        or material_dir == "/dev/null"
     ):
         raise RoleBundleError("human approval relay material is incomplete")
+    material_path = Path(material_dir)
+    if (
+        not material_path.is_absolute()
+        or ".." in material_path.parts
+        or str(material_path) != os.path.normpath(str(material_path))
+        or material_path.name != "active"
+        or RELAY_REVISION_RE.fullmatch(material_path.parent.name) is None
+        or material_path.parent.parent.name != "material-revisions"
+        or material_path.parent.parent.parent.name
+        != str(inventory.get("deployment_id", ""))
+        or material_path.parent.parent.parent.parent.name
+        != str(inventory.get("campaign_id", ""))
+    ):
+        raise RoleBundleError(
+            "human approval relay material directory is not campaign/revision-bound"
+        )
 
 
 def _verify_bundle_source(path: Path, *, expected_mode: int) -> bytes:
@@ -254,12 +333,14 @@ def verify_role_bundle(
     approval_policy: dict[str, Any],
     verify_files: bool,
     required_inventory_stage: str = "provisioned",
+    witness_relay_public_key: str | None = None,
 ) -> dict[str, Any]:
     inventory_result = verify_approved_inventory(
         inventory,
         approval=approval,
         approval_policy=approval_policy,
         host_destructive=None,
+        witness_relay_public_key=witness_relay_public_key,
     )
     if required_inventory_stage not in {"planned", "provisioned"}:
         raise RoleBundleError("role bundle inventory-stage requirement is invalid")
@@ -345,7 +426,7 @@ def verify_role_bundle(
             or values["DR_BLOB_REQUIRE_VERSIONING"] != "true"
         ):
             raise RoleBundleError("role Object Storage settings differ from approved inventory")
-    _verify_human_approval_relay(values, role=role)
+    _verify_human_approval_relay(values, role=role, inventory=inventory)
     _verify_transport(values, role=role)
     database_passwords = {
         value
@@ -360,17 +441,16 @@ def verify_role_bundle(
         raise RoleBundleError("database credentials are reused inside one role bundle")
     if verify_files:
         for name in sorted(PRIVATE_FILE_KEYS & set(values)):
-            if (
-                name in {
-                    "STAGING_HUMAN_APPROVAL_RELAY_SESSION_FILE",
-                    "STAGING_HUMAN_APPROVAL_RELAY_POLICY_FILE",
-                }
-                and values.get("STAGING_HUMAN_APPROVAL_RELAY_ENABLED") != "true"
-            ):
-                continue
             _verify_file(values[name], private=True)
         for name in sorted(PUBLIC_FILE_KEYS & set(values)):
             _verify_file(values[name], private=False)
+        if (
+            role == "witness"
+            and values.get("STAGING_HUMAN_APPROVAL_RELAY_ENABLED") == "true"
+        ):
+            _verify_relay_material_directory(
+                values["STAGING_HUMAN_APPROVAL_RELAY_MATERIAL_DIR"]
+            )
     return {
         "status": "verified",
         "role": role,
@@ -393,6 +473,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--approval", type=Path, required=True)
     parser.add_argument("--approval-policy", type=Path, required=True)
     parser.add_argument("--skip-file-attestation", action="store_true")
+    parser.add_argument("--witness-relay-public-key-file", type=Path)
     args = parser.parse_args(argv)
     try:
         result = verify_role_bundle(
@@ -408,6 +489,15 @@ def main(argv: list[str] | None = None) -> int:
             approval=load_inventory(args.approval),
             approval_policy=load_inventory(args.approval_policy),
             verify_files=not args.skip_file_attestation,
+            witness_relay_public_key=(
+                _verify_bundle_source(
+                    args.witness_relay_public_key_file, expected_mode=0o600
+                )
+                .decode("utf-8")
+                .strip()
+                if args.witness_relay_public_key_file is not None
+                else None
+            ),
         )
     except Exception as exc:
         print(
