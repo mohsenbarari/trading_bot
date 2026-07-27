@@ -19,6 +19,12 @@ if str(REPO_ROOT) not in sys.path:
 
 import yaml
 
+from core.docker_image_identity import (
+    DockerImageIdentityError,
+    canonical_sha256 as _canonical_sha256,
+    image_content_descriptor as _canonical_image_content_descriptor,
+    verify_content_descriptor as _canonical_verify_content_descriptor,
+)
 from scripts.render_three_site_staging_role_compose import _atomic_write
 from scripts.verify_three_site_staging_inventory import load_inventory
 from scripts.verify_three_site_staging_role_bundle import (
@@ -46,12 +52,6 @@ class ImageInventoryError(RuntimeError):
     pass
 
 
-def _canonical_sha256(value: Any) -> str:
-    return "sha256:" + hashlib.sha256(
-        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-
-
 def image_content_descriptor(raw: dict[str, Any]) -> tuple[dict[str, Any], str]:
     """Return a storage-driver-independent identity for one inspected image.
 
@@ -60,42 +60,17 @@ def image_content_descriptor(raw: dict[str, Any]) -> tuple[dict[str, Any], str]:
     configuration and ordered rootfs diff IDs remain identical after an exact
     save/load, so bind the inventory to those canonical values instead.
     """
-    config = raw.get("Config")
-    rootfs = raw.get("RootFS")
-    if not isinstance(config, dict) or not isinstance(rootfs, dict):
-        raise ImageInventoryError("Docker image lacks canonical config/rootfs metadata")
-    layers = rootfs.get("Layers")
-    descriptor = {
-        "architecture": str(raw.get("Architecture") or ""),
-        "os": str(raw.get("Os") or ""),
-        "created": str(raw.get("Created") or ""),
-        "config_sha256": _canonical_sha256(config),
-        "rootfs_type": str(rootfs.get("Type") or ""),
-        "rootfs_layers": list(layers) if isinstance(layers, list) else layers,
-    }
-    return descriptor, _verify_content_descriptor(descriptor)
+    try:
+        return _canonical_image_content_descriptor(raw)
+    except DockerImageIdentityError as exc:
+        raise ImageInventoryError(str(exc)) from exc
 
 
 def _verify_content_descriptor(descriptor: Any) -> str:
-    fields = {
-        "architecture", "os", "created", "config_sha256", "rootfs_type",
-        "rootfs_layers",
-    }
-    if not isinstance(descriptor, dict) or set(descriptor) != fields:
-        raise ImageInventoryError("image content descriptor fields are invalid")
-    layers = descriptor["rootfs_layers"]
-    if (
-        not descriptor["architecture"]
-        or not descriptor["os"]
-        or not descriptor["created"]
-        or not CONTENT_HASH_RE.fullmatch(str(descriptor["config_sha256"]))
-        or descriptor["rootfs_type"] != "layers"
-        or not isinstance(layers, list)
-        or not layers
-        or any(not CONTENT_HASH_RE.fullmatch(str(layer)) for layer in layers)
-    ):
-        raise ImageInventoryError("image content descriptor is malformed")
-    return _canonical_sha256(descriptor)
+    try:
+        return _canonical_verify_content_descriptor(descriptor)
+    except DockerImageIdentityError as exc:
+        raise ImageInventoryError(str(exc)) from exc
 
 
 def _run(arguments: list[str], *, timeout: int = 60) -> str:
