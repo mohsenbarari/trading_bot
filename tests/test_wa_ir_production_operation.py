@@ -2238,7 +2238,7 @@ class ProductionOperationTests(unittest.TestCase):
                     manifest=fixture.manifest,
                 )
 
-    def test_load_images_accepts_cross_engine_ids_and_rejects_preexisting_or_ambiguous(self) -> None:
+    def test_load_images_accepts_cross_engine_and_exact_preexisting_ids_but_rejects_ambiguity(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             fixture = OperationFixture(Path(raw))
             paths = MODULE.verify_incoming(
@@ -2272,7 +2272,12 @@ class ProductionOperationTests(unittest.TestCase):
                 if arguments[1:3] == ["image", "ls"]:
                     inventory_calls += 1
                     if inventory_calls == 1:
-                        return ""
+                        return "\n".join(
+                            (
+                                fixture.runtime_image_ids["redis"],
+                                fixture.runtime_image_ids["nginx"],
+                            )
+                        )
                     return "\n".join(
                         [
                             *fixture.runtime_image_ids.values(),
@@ -2309,38 +2314,12 @@ class ProductionOperationTests(unittest.TestCase):
             )
             self.assertEqual(len(load_calls), len(MODULE.IMAGE_ROLES))
 
-            empty = {
+            exact = {
                 image.content_identity: ()
                 for image in fixture.manifest.image_artifacts.values()
             }
-            preexisting = dict(empty)
-            preexisting[
-                fixture.manifest.image_artifacts["app"].content_identity
-            ] = ({"runtime_image_id": fixture.runtime_image_ids["app"]},)
-            with (
-                patch.object(MODULE, "_docker_archive_identity"),
-                patch.object(
-                    MODULE,
-                    "_enumerate_local_images",
-                    return_value=preexisting,
-                ),
-                patch.object(MODULE, "_run") as no_load,
-                self.assertRaises(MODULE.ProductionOperationError),
-            ):
-                MODULE.load_images(fixture.manifest, paths)
-            no_load.assert_not_called()
-
-            ambiguous = {
-                image.content_identity: (
-                    {
-                        "runtime_image_id": (
-                            fixture.runtime_image_ids[role]
-                        )
-                    },
-                )
-                for role, image in fixture.manifest.image_artifacts.items()
-            }
-            ambiguous[
+            ambiguous_before = dict(exact)
+            ambiguous_before[
                 fixture.manifest.image_artifacts["app"].content_identity
             ] = (
                 {"runtime_image_id": fixture.runtime_image_ids["app"]},
@@ -2351,12 +2330,123 @@ class ProductionOperationTests(unittest.TestCase):
                 patch.object(
                     MODULE,
                     "_enumerate_local_images",
-                    side_effect=[empty, ambiguous],
+                    return_value=ambiguous_before,
+                ),
+                patch.object(MODULE, "_run") as no_load,
+                self.assertRaises(MODULE.ProductionOperationError),
+            ):
+                MODULE.load_images(fixture.manifest, paths)
+            no_load.assert_not_called()
+
+            ambiguous_after = {
+                image.content_identity: (
+                    {
+                        "runtime_image_id": (
+                            fixture.runtime_image_ids[role]
+                        )
+                    },
+                )
+                for role, image in fixture.manifest.image_artifacts.items()
+            }
+            ambiguous_after[
+                fixture.manifest.image_artifacts["app"].content_identity
+            ] = (
+                {"runtime_image_id": fixture.runtime_image_ids["app"]},
+                {"runtime_image_id": "sha256:" + "e" * 64},
+            )
+            with (
+                patch.object(MODULE, "_docker_archive_identity"),
+                patch.object(
+                    MODULE,
+                    "_enumerate_local_images",
+                    side_effect=[exact, ambiguous_after],
                 ),
                 patch.object(MODULE, "_run", return_value=""),
                 self.assertRaises(MODULE.ProductionOperationError),
             ):
                 MODULE.load_images(fixture.manifest, paths)
+
+    def test_load_images_safely_retries_after_partial_idempotent_load(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = OperationFixture(Path(raw))
+            paths = MODULE.verify_incoming(
+                fixture.manifest,
+                operation_root=fixture.operation_root,
+                required_uid=os.geteuid(),
+            )
+            empty = {
+                image.content_identity: ()
+                for image in fixture.manifest.image_artifacts.values()
+            }
+            partial = dict(empty)
+            for role in ("app", "postgres"):
+                partial[
+                    fixture.manifest.image_artifacts[role].content_identity
+                ] = (
+                    {
+                        "runtime_image_id": fixture.runtime_image_ids[
+                            role
+                        ]
+                    },
+                )
+            complete = {
+                image.content_identity: (
+                    {
+                        "runtime_image_id": fixture.runtime_image_ids[
+                            role
+                        ]
+                    },
+                )
+                for role, image in fixture.manifest.image_artifacts.items()
+            }
+            load_attempts: list[str] = []
+            fail_once = True
+
+            def load(arguments, *, timeout):  # noqa: ANN001, ARG001
+                nonlocal fail_once
+                self.assertEqual(arguments[0:2], [MODULE.DOCKER, "load"])
+                load_attempts.append(Path(arguments[-1]).name)
+                if (
+                    fail_once
+                    and len(load_attempts) == 3
+                ):
+                    fail_once = False
+                    raise MODULE.ProductionOperationError(
+                        "simulated interrupted Docker load"
+                    )
+                return "loaded"
+
+            with (
+                patch.object(MODULE, "_docker_archive_identity"),
+                patch.object(
+                    MODULE,
+                    "_enumerate_local_images",
+                    side_effect=[empty, partial, complete],
+                ),
+                patch.object(MODULE, "_run", side_effect=load),
+                patch.object(
+                    MODULE,
+                    "_validate_runtime_image_set",
+                    return_value=[{"status": "validated"}],
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    MODULE.ProductionOperationError,
+                    "interrupted",
+                ):
+                    MODULE.load_images(fixture.manifest, paths)
+                evidence = MODULE.load_images(fixture.manifest, paths)
+            self.assertEqual(evidence, [{"status": "validated"}])
+            self.assertEqual(len(load_attempts), 7)
+            self.assertEqual(
+                load_attempts[-4:],
+                [
+                    "app-image.tar",
+                    "postgres-image.tar",
+                    "redis-image.tar",
+                    "nginx-image.tar",
+                ],
+            )
 
     def test_runtime_image_set_rejects_role_swap(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

@@ -3608,10 +3608,15 @@ def load_images(
             postgres_runtime_gid=manifest.postgres_runtime_gid,
         )
     before = _enumerate_local_images(manifest)
-    if any(before.values()):
+    if any(len(matches) > 1 for matches in before.values()):
         raise ProductionOperationError(
-            "an unjournaled preexisting image matches the staged content"
+            "a preexisting semantic image match is ambiguous"
         )
+    # Loading a tagless, already verified archive is intentionally idempotent.
+    # Shared hosts commonly retain identical upstream Redis/Nginx images from
+    # an earlier campaign, while the local engine ID may also differ across
+    # Docker storage backends.  The post-load semantic inventory, not absence
+    # before load, is the operation binding.
     for role in IMAGE_ROLES:
         image = manifest.image_artifacts[role]
         _run(
