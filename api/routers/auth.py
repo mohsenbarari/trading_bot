@@ -5,6 +5,7 @@ from sqlalchemy import select, update
 from datetime import datetime, timedelta
 import logging
 import math
+import re
 from pydantic import BaseModel, field_validator, model_validator
 from typing import Optional
 import secrets
@@ -527,6 +528,26 @@ class OTPVerify(BaseModel):
 
 class WebAppLogin(BaseModel):
     init_data: str
+
+
+def _telegram_webapp_secret_key() -> bytes | None:
+    configured = settings.telegram_webapp_validation_key
+    if configured is not None:
+        value = configured.get_secret_value().strip()
+        if re.fullmatch(r"[0-9a-f]{64}", value) is None:
+            return None
+        try:
+            derived = bytes.fromhex(value)
+        except ValueError:
+            return None
+        return derived if len(derived) == hashlib.sha256().digest_size else None
+    if settings.bot_token:
+        return hmac.new(
+            b"WebAppData",
+            settings.bot_token.encode(),
+            hashlib.sha256,
+        ).digest()
+    return None
 
 class RegisterOTPRequest(BaseModel):
     token: str
@@ -1935,9 +1956,13 @@ async def webapp_login(
     Login via Telegram WebApp data validation.
     """
     init_data = login_data.init_data
-    
-    if not settings.bot_token:
-        raise HTTPException(status_code=500, detail="Bot token not configured")
+
+    secret_key = _telegram_webapp_secret_key()
+    if secret_key is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Telegram WebApp validation key not configured",
+        )
 
     # Parse and validate init_data
     try:
@@ -1950,10 +1975,9 @@ async def webapp_login(
         data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(parsed_data.items()))
         
         # Calculate HMAC
-        secret_key = hmac.new(b"WebAppData", settings.bot_token.encode(), hashlib.sha256).digest()
         calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
         
-        if calculated_hash != hash_val:
+        if not hmac.compare_digest(calculated_hash, hash_val):
             raise HTTPException(status_code=403, detail="Invalid data hash")
             
         # Check auth_date to prevent replay attacks (optional but recommended)

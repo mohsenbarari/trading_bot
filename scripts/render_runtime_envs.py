@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 import os
 from collections import OrderedDict
 from pathlib import Path
@@ -384,6 +386,11 @@ def build_runtime_env(
     rendered["API_WORKERS"] = str(api_workers)
     for key in COMMON_RUNTIME_KEYS[:6]:
         rendered[key] = values[key]
+    rendered["TELEGRAM_WEBAPP_VALIDATION_KEY"] = hmac.new(
+        b"WebAppData",
+        values["BOT_TOKEN"].encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
     if role == "iran":
         # Telegram provider credentials must never cross the Bot-FI host
         # boundary.  Iran has no Bot service and no reviewed provider-execution
@@ -472,12 +479,18 @@ def build_service_runtime_env(
     if service not in allowed_services or (service == "bot" and role != "foreign"):
         raise ValueError(f"invalid runtime service scope service={service!r} role={role!r}")
     if service == "bot":
-        return OrderedDict(runtime)
+        return OrderedDict(
+            (key, value)
+            for key, value in runtime.items()
+            if key != "TELEGRAM_WEBAPP_VALIDATION_KEY"
+        )
     result = OrderedDict(
         (key, value)
         for key, value in runtime.items()
         if key not in TELEGRAM_EXECUTOR_ONLY_KEYS
     )
+    if service != "api":
+        result.pop("TELEGRAM_WEBAPP_VALIDATION_KEY", None)
     if (
         service == "api"
         and role == "foreign"
