@@ -68,6 +68,15 @@ async def _execute(args: argparse.Namespace) -> dict:
             "execution backend config must be the campaign-bound full_matrix_backend_config"
         )
     config = secure_json(args.backend_config, label="Full Matrix backend config")
+    midpoint_bundle_path = getattr(args, "midpoint_refresh_bundle", None)
+    midpoint_refresh_bundle = (
+        secure_json(
+            midpoint_bundle_path,
+            label="Full Matrix midpoint refresh bundle",
+        )
+        if midpoint_bundle_path is not None
+        else None
+    )
     backend = CommandFullMatrixBackend(
         config=config,
         repo_root=REPO_ROOT,
@@ -84,6 +93,7 @@ async def _execute(args: argparse.Namespace) -> dict:
         artifact_root=args.artifact_root,
         journal=args.journal,
         backend=backend,
+        midpoint_refresh_bundle=midpoint_refresh_bundle,
     )
 
 
@@ -108,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--backend-config", type=Path)
     parser.add_argument("--artifact-root", type=Path, required=True)
     parser.add_argument("--journal", type=Path, required=True)
+    parser.add_argument("--midpoint-refresh-bundle", type=Path)
     parser.add_argument("--bound-artifact", action="append", default=[])
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
@@ -125,7 +136,12 @@ def main(argv: list[str] | None = None) -> int:
             mode=0o600,
             max_size=8 * 1024 * 1024,
         )
-        print(json.dumps({"status": result["status"], "report_hash": result["report_hash"]}))
+        summary = {"status": result["status"]}
+        if "report_hash" in result:
+            summary["report_hash"] = result["report_hash"]
+        elif "pause_event_hash" in result:
+            summary["pause_event_hash"] = result["pause_event_hash"]
+        print(json.dumps(summary))
         return 0
     except Exception as exc:
         print(json.dumps({"status": "blocked", "error": str(exc), "error_class": type(exc).__name__}))

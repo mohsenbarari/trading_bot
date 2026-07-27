@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -8,11 +9,25 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+from uuid import uuid4
+
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from core.dr_event_protocol import canonical_json_bytes
+from core.human_approval import (
+    HumanApprovalRelayCommand,
+    approval_subject,
+    issue_human_approval_relay_receipt,
+)
+from core.human_approval_issuer import (
+    authenticate_and_issue_session,
+    totp_code,
+)
 from core.secure_file_io import append_hash_chained_jsonl, verify_hash_chained_jsonl
 from core.three_site_full_matrix_campaign import (
     BOUND_ARTIFACTS,
+    CAMPAIGN_SCHEMA,
     FullMatrixCampaignError,
     OPERATION_EVIDENCE_SCHEMA,
     PHASES,
@@ -34,6 +49,10 @@ from core.three_site_full_matrix_runner import (
     _operation_id,
     _validate_preflight,
     run_full_matrix_campaign,
+)
+from core.three_site_full_matrix_midpoint import (
+    MIDPOINT_ACTIONS,
+    assemble_midpoint_bundle,
 )
 from core.three_site_execution_safety import SHARED_HOST_SAFE
 from tests.three_site_sync_timing_fixtures import make_sync_timing_artifact
@@ -429,26 +448,178 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
         stack = tempfile.TemporaryDirectory()
         root = Path(stack.name)
         root.chmod(0o700)
+        witness_private_key = Ed25519PrivateKey.generate()
+        witness_public_key = base64.b64encode(
+            witness_private_key.public_key().public_bytes(
+                Encoding.Raw, PublicFormat.Raw
+            )
+        ).decode("ascii")
+        witness_public_key_file = root / "witness-relay-public.key"
+        witness_public_key_file.write_text(witness_public_key + "\n")
+        witness_public_key_file.chmod(0o600)
         bound: dict[str, Path] = {}
         for name in BOUND_ARTIFACTS:
             path = root / f"bound-{name}.json"
-            payload = f"bound:{name}".encode()
+            if name == "failover_backend_config":
+                payload = canonical_json_bytes(
+                    {
+                        "schema": "three-site-staging-failover-backend-v1",
+                        "campaign_id": campaign["campaign_id"],
+                        "release_sha": campaign["release_sha"],
+                        "witness": {"public_key": witness_public_key},
+                    }
+                )
+            elif name == "failover_control_config":
+                payload = canonical_json_bytes(
+                    {
+                        "schema": "three-site-full-matrix-failover-control-v1",
+                        "campaign_id": campaign["campaign_id"],
+                        "gate_group_id": campaign["gate_group_id"],
+                        "execution_class": campaign["execution_class"],
+                        "release_sha": campaign["release_sha"],
+                        "backend_config": str(
+                            (
+                                root
+                                / "bound-failover_backend_config.json"
+                            ).resolve()
+                        ),
+                        "relay_credentials": str(
+                            (root / "relay-credentials.env").resolve()
+                        ),
+                        "witness_relay_public_key_file": str(
+                            witness_public_key_file.resolve()
+                        ),
+                        "journal_root": str(root.resolve()),
+                    }
+                )
+            else:
+                payload = f"bound:{name}".encode()
             path.write_bytes(payload)
             path.chmod(0o600)
             campaign["bound_artifacts"][name] = hashlib.sha256(payload).hexdigest()
             bound[name] = path
         _sign(campaign, keys)
+        if not hasattr(self, "_midpoint_context"):
+            self._midpoint_context = {}
+        self._midpoint_context[root] = (keys, witness_private_key)
         return stack, now, campaign, policy, bound, root, root / "campaign.jsonl"
+
+    def _midpoint_bundle(
+        self,
+        *,
+        paused: dict,
+        campaign: dict,
+        policy: dict,
+        root: Path,
+        issued_at: datetime | None = None,
+        ttl_seconds: int = 48 * 60 * 60,
+        witness_private_key: Ed25519PrivateKey | None = None,
+    ) -> dict:
+        enrollment, bound_witness_private_key = self._midpoint_context[root]
+        pause_time = datetime.fromisoformat(
+            next(
+                record["timestamp"]
+                for record in verify_hash_chained_jsonl(
+                    root / "campaign.jsonl", label="test journal"
+                )
+                if record["event"] == "campaign_paused"
+            )
+        )
+        issued_at = issued_at or pause_time + timedelta(microseconds=1)
+        witness_private_key = witness_private_key or bound_witness_private_key
+        session, _state, _audit = authenticate_and_issue_session(
+            secrets_payload=enrollment.secrets_payload,
+            state_payload=enrollment.state_payload,
+            policy_payload=enrollment.policy_payload,
+            private_key_envelope=enrollment.private_key_envelope,
+            password="test matrix approval passphrase",
+            totp=totp_code(enrollment.totp_secret, at=issued_at)[1],
+            recovery_code=None,
+            release_sha=campaign["release_sha"],
+            allowed_actions=list(MIDPOINT_ACTIONS),
+            ttl_seconds=ttl_seconds,
+            now=issued_at,
+        )
+        subjects = {
+            item["action"]: item["subject"]
+            for item in paused["refresh_subjects"]
+        }
+        receipts = {}
+        for index, action in enumerate(MIDPOINT_ACTIONS):
+            command = HumanApprovalRelayCommand(
+                action=action,
+                environment="staging",
+                subject=subjects[action],
+                request_id=f"midpoint-{index}-{uuid4()}",
+            )
+            receipts[action] = issue_human_approval_relay_receipt(
+                session,
+                policy_payload=policy,
+                command=command,
+                witness_private_key=witness_private_key,
+                now=issued_at,
+                receipt_id=str(uuid4()),
+            )
+        unsigned = {
+            key: value for key, value in campaign.items() if key != "approvals"
+        }
+        return assemble_midpoint_bundle(
+            campaign=campaign,
+            campaign_hash=hashlib.sha256(
+                canonical_json_bytes(unsigned)
+            ).hexdigest(),
+            pre_pause_journal_head=paused["pre_pause_journal_head"],
+            receipts=receipts,
+        )
+
+    async def _run_to_completion(
+        self,
+        *,
+        campaign: dict,
+        policy: dict,
+        bound: dict[str, Path],
+        root: Path,
+        journal: Path,
+        backend: FakeBackend,
+        now: datetime,
+        monotonic=None,  # noqa: ANN001
+    ) -> dict:
+        result = await run_full_matrix_campaign(
+            campaign=campaign,
+            approver_policy=policy,
+            bound_artifacts=bound,
+            artifact_root=root,
+            journal=journal,
+            backend=backend,
+            now=now,
+            monotonic=monotonic,
+        )
+        if result["status"] != "paused":
+            return result
+        bundle = self._midpoint_bundle(
+            paused=result, campaign=campaign, policy=policy, root=root
+        )
+        return await run_full_matrix_campaign(
+            campaign=campaign,
+            approver_policy=policy,
+            bound_artifacts=bound,
+            artifact_root=root,
+            journal=journal,
+            backend=backend,
+            midpoint_refresh_bundle=bundle,
+            now=now,
+            monotonic=monotonic,
+        )
 
     async def test_executes_every_scenario_twice_and_emits_final_report(self):
         stack, now, campaign, policy, bound, root, journal = self._inputs()
         with stack:
             backend = FakeBackend(root)
-            report = await run_full_matrix_campaign(
+            report = await self._run_to_completion(
                 campaign=campaign,
-                approver_policy=policy,
-                bound_artifacts=bound,
-                artifact_root=root,
+                policy=policy,
+                bound=bound,
+                root=root,
                 journal=journal,
                 backend=backend,
                 now=now + timedelta(minutes=1),
@@ -497,6 +668,30 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(retained_audit["report_hash"], report["report_hash"])
 
+            forged = root / "forged-midpoint-journal.jsonl"
+            for row in records:
+                unsigned = {
+                    key: value
+                    for key, value in row.items()
+                    if key not in {"previous_hash", "event_hash"}
+                }
+                if unsigned["event"] == "campaign_resumed":
+                    unsigned = json.loads(json.dumps(unsigned))
+                    unsigned["refresh_summary"]["bundle_sha256"] = "f" * 64
+                append_hash_chained_jsonl(forged, unsigned)
+            with self.assertRaisesRegex(
+                FullMatrixCampaignError, "midpoint refresh proof"
+            ):
+                verify_complete_matrix(
+                    campaign=campaign,
+                    approver_policy=policy,
+                    bound_artifacts=bound,
+                    phase_evidence=retained,
+                    artifact_root=root,
+                    execution_journal=forged,
+                    now=now + timedelta(days=30),
+                )
+
             (root / "operation-preflight.json").unlink()
             with self.assertRaisesRegex(
                 FullMatrixCampaignError, "retained preflight.*artifact"
@@ -510,6 +705,287 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                     execution_journal=journal,
                     now=now + timedelta(days=30),
                 )
+
+    async def test_midpoint_pause_is_zero_residue_and_idempotent_without_proof(self):
+        stack, now, campaign, policy, bound, root, journal = self._inputs()
+        with stack:
+            backend = FakeBackend(root)
+            paused = await run_full_matrix_campaign(
+                campaign=campaign,
+                approver_policy=policy,
+                bound_artifacts=bound,
+                artifact_root=root,
+                journal=journal,
+                backend=backend,
+                now=now + timedelta(minutes=1),
+            )
+            self.assertEqual(paused["status"], "paused")
+            self.assertEqual(paused["cleanup_residue_count"], 0)
+            self.assertEqual(paused["refresh_bundle_status"], "required")
+            before = journal.read_bytes()
+            repeated = await run_full_matrix_campaign(
+                campaign=campaign,
+                approver_policy=policy,
+                bound_artifacts=bound,
+                artifact_root=root,
+                journal=journal,
+                backend=FakeBackend(root),
+                now=now + timedelta(minutes=1),
+            )
+            self.assertEqual(repeated["status"], "paused")
+            self.assertEqual(repeated["pause_event_hash"], paused["pause_event_hash"])
+            self.assertEqual(journal.read_bytes(), before)
+            records = verify_hash_chained_jsonl(journal, label="test journal")
+            self.assertEqual(records[-1]["event"], "campaign_paused")
+            self.assertEqual(
+                sum(row["event"] == "campaign_paused" for row in records), 1
+            )
+            self.assertFalse(
+                any(
+                    row.get("iteration") == 2
+                    or (
+                        isinstance(row.get("operation_context"), dict)
+                        and row["operation_context"].get("iteration") == 2
+                    )
+                    for row in records
+                )
+            )
+            self.assertFalse(
+                any(row["event"] == "campaign_blocked" for row in records)
+            )
+
+    async def test_runner_rejects_divergent_campaign_bound_witness_keys(self):
+        stack, now, campaign, policy, bound, root, journal = self._inputs()
+        with stack:
+            control = json.loads(bound["failover_control_config"].read_text())
+            key_path = Path(control["witness_relay_public_key_file"])
+            divergent = Ed25519PrivateKey.generate().public_key().public_bytes(
+                Encoding.Raw, PublicFormat.Raw
+            )
+            key_path.write_text(base64.b64encode(divergent).decode() + "\n")
+            key_path.chmod(0o600)
+            backend = FakeBackend(root)
+            with self.assertRaisesRegex(
+                FullMatrixRunnerError, "Witness identity"
+            ):
+                await run_full_matrix_campaign(
+                    campaign=campaign,
+                    approver_policy=policy,
+                    bound_artifacts=bound,
+                    artifact_root=root,
+                    journal=journal,
+                    backend=backend,
+                    now=now + timedelta(minutes=1),
+                )
+            self.assertEqual(backend.preflight_calls, 0)
+            self.assertFalse(journal.exists())
+
+    async def test_campaign_start_relay_receipt_uses_bound_witness_key(self):
+        stack, now, campaign, policy, bound, root, journal = self._inputs()
+        with stack:
+            enrollment, witness_private_key = self._midpoint_context[root]
+            unsigned = {
+                key: value for key, value in campaign.items()
+                if key != "approvals"
+            }
+            subject = approval_subject(
+                artifact_type=CAMPAIGN_SCHEMA,
+                artifact_sha256=hashlib.sha256(
+                    canonical_json_bytes(unsigned)
+                ).hexdigest(),
+                release_sha=campaign["release_sha"],
+                bindings={
+                    "campaign_id": campaign["campaign_id"],
+                    "gate_group_id": campaign["gate_group_id"],
+                    "execution_class": campaign["execution_class"],
+                },
+            )
+            session, _state, _audit = authenticate_and_issue_session(
+                secrets_payload=enrollment.secrets_payload,
+                state_payload=enrollment.state_payload,
+                policy_payload=enrollment.policy_payload,
+                private_key_envelope=enrollment.private_key_envelope,
+                password="test matrix approval passphrase",
+                totp=totp_code(enrollment.totp_secret, at=now)[1],
+                recovery_code=None,
+                release_sha=campaign["release_sha"],
+                allowed_actions=["start_full_matrix"],
+                ttl_seconds=48 * 60 * 60,
+                now=now,
+            )
+            command = HumanApprovalRelayCommand(
+                action="start_full_matrix",
+                environment="staging",
+                subject=subject,
+                request_id=f"campaign-start-{uuid4()}",
+            )
+            campaign["approvals"] = [
+                issue_human_approval_relay_receipt(
+                    session,
+                    policy_payload=policy,
+                    command=command,
+                    witness_private_key=witness_private_key,
+                    now=now,
+                    receipt_id=str(uuid4()),
+                )
+            ]
+            paused = await run_full_matrix_campaign(
+                campaign=campaign,
+                approver_policy=policy,
+                bound_artifacts=bound,
+                artifact_root=root,
+                journal=journal,
+                backend=FakeBackend(root),
+                now=now + timedelta(minutes=1),
+            )
+            self.assertEqual(paused["status"], "paused")
+
+    async def test_midpoint_rejects_tamper_wrong_key_old_session_and_short_expiry(self):
+        stack, now, campaign, policy, bound, root, journal = self._inputs()
+        with stack:
+            paused = await run_full_matrix_campaign(
+                campaign=campaign,
+                approver_policy=policy,
+                bound_artifacts=bound,
+                artifact_root=root,
+                journal=journal,
+                backend=FakeBackend(root),
+                now=now + timedelta(minutes=1),
+            )
+            pause_time = datetime.fromisoformat(
+                next(
+                    row["timestamp"]
+                    for row in verify_hash_chained_jsonl(journal)
+                    if row["event"] == "campaign_paused"
+                )
+            )
+            valid = self._midpoint_bundle(
+                paused=paused, campaign=campaign, policy=policy, root=root
+            )
+            tampered = json.loads(json.dumps(valid))
+            tampered["probes"][0]["receipt"]["subject"]["bindings"][
+                "next_iteration"
+            ] = 3
+            wrong_key = self._midpoint_bundle(
+                paused=paused,
+                campaign=campaign,
+                policy=policy,
+                root=root,
+                witness_private_key=Ed25519PrivateKey.generate(),
+            )
+            old_session = self._midpoint_bundle(
+                paused=paused,
+                campaign=campaign,
+                policy=policy,
+                root=root,
+                issued_at=pause_time - timedelta(seconds=1),
+            )
+            short_expiry = self._midpoint_bundle(
+                paused=paused,
+                campaign=campaign,
+                policy=policy,
+                root=root,
+                ttl_seconds=120,
+            )
+            second_session = self._midpoint_bundle(
+                paused=paused, campaign=campaign, policy=policy, root=root
+            )
+            mixed_session = json.loads(json.dumps(valid))
+            mixed_session["probes"][2]["receipt"] = second_session["probes"][2][
+                "receipt"
+            ]
+            before = journal.read_bytes()
+            for name, bundle in {
+                "tampered": tampered,
+                "wrong-key": wrong_key,
+                "old-session": old_session,
+                "short-expiry": short_expiry,
+                "mixed-session": mixed_session,
+            }.items():
+                with self.subTest(name=name):
+                    rejected = await run_full_matrix_campaign(
+                        campaign=campaign,
+                        approver_policy=policy,
+                        bound_artifacts=bound,
+                        artifact_root=root,
+                        journal=journal,
+                        backend=FakeBackend(root),
+                        midpoint_refresh_bundle=bundle,
+                        now=now + timedelta(minutes=1),
+                    )
+                    self.assertEqual(rejected["status"], "paused")
+                    self.assertEqual(
+                        rejected["refresh_bundle_status"], "rejected"
+                    )
+                    self.assertEqual(journal.read_bytes(), before)
+            records = verify_hash_chained_jsonl(journal)
+            self.assertFalse(
+                any(
+                    row["event"] in {"campaign_resumed", "campaign_blocked"}
+                    for row in records
+                )
+            )
+
+    async def test_crash_after_midpoint_resume_is_historically_verifiable(self):
+        stack, now, campaign, policy, bound, root, journal = self._inputs()
+        with stack:
+            backend = FakeBackend(root)
+            paused = await run_full_matrix_campaign(
+                campaign=campaign,
+                approver_policy=policy,
+                bound_artifacts=bound,
+                artifact_root=root,
+                journal=journal,
+                backend=backend,
+                now=now + timedelta(minutes=1),
+            )
+            bundle = self._midpoint_bundle(
+                paused=paused, campaign=campaign, policy=policy, root=root
+            )
+            original = __import__(
+                "core.three_site_full_matrix_runner",
+                fromlist=["_journal_event"],
+            )._journal_event
+
+            def crash_after_resume(path, identity, *, event, **fields):
+                record = original(path, identity, event=event, **fields)
+                if event == "campaign_resumed":
+                    raise KeyboardInterrupt("simulated crash after durable resume")
+                return record
+
+            with patch(
+                "core.three_site_full_matrix_runner._journal_event",
+                side_effect=crash_after_resume,
+            ):
+                with self.assertRaises(KeyboardInterrupt):
+                    await run_full_matrix_campaign(
+                        campaign=campaign,
+                        approver_policy=policy,
+                        bound_artifacts=bound,
+                        artifact_root=root,
+                        journal=journal,
+                        backend=backend,
+                        midpoint_refresh_bundle=bundle,
+                        now=now + timedelta(minutes=1),
+                    )
+            self.assertEqual(
+                verify_hash_chained_jsonl(journal)[-1]["event"],
+                "campaign_resumed",
+            )
+            report = await run_full_matrix_campaign(
+                campaign=campaign,
+                approver_policy=policy,
+                bound_artifacts=bound,
+                artifact_root=root,
+                journal=journal,
+                backend=backend,
+                now=now + timedelta(minutes=1),
+            )
+            self.assertEqual(report["status"], "passed")
+            records = verify_hash_chained_jsonl(journal)
+            self.assertEqual(
+                sum(row["event"] == "campaign_resumed" for row in records), 1
+            )
 
     async def test_endurance_claim_requires_controller_monotonic_duration(self):
         stack, now, campaign, policy, bound, root, journal = self._inputs()
@@ -590,11 +1066,11 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                 )
             artifact_before = (root / "operation-preflight.json").read_bytes()
             resumed = FakeBackend(root)
-            report = await run_full_matrix_campaign(
+            report = await self._run_to_completion(
                 campaign=campaign,
-                approver_policy=policy,
-                bound_artifacts=bound,
-                artifact_root=root,
+                policy=policy,
+                bound=bound,
+                root=root,
                 journal=journal,
                 backend=resumed,
                 now=now + timedelta(minutes=1),
@@ -677,11 +1153,11 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
         stack, now, campaign, policy, bound, root, journal = self._inputs()
         with stack:
             backend = FakeBackend(root)
-            report = await run_full_matrix_campaign(
+            report = await self._run_to_completion(
                 campaign=campaign,
-                approver_policy=policy,
-                bound_artifacts=bound,
-                artifact_root=root,
+                policy=policy,
+                bound=bound,
+                root=root,
                 journal=journal,
                 backend=backend,
                 now=now + timedelta(minutes=1),
@@ -788,11 +1264,11 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                     now=now + timedelta(minutes=1),
                 )
             resumed = FakeBackend(root)
-            report = await run_full_matrix_campaign(
+            report = await self._run_to_completion(
                 campaign=campaign,
-                approver_policy=policy,
-                bound_artifacts=bound,
-                artifact_root=root,
+                policy=policy,
+                bound=bound,
+                root=root,
                 journal=journal,
                 backend=resumed,
                 now=now + timedelta(minutes=1),
@@ -820,11 +1296,11 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                         now=now + timedelta(minutes=1),
                     )
             resumed = FakeBackend(root)
-            report = await run_full_matrix_campaign(
+            report = await self._run_to_completion(
                 campaign=campaign,
-                approver_policy=policy,
-                bound_artifacts=bound,
-                artifact_root=root,
+                policy=policy,
+                bound=bound,
+                root=root,
                 journal=journal,
                 backend=resumed,
                 now=now + timedelta(minutes=1),
@@ -836,11 +1312,11 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
     async def test_completed_campaign_cannot_execute_or_append_again(self):
         stack, now, campaign, policy, bound, root, journal = self._inputs()
         with stack:
-            await run_full_matrix_campaign(
+            await self._run_to_completion(
                 campaign=campaign,
-                approver_policy=policy,
-                bound_artifacts=bound,
-                artifact_root=root,
+                policy=policy,
+                bound=bound,
+                root=root,
                 journal=journal,
                 backend=FakeBackend(root),
                 now=now + timedelta(minutes=1),
@@ -877,6 +1353,22 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                 )
 
             first_backend = FakeBackend(root)
+            paused = await run_full_matrix_campaign(
+                campaign=campaign,
+                approver_policy=policy,
+                bound_artifacts=bound,
+                artifact_root=root,
+                journal=journal,
+                backend=first_backend,
+                now=now + timedelta(minutes=1),
+            )
+            self.assertEqual(paused["status"], "paused")
+            midpoint_bundle = self._midpoint_bundle(
+                paused=paused,
+                campaign=campaign,
+                policy=policy,
+                root=root,
+            )
             with patch(
                 "core.three_site_full_matrix_runner._journal_event",
                 side_effect=crash_before_completion,
@@ -889,6 +1381,7 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                         artifact_root=root,
                         journal=journal,
                         backend=first_backend,
+                        midpoint_refresh_bundle=midpoint_bundle,
                         now=now + timedelta(minutes=1),
                     )
             self.assertEqual(
@@ -897,11 +1390,11 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
             )
 
             resumed_backend = FakeBackend(root)
-            report = await run_full_matrix_campaign(
+            report = await self._run_to_completion(
                 campaign=campaign,
-                approver_policy=policy,
-                bound_artifacts=bound,
-                artifact_root=root,
+                policy=policy,
+                bound=bound,
+                root=root,
                 journal=journal,
                 backend=resumed_backend,
                 now=now + timedelta(minutes=1),
@@ -958,11 +1451,11 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(first_backend.cleanups, [(1, PHASES[0], False)])
 
             resumed_backend = FakeBackend(root)
-            report = await run_full_matrix_campaign(
+            report = await self._run_to_completion(
                 campaign=campaign,
-                approver_policy=policy,
-                bound_artifacts=bound,
-                artifact_root=root,
+                policy=policy,
+                bound=bound,
+                root=root,
                 journal=journal,
                 backend=resumed_backend,
                 now=now + timedelta(minutes=1),

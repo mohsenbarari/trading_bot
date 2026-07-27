@@ -35,6 +35,12 @@ from core.three_site_execution_safety import (
     EXECUTION_CLASSES,
     SHARED_HOST_SAFE,
 )
+from core.three_site_full_matrix_midpoint import (
+    FullMatrixMidpointError,
+    load_bound_witness_public_key,
+    validate_midpoint_journal,
+    verify_midpoint_bundle,
+)
 
 
 CAMPAIGN_SCHEMA = "three-site-staging-full-matrix-campaign-v2"
@@ -571,6 +577,7 @@ def verify_campaign(
     now: datetime | None = None,
     allow_expired_for_safe_cleanup: bool = False,
     require_fresh_approval: bool = True,
+    witness_relay_public_key: str | None = None,
 ) -> dict[str, Any]:
     fields = {
         "schema", "campaign_id", "gate_group_id", "execution_class",
@@ -669,6 +676,7 @@ def verify_campaign(
             expected_subject=subject,
             now=now,
             require_fresh=require_fresh_approval,
+            witness_relay_public_key=witness_relay_public_key,
         )
     except Exception as exc:
         raise FullMatrixCampaignError("Full Matrix human approval is invalid") from exc
@@ -1235,14 +1243,50 @@ def verify_complete_matrix(
     # live work.  A completed campaign must remain independently verifiable
     # after its execution window expires; journal timestamps below still have
     # to fall inside the signed campaign window.
+    _validate_artifact_root(artifact_root)
+    approvals = campaign.get("approvals")
+    approval_uses_relay = (
+        isinstance(approvals, list)
+        and len(approvals) == 1
+        and isinstance(approvals[0], dict)
+        and approvals[0].get("schema")
+        == "three-site-human-approval-witness-relay-receipt-v1"
+    )
+    witness_public_key: str | None = None
+    if execution_journal is not None or approval_uses_relay:
+        try:
+            witness_public_key = load_bound_witness_public_key(
+                bound_artifacts["failover_backend_config"],
+                failover_control_path=bound_artifacts[
+                    "failover_control_config"
+                ],
+                campaign_id=str(campaign.get("campaign_id") or ""),
+                gate_group_id=str(campaign.get("gate_group_id") or ""),
+                execution_class=str(campaign.get("execution_class") or ""),
+                release_sha=str(campaign.get("release_sha") or ""),
+                expected_sha256=str(
+                    campaign.get("bound_artifacts", {}).get(
+                        "failover_backend_config", ""
+                    )
+                ),
+                expected_control_sha256=str(
+                    campaign.get("bound_artifacts", {}).get(
+                        "failover_control_config", ""
+                    )
+                ),
+            )
+        except (KeyError, FullMatrixMidpointError) as exc:
+            raise FullMatrixCampaignError(
+                "campaign-bound Witness identity is invalid"
+            ) from exc
     approved = verify_campaign(
         campaign,
         approver_policy=approver_policy,
         now=now,
         allow_expired_for_safe_cleanup=True,
         require_fresh_approval=False,
+        witness_relay_public_key=witness_public_key,
     )
-    _validate_artifact_root(artifact_root)
     bindings = verify_bound_artifacts(campaign, bound_artifacts)
     expected_keys = {
         (phase, iteration)
@@ -1279,12 +1323,19 @@ def verify_complete_matrix(
     journal_binding: dict[str, Any] | None = None
     completed_report_hash: str | None = None
     if execution_journal is not None:
+        if witness_public_key is None:
+            raise FullMatrixCampaignError(
+                "campaign-bound Witness identity is unavailable"
+            )
         journal_binding, completed_report_hash = _verify_execution_journal(
             execution_journal,
             campaign=campaign,
             campaign_hash=approved["campaign_hash"],
+            approver_policy=approver_policy,
+            witness_public_key=witness_public_key,
             phase_evidence=phase_evidence,
             artifact_root=artifact_root,
+            now=now,
         )
     report_body = {
         **approved,
@@ -1325,8 +1376,11 @@ def _verify_execution_journal(
     *,
     campaign: dict[str, Any],
     campaign_hash: str,
+    approver_policy: dict[str, Any],
+    witness_public_key: str,
     phase_evidence: list[dict[str, Any]],
     artifact_root: Path,
+    now: datetime | None,
 ) -> tuple[dict[str, Any], str | None]:
     records = verify_hash_chained_jsonl(path, label="Full Matrix execution journal")
     if not records or records[0].get("event") != "campaign_started":
@@ -1335,7 +1389,7 @@ def _verify_execution_journal(
         "campaign_started", "scenario_started", "scenario_recovered",
         "scenario_passed", "phase_passed", "campaign_finalized",
         "campaign_completed", "campaign_blocked", "operation_started",
-        "operation_passed",
+        "operation_passed", "campaign_paused", "campaign_resumed",
     }
     identity = {
         "campaign_id": campaign["campaign_id"],
@@ -1343,6 +1397,37 @@ def _verify_execution_journal(
         "release_sha": campaign["release_sha"],
         "activation_sha": campaign["activation_sha"],
     }
+    try:
+        midpoint_pause, midpoint_resume = validate_midpoint_journal(
+            records,
+            campaign=campaign,
+            campaign_hash=campaign_hash,
+        )
+        if midpoint_pause is None or midpoint_resume is None:
+            raise FullMatrixMidpointError(
+                "completed journal lacks the midpoint refresh proof"
+            )
+        midpoint_summary = verify_midpoint_bundle(
+            midpoint_resume["refresh_bundle"],
+            campaign=campaign,
+            campaign_hash=campaign_hash,
+            pre_pause_journal_head=str(
+                midpoint_pause["pre_pause_journal_head"]
+            ),
+            pause_timestamp=str(midpoint_pause["timestamp"]),
+            policy_payload=approver_policy,
+            witness_public_key=witness_public_key,
+            now=now,
+            require_fresh=False,
+        )
+        if midpoint_summary != midpoint_resume["refresh_summary"]:
+            raise FullMatrixMidpointError(
+                "midpoint refresh summary differs from its signed bundle"
+            )
+    except FullMatrixMidpointError as exc:
+        raise FullMatrixCampaignError(
+            "Full Matrix midpoint refresh proof is invalid"
+        ) from exc
     campaign_start = _utc(campaign["generated_at"], label="campaign generated_at")
     campaign_end = _utc(campaign["expires_at"], label="campaign expires_at")
     operation_artifacts: dict[str, dict[str, Any]] = {}
