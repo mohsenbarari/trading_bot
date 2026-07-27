@@ -19,6 +19,10 @@ RUNTIME_PATHS = (
     "frontend/src",
 )
 
+CANONICAL_DEPLOYMENT_IDENTITY_PATHS = frozenset({
+    "core/three_site_topology.py",
+})
+
 OPERATOR_ENTRYPOINTS = (
     "Makefile",
     "deploy.sh",
@@ -104,12 +108,18 @@ def iter_runtime_files(repo_root: Path):
     for raw_path in RUNTIME_PATHS:
         path = repo_root / raw_path
         if path.is_file():
-            if should_scan_runtime_path(path):
+            rel = path.relative_to(repo_root).as_posix()
+            if rel not in CANONICAL_DEPLOYMENT_IDENTITY_PATHS and should_scan_runtime_path(path):
                 yield path
             continue
         if path.is_dir():
             for child in path.rglob("*"):
-                if child.is_file() and should_scan_runtime_path(child):
+                rel = child.relative_to(repo_root).as_posix()
+                if (
+                    rel not in CANONICAL_DEPLOYMENT_IDENTITY_PATHS
+                    and child.is_file()
+                    and should_scan_runtime_path(child)
+                ):
                     yield child
 
 

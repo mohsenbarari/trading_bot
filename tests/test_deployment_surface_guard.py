@@ -2,7 +2,7 @@ import unittest
 import tempfile
 from pathlib import Path
 
-from scripts.check_deployment_surface_guard import check_runtime_env_identity, run_guard
+from scripts.check_deployment_surface_guard import check_runtime_code, check_runtime_env_identity, run_guard
 
 
 def active_compose_services(path: Path) -> dict[str, dict[str, object]]:
@@ -99,6 +99,28 @@ class DeploymentSurfaceGuardTests(unittest.TestCase):
             findings,
             [],
             "\n".join(f"{finding.path}: {finding.detail}" for finding in findings),
+        )
+
+    def test_runtime_identity_scan_exempts_only_canonical_topology_source(self):
+        identity = "203.0.113.10"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir)
+            core_dir = repo_root / "core"
+            core_dir.mkdir()
+            (core_dir / "three_site_topology.py").write_text(
+                f'CANONICAL_HOST = "{identity}"\n',
+                encoding="utf-8",
+            )
+            (core_dir / "runtime_leak.py").write_text(
+                f'LEAKED_HOST = "{identity}"\n',
+                encoding="utf-8",
+            )
+
+            findings = check_runtime_code(repo_root, {identity})
+
+        self.assertEqual(
+            [(finding.path, finding.detail) for finding in findings],
+            [("core/runtime_leak.py", f"contains deployment identity {identity!r}")],
         )
 
     def test_runtime_identity_guard_accepts_valid_foreign_and_iran_envs(self):
