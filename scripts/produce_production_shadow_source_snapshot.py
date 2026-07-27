@@ -64,9 +64,16 @@ SOURCE_CONTAINERS = {
 }
 SOURCE_SERVICES = {"database": "db", "application": "app", "redis": "redis"}
 SOURCE_IMAGE_REFERENCES = {
-    "database": "postgres:15-alpine",
-    "application": "trading_bot_base",
-    "redis": "redis:7-alpine",
+    "bot_fi": {
+        "database": "postgres:15-alpine",
+        "application": "trading_bot_base",
+        "redis": "redis:7-alpine",
+    },
+    "webapp_fi": {
+        "database": "postgres:15-alpine",
+        "application": "trading_bot_base_iran",
+        "redis": "redis:7-alpine",
+    },
 }
 SOURCE_MOUNTS = {
     "database": {"database": "/var/lib/postgresql/data"},
@@ -503,7 +510,7 @@ def load_binding(path: Path) -> SnapshotBinding:
         raise SourceSnapshotError("source container names are not canonical")
     images = document["images"]
     expected_images = {
-        **SOURCE_IMAGE_REFERENCES,
+        **SOURCE_IMAGE_REFERENCES[role],
         "restore_postgres": (
             f"trading_bot_postgres_boottime:15-{new_release}"
         ),
@@ -814,6 +821,7 @@ def _image_identity(
     reference: str,
     *,
     expected_release_sha: str | None = None,
+    allow_missing_release_label: bool = False,
     require_postgres_runtime: bool = False,
 ) -> ImageIdentity:
     document = _inspect_required("image", reference)
@@ -834,10 +842,13 @@ def _image_identity(
         )
     ):
         raise SourceSnapshotError("Docker image identity is invalid")
-    if (
-        expected_release_sha is not None
-        and labels.get("org.opencontainers.image.revision")
-        != expected_release_sha
+    release_label = labels.get("org.opencontainers.image.revision")
+    if expected_release_sha is not None and (
+        (release_label is None and not allow_missing_release_label)
+        or (
+            release_label is not None
+            and release_label != expected_release_sha
+        )
     ):
         raise SourceSnapshotError("Docker image release label differs")
     if require_postgres_runtime and (
@@ -1040,6 +1051,7 @@ def inspect_source(binding: SnapshotBinding) -> SourceInventory:
         "application": _image_identity(
             binding.images["application"],
             expected_release_sha=binding.legacy_release_sha,
+            allow_missing_release_label=True,
         ),
         "database": _image_identity(binding.images["database"]),
         "redis": _image_identity(binding.images["redis"]),
