@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import tempfile
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -393,6 +394,23 @@ class HumanApprovalTests(unittest.TestCase):
         self.assertNotIn("signature", receipt)
         self.assertNotIn("allowed_actions", receipt)
         self.assertNotIn(session["signature"], str(receipt))
+        with patch.dict(
+            "os.environ",
+            {"WRITER_WITNESS_PUBLIC_KEY": witness_public},
+            clear=False,
+        ):
+            with self.assertRaisesRegex(
+                HumanApprovalError,
+                "was not supplied explicitly",
+            ):
+                verify_human_approval(
+                    receipt,
+                    policy_payload=self.enrollment.policy_payload,
+                    expected_action="approve_inventory",
+                    expected_environment="staging",
+                    expected_subject=self.subject,
+                    now=NOW + timedelta(minutes=2),
+                )
         verified = verify_human_approval(
             receipt,
             policy_payload=self.enrollment.policy_payload,
