@@ -10,8 +10,10 @@ runtime file, receiver source, or other payload bytes.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import fcntl
 import hashlib
 import json
 import os
@@ -45,6 +47,7 @@ from scripts.wa_ir_production_object_storage_transport import (
     _journal_ciphertext_path,
     _load_journal,
     _publication_lock,
+    _validate_prepared_journal,
     build_client,
     load_secure_credentials,
     presign_exact_get,
@@ -76,6 +79,15 @@ BOOTSTRAP_ATTESTATION_SCHEMA = "wa-ir-production-bootstrap-attestation-v1"
 BOOTSTRAP_ARTIFACT_KIND = "receiver-bootstrap"
 BOOTSTRAP_DESTINATION_NAME = "wa-ir-production-agent.pyz"
 REMOTE_OPERATIONS_ROOT = Path("/srv/trading-bot/dark-standby/operations")
+REMOTE_PROJECT_ROOT_PREFIX = Path(
+    "/srv/trading-bot-three-site-production-shadow"
+)
+REMOTE_DATA_ROOT_PREFIX = Path(
+    "/srv/trading-bot-three-site-production-shadow-data"
+)
+REMOTE_SECRET_ROOT_PREFIX = Path(
+    "/root/secure-envs/trading-bot/three-site-production-shadow"
+)
 WA_IR_HOST = "95.38.164.29"
 WA_IR_USER = "root"
 WA_IR_PORT = 22
@@ -339,7 +351,7 @@ IFS= read -r plaintext_sha256
 IFS= read -r plaintext_bytes
 test "$schema" = "wa-ir-production-bootstrap-control-v1"
 case "$operation_id" in
-  ????????-????-4???-[89ab]???-????????????) ;;
+  [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-4[0-9a-f][0-9a-f][0-9a-f]-[89ab][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
   *) exit 65 ;;
 esac
 case "$object_key" in
@@ -585,6 +597,53 @@ def _require_secure_directory(path: Path) -> None:
         raise ProductionOrchestratorError("controller journal directory is unsafe")
 
 
+@contextmanager
+def _orchestrator_lock(journal_directory: Path):  # noqa: ANN202
+    _require_secure_directory(journal_directory)
+    path = journal_directory / "orchestrator.lock"
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDWR
+            | os.O_CREAT
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_nlink != 1
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+        ):
+            raise ProductionOrchestratorError(
+                "controller orchestrator lock is unsafe"
+            )
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ProductionOrchestratorError(
+                "another controller operation invocation is already active"
+            ) from exc
+        os.fsync(descriptor)
+        yield
+    except ProductionOrchestratorError:
+        raise
+    except OSError as exc:
+        raise ProductionOrchestratorError(
+            "controller orchestrator lock is unavailable"
+        ) from exc
+    finally:
+        if descriptor >= 0:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            os.close(descriptor)
+
+
 def _require_private_file(path: Path, *, label: str, maximum: int = 1024 * 1024) -> None:
     try:
         metadata = path.stat(follow_symlinks=False)
@@ -605,6 +664,101 @@ def _require_private_file(path: Path, *, label: str, maximum: int = 1024 * 1024)
         raise ProductionOrchestratorError(f"{label} is unavailable or unsafe")
 
 
+def _fsync_controller_directory(path: Path) -> None:
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        os.fsync(descriptor)
+    except OSError as exc:
+        raise ProductionOrchestratorError(
+            "bootstrap parent directory could not be synchronized"
+        ) from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _reconcile_bootstrap_temporary(temporary: Path, output: Path) -> None:
+    if not temporary.exists() and not temporary.is_symlink():
+        return
+    try:
+        temporary_metadata = temporary.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise ProductionOrchestratorError(
+            "bootstrap materialization temporary is unsafe"
+        ) from exc
+    if (
+        not stat.S_ISREG(temporary_metadata.st_mode)
+        or temporary_metadata.st_uid != os.geteuid()
+        or temporary_metadata.st_nlink not in {1, 2}
+        or stat.S_IMODE(temporary_metadata.st_mode) != 0o600
+        or temporary_metadata.st_size > MAX_BOOTSTRAP_BYTES
+    ):
+        raise ProductionOrchestratorError(
+            "bootstrap materialization temporary is unsafe"
+        )
+    if output.exists() or output.is_symlink():
+        try:
+            output_metadata = output.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise ProductionOrchestratorError(
+                "bootstrap output is unsafe"
+            ) from exc
+        if (
+            stat.S_ISREG(output_metadata.st_mode)
+            and output_metadata.st_dev == temporary_metadata.st_dev
+            and output_metadata.st_ino == temporary_metadata.st_ino
+        ):
+            temporary.unlink()
+            _fsync_controller_directory(output.parent)
+            return
+    if temporary_metadata.st_nlink != 1:
+        raise ProductionOrchestratorError(
+            "bootstrap materialization temporary link identity is ambiguous"
+        )
+    try:
+        temporary.unlink()
+        _fsync_controller_directory(output.parent)
+    except OSError as exc:
+        raise ProductionOrchestratorError(
+            "bootstrap materialization temporary could not be reconciled"
+        ) from exc
+
+
+def _remove_disposable_bootstrap_candidate(path: Path) -> None:
+    if not path.exists() and not path.is_symlink():
+        return
+    try:
+        metadata = path.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise ProductionOrchestratorError(
+            "bootstrap verification candidate is unsafe"
+        ) from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != os.geteuid()
+        or metadata.st_nlink != 1
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+        or not 1 <= metadata.st_size <= MAX_BOOTSTRAP_BYTES
+    ):
+        raise ProductionOrchestratorError(
+            "bootstrap verification candidate is unsafe"
+        )
+    try:
+        path.unlink()
+        _fsync_controller_directory(path.parent)
+    except OSError as exc:
+        raise ProductionOrchestratorError(
+            "bootstrap verification candidate could not be reconciled"
+        ) from exc
+
+
 def build_bootstrap_agent(
     repository_root: Path,
     output: Path,
@@ -612,6 +766,8 @@ def build_bootstrap_agent(
     """Build one deterministic, stdlib-only receiver/operation zipapp."""
 
     _require_secure_directory(output.parent)
+    temporary = output.with_name(f".{output.name}.materializing")
+    _reconcile_bootstrap_temporary(temporary, output)
     if output.exists() or output.is_symlink():
         raise ProductionOrchestratorError("bootstrap agent output already exists")
     sources: list[tuple[str, bytes]] = [
@@ -627,10 +783,23 @@ def build_bootstrap_agent(
                 "bootstrap agent source is unavailable or unsafe"
             ) from exc
         sources.append((relative, payload))
+    descriptor = -1
     try:
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
         with zipfile.ZipFile(
-            output,
-            mode="x",
+            temporary,
+            mode="w",
             compression=zipfile.ZIP_STORED,
             allowZip64=False,
         ) as archive:
@@ -639,13 +808,42 @@ def build_bootstrap_agent(
                 info.create_system = 3
                 info.external_attr = (0o600 & 0xFFFF) << 16
                 archive.writestr(info, payload)
-        output.chmod(0o600)
-    except (OSError, ValueError, zipfile.BadZipFile) as exc:
+        temporary.chmod(0o600)
+        temporary_descriptor = os.open(
+            temporary,
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
         try:
-            output.unlink()
-        except OSError:
-            pass
+            os.fsync(temporary_descriptor)
+        finally:
+            os.close(temporary_descriptor)
+        os.link(
+            temporary,
+            output,
+            src_dir_fd=None,
+            dst_dir_fd=None,
+            follow_symlinks=False,
+        )
+        _fsync_controller_directory(output.parent)
+        temporary.unlink()
+        _fsync_controller_directory(output.parent)
+    except ProductionOrchestratorError:
+        if descriptor >= 0:
+            os.close(descriptor)
+            descriptor = -1
+        _reconcile_bootstrap_temporary(temporary, output)
+        raise
+    except (OSError, ValueError, zipfile.BadZipFile) as exc:
+        if descriptor >= 0:
+            os.close(descriptor)
+            descriptor = -1
+        _reconcile_bootstrap_temporary(temporary, output)
         raise ProductionOrchestratorError("bootstrap agent could not be built") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
     return _hash_regular(output, maximum=MAX_BOOTSTRAP_BYTES)
 
 
@@ -659,6 +857,10 @@ def _build_bound_bootstrap_agent(
     """Build only from the manifest-bound clean detached release bundle."""
 
     _require_secure_directory(work_directory)
+    _reconcile_bootstrap_temporary(
+        output.with_name(f".{output.name}.materializing"),
+        output,
+    )
     source_root = work_directory / "bootstrap-source"
     if not source_root.exists() and not source_root.is_symlink():
         source_root.mkdir(mode=0o700)
@@ -675,10 +877,7 @@ def _build_bound_bootstrap_agent(
         ) from exc
     if output.exists() or output.is_symlink():
         candidate = work_directory / ".wa-ir-production-agent.candidate.pyz"
-        if candidate.exists() or candidate.is_symlink():
-            raise ProductionOrchestratorError(
-                "bootstrap verification candidate already exists"
-            )
+        _remove_disposable_bootstrap_candidate(candidate)
         try:
             expected = build_bootstrap_agent(source_root, candidate)
             observed = _hash_regular(output, maximum=MAX_BOOTSTRAP_BYTES)
@@ -687,10 +886,7 @@ def _build_bound_bootstrap_agent(
                     "existing bootstrap agent differs from the exact release"
                 )
         finally:
-            try:
-                candidate.unlink()
-            except FileNotFoundError:
-                pass
+            _remove_disposable_bootstrap_candidate(candidate)
     else:
         observed = build_bootstrap_agent(source_root, output)
     if observed != (manifest.bootstrap_sha256, manifest.bootstrap_bytes):
@@ -1147,6 +1343,97 @@ def publish_one(
         raise ProductionOrchestratorError("artifact publication failed closed") from exc
 
 
+def _verified_source_backup_publication(
+    journal_path: Path,
+    *,
+    operation_id: str,
+    release_sha: str,
+    plaintext_sha256: str,
+    plaintext_bytes: int,
+    object_key: str,
+    version_id: str,
+) -> PublishedObject:
+    try:
+        with _publication_lock(journal_path):
+            state = _load_journal(journal_path)
+            published = _validate_prepared_journal(
+                state,
+                ciphertext_path=_journal_ciphertext_path(journal_path),
+            )
+    except ProductionTransportError as exc:
+        raise ProductionOrchestratorError(
+            "source backup publication journal is invalid"
+        ) from exc
+    if (
+        state.get("phase") != "verified"
+        or published.bucket != PRODUCTION_BUCKET
+        or state.get("operation_id") != operation_id
+        or state.get("artifact_kind") != "database-backup"
+        or state.get("requested_metadata")
+        != {
+            "destination-name": "database.dump",
+            "release-sha": release_sha,
+        }
+        or published.plaintext_sha256 != plaintext_sha256
+        or published.plaintext_bytes != plaintext_bytes
+        or published.object_key != object_key
+        or published.version_id != version_id
+    ):
+        raise ProductionOrchestratorError(
+            "source backup publication/readback binding differs"
+        )
+    return published
+
+
+def publish_source_backup(
+    database_backup: Path,
+    *,
+    operation_id: str,
+    release_sha: str,
+    recipient_file: Path,
+    credentials_file: Path,
+    journal_directory: Path,
+    prefix: str = DEFAULT_PREFIX,
+) -> Mapping[str, Any]:
+    try:
+        operation_id = validate_operation_id(operation_id)
+    except ProductionTransportError as exc:
+        raise ProductionOrchestratorError("operation id is invalid") from exc
+    if not re.fullmatch(r"[0-9a-f]{40}", release_sha):
+        raise ProductionOrchestratorError("release SHA is invalid")
+    with _orchestrator_lock(journal_directory):
+        credentials = load_secure_credentials(credentials_file)
+        client = build_client(credentials)
+        artifact = LocalArtifact(
+            "database-backup",
+            "database.dump",
+            database_backup,
+        )
+        publication_journal = (
+            journal_directory / "publish-database-backup.json"
+        )
+        published = publish_one(
+            artifact,
+            operation_id=operation_id,
+            recipient_file=recipient_file,
+            prefix=prefix,
+            client=client,
+            journal_path=publication_journal,
+            release_sha=release_sha,
+        )
+    return {
+        "schema": ORCHESTRATOR_SCHEMA,
+        "status": "source-backup-published-and-verified",
+        "operation_id": operation_id,
+        "release_sha": release_sha,
+        "object": published.evidence(),
+        "publication_journal": str(publication_journal),
+        "presigned_url_persisted": False,
+        "payload_bytes_over_ssh": False,
+        "object_storage_objects_deleted": False,
+    }
+
+
 def _write_orchestrator_journal(
     path: Path,
     state: Mapping[str, Any],
@@ -1422,6 +1709,34 @@ def transfer_operation(
     ttl_seconds: int = 300,
     runner: Callable[..., subprocess.CompletedProcess[bytes]] = subprocess.run,
 ) -> Mapping[str, Any]:
+    with _orchestrator_lock(journal_directory):
+        return _transfer_operation_locked(
+            manifest_path,
+            artifact_directory,
+            source_database_attestation=source_database_attestation,
+            recipient_file=recipient_file,
+            credentials_file=credentials_file,
+            journal_directory=journal_directory,
+            ssh_identity=ssh_identity,
+            prefix=prefix,
+            ttl_seconds=ttl_seconds,
+            runner=runner,
+        )
+
+
+def _transfer_operation_locked(
+    manifest_path: Path,
+    artifact_directory: Path,
+    *,
+    source_database_attestation: Path,
+    recipient_file: Path,
+    credentials_file: Path,
+    journal_directory: Path,
+    ssh_identity: Path,
+    prefix: str = DEFAULT_PREFIX,
+    ttl_seconds: int = 300,
+    runner: Callable[..., subprocess.CompletedProcess[bytes]] = subprocess.run,
+) -> Mapping[str, Any]:
     """Publish, bootstrap, and receive every artifact in one exact operation."""
 
     _require_secure_directory(journal_directory)
@@ -1435,9 +1750,22 @@ def transfer_operation(
         manifest = _load_manifest_bytes(manifest_payload)
     except (OSError, SecureFileError, ProductionOperationError) as exc:
         raise ProductionOrchestratorError("operation manifest is unavailable or invalid") from exc
-    _verify_source_database_attestation(
+    source_database_evidence = _verify_source_database_attestation(
         source_database_attestation,
         manifest=manifest,
+    )
+    source_backup_publication = _verified_source_backup_publication(
+        journal_directory / "publish-database-backup.json",
+        operation_id=manifest.operation_id,
+        release_sha=manifest.release_sha,
+        plaintext_sha256=manifest.artifacts["database-backup"].sha256,
+        plaintext_bytes=manifest.artifacts["database-backup"].bytes,
+        object_key=str(
+            source_database_evidence["database_backup_object_key"]
+        ),
+        version_id=str(
+            source_database_evidence["database_backup_version_id"]
+        ),
     )
     credentials = load_secure_credentials(credentials_file)
     client = build_client(credentials)
@@ -1526,6 +1854,13 @@ def transfer_operation(
             journal_path=publication_journal,
             release_sha=manifest.release_sha,
         )
+        if (
+            artifact.kind == "database-backup"
+            and published != source_backup_publication
+        ):
+            raise ProductionOrchestratorError(
+                "transfer did not reuse the exact attested source backup object"
+            )
         published_evidence = published.evidence()
         prior_object = state["objects"].get(artifact.kind)
         if prior_object is not None and prior_object != published_evidence:
@@ -1641,17 +1976,28 @@ def _validate_removed_ephemeral_resources(
 def _validate_materialized_attestation(
     value: Any,
     *,
-    operation_id: str,
+    manifest: OperationManifest,
 ) -> bool:
     if not isinstance(value, dict) or set(value) != _MATERIALIZED_FIELDS:
         return False
-    root = REMOTE_OPERATIONS_ROOT / operation_id
+    project_root = REMOTE_PROJECT_ROOT_PREFIX / manifest.operation_id
+    data_root = REMOTE_DATA_ROOT_PREFIX / manifest.operation_id
+    secret_root = REMOTE_SECRET_ROOT_PREFIX / manifest.operation_id
     expected_paths = {
-        "release_root": str(root / "release"),
-        "secrets_root": str(root / "secrets"),
-        "data_root": str(root / "data"),
-        "runtime_env": str(root / "secrets" / "webapp-ir" / "runtime.env.role"),
-        "compose": str(root / "rendered" / "webapp-ir" / "docker-compose.yml"),
+        "release_root": str(
+            project_root / "releases" / manifest.release_sha
+        ),
+        "secrets_root": str(secret_root),
+        "data_root": str(data_root),
+        "runtime_env": str(
+            secret_root / "webapp-ir" / "runtime.env.role"
+        ),
+        "compose": str(
+            project_root
+            / "rendered"
+            / "webapp-ir"
+            / "docker-compose.yml"
+        ),
     }
     if any(value.get(key) != expected for key, expected in expected_paths.items()):
         return False
@@ -1786,9 +2132,8 @@ def run_remote_operation(
         )
         expected_volume = f"{manifest.project_name}_webapp_ir_postgres"
         expected_data_path = str(
-            REMOTE_OPERATIONS_ROOT
+            REMOTE_DATA_ROOT_PREFIX
             / canonical
-            / "data"
             / "webapp-ir"
             / "postgres"
         )
@@ -1843,7 +2188,7 @@ def run_remote_operation(
             or database_container.get("data_path") != expected_data_path
             or not _validate_materialized_attestation(
                 document.get("materialized"),
-                operation_id=canonical,
+                manifest=manifest,
             )
             or document.get("images") != expected_images
             or document.get("presigned_url_persisted") is not False
@@ -1867,6 +2212,22 @@ def run_remote_operation(
 
 
 def finalize_local_ciphertexts(
+    journal_directory: Path,
+    *,
+    operation_id: str,
+    release_sha: str,
+    manifest_sha256: str,
+) -> Mapping[str, Any]:
+    with _orchestrator_lock(journal_directory):
+        return _finalize_local_ciphertexts_locked(
+            journal_directory,
+            operation_id=operation_id,
+            release_sha=release_sha,
+            manifest_sha256=manifest_sha256,
+        )
+
+
+def _finalize_local_ciphertexts_locked(
     journal_directory: Path,
     *,
     operation_id: str,
@@ -1986,6 +2347,7 @@ def _error_payload(message: str) -> Mapping[str, str]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="action", required=True)
+    source_publish_parser = subparsers.add_parser("publish-source-backup")
     plan_parser = subparsers.add_parser("validate-local")
     transfer_parser = subparsers.add_parser("transfer")
     prepare_parser = subparsers.add_parser("prepare")
@@ -1998,6 +2360,31 @@ def main(argv: list[str] | None = None) -> int:
             type=Path,
             required=True,
         )
+    source_publish_parser.add_argument("--operation-id", required=True)
+    source_publish_parser.add_argument("--release-sha", required=True)
+    source_publish_parser.add_argument(
+        "--database-backup",
+        type=Path,
+        required=True,
+    )
+    source_publish_parser.add_argument(
+        "--recipient-file",
+        type=Path,
+        required=True,
+    )
+    source_publish_parser.add_argument(
+        "--credentials-file",
+        type=Path,
+        required=True,
+    )
+    source_publish_parser.add_argument(
+        "--journal-directory",
+        type=Path,
+        required=True,
+    )
+    source_publish_parser.add_argument("--prefix", default=DEFAULT_PREFIX)
+    source_publish_parser.add_argument("--apply", action="store_true")
+    source_publish_parser.add_argument("--confirm")
     transfer_parser.add_argument("--recipient-file", type=Path, required=True)
     transfer_parser.add_argument("--credentials-file", type=Path, required=True)
     transfer_parser.add_argument("--journal-directory", type=Path, required=True)
@@ -2021,7 +2408,33 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if os.geteuid() != 0:
             raise ProductionOrchestratorError("production orchestrator must run as root")
-        if args.action == "validate-local":
+        if args.action == "publish-source-backup":
+            try:
+                operation_id = validate_operation_id(args.operation_id)
+            except ProductionTransportError as exc:
+                raise ProductionOrchestratorError(
+                    "operation id is invalid"
+                ) from exc
+            if not re.fullmatch(r"[0-9a-f]{40}", args.release_sha):
+                raise ProductionOrchestratorError("release SHA is invalid")
+            expected_confirmation = (
+                f"publish-source-backup:{operation_id}:{args.release_sha}"
+            )
+            if not args.apply or args.confirm != expected_confirmation:
+                raise ProductionOrchestratorError(
+                    "source backup publication requires "
+                    f"--apply --confirm {expected_confirmation}"
+                )
+            result = publish_source_backup(
+                args.database_backup,
+                operation_id=operation_id,
+                release_sha=args.release_sha,
+                recipient_file=args.recipient_file,
+                credentials_file=args.credentials_file,
+                journal_directory=args.journal_directory,
+                prefix=args.prefix,
+            )
+        elif args.action == "validate-local":
             manifest_payload = read_secure_bytes(
                 args.manifest,
                 label="WA-IR operation manifest",
@@ -2061,7 +2474,6 @@ def main(argv: list[str] | None = None) -> int:
                 "network_io": False,
             }
         elif args.action == "transfer":
-            required = f"transfer-wa-ir:{args.confirm or ''}"
             manifest_payload = read_secure_bytes(
                 args.manifest,
                 label="WA-IR operation manifest",
