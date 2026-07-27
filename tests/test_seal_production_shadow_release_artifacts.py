@@ -344,11 +344,35 @@ class ReleaseArtifactProducerTests(unittest.TestCase):
         self.assertNotIn(str(self.fixture.release_root), json.dumps(closure))
         self.assertEqual(closure["release"]["commit_sha"], self.fixture.release_sha)
         self.assertEqual(set(closure["images"]), set(MODULE.IMAGE_ROLES))
-        self.assertTrue(
-            all(not image["repo_tags"] for image in closure["images"].values())
-        )
+        for role in MODULE.IMAGE_ROLES:
+            image_id = self.fixture.image_ids[role]
+            archive, inspected = self.fixture.images[image_id]
+            descriptor, content_identity = MODULE.image_content_descriptor(
+                inspected
+            )
+            self.assertEqual(
+                closure["images"][role],
+                {
+                    "archive_sha256": hashlib.sha256(archive).hexdigest(),
+                    "archive_bytes": len(archive),
+                    "config_digest": image_id,
+                    "content_descriptor": descriptor,
+                    "content_identity": content_identity,
+                },
+            )
+            self.assertEqual(
+                closure["source_engine_observations"][role],
+                {
+                    "image_id": image_id,
+                    "informational_only": True,
+                },
+            )
+            self.assertEqual(
+                closure["verified_image_contracts"][role]["repo_tags"],
+                [],
+            )
         self.assertEqual(
-            closure["images"]["postgres"]["runtime_user"],
+            closure["verified_image_contracts"]["postgres"]["runtime_user"],
             {
                 "uid": MODULE.EXPECTED_POSTGRES_RUNTIME_UID,
                 "gid": MODULE.EXPECTED_POSTGRES_RUNTIME_GID,
@@ -357,15 +381,19 @@ class ReleaseArtifactProducerTests(unittest.TestCase):
             },
         )
         self.assertEqual(
-            closure["images"]["app"]["oci_revision"],
+            closure["verified_image_contracts"]["app"]["oci_revision"],
             self.fixture.release_sha,
         )
         self.assertEqual(
-            closure["images"]["postgres"]["oci_revision"],
+            closure["verified_image_contracts"]["postgres"]["oci_revision"],
             self.fixture.release_sha,
         )
-        self.assertIsNone(closure["images"]["redis"]["oci_revision"])
-        self.assertIsNone(closure["images"]["nginx"]["oci_revision"])
+        self.assertIsNone(
+            closure["verified_image_contracts"]["redis"]["oci_revision"]
+        )
+        self.assertIsNone(
+            closure["verified_image_contracts"]["nginx"]["oci_revision"]
+        )
         self.assertEqual(closure["constraints"]["network_transfer_performed"], False)
         self.assertEqual(closure["constraints"]["container_runtime_changed"], False)
 
@@ -428,7 +456,7 @@ class ReleaseArtifactProducerTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             MODULE.ReleaseArtifactError,
-            "semantic",
+            "tagless",
         ):
             self.fixture.request()
 
@@ -473,7 +501,7 @@ class ReleaseArtifactProducerTests(unittest.TestCase):
             (self._operation_root() / "artifacts" / "app-image.tar").exists()
         )
 
-    def test_containerd_style_engine_id_is_bound_by_semantic_content_identity(self):
+    def test_containerd_style_engine_id_is_only_an_informational_observation(self):
         config_digest_id = self.fixture.image_ids["app"]
         archive, inspect = self.fake.images.pop(config_digest_id)
         engine_image_id = "sha256:" + "e" * 64
@@ -487,8 +515,18 @@ class ReleaseArtifactProducerTests(unittest.TestCase):
 
         closure = json.loads(Path(result["closure_manifest"]).read_bytes())
         self.assertEqual(
-            closure["images"]["app"]["image_id"],
+            closure["source_engine_observations"]["app"]["image_id"],
             engine_image_id,
+        )
+        self.assertTrue(
+            closure["source_engine_observations"]["app"][
+                "informational_only"
+            ]
+        )
+        self.assertNotIn("image_id", closure["images"]["app"])
+        self.assertEqual(
+            closure["images"]["app"]["config_digest"],
+            config_digest_id,
         )
         self.assertRegex(
             closure["images"]["app"]["content_identity"],
@@ -518,6 +556,67 @@ class ReleaseArtifactProducerTests(unittest.TestCase):
         with self.assertRaisesRegex(
             MODULE.ReleaseArtifactError,
             "runtime UID/GID",
+        ):
+            self.fixture.request(image_ids=image_ids)
+
+        self.assertFalse(
+            (self._operation_root() / "artifacts" / "postgres-image.tar").exists()
+        )
+
+    def test_postgres_archive_without_runtime_uid_gid_labels_fails_closed(self):
+        postgres_id = self.fixture.image_ids["postgres"]
+        _unlabeled_id, archive, _unlabeled_inspect = _image_fixture(
+            "postgres",
+            self.fixture.release_sha,
+            postgres_runtime_labels=False,
+        )
+        expected_inspect = self.fixture.images[postgres_id][1]
+        self.fake.images[postgres_id] = (archive, expected_inspect)
+
+        with self.assertRaisesRegex(
+            MODULE.ReleaseArtifactError,
+            "runtime UID/GID",
+        ):
+            self.fixture.request()
+
+        self.assertFalse(
+            (self._operation_root() / "artifacts" / "postgres-image.tar").exists()
+        )
+
+    def test_postgres_archive_with_wrong_release_label_fails_closed(self):
+        postgres_id = self.fixture.image_ids["postgres"]
+        _wrong_id, archive, _wrong_inspect = _image_fixture(
+            "postgres",
+            "0" * 40,
+        )
+        expected_inspect = self.fixture.images[postgres_id][1]
+        self.fake.images[postgres_id] = (archive, expected_inspect)
+
+        with self.assertRaisesRegex(
+            MODULE.ReleaseArtifactError,
+            "exact OCI release revision",
+        ):
+            self.fixture.request()
+
+        self.assertFalse(
+            (self._operation_root() / "artifacts" / "postgres-image.tar").exists()
+        )
+
+    def test_postgres_inspect_with_wrong_release_label_fails_closed(self):
+        original_id = self.fixture.image_ids["postgres"]
+        wrong_id, archive, inspect = _image_fixture(
+            "postgres",
+            "0" * 40,
+        )
+        image_ids = dict(self.fixture.image_ids)
+        image_ids["postgres"] = wrong_id
+        self.fake.images[wrong_id] = (archive, inspect)
+        if original_id != wrong_id:
+            self.fake.images.pop(original_id)
+
+        with self.assertRaisesRegex(
+            MODULE.ReleaseArtifactError,
+            "exact OCI release revision",
         ):
             self.fixture.request(image_ids=image_ids)
 
