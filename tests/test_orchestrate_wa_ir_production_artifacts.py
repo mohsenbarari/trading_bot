@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 from urllib.parse import urlencode
+import zipfile
 
 from scripts import orchestrate_wa_ir_production_artifacts as MODULE
 from scripts import produce_wa_ir_source_database_attestation as SOURCE
@@ -165,7 +166,7 @@ def operation_plan(fixture: OperationFixture) -> dict[str, object]:
         "release_sha": fixture.manifest.release_sha,
         "manifest_sha256": fixture.manifest.canonical_sha256,
         "required_confirmation": (
-            f"prepare-wa-ir:{fixture.manifest.operation_id}:"
+            f"stage-wa-ir-images:{fixture.manifest.operation_id}:"
             f"{fixture.manifest.release_sha}"
         ),
         "artifact_count": len(MODULE.EXPECTED_ARTIFACTS),
@@ -183,6 +184,63 @@ def operation_plan(fixture: OperationFixture) -> dict[str, object]:
     }
 
 
+def operation_stage(fixture: OperationFixture) -> dict[str, object]:
+    result = operation_plan(fixture)
+    project_root = (
+        MODULE.REMOTE_PROJECT_ROOT_PREFIX / fixture.manifest.operation_id
+    )
+    data_root = MODULE.REMOTE_DATA_ROOT_PREFIX / fixture.manifest.operation_id
+    secret_root = (
+        MODULE.REMOTE_SECRET_ROOT_PREFIX / fixture.manifest.operation_id
+    )
+    result.update(
+        {
+            "status": "wa-ir-images-staged",
+            "required_confirmation": None,
+            "materialized": {
+                "release_root": str(
+                    project_root
+                    / "releases"
+                    / fixture.manifest.release_sha
+                ),
+                "secrets_root": str(secret_root),
+                "data_root": str(data_root),
+                "runtime_material_installed": False,
+                "uploads_tree": {
+                    "tree_sha256": "1" * 64,
+                    "directory_count": 0,
+                    "file_count": 1,
+                    "expanded_bytes": 6,
+                },
+                "audit_tree": {
+                    "tree_sha256": "2" * 64,
+                    "directory_count": 0,
+                    "file_count": 1,
+                    "expanded_bytes": 3,
+                },
+            },
+            "images": list(fixture.image_stage["images"]),
+            "image_stage": dict(fixture.image_stage),
+            "stage_attestation_sha256": (
+                fixture.stage_attestation_sha256
+            ),
+            "presigned_url_persisted": False,
+            "legacy_resources_mutated": False,
+            "completed_phases": [
+                "received",
+                "materialized",
+                "images-loaded",
+            ],
+            "operation_state_sha256": "3" * 64,
+            "cleanup_policy": MODULE._EXPECTED_STAGE_CLEANUP_POLICY,
+            "functional_boundary": (
+                MODULE._EXPECTED_STAGE_FUNCTIONAL_BOUNDARY
+            ),
+        }
+    )
+    return result
+
+
 def operation_apply(fixture: OperationFixture) -> dict[str, object]:
     result = operation_plan(fixture)
     project_root = (
@@ -198,18 +256,15 @@ def operation_apply(fixture: OperationFixture) -> dict[str, object]:
         "control_state": "fenced",
         "witness_lease_id": None,
     }
-    postgres_image = next(
-        image for image in fixture.manifest.images if image.role == "postgres"
-    )
     database_container = {
         "container_id": "a" * 64,
-        "image_id": postgres_image.image_id,
+        "image_id": fixture.runtime_image_ids["postgres"],
         "project": fixture.manifest.project_name,
         "service": fixture.manifest.services["database"],
         "mount_type": "bind",
         "data_path": str(data_root / "webapp-ir" / "postgres"),
-        "data_uid": postgres_image.runtime_uid,
-        "data_gid": postgres_image.runtime_gid,
+        "data_uid": fixture.manifest.postgres_runtime_uid,
+        "data_gid": fixture.manifest.postgres_runtime_gid,
     }
     result.update(
         {
@@ -224,6 +279,7 @@ def operation_apply(fixture: OperationFixture) -> dict[str, object]:
                 ),
                 "secrets_root": str(secret_root),
                 "data_root": str(data_root),
+                "runtime_material_installed": True,
                 "runtime_env": str(
                     secret_root / "webapp-ir" / "runtime.env.role"
                 ),
@@ -246,14 +302,40 @@ def operation_apply(fixture: OperationFixture) -> dict[str, object]:
                     "expanded_bytes": 3,
                 },
             },
-            "images": [
-                {
-                    "role": image.role,
-                    "image_id": image.image_id,
-                    "source": "object-storage-archive",
-                }
-                for image in fixture.manifest.images
-            ],
+            "images": list(fixture.image_stage["images"]),
+            "image_stage": dict(fixture.image_stage),
+            "stage_attestation_sha256": (
+                fixture.stage_attestation_sha256
+            ),
+            "final_prepare_material": {
+                "final_prepare_manifest_sha256": hashlib.sha256(
+                    json.dumps(
+                        fixture.final_prepare_document,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode()
+                ).hexdigest(),
+                "stage_attestation_sha256": (
+                    fixture.stage_attestation_sha256
+                ),
+                "role_compose_sha256": hashlib.sha256(
+                    fixture.role_compose
+                ).hexdigest(),
+                "role_env_sha256": hashlib.sha256(
+                    fixture.runtime_env
+                ).hexdigest(),
+                "ca_sha256": hashlib.sha256(fixture.ca).hexdigest(),
+                "runtime_image_ids": dict(fixture.runtime_image_ids),
+                "runtime_env": str(
+                    secret_root / "webapp-ir" / "runtime.env.role"
+                ),
+                "compose": str(
+                    project_root
+                    / "rendered"
+                    / "webapp-ir"
+                    / "docker-compose.yml"
+                ),
+            },
             "database": {
                 "database_ready": True,
                 "source_revision": fixture.manifest.source_database[
@@ -317,6 +399,20 @@ class ProductionArtifactOrchestratorTests(unittest.TestCase):
                     fixture.manifest.bootstrap_bytes,
                 ),
             )
+            with zipfile.ZipFile(output) as archive:
+                self.assertEqual(
+                    archive.read("core/docker_image_identity.py"),
+                    (
+                        fixture.root
+                        / "release-source"
+                        / "core"
+                        / "docker_image_identity.py"
+                    ).read_bytes(),
+                )
+                self.assertEqual(
+                    archive.read("core/__init__.py"),
+                    b"",
+                )
             os.link(
                 output,
                 output.with_name(f".{output.name}.materializing"),
@@ -586,6 +682,21 @@ class ProductionArtifactOrchestratorTests(unittest.TestCase):
                 runner=runner_for(operation_plan(fixture)),
             )
             self.assertEqual(planned["status"], "planned")
+            staged = MODULE.run_remote_operation(
+                manifest=fixture.manifest,
+                ssh_identity=identity,
+                apply=False,
+                stage=True,
+                confirm=(
+                    f"stage-wa-ir-images:{fixture.manifest.operation_id}:"
+                    f"{fixture.manifest.release_sha}"
+                ),
+                runner=runner_for(operation_stage(fixture)),
+            )
+            self.assertEqual(
+                staged["stage_attestation_sha256"],
+                fixture.stage_attestation_sha256,
+            )
             applied = MODULE.run_remote_operation(
                 manifest=fixture.manifest,
                 ssh_identity=identity,
@@ -637,6 +748,135 @@ class ProductionArtifactOrchestratorTests(unittest.TestCase):
                     apply=False,
                     runner=runner_for(leaked),
                 )
+
+    def test_final_prepare_transfer_is_one_exact_post_stage_object(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = OperationFixture(Path(raw))
+            journal = fixture.root / "journal"
+            journal.mkdir(mode=0o700)
+            identity = fixture.root / "ssh"
+            recipient = fixture.root / "recipient"
+            credentials = fixture.root / "credentials"
+            stage_path = fixture.root / "stage-attestation.json"
+            for path, payload in (
+                (identity, b"fixture-private-key"),
+                (recipient, b"age1fixture"),
+                (credentials, b"fixture-credentials"),
+            ):
+                secure_file(path, payload)
+            secure_file(
+                stage_path,
+                json.dumps(
+                    operation_stage(fixture),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode(),
+            )
+            artifacts: list[MODULE.LocalArtifact] = []
+
+            def fake_publish(artifact, **_kwargs):  # noqa: ANN001
+                artifacts.append(artifact)
+                return published_object(fixture, artifact)
+
+            def fake_presign(_client, published, **_kwargs):  # noqa: ANN001
+                return presigned_get(published)
+
+            def fake_deliver(descriptor, **_kwargs):  # noqa: ANN001
+                document = json.loads(descriptor.decode())
+                return MODULE.RemoteAttestation(
+                    artifact_kind=document["artifact_kind"],
+                    destination_name=document["destination_name"],
+                    object_key=document["object_key"],
+                    version_id=document["version_id"],
+                    plaintext_sha256=document["plaintext_sha256"],
+                    plaintext_bytes=document["plaintext_bytes"],
+                    installation_result="created",
+                )
+
+            with (
+                patch.object(
+                    MODULE,
+                    "_load_orchestrator_journal",
+                    return_value={"phase": "transferred"},
+                ),
+                patch.object(
+                    MODULE,
+                    "load_secure_credentials",
+                    return_value=object(),
+                ),
+                patch.object(
+                    MODULE,
+                    "build_client",
+                    return_value=object(),
+                ),
+                patch.object(
+                    MODULE,
+                    "publish_one",
+                    side_effect=fake_publish,
+                ),
+                patch.object(
+                    MODULE,
+                    "presign_exact_get",
+                    side_effect=fake_presign,
+                ),
+                patch.object(
+                    MODULE,
+                    "deliver_received_artifact",
+                    side_effect=fake_deliver,
+                ),
+            ):
+                result = MODULE.transfer_final_prepare_material(
+                    fixture.incoming / "operation-manifest.json",
+                    fixture.final_archive_path,
+                    stage_path,
+                    recipient_file=recipient,
+                    credentials_file=credentials,
+                    journal_directory=journal,
+                    ssh_identity=identity,
+                )
+            self.assertEqual(result["status"], "final-prepare-transferred")
+            self.assertEqual(len(artifacts), 1)
+            self.assertEqual(
+                (
+                    artifacts[0].kind,
+                    artifacts[0].destination_name,
+                ),
+                (
+                    MODULE.FINAL_PREPARE_ARTIFACT_KIND,
+                    MODULE.FINAL_PREPARE_DESTINATION_NAME,
+                ),
+            )
+            persisted = (
+                journal / "final-prepare-transfer.json"
+            ).read_bytes()
+            self.assertNotIn(b"https://", persisted)
+            self.assertEqual(
+                json.loads(persisted)["object"]["version_id"],
+                result["object"]["version_id"],
+            )
+
+            with (
+                patch.object(
+                    MODULE,
+                    "_load_orchestrator_journal",
+                    return_value={"phase": "transferred"},
+                ),
+                patch.object(MODULE, "publish_one") as no_publish,
+            ):
+                repeated = MODULE.transfer_final_prepare_material(
+                    fixture.incoming / "operation-manifest.json",
+                    fixture.final_archive_path,
+                    stage_path,
+                    recipient_file=recipient,
+                    credentials_file=credentials,
+                    journal_directory=journal,
+                    ssh_identity=identity,
+                )
+            no_publish.assert_not_called()
+            self.assertEqual(
+                repeated["status"],
+                "final-prepare-already-transferred",
+            )
 
     def test_transfer_publishes_exact_artifact_closure_and_resumes(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

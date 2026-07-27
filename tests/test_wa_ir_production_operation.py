@@ -83,13 +83,17 @@ def docker_archive(
                 MODULE.POSTGRES_RUNTIME_GID_LABEL: str(runtime_gid),
             }
         )
+    layer = b"empty-layer"
+    layer_digest = "sha256:" + hashlib.sha256(layer).hexdigest()
     config = json.dumps(
         {
             "architecture": "amd64",
             "os": "linux",
-            "rootfs": {"type": "layers", "diff_ids": []},
+            "created": "2026-07-27T00:00:00Z",
+            "rootfs": {"type": "layers", "diff_ids": [layer_digest]},
             "config": {
                 "Labels": labels,
+                "Env": [f"FIXTURE_ROLE={role}"],
             },
             "fixture_role": role,
         },
@@ -97,7 +101,6 @@ def docker_archive(
         separators=(",", ":"),
     ).encode()
     image_id = "sha256:" + hashlib.sha256(config).hexdigest()
-    layer = b"empty-layer"
     manifest = json.dumps(
         [
             {
@@ -119,6 +122,43 @@ def docker_archive(
         ),
         image_id,
     )
+
+
+def docker_archive_semantic(
+    payload: bytes,
+) -> tuple[dict[str, object], str]:
+    with tarfile.open(fileobj=io.BytesIO(payload), mode="r:") as archive:
+        manifest = json.loads(
+            archive.extractfile("manifest.json").read().decode()
+        )
+        config = json.loads(
+            archive.extractfile(manifest[0]["Config"]).read().decode()
+        )
+    return MODULE.image_content_descriptor_from_archive_config(config)
+
+
+def docker_inspection(
+    payload: bytes,
+    runtime_image_id: str,
+) -> dict[str, object]:
+    with tarfile.open(fileobj=io.BytesIO(payload), mode="r:") as archive:
+        manifest = json.loads(
+            archive.extractfile("manifest.json").read().decode()
+        )
+        config = json.loads(
+            archive.extractfile(manifest[0]["Config"]).read().decode()
+        )
+    return {
+        "Id": runtime_image_id,
+        "Architecture": config["architecture"],
+        "Os": config["os"],
+        "Created": config["created"],
+        "Config": config["config"],
+        "RootFS": {
+            "Type": config["rootfs"]["type"],
+            "Layers": config["rootfs"]["diff_ids"],
+        },
+    }
 
 
 class OperationFixture:
@@ -166,38 +206,59 @@ class OperationFixture:
             "nginx",
             self.release_sha,
         )
+        self.image_semantics = {
+            role: docker_archive_semantic(payload)
+            for role, payload in {
+                "app": self.app_archive,
+                "postgres": self.db_archive,
+                "redis": self.redis_archive,
+                "nginx": self.nginx_archive,
+            }.items()
+        }
+        self.runtime_image_ids = {
+            "app": "sha256:" + "a" * 63 + "1",
+            "postgres": "sha256:" + "b" * 63 + "2",
+            "redis": "sha256:" + "c" * 63 + "3",
+            "nginx": "sha256:" + "d" * 63 + "4",
+        }
         self.ca = b"test-only-ca\n"
         self.runtime_env = self._runtime_env()
+        runtime_image_env = {
+            "app": "PRODUCTION_SHADOW_APP_IMAGE_ID",
+            "postgres": "PRODUCTION_SHADOW_POSTGRES_IMAGE_ID",
+            "redis": "PRODUCTION_SHADOW_REDIS_IMAGE_ID",
+            "nginx": "PRODUCTION_SHADOW_NGINX_IMAGE_ID",
+        }
         references = "\n".join(
             f"  {key.lower()}: ${{{key}:?required}}"
             for key in sorted(
                 line.split("=", 1)[0]
                 for line in self.runtime_env.decode().splitlines()
+                if line.split("=", 1)[0]
+                not in set(runtime_image_env.values())
             )
         )
         self.role_compose = (
             "name: ${PRODUCTION_SHADOW_PROJECT:?required}-webapp-ir\n"
+            "x-production-shadow-runtime-image-ids:\n"
+            + "\n".join(
+                f"  {role}: ${{{key}:?required}}"
+                for role, key in runtime_image_env.items()
+            )
+            + "\n"
             "x-prepare-environment:\n"
             f"{references}\n"
             "services: {}\n"
         ).encode()
-        self.runtime_archive = tar_bytes(
-            {
-                "role-compose.yml": self.role_compose,
-                "runtime.env.role": self.runtime_env,
-                "ca.crt": self.ca,
-            }
-        )
         self.payloads = {
-            "release-archive": self.release_bundle,
+            "release-bundle": self.release_bundle,
             "app-image-archive": self.app_archive,
-            "db-image-archive": self.db_archive,
+            "postgres-image-archive": self.db_archive,
             "redis-image-archive": self.redis_archive,
             "nginx-image-archive": self.nginx_archive,
             "database-backup": b"PGDMP test fixture",
             "uploads-archive": tar_bytes({"avatar.bin": b"avatar"}, gzip=True),
             "audit-archive": tar_bytes({"audit.jsonl": b"{}\n"}, gzip=True),
-            "runtime-material": self.runtime_archive,
         }
         for kind, (name, _format) in MODULE.EXPECTED_ARTIFACTS.items():
             secure_file(self.incoming / name, self.payloads[kind])
@@ -214,6 +275,31 @@ class OperationFixture:
             self.incoming / "operation-manifest.json",
             required_uid=os.geteuid(),
         )
+        self.image_stage = self._image_stage_document()
+        self.stage_attestation_sha256 = hashlib.sha256(
+            json.dumps(
+                self.image_stage,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        self.final_prepare_document = self._final_prepare_document()
+        self.runtime_archive = tar_bytes(
+            {
+                MODULE.FINAL_PREPARE_MANIFEST_NAME: json.dumps(
+                    self.final_prepare_document,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode(),
+                "role-compose.yml": self.role_compose,
+                "runtime.env.role": self.runtime_env,
+                "ca.crt": self.ca,
+            }
+        )
+        self.final_archive_path = (
+            self.root / MODULE.FINAL_PREPARE_DESTINATION_NAME
+        )
+        secure_file(self.final_archive_path, self.runtime_archive)
 
     def _release_bundle(self) -> tuple[bytes, str, str]:
         repository = self.root / "release-source"
@@ -241,6 +327,7 @@ class OperationFixture:
         source_root = Path(__file__).resolve().parents[1]
         for relative in ORCHESTRATOR._BOOTSTRAP_SOURCE_FILES:
             destination = repository / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes((source_root / relative).read_bytes())
         versions = repository / "migrations" / "versions"
         versions.mkdir(parents=True)
@@ -291,7 +378,9 @@ class OperationFixture:
     def _runtime_env(self) -> bytes:
         project = f"tb3p-{OPERATION_ID.replace('-', '')}"
         values = {
-            "PRODUCTION_SHADOW_APP_IMAGE_ID": self.app_id,
+            "PRODUCTION_SHADOW_APP_IMAGE_ID": self.runtime_image_ids[
+                "app"
+            ],
             "PRODUCTION_SHADOW_CGROUP_PARENT": project,
             "PRODUCTION_SHADOW_DATA_ROOT": str(self.data_root),
             "PRODUCTION_SHADOW_DR_CA_SHA256": hashlib.sha256(
@@ -300,15 +389,21 @@ class OperationFixture:
             "PRODUCTION_SHADOW_DR_TLS_ATTESTATION_SHA256": "2" * 64,
             "PRODUCTION_SHADOW_DR_TLS_ATTESTED_AT_EPOCH": "1785170000",
             "PRODUCTION_SHADOW_OPERATION_ID": OPERATION_ID,
-            "PRODUCTION_SHADOW_NGINX_IMAGE_ID": self.nginx_id,
-            "PRODUCTION_SHADOW_POSTGRES_IMAGE_ID": self.db_id,
+            "PRODUCTION_SHADOW_NGINX_IMAGE_ID": self.runtime_image_ids[
+                "nginx"
+            ],
+            "PRODUCTION_SHADOW_POSTGRES_IMAGE_ID": self.runtime_image_ids[
+                "postgres"
+            ],
             "PRODUCTION_SHADOW_PROJECT": project,
             "PRODUCTION_SHADOW_PROJECT_ROOT": str(self.project_root),
             "PRODUCTION_SHADOW_RELEASE_ROOT": str(
                 self.project_root / "releases" / self.release_sha
             ),
             "PRODUCTION_SHADOW_RELEASE_SHA": self.release_sha,
-            "PRODUCTION_SHADOW_REDIS_IMAGE_ID": self.redis_id,
+            "PRODUCTION_SHADOW_REDIS_IMAGE_ID": self.runtime_image_ids[
+                "redis"
+            ],
             "PRODUCTION_SHADOW_SECRET_ROOT": str(self.secret_root),
             "WEBAPP_IR_APP_DB_PASSWORD": "app-password",
             "WEBAPP_IR_BLOB_DB_PASSWORD": "blob-password",
@@ -340,7 +435,24 @@ class OperationFixture:
                     "format": artifact_format,
                 }
             )
-        runtime_hash = hashlib.sha256(self.runtime_env).hexdigest()
+        image_archives = {
+            "app": ("app-image-archive", self.app_archive, self.app_id),
+            "postgres": (
+                "postgres-image-archive",
+                self.db_archive,
+                self.db_id,
+            ),
+            "redis": (
+                "redis-image-archive",
+                self.redis_archive,
+                self.redis_id,
+            ),
+            "nginx": (
+                "nginx-image-archive",
+                self.nginx_archive,
+                self.nginx_id,
+            ),
+        }
         return {
             "schema": MODULE.MANIFEST_SCHEMA,
             "operation_id": OPERATION_ID,
@@ -364,73 +476,22 @@ class OperationFixture:
                 "table_count": 1,
             },
             "artifacts": artifacts,
-            "images": [
-                {
-                    "role": "app",
-                    "artifact_kind": "app-image-archive",
-                    "image_id": self.app_id,
-                    "repo_tags": [],
-                    "os": "linux",
-                    "architecture": "amd64",
-                },
-                {
-                    "role": "postgres",
-                    "artifact_kind": "db-image-archive",
-                    "image_id": self.db_id,
-                    "repo_tags": [],
-                    "os": "linux",
-                    "architecture": "amd64",
-                    "runtime_uid": 999,
-                    "runtime_gid": 999,
-                },
-                {
-                    "role": "redis",
-                    "artifact_kind": "redis-image-archive",
-                    "image_id": self.redis_id,
-                    "repo_tags": [],
-                    "os": "linux",
-                    "architecture": "amd64",
-                },
-                {
-                    "role": "nginx",
-                    "artifact_kind": "nginx-image-archive",
-                    "image_id": self.nginx_id,
-                    "repo_tags": [],
-                    "os": "linux",
-                    "architecture": "amd64",
-                },
-            ],
-            "runtime": {
-                "artifact_kind": "runtime-material",
-                "role": "webapp-ir",
-                "entries": [
-                    {
-                        "archive_path": "role-compose.yml",
-                        "destination": MODULE.ROLE_COMPOSE_RELATIVE_PATH.as_posix(),
-                        "sha256": hashlib.sha256(self.role_compose).hexdigest(),
-                        "bytes": len(self.role_compose),
-                        "mode": "0600",
-                    },
-                    {
-                        "archive_path": "runtime.env.role",
-                        "destination": MODULE.ROLE_ENV_RELATIVE_PATH.as_posix(),
-                        "sha256": runtime_hash,
-                        "bytes": len(self.runtime_env),
-                        "mode": "0600",
-                    },
-                    {
-                        "archive_path": "ca.crt",
-                        "destination": "secrets/tls/ca.crt",
-                        "sha256": hashlib.sha256(self.ca).hexdigest(),
-                        "bytes": len(self.ca),
-                        "mode": "0600",
-                    }
-                ],
-                "required_env_keys": sorted(
-                    line.split("=", 1)[0]
-                    for line in self.runtime_env.decode().splitlines()
-                ),
+            "image_artifacts": {
+                role: {
+                    "archive_sha256": hashlib.sha256(payload).hexdigest(),
+                    "archive_bytes": len(payload),
+                    "config_digest": config_digest,
+                    "content_descriptor": self.image_semantics[role][0],
+                    "content_identity": self.image_semantics[role][1],
+                }
+                for role, (
+                    _artifact_kind,
+                    payload,
+                    config_digest,
+                ) in image_archives.items()
             },
+            "postgres_runtime_uid": 999,
+            "postgres_runtime_gid": 999,
             "compose": {
                 "relative_path": MODULE.ROLE_COMPOSE_RELATIVE_PATH.as_posix(),
                 "project_name": (
@@ -440,6 +501,136 @@ class OperationFixture:
             },
             "safety": dict(MODULE.EXPECTED_SAFETY),
         }
+
+    def _image_stage_document(self) -> dict[str, object]:
+        images = [
+            {
+                "role": role,
+                "runtime_image_id": self.runtime_image_ids[role],
+                "config_digest": self.manifest.image_artifacts[
+                    role
+                ].config_digest,
+                "content_descriptor": dict(
+                    self.manifest.image_artifacts[
+                        role
+                    ].content_descriptor
+                ),
+                "content_identity": self.manifest.image_artifacts[
+                    role
+                ].content_identity,
+                "source": "object-storage-archive",
+            }
+            for role in MODULE.IMAGE_ROLES
+        ]
+        return {
+            "schema": MODULE.IMAGE_STAGE_ATTESTATION_SCHEMA,
+            "operation_id": OPERATION_ID,
+            "release_sha": self.release_sha,
+            "operation_manifest_sha256": self.manifest.canonical_sha256,
+            "role": "webapp_ir",
+            "image_artifacts": ORCHESTRATOR._expected_image_artifact_bindings(
+                self.manifest
+            ),
+            "runtime_image_ids": dict(self.runtime_image_ids),
+            "images": images,
+            "containers_started": False,
+            "services_started": False,
+        }
+
+    def _final_prepare_document(self) -> dict[str, object]:
+        entries = [
+            {
+                "archive_path": archive_path,
+                "destination": destination,
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "bytes": len(payload),
+                "mode": "0600",
+            }
+            for archive_path, destination, payload in (
+                (
+                    "role-compose.yml",
+                    MODULE.ROLE_COMPOSE_RELATIVE_PATH.as_posix(),
+                    self.role_compose,
+                ),
+                (
+                    "runtime.env.role",
+                    MODULE.ROLE_ENV_RELATIVE_PATH.as_posix(),
+                    self.runtime_env,
+                ),
+                (
+                    "ca.crt",
+                    MODULE.ROLE_CA_RELATIVE_PATH.as_posix(),
+                    self.ca,
+                ),
+            )
+        ]
+        return {
+            "schema": MODULE.FINAL_PREPARE_MANIFEST_SCHEMA,
+            "operation_id": OPERATION_ID,
+            "release_sha": self.release_sha,
+            "operation_manifest_sha256": self.manifest.canonical_sha256,
+            "stage_attestation_sha256": (
+                self.stage_attestation_sha256
+            ),
+            "role": "webapp_ir",
+            "runtime_image_ids": dict(self.runtime_image_ids),
+            "entries": entries,
+            "required_env_keys": sorted(
+                line.split("=", 1)[0]
+                for line in self.runtime_env.decode().splitlines()
+            ),
+        }
+
+
+def materialize_fixture(
+    manifest: MODULE.OperationManifest,
+    paths: dict[str, Path],
+    *,
+    operation_root: Path,
+    required_uid: int,
+) -> dict[str, object]:
+    materialized = dict(
+        MODULE.materialize_stage(
+            manifest,
+            paths,
+            operation_root=operation_root,
+            required_uid=required_uid,
+        )
+    )
+    final_archive = (
+        operation_root.parent / MODULE.FINAL_PREPARE_DESTINATION_NAME
+    )
+    with tarfile.open(final_archive, mode="r:") as archive:
+        final_document = json.loads(
+            archive.extractfile(
+                MODULE.FINAL_PREPARE_MANIFEST_NAME
+            ).read().decode()
+        )
+    with patch.object(
+        MODULE,
+        "_validate_runtime_image_set",
+        return_value=[],
+    ):
+        final = MODULE.install_final_prepare_material(
+            manifest,
+            final_archive,
+            operation_root=operation_root,
+            expected_stage_attestation_sha256=final_document[
+                "stage_attestation_sha256"
+            ],
+            expected_runtime_image_ids=final_document[
+                "runtime_image_ids"
+            ],
+            required_uid=required_uid,
+        )
+    materialized.update(
+        {
+            "runtime_material_installed": True,
+            "runtime_env": final["runtime_env"],
+            "compose": final["compose"],
+        }
+    )
+    return materialized
 
 
 def valid_compose_config(fixture: OperationFixture) -> dict[str, object]:
@@ -607,7 +798,11 @@ def valid_compose_config(fixture: OperationFixture) -> dict[str, object]:
     for name in manifest.services.values():
         postgres_service = name in {"webapp_ir_db", "webapp_ir_restore_tool"}
         service: dict[str, object] = {
-            "image": fixture.db_id if postgres_service else fixture.app_id,
+            "image": (
+                fixture.runtime_image_ids["postgres"]
+                if postgres_service
+                else fixture.runtime_image_ids["app"]
+            ),
             "pull_policy": "never",
             "cgroup_parent": project_base,
             "cpus": 2 if postgres_service else 1,
@@ -718,6 +913,12 @@ def valid_compose_config(fixture: OperationFixture) -> dict[str, object]:
             "dr_tls_attestation_sha256": "2" * 64,
             "dr_tls_attested_at_epoch": "1785170000",
         },
+        "x-production-shadow-runtime-image-ids": {
+            "app": fixture.runtime_image_ids["app"],
+            "postgres": fixture.runtime_image_ids["postgres"],
+            "redis": fixture.runtime_image_ids["redis"],
+            "nginx": fixture.runtime_image_ids["nginx"],
+        },
         "services": services,
         "networks": {
             "webapp_ir": {
@@ -745,9 +946,9 @@ def valid_database_container_inspect(
     return [
         {
             "Id": identifier,
-            "Image": fixture.db_id,
+            "Image": fixture.runtime_image_ids["postgres"],
             "Config": {
-                "Image": fixture.db_id,
+                "Image": fixture.runtime_image_ids["postgres"],
                 "Labels": {
                     "com.docker.compose.oneoff": "False",
                     "com.docker.compose.project": fixture.manifest.project_name,
@@ -1012,7 +1213,7 @@ class ProductionOperationTests(unittest.TestCase):
                 operation_root=fixture.operation_root,
                 required_uid=os.geteuid(),
             )
-            materialized = MODULE.materialize(
+            materialized = materialize_fixture(
                 fixture.manifest,
                 paths,
                 operation_root=fixture.operation_root,
@@ -1054,7 +1255,7 @@ class ProductionOperationTests(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(runtime.stat().st_mode), 0o600)
             self.assertEqual(runtime.read_bytes(), fixture.runtime_env)
             # A lost attestation can be retried without replacing a file.
-            repeated = MODULE.materialize(
+            repeated = materialize_fixture(
                 fixture.manifest,
                 paths,
                 operation_root=fixture.operation_root,
@@ -1071,7 +1272,7 @@ class ProductionOperationTests(unittest.TestCase):
                 encoding="ascii",
             )
             with self.assertRaises(MODULE.ProductionOperationError):
-                MODULE.materialize(
+                materialize_fixture(
                     fixture.manifest,
                     paths,
                     operation_root=fixture.operation_root,
@@ -1093,7 +1294,7 @@ class ProductionOperationTests(unittest.TestCase):
                 required_uid=os.geteuid(),
             )
             with self.assertRaises(MODULE.ProductionOperationError):
-                MODULE.materialize(
+                materialize_fixture(
                     fixture.manifest,
                     paths,
                     operation_root=fixture.operation_root,
@@ -1117,7 +1318,7 @@ class ProductionOperationTests(unittest.TestCase):
                 required_uid=os.geteuid(),
             )
             with self.assertRaises(MODULE.ProductionOperationError):
-                MODULE.materialize(
+                materialize_fixture(
                     fixture.manifest,
                     paths,
                     operation_root=fixture.operation_root,
@@ -1142,7 +1343,7 @@ class ProductionOperationTests(unittest.TestCase):
             redis.mkdir(mode=0o700)
             secure_file(redis / "appendonly.aof", b"legacy")
             with self.assertRaises(MODULE.ProductionOperationError):
-                MODULE.materialize(
+                materialize_fixture(
                     fixture.manifest,
                     paths,
                     operation_root=fixture.operation_root,
@@ -1162,10 +1363,18 @@ class ProductionOperationTests(unittest.TestCase):
             with self.assertRaises(MODULE.ProductionOperationError):
                 MODULE._load_manifest_bytes(json.dumps(duplicate).encode())
 
-            traversal = json.loads(json.dumps(fixture.document))
-            traversal["runtime"]["entries"][0]["destination"] = "../runtime.env"
+            traversal = json.loads(
+                json.dumps(fixture.final_prepare_document)
+            )
+            traversal["entries"][0]["destination"] = "../runtime.env"
             with self.assertRaises(MODULE.ProductionOperationError):
-                MODULE._load_manifest_bytes(json.dumps(traversal).encode())
+                MODULE._load_final_prepare_manifest_bytes(
+                    json.dumps(traversal).encode(),
+                    manifest=fixture.manifest,
+                    expected_stage_attestation_sha256=(
+                        fixture.stage_attestation_sha256
+                    ),
+                )
 
             legacy_project = json.loads(json.dumps(fixture.document))
             legacy_project["compose"]["project_name"] = (
@@ -1182,77 +1391,69 @@ class ProductionOperationTests(unittest.TestCase):
             fixture = OperationFixture(Path(raw))
 
             missing = json.loads(json.dumps(fixture.document))
-            missing["images"].pop()
+            missing["image_artifacts"].pop("nginx")
             with self.assertRaises(MODULE.ProductionOperationError):
                 MODULE._load_manifest_bytes(json.dumps(missing).encode())
 
-            duplicate_role = json.loads(json.dumps(fixture.document))
-            duplicate_role["images"][-1] = dict(duplicate_role["images"][0])
+            duplicate_content = json.loads(json.dumps(fixture.document))
+            duplicate_content["image_artifacts"]["nginx"][
+                "content_descriptor"
+            ] = duplicate_content["image_artifacts"]["app"][
+                "content_descriptor"
+            ]
+            duplicate_content["image_artifacts"]["nginx"][
+                "content_identity"
+            ] = duplicate_content["image_artifacts"]["app"][
+                "content_identity"
+            ]
             with self.assertRaises(MODULE.ProductionOperationError):
-                MODULE._load_manifest_bytes(json.dumps(duplicate_role).encode())
+                MODULE._load_manifest_bytes(
+                    json.dumps(duplicate_content).encode()
+                )
 
             duplicate_id = json.loads(json.dumps(fixture.document))
-            duplicate_id["images"][-1]["image_id"] = duplicate_id["images"][0][
-                "image_id"
+            duplicate_id["image_artifacts"]["nginx"][
+                "config_digest"
+            ] = duplicate_id["image_artifacts"]["app"][
+                "config_digest"
             ]
             with self.assertRaises(MODULE.ProductionOperationError):
                 MODULE._load_manifest_bytes(json.dumps(duplicate_id).encode())
 
             missing_runtime_owner = json.loads(json.dumps(fixture.document))
-            postgres = next(
-                image
-                for image in missing_runtime_owner["images"]
-                if image["role"] == "postgres"
-            )
-            postgres.pop("runtime_uid")
+            missing_runtime_owner.pop("postgres_runtime_uid")
             with self.assertRaises(MODULE.ProductionOperationError):
                 MODULE._load_manifest_bytes(
                     json.dumps(missing_runtime_owner).encode()
                 )
 
             invalid_runtime_owner = json.loads(json.dumps(fixture.document))
-            postgres = next(
-                image
-                for image in invalid_runtime_owner["images"]
-                if image["role"] == "postgres"
-            )
-            postgres["runtime_gid"] = 0
+            invalid_runtime_owner["postgres_runtime_gid"] = 0
             with self.assertRaises(MODULE.ProductionOperationError):
                 MODULE._load_manifest_bytes(
                     json.dumps(invalid_runtime_owner).encode()
                 )
 
             swapped = json.loads(json.dumps(fixture.document))
-            redis = next(
-                image for image in swapped["images"] if image["role"] == "redis"
-            )
-            nginx = next(
-                image for image in swapped["images"] if image["role"] == "nginx"
-            )
-            redis["artifact_kind"], nginx["artifact_kind"] = (
-                nginx["artifact_kind"],
-                redis["artifact_kind"],
+            redis = swapped["image_artifacts"]["redis"]
+            nginx = swapped["image_artifacts"]["nginx"]
+            redis["archive_sha256"], nginx["archive_sha256"] = (
+                nginx["archive_sha256"],
+                redis["archive_sha256"],
             )
             with self.assertRaises(MODULE.ProductionOperationError):
                 MODULE._load_manifest_bytes(json.dumps(swapped).encode())
 
             wrong_archive_id = json.loads(json.dumps(fixture.document))
-            redis = next(
-                image
-                for image in wrong_archive_id["images"]
-                if image["role"] == "redis"
-            )
-            redis["image_id"] = "sha256:" + "a" * 64
+            redis = wrong_archive_id["image_artifacts"]["redis"]
+            redis["config_digest"] = "sha256:" + "a" * 64
             manifest = MODULE._load_manifest_bytes(
                 json.dumps(wrong_archive_id).encode()
-            )
-            expected_redis = next(
-                image for image in manifest.images if image.role == "redis"
             )
             with self.assertRaises(MODULE.ProductionOperationError):
                 MODULE._docker_archive_identity(
                     fixture.incoming / "redis-image.tar",
-                    expected_redis,
+                    manifest.image_artifacts["redis"],
                     release_sha=fixture.release_sha,
                 )
 
@@ -1264,7 +1465,7 @@ class ProductionOperationTests(unittest.TestCase):
                 operation_root=fixture.operation_root,
                 required_uid=os.geteuid(),
             )
-            MODULE.materialize(
+            materialize_fixture(
                 fixture.manifest,
                 paths,
                 operation_root=fixture.operation_root,
@@ -1313,6 +1514,13 @@ class ProductionOperationTests(unittest.TestCase):
                 "project_root"
             ] = str(fixture.operation_root)
             mutations.append(wrong_operation_root)
+            wrong_runtime_map = json.loads(json.dumps(baseline))
+            wrong_runtime_map[
+                "x-production-shadow-runtime-image-ids"
+            ]["redis"] = wrong_runtime_map[
+                "x-production-shadow-runtime-image-ids"
+            ]["nginx"]
+            mutations.append(wrong_runtime_map)
             foreign_bind = json.loads(json.dumps(baseline))
             foreign_bind["services"]["webapp_ir_db"]["volumes"][0][
                 "source"
@@ -1366,7 +1574,7 @@ class ProductionOperationTests(unittest.TestCase):
                 operation_root=fixture.operation_root,
                 required_uid=os.geteuid(),
             )
-            MODULE.materialize(
+            materialize_fixture(
                 fixture.manifest,
                 paths,
                 operation_root=fixture.operation_root,
@@ -1728,13 +1936,23 @@ class ProductionOperationTests(unittest.TestCase):
     def test_oneoff_cleanup_catches_late_container_and_removes_anonymous_volume(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             fixture = OperationFixture(Path(raw))
+            materialize_fixture(
+                fixture.manifest,
+                MODULE.verify_incoming(
+                    fixture.manifest,
+                    operation_root=fixture.operation_root,
+                    required_uid=os.geteuid(),
+                ),
+                operation_root=fixture.operation_root,
+                required_uid=os.geteuid(),
+            )
             identifier = "a" * 12
             volume_name = "b" * 64
             inspection = [
                 {
                     "Id": identifier,
                     "Config": {
-                        "Image": fixture.db_id,
+                        "Image": fixture.runtime_image_ids["postgres"],
                         "Labels": {
                             "com.docker.compose.project": fixture.manifest.project_name,
                             "com.docker.compose.oneoff": "True",
@@ -1807,7 +2025,7 @@ class ProductionOperationTests(unittest.TestCase):
                 {
                     "Id": identifier,
                     "Config": {
-                        "Image": fixture.app_id,
+                        "Image": fixture.runtime_image_ids["app"],
                         "Labels": {
                             "com.docker.compose.project": (
                                 fixture.manifest.project_name
@@ -1988,7 +2206,7 @@ class ProductionOperationTests(unittest.TestCase):
                     wrong_owner_path,
                     MODULE.Image(
                         role="postgres",
-                        artifact_kind="db-image-archive",
+                        artifact_kind="postgres-image-archive",
                         image_id=wrong_owner_id,
                         repo_tags=(),
                         os="linux",
@@ -1999,42 +2217,276 @@ class ProductionOperationTests(unittest.TestCase):
                     release_sha=fixture.release_sha,
                 )
 
-            loaded_inspection = [
-                {
-                    "Id": postgres.image_id,
-                    "Os": "linux",
-                    "Architecture": "amd64",
-                    "Config": {
-                        "Labels": {
-                            MODULE.POSTGRES_RUNTIME_UID_LABEL: "999",
-                            MODULE.POSTGRES_RUNTIME_GID_LABEL: "999",
-                        },
-                    },
-                },
-            ]
-            with patch.object(
-                MODULE,
-                "_run",
-                return_value=json.dumps(loaded_inspection),
-            ):
-                MODULE._validate_loaded_image(
-                    postgres,
-                    release_sha=fixture.release_sha,
-                )
-            loaded_inspection[0]["Config"]["Labels"][
+            loaded_inspection = docker_inspection(
+                fixture.db_archive,
+                fixture.runtime_image_ids["postgres"],
+            )
+            MODULE._local_image_semantic_evidence(
+                loaded_inspection,
+                image=fixture.manifest.image_artifacts["postgres"],
+                manifest=fixture.manifest,
+            )
+            loaded_inspection["Config"]["Labels"][
                 MODULE.POSTGRES_RUNTIME_UID_LABEL
             ] = "998"
+            with self.assertRaises(MODULE.ProductionOperationError):
+                MODULE._local_image_semantic_evidence(
+                    loaded_inspection,
+                    image=fixture.manifest.image_artifacts[
+                        "postgres"
+                    ],
+                    manifest=fixture.manifest,
+                )
+
+    def test_load_images_accepts_cross_engine_ids_and_rejects_preexisting_or_ambiguous(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = OperationFixture(Path(raw))
+            paths = MODULE.verify_incoming(
+                fixture.manifest,
+                operation_root=fixture.operation_root,
+                required_uid=os.geteuid(),
+            )
+            inspections = {
+                fixture.runtime_image_ids["app"]: docker_inspection(
+                    fixture.app_archive,
+                    fixture.runtime_image_ids["app"],
+                ),
+                fixture.runtime_image_ids["postgres"]: docker_inspection(
+                    fixture.db_archive,
+                    fixture.runtime_image_ids["postgres"],
+                ),
+                fixture.runtime_image_ids["redis"]: docker_inspection(
+                    fixture.redis_archive,
+                    fixture.runtime_image_ids["redis"],
+                ),
+                fixture.runtime_image_ids["nginx"]: docker_inspection(
+                    fixture.nginx_archive,
+                    fixture.runtime_image_ids["nginx"],
+                ),
+            }
+            inventory_calls = 0
+            load_calls: list[list[str]] = []
+
+            def fake_run(arguments, *, timeout, stdin=-3):  # noqa: ANN001, ARG001
+                nonlocal inventory_calls
+                if arguments[1:3] == ["image", "ls"]:
+                    inventory_calls += 1
+                    if inventory_calls == 1:
+                        return ""
+                    return "\n".join(
+                        [
+                            *fixture.runtime_image_ids.values(),
+                            fixture.runtime_image_ids["app"],
+                        ]
+                    )
+                if arguments[1:3] == ["image", "inspect"]:
+                    return json.dumps([inspections[arguments[3]]])
+                if arguments[1] == "load":
+                    load_calls.append(list(arguments))
+                    return "loaded"
+                raise AssertionError(arguments)
+
+            with patch.object(MODULE, "_run", side_effect=fake_run):
+                evidence = MODULE.load_images(
+                    fixture.manifest,
+                    paths,
+                )
+            self.assertEqual(
+                {
+                    item["role"]: item["runtime_image_id"]
+                    for item in evidence
+                },
+                fixture.runtime_image_ids,
+            )
+            self.assertTrue(
+                all(
+                    fixture.runtime_image_ids[role]
+                    != fixture.manifest.image_artifacts[
+                        role
+                    ].config_digest
+                    for role in MODULE.IMAGE_ROLES
+                )
+            )
+            self.assertEqual(len(load_calls), len(MODULE.IMAGE_ROLES))
+
+            empty = {
+                image.content_identity: ()
+                for image in fixture.manifest.image_artifacts.values()
+            }
+            preexisting = dict(empty)
+            preexisting[
+                fixture.manifest.image_artifacts["app"].content_identity
+            ] = ({"runtime_image_id": fixture.runtime_image_ids["app"]},)
+            with (
+                patch.object(MODULE, "_docker_archive_identity"),
+                patch.object(
+                    MODULE,
+                    "_enumerate_local_images",
+                    return_value=preexisting,
+                ),
+                patch.object(MODULE, "_run") as no_load,
+                self.assertRaises(MODULE.ProductionOperationError),
+            ):
+                MODULE.load_images(fixture.manifest, paths)
+            no_load.assert_not_called()
+
+            ambiguous = {
+                image.content_identity: (
+                    {
+                        "runtime_image_id": (
+                            fixture.runtime_image_ids[role]
+                        )
+                    },
+                )
+                for role, image in fixture.manifest.image_artifacts.items()
+            }
+            ambiguous[
+                fixture.manifest.image_artifacts["app"].content_identity
+            ] = (
+                {"runtime_image_id": fixture.runtime_image_ids["app"]},
+                {"runtime_image_id": "sha256:" + "e" * 64},
+            )
+            with (
+                patch.object(MODULE, "_docker_archive_identity"),
+                patch.object(
+                    MODULE,
+                    "_enumerate_local_images",
+                    side_effect=[empty, ambiguous],
+                ),
+                patch.object(MODULE, "_run", return_value=""),
+                self.assertRaises(MODULE.ProductionOperationError),
+            ):
+                MODULE.load_images(fixture.manifest, paths)
+
+    def test_runtime_image_set_rejects_role_swap(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = OperationFixture(Path(raw))
+            inspections = {
+                fixture.runtime_image_ids["app"]: docker_inspection(
+                    fixture.app_archive,
+                    fixture.runtime_image_ids["app"],
+                ),
+                fixture.runtime_image_ids["postgres"]: docker_inspection(
+                    fixture.db_archive,
+                    fixture.runtime_image_ids["postgres"],
+                ),
+                fixture.runtime_image_ids["redis"]: docker_inspection(
+                    fixture.redis_archive,
+                    fixture.runtime_image_ids["redis"],
+                ),
+                fixture.runtime_image_ids["nginx"]: docker_inspection(
+                    fixture.nginx_archive,
+                    fixture.runtime_image_ids["nginx"],
+                ),
+            }
+            swapped = dict(fixture.runtime_image_ids)
+            swapped["app"], swapped["postgres"] = (
+                swapped["postgres"],
+                swapped["app"],
+            )
             with (
                 patch.object(
                     MODULE,
-                    "_run",
-                    return_value=json.dumps(loaded_inspection),
+                    "_inspect_local_image",
+                    side_effect=lambda image_id: inspections[image_id],
                 ),
                 self.assertRaises(MODULE.ProductionOperationError),
             ):
-                MODULE._validate_loaded_image(
-                    postgres,
-                    release_sha=fixture.release_sha,
+                MODULE._validate_runtime_image_set(
+                    fixture.manifest,
+                    swapped,
+                )
+
+    def test_final_prepare_manifest_is_post_stage_and_runtime_id_bound(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = OperationFixture(Path(raw))
+            self.assertNotIn("runtime_image_ids", fixture.document)
+            self.assertNotIn("runtime", fixture.document)
+            for role, image in fixture.document[
+                "image_artifacts"
+            ].items():
+                self.assertNotIn(
+                    fixture.runtime_image_ids[role],
+                    json.dumps(image, sort_keys=True),
+                )
+
+            wrong_stage = json.loads(
+                json.dumps(fixture.final_prepare_document)
+            )
+            wrong_stage["stage_attestation_sha256"] = "f" * 64
+            with self.assertRaises(MODULE.ProductionOperationError):
+                MODULE._load_final_prepare_manifest_bytes(
+                    json.dumps(wrong_stage).encode(),
+                    manifest=fixture.manifest,
+                    expected_stage_attestation_sha256=(
+                        fixture.stage_attestation_sha256
+                    ),
+                )
+
+            wrong_runtime = json.loads(
+                json.dumps(fixture.final_prepare_document)
+            )
+            wrong_runtime["runtime_image_ids"]["app"] = (
+                "sha256:" + "f" * 64
+            )
+            parsed = MODULE._load_final_prepare_manifest_bytes(
+                json.dumps(wrong_runtime).encode(),
+                manifest=fixture.manifest,
+                expected_stage_attestation_sha256=(
+                    fixture.stage_attestation_sha256
+                ),
+            )
+            with (
+                patch.object(
+                    MODULE,
+                    "_load_final_prepare_archive",
+                    return_value=parsed,
+                ),
+                self.assertRaises(MODULE.ProductionOperationError),
+            ):
+                MODULE.install_final_prepare_material(
+                    fixture.manifest,
+                    fixture.final_archive_path,
+                    operation_root=fixture.operation_root,
+                    expected_stage_attestation_sha256=(
+                        fixture.stage_attestation_sha256
+                    ),
+                    expected_runtime_image_ids=(
+                        fixture.runtime_image_ids
+                    ),
+                    required_uid=os.geteuid(),
+                )
+
+            noncanonical = io.BytesIO()
+            with tarfile.open(fileobj=noncanonical, mode="w:") as archive:
+                for name, payload in (
+                    (
+                        MODULE.FINAL_PREPARE_MANIFEST_NAME,
+                        json.dumps(
+                            fixture.final_prepare_document,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ).encode(),
+                    ),
+                    ("role-compose.yml", fixture.role_compose),
+                    ("runtime.env.role", fixture.runtime_env),
+                    ("ca.crt", fixture.ca),
+                ):
+                    member = tarfile.TarInfo(name)
+                    member.size = len(payload)
+                    member.mode = 0o600
+                    member.mtime = 1
+                    archive.addfile(member, io.BytesIO(payload))
+            noncanonical_path = fixture.root / "noncanonical-final.tar"
+            secure_file(noncanonical_path, noncanonical.getvalue())
+            with self.assertRaises(MODULE.ProductionOperationError):
+                MODULE._load_final_prepare_archive(
+                    noncanonical_path,
+                    manifest=fixture.manifest,
+                    expected_stage_attestation_sha256=(
+                        fixture.stage_attestation_sha256
+                    ),
+                    required_uid=os.geteuid(),
                 )
 
     def test_prepare_database_runs_only_db_restore_migration_and_exact_fence(self) -> None:
@@ -2045,7 +2497,7 @@ class ProductionOperationTests(unittest.TestCase):
                 operation_root=fixture.operation_root,
                 required_uid=os.geteuid(),
             )
-            MODULE.materialize(
+            materialize_fixture(
                 fixture.manifest,
                 paths,
                 operation_root=fixture.operation_root,
@@ -2284,13 +2736,13 @@ class ProductionOperationTests(unittest.TestCase):
                 operation_root=fixture.operation_root,
                 required_uid=os.geteuid(),
             )
-            MODULE.materialize(
+            materialize_fixture(
                 fixture.manifest,
                 paths,
                 operation_root=fixture.operation_root,
                 required_uid=os.geteuid(),
             )
-            completed = set(MODULE._PHASES[:5])
+            completed = set(MODULE._PHASES[:6])
             phase_evidence: dict[str, dict[str, object]] = {}
 
             def run_with_revision(
@@ -2302,7 +2754,7 @@ class ProductionOperationTests(unittest.TestCase):
                 revision = start_revision
                 index_status: tuple[bool, bool] | None = (False, False)
                 operation_phases = (
-                    set(MODULE._PHASES[:6])
+                    set(MODULE._PHASES[:7])
                     if persisted_migration
                     else completed
                 )
@@ -2419,7 +2871,7 @@ class ProductionOperationTests(unittest.TestCase):
                 operation_root=fixture.operation_root,
                 required_uid=os.geteuid(),
             )
-            MODULE.materialize(
+            materialize_fixture(
                 fixture.manifest,
                 paths,
                 operation_root=fixture.operation_root,
@@ -2453,6 +2905,33 @@ class ProductionOperationTests(unittest.TestCase):
     def test_execute_resumes_from_durable_phase_without_reloading_images(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             fixture = OperationFixture(Path(raw))
+            staged_images = list(fixture.image_stage["images"])
+
+            with (
+                patch.object(
+                    MODULE,
+                    "load_images",
+                    return_value=staged_images,
+                ),
+                patch.object(
+                    MODULE,
+                    "_validate_runtime_image_set",
+                    return_value=staged_images,
+                ),
+            ):
+                MODULE.execute_stage(
+                    fixture.manifest,
+                    operation_root=fixture.operation_root,
+                    required_uid=os.geteuid(),
+                    confirm=MODULE.stage_confirmation_phrase(
+                        fixture.manifest
+                    ),
+                )
+            secure_file(
+                fixture.incoming
+                / MODULE.FINAL_PREPARE_DESTINATION_NAME,
+                fixture.runtime_archive,
+            )
 
             def crash_after_database_start(*args, **kwargs):  # noqa: ANN002, ANN003
                 kwargs["phase_done"](
@@ -2464,14 +2943,8 @@ class ProductionOperationTests(unittest.TestCase):
             with (
                 patch.object(
                     MODULE,
-                    "load_images",
-                    return_value=[
-                        {
-                            "role": image.role,
-                            "image_id": image.image_id,
-                        }
-                        for image in fixture.manifest.images
-                    ],
+                    "_validate_runtime_image_set",
+                    return_value=staged_images,
                 ),
                 patch.object(
                     MODULE,
@@ -2493,7 +2966,7 @@ class ProductionOperationTests(unittest.TestCase):
             )
             self.assertEqual(
                 state["completed_phases"],
-                list(MODULE._PHASES[:4]),
+                list(MODULE._PHASES[:5]),
             )
             self.assertEqual(
                 stat.S_IMODE(
@@ -2533,7 +3006,7 @@ class ProductionOperationTests(unittest.TestCase):
             def complete_resume(*args, **kwargs):  # noqa: ANN002, ANN003
                 self.assertEqual(
                     kwargs["completed_phases"],
-                    set(MODULE._PHASES[:4]),
+                    set(MODULE._PHASES[:5]),
                 )
                 for phase in (
                     "database-restored",
@@ -2554,9 +3027,16 @@ class ProductionOperationTests(unittest.TestCase):
                 }
 
             with (
-                patch.object(MODULE, "materialize") as rematerialize,
+                patch.object(
+                    MODULE,
+                    "materialize_stage",
+                ) as rematerialize,
                 patch.object(MODULE, "load_images") as reload_images,
-                patch.object(MODULE, "_validate_loaded_image"),
+                patch.object(
+                    MODULE,
+                    "_validate_runtime_image_set",
+                    return_value=staged_images,
+                ),
                 patch.object(Path, "stat", new=runtime_postgres_stat),
                 patch.object(
                     MODULE,

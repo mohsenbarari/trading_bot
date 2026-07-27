@@ -56,8 +56,14 @@ from scripts.wa_ir_production_object_storage_transport import (
 from scripts.wa_ir_production_operation import (
     ATTESTATION_SCHEMA as OPERATION_ATTESTATION_SCHEMA,
     EXPECTED_ARTIFACTS,
+    FINAL_PREPARE_ARTIFACT_KIND,
+    FINAL_PREPARE_DESTINATION_NAME,
+    IMAGE_ROLES,
+    IMAGE_STAGE_ATTESTATION_SCHEMA,
+    MAX_MANIFEST_BYTES,
     OperationManifest,
     ProductionOperationError,
+    _load_final_prepare_archive,
     _load_manifest_bytes,
     _materialize_release_bundle,
 )
@@ -74,6 +80,9 @@ from scripts.wa_ir_production_transport_contract import (
 
 ORCHESTRATOR_SCHEMA = "wa-ir-production-artifact-orchestrator-v1"
 ORCHESTRATOR_JOURNAL_SCHEMA = "wa-ir-production-orchestrator-journal-v1"
+FINAL_TRANSFER_JOURNAL_SCHEMA = (
+    "wa-ir-production-final-prepare-transfer-journal-v1"
+)
 BOOTSTRAP_CONTROL_SCHEMA = "wa-ir-production-bootstrap-control-v1"
 BOOTSTRAP_ATTESTATION_SCHEMA = "wa-ir-production-bootstrap-attestation-v1"
 BOOTSTRAP_ARTIFACT_KIND = "receiver-bootstrap"
@@ -151,6 +160,9 @@ _OPERATION_PLAN_FIELDS = {
 _OPERATION_APPLY_FIELDS = _OPERATION_PLAN_FIELDS | {
     "materialized",
     "images",
+    "image_stage",
+    "stage_attestation_sha256",
+    "final_prepare_material",
     "database",
     "presigned_url_persisted",
     "legacy_resources_mutated",
@@ -158,6 +170,48 @@ _OPERATION_APPLY_FIELDS = _OPERATION_PLAN_FIELDS | {
     "operation_state_sha256",
     "cleanup_policy",
     "functional_boundary",
+}
+_OPERATION_STAGE_FIELDS = _OPERATION_PLAN_FIELDS | {
+    "materialized",
+    "images",
+    "image_stage",
+    "stage_attestation_sha256",
+    "presigned_url_persisted",
+    "legacy_resources_mutated",
+    "completed_phases",
+    "operation_state_sha256",
+    "cleanup_policy",
+    "functional_boundary",
+}
+_IMAGE_EVIDENCE_FIELDS = {
+    "role",
+    "runtime_image_id",
+    "config_digest",
+    "content_descriptor",
+    "content_identity",
+    "source",
+}
+_IMAGE_STAGE_FIELDS = {
+    "schema",
+    "operation_id",
+    "release_sha",
+    "operation_manifest_sha256",
+    "role",
+    "image_artifacts",
+    "runtime_image_ids",
+    "images",
+    "containers_started",
+    "services_started",
+}
+_FINAL_PREPARE_EVIDENCE_FIELDS = {
+    "final_prepare_manifest_sha256",
+    "stage_attestation_sha256",
+    "role_compose_sha256",
+    "role_env_sha256",
+    "ca_sha256",
+    "runtime_image_ids",
+    "runtime_env",
+    "compose",
 }
 _DATABASE_ATTESTATION_FIELDS = {
     "database_ready",
@@ -197,10 +251,13 @@ _MATERIALIZED_FIELDS = {
     "release_root",
     "secrets_root",
     "data_root",
-    "runtime_env",
-    "compose",
+    "runtime_material_installed",
     "uploads_tree",
     "audit_tree",
+}
+_PREPARED_MATERIALIZED_FIELDS = _MATERIALIZED_FIELDS | {
+    "runtime_env",
+    "compose",
 }
 _TREE_ATTESTATION_FIELDS = {
     "tree_sha256",
@@ -212,6 +269,7 @@ _COMPLETED_PHASES = [
     "received",
     "materialized",
     "images-loaded",
+    "final-material-installed",
     "database-started",
     "database-restored",
     "database-migrated",
@@ -249,6 +307,14 @@ _EXPECTED_CLEANUP_POLICY = (
 _EXPECTED_FUNCTIONAL_BOUNDARY = (
     "data-ready and fenced only; private DR services, convergence, routing, "
     "writer lease, and public activation require the separate cutover controller"
+)
+_EXPECTED_STAGE_CLEANUP_POLICY = (
+    "retain only create-only staged release/data and loaded tagless "
+    "images; never start a container or service"
+)
+_EXPECTED_STAGE_FUNCTIONAL_BOUNDARY = (
+    "image stage only; final prepare material and every database "
+    "operation require a separate controller step"
 )
 _ORCHESTRATOR_BASE_JOURNAL_FIELDS = {
     "schema",
@@ -302,7 +368,26 @@ _TRANSFER_FUNCTIONAL_BOUNDARY = (
     "artifacts received only; no archive extraction, image load, container, "
     "restore, migration, private service, writer, or route action"
 )
+_FINAL_TRANSFER_FUNCTIONAL_BOUNDARY = (
+    "one final prepare archive received create-only after exact image-stage "
+    "attestation; no archive extraction, container, service, restore, "
+    "migration, writer, or route action"
+)
+_FINAL_TRANSFER_JOURNAL_FIELDS = {
+    "schema",
+    "operation_id",
+    "release_sha",
+    "manifest_sha256",
+    "stage_attestation_sha256",
+    "runtime_image_ids",
+    "object",
+    "remote_attestation",
+    "completed_at",
+    "presigned_url_persisted",
+    "functional_boundary",
+}
 _BOOTSTRAP_SOURCE_FILES = (
+    "core/docker_image_identity.py",
     "scripts/receive_wa_ir_production_artifact.py",
     "scripts/wa_ir_production_transport_contract.py",
     "scripts/wa_ir_production_operation.py",
@@ -775,6 +860,7 @@ def build_bootstrap_agent(
         raise ProductionOrchestratorError("bootstrap agent output already exists")
     sources: list[tuple[str, bytes]] = [
         ("__main__.py", _BOOTSTRAP_DISPATCH),
+        ("core/__init__.py", b""),
         ("scripts/__init__.py", b""),
     ]
     for relative in _BOOTSTRAP_SOURCE_FILES:
@@ -974,11 +1060,7 @@ def _verify_source_database_attestation(
             for character in document["database_backup_version_id"]
         )
         or document.get("postgres_image_id")
-        != next(
-            image.image_id
-            for image in manifest.images
-            if image.role == "postgres"
-        )
+        != manifest.image_artifacts["postgres"].config_digest
         or not isinstance(document.get("scratch_postgres_system_id"), str)
         or not re.fullmatch(
             r"[0-9]{10,20}",
@@ -1472,6 +1554,8 @@ def _write_orchestrator_journal(
 def _expected_destination_name(artifact_kind: str) -> str:
     if artifact_kind == BOOTSTRAP_ARTIFACT_KIND:
         return BOOTSTRAP_DESTINATION_NAME
+    if artifact_kind == FINAL_PREPARE_ARTIFACT_KIND:
+        return FINAL_PREPARE_DESTINATION_NAME
     if artifact_kind == "operation-manifest":
         return "operation-manifest.json"
     try:
@@ -1799,7 +1883,7 @@ def _transfer_operation_locked(
     bootstrap_path = journal_directory / "wa-ir-production-agent.pyz"
     _build_bound_bootstrap_agent(
         manifest,
-        artifact_directory / EXPECTED_ARTIFACTS["release-archive"][0],
+        artifact_directory / EXPECTED_ARTIFACTS["release-bundle"][0],
         work_directory=journal_directory,
         output=bootstrap_path,
     )
@@ -1925,10 +2009,293 @@ def _transfer_operation_locked(
     }
 
 
+def _load_stage_attestation(
+    path: Path,
+    *,
+    manifest: OperationManifest,
+) -> tuple[Mapping[str, Any], Mapping[str, str], str]:
+    try:
+        payload = read_secure_bytes(
+            path,
+            label="WA-IR image stage attestation",
+            max_size=MAX_ATTESTATION_BYTES,
+        )
+        if _attestation_contains_sensitive_transport(payload):
+            raise ProductionOrchestratorError(
+                "image stage attestation contains transport material"
+            )
+        document = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=_strict_json_object,
+        )
+    except ProductionOrchestratorError:
+        raise
+    except (
+        OSError,
+        SecureFileError,
+        UnicodeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise ProductionOrchestratorError(
+            "image stage attestation is unavailable or invalid"
+        ) from exc
+    runtime_image_ids, stage_sha256 = (
+        _validate_stage_operation_attestation(
+            document,
+            manifest=manifest,
+        )
+    )
+    return document, runtime_image_ids, stage_sha256
+
+
+def _load_final_transfer_journal(
+    path: Path,
+    *,
+    manifest: OperationManifest,
+    stage_attestation_sha256: str,
+    runtime_image_ids: Mapping[str, str],
+    plaintext_sha256: str,
+    plaintext_bytes: int,
+) -> Mapping[str, Any]:
+    try:
+        payload = read_secure_bytes(
+            path,
+            label="WA-IR final prepare transfer journal",
+            max_size=1024 * 1024,
+        )
+        if _attestation_contains_sensitive_transport(payload):
+            raise ProductionOrchestratorError(
+                "final prepare transfer journal contains a forbidden URL"
+            )
+        state = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=_strict_json_object,
+        )
+    except ProductionOrchestratorError:
+        raise
+    except (
+        OSError,
+        SecureFileError,
+        UnicodeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise ProductionOrchestratorError(
+            "final prepare transfer journal is unavailable or invalid"
+        ) from exc
+    if (
+        not isinstance(state, dict)
+        or set(state) != _FINAL_TRANSFER_JOURNAL_FIELDS
+        or state.get("schema") != FINAL_TRANSFER_JOURNAL_SCHEMA
+        or state.get("operation_id") != manifest.operation_id
+        or state.get("release_sha") != manifest.release_sha
+        or state.get("manifest_sha256") != manifest.canonical_sha256
+        or state.get("stage_attestation_sha256")
+        != stage_attestation_sha256
+        or state.get("runtime_image_ids") != dict(runtime_image_ids)
+        or state.get("presigned_url_persisted") is not False
+        or state.get("functional_boundary")
+        != _FINAL_TRANSFER_FUNCTIONAL_BOUNDARY
+    ):
+        raise ProductionOrchestratorError(
+            "final prepare transfer journal binding differs"
+        )
+    _validate_object_evidence(
+        state.get("object"),
+        artifact_kind=FINAL_PREPARE_ARTIFACT_KIND,
+        operation_id=manifest.operation_id,
+        release_sha=manifest.release_sha,
+    )
+    if (
+        state["object"].get("plaintext_sha256") != plaintext_sha256
+        or state["object"].get("plaintext_bytes") != plaintext_bytes
+    ):
+        raise ProductionOrchestratorError(
+            "final prepare object identity differs"
+        )
+    _validate_remote_evidence(
+        state.get("remote_attestation"),
+        artifact_kind=FINAL_PREPARE_ARTIFACT_KIND,
+        operation_id=manifest.operation_id,
+        object_evidence=state["object"],
+    )
+    _validate_completed_at(state.get("completed_at"))
+    return state
+
+
+def transfer_final_prepare_material(
+    manifest_path: Path,
+    final_prepare_archive: Path,
+    stage_attestation_path: Path,
+    *,
+    recipient_file: Path,
+    credentials_file: Path,
+    journal_directory: Path,
+    ssh_identity: Path,
+    prefix: str = DEFAULT_PREFIX,
+    ttl_seconds: int = 300,
+    runner: Callable[..., subprocess.CompletedProcess[bytes]] = subprocess.run,
+) -> Mapping[str, Any]:
+    """Publish and receive exactly one post-stage prepare archive."""
+
+    with _orchestrator_lock(journal_directory):
+        _require_private_file(ssh_identity, label="WA-IR SSH identity")
+        try:
+            manifest_payload = read_secure_bytes(
+                manifest_path,
+                label="WA-IR operation manifest",
+                max_size=MAX_MANIFEST_BYTES,
+            )
+            manifest = _load_manifest_bytes(manifest_payload)
+        except (
+            OSError,
+            SecureFileError,
+            ProductionOperationError,
+        ) as exc:
+            raise ProductionOrchestratorError(
+                "operation manifest is unavailable or invalid"
+            ) from exc
+        initial = _load_orchestrator_journal(
+            journal_directory / "orchestrator.json",
+            operation_id=manifest.operation_id,
+            release_sha=manifest.release_sha,
+            manifest_sha256=manifest.canonical_sha256,
+        )
+        if initial["phase"] != "transferred":
+            raise ProductionOrchestratorError(
+                "final prepare transfer requires completed initial transfer"
+            )
+        (
+            _stage_document,
+            runtime_image_ids,
+            stage_attestation_sha256,
+        ) = _load_stage_attestation(
+            stage_attestation_path,
+            manifest=manifest,
+        )
+        final_manifest = _load_final_prepare_archive(
+            final_prepare_archive,
+            manifest=manifest,
+            expected_stage_attestation_sha256=(
+                stage_attestation_sha256
+            ),
+            required_uid=os.geteuid(),
+        )
+        if dict(final_manifest.runtime_image_ids) != dict(
+            runtime_image_ids
+        ):
+            raise ProductionOrchestratorError(
+                "final prepare runtime IDs differ from image stage"
+            )
+        plaintext_sha256, plaintext_bytes = _hash_regular(
+            final_prepare_archive,
+            maximum=MAX_PAYLOAD_BYTES,
+        )
+        final_journal = journal_directory / "final-prepare-transfer.json"
+        if final_journal.exists() or final_journal.is_symlink():
+            state = _load_final_transfer_journal(
+                final_journal,
+                manifest=manifest,
+                stage_attestation_sha256=(
+                    stage_attestation_sha256
+                ),
+                runtime_image_ids=runtime_image_ids,
+                plaintext_sha256=plaintext_sha256,
+                plaintext_bytes=plaintext_bytes,
+            )
+            return {
+                "schema": ORCHESTRATOR_SCHEMA,
+                "status": "final-prepare-already-transferred",
+                "operation_id": manifest.operation_id,
+                "release_sha": manifest.release_sha,
+                "stage_attestation_sha256": (
+                    stage_attestation_sha256
+                ),
+                "runtime_image_ids": dict(runtime_image_ids),
+                "object": dict(state["object"]),
+                "remote_attestation": dict(
+                    state["remote_attestation"]
+                ),
+                "presigned_url_persisted": False,
+                "payload_bytes_over_ssh": False,
+                "compose_started": False,
+            }
+        credentials = load_secure_credentials(credentials_file)
+        client = build_client(credentials)
+        artifact = LocalArtifact(
+            FINAL_PREPARE_ARTIFACT_KIND,
+            FINAL_PREPARE_DESTINATION_NAME,
+            final_prepare_archive,
+        )
+        published = publish_one(
+            artifact,
+            operation_id=manifest.operation_id,
+            recipient_file=recipient_file,
+            prefix=prefix,
+            client=client,
+            journal_path=(
+                journal_directory
+                / f"publish-{FINAL_PREPARE_ARTIFACT_KIND}.json"
+            ),
+            release_sha=manifest.release_sha,
+        )
+        presigned = presign_exact_get(
+            client,
+            published,
+            ttl_seconds=ttl_seconds,
+        )
+        descriptor = build_receive_descriptor(
+            operation_id=manifest.operation_id,
+            artifact=artifact,
+            published=published,
+            presigned=presigned,
+        )
+        remote = deliver_received_artifact(
+            descriptor,
+            ssh_identity=ssh_identity,
+            runner=runner,
+        ).evidence()
+        state = {
+            "schema": FINAL_TRANSFER_JOURNAL_SCHEMA,
+            "operation_id": manifest.operation_id,
+            "release_sha": manifest.release_sha,
+            "manifest_sha256": manifest.canonical_sha256,
+            "stage_attestation_sha256": (
+                stage_attestation_sha256
+            ),
+            "runtime_image_ids": dict(runtime_image_ids),
+            "object": published.evidence(),
+            "remote_attestation": remote,
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "presigned_url_persisted": False,
+            "functional_boundary": _FINAL_TRANSFER_FUNCTIONAL_BOUNDARY,
+        }
+        _write_orchestrator_journal(
+            final_journal,
+            state,
+            create=True,
+        )
+        return {
+            "schema": ORCHESTRATOR_SCHEMA,
+            "status": "final-prepare-transferred",
+            "operation_id": manifest.operation_id,
+            "release_sha": manifest.release_sha,
+            "stage_attestation_sha256": stage_attestation_sha256,
+            "runtime_image_ids": dict(runtime_image_ids),
+            "object": dict(state["object"]),
+            "remote_attestation": dict(remote),
+            "presigned_url_persisted": False,
+            "payload_bytes_over_ssh": False,
+            "compose_started": False,
+        }
+
+
 def _validate_removed_ephemeral_resources(
     value: Any,
     *,
     manifest: OperationManifest,
+    runtime_image_ids: Mapping[str, str],
 ) -> bool:
     if not isinstance(value, list) or len(value) > 256:
         return False
@@ -1936,7 +2303,6 @@ def _validate_removed_ephemeral_resources(
     allowed_services = set(manifest.services.values()) - {
         manifest.services["database"],
     }
-    images = {image.role: image.image_id for image in manifest.images}
     for item in value:
         if not isinstance(item, dict) or set(item) != _REMOVED_EPHEMERAL_FIELDS:
             return False
@@ -1944,9 +2310,9 @@ def _validate_removed_ephemeral_resources(
         service = item.get("service")
         volumes = item.get("anonymous_volume_names")
         expected_image = (
-            images["postgres"]
+            runtime_image_ids["postgres"]
             if service == manifest.services["restore"]
-            else images["app"]
+            else runtime_image_ids["app"]
         ) if service in allowed_services else None
         if (
             not isinstance(identifier, str)
@@ -1980,8 +2346,14 @@ def _validate_materialized_attestation(
     value: Any,
     *,
     manifest: OperationManifest,
+    prepared: bool,
 ) -> bool:
-    if not isinstance(value, dict) or set(value) != _MATERIALIZED_FIELDS:
+    expected_fields = (
+        _PREPARED_MATERIALIZED_FIELDS
+        if prepared
+        else _MATERIALIZED_FIELDS
+    )
+    if not isinstance(value, dict) or set(value) != expected_fields:
         return False
     project_root = REMOTE_PROJECT_ROOT_PREFIX / manifest.operation_id
     data_root = REMOTE_DATA_ROOT_PREFIX / manifest.operation_id
@@ -1992,17 +2364,24 @@ def _validate_materialized_attestation(
         ),
         "secrets_root": str(secret_root),
         "data_root": str(data_root),
-        "runtime_env": str(
-            secret_root / "webapp-ir" / "runtime.env.role"
-        ),
-        "compose": str(
-            project_root
-            / "rendered"
-            / "webapp-ir"
-            / "docker-compose.yml"
-        ),
     }
+    if prepared:
+        expected_paths.update(
+            {
+                "runtime_env": str(
+                    secret_root / "webapp-ir" / "runtime.env.role"
+                ),
+                "compose": str(
+                    project_root
+                    / "rendered"
+                    / "webapp-ir"
+                    / "docker-compose.yml"
+                ),
+            }
+        )
     if any(value.get(key) != expected for key, expected in expected_paths.items()):
+        return False
+    if value.get("runtime_material_installed") is not prepared:
         return False
     for key in ("uploads_tree", "audit_tree"):
         tree = value.get(key)
@@ -2018,6 +2397,163 @@ def _validate_materialized_attestation(
         ):
             return False
     return True
+
+
+def _expected_image_artifact_bindings(
+    manifest: OperationManifest,
+) -> Mapping[str, Mapping[str, Any]]:
+    return {
+        role: {
+            "archive_sha256": image.archive_sha256,
+            "archive_bytes": image.archive_bytes,
+            "config_digest": image.config_digest,
+            "content_descriptor": dict(image.content_descriptor),
+            "content_identity": image.content_identity,
+        }
+        for role, image in sorted(manifest.image_artifacts.items())
+    }
+
+
+def _validate_image_stage_attestation(
+    value: Any,
+    *,
+    manifest: OperationManifest,
+) -> Mapping[str, str]:
+    runtime_ids = (
+        value.get("runtime_image_ids")
+        if isinstance(value, dict)
+        else None
+    )
+    images = value.get("images") if isinstance(value, dict) else None
+    if (
+        not isinstance(value, dict)
+        or set(value) != _IMAGE_STAGE_FIELDS
+        or value.get("schema") != IMAGE_STAGE_ATTESTATION_SCHEMA
+        or value.get("operation_id") != manifest.operation_id
+        or value.get("release_sha") != manifest.release_sha
+        or value.get("operation_manifest_sha256")
+        != manifest.canonical_sha256
+        or value.get("role") != "webapp_ir"
+        or value.get("image_artifacts")
+        != _expected_image_artifact_bindings(manifest)
+        or not isinstance(runtime_ids, dict)
+        or set(runtime_ids) != set(IMAGE_ROLES)
+        or any(
+            not isinstance(runtime_id, str)
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", runtime_id)
+            for runtime_id in runtime_ids.values()
+        )
+        or len(set(runtime_ids.values())) != len(IMAGE_ROLES)
+        or not isinstance(images, list)
+        or len(images) != len(IMAGE_ROLES)
+        or value.get("containers_started") is not False
+        or value.get("services_started") is not False
+    ):
+        raise ProductionOrchestratorError(
+            "remote image stage attestation differs"
+        )
+    expected_images = []
+    for role in IMAGE_ROLES:
+        image = manifest.image_artifacts[role]
+        expected_images.append(
+            {
+                "role": role,
+                "runtime_image_id": runtime_ids[role],
+                "config_digest": image.config_digest,
+                "content_descriptor": dict(image.content_descriptor),
+                "content_identity": image.content_identity,
+                "source": "object-storage-archive",
+            }
+        )
+    if images != expected_images or any(
+        not isinstance(item, dict)
+        or set(item) != _IMAGE_EVIDENCE_FIELDS
+        for item in images
+    ):
+        raise ProductionOrchestratorError(
+            "remote image stage evidence differs"
+        )
+    return {
+        role: str(runtime_ids[role])
+        for role in IMAGE_ROLES
+    }
+
+
+def _canonical_document_sha256(value: Mapping[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            dict(value),
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _validate_stage_operation_attestation(
+    document: Any,
+    *,
+    manifest: OperationManifest,
+) -> tuple[Mapping[str, str], str]:
+    if (
+        not isinstance(document, dict)
+        or set(document) != _OPERATION_STAGE_FIELDS
+        or document.get("schema") != OPERATION_ATTESTATION_SCHEMA
+        or document.get("status") != "wa-ir-images-staged"
+        or document.get("operation_id") != manifest.operation_id
+        or document.get("release_sha") != manifest.release_sha
+        or document.get("manifest_sha256") != manifest.canonical_sha256
+        or document.get("required_confirmation") is not None
+        or document.get("artifact_count") != len(EXPECTED_ARTIFACTS)
+        or document.get("bootstrap_agent_verified") is not True
+        or document.get("bootstrap_agent_sha256")
+        != manifest.bootstrap_sha256
+        or document.get("bootstrap_agent_bytes")
+        != manifest.bootstrap_bytes
+        or document.get("database_container_started") is not False
+        or document.get("public_app_started") is not False
+        or document.get("private_dr_workers_started") is not False
+        or document.get("writer_started") is not False
+        or document.get("persistent_resource_cleanup_performed") is not False
+        or document.get("bounded_ephemeral_oneoff_cleanup_performed")
+        is not False
+        or document.get("removed_ephemeral_resources") != []
+        or document.get("object_storage_mutated") is not False
+        or document.get("presigned_url_persisted") is not False
+        or document.get("legacy_resources_mutated") is not False
+        or document.get("completed_phases")
+        != ["received", "materialized", "images-loaded"]
+        or not isinstance(document.get("operation_state_sha256"), str)
+        or not SHA256_RE.fullmatch(document["operation_state_sha256"])
+        or document.get("cleanup_policy")
+        != _EXPECTED_STAGE_CLEANUP_POLICY
+        or document.get("functional_boundary")
+        != _EXPECTED_STAGE_FUNCTIONAL_BOUNDARY
+        or not _validate_materialized_attestation(
+            document.get("materialized"),
+            manifest=manifest,
+            prepared=False,
+        )
+    ):
+        raise ProductionOrchestratorError(
+            "image stage operation attestation differs"
+        )
+    image_stage = document.get("image_stage")
+    runtime_image_ids = _validate_image_stage_attestation(
+        image_stage,
+        manifest=manifest,
+    )
+    stage_sha256 = document.get("stage_attestation_sha256")
+    if (
+        not isinstance(stage_sha256, str)
+        or not SHA256_RE.fullmatch(stage_sha256)
+        or stage_sha256 != _canonical_document_sha256(image_stage)
+        or document.get("images") != image_stage["images"]
+    ):
+        raise ProductionOrchestratorError(
+            "image stage operation binding differs"
+        )
+    return runtime_image_ids, stage_sha256
 
 
 def _attestation_contains_sensitive_transport(payload: bytes) -> bool:
@@ -2040,9 +2576,14 @@ def run_remote_operation(
     manifest: OperationManifest,
     ssh_identity: Path,
     apply: bool,
+    stage: bool = False,
     confirm: str | None = None,
     runner: Callable[..., subprocess.CompletedProcess[bytes]] = subprocess.run,
 ) -> Mapping[str, Any]:
+    if apply and stage:
+        raise ProductionOrchestratorError(
+            "remote operation action is ambiguous"
+        )
     _require_private_file(ssh_identity, label="WA-IR SSH identity")
     try:
         canonical = validate_operation_id(manifest.operation_id)
@@ -2052,17 +2593,26 @@ def run_remote_operation(
         f"{PYTHON} {_remote_agent_path(canonical)} "
         f"operation --operation-id {canonical}"
     )
-    if apply:
+    if stage:
+        required = f"stage-wa-ir-images:{canonical}:{manifest.release_sha}"
+        if confirm != required:
+            raise ProductionOrchestratorError(
+                "remote image stage confirmation is invalid"
+            )
+        command += f" --stage-only --confirm {confirm}"
+    elif apply:
         required = f"prepare-wa-ir:{canonical}:{manifest.release_sha}"
         if confirm != required:
             raise ProductionOrchestratorError("remote operation confirmation is invalid")
         command += f" --apply --confirm {confirm}"
     elif confirm is not None:
-        raise ProductionOrchestratorError("confirmation is valid only with apply")
+        raise ProductionOrchestratorError(
+            "confirmation is valid only with stage or apply"
+        )
     output = _run_ssh(
         _ssh_arguments(ssh_identity, remote_command=command),
         b"{}\n",
-        timeout=7200 if apply else 900,
+        timeout=7200 if (stage or apply) else 900,
         runner=runner,
     )
     if _attestation_contains_sensitive_transport(output):
@@ -2076,8 +2626,20 @@ def run_remote_operation(
         )
     except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
         raise ProductionOrchestratorError("remote operation attestation is invalid") from exc
-    expected_status = "wa-ir-shadow-data-ready-fenced" if apply else "planned"
-    expected_fields = _OPERATION_APPLY_FIELDS if apply else _OPERATION_PLAN_FIELDS
+    expected_status = (
+        "wa-ir-images-staged"
+        if stage
+        else "wa-ir-shadow-data-ready-fenced"
+        if apply
+        else "planned"
+    )
+    expected_fields = (
+        _OPERATION_STAGE_FIELDS
+        if stage
+        else _OPERATION_APPLY_FIELDS
+        if apply
+        else _OPERATION_PLAN_FIELDS
+    )
     if (
         not isinstance(document, dict)
         or set(document) != expected_fields
@@ -2089,8 +2651,8 @@ def run_remote_operation(
         or document.get("required_confirmation")
         != (
             None
-            if apply
-            else f"prepare-wa-ir:{canonical}:{manifest.release_sha}"
+            if (stage or apply)
+            else f"stage-wa-ir-images:{canonical}:{manifest.release_sha}"
         )
         or document.get("artifact_count") != len(EXPECTED_ARTIFACTS)
         or document.get("bootstrap_agent_verified") is not True
@@ -2107,19 +2669,89 @@ def run_remote_operation(
             bool,
         )
         or not isinstance(document.get("removed_ephemeral_resources"), list)
-        or not _validate_removed_ephemeral_resources(
-            document.get("removed_ephemeral_resources"),
-            manifest=manifest,
-        )
-        or document.get("bounded_ephemeral_oneoff_cleanup_performed")
-        is not bool(document.get("removed_ephemeral_resources"))
     ):
         raise ProductionOrchestratorError("remote operation attestation differs")
-    if not apply and (
+    if not (stage or apply) and (
         document["bounded_ephemeral_oneoff_cleanup_performed"] is not False
         or document["removed_ephemeral_resources"] != []
     ):
         raise ProductionOrchestratorError("remote plan cleanup attestation differs")
+    if not (stage or apply):
+        return document
+    if stage:
+        _validate_stage_operation_attestation(
+            document,
+            manifest=manifest,
+        )
+        return document
+
+    image_stage = document.get("image_stage")
+    runtime_image_ids = _validate_image_stage_attestation(
+        image_stage,
+        manifest=manifest,
+    )
+    stage_attestation_sha256 = document.get(
+        "stage_attestation_sha256"
+    )
+    if (
+        not isinstance(stage_attestation_sha256, str)
+        or not SHA256_RE.fullmatch(stage_attestation_sha256)
+        or stage_attestation_sha256
+        != _canonical_document_sha256(image_stage)
+        or document.get("images") != image_stage["images"]
+        or not _validate_materialized_attestation(
+            document.get("materialized"),
+            manifest=manifest,
+            prepared=True,
+        )
+        or not isinstance(document.get("operation_state_sha256"), str)
+        or not SHA256_RE.fullmatch(document["operation_state_sha256"])
+        or document.get("presigned_url_persisted") is not False
+        or document.get("legacy_resources_mutated") is not False
+    ):
+        raise ProductionOrchestratorError(
+            "remote staged image binding differs"
+        )
+    final_material = document.get("final_prepare_material")
+    project_root = REMOTE_PROJECT_ROOT_PREFIX / canonical
+    secret_root = REMOTE_SECRET_ROOT_PREFIX / canonical
+    if (
+        not isinstance(final_material, dict)
+        or set(final_material) != _FINAL_PREPARE_EVIDENCE_FIELDS
+        or any(
+            not isinstance(final_material.get(field), str)
+            or not SHA256_RE.fullmatch(final_material[field])
+            for field in (
+                "final_prepare_manifest_sha256",
+                "stage_attestation_sha256",
+                "role_compose_sha256",
+                "role_env_sha256",
+                "ca_sha256",
+            )
+        )
+        or final_material.get("stage_attestation_sha256")
+        != stage_attestation_sha256
+        or final_material.get("runtime_image_ids")
+        != runtime_image_ids
+        or final_material.get("runtime_env")
+        != str(secret_root / "webapp-ir" / "runtime.env.role")
+        or final_material.get("compose")
+        != str(
+            project_root
+            / "rendered"
+            / "webapp-ir"
+            / "docker-compose.yml"
+        )
+    ):
+        raise ProductionOrchestratorError(
+            "remote final prepare material binding differs"
+        )
+    if document["bounded_ephemeral_oneoff_cleanup_performed"] is not bool(
+        document["removed_ephemeral_resources"]
+    ):
+        raise ProductionOrchestratorError(
+            "remote bounded cleanup attestation differs"
+        )
     if apply:
         database = document.get("database")
         writer_state = database.get("writer_state") if isinstance(database, dict) else None
@@ -2128,25 +2760,12 @@ def run_remote_operation(
             if isinstance(database, dict)
             else None
         )
-        expected_postgres = next(
-            image
-            for image in manifest.images
-            if image.role == "postgres"
-        )
         expected_data_path = str(
             REMOTE_DATA_ROOT_PREFIX
             / canonical
             / "webapp-ir"
             / "postgres"
         )
-        expected_images = [
-            {
-                "role": image.role,
-                "image_id": image.image_id,
-                "source": "object-storage-archive",
-            }
-            for image in manifest.images
-        ]
         if (
             not isinstance(database, dict)
             or set(database) != _DATABASE_ATTESTATION_FIELDS
@@ -2174,6 +2793,7 @@ def run_remote_operation(
             or not _validate_removed_ephemeral_resources(
                 database.get("removed_ephemeral_resources"),
                 manifest=manifest,
+                runtime_image_ids=runtime_image_ids,
             )
             or not isinstance(database_container, dict)
             or set(database_container) != _DATABASE_CONTAINER_FIELDS
@@ -2183,26 +2803,17 @@ def run_remote_operation(
                 database_container["container_id"],
             )
             or database_container.get("image_id")
-            != expected_postgres.image_id
+            != runtime_image_ids["postgres"]
             or database_container.get("project") != manifest.project_name
             or database_container.get("service")
             != manifest.services["database"]
             or database_container.get("mount_type") != "bind"
             or database_container.get("data_path") != expected_data_path
             or database_container.get("data_uid")
-            != expected_postgres.runtime_uid
+            != manifest.postgres_runtime_uid
             or database_container.get("data_gid")
-            != expected_postgres.runtime_gid
-            or not _validate_materialized_attestation(
-                document.get("materialized"),
-                manifest=manifest,
-            )
-            or document.get("images") != expected_images
-            or document.get("presigned_url_persisted") is not False
-            or document.get("legacy_resources_mutated") is not False
+            != manifest.postgres_runtime_gid
             or document.get("completed_phases") != _COMPLETED_PHASES
-            or not isinstance(document.get("operation_state_sha256"), str)
-            or not SHA256_RE.fullmatch(document["operation_state_sha256"])
             or document.get("cleanup_policy") != _EXPECTED_CLEANUP_POLICY
             or document.get("functional_boundary")
             != _EXPECTED_FUNCTIONAL_BOUNDARY
@@ -2357,6 +2968,10 @@ def main(argv: list[str] | None = None) -> int:
     source_publish_parser = subparsers.add_parser("publish-source-backup")
     plan_parser = subparsers.add_parser("validate-local")
     transfer_parser = subparsers.add_parser("transfer")
+    stage_parser = subparsers.add_parser("stage")
+    final_transfer_parser = subparsers.add_parser(
+        "transfer-final-prepare"
+    )
     prepare_parser = subparsers.add_parser("prepare")
     finalize_parser = subparsers.add_parser("finalize-local")
     for selected in (plan_parser, transfer_parser):
@@ -2400,11 +3015,58 @@ def main(argv: list[str] | None = None) -> int:
     transfer_parser.add_argument("--ttl-seconds", type=int, default=300)
     transfer_parser.add_argument("--apply", action="store_true")
     transfer_parser.add_argument("--confirm")
-    prepare_parser.add_argument("--operation-id", required=True)
-    prepare_parser.add_argument("--manifest", type=Path, required=True)
-    prepare_parser.add_argument("--ssh-identity", type=Path, required=True)
-    prepare_parser.add_argument("--apply", action="store_true")
-    prepare_parser.add_argument("--confirm")
+    for selected in (stage_parser, prepare_parser):
+        selected.add_argument("--operation-id", required=True)
+        selected.add_argument("--manifest", type=Path, required=True)
+        selected.add_argument("--ssh-identity", type=Path, required=True)
+        selected.add_argument("--apply", action="store_true")
+        selected.add_argument("--confirm")
+    final_transfer_parser.add_argument(
+        "--manifest",
+        type=Path,
+        required=True,
+    )
+    final_transfer_parser.add_argument(
+        "--final-prepare-archive",
+        type=Path,
+        required=True,
+    )
+    final_transfer_parser.add_argument(
+        "--stage-attestation",
+        type=Path,
+        required=True,
+    )
+    final_transfer_parser.add_argument(
+        "--recipient-file",
+        type=Path,
+        required=True,
+    )
+    final_transfer_parser.add_argument(
+        "--credentials-file",
+        type=Path,
+        required=True,
+    )
+    final_transfer_parser.add_argument(
+        "--journal-directory",
+        type=Path,
+        required=True,
+    )
+    final_transfer_parser.add_argument(
+        "--ssh-identity",
+        type=Path,
+        required=True,
+    )
+    final_transfer_parser.add_argument(
+        "--prefix",
+        default=DEFAULT_PREFIX,
+    )
+    final_transfer_parser.add_argument(
+        "--ttl-seconds",
+        type=int,
+        default=300,
+    )
+    final_transfer_parser.add_argument("--apply", action="store_true")
+    final_transfer_parser.add_argument("--confirm")
     finalize_parser.add_argument("--journal-directory", type=Path, required=True)
     finalize_parser.add_argument("--operation-id", required=True)
     finalize_parser.add_argument("--release-sha", required=True)
@@ -2469,7 +3131,7 @@ def main(argv: list[str] | None = None) -> int:
                 _build_bound_bootstrap_agent(
                     manifest,
                     args.artifact_directory
-                    / EXPECTED_ARTIFACTS["release-archive"][0],
+                    / EXPECTED_ARTIFACTS["release-bundle"][0],
                     work_directory=work_directory,
                     output=work_directory / BOOTSTRAP_DESTINATION_NAME,
                 )
@@ -2505,7 +3167,7 @@ def main(argv: list[str] | None = None) -> int:
                 prefix=args.prefix,
                 ttl_seconds=args.ttl_seconds,
             )
-        elif args.action == "prepare":
+        elif args.action in {"stage", "prepare"}:
             manifest_payload = read_secure_bytes(
                 args.manifest,
                 label="WA-IR operation manifest",
@@ -2516,11 +3178,62 @@ def main(argv: list[str] | None = None) -> int:
                 raise ProductionOrchestratorError(
                     "remote operation id differs from local manifest"
                 )
-            result = run_remote_operation(
-                manifest=manifest,
+            if args.action == "stage":
+                expected_confirmation = (
+                    f"stage-wa-ir-images:{manifest.operation_id}:"
+                    f"{manifest.release_sha}"
+                )
+                if (
+                    not args.apply
+                    or args.confirm != expected_confirmation
+                ):
+                    raise ProductionOrchestratorError(
+                        "remote image stage requires "
+                        f"--apply --confirm {expected_confirmation}"
+                    )
+                result = run_remote_operation(
+                    manifest=manifest,
+                    ssh_identity=args.ssh_identity,
+                    apply=False,
+                    stage=True,
+                    confirm=args.confirm,
+                )
+            else:
+                result = run_remote_operation(
+                    manifest=manifest,
+                    ssh_identity=args.ssh_identity,
+                    apply=args.apply,
+                    confirm=args.confirm,
+                )
+        elif args.action == "transfer-final-prepare":
+            manifest_payload = read_secure_bytes(
+                args.manifest,
+                label="WA-IR operation manifest",
+                max_size=MAX_MANIFEST_BYTES,
+            )
+            manifest = _load_manifest_bytes(manifest_payload)
+            expected_confirmation = (
+                f"transfer-final-prepare:{manifest.operation_id}:"
+                f"{manifest.release_sha}"
+            )
+            if (
+                not args.apply
+                or args.confirm != expected_confirmation
+            ):
+                raise ProductionOrchestratorError(
+                    "final prepare transfer requires "
+                    f"--apply --confirm {expected_confirmation}"
+                )
+            result = transfer_final_prepare_material(
+                args.manifest,
+                args.final_prepare_archive,
+                args.stage_attestation,
+                recipient_file=args.recipient_file,
+                credentials_file=args.credentials_file,
+                journal_directory=args.journal_directory,
                 ssh_identity=args.ssh_identity,
-                apply=args.apply,
-                confirm=args.confirm,
+                prefix=args.prefix,
+                ttl_seconds=args.ttl_seconds,
             )
         else:
             expected_confirmation = f"finalize-local:{args.operation_id}"
