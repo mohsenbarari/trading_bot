@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import subprocess
@@ -20,7 +20,12 @@ from core.dr_staging_operation_backend import (
 )
 from core.writer_witness_auth import WitnessClientCredential
 from core.writer_witness_client import WriterWitnessClientConfig
-from tests.test_three_site_staging_signed_inventory import _inventory, _signed_documents
+from scripts.verify_three_site_staging_inventory import InventoryError
+from tests.test_three_site_staging_signed_inventory import (
+    _inventory,
+    _relay_documents,
+    _signed_documents,
+)
 
 
 def _host(role: str, ip: str) -> StagingHost:
@@ -220,6 +225,52 @@ class StagingOperationBackendTests(unittest.TestCase):
                 inventory_approval_policy=policy,
             )
             self.assertEqual(config.hosts["webapp_ir"].host_ip, role_ips["webapp_ir"])
+            expired_policy, expired_approval = _signed_documents(
+                inventory, datetime.now(timezone.utc) - timedelta(hours=2)
+            )
+            with self.assertRaisesRegex(InventoryError, "human approval is invalid"):
+                load_staging_backend_config(
+                    path,
+                    inventory=inventory,
+                    inventory_approval=expired_approval,
+                    inventory_approval_policy=expired_policy,
+                )
+            historical = load_staging_backend_config(
+                path,
+                inventory=inventory,
+                inventory_approval=expired_approval,
+                inventory_approval_policy=expired_policy,
+                require_fresh_inventory_approval=False,
+                witness_relay_public_key=payload["witness"]["public_key"],
+            )
+            self.assertEqual(
+                historical.witness_public_key, payload["witness"]["public_key"]
+            )
+            with self.assertRaisesRegex(
+                StagingOperationBackendError, "differs from backend trust key"
+            ):
+                load_staging_backend_config(
+                    path,
+                    inventory=inventory,
+                    inventory_approval=expired_approval,
+                    inventory_approval_policy=expired_policy,
+                    require_fresh_inventory_approval=False,
+                    witness_relay_public_key=base64.b64encode(b"q" * 32).decode(),
+                )
+            relay_policy, relay_approval, relay_public_key = _relay_documents(
+                inventory, datetime.now(timezone.utc) - timedelta(minutes=2)
+            )
+            with patch.dict(
+                "os.environ",
+                {"WRITER_WITNESS_PUBLIC_KEY": relay_public_key},
+                clear=True,
+            ), self.assertRaisesRegex(InventoryError, "human approval is invalid"):
+                load_staging_backend_config(
+                    path,
+                    inventory=inventory,
+                    inventory_approval=relay_approval,
+                    inventory_approval_policy=relay_policy,
+                )
             payload["hosts"]["webapp_ir"]["host_ip"] = "10.30.0.99"
             path.write_text(json.dumps(payload), encoding="utf-8")
             with self.assertRaisesRegex(StagingOperationBackendError, "host identity"):

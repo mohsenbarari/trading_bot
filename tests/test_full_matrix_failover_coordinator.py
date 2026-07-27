@@ -7,8 +7,11 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
+from core.three_site_full_matrix_command_backend import SAFE_ENV as BACKEND_SAFE_ENV
+from scripts.full_matrix_drivers.driver import SAFE_ENV as DRIVER_SAFE_ENV
 from scripts.full_matrix_live.failover_coordinator import (
     FullMatrixFailoverCoordinatorError,
+    _new_plan,
     _pull_operation,
     _source_epoch,
     execute_transition,
@@ -50,6 +53,10 @@ def _writer_probe(*, role: str, active_site: str, epoch: int) -> dict:
 
 
 class FullMatrixFailoverCoordinatorTests(unittest.TestCase):
+    def test_sealed_environments_do_not_supply_relay_trust_key(self):
+        self.assertNotIn("WRITER_WITNESS_PUBLIC_KEY", BACKEND_SAFE_ENV)
+        self.assertNotIn("WRITER_WITNESS_PUBLIC_KEY", DRIVER_SAFE_ENV)
+
     def test_source_epoch_uses_only_active_local_witness_writer(self):
         plan = _plan()
         response = {
@@ -210,6 +217,9 @@ class FullMatrixFailoverCoordinatorTests(unittest.TestCase):
             ), patch(
                 "scripts.full_matrix_live.failover_coordinator.load_staging_backend_config",
                 return_value=object(),
+            ) as load_config, patch(
+                "scripts.full_matrix_live.failover_coordinator.read_secure_text",
+                return_value="public-key\n",
             ), patch(
                 "scripts.full_matrix_live.failover_coordinator.PullFailoverBackend",
                 return_value=backend,
@@ -232,6 +242,13 @@ class FullMatrixFailoverCoordinatorTests(unittest.TestCase):
             self.assertFalse(receipt.called)
             self.assertEqual(prepare.call_count, 1)
             self.assertEqual(list(root.iterdir()), [])
+            self.assertFalse(
+                load_config.call_args.kwargs["require_fresh_inventory_approval"]
+            )
+            self.assertEqual(
+                load_config.call_args.kwargs["witness_relay_public_key"],
+                "public-key",
+            )
 
     def test_preflight_refuses_to_normalize_a_retained_jit_artifact(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -242,6 +259,69 @@ class FullMatrixFailoverCoordinatorTests(unittest.TestCase):
                 from scripts.full_matrix_live.failover_coordinator import _assert_empty_jit_journal_root
 
                 _assert_empty_jit_journal_root(root)
+
+    def test_new_plan_uses_the_supplied_witness_key_snapshot(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            operation_id = "11111111-1111-4111-8111-111111111111"
+            plan = {
+                "_inventory": {},
+                "_bindings": {
+                    "failover_schedule": {"payload": {}},
+                    "human_approval_policy": {
+                        "payload": {},
+                        "path": str(root / "policy.json"),
+                    },
+                },
+            }
+            paths = {
+                "journal_root": root,
+                "relay_credentials": root / "relay.env",
+            }
+            parsed = SimpleNamespace(operation_id=operation_id)
+            final = {"approved": True}
+            with patch(
+                "scripts.full_matrix_live.failover_coordinator._source_epoch",
+                return_value=7,
+            ), patch(
+                "scripts.full_matrix_live.failover_coordinator._classification",
+                return_value={"mode": "online"},
+            ), patch(
+                "scripts.full_matrix_live.failover_coordinator.prepare_plan",
+                return_value=(
+                    {"operation_id": operation_id},
+                    {"subject": True},
+                    {"manifest": True},
+                ),
+            ), patch(
+                "scripts.full_matrix_live.failover_coordinator.request_receipt",
+            ), patch(
+                "scripts.full_matrix_live.failover_coordinator._private_json",
+                return_value={"receipt": True},
+            ), patch(
+                "scripts.full_matrix_live.failover_coordinator.finalize_plan",
+                return_value=final,
+            ) as finalize, patch(
+                "scripts.full_matrix_live.failover_coordinator.parse_plan",
+                return_value=parsed,
+            ):
+                result = _new_plan(
+                    plan=plan,
+                    paths=paths,
+                    backend=object(),
+                    scenario_id="session_failover_contract",
+                    iteration=1,
+                    action="promote_ir",
+                    witness_relay_public_key="snapshot-public-key",
+                )
+
+            self.assertEqual(result[0], parsed)
+            self.assertEqual(result[1], final)
+            self.assertEqual(
+                finalize.call_args.kwargs["witness_relay_public_key"],
+                "snapshot-public-key",
+            )
 
     def test_power_loss_cutpoint_cannot_be_selected_for_another_transition(self):
         with self.assertRaisesRegex(FullMatrixFailoverCoordinatorError, "power-loss cutpoint"):
@@ -295,7 +375,7 @@ class FullMatrixFailoverCoordinatorTests(unittest.TestCase):
         ), patch(
             "scripts.full_matrix_live.failover_coordinator.load_staging_backend_config",
             return_value=object(),
-        ), patch(
+        ) as load_config, patch(
             "scripts.full_matrix_live.failover_coordinator._existing_plan",
             return_value=(parsed, {"approved": True}, Path("/tmp/journal/journal.jsonl")),
         ), patch(
@@ -304,7 +384,7 @@ class FullMatrixFailoverCoordinatorTests(unittest.TestCase):
             "scripts.full_matrix_live.failover_coordinator.verify_human_failover_approval"
         ), patch(
             "scripts.full_matrix_live.failover_coordinator.read_secure_text", return_value="public-key"
-        ), patch(
+        ) as read_key, patch(
             "scripts.full_matrix_live.failover_coordinator.PullFailoverBackend",
             side_effect=[Mock(), backend],
         ), patch(
@@ -321,6 +401,14 @@ class FullMatrixFailoverCoordinatorTests(unittest.TestCase):
             )
         self.assertEqual(result["status"], "completed")
         backend.materialize_webapp_fi_inputs.assert_not_called()
+        self.assertFalse(
+            load_config.call_args.kwargs["require_fresh_inventory_approval"]
+        )
+        self.assertEqual(
+            load_config.call_args.kwargs["witness_relay_public_key"],
+            "public-key",
+        )
+        self.assertEqual(read_key.call_count, 1)
 
 
 if __name__ == "__main__":

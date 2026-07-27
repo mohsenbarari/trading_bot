@@ -360,9 +360,12 @@ def verify_approved_inventory(
     host_destructive: bool | None = None,
     now: datetime | None = None,
     require_fresh_approval: bool = True,
+    witness_relay_public_key: str | None = None,
 ) -> dict[str, Any]:
-    """Require password+TOTP approval of the exact inventory bytes."""
+    """Verify direct or explicitly Witness-trusted approval of exact inventory bytes."""
 
+    if type(require_fresh_approval) is not bool:
+        raise InventoryError("inventory approval freshness setting is invalid")
     structural = verify_inventory(payload, host_destructive=host_destructive)
     inventory_hash = hashlib.sha256(_canonical_bytes(payload)).hexdigest()
     subject = approval_subject(
@@ -385,6 +388,7 @@ def verify_approved_inventory(
             expected_subject=subject,
             now=now,
             require_fresh=require_fresh_approval,
+            witness_relay_public_key=witness_relay_public_key,
         )
     except Exception as exc:
         raise InventoryError("inventory human approval is invalid") from exc

@@ -1,13 +1,23 @@
 from __future__ import annotations
 
+import base64
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
-from core.human_approval import approval_subject
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+from core.human_approval import (
+    approval_subject,
+    issue_human_approval_relay_receipt,
+    parse_human_approval_relay_command,
+)
 from core.human_approval_issuer import (
     authenticate_and_issue,
+    authenticate_and_issue_session,
     create_enrollment,
     totp_code,
 )
@@ -63,14 +73,8 @@ def _inventory() -> dict:
     return payload
 
 
-def _signed_documents(payload: dict, now: datetime):
-    enrollment = create_enrollment(
-        operator="person-1",
-        password="test approval passphrase value",
-        now=now,
-        scrypt_n=2**14,
-    )
-    subject = approval_subject(
+def _inventory_approval_subject(payload: dict) -> dict:
+    return approval_subject(
         artifact_type="three-site-staging-inventory-v3",
         artifact_sha256=__import__("hashlib").sha256(_canonical(payload)).hexdigest(),
         release_sha=payload["release_sha"],
@@ -81,6 +85,16 @@ def _signed_documents(payload: dict, now: datetime):
             "inventory_stage": payload["inventory_stage"],
         },
     )
+
+
+def _signed_documents(payload: dict, now: datetime):
+    enrollment = create_enrollment(
+        operator="person-1",
+        password="test approval passphrase value",
+        now=now,
+        scrypt_n=2**14,
+    )
+    subject = _inventory_approval_subject(payload)
     approval, _state, _audit = authenticate_and_issue(
         secrets_payload=enrollment.secrets_payload,
         state_payload=enrollment.state_payload,
@@ -96,6 +110,52 @@ def _signed_documents(payload: dict, now: datetime):
         now=now,
     )
     return enrollment.policy_payload, approval
+
+
+def _relay_documents(payload: dict, now: datetime) -> tuple[dict, dict, str]:
+    enrollment = create_enrollment(
+        operator="person-1",
+        password="test approval passphrase value",
+        now=now,
+        scrypt_n=2**14,
+    )
+    session, _state, _audit = authenticate_and_issue_session(
+        secrets_payload=enrollment.secrets_payload,
+        state_payload=enrollment.state_payload,
+        policy_payload=enrollment.policy_payload,
+        private_key_envelope=enrollment.private_key_envelope,
+        password="test approval passphrase value",
+        totp=totp_code(enrollment.totp_secret, at=now)[1],
+        recovery_code=None,
+        release_sha=payload["release_sha"],
+        allowed_actions=["approve_inventory"],
+        ttl_seconds=48 * 60 * 60,
+        now=now,
+    )
+    witness_private = Ed25519PrivateKey.generate()
+    witness_public = base64.b64encode(
+        witness_private.public_key().public_bytes(
+            serialization.Encoding.Raw,
+            serialization.PublicFormat.Raw,
+        )
+    ).decode("ascii")
+    receipt = issue_human_approval_relay_receipt(
+        session,
+        policy_payload=enrollment.policy_payload,
+        command=parse_human_approval_relay_command(
+            {
+                "schema": "three-site-human-approval-witness-relay-command-v1",
+                "action": "approve_inventory",
+                "environment": "staging",
+                "subject": _inventory_approval_subject(payload),
+                "request_id": "relay-inventory-historical",
+            }
+        ),
+        witness_private_key=witness_private,
+        now=now + timedelta(minutes=1),
+        receipt_id="22222222-2222-4222-8222-222222222222",
+    )
+    return enrollment.policy_payload, receipt, witness_public
 
 
 class ThreeSiteStagingSignedInventoryTests(unittest.TestCase):
@@ -209,6 +269,79 @@ class ThreeSiteStagingSignedInventoryTests(unittest.TestCase):
         self.assertEqual(result["status"], "approved")
         self.assertEqual(result["approved_by"], ["person-1"])
         self.assertTrue(result["approval_id"])
+
+    def test_inventory_freshness_setting_requires_an_exact_boolean(self):
+        now = datetime.now(timezone.utc)
+        payload = _inventory()
+        policy, approval = _signed_documents(payload, now)
+
+        for invalid in (None, 0, 1, "", "false"):
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(InventoryError, "freshness setting"):
+                    verify_approved_inventory(
+                        payload,
+                        approval=approval,
+                        approval_policy=policy,
+                        host_destructive=True,
+                        now=now,
+                        require_fresh_approval=invalid,
+                    )
+
+    def test_historical_relay_inventory_requires_explicit_witness_key(self):
+        now = datetime(2026, 7, 22, 12, 0, 0, tzinfo=timezone.utc)
+        payload = _inventory()
+        policy, receipt, witness_public = _relay_documents(payload, now)
+        during_session = now + timedelta(hours=25)
+        after_session_expiry = now + timedelta(hours=49)
+
+        with patch.dict("os.environ", {}, clear=True):
+            with self.assertRaisesRegex(InventoryError, "human approval is invalid"):
+                verify_approved_inventory(
+                    payload,
+                    approval=receipt,
+                    approval_policy=policy,
+                    host_destructive=True,
+                    now=after_session_expiry,
+                    require_fresh_approval=False,
+                )
+            with self.assertRaisesRegex(InventoryError, "human approval is invalid"):
+                verify_approved_inventory(
+                    payload,
+                    approval=receipt,
+                    approval_policy=policy,
+                    host_destructive=True,
+                    now=during_session,
+                    witness_relay_public_key=base64.b64encode(b"q" * 32).decode(),
+                )
+            fresh_result = verify_approved_inventory(
+                payload,
+                approval=receipt,
+                approval_policy=policy,
+                host_destructive=True,
+                now=during_session,
+                witness_relay_public_key=witness_public,
+            )
+            result = verify_approved_inventory(
+                payload,
+                approval=receipt,
+                approval_policy=policy,
+                host_destructive=True,
+                now=after_session_expiry,
+                require_fresh_approval=False,
+                witness_relay_public_key=witness_public,
+            )
+
+        self.assertEqual(fresh_result["status"], "approved")
+        self.assertEqual(result["status"], "approved")
+        with self.assertRaisesRegex(InventoryError, "human approval is invalid"):
+            verify_approved_inventory(
+                payload,
+                approval=receipt,
+                approval_policy=policy,
+                host_destructive=True,
+                now=after_session_expiry,
+                witness_relay_public_key=witness_public,
+            )
 
     def test_inventory_mutation_after_approval_is_rejected(self):
         now = datetime.now(timezone.utc)

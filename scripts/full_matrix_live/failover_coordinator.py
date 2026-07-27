@@ -155,6 +155,19 @@ def _control(plan: dict[str, Any]) -> dict[str, Path]:
     return paths
 
 
+def _witness_relay_public_key(paths: dict[str, Path]) -> str:
+    public_key = read_secure_text(
+        paths["witness_relay_public_key_file"],
+        label="Witness relay public key",
+        max_size=16 * 1024,
+    ).strip()
+    if not public_key:
+        raise FullMatrixFailoverCoordinatorError(
+            "Witness relay public key is empty"
+        )
+    return public_key
+
+
 def _classification(backend) -> dict[str, Any]:  # noqa: ANN001
     return backend.preflight_static()
 
@@ -279,6 +292,7 @@ def _new_plan(
     scenario_id: str,
     iteration: int,
     action: str,
+    witness_relay_public_key: str,
 ) -> tuple[Any, dict[str, Any], Path, Path]:
     expected_epoch = _source_epoch(plan, source_site=("webapp_fi" if action == "promote_ir" else "webapp_ir"))
     draft, subject, manifest = prepare_plan(
@@ -324,11 +338,7 @@ def _new_plan(
         policy_payload=plan["_bindings"]["human_approval_policy"]["payload"],
         scenario_id=scenario_id,
         iteration=iteration,
-        witness_relay_public_key=read_secure_text(
-            paths["witness_relay_public_key_file"],
-            label="Witness relay public key",
-            max_size=16 * 1024,
-        ).strip(),
+        witness_relay_public_key=witness_relay_public_key,
         now=datetime.now(timezone.utc),
     )
     parsed = parse_plan(final)
@@ -486,11 +496,14 @@ def preflight_transition_system(plan: dict[str, Any]) -> dict[str, Any]:
     """
 
     paths = _control(plan)
+    witness_relay_public_key = _witness_relay_public_key(paths)
     backend_config = load_staging_backend_config(
         paths["backend_config"],
         inventory=plan["_inventory"],
         inventory_approval=plan["_bindings"]["inventory_approval"]["payload"],
         inventory_approval_policy=plan["_bindings"]["human_approval_policy"]["payload"],
+        require_fresh_inventory_approval=False,
+        witness_relay_public_key=witness_relay_public_key,
     )
     backend = PullFailoverBackend(
         backend_config,
@@ -552,11 +565,14 @@ def execute_transition(
             "JIT power-loss cutpoint is outside its exact promotion scenario"
         )
     paths = _control(plan)
+    witness_relay_public_key = _witness_relay_public_key(paths)
     backend_config = load_staging_backend_config(
         paths["backend_config"],
         inventory=plan["_inventory"],
         inventory_approval=plan["_bindings"]["inventory_approval"]["payload"],
         inventory_approval_policy=plan["_bindings"]["human_approval_policy"]["payload"],
+        require_fresh_inventory_approval=False,
+        witness_relay_public_key=witness_relay_public_key,
     )
     # Construct the plan before any site mutation.  The backend is rebuilt
     # from the same hash-bound configuration for every action.
@@ -582,6 +598,7 @@ def execute_transition(
             scenario_id=scenario_id,
             iteration=iteration,
             action=action,
+            witness_relay_public_key=witness_relay_public_key,
         )
     else:
         parsed, final_document, journal_path = existing
@@ -590,11 +607,7 @@ def execute_transition(
         parsed,
         plan["_bindings"]["human_approval_policy"]["payload"],
         require_fresh=not operation_started,
-        witness_relay_public_key=read_secure_text(
-            paths["witness_relay_public_key_file"],
-            label="Witness relay public key",
-            max_size=16 * 1024,
-        ).strip(),
+        witness_relay_public_key=witness_relay_public_key,
     )
     backend = PullFailoverBackend(
         backend_config,

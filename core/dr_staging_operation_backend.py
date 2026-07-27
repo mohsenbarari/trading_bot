@@ -7,6 +7,7 @@ import base64
 import binascii
 from dataclasses import dataclass
 import hashlib
+import hmac
 import ipaddress
 import json
 from pathlib import Path
@@ -115,7 +116,22 @@ def load_staging_backend_config(
     inventory: dict[str, Any],
     inventory_approval: dict[str, Any],
     inventory_approval_policy: dict[str, Any],
+    require_fresh_inventory_approval: bool = True,
+    witness_relay_public_key: str | None = None,
 ) -> StagingBackendConfig:
+    if type(require_fresh_inventory_approval) is not bool:
+        raise StagingOperationBackendError(
+            "staging inventory approval freshness setting is invalid"
+        )
+    relay_public_key = (
+        None
+        if witness_relay_public_key is None
+        else str(witness_relay_public_key).strip()
+    )
+    if witness_relay_public_key is not None and not relay_public_key:
+        raise StagingOperationBackendError(
+            "staging Witness relay public key is empty"
+        )
     payload = _secure_json(path)
     fields = {
         "schema", "campaign_id", "release_sha", "domain", "record",
@@ -130,11 +146,28 @@ def load_staging_backend_config(
         or payload.get("record") != "app"
     ):
         raise StagingOperationBackendError("staging backend scope/schema is invalid")
+    raw_witness = payload.get("witness")
+    backend_public_key = str(
+        raw_witness.get("public_key", "") if isinstance(raw_witness, dict) else ""
+    )
+    try:
+        if len(base64.b64decode(backend_public_key, validate=True)) != 32:
+            raise ValueError
+    except (ValueError, binascii.Error) as exc:
+        raise StagingOperationBackendError("staging Witness public key is invalid") from exc
+    if relay_public_key is not None and not hmac.compare_digest(
+        backend_public_key, relay_public_key
+    ):
+        raise StagingOperationBackendError(
+            "staging Witness relay public key differs from backend trust key"
+        )
     verified = verify_approved_inventory(
         inventory,
         approval=inventory_approval,
         approval_policy=inventory_approval_policy,
         host_destructive=None,
+        require_fresh_approval=require_fresh_inventory_approval,
+        witness_relay_public_key=backend_public_key,
     )
     if (
         verified["inventory_stage"] != "provisioned"
@@ -238,12 +271,7 @@ def load_staging_backend_config(
     timeout = witness["timeout_seconds"]
     if not isinstance(timeout, (int, float)) or not 0.1 <= float(timeout) <= 10:
         raise StagingOperationBackendError("staging Witness timeout is invalid")
-    public_key = str(witness["public_key"])
-    try:
-        if len(base64.b64decode(public_key, validate=True)) != 32:
-            raise ValueError
-    except (ValueError, binascii.Error) as exc:
-        raise StagingOperationBackendError("staging Witness public key is invalid") from exc
+    public_key = backend_public_key
     return StagingBackendConfig(
         campaign_id=payload["campaign_id"],
         release_sha=payload["release_sha"],
