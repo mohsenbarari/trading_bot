@@ -38,6 +38,17 @@ from core.three_site_full_matrix_campaign import (
     verify_scenario_evidence,
     scenarios_for_execution_class,
 )
+from core.three_site_full_matrix_midpoint import (
+    FullMatrixMidpointError,
+    MIDPOINT_COMPLETED_ITERATION,
+    MIDPOINT_NEXT_ITERATION,
+    MIDPOINT_PAUSE_REASON,
+    MIDPOINT_RESUME_REASON,
+    load_bound_witness_public_key,
+    midpoint_subjects,
+    validate_midpoint_journal,
+    verify_midpoint_bundle,
+)
 
 
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -543,7 +554,7 @@ def _journal_state(
         "campaign_started", "scenario_started", "scenario_recovered",
         "scenario_passed", "phase_passed", "campaign_finalized",
         "campaign_completed", "campaign_blocked", "operation_started",
-        "operation_passed",
+        "operation_passed", "campaign_paused", "campaign_resumed",
     }
     if (
         not records
@@ -691,6 +702,19 @@ def _journal_state(
         expected = sum(len(catalog[phase]) for phase in phases) * identity.repetitions
         if completed_events != 1 or records[-1].get("event") != "campaign_completed" or len(completed) != expected:
             raise FullMatrixRunnerError("completed Full Matrix journal is incomplete")
+    try:
+        validate_midpoint_journal(
+            records,
+            campaign={
+                "required_phases": list(phases),
+                "required_scenarios": {
+                    phase: list(catalog[phase]) for phase in phases
+                },
+            },
+            campaign_hash=identity.campaign_hash,
+        )
+    except (KeyError, FullMatrixMidpointError) as exc:
+        raise FullMatrixRunnerError("Full Matrix midpoint journal is invalid") from exc
     return records, completed
 
 
@@ -758,6 +782,84 @@ def _completed_phase_hashes(
     if observed_order != expected_order[: len(observed_order)]:
         raise FullMatrixRunnerError("Full Matrix journal phase order is invalid")
     return completed
+
+
+def _midpoint_state(
+    records: list[dict[str, Any]],
+    *,
+    campaign: dict[str, Any],
+    identity: CampaignIdentity,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    try:
+        return validate_midpoint_journal(
+            records,
+            campaign=campaign,
+            campaign_hash=identity.campaign_hash,
+        )
+    except FullMatrixMidpointError as exc:
+        raise FullMatrixRunnerError("Full Matrix midpoint journal is invalid") from exc
+
+
+def _paused_result(
+    *,
+    campaign: dict[str, Any],
+    identity: CampaignIdentity,
+    pause: dict[str, Any],
+    refresh_bundle_status: str,
+    rejection: str | None = None,
+) -> dict[str, Any]:
+    pre_pause_head = str(pause["pre_pause_journal_head"])
+    result: dict[str, Any] = {
+        "schema": "three-site-staging-full-matrix-paused-v1",
+        "status": "paused",
+        "reason": MIDPOINT_PAUSE_REASON,
+        **_identity_fields(identity),
+        "gate_group_id": identity.gate_group_id,
+        "execution_class": identity.execution_class,
+        "phase": pause["phase"],
+        "completed_iteration": MIDPOINT_COMPLETED_ITERATION,
+        "next_iteration": MIDPOINT_NEXT_ITERATION,
+        "pre_pause_journal_head": pre_pause_head,
+        "pause_event_hash": pause["event_hash"],
+        "refresh_bundle_status": refresh_bundle_status,
+        "refresh_subjects": [
+            {"action": action, "subject": subject}
+            for action, subject in midpoint_subjects(
+                campaign=campaign,
+                campaign_hash=identity.campaign_hash,
+                pre_pause_journal_head=pre_pause_head,
+            ).items()
+        ],
+        "cleanup_residue_count": 0,
+        "production_touched": False,
+    }
+    if rejection is not None:
+        result["refresh_bundle_rejection"] = rejection
+    return result
+
+
+def _verify_refresh_bundle(
+    bundle: dict[str, Any],
+    *,
+    campaign: dict[str, Any],
+    approver_policy: dict[str, Any],
+    identity: CampaignIdentity,
+    pause: dict[str, Any],
+    witness_public_key: str,
+    now: datetime | None,
+    require_fresh: bool,
+) -> dict[str, Any]:
+    return verify_midpoint_bundle(
+        bundle,
+        campaign=campaign,
+        campaign_hash=identity.campaign_hash,
+        pre_pause_journal_head=str(pause["pre_pause_journal_head"]),
+        pause_timestamp=str(pause["timestamp"]),
+        policy_payload=approver_policy,
+        witness_public_key=witness_public_key,
+        now=now,
+        require_fresh=require_fresh,
+    )
 
 
 def _write_exact(path: Path, payload: bytes, *, label: str) -> None:
@@ -936,6 +1038,7 @@ async def run_full_matrix_campaign(
     artifact_root: Path,
     journal: Path,
     backend: FullMatrixExecutionBackend,
+    midpoint_refresh_bundle: dict[str, Any] | None = None,
     now: datetime | None = None,
     monotonic: Callable[[], float] | None = None,
 ) -> dict[str, Any]:
@@ -943,14 +1046,38 @@ async def run_full_matrix_campaign(
 
     monotonic = monotonic or getattr(backend, "monotonic", time.monotonic)
     journal_exists = journal.exists() and journal.stat().st_size > 0
+    _validate_artifact_root(artifact_root)
+    try:
+        witness_public_key = load_bound_witness_public_key(
+            bound_artifacts["failover_backend_config"],
+            failover_control_path=bound_artifacts["failover_control_config"],
+            campaign_id=str(campaign.get("campaign_id") or ""),
+            gate_group_id=str(campaign.get("gate_group_id") or ""),
+            execution_class=str(campaign.get("execution_class") or ""),
+            release_sha=str(campaign.get("release_sha") or ""),
+            expected_sha256=str(
+                campaign.get("bound_artifacts", {}).get(
+                    "failover_backend_config", ""
+                )
+            ),
+            expected_control_sha256=str(
+                campaign.get("bound_artifacts", {}).get(
+                    "failover_control_config", ""
+                )
+            ),
+        )
+    except FullMatrixMidpointError as exc:
+        raise FullMatrixRunnerError(
+            "campaign-bound Witness identity is invalid"
+        ) from exc
     approved = verify_campaign(
         campaign,
         approver_policy=approver_policy,
         now=now,
         allow_expired_for_safe_cleanup=journal_exists,
         require_fresh_approval=not journal_exists,
+        witness_relay_public_key=witness_public_key,
     )
-    _validate_artifact_root(artifact_root)
     verify_bound_artifacts(campaign, bound_artifacts)
     identity = CampaignIdentity(
         campaign_id=approved["campaign_id"],
@@ -963,6 +1090,29 @@ async def run_full_matrix_campaign(
     )
     records, completed = _journal_state(journal, identity)
     completed_phases = _completed_phase_hashes(records, identity)
+    midpoint_pause, midpoint_resume = _midpoint_state(
+        records, campaign=campaign, identity=identity
+    )
+    if midpoint_resume is not None:
+        try:
+            historical_summary = _verify_refresh_bundle(
+                midpoint_resume["refresh_bundle"],
+                campaign=campaign,
+                approver_policy=approver_policy,
+                identity=identity,
+                pause=midpoint_pause,
+                witness_public_key=witness_public_key,
+                now=now,
+                require_fresh=False,
+            )
+        except FullMatrixMidpointError as exc:
+            raise FullMatrixRunnerError(
+                "durable Full Matrix midpoint refresh proof is invalid"
+            ) from exc
+        if historical_summary != midpoint_resume["refresh_summary"]:
+            raise FullMatrixRunnerError(
+                "durable Full Matrix midpoint refresh summary differs"
+            )
     if any(record.get("event") == "campaign_blocked" for record in records):
         raise FullMatrixRunnerError("blocked Full Matrix campaign requires a new campaign")
     if any(record.get("event") == "campaign_completed" for record in records):
@@ -1010,7 +1160,7 @@ async def run_full_matrix_campaign(
                 artifact_root=artifact_root,
             ),
         )
-        _journal_event(
+        recovered_record = _journal_event(
             journal,
             identity,
             event="scenario_recovered",
@@ -1021,6 +1171,7 @@ async def run_full_matrix_campaign(
             operation_id=recovery["operation_id"],
             result=recovery,
         )
+        records.append(recovered_record)
 
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     if _utc(campaign["expires_at"], label="campaign expires_at") <= current:
@@ -1122,6 +1273,7 @@ async def run_full_matrix_campaign(
                         approver_policy=approver_policy,
                         now=now,
                         require_fresh_approval=False,
+                        witness_relay_public_key=witness_public_key,
                     )
                     if fresh["campaign_hash"] != identity.campaign_hash:
                         raise FullMatrixRunnerError(
@@ -1157,7 +1309,7 @@ async def run_full_matrix_campaign(
                         scenario_id=scenario_id, iteration=iteration,
                         attempt=attempt,
                     )
-                    _journal_event(
+                    started_record = _journal_event(
                         journal,
                         identity,
                         event="scenario_started",
@@ -1167,6 +1319,7 @@ async def run_full_matrix_campaign(
                         attempt=attempt,
                         operation_id=scenario_operation_id,
                     )
+                    records.append(started_record)
                     monotonic_started = monotonic()
                     result = _validate_scenario(
                         await backend.execute_scenario(
@@ -1194,7 +1347,7 @@ async def run_full_matrix_campaign(
                             "Full Matrix scenario artifact was reused"
                         )
                     used_scenario_artifacts.add(result["artifact_path"])
-                    _journal_event(
+                    passed_record = _journal_event(
                         journal,
                         identity,
                         event="scenario_passed",
@@ -1205,6 +1358,7 @@ async def run_full_matrix_campaign(
                         operation_id=scenario_operation_id,
                         result=result,
                     )
+                    records.append(passed_record)
                     completed[key] = result
                     results.append(result)
                 phase_key = (iteration, phase)
@@ -1222,50 +1376,129 @@ async def run_full_matrix_campaign(
                             "Full Matrix retained phase evidence differs on resume"
                         )
                     phase_evidence.append(evidence)
-                    continue
-                cleanup_context = _operation_context(
-                    phase=phase, iteration=iteration, failed=False
-                )
-                cleanup = await _run_journaled_operation(
-                    journal=journal,
-                    identity=identity,
-                    records=records,
-                    operation_kind="cleanup",
-                    context=cleanup_context,
-                    invoke=lambda operation_id: backend.cleanup_phase(
-                        identity, phase=phase, iteration=iteration,
-                        failed=False, operation_id=operation_id,
-                    ),
-                    validate=lambda result, operation_id: _validate_cleanup(
-                        result, identity, phase=phase, iteration=iteration,
-                        failed=False,
-                        operation_id=operation_id, artifact_root=artifact_root,
-                    ),
-                )
-                evidence, evidence_hash = _phase_documents(
-                    identity=identity,
-                    iteration=iteration,
-                    phase=phase,
-                    results=results,
-                    cleanup=cleanup,
-                    artifact_root=artifact_root,
-                )
-                phase_evidence.append(evidence)
-                _journal_event(
-                    journal,
-                    identity,
-                    event="phase_passed",
-                    phase=phase,
-                    iteration=iteration,
-                    evidence_hash=evidence_hash,
-                    cleanup_evidence_hash=cleanup["evidence_hash"],
-                    cleanup_result=cleanup,
-                )
+                else:
+                    cleanup_context = _operation_context(
+                        phase=phase, iteration=iteration, failed=False
+                    )
+                    cleanup = await _run_journaled_operation(
+                        journal=journal,
+                        identity=identity,
+                        records=records,
+                        operation_kind="cleanup",
+                        context=cleanup_context,
+                        invoke=lambda operation_id: backend.cleanup_phase(
+                            identity, phase=phase, iteration=iteration,
+                            failed=False, operation_id=operation_id,
+                        ),
+                        validate=lambda result, operation_id: _validate_cleanup(
+                            result, identity=identity, phase=phase,
+                            iteration=iteration, failed=False,
+                            operation_id=operation_id, artifact_root=artifact_root,
+                        ),
+                    )
+                    evidence, evidence_hash = _phase_documents(
+                        identity=identity,
+                        iteration=iteration,
+                        phase=phase,
+                        results=results,
+                        cleanup=cleanup,
+                        artifact_root=artifact_root,
+                    )
+                    phase_evidence.append(evidence)
+                    phase_record = _journal_event(
+                        journal,
+                        identity,
+                        event="phase_passed",
+                        phase=phase,
+                        iteration=iteration,
+                        evidence_hash=evidence_hash,
+                        cleanup_evidence_hash=cleanup["evidence_hash"],
+                        cleanup_result=cleanup,
+                    )
+                    records.append(phase_record)
+                    completed_phases[phase_key] = evidence_hash
+
+                if (
+                    iteration == MIDPOINT_COMPLETED_ITERATION
+                    and phase == tuple(catalog)[-1]
+                ):
+                    midpoint_pause, midpoint_resume = _midpoint_state(
+                        records, campaign=campaign, identity=identity
+                    )
+                    if midpoint_pause is None:
+                        preceding = records[-1]
+                        midpoint_pause = _journal_event(
+                            journal,
+                            identity,
+                            event="campaign_paused",
+                            reason=MIDPOINT_PAUSE_REASON,
+                            phase=phase,
+                            completed_iteration=MIDPOINT_COMPLETED_ITERATION,
+                            next_iteration=MIDPOINT_NEXT_ITERATION,
+                            pre_pause_journal_head=preceding["event_hash"],
+                            cleanup_evidence_hash=preceding[
+                                "cleanup_evidence_hash"
+                            ],
+                        )
+                        records.append(midpoint_pause)
+                        midpoint_pause, midpoint_resume = _midpoint_state(
+                            records, campaign=campaign, identity=identity
+                        )
+                        return _paused_result(
+                            campaign=campaign,
+                            identity=identity,
+                            pause=midpoint_pause,
+                            refresh_bundle_status="required",
+                        )
+                    if midpoint_resume is None:
+                        if midpoint_refresh_bundle is None:
+                            return _paused_result(
+                                campaign=campaign,
+                                identity=identity,
+                                pause=midpoint_pause,
+                                refresh_bundle_status="required",
+                            )
+                        try:
+                            refresh_summary = _verify_refresh_bundle(
+                                midpoint_refresh_bundle,
+                                campaign=campaign,
+                                approver_policy=approver_policy,
+                                identity=identity,
+                                pause=midpoint_pause,
+                                witness_public_key=witness_public_key,
+                                now=now,
+                                require_fresh=True,
+                            )
+                        except FullMatrixMidpointError as exc:
+                            return _paused_result(
+                                campaign=campaign,
+                                identity=identity,
+                                pause=midpoint_pause,
+                                refresh_bundle_status="rejected",
+                                rejection=str(exc),
+                            )
+                        midpoint_resume = _journal_event(
+                            journal,
+                            identity,
+                            event="campaign_resumed",
+                            reason=MIDPOINT_RESUME_REASON,
+                            phase=phase,
+                            completed_iteration=MIDPOINT_COMPLETED_ITERATION,
+                            next_iteration=MIDPOINT_NEXT_ITERATION,
+                            pre_pause_journal_head=midpoint_pause[
+                                "pre_pause_journal_head"
+                            ],
+                            pause_event_hash=midpoint_pause["event_hash"],
+                            refresh_bundle=midpoint_refresh_bundle,
+                            refresh_summary=refresh_summary,
+                        )
+                        records.append(midpoint_resume)
         fresh = verify_campaign(
             campaign,
             approver_policy=approver_policy,
             now=now,
             require_fresh_approval=False,
+            witness_relay_public_key=witness_public_key,
         )
         if fresh["campaign_hash"] != identity.campaign_hash:
             raise FullMatrixRunnerError(

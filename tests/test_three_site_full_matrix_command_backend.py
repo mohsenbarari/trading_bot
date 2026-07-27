@@ -22,6 +22,7 @@ from scripts.run_three_site_staging_full_matrix_campaign import (
     CONFIRM_ENV,
     CONFIRM_VALUE,
     _execute,
+    main as campaign_cli_main,
 )
 
 
@@ -321,6 +322,33 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
             with patch.dict(os.environ, {CONFIRM_ENV: CONFIRM_VALUE}, clear=True):
                 with self.assertRaisesRegex(RuntimeError, "campaign-bound"):
                     await _execute(args)
+
+
+class FullMatrixCampaignCliTests(unittest.TestCase):
+    def test_execute_writes_and_reports_paused_status_without_report_hash(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "paused.json"
+            paused = {
+                "schema": "three-site-staging-full-matrix-paused-v1",
+                "status": "paused",
+                "pause_event_hash": "a" * 64,
+            }
+            argv = [
+                "execute",
+                "--campaign", str(root / "campaign.json"),
+                "--approver-policy", str(root / "policy.json"),
+                "--backend-config", str(root / "backend.json"),
+                "--artifact-root", str(root),
+                "--journal", str(root / "journal.jsonl"),
+                "--output", str(output),
+            ]
+            with patch(
+                "scripts.run_three_site_staging_full_matrix_campaign._execute",
+                return_value=paused,
+            ):
+                self.assertEqual(campaign_cli_main(argv), 0)
+            self.assertEqual(json.loads(output.read_text()), paused)
 
 
 if __name__ == "__main__":
