@@ -38,12 +38,16 @@ def valid_values() -> dict[str, str]:
         "WA_IR_DEPLOY_BASE_DIR": "/srv/app",
         "OBJECT_STORAGE_CREDENTIAL_FILE": "/root/secure/s3.env",
         "OBJECT_URL_TTL_SECONDS": "900",
-        "AGE_IDENTITY_FILE": "/root/secure/identity.txt",
+        "AGE_IDENTITY_FILE": str(MODULE.WA_IR_AGE_IDENTITY_FILE),
         "AGE_RECIPIENT_FILE": "/root/secure/recipient.txt",
         "LOCAL_ARTIFACT_DIR": "/srv/artifacts",
         "REMOTE_BACKUP_DIR": "/srv/backups",
         "RESTORE_OPERATION_ID": "12345678-1234-4234-8234-123456789abc",
-        "TARGET_DB_VOLUME_NAME": "trading_bot_dark_ir_postgres_data",
+        "TARGET_DB_IMAGE_ID": "sha256:" + "d" * 64,
+        "TARGET_DB_VOLUME_NAME": (
+            "trading_bot_dark_ir_"
+            "12345678-1234-4234-8234-123456789abc_postgres_data"
+        ),
     })
     return values
 
@@ -124,9 +128,20 @@ class DarkStandbyManifestTests(unittest.TestCase):
         values = valid_values()
         values["RELEASE_ARTIFACT_SHA256"] = "short"
         values["RESTORE_OPERATION_ID"] = "not-a-uuid"
+        values["TARGET_DB_IMAGE_ID"] = "latest"
+        values["TARGET_DB_VOLUME_NAME"] = "shared-volume"
         failures, _ = MODULE.validate(values, check_files=False)
         self.assertTrue(any("RELEASE_ARTIFACT_SHA256" in item for item in failures))
         self.assertTrue(any("RESTORE_OPERATION_ID" in item for item in failures))
+        self.assertTrue(any("TARGET_DB_IMAGE_ID" in item for item in failures))
+        self.assertTrue(any("TARGET_DB_VOLUME_NAME" in item for item in failures))
+
+    def test_remote_age_identity_path_is_canonical_and_not_a_local_secret_probe(self) -> None:
+        values = valid_values()
+        values["AGE_IDENTITY_FILE"] = "/root/secure/legacy-identity.txt"
+        failures, _ = MODULE.validate(values, check_files=False)
+        self.assertTrue(any("canonical WA-IR-local" in item for item in failures))
+        self.assertNotIn("AGE_IDENTITY_FILE", MODULE.SECRET_PATH_KEYS)
 
 
 if __name__ == "__main__":

@@ -24,9 +24,11 @@ from core.three_site_topology import (
     WEBAPP_FI_HOST,
     WEBAPP_IR_HOST,
 )
+from scripts.wa_ir_production_transport_contract import WA_IR_AGE_IDENTITY_FILE
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 TRUE_VALUES = {"1", "true", "yes", "on"}
 EXPECTED_TOPOLOGY = {
@@ -94,11 +96,11 @@ REQUIRED_KEYS = (
     "AGE_IDENTITY_FILE", "AGE_RECIPIENT_FILE", "LOCAL_ARTIFACT_DIR",
     "REMOTE_BACKUP_DIR", "WRITER_WITNESS_HOST", "TRANSITIONAL_WRITER_WITNESS_HOST",
     "SOURCE_TREE_SHA", "RELEASE_ARTIFACT_PATH", "RELEASE_ARTIFACT_SHA256",
-    "RESTORE_OPERATION_ID", "TARGET_DB_VOLUME_NAME",
+    "RESTORE_OPERATION_ID", "TARGET_DB_IMAGE_ID", "TARGET_DB_VOLUME_NAME",
 )
 
 SECRET_PATH_KEYS = (
-    "SOURCE_RUNTIME_ENV", "OBJECT_STORAGE_CREDENTIAL_FILE", "AGE_IDENTITY_FILE",
+    "SOURCE_RUNTIME_ENV", "OBJECT_STORAGE_CREDENTIAL_FILE",
 )
 
 
@@ -172,8 +174,20 @@ def validate(values: dict[str, str], *, check_files: bool) -> tuple[list[str], l
         failures.append("SOURCE_TREE_SHA must be an exact 40-character lowercase Git tree SHA")
     if not SHA256_RE.fullmatch(values.get("RELEASE_ARTIFACT_SHA256", "")):
         failures.append("RELEASE_ARTIFACT_SHA256 must be exactly 64 lowercase hex characters")
-    if not UUID_RE.fullmatch(values.get("RESTORE_OPERATION_ID", "")):
+    operation_id = values.get("RESTORE_OPERATION_ID", "")
+    if not UUID_RE.fullmatch(operation_id):
         failures.append("RESTORE_OPERATION_ID must be a canonical UUID")
+    if not IMAGE_ID_RE.fullmatch(values.get("TARGET_DB_IMAGE_ID", "")):
+        failures.append("TARGET_DB_IMAGE_ID must be an immutable sha256 Docker image ID")
+    expected_volume = f"trading_bot_dark_ir_{operation_id}_postgres_data"
+    if values.get("TARGET_DB_VOLUME_NAME") != expected_volume:
+        failures.append(
+            "TARGET_DB_VOLUME_NAME must be derived from RESTORE_OPERATION_ID"
+        )
+    if values.get("AGE_IDENTITY_FILE") != str(WA_IR_AGE_IDENTITY_FILE):
+        failures.append(
+            "AGE_IDENTITY_FILE must be the canonical WA-IR-local identity path"
+        )
     for key, expected in EXPECTED_TOPOLOGY.items():
         if values.get(key) != expected:
             failures.append(f"{key} must match the approved topology address {expected}")

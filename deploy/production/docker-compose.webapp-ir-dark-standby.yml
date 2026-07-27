@@ -1,16 +1,15 @@
-# Standalone DB-only manifest for data-ready WebApp-IR.
+# Standalone DB-only manifest for one data-ready WebApp-IR restore operation.
 #
-# Do NOT combine this file with docker-compose.iran.yml.  Application-capable
-# services are intentionally absent, so profiles and `docker compose run`
-# cannot make them available.  The database has no host port and no container
-# network while the site is dark.
+# Do NOT combine this file with another Compose file. Application-capable
+# services are absent, the exact database image must already be loaded, and the
+# database has neither a host port nor a container network while the site is
+# dark.
+name: trading_bot_dark_ir_${DARK_STANDBY_OPERATION_ID:?canonical operation id required}
+
 services:
   db:
-    image: trading_bot_postgres_boottime:15-${RELEASE_SHA:?exact release SHA required}
-    build:
-      context: ../..
-      dockerfile: deploy/postgres-boottime/Dockerfile
-    container_name: trading_bot_db
+    image: ${DARK_STANDBY_DB_IMAGE_ID:?immutable target-local database image ID required}
+    pull_policy: never
     restart: unless-stopped
     network_mode: none
     environment:
@@ -37,4 +36,4 @@ services:
 
 volumes:
   postgres_data:
-    name: ${DARK_STANDBY_DB_VOLUME_NAME:-trading_bot_dark_ir_postgres_data}
+    name: trading_bot_dark_ir_${DARK_STANDBY_OPERATION_ID:?canonical operation id required}_postgres_data

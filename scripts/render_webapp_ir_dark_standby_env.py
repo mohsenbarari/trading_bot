@@ -11,9 +11,12 @@ from core.secure_file_io import read_secure_text, write_secure_atomic_bytes
 
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
 OVERRIDES = {
     "DARK_STANDBY_MODE": "1",
-    "COMPOSE_PROJECT_NAME": "trading_bot_dark_ir",
     "TZ": "UTC",
     "PGTZ": "UTC",
 }
@@ -51,9 +54,19 @@ def parse(path: Path) -> dict[str, str]:
     return values
 
 
-def render(source: Path, output: Path, release_sha: str) -> None:
+def render(
+    source: Path,
+    output: Path,
+    release_sha: str,
+    operation_id: str,
+    db_image_id: str,
+) -> None:
     if not SHA_RE.fullmatch(release_sha):
         raise ValueError("release SHA must be exactly 40 lowercase hex characters")
+    if not UUID_RE.fullmatch(operation_id):
+        raise ValueError("operation id must be a nonzero canonical UUID")
+    if not IMAGE_ID_RE.fullmatch(db_image_id):
+        raise ValueError("database image ID must be sha256 plus 64 lowercase hex characters")
     source_values = parse(source)
     missing = sorted(key for key in REQUIRED_DATABASE_KEYS if not source_values.get(key))
     if missing:
@@ -61,8 +74,10 @@ def render(source: Path, output: Path, release_sha: str) -> None:
     values = {key: source_values[key] for key in DATABASE_ONLY_KEYS if source_values.get(key)}
     values.update(OVERRIDES)
     values["RELEASE_SHA"] = release_sha
+    values["DARK_STANDBY_OPERATION_ID"] = operation_id
+    values["DARK_STANDBY_DB_IMAGE_ID"] = db_image_id
     rendered = (
-        "# Generated DB-only WebApp-IR environment; contains no application runtime secrets.\n"
+        "# Generated DB-only WebApp-IR environment; root-only database credential.\n"
         + "\n".join(f"{key}={values[key]}" for key in sorted(values))
         + "\n"
     )
@@ -78,8 +93,16 @@ def main() -> int:
     parser.add_argument("--source", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--release-sha", required=True)
+    parser.add_argument("--operation-id", required=True)
+    parser.add_argument("--db-image-id", required=True)
     args = parser.parse_args()
-    render(Path(args.source), Path(args.output), args.release_sha)
+    render(
+        Path(args.source),
+        Path(args.output),
+        args.release_sha,
+        args.operation_id,
+        args.db_image_id,
+    )
     print("dark-standby runtime env rendered; values suppressed")
     return 0
 

@@ -78,7 +78,7 @@ timezone must never be changed to affect display.
 | Bot-FI | `65.109.216.187` | `UTC` |
 | WebApp-FI | `65.109.220.59` | `UTC` |
 | WA-IR dark standby | `95.38.164.29` | `UTC` |
-| Primary Witness | `185.206.95.94` | `UTC` |
+| Primary Witness | `37.152.191.11` | `UTC` |
 | Transitional Witness | `185.231.182.6` | `UTC` |
 
 ## Ordered Procedure
@@ -125,8 +125,24 @@ The delivery implementation is split into four fail-closed tools:
   Matrix runner rejects direct WA-IR downloads over SCP.
 
 Durable evidence contains object keys, version IDs, byte counts, and hashes,
-but never presigned URLs. URLs live only in a root-owned `0600` ephemeral
-bootstrap descriptor and expire within 900 seconds.
+but never presigned URLs. The controller must build each descriptor in memory
+and stream it directly over non-interactive SSH stdin; it must never write the
+descriptor to a regular file. URLs expire within 900 seconds.
+
+The production data-ready implementation uses
+`scripts/wa_ir_production_object_storage_transport.py` for create-only,
+exact-version publication primitives,
+`scripts/wa_ir_production_transport_contract.py` for the receiver's
+dependency-free boundary, and
+`scripts/receive_wa_ir_production_artifact.py` for the WA-IR receive boundary.
+The publisher requires a durable root-only operation journal so an ambiguous
+PUT or read-back failure can resume with the same key and ciphertext. The
+receiver accepts its bounded descriptor only from an ephemeral non-interactive
+stdin stream, so the presigned URL is absent from argv, the environment, and
+regular files. Exact retries attest an already-installed matching artifact
+without overwriting it. It does not extract an archive, run `docker load`, or
+start Compose. The live publisher/orchestrator remains a separate reviewed
+step.
 
 The SSH target is the provider-created `ubuntu` account. It accepts the
 controller public key and uses passwordless `sudo -n` for the bounded root
@@ -168,11 +184,11 @@ payload crosses the Finland-Iran SSH link.
 5. Do not restore Redis.
 6. Keep `app`, `sync_worker`, Nginx public ingress, and writer lease stopped.
 
-Always combine the production Iran Compose file with
-`deploy/production/docker-compose.webapp-ir-dark-standby.yml`. The overlay puts
-`app`, `sync_worker`, `migration`, and Redis behind the
-`activation-forbidden` profile; an ordinary data-ready start can therefore
-bring up only PostgreSQL.
+Use `deploy/production/docker-compose.webapp-ir-dark-standby.yml` by itself.
+Never combine it with the production Iran Compose file. The standalone
+manifest contains only PostgreSQL, requires a target-local immutable image ID,
+derives its project and volume names from the restore operation UUID, disables
+image pulls, publishes no ports, and attaches no container network.
 
 The current API startup performs rollout writes even when background jobs are
 disabled. Starting it is therefore not a valid parity probe in this phase.

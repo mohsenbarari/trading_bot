@@ -18,6 +18,18 @@ SPEC.loader.exec_module(MODULE)
 
 
 class RenderDarkStandbyEnvTests(unittest.TestCase):
+    OPERATION_ID = "12345678-1234-4234-8234-123456789abc"
+    IMAGE_ID = "sha256:" + "d" * 64
+
+    def render(self, source: Path, output: Path) -> None:
+        MODULE.render(
+            source,
+            output,
+            "a" * 40,
+            self.OPERATION_ID,
+            self.IMAGE_ID,
+        )
+
     def test_render_emits_only_closed_database_allowlist(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -33,11 +45,13 @@ class RenderDarkStandbyEnvTests(unittest.TestCase):
                 encoding="utf-8",
             )
             source.chmod(0o600)
-            MODULE.render(source, output, "a" * 40)
+            self.render(source, output)
             values = MODULE.parse(output)
             self.assertEqual(values["DARK_STANDBY_MODE"], "1")
-            self.assertEqual(values["COMPOSE_PROJECT_NAME"], "trading_bot_dark_ir")
+            self.assertNotIn("COMPOSE_PROJECT_NAME", values)
             self.assertEqual(values["RELEASE_SHA"], "a" * 40)
+            self.assertEqual(values["DARK_STANDBY_OPERATION_ID"], self.OPERATION_ID)
+            self.assertEqual(values["DARK_STANDBY_DB_IMAGE_ID"], self.IMAGE_ID)
             self.assertEqual(values["POSTGRES_PASSWORD"], "db-secret")
             self.assertEqual(values["POSTGRES_MAX_CONNECTIONS"], "200")
             for forbidden in (
@@ -59,7 +73,7 @@ class RenderDarkStandbyEnvTests(unittest.TestCase):
             source.write_text("POSTGRES_DB=app\nPOSTGRES_USER=app\n", encoding="utf-8")
             source.chmod(0o600)
             with self.assertRaisesRegex(ValueError, "POSTGRES_PASSWORD"):
-                MODULE.render(source, root / "target.env", "a" * 40)
+                self.render(source, root / "target.env")
 
     def test_source_symlink_and_hardlink_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -73,11 +87,11 @@ class RenderDarkStandbyEnvTests(unittest.TestCase):
             symlink = root / "symlink.env"
             symlink.symlink_to(source)
             with self.assertRaises(Exception):
-                MODULE.render(symlink, root / "target.env", "a" * 40)
+                self.render(symlink, root / "target.env")
             hardlink = root / "hardlink.env"
             hardlink.hardlink_to(source)
             with self.assertRaises(Exception):
-                MODULE.render(source, root / "target.env", "a" * 40)
+                self.render(source, root / "target.env")
 
     def test_output_symlink_is_rejected_without_touching_target(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -94,8 +108,34 @@ class RenderDarkStandbyEnvTests(unittest.TestCase):
             output = root / "target.env"
             output.symlink_to(unrelated)
             with self.assertRaises(Exception):
-                MODULE.render(source, output, "a" * 40)
+                self.render(source, output)
             self.assertEqual(unrelated.read_text(encoding="utf-8"), "do-not-change\n")
+
+    def test_nonimmutable_image_or_invalid_operation_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.env"
+            source.write_text(
+                "POSTGRES_DB=app\nPOSTGRES_USER=app\nPOSTGRES_PASSWORD=secret\n",
+                encoding="utf-8",
+            )
+            source.chmod(0o600)
+            with self.assertRaisesRegex(ValueError, "operation id"):
+                MODULE.render(
+                    source,
+                    root / "target.env",
+                    "a" * 40,
+                    "shared",
+                    self.IMAGE_ID,
+                )
+            with self.assertRaisesRegex(ValueError, "image ID"):
+                MODULE.render(
+                    source,
+                    root / "target.env",
+                    "a" * 40,
+                    self.OPERATION_ID,
+                    "trading_bot_postgres_boottime:latest",
+                )
 
 
 if __name__ == "__main__":
