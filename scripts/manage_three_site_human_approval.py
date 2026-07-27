@@ -406,6 +406,7 @@ def _issue_session(args: argparse.Namespace) -> dict:
             expected_action=actions[0],
             expected_environment="staging",
             expected_subject=probe_subject,
+            allow_session=True,
         )
         write_secure_new_bytes(
             output,

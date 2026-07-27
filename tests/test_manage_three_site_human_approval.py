@@ -176,6 +176,7 @@ class ManageHumanApprovalTests(unittest.TestCase):
                     expected_environment="staging",
                     expected_subject=subject,
                     now=now,
+                    allow_session=True,
                 )
                 self.assertEqual(verified.action, action)
             audit = verify_hash_chained_jsonl(issuer_paths(issuer)["audit"])
