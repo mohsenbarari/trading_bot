@@ -7,6 +7,8 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -362,6 +364,30 @@ class LegacyRollbackAttestationTests(unittest.TestCase):
             status, result = self.run_main(self.arguments())
         self.assertEqual(status, 1)
         self.assertNotIn("secret", json.dumps(result))
+
+    def test_release_cli_entrypoints_import_from_outside_repository(self):
+        for name in (
+            "attest_production_shadow_legacy_rollback.py",
+            "build_production_shadow_source_snapshot_binding.py",
+        ):
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(MODULE.REPO_ROOT / "scripts" / name),
+                    "--help",
+                ],
+                cwd="/",
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=10,
+                check=False,
+            )
+            self.assertEqual(
+                result.returncode,
+                0,
+                result.stderr.decode("utf-8", errors="replace"),
+            )
 
 
 if __name__ == "__main__":
