@@ -11,6 +11,7 @@ from unittest.mock import patch
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from core.canonical_json import canonical_json_bytes
 from core.human_approval import (
     HumanApprovalError,
     approval_subject,
@@ -411,6 +412,10 @@ class HumanApprovalTests(unittest.TestCase):
         self.assertNotIn("allowed_actions", receipt)
         self.assertNotIn(session["signature"], str(receipt))
         self.assertEqual(
+            datetime.fromisoformat(receipt["session_issued_at"]),
+            datetime.fromisoformat(session["issued_at"].replace("Z", "+00:00")),
+        )
+        self.assertEqual(
             receipt["session_scope_sha256"],
             staging_session_scope_sha256(
                 release_sha="b" * 40,
@@ -445,6 +450,29 @@ class HumanApprovalTests(unittest.TestCase):
         )
         self.assertEqual(verified.approval_id, session["approval_id"])
         self.assertEqual(verified.authentication_methods, ("password", "totp"))
+
+        invalid_chronology = copy.deepcopy(receipt)
+        invalid_chronology["session_issued_at"] = (
+            NOW + timedelta(minutes=2)
+        ).isoformat()
+        invalid_unsigned = {
+            key: value
+            for key, value in invalid_chronology.items()
+            if key != "witness_signature"
+        }
+        invalid_chronology["witness_signature"] = base64.b64encode(
+            witness_private.sign(canonical_json_bytes(invalid_unsigned))
+        ).decode("ascii")
+        with self.assertRaisesRegex(HumanApprovalError, "chronology"):
+            verify_human_approval(
+                invalid_chronology,
+                policy_payload=self.enrollment.policy_payload,
+                expected_action="approve_inventory",
+                expected_environment="staging",
+                expected_subject=self.subject,
+                now=NOW + timedelta(minutes=2),
+                witness_relay_public_key=witness_public,
+            )
 
         changed_subject = copy.deepcopy(self.subject)
         changed_subject["artifact_sha256"] = "c" * 64

@@ -1048,6 +1048,19 @@ async def run_full_matrix_campaign(
 ) -> dict[str, Any]:
     """Execute or resume the one fixed campaign and return its final report."""
 
+    approvals = campaign.get("approvals")
+    initial_approval = (
+        approvals[0]
+        if isinstance(approvals, list) and len(approvals) == 1
+        else None
+    )
+    if (
+        not isinstance(initial_approval, dict)
+        or initial_approval.get("schema") != RELAY_RECEIPT_SCHEMA
+    ):
+        raise FullMatrixRunnerError(
+            "new Full Matrix execution requires a Witness relay start receipt"
+        )
     monotonic = monotonic or getattr(backend, "monotonic", time.monotonic)
     journal_exists = journal.exists() and journal.stat().st_size > 0
     _validate_artifact_root(artifact_root)
@@ -1083,27 +1096,20 @@ async def run_full_matrix_campaign(
         witness_relay_public_key=witness_public_key,
     )
     verify_bound_artifacts(campaign, bound_artifacts)
-    initial_approval = campaign["approvals"][0]
-    prior_session_token_sha256: str | None = None
-    if (
-        isinstance(initial_approval, dict)
-        and initial_approval.get("schema") == RELAY_RECEIPT_SCHEMA
-    ):
-        if not journal_exists:
-            try:
-                prior_session_token_sha256 = verify_initial_session_runway(
-                    initial_approval,
-                    release_sha=approved["release_sha"],
-                    now=now,
-                )
-            except FullMatrixMidpointError as exc:
-                raise FullMatrixRunnerError(
-                    "initial Full Matrix Witness session is not fresh enough"
-                ) from exc
-        else:
-            prior_session_token_sha256 = str(
-                initial_approval.get("session_token_sha256") or ""
+    prior_session_token_sha256 = str(
+        initial_approval.get("session_token_sha256") or ""
+    )
+    if not journal_exists:
+        try:
+            prior_session_token_sha256 = verify_initial_session_runway(
+                initial_approval,
+                release_sha=approved["release_sha"],
+                now=now,
             )
+        except FullMatrixMidpointError as exc:
+            raise FullMatrixRunnerError(
+                "initial Full Matrix Witness session is not fresh enough"
+            ) from exc
     identity = CampaignIdentity(
         campaign_id=approved["campaign_id"],
         gate_group_id=approved["gate_group_id"],

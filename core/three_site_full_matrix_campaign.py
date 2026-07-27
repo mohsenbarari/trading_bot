@@ -1260,11 +1260,10 @@ def verify_complete_matrix(
         isinstance(approvals, list)
         and len(approvals) == 1
         and isinstance(approvals[0], dict)
-        and approvals[0].get("schema")
-        == "three-site-human-approval-witness-relay-receipt-v1"
+        and approvals[0].get("schema") == RELAY_RECEIPT_SCHEMA
     )
     witness_public_key: str | None = None
-    if execution_journal is not None or approval_uses_relay:
+    if approval_uses_relay:
         try:
             witness_public_key = load_bound_witness_public_key(
                 bound_artifacts["failover_backend_config"],
@@ -1334,16 +1333,13 @@ def verify_complete_matrix(
     journal_binding: dict[str, Any] | None = None
     completed_report_hash: str | None = None
     if execution_journal is not None:
-        if witness_public_key is None:
-            raise FullMatrixCampaignError(
-                "campaign-bound Witness identity is unavailable"
-            )
         journal_binding, completed_report_hash = _verify_execution_journal(
             execution_journal,
             campaign=campaign,
             campaign_hash=approved["campaign_hash"],
             approver_policy=approver_policy,
             witness_public_key=witness_public_key,
+            require_midpoint_refresh=approval_uses_relay,
             phase_evidence=phase_evidence,
             artifact_root=artifact_root,
             now=now,
@@ -1388,7 +1384,8 @@ def _verify_execution_journal(
     campaign: dict[str, Any],
     campaign_hash: str,
     approver_policy: dict[str, Any],
-    witness_public_key: str,
+    witness_public_key: str | None,
+    require_midpoint_refresh: bool,
     phase_evidence: list[dict[str, Any]],
     artifact_root: Path,
     now: datetime | None,
@@ -1400,52 +1397,57 @@ def _verify_execution_journal(
         "campaign_started", "scenario_started", "scenario_recovered",
         "scenario_passed", "phase_passed", "campaign_finalized",
         "campaign_completed", "campaign_blocked", "operation_started",
-        "operation_passed", "campaign_paused", "campaign_resumed",
+        "operation_passed",
     }
+    if require_midpoint_refresh:
+        allowed_events.update({"campaign_paused", "campaign_resumed"})
     identity = {
         "campaign_id": campaign["campaign_id"],
         "campaign_hash": campaign_hash,
         "release_sha": campaign["release_sha"],
         "activation_sha": campaign["activation_sha"],
     }
-    try:
-        midpoint_pause, midpoint_resume = validate_midpoint_journal(
-            records,
-            campaign=campaign,
-            campaign_hash=campaign_hash,
-        )
-        if midpoint_pause is None or midpoint_resume is None:
-            raise FullMatrixMidpointError(
-                "completed journal lacks the midpoint refresh proof"
+    if require_midpoint_refresh:
+        if witness_public_key is None:
+            raise FullMatrixCampaignError(
+                "campaign-bound Witness identity is unavailable"
             )
-        midpoint_summary = verify_midpoint_bundle(
-            midpoint_resume["refresh_bundle"],
-            campaign=campaign,
-            campaign_hash=campaign_hash,
-            pre_pause_journal_head=str(
-                midpoint_pause["pre_pause_journal_head"]
-            ),
-            pause_timestamp=str(midpoint_pause["timestamp"]),
-            policy_payload=approver_policy,
-            witness_public_key=witness_public_key,
-            prior_session_token_sha256=(
-                str(campaign["approvals"][0].get("session_token_sha256") or "")
-                if isinstance(campaign["approvals"][0], dict)
-                and campaign["approvals"][0].get("schema")
-                == RELAY_RECEIPT_SCHEMA
-                else None
-            ),
-            now=now,
-            require_fresh=False,
-        )
-        if midpoint_summary != midpoint_resume["refresh_summary"]:
-            raise FullMatrixMidpointError(
-                "midpoint refresh summary differs from its signed bundle"
+        try:
+            midpoint_pause, midpoint_resume = validate_midpoint_journal(
+                records,
+                campaign=campaign,
+                campaign_hash=campaign_hash,
             )
-    except FullMatrixMidpointError as exc:
-        raise FullMatrixCampaignError(
-            "Full Matrix midpoint refresh proof is invalid"
-        ) from exc
+            if midpoint_pause is None or midpoint_resume is None:
+                raise FullMatrixMidpointError(
+                    "completed journal lacks the midpoint refresh proof"
+                )
+            midpoint_summary = verify_midpoint_bundle(
+                midpoint_resume["refresh_bundle"],
+                campaign=campaign,
+                campaign_hash=campaign_hash,
+                pre_pause_journal_head=str(
+                    midpoint_pause["pre_pause_journal_head"]
+                ),
+                pause_timestamp=str(midpoint_pause["timestamp"]),
+                policy_payload=approver_policy,
+                witness_public_key=witness_public_key,
+                prior_session_token_sha256=str(
+                    campaign["approvals"][0].get(
+                        "session_token_sha256"
+                    ) or ""
+                ),
+                now=now,
+                require_fresh=False,
+            )
+            if midpoint_summary != midpoint_resume["refresh_summary"]:
+                raise FullMatrixMidpointError(
+                    "midpoint refresh summary differs from its signed bundle"
+                )
+        except FullMatrixMidpointError as exc:
+            raise FullMatrixCampaignError(
+                "Full Matrix midpoint refresh proof is invalid"
+            ) from exc
     campaign_start = _utc(campaign["generated_at"], label="campaign generated_at")
     campaign_end = _utc(campaign["expires_at"], label="campaign expires_at")
     operation_artifacts: dict[str, dict[str, Any]] = {}
