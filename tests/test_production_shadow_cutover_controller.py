@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from contextlib import redirect_stdout
+import hashlib
 import io
 import json
 import os
@@ -17,13 +18,19 @@ from scripts.production_shadow_cutover_controller import (
     EXPECTED_TOPOLOGY,
     FIRST_WRITE_COMMIT_CONFIRMATION,
     FORWARD_ONLY_COMMIT_GATE,
+    HOST_AGENT_CONTRACT_SHA256,
     MANIFEST_SCHEMA,
     PHASES,
+    PHASE_SPECS,
+    PHASE_VERIFICATION_SCHEMA,
     POSTCOMMIT_JOURNAL_STATUS,
     POSTCOMMIT_SPECS,
     POLICY_FIELDS,
     PRODUCTION_VHOSTS,
     ProductionCutoverJournal,
+    VerifiedPhaseCompletion,
+    _persist_phase_verification_receipt,
+    _validate_phase_verification_result,
     _secure_root,
     _shadow_project,
     _shadow_root,
@@ -38,6 +45,21 @@ CAMPAIGN_ID = "11111111-1111-4111-8111-111111111111"
 OPERATION_ID = "22222222-2222-4222-8222-222222222222"
 RELEASE_SHA = "a" * 40
 LEGACY_RELEASE_SHA = "b" * 40
+
+
+def verified_completion(
+    phase: str,
+    evidence_sha256: str,
+    *,
+    receipt_sha256: str = "e" * 64,
+) -> VerifiedPhaseCompletion:
+    return VerifiedPhaseCompletion(
+        phase=phase,
+        evidence_sha256=evidence_sha256,
+        receipt_sha256=receipt_sha256,
+    )
+
+
 EXPECTED_PHASE_ORDER = [
     "pre_freeze_evidence",
     "shadow_startup_normalization",
@@ -98,6 +120,9 @@ def manifest_payload() -> dict:
             "nginx_rollback_generation_sha256": "9" * 64,
             "postcommit_executor_contract_sha256": "a" * 64,
             "phase_evidence_schema_sha256": "b" * 64,
+            "host_agent_sha256": "c" * 64,
+            "host_agent_contract_sha256": HOST_AGENT_CONTRACT_SHA256,
+            "phase_evidence_verifier_sha256": "d" * 64,
         },
         "policy": {field: True for field in POLICY_FIELDS},
     }
@@ -181,7 +206,42 @@ class ProductionShadowManifestTests(unittest.TestCase):
             gaps["postcommit-forward-recovery-executor"],
             "missing-hard-blocker",
         )
-        self.assertEqual(gaps["phase-evidence-schema-verifiers"], "missing")
+        self.assertEqual(
+            gaps["phase-evidence-schema-verifiers"],
+            "controller-wired-local-verifier",
+        )
+        verification = plan["phase_evidence_verification"]
+        self.assertTrue(
+            verification[
+                "semantic_verification_required_before_journal_completion"
+            ]
+        )
+        self.assertTrue(
+            verification["expected_role_request_sha256_required"]
+        )
+        self.assertTrue(
+            verification[
+                "expected_role_source_artifact_readback_sha256_required"
+            ]
+        )
+        self.assertTrue(verification["exact_release_path_required"])
+        self.assertTrue(
+            verification["verifier_path"].startswith(
+                str(_shadow_root(CAMPAIGN_ID))
+            )
+        )
+        self.assertTrue(verification["executor_wired"])
+        self.assertTrue(
+            verification["controller_executes_release_bound_verifier"]
+        )
+        agent_contract = plan["host_agent_contract"]
+        self.assertEqual(
+            agent_contract["sha256"],
+            HOST_AGENT_CONTRACT_SHA256,
+        )
+        self.assertTrue(agent_contract["self_hash_required"])
+        self.assertTrue(agent_contract["local_host_identity_required"])
+        self.assertFalse(agent_contract["operation_execution_supported"])
 
     def test_unknown_root_and_nested_fields_fail_closed(self):
         root_extra = manifest_payload()
@@ -198,6 +258,11 @@ class ProductionShadowManifestTests(unittest.TestCase):
         artifact_missing["artifacts"].pop(next(iter(ARTIFACT_FIELDS)))
         with self.assertRaisesRegex(CutoverContractError, "fields are not exact"):
             validate_manifest(artifact_missing)
+
+        zero_artifact = manifest_payload()
+        zero_artifact["artifacts"]["release_bundle_sha256"] = "0" * 64
+        with self.assertRaisesRegex(CutoverContractError, "not a SHA-256"):
+            validate_manifest(zero_artifact)
 
     def test_topology_policy_and_paths_are_pinned(self):
         wrong_host = manifest_payload()
@@ -461,6 +526,166 @@ class ProductionShadowManifestTests(unittest.TestCase):
             self.assertEqual(blocked["status"], "blocked")
             self.assertFalse(blocked["irreversible_commit_enabled"])
 
+    @unittest.skipUnless(os.geteuid() == 0, "production CLI is intentionally root-only")
+    def test_cli_complete_phase_runs_release_verifier_and_rejects_raw_digest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+            path.write_text(json.dumps(manifest_payload()), encoding="utf-8")
+            path.chmod(0o600)
+            token = verified_completion(PHASES[0], "7" * 64)
+            receipt = b'{"status":"verified"}\n'
+            journal = mock.Mock(unsafe=True)
+            journal.assert_bindings.return_value = {"status": "phase_started"}
+            journal.complete_phase.return_value = {
+                "status": "active",
+                "completed_phases": [PHASES[0]],
+            }
+            output = io.StringIO()
+            argv = [
+                "production-shadow-cutover-controller",
+                "--manifest",
+                str(path),
+                "--action",
+                "complete-phase",
+                "--phase",
+                PHASES[0],
+                "--evidence",
+                "/root/evidence.json",
+                "--approval",
+                "/root/approval.json",
+                "--apply",
+                "--confirm",
+                APPLY_CONFIRMATION,
+            ]
+            with (
+                mock.patch(
+                    "scripts.production_shadow_cutover_controller.ProductionCutoverJournal",
+                    return_value=journal,
+                ),
+                mock.patch(
+                    "scripts.production_shadow_cutover_controller._run_release_phase_verifier",
+                    return_value=(token, receipt),
+                ) as verifier,
+                mock.patch(
+                    "scripts.production_shadow_cutover_controller._persist_phase_verification_receipt",
+                    return_value=Path("/root/receipt.json"),
+                ) as persist,
+                mock.patch("sys.argv", argv),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(main(), 0)
+            self.assertEqual(json.loads(output.getvalue())["status"], "active")
+            verifier.assert_called_once()
+            persist.assert_called_once()
+            journal.complete_phase.assert_called_once_with(
+                PHASES[0],
+                verification=token,
+            )
+
+            blocked_output = io.StringIO()
+            with (
+                mock.patch.object(
+                    ProductionCutoverJournal,
+                    "complete_phase",
+                    side_effect=AssertionError("raw digest must not advance"),
+                ),
+                mock.patch(
+                    "sys.argv",
+                    [
+                        "production-shadow-cutover-controller",
+                        "--manifest",
+                        str(path),
+                        "--action",
+                        "complete-phase",
+                        "--phase",
+                        PHASES[0],
+                        "--evidence-sha256",
+                        "7" * 64,
+                    ],
+                ),
+                redirect_stdout(blocked_output),
+            ):
+                self.assertEqual(main(), 2)
+            blocked = json.loads(blocked_output.getvalue())
+            self.assertEqual(blocked["status"], "blocked")
+            self.assertIn("never accepts", blocked["error"])
+
+    @unittest.skipUnless(os.geteuid() == 0, "verification receipt is root-only")
+    def test_verifier_result_bindings_and_receipt_are_exact(self):
+        manifest = validate_manifest(manifest_payload())
+        manifest_sha256 = "4" * 64
+        plan = render_plan(manifest, manifest_sha256=manifest_sha256)
+        spec = next(item for item in PHASE_SPECS if item.phase == PHASES[0])
+        timestamp = datetime.now(timezone.utc).isoformat()
+        result = {
+            "schema": PHASE_VERIFICATION_SCHEMA,
+            "status": "verified",
+            "phase": PHASES[0],
+            "operation": spec.operation,
+            "campaign_id": CAMPAIGN_ID,
+            "operation_id": OPERATION_ID,
+            "release_sha": RELEASE_SHA,
+            "legacy_release_sha": LEGACY_RELEASE_SHA,
+            "manifest_sha256": manifest_sha256,
+            "plan_sha256": plan["plan_sha256"],
+            "approval_sha256": manifest["artifacts"][
+                "cutover_approval_sha256"
+            ],
+            "phase_evidence_schema_sha256": manifest["artifacts"][
+                "phase_evidence_schema_sha256"
+            ],
+            "manifest_artifact_bindings_sha256": hashlib.sha256(
+                json.dumps(
+                    manifest["artifacts"],
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest(),
+            "prior_phase_evidence_closure_sha256": "1" * 64,
+            "phase_input_closure_sha256": "2" * 64,
+            "prior_phase_count": 0,
+            "evidence_sha256": "3" * 64,
+            "verified_roles": list(spec.roles),
+            "verified_claim_count": 1,
+            "captured_at": timestamp,
+            "verified_at": timestamp,
+            "production_contacted": False,
+        }
+        token, receipt = _validate_phase_verification_result(
+            result,
+            phase=PHASES[0],
+            manifest=manifest,
+            manifest_sha256=manifest_sha256,
+            plan_sha256=plan["plan_sha256"],
+        )
+        self.assertEqual(token.evidence_sha256, "3" * 64)
+        with tempfile.TemporaryDirectory() as directory:
+            receipt_path = _persist_phase_verification_receipt(
+                token=token,
+                receipt=receipt,
+                evidence_root=Path(directory),
+            )
+            self.assertEqual(receipt_path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(
+                _persist_phase_verification_receipt(
+                    token=token,
+                    receipt=receipt,
+                    evidence_root=Path(directory),
+                ),
+                receipt_path,
+            )
+
+        forged = dict(result)
+        forged["production_contacted"] = True
+        with self.assertRaisesRegex(CutoverContractError, "mismatched bindings"):
+            _validate_phase_verification_result(
+                forged,
+                phase=PHASES[0],
+                manifest=manifest,
+                manifest_sha256=manifest_sha256,
+                plan_sha256=plan["plan_sha256"],
+            )
+
 
 class ProductionShadowCutoverJournalTests(unittest.TestCase):
     def journal(self, directory: str) -> ProductionCutoverJournal:
@@ -485,7 +710,11 @@ class ProductionShadowCutoverJournalTests(unittest.TestCase):
             journal.begin_phase(phase)
             state = journal.complete_phase(
                 phase,
-                evidence_sha256=f"{index:064x}",
+                verification=verified_completion(
+                    phase,
+                    f"{index:064x}",
+                    receipt_sha256=f"{index + 100:064x}",
+                ),
             )
         return state
 
@@ -509,19 +738,56 @@ class ProductionShadowCutoverJournalTests(unittest.TestCase):
                 journal.begin_phase(PHASES[1])
 
             digest = "5" * 64
-            completed = journal.complete_phase(PHASES[0], evidence_sha256=digest)
+            completion = verified_completion(PHASES[0], digest)
+            completed = journal.complete_phase(
+                PHASES[0],
+                verification=completion,
+            )
             self.assertEqual(completed["status"], "active")
             self.assertEqual(completed["completed_phases"], [PHASES[0]])
+            self.assertEqual(
+                completed["phase_verification_sha256"][PHASES[0]],
+                completion.receipt_sha256,
+            )
             self.assertEqual(
                 [event["kind"] for event in completed["events"]],
                 ["journal_created", "phase_started", "phase_completed"],
             )
             self.assertEqual(
-                journal.complete_phase(PHASES[0], evidence_sha256=digest),
+                journal.complete_phase(PHASES[0], verification=completion),
                 completed,
             )
             with self.assertRaisesRegex(CutoverContractError, "differs"):
-                journal.complete_phase(PHASES[0], evidence_sha256="6" * 64)
+                journal.complete_phase(
+                    PHASES[0],
+                    verification=verified_completion(PHASES[0], "6" * 64),
+                )
+
+    def test_raw_digest_or_invalid_verifier_completion_cannot_advance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = self.journal(directory)
+            self.create(journal)
+            journal.begin_phase(PHASES[0])
+            with self.assertRaises(TypeError):
+                journal.complete_phase(  # type: ignore[call-arg]
+                    PHASES[0],
+                    evidence_sha256="5" * 64,
+                )
+            with self.assertRaisesRegex(
+                CutoverContractError,
+                "release-verifier completion",
+            ):
+                journal.complete_phase(
+                    PHASES[0],
+                    verification=VerifiedPhaseCompletion(
+                        phase=PHASES[0],
+                        evidence_sha256="0" * 64,
+                        receipt_sha256="e" * 64,
+                    ),
+                )
+            state = journal.load()
+            self.assertEqual(state["status"], "phase_started")
+            self.assertEqual(state["completed_phases"], [])
 
     def test_phase_order_and_durable_start_are_required(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -530,7 +796,10 @@ class ProductionShadowCutoverJournalTests(unittest.TestCase):
             with self.assertRaisesRegex(CutoverContractError, "out of order"):
                 journal.begin_phase(PHASES[1])
             with self.assertRaisesRegex(CutoverContractError, "no matching durable start"):
-                journal.complete_phase(PHASES[0], evidence_sha256="5" * 64)
+                journal.complete_phase(
+                    PHASES[0],
+                    verification=verified_completion(PHASES[0], "5" * 64),
+                )
 
     def test_rollback_is_allowed_before_commit_and_terminal(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -647,7 +916,10 @@ class ProductionShadowCutoverJournalTests(unittest.TestCase):
             journal = self.journal(directory)
             self.create(journal)
             journal.begin_phase(PHASES[0])
-            journal.complete_phase(PHASES[0], evidence_sha256="5" * 64)
+            journal.complete_phase(
+                PHASES[0],
+                verification=verified_completion(PHASES[0], "5" * 64),
+            )
             payload = json.loads(journal.path.read_text(encoding="utf-8"))
             payload["events"][1], payload["events"][2] = (
                 payload["events"][2],

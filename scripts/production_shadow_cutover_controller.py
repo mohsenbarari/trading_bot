@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Fail-closed controller contract for a side-by-side production cutover.
 
-This module does not execute production commands.  It verifies one root-only
-manifest, renders fixed argv for a future bounded host agent, and maintains a
+This module does not execute production host commands.  It verifies one
+root-only manifest, renders fixed argv for a future bounded host agent, runs
+the immutable release-bound local evidence verifier, and maintains a
 crash-visible local journal.  The separate first-business-write boundary is
-hard-disabled until the forward-only executor and semantic evidence verifiers
+hard-disabled until the forward-only executor and bounded operation workers
 exist because rollback to the untouched legacy database ends at that boundary.
 """
 
@@ -20,6 +21,7 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import stat
+import subprocess
 import sys
 from typing import Any, Iterable
 from uuid import UUID
@@ -46,10 +48,18 @@ from core.three_site_topology import (  # noqa: E402
 MANIFEST_SCHEMA = "production-shadow-cutover-manifest-v1"
 PLAN_SCHEMA = "production-shadow-cutover-plan-v1"
 JOURNAL_SCHEMA = "production-shadow-cutover-journal-v1"
+PHASE_VERIFICATION_SCHEMA = "production-shadow-phase-evidence-verification-v1"
 APPLY_CONFIRMATION = "APPLY-PRODUCTION-SHADOW-CUTOVER-JOURNAL"
 FIRST_WRITE_COMMIT_CONFIRMATION = "COMMIT-PRODUCTION-SHADOW-FIRST-BUSINESS-WRITE"
 CONTROLLER_PATH = "/usr/local/sbin/trading-bot-production-shadow-controller"
 REMOTE_AGENT_PATH = "/usr/local/sbin/trading-bot-production-shadow-agent"
+REMOTE_AGENT_CONTRACT_PATH = (
+    "/etc/trading-bot-production-shadow/host-agent-contract.json"
+)
+HOST_AGENT_CONTRACT_SCHEMA = "production-shadow-host-agent-contract-v1"
+PHASE_EVIDENCE_VERIFIER_RELATIVE_PATH = (
+    "release/scripts/verify_production_shadow_phase_evidence.py"
+)
 PRODUCTION_HOSTNAME = "coin.gold-trade.ir"
 LEGACY_COMPOSE_PROJECT = "trading_bot"
 ZERO_SHA256 = "0" * 64
@@ -68,6 +78,32 @@ SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 PROJECT_RE = re.compile(r"^[a-z][a-z0-9_]{7,62}$")
+PHASE_VERIFICATION_FIELDS = frozenset(
+    {
+        "schema",
+        "status",
+        "phase",
+        "operation",
+        "campaign_id",
+        "operation_id",
+        "release_sha",
+        "legacy_release_sha",
+        "manifest_sha256",
+        "plan_sha256",
+        "approval_sha256",
+        "phase_evidence_schema_sha256",
+        "manifest_artifact_bindings_sha256",
+        "prior_phase_evidence_closure_sha256",
+        "phase_input_closure_sha256",
+        "prior_phase_count",
+        "evidence_sha256",
+        "verified_roles",
+        "verified_claim_count",
+        "captured_at",
+        "verified_at",
+        "production_contacted",
+    }
+)
 
 MANIFEST_FIELDS = frozenset(
     {
@@ -112,6 +148,9 @@ ARTIFACT_FIELDS = frozenset(
         "nginx_rollback_generation_sha256",
         "postcommit_executor_contract_sha256",
         "phase_evidence_schema_sha256",
+        "host_agent_sha256",
+        "host_agent_contract_sha256",
+        "phase_evidence_verifier_sha256",
     }
 )
 POLICY_FIELDS = frozenset(
@@ -188,6 +227,15 @@ class PhaseSpec:
     business_write_allowed: bool = False
     required_journal_status: str = PRECOMMIT_JOURNAL_STATUS
     requirements: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class VerifiedPhaseCompletion:
+    """Opaque controller result produced by the release-bound verifier."""
+
+    phase: str
+    evidence_sha256: str
+    receipt_sha256: str
 
 
 # Every phase below remains before the first business write. The controller
@@ -558,8 +606,11 @@ ROLLBACK_SPECS: tuple[PhaseSpec, ...] = (
 OPERATIONAL_GAPS = (
     {
         "component": REMOTE_AGENT_PATH,
-        "status": "missing",
-        "required_for": "Every rendered host argv; the controller never executes it.",
+        "status": "request-contract-only",
+        "required_for": (
+            "Every rendered host argv; source validation exists, but bounded "
+            "operation implementations and host installation do not."
+        ),
     },
     {
         "component": "immutable-release-image-compose-verifier",
@@ -621,8 +672,11 @@ OPERATIONAL_GAPS = (
     },
     {
         "component": "phase-evidence-schema-verifiers",
-        "status": "missing",
-        "required_for": "Semantic verification of each evidence file before its digest completes a phase.",
+        "status": "controller-wired-local-verifier",
+        "required_for": (
+            "Actual bounded workers must produce the root-only role, claim, "
+            "and prior-evidence artifacts consumed by the wired verifier."
+        ),
     },
     {
         "component": "postcommit-forward-recovery-executor",
@@ -637,6 +691,39 @@ OPERATIONAL_GAPS = (
 
 def _canonical_json_bytes(payload: dict[str, Any]) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def host_agent_contract_document() -> dict[str, Any]:
+    return {
+        "schema": HOST_AGENT_CONTRACT_SCHEMA,
+        "production_vhosts": {
+            role: list(vhosts) for role, vhosts in PRODUCTION_VHOSTS.items()
+        },
+        "topology": EXPECTED_TOPOLOGY,
+        "policies": {
+            "legacy_redis": LEGACY_REDIS_POLICY,
+            "shadow_redis": SHADOW_REDIS_POLICY,
+            "precommit_journal_status": PRECOMMIT_JOURNAL_STATUS,
+            "postcommit_journal_status": POSTCOMMIT_JOURNAL_STATUS,
+            "business_write_forbidden": "forbid",
+            "business_write_forward_only": "allow-after-forward-only-commit",
+        },
+        "operations": [
+            {
+                "operation": spec.operation,
+                "roles": list(spec.roles),
+                "forward_only": spec.forward_only,
+                "business_write_allowed": spec.business_write_allowed,
+                "required_journal_status": spec.required_journal_status,
+            }
+            for spec in (*PHASE_SPECS, *POSTCOMMIT_SPECS, *ROLLBACK_SPECS)
+        ],
+    }
+
+
+HOST_AGENT_CONTRACT_SHA256 = hashlib.sha256(
+    _canonical_json_bytes(host_agent_contract_document())
+).hexdigest()
 
 
 def _state_hash(payload: dict[str, Any]) -> str:
@@ -759,11 +846,26 @@ def validate_manifest(document: Any) -> dict[str, Any]:
         "nginx_rollback_generation_sha256",
         "postcommit_executor_contract_sha256",
         "phase_evidence_schema_sha256",
+        "host_agent_sha256",
+        "host_agent_contract_sha256",
+        "phase_evidence_verifier_sha256",
     ):
-        if not isinstance(artifacts[field], str) or SHA256_RE.fullmatch(artifacts[field]) is None:
+        if (
+            not isinstance(artifacts[field], str)
+            or SHA256_RE.fullmatch(artifacts[field]) is None
+            or artifacts[field] == ZERO_SHA256
+        ):
             raise CutoverContractError(f"artifacts.{field} is not a SHA-256 digest")
+    if artifacts["host_agent_contract_sha256"] != HOST_AGENT_CONTRACT_SHA256:
+        raise CutoverContractError(
+            "artifacts.host_agent_contract_sha256 differs from the controller contract"
+        )
     for field in ("app_image_id", "postgres_image_id"):
-        if not isinstance(artifacts[field], str) or IMAGE_ID_RE.fullmatch(artifacts[field]) is None:
+        if (
+            not isinstance(artifacts[field], str)
+            or IMAGE_ID_RE.fullmatch(artifacts[field]) is None
+            or artifacts[field] == f"sha256:{ZERO_SHA256}"
+        ):
             raise CutoverContractError(f"artifacts.{field} is not an immutable image ID")
     expected_postgres_ref = f"trading_bot_postgres_boottime:15-{manifest['release_sha']}"
     if artifacts["postgres_image_ref"] != expected_postgres_ref:
@@ -896,6 +998,12 @@ def _agent_args(
         manifest["artifacts"]["postcommit_executor_contract_sha256"],
         "--phase-evidence-schema-sha256",
         manifest["artifacts"]["phase_evidence_schema_sha256"],
+        "--host-agent-sha256",
+        manifest["artifacts"]["host_agent_sha256"],
+        "--host-agent-contract",
+        REMOTE_AGENT_CONTRACT_PATH,
+        "--host-agent-contract-sha256",
+        manifest["artifacts"]["host_agent_contract_sha256"],
     ]
     if topology["transport"] == "local-controller":
         return agent
@@ -1002,7 +1110,7 @@ def _render_specs(
                 "requirements": list(spec.requirements),
                 "execution_supported": False,
                 "journal_begin_required_before_commands": True,
-                "journal_completion_requires_evidence_sha256": True,
+                "journal_completion_requires_release_verifier_receipt": True,
                 "commands": commands,
             }
         )
@@ -1109,6 +1217,38 @@ def render_plan(
             "due_otp_jobs_allowed": False,
             "site_local_job_allowlist_required": True,
         },
+        "phase_evidence_verification": {
+            "verifier_path": str(
+                PurePosixPath(manifest["deployment"]["shadow_root"])
+                / PHASE_EVIDENCE_VERIFIER_RELATIVE_PATH
+            ),
+            "verifier_sha256": manifest["artifacts"][
+                "phase_evidence_verifier_sha256"
+            ],
+            "contract_sha256": manifest["artifacts"][
+                "phase_evidence_schema_sha256"
+            ],
+            "semantic_verification_required_before_journal_completion": True,
+            "controller_executes_release_bound_verifier": True,
+            "root_only_verification_receipt_required": True,
+            "prior_evidence_files_must_match_journal": True,
+            "root_only_manifest_plan_approval_journal_required": True,
+            "root_only_role_and_claim_source_records_required": True,
+            "expected_role_request_sha256_required": True,
+            "expected_role_source_artifact_readback_sha256_required": True,
+            "source_available_in_release": True,
+            "exact_release_path_required": True,
+            "executor_wired": True,
+        },
+        "host_agent_contract": {
+            "path": REMOTE_AGENT_CONTRACT_PATH,
+            "sha256": manifest["artifacts"]["host_agent_contract_sha256"],
+            "agent_sha256": manifest["artifacts"]["host_agent_sha256"],
+            "standalone_contract_sha256": HOST_AGENT_CONTRACT_SHA256,
+            "self_hash_required": True,
+            "local_host_identity_required": True,
+            "operation_execution_supported": False,
+        },
         "rollback": {
             "eligible_until_commit_gate": True,
             "prohibited_after_commit_gate": True,
@@ -1124,12 +1264,11 @@ def render_plan(
             "prospective_argv_template": commit_argv,
             "blocked_by": [
                 "postcommit-forward-recovery-executor",
-                "phase-evidence-schema-verifiers",
                 "coordinated-three-vhost-nginx-generation-worker",
             ],
             "effect": (
                 "Hard-disabled while the rendered postcommit contract has no "
-                "bounded executor and semantic evidence verifiers."
+                "bounded executor and production operation workers."
             ),
         },
         "prohibitions": [
@@ -1149,6 +1288,310 @@ def render_plan(
     return plan
 
 
+def _hash_release_verifier(path: Path, *, owner_uid: int = 0) -> str:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(
+        os,
+        "O_NOFOLLOW",
+        0,
+    )
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise CutoverContractError(
+            "cannot securely open release-bound phase verifier"
+        ) from exc
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != owner_uid
+            or before.st_nlink != 1
+            or before.st_size < 1
+            or before.st_size > 4 * 1024 * 1024
+            or stat.S_IMODE(before.st_mode) & 0o022
+        ):
+            raise CutoverContractError(
+                "release-bound phase verifier artifact is unsafe"
+            )
+        digest = hashlib.sha256()
+        size = 0
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > 4 * 1024 * 1024:
+                raise CutoverContractError(
+                    "release-bound phase verifier artifact is oversized"
+                )
+            digest.update(chunk)
+        after = os.fstat(descriptor)
+        stable = (
+            "st_dev",
+            "st_ino",
+            "st_mode",
+            "st_uid",
+            "st_gid",
+            "st_nlink",
+            "st_size",
+        )
+        if any(
+            getattr(before, field) != getattr(after, field) for field in stable
+        ):
+            raise CutoverContractError(
+                "release-bound phase verifier changed while being hashed"
+            )
+        return digest.hexdigest()
+    finally:
+        os.close(descriptor)
+
+
+def _absolute_mapping_args(values: list[str], *, label: str) -> list[str]:
+    result: list[str] = []
+    observed: set[str] = set()
+    for value in values:
+        key, separator, raw_path = str(value).partition("=")
+        path = Path(raw_path)
+        if (
+            not separator
+            or not key
+            or key in observed
+            or not path.is_absolute()
+            or ".." in path.parts
+        ):
+            raise CutoverContractError(f"{label} must use unique absolute paths")
+        observed.add(key)
+        result.append(f"{key}={path}")
+    return result
+
+
+def _validate_phase_verification_result(
+    document: Any,
+    *,
+    phase: str,
+    manifest: dict[str, Any],
+    manifest_sha256: str,
+    plan_sha256: str,
+) -> tuple[VerifiedPhaseCompletion, bytes]:
+    result = _require_exact_fields(
+        document,
+        PHASE_VERIFICATION_FIELDS,
+        label="phase verification result",
+    )
+    spec = next((item for item in PHASE_SPECS if item.phase == phase), None)
+    if spec is None:
+        raise CutoverContractError("phase verification result names an unknown phase")
+    expected = {
+        "schema": PHASE_VERIFICATION_SCHEMA,
+        "status": "verified",
+        "phase": phase,
+        "operation": spec.operation,
+        "campaign_id": manifest["campaign_id"],
+        "operation_id": manifest["operation_id"],
+        "release_sha": manifest["release_sha"],
+        "legacy_release_sha": manifest["legacy_release_sha"],
+        "manifest_sha256": manifest_sha256,
+        "plan_sha256": plan_sha256,
+        "approval_sha256": manifest["artifacts"]["cutover_approval_sha256"],
+        "phase_evidence_schema_sha256": manifest["artifacts"][
+            "phase_evidence_schema_sha256"
+        ],
+        "manifest_artifact_bindings_sha256": hashlib.sha256(
+            _canonical_json_bytes(manifest["artifacts"])
+        ).hexdigest(),
+        "prior_phase_count": PHASES.index(phase),
+        "verified_roles": list(spec.roles),
+        "production_contacted": False,
+    }
+    if any(result[field] != value for field, value in expected.items()):
+        raise CutoverContractError(
+            "release-bound phase verifier returned mismatched bindings"
+        )
+    for field in (
+        "prior_phase_evidence_closure_sha256",
+        "phase_input_closure_sha256",
+        "evidence_sha256",
+    ):
+        if (
+            not isinstance(result[field], str)
+            or SHA256_RE.fullmatch(result[field]) is None
+            or result[field] == ZERO_SHA256
+        ):
+            raise CutoverContractError(
+                "release-bound phase verifier returned an invalid digest"
+            )
+    if (
+        not isinstance(result["verified_claim_count"], int)
+        or isinstance(result["verified_claim_count"], bool)
+        or result["verified_claim_count"] < 1
+        or not _valid_timestamp(result["captured_at"])
+        or not _valid_timestamp(result["verified_at"])
+    ):
+        raise CutoverContractError(
+            "release-bound phase verifier returned invalid verification metadata"
+        )
+    receipt = (
+        json.dumps(result, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        + b"\n"
+    )
+    receipt_sha256 = hashlib.sha256(receipt).hexdigest()
+    return (
+        VerifiedPhaseCompletion(
+            phase=phase,
+            evidence_sha256=result["evidence_sha256"],
+            receipt_sha256=receipt_sha256,
+        ),
+        receipt,
+    )
+
+
+def _run_release_phase_verifier(
+    *,
+    phase: str,
+    manifest: dict[str, Any],
+    manifest_sha256: str,
+    plan: dict[str, Any],
+    manifest_path: Path,
+    approval_path: Path,
+    evidence_path: Path,
+    role_validation: list[str],
+    claim_source: list[str],
+    prior_phase_evidence: list[str],
+) -> tuple[VerifiedPhaseCompletion, bytes]:
+    for path, label in (
+        (manifest_path, "manifest"),
+        (approval_path, "approval"),
+        (evidence_path, "evidence"),
+    ):
+        if not path.is_absolute() or ".." in path.parts:
+            raise CutoverContractError(
+                f"phase verification {label} must be an absolute path"
+            )
+    verifier_path = (
+        Path(manifest["deployment"]["shadow_root"])
+        / PHASE_EVIDENCE_VERIFIER_RELATIVE_PATH
+    )
+    expected_verifier_sha256 = manifest["artifacts"][
+        "phase_evidence_verifier_sha256"
+    ]
+    if _hash_release_verifier(verifier_path) != expected_verifier_sha256:
+        raise CutoverContractError(
+            "release-bound phase verifier differs from the manifest"
+        )
+    argv = [
+        sys.executable,
+        "-I",
+        str(verifier_path),
+        "--evidence",
+        str(evidence_path),
+        "--manifest",
+        str(manifest_path),
+        "--approval",
+        str(approval_path),
+        "--expected-phase",
+        phase,
+    ]
+    for flag, values, label in (
+        ("--role-validation", role_validation, "role validation"),
+        ("--claim-source", claim_source, "claim source"),
+        (
+            "--prior-phase-evidence",
+            prior_phase_evidence,
+            "prior phase evidence",
+        ),
+    ):
+        for value in _absolute_mapping_args(values, label=label):
+            argv.extend((flag, value))
+    try:
+        completed = subprocess.run(
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=120,
+            env={
+                "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
+                "LANG": "C.UTF-8",
+                "LC_ALL": "C.UTF-8",
+            },
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise CutoverContractError(
+            "release-bound phase verifier could not complete"
+        ) from exc
+    if (
+        completed.returncode != 0
+        or completed.stderr
+        or not completed.stdout
+        or len(completed.stdout) > 64 * 1024
+        or completed.stdout.count(b"\n") > 1
+    ):
+        raise CutoverContractError(
+            "release-bound phase verifier rejected the phase evidence"
+        )
+    try:
+        result = json.loads(
+            completed.stdout.decode("utf-8"),
+            object_pairs_hook=_strict_object,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise CutoverContractError(
+            "release-bound phase verifier returned invalid strict JSON"
+        ) from exc
+    if _hash_release_verifier(verifier_path) != expected_verifier_sha256:
+        raise CutoverContractError(
+            "release-bound phase verifier changed during verification"
+        )
+    return _validate_phase_verification_result(
+        result,
+        phase=phase,
+        manifest=manifest,
+        manifest_sha256=manifest_sha256,
+        plan_sha256=plan["plan_sha256"],
+    )
+
+
+def _persist_phase_verification_receipt(
+    *,
+    token: VerifiedPhaseCompletion,
+    receipt: bytes,
+    evidence_root: Path,
+) -> Path:
+    if hashlib.sha256(receipt).hexdigest() != token.receipt_sha256:
+        raise CutoverContractError("phase verification receipt digest is invalid")
+    path = (
+        evidence_root
+        / "verification"
+        / f"{token.phase}.{token.receipt_sha256}.json"
+    )
+    try:
+        write_secure_new_bytes(
+            path,
+            receipt,
+            label="production phase verification receipt",
+            mode=0o600,
+            max_size=64 * 1024,
+        )
+    except SecureFileError:
+        try:
+            existing = read_secure_bytes(
+                path,
+                label="production phase verification receipt",
+                owner_uid=0,
+                max_size=64 * 1024,
+            )
+        except SecureFileError as exc:
+            raise CutoverContractError(
+                "phase verification receipt could not be persisted"
+            ) from exc
+        if existing != receipt:
+            raise CutoverContractError(
+                "existing phase verification receipt differs"
+            )
+    return path
+
+
 JOURNAL_FIELDS = frozenset(
     {
         "schema",
@@ -1161,6 +1604,7 @@ JOURNAL_FIELDS = frozenset(
         "status",
         "completed_phases",
         "phase_evidence_sha256",
+        "phase_verification_sha256",
         "started_phase",
         "started_at",
         "rollback_eligible",
@@ -1188,6 +1632,7 @@ EVENT_FIELDS = frozenset(
         "kind",
         "phase",
         "evidence_sha256",
+        "verification_sha256",
         "reason",
         "at",
         "previous_hash",
@@ -1213,6 +1658,7 @@ def _append_event(
     kind: str,
     phase: str | None = None,
     evidence_sha256: str | None = None,
+    verification_sha256: str | None = None,
     reason: str | None = None,
 ) -> None:
     if kind not in EVENT_KINDS:
@@ -1224,6 +1670,7 @@ def _append_event(
         "kind": kind,
         "phase": phase,
         "evidence_sha256": evidence_sha256,
+        "verification_sha256": verification_sha256,
         "reason": reason,
         "at": _now(),
         "previous_hash": previous,
@@ -1243,11 +1690,13 @@ def _validate_event_history(journal: dict[str, Any]) -> None:
     replay_started: str | None = None
     replay_status = "active"
     replay_evidence: dict[str, str] = {}
+    replay_verification: dict[str, str] = {}
     for expected_sequence, raw in enumerate(events, 1):
         event = _require_exact_fields(raw, EVENT_FIELDS, label="cutover journal event")
         kind = event["kind"]
         phase = event["phase"]
         evidence = event["evidence_sha256"]
+        verification = event["verification_sha256"]
         reason = event["reason"]
         if (
             event["sequence"] != expected_sequence
@@ -1262,6 +1711,7 @@ def _validate_event_history(journal: dict[str, Any]) -> None:
                 kind != "journal_created"
                 or phase is not None
                 or evidence is not None
+                or verification is not None
                 or reason is not None
             ):
                 raise CutoverContractError("cutover journal creation event is invalid")
@@ -1276,6 +1726,7 @@ def _validate_event_history(journal: dict[str, Any]) -> None:
                 or replay_started is not None
                 or phase != expected_phase
                 or evidence is not None
+                or verification is not None
                 or reason is not None
             ):
                 raise CutoverContractError("cutover journal phase-start history is invalid")
@@ -1286,11 +1737,15 @@ def _validate_event_history(journal: dict[str, Any]) -> None:
                 replay_status != "phase_started"
                 or phase != replay_started
                 or SHA256_RE.fullmatch(str(evidence)) is None
+                or SHA256_RE.fullmatch(str(verification)) is None
+                or evidence == ZERO_SHA256
+                or verification == ZERO_SHA256
                 or reason is not None
             ):
                 raise CutoverContractError("cutover journal phase-completion history is invalid")
             replay_completed.append(str(phase))
             replay_evidence[str(phase)] = str(evidence)
+            replay_verification[str(phase)] = str(verification)
             replay_started = None
             replay_status = (
                 "ready_for_commit"
@@ -1302,6 +1757,7 @@ def _validate_event_history(journal: dict[str, Any]) -> None:
                 replay_status not in {"active", "phase_started", "ready_for_commit"}
                 or phase is not None
                 or SHA256_RE.fullmatch(str(evidence)) is None
+                or verification is not None
                 or not isinstance(reason, str)
                 or not reason
             ):
@@ -1315,6 +1771,7 @@ def _validate_event_history(journal: dict[str, Any]) -> None:
         journal["event_tail_sha256"] != previous
         or journal["completed_phases"] != replay_completed
         or journal["phase_evidence_sha256"] != replay_evidence
+        or journal["phase_verification_sha256"] != replay_verification
         or journal["started_phase"] != replay_started
         or journal["status"] != replay_status
     ):
@@ -1349,13 +1806,23 @@ def _validate_journal(payload: Any) -> dict[str, Any]:
         raise CutoverContractError("cutover journal operation_id is invalid")
     completed = journal["completed_phases"]
     evidence = journal["phase_evidence_sha256"]
+    verification = journal["phase_verification_sha256"]
     if (
         not isinstance(completed, list)
         or completed != list(PHASES[: len(completed)])
         or len(completed) != len(set(completed))
         or not isinstance(evidence, dict)
         or set(evidence) != set(completed)
-        or any(SHA256_RE.fullmatch(str(value)) is None for value in evidence.values())
+        or not isinstance(verification, dict)
+        or set(verification) != set(completed)
+        or any(
+            SHA256_RE.fullmatch(str(value)) is None or value == ZERO_SHA256
+            for value in evidence.values()
+        )
+        or any(
+            SHA256_RE.fullmatch(str(value)) is None or value == ZERO_SHA256
+            for value in verification.values()
+        )
     ):
         raise CutoverContractError("cutover journal phase prefix or evidence is invalid")
     next_phase = PHASES[len(completed)] if len(completed) < len(PHASES) else None
@@ -1527,6 +1994,7 @@ class ProductionCutoverJournal:
                 "status": "active",
                 "completed_phases": [],
                 "phase_evidence_sha256": {},
+                "phase_verification_sha256": {},
                 "started_phase": None,
                 "started_at": None,
                 "rollback_eligible": True,
@@ -1605,20 +2073,43 @@ class ProductionCutoverJournal:
         finally:
             os.close(descriptor)
 
-    def complete_phase(self, phase: str, *, evidence_sha256: str) -> dict[str, Any]:
-        if phase not in PHASES or SHA256_RE.fullmatch(evidence_sha256) is None:
-            raise CutoverContractError("cutover phase or evidence SHA-256 is invalid")
+    def complete_phase(
+        self,
+        phase: str,
+        *,
+        verification: VerifiedPhaseCompletion,
+    ) -> dict[str, Any]:
+        if (
+            phase not in PHASES
+            or not isinstance(verification, VerifiedPhaseCompletion)
+            or verification.phase != phase
+            or SHA256_RE.fullmatch(verification.evidence_sha256) is None
+            or SHA256_RE.fullmatch(verification.receipt_sha256) is None
+            or verification.evidence_sha256 == ZERO_SHA256
+            or verification.receipt_sha256 == ZERO_SHA256
+        ):
+            raise CutoverContractError(
+                "cutover phase lacks a valid release-verifier completion"
+            )
         descriptor = self._lock()
         try:
             payload = self._read()
             if phase in payload["completed_phases"]:
-                if payload["phase_evidence_sha256"][phase] != evidence_sha256:
+                if (
+                    payload["phase_evidence_sha256"][phase]
+                    != verification.evidence_sha256
+                    or payload["phase_verification_sha256"][phase]
+                    != verification.receipt_sha256
+                ):
                     raise CutoverContractError("idempotent phase evidence differs from the journal")
                 return payload
             if payload["status"] != "phase_started" or payload["started_phase"] != phase:
                 raise CutoverContractError("cutover phase completion has no matching durable start")
             payload["completed_phases"].append(phase)
-            payload["phase_evidence_sha256"][phase] = evidence_sha256
+            payload["phase_evidence_sha256"][phase] = verification.evidence_sha256
+            payload["phase_verification_sha256"][phase] = (
+                verification.receipt_sha256
+            )
             payload["started_phase"] = None
             payload["started_at"] = None
             payload["status"] = (
@@ -1630,7 +2121,8 @@ class ProductionCutoverJournal:
                 payload,
                 kind="phase_completed",
                 phase=phase,
-                evidence_sha256=evidence_sha256,
+                evidence_sha256=verification.evidence_sha256,
+                verification_sha256=verification.receipt_sha256,
             )
             return self._write(payload)
         finally:
@@ -1684,7 +2176,7 @@ class ProductionCutoverJournal:
         del evidence_sha256, confirmation
         raise CutoverContractError(
             "irreversible first-business-write commit is hard-disabled until "
-            "the postcommit executor and semantic evidence verifiers exist"
+            "the postcommit executor and bounded operation workers exist"
         )
 
 
@@ -1721,8 +2213,17 @@ def _planned_transition(args: argparse.Namespace) -> dict[str, Any]:
 def _require_action_arguments(args: argparse.Namespace) -> None:
     if args.action in {"begin-phase", "complete-phase"} and args.phase not in PHASES:
         raise CutoverContractError("--phase must name the exact next cutover phase")
+    if args.action == "complete-phase":
+        if args.evidence_sha256 is not None:
+            raise CutoverContractError(
+                "complete-phase never accepts a caller-supplied evidence SHA-256"
+            )
+        if args.evidence is None or args.approval is None:
+            raise CutoverContractError(
+                "complete-phase requires --evidence and --approval for the "
+                "release-bound verifier"
+            )
     if args.action in {
-        "complete-phase",
         "record-rollback",
         "commit-first-business-write",
     } and SHA256_RE.fullmatch(str(args.evidence_sha256 or "")) is None:
@@ -1749,6 +2250,11 @@ def main() -> int:
     )
     parser.add_argument("--phase")
     parser.add_argument("--evidence-sha256")
+    parser.add_argument("--evidence", type=Path)
+    parser.add_argument("--approval", type=Path)
+    parser.add_argument("--role-validation", action="append", default=[])
+    parser.add_argument("--claim-source", action="append", default=[])
+    parser.add_argument("--prior-phase-evidence", action="append", default=[])
     parser.add_argument("--reason")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")
@@ -1810,8 +2316,28 @@ def main() -> int:
                 if args.action == "begin-phase":
                     state = journal.begin_phase(str(args.phase))
                 elif args.action == "complete-phase":
+                    verification, receipt = _run_release_phase_verifier(
+                        phase=str(args.phase),
+                        manifest=manifest,
+                        manifest_sha256=manifest_sha256,
+                        plan=plan,
+                        manifest_path=args.manifest,
+                        approval_path=Path(args.approval),
+                        evidence_path=Path(args.evidence),
+                        role_validation=list(args.role_validation),
+                        claim_source=list(args.claim_source),
+                        prior_phase_evidence=list(args.prior_phase_evidence),
+                    )
+                    _persist_phase_verification_receipt(
+                        token=verification,
+                        receipt=receipt,
+                        evidence_root=Path(
+                            manifest["deployment"]["controller_evidence_root"]
+                        ),
+                    )
                     state = journal.complete_phase(
-                        str(args.phase), evidence_sha256=str(args.evidence_sha256)
+                        str(args.phase),
+                        verification=verification,
                     )
                 elif args.action == "record-rollback":
                     state = journal.record_rollback(
