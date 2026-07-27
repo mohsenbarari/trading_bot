@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
+from pydantic import SecretStr
 
 from api.routers import auth
 from api.routers.auth import (
@@ -212,20 +213,99 @@ class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.added[0].home_server, "foreign")
         self.assertEqual(result["user_id"], 7)
 
-    async def test_webapp_login_requires_bot_token_and_invalid_payload_returns_auth_failed(self):
+    async def test_webapp_login_requires_validation_key_and_invalid_payload_returns_auth_failed(self):
         request = make_request(headers={"user-agent": "Telegram"}, host="10.0.0.8")
 
-        with patch.object(auth.settings, "bot_token", ""):
+        with patch.object(auth.settings, "bot_token", ""), patch.object(
+            auth.settings,
+            "telegram_webapp_validation_key",
+            None,
+        ):
             with self.assertRaises(HTTPException) as exc_info:
                 await webapp_login(WebAppLogin(init_data="x"), raw_request=request, db=FakeDB())
         self.assertEqual(exc_info.exception.status_code, 500)
-        self.assertEqual(exc_info.exception.detail, "Bot token not configured")
+        self.assertEqual(
+            exc_info.exception.detail,
+            "Telegram WebApp validation key not configured",
+        )
 
-        with patch.object(auth.settings, "bot_token", "bot-token"):
+        derived_key = hmac.new(
+            b"WebAppData",
+            b"bot-token",
+            hashlib.sha256,
+        ).hexdigest()
+        with patch.object(auth.settings, "bot_token", ""), patch.object(
+            auth.settings,
+            "telegram_webapp_validation_key",
+            SecretStr(derived_key),
+        ):
             with self.assertRaises(HTTPException) as exc_info:
                 await webapp_login(WebAppLogin(init_data="auth_date=1&hash=bad&user=%7B%7D"), raw_request=request, db=FakeDB())
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "Authentication failed")
+
+        with patch.object(auth.settings, "bot_token", ""), patch.object(
+            auth.settings,
+            "telegram_webapp_validation_key",
+            SecretStr(derived_key.upper()),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await webapp_login(
+                    WebAppLogin(init_data="auth_date=1&hash=bad&user=%7B%7D"),
+                    raw_request=request,
+                    db=FakeDB(),
+                )
+        self.assertEqual(exc_info.exception.status_code, 500)
+        self.assertEqual(
+            exc_info.exception.detail,
+            "Telegram WebApp validation key not configured",
+        )
+
+    async def test_webapp_login_accepts_derived_validation_key_without_bot_token(self):
+        request = make_request(headers={"user-agent": "Telegram"}, host="10.0.0.8")
+        init_data = build_webapp_init_data("bot-token", {"id": 123})
+        derived_key = hmac.new(
+            b"WebAppData",
+            b"bot-token",
+            hashlib.sha256,
+        ).hexdigest()
+        user = SimpleNamespace(
+            id=7,
+            telegram_id=123,
+            is_deleted=False,
+            home_server="iran",
+        )
+
+        with patch.object(auth.settings, "bot_token", ""), patch.object(
+            auth.settings,
+            "telegram_webapp_validation_key",
+            SecretStr(derived_key),
+        ), patch(
+            "api.routers.auth.create_refresh_token",
+            return_value="refresh-token",
+        ), patch(
+            "api.routers.auth.assert_login_allowed_for_server",
+            new=AsyncMock(),
+        ), patch(
+            "api.routers.auth.handle_login_session",
+            new=AsyncMock(
+                return_value={
+                    "action": "ok",
+                    "session": SimpleNamespace(id="session-1"),
+                }
+            ),
+        ), patch(
+            "api.routers.auth.create_access_token",
+            return_value="access-token",
+        ):
+            result = await webapp_login(
+                WebAppLogin(init_data=init_data),
+                raw_request=request,
+                db=FakeDB([FakeExecuteResult(user)]),
+            )
+
+        self.assertEqual(result["access_token"], "access-token")
+        self.assertEqual(result["refresh_token"], "refresh-token")
 
     async def test_webapp_login_returns_auth_failed_for_unknown_or_deleted_user(self):
         request = make_request(headers={"user-agent": "Telegram"}, host="10.0.0.8")
