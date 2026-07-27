@@ -16,11 +16,12 @@ import sys
 import tarfile
 import time
 
+sys.dont_write_bytecode = True
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.render_three_site_staging_role_compose import _atomic_write, parse_env_values
+from scripts.render_three_site_staging_role_compose import parse_env_values
 from core.three_site_staging_source_contract import (
     legacy_staging_project_allowed,
 )
@@ -32,7 +33,6 @@ from scripts.verify_three_site_staging_inventory import (
 
 DOCKER = "/usr/bin/docker"
 GIT = "/usr/bin/git"
-POSTGRES_IMAGE = "postgres:15-alpine"
 ROLE_APP_SERVICE = {"bot_fi": "foreign_app", "webapp_fi": "app"}
 ROLE_PROFILE = {"bot_fi": "staging-bot", "webapp_fi": None}
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -51,6 +51,55 @@ SAFE_ENV = {
 
 class StagingBackupError(RuntimeError):
     pass
+
+
+def _strict_json_object(pairs):  # noqa: ANN001
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise StagingBackupError("JSON contains a duplicate key")
+        result[key] = value
+    return result
+
+
+def _secure_root_bytes(path: Path, *, maximum: int) -> bytes:
+    if os.geteuid() != 0 or not path.is_absolute() or ".." in path.parts:
+        raise StagingBackupError("secure input requires root and an absolute path")
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != 0
+            or before.st_nlink != 1
+            or stat.S_IMODE(before.st_mode) != 0o600
+            or not 1 <= before.st_size <= maximum
+        ):
+            raise StagingBackupError("secure input mode/owner/size is invalid")
+        raw = b""
+        while len(raw) < before.st_size:
+            chunk = os.read(descriptor, before.st_size - len(raw))
+            if not chunk:
+                raise StagingBackupError("secure input changed during read")
+            raw += chunk
+        after = os.fstat(descriptor)
+        if (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        ):
+            raise StagingBackupError("secure input changed during read")
+        return raw
+    finally:
+        os.close(descriptor)
 
 
 def confirmation_phrase(campaign_id: str, source_role: str, target_release_sha: str) -> str:
@@ -93,62 +142,11 @@ def _compose_base(
 
 
 def _secure_env(path: Path) -> dict[str, str]:
-    metadata = path.lstat()
-    if (
-        not stat.S_ISREG(metadata.st_mode)
-        or stat.S_ISLNK(metadata.st_mode)
-        or metadata.st_nlink != 1
-        or stat.S_IMODE(metadata.st_mode) != 0o600
-    ):
-        raise StagingBackupError("legacy staging environment must be a non-linked mode-0600 file")
-    return parse_env_values(path.read_text(encoding="utf-8"))
-
-
-def _prepare_output(path: Path, *, repo: Path) -> None:
-    resolved = path.resolve()
     try:
-        resolved.relative_to(repo.resolve())
-    except ValueError:
-        pass
-    else:
-        raise StagingBackupError("backup artifacts must be outside the Git repository")
-    if path.exists():
-        if path.is_symlink() or not path.is_dir() or any(path.iterdir()):
-            raise StagingBackupError("backup output directory must be absent or empty")
-        path.chmod(0o700)
-    else:
-        path.mkdir(mode=0o700, parents=True)
-    if stat.S_IMODE(path.stat().st_mode) != 0o700:
-        raise StagingBackupError("backup output directory must be mode 0700")
-
-
-def _stream_to_file(arguments: list[str], target: Path, *, timeout: int) -> None:
-    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    try:
-        with os.fdopen(descriptor, "wb") as output:
-            process = subprocess.Popen(
-                arguments,
-                stdin=subprocess.DEVNULL,
-                stdout=output,
-                stderr=subprocess.PIPE,
-                env=SAFE_ENV,
-            )
-            try:
-                _stderr = process.communicate(timeout=timeout)[1]
-            except subprocess.TimeoutExpired as exc:
-                process.kill()
-                process.communicate()
-                raise StagingBackupError("backup stream timed out") from exc
-            if process.returncode != 0:
-                raise StagingBackupError("backup stream command failed closed")
-            output.flush()
-            os.fsync(output.fileno())
-    except Exception:
-        target.unlink(missing_ok=True)
-        raise
-    if target.stat().st_size <= 0:
-        target.unlink(missing_ok=True)
-        raise StagingBackupError("backup stream produced an empty artifact")
+        source = _secure_root_bytes(path, maximum=1024 * 1024).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise StagingBackupError("legacy staging environment is not UTF-8") from exc
+    return parse_env_values(source)
 
 
 def _sha_file(path: Path) -> dict[str, object]:
@@ -174,19 +172,12 @@ def _load_freeze_evidence(
     expected_source_release_sha: str,
     project_name: str,
 ) -> tuple[dict[str, object], str]:
-    metadata = path.lstat()
-    if (
-        not stat.S_ISREG(metadata.st_mode)
-        or stat.S_ISLNK(metadata.st_mode)
-        or metadata.st_nlink != 1
-        or stat.S_IMODE(metadata.st_mode) != 0o600
-        or metadata.st_size <= 0
-        or metadata.st_size > 1024 * 1024
-    ):
-        raise StagingBackupError("source-freeze evidence must be a non-linked mode-0600 file")
     try:
-        evidence = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        evidence = json.loads(
+            _secure_root_bytes(path, maximum=1024 * 1024).decode("utf-8"),
+            object_pairs_hook=_strict_json_object,
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise StagingBackupError("source-freeze evidence is unreadable") from exc
     fields = {
         "schema", "campaign_id", "target_release_sha", "project_name", "observed_at",
@@ -409,16 +400,6 @@ def _psql(
     )
 
 
-def _scratch_psql(container: str, sql: str) -> str:
-    return _run(
-        [
-            DOCKER, "exec", container, "psql", "-v", "ON_ERROR_STOP=1",
-            "-U", "restore", "-d", "restore", "-Atqc", sql,
-        ],
-        timeout=60,
-    )
-
-
 def _wait_for_scratch_database(container: str, *, attempts: int = 30) -> None:
     """Wait until the initialized scratch database, not merely PostgreSQL, is usable.
 
@@ -487,60 +468,6 @@ def _database_fingerprint(query) -> tuple[str, int, int]:  # noqa: ANN001
     return digest, total_rows, len(tables)
 
 
-def _restore_drill(dump_path: Path, *, container: str) -> dict[str, object]:
-    _run(
-        [
-            DOCKER, "run", "-d", "--name", container,
-            "--label", "trading-bot.three-site-staging.restore-drill=true",
-            "-e", "POSTGRES_USER=restore", "-e", "POSTGRES_DB=restore",
-            "-e", "POSTGRES_HOST_AUTH_METHOD=trust", POSTGRES_IMAGE,
-        ],
-        timeout=60,
-    )
-    try:
-        _wait_for_scratch_database(container)
-        with dump_path.open("rb") as source:
-            result = subprocess.run(
-                [
-                    DOCKER, "exec", "-i", container, "pg_restore",
-                    "-U", "restore", "-d", "restore", "--exit-on-error",
-                    "--no-owner", "--no-acl",
-                ],
-                stdin=source,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                check=False,
-                timeout=900,
-                env=SAFE_ENV,
-            )
-        if result.returncode != 0:
-            raise StagingBackupError("PostgreSQL restore drill failed")
-        revision = _scratch_psql(container, "SELECT version_num FROM alembic_version")
-        system_id = _scratch_psql(
-            container, "SELECT system_identifier FROM pg_control_system()"
-        )
-        fingerprint, row_count, table_count = _database_fingerprint(
-            lambda sql: _scratch_psql(container, sql)
-        )
-        return {
-            "status": "passed",
-            "restored_alembic_revision": revision,
-            "scratch_postgres_system_id": system_id,
-            "database_fingerprint_sha256": fingerprint,
-            "database_row_count": row_count,
-            "public_table_count": table_count,
-        }
-    finally:
-        subprocess.run(
-            [DOCKER, "rm", "-f", container],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-            timeout=30,
-            env=SAFE_ENV,
-        )
-
-
 def build_plan(args: argparse.Namespace, inventory_result: dict[str, object]) -> dict[str, object]:
     return {
         "status": "planned",
@@ -560,145 +487,11 @@ def build_plan(args: argparse.Namespace, inventory_result: dict[str, object]) ->
 
 
 def execute(args: argparse.Namespace, inventory_result: dict[str, object]) -> dict[str, object]:
-    repo = args.repo.resolve()
-    expected_compose = (repo / "deploy/staging/docker-compose.staging.yml").resolve()
-    if args.compose.resolve() != expected_compose:
-        raise StagingBackupError("source backup is locked to the reviewed legacy staging Compose")
-    if _run([GIT, "-C", str(repo), "rev-parse", "HEAD"]) != args.target_release_sha:
-        raise StagingBackupError("backup controller repository is not the exact target release")
-    if _run([GIT, "-C", str(repo), "status", "--porcelain=v1", "--untracked-files=all"]):
-        raise StagingBackupError("backup controller repository must be clean")
-    env = _secure_env(args.env_file)
-    user = env.get("POSTGRES_USER", "")
-    database = env.get("POSTGRES_DB", "")
-    if not IDENT_RE.fullmatch(user) or not IDENT_RE.fullmatch(database):
-        raise StagingBackupError("legacy staging database identity is invalid")
-    _prepare_output(args.output_dir, repo=repo)
-    prefix = _compose_base(
-        args.compose, args.env_file, args.source_role, args.project_name
+    raise StagingBackupError(
+        "legacy direct apply is retired; use "
+        "adopt_three_site_staging_frozen_source_and_backup.py with a bound "
+        "root-owned adoption contract"
     )
-    _run([*prefix, "config", "--quiet"], timeout=30)
-    freeze, freeze_hash = _load_freeze_evidence(
-        args.source_freeze_evidence,
-        campaign_id=str(inventory_result["campaign_id"]),
-        target_release_sha=str(inventory_result["release_sha"]),
-        source_role=args.source_role,
-        expected_source_release_sha=args.expected_source_release_sha,
-        project_name=args.project_name,
-    )
-    app_service = ROLE_APP_SERVICE[args.source_role]
-    if not _run([*prefix, "ps", "--status", "running", "-q", "db"]):
-        raise StagingBackupError("required legacy staging database is not running")
-    if _run([*prefix, "ps", "--status", "running", "-q", app_service]):
-        raise StagingBackupError("legacy source application resumed after freeze")
-    source_system_id = _psql(
-        prefix, "db", user, database,
-        "SELECT system_identifier FROM pg_control_system()",
-    )
-    source_revision = _psql(
-        prefix, "db", user, database, "SELECT version_num FROM alembic_version"
-    )
-    if (
-        source_system_id != freeze["postgres"]["system_id"]
-        or source_revision != freeze["postgres"]["alembic_revision"]
-    ):
-        raise StagingBackupError("legacy database identity changed after source freeze")
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    base = f"{args.source_role}-{inventory_result['campaign_id']}-{stamp}"
-    dump = args.output_dir / f"{base}.postgres.custom"
-    uploads = args.output_dir / f"{base}.uploads.tar.gz"
-    audit = args.output_dir / f"{base}.audit.tar.gz"
-    _stream_to_file(
-        [
-            *prefix, "exec", "-T", "db", "pg_dump", "-U", user, "-d", database,
-            "-Fc", "--no-owner", "--no-acl",
-        ],
-        dump,
-        timeout=900,
-    )
-    for target, directory in ((uploads, "/app/uploads"), (audit, "/app/audit_trail")):
-        _stream_to_file(
-            [
-                *prefix, "run", "--rm", "--no-deps", "-T",
-                "--entrypoint", "tar", app_service,
-                "-C", directory, "-czf", "-", ".",
-            ],
-            target,
-            timeout=900,
-        )
-    upload_members = verify_tar_artifact(uploads)
-    audit_members = verify_tar_artifact(audit)
-    scratch = f"tb3-restore-{args.source_role.replace('_', '-')}-{str(inventory_result['campaign_id'])[:8]}"
-    # Refuse to replace an unrelated or stale scratch resource.
-    existing = subprocess.run(
-        [DOCKER, "container", "inspect", scratch],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-        timeout=10,
-        env=SAFE_ENV,
-    )
-    if existing.returncode == 0:
-        raise StagingBackupError("restore-drill container name is already occupied")
-    restore = _restore_drill(dump, container=scratch)
-    if restore["restored_alembic_revision"] != source_revision:
-        raise StagingBackupError("restore drill schema revision differs from source backup")
-    if restore["scratch_postgres_system_id"] == source_system_id:
-        raise StagingBackupError("restore drill did not use an independent PostgreSQL cluster")
-    if restore["database_fingerprint_sha256"] != freeze["postgres"]["database_fingerprint_sha256"]:
-        raise StagingBackupError("restored backup fingerprint differs from frozen source")
-    running_after = {
-        value for value in _run(
-            [*prefix, "ps", "--status", "running", "--services"]
-        ).splitlines() if value
-    }
-    if running_after != {"db", "redis"}:
-        raise StagingBackupError("legacy staging changed its frozen service state during backup")
-    manifest = {
-        "schema": "three-site-staging-source-backup-v2",
-        "campaign_id": inventory_result["campaign_id"],
-        "source_role": args.source_role,
-        "source_release_sha": args.expected_source_release_sha,
-        "target_release_sha": inventory_result["release_sha"],
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "source_postgres_system_id": source_system_id,
-        "source_alembic_revision": source_revision,
-        "source_freeze_evidence_sha256": freeze_hash,
-        "redis_observation": freeze["redis_observation"],
-        "artifacts": {
-            "postgres": _sha_file(dump),
-            "uploads": {**_sha_file(uploads), "safe_member_count": upload_members},
-            "audit": {**_sha_file(audit), "safe_member_count": audit_members},
-        },
-        "restore_drill": restore,
-        "redis_restore": False,
-        "application_mutation": False,
-    }
-    manifest_path = args.output_dir / f"{base}.manifest.json"
-    _atomic_write(
-        manifest_path,
-        (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode(),
-        mode=0o600,
-    )
-    verify_backup_manifest(
-        manifest,
-        campaign_id=str(inventory_result["campaign_id"]),
-        source_role=args.source_role,
-        source_release_sha=args.expected_source_release_sha,
-        target_release_sha=str(inventory_result["release_sha"]),
-        verify_files=True,
-    )
-    return {
-        "status": "backup-and-restore-verified",
-        "campaign_id": inventory_result["campaign_id"],
-        "source_role": args.source_role,
-        "manifest": str(manifest_path),
-        "manifest_sha256": hashlib.sha256(
-            json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest(),
-        "database_fingerprint_sha256": restore["database_fingerprint_sha256"],
-        "redis_restore": False,
-    }
 
 
 def main(argv: list[str] | None = None) -> int:

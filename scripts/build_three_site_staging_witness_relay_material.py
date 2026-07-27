@@ -30,6 +30,7 @@ from core.canonical_json import canonical_json_bytes
 from core.human_approval import (
     RELAY_RECEIPT_SCHEMA,
     SESSION_TOKEN_SCHEMA,
+    TOKEN_SCHEMA,
     approval_policy_hash,
     approval_subject,
     load_human_approval_policy,
@@ -46,6 +47,7 @@ from scripts.render_three_site_staging_role_compose import (
     render_role_compose,
 )
 from scripts.verify_three_site_staging_campaign_bundle import (
+    CampaignBundleError,
     ROLES,
     verify_campaign_bundle,
 )
@@ -59,6 +61,8 @@ PREPARED_SCHEMA = "three-site-staging-witness-relay-prepared-v2"
 FINAL_SCHEMA = "three-site-staging-witness-relay-final-v2"
 PREPARED_STATUS = "prepared-not-file-or-image-attested"
 FINAL_STATUS = "final-transfer-bundle-not-installed-or-image-attested"
+CAMPAIGN_VALIDATION_SCHEMA = "three-site-staging-witness-relay-campaign-validation-v1"
+MATERIAL_APPROVAL_ACTION = "approve_witness_relay_material"
 MANIFEST_NAME = "relay-material-manifest.json"
 PREPARED_MANIFEST_NAME = "prepared-relay-material-manifest.json"
 COMPOSE_NAME = "witness.compose.yml"
@@ -164,10 +168,7 @@ def _safe_key_id(value: str) -> str:
 def _safe_secret(value: str) -> str:
     secret = str(value)
     if (
-        len(secret.encode("utf-8")) < 32
-        or "\x00" in secret
-        or "\r" in secret
-        or "\n" in secret
+        re.fullmatch(r"[A-Za-z0-9_-]{32,256}", secret) is None
         or "change_me" in secret.lower()
         or "placeholder" in secret.lower()
     ):
@@ -175,11 +176,84 @@ def _safe_secret(value: str) -> str:
     return secret
 
 
+def _assert_new_relay_credential(
+    *,
+    base_values: dict[str, str],
+    relay_key_id: str,
+    relay_secret: str,
+) -> None:
+    credential_values = {
+        value
+        for name, value in base_values.items()
+        if value
+        and (
+            any(
+                marker in name
+                for marker in (
+                    "SECRET",
+                    "PASSWORD",
+                    "TOKEN",
+                    "KEY_ID",
+                    "PUBLIC_KEY",
+                    "PRIVATE_KEY",
+                )
+            )
+            or name.endswith("_KEY")
+        )
+    }
+    if (
+        relay_key_id == relay_secret
+        or relay_key_id in credential_values
+        or relay_secret in credential_values
+    ):
+        raise WitnessRelayMaterialError(
+            "relay orchestrator credential reuses base Witness credential material"
+        )
+
+
 def _normalized_absolute(value: str, *, label: str) -> Path:
-    path = Path(str(value))
-    if not path.is_absolute() or ".." in path.parts or str(path) != os.path.normpath(str(path)):
+    raw = str(value)
+    path = Path(raw)
+    if (
+        re.fullmatch(r"/[A-Za-z0-9_./-]+", raw) is None
+        or not path.is_absolute()
+        or ".." in path.parts
+        or str(path) != os.path.normpath(str(path))
+    ):
         raise WitnessRelayMaterialError(f"{label} must be an absolute normalized path")
     return path
+
+
+def assert_root_controlled_ancestors(
+    path: Path,
+    *,
+    label: str,
+    expected_uid: int | None = None,
+) -> None:
+    """Reject pathname ancestors that another local user could replace."""
+
+    owner_uid = os.geteuid() if expected_uid is None else expected_uid
+    for directory in (path, *path.parents):
+        try:
+            metadata = directory.lstat()
+        except OSError as exc:
+            raise WitnessRelayMaterialError(
+                f"{label} ancestor is unavailable: {directory}"
+            ) from exc
+        mode = stat.S_IMODE(metadata.st_mode)
+        sticky_root_directory = (
+            metadata.st_uid == 0
+            and bool(metadata.st_mode & stat.S_ISVTX)
+        )
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or metadata.st_uid not in {0, owner_uid}
+            or (mode & 0o022 and not sticky_root_directory)
+        ):
+            raise WitnessRelayMaterialError(
+                f"{label} ancestors must be owner-controlled and non-replaceable"
+            )
 
 
 def _relay_material_directory(
@@ -284,6 +358,11 @@ def _derive_environment(
         raise WitnessRelayMaterialError(
             "base Witness environment is not the exact disabled relay baseline"
         )
+    _assert_new_relay_credential(
+        base_values=base_values,
+        relay_key_id=relay_key_id,
+        relay_secret=relay_secret,
+    )
     exact_source_root = _source_root(release_sha)
     if base_values.get("STAGING_SOURCE_ROOT") == exact_source_root:
         raise WitnessRelayMaterialError(
@@ -564,6 +643,13 @@ def verify_prepared_structure(
         raise WitnessRelayMaterialError(
             "prepared Witness environment is not canonical and closed"
         )
+    _assert_new_relay_credential(
+        base_values=base_values,
+        relay_key_id=str(bindings["relay_key_id"]),
+        relay_secret=prepared_values.get(
+            "STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_SECRET", ""
+        ),
+    )
     changed = {
         name
         for name in set(base_values) | set(prepared_values)
@@ -661,18 +747,23 @@ def validate_prepared_campaign(
         raise WitnessRelayMaterialError(
             "prepared validation requires exactly the three unchanged role bundles"
         )
-    campaign = verify_campaign_bundle(
-        canonical_compose=canonical_compose,
-        bundles={
-            **other_bundles,
-            "witness": (prepared_compose_bytes, prepared_env_bytes),
-        },
-        inventory=inventory,
-        approval=approval,
-        approval_policy=approval_policy,
-        verify_files=False,
-        witness_relay_public_key=witness_relay_public_key,
-    )
+    try:
+        campaign = verify_campaign_bundle(
+            canonical_compose=canonical_compose,
+            bundles={
+                **other_bundles,
+                "witness": (prepared_compose_bytes, prepared_env_bytes),
+            },
+            inventory=inventory,
+            approval=approval,
+            approval_policy=approval_policy,
+            verify_files=False,
+            witness_relay_public_key=witness_relay_public_key,
+        )
+    except CampaignBundleError as exc:
+        raise WitnessRelayMaterialError(
+            "prepared four-role campaign validation failed"
+        ) from exc
     if campaign["file_attestation"]:
         raise WitnessRelayMaterialError(
             "prepared relay validation unexpectedly claimed file attestation"
@@ -682,6 +773,249 @@ def validate_prepared_campaign(
         "status": "prepared-relay-material-verified-not-image-attested",
         "campaign_bundle_sha256": campaign["campaign_bundle_sha256"],
         "next_gate": "finalize-with-real-session-and-policy-before-any-activation",
+    }
+
+
+def build_campaign_validation_core(
+    *,
+    prepared_compose_bytes: bytes,
+    prepared_env_bytes: bytes,
+    prepared_manifest: dict[str, Any],
+    inventory: dict[str, Any],
+    inventory_approval: dict[str, Any],
+    approval_policy: dict[str, Any],
+    other_bundles: dict[str, tuple[bytes, bytes]],
+    campaign_result: dict[str, Any],
+    witness_relay_public_key: str | None,
+) -> dict[str, Any]:
+    if set(other_bundles) != set(ROLES) - {"witness"}:
+        raise WitnessRelayMaterialError(
+            "relay campaign validation requires exactly three unchanged role bundles"
+        )
+    role_bundles = {
+        role: {
+            "compose_sha256": _sha256(compose),
+            "environment_sha256": _sha256(environment),
+        }
+        for role, (compose, environment) in {
+            **other_bundles,
+            "witness": (prepared_compose_bytes, prepared_env_bytes),
+        }.items()
+    }
+    campaign_bundle_sha256 = _sha256(
+        json.dumps(
+            role_bundles,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    if campaign_result.get("campaign_bundle_sha256") != campaign_bundle_sha256:
+        raise WitnessRelayMaterialError(
+            "campaign validation result differs from the exact four role bundles"
+        )
+    core = {
+        "schema": CAMPAIGN_VALIDATION_SCHEMA,
+        "campaign_id": inventory["campaign_id"],
+        "deployment_id": inventory["deployment_id"],
+        "release_sha": inventory["release_sha"],
+        "inventory_sha256": _sha256(_canonical_bytes(inventory)),
+        "inventory_approval_sha256": _sha256(
+            canonical_json_bytes(inventory_approval)
+        ),
+        "inventory_approval_witness_key_sha256": (
+            _sha256((witness_relay_public_key.strip() + "\n").encode("utf-8"))
+            if str(witness_relay_public_key or "").strip()
+            else None
+        ),
+        "approval_policy_sha256": approval_policy_hash(approval_policy),
+        "revision_id": prepared_manifest["revision_id"],
+        "prepared_manifest_sha256": _sha256(
+            _manifest_bytes(prepared_manifest)
+        ),
+        "role_bundles": role_bundles,
+        "campaign_bundle_sha256": campaign_bundle_sha256,
+        "relay_key_id": prepared_manifest["bindings"]["relay_key_id"],
+        "relay_secret_sha256": prepared_manifest["bindings"][
+            "relay_secret_sha256"
+        ],
+        "file_attestation": False,
+        "activation": False,
+    }
+    validate_campaign_validation_core(
+        core,
+        prepared_manifest=prepared_manifest,
+        inventory=inventory,
+        approval_policy=approval_policy,
+    )
+    return core
+
+
+def validate_campaign_validation_core(
+    core: dict[str, Any],
+    *,
+    prepared_manifest: dict[str, Any],
+    inventory: dict[str, Any],
+    approval_policy: dict[str, Any],
+) -> None:
+    expected_fields = {
+        "schema",
+        "campaign_id",
+        "deployment_id",
+        "release_sha",
+        "inventory_sha256",
+        "inventory_approval_sha256",
+        "inventory_approval_witness_key_sha256",
+        "approval_policy_sha256",
+        "revision_id",
+        "prepared_manifest_sha256",
+        "role_bundles",
+        "campaign_bundle_sha256",
+        "relay_key_id",
+        "relay_secret_sha256",
+        "file_attestation",
+        "activation",
+    }
+    role_bundles = core.get("role_bundles") if isinstance(core, dict) else None
+    if (
+        not isinstance(core, dict)
+        or set(core) != expected_fields
+        or core.get("schema") != CAMPAIGN_VALIDATION_SCHEMA
+        or core.get("campaign_id") != inventory.get("campaign_id")
+        or core.get("deployment_id") != inventory.get("deployment_id")
+        or core.get("release_sha") != inventory.get("release_sha")
+        or core.get("inventory_sha256")
+        != _sha256(_canonical_bytes(inventory))
+        or core.get("approval_policy_sha256")
+        != approval_policy_hash(approval_policy)
+        or core.get("revision_id") != prepared_manifest.get("revision_id")
+        or core.get("prepared_manifest_sha256")
+        != _sha256(_manifest_bytes(prepared_manifest))
+        or core.get("relay_key_id")
+        != prepared_manifest.get("bindings", {}).get("relay_key_id")
+        or core.get("relay_secret_sha256")
+        != prepared_manifest.get("bindings", {}).get("relay_secret_sha256")
+        or core.get("file_attestation") is not False
+        or core.get("activation") is not False
+        or not isinstance(role_bundles, dict)
+        or set(role_bundles) != set(ROLES)
+    ):
+        raise WitnessRelayMaterialError(
+            "relay campaign validation core is invalid"
+        )
+    hashes = (
+        core["inventory_approval_sha256"],
+        core["campaign_bundle_sha256"],
+        *(
+            value
+            for role in ROLES
+            for value in (
+                role_bundles.get(role, {}).get("compose_sha256"),
+                role_bundles.get(role, {}).get("environment_sha256"),
+            )
+        ),
+    )
+    if any(
+        not isinstance(value, str) or SHA256_RE.fullmatch(value) is None
+        for value in hashes
+    ):
+        raise WitnessRelayMaterialError(
+            "relay campaign validation hashes are invalid"
+        )
+    witness_key_hash = core["inventory_approval_witness_key_sha256"]
+    if witness_key_hash is not None and (
+        not isinstance(witness_key_hash, str)
+        or SHA256_RE.fullmatch(witness_key_hash) is None
+    ):
+        raise WitnessRelayMaterialError(
+            "relay campaign validation Witness trust hash is invalid"
+        )
+    expected_witness = {
+        "compose_sha256": prepared_manifest["prepared"][
+            "role_compose_sha256"
+        ],
+        "environment_sha256": prepared_manifest["prepared"][
+            "role_env_sha256"
+        ],
+    }
+    campaign_hash = _sha256(
+        json.dumps(
+            role_bundles,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    if (
+        role_bundles["witness"] != expected_witness
+        or campaign_hash != core["campaign_bundle_sha256"]
+    ):
+        raise WitnessRelayMaterialError(
+            "relay campaign validation bundle commitment differs"
+        )
+
+
+def relay_material_approval_subject(
+    core: dict[str, Any],
+    *,
+    prepared_manifest: dict[str, Any],
+    inventory: dict[str, Any],
+    approval_policy: dict[str, Any],
+) -> dict[str, Any]:
+    validate_campaign_validation_core(
+        core,
+        prepared_manifest=prepared_manifest,
+        inventory=inventory,
+        approval_policy=approval_policy,
+    )
+    return approval_subject(
+        artifact_type=CAMPAIGN_VALIDATION_SCHEMA,
+        artifact_sha256=_sha256(canonical_json_bytes(core)),
+        release_sha=str(core["release_sha"]),
+        bindings={
+            "campaign_id": core["campaign_id"],
+            "deployment_id": core["deployment_id"],
+            "revision_id": core["revision_id"],
+            "campaign_bundle_sha256": core["campaign_bundle_sha256"],
+        },
+    )
+
+
+def verify_relay_material_approval(
+    *,
+    token: dict[str, Any],
+    core: dict[str, Any],
+    prepared_manifest: dict[str, Any],
+    inventory: dict[str, Any],
+    approval_policy: dict[str, Any],
+    now: datetime | None,
+) -> dict[str, str]:
+    if not isinstance(token, dict) or token.get("schema") != TOKEN_SCHEMA:
+        raise WitnessRelayMaterialError(
+            "relay material requires a direct password-plus-possession approval"
+        )
+    try:
+        verified = verify_human_approval(
+            token,
+            policy_payload=approval_policy,
+            expected_action=MATERIAL_APPROVAL_ACTION,
+            expected_environment="staging",
+            expected_subject=relay_material_approval_subject(
+                core,
+                prepared_manifest=prepared_manifest,
+                inventory=inventory,
+                approval_policy=approval_policy,
+            ),
+            now=now,
+            require_fresh=True,
+        )
+    except Exception as exc:
+        raise WitnessRelayMaterialError(
+            "relay material approval is invalid"
+        ) from exc
+    return {
+        "sha256": _sha256(canonical_json_bytes(token)),
+        "approval_id": verified.approval_id,
+        "expires_at": verified.expires_at.isoformat(),
+        "action": MATERIAL_APPROVAL_ACTION,
     }
 
 
@@ -755,12 +1089,16 @@ def finalize_revision(
     prepared_manifest: dict[str, Any],
     prepared_manifest_bytes: bytes,
     inventory: dict[str, Any],
+    inventory_approval: dict[str, Any],
+    other_bundles: dict[str, tuple[bytes, bytes]],
     policy: dict[str, Any],
     policy_bytes: bytes,
+    material_approval: dict[str, Any],
     session: dict[str, Any],
     session_bytes: bytes,
     created_at: datetime | None = None,
     now: datetime | None = None,
+    witness_relay_public_key: str | None = None,
 ) -> dict[str, Any]:
     """Bind real session/policy bytes into a new final transfer bundle."""
 
@@ -776,6 +1114,38 @@ def finalize_revision(
     )
     if prepared_manifest_bytes != _manifest_bytes(prepared_manifest):
         raise WitnessRelayMaterialError("prepared relay manifest bytes are not canonical")
+    campaign_result = validate_prepared_campaign(
+        canonical_compose=canonical_compose,
+        base_compose_bytes=base_compose_bytes,
+        base_env_bytes=base_env_bytes,
+        prepared_compose_bytes=prepared_compose_bytes,
+        prepared_env_bytes=prepared_env_bytes,
+        manifest=prepared_manifest,
+        inventory=inventory,
+        approval=inventory_approval,
+        approval_policy=policy,
+        other_bundles=other_bundles,
+        witness_relay_public_key=witness_relay_public_key,
+    )
+    campaign_validation = build_campaign_validation_core(
+        prepared_compose_bytes=prepared_compose_bytes,
+        prepared_env_bytes=prepared_env_bytes,
+        prepared_manifest=prepared_manifest,
+        inventory=inventory,
+        inventory_approval=inventory_approval,
+        approval_policy=policy,
+        other_bundles=other_bundles,
+        campaign_result=campaign_result,
+        witness_relay_public_key=witness_relay_public_key,
+    )
+    material_approval_result = verify_relay_material_approval(
+        token=material_approval,
+        core=campaign_validation,
+        prepared_manifest=prepared_manifest,
+        inventory=inventory,
+        approval_policy=policy,
+        now=now,
+    )
     session_result = _verify_final_session(
         session=session,
         policy=policy,
@@ -810,6 +1180,9 @@ def finalize_revision(
         "required_session_actions": list(
             prepared_manifest["required_session_actions"]
         ),
+        "campaign_validation": campaign_validation,
+        "material_approval_token": material_approval,
+        "material_approval": material_approval_result,
         "final": {
             "policy_file_sha256": _sha256(policy_bytes),
             "approval_policy_sha256": approval_policy_hash(policy),
@@ -857,6 +1230,9 @@ def verify_final_structure(
             "prepared",
             "bindings",
             "required_session_actions",
+            "campaign_validation",
+            "material_approval_token",
+            "material_approval",
             "final",
             "attestations",
         },
@@ -889,6 +1265,30 @@ def verify_final_structure(
         manifest=prepared_manifest,
         inventory=inventory,
         approval_policy=policy,
+    )
+    campaign_validation = final_manifest["campaign_validation"]
+    if not isinstance(campaign_validation, dict):
+        raise WitnessRelayMaterialError(
+            "final relay campaign validation is invalid"
+        )
+    validate_campaign_validation_core(
+        campaign_validation,
+        prepared_manifest=prepared_manifest,
+        inventory=inventory,
+        approval_policy=policy,
+    )
+    material_approval_token = final_manifest["material_approval_token"]
+    if not isinstance(material_approval_token, dict):
+        raise WitnessRelayMaterialError(
+            "final relay material approval token is invalid"
+        )
+    material_approval_result = verify_relay_material_approval(
+        token=material_approval_token,
+        core=campaign_validation,
+        prepared_manifest=prepared_manifest,
+        inventory=inventory,
+        approval_policy=policy,
+        now=now,
     )
     session_result = _verify_final_session(
         session=session,
@@ -935,6 +1335,7 @@ def verify_final_structure(
             for field in copied_fields
         )
         or final_values != expected_final
+        or final_manifest["material_approval"] != material_approval_result
         or _strict_json_bytes(policy_bytes, label="relay policy") != policy
         or _strict_json_bytes(session_bytes, label="relay session") != session
         or policy_bytes != _manifest_bytes(policy)
@@ -948,6 +1349,10 @@ def verify_final_structure(
         "status": "final-relay-transfer-bundle-verified-not-installed",
         "stage": "final",
         "session_expires_at": session_result["expires_at"],
+        "campaign_bundle_sha256": campaign_validation[
+            "campaign_bundle_sha256"
+        ],
+        "material_approval_id": material_approval_result["approval_id"],
         "file_attestation": False,
         "image_attestation": False,
         "activation": False,
@@ -981,6 +1386,7 @@ def _assert_output_directory(path: Path) -> None:
         raise WitnessRelayMaterialError(
             "bundle output parent must not traverse a symlink"
         )
+    assert_root_controlled_ancestors(parent, label="bundle output parent")
     metadata = parent.lstat()
     if (
         not stat.S_ISDIR(metadata.st_mode)
@@ -1045,6 +1451,7 @@ def _assert_existing_bundle_directory(directory: Path) -> None:
         raise WitnessRelayMaterialError(
             "relay bundle directory must not traverse a symlink"
         )
+    assert_root_controlled_ancestors(directory, label="relay bundle directory")
     metadata = directory.lstat()
     if (
         not stat.S_ISDIR(metadata.st_mode)
@@ -1315,10 +1722,19 @@ def main(argv: list[str] | None = None) -> int:
     prepared.add_argument("--bundle", action="append", required=True)
     prepared.add_argument("--prepared-directory", type=Path, required=True)
     prepared.add_argument("--witness-relay-public-key-file", type=Path)
+    prepared.add_argument(
+        "--material-approval-subject-output",
+        type=Path,
+        required=True,
+    )
 
     finalize = commands.add_parser("finalize")
     _base_args(finalize)
     finalize.add_argument("--prepared-directory", type=Path, required=True)
+    finalize.add_argument("--inventory-approval", type=Path, required=True)
+    finalize.add_argument("--bundle", action="append", required=True)
+    finalize.add_argument("--material-approval", type=Path, required=True)
+    finalize.add_argument("--witness-relay-public-key-file", type=Path)
     finalize.add_argument("--session", type=Path, required=True)
     finalize.add_argument("--policy", type=Path, required=True)
     finalize.add_argument("--output-directory", type=Path, required=True)
@@ -1387,6 +1803,23 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 for role, compose_path, env_path in parsed
             }
+            inventory_approval = read_exact_json_file(
+                args.approval, label="inventory approval"
+            )
+            policy = read_exact_json_file(
+                args.approval_policy, label="approval policy"
+            )
+            witness_relay_public_key = (
+                read_exact_material_file(
+                    args.witness_relay_public_key_file,
+                    expected_mode=0o600,
+                    label="pinned Witness relay public key",
+                )
+                .decode("utf-8")
+                .strip()
+                if args.witness_relay_public_key_file is not None
+                else None
+            )
             result = validate_prepared_campaign(
                 canonical_compose=canonical,
                 base_compose_bytes=base_compose,
@@ -1395,25 +1828,47 @@ def main(argv: list[str] | None = None) -> int:
                 prepared_env_bytes=env,
                 manifest=manifest,
                 inventory=inventory,
-                approval=read_exact_json_file(
-                    args.approval, label="inventory approval"
-                ),
-                approval_policy=read_exact_json_file(
-                    args.approval_policy, label="approval policy"
-                ),
+                approval=inventory_approval,
+                approval_policy=policy,
                 other_bundles=other_bundles,
-                witness_relay_public_key=(
-                    read_exact_material_file(
-                        args.witness_relay_public_key_file,
-                        expected_mode=0o600,
-                        label="pinned Witness relay public key",
-                    )
-                    .decode("utf-8")
-                    .strip()
-                    if args.witness_relay_public_key_file is not None
-                    else None
-                ),
+                witness_relay_public_key=witness_relay_public_key,
             )
+            validation_core = build_campaign_validation_core(
+                prepared_compose_bytes=compose,
+                prepared_env_bytes=env,
+                prepared_manifest=manifest,
+                inventory=inventory,
+                inventory_approval=inventory_approval,
+                approval_policy=policy,
+                other_bundles=other_bundles,
+                campaign_result=result,
+                witness_relay_public_key=witness_relay_public_key,
+            )
+            material_subject = relay_material_approval_subject(
+                validation_core,
+                prepared_manifest=manifest,
+                inventory=inventory,
+                approval_policy=policy,
+            )
+            write_secure_new_bytes(
+                args.material_approval_subject_output,
+                _manifest_bytes(material_subject),
+                label="relay material approval subject",
+                mode=0o600,
+            )
+            result = {
+                **result,
+                "campaign_validation": validation_core,
+                "material_approval_subject_output": str(
+                    args.material_approval_subject_output
+                ),
+                "material_approval_subject_sha256": _sha256(
+                    canonical_json_bytes(material_subject)
+                ),
+                "material_approval_subject_file_sha256": _sha256(
+                    _manifest_bytes(material_subject)
+                ),
+            }
         elif args.command == "finalize":
             (
                 compose,
@@ -1433,6 +1888,26 @@ def main(argv: list[str] | None = None) -> int:
             )
             policy = _strict_json_bytes(policy_bytes, label="relay policy")
             session = _strict_json_bytes(session_bytes, label="relay session")
+            parsed = [_parse_other_bundle(value) for value in args.bundle]
+            if len(parsed) != 3 or len({role for role, _c, _e in parsed}) != 3:
+                raise WitnessRelayMaterialError(
+                    "exactly three distinct unchanged role bundles are required"
+                )
+            other_bundles = {
+                role: (
+                    read_exact_material_file(
+                        compose_path,
+                        expected_mode=0o640,
+                        label=f"{role} Compose",
+                    ),
+                    read_exact_material_file(
+                        env_path,
+                        expected_mode=0o600,
+                        label=f"{role} environment",
+                    ),
+                )
+                for role, compose_path, env_path in parsed
+            }
             final_manifest = finalize_revision(
                 canonical_compose=canonical,
                 base_compose_bytes=base_compose,
@@ -1442,10 +1917,30 @@ def main(argv: list[str] | None = None) -> int:
                 prepared_manifest=prepared_manifest,
                 prepared_manifest_bytes=prepared_manifest_bytes,
                 inventory=inventory,
+                inventory_approval=read_exact_json_file(
+                    args.inventory_approval,
+                    label="inventory approval",
+                ),
+                other_bundles=other_bundles,
                 policy=policy,
                 policy_bytes=policy_bytes,
+                material_approval=read_exact_json_file(
+                    args.material_approval,
+                    label="relay material approval",
+                ),
                 session=session,
                 session_bytes=session_bytes,
+                witness_relay_public_key=(
+                    read_exact_material_file(
+                        args.witness_relay_public_key_file,
+                        expected_mode=0o600,
+                        label="pinned Witness relay public key",
+                    )
+                    .decode("utf-8")
+                    .strip()
+                    if args.witness_relay_public_key_file is not None
+                    else None
+                ),
             )
             _publish_new_bundle(
                 args.output_directory,

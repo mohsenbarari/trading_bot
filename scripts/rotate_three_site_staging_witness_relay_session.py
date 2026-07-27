@@ -37,9 +37,11 @@ from scripts.build_three_site_staging_witness_relay_material import (
     JOURNAL_DIRECTORY_NAME,
     POLICY_NAME,
     SESSION_NAME,
+    WitnessRelayMaterialError,
     _manifest_bytes,
     _sha256,
     _strict_json_bytes,
+    assert_root_controlled_ancestors,
     read_exact_material_file,
 )
 from scripts.render_three_site_staging_role_compose import (
@@ -93,6 +95,7 @@ def _inspect_runtime_container(
     container_id: str,
     material_directory: Path,
     values: dict[str, str],
+    expected_project: str,
 ) -> dict[str, Any]:
     if CONTAINER_ID_RE.fullmatch(container_id) is None:
         raise WitnessRelayRotationError("Witness container identifier is invalid")
@@ -170,8 +173,7 @@ def _inspect_runtime_container(
         or document["RestartCount"] < 0
         or not isinstance(labels, dict)
         or labels.get("com.docker.compose.service") != "witness_api"
-        or labels.get("com.docker.compose.project")
-        != values.get("STAGING_STORAGE_NAMESPACE")
+        or labels.get("com.docker.compose.project") != expected_project
         or not isinstance(environment, list)
         or not isinstance(mounts, list)
     ):
@@ -280,6 +282,14 @@ def _assert_root_directory(path: Path, *, label: str) -> None:
         )
 
 
+def _assert_pinned_directory(path: Path, descriptor: int, *, label: str) -> None:
+    _assert_root_directory(path, label=label)
+    pathname = path.lstat()
+    pinned = os.fstat(descriptor)
+    if (pathname.st_dev, pathname.st_ino) != (pinned.st_dev, pinned.st_ino):
+        raise WitnessRelayRotationError(f"{label} changed after it was pinned")
+
+
 def _read_canonical_json(path: Path, *, label: str) -> tuple[bytes, dict[str, Any]]:
     payload = read_exact_material_file(
         path,
@@ -355,11 +365,16 @@ def _fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
-def _unlink_recoverable_file(path: Path, *, label: str) -> None:
+def _unlink_recoverable_file(
+    path: Path,
+    *,
+    label: str,
+    allowed_links: frozenset[int] = frozenset({1, 2}),
+) -> None:
     _read_root_file_relaxed(
         path,
         label=label,
-        allowed_links=frozenset({1, 2}),
+        allowed_links=allowed_links,
     )
     path.unlink()
     _fsync_directory(path.parent)
@@ -586,7 +601,7 @@ def _recoverable_atomic_replace(
 def _prove_directory_bind(
     compose_bytes: bytes,
     env_bytes: bytes,
-) -> tuple[dict[str, str], Path]:
+) -> tuple[dict[str, str], Path, str]:
     try:
         compose = yaml.safe_load(compose_bytes.decode("utf-8"))
         values = parse_env_values(env_bytes.decode("utf-8"))
@@ -636,6 +651,11 @@ def _prove_directory_bind(
         raise WitnessRelayRotationError(
             "Witness environment is not the exact canonical closed variable set"
         )
+    expected_project = f"{values.get('STAGING_STORAGE_NAMESPACE', '')}-witness"
+    if compose.get("name") != expected_project:
+        raise WitnessRelayRotationError(
+            "Witness Compose project name differs from its role namespace"
+        )
     material_value = values.get("STAGING_HUMAN_APPROVAL_RELAY_MATERIAL_DIR", "")
     material = Path(material_value)
     if (
@@ -666,7 +686,7 @@ def _prove_directory_bind(
         raise WitnessRelayRotationError(
             "Witness relay environment is not bound to the immutable release"
         )
-    return values, material
+    return values, material, expected_project
 
 
 def _session_probe_subject(
@@ -820,6 +840,27 @@ def _read_journal(path: Path) -> dict[str, Any]:
     return _validate_journal_payload(journal)
 
 
+def _read_unpublished_journal_sidecar(path: Path) -> dict[str, Any] | None:
+    """Return only a complete canonical admission; partial writes are residue."""
+
+    payload, _metadata = _read_root_file_relaxed(
+        path,
+        label="relay rotation journal creation sidecar",
+    )
+    try:
+        journal = _strict_json_bytes(
+            payload,
+            label="relay rotation journal creation sidecar",
+        )
+        if payload != _journal_bytes(journal):
+            raise WitnessRelayRotationError(
+                "relay rotation journal creation sidecar bytes are not canonical"
+            )
+        return _validate_journal_payload(journal)
+    except (WitnessRelayMaterialError, WitnessRelayRotationError):
+        return None
+
+
 def _validate_journal_payload(journal: dict[str, Any]) -> dict[str, Any]:
     expected = {
         "schema",
@@ -961,6 +1002,14 @@ def rotate_witness_relay_session(
         raise WitnessRelayRotationError("expected relay policy hash is invalid")
     if CONTAINER_ID_RE.fullmatch(str(container_id)) is None:
         raise WitnessRelayRotationError("Witness container identifier is invalid")
+    assert_root_controlled_ancestors(
+        role_compose_path.parent,
+        label="installed Witness Compose parent",
+    )
+    assert_root_controlled_ancestors(
+        env_file_path.parent,
+        label="installed Witness environment parent",
+    )
     compose_bytes = read_exact_material_file(
         role_compose_path,
         expected_mode=0o640,
@@ -971,7 +1020,10 @@ def rotate_witness_relay_session(
         expected_mode=0o600,
         label="installed Witness environment",
     )
-    values, active = _prove_directory_bind(compose_bytes, env_bytes)
+    values, active, expected_project = _prove_directory_bind(
+        compose_bytes,
+        env_bytes,
+    )
     revision_root = active.parent
     archive = revision_root / ARCHIVE_DIRECTORY_NAME
     journals = revision_root / JOURNAL_DIRECTORY_NAME
@@ -982,6 +1034,10 @@ def rotate_witness_relay_session(
         (journals, "relay journal directory"),
     ):
         _assert_root_directory(path, label=label)
+    assert_root_controlled_ancestors(
+        revision_root,
+        label="relay revision root",
+    )
     try:
         new_resolved = new_session_path.resolve(strict=True)
     except OSError as exc:
@@ -990,6 +1046,10 @@ def rotate_witness_relay_session(
         raise WitnessRelayRotationError(
             "new relay session source must be outside the installed revision"
         )
+    assert_root_controlled_ancestors(
+        new_session_path.parent,
+        label="new relay session parent",
+    )
     new_bytes, new_session = _read_canonical_json(
         new_session_path,
         label="new relay session",
@@ -1031,7 +1091,7 @@ def rotate_witness_relay_session(
         policy=policy,
         release_sha=release,
         now=now,
-        require_fresh=not new_is_live,
+        require_fresh=False,
     )
     scope_hash = new_result["session_scope_sha256"]
 
@@ -1043,6 +1103,11 @@ def rotate_witness_relay_session(
     )
     lock_fd = os.open(revision_root, lock_flags)
     try:
+        _assert_pinned_directory(
+            revision_root,
+            lock_fd,
+            label="relay revision root",
+        )
         try:
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
@@ -1056,6 +1121,11 @@ def rotate_witness_relay_session(
             (journals, "relay journal directory"),
         ):
             _assert_root_directory(path, label=label)
+        _assert_pinned_directory(
+            revision_root,
+            lock_fd,
+            label="relay revision root",
+        )
         journal_path = journals / f"{operation_id}.json"
         journal_create_sidecar = f".{journal_path.name}.creating"
         journal_update_sidecar = (
@@ -1073,6 +1143,39 @@ def rotate_witness_relay_session(
                 }
             ),
         )
+        for existing_path in journals.iterdir():
+            if JOURNAL_NAME_RE.fullmatch(existing_path.name) is None:
+                continue
+            existing_journal = _read_journal(existing_path)
+            if existing_journal["operation_id"] != existing_path.stem:
+                raise WitnessRelayRotationError(
+                    "relay rotation journal filename differs from its operation"
+                )
+            if (
+                existing_path != journal_path
+                and existing_journal["phase"] != "complete"
+            ):
+                raise WitnessRelayRotationError(
+                    "another relay rotation journal is incomplete"
+                )
+        _finish_published_create_sidecar(
+            journal_path,
+            label="relay rotation journal",
+        )
+        journal_sidecar_path = journals / journal_create_sidecar
+        if journal_path.exists() or journal_path.is_symlink():
+            journal_source_path: Path | None = journal_path
+            journal_candidate: dict[str, Any] | None = _read_journal(
+                journal_source_path
+            )
+        elif journal_sidecar_path.exists() or journal_sidecar_path.is_symlink():
+            journal_source_path = journal_sidecar_path
+            journal_candidate = _read_unpublished_journal_sidecar(
+                journal_source_path
+            )
+        else:
+            journal_source_path = None
+            journal_candidate = None
         active_entries = {entry.name for entry in active.iterdir()}
         if (
             not {SESSION_NAME, POLICY_NAME}.issubset(active_entries)
@@ -1104,13 +1207,14 @@ def rotate_witness_relay_session(
             policy=policy,
             release_sha=release,
             now=now,
-            require_fresh=not new_is_live,
+            require_fresh=False,
         )
         scope_hash = new_result["session_scope_sha256"]
         runtime_before = _inspect_runtime_container(
             container_id=container_id,
             material_directory=active,
             values=values,
+            expected_project=expected_project,
         )
         preflight_old_result = None
         if not new_is_live:
@@ -1125,12 +1229,86 @@ def rotate_witness_relay_session(
                 old_result=preflight_old_result,
                 new_result=new_result,
             )
-        _finish_published_create_sidecar(
-            journal_path,
-            label="relay rotation journal",
+        expected_new = {
+            "approval_id": new_result["approval_id"],
+            "expires_at": new_result["expires_at"],
+            "session_sha256": new_hash,
+        }
+        journal_matches_request = (
+            journal_candidate is not None
+            and journal_candidate["operation_id"] == operation_id
+            and journal_candidate["revision_id"] == revision_root.name
+            and journal_candidate["release_sha"] == release
+            and journal_candidate["policy_sha256"] == policy_hash
+            and journal_candidate["session_scope_sha256"] == scope_hash
+            and journal_candidate["runtime"] == runtime_before
+            and journal_candidate["new"] == expected_new
         )
-        if journal_path.exists() or journal_path.is_symlink():
-            journal = _read_journal(journal_path)
+        if journal_source_path == journal_path:
+            if not journal_matches_request:
+                raise WitnessRelayRotationError(
+                    "published relay rotation journal differs from the requested operation"
+                )
+            has_durable_admission = True
+        elif journal_source_path == journal_sidecar_path:
+            has_durable_admission = bool(
+                journal_matches_request
+                and journal_candidate is not None
+                and journal_candidate["phase"] == "prepared"
+                and not new_is_live
+                and preflight_old_result is not None
+                and journal_candidate["old"]
+                == {
+                    "approval_id": preflight_old_result["approval_id"],
+                    "session_sha256": live_hash,
+                }
+                and journal_candidate["archive_name"]
+                == f"session-{live_hash}.json"
+                and journal_candidate["temporary_name"] == temporary_name
+            )
+        else:
+            has_durable_admission = False
+        if not has_durable_admission:
+            new_result = _verify_session(
+                new_session,
+                policy=policy,
+                release_sha=release,
+                now=now,
+                require_fresh=True,
+            )
+            scope_hash = new_result["session_scope_sha256"]
+            if new_is_live:
+                raise WitnessRelayRotationError(
+                    "new session is live without its rotation journal"
+                )
+            if journal_source_path == journal_sidecar_path:
+                _assert_pinned_directory(
+                    revision_root,
+                    lock_fd,
+                    label="relay revision root",
+                )
+                _assert_root_directory(
+                    journals,
+                    label="relay journal directory",
+                )
+                _unlink_recoverable_file(
+                    journal_sidecar_path,
+                    label="incomplete relay rotation journal creation sidecar",
+                    allowed_links=frozenset({1}),
+                )
+                _assert_pinned_directory(
+                    revision_root,
+                    lock_fd,
+                    label="relay revision root",
+                )
+                journal_source_path = None
+                journal_candidate = None
+        if has_durable_admission:
+            if journal_source_path is None:
+                raise WitnessRelayRotationError(
+                    "relay rotation lost its durable admission"
+                )
+            journal = _read_journal(journal_source_path)
             if (
                 journal["operation_id"] != operation_id
                 or journal["revision_id"] != revision_root.name
@@ -1138,15 +1316,16 @@ def rotate_witness_relay_session(
                 or journal["policy_sha256"] != policy_hash
                 or journal["session_scope_sha256"] != scope_hash
                 or journal["runtime"] != runtime_before
-                or journal["new"]
-                != {
-                    "approval_id": new_result["approval_id"],
-                    "expires_at": new_result["expires_at"],
-                    "session_sha256": new_hash,
-                }
+                or journal["new"] != expected_new
             ):
                 raise WitnessRelayRotationError(
                     "relay rotation journal differs from the requested operation"
+                )
+            if journal_source_path == journal_sidecar_path:
+                _recoverable_create_exclusive(
+                    journal_path,
+                    _journal_bytes(journal),
+                    label="relay rotation journal",
                 )
         else:
             if new_is_live:
@@ -1192,6 +1371,11 @@ def rotate_witness_relay_session(
             _crash(crash_after, "journal-prepared")
 
         old_hash = str(journal["old"]["session_sha256"])
+        _assert_pinned_directory(
+            revision_root,
+            lock_fd,
+            label="relay revision root",
+        )
         archive_path = archive / str(journal["archive_name"])
         temporary_path = active / str(journal["temporary_name"])
         if (
@@ -1294,6 +1478,11 @@ def rotate_witness_relay_session(
                 _crash(crash_after, "temp-written")
             if journal["phase"] in {"prepared", "archived"}:
                 _set_phase(journal_path, journal, "staged")
+            _assert_pinned_directory(
+                revision_root,
+                lock_fd,
+                label="relay revision root",
+            )
             _replace_active_session(
                 active=active,
                 temporary_name=temporary_name,
@@ -1334,6 +1523,11 @@ def rotate_witness_relay_session(
             raise WitnessRelayRotationError(
                 "relay active directory retained rotation residue"
             )
+        _assert_pinned_directory(
+            revision_root,
+            lock_fd,
+            label="relay revision root",
+        )
         _assert_control_directory_entries(
             archive,
             name_pattern=ARCHIVE_NAME_RE,
@@ -1348,6 +1542,7 @@ def rotate_witness_relay_session(
             container_id=container_id,
             material_directory=active,
             values=values,
+            expected_project=expected_project,
         )
         if runtime_after != runtime_before or runtime_after != journal["runtime"]:
             raise WitnessRelayRotationError(

@@ -179,26 +179,42 @@ class ThreeSiteStagingMigrationPlanTests(unittest.TestCase):
                     "database_fingerprint_sha256": database_fingerprint,
                 }
             )
-            object_prefix = f"{inventory['object_storage']['prefix']}seed/{role}/"
+            object_prefix = (
+                f"{inventory['object_storage']['prefix']}seed-v2/"
+                f"{inventory['campaign_id']}/{inventory['release_sha']}/{role}/"
+            )
             readback = hashlib.sha256(f"readback-{role}".encode()).hexdigest()
+            targets = (
+                ("bot_fi",)
+                if role == "bot_fi"
+                else ("webapp_fi", "webapp_ir")
+            )
+            fingerprints = {
+                target: hashlib.sha256(f"recipient-{target}".encode()).hexdigest()
+                for target in targets
+            }
             seed = {
-                "schema": "three-site-staging-seed-manifest-v1",
+                "schema": "three-site-staging-seed-manifest-v2",
                 "campaign_id": inventory["campaign_id"],
                 "release_sha": inventory["release_sha"],
                 "source_role": role,
                 "bucket": inventory["object_storage"]["bucket"],
+                "bucket_owner_id": "owner-1",
                 "object_prefix": object_prefix,
-                "encryption": "age-x25519",
-                "recipient_fingerprint": hashlib.sha256(b"recipient").hexdigest(),
+                "encryption": "age-x25519-multi-recipient",
+                "recipient_fingerprints": fingerprints,
                 "objects": [
                     {
                         "kind": kind,
-                        "object_key": f"{object_prefix}{hashlib.sha256(f'{role}-{kind}-key'.encode()).hexdigest()}.age",
+                        "object_key": f"{object_prefix}{kind}.age",
                         "version_id": f"version-{role}-{kind}",
                         "plaintext_sha256": artifact["sha256"],
                         "plaintext_bytes": artifact["bytes"],
                         "ciphertext_sha256": hashlib.sha256(f"cipher-{role}-{kind}".encode()).hexdigest(),
                         "ciphertext_bytes": artifact["bytes"] + 256,
+                        "publication_intent": hashlib.sha256(
+                            f"intent-{role}-{kind}".encode()
+                        ).hexdigest(),
                     }
                     for kind, artifact in artifacts.items()
                 ],
@@ -210,8 +226,8 @@ class ThreeSiteStagingMigrationPlanTests(unittest.TestCase):
                     "source_role": role,
                     "manifest_sha256": hashlib.sha256(_canonical_bytes(seed)).hexdigest(),
                     "object_prefix": object_prefix,
-                    "encryption": "age-x25519",
-                    "recipient_fingerprint": seed["recipient_fingerprint"],
+                    "encryption": "age-x25519-multi-recipient",
+                    "recipient_fingerprints": fingerprints,
                     "readback_evidence_sha256": readback,
                 }
             )
@@ -330,7 +346,7 @@ class ThreeSiteStagingMigrationPlanTests(unittest.TestCase):
         )
         return approval_time, inventory, inventory_approval, policy, freezes, backups, seeds, images, plan, approval
 
-    def _verify(self, documents):
+    def _verify(self, documents, **kwargs):
         now, inventory, inventory_approval, policy, freezes, backups, seeds, images, plan, approval = documents
         return verify_migration_plan(
             plan,
@@ -343,52 +359,95 @@ class ThreeSiteStagingMigrationPlanTests(unittest.TestCase):
             backup_manifests=backups,
             seed_manifests=seeds,
             now=now,
+            **kwargs,
         )
 
     def test_exact_signed_plan_with_backup_and_encrypted_seed_evidence_passes(self):
-        result = self._verify(self._documents())
+        documents = self._documents()
+        result = self._verify(documents)
         self.assertEqual(result["status"], "approved")
         self.assertEqual(result["source_roles"], ["bot_fi", "webapp_fi"])
+        phases = documents[-2]["ordered_phases"]
+        bootstrap = phases.index(
+            "bootstrap_webapp_fi_writer_lease_epoch_1"
+        )
+        self.assertEqual(
+            phases[bootstrap - 1],
+            "start_private_receivers_and_witness",
+        )
+        self.assertEqual(
+            phases[bootstrap + 1],
+            "start_projection_delivery_blob_and_effect_workers",
+        )
 
     def test_v2_distinct_target_recipient_map_is_consumer_verified(self):
         documents = self._documents()
         seeds = documents[6]
-        plan = documents[-2]
-        for role, manifest in seeds.items():
-            targets = (
-                ("bot_fi",)
-                if role == "bot_fi"
-                else ("webapp_fi", "webapp_ir")
-            )
-            fingerprints = {
-                target: hashlib.sha256(f"recipient-{target}".encode()).hexdigest()
-                for target in targets
-            }
-            manifest["schema"] = "three-site-staging-seed-manifest-v2"
-            manifest["encryption"] = "age-x25519-multi-recipient"
-            manifest["recipient_fingerprints"] = fingerprints
-            del manifest["recipient_fingerprint"]
-            for item in manifest["objects"]:
-                item["publication_intent"] = hashlib.sha256(
-                    f"intent-{role}-{item['kind']}".encode()
-                ).hexdigest()
-            row = next(
-                value
-                for value in plan["seed_bundles"]
-                if value["source_role"] == role
-            )
-            row["encryption"] = "age-x25519-multi-recipient"
-            row["recipient_fingerprints"] = fingerprints
-            del row["recipient_fingerprint"]
-            row["manifest_sha256"] = hashlib.sha256(
-                _canonical_bytes(manifest)
-            ).hexdigest()
-        with patch(
-            "scripts.verify_three_site_staging_migration_plan._verify_approval",
-            return_value={"approval_id": "test"},
-        ):
-            result = self._verify(documents)
+        result = self._verify(documents)
         self.assertEqual(result["status"], "approved")
+        fingerprints = {
+            value
+            for manifest in seeds.values()
+            for value in manifest["recipient_fingerprints"].values()
+        }
+        self.assertEqual(len(fingerprints), 3)
+
+    def test_legacy_v1_seed_manifest_is_rejected(self):
+        documents = self._documents()
+        manifest = documents[6]["bot_fi"]
+        manifest["schema"] = "three-site-staging-seed-manifest-v1"
+        next(
+            row
+            for row in documents[-2]["seed_bundles"]
+            if row["source_role"] == "bot_fi"
+        )["manifest_sha256"] = hashlib.sha256(
+            _canonical_bytes(manifest)
+        ).hexdigest()
+        with self.assertRaisesRegex(MigrationPlanError, "only the sealed v2"):
+            self._verify(documents)
+
+    def test_duplicate_global_recipient_fingerprint_is_rejected(self):
+        documents = self._documents()
+        seeds = documents[6]
+        plan = documents[-2]
+        duplicate = seeds["bot_fi"]["recipient_fingerprints"]["bot_fi"]
+        seeds["webapp_fi"]["recipient_fingerprints"]["webapp_ir"] = duplicate
+        row = next(
+            value
+            for value in plan["seed_bundles"]
+            if value["source_role"] == "webapp_fi"
+        )
+        row["recipient_fingerprints"] = dict(
+            seeds["webapp_fi"]["recipient_fingerprints"]
+        )
+        row["manifest_sha256"] = hashlib.sha256(
+            _canonical_bytes(seeds["webapp_fi"])
+        ).hexdigest()
+        with self.assertRaisesRegex(MigrationPlanError, "globally exact"):
+            self._verify(documents)
+
+    def test_seed_key_prefix_and_non_null_version_are_exact(self):
+        for field, replacement in (
+            ("object_key", "staging/foreign/postgres.age"),
+            ("version_id", "null"),
+        ):
+            with self.subTest(field=field):
+                documents = self._documents()
+                manifest = documents[6]["bot_fi"]
+                manifest["objects"][0][field] = replacement
+                row = next(
+                    value
+                    for value in documents[-2]["seed_bundles"]
+                    if value["source_role"] == "bot_fi"
+                )
+                row["manifest_sha256"] = hashlib.sha256(
+                    _canonical_bytes(manifest)
+                ).hexdigest()
+                with self.assertRaisesRegex(
+                    MigrationPlanError,
+                    "object identity",
+                ):
+                    self._verify(documents)
 
     def test_migration_policy_or_token_tampering_is_rejected(self):
         documents = self._documents()
@@ -428,6 +487,38 @@ class ThreeSiteStagingMigrationPlanTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(MigrationPlanError, "source-backup identity"):
             self._verify(documents)
+
+    def test_source_postgres_system_identities_must_be_distinct(self):
+        documents = self._documents()
+        backups = documents[5]
+        plan = documents[-2]
+        bot_system_id = backups["bot_fi"]["source_postgres_system_id"]
+        backups["webapp_fi"]["source_postgres_system_id"] = bot_system_id
+        webapp_row = next(
+            row
+            for row in plan["source_backups"]
+            if row["source_role"] == "webapp_fi"
+        )
+        webapp_row["postgres_system_id"] = bot_system_id
+        webapp_row["manifest_sha256"] = hashlib.sha256(
+            _canonical_bytes(backups["webapp_fi"])
+        ).hexdigest()
+        with self.assertRaisesRegex(MigrationPlanError, "must be distinct"):
+            self._verify(documents)
+
+    def test_expired_plan_requires_explicit_historical_verification_mode(self):
+        documents = list(self._documents())
+        documents[0] = datetime.fromisoformat(
+            documents[-2]["not_after"]
+        ) + timedelta(seconds=1)
+        with self.assertRaisesRegex(MigrationPlanError, "not currently valid"):
+            self._verify(documents)
+        result = self._verify(
+            documents,
+            allow_expired_plan=True,
+            require_fresh_approval=False,
+        )
+        self.assertTrue(result["plan_expired"])
 
     def test_deployed_repeat_offer_revision_is_a_supported_source(self):
         documents = self._documents()

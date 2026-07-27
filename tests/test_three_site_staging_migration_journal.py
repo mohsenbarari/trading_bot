@@ -90,6 +90,72 @@ class ThreeSiteStagingMigrationJournalTests(unittest.TestCase):
             with self.assertRaises(MigrationJournalError):
                 journal.commit(acceptance_evidence_sha256="z" * 64)
 
+    def test_writer_lease_bootstrap_retry_reuses_one_durable_request_id(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = MigrationJournal(Path(directory) / "role.json")
+            journal.create(
+                campaign_id="11111111-1111-4111-8111-111111111111",
+                release_sha="a" * 40,
+                plan_sha256="b" * 64,
+                role="webapp_fi",
+                role_compose_sha256="c" * 64,
+                role_env_sha256="d" * 64,
+                image_inventory_sha256="e" * 64,
+            )
+            for phase in (
+                "seed_restored",
+                "database_configured",
+                "private_ready",
+            ):
+                journal.begin_phase(phase)
+                journal.complete_phase(phase)
+            request_id = "22222222-2222-4222-8222-222222222222"
+            started = journal.begin_writer_lease_bootstrap(
+                request_id=request_id,
+            )
+            retried = journal.begin_writer_lease_bootstrap(
+                request_id=request_id,
+            )
+            self.assertEqual(retried["state_sha256"], started["state_sha256"])
+            with self.assertRaisesRegex(MigrationJournalError, "current state"):
+                journal.begin_writer_lease_bootstrap(
+                    request_id="33333333-3333-4333-8333-333333333333",
+                )
+            completed = journal.complete_phase("writer_lease_bootstrapped")
+            self.assertEqual(completed["writer_lease_request_id"], request_id)
+            self.assertIn(
+                "writer_lease_bootstrapped",
+                completed["completed_phases"],
+            )
+
+    def test_interrupted_writer_bootstrap_can_roll_back_with_forensic_request(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = MigrationJournal(Path(directory) / "role.json")
+            journal.create(
+                campaign_id="11111111-1111-4111-8111-111111111111",
+                release_sha="a" * 40,
+                plan_sha256="b" * 64,
+                role="webapp_fi",
+                role_compose_sha256="c" * 64,
+                role_env_sha256="d" * 64,
+                image_inventory_sha256="e" * 64,
+            )
+            for phase in (
+                "seed_restored",
+                "database_configured",
+                "private_ready",
+            ):
+                journal.begin_phase(phase)
+                journal.complete_phase(phase)
+            request_id = "44444444-4444-4444-8444-444444444444"
+            journal.begin_writer_lease_bootstrap(request_id=request_id)
+            rolled_back = journal.complete_rollback()
+            self.assertEqual(rolled_back["status"], "rolled_back")
+            self.assertEqual(
+                rolled_back["writer_lease_request_id"],
+                request_id,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

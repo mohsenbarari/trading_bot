@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import fcntl
 import hashlib
@@ -11,6 +12,7 @@ from pathlib import Path
 import re
 import stat
 from typing import Any
+from uuid import UUID
 
 from core.secure_file_io import read_secure_bytes, write_secure_atomic_bytes
 
@@ -24,7 +26,8 @@ ROLE_PHASES = {
     ),
     "webapp_fi": (
         "seed_restored", "database_configured", "private_ready",
-        "writer_initialized", "workers_ready", "public_ready", "accepted",
+        "writer_lease_bootstrapped", "writer_initialized",
+        "workers_ready", "public_ready", "accepted",
     ),
     "webapp_ir": (
         "seed_restored", "database_configured", "private_ready",
@@ -54,7 +57,8 @@ def _validate(payload: dict[str, Any]) -> None:
         "schema", "campaign_id", "release_sha", "plan_sha256", "role",
         "role_compose_sha256", "role_env_sha256", "image_inventory_sha256",
         "status", "completed_phases", "started_phase", "rollback_reason",
-        "acceptance_evidence_sha256", "created_at", "updated_at", "state_sha256",
+        "writer_lease_request_id", "acceptance_evidence_sha256",
+        "created_at", "updated_at", "state_sha256",
     }
     role = payload.get("role") if isinstance(payload, dict) else None
     phases = ROLE_PHASES.get(str(role))
@@ -84,6 +88,35 @@ def _validate(payload: dict[str, Any]) -> None:
         or payload.get("state_sha256") != _state_hash(payload)
     ):
         raise MigrationJournalError("migration journal schema/state/hash is invalid")
+    request_id = payload.get("writer_lease_request_id")
+    if request_id is not None:
+        try:
+            normalized_request_id = str(UUID(str(request_id)))
+        except ValueError as exc:
+            raise MigrationJournalError(
+                "migration Writer lease request id is invalid"
+            ) from exc
+        if request_id != normalized_request_id:
+            raise MigrationJournalError(
+                "migration Writer lease request id is not canonical"
+            )
+    bootstrap_phase = "writer_lease_bootstrapped"
+    bootstrap_reached = (
+        bootstrap_phase in payload["completed_phases"]
+        or payload.get("started_phase") == bootstrap_phase
+        or (
+            payload.get("status") == "rolled_back"
+            and request_id is not None
+        )
+    )
+    if (
+        (role != "webapp_fi" and request_id is not None)
+        or (bootstrap_reached and request_id is None)
+        or (not bootstrap_reached and request_id is not None)
+    ):
+        raise MigrationJournalError(
+            "migration Writer lease request id/phase binding is invalid"
+        )
     next_index = len(payload["completed_phases"])
     if payload["started_phase"] is not None and (
         next_index >= len(phases) or payload["started_phase"] != phases[next_index]
@@ -123,6 +156,41 @@ class MigrationJournal:
             raise MigrationJournalError("migration journal lock is unsafe")
         fcntl.flock(descriptor, fcntl.LOCK_EX)
         return descriptor
+
+    @contextmanager
+    def writer_lease_execution_lock(self):
+        path = self.path.with_suffix(
+            self.path.suffix + ".writer-lease-execution.lock"
+        )
+        flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags, 0o600)
+        try:
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != os.geteuid()
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+                or metadata.st_nlink != 1
+            ):
+                raise MigrationJournalError(
+                    "Writer lease execution lock is unsafe"
+                )
+            try:
+                fcntl.flock(
+                    descriptor,
+                    fcntl.LOCK_EX | fcntl.LOCK_NB,
+                )
+            except BlockingIOError as exc:
+                raise MigrationJournalError(
+                    "Writer lease bootstrap execution is already active"
+                ) from exc
+            yield
+        finally:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            finally:
+                os.close(descriptor)
 
     def _read(self) -> dict[str, Any]:
         try:
@@ -178,6 +246,7 @@ class MigrationJournal:
                 "completed_phases": [],
                 "started_phase": None,
                 "rollback_reason": None,
+                "writer_lease_request_id": None,
                 "acceptance_evidence_sha256": None,
                 "created_at": now,
                 "updated_at": now,
@@ -204,9 +273,64 @@ class MigrationJournal:
             index = len(payload["completed_phases"])
             if index >= len(phases) or phase != phases[index]:
                 raise MigrationJournalError("migration phase is out of order")
+            if phase == "writer_lease_bootstrapped":
+                raise MigrationJournalError(
+                    "Writer lease bootstrap requires its persisted request id"
+                )
             payload["started_phase"] = phase
             payload["status"] = "rollback_required"
             payload["rollback_reason"] = "phase_started_without_durable_completion"
+            return self._write(payload)
+        finally:
+            os.close(descriptor)
+
+    def begin_writer_lease_bootstrap(
+        self,
+        *,
+        request_id: str,
+    ) -> dict[str, Any]:
+        try:
+            normalized_request_id = str(UUID(str(request_id)))
+        except ValueError as exc:
+            raise MigrationJournalError(
+                "Writer lease bootstrap request id is invalid"
+            ) from exc
+        if request_id != normalized_request_id:
+            raise MigrationJournalError(
+                "Writer lease bootstrap request id is not canonical"
+            )
+        descriptor = self._lock()
+        try:
+            payload = self._read()
+            phase = "writer_lease_bootstrapped"
+            if (
+                payload["role"] == "webapp_fi"
+                and payload["status"] == "rollback_required"
+                and payload["started_phase"] == phase
+                and payload["writer_lease_request_id"] == request_id
+            ):
+                # An ambiguous container/transport result is retried with the
+                # exact durable Witness request id. No journal bytes change.
+                return payload
+            phases = ROLE_PHASES[payload["role"]]
+            index = len(payload["completed_phases"])
+            if (
+                payload["role"] != "webapp_fi"
+                or payload["status"] != "active"
+                or payload["started_phase"] is not None
+                or index >= len(phases)
+                or phases[index] != phase
+                or payload["writer_lease_request_id"] is not None
+            ):
+                raise MigrationJournalError(
+                    "Writer lease bootstrap cannot begin from current state"
+                )
+            payload["started_phase"] = phase
+            payload["writer_lease_request_id"] = request_id
+            payload["status"] = "rollback_required"
+            payload["rollback_reason"] = (
+                "writer_lease_bootstrap_started_without_durable_completion"
+            )
             return self._write(payload)
         finally:
             os.close(descriptor)

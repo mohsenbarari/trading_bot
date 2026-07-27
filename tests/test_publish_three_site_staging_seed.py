@@ -148,38 +148,31 @@ class PublishThreeSiteStagingSeedTests(unittest.TestCase):
         args.confirm = planned["required_confirmation"]
         return args, inventory, inventory_result, backup, _FakeS3(versioning=versioning)
 
-    def test_publish_requires_versioning_and_proves_decrypted_readback(self):
+    def test_legacy_v1_apply_is_disabled_before_any_provider_call(self):
         with tempfile.TemporaryDirectory() as directory:
             args, inventory, inventory_result, backup, client = self._fixture(Path(directory))
-            with patch("scripts.publish_three_site_staging_seed._client", return_value=client), patch(
-                "scripts.publish_three_site_staging_seed._run_age", side_effect=_fake_age
-            ):
-                result = execute(
+            with self.assertRaisesRegex(SeedPublicationError, "legacy v1"):
+                execute(
                     args,
                     inventory=inventory,
                     inventory_result=inventory_result,
                     backup=backup,
                 )
-            self.assertEqual(result["status"], "published-and-readback-verified")
-            self.assertEqual(result["object_count"], 3)
-            manifest = json.loads((args.output_dir / "seed-manifest.json").read_text())
-            self.assertEqual(len(manifest["objects"]), 3)
-            self.assertTrue(all(item["version_id"] == "version-1" for item in manifest["objects"]))
-            self.assertEqual((args.output_dir / "seed-manifest.json").stat().st_mode & 0o777, 0o600)
+            self.assertFalse(client.objects)
+            self.assertFalse(args.output_dir.exists())
 
-    def test_suspended_bucket_fails_before_upload(self):
+    def test_legacy_v1_remains_disabled_when_bucket_is_suspended(self):
         with tempfile.TemporaryDirectory() as directory:
             args, inventory, inventory_result, backup, client = self._fixture(
                 Path(directory), versioning=False
             )
-            with patch("scripts.publish_three_site_staging_seed._client", return_value=client):
-                with self.assertRaisesRegex(SeedPublicationError, "versioning"):
-                    execute(
-                        args,
-                        inventory=inventory,
-                        inventory_result=inventory_result,
-                        backup=backup,
-                    )
+            with self.assertRaisesRegex(SeedPublicationError, "legacy v1"):
+                execute(
+                    args,
+                    inventory=inventory,
+                    inventory_result=inventory_result,
+                    backup=backup,
+                )
             self.assertFalse(client.objects)
 
 

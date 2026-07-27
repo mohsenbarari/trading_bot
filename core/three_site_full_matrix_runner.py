@@ -1151,27 +1151,13 @@ async def run_full_matrix_campaign(
         raise FullMatrixRunnerError(
             "completed Full Matrix campaign is immutable; use the evidence verifier"
         )
-    preflight_context = _operation_context()
-    await _run_journaled_operation(
-        journal=journal,
-        identity=identity,
-        records=records,
-        operation_kind="preflight",
-        context=preflight_context,
-        campaign_start_intent=not records,
-        invoke=lambda operation_id: backend.preflight(
-            identity, operation_id=operation_id
-        ),
-        validate=lambda result, operation_id: _validate_preflight(
-            result, identity, operation_id=operation_id, artifact_root=artifact_root
-        ),
-    )
-    records, completed = _journal_state(journal, identity)
-    completed_phases = _completed_phase_hashes(records, identity)
 
     interrupted = _interrupted_key(records, completed)
-    if interrupted is not None:
-        iteration, phase, scenario_id, attempt = interrupted
+
+    async def recover_interrupted_scenario(
+        key: tuple[int, str, str, int],
+    ) -> None:
+        iteration, phase, scenario_id, attempt = key
         recovery_context = _operation_context(
             phase=phase, scenario_id=scenario_id, iteration=iteration,
             attempt=attempt,
@@ -1206,7 +1192,46 @@ async def run_full_matrix_campaign(
         records.append(recovered_record)
 
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    if _utc(campaign["expires_at"], label="campaign expires_at") <= current:
+    expired = _utc(campaign["expires_at"], label="campaign expires_at") <= current
+    finalized = [
+        record for record in records if record.get("event") == "campaign_finalized"
+    ]
+    if finalized:
+        phase_evidence = _load_all_phase_evidence(
+            identity=identity,
+            artifact_root=artifact_root,
+        )
+        report = verify_complete_matrix(
+            campaign=campaign,
+            approver_policy=approver_policy,
+            bound_artifacts=bound_artifacts,
+            phase_evidence=phase_evidence,
+            artifact_root=artifact_root,
+            execution_journal=journal,
+            now=now,
+        )
+        if not expired:
+            _journal_event(
+                journal,
+                identity,
+                event="campaign_completed",
+                report_hash=report["report_hash"],
+            )
+        return report
+
+    if midpoint_pause is not None and midpoint_resume is None and (
+        expired or midpoint_refresh_bundle is None
+    ):
+        return _paused_result(
+            campaign=campaign,
+            identity=identity,
+            pause=midpoint_pause,
+            refresh_bundle_status="required",
+        )
+
+    if expired:
+        if interrupted is not None:
+            await recover_interrupted_scenario(interrupted)
         active = interrupted
         if active is None:
             for record in reversed(records):
@@ -1269,28 +1294,26 @@ async def run_full_matrix_campaign(
             "expired Full Matrix campaign performed cleanup only and is now blocked"
         )
 
-    finalized = [record for record in records if record.get("event") == "campaign_finalized"]
-    if finalized:
-        phase_evidence = _load_all_phase_evidence(
-            identity=identity,
-            artifact_root=artifact_root,
-        )
-        report = verify_complete_matrix(
-            campaign=campaign,
-            approver_policy=approver_policy,
-            bound_artifacts=bound_artifacts,
-            phase_evidence=phase_evidence,
-            artifact_root=artifact_root,
-            execution_journal=journal,
-            now=now,
-        )
-        _journal_event(
-            journal,
-            identity,
-            event="campaign_completed",
-            report_hash=report["report_hash"],
-        )
-        return report
+    preflight_context = _operation_context()
+    await _run_journaled_operation(
+        journal=journal,
+        identity=identity,
+        records=records,
+        operation_kind="preflight",
+        context=preflight_context,
+        campaign_start_intent=not records,
+        invoke=lambda operation_id: backend.preflight(
+            identity, operation_id=operation_id
+        ),
+        validate=lambda result, operation_id: _validate_preflight(
+            result, identity, operation_id=operation_id, artifact_root=artifact_root
+        ),
+    )
+    records, completed = _journal_state(journal, identity)
+    completed_phases = _completed_phase_hashes(records, identity)
+    interrupted = _interrupted_key(records, completed)
+    if interrupted is not None:
+        await recover_interrupted_scenario(interrupted)
 
     phase_evidence: list[dict[str, Any]] = []
     used_scenario_artifacts: set[str] = set()

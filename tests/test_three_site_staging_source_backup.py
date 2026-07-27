@@ -124,6 +124,12 @@ class ThreeSiteStagingSourceBackupTests(unittest.TestCase):
             confirmation_phrase(inventory["campaign_id"], "webapp_fi", "a" * 40),
         )
 
+    def test_legacy_direct_apply_is_retired_fail_closed(self):
+        from scripts.run_three_site_staging_source_backup import execute
+
+        with self.assertRaisesRegex(StagingBackupError, "direct apply is retired"):
+            execute(SimpleNamespace(), {})
+
     def test_archive_verifier_rejects_links_and_parent_traversal(self):
         with tempfile.TemporaryDirectory() as directory:
             safe = Path(directory) / "safe.tar.gz"

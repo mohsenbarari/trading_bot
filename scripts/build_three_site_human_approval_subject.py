@@ -14,22 +14,41 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.human_approval import approval_subject
-from core.secure_file_io import write_secure_atomic_bytes
+from core.secure_file_io import read_secure_text, write_secure_new_bytes
 from core.dr_failover_orchestrator import failover_approval_subject, parse_plan
 from scripts.verify_three_site_staging_inventory import (
     _canonical_bytes,
-    load_inventory,
     verify_inventory,
 )
-from scripts.verify_three_site_staging_migration_plan import migration_approval_subject
 
 
 class ApprovalSubjectError(RuntimeError):
     pass
 
 
+def _secure_document(path: Path, *, label: str) -> dict:
+    def strict_object(pairs):  # noqa: ANN001
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ApprovalSubjectError(f"{label} contains a duplicate key")
+            result[key] = value
+        return result
+
+    try:
+        value = json.loads(
+            read_secure_text(path, label=label, max_size=4 * 1024 * 1024),
+            object_pairs_hook=strict_object,
+        )
+    except Exception as exc:
+        raise ApprovalSubjectError(f"{label} is not secure strict JSON") from exc
+    if not isinstance(value, dict):
+        raise ApprovalSubjectError(f"{label} must be a JSON object")
+    return value
+
+
 def inventory_subject(path: Path) -> tuple[dict, dict]:
-    payload = load_inventory(path)
+    payload = _secure_document(path, label="inventory approval subject source")
     verified = verify_inventory(payload, host_destructive=None)
     digest = hashlib.sha256(_canonical_bytes(payload)).hexdigest()
     subject = approval_subject(
@@ -54,19 +73,15 @@ def inventory_subject(path: Path) -> tuple[dict, dict]:
 
 
 def migration_subject(path: Path) -> tuple[dict, dict]:
-    plan = load_inventory(path)
-    subject = migration_approval_subject(plan)
-    return subject, {
-        "action": "approve_migration",
-        "environment": "staging",
-        "artifact_sha256": subject["artifact_sha256"],
-        "release_sha": subject["release_sha"],
-        "campaign_id": subject["bindings"]["campaign_id"],
-    }
+    del path
+    raise ApprovalSubjectError(
+        "migration subjects must come from build_three_site_staging_migration_plan.py "
+        "after full evidence validation"
+    )
 
 
 def failover_subject(path: Path) -> tuple[dict, dict]:
-    payload = load_inventory(path)
+    payload = _secure_document(path, label="failover approval subject source")
     plan = parse_plan(payload, require_approval=False)
     subject = failover_approval_subject(plan)
     return subject, {
@@ -95,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
             "failover": failover_subject,
         }[args.kind]
         subject, summary = builder(args.artifact)
-        write_secure_atomic_bytes(
+        write_secure_new_bytes(
             args.output,
             (json.dumps(subject, sort_keys=True, indent=2) + "\n").encode(),
             label="human approval subject",

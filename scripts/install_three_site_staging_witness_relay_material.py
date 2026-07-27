@@ -40,6 +40,7 @@ from scripts.build_three_site_staging_witness_relay_material import (
     WitnessRelayMaterialError,
     _read_final_directory,
     _read_prepared_directory,
+    assert_root_controlled_ancestors,
     read_exact_json_file,
     read_exact_material_file,
     verify_final_structure,
@@ -87,6 +88,7 @@ def _assert_inert_root(root: Path) -> Path:
         raise InertRelayInstallError("inert root must already exist") from exc
     if resolved != root:
         raise InertRelayInstallError("inert root must not traverse a symlink")
+    assert_root_controlled_ancestors(root, label="inert root")
     metadata = root.lstat()
     if (
         not stat.S_ISDIR(metadata.st_mode)
@@ -112,6 +114,7 @@ def _assert_source_directory(directory: Path) -> None:
         raise InertRelayInstallError("relay bundle source is unavailable") from exc
     if resolved != directory:
         raise InertRelayInstallError("relay bundle source must not traverse a symlink")
+    assert_root_controlled_ancestors(directory, label="relay bundle source")
     metadata = directory.lstat()
     if (
         not stat.S_ISDIR(metadata.st_mode)
@@ -218,6 +221,7 @@ def install_inert_bundle(
 
     _assert_source_directory(bundle_directory)
     root = _assert_inert_root(inert_root)
+    root_identity = (root.lstat().st_dev, root.lstat().st_ino)
     manifest_path = bundle_directory / MANIFEST_NAME
     try:
         schema = json.loads(manifest_path.read_text(encoding="utf-8")).get("schema")
@@ -225,28 +229,10 @@ def install_inert_bundle(
         raise InertRelayInstallError("relay bundle manifest is unavailable") from exc
 
     if schema == PREPARED_SCHEMA:
-        compose, env, manifest_bytes, manifest = _read_prepared_directory(
-            bundle_directory
+        raise InertRelayInstallError(
+            "prepared relay bundles are controller-only and cannot be installed"
         )
-        validation = verify_prepared_structure(
-            canonical_compose=canonical_compose,
-            base_compose_bytes=base_compose_bytes,
-            base_env_bytes=base_env_bytes,
-            prepared_compose_bytes=compose,
-            prepared_env_bytes=env,
-            manifest=manifest,
-            inventory=inventory,
-            approval_policy=approval_policy,
-        )
-        files = {
-            COMPOSE_NAME: (compose, PREPARED_FILE_MODES[COMPOSE_NAME]),
-            ENV_NAME: (env, PREPARED_FILE_MODES[ENV_NAME]),
-            MANIFEST_NAME: (
-                manifest_bytes,
-                PREPARED_FILE_MODES[MANIFEST_NAME],
-            ),
-        }
-    elif schema == FINAL_SCHEMA:
+    if schema == FINAL_SCHEMA:
         (
             compose,
             env,
@@ -322,6 +308,13 @@ def install_inert_bundle(
         raise InertRelayInstallError(
             "Witness environment material directory differs from install destination"
         )
+    rechecked_root = _assert_inert_root(inert_root)
+    if (
+        rechecked_root != root
+        or (rechecked_root.lstat().st_dev, rechecked_root.lstat().st_ino)
+        != root_identity
+    ):
+        raise InertRelayInstallError("inert root changed during bundle validation")
     _copy_new_directory(destination=destination, files=files)
     return {
         "status": "installed-inert-not-activated",

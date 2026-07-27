@@ -52,6 +52,7 @@ ORDERED_PHASES = (
     "provision_least_privilege_roles",
     "activate_database_fencing",
     "start_private_receivers_and_witness",
+    "bootstrap_webapp_fi_writer_lease_epoch_1",
     "start_projection_delivery_blob_and_effect_workers",
     "prove_initial_convergence",
     "start_public_apps_with_routing_held",
@@ -168,7 +169,10 @@ def verify_migration_plan(
     seed_manifests: dict[str, dict[str, Any]],
     now: datetime | None = None,
     require_fresh_approval: bool = True,
+    allow_expired_plan: bool = False,
 ) -> dict[str, Any]:
+    if type(allow_expired_plan) is not bool:
+        raise MigrationPlanError("expired-plan setting is invalid")
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     inventory_result = verify_approved_inventory(
         inventory,
@@ -194,7 +198,10 @@ def verify_migration_plan(
     not_after = _utc(plan["not_after"], label="migration plan not_after")
     if not_after <= created_at or not_after - created_at > timedelta(hours=4):
         raise MigrationPlanError("migration plan validity exceeds four hours")
-    if not (created_at - timedelta(minutes=5) <= current < not_after):
+    if current < created_at - timedelta(minutes=5):
+        raise MigrationPlanError("migration plan is not currently valid")
+    plan_expired = current >= not_after
+    if plan_expired and not allow_expired_plan:
         raise MigrationPlanError("migration plan is not currently valid")
 
     freeze = plan["source_freeze"]
@@ -212,6 +219,7 @@ def verify_migration_plan(
     if not isinstance(source_rows, list) or len(source_rows) != len(SOURCE_ROLES):
         raise MigrationPlanError("migration requires exactly two source backups")
     source_by_role: dict[str, dict[str, Any]] = {}
+    source_system_ids: set[str] = set()
     target_system_ids = {str(role["postgres_system_id"]) for role in inventory["roles"]}
     protected_existing_system_ids = {
         str(value).lower()
@@ -243,6 +251,11 @@ def verify_migration_plan(
             not in protected_existing_system_ids
         ):
             raise MigrationPlanError("source-backup identity/hash is unsafe")
+        source_system_id = str(row["postgres_system_id"])
+        if source_system_id in source_system_ids:
+            raise MigrationPlanError(
+                "source PostgreSQL system identities must be distinct"
+            )
         manifest = backup_manifests.get(role)
         if manifest is None or hashlib.sha256(_canonical_bytes(manifest)).hexdigest() != row["manifest_sha256"]:
             raise MigrationPlanError("source-backup manifest bytes differ from the signed plan")
@@ -261,6 +274,7 @@ def verify_migration_plan(
         ):
             raise MigrationPlanError("source-backup evidence differs from the signed plan")
         source_by_role[role] = row
+        source_system_ids.add(source_system_id)
     if set(source_by_role) != set(SOURCE_ROLES):
         raise MigrationPlanError("source-backup role set is incomplete")
 
@@ -413,6 +427,9 @@ def verify_migration_plan(
     if not isinstance(bundle_rows, list) or len(bundle_rows) != len(SOURCE_ROLES):
         raise MigrationPlanError("migration requires exactly two encrypted seed bundles")
     seen_bundles: set[str] = set()
+    global_object_keys: set[str] = set()
+    global_recipient_fingerprints: dict[str, str] = {}
+    bucket_owner_ids: set[str] = set()
     inventory_storage = inventory["object_storage"]
     for row in bundle_rows:
         if not isinstance(row, dict):
@@ -428,57 +445,40 @@ def verify_migration_plan(
         ):
             raise MigrationPlanError("seed manifest bytes differ from the signed plan")
         schema = manifest.get("schema") if isinstance(manifest, dict) else None
-        if schema == "three-site-staging-seed-manifest-v1":
-            expected_row = {
-                "source_role", "manifest_sha256", "object_prefix", "encryption",
-                "recipient_fingerprint", "readback_evidence_sha256",
-            }
-            required_manifest = {
-                "schema", "campaign_id", "release_sha", "source_role", "bucket",
-                "object_prefix", "encryption", "recipient_fingerprint", "objects",
-                "readback_evidence_sha256",
-            }
-            recipient_valid = (
-                row.get("encryption") == "age-x25519"
-                and SHA256_RE.fullmatch(str(row.get("recipient_fingerprint") or ""))
-                is not None
-                and manifest.get("recipient_fingerprint")
-                == row.get("recipient_fingerprint")
+        if schema != "three-site-staging-seed-manifest-v2":
+            raise MigrationPlanError("only the sealed v2 seed manifest is supported")
+        expected_row = {
+            "source_role", "manifest_sha256", "object_prefix", "encryption",
+            "recipient_fingerprints", "readback_evidence_sha256",
+        }
+        required_manifest = {
+            "schema", "campaign_id", "release_sha", "source_role", "bucket",
+            "bucket_owner_id", "object_prefix", "encryption",
+            "recipient_fingerprints", "objects", "readback_evidence_sha256",
+        }
+        fingerprints = row.get("recipient_fingerprints")
+        recipient_valid = (
+            row.get("encryption") == "age-x25519-multi-recipient"
+            and isinstance(fingerprints, dict)
+            and set(fingerprints) == SOURCE_RECIPIENT_TARGETS[role]
+            and all(
+                SHA256_RE.fullmatch(str(value)) is not None
+                for value in fingerprints.values()
             )
-            expected_object_fields = {
-                "kind", "object_key", "version_id", "plaintext_sha256",
-                "plaintext_bytes", "ciphertext_sha256", "ciphertext_bytes",
-            }
-        elif schema == "three-site-staging-seed-manifest-v2":
-            expected_row = {
-                "source_role", "manifest_sha256", "object_prefix", "encryption",
-                "recipient_fingerprints", "readback_evidence_sha256",
-            }
-            required_manifest = {
-                "schema", "campaign_id", "release_sha", "source_role", "bucket",
-                "object_prefix", "encryption", "recipient_fingerprints", "objects",
-                "readback_evidence_sha256",
-            }
-            fingerprints = row.get("recipient_fingerprints")
-            recipient_valid = (
-                row.get("encryption") == "age-x25519-multi-recipient"
-                and isinstance(fingerprints, dict)
-                and set(fingerprints) == SOURCE_RECIPIENT_TARGETS[role]
-                and all(
-                    SHA256_RE.fullmatch(str(value)) is not None
-                    for value in fingerprints.values()
-                )
-                and len(set(fingerprints.values())) == len(fingerprints)
-                and manifest.get("recipient_fingerprints") == fingerprints
-            )
-            expected_object_fields = {
-                "kind", "object_key", "version_id", "plaintext_sha256",
-                "plaintext_bytes", "ciphertext_sha256", "ciphertext_bytes",
-                "publication_intent",
-            }
-        else:
-            raise MigrationPlanError("seed manifest schema is unsupported")
+            and len(set(fingerprints.values())) == len(fingerprints)
+            and manifest.get("recipient_fingerprints") == fingerprints
+        )
+        expected_object_fields = {
+            "kind", "object_key", "version_id", "plaintext_sha256",
+            "plaintext_bytes", "ciphertext_sha256", "ciphertext_bytes",
+            "publication_intent",
+        }
         objects = manifest.get("objects") if isinstance(manifest, dict) else None
+        expected_prefix = (
+            f"{inventory_storage['prefix']}seed-v2/"
+            f"{inventory_result['campaign_id']}/"
+            f"{inventory_result['release_sha']}/{role}/"
+        )
         if (
             set(row) != expected_row
             or set(manifest) != required_manifest
@@ -486,17 +486,26 @@ def verify_migration_plan(
             or manifest["release_sha"] != inventory_result["release_sha"]
             or manifest["source_role"] != role
             or manifest["bucket"] != inventory_storage["bucket"]
+            or not str(manifest["bucket_owner_id"]).strip()
             or manifest["object_prefix"] != row["object_prefix"]
+            or row["object_prefix"] != expected_prefix
             or manifest["encryption"] != row["encryption"]
             or not recipient_valid
             or manifest["readback_evidence_sha256"] != row["readback_evidence_sha256"]
-            or not str(row["object_prefix"]).startswith(str(inventory_storage["prefix"]))
             or not SHA256_RE.fullmatch(str(row["manifest_sha256"]))
             or not SHA256_RE.fullmatch(str(row["readback_evidence_sha256"]))
             or not isinstance(objects, list)
             or len(objects) != 3
         ):
             raise MigrationPlanError("seed manifest identity is invalid")
+        for target, fingerprint in fingerprints.items():
+            if (
+                target in global_recipient_fingerprints
+                and global_recipient_fingerprints[target] != fingerprint
+            ):
+                raise MigrationPlanError("target recipient fingerprint is inconsistent")
+            global_recipient_fingerprints[target] = fingerprint
+        bucket_owner_ids.add(str(manifest["bucket_owner_id"]))
         kinds: set[str] = set()
         keys: set[str] = set()
         for item in objects:
@@ -509,14 +518,13 @@ def verify_migration_plan(
                 kind not in {"postgres", "uploads", "audit"}
                 or kind in kinds
                 or key in keys
-                or not key.startswith(str(row["object_prefix"]))
+                or key != f"{expected_prefix}{kind}.age"
+                or key in global_object_keys
                 or not version
+                or version == "null"
                 or not SHA256_RE.fullmatch(str(item["plaintext_sha256"]))
                 or not SHA256_RE.fullmatch(str(item["ciphertext_sha256"]))
-                or (
-                    schema == "three-site-staging-seed-manifest-v2"
-                    and SHA256_RE.fullmatch(str(item["publication_intent"])) is None
-                )
+                or SHA256_RE.fullmatch(str(item["publication_intent"])) is None
                 or type(item["plaintext_bytes"]) is not int
                 or int(item["plaintext_bytes"]) <= 0
                 or type(item["ciphertext_bytes"]) is not int
@@ -531,9 +539,20 @@ def verify_migration_plan(
                 raise MigrationPlanError("seed plaintext differs from source backup artifact")
             kinds.add(kind)
             keys.add(key)
+            global_object_keys.add(key)
         if kinds != {"postgres", "uploads", "audit"}:
             raise MigrationPlanError("seed object set is incomplete")
         seen_bundles.add(role)
+    if (
+        len(global_object_keys) != 6
+        or len(bucket_owner_ids) != 1
+        or set(global_recipient_fingerprints)
+        != set(TARGET_SEED_MAP) - {"witness"}
+        or len(set(global_recipient_fingerprints.values())) != 3
+    ):
+        raise MigrationPlanError(
+            "seed keys or target recipient fingerprints are not globally exact"
+        )
 
     mappings = plan["target_seed_map"]
     if not isinstance(mappings, list) or len(mappings) != len(TARGET_SEED_MAP):
@@ -577,6 +596,7 @@ def verify_migration_plan(
         "source_roles": list(SOURCE_ROLES),
         "target_roles": sorted(TARGET_SEED_MAP),
         "image_inventory_sha256": image_inventory_hashes,
+        "plan_expired": plan_expired,
         **signed,
     }
 

@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+import fcntl
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -19,8 +21,8 @@ if str(REPO_ROOT) not in sys.path:
 
 import yaml
 
-from scripts.render_three_site_staging_role_compose import _atomic_write
-from scripts.verify_three_site_staging_inventory import load_inventory
+from core.secure_file_io import write_secure_new_bytes
+from core.three_site_full_matrix_campaign import secure_json
 from scripts.verify_three_site_staging_role_bundle import (
     _verify_bundle_source,
     verify_role_bundle,
@@ -36,6 +38,12 @@ SAFE_ENV = {
 }
 IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 CONTENT_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+REPOSITORY_COMPONENT = r"[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*"
+REPO_DIGEST_RE = re.compile(
+    rf"^(?:[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::[0-9]+)?/)?"
+    rf"{REPOSITORY_COMPONENT}(?:/{REPOSITORY_COMPONENT})*"
+    r"@sha256:[0-9a-f]{64}$"
+)
 LOCAL_RELEASE_IMAGE_PREFIXES = (
     "trading_bot_three_site_staging:",
     "trading_bot_postgres_boottime:",
@@ -98,7 +106,12 @@ def _verify_content_descriptor(descriptor: Any) -> str:
     return _canonical_sha256(descriptor)
 
 
-def _run(arguments: list[str], *, timeout: int = 60) -> str:
+def _run(
+    arguments: list[str],
+    *,
+    timeout: int = 60,
+    pass_fds: tuple[int, ...] = (),
+) -> str:
     try:
         result = subprocess.run(
             arguments,
@@ -108,12 +121,48 @@ def _run(arguments: list[str], *, timeout: int = 60) -> str:
             stdin=subprocess.DEVNULL,
             timeout=timeout,
             env=SAFE_ENV,
+            pass_fds=pass_fds,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise ImageInventoryError(f"image inventory command unavailable: {arguments[0]}") from exc
     if result.returncode != 0:
         raise ImageInventoryError(f"image inventory command failed: {Path(arguments[0]).name}")
     return result.stdout.strip()
+
+
+def _sealed_memfd(payload: bytes, *, label: str) -> int:
+    """Return a read-only sealed descriptor containing the already-verified bytes."""
+    if not isinstance(payload, bytes) or not payload:
+        raise ImageInventoryError(f"{label} bytes are empty")
+    try:
+        descriptor = os.memfd_create(
+            f"three-site-{label}",
+            flags=getattr(os, "MFD_CLOEXEC", 0) | getattr(os, "MFD_ALLOW_SEALING", 0),
+        )
+    except (AttributeError, OSError) as exc:
+        raise ImageInventoryError("sealed in-memory Compose inputs are unavailable") from exc
+    try:
+        offset = 0
+        while offset < len(payload):
+            written = os.write(descriptor, payload[offset:])
+            if written <= 0:
+                raise ImageInventoryError(f"{label} memfd write made no progress")
+            offset += written
+        os.fchmod(descriptor, 0o600)
+        seals = (
+            getattr(fcntl, "F_SEAL_SEAL", 0)
+            | getattr(fcntl, "F_SEAL_SHRINK", 0)
+            | getattr(fcntl, "F_SEAL_GROW", 0)
+            | getattr(fcntl, "F_SEAL_WRITE", 0)
+        )
+        if not seals or not hasattr(fcntl, "F_ADD_SEALS"):
+            raise ImageInventoryError("kernel memfd sealing constants are unavailable")
+        fcntl.fcntl(descriptor, fcntl.F_ADD_SEALS, seals)
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
 
 
 def verify_image_document(
@@ -171,7 +220,11 @@ def verify_image_document(
             or reference in references
             or not IMAGE_ID_RE.fullmatch(image_id)
             or not isinstance(digests, list)
-            or any(not isinstance(value, str) or "@sha256:" not in value for value in digests)
+            or any(
+                not isinstance(value, str)
+                or REPO_DIGEST_RE.fullmatch(value) is None
+                for value in digests
+            )
             or len(set(digests)) != len(digests)
         ):
             raise ImageInventoryError("image reference/ID/digest is invalid")
@@ -206,19 +259,38 @@ def collect_image_document(
     role: str,
     campaign_id: str,
     release_sha: str,
-    role_compose: Path,
-    env_file: Path,
+    role_compose_bytes: bytes,
+    env_bytes: bytes,
 ) -> dict[str, Any]:
-    references = sorted(
-        {
-            value for value in _run(
-                [
-                    DOCKER, "compose", "-f", str(role_compose),
-                    "--env-file", str(env_file), "config", "--images",
-                ]
-            ).splitlines() if value
-        }
-    )
+    compose_fd = _sealed_memfd(role_compose_bytes, label="role-compose")
+    env_fd = _sealed_memfd(env_bytes, label="role-env")
+    try:
+        references = sorted(
+            {
+                value
+                for value in _run(
+                    [
+                        DOCKER,
+                        "compose",
+                        "-p",
+                        "three-site-image-inventory-readonly",
+                        "--project-directory",
+                        str(REPO_ROOT),
+                        "-f",
+                        f"/proc/self/fd/{compose_fd}",
+                        "--env-file",
+                        f"/proc/self/fd/{env_fd}",
+                        "config",
+                        "--images",
+                    ],
+                    pass_fds=(compose_fd, env_fd),
+                ).splitlines()
+                if value
+            }
+        )
+    finally:
+        os.close(env_fd)
+        os.close(compose_fd)
     images = []
     for reference in references:
         try:
@@ -247,8 +319,8 @@ def collect_image_document(
         "release_sha": release_sha,
         "role": role,
         "observed_at": datetime.now(timezone.utc).isoformat(),
-        "role_compose_sha256": hashlib.sha256(role_compose.read_bytes()).hexdigest(),
-        "role_env_sha256": hashlib.sha256(env_file.read_bytes()).hexdigest(),
+        "role_compose_sha256": hashlib.sha256(role_compose_bytes).hexdigest(),
+        "role_env_sha256": hashlib.sha256(env_bytes).hexdigest(),
         "images": images,
     }
 
@@ -265,17 +337,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
-        inventory = load_inventory(args.inventory)
+        inventory = secure_json(args.inventory, label="provisioned inventory")
+        inventory_approval = secure_json(
+            args.inventory_approval, label="provisioned inventory approval"
+        )
+        approval_policy = secure_json(
+            args.approval_policy, label="human approval policy"
+        )
+        canonical_compose_bytes = _verify_bundle_source(
+            args.canonical_compose, expected_mode=0o644
+        )
         role_compose_bytes = _verify_bundle_source(args.role_compose, expected_mode=0o640)
         env_bytes = _verify_bundle_source(args.env_file, expected_mode=0o600)
         role_bundle = verify_role_bundle(
             role=args.role,
-            canonical_compose=yaml.safe_load(args.canonical_compose.read_text(encoding="utf-8")),
+            canonical_compose=yaml.safe_load(canonical_compose_bytes),
             role_compose_bytes=role_compose_bytes,
             env_bytes=env_bytes,
             inventory=inventory,
-            approval=load_inventory(args.inventory_approval),
-            approval_policy=load_inventory(args.approval_policy),
+            approval=inventory_approval,
+            approval_policy=approval_policy,
             verify_files=True,
             required_inventory_stage="provisioned",
         )
@@ -283,8 +364,8 @@ def main(argv: list[str] | None = None) -> int:
             role=args.role,
             campaign_id=str(inventory["campaign_id"]),
             release_sha=role_bundle["release_sha"],
-            role_compose=args.role_compose,
-            env_file=args.env_file,
+            role_compose_bytes=role_compose_bytes,
+            env_bytes=env_bytes,
         )
         result = verify_image_document(
             document,
@@ -294,10 +375,12 @@ def main(argv: list[str] | None = None) -> int:
             role_compose_sha256=role_bundle["compose_sha256"],
             role_env_sha256=role_bundle["environment_sha256"],
         )
-        _atomic_write(
+        write_secure_new_bytes(
             args.output,
             (json.dumps(document, sort_keys=True, indent=2) + "\n").encode(),
+            label="staging image inventory",
             mode=0o600,
+            max_size=16 * 1024 * 1024,
         )
     except Exception as exc:
         print(json.dumps({"status": "blocked", "error": str(exc), "error_class": type(exc).__name__}, sort_keys=True))

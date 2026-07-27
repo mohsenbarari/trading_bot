@@ -26,6 +26,7 @@ import subprocess
 import sys
 from typing import Any, Callable, Iterator
 
+sys.dont_write_bytecode = True
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -64,6 +65,7 @@ TARGET_RECIPIENTS = {
 TARGET_ROLES = ("bot_fi", "webapp_fi", "webapp_ir")
 ARTIFACT_KINDS = ("postgres", "uploads", "audit")
 AGE = "/usr/bin/age"
+AGE_KEYGEN = "/usr/bin/age-keygen"
 ARVAN_ENDPOINT = "https://s3.ir-thr-at1.arvanstorage.ir"
 ARVAN_REGION = "ir-thr-at1"
 MAX_JSON_BYTES = 2 * 1024 * 1024
@@ -92,6 +94,27 @@ CONTRACT_SCHEMA = "three-site-staging-seed-publication-contract-v2"
 PREPARATION_SCHEMA = "three-site-staging-seed-role-preparation-v2"
 READINESS_SCHEMA = "three-site-staging-seed-global-readiness-v2"
 BASELINE_SCHEMA = "three-site-staging-seed-global-absence-baseline-v2"
+SECURITY_RELEASE_FILES = (
+    "core/canonical_json.py",
+    "core/human_approval.py",
+    "core/human_approval_issuer.py",
+    "core/secure_file_io.py",
+    "core/three_site_execution_safety.py",
+    "core/three_site_staging_source_contract.py",
+    "core/three_site_topology.py",
+    "scripts/fetch_three_site_staging_seed.py",
+    "scripts/publish_three_site_staging_seed.py",
+    "scripts/publish_three_site_staging_seed_campaign.py",
+    "scripts/render_three_site_staging_role_compose.py",
+    "scripts/run_three_site_staging_role_migration.py",
+    "scripts/run_three_site_staging_source_backup.py",
+    "scripts/three_site_staging_migration_journal.py",
+    "scripts/verify_three_site_staging_host_identity.py",
+    "scripts/verify_three_site_staging_image_inventory.py",
+    "scripts/verify_three_site_staging_inventory.py",
+    "scripts/verify_three_site_staging_migration_plan.py",
+    "scripts/verify_three_site_staging_role_bundle.py",
+)
 
 
 class CampaignSeedError(RuntimeError):
@@ -148,6 +171,7 @@ def _load_canonical_contract(path: Path) -> tuple[dict[str, Any], str]:
     if raw != _canonical_encoded(payload):
         raise CampaignSeedError("campaign seed contract is not canonical JSON")
     _validate_contract(payload)
+    _verify_release_files(payload)
     return payload, _canonical_hash(payload)
 
 
@@ -184,35 +208,100 @@ def _write_or_verify(
             raise CampaignSeedError(f"{label} is not canonical JSON")
 
 
-def _ensure_private_directory(path: Path) -> None:
-    if path.exists() or path.is_symlink():
-        metadata = path.lstat()
-        if (
-            path.is_symlink()
-            or not stat.S_ISDIR(metadata.st_mode)
-            or metadata.st_uid != 0
-            or stat.S_IMODE(metadata.st_mode) != 0o700
-        ):
-            raise CampaignSeedError(f"unsafe private directory: {path}")
-        return
-    path.mkdir(mode=0o700, parents=True)
-    metadata = path.lstat()
-    if metadata.st_uid != 0 or stat.S_IMODE(metadata.st_mode) != 0o700:
+def _directory_metadata_is_safe(
+    metadata: os.stat_result,
+    *,
+    leaf: bool,
+) -> bool:
+    mode = stat.S_IMODE(metadata.st_mode)
+    return (
+        stat.S_ISDIR(metadata.st_mode)
+        and metadata.st_uid == 0
+        and (
+            mode == 0o700
+            if leaf
+            else not (mode & 0o022) or bool(mode & stat.S_ISVTX)
+        )
+    )
+
+
+def _open_private_directory(path: Path) -> int:
+    if (
+        not path.is_absolute()
+        or path == Path("/")
+        or any(component in {".", ".."} for component in path.parts[1:])
+    ):
         raise CampaignSeedError(f"unsafe private directory: {path}")
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    descriptor = -1
+    try:
+        descriptor = os.open("/", flags)
+        root_metadata = os.fstat(descriptor)
+        if not _directory_metadata_is_safe(root_metadata, leaf=False):
+            raise CampaignSeedError("filesystem root is not root-controlled")
+        components = path.parts[1:]
+        for index, component in enumerate(components):
+            leaf = index == len(components) - 1
+            try:
+                child = os.open(component, flags, dir_fd=descriptor)
+            except FileNotFoundError:
+                os.mkdir(component, mode=0o700, dir_fd=descriptor)
+                child = os.open(component, flags, dir_fd=descriptor)
+            metadata = os.fstat(child)
+            if not _directory_metadata_is_safe(metadata, leaf=leaf):
+                os.close(child)
+                raise CampaignSeedError(f"unsafe private directory: {path}")
+            os.close(descriptor)
+            descriptor = child
+        return descriptor
+    except CampaignSeedError:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise
+    except OSError as exc:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise CampaignSeedError(f"unsafe private directory: {path}") from exc
+
+
+def _assert_directory_binding(path: Path, descriptor: int) -> None:
+    try:
+        pinned = os.fstat(descriptor)
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise CampaignSeedError(f"private directory path changed: {path}") from exc
+    if (
+        not stat.S_ISDIR(current.st_mode)
+        or current.st_dev != pinned.st_dev
+        or current.st_ino != pinned.st_ino
+    ):
+        raise CampaignSeedError(f"private directory path changed: {path}")
+
+
+def _ensure_private_directory(path: Path) -> None:
+    descriptor = _open_private_directory(path)
+    os.close(descriptor)
 
 
 @contextmanager
 def _exclusive_lock(root: Path) -> Iterator[None]:
-    _ensure_private_directory(root)
-    descriptor = os.open(
-        root / ".lock",
-        os.O_RDWR
-        | os.O_CREAT
-        | getattr(os, "O_CLOEXEC", 0)
-        | getattr(os, "O_NOFOLLOW", 0),
-        0o600,
-    )
+    root_descriptor = _open_private_directory(root)
+    descriptor = -1
     try:
+        descriptor = os.open(
+            ".lock",
+            os.O_RDWR
+            | os.O_CREAT
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+            dir_fd=root_descriptor,
+        )
         metadata = os.fstat(descriptor)
         if (
             not stat.S_ISREG(metadata.st_mode)
@@ -225,9 +314,13 @@ def _exclusive_lock(root: Path) -> Iterator[None]:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise CampaignSeedError("campaign publication is already running") from exc
+        _assert_directory_binding(root, root_descriptor)
         yield
+        _assert_directory_binding(root, root_descriptor)
     finally:
-        os.close(descriptor)
+        if descriptor >= 0:
+            os.close(descriptor)
+        os.close(root_descriptor)
 
 
 def _sha_regular_file(
@@ -278,10 +371,176 @@ def _sha_regular_file(
     return digest.hexdigest(), size
 
 
+def _open_pinned_artifact(
+    path: Path,
+    *,
+    label: str,
+    maximum: int,
+) -> tuple[int, os.stat_result]:
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+    except OSError as exc:
+        raise CampaignSeedError(f"{label} is unavailable") from exc
+    metadata = os.fstat(descriptor)
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != 0
+        or metadata.st_nlink != 1
+        or stat.S_IMODE(metadata.st_mode) & 0o077
+        or metadata.st_size <= 0
+        or metadata.st_size > maximum
+    ):
+        os.close(descriptor)
+        raise CampaignSeedError(f"{label} is not a safe root-only regular file")
+    return descriptor, metadata
+
+
+def _hash_pinned_artifact(
+    descriptor: int,
+    *,
+    metadata: os.stat_result,
+    label: str,
+    maximum: int,
+) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    size = 0
+    try:
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > maximum:
+                raise CampaignSeedError(f"{label} exceeds its safety bound")
+            digest.update(chunk)
+        after = os.fstat(descriptor)
+    except OSError as exc:
+        raise CampaignSeedError(f"{label} changed while pinned") from exc
+    stable = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink", "st_size")
+    if any(getattr(metadata, field) != getattr(after, field) for field in stable):
+        raise CampaignSeedError(f"{label} changed while pinned")
+    return digest.hexdigest(), size
+
+
+def _assert_file_binding(path: Path, descriptor: int, *, label: str) -> None:
+    try:
+        pinned = os.fstat(descriptor)
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise CampaignSeedError(f"{label} path changed") from exc
+    if (
+        not stat.S_ISREG(current.st_mode)
+        or current.st_dev != pinned.st_dev
+        or current.st_ino != pinned.st_ino
+    ):
+        raise CampaignSeedError(f"{label} path changed")
+
+
 def _recipient_fingerprint(recipient: str) -> str:
     if RECIPIENT_RE.fullmatch(recipient) is None:
         raise CampaignSeedError("age recipient is malformed")
     return hashlib.sha256((recipient + "\n").encode()).hexdigest()
+
+
+def _derive_single_age_identity_recipient(
+    identity_path: Path,
+    *,
+    derive: Callable[[Path], str] | None = None,
+) -> tuple[str, str]:
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            identity_path,
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        metadata = os.fstat(descriptor)
+        raw = os.read(descriptor, 4097)
+        if len(raw) > 4096:
+            raise CampaignSeedError("allowed local target identity exceeds its safety bound")
+        identity = raw.decode("ascii")
+    except CampaignSeedError:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise
+    except (OSError, UnicodeError) as exc:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise CampaignSeedError("allowed local target identity is unavailable") from exc
+    secret_lines = [
+        line.strip()
+        for line in identity.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or metadata.st_uid != 0
+        or metadata.st_nlink != 1
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+        or len(secret_lines) != 1
+        or re.fullmatch(r"AGE-SECRET-KEY-[A-Z0-9]+", secret_lines[0]) is None
+    ):
+        os.close(descriptor)
+        raise CampaignSeedError(
+            "allowed local target identity must contain exactly one root-only age private key"
+        )
+    try:
+        if derive is None:
+            if not Path(AGE_KEYGEN).is_file():
+                raise CampaignSeedError("age-keygen is unavailable at its fixed path")
+            result = subprocess.run(
+                [AGE_KEYGEN, "-y", f"/proc/self/fd/{descriptor}"],
+                stdin=subprocess.DEVNULL,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=30,
+                env=SAFE_ENV,
+                pass_fds=(descriptor,),
+            )
+            if result.returncode != 0:
+                raise CampaignSeedError(
+                    "cannot derive the allowed local target recipient"
+                )
+            recipient = result.stdout.strip()
+        else:
+            recipient = str(derive(identity_path)).strip()
+        after = os.fstat(descriptor)
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        if (
+            os.read(descriptor, 4097) != raw
+            or any(
+                getattr(metadata, field) != getattr(after, field)
+                for field in (
+                    "st_dev",
+                    "st_ino",
+                    "st_mode",
+                    "st_uid",
+                    "st_nlink",
+                    "st_size",
+                )
+            )
+        ):
+            raise CampaignSeedError(
+                "allowed local target identity changed while deriving its recipient"
+            )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise CampaignSeedError(
+            "cannot derive the allowed local target recipient"
+        ) from exc
+    finally:
+        os.close(descriptor)
+    if RECIPIENT_RE.fullmatch(recipient) is None:
+        raise CampaignSeedError("derived allowed local target recipient is malformed")
+    return recipient, _recipient_fingerprint(recipient)
 
 
 def _machine_id(path: Path = Path("/etc/machine-id")) -> str:
@@ -385,20 +644,25 @@ def _validate_contract_core(core: dict[str, Any]) -> None:
     ):
         raise CampaignSeedError("contract core identity or policy is invalid")
     immutable = core["immutable_release"]
-    release_files = immutable.get("files") if isinstance(immutable, dict) else None
-    required_release_files = {
-        "scripts/publish_three_site_staging_seed_campaign.py",
-        "scripts/run_three_site_staging_source_backup.py",
-        "scripts/fetch_three_site_staging_seed.py",
-        "scripts/verify_three_site_staging_migration_plan.py",
-    }
+    release_files = (
+        immutable.get("security_files") if isinstance(immutable, dict) else None
+    )
     if (
         not isinstance(immutable, dict)
-        or set(immutable) != {"root", "git_head", "files"}
+        or set(immutable)
+        != {
+            "root",
+            "git_head",
+            "git_tree",
+            "tracked_index_sha256",
+            "security_files",
+        }
         or not Path(str(immutable["root"])).is_absolute()
         or immutable["git_head"] != core["release_sha"]
+        or SHA_RE.fullmatch(str(immutable["git_tree"])) is None
+        or SHA256_RE.fullmatch(str(immutable["tracked_index_sha256"])) is None
         or not isinstance(release_files, dict)
-        or set(release_files) != required_release_files
+        or set(release_files) != set(SECURITY_RELEASE_FILES)
         or any(SHA256_RE.fullmatch(str(value)) is None for value in release_files.values())
     ):
         raise CampaignSeedError("immutable release binding is invalid")
@@ -597,7 +861,22 @@ def _immutable_release_binding(root: Path, release_sha: str) -> dict[str, Any]:
         head = subprocess.run(
             ["/usr/bin/git", "-C", str(root), "rev-parse", "HEAD"],
             stdin=subprocess.DEVNULL,
-            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+            env=SAFE_ENV,
+        )
+        tree = subprocess.run(
+            ["/usr/bin/git", "-C", str(root), "rev-parse", "HEAD^{tree}"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            check=False,
+            timeout=30,
+            env=SAFE_ENV,
+        )
+        tracked = subprocess.run(
+            ["/usr/bin/git", "-C", str(root), "ls-files", "--stage", "-z"],
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             check=False,
             timeout=30,
@@ -610,10 +889,9 @@ def _immutable_release_binding(root: Path, release_sha: str) -> dict[str, Any]:
                 str(root),
                 "status",
                 "--porcelain",
-                "--untracked-files=no",
+                "--untracked-files=all",
             ],
             stdin=subprocess.DEVNULL,
-            text=True,
             capture_output=True,
             check=False,
             timeout=30,
@@ -623,26 +901,33 @@ def _immutable_release_binding(root: Path, release_sha: str) -> dict[str, Any]:
         raise CampaignSeedError("cannot verify immutable release Git identity") from exc
     if (
         head.returncode != 0
-        or head.stdout.strip().lower() != release_sha
+        or head.stdout.decode("ascii", errors="strict").strip().lower() != release_sha
+        or tree.returncode != 0
+        or SHA_RE.fullmatch(
+            tree.stdout.decode("ascii", errors="strict").strip().lower()
+        )
+        is None
+        or tracked.returncode != 0
+        or not tracked.stdout
         or dirty.returncode != 0
         or dirty.stdout.strip()
     ):
         raise CampaignSeedError("release root is not the exact clean immutable Git release")
-    relative_files = (
-        "scripts/publish_three_site_staging_seed_campaign.py",
-        "scripts/run_three_site_staging_source_backup.py",
-        "scripts/fetch_three_site_staging_seed.py",
-        "scripts/verify_three_site_staging_migration_plan.py",
-    )
     files: dict[str, str] = {}
-    for relative in relative_files:
+    for relative in SECURITY_RELEASE_FILES:
         files[relative] = _sha_regular_file(
             root / relative,
             label=f"immutable release file {relative}",
             maximum=4 * 1024 * 1024,
             require_private=False,
         )[0]
-    return {"root": str(root), "git_head": release_sha, "files": files}
+    return {
+        "root": str(root),
+        "git_head": release_sha,
+        "git_tree": tree.stdout.decode("ascii").strip().lower(),
+        "tracked_index_sha256": hashlib.sha256(tracked.stdout).hexdigest(),
+        "security_files": files,
+    }
 
 
 def build_preparation_core(
@@ -808,22 +1093,108 @@ def build_preparation_core(
     return core
 
 
+def source_preparation_subject(
+    preparation_core: dict[str, Any],
+) -> dict[str, Any]:
+    _validate_contract_core(preparation_core)
+    recipient_map = {
+        role: {
+            target: preparation_core["recipients"][target]["fingerprint"]
+            for target in TARGET_RECIPIENTS[role]
+        }
+        for role in SOURCE_ROLES
+    }
+    return approval_subject(
+        artifact_type=PREPARATION_CORE_SCHEMA,
+        artifact_sha256=_canonical_hash(preparation_core),
+        release_sha=str(preparation_core["release_sha"]),
+        bindings={
+            "campaign_id": preparation_core["campaign_id"],
+            "deployment_id": preparation_core["deployment_id"],
+            "inventory_sha256": preparation_core["inventory"]["sha256"],
+            "object_count": 6,
+            "fixed_object_keys_sha256": _canonical_hash(
+                [row["object_key"] for row in preparation_core["objects"]]
+            ),
+            "recipient_map_sha256": _canonical_hash(recipient_map),
+        },
+    )
+
+
+def _verify_source_preparation_approval(
+    *,
+    preparation_core: dict[str, Any],
+    approval: dict[str, Any],
+    approval_policy: dict[str, Any],
+    witness_relay_public_key: str,
+    require_fresh: bool,
+    now: datetime | None,
+) -> dict[str, str]:
+    key = witness_relay_public_key.strip()
+    if (
+        approval_policy_hash(approval_policy)
+        != preparation_core["approval_policy_sha256"]
+        or hashlib.sha256((key + "\n").encode()).hexdigest()
+        != preparation_core["witness_relay_public_key_sha256"]
+        or approval.get("schema") != TOKEN_SCHEMA
+    ):
+        raise CampaignSeedError(
+            "source preparation requires direct trusted approval material"
+        )
+    try:
+        verified = verify_human_approval(
+            approval,
+            policy_payload=approval_policy,
+            expected_action="approve_seed_preparation",
+            expected_environment="staging",
+            expected_subject=source_preparation_subject(preparation_core),
+            now=now,
+            require_fresh=require_fresh,
+            witness_relay_public_key=key,
+        )
+    except Exception as exc:
+        raise CampaignSeedError(
+            "direct source preparation approval is invalid"
+        ) from exc
+    return {
+        "sha256": _canonical_hash(approval),
+        "approval_id": verified.approval_id,
+        "expires_at": verified.expires_at.isoformat(),
+        "action": "approve_seed_preparation",
+    }
+
+
 def source_preparation_plan(
     preparation_core: dict[str, Any],
     *,
     role: str,
+    preparation_approval: dict[str, Any],
+    approval_policy: dict[str, Any],
+    witness_relay_public_key: str,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     _validate_contract_core(preparation_core)
     if role not in SOURCE_ROLES:
         raise CampaignSeedError("source role is invalid")
+    approval_binding = _verify_source_preparation_approval(
+        preparation_core=preparation_core,
+        approval=preparation_approval,
+        approval_policy=approval_policy,
+        witness_relay_public_key=witness_relay_public_key,
+        require_fresh=True,
+        now=now,
+    )
     return {
         "schema": SOURCE_PLAN_SCHEMA,
         "preparation_core": preparation_core,
         "preparation_core_sha256": _canonical_hash(preparation_core),
         "source_role": role,
         "inventory_approval": dict(preparation_core["inventory_approval"]),
+        "preparation_approval_token": preparation_approval,
+        "preparation_approval": approval_binding,
+        "approval_policy": approval_policy,
+        "witness_relay_public_key": witness_relay_public_key.strip(),
         "publication_token_present": False,
-        "approval_policy_present": False,
         "object_storage_secret_present": False,
     }
 
@@ -835,7 +1206,13 @@ def source_confirmation_phrase(plan: dict[str, Any]) -> str:
     )
 
 
-def _validate_source_plan(plan: dict[str, Any], *, role: str) -> None:
+def _validate_source_plan(
+    plan: dict[str, Any],
+    *,
+    role: str,
+    require_fresh_approval: bool = False,
+    now: datetime | None = None,
+) -> None:
     if (
         not isinstance(plan, dict)
         or set(plan)
@@ -845,8 +1222,11 @@ def _validate_source_plan(plan: dict[str, Any], *, role: str) -> None:
             "preparation_core_sha256",
             "source_role",
             "inventory_approval",
+            "preparation_approval_token",
+            "preparation_approval",
+            "approval_policy",
+            "witness_relay_public_key",
             "publication_token_present",
-            "approval_policy_present",
             "object_storage_secret_present",
         }
         or plan.get("schema") != SOURCE_PLAN_SCHEMA
@@ -856,12 +1236,25 @@ def _validate_source_plan(plan: dict[str, Any], *, role: str) -> None:
         != _canonical_hash(plan["preparation_core"])
         or plan.get("inventory_approval")
         != plan["preparation_core"].get("inventory_approval")
+        or not isinstance(plan.get("preparation_approval_token"), dict)
+        or not isinstance(plan.get("preparation_approval"), dict)
+        or not isinstance(plan.get("approval_policy"), dict)
+        or not isinstance(plan.get("witness_relay_public_key"), str)
         or plan.get("publication_token_present") is not False
-        or plan.get("approval_policy_present") is not False
         or plan.get("object_storage_secret_present") is not False
     ):
         raise CampaignSeedError("source preparation plan is invalid")
     _validate_contract_core(plan["preparation_core"])
+    verified = _verify_source_preparation_approval(
+        preparation_core=plan["preparation_core"],
+        approval=plan["preparation_approval_token"],
+        approval_policy=plan["approval_policy"],
+        witness_relay_public_key=plan["witness_relay_public_key"],
+        require_fresh=require_fresh_approval,
+        now=now,
+    )
+    if plan["preparation_approval"] != verified:
+        raise CampaignSeedError("source preparation approval binding differs")
 
 
 def _validate_publication_core(
@@ -1000,6 +1393,7 @@ def seal_contract(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     _validate_contract_core(preparation_core)
+    _verify_release_files(preparation_core)
     _validate_publication_core(
         publication_core,
         preparation_core=preparation_core,
@@ -1154,15 +1548,11 @@ def _verify_release_files(contract: dict[str, Any]) -> None:
         raise CampaignSeedError(
             "seed helper is not executing from the contract's immutable release"
         )
-    for relative, expected in immutable["files"].items():
-        actual, _size = _sha_regular_file(
-            root / relative,
-            label=f"immutable release file {relative}",
-            maximum=4 * 1024 * 1024,
-            require_private=False,
+    current = _immutable_release_binding(root, str(core["release_sha"]))
+    if current != immutable:
+        raise CampaignSeedError(
+            "current clean Git release differs from the sealed immutable release"
         )
-        if actual != expected:
-            raise CampaignSeedError(f"immutable release file changed: {relative}")
 
 
 def _verify_backup(
@@ -1201,6 +1591,11 @@ def _run_age(arguments: list[str], *, timeout: int = 1800) -> None:
     if not Path(AGE).is_file():
         raise CampaignSeedError("age is unavailable at the fixed path")
     try:
+        inherited_descriptors = tuple(
+            int(argument.rsplit("/", 1)[1])
+            for argument in arguments
+            if re.fullmatch(r"/proc/self/fd/[0-9]+", argument)
+        )
         completed = subprocess.run(
             [AGE, *arguments],
             stdin=subprocess.DEVNULL,
@@ -1209,6 +1604,7 @@ def _run_age(arguments: list[str], *, timeout: int = 1800) -> None:
             check=False,
             timeout=timeout,
             env=SAFE_ENV,
+            pass_fds=inherited_descriptors,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise CampaignSeedError("age encryption failed closed") from exc
@@ -1219,6 +1615,9 @@ def _run_age(arguments: list[str], *, timeout: int = 1800) -> None:
 def _publish_ciphertext(
     *,
     source: Path,
+    source_descriptor: int,
+    source_metadata: os.stat_result,
+    expected_source: tuple[str, int],
     target: Path,
     recipients: list[str],
     encrypt: Callable[[list[str]], None],
@@ -1244,9 +1643,21 @@ def _publish_ciphertext(
     arguments = ["--encrypt"]
     for recipient in recipients:
         arguments.extend(("--recipient", recipient))
-    arguments.extend(("--output", str(temporary), str(source)))
+    arguments.extend(
+        ("--output", str(temporary), f"/proc/self/fd/{source_descriptor}")
+    )
     try:
+        os.lseek(source_descriptor, 0, os.SEEK_SET)
         encrypt(arguments)
+        observed_source = _hash_pinned_artifact(
+            source_descriptor,
+            metadata=source_metadata,
+            label=f"backup artifact {source.name}",
+            maximum=MAX_ARTIFACT_BYTES,
+        )
+        _assert_file_binding(source, source_descriptor, label="backup artifact")
+        if observed_source != expected_source:
+            raise CampaignSeedError("backup artifact changed during encryption")
         temporary.chmod(0o600)
         digest, size = sha256_secure_file(
             temporary,
@@ -1274,7 +1685,7 @@ def _validate_preparation(
     role: str,
 ) -> None:
     core = _preparation_core(contract)
-    expected_plan = source_preparation_plan(core, role=role)
+    source_plan = preparation.get("source_plan") if isinstance(preparation, dict) else None
     if (
         not isinstance(preparation, dict)
         or set(preparation)
@@ -1283,6 +1694,7 @@ def _validate_preparation(
             "campaign_id",
             "release_sha",
             "preparation_core_sha256",
+            "source_plan",
             "source_plan_sha256",
             "source_role",
             "source_machine_id",
@@ -1297,7 +1709,9 @@ def _validate_preparation(
         or preparation.get("campaign_id") != core["campaign_id"]
         or preparation.get("release_sha") != core["release_sha"]
         or preparation.get("preparation_core_sha256") != _canonical_hash(core)
-        or preparation.get("source_plan_sha256") != _canonical_hash(expected_plan)
+        or not isinstance(source_plan, dict)
+        or source_plan.get("preparation_core") != core
+        or preparation.get("source_plan_sha256") != _canonical_hash(source_plan)
         or preparation.get("source_role") != role
         or preparation.get("source_machine_id")
         != core["source_machine_ids"][role]
@@ -1313,6 +1727,13 @@ def _validate_preparation(
         or len(preparation["objects"]) != 3
     ):
         raise CampaignSeedError("source preparation identity or policy is invalid")
+    _validate_source_plan(
+        source_plan,
+        role=role,
+        require_fresh_approval=False,
+    )
+    if contract.get("schema") == SOURCE_PLAN_SCHEMA and source_plan != contract:
+        raise CampaignSeedError("source preparation plan differs from its input")
     forbidden_targets = [target for target in TARGET_ROLES if target != role]
     identity_policy = preparation.get("identity_path_policy")
     if (
@@ -1328,7 +1749,7 @@ def _validate_preparation(
         or identity_policy["allowed_local_target"] != role
         or identity_policy["allowed_local_identity_path"]
         != core["target_identity_paths"][role]
-        or type(identity_policy["allowed_local_identity_present"]) is not bool
+        or identity_policy["allowed_local_identity_present"] is not True
         or identity_policy["forbidden_target_roles"] != forbidden_targets
         or identity_policy["forbidden_target_identity_paths_absent"] is not True
     ):
@@ -1377,8 +1798,15 @@ def prepare_role(
     confirmation: str,
     machine_id_path: Path = Path("/etc/machine-id"),
     encrypt: Callable[[list[str]], None] = _run_age,
+    derive_recipient: Callable[[Path], str] | None = None,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
-    _validate_source_plan(source_plan, role=role)
+    _validate_source_plan(
+        source_plan,
+        role=role,
+        require_fresh_approval=True,
+        now=now,
+    )
     core = source_plan["preparation_core"]
     plan_hash = _canonical_hash(source_plan)
     if confirmation != source_confirmation_phrase(source_plan):
@@ -1393,17 +1821,17 @@ def prepare_role(
                 f"private identity for forbidden target {target} exists on {role}"
             )
     allowed_identity = Path(str(core["target_identity_paths"][role]))
-    allowed_identity_present = allowed_identity.exists() or allowed_identity.is_symlink()
-    if allowed_identity_present:
-        metadata = allowed_identity.lstat()
-        if (
-            not stat.S_ISREG(metadata.st_mode)
-            or stat.S_ISLNK(metadata.st_mode)
-            or metadata.st_uid != 0
-            or stat.S_IMODE(metadata.st_mode) != 0o600
-            or metadata.st_nlink != 1
-        ):
-            raise CampaignSeedError("allowed local target identity path is unsafe")
+    allowed_recipient, allowed_fingerprint = _derive_single_age_identity_recipient(
+        allowed_identity,
+        derive=derive_recipient,
+    )
+    if (
+        allowed_recipient != core["recipients"][role]["recipient"]
+        or allowed_fingerprint != core["recipients"][role]["fingerprint"]
+    ):
+        raise CampaignSeedError(
+            "allowed local target identity differs from the approved role recipient"
+        )
     _verify_release_files(source_plan)
     _verify_backup(source_plan, role=role, verify_files=False)
     root = Path(str(core["source_state_roots"][role]))
@@ -1450,65 +1878,86 @@ def prepare_role(
         for row in _role_rows(source_plan, role):
             kind = row["kind"]
             source = Path(str(backup["artifacts"][kind]["path"]))
-            before = sha256_secure_file(
+            source_descriptor, source_metadata = _open_pinned_artifact(
                 source,
                 label=f"{role} {kind} backup artifact",
-                owner_uid=0,
-                max_size=MAX_ARTIFACT_BYTES,
+                maximum=MAX_ARTIFACT_BYTES,
             )
-            if before != (row["plaintext_sha256"], row["plaintext_bytes"]):
-                raise CampaignSeedError("backup artifact changed before encryption")
-            ciphertext = root / f"{kind}.age"
-            sidecar = root / f"prepared-{kind}.json"
-            if sidecar.exists() or sidecar.is_symlink():
-                prepared = _secure_json(
-                    sidecar,
-                    label=f"{role} {kind} preparation sidecar",
+            try:
+                before = _hash_pinned_artifact(
+                    source_descriptor,
+                    metadata=source_metadata,
+                    label=f"{role} {kind} backup artifact",
+                    maximum=MAX_ARTIFACT_BYTES,
                 )
-                digest, size = sha256_secure_file(
-                    ciphertext,
-                    label=f"{role} {kind} prepared ciphertext",
-                    owner_uid=0,
-                    max_size=MAX_CIPHERTEXT_BYTES,
+                _assert_file_binding(
+                    source,
+                    source_descriptor,
+                    label=f"{role} {kind} backup artifact",
                 )
-                if (
-                    prepared.get("source_role") != role
-                    or prepared.get("kind") != kind
-                    or prepared.get("object_key") != row["object_key"]
-                    or prepared.get("plaintext_sha256") != before[0]
-                    or prepared.get("plaintext_bytes") != before[1]
-                    or prepared.get("ciphertext_sha256") != digest
-                    or prepared.get("ciphertext_bytes") != size
-                    or prepared.get("recipient_fingerprints")
-                    != row["recipient_fingerprints"]
-                ):
-                    raise CampaignSeedError("existing preparation sidecar differs")
-            else:
-                if ciphertext.exists() or ciphertext.is_symlink():
-                    metadata = ciphertext.lstat()
+                if before != (row["plaintext_sha256"], row["plaintext_bytes"]):
+                    raise CampaignSeedError("backup artifact changed before encryption")
+                ciphertext = root / f"{kind}.age"
+                sidecar = root / f"prepared-{kind}.json"
+                if sidecar.exists() or sidecar.is_symlink():
+                    prepared = _secure_json(
+                        sidecar,
+                        label=f"{role} {kind} preparation sidecar",
+                    )
+                    digest, size = sha256_secure_file(
+                        ciphertext,
+                        label=f"{role} {kind} prepared ciphertext",
+                        owner_uid=0,
+                        max_size=MAX_CIPHERTEXT_BYTES,
+                    )
                     if (
-                        not stat.S_ISREG(metadata.st_mode)
-                        or stat.S_ISLNK(metadata.st_mode)
-                        or metadata.st_uid != 0
+                        prepared.get("source_role") != role
+                        or prepared.get("kind") != kind
+                        or prepared.get("object_key") != row["object_key"]
+                        or prepared.get("plaintext_sha256") != before[0]
+                        or prepared.get("plaintext_bytes") != before[1]
+                        or prepared.get("ciphertext_sha256") != digest
+                        or prepared.get("ciphertext_bytes") != size
+                        or prepared.get("recipient_fingerprints")
+                        != row["recipient_fingerprints"]
                     ):
-                        raise CampaignSeedError(
-                            "interrupted prepared ciphertext path is unsafe"
-                        )
-                    ciphertext.unlink()
-                digest, size = _publish_ciphertext(
-                    source=source,
-                    target=ciphertext,
-                    recipients=recipients,
-                    encrypt=encrypt,
+                        raise CampaignSeedError("existing preparation sidecar differs")
+                else:
+                    if ciphertext.exists() or ciphertext.is_symlink():
+                        metadata = ciphertext.lstat()
+                        if (
+                            not stat.S_ISREG(metadata.st_mode)
+                            or stat.S_ISLNK(metadata.st_mode)
+                            or metadata.st_uid != 0
+                        ):
+                            raise CampaignSeedError(
+                                "interrupted prepared ciphertext path is unsafe"
+                            )
+                        ciphertext.unlink()
+                    digest, size = _publish_ciphertext(
+                        source=source,
+                        source_descriptor=source_descriptor,
+                        source_metadata=source_metadata,
+                        expected_source=before,
+                        target=ciphertext,
+                        recipients=recipients,
+                        encrypt=encrypt,
+                    )
+                after = _hash_pinned_artifact(
+                    source_descriptor,
+                    metadata=source_metadata,
+                    label=f"{role} {kind} backup artifact",
+                    maximum=MAX_ARTIFACT_BYTES,
                 )
-            after = sha256_secure_file(
-                source,
-                label=f"{role} {kind} backup artifact",
-                owner_uid=0,
-                max_size=MAX_ARTIFACT_BYTES,
-            )
-            if after != before:
-                raise CampaignSeedError("backup artifact changed during encryption")
+                _assert_file_binding(
+                    source,
+                    source_descriptor,
+                    label=f"{role} {kind} backup artifact",
+                )
+                if after != before:
+                    raise CampaignSeedError("backup artifact changed during encryption")
+            finally:
+                os.close(source_descriptor)
             if size <= before[1]:
                 raise CampaignSeedError("age ciphertext size is inconsistent")
             prepared = {
@@ -1534,6 +1983,7 @@ def prepare_role(
             "campaign_id": core["campaign_id"],
             "release_sha": core["release_sha"],
             "preparation_core_sha256": _canonical_hash(core),
+            "source_plan": source_plan,
             "source_plan_sha256": plan_hash,
             "source_role": role,
             "source_machine_id": core["source_machine_ids"][role],
@@ -1548,7 +1998,7 @@ def prepare_role(
             "identity_path_policy": {
                 "allowed_local_target": role,
                 "allowed_local_identity_path": core["target_identity_paths"][role],
-                "allowed_local_identity_present": allowed_identity_present,
+                "allowed_local_identity_present": True,
                 "forbidden_target_roles": forbidden_targets,
                 "forbidden_target_identity_paths_absent": True,
             },
@@ -1716,10 +2166,15 @@ def _client_error_code(exc: BaseException) -> str:
     return str(error.get("Code") or "") if isinstance(error, dict) else ""
 
 
-def _credentials(path: Path) -> tuple[str, str]:
+def _credentials(
+    path: Path,
+    *,
+    expected_credential_id: str,
+) -> tuple[str, str]:
     payload = _secure_json(path, label="campaign Object Storage credentials")
     if (
-        set(payload) != {"access_key", "secret_key"}
+        set(payload) != {"credential_id", "access_key", "secret_key"}
+        or payload.get("credential_id") != expected_credential_id
         or not isinstance(payload["access_key"], str)
         or len(payload["access_key"]) < 8
         or not isinstance(payload["secret_key"], str)
@@ -1748,11 +2203,21 @@ def _new_client(access_key: str, secret_key: str):  # noqa: ANN201
     )
 
 
-def _require_owner_only_acl(payload: dict[str, Any], *, label: str) -> None:
+def _require_owner_only_acl(
+    payload: dict[str, Any],
+    *,
+    label: str,
+    expected_owner_id: str | None = None,
+) -> str:
     owner = payload.get("Owner")
     grants = payload.get("Grants")
     owner_id = str(owner.get("ID") or "") if isinstance(owner, dict) else ""
-    if not owner_id or not isinstance(grants, list) or len(grants) != 1:
+    if (
+        not owner_id
+        or (expected_owner_id is not None and owner_id != expected_owner_id)
+        or not isinstance(grants, list)
+        or len(grants) != 1
+    ):
         raise CampaignSeedError(f"{label} ACL is not strict owner-only")
     grant = grants[0]
     grantee = grant.get("Grantee") if isinstance(grant, dict) else None
@@ -1767,12 +2232,16 @@ def _require_owner_only_acl(payload: dict[str, Any], *, label: str) -> None:
         or grantee.get("ID") != owner_id
     ):
         raise CampaignSeedError(f"{label} ACL is not strict owner-only")
+    return owner_id
 
 
-def _require_private_versioned_bucket(client: Any, *, bucket: str) -> None:
+def _require_private_versioned_bucket(client: Any, *, bucket: str) -> str:
     if client.get_bucket_versioning(Bucket=bucket).get("Status") != "Enabled":
         raise CampaignSeedError("seed bucket versioning is not enabled")
-    _require_owner_only_acl(client.get_bucket_acl(Bucket=bucket), label="seed bucket")
+    owner_id = _require_owner_only_acl(
+        client.get_bucket_acl(Bucket=bucket),
+        label="seed bucket",
+    )
     try:
         policy = client.get_bucket_policy_status(Bucket=bucket)
     except Exception as exc:
@@ -1798,6 +2267,7 @@ def _require_private_versioned_bucket(client: Any, *, bucket: str) -> None:
         )
         if rules:
             raise CampaignSeedError("provider-side default encryption is configured")
+    return owner_id
 
 
 def _versions_for_key(
@@ -1972,7 +2442,7 @@ def establish_global_readiness(
             label="global six-object readiness",
             canonical_json=True,
         )
-        _require_private_versioned_bucket(
+        bucket_owner_id = _require_private_versioned_bucket(
             client,
             bucket=contract["core"]["storage"]["bucket"],
         )
@@ -1989,6 +2459,7 @@ def establish_global_readiness(
                 ],
                 "object_count": 6,
                 "versioning": "Enabled",
+                "bucket_owner_id": bucket_owner_id,
                 "strict_owner_only": True,
                 "provider_side_sse": False,
                 "captured_before_first_put": True,
@@ -2023,6 +2494,7 @@ def establish_global_readiness(
                 ],
                 "object_count": 6,
                 "versioning": "Enabled",
+                "bucket_owner_id": bucket_owner_id,
                 "strict_owner_only": True,
                 "provider_side_sse": False,
                 "captured_before_first_put": True,
@@ -2095,6 +2567,68 @@ def _hash_body(stream: Any, *, maximum: int) -> tuple[str, int]:
     return digest.hexdigest(), size
 
 
+@contextmanager
+def _verified_upload_body(
+    path: Path,
+    *,
+    expected_sha256: str,
+    expected_bytes: int,
+    label: str,
+) -> Iterator[Any]:
+    descriptor = os.open(
+        path,
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0),
+    )
+    body = None
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != 0
+            or before.st_nlink != 1
+            or stat.S_IMODE(before.st_mode) != 0o600
+            or before.st_size != expected_bytes
+        ):
+            raise CampaignSeedError(f"{label} is not a safe exact upload file")
+        digest = hashlib.sha256()
+        size = 0
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > expected_bytes:
+                raise CampaignSeedError(f"{label} exceeds its sealed size")
+            digest.update(chunk)
+        if (digest.hexdigest(), size) != (expected_sha256, expected_bytes):
+            raise CampaignSeedError(f"{label} differs from its sealed hash")
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        body = os.fdopen(descriptor, "rb", closefd=False)
+        yield body
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        digest = hashlib.sha256()
+        size = 0
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            digest.update(chunk)
+        after = os.fstat(descriptor)
+        stable = ("st_dev", "st_ino", "st_mode", "st_uid", "st_nlink", "st_size")
+        if (
+            (digest.hexdigest(), size) != (expected_sha256, expected_bytes)
+            or any(getattr(before, field) != getattr(after, field) for field in stable)
+        ):
+            raise CampaignSeedError(f"{label} changed during exact upload")
+    finally:
+        if body is not None:
+            body.close()
+        os.close(descriptor)
+
+
 def _verify_remote_object(
     client: Any,
     *,
@@ -2104,6 +2638,7 @@ def _verify_remote_object(
     intent: str,
     controller_root: Path,
     contract_sha256: str,
+    bucket_owner_id: str,
 ) -> dict[str, Any]:
     if not version_id or version_id == "null":
         raise CampaignSeedError("seed object lacks a non-null VersionId")
@@ -2128,6 +2663,7 @@ def _verify_remote_object(
             VersionId=version_id,
         ),
         label="seed object",
+        expected_owner_id=bucket_owner_id,
     )
     _readback_started(controller_root, contract_sha256)
     response = client.get_object(
@@ -2178,6 +2714,7 @@ def _owned_publication_version_exists(
     publication_core_sha256: str,
     client: Any,
     intents_root: Path,
+    bucket_owner_id: str,
 ) -> bool:
     bucket = contract["core"]["storage"]["bucket"]
     owned = False
@@ -2220,6 +2757,15 @@ def _owned_publication_version_exists(
             or not _no_sse(head)
         ):
             raise CampaignSeedError("remote version is foreign to the durable PUT intent")
+        _require_owner_only_acl(
+            client.get_object_acl(
+                Bucket=bucket,
+                Key=row["object_key"],
+                VersionId=version_id,
+            ),
+            label="seed object",
+            expected_owner_id=bucket_owner_id,
+        )
         owned = True
     return owned
 
@@ -2253,6 +2799,7 @@ def publish_six(
         publication_core_sha256=contract["publication_core_sha256"],
         client=client,
         intents_root=intents_root,
+        bucket_owner_id=baseline["bucket_owner_id"],
     ):
         _validate_contract(
             contract,
@@ -2349,6 +2896,7 @@ def publish_six(
                     intent=intent,
                     controller_root=root,
                     contract_sha256=contract_sha256,
+                    bucket_owner_id=baseline["bucket_owner_id"],
                 )
                 if receipt["object"] != verified:
                     raise CampaignSeedError("durable receipt content differs")
@@ -2357,7 +2905,12 @@ def publish_six(
             response_version = ""
             if not versions:
                 try:
-                    with ciphertext.open("rb") as body:
+                    with _verified_upload_body(
+                        ciphertext,
+                        expected_sha256=row["ciphertext_sha256"],
+                        expected_bytes=row["ciphertext_bytes"],
+                        label=f"{role} {row['kind']} controller ciphertext",
+                    ) as body:
                         response = client.put_object(
                             Bucket=bucket,
                             Key=row["object_key"],
@@ -2394,6 +2947,7 @@ def publish_six(
                 intent=intent,
                 controller_root=root,
                 contract_sha256=contract_sha256,
+                bucket_owner_id=baseline["bucket_owner_id"],
             )
             receipt = {
                 "schema": "three-site-staging-seed-object-publication-v2",
@@ -2444,17 +2998,129 @@ def finalize_manifests(
     contract: dict[str, Any],
     contract_sha256: str,
     publication: dict[str, Any],
+    client: Any,
+    machine_id_path: Path = Path("/etc/machine-id"),
 ) -> dict[str, Any]:
     if contract_sha256 != _canonical_hash(contract):
         raise CampaignSeedError("sealed publication contract hash differs")
     _validate_contract(contract)
     _verify_release_files(contract)
     root = Path(str(contract["core"]["controller_state_root"]))
+    readiness, baseline = establish_global_readiness(
+        contract=contract,
+        contract_sha256=contract_sha256,
+        client=client,
+        machine_id_path=machine_id_path,
+    )
     durable = _secure_json(root / "six-publication.json", label="six-object publication result")
     if durable != publication or publication.get("contract_sha256") != contract_sha256:
         raise CampaignSeedError("publication result differs from the durable controller state")
-    if publication.get("object_count") != 6 or len(publication.get("objects", [])) != 6:
-        raise CampaignSeedError("publication result is not exactly six objects")
+    receipts: list[dict[str, Any]] = []
+    observed_keys: set[str] = set()
+    bucket = contract["core"]["storage"]["bucket"]
+    for row in contract["publication_core"]["objects"]:
+        role = row["source_role"]
+        kind = row["kind"]
+        intent = _secure_json(
+            root / "intents" / f"{role}-{kind}.json",
+            label="final object PUT intent",
+        )
+        receipt = _secure_json(
+            root / "receipts" / f"{role}-{kind}.json",
+            label="final object publication receipt",
+        )
+        versions, markers = _versions_for_key(
+            client,
+            bucket=bucket,
+            key=row["object_key"],
+        )
+        version_id = str(receipt.get("version_id") or "")
+        if (
+            set(intent)
+            != {
+                "schema",
+                "publication_core_sha256",
+                "object_key",
+                "ciphertext_sha256",
+                "intent",
+            }
+            or intent["schema"] != "three-site-staging-seed-put-intent-v2"
+            or intent["publication_core_sha256"]
+            != contract["publication_core_sha256"]
+            or intent["object_key"] != row["object_key"]
+            or intent["ciphertext_sha256"] != row["ciphertext_sha256"]
+            or SHA256_RE.fullmatch(str(intent["intent"])) is None
+            or set(receipt)
+            != {
+                "schema",
+                "contract_sha256",
+                "source_role",
+                "kind",
+                "version_id",
+                "intent",
+                "object",
+                "initial_global_absence_proven",
+                "conditional_create",
+            }
+            or receipt["schema"]
+            != "three-site-staging-seed-object-publication-v2"
+            or receipt["contract_sha256"] != contract_sha256
+            or receipt["source_role"] != role
+            or receipt["kind"] != kind
+            or receipt["intent"] != intent["intent"]
+            or receipt["initial_global_absence_proven"] is not True
+            or receipt["conditional_create"] is not True
+            or markers
+            or len(versions) != 1
+            or not version_id
+            or version_id == "null"
+            or str(versions[0].get("VersionId") or "") != version_id
+            or row["object_key"] in observed_keys
+        ):
+            raise CampaignSeedError(
+                "finalization receipt does not prove one exact sealed object"
+            )
+        verified = _verify_remote_object(
+            client,
+            bucket=bucket,
+            row=row,
+            version_id=version_id,
+            intent=str(intent["intent"]),
+            controller_root=root,
+            contract_sha256=contract_sha256,
+            bucket_owner_id=baseline["bucket_owner_id"],
+        )
+        if receipt["object"] != verified:
+            raise CampaignSeedError(
+                "finalization receipt differs from exact provider readback"
+            )
+        observed_keys.add(row["object_key"])
+        receipts.append(receipt)
+    expected_publication = {
+        "schema": "three-site-staging-seed-six-publication-v2",
+        "status": "six-private-versioned-ciphertexts-readback-verified",
+        "campaign_id": contract["core"]["campaign_id"],
+        "release_sha": contract["core"]["release_sha"],
+        "contract_sha256": contract_sha256,
+        "readiness_sha256": _canonical_hash(readiness),
+        "baseline_sha256": _canonical_hash(baseline),
+        "objects": [receipt["object"] for receipt in receipts],
+        "object_count": 6,
+        "conditional_create": True,
+        "object_overwrite": False,
+        "object_delete": False,
+        "provider_side_sse": False,
+        "controller_publication_identity_input_accepted": False,
+        "controller_decryption_performed": False,
+    }
+    if (
+        len(observed_keys) != 6
+        or publication != expected_publication
+        or durable != expected_publication
+    ):
+        raise CampaignSeedError(
+            "publication result differs from six exact receipts and provider readbacks"
+        )
     readback_start = _secure_json(
         root / "readback-started.json",
         label="first readback timestamp",
@@ -2508,6 +3174,7 @@ def finalize_manifests(
             "release_sha": contract["core"]["release_sha"],
             "source_role": role,
             "bucket": contract["core"]["storage"]["bucket"],
+            "bucket_owner_id": baseline["bucket_owner_id"],
             "object_prefix": _seed_role_prefix(
                 prefix=contract["core"]["storage"]["prefix"],
                 campaign_id=contract["core"]["campaign_id"],
@@ -2642,7 +3309,7 @@ def _main_preparation_core(args: argparse.Namespace) -> dict[str, Any]:
         label="--target-identity-path",
     )
     immutable = _immutable_release_binding(
-        args.release_root.resolve(),
+        REPO_ROOT.resolve(),
         inventory_result["release_sha"],
     )
     core = build_preparation_core(
@@ -2663,14 +3330,54 @@ def _main_preparation_core(args: argparse.Namespace) -> dict[str, Any]:
         label="seed preparation core",
         canonical_json=True,
     )
+    subject = source_preparation_subject(core)
+    _write_or_verify(
+        args.output_preparation_subject,
+        _canonical_encoded(subject),
+        label="source preparation approval subject",
+        canonical_json=True,
+    )
+    return {
+        "status": "awaiting-direct-source-preparation-approval",
+        "campaign_id": core["campaign_id"],
+        "release_sha": core["release_sha"],
+        "preparation_core_sha256": _canonical_hash(core),
+        "approval_action": "approve_seed_preparation",
+        "subject": str(args.output_preparation_subject),
+    }
+
+
+def _main_source_plans(args: argparse.Namespace) -> dict[str, Any]:
+    core = _load_canonical_document(
+        args.preparation_core,
+        label="seed preparation core",
+    )
+    approval = _secure_json(
+        args.preparation_approval,
+        label="direct source preparation approval",
+    )
+    approval_policy = _secure_json(args.approval_policy, label="human approval policy")
+    witness_key = read_secure_text(
+        args.witness_relay_public_key,
+        label="campaign Witness relay public key",
+        owner_uid=0,
+        max_size=4096,
+    ).strip()
+    _verify_release_files(core)
     output_plans = _path_mapping(
         args.output_source_plan,
         expected=set(SOURCE_ROLES),
         label="--output-source-plan",
     )
-    confirmations = {}
+    confirmations: dict[str, str] = {}
     for role in SOURCE_ROLES:
-        plan = source_preparation_plan(core, role=role)
+        plan = source_preparation_plan(
+            core,
+            role=role,
+            preparation_approval=approval,
+            approval_policy=approval_policy,
+            witness_relay_public_key=witness_key,
+        )
         _write_or_verify(
             output_plans[role],
             _canonical_encoded(plan),
@@ -2679,12 +3386,12 @@ def _main_preparation_core(args: argparse.Namespace) -> dict[str, Any]:
         )
         confirmations[role] = source_confirmation_phrase(plan)
     return {
-        "status": "source-preparation-plans-created",
+        "status": "authorized-source-preparation-plans-created",
         "campaign_id": core["campaign_id"],
         "release_sha": core["release_sha"],
         "preparation_core_sha256": _canonical_hash(core),
         "source_confirmations": confirmations,
-        "publication_approval_required": False,
+        "preparation_approval_sha256": _canonical_hash(approval),
     }
 
 
@@ -2695,7 +3402,7 @@ def _main_publication_subject(args: argparse.Namespace) -> dict[str, Any]:
     )
     _validate_contract_core(core)
     _verify_release_files(core)
-    if _machine_id(args.machine_id_file) != core["controller_machine_id"]:
+    if _machine_id() != core["controller_machine_id"]:
         raise CampaignSeedError("controller machine id differs from the preparation core")
     preparations = _load_controller_preparations(core)
     publication_core = build_publication_core(
@@ -2780,12 +3487,18 @@ def _parser() -> argparse.ArgumentParser:
     prepare_core.add_argument("--witness-relay-public-key", type=Path, required=True)
     prepare_core.add_argument("--backup-manifest", action="append", required=True)
     prepare_core.add_argument("--recipient", action="append", required=True)
-    prepare_core.add_argument("--release-root", type=Path, required=True)
     prepare_core.add_argument("--source-state-root", action="append", required=True)
     prepare_core.add_argument("--target-identity-path", action="append", required=True)
     prepare_core.add_argument("--controller-state-root", type=Path, required=True)
     prepare_core.add_argument("--output-core", type=Path, required=True)
-    prepare_core.add_argument("--output-source-plan", action="append", required=True)
+    prepare_core.add_argument("--output-preparation-subject", type=Path, required=True)
+
+    source_plans = subparsers.add_parser("source-plans")
+    source_plans.add_argument("--preparation-core", type=Path, required=True)
+    source_plans.add_argument("--preparation-approval", type=Path, required=True)
+    source_plans.add_argument("--approval-policy", type=Path, required=True)
+    source_plans.add_argument("--witness-relay-public-key", type=Path, required=True)
+    source_plans.add_argument("--output-source-plan", action="append", required=True)
 
     publication_subject = subparsers.add_parser("publication-subject")
     publication_subject.add_argument("--preparation-core", type=Path, required=True)
@@ -2795,12 +3508,6 @@ def _parser() -> argparse.ArgumentParser:
         required=True,
     )
     publication_subject.add_argument("--output-subject", type=Path, required=True)
-    publication_subject.add_argument(
-        "--machine-id-file",
-        type=Path,
-        default=Path("/etc/machine-id"),
-    )
-
     seal = subparsers.add_parser("seal-contract")
     seal.add_argument("--preparation-core", type=Path, required=True)
     seal.add_argument("--publication-core", type=Path, required=True)
@@ -2816,22 +3523,20 @@ def _parser() -> argparse.ArgumentParser:
     prepare.add_argument("--source-plan", type=Path, required=True)
     prepare.add_argument("--source-role", choices=SOURCE_ROLES, required=True)
     prepare.add_argument("--confirm", required=True)
-    prepare.add_argument("--machine-id-file", type=Path, default=Path("/etc/machine-id"))
 
     ingest = subparsers.add_parser("ingest-role")
     ingest.add_argument("--preparation-core", type=Path, required=True)
     ingest.add_argument("--source-role", choices=SOURCE_ROLES, required=True)
     ingest.add_argument("--preparation", type=Path, required=True)
     ingest.add_argument("--ciphertext-root", type=Path, required=True)
-    ingest.add_argument("--machine-id-file", type=Path, default=Path("/etc/machine-id"))
 
     publish = subparsers.add_parser("publish")
     publish.add_argument("--contract", type=Path, required=True)
     publish.add_argument("--credentials", type=Path, required=True)
-    publish.add_argument("--machine-id-file", type=Path, default=Path("/etc/machine-id"))
 
     finalize = subparsers.add_parser("finalize")
     finalize.add_argument("--contract", type=Path, required=True)
+    finalize.add_argument("--credentials", type=Path, required=True)
     return parser
 
 
@@ -2840,6 +3545,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "preparation-core":
             result = _main_preparation_core(args)
+        elif args.command == "source-plans":
+            result = _main_source_plans(args)
         elif args.command == "publication-subject":
             result = _main_publication_subject(args)
         elif args.command == "seal-contract":
@@ -2853,7 +3560,6 @@ def main(argv: list[str] | None = None) -> int:
                 source_plan=source_plan,
                 role=args.source_role,
                 confirmation=args.confirm,
-                machine_id_path=args.machine_id_file,
             )
         elif args.command == "ingest-role":
             preparation_core = _load_canonical_document(
@@ -2865,7 +3571,6 @@ def main(argv: list[str] | None = None) -> int:
                 role=args.source_role,
                 preparation_path=args.preparation,
                 ciphertext_root=args.ciphertext_root,
-                machine_id_path=args.machine_id_file,
             )
         else:
             contract, contract_sha256 = _load_canonical_contract(args.contract)
@@ -2878,14 +3583,24 @@ def main(argv: list[str] | None = None) -> int:
                     "fixed_object_count": 6,
                 }
             elif args.command == "publish":
-                access_key, secret_key = _credentials(args.credentials)
+                access_key, secret_key = _credentials(
+                    args.credentials,
+                    expected_credential_id=contract["core"]["storage"][
+                        "credential_id"
+                    ],
+                )
                 result = publish_six(
                     contract=contract,
                     contract_sha256=contract_sha256,
                     client=_new_client(access_key, secret_key),
-                    machine_id_path=args.machine_id_file,
                 )
             else:
+                access_key, secret_key = _credentials(
+                    args.credentials,
+                    expected_credential_id=contract["core"]["storage"][
+                        "credential_id"
+                    ],
+                )
                 publication = _secure_json(
                     Path(str(contract["core"]["controller_state_root"]))
                     / "six-publication.json",
@@ -2895,6 +3610,7 @@ def main(argv: list[str] | None = None) -> int:
                     contract=contract,
                     contract_sha256=contract_sha256,
                     publication=publication,
+                    client=_new_client(access_key, secret_key),
                 )
     except Exception as exc:
         print(

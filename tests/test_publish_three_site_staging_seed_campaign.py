@@ -11,6 +11,8 @@ from pathlib import Path
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 from uuid import uuid4
 
 from cryptography.hazmat.primitives import serialization
@@ -28,6 +30,7 @@ from core.human_approval_issuer import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
+REAL_IMMUTABLE_RELEASE_BINDING = campaign._immutable_release_binding
 
 
 class FakeS3Error(RuntimeError):
@@ -231,6 +234,11 @@ class CampaignFixture:
                     "max_ttl_seconds": 86400,
                 },
                 {
+                    "action": "approve_seed_preparation",
+                    "environments": ["staging"],
+                    "max_ttl_seconds": 3600,
+                },
+                {
                     "action": "approve_seed_publication",
                     "environments": ["staging"],
                     "max_ttl_seconds": 3600,
@@ -272,20 +280,18 @@ class CampaignFixture:
             ).hexdigest(),
         }
         release_files = {}
-        for relative in (
-            "scripts/publish_three_site_staging_seed_campaign.py",
-            "scripts/run_three_site_staging_source_backup.py",
-            "scripts/fetch_three_site_staging_seed.py",
-            "scripts/verify_three_site_staging_migration_plan.py",
-        ):
+        for relative in campaign.SECURITY_RELEASE_FILES:
             release_files[relative] = hashlib.sha256(
                 (ROOT / relative).read_bytes()
             ).hexdigest()
         immutable_release = {
             "root": str(ROOT),
             "git_head": self.release_sha,
-            "files": release_files,
+            "git_tree": "2" * 40,
+            "tracked_index_sha256": "3" * 64,
+            "security_files": release_files,
         }
+        self.immutable_release = immutable_release
         core = campaign.build_preparation_core(
             inventory=inventory,
             inventory_result=inventory_result,
@@ -299,14 +305,55 @@ class CampaignFixture:
             target_identity_paths=self.identity_paths,
         )
         self.preparation_core = core
+        preparation_approval = self.issue_token(
+            action="approve_seed_preparation",
+            subject=campaign.source_preparation_subject(core),
+        )
         self.source_plans = {
-            role: campaign.source_preparation_plan(core, role=role)
+            role: campaign.source_preparation_plan(
+                core,
+                role=role,
+                preparation_approval=preparation_approval,
+                approval_policy=self.approval_policy,
+                witness_relay_public_key=self.witness_key,
+            )
             for role in campaign.SOURCE_ROLES
         }
         self.contract = None
         self.contract_sha = None
         self.publication_core = None
         self.age_calls: list[list[str]] = []
+
+    def issue_token(
+        self,
+        *,
+        action: str,
+        subject: dict[str, object],
+        now: datetime | None = None,
+    ) -> dict[str, object]:
+        now = now or datetime.now(timezone.utc).replace(microsecond=0)
+        unsigned = {
+            "schema": "three-site-human-approval-token-v1",
+            "approval_id": str(uuid4()),
+            "policy_id": self.approval_policy["policy_id"],
+            "policy_hash": approval_policy_hash(self.approval_policy),
+            "issuer_id": self.approval_policy["issuer"]["issuer_id"],
+            "key_id": self.approval_policy["issuer"]["key_id"],
+            "operator": self.approval_policy["issuer"]["operator"],
+            "authenticator_id": self.approval_policy["issuer"]["authenticator_id"],
+            "action": action,
+            "environment": "staging",
+            "subject": subject,
+            "issued_at": now.isoformat(),
+            "expires_at": (now + timedelta(seconds=3600)).isoformat(),
+            "authentication": {"methods": ["password", "totp"]},
+        }
+        return {
+            **unsigned,
+            "signature": base64.b64encode(
+                self.approval_private.sign(canonical_json_bytes(unsigned))
+            ).decode("ascii"),
+        }
 
     def seal_publication(
         self,
@@ -320,28 +367,11 @@ class CampaignFixture:
             publication_core,
             preparation_core=core,
         )
-        unsigned = {
-            "schema": "three-site-human-approval-token-v1",
-            "approval_id": str(uuid4()),
-            "policy_id": self.approval_policy["policy_id"],
-            "policy_hash": approval_policy_hash(self.approval_policy),
-            "issuer_id": self.approval_policy["issuer"]["issuer_id"],
-            "key_id": self.approval_policy["issuer"]["key_id"],
-            "operator": self.approval_policy["issuer"]["operator"],
-            "authenticator_id": self.approval_policy["issuer"]["authenticator_id"],
-            "action": "approve_seed_publication",
-            "environment": "staging",
-            "subject": subject,
-            "issued_at": now.isoformat(),
-            "expires_at": (now + timedelta(seconds=3600)).isoformat(),
-            "authentication": {"methods": ["password", "totp"]},
-        }
-        token = {
-            **unsigned,
-            "signature": base64.b64encode(
-                self.approval_private.sign(canonical_json_bytes(unsigned))
-            ).decode("ascii"),
-        }
+        token = self.issue_token(
+            action="approve_seed_publication",
+            subject=subject,
+            now=now,
+        )
         contract = {
             "schema": campaign.CONTRACT_SCHEMA,
             "core": core,
@@ -433,26 +463,57 @@ class CampaignFixture:
         source = Path(arguments[-1])
         _write_private(output, b"age-v1-encrypted-header:" + source.read_bytes())
 
+    def install_identity(self, role: str) -> None:
+        _write_private(
+            self.identity_paths[role],
+            b"# fixture identity\nAGE-SECRET-KEY-TEST123\n",
+        )
+
+    def fake_derive_recipient(self, identity_path: Path) -> str:
+        matching = [
+            role
+            for role, expected_path in self.identity_paths.items()
+            if identity_path == expected_path
+        ]
+        if len(matching) != 1:
+            raise AssertionError("unexpected identity path")
+        return self.recipients[matching[0]]
+
     def prepare_and_ingest_core(
         self,
         core: dict[str, object],
     ) -> tuple[dict[str, dict[str, object]], dict[str, object]]:
         preparations = {}
+        preparation_approval = self.issue_token(
+            action="approve_seed_preparation",
+            subject=campaign.source_preparation_subject(core),
+        )
         plans = {
-            role: campaign.source_preparation_plan(core, role=role)
+            role: campaign.source_preparation_plan(
+                core,
+                role=role,
+                preparation_approval=preparation_approval,
+                approval_policy=self.approval_policy,
+                witness_relay_public_key=self.witness_key,
+            )
             for role in campaign.SOURCE_ROLES
         }
         for role, machine in (
             ("bot_fi", self.controller_machine),
             ("webapp_fi", self.web_machine),
         ):
-            preparation = campaign.prepare_role(
-                source_plan=plans[role],
-                role=role,
-                confirmation=campaign.source_confirmation_phrase(plans[role]),
-                machine_id_path=machine,
-                encrypt=self.fake_age,
-            )
+            self.install_identity(role)
+            try:
+                preparation = campaign.prepare_role(
+                    source_plan=plans[role],
+                    role=role,
+                    confirmation=campaign.source_confirmation_phrase(plans[role]),
+                    machine_id_path=machine,
+                    encrypt=self.fake_age,
+                    derive_recipient=self.fake_derive_recipient,
+                )
+            finally:
+                self.identity_paths[role].unlink(missing_ok=True)
             preparations[role] = preparation
             campaign.ingest_role(
                 preparation_core=core,
@@ -483,8 +544,15 @@ class CampaignSeedPublicationTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.fixture = CampaignFixture(Path(self.temporary.name))
+        self.release_patch = patch.object(
+            campaign,
+            "_immutable_release_binding",
+            return_value=self.fixture.immutable_release,
+        )
+        self.release_patch.start()
 
     def tearDown(self):
+        self.release_patch.stop()
         self.temporary.cleanup()
 
     def test_end_to_end_exact_six_with_distinct_target_recipient_map(self):
@@ -521,6 +589,8 @@ class CampaignSeedPublicationTests(unittest.TestCase):
             contract=self.fixture.contract,
             contract_sha256=self.fixture.contract_sha,
             publication=published,
+            client=client,
+            machine_id_path=self.fixture.controller_machine,
         )
         self.assertFalse(result["controller_decryption"])
         web_manifest = json.loads(
@@ -714,6 +784,40 @@ class CampaignSeedPublicationTests(unittest.TestCase):
         )
         self.assertEqual(client.put_attempts, attempts)
 
+    def test_path_swap_between_hash_and_upload_creates_zero_versions(self):
+        self.fixture.prepare_and_ingest()
+        first = self.fixture.contract["publication_core"]["objects"][0]
+        ciphertext = (
+            self.fixture.controller_root
+            / "incoming"
+            / first["source_role"]
+            / f"{first['kind']}.age"
+        )
+
+        class SwapClient(FakeS3):
+            def __init__(self):
+                super().__init__()
+                self.list_calls = 0
+
+            def list_object_versions(self, **kwargs):
+                self.list_calls += 1
+                if self.list_calls == 13:
+                    replacement = ciphertext.parent / ".replacement"
+                    _write_private(replacement, b"foreign-ciphertext")
+                    replacement.replace(ciphertext)
+                return super().list_object_versions(**kwargs)
+
+        client = SwapClient()
+        with self.assertRaisesRegex(campaign.CampaignSeedError, "exactly one"):
+            campaign.publish_six(
+                contract=self.fixture.contract,
+                contract_sha256=self.fixture.contract_sha,
+                client=client,
+                machine_id_path=self.fixture.controller_machine,
+            )
+        self.assertEqual(client.put_count, 0)
+        self.assertEqual(client.objects, {})
+
     def test_second_distinct_contract_with_same_campaign_keys_is_blocked(self):
         self.fixture.prepare_and_ingest()
         client = FakeS3()
@@ -855,6 +959,44 @@ class CampaignSeedPublicationTests(unittest.TestCase):
                 machine_id_path=self.fixture.controller_machine,
             )
 
+        client = FakeS3()
+        client.object_acl = {
+            "Owner": {"ID": "owner-2"},
+            "Grants": [
+                {
+                    "Grantee": {"Type": "CanonicalUser", "ID": "owner-2"},
+                    "Permission": "FULL_CONTROL",
+                }
+            ],
+        }
+        with self.assertRaisesRegex(campaign.CampaignSeedError, "owner-only"):
+            campaign.publish_six(
+                contract=self.fixture.contract,
+                contract_sha256=self.fixture.contract_sha,
+                client=client,
+                machine_id_path=self.fixture.controller_machine,
+            )
+
+    def test_finalize_rechecks_exact_receipts_and_provider_bytes(self):
+        self.fixture.prepare_and_ingest()
+        client = FakeS3()
+        publication = campaign.publish_six(
+            contract=self.fixture.contract,
+            contract_sha256=self.fixture.contract_sha,
+            client=client,
+            machine_id_path=self.fixture.controller_machine,
+        )
+        first_key = publication["objects"][0]["object_key"]
+        client.objects[first_key][0]["body"] = b"tampered"
+        with self.assertRaises(campaign.CampaignSeedError):
+            campaign.finalize_manifests(
+                contract=self.fixture.contract,
+                contract_sha256=self.fixture.contract_sha,
+                publication=publication,
+                client=client,
+                machine_id_path=self.fixture.controller_machine,
+            )
+
     def test_host_mismatch_and_identity_path_presence_block_source(self):
         web_plan = self.fixture.source_plans["webapp_fi"]
         with self.assertRaisesRegex(campaign.CampaignSeedError, "machine id"):
@@ -867,7 +1009,7 @@ class CampaignSeedPublicationTests(unittest.TestCase):
             )
         _write_private(
             self.fixture.identity_paths["bot_fi"],
-            b"AGE-SECRET-KEY-test",
+            b"AGE-SECRET-KEY-TEST123\n",
         )
         bot_plan = self.fixture.source_plans["bot_fi"]
         bot_preparation = campaign.prepare_role(
@@ -876,6 +1018,7 @@ class CampaignSeedPublicationTests(unittest.TestCase):
             confirmation=campaign.source_confirmation_phrase(bot_plan),
             machine_id_path=self.fixture.controller_machine,
             encrypt=self.fixture.fake_age,
+            derive_recipient=self.fixture.fake_derive_recipient,
         )
         self.assertTrue(
             bot_preparation["identity_path_policy"][
@@ -897,13 +1040,18 @@ class CampaignSeedPublicationTests(unittest.TestCase):
         interrupted = root / ".postgres.age.encrypting"
         _write_private(interrupted, b"partial-ciphertext")
         plan = self.fixture.source_plans["bot_fi"]
-        campaign.prepare_role(
-            source_plan=plan,
-            role="bot_fi",
-            confirmation=campaign.source_confirmation_phrase(plan),
-            machine_id_path=self.fixture.controller_machine,
-            encrypt=self.fixture.fake_age,
-        )
+        self.fixture.install_identity("bot_fi")
+        try:
+            campaign.prepare_role(
+                source_plan=plan,
+                role="bot_fi",
+                confirmation=campaign.source_confirmation_phrase(plan),
+                machine_id_path=self.fixture.controller_machine,
+                encrypt=self.fixture.fake_age,
+                derive_recipient=self.fixture.fake_derive_recipient,
+            )
+        finally:
+            self.fixture.identity_paths["bot_fi"].unlink(missing_ok=True)
         self.assertFalse(interrupted.exists())
         names = {path.name for path in root.iterdir()}
         self.assertFalse(any("plain" in name for name in names))
@@ -911,6 +1059,97 @@ class CampaignSeedPublicationTests(unittest.TestCase):
             {name for name in names if name.endswith(".age")},
             {"postgres.age", "uploads.age", "audit.age"},
         )
+
+    def test_source_identity_must_derive_exact_approved_role_recipient_before_age(self):
+        plan = self.fixture.source_plans["bot_fi"]
+        self.fixture.install_identity("bot_fi")
+        try:
+            with self.assertRaisesRegex(
+                campaign.CampaignSeedError,
+                "approved role recipient",
+            ):
+                campaign.prepare_role(
+                    source_plan=plan,
+                    role="bot_fi",
+                    confirmation=campaign.source_confirmation_phrase(plan),
+                    machine_id_path=self.fixture.controller_machine,
+                    encrypt=self.fixture.fake_age,
+                    derive_recipient=lambda _path: "age1" + "z" * 58,
+                )
+        finally:
+            self.fixture.identity_paths["bot_fi"].unlink(missing_ok=True)
+        self.assertEqual(self.fixture.age_calls, [])
+        self.assertFalse(self.fixture.source_roots["bot_fi"].exists())
+
+    def test_private_state_roots_reject_unsafe_ancestors_and_path_swap(self):
+        with self.assertRaisesRegex(campaign.CampaignSeedError, "unsafe private"):
+            campaign._ensure_private_directory(Path("/"))
+
+        unsafe_parent = self.fixture.root / "unsafe-parent"
+        unsafe_parent.mkdir(mode=0o700)
+        unsafe_parent.chmod(0o777)
+        with self.assertRaisesRegex(campaign.CampaignSeedError, "unsafe private"):
+            campaign._ensure_private_directory(unsafe_parent / "state")
+
+        real_parent = self.fixture.root / "real-parent"
+        real_parent.mkdir(mode=0o700)
+        alias = self.fixture.root / "state-alias"
+        alias.symlink_to(real_parent, target_is_directory=True)
+        with self.assertRaisesRegex(campaign.CampaignSeedError, "unsafe private"):
+            campaign._ensure_private_directory(alias / "state")
+
+        locked = self.fixture.root / "locked-state"
+        moved = self.fixture.root / "moved-state"
+        with self.assertRaisesRegex(campaign.CampaignSeedError, "path changed"):
+            with campaign._exclusive_lock(locked):
+                locked.rename(moved)
+                locked.symlink_to(moved, target_is_directory=True)
+
+    def test_source_backup_path_swap_cannot_change_bytes_read_by_age(self):
+        plan = self.fixture.source_plans["bot_fi"]
+        source = Path(
+            self.fixture.backups["bot_fi"]["artifacts"]["postgres"]["path"]
+        )
+        original_path = source.parent / ".original-postgres"
+        replacement = source.parent / ".replacement-postgres"
+        _write_private(replacement, b"foreign-secret-payload")
+        self.fixture.install_identity("bot_fi")
+        calls = 0
+
+        def swapping_age(arguments: list[str]) -> None:
+            nonlocal calls
+            calls += 1
+            output = Path(arguments[arguments.index("--output") + 1])
+            if calls == 1:
+                source.rename(original_path)
+                replacement.rename(source)
+            _write_private(
+                output,
+                b"age-v1-encrypted-header:" + Path(arguments[-1]).read_bytes(),
+            )
+
+        try:
+            with self.assertRaisesRegex(
+                campaign.CampaignSeedError,
+                "backup artifact path changed",
+            ):
+                campaign.prepare_role(
+                    source_plan=plan,
+                    role="bot_fi",
+                    confirmation=campaign.source_confirmation_phrase(plan),
+                    machine_id_path=self.fixture.controller_machine,
+                    encrypt=swapping_age,
+                    derive_recipient=self.fixture.fake_derive_recipient,
+                )
+            self.assertEqual(calls, 1)
+            self.assertFalse(
+                (self.fixture.source_roots["bot_fi"] / "postgres.age").exists()
+            )
+        finally:
+            self.fixture.identity_paths["bot_fi"].unlink(missing_ok=True)
+            source.unlink(missing_ok=True)
+            if original_path.exists():
+                original_path.rename(source)
 
     def test_source_confirmation_is_required_before_state_or_encryption(self):
         plan = self.fixture.source_plans["bot_fi"]
@@ -928,6 +1167,23 @@ class CampaignSeedPublicationTests(unittest.TestCase):
         self.assertFalse(self.fixture.source_roots["bot_fi"].exists())
         self.assertEqual(self.fixture.age_calls, [])
 
+    def test_source_requires_fresh_direct_preparation_approval_before_age(self):
+        plan = copy.deepcopy(self.fixture.source_plans["bot_fi"])
+        plan["preparation_approval_token"]["subject"]["artifact_sha256"] = "f" * 64
+        with self.assertRaisesRegex(
+            campaign.CampaignSeedError,
+            "direct source preparation approval",
+        ):
+            campaign.prepare_role(
+                source_plan=plan,
+                role="bot_fi",
+                confirmation=campaign.source_confirmation_phrase(plan),
+                machine_id_path=self.fixture.controller_machine,
+                encrypt=self.fixture.fake_age,
+            )
+        self.assertEqual(self.fixture.age_calls, [])
+        self.assertFalse(self.fixture.source_roots["bot_fi"].exists())
+
     def test_source_surface_has_no_credentials_private_key_s3_or_delete(self):
         source = inspect.getsource(campaign.prepare_role)
         source += inspect.getsource(campaign._publish_ciphertext)
@@ -936,6 +1192,7 @@ class CampaignSeedPublicationTests(unittest.TestCase):
         self.assertNotIn("AGE-SECRET-KEY", source)
         self.assertNotIn("put_object", source)
         self.assertNotIn("delete_object", inspect.getsource(campaign))
+        self.assertNotIn("--machine-id-file", inspect.getsource(campaign._parser))
         self.assertNotIn("identity", inspect.signature(campaign.prepare_role).parameters)
         self.assertNotIn("credentials", inspect.signature(campaign.prepare_role).parameters)
         parser = campaign._parser()
@@ -952,10 +1209,12 @@ class CampaignSeedPublicationTests(unittest.TestCase):
         )
         self.assertFalse(hasattr(prepare, "credentials"))
         self.assertFalse(hasattr(prepare, "identity"))
+        self.assertFalse(hasattr(prepare, "machine_id_file"))
         encoded_plan = json.dumps(self.fixture.source_plans["webapp_fi"])
         self.assertNotIn("publication_approval_token", encoded_plan)
-        self.assertNotIn('"signature"', encoded_plan)
-        self.assertNotIn('"approval_policy":', encoded_plan)
+        self.assertIn('"preparation_approval_token"', encoded_plan)
+        self.assertIn('"signature"', encoded_plan)
+        self.assertIn('"approval_policy":', encoded_plan)
         self.assertNotIn('"access_key"', encoded_plan)
         self.assertNotIn('"secret_key"', encoded_plan)
 
@@ -970,10 +1229,86 @@ class CampaignSeedPublicationTests(unittest.TestCase):
         self.assertEqual(len(set(keys)), 6)
         self.assertTrue(all("/seed-v2/" in key for key in keys))
 
+    def test_credentials_must_name_the_signed_credential_id(self):
+        path = self.fixture.root / "credentials.json"
+        _write_private(
+            path,
+            json.dumps(
+                {
+                    "credential_id": "wrong",
+                    "access_key": "access-key",
+                    "secret_key": "s" * 40,
+                }
+            ).encode(),
+        )
+        with self.assertRaisesRegex(campaign.CampaignSeedError, "malformed"):
+            campaign._credentials(
+                path,
+                expected_credential_id="staging-seed-publisher",
+            )
+        payload = json.loads(path.read_text())
+        payload["credential_id"] = "staging-seed-publisher"
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        path.chmod(0o600)
+        self.assertEqual(
+            campaign._credentials(
+                path,
+                expected_credential_id="staging-seed-publisher",
+            ),
+            ("access-key", "s" * 40),
+        )
+
+    def test_immutable_release_rejects_untracked_state(self):
+        clean_calls = [
+            SimpleNamespace(returncode=0, stdout=(self.fixture.release_sha + "\n").encode()),
+            SimpleNamespace(returncode=0, stdout=("2" * 40 + "\n").encode()),
+            SimpleNamespace(returncode=0, stdout=b"100644 blob 0\tfile.py\0"),
+            SimpleNamespace(returncode=0, stdout=b"?? untracked-secret\n"),
+        ]
+        with patch.object(
+            campaign.subprocess,
+            "run",
+            side_effect=clean_calls,
+        ) as run:
+            with self.assertRaisesRegex(campaign.CampaignSeedError, "clean immutable"):
+                REAL_IMMUTABLE_RELEASE_BINDING(ROOT, self.fixture.release_sha)
+        self.assertIn("--untracked-files=all", run.call_args_list[-1].args[0])
+
+    def test_seal_rechecks_the_exact_clean_release_binding(self):
+        self.fixture.prepare_and_ingest()
+        changed = copy.deepcopy(self.fixture.immutable_release)
+        changed["tracked_index_sha256"] = "f" * 64
+        with patch.object(
+            campaign,
+            "_immutable_release_binding",
+            return_value=changed,
+        ):
+            with self.assertRaisesRegex(
+                campaign.CampaignSeedError,
+                "differs from the sealed immutable release",
+            ):
+                campaign.seal_contract(
+                    preparation_core=self.fixture.contract["core"],
+                    publication_core=self.fixture.contract["publication_core"],
+                    publication_approval=self.fixture.contract[
+                        "publication_approval_token"
+                    ],
+                    approval_policy=self.fixture.approval_policy,
+                    witness_relay_public_key=self.fixture.witness_key,
+                )
+
     def test_dedicated_seed_action_is_bounded_and_not_session_scoped(self):
         actions = {
             row["action"]: row for row in human_approval_issuer.DEFAULT_ACTIONS
         }
+        self.assertEqual(
+            actions["approve_seed_preparation"],
+            {
+                "action": "approve_seed_preparation",
+                "environments": ["staging"],
+                "max_ttl_seconds": 3600,
+            },
+        )
         self.assertEqual(
             actions["approve_seed_publication"],
             {
@@ -982,8 +1317,36 @@ class CampaignSeedPublicationTests(unittest.TestCase):
                 "max_ttl_seconds": 3600,
             },
         )
+        self.assertEqual(
+            actions["approve_witness_relay_material"],
+            {
+                "action": "approve_witness_relay_material",
+                "environments": ["staging"],
+                "max_ttl_seconds": 3600,
+            },
+        )
+        self.assertEqual(
+            actions["approve_source_adoption_backup"],
+            {
+                "action": "approve_source_adoption_backup",
+                "environments": ["staging"],
+                "max_ttl_seconds": 3600,
+            },
+        )
+        self.assertNotIn(
+            "approve_seed_preparation",
+            human_approval_issuer.DEFAULT_STAGING_SESSION_ACTIONS,
+        )
         self.assertNotIn(
             "approve_seed_publication",
+            human_approval_issuer.DEFAULT_STAGING_SESSION_ACTIONS,
+        )
+        self.assertNotIn(
+            "approve_witness_relay_material",
+            human_approval_issuer.DEFAULT_STAGING_SESSION_ACTIONS,
+        )
+        self.assertNotIn(
+            "approve_source_adoption_backup",
             human_approval_issuer.DEFAULT_STAGING_SESSION_ACTIONS,
         )
 

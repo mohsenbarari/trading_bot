@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -51,9 +52,11 @@ from core.three_site_full_matrix_runner import (
     run_full_matrix_campaign,
 )
 from core.three_site_full_matrix_midpoint import (
+    FullMatrixMidpointError,
     MIDPOINT_ACTIONS,
     MIDPOINT_SESSION_ACTIONS,
     assemble_midpoint_bundle,
+    validate_midpoint_journal,
 )
 from core.three_site_execution_safety import SHARED_HOST_SAFE
 from tests.three_site_sync_timing_fixtures import make_sync_timing_artifact
@@ -77,6 +80,7 @@ class FakeBackend:
         self.crash_key = crash_key
         self.crashed = False
         self.preflight_calls = 0
+        self.finalize_calls = 0
         self.executed: list[tuple[int, str, str]] = []
         self.recovered: list[tuple[int, str, str]] = []
         self.cleanups: list[tuple[int, str, bool]] = []
@@ -423,6 +427,7 @@ class FakeBackend:
     async def finalize(
         self, identity: CampaignIdentity, *, operation_id: str
     ) -> dict:
+        self.finalize_calls += 1
         value = {
             **self._identity(identity),
             "residue_count": 0,
@@ -881,6 +886,226 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(
                 any(row["event"] == "campaign_blocked" for row in records)
             )
+
+    async def test_midpoint_requires_exact_final_cleanup_quartet(self):
+        stack, now, campaign, policy, bound, root, journal = self._inputs()
+        with stack:
+            paused = await run_full_matrix_campaign(
+                campaign=campaign,
+                approver_policy=policy,
+                bound_artifacts=bound,
+                artifact_root=root,
+                journal=journal,
+                backend=FakeBackend(root),
+                now=now + timedelta(minutes=1),
+            )
+            records = verify_hash_chained_jsonl(journal, label="test journal")
+            pause_index = next(
+                index
+                for index, record in enumerate(records)
+                if record["event"] == "campaign_paused"
+            )
+
+            cases = {}
+
+            missing_start = deepcopy(records)
+            del missing_start[pause_index - 3]
+            cases["missing cleanup start"] = missing_start
+
+            moved_start = deepcopy(records)
+            moved_start[pause_index - 4], moved_start[pause_index - 3] = (
+                moved_start[pause_index - 3],
+                moved_start[pause_index - 4],
+            )
+            cases["moved cleanup start"] = moved_start
+
+            substituted_pair = deepcopy(records)
+            substituted_pair[pause_index - 2]["operation_id"] = str(uuid4())
+            cases["substituted cleanup pass"] = substituted_pair
+
+            mismatched_result = deepcopy(records)
+            mismatched_result[pause_index - 1]["cleanup_result"] = {
+                **mismatched_result[pause_index - 1]["cleanup_result"],
+                "artifact_size": (
+                    mismatched_result[pause_index - 1]["cleanup_result"][
+                        "artifact_size"
+                    ]
+                    + 1
+                ),
+            }
+            cases["phase/result mismatch"] = mismatched_result
+
+            residue = deepcopy(records)
+            residue[pause_index - 2]["result"]["residue_count"] = 1
+            residue[pause_index - 1]["cleanup_result"]["residue_count"] = 1
+            cases["nonzero residue"] = residue
+
+            production = deepcopy(records)
+            production[pause_index - 2]["result"]["production_touched"] = True
+            production[pause_index - 1]["cleanup_result"][
+                "production_touched"
+            ] = True
+            cases["production touched"] = production
+
+            for label, candidate in cases.items():
+                with self.subTest(label=label):
+                    with self.assertRaises(FullMatrixMidpointError):
+                        validate_midpoint_journal(
+                            candidate,
+                            campaign=campaign,
+                            campaign_hash=paused["campaign_hash"],
+                        )
+
+    async def test_expired_unresumed_pause_is_read_only_and_idempotent(self):
+        stack, now, campaign, policy, bound, root, journal = self._inputs()
+        with stack:
+            paused = await run_full_matrix_campaign(
+                campaign=campaign,
+                approver_policy=policy,
+                bound_artifacts=bound,
+                artifact_root=root,
+                journal=journal,
+                backend=FakeBackend(root),
+                now=now + timedelta(minutes=1),
+            )
+            midpoint_bundle = self._midpoint_bundle(
+                paused=paused,
+                campaign=campaign,
+                policy=policy,
+                root=root,
+            )
+            before = journal.read_bytes()
+            for attempt in range(2):
+                with self.subTest(attempt=attempt):
+                    resumed = FakeBackend(root)
+                    repeated = await run_full_matrix_campaign(
+                        campaign=campaign,
+                        approver_policy=policy,
+                        bound_artifacts=bound,
+                        artifact_root=root,
+                        journal=journal,
+                        backend=resumed,
+                        midpoint_refresh_bundle=midpoint_bundle,
+                        now=now + timedelta(hours=49),
+                    )
+                    self.assertEqual(repeated["status"], "paused")
+                    self.assertEqual(
+                        repeated["pause_event_hash"],
+                        paused["pause_event_hash"],
+                    )
+                    self.assertEqual(journal.read_bytes(), before)
+                    self.assertEqual(resumed.preflight_calls, 0)
+                    self.assertEqual(resumed.finalize_calls, 0)
+                    self.assertEqual(resumed.executed, [])
+                    self.assertEqual(resumed.recovered, [])
+                    self.assertEqual(resumed.cleanups, [])
+
+    async def test_finalize_intent_and_completion_order_matrix(self):
+        stack, now, campaign, policy, bound, root, journal = self._inputs()
+        with stack:
+            report = await self._run_to_completion(
+                campaign=campaign,
+                policy=policy,
+                bound=bound,
+                root=root,
+                journal=journal,
+                backend=FakeBackend(root),
+                now=now + timedelta(minutes=1),
+            )
+            self.assertEqual(report["status"], "passed")
+            records = verify_hash_chained_jsonl(journal, label="test journal")
+            validate_midpoint_journal(
+                records,
+                campaign=campaign,
+                campaign_hash=report["campaign_hash"],
+            )
+            pause_index = next(
+                index
+                for index, record in enumerate(records)
+                if record["event"] == "campaign_paused"
+            )
+            resume_index = next(
+                index
+                for index, record in enumerate(records)
+                if record["event"] == "campaign_resumed"
+            )
+            finalize_start_index = next(
+                index
+                for index, record in enumerate(records)
+                if record["event"] == "operation_started"
+                and record["operation_kind"] == "finalize"
+            )
+            finalize_pass_index = finalize_start_index + 1
+            finalized_index = finalize_pass_index + 1
+
+            cases = {}
+
+            pre_pause = deepcopy(records)
+            pre_pause[pause_index - 4]["operation_kind"] = "finalize"
+            pre_pause[pause_index - 4]["operation_context"] = {
+                "phase": "",
+                "scenario_id": "",
+                "iteration": 0,
+                "failed": None,
+                "attempt": 0,
+            }
+            cases["iteration-zero finalize marker before pause"] = pre_pause
+
+            between_checkpoint_events = deepcopy(records)
+            between_checkpoint_events.insert(
+                resume_index,
+                deepcopy(records[finalize_start_index]),
+            )
+            cases["finalize intent between pause and resume"] = (
+                between_checkpoint_events
+            )
+
+            before_iteration_two_completion = deepcopy(records)
+            finalize_pair = before_iteration_two_completion[
+                finalize_start_index : finalize_pass_index + 1
+            ]
+            del before_iteration_two_completion[
+                finalize_start_index : finalize_pass_index + 1
+            ]
+            final_iteration_two_phase = max(
+                index
+                for index, record in enumerate(before_iteration_two_completion)
+                if record.get("event") == "phase_passed"
+                and record.get("iteration") == 2
+            )
+            before_iteration_two_completion[
+                final_iteration_two_phase:final_iteration_two_phase
+            ] = finalize_pair
+            cases["finalize before final iteration-two phase"] = (
+                before_iteration_two_completion
+            )
+
+            finalized_before_pass = deepcopy(records)
+            finalized_before_pass[finalize_pass_index], finalized_before_pass[
+                finalized_index
+            ] = (
+                finalized_before_pass[finalized_index],
+                finalized_before_pass[finalize_pass_index],
+            )
+            cases["campaign finalized before operation pass"] = (
+                finalized_before_pass
+            )
+
+            mismatched_finalized_result = deepcopy(records)
+            mismatched_finalized_result[finalized_index]["result"] = {
+                **mismatched_finalized_result[finalized_index]["result"],
+                "residue_count": 1,
+            }
+            cases["finalized/result mismatch"] = mismatched_finalized_result
+
+            for label, candidate in cases.items():
+                with self.subTest(label=label):
+                    with self.assertRaises(FullMatrixMidpointError):
+                        validate_midpoint_journal(
+                            candidate,
+                            campaign=campaign,
+                            campaign_hash=report["campaign_hash"],
+                        )
 
     async def test_runner_rejects_divergent_campaign_bound_witness_keys(self):
         stack, now, campaign, policy, bound, root, journal = self._inputs()
@@ -1463,7 +1688,8 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                 for phase in campaign["required_phases"]
             ]
             with self.assertRaisesRegex(
-                FullMatrixCampaignError, "reused|identity/status"
+                FullMatrixCampaignError,
+                "reused|identity/status|midpoint refresh proof",
             ):
                 verify_complete_matrix(
                     campaign=campaign,
@@ -1491,6 +1717,8 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                     now=now + timedelta(minutes=1),
                 )
             self.assertEqual(backend.cleanups, [(1, PHASES[0], True)])
+            before = journal.read_bytes()
+            retried = FakeBackend(root)
             with self.assertRaisesRegex(FullMatrixRunnerError, "new campaign"):
                 await run_full_matrix_campaign(
                     campaign=campaign,
@@ -1498,9 +1726,15 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                     bound_artifacts=bound,
                     artifact_root=root,
                     journal=journal,
-                    backend=FakeBackend(root),
-                    now=now + timedelta(minutes=1),
+                    backend=retried,
+                    now=now + timedelta(hours=49),
                 )
+            self.assertEqual(journal.read_bytes(), before)
+            self.assertEqual(retried.preflight_calls, 0)
+            self.assertEqual(retried.finalize_calls, 0)
+            self.assertEqual(retried.executed, [])
+            self.assertEqual(retried.recovered, [])
+            self.assertEqual(retried.cleanups, [])
 
     async def test_interrupted_scenario_requires_zero_residue_recovery_then_resumes(self):
         stack, now, campaign, policy, bound, root, journal = self._inputs()
@@ -1577,6 +1811,7 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                 now=now + timedelta(minutes=1),
             )
             before = journal.read_bytes()
+            resumed = FakeBackend(root)
             with self.assertRaisesRegex(FullMatrixRunnerError, "immutable"):
                 await run_full_matrix_campaign(
                     campaign=campaign,
@@ -1584,10 +1819,15 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                     bound_artifacts=bound,
                     artifact_root=root,
                     journal=journal,
-                    backend=FakeBackend(root),
-                    now=now + timedelta(minutes=1),
+                    backend=resumed,
+                    now=now + timedelta(hours=49),
                 )
             self.assertEqual(journal.read_bytes(), before)
+            self.assertEqual(resumed.preflight_calls, 0)
+            self.assertEqual(resumed.finalize_calls, 0)
+            self.assertEqual(resumed.executed, [])
+            self.assertEqual(resumed.recovered, [])
+            self.assertEqual(resumed.cleanups, [])
 
     async def test_crash_after_finalization_resumes_without_reexecuting_live_work(self):
         stack, now, campaign, policy, bound, root, journal = self._inputs()
@@ -1663,6 +1903,81 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                 verify_hash_chained_jsonl(journal)[-1]["event"],
                 "campaign_completed",
             )
+
+    async def test_expired_finalized_checkpoint_is_read_only_and_idempotent(self):
+        stack, now, campaign, policy, bound, root, journal = self._inputs()
+        with stack:
+            paused = await run_full_matrix_campaign(
+                campaign=campaign,
+                approver_policy=policy,
+                bound_artifacts=bound,
+                artifact_root=root,
+                journal=journal,
+                backend=FakeBackend(root),
+                now=now + timedelta(minutes=1),
+            )
+            midpoint_bundle = self._midpoint_bundle(
+                paused=paused,
+                campaign=campaign,
+                policy=policy,
+                root=root,
+            )
+            original_journal_event = __import__(
+                "core.three_site_full_matrix_runner",
+                fromlist=["_journal_event"],
+            )._journal_event
+
+            def crash_before_completion(path, identity, *, event, **fields):
+                if event == "campaign_completed":
+                    raise KeyboardInterrupt(
+                        "simulated controller death after finalization"
+                    )
+                return original_journal_event(
+                    path,
+                    identity,
+                    event=event,
+                    **fields,
+                )
+
+            with patch(
+                "core.three_site_full_matrix_runner._journal_event",
+                side_effect=crash_before_completion,
+            ):
+                with self.assertRaises(KeyboardInterrupt):
+                    await run_full_matrix_campaign(
+                        campaign=campaign,
+                        approver_policy=policy,
+                        bound_artifacts=bound,
+                        artifact_root=root,
+                        journal=journal,
+                        backend=FakeBackend(root),
+                        midpoint_refresh_bundle=midpoint_bundle,
+                        now=now + timedelta(minutes=1),
+                    )
+            self.assertEqual(
+                verify_hash_chained_jsonl(journal)[-1]["event"],
+                "campaign_finalized",
+            )
+            before = journal.read_bytes()
+            for attempt in range(2):
+                with self.subTest(attempt=attempt):
+                    resumed = FakeBackend(root)
+                    report = await run_full_matrix_campaign(
+                        campaign=campaign,
+                        approver_policy=policy,
+                        bound_artifacts=bound,
+                        artifact_root=root,
+                        journal=journal,
+                        backend=resumed,
+                        now=now + timedelta(hours=49),
+                    )
+                    self.assertEqual(report["status"], "passed")
+                    self.assertEqual(journal.read_bytes(), before)
+                    self.assertEqual(resumed.preflight_calls, 0)
+                    self.assertEqual(resumed.finalize_calls, 0)
+                    self.assertEqual(resumed.executed, [])
+                    self.assertEqual(resumed.recovered, [])
+                    self.assertEqual(resumed.cleanups, [])
 
     async def test_crash_between_phases_does_not_repeat_completed_phase_cleanup(self):
         stack, now, campaign, policy, bound, root, journal = self._inputs()
@@ -1756,10 +2071,30 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                 )
             self.assertEqual(expired.recovered, [interrupted])
             self.assertEqual(expired.cleanups, [(1, PHASES[0], True)])
+            self.assertEqual(expired.preflight_calls, 0)
+            self.assertEqual(expired.finalize_calls, 0)
             self.assertEqual(expired.executed, [])
             self.assertEqual(
                 verify_hash_chained_jsonl(journal)[-1]["event"], "campaign_blocked"
             )
+            before = journal.read_bytes()
+            retried = FakeBackend(root)
+            with self.assertRaisesRegex(FullMatrixRunnerError, "new campaign"):
+                await run_full_matrix_campaign(
+                    campaign=campaign,
+                    approver_policy=policy,
+                    bound_artifacts=bound,
+                    artifact_root=root,
+                    journal=journal,
+                    backend=retried,
+                    now=now + timedelta(hours=50),
+                )
+            self.assertEqual(journal.read_bytes(), before)
+            self.assertEqual(retried.preflight_calls, 0)
+            self.assertEqual(retried.finalize_calls, 0)
+            self.assertEqual(retried.executed, [])
+            self.assertEqual(retried.recovered, [])
+            self.assertEqual(retried.cleanups, [])
 
     async def test_journal_identity_drift_is_rejected_before_backend_use(self):
         stack, now, campaign, policy, bound, root, journal = self._inputs()

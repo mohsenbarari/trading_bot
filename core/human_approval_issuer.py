@@ -67,7 +67,27 @@ DEFAULT_ACTIONS = (
     {"action": "approve_inventory", "environments": ["staging"], "max_ttl_seconds": 86400},
     {"action": "approve_migration", "environments": ["staging"], "max_ttl_seconds": 14400},
     {
+        "action": "approve_migration_resume",
+        "environments": ["staging"],
+        "max_ttl_seconds": 3600,
+    },
+    {
+        "action": "approve_seed_preparation",
+        "environments": ["staging"],
+        "max_ttl_seconds": 3600,
+    },
+    {
+        "action": "approve_source_adoption_backup",
+        "environments": ["staging"],
+        "max_ttl_seconds": 3600,
+    },
+    {
         "action": "approve_seed_publication",
+        "environments": ["staging"],
+        "max_ttl_seconds": 3600,
+    },
+    {
+        "action": "approve_witness_relay_material",
         "environments": ["staging"],
         "max_ttl_seconds": 3600,
     },

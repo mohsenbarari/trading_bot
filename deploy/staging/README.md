@@ -302,56 +302,82 @@ bucket in the signed inventory and must not be any bucket listed in
 `production_boundaries`; `production-sync-coin` is therefore forbidden for
 this staging campaign.
 
-First freeze the legacy Compose project. The evidence records exactly which
-services were running so rollback cannot accidentally start an unrecorded
-service. The source-project allowlist is role-bound: `bot_fi` may use only
-`trading_bot_staging`; `webapp_fi` may use `trading_bot_staging` when it is
-genuinely co-located with the Bot source, or the deployed Finland WebApp
-project `trading_bot_staging_iran`. No production or arbitrary Compose project
-name is accepted. Freeze independently deployed sources in separate local
-runs, and require the runtime `RELEASE_SHA` for each selected application to
-be the exact 40-hex commit; a shortened deployment label is rejected:
+For an already-frozen legacy source, do not stretch its historical inventory
+approval into fresh backup or temporary-Docker authority. Use the sealed v2
+source-adoption contract and the dedicated direct
+`approve_source_adoption_backup` action. The exact contract binds the current
+campaign/release/deployment and host safety mode, the helper bytes, historical
+freeze hash, source role, output intent, read-only operation, `network=none`,
+at most three temporary containers, and at most one scratch volume. The action
+is staging-only, has a maximum 3600-second lifetime, is excluded from reusable
+sessions, and must have at least 20 minutes remaining when apply begins.
+
+On each source host, emit the create-exclusive mode-0600 subject without
+opening a source volume or contacting Docker:
 
 ```bash
-python3 scripts/freeze_three_site_staging_sources.py \
-  --repo /srv/trading-bot/current \
-  --compose /srv/trading-bot/current/deploy/staging/docker-compose.staging.yml \
-  --env-file /root/secure/.env.staging \
-  --project-name trading_bot_staging_iran \
-  --source-role webapp_fi \
-  --expected-source-release-sha webapp_fi=<current-staging-sha> \
-  --inventory /root/secure/provisioned-inventory.json \
-  --inventory-approval /root/secure/provisioned-inventory-approval.json \
-  --approval-policy /etc/trading-bot/security/human-approval/human-approval-policy.json \
-  --output /root/secure/source-freeze-webapp-fi.json
+python3 scripts/adopt_three_site_staging_frozen_source_and_backup.py \
+  --adoption-contract /root/secure-envs/trading-bot/three-site-staging-<sha8>/source-adoption-contract.json \
+  --mode approval-subject \
+  --source-role webapp_fi
 ```
 
-Then run the backup tool against that still-frozen source. Applied execution
-creates owner-only PostgreSQL/uploads/audit artifacts outside Git, excludes
-Redis from restore, restores the dump into an isolated PostgreSQL 15 container
-with no published port, and records a full table/sequence fingerprint:
+Transfer that nonsecret subject to the isolated issuer, issue the direct token,
+and return the token only through the approved encrypted channel to the exact
+contract path:
 
 ```bash
-python3 scripts/run_three_site_staging_source_backup.py \
-  --source-role webapp_fi \
-  --repo /srv/trading-bot-three-site/current \
-  --compose /srv/trading-bot-three-site/current/deploy/staging/docker-compose.staging.yml \
-  --env-file /root/secure/.env.staging \
-  --output-dir /srv/trading-bot-three-site-backups/<campaign>/webapp_fi \
-  --project-name trading_bot_staging_iran \
-  --source-freeze-evidence /root/secure/source-freeze.json \
-  --inventory /root/secure/provisioned-inventory.json \
-  --inventory-approval /root/secure/provisioned-inventory-approval.json \
-  --approval-policy /etc/trading-bot/security/human-approval/human-approval-policy.json \
-  --expected-source-release-sha <current-staging-sha> \
-  --target-release-sha <integration-candidate-sha>
+python3 scripts/manage_three_site_human_approval.py issue \
+  --action approve_source_adoption_backup \
+  --environment staging \
+  --subject /root/secure/source-adoption-subject-webapp-fi.json \
+  --ttl-seconds 3600 \
+  --output /root/secure/source-adoption-approval-webapp-fi.json
 ```
 
-`publish_three_site_staging_seed.py` and
-`fetch_three_site_staging_seed.py` provide the only approved seed transport.
-Their S3 credential file, age identity/recipient material, fetched artifacts,
-and evidence outputs must be owner-only and outside Git. A moving key without
-an exact Object Storage version id is rejected.
+The issuer policy installed before this action was introduced does not gain it
+automatically; rotate/re-enroll the issuer first. After the exact token is
+installed at its contract-bound path, run plan, review its confirmation, then
+apply:
+
+```bash
+python3 scripts/adopt_three_site_staging_frozen_source_and_backup.py \
+  --adoption-contract /root/secure-envs/trading-bot/three-site-staging-<sha8>/source-adoption-contract.json \
+  --mode plan \
+  --source-role webapp_fi
+
+python3 scripts/adopt_three_site_staging_frozen_source_and_backup.py \
+  --adoption-contract /root/secure-envs/trading-bot/three-site-staging-<sha8>/source-adoption-contract.json \
+  --mode apply \
+  --source-role webapp_fi \
+  --confirm <exact-plan-confirmation>
+```
+
+Apply never starts, stops, or recreates a Compose service, never pulls/builds
+an image, never restores Redis, and never overwrites an output. Source mounts
+are read-only; PostgreSQL is restore-verified in an isolated no-network scratch
+container, and all temporary containers and the scratch volume must be proven
+absent before success. After SIGKILL, only `--mode recover` with the exact
+journal-bound historical approvals and returned recovery confirmation may
+remove exact recorded temporary resources. Recovery is cleanup-only, accepts
+the expired original action token only as historical journal evidence, and
+requires a new output directory for any later backup attempt.
+
+Only the sealed v2 flow in
+`publish_three_site_staging_seed_campaign.py` and
+`fetch_three_site_staging_seed.py` is approved for seed transport. The legacy
+single-source v1 publisher is disabled, and v1 manifests are rejected by both
+fetch and migration verification. Before either source invokes `age`, it must
+verify a fresh direct `approve_seed_preparation` authorization bound to the
+exact clean Git release, preparation core, deterministic six keys, and three
+distinct target recipients. A separate direct `approve_seed_publication`
+authorization seals the final ciphertext hashes before the first conditional
+PUT. The credential document must name the signed inventory `credential_id`;
+the bucket and every exact-version object must retain the baseline canonical
+owner, private ACL, versioning, and no provider-side SSE. Target hosts derive
+their public recipient from exactly one local root-only age identity. Fetched
+artifacts and evidence remain outside Git in a root-owned mode-0700 directory,
+and moving keys or null Object Storage version ids are rejected.
 
 ### Four-role execution and barriers
 
@@ -379,21 +405,59 @@ starts with protocol v2, and pre-`source_xid` v2 envelopes are accepted as
 historical destination evidence.
 
 The compatibility migration leaves WebApp-FI active at epoch 1 but does not
-invent a Witness lease. After the Witness private service is ready, run the
-following first inside the `webapp_fi_writer_control` service without `--apply`,
-then with its exact confirmation. The UUID must be generated and durably
-recorded before the first attempt and reused after any ambiguous response:
+invent a Witness lease. The signed migration plan therefore contains the
+explicit `bootstrap_webapp_fi_writer_lease_epoch_1` phase after private service
+readiness and before worker startup. Generate and durably record one UUID before
+the first attempt, then run the guarded role action with the same complete,
+signed forward-input flags used by the preceding WebApp-FI role phases:
 
 ```bash
-python3 scripts/bootstrap_three_site_staging_writer_lease.py \
-  --campaign-id <campaign-uuid> \
-  --request-id <persisted-request-uuid> \
-  --expected-release-sha <integration-candidate-sha>
+python3 scripts/run_three_site_staging_role_migration.py \
+  bootstrap-writer-lease \
+  --role webapp_fi \
+  --journal /root/secure/migration-webapp-fi.json \
+  --writer-lease-request-id <persisted-request-uuid> \
+  <the exact signed inventory/plan/bundle/seed/image input flags>
 ```
 
-The `attest-writer-state` role phase then requires WebApp-FI to hold and renew a
-live Witness epoch-1 lease, while WebApp-IR must remain locally fenced. It does
-not accept a hand-written Writer-state document.
+First run without `--apply`, retain the returned confirmation, and repeat with
+`--apply --confirm <exact-phrase>`. Reuse the same UUID after any ambiguous
+response. Direct invocation of the inner
+`bootstrap_three_site_staging_writer_lease.py` helper is unsupported: the role
+state machine must persist the request before execution, reconcile only an
+exactly owned one-off container after a crash, start the persistent Writer
+control agent without pulling or rebuilding images, and prove a subsequent
+Witness renewal before durably completing the phase. `attest-writer-state` is
+then read-only. It requires WebApp-FI to retain a live epoch-1 Witness lease and
+the renewal agent to be running, while WebApp-IR must remain locally fenced; it
+does not accept a hand-written Writer-state document.
+
+If the signed migration plan expires after a role journal has begun, do not
+regenerate or edit the journal. Create a one-use subject for the exact next
+action and checkpoint:
+
+```bash
+python3 scripts/run_three_site_staging_role_migration.py \
+  resume-subject \
+  --role webapp_fi \
+  --journal /root/secure/migration-webapp-fi.json \
+  --next-action bootstrap-writer-lease \
+  --writer-lease-request-id <same-persisted-request-uuid> \
+  --subject-output /root/secure/migration-resume-subject.json
+
+python3 scripts/manage_three_site_human_approval.py issue \
+  --action approve_migration_resume \
+  --environment staging \
+  --subject /root/secure/migration-resume-subject.json \
+  --ttl-seconds 600 \
+  --output /root/secure/migration-resume-approval.json
+```
+
+Pass that token as `--resume-approval` only to the bound action. This is a
+direct password-plus-TOTP action with a maximum 3600-second lifetime and is not
+available through the reusable staging session. An already enrolled issuer does
+not acquire this action automatically; rotate/re-enroll it before relying on the
+resume path.
 
 Collect the four mode-0600 journals on the trusted migration controller and use
 `coordinate_three_site_staging_migration.py` in this order:

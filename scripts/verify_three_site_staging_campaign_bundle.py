@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import sys
 from typing import Any
 
@@ -29,10 +30,47 @@ from scripts.verify_three_site_staging_role_bundle import (
 
 
 ROLES = tuple(sorted(EXPECTED_PEERS))
+DOTENV_INTERPOLATION_RE = re.compile(r"""[$\\'"#\s]""")
 
 
 class CampaignBundleError(RuntimeError):
     pass
+
+
+def _verify_literal_credentials(
+    role_values: dict[str, dict[str, str]],
+) -> None:
+    for role, values in role_values.items():
+        for name, value in values.items():
+            if (
+                value
+                and (
+                    any(
+                        marker in name
+                        for marker in (
+                            "SECRET",
+                            "PASSWORD",
+                            "TOKEN",
+                            "KEY_ID",
+                            "PUBLIC_KEY",
+                            "PRIVATE_KEY",
+                        )
+                    )
+                    or name.endswith("_KEY")
+                )
+                and DOTENV_INTERPOLATION_RE.search(value)
+            ):
+                raise CampaignBundleError(
+                    f"{role} credential contains dotenv interpolation syntax"
+                )
+        for item in _pairwise_entries(values, role=role):
+            if any(
+                DOTENV_INTERPOLATION_RE.search(str(item[field]))
+                for field in ("key_id", "secret")
+            ):
+                raise CampaignBundleError(
+                    f"{role} pairwise credential contains dotenv interpolation syntax"
+                )
 
 
 def _pairwise_entries(values: dict[str, str], *, role: str) -> list[dict[str, str]]:
@@ -122,6 +160,37 @@ def _verify_witness_contract(role_values: dict[str, dict[str, str]]) -> set[str]
     relay_key_id = witness.get("STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_KEY_ID", "")
     relay_secret = witness.get("STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_SECRET", "")
     if relay_enabled == "true":
+        other_credentials = {
+            value
+            for values in role_values.values()
+            for name, value in values.items()
+            if value
+            and name
+            not in {
+                "STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_KEY_ID",
+                "STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_SECRET",
+            }
+            and (
+                any(
+                    marker in name
+                    for marker in (
+                        "SECRET",
+                        "PASSWORD",
+                        "TOKEN",
+                        "KEY_ID",
+                        "PUBLIC_KEY",
+                        "PRIVATE_KEY",
+                    )
+                )
+                or name.endswith("_KEY")
+            )
+        }
+        other_credentials.update(
+            str(item[field])
+            for role in ROLES
+            for item in _pairwise_entries(role_values[role], role=role)
+            for field in ("key_id", "secret")
+        )
         if (
             not relay_material_dir
             or relay_material_dir == "/dev/null"
@@ -130,6 +199,9 @@ def _verify_witness_contract(role_values: dict[str, dict[str, str]]) -> set[str]
             or len(relay_secret.encode("utf-8")) < 32
             or relay_key_id in witness_key_ids
             or relay_secret in witness_secrets
+            or relay_key_id in other_credentials
+            or relay_secret in other_credentials
+            or relay_key_id == relay_secret
         ):
             raise CampaignBundleError("human approval relay credential is unsafe")
         witness_key_ids.add(relay_key_id)
@@ -214,6 +286,7 @@ def verify_campaign_bundle(
         except (RoleBundleError, UnicodeDecodeError) as exc:
             raise CampaignBundleError(f"{role} role bundle is invalid") from exc
 
+    _verify_literal_credentials(role_values)
     pairwise_count = _verify_pairwise_contract(role_values)
     witness_secrets = _verify_witness_contract(role_values)
     database_secrets = _database_secrets(role_values)

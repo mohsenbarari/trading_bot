@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -8,6 +9,7 @@ from unittest import mock
 
 import yaml
 
+from core.secure_file_io import SecureFileError
 from scripts import verify_three_site_staging_role_bundle as role_verifier
 from scripts.render_three_site_staging_role_compose import (
     canonical_role_compose_bytes,
@@ -18,7 +20,9 @@ from scripts.render_three_site_staging_role_compose import (
 )
 from scripts.verify_three_site_staging_role_bundle import (
     RoleBundleError,
+    _secure_json_document,
     _verify_bundle_source,
+    _verify_file,
     _verify_relay_material_directory,
     verify_role_bundle,
 )
@@ -192,6 +196,53 @@ class ThreeSiteStagingRoleBundleTests(unittest.TestCase):
             with self.assertRaises(RoleBundleError):
                 _verify_bundle_source(link, expected_mode=0o600)
 
+    def test_cli_security_documents_use_owner_only_duplicate_safe_reads(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            document = root / "inventory.json"
+            document.write_text('{"schema":"one"}\n', encoding="utf-8")
+            document.chmod(0o600)
+            self.assertEqual(
+                _secure_json_document(document, label="inventory"),
+                {"schema": "one"},
+            )
+            document.write_text('{"schema":"one","schema":"two"}\n', encoding="utf-8")
+            with self.assertRaisesRegex(RoleBundleError, "strict JSON"):
+                _secure_json_document(document, label="inventory")
+            document.write_text('{"schema":"one"}\n', encoding="utf-8")
+            document.chmod(0o640)
+            with self.assertRaises(SecureFileError):
+                _secure_json_document(document, label="inventory")
+
+    def test_role_files_require_root_controlled_paths_and_stable_single_links(self):
+        if os.geteuid() != 0:
+            self.skipTest("root-owned role-file validation requires uid 0")
+        secure_test_root = Path("/root/trading-bot/trading_bot/tmp")
+        if not secure_test_root.is_dir():
+            self.skipTest("no root-controlled writable test directory is available")
+        with tempfile.TemporaryDirectory(
+            prefix=".three-site-role-file-test-", dir=secure_test_root
+        ) as directory:
+            root = Path(directory)
+            private = root / "private.key"
+            private.write_text("secret\n", encoding="utf-8")
+            private.chmod(0o600)
+            _verify_file(str(private), private=True)
+
+            hardlink = root / "private-hardlink.key"
+            hardlink.hardlink_to(private)
+            with self.assertRaisesRegex(RoleBundleError, "single-link"):
+                _verify_file(str(private), private=True)
+            hardlink.unlink()
+
+            with self.assertRaisesRegex(RoleBundleError, "absolute"):
+                _verify_file("relative/private.key", private=True)
+
+            root.chmod(0o777)
+            with self.assertRaisesRegex(RoleBundleError, "root-controlled"):
+                _verify_file(str(private), private=True)
+            root.chmod(0o700)
+
     def test_enabled_relay_directory_requires_exact_root_only_active_files(self):
         import tempfile
 
@@ -221,8 +272,40 @@ class ThreeSiteStagingRoleBundleTests(unittest.TestCase):
                 path.chmod(0o600)
             alias = Path(directory) / "alias"
             alias.symlink_to(real, target_is_directory=True)
-            with self.assertRaisesRegex(RoleBundleError, "root-owned"):
+            with self.assertRaisesRegex(
+                RoleBundleError,
+                "unavailable|root-controlled|root-owned",
+            ):
                 _verify_relay_material_directory(str(alias / "active"))
+
+    def test_relay_material_rejects_replaceable_ancestor_and_linked_child(self):
+        if os.geteuid() != 0:
+            self.skipTest("root-controlled relay validation requires uid 0")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            unsafe = root / "unsafe"
+            active = unsafe / "active"
+            active.mkdir(mode=0o700, parents=True)
+            for name in ("session.json", "policy.json"):
+                child = active / name
+                child.write_text("{}\n", encoding="utf-8")
+                child.chmod(0o600)
+            unsafe.chmod(0o777)
+            with self.assertRaisesRegex(RoleBundleError, "root-controlled"):
+                _verify_relay_material_directory(str(active))
+            unsafe.chmod(0o700)
+            _verify_relay_material_directory(str(active))
+
+            session = active / "session.json"
+            original = unsafe / "session-original.json"
+            session.rename(original)
+            session.symlink_to(original)
+            with self.assertRaisesRegex(RoleBundleError, "unavailable"):
+                _verify_relay_material_directory(str(active))
+            session.unlink()
+            session.hardlink_to(original)
+            with self.assertRaisesRegex(RoleBundleError, "single-link"):
+                _verify_relay_material_directory(str(active))
 
     def test_enabled_relay_file_attestation_reaches_exact_directory_check(self):
         with tempfile.TemporaryDirectory() as directory:

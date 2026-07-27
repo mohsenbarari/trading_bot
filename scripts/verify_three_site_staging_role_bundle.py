@@ -19,16 +19,14 @@ if str(REPO_ROOT) not in sys.path:
 
 import yaml
 
+from core.secure_file_io import read_secure_text
 from scripts.render_three_site_staging_role_compose import (
     canonical_role_compose_bytes,
     parse_env_values,
     referenced_environment_names,
     render_role_compose,
 )
-from scripts.verify_three_site_staging_inventory import (
-    load_inventory,
-    verify_approved_inventory,
-)
+from scripts.verify_three_site_staging_inventory import verify_approved_inventory
 
 
 EXPECTED_PEERS = {
@@ -117,6 +115,16 @@ def _strict_json(raw: str, *, label: str) -> Any:
         raise RoleBundleError(f"{label} is not strict JSON") from exc
 
 
+def _secure_json_document(path: Path, *, label: str) -> dict[str, Any]:
+    value = _strict_json(
+        read_secure_text(path, label=label, max_size=4 * 1024 * 1024),
+        label=label,
+    )
+    if not isinstance(value, dict):
+        raise RoleBundleError(f"{label} must be a JSON object")
+    return value
+
+
 def _verify_transport(values: dict[str, str], *, role: str) -> None:
     if role == "witness":
         return
@@ -182,25 +190,84 @@ def _verify_transport(values: dict[str, str], *, role: str) -> None:
 
 def _verify_file(path_value: str, *, private: bool) -> None:
     path = Path(path_value)
+    if (
+        os.geteuid() != 0
+        or not path.is_absolute()
+        or ".." in path.parts
+        or str(path) != os.path.normpath(str(path))
+    ):
+        raise RoleBundleError(
+            "required role file path must be absolute, normalized and verified as root"
+        )
+    for ancestor in reversed(path.parents):
+        try:
+            ancestor_metadata = ancestor.lstat()
+        except OSError as exc:
+            raise RoleBundleError(
+                f"required role file ancestor is unavailable: {ancestor}"
+            ) from exc
+        if (
+            not stat.S_ISDIR(ancestor_metadata.st_mode)
+            or stat.S_ISLNK(ancestor_metadata.st_mode)
+            or ancestor_metadata.st_uid != 0
+            or stat.S_IMODE(ancestor_metadata.st_mode) & 0o022
+        ):
+            raise RoleBundleError(
+                f"required role file ancestor is not root-controlled: {ancestor}"
+            )
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
-        metadata = path.lstat()
+        descriptor = os.open(path, flags)
     except OSError as exc:
         raise RoleBundleError(f"required role file is unavailable: {path}") from exc
-    mode = stat.S_IMODE(metadata.st_mode)
-    if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
-        raise RoleBundleError(f"required role file is not a regular non-symlink: {path}")
-    if private and (mode & 0o077):
-        raise RoleBundleError(f"private role file permissions are too broad: {path}")
-    if not private and (mode & 0o022):
-        raise RoleBundleError(f"public trust file is group/world writable: {path}")
-    if metadata.st_size <= 0:
-        raise RoleBundleError(f"required role file is empty: {path}")
+    try:
+        before = os.fstat(descriptor)
+        mode = stat.S_IMODE(before.st_mode)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != 0
+            or before.st_nlink != 1
+        ):
+            raise RoleBundleError(
+                f"required role file is not a single-link root-owned regular file: {path}"
+            )
+        if private and (mode & 0o077):
+            raise RoleBundleError(f"private role file permissions are too broad: {path}")
+        if not private and (mode & 0o022):
+            raise RoleBundleError(f"public trust file is group/world writable: {path}")
+        if not 1 <= before.st_size <= 16 * 1024 * 1024:
+            raise RoleBundleError(f"required role file size is invalid: {path}")
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(descriptor, min(65536, remaining))
+            if not chunk:
+                raise RoleBundleError(f"required role file changed while read: {path}")
+            remaining -= len(chunk)
+        if os.read(descriptor, 1):
+            raise RoleBundleError(f"required role file grew while read: {path}")
+        after = os.fstat(descriptor)
+        stable = (
+            "st_dev",
+            "st_ino",
+            "st_mode",
+            "st_uid",
+            "st_gid",
+            "st_nlink",
+            "st_size",
+            "st_mtime_ns",
+            "st_ctime_ns",
+        )
+        if any(getattr(before, field) != getattr(after, field) for field in stable):
+            raise RoleBundleError(f"required role file changed while read: {path}")
+    finally:
+        os.close(descriptor)
 
 
 def _verify_relay_material_directory(path_value: str) -> None:
     path = Path(path_value)
     if (
-        not path.is_absolute()
+        os.geteuid() != 0
+        or not path.is_absolute()
         or ".." in path.parts
         or str(path) != os.path.normpath(str(path))
         or path.name != "active"
@@ -208,54 +275,145 @@ def _verify_relay_material_directory(path_value: str) -> None:
         raise RoleBundleError(
             "human approval relay material directory must be an absolute active path"
         )
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    descriptor = -1
     try:
-        metadata = path.lstat()
-        resolved = path.resolve(strict=True)
+        descriptor = os.open("/", flags)
+        parts = path.parts[1:]
+        for index, component in enumerate(parts):
+            child = os.open(component, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+            metadata = os.fstat(descriptor)
+            mode = stat.S_IMODE(metadata.st_mode)
+            is_leaf = index == len(parts) - 1
+            sticky_root_directory = (
+                metadata.st_uid == 0
+                and bool(mode & stat.S_ISVTX)
+            )
+            if (
+                not stat.S_ISDIR(metadata.st_mode)
+                or metadata.st_uid != 0
+                or (
+                    not is_leaf
+                    and mode & 0o022
+                    and not sticky_root_directory
+                )
+                or (is_leaf and mode != 0o700)
+            ):
+                raise RoleBundleError(
+                    "human approval relay material ancestor is not root-controlled"
+                )
+        bound = os.fstat(descriptor)
+        path_metadata = path.lstat()
+    except RoleBundleError:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise
     except OSError as exc:
+        if descriptor >= 0:
+            os.close(descriptor)
         raise RoleBundleError(
             f"human approval relay material directory is unavailable: {path}"
         ) from exc
     if (
-        not stat.S_ISDIR(metadata.st_mode)
-        or stat.S_ISLNK(metadata.st_mode)
-        or resolved != path
-        or metadata.st_uid != 0
-        or stat.S_IMODE(metadata.st_mode) != 0o700
+        descriptor < 0
+        or not stat.S_ISDIR(path_metadata.st_mode)
+        or stat.S_ISLNK(path_metadata.st_mode)
+        or path_metadata.st_dev != bound.st_dev
+        or path_metadata.st_ino != bound.st_ino
+        or bound.st_uid != 0
+        or stat.S_IMODE(bound.st_mode) != 0o700
     ):
+        if descriptor >= 0:
+            os.close(descriptor)
         raise RoleBundleError(
             "human approval relay material directory must be root-owned mode-0700"
         )
     try:
-        entries = {entry.name for entry in path.iterdir()}
+        entries = set(os.listdir(descriptor))
     except OSError as exc:
+        os.close(descriptor)
         raise RoleBundleError(
             "human approval relay material directory cannot be enumerated"
         ) from exc
     if entries != {"session.json", "policy.json"}:
+        os.close(descriptor)
         raise RoleBundleError(
             "human approval relay active directory must contain exactly session.json "
             "and policy.json"
         )
-    for name in ("session.json", "policy.json"):
-        child = path / name
-        try:
-            child_metadata = child.lstat()
-        except OSError as exc:
-            raise RoleBundleError(
-                f"human approval relay material file is unavailable: {child}"
-            ) from exc
-        if (
-            not stat.S_ISREG(child_metadata.st_mode)
-            or stat.S_ISLNK(child_metadata.st_mode)
-            or child_metadata.st_uid != 0
-            or child_metadata.st_nlink != 1
-            or stat.S_IMODE(child_metadata.st_mode) != 0o600
-            or child_metadata.st_size <= 0
-        ):
-            raise RoleBundleError(
-                "human approval relay material files must be root-owned, "
-                "single-link mode-0600 regular files"
-            )
+    try:
+        for name in ("session.json", "policy.json"):
+            child_descriptor = -1
+            try:
+                child_descriptor = os.open(
+                    name,
+                    os.O_RDONLY
+                    | getattr(os, "O_CLOEXEC", 0)
+                    | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=descriptor,
+                )
+                before = os.fstat(child_descriptor)
+                if (
+                    not stat.S_ISREG(before.st_mode)
+                    or before.st_uid != 0
+                    or before.st_nlink != 1
+                    or stat.S_IMODE(before.st_mode) != 0o600
+                    or not 1 <= before.st_size <= 4 * 1024 * 1024
+                ):
+                    raise RoleBundleError(
+                        "human approval relay material files must be root-owned, "
+                        "single-link mode-0600 regular files"
+                    )
+                remaining = before.st_size
+                while remaining:
+                    chunk = os.read(
+                        child_descriptor,
+                        min(65536, remaining),
+                    )
+                    if not chunk:
+                        raise RoleBundleError(
+                            "human approval relay material changed while read"
+                        )
+                    remaining -= len(chunk)
+                if os.read(child_descriptor, 1):
+                    raise RoleBundleError(
+                        "human approval relay material changed while read"
+                    )
+                after = os.fstat(child_descriptor)
+                stable = (
+                    "st_dev",
+                    "st_ino",
+                    "st_mode",
+                    "st_uid",
+                    "st_gid",
+                    "st_nlink",
+                    "st_size",
+                    "st_mtime_ns",
+                    "st_ctime_ns",
+                )
+                if any(
+                    getattr(before, field) != getattr(after, field)
+                    for field in stable
+                ):
+                    raise RoleBundleError(
+                        "human approval relay material changed while read"
+                    )
+            except OSError as exc:
+                raise RoleBundleError(
+                    "human approval relay material file is unavailable"
+                ) from exc
+            finally:
+                if child_descriptor >= 0:
+                    os.close(child_descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _verify_human_approval_relay(
@@ -281,9 +439,10 @@ def _verify_human_approval_relay(
     if (
         not key_id
         or len(key_id) > 64
-        or len(secret.encode("utf-8")) < 32
+        or re.fullmatch(r"[A-Za-z0-9_-]{32,256}", secret) is None
         or not material_dir
         or material_dir == "/dev/null"
+        or re.fullmatch(r"/[A-Za-z0-9_./-]+", material_dir) is None
     ):
         raise RoleBundleError("human approval relay material is incomplete")
     material_path = Path(material_dir)
@@ -305,21 +464,51 @@ def _verify_human_approval_relay(
 
 
 def _verify_bundle_source(path: Path, *, expected_mode: int) -> bytes:
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
-        metadata = path.lstat()
+        descriptor = os.open(path, flags)
     except OSError as exc:
         raise RoleBundleError(f"role bundle source is unavailable: {path}") from exc
-    if (
-        not stat.S_ISREG(metadata.st_mode)
-        or stat.S_ISLNK(metadata.st_mode)
-        or metadata.st_nlink != 1
-        or stat.S_IMODE(metadata.st_mode) != expected_mode
-        or metadata.st_size <= 0
-    ):
-        raise RoleBundleError(
-            f"role bundle source must be a non-linked mode-{expected_mode:04o} file: {path}"
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != os.geteuid()
+            or before.st_nlink != 1
+            or stat.S_IMODE(before.st_mode) != expected_mode
+            or not 1 <= before.st_size <= 16 * 1024 * 1024
+        ):
+            raise RoleBundleError(
+                f"role bundle source must be an owner-owned, non-linked "
+                f"mode-{expected_mode:04o} file: {path}"
+            )
+        chunks: list[bytes] = []
+        remaining = before.st_size
+        while remaining:
+            chunk = os.read(descriptor, min(65536, remaining))
+            if not chunk:
+                raise RoleBundleError("role bundle source changed while being read")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(descriptor, 1):
+            raise RoleBundleError("role bundle source grew while being read")
+        after = os.fstat(descriptor)
+        stable = (
+            "st_dev",
+            "st_ino",
+            "st_mode",
+            "st_uid",
+            "st_gid",
+            "st_nlink",
+            "st_size",
+            "st_mtime_ns",
+            "st_ctime_ns",
         )
-    return path.read_bytes()
+        if any(getattr(before, field) != getattr(after, field) for field in stable):
+            raise RoleBundleError("role bundle source changed while being read")
+        return b"".join(chunks)
+    finally:
+        os.close(descriptor)
 
 
 def verify_role_bundle(
@@ -479,15 +668,23 @@ def main(argv: list[str] | None = None) -> int:
         result = verify_role_bundle(
             role=args.role,
             canonical_compose=yaml.safe_load(
-                args.canonical_compose.read_text(encoding="utf-8")
+                _verify_bundle_source(
+                    args.canonical_compose, expected_mode=0o644
+                )
             ),
             role_compose_bytes=_verify_bundle_source(
                 args.role_compose, expected_mode=0o640
             ),
             env_bytes=_verify_bundle_source(args.env_file, expected_mode=0o600),
-            inventory=load_inventory(args.inventory),
-            approval=load_inventory(args.approval),
-            approval_policy=load_inventory(args.approval_policy),
+            inventory=_secure_json_document(
+                args.inventory, label="provisioned inventory"
+            ),
+            approval=_secure_json_document(
+                args.approval, label="provisioned inventory approval"
+            ),
+            approval_policy=_secure_json_document(
+                args.approval_policy, label="human approval policy"
+            ),
             verify_files=not args.skip_file_attestation,
             witness_relay_public_key=(
                 _verify_bundle_source(

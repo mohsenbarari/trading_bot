@@ -42,7 +42,12 @@ def _journals(root: Path) -> tuple[dict[str, MigrationJournal], dict[str, dict]]
 
 def _advance(journal: MigrationJournal, through: str) -> None:
     for phase in ROLE_PHASES[journal.load()["role"]]:
-        journal.begin_phase(phase)
+        if phase == "writer_lease_bootstrapped":
+            journal.begin_writer_lease_bootstrap(
+                request_id="33333333-3333-4333-8333-333333333333"
+            )
+        else:
+            journal.begin_phase(phase)
         journal.complete_phase(phase)
         if phase == through:
             return

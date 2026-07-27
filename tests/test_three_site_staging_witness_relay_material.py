@@ -10,9 +10,14 @@ from unittest import mock
 
 import yaml
 
-from core.human_approval import RELAY_RECEIPT_SCHEMA, staging_session_scope_sha256
+from core.human_approval import (
+    HumanApprovalError,
+    RELAY_RECEIPT_SCHEMA,
+    staging_session_scope_sha256,
+)
 from core.human_approval_issuer import (
     DEFAULT_ACTIONS,
+    authenticate_and_issue,
     authenticate_and_issue_session,
     create_enrollment,
     totp_code,
@@ -37,9 +42,11 @@ from scripts.build_three_site_staging_witness_relay_material import (
     WitnessRelayMaterialError,
     _manifest_bytes,
     _publish_new_bundle,
+    build_campaign_validation_core,
     derive_prepared_revision,
     finalize_revision,
     read_exact_material_file,
+    relay_material_approval_subject,
     validate_prepared_campaign,
     verify_final_structure,
     verify_prepared_structure,
@@ -56,6 +63,9 @@ from scripts.rotate_three_site_staging_witness_relay_session import (
     rotate_witness_relay_session,
 )
 from tests import test_three_site_staging_campaign_bundle as campaign_fixtures
+from tests.test_three_site_staging_signed_inventory import (
+    _inventory_approval_subject,
+)
 
 
 REVISION_ID = "relay-11111111-r001"
@@ -108,9 +118,9 @@ class ThreeSiteStagingWitnessRelayMaterialTests(unittest.TestCase):
                 "Config": {
                     "Labels": {
                         "com.docker.compose.service": "witness_api",
-                        "com.docker.compose.project": values[
-                            "STAGING_STORAGE_NAMESPACE"
-                        ],
+                        "com.docker.compose.project": (
+                            f"{values['STAGING_STORAGE_NAMESPACE']}-witness"
+                        ),
                     },
                     "Env": [
                         (
@@ -193,6 +203,22 @@ class ThreeSiteStagingWitnessRelayMaterialTests(unittest.TestCase):
             now=now,
             scrypt_n=2**14,
         )
+        inventory_approval, _inventory_state, _inventory_audit = (
+            authenticate_and_issue(
+                secrets_payload=enrollment.secrets_payload,
+                state_payload=enrollment.state_payload,
+                policy_payload=enrollment.policy_payload,
+                private_key_envelope=enrollment.private_key_envelope,
+                password=PASSWORD,
+                totp=totp_code(enrollment.totp_secret, at=now)[1],
+                recovery_code=None,
+                action="approve_inventory",
+                environment="staging",
+                subject=_inventory_approval_subject(self.inventory),
+                ttl_seconds=60 * 60,
+                now=now,
+            )
+        )
         old_session, state, _audit = authenticate_and_issue_session(
             secrets_payload=enrollment.secrets_payload,
             state_payload=enrollment.state_payload,
@@ -220,7 +246,7 @@ class ThreeSiteStagingWitnessRelayMaterialTests(unittest.TestCase):
             ttl_seconds=48 * 60 * 60,
             now=second_at,
         )
-        return enrollment, old_session, new_session, state
+        return enrollment, inventory_approval, old_session, new_session, state
 
     def _prepared_directory(
         self,
@@ -244,11 +270,72 @@ class ThreeSiteStagingWitnessRelayMaterialTests(unittest.TestCase):
         )
         return directory, compose, env, manifest
 
+    def _material_gate(
+        self,
+        *,
+        enrollment,
+        inventory_approval: dict,
+        compose: bytes,
+        env: bytes,
+        prepared: dict,
+        now: datetime,
+    ):
+        other_bundles = {
+            role: self.bundles[role]
+            for role in ("bot-fi", "webapp-fi", "webapp-ir")
+        }
+        campaign_result = validate_prepared_campaign(
+            canonical_compose=self.canonical,
+            base_compose_bytes=self.base_compose,
+            base_env_bytes=self.base_env,
+            prepared_compose_bytes=compose,
+            prepared_env_bytes=env,
+            manifest=prepared,
+            inventory=self.inventory,
+            approval=inventory_approval,
+            approval_policy=enrollment.policy_payload,
+            other_bundles=other_bundles,
+        )
+        validation_core = build_campaign_validation_core(
+            prepared_compose_bytes=compose,
+            prepared_env_bytes=env,
+            prepared_manifest=prepared,
+            inventory=self.inventory,
+            inventory_approval=inventory_approval,
+            approval_policy=enrollment.policy_payload,
+            other_bundles=other_bundles,
+            campaign_result=campaign_result,
+            witness_relay_public_key=None,
+        )
+        material_approval, _material_state, _material_audit = (
+            authenticate_and_issue(
+                secrets_payload=enrollment.secrets_payload,
+                state_payload=enrollment.state_payload,
+                policy_payload=enrollment.policy_payload,
+                private_key_envelope=enrollment.private_key_envelope,
+                password=PASSWORD,
+                totp=totp_code(enrollment.totp_secret, at=now)[1],
+                recovery_code=None,
+                action=builder.MATERIAL_APPROVAL_ACTION,
+                environment="staging",
+                subject=relay_material_approval_subject(
+                    validation_core,
+                    prepared_manifest=prepared,
+                    inventory=self.inventory,
+                    approval_policy=enrollment.policy_payload,
+                ),
+                ttl_seconds=60 * 60,
+                now=now,
+            )
+        )
+        return other_bundles, material_approval
+
     def _install_final(
         self,
         root: Path,
         *,
         enrollment,
+        inventory_approval: dict,
         old_session: dict,
         now: datetime,
     ):
@@ -261,6 +348,14 @@ class ThreeSiteStagingWitnessRelayMaterialTests(unittest.TestCase):
         prepared_bytes = _manifest_bytes(prepared)
         policy_bytes = _manifest_bytes(enrollment.policy_payload)
         session_bytes = _manifest_bytes(old_session)
+        other_bundles, material_approval = self._material_gate(
+            enrollment=enrollment,
+            inventory_approval=inventory_approval,
+            compose=compose,
+            env=env,
+            prepared=prepared,
+            now=now,
+        )
         final = finalize_revision(
             canonical_compose=self.canonical,
             base_compose_bytes=self.base_compose,
@@ -270,8 +365,11 @@ class ThreeSiteStagingWitnessRelayMaterialTests(unittest.TestCase):
             prepared_manifest=prepared,
             prepared_manifest_bytes=prepared_bytes,
             inventory=self.inventory,
+            inventory_approval=inventory_approval,
+            other_bundles=other_bundles,
             policy=enrollment.policy_payload,
             policy_bytes=policy_bytes,
+            material_approval=material_approval,
             session=old_session,
             session_bytes=session_bytes,
             created_at=now,
@@ -426,9 +524,169 @@ class ThreeSiteStagingWitnessRelayMaterialTests(unittest.TestCase):
             "explicit-pinned-witness-key",
         )
 
+    def test_relay_credential_cannot_reuse_base_witness_credentials(self) -> None:
+        base_values = parse_env_values(self.base_env.decode("utf-8"))
+        material = self._material_directory(Path("/tmp/witness-relay-isolation"))
+        for field, value in (
+            ("relay_key_id", base_values["WEBAPP_FI_WITNESS_KEY_ID"]),
+            ("relay_secret", base_values["WEBAPP_FI_WITNESS_SECRET"]),
+            ("relay_secret", base_values["WITNESS_RUNTIME_DB_PASSWORD"]),
+        ):
+            with self.subTest(field=field, source=value[:8]), self.assertRaisesRegex(
+                WitnessRelayMaterialError,
+                "reuses base Witness credential",
+            ):
+                derive_prepared_revision(
+                    canonical_compose=self.canonical,
+                    base_compose_bytes=self.base_compose,
+                    base_env_bytes=self.base_env,
+                    inventory=self.inventory,
+                    approval_policy=self.policy,
+                    revision_id=REVISION_ID,
+                    material_directory=str(material),
+                    relay_key_id=(
+                        value if field == "relay_key_id" else "relay-orchestrator-r001"
+                    ),
+                    relay_secret=(
+                        value if field == "relay_secret" else RELAY_SECRET
+                    ),
+                )
+
+        compose, env, manifest = self._derive(material_directory=material)
+        forged_values = parse_env_values(env.decode("utf-8"))
+        reused_secret = base_values["WEBAPP_FI_WITNESS_SECRET"]
+        forged_values[
+            "STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_SECRET"
+        ] = reused_secret
+        required_names = frozenset(base_values)
+        forged_env = builder.canonical_role_env_bytes(
+            forged_values,
+            required_names=required_names,
+        )
+        forged_manifest = json.loads(json.dumps(manifest))
+        forged_manifest["prepared"]["role_env_sha256"] = builder._sha256(forged_env)
+        forged_manifest["bindings"]["relay_secret_sha256"] = builder._sha256(
+            reused_secret.encode("utf-8")
+        )
+        with self.assertRaisesRegex(
+            WitnessRelayMaterialError,
+            "reuses base Witness credential",
+        ):
+            verify_prepared_structure(
+                canonical_compose=self.canonical,
+                base_compose_bytes=self.base_compose,
+                base_env_bytes=self.base_env,
+                prepared_compose_bytes=compose,
+                prepared_env_bytes=forged_env,
+                manifest=forged_manifest,
+                inventory=self.inventory,
+                approval_policy=self.policy,
+            )
+
+    def test_relay_material_rejects_dotenv_interpolation(self) -> None:
+        material = self._material_directory(Path("/tmp/witness-relay-interpolation"))
+        with self.assertRaisesRegex(
+            WitnessRelayMaterialError,
+            "secret is unsafe",
+        ):
+            derive_prepared_revision(
+                canonical_compose=self.canonical,
+                base_compose_bytes=self.base_compose,
+                base_env_bytes=self.base_env,
+                inventory=self.inventory,
+                approval_policy=self.policy,
+                revision_id=REVISION_ID,
+                material_directory=str(material),
+                relay_key_id="relay-orchestrator-r001",
+                relay_secret=(
+                    "${BOT_TOKEN:?this-required-message-makes-the-value-long-enough}"
+                ),
+            )
+        unsafe_path = (
+            Path("/tmp/${RELAY_ROOT}")
+            / self.inventory["campaign_id"]
+            / self.inventory["deployment_id"]
+            / "material-revisions"
+            / REVISION_ID
+            / ACTIVE_DIRECTORY_NAME
+        )
+        with self.assertRaisesRegex(
+            WitnessRelayMaterialError,
+            "absolute normalized path",
+        ):
+            self._derive(material_directory=unsafe_path)
+
+        compose, env, manifest = self._derive(material_directory=material)
+        bot_compose, bot_env = self.bundles["bot-fi"]
+        bot_values = parse_env_values(bot_env.decode("utf-8"))
+        bot_values["BOT_TOKEN"] = f"${{UNSET:-{RELAY_SECRET}}}"
+        bot_env = builder.canonical_role_env_bytes(
+            bot_values,
+            required_names=frozenset(bot_values),
+        )
+        with self.assertRaisesRegex(
+            WitnessRelayMaterialError,
+            "four-role campaign validation failed",
+        ):
+            validate_prepared_campaign(
+                canonical_compose=self.canonical,
+                base_compose_bytes=self.base_compose,
+                base_env_bytes=self.base_env,
+                prepared_compose_bytes=compose,
+                prepared_env_bytes=env,
+                manifest=manifest,
+                inventory=self.inventory,
+                approval=self.approval,
+                approval_policy=self.policy,
+                other_bundles={
+                    **{
+                        role: self.bundles[role]
+                        for role in ("webapp-fi", "webapp-ir")
+                    },
+                    "bot-fi": (bot_compose, bot_env),
+                },
+            )
+
+    def test_campaign_validation_rejects_relay_reuse_of_bot_token(self) -> None:
+        bot_values = parse_env_values(self.bundles["bot-fi"][1].decode("utf-8"))
+        reused_secret = bot_values["BOT_TOKEN"]
+        material = self._material_directory(Path("/tmp/witness-relay-cross-role"))
+        compose, env, manifest = derive_prepared_revision(
+            canonical_compose=self.canonical,
+            base_compose_bytes=self.base_compose,
+            base_env_bytes=self.base_env,
+            inventory=self.inventory,
+            approval_policy=self.policy,
+            revision_id=REVISION_ID,
+            material_directory=str(material),
+            relay_key_id="relay-orchestrator-r001",
+            relay_secret=reused_secret,
+        )
+        with self.assertRaisesRegex(
+            WitnessRelayMaterialError,
+            "four-role campaign validation failed",
+        ):
+            validate_prepared_campaign(
+                canonical_compose=self.canonical,
+                base_compose_bytes=self.base_compose,
+                base_env_bytes=self.base_env,
+                prepared_compose_bytes=compose,
+                prepared_env_bytes=env,
+                manifest=manifest,
+                inventory=self.inventory,
+                approval=self.approval,
+                approval_policy=self.policy,
+                other_bundles={
+                    role: self.bundles[role]
+                    for role in ("bot-fi", "webapp-fi", "webapp-ir")
+                },
+            )
+
     def test_final_bundle_requires_exact_session_scope_and_exposes_scope_hash(self) -> None:
         now = datetime.now(timezone.utc).replace(microsecond=0)
-        enrollment, old_session, _new_session, state = self._issue_pair(now=now)
+        enrollment, inventory_approval, old_session, _new_session, state = (
+            self._issue_pair(now=now)
+        )
         material = self._material_directory(Path("/tmp/witness-relay-contract"))
         compose, env, prepared = self._derive(
             material_directory=material,
@@ -438,6 +696,14 @@ class ThreeSiteStagingWitnessRelayMaterialTests(unittest.TestCase):
         prepared_bytes = _manifest_bytes(prepared)
         policy_bytes = _manifest_bytes(enrollment.policy_payload)
         session_bytes = _manifest_bytes(old_session)
+        other_bundles, material_approval = self._material_gate(
+            enrollment=enrollment,
+            inventory_approval=inventory_approval,
+            compose=compose,
+            env=env,
+            prepared=prepared,
+            now=now,
+        )
         final = finalize_revision(
             canonical_compose=self.canonical,
             base_compose_bytes=self.base_compose,
@@ -447,8 +713,11 @@ class ThreeSiteStagingWitnessRelayMaterialTests(unittest.TestCase):
             prepared_manifest=prepared,
             prepared_manifest_bytes=prepared_bytes,
             inventory=self.inventory,
+            inventory_approval=inventory_approval,
+            other_bundles=other_bundles,
             policy=enrollment.policy_payload,
             policy_bytes=policy_bytes,
+            material_approval=material_approval,
             session=old_session,
             session_bytes=session_bytes,
             created_at=now,
@@ -476,6 +745,39 @@ class ThreeSiteStagingWitnessRelayMaterialTests(unittest.TestCase):
             now=now,
         )
         self.assertEqual(result["stage"], "final")
+        tampered = json.loads(json.dumps(final))
+        tampered["campaign_validation"]["role_bundles"]["bot-fi"][
+            "environment_sha256"
+        ] = "0" * 64
+        tampered["campaign_validation"]["campaign_bundle_sha256"] = (
+            builder._sha256(
+                json.dumps(
+                    tampered["campaign_validation"]["role_bundles"],
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            )
+        )
+        with self.assertRaisesRegex(
+            WitnessRelayMaterialError,
+            "material approval is invalid",
+        ):
+            verify_final_structure(
+                canonical_compose=self.canonical,
+                base_compose_bytes=self.base_compose,
+                base_env_bytes=self.base_env,
+                final_compose_bytes=compose,
+                final_env_bytes=env,
+                prepared_manifest=prepared,
+                prepared_manifest_bytes=prepared_bytes,
+                final_manifest=tampered,
+                inventory=self.inventory,
+                policy=enrollment.policy_payload,
+                policy_bytes=policy_bytes,
+                session=old_session,
+                session_bytes=session_bytes,
+                now=now,
+            )
 
         overbroad_at = now + timedelta(seconds=62)
         overbroad, _state, _audit = authenticate_and_issue_session(
@@ -503,24 +805,120 @@ class ThreeSiteStagingWitnessRelayMaterialTests(unittest.TestCase):
                 prepared_manifest=prepared,
                 prepared_manifest_bytes=prepared_bytes,
                 inventory=self.inventory,
+                inventory_approval=inventory_approval,
+                other_bundles=other_bundles,
                 policy=enrollment.policy_payload,
                 policy_bytes=policy_bytes,
+                material_approval=material_approval,
                 session=overbroad,
                 session_bytes=_manifest_bytes(overbroad),
                 now=overbroad_at,
+            )
+
+    def test_validate_prepared_cli_writes_a_directly_issuable_subject(self) -> None:
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        enrollment, inventory_approval, _old, _new, _state = self._issue_pair(
+            now=now
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            material = self._material_directory(root)
+            prepared, _compose, _env, _manifest = self._prepared_directory(
+                root,
+                material_directory=material,
+                policy=enrollment.policy_payload,
+            )
+            canonical_path = root / "canonical.yml"
+            canonical_path.write_text(
+                yaml.safe_dump(self.canonical, sort_keys=False),
+                encoding="utf-8",
+            )
+            base_compose_path = root / "base.compose.yml"
+            base_compose_path.write_bytes(self.base_compose)
+            base_compose_path.chmod(0o640)
+            base_env_path = root / "base.env"
+            base_env_path.write_bytes(self.base_env)
+            base_env_path.chmod(0o600)
+            inventory_path = root / "inventory.json"
+            inventory_path.write_bytes(_manifest_bytes(self.inventory))
+            inventory_path.chmod(0o600)
+            approval_path = root / "inventory-approval.json"
+            approval_path.write_bytes(_manifest_bytes(inventory_approval))
+            approval_path.chmod(0o600)
+            policy_path = root / "policy.json"
+            policy_path.write_bytes(_manifest_bytes(enrollment.policy_payload))
+            policy_path.chmod(0o600)
+            bundle_arguments: list[str] = []
+            for role in ("bot-fi", "webapp-fi", "webapp-ir"):
+                compose_path = root / f"{role}.compose.yml"
+                env_path = root / f"{role}.env"
+                compose_path.write_bytes(self.bundles[role][0])
+                compose_path.chmod(0o640)
+                env_path.write_bytes(self.bundles[role][1])
+                env_path.chmod(0o600)
+                bundle_arguments.extend(
+                    ["--bundle", f"{role}={compose_path},{env_path}"]
+                )
+            subject_path = root / "material-subject.json"
+            with mock.patch("builtins.print"):
+                exit_code = builder.main(
+                    [
+                        "validate-prepared",
+                        "--canonical-compose",
+                        str(canonical_path),
+                        "--base-witness-compose",
+                        str(base_compose_path),
+                        "--base-witness-env",
+                        str(base_env_path),
+                        "--inventory",
+                        str(inventory_path),
+                        "--approval",
+                        str(approval_path),
+                        "--approval-policy",
+                        str(policy_path),
+                        "--prepared-directory",
+                        str(prepared),
+                        "--material-approval-subject-output",
+                        str(subject_path),
+                        *bundle_arguments,
+                    ]
+                )
+            self.assertEqual(exit_code, 0)
+            subject = json.loads(subject_path.read_text(encoding="utf-8"))
+            token, _issued_state, _audit = authenticate_and_issue(
+                secrets_payload=enrollment.secrets_payload,
+                state_payload=enrollment.state_payload,
+                policy_payload=enrollment.policy_payload,
+                private_key_envelope=enrollment.private_key_envelope,
+                password=PASSWORD,
+                totp=totp_code(enrollment.totp_secret, at=now)[1],
+                recovery_code=None,
+                action=builder.MATERIAL_APPROVAL_ACTION,
+                environment="staging",
+                subject=subject,
+                ttl_seconds=60 * 60,
+                now=now,
+            )
+            self.assertEqual(
+                token["action"],
+                builder.MATERIAL_APPROVAL_ACTION,
             )
 
     def test_final_publish_and_install_create_exact_active_and_unmounted_controls(
         self,
     ) -> None:
         now = datetime.now(timezone.utc).replace(microsecond=0)
-        enrollment, old_session, _new_session, _state = self._issue_pair(now=now)
+        enrollment, inventory_approval, old_session, _new_session, _state = (
+            self._issue_pair(now=now)
+        )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             root.chmod(0o700)
             destination, _final, session_bytes, policy_bytes = self._install_final(
                 root,
                 enrollment=enrollment,
+                inventory_approval=inventory_approval,
                 old_session=old_session,
                 now=now,
             )
@@ -560,17 +958,15 @@ class ThreeSiteStagingWitnessRelayMaterialTests(unittest.TestCase):
                 )
 
     def test_inert_install_cleans_partial_revision(self) -> None:
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        enrollment, inventory_approval, old_session, _new_session, _state = (
+            self._issue_pair(now=now)
+        )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             root.chmod(0o700)
             material = self._material_directory(root)
-            bundle, _compose, _env, _manifest = self._prepared_directory(
-                root,
-                material_directory=material,
-            )
             inert_root = material.parent.parent
-            inert_root.mkdir(mode=0o700, parents=True)
-            inert_root.chmod(0o700)
             real_write = installer.write_secure_new_bytes
             calls = 0
 
@@ -587,6 +983,31 @@ class ThreeSiteStagingWitnessRelayMaterialTests(unittest.TestCase):
                 ),
                 self.assertRaisesRegex(OSError, "injected"),
             ):
+                self._install_final(
+                    root,
+                    enrollment=enrollment,
+                    inventory_approval=inventory_approval,
+                    old_session=old_session,
+                    now=now,
+                )
+            self.assertFalse((inert_root / REVISION_ID).exists())
+
+    def test_prepared_bundle_is_controller_only_and_never_installed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            material = self._material_directory(root)
+            bundle, _compose, _env, _manifest = self._prepared_directory(
+                root,
+                material_directory=material,
+            )
+            inert_root = material.parent.parent
+            inert_root.mkdir(mode=0o700, parents=True)
+            inert_root.chmod(0o700)
+            with self.assertRaisesRegex(
+                InertRelayInstallError,
+                "controller-only",
+            ):
                 install_inert_bundle(
                     canonical_compose=self.canonical,
                     base_compose_bytes=self.base_compose,
@@ -598,15 +1019,64 @@ class ThreeSiteStagingWitnessRelayMaterialTests(unittest.TestCase):
                 )
             self.assertFalse((inert_root / REVISION_ID).exists())
 
+    def test_inert_install_rejects_root_swap_before_publication(self) -> None:
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        enrollment, inventory_approval, old_session, _new_session, _state = (
+            self._issue_pair(now=now)
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            material = self._material_directory(root)
+            inert_root = material.parent.parent
+            detached = inert_root.with_name("material-revisions-detached")
+            redirected = root / "redirected"
+            redirected.mkdir(mode=0o700)
+            real_assert = installer._assert_inert_root
+            calls = 0
+
+            def swap_after_recheck(path):  # noqa: ANN001
+                nonlocal calls
+                result = real_assert(path)
+                calls += 1
+                if calls == 2:
+                    path.rename(detached)
+                    path.symlink_to(redirected, target_is_directory=True)
+                return result
+
+            with (
+                mock.patch.object(
+                    installer,
+                    "_assert_inert_root",
+                    side_effect=swap_after_recheck,
+                ),
+                self.assertRaisesRegex(
+                    InertRelayInstallError,
+                    "changed during bundle validation",
+                ),
+            ):
+                self._install_final(
+                    root,
+                    enrollment=enrollment,
+                    inventory_approval=inventory_approval,
+                    old_session=old_session,
+                    now=now,
+                )
+            self.assertEqual(list(redirected.iterdir()), [])
+            self.assertFalse((redirected / REVISION_ID).exists())
+
     def test_rotation_is_atomic_idempotent_and_has_no_active_residue(self) -> None:
         now = datetime.now(timezone.utc).replace(microsecond=0)
-        enrollment, old_session, new_session, _state = self._issue_pair(now=now)
+        enrollment, inventory_approval, old_session, new_session, _state = (
+            self._issue_pair(now=now)
+        )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             root.chmod(0o700)
             destination, final, old_bytes, _policy_bytes = self._install_final(
                 root,
                 enrollment=enrollment,
+                inventory_approval=inventory_approval,
                 old_session=old_session,
                 now=now,
             )
@@ -661,10 +1131,67 @@ class ThreeSiteStagingWitnessRelayMaterialTests(unittest.TestCase):
                 self.docker_run.call_args.kwargs["env"],
                 {"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
             )
+            rendered = yaml.safe_load((destination / COMPOSE_NAME).read_text())
+            namespace = parse_env_values(
+                (destination / ENV_NAME).read_text()
+            )["STAGING_STORAGE_NAMESPACE"]
+            self.assertEqual(rendered["name"], f"{namespace}-witness")
+            self.assertNotEqual(rendered["name"], namespace)
+
+    def test_rotation_rejects_revision_root_swap_against_pinned_fd(self) -> None:
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        enrollment, inventory_approval, old_session, new_session, _state = (
+            self._issue_pair(now=now)
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            destination, final, _old_bytes, _policy_bytes = self._install_final(
+                root,
+                enrollment=enrollment,
+                inventory_approval=inventory_approval,
+                old_session=old_session,
+                now=now,
+            )
+            new_path = root / "new-session.json"
+            new_path.write_bytes(_manifest_bytes(new_session))
+            new_path.chmod(0o600)
+            detached = destination.with_name(f"{destination.name}-detached")
+            redirected = root / "rotation-redirected"
+            redirected.mkdir(mode=0o700)
+            real_flock = rotation.fcntl.flock
+
+            def swap_after_lock(descriptor, operation):  # noqa: ANN001
+                result = real_flock(descriptor, operation)
+                destination.rename(detached)
+                destination.symlink_to(redirected, target_is_directory=True)
+                return result
+
+            with (
+                mock.patch.object(
+                    rotation.fcntl,
+                    "flock",
+                    side_effect=swap_after_lock,
+                ),
+                self.assertRaises(WitnessRelayRotationError),
+            ):
+                rotate_witness_relay_session(
+                    role_compose_path=destination / COMPOSE_NAME,
+                    env_file_path=destination / ENV_NAME,
+                    new_session_path=new_path,
+                    expected_policy_sha256=final["final"][
+                        "policy_file_sha256"
+                    ],
+                    container_id=CONTAINER_ID,
+                    now=now + timedelta(seconds=32),
+                )
+            self.assertEqual(list(redirected.iterdir()), [])
 
     def test_every_rotation_crash_point_reconciles_to_zero_active_residue(self) -> None:
         now = datetime.now(timezone.utc).replace(microsecond=0)
-        enrollment, old_session, new_session, _state = self._issue_pair(now=now)
+        enrollment, inventory_approval, old_session, new_session, _state = (
+            self._issue_pair(now=now)
+        )
         for crash_point in sorted(CRASH_POINTS):
             with self.subTest(crash_point=crash_point), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
@@ -672,6 +1199,7 @@ class ThreeSiteStagingWitnessRelayMaterialTests(unittest.TestCase):
                 destination, final, old_bytes, _policy_bytes = self._install_final(
                     root,
                     enrollment=enrollment,
+                    inventory_approval=inventory_approval,
                     old_session=old_session,
                     now=now,
                 )
@@ -704,9 +1232,468 @@ class ThreeSiteStagingWitnessRelayMaterialTests(unittest.TestCase):
                 self.assertEqual(len(archives), 1)
                 self.assertEqual(archives[0].read_bytes(), old_bytes)
 
+    def test_pre_activation_crashes_reconcile_after_replacement_expires(self) -> None:
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        enrollment, inventory_approval, old_session, new_session, state = (
+            self._issue_pair(now=now)
+        )
+        for crash_point in ("journal-prepared", "archive-written", "temp-written"):
+            with self.subTest(crash_point=crash_point), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                root.chmod(0o700)
+                destination, final, old_bytes, _policy_bytes = self._install_final(
+                    root,
+                    enrollment=enrollment,
+                    inventory_approval=inventory_approval,
+                    old_session=old_session,
+                    now=now,
+                )
+                new_path = root / "new-session.json"
+                new_bytes = _manifest_bytes(new_session)
+                new_path.write_bytes(new_bytes)
+                new_path.chmod(0o600)
+                arguments = dict(
+                    role_compose_path=destination / COMPOSE_NAME,
+                    env_file_path=destination / ENV_NAME,
+                    new_session_path=new_path,
+                    expected_policy_sha256=final["final"]["policy_file_sha256"],
+                    container_id=CONTAINER_ID,
+                )
+                with self.assertRaises(InjectedRotationCrash):
+                    rotate_witness_relay_session(
+                        **arguments,
+                        now=now + timedelta(seconds=32),
+                        crash_after=crash_point,
+                    )
+
+                resume_at = now + timedelta(hours=49)
+                recovered = rotate_witness_relay_session(
+                    **arguments,
+                    now=resume_at,
+                )
+                self.assertEqual(recovered["journal_phase"], "complete")
+                active = destination / ACTIVE_DIRECTORY_NAME
+                self.assertEqual(
+                    {path.name for path in active.iterdir()},
+                    {SESSION_NAME, POLICY_NAME},
+                )
+                self.assertEqual((active / SESSION_NAME).read_bytes(), new_bytes)
+                archives = list((destination / ARCHIVE_DIRECTORY_NAME).iterdir())
+                self.assertEqual(len(archives), 1)
+                self.assertEqual(archives[0].read_bytes(), old_bytes)
+
+                third_at = resume_at + timedelta(seconds=31)
+                third_session, _third_state, _audit = authenticate_and_issue_session(
+                    secrets_payload=enrollment.secrets_payload,
+                    state_payload=state,
+                    policy_payload=enrollment.policy_payload,
+                    private_key_envelope=enrollment.private_key_envelope,
+                    password=PASSWORD,
+                    totp=totp_code(enrollment.totp_secret, at=third_at)[1],
+                    recovery_code=None,
+                    release_sha=self.inventory["release_sha"],
+                    allowed_actions=list(REQUIRED_MATRIX_ACTIONS),
+                    ttl_seconds=48 * 60 * 60,
+                    now=third_at,
+                )
+                third_path = root / "third-session.json"
+                third_path.write_bytes(_manifest_bytes(third_session))
+                third_path.chmod(0o600)
+                subsequent = rotate_witness_relay_session(
+                    **{
+                        **arguments,
+                        "new_session_path": third_path,
+                    },
+                    now=third_at + timedelta(seconds=1),
+                )
+                self.assertEqual(subsequent["journal_phase"], "complete")
+                self.assertEqual(
+                    (active / SESSION_NAME).read_bytes(),
+                    _manifest_bytes(third_session),
+                )
+
+    def test_journal_sidecar_only_reconciles_after_replacement_expires(self) -> None:
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        enrollment, inventory_approval, old_session, new_session, state = (
+            self._issue_pair(now=now)
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            destination, final, old_bytes, _policy_bytes = self._install_final(
+                root,
+                enrollment=enrollment,
+                inventory_approval=inventory_approval,
+                old_session=old_session,
+                now=now,
+            )
+            new_path = root / "new-session.json"
+            new_bytes = _manifest_bytes(new_session)
+            new_path.write_bytes(new_bytes)
+            new_path.chmod(0o600)
+            arguments = dict(
+                role_compose_path=destination / COMPOSE_NAME,
+                env_file_path=destination / ENV_NAME,
+                new_session_path=new_path,
+                expected_policy_sha256=final["final"]["policy_file_sha256"],
+                container_id=CONTAINER_ID,
+            )
+            with (
+                mock.patch.object(
+                    rotation.os,
+                    "link",
+                    side_effect=InjectedRotationCrash("injected before journal link"),
+                ),
+                self.assertRaises(InjectedRotationCrash),
+            ):
+                rotate_witness_relay_session(
+                    **arguments,
+                    now=now + timedelta(seconds=32),
+                )
+            journals = destination / JOURNAL_DIRECTORY_NAME
+            journal_entries = list(journals.iterdir())
+            self.assertEqual(len(journal_entries), 1)
+            self.assertTrue(journal_entries[0].name.endswith(".json.creating"))
+
+            resume_at = now + timedelta(hours=49)
+            recovered = rotate_witness_relay_session(
+                **arguments,
+                now=resume_at,
+            )
+            self.assertEqual(recovered["journal_phase"], "complete")
+            active = destination / ACTIVE_DIRECTORY_NAME
+            self.assertEqual(
+                {path.name for path in active.iterdir()},
+                {SESSION_NAME, POLICY_NAME},
+            )
+            self.assertEqual((active / SESSION_NAME).read_bytes(), new_bytes)
+            archives = list((destination / ARCHIVE_DIRECTORY_NAME).iterdir())
+            self.assertEqual(len(archives), 1)
+            self.assertEqual(archives[0].read_bytes(), old_bytes)
+
+            third_at = resume_at + timedelta(seconds=31)
+            third_session, _third_state, _audit = authenticate_and_issue_session(
+                secrets_payload=enrollment.secrets_payload,
+                state_payload=state,
+                policy_payload=enrollment.policy_payload,
+                private_key_envelope=enrollment.private_key_envelope,
+                password=PASSWORD,
+                totp=totp_code(enrollment.totp_secret, at=third_at)[1],
+                recovery_code=None,
+                release_sha=self.inventory["release_sha"],
+                allowed_actions=list(REQUIRED_MATRIX_ACTIONS),
+                ttl_seconds=48 * 60 * 60,
+                now=third_at,
+            )
+            third_path = root / "third-session.json"
+            third_path.write_bytes(_manifest_bytes(third_session))
+            third_path.chmod(0o600)
+            subsequent = rotate_witness_relay_session(
+                **{
+                    **arguments,
+                    "new_session_path": third_path,
+                },
+                now=third_at + timedelta(seconds=1),
+            )
+            self.assertEqual(subsequent["journal_phase"], "complete")
+            self.assertEqual(
+                (active / SESSION_NAME).read_bytes(),
+                _manifest_bytes(third_session),
+            )
+
+    def test_incomplete_initial_journal_sidecar_restarts_only_while_fresh(
+        self,
+    ) -> None:
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        enrollment, inventory_approval, old_session, new_session, _state = (
+            self._issue_pair(now=now)
+        )
+
+        def nonmatching_journal(payload: bytes) -> bytes:
+            journal = json.loads(payload)
+            journal["runtime"]["started_at"] = "2026-07-27T09:00:01.000000000Z"
+            return _manifest_bytes(journal)
+
+        residues = {
+            "empty": lambda _payload: b"",
+            "partial": lambda payload: payload[:17],
+            "valid-but-nonmatching": nonmatching_journal,
+        }
+        for label, residue_for in residues.items():
+            with self.subTest(residue=label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                root.chmod(0o700)
+                destination, final, old_bytes, _policy_bytes = self._install_final(
+                    root,
+                    enrollment=enrollment,
+                    inventory_approval=inventory_approval,
+                    old_session=old_session,
+                    now=now,
+                )
+                new_path = root / "new-session.json"
+                new_bytes = _manifest_bytes(new_session)
+                new_path.write_bytes(new_bytes)
+                new_path.chmod(0o600)
+                arguments = {
+                    "role_compose_path": destination / COMPOSE_NAME,
+                    "env_file_path": destination / ENV_NAME,
+                    "new_session_path": new_path,
+                    "expected_policy_sha256": final["final"][
+                        "policy_file_sha256"
+                    ],
+                    "container_id": CONTAINER_ID,
+                }
+                real_write = rotation._write_direct_new
+
+                def leave_incomplete_sidecar(path, payload, *, label):  # noqa: ANN001
+                    if (
+                        path.parent.name == JOURNAL_DIRECTORY_NAME
+                        and path.name.endswith(".creating")
+                    ):
+                        path.write_bytes(residue_for(payload))
+                        path.chmod(0o600)
+                        raise InjectedRotationCrash(
+                            "injected SIGKILL during initial journal write"
+                        )
+                    return real_write(path, payload, label=label)
+
+                with (
+                    mock.patch.object(
+                        rotation,
+                        "_write_direct_new",
+                        side_effect=leave_incomplete_sidecar,
+                    ),
+                    self.assertRaises(InjectedRotationCrash),
+                ):
+                    rotate_witness_relay_session(
+                        **arguments,
+                        now=now + timedelta(seconds=32),
+                    )
+
+                journals = destination / JOURNAL_DIRECTORY_NAME
+                residue = list(journals.iterdir())
+                self.assertEqual(len(residue), 1)
+                self.assertTrue(residue[0].name.endswith(".json.creating"))
+                self.assertEqual(
+                    list((destination / ARCHIVE_DIRECTORY_NAME).iterdir()),
+                    [],
+                )
+                self.assertEqual(
+                    (destination / ACTIVE_DIRECTORY_NAME / SESSION_NAME).read_bytes(),
+                    old_bytes,
+                )
+
+                recovered = rotate_witness_relay_session(
+                    **arguments,
+                    now=now + timedelta(seconds=33),
+                )
+                self.assertEqual(recovered["journal_phase"], "complete")
+                self.assertEqual(
+                    (destination / ACTIVE_DIRECTORY_NAME / SESSION_NAME).read_bytes(),
+                    new_bytes,
+                )
+                archives = list(
+                    (destination / ARCHIVE_DIRECTORY_NAME).iterdir()
+                )
+                self.assertEqual(len(archives), 1)
+                self.assertEqual(archives[0].read_bytes(), old_bytes)
+                journal_entries = list(journals.iterdir())
+                self.assertEqual(len(journal_entries), 1)
+                self.assertFalse(journal_entries[0].name.startswith("."))
+                self.assertEqual(
+                    json.loads(journal_entries[0].read_text())["phase"],
+                    "complete",
+                )
+
+    def test_expired_session_cannot_clean_malformed_initial_journal_sidecar(
+        self,
+    ) -> None:
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        enrollment, inventory_approval, old_session, new_session, _state = (
+            self._issue_pair(now=now)
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            destination, final, old_bytes, _policy_bytes = self._install_final(
+                root,
+                enrollment=enrollment,
+                inventory_approval=inventory_approval,
+                old_session=old_session,
+                now=now,
+            )
+            new_path = root / "new-session.json"
+            new_path.write_bytes(_manifest_bytes(new_session))
+            new_path.chmod(0o600)
+            arguments = {
+                "role_compose_path": destination / COMPOSE_NAME,
+                "env_file_path": destination / ENV_NAME,
+                "new_session_path": new_path,
+                "expected_policy_sha256": final["final"][
+                    "policy_file_sha256"
+                ],
+                "container_id": CONTAINER_ID,
+            }
+            real_write = rotation._write_direct_new
+            invalid = _manifest_bytes({"schema": rotation.ROTATION_SCHEMA})
+
+            def leave_invalid_sidecar(path, payload, *, label):  # noqa: ANN001
+                if (
+                    path.parent.name == JOURNAL_DIRECTORY_NAME
+                    and path.name.endswith(".creating")
+                ):
+                    path.write_bytes(invalid)
+                    path.chmod(0o600)
+                    raise InjectedRotationCrash(
+                        "injected SIGKILL during initial journal write"
+                    )
+                return real_write(path, payload, label=label)
+
+            with (
+                mock.patch.object(
+                    rotation,
+                    "_write_direct_new",
+                    side_effect=leave_invalid_sidecar,
+                ),
+                self.assertRaises(InjectedRotationCrash),
+            ):
+                rotate_witness_relay_session(
+                    **arguments,
+                    now=now + timedelta(seconds=32),
+                )
+
+            def snapshot(directory: Path) -> dict[str, bytes]:
+                return {
+                    path.name: path.read_bytes()
+                    for path in directory.iterdir()
+                    if path.is_file()
+                }
+
+            active = destination / ACTIVE_DIRECTORY_NAME
+            archive = destination / ARCHIVE_DIRECTORY_NAME
+            journals = destination / JOURNAL_DIRECTORY_NAME
+            before = (
+                snapshot(active),
+                snapshot(archive),
+                snapshot(journals),
+            )
+            with self.assertRaisesRegex(HumanApprovalError, "expired"):
+                rotate_witness_relay_session(
+                    **arguments,
+                    now=now + timedelta(hours=49),
+                )
+            self.assertEqual(
+                (
+                    snapshot(active),
+                    snapshot(archive),
+                    snapshot(journals),
+                ),
+                before,
+            )
+            self.assertEqual((active / SESSION_NAME).read_bytes(), old_bytes)
+
+    def test_incomplete_rotation_blocks_a_different_replacement(self) -> None:
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        enrollment, inventory_approval, old_session, new_session, state = (
+            self._issue_pair(now=now)
+        )
+        third_at = now + timedelta(seconds=62)
+        third_session, _third_state, _audit = authenticate_and_issue_session(
+            secrets_payload=enrollment.secrets_payload,
+            state_payload=state,
+            policy_payload=enrollment.policy_payload,
+            private_key_envelope=enrollment.private_key_envelope,
+            password=PASSWORD,
+            totp=totp_code(enrollment.totp_secret, at=third_at)[1],
+            recovery_code=None,
+            release_sha=self.inventory["release_sha"],
+            allowed_actions=list(REQUIRED_MATRIX_ACTIONS),
+            ttl_seconds=48 * 60 * 60,
+            now=third_at,
+        )
+        for crash_point in sorted(CRASH_POINTS - {"journal-complete"}):
+            with self.subTest(crash_point=crash_point), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                root.chmod(0o700)
+                destination, final, _old_bytes, _policy_bytes = self._install_final(
+                    root,
+                    enrollment=enrollment,
+                    inventory_approval=inventory_approval,
+                    old_session=old_session,
+                    now=now,
+                )
+                new_path = root / "new-session.json"
+                new_path.write_bytes(_manifest_bytes(new_session))
+                new_path.chmod(0o600)
+                third_path = root / "third-session.json"
+                third_path.write_bytes(_manifest_bytes(third_session))
+                third_path.chmod(0o600)
+                arguments = dict(
+                    role_compose_path=destination / COMPOSE_NAME,
+                    env_file_path=destination / ENV_NAME,
+                    expected_policy_sha256=final["final"]["policy_file_sha256"],
+                    container_id=CONTAINER_ID,
+                )
+                with self.assertRaises(InjectedRotationCrash):
+                    rotate_witness_relay_session(
+                        **arguments,
+                        new_session_path=new_path,
+                        now=now + timedelta(seconds=32),
+                        crash_after=crash_point,
+                    )
+
+                def snapshot(directory: Path) -> dict[str, bytes]:
+                    return {
+                        path.name: path.read_bytes()
+                        for path in directory.iterdir()
+                        if path.is_file()
+                    }
+
+                active = destination / ACTIVE_DIRECTORY_NAME
+                archive = destination / ARCHIVE_DIRECTORY_NAME
+                journals = destination / JOURNAL_DIRECTORY_NAME
+                before = (
+                    snapshot(active),
+                    snapshot(archive),
+                    snapshot(journals),
+                )
+                with self.assertRaises(WitnessRelayRotationError):
+                    rotate_witness_relay_session(
+                        **arguments,
+                        new_session_path=third_path,
+                        now=third_at + timedelta(seconds=1),
+                    )
+                self.assertEqual(
+                    (
+                        snapshot(active),
+                        snapshot(archive),
+                        snapshot(journals),
+                    ),
+                    before,
+                )
+
+                recovered = rotate_witness_relay_session(
+                    **arguments,
+                    new_session_path=new_path,
+                    now=third_at + timedelta(seconds=2),
+                )
+                self.assertEqual(recovered["journal_phase"], "complete")
+                subsequent = rotate_witness_relay_session(
+                    **arguments,
+                    new_session_path=third_path,
+                    now=third_at + timedelta(seconds=3),
+                )
+                self.assertEqual(subsequent["journal_phase"], "complete")
+                self.assertEqual(
+                    (active / SESSION_NAME).read_bytes(),
+                    _manifest_bytes(third_session),
+                )
+
     def test_rotation_rejects_file_bind_and_unsafe_active_directory(self) -> None:
         now = datetime.now(timezone.utc).replace(microsecond=0)
-        enrollment, old_session, new_session, _state = self._issue_pair(now=now)
+        enrollment, inventory_approval, old_session, new_session, _state = (
+            self._issue_pair(now=now)
+        )
         for mutation in ("file-bind", "broad-directory"):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
@@ -714,6 +1701,7 @@ class ThreeSiteStagingWitnessRelayMaterialTests(unittest.TestCase):
                 destination, final, old_bytes, _policy_bytes = self._install_final(
                     root,
                     enrollment=enrollment,
+                    inventory_approval=inventory_approval,
                     old_session=old_session,
                     now=now,
                 )
@@ -767,7 +1755,9 @@ class ThreeSiteStagingWitnessRelayMaterialTests(unittest.TestCase):
 
     def test_rotation_requires_exact_running_directory_bind_and_secret(self) -> None:
         now = datetime.now(timezone.utc).replace(microsecond=0)
-        enrollment, old_session, new_session, _state = self._issue_pair(now=now)
+        enrollment, inventory_approval, old_session, new_session, _state = (
+            self._issue_pair(now=now)
+        )
         for mutation in ("legacy-file-mounts", "different-relay-secret"):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
@@ -775,6 +1765,7 @@ class ThreeSiteStagingWitnessRelayMaterialTests(unittest.TestCase):
                 destination, final, old_bytes, _policy_bytes = self._install_final(
                     root,
                     enrollment=enrollment,
+                    inventory_approval=inventory_approval,
                     old_session=old_session,
                     now=now,
                 )
@@ -848,14 +1839,17 @@ class ThreeSiteStagingWitnessRelayMaterialTests(unittest.TestCase):
                 )
 
     def test_rotation_rejects_an_older_valid_session_before_writing(self) -> None:
-        now = datetime.now(timezone.utc).replace(microsecond=0)
-        enrollment, old_session, new_session, _state = self._issue_pair(now=now)
+        now = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(minutes=1)
+        enrollment, inventory_approval, old_session, new_session, _state = (
+            self._issue_pair(now=now)
+        )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             root.chmod(0o700)
             destination, final, live_bytes, _policy_bytes = self._install_final(
                 root,
                 enrollment=enrollment,
+                inventory_approval=inventory_approval,
                 old_session=new_session,
                 now=now + timedelta(seconds=32),
             )

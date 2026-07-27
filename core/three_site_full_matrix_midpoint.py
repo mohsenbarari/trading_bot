@@ -130,6 +130,7 @@ def validate_midpoint_journal(
                 isinstance(context, dict)
                 and context.get("iteration") == MIDPOINT_NEXT_ITERATION
             )
+            or record.get("operation_kind") == "finalize"
             or record.get("event") in {"campaign_finalized", "campaign_completed"}
         )
 
@@ -147,12 +148,14 @@ def validate_midpoint_journal(
         not isinstance(phases, list)
         or not phases
         or not isinstance(required, dict)
-        or pause_index == 0
+        or pause_index < 3
     ):
         raise FullMatrixMidpointError("midpoint campaign catalog is invalid")
     final_phase = phases[-1]
-    previous = records[pause_index - 1]
-    pre_pause_head = str(previous.get("event_hash") or "")
+    cleanup_start, cleanup_pass, final_phase_pass = records[
+        pause_index - 3 : pause_index
+    ]
+    pre_pause_head = str(final_phase_pass.get("event_hash") or "")
     pause_fields = _JOURNAL_BASE_FIELDS | {
         "reason",
         "phase",
@@ -161,7 +164,15 @@ def validate_midpoint_journal(
         "pre_pause_journal_head",
         "cleanup_evidence_hash",
     }
-    cleanup = previous.get("cleanup_result")
+    cleanup_context = {
+        "phase": final_phase,
+        "scenario_id": "",
+        "iteration": MIDPOINT_COMPLETED_ITERATION,
+        "failed": False,
+        "attempt": 0,
+    }
+    cleanup_operation_id = str(cleanup_start.get("operation_id") or "")
+    cleanup = cleanup_pass.get("result")
     if (
         set(pause) != pause_fields
         or pause.get("campaign_hash") != campaign_hash
@@ -172,24 +183,40 @@ def validate_midpoint_journal(
         or SHA256.fullmatch(pre_pause_head) is None
         or pause.get("pre_pause_journal_head") != pre_pause_head
         or pause.get("previous_hash") != pre_pause_head
-        or previous.get("event") != "phase_passed"
-        or previous.get("phase") != final_phase
-        or previous.get("iteration") != MIDPOINT_COMPLETED_ITERATION
+        or cleanup_start.get("event") != "operation_started"
+        or cleanup_start.get("operation_kind") != "cleanup"
+        or cleanup_start.get("operation_context") != cleanup_context
+        or not cleanup_operation_id
+        or cleanup_pass.get("event") != "operation_passed"
+        or cleanup_pass.get("operation_kind") != "cleanup"
+        or cleanup_pass.get("operation_context") != cleanup_context
+        or cleanup_pass.get("operation_id") != cleanup_operation_id
+        or cleanup_pass.get("previous_hash") != cleanup_start.get("event_hash")
+        or final_phase_pass.get("event") != "phase_passed"
+        or final_phase_pass.get("phase") != final_phase
+        or final_phase_pass.get("iteration") != MIDPOINT_COMPLETED_ITERATION
+        or final_phase_pass.get("previous_hash") != cleanup_pass.get("event_hash")
         or not isinstance(cleanup, dict)
+        or cleanup.get("operation_id") != cleanup_operation_id
+        or cleanup.get("phase") != final_phase
+        or cleanup.get("iteration") != MIDPOINT_COMPLETED_ITERATION
         or cleanup.get("residue_count") != 0
         or cleanup.get("production_touched") is not False
+        or final_phase_pass.get("cleanup_result") != cleanup
+        or final_phase_pass.get("cleanup_evidence_hash")
+        != cleanup.get("evidence_hash")
         or pause.get("cleanup_evidence_hash")
-        != previous.get("cleanup_evidence_hash")
+        != final_phase_pass.get("cleanup_evidence_hash")
         or SHA256.fullmatch(str(pause.get("cleanup_evidence_hash") or "")) is None
     ):
         raise FullMatrixMidpointError("midpoint pause is not at a zero-residue boundary")
 
-    expected_scenarios = {
+    expected_scenarios = [
         (MIDPOINT_COMPLETED_ITERATION, phase, scenario)
         for phase in phases
         for scenario in required.get(phase, ())
-    }
-    observed_scenarios = {
+    ]
+    observed_scenarios = [
         (
             record.get("iteration"),
             record.get("phase"),
@@ -197,26 +224,26 @@ def validate_midpoint_journal(
         )
         for record in records[:pause_index]
         if record.get("event") == "scenario_passed"
-    }
-    expected_phases = {
+    ]
+    expected_phases = [
         (MIDPOINT_COMPLETED_ITERATION, phase)
         for phase in phases
-    }
-    observed_phases = {
+    ]
+    observed_phases = [
         (record.get("iteration"), record.get("phase"))
         for record in records[:pause_index]
         if record.get("event") == "phase_passed"
-    }
-    starts = {
+    ]
+    starts = [
         str(record.get("operation_id") or "")
         for record in records[:pause_index]
         if record.get("event") in {"campaign_started", "operation_started"}
-    }
-    passes = {
+    ]
+    passes = [
         str(record.get("operation_id") or "")
         for record in records[:pause_index]
         if record.get("event") == "operation_passed"
-    }
+    ]
     open_scenarios: set[tuple[Any, Any, Any]] = set()
     for record in records[:pause_index]:
         if record.get("event") == "scenario_started":
@@ -238,7 +265,9 @@ def validate_midpoint_journal(
     if (
         observed_scenarios != expected_scenarios
         or observed_phases != expected_phases
-        or starts != passes
+        or len(starts) != len(set(starts))
+        or len(passes) != len(set(passes))
+        or set(starts) != set(passes)
         or open_scenarios
         or any(is_iteration_two_intent(record) for record in records[:pause_index])
     ):
@@ -282,6 +311,135 @@ def validate_midpoint_journal(
         )
     ):
         raise FullMatrixMidpointError("midpoint resume ordering/identity is invalid")
+
+    finalize_markers = [
+        (index, record)
+        for index, record in enumerate(records)
+        if record.get("operation_kind") == "finalize"
+    ]
+    finalize_starts = [
+        (index, record)
+        for index, record in finalize_markers
+        if record.get("event") == "operation_started"
+    ]
+    finalize_passes = [
+        (index, record)
+        for index, record in finalize_markers
+        if record.get("event") == "operation_passed"
+    ]
+    finalized = [
+        (index, record)
+        for index, record in enumerate(records)
+        if record.get("event") == "campaign_finalized"
+    ]
+    completed = [
+        (index, record)
+        for index, record in enumerate(records)
+        if record.get("event") == "campaign_completed"
+    ]
+    if (
+        any(
+            record.get("event") not in {"operation_started", "operation_passed"}
+            for _index, record in finalize_markers
+        )
+        or len(finalize_starts) > 1
+        or len(finalize_passes) > 1
+        or len(finalized) > 1
+        or len(completed) > 1
+        or (finalize_passes and not finalize_starts)
+        or (finalized and not finalize_passes)
+        or (completed and not finalized)
+    ):
+        raise FullMatrixMidpointError("Full Matrix finalization sequence is invalid")
+
+    if finalize_starts:
+        finalize_start_index, finalize_start = finalize_starts[0]
+        finalize_context = {
+            "phase": "",
+            "scenario_id": "",
+            "iteration": 0,
+            "failed": None,
+            "attempt": 0,
+        }
+        finalize_operation_id = str(finalize_start.get("operation_id") or "")
+        expected_iteration_two_scenarios = [
+            (MIDPOINT_NEXT_ITERATION, phase, scenario)
+            for phase in phases
+            for scenario in required.get(phase, ())
+        ]
+        observed_iteration_two_scenarios = [
+            (
+                record.get("iteration"),
+                record.get("phase"),
+                record.get("scenario_id"),
+            )
+            for record in records[:finalize_start_index]
+            if record.get("event") == "scenario_passed"
+            and record.get("iteration") == MIDPOINT_NEXT_ITERATION
+        ]
+        expected_iteration_two_phases = [
+            (MIDPOINT_NEXT_ITERATION, phase) for phase in phases
+        ]
+        observed_iteration_two_phases = [
+            (record.get("iteration"), record.get("phase"))
+            for record in records[:finalize_start_index]
+            if record.get("event") == "phase_passed"
+            and record.get("iteration") == MIDPOINT_NEXT_ITERATION
+        ]
+        if (
+            finalize_start_index <= resume_index
+            or finalize_start.get("operation_context") != finalize_context
+            or not finalize_operation_id
+            or observed_iteration_two_scenarios
+            != expected_iteration_two_scenarios
+            or observed_iteration_two_phases != expected_iteration_two_phases
+            or any(
+                record.get("iteration") == MIDPOINT_NEXT_ITERATION
+                and record.get("event") in {"scenario_passed", "phase_passed"}
+                for record in records[finalize_start_index:]
+            )
+        ):
+            raise FullMatrixMidpointError(
+                "Full Matrix finalization precedes iteration 2 completion"
+            )
+
+        if finalize_passes:
+            finalize_pass_index, finalize_pass = finalize_passes[0]
+            finalization_result = finalize_pass.get("result")
+            if (
+                finalize_pass_index != finalize_start_index + 1
+                or finalize_pass.get("operation_id") != finalize_operation_id
+                or finalize_pass.get("operation_context") != finalize_context
+                or not isinstance(finalization_result, dict)
+                or finalization_result.get("operation_id")
+                != finalize_operation_id
+                or finalization_result.get("residue_count") != 0
+                or finalization_result.get("production_touched") is not False
+            ):
+                raise FullMatrixMidpointError(
+                    "Full Matrix finalization operation pair is invalid"
+                )
+            if finalized:
+                finalized_index, finalized_record = finalized[0]
+                if (
+                    finalized_index != finalize_pass_index + 1
+                    or finalized_record.get("result") != finalization_result
+                    or finalized_record.get("finalization_evidence_hash")
+                    != finalization_result.get("evidence_hash")
+                ):
+                    raise FullMatrixMidpointError(
+                        "Full Matrix finalized event differs from its operation"
+                    )
+            elif finalize_pass_index != len(records) - 1:
+                raise FullMatrixMidpointError(
+                    "successful Full Matrix finalization is not journal-tail recoverable"
+                )
+        elif finalize_start_index != len(records) - 1:
+            raise FullMatrixMidpointError(
+                "unfinished Full Matrix finalization is not the journal tail"
+            )
+    elif finalized or completed:
+        raise FullMatrixMidpointError("Full Matrix finalization intent is missing")
     return pause, resume
 
 
