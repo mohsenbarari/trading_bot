@@ -4255,15 +4255,17 @@ def _validate_cutover_manifest_source(
         CUTOVER_DEPLOYMENT_FIELDS,
         label="cutover deployment",
     )
-    compact_campaign = campaign_id.replace("-", "")[:16]
+    compact_operation = operation_id.replace("-", "")
     secure_root = (
         f"/root/secure-envs/trading-bot/production-cutover/{campaign_id}"
     )
     expected_deployment = {
         "production_hostname": PRODUCTION_HOSTNAME,
         "legacy_compose_project": "trading_bot",
-        "shadow_compose_project": f"tb_prod_{compact_campaign}",
-        "shadow_root": f"/srv/trading-bot-production-shadow/{campaign_id}",
+        "shadow_compose_project": f"tb3p-{compact_operation}",
+        "shadow_root": (
+            f"/srv/trading-bot-three-site-production-shadow/{operation_id}"
+        ),
         "controller_journal_path": f"{secure_root}/journal.json",
         "controller_evidence_root": f"{secure_root}/evidence",
     }
