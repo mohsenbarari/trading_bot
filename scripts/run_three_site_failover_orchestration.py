@@ -78,8 +78,6 @@ def prepare(args: argparse.Namespace):  # noqa: ANN202
     plan = parse_plan(_strict_json(args.plan, "orchestration plan"))
     policy = load_approver_policy(args.human_approval_policy)
     operation_started = _journal_proves_operation_started(args.journal, plan)
-    verify_human_failover_approval(plan, policy, require_fresh=not operation_started)
-    operations = load_typed_operation_manifest(args.command_manifest, plan=plan)
     config = load_staging_backend_config(
         args.backend_config,
         inventory=_strict_json(args.inventory, "provisioned staging inventory"),
@@ -90,6 +88,13 @@ def prepare(args: argparse.Namespace):  # noqa: ANN202
             args.inventory_approval_policy, "staging human approval policy"
         ),
     )
+    verify_human_failover_approval(
+        plan,
+        policy,
+        require_fresh=not operation_started,
+        witness_relay_public_key=config.witness_public_key,
+    )
+    operations = load_typed_operation_manifest(args.command_manifest, plan=plan)
     backend = StagingTypedOperationBackend(config)
     backend.preflight(plan)
     return plan, operations, backend
