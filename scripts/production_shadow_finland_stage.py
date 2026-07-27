@@ -1,0 +1,2644 @@
+#!/usr/bin/env python3
+"""Stage one immutable production-shadow release and image set on a Finland host.
+
+The deployed copy is standalone.  It accepts only an operation-bound manifest,
+materializes its detached Git release, validates every Docker archive before
+the first image-store mutation, and loads the four images without creating or
+starting any Docker runtime resource.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import binascii
+from contextlib import contextmanager
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path, PurePosixPath
+import re
+import secrets
+import socket
+import stat
+import struct
+import subprocess
+import sys
+import tarfile
+from typing import Any, BinaryIO, Callable, Iterator, Mapping
+from uuid import UUID
+
+
+MANIFEST_SCHEMA = "production-shadow-finland-image-stage-manifest-v1"
+REQUEST_SCHEMA = "production-shadow-finland-image-stage-request-v1"
+BOOTSTRAP_REQUEST_SCHEMA = (
+    "production-shadow-finland-image-stage-bootstrap-request-v1"
+)
+VERSION_SCHEMA = "production-shadow-finland-image-stage-agent-version-v1"
+ATTESTATION_SCHEMA = "production-shadow-finland-image-stage-attestation-v1"
+RESULT_SCHEMA = "production-shadow-finland-image-stage-result-v1"
+JOURNAL_SCHEMA = "production-shadow-finland-image-stage-journal-v1"
+AGENT_VERSION = 1
+
+PROJECT_ROOT_PREFIX = Path("/srv/trading-bot-three-site-production-shadow")
+SECRET_ROOT_PREFIX = Path(
+    "/root/secure-envs/trading-bot/three-site-production-shadow"
+)
+AGENT_FILENAME = "production-shadow-finland-stage.py"
+MANIFEST_FILENAME = "image-stage-manifest.json"
+ATTESTATION_FILENAME = "image-stage-attestation.json"
+JOURNAL_FILENAME = "image-stage-journal.json"
+LOCK_FILENAME = "image-stage.lock"
+
+GIT = "/usr/bin/git"
+DOCKER = "/usr/bin/docker"
+IMAGE_ROLES = ("app", "postgres", "redis", "nginx")
+STAGE_ROLES = ("bot_fi", "webapp_fi")
+ROLE_PATHS = {"bot_fi": "bot-fi", "webapp_fi": "webapp-fi"}
+ROLE_HOSTS = {
+    "bot_fi": "65.109.216.187",
+    "webapp_fi": "65.109.220.59",
+}
+RELEASE_BOUND_IMAGE_ROLES = frozenset({"app", "postgres"})
+POSTGRES_RUNTIME_UID_LABEL = "trading-bot.postgres.runtime-uid"
+POSTGRES_RUNTIME_GID_LABEL = "trading-bot.postgres.runtime-gid"
+POSTGRES_RUNTIME_UID = 70
+POSTGRES_RUNTIME_GID = 70
+ARTIFACT_FILENAMES = {
+    "release-bundle": "release.bundle",
+    "app-image-archive": "app-image.tar",
+    "postgres-image-archive": "postgres-image.tar",
+    "redis-image-archive": "redis-image.tar",
+    "nginx-image-archive": "nginx-image.tar",
+}
+ARTIFACT_FORMATS = {
+    "release-bundle": "git-bundle",
+    "app-image-archive": "docker-archive",
+    "postgres-image-archive": "docker-archive",
+    "redis-image-archive": "docker-archive",
+    "nginx-image-archive": "docker-archive",
+}
+ARTIFACT_KINDS = tuple(ARTIFACT_FILENAMES)
+IMAGE_ARTIFACT_FIELDS = frozenset(
+    {
+        "archive_sha256",
+        "archive_bytes",
+        "config_digest",
+        "content_descriptor",
+        "content_identity",
+    }
+)
+DESCRIPTOR_FIELDS = frozenset(
+    {
+        "architecture",
+        "os",
+        "created",
+        "config_sha256",
+        "rootfs_type",
+        "rootfs_layers",
+    }
+)
+ARTIFACT_FIELDS = frozenset({"kind", "filename", "sha256", "bytes", "format"})
+MANIFEST_FIELDS = frozenset(
+    {
+        "schema",
+        "operation_id",
+        "release_sha",
+        "release_tree_sha",
+        "role",
+        "project_name",
+        "project_root",
+        "release_root",
+        "incoming_root",
+        "secret_role_root",
+        "bootstrap_sha256",
+        "artifacts",
+        "image_artifacts",
+        "postgres_runtime_uid",
+        "postgres_runtime_gid",
+        "pull_policy",
+    }
+)
+REQUEST_FIELDS = frozenset(
+    {
+        "schema",
+        "action",
+        "operation_id",
+        "release_sha",
+        "release_tree_sha",
+        "role",
+        "operation_manifest_sha256",
+        "agent_sha256",
+        "pull_policy",
+    }
+)
+BOOTSTRAP_REQUEST_FIELDS = frozenset(
+    {"schema", "action", "operation_id", "role", "agent_sha256"}
+)
+IMAGE_ATTESTATION_FIELDS = frozenset(
+    {
+        "role",
+        "runtime_image_id",
+        "config_digest",
+        "content_descriptor",
+        "content_identity",
+        "source",
+    }
+)
+ATTESTATION_FIELDS = frozenset(
+    {
+        "schema",
+        "operation_id",
+        "release_sha",
+        "release_tree_sha",
+        "operation_manifest_sha256",
+        "role",
+        "image_artifacts",
+        "runtime_image_ids",
+        "images",
+        "images_built",
+        "images_pulled",
+        "containers_created",
+        "containers_started",
+        "services_started",
+        "networks_created",
+        "volumes_created",
+        "current_mutated",
+        "data_mutated",
+    }
+)
+PHASES = (
+    "inputs-verified",
+    "release-materialized",
+    "archives-verified",
+    "app-loaded",
+    "postgres-loaded",
+    "redis-loaded",
+    "nginx-loaded",
+    "attested",
+)
+JOURNAL_FIELDS = frozenset(
+    {
+        "schema",
+        "operation_id",
+        "release_sha",
+        "release_tree_sha",
+        "role",
+        "operation_manifest_sha256",
+        "status",
+        "completed_phases",
+        "current_phase",
+        "archive_evidence",
+        "load_intents",
+        "runtime_image_ids",
+        "images",
+        "events",
+        "event_tail_sha256",
+        "state_sha256",
+    }
+)
+
+SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+ZERO_SHA256 = "0" * 64
+MAX_MANIFEST_BYTES = 1024 * 1024
+MAX_JOURNAL_BYTES = 2 * 1024 * 1024
+MAX_ATTESTATION_BYTES = 2 * 1024 * 1024
+MAX_AGENT_BYTES = 8 * 1024 * 1024
+MAX_ARTIFACT_BYTES = 64 * 1024 * 1024 * 1024
+MAX_ARCHIVE_MEMBERS = 250_000
+MAX_ARCHIVE_CONFIG_BYTES = 16 * 1024 * 1024
+MAX_ARCHIVE_MANIFEST_BYTES = 1024 * 1024
+MAX_COMMAND_OUTPUT_BYTES = 8 * 1024 * 1024
+SAFE_ENV = {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "/nonexistent",
+    "LANG": "C.UTF-8",
+    "LC_ALL": "C.UTF-8",
+    "DOCKER_CONFIG": "/nonexistent",
+}
+SAFE_GIT_ENV = {
+    **SAFE_ENV,
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_CONFIG_SYSTEM": "/dev/null",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_OPTIONAL_LOCKS": "0",
+}
+
+
+class FinlandStageError(RuntimeError):
+    """Raised when the bounded stage/load contract cannot be proven."""
+
+
+Checkpoint = Callable[[str], None]
+Runner = Callable[..., subprocess.CompletedProcess[bytes]]
+
+
+def canonical_json(value: Any) -> bytes:
+    try:
+        return json.dumps(
+            value,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+    except (TypeError, ValueError, UnicodeError) as exc:
+        raise FinlandStageError("value is not canonical JSON") from exc
+
+
+def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def _strict_json(raw: bytes, *, label: str) -> dict[str, Any]:
+    try:
+        value = json.loads(
+            raw.decode("ascii"),
+            object_pairs_hook=_strict_object,
+            parse_constant=lambda value: (_ for _ in ()).throw(
+                ValueError(f"invalid JSON constant: {value}")
+            ),
+        )
+    except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+        raise FinlandStageError(f"{label} is not strict JSON") from exc
+    if not isinstance(value, dict):
+        raise FinlandStageError(f"{label} must contain one JSON object")
+    return value
+
+
+def _canonical_uuid4(value: Any, *, label: str) -> str:
+    if not isinstance(value, str):
+        raise FinlandStageError(f"{label} must be a canonical UUIDv4")
+    try:
+        parsed = UUID(value)
+    except (ValueError, AttributeError) as exc:
+        raise FinlandStageError(f"{label} must be a canonical UUIDv4") from exc
+    if parsed.version != 4 or str(parsed) != value:
+        raise FinlandStageError(f"{label} must be a canonical UUIDv4")
+    return value
+
+
+def _nonzero_sha256(value: Any, *, label: str) -> str:
+    if (
+        not isinstance(value, str)
+        or SHA256_RE.fullmatch(value) is None
+        or value == ZERO_SHA256
+    ):
+        raise FinlandStageError(f"{label} must be a nonzero SHA-256")
+    return value
+
+
+def _bounded_size(value: Any, *, label: str, maximum: int) -> int:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 1 <= value <= maximum
+    ):
+        raise FinlandStageError(f"{label} is outside its size bound")
+    return value
+
+
+def _content_sha256(value: Any) -> str:
+    return "sha256:" + hashlib.sha256(canonical_json(value)).hexdigest()
+
+
+def verify_content_descriptor(descriptor: Any) -> str:
+    if not isinstance(descriptor, dict) or set(descriptor) != DESCRIPTOR_FIELDS:
+        raise FinlandStageError("image content descriptor fields are not exact")
+    layers = descriptor["rootfs_layers"]
+    if (
+        not isinstance(descriptor["architecture"], str)
+        or descriptor["architecture"] != "amd64"
+        or not isinstance(descriptor["os"], str)
+        or descriptor["os"] != "linux"
+        or not isinstance(descriptor["created"], str)
+        or not descriptor["created"]
+        or not isinstance(descriptor["config_sha256"], str)
+        or IMAGE_ID_RE.fullmatch(descriptor["config_sha256"]) is None
+        or descriptor["rootfs_type"] != "layers"
+        or not isinstance(layers, list)
+        or not layers
+        or any(
+            not isinstance(layer, str) or IMAGE_ID_RE.fullmatch(layer) is None
+            for layer in layers
+        )
+    ):
+        raise FinlandStageError("image content descriptor is malformed")
+    return _content_sha256(descriptor)
+
+
+def _content_descriptor(
+    *,
+    architecture: Any,
+    operating_system: Any,
+    created: Any,
+    config: Any,
+    rootfs_type: Any,
+    rootfs_layers: Any,
+) -> tuple[dict[str, Any], str]:
+    if not isinstance(config, dict):
+        raise FinlandStageError("image configuration metadata is invalid")
+    descriptor = {
+        "architecture": str(architecture or ""),
+        "os": str(operating_system or ""),
+        "created": str(created or ""),
+        "config_sha256": _content_sha256(config),
+        "rootfs_type": str(rootfs_type or ""),
+        "rootfs_layers": (
+            list(rootfs_layers) if isinstance(rootfs_layers, list) else rootfs_layers
+        ),
+    }
+    return descriptor, verify_content_descriptor(descriptor)
+
+
+def image_content_descriptor_from_archive(
+    config: dict[str, Any],
+) -> tuple[dict[str, Any], str]:
+    rootfs = config.get("rootfs") if isinstance(config, dict) else None
+    if not isinstance(rootfs, dict):
+        raise FinlandStageError("Docker archive rootfs metadata is invalid")
+    return _content_descriptor(
+        architecture=config.get("architecture"),
+        operating_system=config.get("os"),
+        created=config.get("created"),
+        config=config.get("config"),
+        rootfs_type=rootfs.get("type"),
+        rootfs_layers=rootfs.get("diff_ids"),
+    )
+
+
+def image_content_descriptor_from_inspect(
+    image: dict[str, Any],
+) -> tuple[dict[str, Any], str]:
+    rootfs = image.get("RootFS") if isinstance(image, dict) else None
+    if not isinstance(rootfs, dict):
+        raise FinlandStageError("Docker inspect rootfs metadata is invalid")
+    return _content_descriptor(
+        architecture=image.get("Architecture"),
+        operating_system=image.get("Os"),
+        created=image.get("Created"),
+        config=image.get("Config"),
+        rootfs_type=rootfs.get("Type"),
+        rootfs_layers=rootfs.get("Layers"),
+    )
+
+
+def canonical_paths(
+    operation_id: str,
+    release_sha: str,
+    role: str,
+) -> dict[str, Path | str]:
+    operation_id = _canonical_uuid4(operation_id, label="operation_id")
+    if not isinstance(release_sha, str) or SHA40_RE.fullmatch(release_sha) is None:
+        raise FinlandStageError("release_sha is invalid")
+    if role not in STAGE_ROLES:
+        raise FinlandStageError("role is not a Finland Docker role")
+    role_path = ROLE_PATHS[role]
+    project_root = PROJECT_ROOT_PREFIX / operation_id
+    secret_role_root = SECRET_ROOT_PREFIX / operation_id / role_path
+    return {
+        "project_name": (
+            f"tb3p-{operation_id.replace('-', '')}-{role_path}"
+        ),
+        "project_root": project_root,
+        "release_root": project_root / "releases" / release_sha,
+        "incoming_root": project_root / "incoming" / role_path,
+        "secret_role_root": secret_role_root,
+        "agent": project_root / "incoming" / role_path / AGENT_FILENAME,
+        "manifest": project_root / "incoming" / role_path / MANIFEST_FILENAME,
+        "secret_manifest": secret_role_root / MANIFEST_FILENAME,
+        "attestation": secret_role_root / ATTESTATION_FILENAME,
+        "journal": secret_role_root / JOURNAL_FILENAME,
+        "lock": secret_role_root / LOCK_FILENAME,
+    }
+
+
+def validate_manifest(document: dict[str, Any]) -> dict[str, Any]:
+    if set(document) != MANIFEST_FIELDS:
+        raise FinlandStageError("stage manifest fields are not exact")
+    if document["schema"] != MANIFEST_SCHEMA:
+        raise FinlandStageError("stage manifest schema is invalid")
+    operation_id = _canonical_uuid4(document["operation_id"], label="operation_id")
+    release_sha = document["release_sha"]
+    release_tree_sha = document["release_tree_sha"]
+    role = document["role"]
+    if (
+        not isinstance(release_sha, str)
+        or SHA40_RE.fullmatch(release_sha) is None
+        or not isinstance(release_tree_sha, str)
+        or SHA40_RE.fullmatch(release_tree_sha) is None
+    ):
+        raise FinlandStageError("release commit or tree identity is invalid")
+    paths = canonical_paths(operation_id, release_sha, role)
+    for field in (
+        "project_name",
+        "project_root",
+        "release_root",
+        "incoming_root",
+        "secret_role_root",
+    ):
+        expected = str(paths[field]) if isinstance(paths[field], Path) else paths[field]
+        if document[field] != expected:
+            raise FinlandStageError(f"{field} differs from its canonical value")
+    _nonzero_sha256(document["bootstrap_sha256"], label="bootstrap_sha256")
+    if (
+        document["postgres_runtime_uid"] != POSTGRES_RUNTIME_UID
+        or document["postgres_runtime_gid"] != POSTGRES_RUNTIME_GID
+    ):
+        raise FinlandStageError("PostgreSQL runtime UID/GID must be 70")
+    if document["pull_policy"] != "never":
+        raise FinlandStageError("stage manifest pull policy must be never")
+
+    artifacts = document["artifacts"]
+    if not isinstance(artifacts, dict) or set(artifacts) != set(ARTIFACT_KINDS):
+        raise FinlandStageError("stage artifact kinds are not exact")
+    for kind in ARTIFACT_KINDS:
+        row = artifacts[kind]
+        if not isinstance(row, dict) or set(row) != ARTIFACT_FIELDS:
+            raise FinlandStageError(f"artifact {kind} fields are not exact")
+        if (
+            row["kind"] != kind
+            or row["filename"] != ARTIFACT_FILENAMES[kind]
+            or row["format"] != ARTIFACT_FORMATS[kind]
+        ):
+            raise FinlandStageError(f"artifact {kind} identity is not canonical")
+        _nonzero_sha256(row["sha256"], label=f"artifact {kind} sha256")
+        _bounded_size(
+            row["bytes"],
+            label=f"artifact {kind} bytes",
+            maximum=MAX_ARTIFACT_BYTES,
+        )
+    if len({artifacts[kind]["sha256"] for kind in ARTIFACT_KINDS}) != len(
+        ARTIFACT_KINDS
+    ):
+        raise FinlandStageError("artifact SHA-256 values must be distinct")
+
+    image_artifacts = document["image_artifacts"]
+    if (
+        not isinstance(image_artifacts, dict)
+        or set(image_artifacts) != set(IMAGE_ROLES)
+    ):
+        raise FinlandStageError("image artifact roles are not exact")
+    for role_name in IMAGE_ROLES:
+        row = image_artifacts[role_name]
+        if not isinstance(row, dict) or set(row) != IMAGE_ARTIFACT_FIELDS:
+            raise FinlandStageError(
+                f"image artifact {role_name} fields are not exact"
+            )
+        _nonzero_sha256(
+            row["archive_sha256"],
+            label=f"image artifact {role_name} archive_sha256",
+        )
+        _bounded_size(
+            row["archive_bytes"],
+            label=f"image artifact {role_name} archive_bytes",
+            maximum=MAX_ARTIFACT_BYTES,
+        )
+        for field in ("config_digest", "content_identity"):
+            value = row[field]
+            if (
+                not isinstance(value, str)
+                or IMAGE_ID_RE.fullmatch(value) is None
+                or value == "sha256:" + ZERO_SHA256
+            ):
+                raise FinlandStageError(
+                    f"image artifact {role_name} {field} is invalid"
+                )
+        if verify_content_descriptor(row["content_descriptor"]) != row[
+            "content_identity"
+        ]:
+            raise FinlandStageError(
+                f"image artifact {role_name} content identity differs"
+            )
+        artifact_kind = f"{role_name}-image-archive"
+        if (
+            artifacts[artifact_kind]["sha256"] != row["archive_sha256"]
+            or artifacts[artifact_kind]["bytes"] != row["archive_bytes"]
+        ):
+            raise FinlandStageError(
+                f"image artifact {role_name} differs from artifact inventory"
+            )
+    for field in ("archive_sha256", "config_digest", "content_identity"):
+        if len(
+            {image_artifacts[role_name][field] for role_name in IMAGE_ROLES}
+        ) != len(IMAGE_ROLES):
+            raise FinlandStageError(f"all four image {field} values must be distinct")
+    return document
+
+
+def load_manifest_bytes(
+    raw: bytes,
+    *,
+    expected_sha256: str | None = None,
+) -> tuple[dict[str, Any], str]:
+    if not 1 <= len(raw) <= MAX_MANIFEST_BYTES:
+        raise FinlandStageError("stage manifest is empty or oversized")
+    digest = hashlib.sha256(raw).hexdigest()
+    if expected_sha256 is not None and digest != _nonzero_sha256(
+        expected_sha256, label="operation_manifest_sha256"
+    ):
+        raise FinlandStageError("stage manifest SHA-256 differs")
+    document = validate_manifest(_strict_json(raw, label="stage manifest"))
+    if raw != canonical_json(document):
+        raise FinlandStageError("stage manifest bytes are not canonical")
+    return document, digest
+
+
+def _decode_request(
+    encoded: str,
+    *,
+    bootstrap: bool,
+) -> dict[str, Any]:
+    if (
+        not isinstance(encoded, str)
+        or not encoded
+        or len(encoded) > 64 * 1024
+        or re.fullmatch(r"[A-Za-z0-9_-]+", encoded) is None
+    ):
+        raise FinlandStageError("request encoding is invalid")
+    try:
+        padding = "=" * (-len(encoded) % 4)
+        raw = base64.b64decode(
+            encoded + padding,
+            altchars=b"-_",
+            validate=True,
+        )
+    except (ValueError, binascii.Error) as exc:
+        raise FinlandStageError("request encoding is invalid") from exc
+    document = _strict_json(raw, label="stage request")
+    if raw != canonical_json(document):
+        raise FinlandStageError("stage request bytes are not canonical")
+    expected_fields = (
+        BOOTSTRAP_REQUEST_FIELDS if bootstrap else REQUEST_FIELDS
+    )
+    if set(document) != expected_fields:
+        raise FinlandStageError("stage request fields are not exact")
+    expected_schema = BOOTSTRAP_REQUEST_SCHEMA if bootstrap else REQUEST_SCHEMA
+    expected_action = "install-bootstrap" if bootstrap else "stage"
+    if (
+        document["schema"] != expected_schema
+        or document["action"] != expected_action
+    ):
+        raise FinlandStageError("stage request operation is invalid")
+    _canonical_uuid4(document["operation_id"], label="operation_id")
+    if document["role"] not in STAGE_ROLES:
+        raise FinlandStageError("stage request role is invalid")
+    _nonzero_sha256(document["agent_sha256"], label="agent_sha256")
+    if not bootstrap:
+        if (
+            not isinstance(document["release_sha"], str)
+            or SHA40_RE.fullmatch(document["release_sha"]) is None
+            or not isinstance(document["release_tree_sha"], str)
+            or SHA40_RE.fullmatch(document["release_tree_sha"]) is None
+            or document["pull_policy"] != "never"
+        ):
+            raise FinlandStageError("stage request release or pull policy is invalid")
+        _nonzero_sha256(
+            document["operation_manifest_sha256"],
+            label="operation_manifest_sha256",
+        )
+    return document
+
+
+def encode_request(document: Mapping[str, Any]) -> str:
+    return base64.urlsafe_b64encode(canonical_json(document)).decode("ascii").rstrip(
+        "="
+    )
+
+
+@contextmanager
+def _private_umask() -> Iterator[None]:
+    previous = os.umask(0o077)
+    try:
+        yield
+    finally:
+        os.umask(previous)
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        os.fsync(descriptor)
+    except OSError as exc:
+        raise FinlandStageError("operation directory could not be synchronized") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _assert_directory(
+    path: Path,
+    *,
+    required_uid: int,
+    private: bool,
+) -> None:
+    try:
+        metadata = path.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise FinlandStageError("operation directory is unavailable") from exc
+    mode = stat.S_IMODE(metadata.st_mode)
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != required_uid
+        or (private and mode != 0o700)
+        or (not private and mode & 0o022)
+    ):
+        raise FinlandStageError("operation directory ownership or mode is unsafe")
+
+
+def _ensure_private_directory(path: Path, *, required_uid: int) -> None:
+    if path.exists() or path.is_symlink():
+        _assert_directory(path, required_uid=required_uid, private=True)
+        return
+    try:
+        with _private_umask():
+            path.mkdir(mode=0o700)
+        _fsync_directory(path.parent)
+    except OSError as exc:
+        raise FinlandStageError("operation directory could not be created") from exc
+    _assert_directory(path, required_uid=required_uid, private=True)
+
+
+def ensure_operation_directories(
+    operation_id: str,
+    release_sha: str,
+    role: str,
+    *,
+    required_uid: int = 0,
+) -> dict[str, Path | str]:
+    paths = canonical_paths(operation_id, release_sha, role)
+    _assert_directory(
+        PROJECT_ROOT_PREFIX,
+        required_uid=required_uid,
+        private=False,
+    )
+    _ensure_private_directory(
+        paths["project_root"],  # type: ignore[arg-type]
+        required_uid=required_uid,
+    )
+    _ensure_private_directory(
+        paths["project_root"] / "releases",  # type: ignore[operator]
+        required_uid=required_uid,
+    )
+    _ensure_private_directory(
+        paths["project_root"] / "incoming",  # type: ignore[operator]
+        required_uid=required_uid,
+    )
+    _ensure_private_directory(
+        paths["incoming_root"],  # type: ignore[arg-type]
+        required_uid=required_uid,
+    )
+    _assert_directory(
+        SECRET_ROOT_PREFIX,
+        required_uid=required_uid,
+        private=False,
+    )
+    secret_operation = SECRET_ROOT_PREFIX / operation_id
+    _ensure_private_directory(secret_operation, required_uid=required_uid)
+    _ensure_private_directory(
+        paths["secret_role_root"],  # type: ignore[arg-type]
+        required_uid=required_uid,
+    )
+    return paths
+
+
+def observe_local_ipv4_addresses() -> set[str]:
+    addresses: set[str] = set()
+    try:
+        interfaces = socket.if_nameindex()
+        handle = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    except OSError as exc:
+        raise FinlandStageError(
+            "cannot inspect local host network identity"
+        ) from exc
+    try:
+        for _, name in interfaces:
+            try:
+                packed = struct.pack("256s", name.encode("ascii")[:15])
+                result = fcntl.ioctl(handle.fileno(), 0x8915, packed)
+            except (OSError, UnicodeEncodeError):
+                continue
+            addresses.add(socket.inet_ntoa(result[20:24]))
+    finally:
+        handle.close()
+    if not addresses:
+        raise FinlandStageError("local host has no observable IPv4 identity")
+    return addresses
+
+
+def _verify_role_host(
+    role: str,
+    *,
+    observed_host_addresses: set[str] | None,
+) -> None:
+    addresses = (
+        observe_local_ipv4_addresses()
+        if observed_host_addresses is None
+        else set(observed_host_addresses)
+    )
+    if ROLE_HOSTS[role] not in addresses:
+        raise FinlandStageError(
+            "local host identity differs from the manifest-bound Finland role"
+        )
+
+
+@contextmanager
+def _held_file(
+    path: Path,
+    *,
+    required_uid: int,
+    expected_mode: int,
+    maximum: int,
+    allow_two_links: bool = False,
+) -> Iterator[tuple[BinaryIO, os.stat_result]]:
+    descriptor = -1
+    stream: BinaryIO | None = None
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        before = os.fstat(descriptor)
+        allowed_links = {1, 2} if allow_two_links else {1}
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != required_uid
+            or stat.S_IMODE(before.st_mode) != expected_mode
+            or before.st_nlink not in allowed_links
+            or not 1 <= before.st_size <= maximum
+        ):
+            raise FinlandStageError("operation file ownership or mode is unsafe")
+        stream = os.fdopen(descriptor, "rb", closefd=True)
+        descriptor = -1
+        yield stream, before
+        after = os.fstat(stream.fileno())
+        stable = (
+            "st_dev",
+            "st_ino",
+            "st_mode",
+            "st_uid",
+            "st_gid",
+            "st_nlink",
+            "st_size",
+            "st_mtime_ns",
+        )
+        if any(getattr(before, field) != getattr(after, field) for field in stable):
+            raise FinlandStageError("operation file changed while being read")
+    except FinlandStageError:
+        raise
+    except OSError as exc:
+        raise FinlandStageError("operation file could not be read safely") from exc
+    finally:
+        if stream is not None:
+            stream.close()
+        elif descriptor >= 0:
+            os.close(descriptor)
+
+
+def hash_secure_file(
+    path: Path,
+    *,
+    required_uid: int,
+    expected_mode: int,
+    maximum: int,
+    allow_two_links: bool = False,
+) -> tuple[str, int]:
+    with _held_file(
+        path,
+        required_uid=required_uid,
+        expected_mode=expected_mode,
+        maximum=maximum,
+        allow_two_links=allow_two_links,
+    ) as (stream, before):
+        digest = hashlib.sha256()
+        size = 0
+        while chunk := stream.read(1024 * 1024):
+            size += len(chunk)
+            if size > maximum:
+                raise FinlandStageError("operation file exceeds its size bound")
+            digest.update(chunk)
+    return digest.hexdigest(), size
+
+
+def _read_secure_file(
+    path: Path,
+    *,
+    required_uid: int,
+    expected_mode: int,
+    maximum: int,
+    allow_two_links: bool = False,
+) -> bytes:
+    with _held_file(
+        path,
+        required_uid=required_uid,
+        expected_mode=expected_mode,
+        maximum=maximum,
+        allow_two_links=allow_two_links,
+    ) as (stream, _before):
+        payload = stream.read(maximum + 1)
+    if not 1 <= len(payload) <= maximum:
+        raise FinlandStageError("operation file is empty or oversized")
+    return payload
+
+
+def transfer_partial_path(destination: Path) -> Path:
+    return destination.with_name(f".{destination.name}.transfer")
+
+
+def _publish_transfer_partial(
+    destination: Path,
+    *,
+    expected_sha256: str,
+    expected_bytes: int,
+    required_uid: int,
+    mode: int,
+) -> None:
+    partial = transfer_partial_path(destination)
+    if partial.exists() or partial.is_symlink():
+        try:
+            partial_metadata = partial.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise FinlandStageError("incoming transfer partial is unsafe") from exc
+        if (
+            not stat.S_ISREG(partial_metadata.st_mode)
+            or partial_metadata.st_uid != required_uid
+            or stat.S_IMODE(partial_metadata.st_mode) != mode
+            or partial_metadata.st_nlink not in {1, 2}
+            or not 1 <= partial_metadata.st_size <= expected_bytes
+        ):
+            raise FinlandStageError("incoming transfer partial is unsafe")
+        if partial_metadata.st_nlink == 2:
+            try:
+                destination_metadata = destination.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise FinlandStageError(
+                    "incoming transfer link identity is ambiguous"
+                ) from exc
+            if (
+                not stat.S_ISREG(destination_metadata.st_mode)
+                or partial_metadata.st_dev != destination_metadata.st_dev
+                or partial_metadata.st_ino != destination_metadata.st_ino
+            ):
+                raise FinlandStageError(
+                    "incoming transfer link identity is ambiguous"
+                )
+            partial.unlink()
+            _fsync_directory(destination.parent)
+    if destination.exists() or destination.is_symlink():
+        if hash_secure_file(
+            destination,
+            required_uid=required_uid,
+            expected_mode=mode,
+            maximum=max(expected_bytes, 1),
+        ) != (expected_sha256, expected_bytes):
+            raise FinlandStageError("create-only incoming destination differs")
+        if partial.exists() or partial.is_symlink():
+            if hash_secure_file(
+                partial,
+                required_uid=required_uid,
+                expected_mode=mode,
+                maximum=max(expected_bytes, 1),
+            ) != (expected_sha256, expected_bytes):
+                raise FinlandStageError("incoming transfer partial differs")
+            partial.unlink()
+            _fsync_directory(destination.parent)
+        return
+    if hash_secure_file(
+        partial,
+        required_uid=required_uid,
+        expected_mode=mode,
+        maximum=max(expected_bytes, 1),
+    ) != (expected_sha256, expected_bytes):
+        raise FinlandStageError("incoming transfer partial identity differs")
+    try:
+        os.link(partial, destination, follow_symlinks=False)
+        _fsync_directory(destination.parent)
+        partial.unlink()
+        _fsync_directory(destination.parent)
+    except FileExistsError as exc:
+        raise FinlandStageError("create-only incoming destination appeared") from exc
+    except OSError as exc:
+        raise FinlandStageError("incoming transfer could not be published") from exc
+    if hash_secure_file(
+        destination,
+        required_uid=required_uid,
+        expected_mode=mode,
+        maximum=max(expected_bytes, 1),
+    ) != (expected_sha256, expected_bytes):
+        raise FinlandStageError("published incoming file identity differs")
+
+
+def _write_create_only(
+    destination: Path,
+    payload: bytes,
+    *,
+    required_uid: int,
+    mode: int,
+    maximum: int,
+) -> str:
+    if not 1 <= len(payload) <= maximum:
+        raise FinlandStageError("create-only payload is empty or oversized")
+    expected = hashlib.sha256(payload).hexdigest()
+    temporary = destination.with_name(f".{destination.name}.materializing")
+    if temporary.exists() or temporary.is_symlink():
+        try:
+            temporary_metadata = temporary.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise FinlandStageError("create-only temporary is unsafe") from exc
+        if (
+            not stat.S_ISREG(temporary_metadata.st_mode)
+            or temporary_metadata.st_uid != required_uid
+            or stat.S_IMODE(temporary_metadata.st_mode) != mode
+            or temporary_metadata.st_nlink not in {1, 2}
+            or not 0 <= temporary_metadata.st_size <= maximum
+        ):
+            raise FinlandStageError("create-only temporary is unsafe")
+        if temporary_metadata.st_nlink == 2:
+            try:
+                destination_metadata = destination.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise FinlandStageError(
+                    "create-only temporary link identity is ambiguous"
+                ) from exc
+            if (
+                not stat.S_ISREG(destination_metadata.st_mode)
+                or temporary_metadata.st_dev != destination_metadata.st_dev
+                or temporary_metadata.st_ino != destination_metadata.st_ino
+            ):
+                raise FinlandStageError(
+                    "create-only temporary link identity is ambiguous"
+                )
+        temporary.unlink()
+        _fsync_directory(destination.parent)
+    if destination.exists() or destination.is_symlink():
+        if hash_secure_file(
+            destination,
+            required_uid=required_uid,
+            expected_mode=mode,
+            maximum=maximum,
+        ) != (expected, len(payload)):
+            raise FinlandStageError("create-only destination differs")
+        return expected
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            mode,
+        )
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise OSError("short create-only write")
+            view = view[written:]
+        os.fchmod(descriptor, mode)
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+        _publish_transfer_like_temporary(
+            temporary,
+            destination,
+            expected_sha256=expected,
+            expected_bytes=len(payload),
+            required_uid=required_uid,
+            mode=mode,
+            maximum=maximum,
+        )
+    except FinlandStageError:
+        raise
+    except OSError as exc:
+        raise FinlandStageError("create-only destination could not be written") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    return expected
+
+
+def _publish_transfer_like_temporary(
+    temporary: Path,
+    destination: Path,
+    *,
+    expected_sha256: str,
+    expected_bytes: int,
+    required_uid: int,
+    mode: int,
+    maximum: int,
+) -> None:
+    if hash_secure_file(
+        temporary,
+        required_uid=required_uid,
+        expected_mode=mode,
+        maximum=maximum,
+    ) != (expected_sha256, expected_bytes):
+        raise FinlandStageError("create-only temporary identity differs")
+    try:
+        os.link(temporary, destination, follow_symlinks=False)
+    except FileExistsError:
+        if hash_secure_file(
+            destination,
+            required_uid=required_uid,
+            expected_mode=mode,
+            maximum=maximum,
+        ) != (expected_sha256, expected_bytes):
+            raise FinlandStageError("create-only destination differs")
+    except OSError as exc:
+        raise FinlandStageError("create-only publication failed") from exc
+    _fsync_directory(destination.parent)
+    temporary.unlink()
+    _fsync_directory(destination.parent)
+
+
+def install_bootstrap(
+    request: Mapping[str, Any],
+    *,
+    executing_path: Path,
+    required_uid: int = 0,
+    observed_host_addresses: set[str] | None = None,
+) -> dict[str, Any]:
+    if os.geteuid() != required_uid or required_uid != 0:
+        raise FinlandStageError("Finland stage agent must run as root")
+    request = _decode_request(
+        encode_request(request),
+        bootstrap=True,
+    )
+    _verify_role_host(
+        str(request["role"]),
+        observed_host_addresses=observed_host_addresses,
+    )
+    paths = ensure_operation_directories(
+        str(request["operation_id"]),
+        "0" * 40,
+        str(request["role"]),
+        required_uid=required_uid,
+    )
+    # Bootstrap installation is independent of a release.  Replace the
+    # placeholder release-derived values with the exact incoming path.
+    incoming = (
+        PROJECT_ROOT_PREFIX
+        / str(request["operation_id"])
+        / "incoming"
+        / ROLE_PATHS[str(request["role"])]
+    )
+    destination = incoming / AGENT_FILENAME
+    expected_partial = transfer_partial_path(destination)
+    if executing_path != expected_partial:
+        raise FinlandStageError("bootstrap agent is not at its fixed transfer path")
+    expected_sha = _nonzero_sha256(
+        request["agent_sha256"], label="agent_sha256"
+    )
+    observed = hash_secure_file(
+        executing_path,
+        required_uid=required_uid,
+        expected_mode=0o700,
+        maximum=MAX_AGENT_BYTES,
+        allow_two_links=True,
+    )
+    if observed[0] != expected_sha:
+        raise FinlandStageError("bootstrap agent SHA-256 differs")
+    _publish_transfer_partial(
+        destination,
+        expected_sha256=expected_sha,
+        expected_bytes=observed[1],
+        required_uid=required_uid,
+        mode=0o700,
+    )
+    return {
+        "schema": VERSION_SCHEMA,
+        "version": AGENT_VERSION,
+        "agent_sha256": expected_sha,
+        "installed_path": str(destination),
+    }
+
+
+def _agent_version(
+    path: Path,
+    *,
+    expected_sha256: str,
+    required_uid: int,
+) -> dict[str, Any]:
+    observed, size = hash_secure_file(
+        path,
+        required_uid=required_uid,
+        expected_mode=0o700,
+        maximum=MAX_AGENT_BYTES,
+    )
+    if observed != _nonzero_sha256(expected_sha256, label="agent_sha256"):
+        raise FinlandStageError("stage agent SHA-256 differs")
+    return {
+        "schema": VERSION_SCHEMA,
+        "version": AGENT_VERSION,
+        "agent_sha256": observed,
+        "agent_bytes": size,
+    }
+
+
+def _run(
+    arguments: list[str],
+    *,
+    timeout: int,
+    env: Mapping[str, str],
+    runner: Runner,
+) -> bytes:
+    if (
+        not arguments
+        or any(not isinstance(token, str) or not token for token in arguments)
+        or arguments[0] not in {GIT, DOCKER}
+    ):
+        raise FinlandStageError("stage command is outside the executable allowlist")
+    lowered = [token.lower() for token in arguments]
+    if arguments[0] == DOCKER:
+        allowed = (
+            lowered[1:3] in (["image", "inspect"], ["image", "ls"], ["image", "load"])
+            and not any(
+                token
+                in {
+                    "build",
+                    "pull",
+                    "tag",
+                    "run",
+                    "create",
+                    "start",
+                    "stop",
+                    "compose",
+                    "service",
+                    "network",
+                    "volume",
+                    "rm",
+                    "rmi",
+                }
+                for token in lowered[1:]
+            )
+        )
+        if not allowed:
+            raise FinlandStageError("Docker command is outside stage/load boundary")
+    try:
+        completed = runner(
+            arguments,
+            input=None,
+            capture_output=True,
+            check=False,
+            timeout=timeout,
+            env=dict(env),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise FinlandStageError(
+            f"required command is unavailable: {Path(arguments[0]).name}"
+        ) from exc
+    if (
+        len(completed.stdout) > MAX_COMMAND_OUTPUT_BYTES
+        or len(completed.stderr) > MAX_COMMAND_OUTPUT_BYTES
+    ):
+        raise FinlandStageError("required command output exceeded its bound")
+    if completed.returncode != 0:
+        raise FinlandStageError(
+            f"required command failed closed: {Path(arguments[0]).name}"
+        )
+    return completed.stdout
+
+
+def _run_text(
+    arguments: list[str],
+    *,
+    timeout: int,
+    env: Mapping[str, str],
+    runner: Runner,
+) -> str:
+    try:
+        return _run(
+            arguments,
+            timeout=timeout,
+            env=env,
+            runner=runner,
+        ).decode("utf-8").strip()
+    except UnicodeDecodeError as exc:
+        raise FinlandStageError("required command returned non-UTF-8 output") from exc
+
+
+def _safe_archive_path(raw: Any, *, label: str) -> str:
+    if not isinstance(raw, str) or not raw or "\\" in raw or "\x00" in raw:
+        raise FinlandStageError(f"{label} is invalid")
+    path = PurePosixPath(raw)
+    if (
+        path.is_absolute()
+        or raw != path.as_posix()
+        or any(part in {"", ".", ".."} for part in path.parts)
+    ):
+        raise FinlandStageError(f"{label} is outside the archive")
+    return raw
+
+
+def _archive_members(archive: tarfile.TarFile) -> dict[str, tarfile.TarInfo]:
+    regular: dict[str, tarfile.TarInfo] = {}
+    names: set[str] = set()
+    expanded = 0
+    for count, member in enumerate(archive, 1):
+        if count > MAX_ARCHIVE_MEMBERS:
+            raise FinlandStageError("Docker archive has too many members")
+        name = _safe_archive_path(
+            member.name.rstrip("/"),
+            label="Docker archive member",
+        )
+        if name in names:
+            raise FinlandStageError("Docker archive contains a duplicate member")
+        names.add(name)
+        if member.isdir():
+            if member.size != 0:
+                raise FinlandStageError("Docker archive directory contains data")
+            continue
+        if not member.isreg():
+            raise FinlandStageError(
+                "Docker archive contains a link, sparse, or special member"
+            )
+        if member.size < 0 or member.size > MAX_ARTIFACT_BYTES:
+            raise FinlandStageError("Docker archive member size is invalid")
+        expanded += member.size
+        if expanded > MAX_ARTIFACT_BYTES:
+            raise FinlandStageError("Docker archive expanded size is oversized")
+        regular[name] = member
+    if not names:
+        raise FinlandStageError("Docker archive is empty")
+    return regular
+
+
+def _read_archive_member(
+    archive: tarfile.TarFile,
+    member: tarfile.TarInfo,
+    *,
+    maximum: int,
+    label: str,
+) -> bytes:
+    if not 1 <= member.size <= maximum:
+        raise FinlandStageError(f"{label} is empty or oversized")
+    source = archive.extractfile(member)
+    if source is None:
+        raise FinlandStageError(f"{label} is unreadable")
+    try:
+        payload = source.read(maximum + 1)
+    finally:
+        source.close()
+    if len(payload) != member.size:
+        raise FinlandStageError(f"{label} size differs")
+    return payload
+
+
+def verify_image_archive(
+    path: Path,
+    *,
+    image_role: str,
+    release_sha: str,
+    expected: Mapping[str, Any],
+    required_uid: int = 0,
+) -> dict[str, Any]:
+    expected_digest = _nonzero_sha256(
+        expected["archive_sha256"],
+        label=f"{image_role} archive SHA-256",
+    )
+    expected_bytes = _bounded_size(
+        expected["archive_bytes"],
+        label=f"{image_role} archive bytes",
+        maximum=MAX_ARTIFACT_BYTES,
+    )
+    observed = hash_secure_file(
+        path,
+        required_uid=required_uid,
+        expected_mode=0o600,
+        maximum=MAX_ARTIFACT_BYTES,
+    )
+    if observed != (expected_digest, expected_bytes):
+        raise FinlandStageError(f"{image_role} archive identity differs")
+    try:
+        with _held_file(
+            path,
+            required_uid=required_uid,
+            expected_mode=0o600,
+            maximum=MAX_ARTIFACT_BYTES,
+        ) as (stream, _before):
+            with tarfile.open(fileobj=stream, mode="r:") as archive:
+                regular = _archive_members(archive)
+                manifest_member = regular.get("manifest.json")
+                if manifest_member is None:
+                    raise FinlandStageError("Docker archive manifest is missing")
+                manifest_raw = _read_archive_member(
+                    archive,
+                    manifest_member,
+                    maximum=MAX_ARCHIVE_MANIFEST_BYTES,
+                    label="Docker archive manifest",
+                )
+                manifest = json.loads(
+                    manifest_raw.decode("utf-8"),
+                    object_pairs_hook=_strict_object,
+                )
+                if not isinstance(manifest, list) or len(manifest) != 1:
+                    raise FinlandStageError(
+                        "Docker archive must contain exactly one image"
+                    )
+                entry = manifest[0]
+                if (
+                    not isinstance(entry, dict)
+                    or set(entry) - {"Config", "RepoTags", "Layers", "LayerSources"}
+                    or not {"Config", "Layers"} <= set(entry)
+                    or not isinstance(entry["Config"], str)
+                    or not isinstance(entry["Layers"], list)
+                    or not entry["Layers"]
+                    or any(not isinstance(layer, str) for layer in entry["Layers"])
+                    or len(entry["Layers"]) != len(set(entry["Layers"]))
+                    or (
+                        "LayerSources" in entry
+                        and not isinstance(entry["LayerSources"], dict)
+                    )
+                ):
+                    raise FinlandStageError(
+                        "Docker archive manifest entry is invalid"
+                    )
+                if entry.get("RepoTags") not in (None, []):
+                    raise FinlandStageError("Docker archive must be tagless")
+                if "repositories" in regular:
+                    raise FinlandStageError(
+                        "Docker archive contains a legacy tag repository"
+                    )
+                config_name = _safe_archive_path(
+                    entry["Config"], label="Docker archive config path"
+                )
+                config_member = regular.get(config_name)
+                if config_member is None:
+                    raise FinlandStageError("Docker archive config is missing")
+                config_raw = _read_archive_member(
+                    archive,
+                    config_member,
+                    maximum=MAX_ARCHIVE_CONFIG_BYTES,
+                    label="Docker archive config",
+                )
+                layer_names = [
+                    _safe_archive_path(
+                        layer,
+                        label="Docker archive layer path",
+                    )
+                    for layer in entry["Layers"]
+                ]
+                if config_name in layer_names or "manifest.json" in layer_names:
+                    raise FinlandStageError("Docker archive member roles overlap")
+                if any(layer not in regular for layer in layer_names):
+                    raise FinlandStageError("Docker archive layer is missing")
+                config = json.loads(
+                    config_raw.decode("utf-8"),
+                    object_pairs_hook=_strict_object,
+                )
+    except FinlandStageError:
+        raise
+    except (
+        OSError,
+        UnicodeError,
+        ValueError,
+        json.JSONDecodeError,
+        tarfile.TarError,
+    ) as exc:
+        raise FinlandStageError("Docker archive validation failed") from exc
+    if not isinstance(config, dict):
+        raise FinlandStageError("Docker archive config is invalid")
+    config_digest = "sha256:" + hashlib.sha256(config_raw).hexdigest()
+    if config_name != f"{config_digest.removeprefix('sha256:')}.json":
+        raise FinlandStageError("Docker archive config path differs from its digest")
+    descriptor, content_identity = image_content_descriptor_from_archive(config)
+    labels_parent = config.get("config")
+    labels = (
+        labels_parent.get("Labels") if isinstance(labels_parent, dict) else None
+    )
+    if image_role in RELEASE_BOUND_IMAGE_ROLES and (
+        not isinstance(labels, dict)
+        or labels.get("org.opencontainers.image.revision") != release_sha
+    ):
+        raise FinlandStageError(
+            f"{image_role} archive lacks the exact release label"
+        )
+    if image_role == "postgres" and (
+        not isinstance(labels, dict)
+        or labels.get(POSTGRES_RUNTIME_UID_LABEL) != str(POSTGRES_RUNTIME_UID)
+        or labels.get(POSTGRES_RUNTIME_GID_LABEL) != str(POSTGRES_RUNTIME_GID)
+    ):
+        raise FinlandStageError(
+            "postgres archive lacks exact runtime UID/GID labels"
+        )
+    if (
+        config_digest != expected["config_digest"]
+        or descriptor != expected["content_descriptor"]
+        or content_identity != expected["content_identity"]
+    ):
+        raise FinlandStageError(
+            f"{image_role} archive semantic descriptor differs"
+        )
+    return {
+        "archive_sha256": observed[0],
+        "archive_bytes": observed[1],
+        "config_digest": config_digest,
+        "content_descriptor": descriptor,
+        "content_identity": content_identity,
+    }
+
+
+def _verify_release_bundle(
+    bundle: Path,
+    *,
+    release_sha: str,
+    expected_sha256: str,
+    expected_bytes: int,
+    required_uid: int,
+    runner: Runner,
+) -> None:
+    observed = hash_secure_file(
+        bundle,
+        required_uid=required_uid,
+        expected_mode=0o600,
+        maximum=MAX_ARTIFACT_BYTES,
+    )
+    if observed != (expected_sha256, expected_bytes):
+        raise FinlandStageError("release bundle identity differs")
+    heads = _run_text(
+        [GIT, "bundle", "list-heads", str(bundle)],
+        timeout=60,
+        env=SAFE_GIT_ENV,
+        runner=runner,
+    ).splitlines()
+    if heads != [f"{release_sha} HEAD"]:
+        raise FinlandStageError("Git bundle does not contain only the exact release")
+
+
+def _verify_materialized_release(
+    release_root: Path,
+    *,
+    bundle: Path,
+    release_sha: str,
+    release_tree_sha: str,
+    required_uid: int,
+    runner: Runner,
+) -> None:
+    _assert_directory(release_root, required_uid=required_uid, private=True)
+    try:
+        git_metadata = (release_root / ".git").stat(follow_symlinks=False)
+    except OSError as exc:
+        raise FinlandStageError("materialized release Git directory is unavailable") from exc
+    if not stat.S_ISDIR(git_metadata.st_mode):
+        raise FinlandStageError("materialized release Git layout is unsafe")
+    observed = {
+        "root": _run_text(
+            [GIT, "-C", str(release_root), "rev-parse", "--show-toplevel"],
+            timeout=30,
+            env=SAFE_GIT_ENV,
+            runner=runner,
+        ),
+        "head": _run_text(
+            [GIT, "-C", str(release_root), "rev-parse", "HEAD"],
+            timeout=30,
+            env=SAFE_GIT_ENV,
+            runner=runner,
+        ),
+        "tree": _run_text(
+            [GIT, "-C", str(release_root), "rev-parse", "HEAD^{tree}"],
+            timeout=30,
+            env=SAFE_GIT_ENV,
+            runner=runner,
+        ),
+        "branch": _run_text(
+            [GIT, "-C", str(release_root), "rev-parse", "--abbrev-ref", "HEAD"],
+            timeout=30,
+            env=SAFE_GIT_ENV,
+            runner=runner,
+        ),
+        "status": _run_text(
+            [
+                GIT,
+                "-C",
+                str(release_root),
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+            ],
+            timeout=30,
+            env=SAFE_GIT_ENV,
+            runner=runner,
+        ),
+        "remotes": _run_text(
+            [GIT, "-C", str(release_root), "remote"],
+            timeout=30,
+            env=SAFE_GIT_ENV,
+            runner=runner,
+        ),
+    }
+    if (
+        observed["root"] != str(release_root)
+        or observed["head"] != release_sha
+        or observed["tree"] != release_tree_sha
+        or observed["branch"] != "HEAD"
+        or observed["status"]
+        or observed["remotes"]
+    ):
+        raise FinlandStageError(
+            "release is not exact, detached, clean, and remote-free"
+        )
+    _run(
+        [GIT, "-C", str(release_root), "bundle", "verify", str(bundle)],
+        timeout=120,
+        env=SAFE_GIT_ENV,
+        runner=runner,
+    )
+
+
+def _materialize_release(
+    bundle: Path,
+    release_root: Path,
+    *,
+    release_sha: str,
+    release_tree_sha: str,
+    required_uid: int,
+    runner: Runner,
+) -> None:
+    if not release_root.exists() and not release_root.is_symlink():
+        with _private_umask():
+            _run(
+                [
+                    GIT,
+                    "-c",
+                    "core.hooksPath=/dev/null",
+                    "clone",
+                    "--no-checkout",
+                    "--no-hardlinks",
+                    str(bundle),
+                    str(release_root),
+                ],
+                timeout=300,
+                env=SAFE_GIT_ENV,
+                runner=runner,
+            )
+        try:
+            release_root.chmod(0o700)
+        except OSError as exc:
+            raise FinlandStageError("release root permissions could not be fixed") from exc
+        _fsync_directory(release_root.parent)
+    _assert_directory(release_root, required_uid=required_uid, private=True)
+    remotes = _run_text(
+        [GIT, "-C", str(release_root), "remote"],
+        timeout=30,
+        env=SAFE_GIT_ENV,
+        runner=runner,
+    ).splitlines()
+    if any(remote != "origin" for remote in remotes):
+        raise FinlandStageError("materialized release has an unexpected remote")
+    if remotes == ["origin"]:
+        _run(
+            [GIT, "-C", str(release_root), "remote", "remove", "origin"],
+            timeout=30,
+            env=SAFE_GIT_ENV,
+            runner=runner,
+        )
+    _run(
+        [
+            GIT,
+            "-C",
+            str(release_root),
+            "-c",
+            "core.hooksPath=/dev/null",
+            "checkout",
+            "--detach",
+            release_sha,
+        ],
+        timeout=300,
+        env=SAFE_GIT_ENV,
+        runner=runner,
+    )
+    _run(
+        [
+            GIT,
+            "-C",
+            str(release_root),
+            "config",
+            "--local",
+            "core.hooksPath",
+            "/dev/null",
+        ],
+        timeout=30,
+        env=SAFE_GIT_ENV,
+        runner=runner,
+    )
+    _verify_materialized_release(
+        release_root,
+        bundle=bundle,
+        release_sha=release_sha,
+        release_tree_sha=release_tree_sha,
+        required_uid=required_uid,
+        runner=runner,
+    )
+
+
+def _docker_image_ids(*, runner: Runner) -> list[str]:
+    raw = _run_text(
+        [DOCKER, "image", "ls", "--all", "--no-trunc", "--quiet"],
+        timeout=60,
+        env=SAFE_ENV,
+        runner=runner,
+    )
+    values = sorted(set(raw.splitlines())) if raw else []
+    if any(IMAGE_ID_RE.fullmatch(value) is None for value in values):
+        raise FinlandStageError("Docker image inventory returned an invalid ID")
+    return values
+
+
+def _inspect_image_raw(image_id: str, *, runner: Runner) -> dict[str, Any]:
+    if IMAGE_ID_RE.fullmatch(image_id) is None:
+        raise FinlandStageError("runtime image ID is invalid")
+    raw = _run_text(
+        [DOCKER, "image", "inspect", image_id],
+        timeout=60,
+        env=SAFE_ENV,
+        runner=runner,
+    )
+    try:
+        document = json.loads(raw, object_pairs_hook=_strict_object)
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise FinlandStageError("Docker image inspect returned invalid JSON") from exc
+    if (
+        not isinstance(document, list)
+        or len(document) != 1
+        or not isinstance(document[0], dict)
+        or document[0].get("Id") != image_id
+    ):
+        raise FinlandStageError("Docker image inspect identity is ambiguous")
+    return document[0]
+
+
+def _runtime_semantic_matches(
+    expected: Mapping[str, Any],
+    *,
+    runner: Runner,
+) -> list[str]:
+    matches: list[str] = []
+    for image_id in _docker_image_ids(runner=runner):
+        image = _inspect_image_raw(image_id, runner=runner)
+        try:
+            descriptor, identity = image_content_descriptor_from_inspect(image)
+        except FinlandStageError:
+            continue
+        if (
+            descriptor == expected["content_descriptor"]
+            and identity == expected["content_identity"]
+        ):
+            matches.append(image_id)
+    return matches
+
+
+def _verify_runtime_image(
+    image_id: str,
+    *,
+    image_role: str,
+    expected: Mapping[str, Any],
+    release_sha: str,
+    runner: Runner,
+) -> dict[str, Any]:
+    image = _inspect_image_raw(image_id, runner=runner)
+    descriptor, identity = image_content_descriptor_from_inspect(image)
+    config = image.get("Config")
+    labels = config.get("Labels") if isinstance(config, dict) else None
+    if (
+        descriptor != expected["content_descriptor"]
+        or identity != expected["content_identity"]
+    ):
+        raise FinlandStageError(
+            f"loaded {image_role} image semantic descriptor differs"
+        )
+    if image_role in RELEASE_BOUND_IMAGE_ROLES and (
+        not isinstance(labels, dict)
+        or labels.get("org.opencontainers.image.revision") != release_sha
+    ):
+        raise FinlandStageError(f"loaded {image_role} release label differs")
+    if image_role == "postgres" and (
+        not isinstance(labels, dict)
+        or labels.get(POSTGRES_RUNTIME_UID_LABEL) != str(POSTGRES_RUNTIME_UID)
+        or labels.get(POSTGRES_RUNTIME_GID_LABEL) != str(POSTGRES_RUNTIME_GID)
+    ):
+        raise FinlandStageError(
+            "loaded postgres runtime UID/GID labels differ"
+        )
+    return {
+        "role": image_role,
+        "runtime_image_id": image_id,
+        "config_digest": expected["config_digest"],
+        "content_descriptor": descriptor,
+        "content_identity": identity,
+        "source": "docker-load",
+    }
+
+
+def _state_sha256(journal: Mapping[str, Any]) -> str:
+    return hashlib.sha256(
+        canonical_json(
+            {key: value for key, value in journal.items() if key != "state_sha256"}
+        )
+    ).hexdigest()
+
+
+def _append_event(
+    journal: dict[str, Any],
+    *,
+    kind: str,
+    phase: str | None,
+) -> None:
+    event = {
+        "sequence": len(journal["events"]) + 1,
+        "kind": kind,
+        "phase": phase,
+        "previous_event_sha256": journal["event_tail_sha256"],
+    }
+    event["event_sha256"] = hashlib.sha256(canonical_json(event)).hexdigest()
+    journal["events"].append(event)
+    journal["event_tail_sha256"] = event["event_sha256"]
+
+
+def _validate_journal(journal: Any) -> dict[str, Any]:
+    if not isinstance(journal, dict) or set(journal) != JOURNAL_FIELDS:
+        raise FinlandStageError("stage journal fields are not exact")
+    if (
+        journal["schema"] != JOURNAL_SCHEMA
+        or journal["status"] not in {"active", "complete"}
+        or journal["state_sha256"] != _state_sha256(journal)
+    ):
+        raise FinlandStageError("stage journal state hash is invalid")
+    _canonical_uuid4(journal["operation_id"], label="journal operation_id")
+    if (
+        SHA40_RE.fullmatch(str(journal["release_sha"])) is None
+        or SHA40_RE.fullmatch(str(journal["release_tree_sha"])) is None
+        or journal["role"] not in STAGE_ROLES
+    ):
+        raise FinlandStageError("stage journal identity is invalid")
+    _nonzero_sha256(
+        journal["operation_manifest_sha256"],
+        label="journal operation manifest",
+    )
+    completed = journal["completed_phases"]
+    current = journal["current_phase"]
+    if (
+        not isinstance(completed, list)
+        or completed != list(PHASES[: len(completed)])
+        or current
+        not in (
+            {None}
+            if len(completed) == len(PHASES)
+            else {None, PHASES[len(completed)]}
+        )
+        or (journal["status"] == "complete") != (completed == list(PHASES))
+    ):
+        raise FinlandStageError("stage journal phase prefix is invalid")
+    for field in (
+        "archive_evidence",
+        "load_intents",
+        "runtime_image_ids",
+        "images",
+    ):
+        if not isinstance(journal[field], dict):
+            raise FinlandStageError(f"stage journal {field} is invalid")
+    if not set(journal["archive_evidence"]) <= set(IMAGE_ROLES):
+        raise FinlandStageError("stage journal archive evidence is invalid")
+    if not set(journal["load_intents"]) <= set(IMAGE_ROLES):
+        raise FinlandStageError("stage journal load intent is invalid")
+    if not set(journal["runtime_image_ids"]) <= set(IMAGE_ROLES):
+        raise FinlandStageError("stage journal runtime image inventory is invalid")
+    if set(journal["images"]) != set(journal["runtime_image_ids"]):
+        raise FinlandStageError("stage journal image evidence differs")
+    if any(
+        IMAGE_ID_RE.fullmatch(value) is None
+        for value in journal["runtime_image_ids"].values()
+    ):
+        raise FinlandStageError("stage journal runtime image ID is invalid")
+    events = journal["events"]
+    if not isinstance(events, list) or not events:
+        raise FinlandStageError("stage journal event chain is empty")
+    previous = ZERO_SHA256
+    for index, event in enumerate(events, 1):
+        if (
+            not isinstance(event, dict)
+            or set(event)
+            != {
+                "sequence",
+                "kind",
+                "phase",
+                "previous_event_sha256",
+                "event_sha256",
+            }
+        ):
+            raise FinlandStageError("stage journal event fields are invalid")
+        expected = hashlib.sha256(
+            canonical_json(
+                {key: value for key, value in event.items() if key != "event_sha256"}
+            )
+        ).hexdigest()
+        if (
+            event["sequence"] != index
+            or event["previous_event_sha256"] != previous
+            or event["event_sha256"] != expected
+        ):
+            raise FinlandStageError("stage journal event chain is invalid")
+        previous = event["event_sha256"]
+    if journal["event_tail_sha256"] != previous:
+        raise FinlandStageError("stage journal event tail differs")
+    return journal
+
+
+def _journal_temporary(path: Path) -> Path:
+    return path.with_name(
+        f".{path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp"
+    )
+
+
+def _reconcile_journal_temporaries(
+    path: Path,
+    *,
+    required_uid: int,
+) -> None:
+    pattern = re.compile(
+        rf"^\.{re.escape(path.name)}\.[1-9][0-9]*\.[0-9a-f]{{16}}\.tmp$"
+    )
+    try:
+        candidates = [
+            path.parent / entry.name
+            for entry in os.scandir(path.parent)
+            if pattern.fullmatch(entry.name)
+        ]
+    except OSError as exc:
+        raise FinlandStageError(
+            "stage journal temporary inventory is unavailable"
+        ) from exc
+    if len(candidates) > 64:
+        raise FinlandStageError("stage journal temporary inventory is excessive")
+    changed = False
+    for candidate in candidates:
+        try:
+            metadata = candidate.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise FinlandStageError("stage journal temporary is unsafe") from exc
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != required_uid
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_nlink not in {1, 2}
+            or not 0 <= metadata.st_size <= MAX_JOURNAL_BYTES
+        ):
+            raise FinlandStageError("stage journal temporary is unsafe")
+        if metadata.st_nlink == 2:
+            try:
+                published = path.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise FinlandStageError(
+                    "stage journal temporary link identity is ambiguous"
+                ) from exc
+            if (
+                not stat.S_ISREG(published.st_mode)
+                or metadata.st_dev != published.st_dev
+                or metadata.st_ino != published.st_ino
+            ):
+                raise FinlandStageError(
+                    "stage journal temporary link identity is ambiguous"
+                )
+        candidate.unlink()
+        changed = True
+    if changed:
+        _fsync_directory(path.parent)
+
+
+def _write_journal(
+    path: Path,
+    journal: dict[str, Any],
+    *,
+    create: bool,
+    required_uid: int,
+) -> None:
+    _reconcile_journal_temporaries(path, required_uid=required_uid)
+    journal["state_sha256"] = _state_sha256(journal)
+    _validate_journal(journal)
+    payload = canonical_json(journal)
+    temporary = _journal_temporary(path)
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise OSError("short stage journal write")
+            view = view[written:]
+        os.fchmod(descriptor, 0o600)
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+        if create:
+            try:
+                os.link(temporary, path, follow_symlinks=False)
+            except FileExistsError as exc:
+                raise FinlandStageError("stage journal already exists") from exc
+        else:
+            if not path.exists() or path.is_symlink():
+                raise FinlandStageError("stage journal disappeared")
+            os.replace(temporary, path)
+        _fsync_directory(path.parent)
+    except FinlandStageError:
+        raise
+    except OSError as exc:
+        raise FinlandStageError("stage journal could not be persisted") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if temporary.exists() and not temporary.is_symlink():
+            metadata = temporary.stat(follow_symlinks=False)
+            if (
+                stat.S_ISREG(metadata.st_mode)
+                and metadata.st_uid == required_uid
+                and stat.S_IMODE(metadata.st_mode) == 0o600
+                and metadata.st_nlink in {1, 2}
+            ):
+                temporary.unlink()
+
+
+def _load_or_create_journal(
+    path: Path,
+    *,
+    manifest: Mapping[str, Any],
+    manifest_sha256: str,
+    required_uid: int,
+) -> dict[str, Any]:
+    _reconcile_journal_temporaries(path, required_uid=required_uid)
+    if not path.exists() and not path.is_symlink():
+        journal: dict[str, Any] = {
+            "schema": JOURNAL_SCHEMA,
+            "operation_id": manifest["operation_id"],
+            "release_sha": manifest["release_sha"],
+            "release_tree_sha": manifest["release_tree_sha"],
+            "role": manifest["role"],
+            "operation_manifest_sha256": manifest_sha256,
+            "status": "active",
+            "completed_phases": [],
+            "current_phase": None,
+            "archive_evidence": {},
+            "load_intents": {},
+            "runtime_image_ids": {},
+            "images": {},
+            "events": [],
+            "event_tail_sha256": ZERO_SHA256,
+            "state_sha256": "",
+        }
+        _append_event(journal, kind="journal-created", phase=None)
+        _write_journal(
+            path,
+            journal,
+            create=True,
+            required_uid=required_uid,
+        )
+        return journal
+    raw = _read_secure_file(
+        path,
+        required_uid=required_uid,
+        expected_mode=0o600,
+        maximum=MAX_JOURNAL_BYTES,
+    )
+    journal = _validate_journal(_strict_json(raw, label="stage journal"))
+    expected = {
+        "operation_id": manifest["operation_id"],
+        "release_sha": manifest["release_sha"],
+        "release_tree_sha": manifest["release_tree_sha"],
+        "role": manifest["role"],
+        "operation_manifest_sha256": manifest_sha256,
+    }
+    if any(journal[key] != value for key, value in expected.items()):
+        raise FinlandStageError("existing stage journal has different bindings")
+    return journal
+
+
+@contextmanager
+def _operation_lock(path: Path, *, required_uid: int) -> Iterator[None]:
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDWR
+            | os.O_CREAT
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != required_uid
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_nlink != 1
+        ):
+            raise FinlandStageError("stage lock is unsafe")
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise FinlandStageError("another stage operation holds the lock") from exc
+        yield
+    except FinlandStageError:
+        raise
+    except OSError as exc:
+        raise FinlandStageError("stage lock could not be acquired") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _start_phase(
+    path: Path,
+    journal: dict[str, Any],
+    phase: str,
+    *,
+    required_uid: int,
+) -> None:
+    if journal["current_phase"] == phase:
+        return
+    if (
+        journal["current_phase"] is not None
+        or phase != PHASES[len(journal["completed_phases"])]
+    ):
+        raise FinlandStageError("stage journal phase transition is invalid")
+    journal["current_phase"] = phase
+    _append_event(journal, kind="phase-started", phase=phase)
+    _write_journal(path, journal, create=False, required_uid=required_uid)
+
+
+def _complete_phase(
+    path: Path,
+    journal: dict[str, Any],
+    phase: str,
+    *,
+    required_uid: int,
+) -> None:
+    if journal["current_phase"] != phase:
+        raise FinlandStageError("stage journal phase completion is invalid")
+    journal["completed_phases"].append(phase)
+    journal["current_phase"] = None
+    if journal["completed_phases"] == list(PHASES):
+        journal["status"] = "complete"
+    _append_event(journal, kind="phase-completed", phase=phase)
+    _write_journal(path, journal, create=False, required_uid=required_uid)
+
+
+def _attestation_document(
+    manifest: Mapping[str, Any],
+    manifest_sha256: str,
+    journal: Mapping[str, Any],
+) -> dict[str, Any]:
+    runtime_ids = {
+        role: journal["runtime_image_ids"][role] for role in IMAGE_ROLES
+    }
+    images = [journal["images"][role] for role in IMAGE_ROLES]
+    document = {
+        "schema": ATTESTATION_SCHEMA,
+        "operation_id": manifest["operation_id"],
+        "release_sha": manifest["release_sha"],
+        "release_tree_sha": manifest["release_tree_sha"],
+        "operation_manifest_sha256": manifest_sha256,
+        "role": manifest["role"],
+        "image_artifacts": {
+            role: manifest["image_artifacts"][role] for role in IMAGE_ROLES
+        },
+        "runtime_image_ids": runtime_ids,
+        "images": images,
+        "images_built": False,
+        "images_pulled": False,
+        "containers_created": False,
+        "containers_started": False,
+        "services_started": False,
+        "networks_created": False,
+        "volumes_created": False,
+        "current_mutated": False,
+        "data_mutated": False,
+    }
+    if set(document) != ATTESTATION_FIELDS:
+        raise FinlandStageError("internal attestation fields are not exact")
+    if any(document[field] is not False for field in (
+        "images_built",
+        "images_pulled",
+        "containers_created",
+        "containers_started",
+        "services_started",
+        "networks_created",
+        "volumes_created",
+        "current_mutated",
+        "data_mutated",
+    )):
+        raise FinlandStageError("forbidden mutation attestation is not false")
+    return document
+
+
+def _stage_image(
+    image_role: str,
+    *,
+    manifest: Mapping[str, Any],
+    paths: Mapping[str, Path | str],
+    journal: dict[str, Any],
+    journal_path: Path,
+    required_uid: int,
+    runner: Runner,
+    checkpoint: Checkpoint,
+) -> None:
+    expected = manifest["image_artifacts"][image_role]
+    phase = f"{image_role}-loaded"
+    if image_role in journal["runtime_image_ids"]:
+        evidence = _verify_runtime_image(
+            journal["runtime_image_ids"][image_role],
+            image_role=image_role,
+            expected=expected,
+            release_sha=manifest["release_sha"],
+            runner=runner,
+        )
+        if evidence != journal["images"][image_role]:
+            raise FinlandStageError("loaded image differs from stage journal")
+        return
+    intent = journal["load_intents"].get(image_role)
+    if intent is None:
+        baseline = _docker_image_ids(runner=runner)
+        matches = _runtime_semantic_matches(expected, runner=runner)
+        if matches:
+            raise FinlandStageError(
+                f"{image_role} semantic image already existed before this operation"
+            )
+        intent = {
+            "baseline_runtime_image_ids": baseline,
+            "archive_sha256": expected["archive_sha256"],
+            "content_identity": expected["content_identity"],
+        }
+        journal["load_intents"][image_role] = intent
+        _write_journal(
+            journal_path,
+            journal,
+            create=False,
+            required_uid=required_uid,
+        )
+        checkpoint(f"after-intent:{image_role}")
+    elif (
+        not isinstance(intent, dict)
+        or set(intent)
+        != {
+            "baseline_runtime_image_ids",
+            "archive_sha256",
+            "content_identity",
+        }
+        or intent["archive_sha256"] != expected["archive_sha256"]
+        or intent["content_identity"] != expected["content_identity"]
+        or not isinstance(intent["baseline_runtime_image_ids"], list)
+        or any(
+            IMAGE_ID_RE.fullmatch(value) is None
+            for value in intent["baseline_runtime_image_ids"]
+        )
+    ):
+        raise FinlandStageError("stage image load intent is invalid")
+
+    matches = _runtime_semantic_matches(expected, runner=runner)
+    if not matches:
+        archive_path = (
+            paths["incoming_root"] / ARTIFACT_FILENAMES[f"{image_role}-image-archive"]  # type: ignore[operator]
+        )
+        _run(
+            [DOCKER, "image", "load", "--input", str(archive_path)],
+            timeout=1800,
+            env=SAFE_ENV,
+            runner=runner,
+        )
+        checkpoint(f"after-load:{image_role}")
+        matches = _runtime_semantic_matches(expected, runner=runner)
+    if len(matches) != 1:
+        raise FinlandStageError(
+            f"{image_role} loaded semantic image match is not unique"
+        )
+    runtime_id = matches[0]
+    if runtime_id in intent["baseline_runtime_image_ids"]:
+        raise FinlandStageError(
+            f"{image_role} runtime image was present before the load intent"
+        )
+    evidence = _verify_runtime_image(
+        runtime_id,
+        image_role=image_role,
+        expected=expected,
+        release_sha=manifest["release_sha"],
+        runner=runner,
+    )
+    if runtime_id in journal["runtime_image_ids"].values():
+        raise FinlandStageError("runtime image IDs must be distinct across roles")
+    journal["runtime_image_ids"][image_role] = runtime_id
+    journal["images"][image_role] = evidence
+    _write_journal(
+        journal_path,
+        journal,
+        create=False,
+        required_uid=required_uid,
+    )
+
+
+def _finalize_inputs(
+    paths: Mapping[str, Path | str],
+    *,
+    manifest_sha256: str,
+    required_uid: int,
+) -> tuple[dict[str, Any], bytes]:
+    incoming_manifest = paths["manifest"]
+    manifest_partial = transfer_partial_path(incoming_manifest)  # type: ignore[arg-type]
+    source_path = (
+        manifest_partial
+        if manifest_partial.exists() or manifest_partial.is_symlink()
+        else incoming_manifest
+    )
+    raw = _read_secure_file(
+        source_path,  # type: ignore[arg-type]
+        required_uid=required_uid,
+        expected_mode=0o600,
+        maximum=MAX_MANIFEST_BYTES,
+    )
+    manifest, observed_sha = load_manifest_bytes(
+        raw,
+        expected_sha256=manifest_sha256,
+    )
+    if observed_sha != manifest_sha256:
+        raise FinlandStageError("stage manifest SHA-256 differs")
+    expected_paths = canonical_paths(
+        manifest["operation_id"],
+        manifest["release_sha"],
+        manifest["role"],
+    )
+    if any(paths[key] != expected_paths[key] for key in expected_paths):
+        raise FinlandStageError("stage request and manifest paths differ")
+    _publish_transfer_partial(
+        incoming_manifest,  # type: ignore[arg-type]
+        expected_sha256=manifest_sha256,
+        expected_bytes=len(raw),
+        required_uid=required_uid,
+        mode=0o600,
+    )
+    for kind in ARTIFACT_KINDS:
+        row = manifest["artifacts"][kind]
+        destination = (
+            paths["incoming_root"] / row["filename"]  # type: ignore[operator]
+        )
+        if (
+            transfer_partial_path(destination).exists()
+            or transfer_partial_path(destination).is_symlink()
+        ):
+            _publish_transfer_partial(
+                destination,
+                expected_sha256=row["sha256"],
+                expected_bytes=row["bytes"],
+                required_uid=required_uid,
+                mode=0o600,
+            )
+        elif hash_secure_file(
+            destination,
+            required_uid=required_uid,
+            expected_mode=0o600,
+            maximum=MAX_ARTIFACT_BYTES,
+        ) != (row["sha256"], row["bytes"]):
+            raise FinlandStageError(f"incoming artifact {kind} differs")
+    _write_create_only(
+        paths["secret_manifest"],  # type: ignore[arg-type]
+        raw,
+        required_uid=required_uid,
+        mode=0o600,
+        maximum=MAX_MANIFEST_BYTES,
+    )
+    expected_names = {
+        AGENT_FILENAME,
+        MANIFEST_FILENAME,
+        *(
+            manifest["artifacts"][kind]["filename"]
+            for kind in ARTIFACT_KINDS
+        ),
+    }
+    try:
+        observed_names = {entry.name for entry in os.scandir(paths["incoming_root"])}
+    except OSError as exc:
+        raise FinlandStageError("incoming artifact inventory is unavailable") from exc
+    if observed_names != expected_names:
+        raise FinlandStageError("incoming artifact inventory is not exact")
+    return manifest, raw
+
+
+def stage_operation(
+    request: Mapping[str, Any],
+    *,
+    required_uid: int = 0,
+    runner: Runner = subprocess.run,
+    checkpoint: Checkpoint | None = None,
+    observed_host_addresses: set[str] | None = None,
+) -> dict[str, Any]:
+    if os.geteuid() != required_uid or required_uid != 0:
+        raise FinlandStageError("Finland stage agent must run as root")
+    request = _decode_request(
+        encode_request(request),
+        bootstrap=False,
+    )
+    _verify_role_host(
+        str(request["role"]),
+        observed_host_addresses=observed_host_addresses,
+    )
+    callback = checkpoint if checkpoint is not None else (lambda _name: None)
+    paths = ensure_operation_directories(
+        str(request["operation_id"]),
+        str(request["release_sha"]),
+        str(request["role"]),
+        required_uid=required_uid,
+    )
+    agent_path = paths["agent"]
+    version = _agent_version(
+        agent_path,  # type: ignore[arg-type]
+        expected_sha256=str(request["agent_sha256"]),
+        required_uid=required_uid,
+    )
+    manifest, manifest_raw = _finalize_inputs(
+        paths,
+        manifest_sha256=str(request["operation_manifest_sha256"]),
+        required_uid=required_uid,
+    )
+    if (
+        request["operation_id"] != manifest["operation_id"]
+        or request["release_sha"] != manifest["release_sha"]
+        or request["release_tree_sha"] != manifest["release_tree_sha"]
+        or request["role"] != manifest["role"]
+        or request["agent_sha256"] != manifest["bootstrap_sha256"]
+        or request["pull_policy"] != manifest["pull_policy"]
+        or version["agent_sha256"] != manifest["bootstrap_sha256"]
+        or hashlib.sha256(manifest_raw).hexdigest()
+        != request["operation_manifest_sha256"]
+    ):
+        raise FinlandStageError("stage request differs from its manifest")
+
+    with _operation_lock(
+        paths["lock"],  # type: ignore[arg-type]
+        required_uid=required_uid,
+    ):
+        journal_path = paths["journal"]
+        journal = _load_or_create_journal(
+            journal_path,  # type: ignore[arg-type]
+            manifest=manifest,
+            manifest_sha256=str(request["operation_manifest_sha256"]),
+            required_uid=required_uid,
+        )
+        release_bundle = (
+            paths["incoming_root"] / ARTIFACT_FILENAMES["release-bundle"]  # type: ignore[operator]
+        )
+        release_artifact = manifest["artifacts"]["release-bundle"]
+        _verify_release_bundle(
+            release_bundle,
+            release_sha=manifest["release_sha"],
+            expected_sha256=release_artifact["sha256"],
+            expected_bytes=release_artifact["bytes"],
+            required_uid=required_uid,
+            runner=runner,
+        )
+        verified_archives = {}
+        for image_role in IMAGE_ROLES:
+            archive = (
+                paths["incoming_root"]
+                / ARTIFACT_FILENAMES[
+                    f"{image_role}-image-archive"
+                ]
+            )
+            verified_archives[image_role] = verify_image_archive(
+                archive,
+                image_role=image_role,
+                release_sha=manifest["release_sha"],
+                expected=manifest["image_artifacts"][image_role],
+                required_uid=required_uid,
+            )
+        if (
+            journal["archive_evidence"]
+            and journal["archive_evidence"] != verified_archives
+        ):
+            raise FinlandStageError(
+                "Docker archive evidence differs from the stage journal"
+            )
+
+        for phase in PHASES:
+            if phase in journal["completed_phases"]:
+                continue
+            _start_phase(
+                journal_path,  # type: ignore[arg-type]
+                journal,
+                phase,
+                required_uid=required_uid,
+            )
+            if phase == "inputs-verified":
+                for kind in ARTIFACT_KINDS:
+                    row = manifest["artifacts"][kind]
+                    path = paths["incoming_root"] / row["filename"]  # type: ignore[operator]
+                    if hash_secure_file(
+                        path,
+                        required_uid=required_uid,
+                        expected_mode=0o600,
+                        maximum=MAX_ARTIFACT_BYTES,
+                    ) != (row["sha256"], row["bytes"]):
+                        raise FinlandStageError(f"incoming artifact {kind} differs")
+            elif phase == "release-materialized":
+                _materialize_release(
+                    release_bundle,
+                    paths["release_root"],  # type: ignore[arg-type]
+                    release_sha=manifest["release_sha"],
+                    release_tree_sha=manifest["release_tree_sha"],
+                    required_uid=required_uid,
+                    runner=runner,
+                )
+            elif phase == "archives-verified":
+                journal["archive_evidence"] = verified_archives
+                _write_journal(
+                    journal_path,  # type: ignore[arg-type]
+                    journal,
+                    create=False,
+                    required_uid=required_uid,
+                )
+            elif phase.endswith("-loaded"):
+                image_role = phase.removesuffix("-loaded")
+                _stage_image(
+                    image_role,
+                    manifest=manifest,
+                    paths=paths,
+                    journal=journal,
+                    journal_path=journal_path,  # type: ignore[arg-type]
+                    required_uid=required_uid,
+                    runner=runner,
+                    checkpoint=callback,
+                )
+            elif phase == "attested":
+                if set(journal["runtime_image_ids"]) != set(IMAGE_ROLES):
+                    raise FinlandStageError("runtime image inventory is incomplete")
+                if len(set(journal["runtime_image_ids"].values())) != len(
+                    IMAGE_ROLES
+                ):
+                    raise FinlandStageError("runtime image IDs are not distinct")
+                document = _attestation_document(
+                    manifest,
+                    str(request["operation_manifest_sha256"]),
+                    journal,
+                )
+                payload = canonical_json(document)
+                _write_create_only(
+                    paths["attestation"],  # type: ignore[arg-type]
+                    payload,
+                    required_uid=required_uid,
+                    mode=0o600,
+                    maximum=MAX_ATTESTATION_BYTES,
+                )
+            else:
+                raise FinlandStageError("unknown stage phase")
+            callback(f"after-phase:{phase}")
+            _complete_phase(
+                journal_path,  # type: ignore[arg-type]
+                journal,
+                phase,
+                required_uid=required_uid,
+            )
+
+        _verify_materialized_release(
+            paths["release_root"],  # type: ignore[arg-type]
+            bundle=release_bundle,
+            release_sha=manifest["release_sha"],
+            release_tree_sha=manifest["release_tree_sha"],
+            required_uid=required_uid,
+            runner=runner,
+        )
+        for image_role in IMAGE_ROLES:
+            evidence = _verify_runtime_image(
+                journal["runtime_image_ids"][image_role],
+                image_role=image_role,
+                expected=manifest["image_artifacts"][image_role],
+                release_sha=manifest["release_sha"],
+                runner=runner,
+            )
+            if evidence != journal["images"][image_role]:
+                raise FinlandStageError("runtime image evidence differs on resume")
+        expected_attestation = canonical_json(
+            _attestation_document(
+                manifest,
+                str(request["operation_manifest_sha256"]),
+                journal,
+            )
+        )
+        observed_attestation = _read_secure_file(
+            paths["attestation"],  # type: ignore[arg-type]
+            required_uid=required_uid,
+            expected_mode=0o600,
+            maximum=MAX_ATTESTATION_BYTES,
+        )
+        if observed_attestation != expected_attestation:
+            raise FinlandStageError("stage attestation differs")
+        attestation_sha256 = hashlib.sha256(observed_attestation).hexdigest()
+        return {
+            "schema": RESULT_SCHEMA,
+            "status": "staged",
+            "operation_id": manifest["operation_id"],
+            "release_sha": manifest["release_sha"],
+            "release_tree_sha": manifest["release_tree_sha"],
+            "role": manifest["role"],
+            "operation_manifest_sha256": request[
+                "operation_manifest_sha256"
+            ],
+            "stage_attestation_sha256": attestation_sha256,
+            "stage_attestation_path": str(paths["attestation"]),
+            "runtime_image_ids": {
+                role_name: journal["runtime_image_ids"][role_name]
+                for role_name in IMAGE_ROLES
+            },
+            "containers_started": False,
+            "services_started": False,
+            "networks_created": False,
+            "volumes_created": False,
+            "current_mutated": False,
+            "data_mutated": False,
+        }
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--version", action="store_true")
+    mode.add_argument("--install-bootstrap-request-b64")
+    mode.add_argument("--request-b64")
+    parser.add_argument("--expected-agent-sha256")
+    parser.add_argument("--pull", choices=("never",), default="never")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    try:
+        if args.pull != "never":
+            raise FinlandStageError("only --pull never is supported")
+        if os.geteuid() != 0:
+            raise FinlandStageError("Finland stage agent must run as root")
+        if args.version:
+            if args.expected_agent_sha256 is None:
+                raise FinlandStageError("version readback requires the agent SHA-256")
+            result = _agent_version(
+                Path(__file__),
+                expected_sha256=args.expected_agent_sha256,
+                required_uid=0,
+            )
+        elif args.install_bootstrap_request_b64 is not None:
+            request = _decode_request(
+                args.install_bootstrap_request_b64,
+                bootstrap=True,
+            )
+            result = install_bootstrap(
+                request,
+                executing_path=Path(__file__),
+                required_uid=0,
+            )
+        else:
+            request = _decode_request(str(args.request_b64), bootstrap=False)
+            if args.expected_agent_sha256 not in {
+                None,
+                request["agent_sha256"],
+            }:
+                raise FinlandStageError("CLI agent SHA-256 differs from request")
+            result = stage_operation(request, required_uid=0)
+        print(canonical_json(result).decode("ascii"))
+        return 0
+    except FinlandStageError as exc:
+        print(
+            canonical_json(
+                {
+                    "schema": RESULT_SCHEMA,
+                    "status": "blocked",
+                    "error": str(exc),
+                }
+            ).decode("ascii"),
+            file=sys.stderr,
+        )
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
