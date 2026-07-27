@@ -16,9 +16,13 @@ from scripts.production_shadow_cutover_controller import (
     CutoverContractError,
     EXPECTED_TOPOLOGY,
     FIRST_WRITE_COMMIT_CONFIRMATION,
+    FORWARD_ONLY_COMMIT_GATE,
     MANIFEST_SCHEMA,
     PHASES,
+    POSTCOMMIT_JOURNAL_STATUS,
+    POSTCOMMIT_SPECS,
     POLICY_FIELDS,
+    PRODUCTION_VHOSTS,
     ProductionCutoverJournal,
     _secure_root,
     _shadow_project,
@@ -36,20 +40,25 @@ RELEASE_SHA = "a" * 40
 LEGACY_RELEASE_SHA = "b" * 40
 EXPECTED_PHASE_ORDER = [
     "pre_freeze_evidence",
-    "write_block_install",
-    "write_block_nginx_test",
-    "write_block_reload",
+    "shadow_startup_normalization",
+    "freeze_generation_install",
+    "freeze_generation_test",
+    "freeze_generation_activate",
     "stop_legacy_writers",
-    "zero_client_readback",
-    "write_block_readback",
+    "zero_writer_surface_readback",
     "final_snapshot_hashes",
+    "pristine_shadow_redis",
     "shadow_restore",
+    "shadow_roles_pre_migration",
     "shadow_migrate",
-    "shadow_roles",
+    "shadow_roles_post_migration",
     "shadow_fence",
     "witness_lease",
     "convergence_gate",
     "readonly_upstream_switch",
+    "precommit_no_due_mutator_delta",
+    "precommit_provider_free_queue_rehydrate",
+    "precommit_irreversible_effect_watchers",
     "pre_first_write_acceptance",
 ]
 
@@ -81,8 +90,14 @@ def manifest_payload() -> dict:
             "postgres_image_ref": f"trading_bot_postgres_boottime:15-{RELEASE_SHA}",
             "legacy_bot_rollback_sha256": "2" * 64,
             "legacy_webapp_rollback_sha256": "3" * 64,
+            "legacy_bot_redis_rollback_sha256": "6" * 64,
+            "legacy_webapp_redis_rollback_sha256": "7" * 64,
             "shadow_compose_sha256": "4" * 64,
             "cutover_approval_sha256": "5" * 64,
+            "nginx_freeze_generation_sha256": "8" * 64,
+            "nginx_rollback_generation_sha256": "9" * 64,
+            "postcommit_executor_contract_sha256": "a" * 64,
+            "phase_evidence_schema_sha256": "b" * 64,
         },
         "policy": {field: True for field in POLICY_FIELDS},
     }
@@ -110,14 +125,62 @@ class ProductionShadowManifestTests(unittest.TestCase):
         self.assertTrue(plan["rollback"]["prohibited_after_commit_gate"])
         self.assertTrue(plan["rollback"]["preserves_shadow_volumes_and_artifacts"])
         gate = plan["first_business_write_commit_gate"]
+        self.assertFalse(gate["enabled"])
+        self.assertTrue(gate["hard_disabled"])
         self.assertTrue(gate["irreversible_boundary"])
         self.assertEqual(gate["required_completed_phase"], PHASES[-1])
         self.assertEqual(
             gate["required_confirmation"], FIRST_WRITE_COMMIT_CONFIRMATION
         )
-        self.assertIn(APPLY_CONFIRMATION, gate["argv_template"])
+        self.assertIn(APPLY_CONFIRMATION, gate["prospective_argv_template"])
+        self.assertEqual(plan["production_vhosts"], PRODUCTION_VHOSTS)
+        self.assertEqual(
+            plan["postcommit_forward_recovery"]["first_write_boundary_phase"],
+            FORWARD_ONLY_COMMIT_GATE,
+        )
+        postcommit = plan["postcommit_forward_recovery"]["commands"]
+        self.assertEqual(
+            [item["phase"] for item in postcommit],
+            [spec.phase for spec in POSTCOMMIT_SPECS],
+        )
+        self.assertFalse(any(item["first_write_boundary"] for item in postcommit))
+        self.assertTrue(all(item["business_write_allowed"] for item in postcommit))
+        self.assertTrue(all(item["forward_only"] for item in postcommit))
+        self.assertTrue(
+            all(
+                item["required_journal_status"] == POSTCOMMIT_JOURNAL_STATUS
+                for item in postcommit
+            )
+        )
+        self.assertEqual(
+            postcommit[0]["prerequisite_phase"],
+            FORWARD_ONLY_COMMIT_GATE,
+        )
+        self.assertTrue(
+            all(
+                command["business_write_allowed"]
+                and command["required_journal_status"] == POSTCOMMIT_JOURNAL_STATUS
+                for item in postcommit
+                for command in item["commands"]
+            )
+        )
+        self.assertTrue(
+            all(not item["business_write_allowed"] for item in plan["phases"])
+        )
+        self.assertEqual(
+            plan["redis_contract"]["legacy"],
+            "sealed-rollback-evidence-only",
+        )
+        self.assertFalse(
+            plan["webapp_ir_standby_contract"][
+                "public_route_enabled_before_promotion"
+            ]
+        )
         gaps = {item["component"]: item["status"] for item in plan["operational_gaps"]}
-        self.assertEqual(gaps["first-business-write-executor"], "intentionally-absent")
+        self.assertEqual(
+            gaps["postcommit-forward-recovery-executor"],
+            "missing-hard-blocker",
+        )
         self.assertEqual(gaps["phase-evidence-schema-verifiers"], "missing")
 
     def test_unknown_root_and_nested_fields_fail_closed(self):
@@ -169,6 +232,11 @@ class ProductionShadowManifestTests(unittest.TestCase):
             for phase in plan["rollback"]["commands"]
             for command in phase["commands"]
         )
+        all_commands.extend(
+            command
+            for phase in plan["postcommit_forward_recovery"]["commands"]
+            for command in phase["commands"]
+        )
         self.assertTrue(all(isinstance(command["argv"], list) for command in all_commands))
         self.assertTrue(all(command["render_only"] for command in all_commands))
         self.assertTrue(all(not command["executor_available"] for command in all_commands))
@@ -184,6 +252,11 @@ class ProductionShadowManifestTests(unittest.TestCase):
             "downgrade",
         ):
             self.assertNotIn(forbidden, rendered)
+        self.assertIn("coin.362514.ir", rendered)
+        self.assertIn("mini-app.362514.ir", rendered)
+        self.assertIn("coin.gold-trade.ir", rendered)
+        self.assertIn("sealed-rollback-evidence-only", rendered)
+        self.assertIn("pristine-empty-no-restore", rendered)
         for command in all_commands:
             if command["role"] in {"webapp_ir", "witness"}:
                 self.assertEqual(
@@ -191,6 +264,95 @@ class ProductionShadowManifestTests(unittest.TestCase):
                     "object-storage-private-versioned-age",
                 )
                 self.assertIn("object-storage-private-versioned-age", command["argv"])
+
+    def test_freeze_rollback_and_forward_recovery_contracts_are_complete(self):
+        plan = render_plan(
+            validate_manifest(manifest_payload()),
+            manifest_sha256="4" * 64,
+        )
+        phases = {item["phase"]: item for item in plan["phases"]}
+        self.assertEqual(
+            {command["role"] for command in phases["freeze_generation_install"]["commands"]},
+            {"bot_fi", "webapp_fi"},
+        )
+        self.assertEqual(
+            {
+                command["role"]
+                for command in phases["zero_writer_surface_readback"]["commands"]
+            },
+            {"bot_fi", "webapp_fi", "witness"},
+        )
+        self.assertLess(
+            EXPECTED_PHASE_ORDER.index("pristine_shadow_redis"),
+            EXPECTED_PHASE_ORDER.index("shadow_restore"),
+        )
+        self.assertLess(
+            EXPECTED_PHASE_ORDER.index("shadow_roles_pre_migration"),
+            EXPECTED_PHASE_ORDER.index("shadow_migrate"),
+        )
+        self.assertLess(
+            EXPECTED_PHASE_ORDER.index("shadow_migrate"),
+            EXPECTED_PHASE_ORDER.index("shadow_roles_post_migration"),
+        )
+        self.assertIn(
+            "no token",
+            phases["precommit_provider_free_queue_rehydrate"][
+                "description"
+            ].lower(),
+        )
+        nginx = plan["nginx_generation_transaction"]
+        self.assertFalse(nginx["cross_host_instantaneous_atomicity_claimed"])
+        self.assertEqual(
+            nginx["coordination_model"],
+            "ordered-fail-closed-per-host-generation-readback",
+        )
+        self.assertTrue(nginx["per_host_generation_readback_required"])
+
+        rollback = plan["rollback"]["commands"]
+        self.assertEqual(
+            [item["phase"] for item in rollback[:2]],
+            [
+                "rollback_refence_and_revoke_lease",
+                "rollback_lease_readback",
+            ],
+        )
+        for item in rollback[2:5]:
+            self.assertEqual(
+                {command["role"] for command in item["commands"]},
+                {"bot_fi", "webapp_fi"},
+            )
+
+        postcommit = {
+            item["phase"]: item
+            for item in plan["postcommit_forward_recovery"]["commands"]
+        }
+        self.assertEqual(
+            {
+                command["role"]
+                for command in postcommit[
+                    "postcommit_activate_webapp_apis"
+                ]["commands"]
+            },
+            {"webapp_fi", "webapp_ir"},
+        )
+        self.assertEqual(
+            {
+                command["role"]
+                for command in postcommit[
+                    "postcommit_activate_fi_effects"
+                ]["commands"]
+            },
+            {"webapp_fi"},
+        )
+        self.assertNotIn("postcommit_rehydrate_bot_queue", postcommit)
+        self.assertIn("postcommit_forward_only_unblock", postcommit)
+        rendered = json.dumps(plan, sort_keys=True)
+        for vhost in (
+            "coin.362514.ir",
+            "mini-app.362514.ir",
+            "coin.gold-trade.ir",
+        ):
+            self.assertIn(vhost, rendered)
 
     def test_root_only_manifest_reader_rejects_mode_symlink_and_duplicate_key(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -272,6 +434,32 @@ class ProductionShadowManifestTests(unittest.TestCase):
                 transition["required_apply_confirmation"],
                 APPLY_CONFIRMATION,
             )
+
+            output = io.StringIO()
+            with (
+                mock.patch.object(
+                    ProductionCutoverJournal,
+                    "create",
+                    side_effect=AssertionError("journal create must not run"),
+                ),
+                mock.patch(
+                    "sys.argv",
+                    [
+                        "production-shadow-cutover-controller",
+                        "--manifest",
+                        str(path),
+                        "--action",
+                        "commit-first-business-write",
+                        "--evidence-sha256",
+                        "f" * 64,
+                    ],
+                ),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(main(), 2)
+            blocked = json.loads(output.getvalue())
+            self.assertEqual(blocked["status"], "blocked")
+            self.assertFalse(blocked["irreversible_commit_enabled"])
 
 
 class ProductionShadowCutoverJournalTests(unittest.TestCase):
@@ -366,7 +554,7 @@ class ProductionShadowCutoverJournalTests(unittest.TestCase):
             with self.assertRaises(CutoverContractError):
                 journal.begin_phase(PHASES[0])
 
-    def test_first_write_commit_is_explicit_and_prohibits_rollback(self):
+    def test_first_write_commit_is_hard_disabled_without_executor(self):
         with tempfile.TemporaryDirectory() as directory:
             journal = self.journal(directory)
             self.create(journal)
@@ -375,35 +563,19 @@ class ProductionShadowCutoverJournalTests(unittest.TestCase):
             self.assertTrue(ready["rollback_eligible"])
             acceptance = ready["phase_evidence_sha256"][PHASES[-1]]
 
-            with self.assertRaisesRegex(CutoverContractError, "confirmation"):
-                journal.commit_first_business_write(
-                    evidence_sha256=acceptance,
-                    confirmation="wrong",
-                )
-            with self.assertRaisesRegex(CutoverContractError, "must equal"):
-                journal.commit_first_business_write(
-                    evidence_sha256="f" * 64,
-                    confirmation=FIRST_WRITE_COMMIT_CONFIRMATION,
-                )
-            committed = journal.commit_first_business_write(
-                evidence_sha256=acceptance,
-                confirmation=FIRST_WRITE_COMMIT_CONFIRMATION,
-            )
-            self.assertEqual(committed["status"], "first_write_committed")
-            self.assertTrue(committed["first_business_write_allowed"])
-            self.assertFalse(committed["rollback_eligible"])
-            self.assertEqual(
+            with self.assertRaisesRegex(CutoverContractError, "hard-disabled"):
                 journal.commit_first_business_write(
                     evidence_sha256=acceptance,
                     confirmation=FIRST_WRITE_COMMIT_CONFIRMATION,
-                ),
-                committed,
-            )
-            with self.assertRaisesRegex(CutoverContractError, "prohibited"):
-                journal.record_rollback(
-                    reason="too late",
-                    evidence_sha256="8" * 64,
                 )
+            unchanged = journal.load()
+            self.assertEqual(unchanged["status"], "ready_for_commit")
+            self.assertFalse(unchanged["first_business_write_allowed"])
+            rolled_back = journal.record_rollback(
+                reason="executor unavailable",
+                evidence_sha256="8" * 64,
+            )
+            self.assertEqual(rolled_back["status"], "rolled_back")
 
     def test_create_is_idempotent_but_binding_changes_fail(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -449,6 +621,25 @@ class ProductionShadowCutoverJournalTests(unittest.TestCase):
             journal.path.write_text(json.dumps(payload), encoding="utf-8")
             journal.path.chmod(0o600)
             with self.assertRaisesRegex(CutoverContractError, "schema, identity, or hash"):
+                journal.load()
+
+    def test_forged_committed_status_is_not_a_valid_journal_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = self.journal(directory)
+            self.create(journal)
+            payload = json.loads(journal.path.read_text(encoding="utf-8"))
+            payload["status"] = "first_write_committed"
+            payload["rollback_eligible"] = False
+            payload["first_business_write_allowed"] = True
+            from scripts.production_shadow_cutover_controller import _state_hash
+
+            payload["state_sha256"] = _state_hash(payload)
+            journal.path.write_text(json.dumps(payload), encoding="utf-8")
+            journal.path.chmod(0o600)
+            with self.assertRaisesRegex(
+                CutoverContractError,
+                "schema, identity, or hash",
+            ):
                 journal.load()
 
     def test_event_history_reorder_or_rehash_gap_is_rejected(self):

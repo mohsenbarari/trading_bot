@@ -3,9 +3,9 @@
 
 This module does not execute production commands.  It verifies one root-only
 manifest, renders fixed argv for a future bounded host agent, and maintains a
-crash-visible local journal.  Crossing the first-business-write boundary is a
-separate explicit journal operation because rollback to the untouched legacy
-database is no longer valid after that point.
+crash-visible local journal.  The separate first-business-write boundary is
+hard-disabled until the forward-only executor and semantic evidence verifiers
+exist because rollback to the untouched legacy database ends at that boundary.
 """
 
 from __future__ import annotations
@@ -53,6 +53,16 @@ REMOTE_AGENT_PATH = "/usr/local/sbin/trading-bot-production-shadow-agent"
 PRODUCTION_HOSTNAME = "coin.gold-trade.ir"
 LEGACY_COMPOSE_PROJECT = "trading_bot"
 ZERO_SHA256 = "0" * 64
+IRREVERSIBLE_COMMIT_ENABLED = False
+FORWARD_ONLY_COMMIT_GATE = "journal_forward_only_commit_gate"
+PRECOMMIT_JOURNAL_STATUS = "rollback-eligible-precommit"
+POSTCOMMIT_JOURNAL_STATUS = "forward-only-committed"
+PRODUCTION_VHOSTS = {
+    "bot_fi": ("coin.362514.ir", "mini-app.362514.ir"),
+    "webapp_fi": (PRODUCTION_HOSTNAME,),
+}
+LEGACY_REDIS_POLICY = "sealed-rollback-evidence-only"
+SHADOW_REDIS_POLICY = "pristine-empty-no-restore"
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -94,8 +104,14 @@ ARTIFACT_FIELDS = frozenset(
         "postgres_image_ref",
         "legacy_bot_rollback_sha256",
         "legacy_webapp_rollback_sha256",
+        "legacy_bot_redis_rollback_sha256",
+        "legacy_webapp_redis_rollback_sha256",
         "shadow_compose_sha256",
         "cutover_approval_sha256",
+        "nginx_freeze_generation_sha256",
+        "nginx_rollback_generation_sha256",
+        "postcommit_executor_contract_sha256",
+        "phase_evidence_schema_sha256",
     }
 )
 POLICY_FIELDS = frozenset(
@@ -114,6 +130,13 @@ POLICY_FIELDS = frozenset(
         "current_path_mutation_forbidden",
         "destructive_cleanup_forbidden",
         "database_downgrade_forbidden",
+        "legacy_redis_restore_forbidden",
+        "pristine_shadow_redis_required",
+        "nginx_generation_coordinated_all_vhosts_required",
+        "postcommit_forward_recovery_required",
+        "iran_public_route_prepromotion_forbidden",
+        "iran_effects_prepromotion_forbidden",
+        "queue_rehydrate_before_claim_required",
     }
 )
 
@@ -160,39 +183,71 @@ class PhaseSpec:
     roles: tuple[str, ...]
     description: str
     mutates_production: bool
+    forward_only: bool = False
+    first_write_boundary: bool = False
+    business_write_allowed: bool = False
+    required_journal_status: str = PRECOMMIT_JOURNAL_STATUS
+    requirements: tuple[str, ...] = ()
 
 
-# The order is the rollback boundary.  None of these phases permits a business
-# write.  The separate commit gate below is the first point after which rollback
-# to the legacy database is prohibited.
+# Every phase below remains before the first business write. The controller
+# renders commands and journals intent only; it never contacts a host.
 PHASE_SPECS: tuple[PhaseSpec, ...] = (
     PhaseSpec(
         "pre_freeze_evidence",
         "capture-pre-freeze-evidence",
         ("bot_fi", "webapp_fi", "webapp_ir", "witness"),
-        "Capture immutable health, release, topology, backup, and rollback evidence.",
+        "Capture immutable health, release, topology, backup, route, and rollback evidence.",
         False,
+        requirements=(
+            "attest exact releases, images, host identities, routes, and legacy rollback sets",
+            "capture the active Nginx generation on Bot-FI and WebApp-FI",
+        ),
     ),
     PhaseSpec(
-        "write_block_install",
-        "install-production-write-block",
-        ("webapp_fi",),
-        "Install the production write-block configuration without reloading it.",
+        "shadow_startup_normalization",
+        "normalize-operation-owned-shadow-startup-state",
+        ("bot_fi", "webapp_fi", "webapp_ir"),
+        "Normalize only operation-owned containers to the audited stopped baseline.",
         True,
+        requirements=(
+            "no legacy container, service, volume, current path, or route mutation",
+            "zero unplanned container delta before any shadow start",
+        ),
     ),
     PhaseSpec(
-        "write_block_nginx_test",
-        "test-production-nginx-configuration",
-        ("webapp_fi",),
-        "Validate the write-block configuration before reload.",
+        "freeze_generation_install",
+        "install-coordinated-three-vhost-freeze-generations",
+        ("bot_fi", "webapp_fi"),
+        "Stage matching reversible write-block generations for all three production vhosts.",
+        True,
+        requirements=(
+            "Bot-FI vhosts coin.362514.ir and mini-app.362514.ir are both write-blocked",
+            "WebApp-FI vhost coin.gold-trade.ir is write-blocked",
+            "the previous complete Nginx generation remains restorable",
+        ),
+    ),
+    PhaseSpec(
+        "freeze_generation_test",
+        "test-coordinated-three-vhost-freeze-generations",
+        ("bot_fi", "webapp_fi"),
+        "Test the complete three-vhost generation on both Nginx hosts.",
         False,
+        requirements=(
+            "nginx configuration tests pass on Bot-FI and WebApp-FI",
+            "no partial-host activation is permitted",
+        ),
     ),
     PhaseSpec(
-        "write_block_reload",
-        "reload-production-nginx-write-block",
-        ("webapp_fi",),
-        "Reload the validated write block.",
+        "freeze_generation_activate",
+        "activate-ordered-fail-closed-three-vhost-freeze",
+        ("bot_fi", "webapp_fi"),
+        "Activate the tested write-block generations in an ordered fail-closed sequence.",
         True,
+        requirements=(
+            "each host activates and reads back its manifest-bound generation",
+            "activation failure compensates by restoring every host already switched",
+        ),
     ),
     PhaseSpec(
         "stop_legacy_writers",
@@ -202,45 +257,75 @@ PHASE_SPECS: tuple[PhaseSpec, ...] = (
         True,
     ),
     PhaseSpec(
-        "zero_client_readback",
-        "verify-zero-legacy-writer-clients",
-        ("bot_fi", "webapp_fi"),
-        "Prove the legacy databases have no writer clients.",
+        "zero_writer_surface_readback",
+        "verify-zero-write-capable-routes-processes-and-clients",
+        ("bot_fi", "webapp_fi", "witness"),
+        "Externally read back all vhosts and prove no write-capable route, process, or DB client remains.",
         False,
-    ),
-    PhaseSpec(
-        "write_block_readback",
-        "verify-production-write-block-readback",
-        ("bot_fi",),
-        "Read back the public write block from the controller.",
-        False,
+        requirements=(
+            "external readback covers coin.362514.ir, mini-app.362514.ir, and coin.gold-trade.ir",
+            "Bot-FI and WebApp-FI have zero legacy writer processes and DB writer clients",
+        ),
     ),
     PhaseSpec(
         "final_snapshot_hashes",
         "capture-final-frozen-snapshot-hashes",
         ("bot_fi", "webapp_fi"),
-        "Capture final frozen DB, Redis, upload, audit, and manifest hashes.",
+        "Capture final DB/file snapshots and seal legacy Redis only as rollback evidence.",
         True,
+        requirements=(
+            "snapshot PostgreSQL, uploads, audit, and manifests for shadow restore",
+            "hash legacy Redis RDB/AOF as sealed rollback evidence only",
+            "exclude every legacy Redis byte from shadow restore artifacts",
+        ),
+    ),
+    PhaseSpec(
+        "pristine_shadow_redis",
+        "verify-pristine-empty-shadow-redis-targets",
+        ("bot_fi", "webapp_fi", "webapp_ir"),
+        "Prove every operation-owned Redis target is secure and pristine before first start.",
+        False,
+        requirements=(
+            "root-owned non-symlink mode-0700 directory chain",
+            "empty target and no RDB, AOF, session, cache, OTP, or queue restore",
+        ),
     ),
     PhaseSpec(
         "shadow_restore",
-        "restore-shadow-production-state",
+        "restore-shadow-postgres-and-files-without-redis",
         ("bot_fi", "webapp_fi", "webapp_ir"),
-        "Restore only into operation-owned shadow volumes.",
+        "Restore reviewed PostgreSQL and file artifacts only into operation-owned shadow volumes.",
+        True,
+        requirements=(
+            "restore PostgreSQL and explicitly reviewed uploads/audit artifacts only",
+            "legacy Redis restore is prohibited",
+            "WebApp-IR PostgreSQL restore is stdin-only",
+        ),
+    ),
+    PhaseSpec(
+        "shadow_roles_pre_migration",
+        "bind-shadow-least-privilege-roles-before-migration",
+        ("webapp_fi", "webapp_ir"),
+        "Create the WebApp role set needed to run exact-release migrations.",
         True,
     ),
     PhaseSpec(
         "shadow_migrate",
-        "migrate-shadow-databases-forward",
+        "resume-safe-migrate-shadow-databases-forward",
         ("bot_fi", "webapp_fi", "webapp_ir"),
-        "Run forward-only migrations on the shadow databases.",
+        "Run the exact reviewed Alembic chain with crash-safe resume.",
         True,
+        requirements=(
+            "accept only source, target, or on-chain intermediate Alembic revisions",
+            "repair only reviewed invalid or unready concurrent indexes",
+            "reject every off-chain or unknown schema state",
+        ),
     ),
     PhaseSpec(
-        "shadow_roles",
-        "bind-shadow-least-privilege-roles",
+        "shadow_roles_post_migration",
+        "rebind-shadow-least-privilege-roles-after-migration",
         ("bot_fi", "webapp_fi", "webapp_ir"),
-        "Create and bind distinct least-privilege runtime roles.",
+        "Re-apply least-privilege grants after migration-created objects exist.",
         True,
     ),
     PhaseSpec(
@@ -261,15 +346,61 @@ PHASE_SPECS: tuple[PhaseSpec, ...] = (
         "convergence_gate",
         "verify-shadow-three-site-convergence",
         ("bot_fi", "webapp_fi", "webapp_ir", "witness"),
-        "Require schema, role, fence, queue, parity, and DR convergence evidence.",
+        "Require schema, role, fence, queue, parity, DR, TLS, blob, and firewall evidence.",
         False,
+        requirements=(
+            "verify signed Witness release/health attestation and live singleton lease",
+            "verify exact DR TLS SAN/EKU/expiry/key/CA/peer handshakes",
+            "verify FI/IR blob keyring compatibility and encrypted exact-version round trip",
+            "verify operation-labelled nftables or DOCKER-USER destination allowlists",
+        ),
     ),
     PhaseSpec(
         "readonly_upstream_switch",
-        "switch-production-upstream-shadow-readonly",
-        ("webapp_fi",),
-        "Switch the public upstream to shadow while all business writes remain blocked.",
+        "switch-three-vhost-upstreams-shadow-readonly",
+        ("bot_fi", "webapp_fi"),
+        "Switch all three vhosts to shadow readonly upstreams as one tested generation.",
         True,
+        requirements=(
+            "all vhosts remain write-blocked",
+            "WebApp-IR remains unrouted and effects-disabled",
+            "each host reads back the expected readonly upstream generation",
+        ),
+    ),
+    PhaseSpec(
+        "precommit_no_due_mutator_delta",
+        "verify-no-due-jobs-effects-leases-or-provider-attempts",
+        ("bot_fi", "webapp_fi", "webapp_ir"),
+        "Capture zero-delta baselines while every business mutator remains stopped.",
+        False,
+        requirements=(
+            "all APIs remain background-disabled and all effects/Bot polling remain stopped",
+            "no due OTP, inline SMS, DR effect outbox, Telegram lease, dispatch, or provider attempt",
+            "authoritative event/change sequences are captured as durable baselines",
+        ),
+    ),
+    PhaseSpec(
+        "precommit_provider_free_queue_rehydrate",
+        "rehydrate-bot-limiter-provider-free-one-shot",
+        ("bot_fi",),
+        "Rehydrate fresh Redis from PostgreSQL with no token, provider egress, claim, or polling.",
+        True,
+        requirements=(
+            "isolated DB/Redis-only one-shot receives no BOT_TOKEN or provider network",
+            "source rows, leases, dispatch_started_at, outcomes, and provider attempts remain unchanged",
+        ),
+    ),
+    PhaseSpec(
+        "precommit_irreversible_effect_watchers",
+        "establish-durable-first-effect-watchers",
+        ("bot_fi", "webapp_fi", "webapp_ir", "witness"),
+        "Install durable baselines and watchers before the forward-only commit.",
+        False,
+        requirements=(
+            "watch Telegram dispatch_started_at commits before provider calls",
+            "watch DR effect outbox inflight/attempt commits and inline SMS claims",
+            "watch authoritative event/change sequences, lease epoch, and public route generation",
+        ),
     ),
     PhaseSpec(
         "pre_first_write_acceptance",
@@ -281,26 +412,117 @@ PHASE_SPECS: tuple[PhaseSpec, ...] = (
 )
 PHASES = tuple(spec.phase for spec in PHASE_SPECS)
 
+POSTCOMMIT_SPECS: tuple[PhaseSpec, ...] = (
+    PhaseSpec(
+        "postcommit_activate_webapp_apis",
+        "activate-fi-ir-apis-with-background-jobs",
+        ("webapp_fi", "webapp_ir"),
+        "Start exact-release FI and IR APIs with BACKGROUND_JOBS_ENABLED=true.",
+        True,
+        forward_only=True,
+        business_write_allowed=True,
+        required_journal_status=POSTCOMMIT_JOURNAL_STATUS,
+        requirements=(
+            "both WebApp APIs run with BACKGROUND_JOBS_ENABLED=true",
+            "WebApp-IR remains absent from public routes and effects remain stopped",
+        ),
+    ),
+    PhaseSpec(
+        "postcommit_activate_fi_effects",
+        "activate-webapp-fi-effects-only",
+        ("webapp_fi",),
+        "Activate provider effects only on WebApp-FI.",
+        True,
+        forward_only=True,
+        business_write_allowed=True,
+        required_journal_status=POSTCOMMIT_JOURNAL_STATUS,
+        requirements=("WebApp-IR effects remain disabled",),
+    ),
+    PhaseSpec(
+        "postcommit_activate_bot_worker_watch",
+        "activate-bot-worker-and-watch-first-irreversible-effect",
+        ("bot_fi",),
+        "Start the sole Telegram execution owner and atomically watch its first DB/provider effect.",
+        True,
+        forward_only=True,
+        business_write_allowed=True,
+        required_journal_status=POSTCOMMIT_JOURNAL_STATUS,
+        requirements=(
+            "provider-free queue rehydration and durable watchers already completed",
+            "journal is already in forward-only recovery before Bot polling starts",
+            "any naturally occurring first DB write or provider attempt is captured",
+            "no synthetic Telegram effect is required",
+        ),
+    ),
+    PhaseSpec(
+        "postcommit_forward_only_unblock",
+        "activate-forward-only-three-vhost-generations",
+        ("bot_fi", "webapp_fi"),
+        "Activate the write-capable generations in a forward-only ordered sequence.",
+        True,
+        forward_only=True,
+        business_write_allowed=True,
+        required_journal_status=POSTCOMMIT_JOURNAL_STATUS,
+        requirements=(
+            "Bot watcher is armed and Bot health is proven without requiring a send",
+            "each host reads back the exact target generation after activation",
+            "partial failure retries the same generation and never restores legacy writers",
+        ),
+    ),
+    PhaseSpec(
+        "postcommit_first_write_observation",
+        "observe-first-write-provider-effect-and-replication",
+        ("bot_fi", "webapp_fi", "webapp_ir", "witness"),
+        "Observe the first write, provider effect, DR projection, lease, and queue result.",
+        False,
+        forward_only=True,
+        business_write_allowed=True,
+        required_journal_status=POSTCOMMIT_JOURNAL_STATUS,
+        requirements=(
+            "first write is recorded exactly once",
+            "forward recovery remains the only recovery mode",
+        ),
+    ),
+)
+
 ROLLBACK_SPECS: tuple[PhaseSpec, ...] = (
     PhaseSpec(
-        "rollback_readonly_upstream",
-        "restore-production-upstream-legacy-readonly",
-        ("webapp_fi",),
-        "Route readonly traffic back to the untouched legacy stack.",
+        "rollback_refence_and_revoke_lease",
+        "refence-shadow-fi-and-revoke-witness-lease",
+        ("webapp_fi", "webapp_ir", "witness"),
+        "Re-fence shadow writer authority and expire the operation Witness lease.",
+        True,
+        requirements=(
+            "WebApp-FI and WebApp-IR are fenced",
+            "operation lease is revoked or expired at the expected epoch",
+        ),
+    ),
+    PhaseSpec(
+        "rollback_lease_readback",
+        "verify-no-live-shadow-witness-lease",
+        ("webapp_fi", "webapp_ir", "witness"),
+        "Read back null shadow writer authority and no live operation lease.",
+        False,
+    ),
+    PhaseSpec(
+        "rollback_readonly_generation",
+        "restore-three-vhost-legacy-readonly-generation",
+        ("bot_fi", "webapp_fi"),
+        "Stage the manifest-bound legacy readonly generation on both Nginx hosts.",
         True,
     ),
     PhaseSpec(
         "rollback_nginx_test",
         "test-production-nginx-configuration",
-        ("webapp_fi",),
-        "Validate the legacy readonly upstream.",
+        ("bot_fi", "webapp_fi"),
+        "Validate the complete legacy readonly generation on both hosts.",
         False,
     ),
     PhaseSpec(
         "rollback_nginx_reload",
         "reload-production-nginx-legacy-readonly",
-        ("webapp_fi",),
-        "Reload the validated legacy readonly upstream.",
+        ("bot_fi", "webapp_fi"),
+        "Activate the validated legacy readonly generation on both hosts.",
         True,
     ),
     PhaseSpec(
@@ -319,16 +541,16 @@ ROLLBACK_SPECS: tuple[PhaseSpec, ...] = (
     ),
     PhaseSpec(
         "rollback_write_block_restore",
-        "restore-legacy-production-write-policy",
-        ("webapp_fi",),
-        "Restore the legacy write policy only after legacy health is proven.",
+        "restore-three-vhost-legacy-write-policy",
+        ("bot_fi", "webapp_fi"),
+        "Restore the legacy write policy on all three vhosts only after legacy health is proven.",
         True,
     ),
     PhaseSpec(
         "rollback_final_readback",
         "verify-legacy-production-readback",
-        ("bot_fi", "webapp_fi"),
-        "Verify legacy health and routing after rollback.",
+        ("bot_fi", "webapp_fi", "witness"),
+        "Externally verify all three vhosts, legacy health, null lease, and routing after rollback.",
         False,
     ),
 )
@@ -345,29 +567,44 @@ OPERATIONAL_GAPS = (
         "required_for": "Pre-freeze release, image ID, compose hash, and host identity attestation.",
     },
     {
-        "component": "write-block-and-legacy-writer-worker",
+        "component": "coordinated-three-vhost-nginx-generation-worker",
         "status": "missing",
-        "required_for": "Nginx install/test/reload, legacy writer stop/start, zero-client and public readback.",
+        "required_for": (
+            "Atomic install/test/activate/rollback across both Bot-FI vhosts "
+            "and the WebApp-FI vhost, with external readback."
+        ),
     },
     {
         "component": "final-frozen-snapshot-worker",
         "status": "missing",
-        "required_for": "Final DB/Redis/uploads/audit snapshot, restore-smoke, hash, and readback evidence.",
+        "required_for": (
+            "Final DB/uploads/audit restore material and sealed legacy Redis "
+            "rollback-only hashes."
+        ),
     },
     {
-        "component": "shadow-restore-migration-role-fence-worker",
+        "component": "resume-safe-shadow-restore-migration-role-fence-worker",
         "status": "missing",
-        "required_for": "Operation-owned restore plus forward migration, least-privilege roles, and fencing.",
+        "required_for": (
+            "Redis-free operation-owned restore plus on-chain crash-resumable "
+            "migration, post-migration roles, and fencing."
+        ),
     },
     {
-        "component": "witness-lease-and-clock-validator",
+        "component": "signed-witness-attestation-and-live-lease-validator",
         "status": "missing",
-        "required_for": "Live Witness lease, boot clock, epoch, transition, and renewal evidence.",
+        "required_for": (
+            "Signed exact-version health/release/TLS attestation plus immediate "
+            "singleton lease, epoch, and current/previous key readback."
+        ),
     },
     {
-        "component": "three-site-convergence-validator",
+        "component": "tls-blob-firewall-and-convergence-validator",
         "status": "missing",
-        "required_for": "Queue, cursor, DR, parity, quarantine, lag, TLS, and role convergence evidence.",
+        "required_for": (
+            "Peer TLS handshakes, blob keyring round-trip, destination-allowlisted "
+            "nftables/DOCKER-USER rules, queue, DR, parity, and lag evidence."
+        ),
     },
     {
         "component": "readonly-upstream-and-rollback-worker",
@@ -375,14 +612,25 @@ OPERATIONAL_GAPS = (
         "required_for": "Readonly shadow switch, pre-commit rollback rehearsal, and legacy readback.",
     },
     {
+        "component": "wa-ir-private-key-csr-certificate-and-dns-worker",
+        "status": "missing",
+        "required_for": (
+            "WA-local private key/CSR, controller-side Arvan DNS-01 issuance, "
+            "curl --resolve validation, and reversible versioned DNS A update."
+        ),
+    },
+    {
         "component": "phase-evidence-schema-verifiers",
         "status": "missing",
         "required_for": "Semantic verification of each evidence file before its digest completes a phase.",
     },
     {
-        "component": "first-business-write-executor",
-        "status": "intentionally-absent",
-        "required_for": "A later reviewed slice after the explicit irreversible journal commit gate.",
+        "component": "postcommit-forward-recovery-executor",
+        "status": "missing-hard-blocker",
+        "required_for": (
+            "WebApp activation, fresh-Redis/job proof, provider-free Bot queue "
+            "rehydration, watched Bot start, coordinated HTTP unblock, and first-effect observation."
+        ),
     },
 )
 
@@ -503,8 +751,14 @@ def validate_manifest(document: Any) -> dict[str, Any]:
         "role_material_sha256",
         "legacy_bot_rollback_sha256",
         "legacy_webapp_rollback_sha256",
+        "legacy_bot_redis_rollback_sha256",
+        "legacy_webapp_redis_rollback_sha256",
         "shadow_compose_sha256",
         "cutover_approval_sha256",
+        "nginx_freeze_generation_sha256",
+        "nginx_rollback_generation_sha256",
+        "postcommit_executor_contract_sha256",
+        "phase_evidence_schema_sha256",
     ):
         if not isinstance(artifacts[field], str) or SHA256_RE.fullmatch(artifacts[field]) is None:
             raise CutoverContractError(f"artifacts.{field} is not a SHA-256 digest")
@@ -578,12 +832,22 @@ def _agent_args(
     manifest_sha256: str,
     role: str,
     operation: str,
+    business_write_allowed: bool,
+    required_journal_status: str,
 ) -> list[str]:
     topology = manifest["topology"][role]
     agent = [
         REMOTE_AGENT_PATH,
         "--operation",
         operation,
+        "--business-write-policy",
+        (
+            "allow-after-forward-only-commit"
+            if business_write_allowed
+            else "forbid"
+        ),
+        "--required-journal-status",
+        required_journal_status,
         "--role",
         role,
         "--expected-host",
@@ -614,6 +878,24 @@ def _agent_args(
         manifest["deployment"]["shadow_compose_project"],
         "--shadow-root",
         manifest["deployment"]["shadow_root"],
+        "--production-vhosts-json",
+        json.dumps(
+            PRODUCTION_VHOSTS,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        "--nginx-freeze-generation-sha256",
+        manifest["artifacts"]["nginx_freeze_generation_sha256"],
+        "--nginx-rollback-generation-sha256",
+        manifest["artifacts"]["nginx_rollback_generation_sha256"],
+        "--legacy-redis-policy",
+        LEGACY_REDIS_POLICY,
+        "--shadow-redis-policy",
+        SHADOW_REDIS_POLICY,
+        "--postcommit-executor-contract-sha256",
+        manifest["artifacts"]["postcommit_executor_contract_sha256"],
+        "--phase-evidence-schema-sha256",
+        manifest["artifacts"]["phase_evidence_schema_sha256"],
     ]
     if topology["transport"] == "local-controller":
         return agent
@@ -662,10 +944,21 @@ def _render_specs(
     *,
     manifest_sha256: str,
     specs: tuple[PhaseSpec, ...],
+    initial_prerequisite: str | None = None,
 ) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
-    previous: str | None = None
+    previous = initial_prerequisite
     for index, spec in enumerate(specs, 1):
+        if spec.forward_only != (
+            spec.required_journal_status == POSTCOMMIT_JOURNAL_STATUS
+        ):
+            raise CutoverContractError(
+                f"phase {spec.phase} has inconsistent forward-only journal binding"
+            )
+        if spec.business_write_allowed and not spec.forward_only:
+            raise CutoverContractError(
+                f"phase {spec.phase} permits writes outside forward-only recovery"
+            )
         commands = [
             {
                 "command_id": f"{spec.phase}.{role}",
@@ -675,11 +968,15 @@ def _render_specs(
                     manifest_sha256=manifest_sha256,
                     role=role,
                     operation=spec.operation,
+                    business_write_allowed=spec.business_write_allowed,
+                    required_journal_status=spec.required_journal_status,
                 ),
                 "required": True,
                 "render_only": True,
                 "executor_available": False,
                 "requires_live_state_recheck": True,
+                "business_write_allowed": spec.business_write_allowed,
+                "required_journal_status": spec.required_journal_status,
                 "approval_sha256": manifest["artifacts"]["cutover_approval_sha256"],
                 "payload_transfer": (
                     "object-storage-private-versioned-age"
@@ -698,7 +995,11 @@ def _render_specs(
                 "description": spec.description,
                 "prerequisite_phase": previous,
                 "mutates_production": spec.mutates_production,
-                "business_write_allowed": False,
+                "business_write_allowed": spec.business_write_allowed,
+                "forward_only": spec.forward_only,
+                "first_write_boundary": spec.first_write_boundary,
+                "required_journal_status": spec.required_journal_status,
+                "requirements": list(spec.requirements),
                 "execution_supported": False,
                 "journal_begin_required_before_commands": True,
                 "journal_completion_requires_evidence_sha256": True,
@@ -729,6 +1030,12 @@ def render_plan(
     rollback = _render_specs(
         manifest, manifest_sha256=manifest_sha256, specs=ROLLBACK_SPECS
     )
+    postcommit = _render_specs(
+        manifest,
+        manifest_sha256=manifest_sha256,
+        specs=POSTCOMMIT_SPECS,
+        initial_prerequisite=FORWARD_ONLY_COMMIT_GATE,
+    )
     commit_argv = [
         CONTROLLER_PATH,
         "--manifest",
@@ -756,7 +1063,52 @@ def render_plan(
         "release_sha": manifest["release_sha"],
         "legacy_release_sha": manifest["legacy_release_sha"],
         "topology": manifest["topology"],
+        "production_vhosts": PRODUCTION_VHOSTS,
         "phases": phases,
+        "postcommit_forward_recovery": {
+            "execution_supported": False,
+            "contract_sha256": manifest["artifacts"][
+                "postcommit_executor_contract_sha256"
+            ],
+            "first_write_boundary_phase": FORWARD_ONLY_COMMIT_GATE,
+            "commands": postcommit,
+        },
+        "nginx_generation_transaction": {
+            "hosts": ["bot_fi", "webapp_fi"],
+            "vhosts": PRODUCTION_VHOSTS,
+            "freeze_generation_sha256": manifest["artifacts"][
+                "nginx_freeze_generation_sha256"
+            ],
+            "rollback_generation_sha256": manifest["artifacts"][
+                "nginx_rollback_generation_sha256"
+            ],
+            "requires_both_host_tests_before_activation": True,
+            "requires_external_readback": True,
+            "cross_host_instantaneous_atomicity_claimed": False,
+            "coordination_model": "ordered-fail-closed-per-host-generation-readback",
+            "freeze_failure_mode": "compensating-restore-already-switched-hosts",
+            "forward_unblock_failure_mode": "retry-exact-same-generation",
+            "per_host_generation_readback_required": True,
+        },
+        "redis_contract": {
+            "legacy": LEGACY_REDIS_POLICY,
+            "shadow": SHADOW_REDIS_POLICY,
+            "legacy_bot_rollback_sha256": manifest["artifacts"][
+                "legacy_bot_redis_rollback_sha256"
+            ],
+            "legacy_webapp_rollback_sha256": manifest["artifacts"][
+                "legacy_webapp_redis_rollback_sha256"
+            ],
+            "queue_rehydrate_before_bot_claims": True,
+        },
+        "webapp_ir_standby_contract": {
+            "background_jobs_enabled": True,
+            "public_route_enabled_before_promotion": False,
+            "effects_enabled_before_promotion": False,
+            "fresh_redis_required": True,
+            "due_otp_jobs_allowed": False,
+            "site_local_job_allowlist_required": True,
+        },
         "rollback": {
             "eligible_until_commit_gate": True,
             "prohibited_after_commit_gate": True,
@@ -764,13 +1116,20 @@ def render_plan(
             "commands": rollback,
         },
         "first_business_write_commit_gate": {
+            "enabled": IRREVERSIBLE_COMMIT_ENABLED,
+            "hard_disabled": not IRREVERSIBLE_COMMIT_ENABLED,
             "irreversible_boundary": True,
             "required_completed_phase": PHASES[-1],
             "required_confirmation": FIRST_WRITE_COMMIT_CONFIRMATION,
-            "argv_template": commit_argv,
+            "prospective_argv_template": commit_argv,
+            "blocked_by": [
+                "postcommit-forward-recovery-executor",
+                "phase-evidence-schema-verifiers",
+                "coordinated-three-vhost-nginx-generation-worker",
+            ],
             "effect": (
-                "Journal rollback becomes permanently prohibited before any first "
-                "business write may be attempted."
+                "Hard-disabled while the rendered postcommit contract has no "
+                "bounded executor and semantic evidence verifiers."
             ),
         },
         "prohibitions": [
@@ -779,6 +1138,8 @@ def render_plan(
             "no delete, compose down, volume removal, or destructive cleanup",
             "no database downgrade",
             "no direct payload transfer to WebApp-IR",
+            "no legacy Redis restore into any shadow target",
+            "no WebApp-IR public route or effects before explicit promotion",
             "no business write before the explicit commit gate",
             "no rollback after the explicit commit gate",
         ],
@@ -820,7 +1181,6 @@ JOURNAL_STATUSES = {
     "phase_started",
     "ready_for_commit",
     "rolled_back",
-    "first_write_committed",
 }
 EVENT_FIELDS = frozenset(
     {
@@ -839,7 +1199,6 @@ EVENT_KINDS = {
     "phase_started",
     "phase_completed",
     "rollback_recorded",
-    "first_write_committed",
 }
 
 
@@ -949,15 +1308,6 @@ def _validate_event_history(journal: dict[str, Any]) -> None:
                 raise CutoverContractError("cutover journal rollback history is invalid")
             replay_started = None
             replay_status = "rolled_back"
-        elif kind == "first_write_committed":
-            if (
-                replay_status != "ready_for_commit"
-                or phase is not None
-                or evidence != replay_evidence.get(PHASES[-1])
-                or reason is not None
-            ):
-                raise CutoverContractError("cutover journal commit history is invalid")
-            replay_status = "first_write_committed"
         else:
             raise CutoverContractError("cutover journal creation event may only occur once")
         previous = event["event_hash"]
@@ -976,9 +1326,6 @@ def _validate_event_history(journal: dict[str, Any]) -> None:
             or journal["rollback_evidence_sha256"] != last["evidence_sha256"]
         ):
             raise CutoverContractError("cutover rollback state differs from event history")
-    if replay_status == "first_write_committed":
-        if journal["commit_evidence_sha256"] != events[-1]["evidence_sha256"]:
-            raise CutoverContractError("cutover commit state differs from event history")
 
 
 def _validate_journal(payload: Any) -> dict[str, Any]:
@@ -1029,7 +1376,7 @@ def _validate_journal(payload: Any) -> dict[str, Any]:
     expected_rollback_eligible = status in {"active", "phase_started", "ready_for_commit"}
     if journal["rollback_eligible"] is not expected_rollback_eligible:
         raise CutoverContractError("cutover journal rollback eligibility is inconsistent")
-    if journal["first_business_write_allowed"] is not (status == "first_write_committed"):
+    if journal["first_business_write_allowed"] is not False:
         raise CutoverContractError("cutover journal first-write state is inconsistent")
     if status == "rolled_back":
         if (
@@ -1042,14 +1389,7 @@ def _validate_journal(payload: Any) -> dict[str, Any]:
             raise CutoverContractError("rolled-back journal lacks exact evidence")
     elif journal["rollback_reason"] is not None or journal["rollback_evidence_sha256"] is not None:
         raise CutoverContractError("non-rollback journal contains rollback evidence")
-    if status == "first_write_committed":
-        if (
-            completed != list(PHASES)
-            or journal["commit_evidence_sha256"] != evidence[PHASES[-1]]
-            or not _valid_timestamp(journal["committed_at"])
-        ):
-            raise CutoverContractError("first-write commit gate lacks acceptance evidence")
-    elif journal["commit_evidence_sha256"] is not None or journal["committed_at"] is not None:
+    if journal["commit_evidence_sha256"] is not None or journal["committed_at"] is not None:
         raise CutoverContractError("pre-commit journal contains commit evidence")
     _validate_event_history(journal)
     return journal
@@ -1246,7 +1586,7 @@ class ProductionCutoverJournal:
         descriptor = self._lock()
         try:
             payload = self._read()
-            if payload["status"] in {"rolled_back", "first_write_committed", "ready_for_commit"}:
+            if payload["status"] in {"rolled_back", "ready_for_commit"}:
                 raise CutoverContractError("cutover phase cannot begin from terminal state")
             if phase in payload["completed_phases"]:
                 return payload
@@ -1312,8 +1652,6 @@ class ProductionCutoverJournal:
         descriptor = self._lock()
         try:
             payload = self._read()
-            if payload["status"] == "first_write_committed":
-                raise CutoverContractError("rollback is prohibited after first-write commit")
             if payload["status"] == "rolled_back":
                 if (
                     payload["rollback_reason"] != normalized_reason
@@ -1343,36 +1681,11 @@ class ProductionCutoverJournal:
         evidence_sha256: str,
         confirmation: str,
     ) -> dict[str, Any]:
-        if confirmation != FIRST_WRITE_COMMIT_CONFIRMATION:
-            raise CutoverContractError("first-business-write commit confirmation is invalid")
-        if SHA256_RE.fullmatch(evidence_sha256) is None:
-            raise CutoverContractError("first-business-write evidence SHA-256 is invalid")
-        descriptor = self._lock()
-        try:
-            payload = self._read()
-            if payload["status"] == "first_write_committed":
-                if payload["commit_evidence_sha256"] != evidence_sha256:
-                    raise CutoverContractError("idempotent commit evidence differs from journal")
-                return payload
-            if payload["status"] != "ready_for_commit":
-                raise CutoverContractError("first business write cannot commit before all gates")
-            if payload["phase_evidence_sha256"][PHASES[-1]] != evidence_sha256:
-                raise CutoverContractError(
-                    "commit evidence must equal pre-first-write acceptance evidence"
-                )
-            payload["status"] = "first_write_committed"
-            payload["rollback_eligible"] = False
-            payload["first_business_write_allowed"] = True
-            payload["commit_evidence_sha256"] = evidence_sha256
-            payload["committed_at"] = _now()
-            _append_event(
-                payload,
-                kind="first_write_committed",
-                evidence_sha256=evidence_sha256,
-            )
-            return self._write(payload)
-        finally:
-            os.close(descriptor)
+        del evidence_sha256, confirmation
+        raise CutoverContractError(
+            "irreversible first-business-write commit is hard-disabled until "
+            "the postcommit executor and semantic evidence verifiers exist"
+        )
 
 
 MUTATING_ACTIONS = {
@@ -1386,7 +1699,11 @@ MUTATING_ACTIONS = {
 
 def _planned_transition(args: argparse.Namespace) -> dict[str, Any]:
     return {
-        "status": "planned",
+        "status": (
+            "blocked"
+            if args.action == "commit-first-business-write"
+            else "planned"
+        ),
         "action": args.action,
         "phase": args.phase,
         "required_apply_confirmation": APPLY_CONFIRMATION,
@@ -1397,6 +1714,7 @@ def _planned_transition(args: argparse.Namespace) -> dict[str, Any]:
         ),
         "journal_mutated": False,
         "production_contacted": False,
+        "irreversible_commit_enabled": IRREVERSIBLE_COMMIT_ENABLED,
     }
 
 
@@ -1512,7 +1830,7 @@ def main() -> int:
                 "production_contacted": False,
             }
         print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
-        return 0
+        return 2 if payload.get("status") == "blocked" else 0
     except Exception as exc:
         print(
             json.dumps(
