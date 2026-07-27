@@ -69,6 +69,12 @@ BUSINESS_WRITE_FORBIDDEN = "forbid"
 BUSINESS_WRITE_FORWARD_ONLY = "allow-after-forward-only-commit"
 PRECOMMIT_JOURNAL_STATUS = "rollback-eligible-precommit"
 POSTCOMMIT_JOURNAL_STATUS = "forward-only-committed"
+NGINX_GENERATION_ARTIFACT_FIELDS = {
+    "legacy-normal": "nginx_rollback_generation_sha256",
+    "legacy-frozen": "nginx_freeze_generation_sha256",
+    "shadow-readonly": "nginx_shadow_readonly_generation_sha256",
+    "shadow-writable": "nginx_shadow_writable_generation_sha256",
+}
 PRECOMMIT_MANIFEST_SCHEMA = "production-shadow-precommit-operation-v1"
 PRECOMMIT_SECRET_ROOT = Path(
     "/root/secure-envs/trading-bot/three-site-production-shadow"
@@ -171,6 +177,8 @@ REQUEST_FIELDS = frozenset(
         "production_vhosts",
         "nginx_freeze_generation_sha256",
         "nginx_rollback_generation_sha256",
+        "nginx_shadow_readonly_generation_sha256",
+        "nginx_shadow_writable_generation_sha256",
         "legacy_redis_policy",
         "shadow_redis_policy",
         "postcommit_executor_contract_sha256",
@@ -212,6 +220,7 @@ OPERATION_FIELDS = frozenset(
         "forward_only",
         "business_write_allowed",
         "required_journal_status",
+        "nginx_generations",
     }
 )
 EXPECTED_ROLES = frozenset({"bot_fi", "webapp_fi", "webapp_ir", "witness"})
@@ -475,6 +484,7 @@ def validate_contract(document: Any) -> dict[str, Any]:
         names.add(name)
         forward_only = operation["forward_only"]
         required_status = operation["required_journal_status"]
+        nginx_generations = operation["nginx_generations"]
         if (
             forward_only
             != (required_status == POSTCOMMIT_JOURNAL_STATUS)
@@ -482,6 +492,29 @@ def validate_contract(document: Any) -> dict[str, Any]:
         ):
             raise HostAgentError(
                 "host-agent contract operation has unsafe write/journal policy"
+            )
+        if (
+            not isinstance(nginx_generations, list)
+            or len(nginx_generations) != len(set(nginx_generations))
+            or any(
+                state not in NGINX_GENERATION_ARTIFACT_FIELDS
+                for state in nginx_generations
+            )
+            or nginx_generations
+            != [
+                state
+                for state in NGINX_GENERATION_ARTIFACT_FIELDS
+                if state in nginx_generations
+            ]
+        ):
+            raise HostAgentError(
+                "host-agent contract operation Nginx generation bindings are invalid"
+            )
+        if "shadow-writable" in nginx_generations and not (
+            name == "verify-pre-first-write-acceptance" or forward_only
+        ):
+            raise HostAgentError(
+                "host-agent contract binds writable Nginx before the commit boundary"
             )
     return document
 
@@ -626,10 +659,20 @@ def validate_request(
         "shadow_compose_sha256",
         "nginx_freeze_generation_sha256",
         "nginx_rollback_generation_sha256",
+        "nginx_shadow_readonly_generation_sha256",
+        "nginx_shadow_writable_generation_sha256",
         "postcommit_executor_contract_sha256",
         "phase_evidence_schema_sha256",
     ):
         _nonzero_sha256(document[field], label=field)
+    generation_digests = {
+        document[field]
+        for field in NGINX_GENERATION_ARTIFACT_FIELDS.values()
+    }
+    if len(generation_digests) != len(NGINX_GENERATION_ARTIFACT_FIELDS):
+        raise HostAgentError(
+            "Nginx generation digests must be distinct across semantic states"
+        )
     for field in (
         "release_bundle_bytes",
         "role_material_bytes",
@@ -817,6 +860,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--production-vhosts-b64", required=True)
     parser.add_argument("--nginx-freeze-generation-sha256", required=True)
     parser.add_argument("--nginx-rollback-generation-sha256", required=True)
+    parser.add_argument("--nginx-shadow-readonly-generation-sha256", required=True)
+    parser.add_argument("--nginx-shadow-writable-generation-sha256", required=True)
     parser.add_argument("--legacy-redis-policy", required=True)
     parser.add_argument("--shadow-redis-policy", required=True)
     parser.add_argument("--postcommit-executor-contract-sha256", required=True)
@@ -882,6 +927,12 @@ def request_from_args(args: argparse.Namespace) -> dict[str, Any]:
         "production_vhosts": vhosts,
         "nginx_freeze_generation_sha256": args.nginx_freeze_generation_sha256,
         "nginx_rollback_generation_sha256": args.nginx_rollback_generation_sha256,
+        "nginx_shadow_readonly_generation_sha256": (
+            args.nginx_shadow_readonly_generation_sha256
+        ),
+        "nginx_shadow_writable_generation_sha256": (
+            args.nginx_shadow_writable_generation_sha256
+        ),
         "legacy_redis_policy": args.legacy_redis_policy,
         "shadow_redis_policy": args.shadow_redis_policy,
         "postcommit_executor_contract_sha256": args.postcommit_executor_contract_sha256,

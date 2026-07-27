@@ -82,6 +82,12 @@ PRODUCTION_VHOSTS = {
 }
 LEGACY_REDIS_POLICY = "sealed-rollback-evidence-only"
 SHADOW_REDIS_POLICY = "pristine-empty-no-restore"
+NGINX_GENERATION_ARTIFACT_FIELDS = {
+    "legacy-normal": "nginx_rollback_generation_sha256",
+    "legacy-frozen": "nginx_freeze_generation_sha256",
+    "shadow-readonly": "nginx_shadow_readonly_generation_sha256",
+    "shadow-writable": "nginx_shadow_writable_generation_sha256",
+}
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -170,6 +176,8 @@ ARTIFACT_FIELDS = frozenset(
         "human_approval_policy_sha256",
         "nginx_freeze_generation_sha256",
         "nginx_rollback_generation_sha256",
+        "nginx_shadow_readonly_generation_sha256",
+        "nginx_shadow_writable_generation_sha256",
         "postcommit_executor_contract_sha256",
         "phase_evidence_schema_sha256",
         "host_agent_sha256",
@@ -254,6 +262,7 @@ class PhaseSpec:
     business_write_allowed: bool = False
     required_journal_status: str = PRECOMMIT_JOURNAL_STATUS
     requirements: tuple[str, ...] = ()
+    nginx_generations: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -317,6 +326,7 @@ PHASE_SPECS: tuple[PhaseSpec, ...] = (
             "attest exact releases, images, host identities, routes, and legacy rollback sets",
             "capture the active Nginx generation on Bot-FI and WebApp-FI",
         ),
+        nginx_generations=("legacy-normal",),
     ),
     PhaseSpec(
         "shadow_startup_normalization",
@@ -340,6 +350,7 @@ PHASE_SPECS: tuple[PhaseSpec, ...] = (
             "WebApp-FI vhost coin.gold-trade.ir is write-blocked",
             "the previous complete Nginx generation remains restorable",
         ),
+        nginx_generations=("legacy-normal", "legacy-frozen"),
     ),
     PhaseSpec(
         "freeze_generation_test",
@@ -351,6 +362,7 @@ PHASE_SPECS: tuple[PhaseSpec, ...] = (
             "nginx configuration tests pass on Bot-FI and WebApp-FI",
             "no partial-host activation is permitted",
         ),
+        nginx_generations=("legacy-frozen",),
     ),
     PhaseSpec(
         "freeze_generation_activate",
@@ -362,6 +374,7 @@ PHASE_SPECS: tuple[PhaseSpec, ...] = (
             "each host activates and reads back its manifest-bound generation",
             "activation failure compensates by restoring every host already switched",
         ),
+        nginx_generations=("legacy-frozen",),
     ),
     PhaseSpec(
         "stop_legacy_writers",
@@ -486,6 +499,7 @@ PHASE_SPECS: tuple[PhaseSpec, ...] = (
             "WebApp-IR remains unrouted and effects-disabled",
             "each host reads back the expected readonly upstream generation",
         ),
+        nginx_generations=("legacy-frozen", "shadow-readonly"),
     ),
     PhaseSpec(
         "precommit_no_due_mutator_delta",
@@ -528,6 +542,7 @@ PHASE_SPECS: tuple[PhaseSpec, ...] = (
         ("bot_fi", "webapp_fi", "webapp_ir", "witness"),
         "Re-read every gate and prove rollback remains available before commit.",
         False,
+        nginx_generations=("shadow-readonly", "shadow-writable"),
     ),
 )
 PHASES = tuple(spec.phase for spec in PHASE_SPECS)
@@ -588,6 +603,7 @@ POSTCOMMIT_SPECS: tuple[PhaseSpec, ...] = (
             "each host reads back the exact target generation after activation",
             "partial failure retries the same generation and never restores legacy writers",
         ),
+        nginx_generations=("shadow-writable",),
     ),
     PhaseSpec(
         "postcommit_first_write_observation",
@@ -630,6 +646,7 @@ ROLLBACK_SPECS: tuple[PhaseSpec, ...] = (
         ("bot_fi", "webapp_fi"),
         "Stage the manifest-bound legacy readonly generation on both Nginx hosts.",
         True,
+        nginx_generations=("legacy-frozen",),
     ),
     PhaseSpec(
         "rollback_nginx_test",
@@ -637,6 +654,7 @@ ROLLBACK_SPECS: tuple[PhaseSpec, ...] = (
         ("bot_fi", "webapp_fi"),
         "Validate the complete legacy readonly generation on both hosts.",
         False,
+        nginx_generations=("legacy-frozen",),
     ),
     PhaseSpec(
         "rollback_nginx_reload",
@@ -644,6 +662,7 @@ ROLLBACK_SPECS: tuple[PhaseSpec, ...] = (
         ("bot_fi", "webapp_fi"),
         "Activate the validated legacy readonly generation on both hosts.",
         True,
+        nginx_generations=("legacy-frozen",),
     ),
     PhaseSpec(
         "rollback_shadow_stop",
@@ -665,6 +684,7 @@ ROLLBACK_SPECS: tuple[PhaseSpec, ...] = (
         ("bot_fi", "webapp_fi"),
         "Restore the legacy write policy on all three vhosts only after legacy health is proven.",
         True,
+        nginx_generations=("legacy-normal",),
     ),
     PhaseSpec(
         "rollback_final_readback",
@@ -672,6 +692,7 @@ ROLLBACK_SPECS: tuple[PhaseSpec, ...] = (
         ("bot_fi", "webapp_fi", "witness"),
         "Externally verify all three vhosts, legacy health, null lease, and routing after rollback.",
         False,
+        nginx_generations=("legacy-normal",),
     ),
 )
 
@@ -796,6 +817,7 @@ def host_agent_contract_document() -> dict[str, Any]:
                 "forward_only": spec.forward_only,
                 "business_write_allowed": spec.business_write_allowed,
                 "required_journal_status": spec.required_journal_status,
+                "nginx_generations": list(spec.nginx_generations),
             }
             for spec in (
                 *PREPARATION_SPECS,
@@ -933,6 +955,8 @@ def validate_manifest(document: Any) -> dict[str, Any]:
         "human_approval_policy_sha256",
         "nginx_freeze_generation_sha256",
         "nginx_rollback_generation_sha256",
+        "nginx_shadow_readonly_generation_sha256",
+        "nginx_shadow_writable_generation_sha256",
         "postcommit_executor_contract_sha256",
         "phase_evidence_schema_sha256",
         "host_agent_sha256",
@@ -945,6 +969,14 @@ def validate_manifest(document: Any) -> dict[str, Any]:
             or artifacts[field] == ZERO_SHA256
         ):
             raise CutoverContractError(f"artifacts.{field} is not a SHA-256 digest")
+    generation_digests = {
+        artifacts[field]
+        for field in NGINX_GENERATION_ARTIFACT_FIELDS.values()
+    }
+    if len(generation_digests) != len(NGINX_GENERATION_ARTIFACT_FIELDS):
+        raise CutoverContractError(
+            "Nginx generation digests must be distinct across semantic states"
+        )
     if artifacts["host_agent_contract_sha256"] != HOST_AGENT_CONTRACT_SHA256:
         raise CutoverContractError(
             "artifacts.host_agent_contract_sha256 differs from the controller contract"
@@ -1220,6 +1252,10 @@ def _agent_args(
         manifest["artifacts"]["nginx_freeze_generation_sha256"],
         "--nginx-rollback-generation-sha256",
         manifest["artifacts"]["nginx_rollback_generation_sha256"],
+        "--nginx-shadow-readonly-generation-sha256",
+        manifest["artifacts"]["nginx_shadow_readonly_generation_sha256"],
+        "--nginx-shadow-writable-generation-sha256",
+        manifest["artifacts"]["nginx_shadow_writable_generation_sha256"],
         "--legacy-redis-policy",
         LEGACY_REDIS_POLICY,
         "--shadow-redis-policy",
@@ -1300,6 +1336,34 @@ def _render_specs(
             raise CutoverContractError(
                 f"phase {spec.phase} permits writes outside forward-only recovery"
             )
+        if (
+            len(set(spec.nginx_generations)) != len(spec.nginx_generations)
+            or any(
+                state not in NGINX_GENERATION_ARTIFACT_FIELDS
+                for state in spec.nginx_generations
+            )
+            or tuple(
+                state
+                for state in NGINX_GENERATION_ARTIFACT_FIELDS
+                if state in spec.nginx_generations
+            )
+            != spec.nginx_generations
+        ):
+            raise CutoverContractError(
+                f"phase {spec.phase} has invalid Nginx generation bindings"
+            )
+        if "shadow-writable" in spec.nginx_generations and not (
+            spec.phase == "pre_first_write_acceptance" or spec.forward_only
+        ):
+            raise CutoverContractError(
+                f"phase {spec.phase} binds writable Nginx before the commit boundary"
+            )
+        nginx_generation_bindings = {
+            state: manifest["artifacts"][
+                NGINX_GENERATION_ARTIFACT_FIELDS[state]
+            ]
+            for state in spec.nginx_generations
+        }
         commands = [
             {
                 "command_id": f"{spec.phase}.{role}",
@@ -1320,6 +1384,7 @@ def _render_specs(
                 "business_write_allowed": spec.business_write_allowed,
                 "required_journal_status": spec.required_journal_status,
                 "approval_sha256": manifest["artifacts"]["cutover_approval_sha256"],
+                "nginx_generation_bindings": nginx_generation_bindings,
                 "payload_transfer": (
                     "object-storage-private-versioned-age"
                     if manifest["topology"][role]["transport"]
@@ -1342,6 +1407,7 @@ def _render_specs(
                 "first_write_boundary": spec.first_write_boundary,
                 "required_journal_status": spec.required_journal_status,
                 "requirements": list(spec.requirements),
+                "nginx_generation_bindings": nginx_generation_bindings,
                 "execution_supported": execution_supported,
                 "journal_begin_required_before_commands": True,
                 "journal_completion_requires_release_verifier_receipt": True,
@@ -1432,12 +1498,22 @@ def render_plan(
         "nginx_generation_transaction": {
             "hosts": ["bot_fi", "webapp_fi"],
             "vhosts": PRODUCTION_VHOSTS,
+            "legacy_normal_generation_sha256": manifest["artifacts"][
+                "nginx_rollback_generation_sha256"
+            ],
             "freeze_generation_sha256": manifest["artifacts"][
                 "nginx_freeze_generation_sha256"
             ],
             "rollback_generation_sha256": manifest["artifacts"][
                 "nginx_rollback_generation_sha256"
             ],
+            "shadow_readonly_generation_sha256": manifest["artifacts"][
+                "nginx_shadow_readonly_generation_sha256"
+            ],
+            "shadow_writable_generation_sha256": manifest["artifacts"][
+                "nginx_shadow_writable_generation_sha256"
+            ],
+            "rollback_is_legacy_normal_alias": True,
             "requires_both_host_tests_before_activation": True,
             "requires_external_readback": True,
             "cross_host_instantaneous_atomicity_claimed": False,

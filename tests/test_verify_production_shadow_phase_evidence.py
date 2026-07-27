@@ -314,6 +314,18 @@ class ProductionShadowPhaseEvidenceTests(unittest.TestCase):
             "witness",
             validated["role_runtime_image_ids"],
         )
+        self.assertEqual(
+            validated["nginx_shadow_readonly_generation_sha256"],
+            MANIFEST_ARTIFACTS[
+                "nginx_shadow_readonly_generation_sha256"
+            ],
+        )
+        self.assertEqual(
+            validated["nginx_shadow_writable_generation_sha256"],
+            MANIFEST_ARTIFACTS[
+                "nginx_shadow_writable_generation_sha256"
+            ],
+        )
 
         for mutation in ("missing-redis", "bool-size", "duplicate-image", "bad-role"):
             with self.subTest(mutation=mutation):
@@ -339,6 +351,23 @@ class ProductionShadowPhaseEvidenceTests(unittest.TestCase):
                         candidate,
                         release_sha=RELEASE_SHA,
                     )
+
+        duplicate_generation = json.loads(
+            json.dumps(MANIFEST_ARTIFACTS)
+        )
+        duplicate_generation[
+            "nginx_shadow_writable_generation_sha256"
+        ] = duplicate_generation[
+            "nginx_shadow_readonly_generation_sha256"
+        ]
+        with self.assertRaisesRegex(
+            PhaseEvidenceError,
+            "generation digests are not distinct",
+        ):
+            _validate_manifest_artifacts(
+                duplicate_generation,
+                release_sha=RELEASE_SHA,
+            )
 
         swapped = json.loads(json.dumps(MANIFEST_ARTIFACTS))
         swapped["role_runtime_image_ids"]["webapp_ir"]["redis"], swapped[
@@ -369,6 +398,21 @@ class ProductionShadowPhaseEvidenceTests(unittest.TestCase):
         self.assertEqual(
             list(PHASE_CLAIM_RULES),
             [spec.phase for spec in PHASE_SPECS],
+        )
+        contract_phases = {
+            row["phase"]: row for row in PHASE_EVIDENCE_CONTRACT["phases"]
+        }
+        self.assertEqual(
+            contract_phases["readonly_upstream_switch"][
+                "nginx_generations"
+            ],
+            ["legacy-frozen", "shadow-readonly"],
+        )
+        self.assertEqual(
+            contract_phases["pre_first_write_acceptance"][
+                "nginx_generations"
+            ],
+            ["shadow-readonly", "shadow-writable"],
         )
 
     def test_every_precommit_phase_exact_evidence_verifies(self):
@@ -447,6 +491,48 @@ class ProductionShadowPhaseEvidenceTests(unittest.TestCase):
                 now=now,
                 dynamic_claims=changed_dynamic,
             )
+
+        generation_bindings = (
+            (
+                "readonly_upstream_switch",
+                "manifest_shadow_readonly_generation_sha256",
+                "nginx_shadow_readonly_generation_sha256",
+            ),
+            (
+                "pre_first_write_acceptance",
+                "active_shadow_readonly_generation_sha256",
+                "nginx_shadow_readonly_generation_sha256",
+            ),
+            (
+                "pre_first_write_acceptance",
+                "prospective_shadow_writable_generation_sha256",
+                "nginx_shadow_writable_generation_sha256",
+            ),
+        )
+        for phase, claim, artifact in generation_bindings:
+            with self.subTest(phase=phase, claim=claim):
+                self.assertEqual(
+                    PHASE_MANIFEST_CLAIM_BINDINGS[phase][claim],
+                    artifact,
+                )
+                bound = evidence_for(phase, captured_at=now)
+                self.assertEqual(
+                    bound["claims"][claim]["value"],
+                    MANIFEST_ARTIFACTS[artifact],
+                )
+                bound["claims"][claim]["value"] = "a" * 64
+                changed_dynamic = expected_dynamic_claims(phase)
+                changed_dynamic[claim] = "a" * 64
+                with self.assertRaisesRegex(
+                    PhaseEvidenceError,
+                    "phase input closure|manifest artifact|prior claim",
+                ):
+                    verify(
+                        bound,
+                        phase=phase,
+                        now=now,
+                        dynamic_claims=changed_dynamic,
+                    )
 
         final_phase = "pre_first_write_acceptance"
         acceptance = evidence_for(final_phase, captured_at=now)

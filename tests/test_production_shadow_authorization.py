@@ -144,6 +144,23 @@ class ProductionShadowAuthorizationTests(unittest.TestCase):
             authorization_basis_sha256(final),
             authorization_basis_sha256(changed),
         )
+        for field, replacement in (
+            ("nginx_shadow_readonly_generation_sha256", "a" * 64),
+            ("nginx_shadow_writable_generation_sha256", "b" * 64),
+        ):
+            with self.subTest(field=field):
+                generation_changed = json.loads(canonical_json_bytes(final))
+                generation_changed["artifacts"][field] = replacement
+                self.assertNotEqual(
+                    authorization_basis_sha256(final),
+                    authorization_basis_sha256(generation_changed),
+                )
+                self.assertNotEqual(
+                    authorization_subject_from_manifest(final),
+                    authorization_subject_from_manifest(
+                        generation_changed
+                    ),
+                )
 
     def test_subject_and_finalize_publish_exact_canonical_documents(self) -> None:
         subject_output = self.root / "subject.json"
@@ -226,7 +243,9 @@ class ProductionShadowAuthorizationTests(unittest.TestCase):
     def test_finalize_rejects_token_after_any_basis_change(self) -> None:
         token = self.token()
         changed = json.loads(canonical_json_bytes(self.template))
-        changed["artifacts"]["release_bundle_sha256"] = "f" * 64
+        changed["artifacts"][
+            "nginx_shadow_writable_generation_sha256"
+        ] = "b" * 64
         changed_path = self.root / "changed-template.json"
         secure_file(changed_path, canonical_json_bytes(changed))
         policy_path = self.root / "policy-source.json"

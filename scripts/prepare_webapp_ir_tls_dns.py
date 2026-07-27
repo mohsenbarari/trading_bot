@@ -183,6 +183,8 @@ CUTOVER_ARTIFACT_FIELDS = {
     "human_approval_policy_sha256",
     "nginx_freeze_generation_sha256",
     "nginx_rollback_generation_sha256",
+    "nginx_shadow_readonly_generation_sha256",
+    "nginx_shadow_writable_generation_sha256",
     "postcommit_executor_contract_sha256",
     "phase_evidence_schema_sha256",
     "host_agent_sha256",
@@ -4324,6 +4326,19 @@ def _validate_cutover_manifest_source(
         )
         if digest == "0" * 64:
             raise WebAppIrTlsError(f"cutover artifact {field} is zero")
+    generation_digests = {
+        artifacts[field]
+        for field in (
+            "nginx_rollback_generation_sha256",
+            "nginx_freeze_generation_sha256",
+            "nginx_shadow_readonly_generation_sha256",
+            "nginx_shadow_writable_generation_sha256",
+        )
+    }
+    if len(generation_digests) != 4:
+        raise WebAppIrTlsError(
+            "cutover Nginx generation digests are not distinct"
+        )
     if (
         isinstance(artifacts["release_bundle_bytes"], bool)
         or not isinstance(artifacts["release_bundle_bytes"], int)

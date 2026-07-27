@@ -232,6 +232,27 @@ class ProductionShadowHostAgentTests(unittest.TestCase):
                         else BUSINESS_WRITE_FORBIDDEN
                     ),
                 )
+                for field in (
+                    HOST_MODULE.NGINX_GENERATION_ARTIFACT_FIELDS.values()
+                ):
+                    self.assertEqual(
+                        request[field],
+                        manifest_payload()["artifacts"][field],
+                    )
+                operation = next(
+                    row
+                    for row in CONTRACT["operations"]
+                    if row["operation"] == request["operation"]
+                )
+                self.assertEqual(
+                    command["nginx_generation_bindings"],
+                    {
+                        state: request[
+                            HOST_MODULE.NGINX_GENERATION_ARTIFACT_FIELDS[state]
+                        ]
+                        for state in operation["nginx_generations"]
+                    },
+                )
                 self.assertEqual(
                     len(
                         request_sha256(
@@ -428,12 +449,57 @@ class ProductionShadowHostAgentTests(unittest.TestCase):
             contract=CONTRACT,
             observed_agent_sha256=AGENT_SHA256,
         )
+        request_digest = request_sha256(
+            request,
+            contract=CONTRACT,
+            observed_agent_sha256=AGENT_SHA256,
+        )
+        for field, replacement in (
+            ("nginx_shadow_readonly_generation_sha256", "e" * 64),
+            ("nginx_shadow_writable_generation_sha256", "d" * 64),
+        ):
+            with self.subTest(field=field):
+                changed = dict(request)
+                changed[field] = replacement
+                self.assertNotEqual(
+                    request_sha256(
+                        changed,
+                        contract=CONTRACT,
+                        observed_agent_sha256=AGENT_SHA256,
+                    ),
+                    request_digest,
+                )
 
         zero_hash = dict(request)
         zero_hash["approval_sha256"] = "0" * 64
         with self.assertRaisesRegex(HostAgentError, "nonzero"):
             validate_request(
                 zero_hash,
+                contract=CONTRACT,
+                observed_agent_sha256=AGENT_SHA256,
+            )
+
+        zero_readonly_generation = dict(request)
+        zero_readonly_generation[
+            "nginx_shadow_readonly_generation_sha256"
+        ] = "0" * 64
+        with self.assertRaisesRegex(HostAgentError, "nonzero"):
+            validate_request(
+                zero_readonly_generation,
+                contract=CONTRACT,
+                observed_agent_sha256=AGENT_SHA256,
+            )
+
+        duplicate_generation = dict(request)
+        duplicate_generation[
+            "nginx_shadow_writable_generation_sha256"
+        ] = request["nginx_shadow_readonly_generation_sha256"]
+        with self.assertRaisesRegex(
+            HostAgentError,
+            "generation digests must be distinct",
+        ):
+            validate_request(
+                duplicate_generation,
                 contract=CONTRACT,
                 observed_agent_sha256=AGENT_SHA256,
             )
@@ -530,6 +596,33 @@ class ProductionShadowHostAgentTests(unittest.TestCase):
                 contract=tampered,
                 observed_agent_sha256=AGENT_SHA256,
             )
+
+        invalid_generation_contract = json.loads(json.dumps(CONTRACT))
+        invalid_generation_contract["operations"][0][
+            "nginx_generations"
+        ] = ["shadow-writable"]
+        with self.assertRaisesRegex(
+            HostAgentError,
+            "writable Nginx before the commit boundary",
+        ):
+            validate_contract(invalid_generation_contract)
+
+        operations = {
+            row["operation"]: row["nginx_generations"]
+            for row in CONTRACT["operations"]
+        }
+        self.assertEqual(
+            operations["switch-three-vhost-upstreams-shadow-readonly"],
+            ["legacy-frozen", "shadow-readonly"],
+        )
+        self.assertEqual(
+            operations["verify-pre-first-write-acceptance"],
+            ["shadow-readonly", "shadow-writable"],
+        )
+        self.assertEqual(
+            operations["activate-forward-only-three-vhost-generations"],
+            ["shadow-writable"],
+        )
 
     def test_validate_only_cli_is_non_mutating_and_execute_is_hard_blocked(self):
         command = rendered_phases()[0]["commands"][0]

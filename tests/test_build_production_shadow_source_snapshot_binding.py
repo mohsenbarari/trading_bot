@@ -139,6 +139,8 @@ def controller_manifest() -> dict:
             "human_approval_policy_sha256": "e" * 64,
             "nginx_freeze_generation_sha256": "8" * 64,
             "nginx_rollback_generation_sha256": "9" * 64,
+            "nginx_shadow_readonly_generation_sha256": "f" * 64,
+            "nginx_shadow_writable_generation_sha256": "0" * 63 + "1",
             "postcommit_executor_contract_sha256": "a" * 64,
             "phase_evidence_schema_sha256": "b" * 64,
             "host_agent_sha256": "c" * 64,

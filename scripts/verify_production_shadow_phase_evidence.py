@@ -360,6 +360,7 @@ PHASE_CLAIM_RULES: dict[str, dict[str, ClaimRule]] = {
         "convergence_state_sha256": HASH,
     },
     "readonly_upstream_switch": {
+        "manifest_shadow_readonly_generation_sha256": HASH,
         "readonly_shadow_vhost_count": exact(3),
         "write_blocked_vhost_count": exact(3),
         "per_host_generation_readback_verified": exact(True),
@@ -393,6 +394,8 @@ PHASE_CLAIM_RULES: dict[str, dict[str, ClaimRule]] = {
         "watcher_baseline_set_sha256": HASH,
     },
     "pre_first_write_acceptance": {
+        "active_shadow_readonly_generation_sha256": HASH,
+        "prospective_shadow_writable_generation_sha256": HASH,
         "acceptance_gate_failure_count": exact(0),
         "rollback_rehearsal_verified": exact(True),
         "business_write_count": exact(0),
@@ -499,6 +502,19 @@ PHASE_MANIFEST_CLAIM_BINDINGS = {
     "freeze_generation_activate": {
         "manifest_freeze_generation_sha256": "nginx_freeze_generation_sha256",
     },
+    "readonly_upstream_switch": {
+        "manifest_shadow_readonly_generation_sha256": (
+            "nginx_shadow_readonly_generation_sha256"
+        ),
+    },
+    "pre_first_write_acceptance": {
+        "active_shadow_readonly_generation_sha256": (
+            "nginx_shadow_readonly_generation_sha256"
+        ),
+        "prospective_shadow_writable_generation_sha256": (
+            "nginx_shadow_writable_generation_sha256"
+        ),
+    },
 }
 
 PHASE_PRIOR_CLAIM_BINDINGS = {
@@ -541,6 +557,10 @@ PHASE_PRIOR_CLAIM_BINDINGS = {
         ),
     },
     "pre_first_write_acceptance": {
+        "active_shadow_readonly_generation_sha256": (
+            "readonly_upstream_switch",
+            "manifest_shadow_readonly_generation_sha256",
+        ),
         "convergence_state_sha256": (
             "convergence_gate",
             "convergence_state_sha256",
@@ -582,6 +602,7 @@ def _contract_document() -> dict[str, Any]:
                 "phase": spec.phase,
                 "operation": spec.operation,
                 "roles": list(spec.roles),
+                "nginx_generations": list(spec.nginx_generations),
                 "max_age_seconds": int(
                     PHASE_MAX_AGE.get(
                         spec.phase,
@@ -668,6 +689,8 @@ def _validate_manifest_artifacts(
         "human_approval_policy_sha256",
         "nginx_freeze_generation_sha256",
         "nginx_rollback_generation_sha256",
+        "nginx_shadow_readonly_generation_sha256",
+        "nginx_shadow_writable_generation_sha256",
         "postcommit_executor_contract_sha256",
         "phase_evidence_schema_sha256",
         "host_agent_sha256",
@@ -676,6 +699,19 @@ def _validate_manifest_artifacts(
     }
     for field in hash_fields:
         _nonzero_sha256(value[field], label=f"manifest artifact {field}")
+    generation_digests = {
+        value[field]
+        for field in (
+            "nginx_rollback_generation_sha256",
+            "nginx_freeze_generation_sha256",
+            "nginx_shadow_readonly_generation_sha256",
+            "nginx_shadow_writable_generation_sha256",
+        )
+    }
+    if len(generation_digests) != 4:
+        raise PhaseEvidenceError(
+            "manifest Nginx generation digests are not distinct"
+        )
     for field in (
         "release_bundle_bytes",
     ):

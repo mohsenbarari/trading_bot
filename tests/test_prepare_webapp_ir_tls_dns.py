@@ -1,3 +1,4 @@
+import hashlib
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
@@ -1188,8 +1189,8 @@ class ActivationDocumentTests(unittest.TestCase):
         }
         legacy_release_sha = "d" * 40
         artifacts = {
-            name: chr(97 + index % 6) * 64
-            for index, name in enumerate(worker.CUTOVER_ARTIFACT_FIELDS)
+            name: hashlib.sha256(name.encode("ascii")).hexdigest()
+            for name in worker.CUTOVER_ARTIFACT_FIELDS
             if name
             not in {
                 "release_bundle_bytes",
@@ -1417,6 +1418,74 @@ class ActivationDocumentTests(unittest.TestCase):
                     campaign_id=CAMPAIGN_ID,
                     operation_id=OPERATION_ID,
                     release_sha=RELEASE_SHA,
+                )
+
+    def test_cutover_manifest_binds_distinct_readonly_and_writable_generations(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = private_dir(Path(tmp) / "documents")
+            documents = self._documents(root)
+            cutover = json.loads(
+                documents["cutover"].read_text(encoding="utf-8")
+            )
+            validated = worker._validate_cutover_manifest_source(
+                cutover,
+                campaign_id=CAMPAIGN_ID,
+                operation_id=OPERATION_ID,
+                release_sha=RELEASE_SHA,
+            )
+            self.assertEqual(
+                validated["artifacts"][
+                    "nginx_shadow_readonly_generation_sha256"
+                ],
+                cutover["artifacts"][
+                    "nginx_shadow_readonly_generation_sha256"
+                ],
+            )
+            self.assertEqual(
+                validated["artifacts"][
+                    "nginx_shadow_writable_generation_sha256"
+                ],
+                cutover["artifacts"][
+                    "nginx_shadow_writable_generation_sha256"
+                ],
+            )
+
+            duplicate = json.loads(json.dumps(cutover))
+            duplicate["artifacts"][
+                "nginx_shadow_writable_generation_sha256"
+            ] = duplicate["artifacts"][
+                "nginx_shadow_readonly_generation_sha256"
+            ]
+            with self.assertRaisesRegex(
+                worker.WebAppIrTlsError,
+                "generation digests are not distinct",
+            ):
+                worker._validate_cutover_manifest_source(
+                    duplicate,
+                    campaign_id=CAMPAIGN_ID,
+                    operation_id=OPERATION_ID,
+                    release_sha=RELEASE_SHA,
+                )
+
+            precondition = json.loads(
+                documents["precondition"].read_text(encoding="utf-8")
+            )
+            writable_tamper = json.loads(json.dumps(validated))
+            writable_tamper["artifacts"][
+                "nginx_shadow_writable_generation_sha256"
+            ] = hashlib.sha256(b"writable-tamper").hexdigest()
+            with self.assertRaisesRegex(
+                worker.WebAppIrTlsError,
+                "precondition evidence binding mismatch",
+            ):
+                worker._validate_activation_precondition_source(
+                    precondition,
+                    manifest=writable_tamper,
+                    manifest_sha256=sha256_secure_file(
+                        documents["cutover"]
+                    )[0],
                 )
 
     def test_finalization_rejects_enabled_jobs_or_effects(self) -> None:

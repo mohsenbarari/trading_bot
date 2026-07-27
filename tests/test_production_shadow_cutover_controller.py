@@ -23,6 +23,7 @@ from scripts.production_shadow_cutover_controller import (
     FORWARD_ONLY_COMMIT_GATE,
     HOST_AGENT_CONTRACT_SHA256,
     MANIFEST_SCHEMA,
+    NGINX_GENERATION_ARTIFACT_FIELDS,
     PHASES,
     PHASE_SPECS,
     PHASE_VERIFICATION_SCHEMA,
@@ -38,6 +39,7 @@ from scripts.production_shadow_cutover_controller import (
     _secure_root,
     _shadow_project,
     _shadow_root,
+    host_agent_contract_document,
     read_root_only_manifest,
     render_plan,
     validate_manifest,
@@ -187,6 +189,8 @@ def manifest_payload() -> dict:
             "human_approval_policy_sha256": "e" * 64,
             "nginx_freeze_generation_sha256": "8" * 64,
             "nginx_rollback_generation_sha256": "9" * 64,
+            "nginx_shadow_readonly_generation_sha256": "f" * 64,
+            "nginx_shadow_writable_generation_sha256": "0" * 63 + "1",
             "postcommit_executor_contract_sha256": "a" * 64,
             "phase_evidence_schema_sha256": "b" * 64,
             "host_agent_sha256": "c" * 64,
@@ -311,6 +315,20 @@ class ProductionShadowManifestTests(unittest.TestCase):
         self.assertTrue(agent_contract["self_hash_required"])
         self.assertTrue(agent_contract["local_host_identity_required"])
         self.assertFalse(agent_contract["operation_execution_supported"])
+        nginx = plan["nginx_generation_transaction"]
+        self.assertTrue(nginx["rollback_is_legacy_normal_alias"])
+        self.assertEqual(
+            nginx["legacy_normal_generation_sha256"],
+            nginx["rollback_generation_sha256"],
+        )
+        self.assertEqual(
+            nginx["shadow_readonly_generation_sha256"],
+            manifest["artifacts"]["nginx_shadow_readonly_generation_sha256"],
+        )
+        self.assertEqual(
+            nginx["shadow_writable_generation_sha256"],
+            manifest["artifacts"]["nginx_shadow_writable_generation_sha256"],
+        )
 
     def test_unknown_root_and_nested_fields_fail_closed(self):
         root_extra = manifest_payload()
@@ -332,6 +350,18 @@ class ProductionShadowManifestTests(unittest.TestCase):
         zero_artifact["artifacts"]["release_bundle_sha256"] = "0" * 64
         with self.assertRaisesRegex(CutoverContractError, "not a SHA-256"):
             validate_manifest(zero_artifact)
+
+        duplicate_generation = manifest_payload()
+        duplicate_generation["artifacts"][
+            "nginx_shadow_writable_generation_sha256"
+        ] = duplicate_generation["artifacts"][
+            "nginx_shadow_readonly_generation_sha256"
+        ]
+        with self.assertRaisesRegex(
+            CutoverContractError,
+            "generation digests must be distinct",
+        ):
+            validate_manifest(duplicate_generation)
 
         duplicate_image = manifest_payload()
         duplicate_image["artifacts"]["role_runtime_image_ids"]["bot_fi"][
@@ -438,6 +468,34 @@ class ProductionShadowManifestTests(unittest.TestCase):
                         "role_runtime_image_ids"
                     ][role],
                 )
+            generation_flags = {
+                "legacy-normal": "--nginx-rollback-generation-sha256",
+                "legacy-frozen": "--nginx-freeze-generation-sha256",
+                "shadow-readonly": (
+                    "--nginx-shadow-readonly-generation-sha256"
+                ),
+                "shadow-writable": (
+                    "--nginx-shadow-writable-generation-sha256"
+                ),
+            }
+            for state, field in NGINX_GENERATION_ARTIFACT_FIELDS.items():
+                flag = generation_flags[state]
+                self.assertEqual(
+                    argv[argv.index(flag) + 1],
+                    manifest_payload()["artifacts"][field],
+                )
+            self.assertEqual(
+                command["nginx_generation_bindings"],
+                next(
+                    phase["nginx_generation_bindings"]
+                    for phase in [
+                        *plan["phases"],
+                        *plan["rollback"]["commands"],
+                        *plan["postcommit_forward_recovery"]["commands"],
+                    ]
+                    if command in phase["commands"]
+                ),
+            )
         self.assertTrue(all(not command["executor_available"] for command in all_commands))
         rendered = "\n".join(" ".join(command["argv"]) for command in all_commands).lower()
         for forbidden in (
@@ -525,6 +583,32 @@ class ProductionShadowManifestTests(unittest.TestCase):
             "ordered-fail-closed-per-host-generation-readback",
         )
         self.assertTrue(nginx["per_host_generation_readback_required"])
+        self.assertEqual(
+            phases["readonly_upstream_switch"][
+                "nginx_generation_bindings"
+            ],
+            {
+                "legacy-frozen": manifest_payload()["artifacts"][
+                    "nginx_freeze_generation_sha256"
+                ],
+                "shadow-readonly": manifest_payload()["artifacts"][
+                    "nginx_shadow_readonly_generation_sha256"
+                ],
+            },
+        )
+        self.assertEqual(
+            phases["pre_first_write_acceptance"][
+                "nginx_generation_bindings"
+            ],
+            {
+                "shadow-readonly": manifest_payload()["artifacts"][
+                    "nginx_shadow_readonly_generation_sha256"
+                ],
+                "shadow-writable": manifest_payload()["artifacts"][
+                    "nginx_shadow_writable_generation_sha256"
+                ],
+            },
+        )
 
         rollback = plan["rollback"]["commands"]
         self.assertEqual(
@@ -564,6 +648,38 @@ class ProductionShadowManifestTests(unittest.TestCase):
         )
         self.assertNotIn("postcommit_rehydrate_bot_queue", postcommit)
         self.assertIn("postcommit_forward_only_unblock", postcommit)
+        self.assertEqual(
+            postcommit["postcommit_forward_only_unblock"][
+                "nginx_generation_bindings"
+            ],
+            {
+                "shadow-writable": manifest_payload()["artifacts"][
+                    "nginx_shadow_writable_generation_sha256"
+                ]
+            },
+        )
+        contract_operations = {
+            row["operation"]: row["nginx_generations"]
+            for row in host_agent_contract_document()["operations"]
+        }
+        self.assertEqual(
+            contract_operations[
+                "switch-three-vhost-upstreams-shadow-readonly"
+            ],
+            ["legacy-frozen", "shadow-readonly"],
+        )
+        self.assertEqual(
+            contract_operations[
+                "verify-pre-first-write-acceptance"
+            ],
+            ["shadow-readonly", "shadow-writable"],
+        )
+        self.assertEqual(
+            contract_operations[
+                "activate-forward-only-three-vhost-generations"
+            ],
+            ["shadow-writable"],
+        )
         rendered = json.dumps(plan, sort_keys=True)
         for vhost in (
             "coin.362514.ir",
