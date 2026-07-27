@@ -359,6 +359,7 @@ def issue_human_approval_relay_receipt(
             release_sha=str(session_token.get("release_sha", "")),
             allowed_actions=session_token.get("allowed_actions", []),
         ),
+        "session_issued_at": verified.issued_at.isoformat(),
         "issued_at": current.isoformat(),
         "expires_at": verified.expires_at.isoformat(),
         "authentication": {"methods": list(verified.authentication_methods)},
@@ -388,8 +389,8 @@ def verify_human_approval_relay_receipt(
         "schema", "receipt_id", "approval_id", "policy_id", "policy_hash",
         "issuer_id", "key_id", "operator", "authenticator_id", "action",
         "environment", "subject", "request_id", "session_token_sha256",
-        "session_scope_sha256", "issued_at", "expires_at", "authentication",
-        "witness_signature",
+        "session_scope_sha256", "session_issued_at", "issued_at", "expires_at",
+        "authentication", "witness_signature",
     }
     if (
         not isinstance(receipt, dict)
@@ -455,13 +456,21 @@ def verify_human_approval_relay_receipt(
         raise HumanApprovalError(
             "human approval relay did not use password plus a possession factor"
         )
+    session_issued = _utc(
+        receipt["session_issued_at"],
+        label="human approval relay session_issued_at",
+    )
     issued = _utc(receipt["issued_at"], label="human approval relay issued_at")
     expires = _utc(receipt["expires_at"], label="human approval relay expires_at")
     if (
-        expires <= issued
-        or expires - issued > timedelta(seconds=SESSION_MAX_TTL_SECONDS)
+        session_issued > issued
+        or issued >= expires
+        or expires - session_issued
+        > timedelta(seconds=SESSION_MAX_TTL_SECONDS)
     ):
-        raise HumanApprovalError("human approval relay receipt lifetime exceeds session policy")
+        raise HumanApprovalError(
+            "human approval relay receipt/session chronology exceeds session policy"
+        )
     current = _current_utc(now)
     if issued > current + timedelta(seconds=30):
         raise HumanApprovalError("human approval relay receipt is future-dated")

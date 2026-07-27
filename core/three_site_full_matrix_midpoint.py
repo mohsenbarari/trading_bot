@@ -601,6 +601,7 @@ def verify_midpoint_bundle(
         str(campaign.get("release_sha") or "")
     )
     session_hash: str | None = None
+    session_issued_at: datetime | None = None
     approval_id: str | None = None
     expiry: datetime | None = None
     receipt_hashes: dict[str, str] = {}
@@ -643,6 +644,14 @@ def verify_midpoint_bundle(
             raise FullMatrixMidpointError(
                 "midpoint relay receipt predates the durable pause"
             )
+        current_session_issued_at = _utc(
+            receipt.get("session_issued_at"),
+            label="midpoint Witness session issued_at",
+        )
+        if current_session_issued_at <= pause_time:
+            raise FullMatrixMidpointError(
+                "midpoint Witness session predates the durable pause"
+            )
         if verified.expires_at < campaign_expiry:
             raise FullMatrixMidpointError(
                 "midpoint Witness session expires before the campaign"
@@ -658,10 +667,12 @@ def verify_midpoint_bundle(
             raise FullMatrixMidpointError("midpoint relay receipt identity is unsafe")
         if session_hash is None:
             session_hash = current_session_hash
+            session_issued_at = current_session_issued_at
             approval_id = verified.approval_id
             expiry = verified.expires_at
         elif (
             current_session_hash != session_hash
+            or current_session_issued_at != session_issued_at
             or verified.approval_id != approval_id
             or verified.expires_at != expiry
         ):
@@ -672,7 +683,12 @@ def verify_midpoint_bundle(
         receipt_ids.add(current_receipt_id)
         issued_values.append(verified.issued_at)
         receipt_hashes[action] = verified.token_hash
-    if session_hash is None or approval_id is None or expiry is None:
+    if (
+        session_hash is None
+        or session_issued_at is None
+        or approval_id is None
+        or expiry is None
+    ):
         raise FullMatrixMidpointError("midpoint session proof is incomplete")
     if (
         prior_session_token_sha256 is not None
@@ -689,6 +705,7 @@ def verify_midpoint_bundle(
         "bundle_sha256": bundle_hash,
         "session_token_sha256": session_hash,
         "session_scope_sha256": expected_session_scope,
+        "session_issued_at": session_issued_at.isoformat(),
         "approval_id": approval_id,
         "issued_after": min(issued_values).isoformat(),
         "expires_at": expiry.isoformat(),

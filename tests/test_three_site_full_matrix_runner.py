@@ -503,6 +503,14 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
         if not hasattr(self, "_midpoint_context"):
             self._midpoint_context = {}
         self._midpoint_context[root] = (keys, witness_private_key)
+        if not hasattr(self, "_initial_sessions"):
+            self._initial_sessions = {}
+        self._initial_sessions[root] = self._set_relay_start_approval(
+            campaign=campaign,
+            policy=policy,
+            root=root,
+            issued_at=now,
+        )
         return stack, now, campaign, policy, bound, root, root / "campaign.jsonl"
 
     def _midpoint_bundle(
@@ -770,6 +778,62 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                     now=now + timedelta(days=30),
                 )
 
+    async def test_historical_direct_journal_needs_no_witness_or_midpoint(self):
+        stack, now, campaign, policy, bound, root, journal = self._inputs()
+        with stack:
+            await self._run_to_completion(
+                campaign=campaign,
+                policy=policy,
+                bound=bound,
+                root=root,
+                journal=journal,
+                backend=FakeBackend(root),
+                now=now + timedelta(minutes=1),
+            )
+            legacy_journal = root / "legacy-direct-campaign.jsonl"
+            for row in verify_hash_chained_jsonl(journal):
+                if row["event"] in {
+                    "campaign_paused",
+                    "campaign_resumed",
+                    "campaign_completed",
+                }:
+                    continue
+                append_hash_chained_jsonl(
+                    legacy_journal,
+                    {
+                        key: value
+                        for key, value in row.items()
+                        if key not in {"previous_hash", "event_hash"}
+                    },
+                )
+            enrollment, _witness_private_key = self._midpoint_context[root]
+            _sign(campaign, enrollment)
+            retained = [
+                json.loads(
+                    (
+                        root
+                        / f"{campaign['campaign_id']}-i{iteration:02d}-{phase}-evidence.json"
+                    ).read_text()
+                )
+                for iteration in range(1, campaign["repetitions"] + 1)
+                for phase in campaign["required_phases"]
+            ]
+            with patch(
+                "core.three_site_full_matrix_campaign.load_bound_witness_public_key",
+                side_effect=AssertionError("legacy audit loaded Witness material"),
+            ):
+                report = verify_complete_matrix(
+                    campaign=campaign,
+                    approver_policy=policy,
+                    bound_artifacts=bound,
+                    phase_evidence=retained,
+                    artifact_root=root,
+                    execution_journal=legacy_journal,
+                    now=now + timedelta(days=30),
+                )
+            self.assertEqual(report["status"], "passed")
+            self.assertTrue(report["authoritative_controller_journal"])
+
     async def test_midpoint_pause_is_zero_residue_and_idempotent_without_proof(self):
         stack, now, campaign, policy, bound, root, journal = self._inputs()
         with stack:
@@ -847,12 +911,7 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
     async def test_campaign_start_relay_receipt_uses_bound_witness_key(self):
         stack, now, campaign, policy, bound, root, journal = self._inputs()
         with stack:
-            session = self._set_relay_start_approval(
-                campaign=campaign,
-                policy=policy,
-                root=root,
-                issued_at=now,
-            )
+            session = self._initial_sessions[root]
             paused = await run_full_matrix_campaign(
                 campaign=campaign,
                 approver_policy=policy,
@@ -891,6 +950,28 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(rejected["refresh_bundle_status"], "rejected")
             self.assertEqual(journal.read_bytes(), before)
+
+    async def test_new_run_rejects_direct_approval_before_bound_material(self):
+        stack, now, campaign, policy, bound, root, journal = self._inputs()
+        with stack:
+            enrollment, _witness_private_key = self._midpoint_context[root]
+            _sign(campaign, enrollment)
+            bound["failover_backend_config"] = root / "must-not-be-opened.json"
+            backend = FakeBackend(root)
+            with self.assertRaisesRegex(
+                FullMatrixRunnerError, "requires a Witness relay"
+            ):
+                await run_full_matrix_campaign(
+                    campaign=campaign,
+                    approver_policy=policy,
+                    bound_artifacts=bound,
+                    artifact_root=root,
+                    journal=journal,
+                    backend=backend,
+                    now=now + timedelta(minutes=1),
+                )
+            self.assertEqual(backend.preflight_calls, 0)
+            self.assertFalse(journal.exists())
 
     async def test_initial_relay_session_requires_exact_scope_and_runway(self):
         for name, ttl_seconds, actions, error in (
@@ -974,6 +1055,32 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                 root=root,
                 issued_at=pause_time - timedelta(seconds=1),
             )
+            enrollment, witness_private_key = self._midpoint_context[root]
+            pre_pause_session_at = pause_time - timedelta(microseconds=1)
+            pre_pause_session, _state, _audit = authenticate_and_issue_session(
+                secrets_payload=enrollment.secrets_payload,
+                state_payload=enrollment.state_payload,
+                policy_payload=enrollment.policy_payload,
+                private_key_envelope=enrollment.private_key_envelope,
+                password="test matrix approval passphrase",
+                totp=totp_code(
+                    enrollment.totp_secret,
+                    at=pre_pause_session_at,
+                )[1],
+                recovery_code=None,
+                release_sha=campaign["release_sha"],
+                allowed_actions=list(MIDPOINT_SESSION_ACTIONS),
+                ttl_seconds=48 * 60 * 60,
+                now=pre_pause_session_at,
+            )
+            pre_pause_session_bundle = self._midpoint_bundle(
+                paused=paused,
+                campaign=campaign,
+                policy=policy,
+                root=root,
+                issued_at=pause_time + timedelta(microseconds=1),
+                session_token=pre_pause_session,
+            )
             short_expiry = self._midpoint_bundle(
                 paused=paused,
                 campaign=campaign,
@@ -998,14 +1105,57 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
             mixed_session["probes"][2]["receipt"] = second_session["probes"][2][
                 "receipt"
             ]
+            shared_session_at = pause_time + timedelta(seconds=1)
+            shared_session, _state, _audit = authenticate_and_issue_session(
+                secrets_payload=enrollment.secrets_payload,
+                state_payload=enrollment.state_payload,
+                policy_payload=enrollment.policy_payload,
+                private_key_envelope=enrollment.private_key_envelope,
+                password="test matrix approval passphrase",
+                totp=totp_code(
+                    enrollment.totp_secret,
+                    at=shared_session_at,
+                )[1],
+                recovery_code=None,
+                release_sha=campaign["release_sha"],
+                allowed_actions=list(MIDPOINT_SESSION_ACTIONS),
+                ttl_seconds=48 * 60 * 60,
+                now=shared_session_at,
+            )
+            inconsistent_session_time = self._midpoint_bundle(
+                paused=paused,
+                campaign=campaign,
+                policy=policy,
+                root=root,
+                issued_at=pause_time + timedelta(seconds=2),
+                session_token=shared_session,
+            )
+            inconsistent_receipt = inconsistent_session_time["probes"][2][
+                "receipt"
+            ]
+            inconsistent_receipt["session_issued_at"] = (
+                shared_session_at + timedelta(microseconds=1)
+            ).isoformat()
+            inconsistent_unsigned = {
+                key: value
+                for key, value in inconsistent_receipt.items()
+                if key != "witness_signature"
+            }
+            inconsistent_receipt["witness_signature"] = base64.b64encode(
+                witness_private_key.sign(
+                    canonical_json_bytes(inconsistent_unsigned)
+                )
+            ).decode("ascii")
             before = journal.read_bytes()
             for name, bundle in {
                 "tampered": tampered,
                 "wrong-key": wrong_key,
                 "old-session": old_session,
+                "pre-pause-session": pre_pause_session_bundle,
                 "short-expiry": short_expiry,
                 "broad-scope": broad_scope,
                 "mixed-session": mixed_session,
+                "inconsistent-session-issued-at": inconsistent_session_time,
             }.items():
                 with self.subTest(name=name):
                     rejected = await run_full_matrix_campaign(
