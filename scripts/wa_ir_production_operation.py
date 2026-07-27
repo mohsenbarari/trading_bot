@@ -17,6 +17,7 @@ from dataclasses import dataclass
 import errno
 import fcntl
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -85,6 +86,8 @@ EXPECTED_ARTIFACTS = {
     "release-archive": ("release.bundle", "git-bundle"),
     "app-image-archive": ("app-image.tar", "docker-archive"),
     "db-image-archive": ("db-image.tar", "docker-archive"),
+    "redis-image-archive": ("redis-image.tar", "docker-archive"),
+    "nginx-image-archive": ("nginx-image.tar", "docker-archive"),
     "database-backup": ("database.dump", "postgres-custom"),
     "uploads-archive": ("uploads.tar.gz", "tar-gzip"),
     "audit-archive": ("audit.tar.gz", "tar-gzip"),
@@ -140,6 +143,10 @@ _IMAGE_FIELDS = {
     "os",
     "architecture",
 }
+_POSTGRES_IMAGE_RUNTIME_FIELDS = {
+    "runtime_uid",
+    "runtime_gid",
+}
 _RUNTIME_FIELDS = {"artifact_kind", "role", "entries", "required_env_keys"}
 _RUNTIME_ENTRY_FIELDS = {
     "archive_path",
@@ -177,6 +184,8 @@ _STATE_FIELDS = {
 }
 _ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
 _IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+POSTGRES_RUNTIME_UID_LABEL = "trading-bot.postgres.runtime-uid"
+POSTGRES_RUNTIME_GID_LABEL = "trading-bot.postgres.runtime-gid"
 _RELEASE_RE = re.compile(r"^[0-9a-f]{40}$")
 _REVISION_RE = re.compile(r"^[0-9a-z]{1,64}$")
 _ALEMBIC_REVISION_RE = re.compile(r"^[0-9a-z_]{1,64}$")
@@ -243,6 +252,8 @@ class Image:
     repo_tags: tuple[str, ...]
     os: str
     architecture: str
+    runtime_uid: int | None = None
+    runtime_gid: int | None = None
 
 
 @dataclass(frozen=True)
@@ -724,7 +735,7 @@ def _load_manifest_bytes(payload: bytes) -> OperationManifest:
         raise ProductionOperationError("operation artifact inventory is incomplete")
 
     raw_images = document.get("images")
-    if not isinstance(raw_images, list) or len(raw_images) != 2:
+    if not isinstance(raw_images, list) or len(raw_images) != 4:
         raise ProductionOperationError("operation image inventory is incomplete")
     images: list[Image] = []
     roles: set[str] = set()
@@ -732,14 +743,25 @@ def _load_manifest_bytes(payload: bytes) -> OperationManifest:
     expected_image_artifacts = {
         "app": "app-image-archive",
         "postgres": "db-image-archive",
+        "redis": "redis-image-archive",
+        "nginx": "nginx-image-archive",
     }
     for raw in raw_images:
-        if not isinstance(raw, dict) or set(raw) != _IMAGE_FIELDS:
+        if not isinstance(raw, dict):
             raise ProductionOperationError("operation image entry is invalid")
         role = raw.get("role")
+        expected_fields = (
+            _IMAGE_FIELDS | _POSTGRES_IMAGE_RUNTIME_FIELDS
+            if role == "postgres"
+            else _IMAGE_FIELDS
+        )
+        if set(raw) != expected_fields:
+            raise ProductionOperationError("operation image entry is invalid")
         artifact_kind = raw.get("artifact_kind")
         image_id = raw.get("image_id")
         tags = raw.get("repo_tags")
+        runtime_uid = raw.get("runtime_uid")
+        runtime_gid = raw.get("runtime_gid")
         if (
             not isinstance(role, str)
             or role not in expected_image_artifacts
@@ -752,6 +774,15 @@ def _load_manifest_bytes(payload: bytes) -> OperationManifest:
             or tags != []
             or raw.get("os") != "linux"
             or raw.get("architecture") != "amd64"
+            or (
+                role == "postgres"
+                and (
+                    type(runtime_uid) is not int
+                    or not 1 <= runtime_uid <= 65535
+                    or type(runtime_gid) is not int
+                    or not 1 <= runtime_gid <= 65535
+                )
+            )
         ):
             raise ProductionOperationError("operation image binding is invalid")
         images.append(
@@ -762,6 +793,8 @@ def _load_manifest_bytes(payload: bytes) -> OperationManifest:
                 repo_tags=tuple(tags),
                 os="linux",
                 architecture="amd64",
+                runtime_uid=runtime_uid if role == "postgres" else None,
+                runtime_gid=runtime_gid if role == "postgres" else None,
             )
         )
         roles.add(role)
@@ -1692,6 +1725,16 @@ def _docker_archive_identity(
                 raise ProductionOperationError(
                     "application image lacks the exact OCI release revision"
                 )
+            if image.role == "postgres" and (
+                not isinstance(labels, dict)
+                or labels.get(POSTGRES_RUNTIME_UID_LABEL)
+                != str(image.runtime_uid)
+                or labels.get(POSTGRES_RUNTIME_GID_LABEL)
+                != str(image.runtime_gid)
+            ):
+                raise ProductionOperationError(
+                    "PostgreSQL archive runtime ownership labels differ"
+                )
             tags = entry.get("RepoTags")
             tags = [] if tags is None else tags
             if (
@@ -1732,6 +1775,8 @@ def _runtime_expected_values(
         "PRODUCTION_SHADOW_RELEASE_SHA": manifest.release_sha,
         "PRODUCTION_SHADOW_APP_IMAGE_ID": image_by_role["app"],
         "PRODUCTION_SHADOW_POSTGRES_IMAGE_ID": image_by_role["postgres"],
+        "PRODUCTION_SHADOW_REDIS_IMAGE_ID": image_by_role["redis"],
+        "PRODUCTION_SHADOW_NGINX_IMAGE_ID": image_by_role["nginx"],
         "PRODUCTION_SHADOW_DR_CA_SHA256": ca_sha256,
     }
 
@@ -1779,6 +1824,7 @@ def _ensure_canonical_operation_directories(
     paths: CanonicalOperationPaths,
     *,
     required_uid: int,
+    postgres_runtime_identity: tuple[int, int] | None = None,
 ) -> None:
     for prefix in (
         PROJECT_ROOT_PREFIX,
@@ -1814,7 +1860,6 @@ def _ensure_canonical_operation_directories(
             paths.data_root,
             PurePosixPath("restore-input/webapp-ir"),
         ),
-        (paths.data_root, PurePosixPath("webapp-ir/postgres")),
         (paths.data_root, PurePosixPath("webapp-ir/redis")),
         (paths.data_root, PurePosixPath("webapp-ir/uploads")),
         (paths.data_root, PurePosixPath("webapp-ir/audit")),
@@ -1825,6 +1870,38 @@ def _ensure_canonical_operation_directories(
             root,
             relative,
             required_uid=required_uid,
+        )
+    if postgres_runtime_identity is None:
+        _ensure_directory_tree(
+            paths.data_root,
+            PurePosixPath("webapp-ir/postgres"),
+            required_uid=required_uid,
+        )
+        return
+
+    _require_real_owned_directory_chain(
+        paths.postgres.parent,
+        required_uid=required_uid,
+    )
+    if not paths.postgres.exists() and not paths.postgres.is_symlink():
+        _ensure_secure_directory(paths.postgres, required_uid=required_uid)
+    try:
+        metadata = paths.postgres.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise ProductionOperationError(
+            "operation PostgreSQL directory is unsafe"
+        ) from exc
+    allowed_owners = {
+        (required_uid, os.getegid()),
+        postgres_runtime_identity,
+    }
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or (metadata.st_uid, metadata.st_gid) not in allowed_owners
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+    ):
+        raise ProductionOperationError(
+            "operation PostgreSQL directory is unsafe"
         )
 
 
@@ -2520,19 +2597,16 @@ def _compose_base(manifest: OperationManifest, *, operation_root: Path) -> list[
     ]
 
 
-def _oneoff_ids(manifest: OperationManifest) -> list[str]:
+def _project_container_ids(manifest: OperationManifest) -> list[str]:
     output = _run(
         [
             DOCKER,
             "ps",
             "--all",
             "--quiet",
+            "--no-trunc",
             "--filter",
             f"label=com.docker.compose.project={manifest.project_name}",
-            "--filter",
-            "label=com.docker.compose.oneoff=True",
-            "--filter",
-            f"label=trading-bot.production.operation-id={manifest.operation_id}",
         ],
         timeout=30,
     )
@@ -2540,12 +2614,93 @@ def _oneoff_ids(manifest: OperationManifest) -> list[str]:
     if (
         len(identifiers) != len(set(identifiers))
         or any(
-            not re.fullmatch(r"[0-9a-f]{12,64}", value)
+            not re.fullmatch(r"[0-9a-f]{64}", value)
             for value in identifiers
         )
     ):
-        raise ProductionOperationError("operation one-shot inventory is invalid")
+        raise ProductionOperationError(
+            "operation project container inventory is invalid"
+        )
     return identifiers
+
+
+def _container_compose_labels(
+    identifier: str,
+    manifest: OperationManifest,
+) -> Mapping[str, str]:
+    raw = _run([DOCKER, "inspect", identifier], timeout=30)
+    try:
+        documents = json.loads(raw, object_pairs_hook=_strict_json_object)
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise ProductionOperationError(
+            "operation project container inspection is invalid"
+        ) from exc
+    if (
+        not isinstance(documents, list)
+        or len(documents) != 1
+        or not isinstance(documents[0], dict)
+        or documents[0].get("Id") != identifier
+        or not isinstance(documents[0].get("Config"), dict)
+        or not isinstance(documents[0]["Config"].get("Labels"), dict)
+    ):
+        raise ProductionOperationError(
+            "operation project container inspection is invalid"
+        )
+    labels = documents[0]["Config"]["Labels"]
+    if labels.get("com.docker.compose.project") != manifest.project_name:
+        raise ProductionOperationError(
+            "operation project container identity differs"
+        )
+    return labels
+
+
+def _oneoff_ids(
+    manifest: OperationManifest,
+    *,
+    operation_root: Path,
+) -> list[str]:
+    database_identifiers: list[str] = []
+    oneoff_identifiers: list[str] = []
+    for identifier in _project_container_ids(manifest):
+        labels = _container_compose_labels(identifier, manifest)
+        service = labels.get("com.docker.compose.service")
+        if (
+            service == manifest.services["database"]
+            and labels.get("com.docker.compose.oneoff") != "True"
+        ):
+            if (
+                labels.get("trading-bot.production.operation-id")
+                != manifest.operation_id
+            ):
+                raise ProductionOperationError(
+                    "operation database container lacks its ownership label"
+                )
+            database_identifiers.append(identifier)
+            continue
+        _validate_oneoff_for_cleanup(
+            identifier,
+            manifest,
+            operation_root=operation_root,
+        )
+        oneoff_identifiers.append(identifier)
+    if len(database_identifiers) > 1:
+        raise ProductionOperationError(
+            "operation project has multiple database containers"
+        )
+    if database_identifiers:
+        database_identifier = database_identifiers[0]
+        running = _validate_database_container(
+            database_identifier,
+            manifest,
+        )
+        _validate_operation_network(
+            manifest,
+            expected_container_id=database_identifier,
+            allowed_container_ids=set(oneoff_identifiers),
+            require_present=True,
+            require_attached=running,
+        )
+    return oneoff_identifiers
 
 
 def _validate_oneoff_for_cleanup(
@@ -2640,7 +2795,7 @@ def _validate_oneoff_for_cleanup(
             "refusing to remove a one-shot with an unexpected mount"
         )
     if service == manifest.services["restore"]:
-        if observed_ca:
+        if observed_ca or not observed_anonymous_pgdata:
             raise ProductionOperationError(
                 "restore one-shot inherited an unexpected application mount"
             )
@@ -2665,7 +2820,10 @@ def _cleanup_operation_oneoffs(
     removed: list[Mapping[str, Any]] = []
     stable_empty = 0
     for _attempt in range(40):
-        identifiers = _oneoff_ids(manifest)
+        identifiers = _oneoff_ids(
+            manifest,
+            operation_root=operation_root,
+        )
         if not identifiers:
             stable_empty += 1
             if stable_empty >= 2:
@@ -2715,7 +2873,10 @@ def _compose_one_shot(
         or env_path != canonical.runtime_env
     ):
         raise ProductionOperationError("Compose command prefix escaped its operation")
-    if _oneoff_ids(manifest):
+    if _oneoff_ids(
+        manifest,
+        operation_root=operation_root,
+    ):
         raise ProductionOperationError(
             "operation has stale one-shot container residue"
         )
@@ -2770,7 +2931,10 @@ def _compose_streaming_copy_sha256(
         or env_path != canonical.runtime_env
     ):
         raise ProductionOperationError("Compose command prefix escaped its operation")
-    if _oneoff_ids(manifest):
+    if _oneoff_ids(
+        manifest,
+        operation_root=operation_root,
+    ):
         raise ProductionOperationError(
             "operation has stale one-shot container residue"
         )
@@ -2845,6 +3009,16 @@ def _validate_loaded_image(image: Image, *, release_sha: str) -> None:
                 or labels.get("org.opencontainers.image.revision") != release_sha
             )
         )
+        or (
+            image.role == "postgres"
+            and (
+                not isinstance(labels, dict)
+                or labels.get(POSTGRES_RUNTIME_UID_LABEL)
+                != str(image.runtime_uid)
+                or labels.get(POSTGRES_RUNTIME_GID_LABEL)
+                != str(image.runtime_gid)
+            )
+        )
     ):
         raise ProductionOperationError("Docker image identity or platform differs")
 
@@ -2913,9 +3087,6 @@ def _validate_compose_config(
         else None
     )
     expected_service_names = set(manifest.services.values())
-    expected_volume_devices = {
-        "webapp_ir_postgres": str(canonical.postgres),
-    }
     expected_operation = {
         "operation_id": manifest.operation_id,
         "project_root": str(canonical.project_root),
@@ -2939,29 +3110,19 @@ def _validate_compose_config(
         or set(services) != expected_service_names
         or not isinstance(networks, dict)
         or set(networks) != {"webapp_ir"}
-        or not isinstance(networks.get("webapp_ir"), dict)
-        or networks["webapp_ir"].get("internal") is not True
-        or networks["webapp_ir"].get("name")
-        != f"{manifest.project_name}_webapp_ir"
-        or not isinstance(volumes, dict)
-        or set(volumes) != set(expected_volume_devices)
+        or networks.get("webapp_ir")
+        != {
+            "name": f"{manifest.project_name}_webapp_ir",
+            "ipam": {},
+            "internal": True,
+            "labels": {
+                "trading-bot.production.operation-id": manifest.operation_id,
+            },
+        }
+        or volumes not in (None, {})
     ):
         raise ProductionOperationError("rendered production shadow Compose scope differs")
     image_by_role = {image.role: image.image_id for image in manifest.images}
-    for name, expected_device in expected_volume_devices.items():
-        volume = volumes[name]
-        if (
-            not isinstance(volume, dict)
-            or volume.get("driver") != "local"
-            or not isinstance(volume.get("driver_opts"), dict)
-            or volume["driver_opts"].get("type") != "none"
-            or volume["driver_opts"].get("o") != "bind"
-            or volume["driver_opts"].get("device") != expected_device
-            or volume.get("name") != f"{manifest.project_name}_{name}"
-        ):
-            raise ProductionOperationError(
-                "shadow volume is not operation-owned"
-            )
 
     expected_commands = {
         manifest.services["restore"]: [
@@ -3252,7 +3413,12 @@ def _validate_compose_config(
     ca_source = str(canonical.ca)
     expected_mounts = {
         manifest.services["database"]: {
-            ("volume", "webapp_ir_postgres", "/var/lib/postgresql/data", False),
+            (
+                "bind",
+                str(canonical.postgres),
+                "/var/lib/postgresql/data",
+                False,
+            ),
         },
         manifest.services["restore"]: set(),
         manifest.services["roles"]: {
@@ -3456,10 +3622,233 @@ def _psql(
     )
 
 
+def _operation_network_name(manifest: OperationManifest) -> str:
+    return f"{manifest.project_name}_webapp_ir"
+
+
+def _operation_network_present(manifest: OperationManifest) -> bool:
+    raw = _run(
+        [DOCKER, "network", "ls", "--format", "{{.Name}}"],
+        timeout=30,
+    )
+    names = raw.splitlines() if raw else []
+    if (
+        len(names) != len(set(names))
+        or any(
+            not name
+            or "\x00" in name
+            or name != name.strip()
+            for name in names
+        )
+    ):
+        raise ProductionOperationError(
+            "Docker network inventory is invalid"
+        )
+    return _operation_network_name(manifest) in names
+
+
+def _validate_operation_network(
+    manifest: OperationManifest,
+    *,
+    expected_container_id: str | None,
+    allowed_container_ids: set[str] | None = None,
+    require_present: bool,
+    require_attached: bool,
+) -> Mapping[str, Any] | None:
+    expected_name = _operation_network_name(manifest)
+    if not _operation_network_present(manifest):
+        if require_present:
+            raise ProductionOperationError(
+                "operation database network is absent"
+            )
+        return None
+    raw = _run([DOCKER, "network", "inspect", expected_name], timeout=30)
+    try:
+        documents = json.loads(raw, object_pairs_hook=_strict_json_object)
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise ProductionOperationError(
+            "operation database network inspection is invalid"
+        ) from exc
+    if (
+        not isinstance(documents, list)
+        or len(documents) != 1
+        or not isinstance(documents[0], dict)
+    ):
+        raise ProductionOperationError(
+            "operation database network inspection is invalid"
+        )
+    document = documents[0]
+    labels = document.get("Labels")
+    expected_labels = {
+        "com.docker.compose.network": "webapp_ir",
+        "com.docker.compose.project": manifest.project_name,
+        "trading-bot.production.operation-id": manifest.operation_id,
+    }
+    allowed_label_keys = set(expected_labels) | {
+        "com.docker.compose.version",
+    }
+    if (
+        not isinstance(labels, dict)
+        or any(
+            labels.get(key) != value
+            for key, value in expected_labels.items()
+        )
+        or not set(labels).issubset(allowed_label_keys)
+        or (
+            "com.docker.compose.version" in labels
+            and (
+                not isinstance(labels["com.docker.compose.version"], str)
+                or not re.fullmatch(
+                    r"[0-9]+(?:\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?",
+                    labels["com.docker.compose.version"],
+                )
+            )
+        )
+    ):
+        raise ProductionOperationError(
+            "operation database network labels differ"
+        )
+    ipam = document.get("IPAM")
+    ipam_config = ipam.get("Config") if isinstance(ipam, dict) else None
+    if (
+        not isinstance(ipam, dict)
+        or ipam.get("Driver") != "default"
+        or ipam.get("Options") not in (None, {})
+        or not isinstance(ipam_config, list)
+        or len(ipam_config) != 1
+        or not isinstance(ipam_config[0], dict)
+        or set(ipam_config[0]) != {"Subnet", "Gateway"}
+    ):
+        raise ProductionOperationError(
+            "operation database network IPAM differs"
+        )
+    try:
+        subnet = ipaddress.ip_network(
+            ipam_config[0]["Subnet"],
+            strict=True,
+        )
+        gateway = ipaddress.ip_address(ipam_config[0]["Gateway"])
+    except (TypeError, ValueError) as exc:
+        raise ProductionOperationError(
+            "operation database network IPAM is invalid"
+        ) from exc
+    if (
+        subnet.version != 4
+        or not subnet.is_private
+        or gateway.version != 4
+        or gateway not in subnet
+        or gateway in {subnet.network_address, subnet.broadcast_address}
+    ):
+        raise ProductionOperationError(
+            "operation database network IPAM is unsafe"
+        )
+    containers = document.get("Containers")
+    if not isinstance(containers, dict):
+        raise ProductionOperationError(
+            "operation database network endpoint inventory is invalid"
+        )
+    allowed_endpoints = set(allowed_container_ids or ())
+    if any(
+        not re.fullmatch(r"[0-9a-f]{64}", identifier)
+        for identifier in allowed_endpoints
+    ):
+        raise ProductionOperationError(
+            "operation database network endpoint allowlist is invalid"
+        )
+    expected_endpoints = allowed_endpoints | (
+        set()
+        if expected_container_id is None
+        else {expected_container_id}
+    )
+    observed_endpoints = set(containers)
+    if (
+        not observed_endpoints.issubset(expected_endpoints)
+        or (
+            require_attached
+            and expected_container_id not in observed_endpoints
+        )
+        or any(not isinstance(value, dict) for value in containers.values())
+    ):
+        raise ProductionOperationError(
+            "operation database network has a foreign or missing endpoint"
+        )
+    network_id = document.get("Id")
+    if (
+        not isinstance(network_id, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", network_id)
+        or document.get("Name") != expected_name
+        or document.get("Scope") != "local"
+        or document.get("Driver") != "bridge"
+        or document.get("EnableIPv6") is not False
+        or document.get("Internal") is not True
+        or document.get("Attachable") is not False
+        or document.get("Ingress") is not False
+        or document.get("ConfigOnly") is not False
+        or document.get("ConfigFrom") != {"Network": ""}
+        or document.get("Options") != {}
+    ):
+        raise ProductionOperationError(
+            "operation database network identity differs"
+        )
+    return {
+        "network_id": network_id,
+        "network_name": expected_name,
+        "driver": "bridge",
+        "internal": True,
+    }
+
+
+def _postgres_runtime_identity(
+    manifest: OperationManifest,
+) -> tuple[int, int]:
+    image = next(
+        image for image in manifest.images if image.role == "postgres"
+    )
+    if image.runtime_uid is None or image.runtime_gid is None:
+        raise ProductionOperationError(
+            "PostgreSQL runtime ownership binding is absent"
+        )
+    return image.runtime_uid, image.runtime_gid
+
+
+def _validate_postgres_bind_source(
+    manifest: OperationManifest,
+    *,
+    initialized: bool,
+) -> os.stat_result:
+    canonical = _canonical_operation_paths(manifest)
+    _require_real_owned_directory_chain(
+        canonical.postgres.parent,
+        required_uid=os.geteuid(),
+    )
+    try:
+        metadata = canonical.postgres.stat(follow_symlinks=False)
+    except OSError as exc:
+        raise ProductionOperationError(
+            "operation PostgreSQL bind source is unavailable"
+        ) from exc
+    expected_uid, expected_gid = (
+        _postgres_runtime_identity(manifest)
+        if initialized
+        else (os.geteuid(), os.getegid())
+    )
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != expected_uid
+        or metadata.st_gid != expected_gid
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+    ):
+        raise ProductionOperationError(
+            "operation PostgreSQL bind source ownership is unsafe"
+        )
+    return metadata
+
+
 def _validate_database_container(
     identifier: str,
     manifest: OperationManifest,
-) -> None:
+) -> bool:
+    canonical = _canonical_operation_paths(manifest)
     raw = _run([DOCKER, "inspect", identifier], timeout=30)
     try:
         documents = json.loads(raw, object_pairs_hook=_strict_json_object)
@@ -3489,15 +3878,17 @@ def _validate_database_container(
         image.image_id for image in manifest.images if image.role == "postgres"
     )
     expected_network = f"{manifest.project_name}_webapp_ir"
-    expected_volume = f"{manifest.project_name}_webapp_ir_postgres"
     restart_policy = (
         host_config.get("RestartPolicy")
         if isinstance(host_config, dict)
         else None
     )
+    state = document.get("State")
+    running = state.get("Running") if isinstance(state, dict) else None
+    status = state.get("Status") if isinstance(state, dict) else None
     if (
         not isinstance(document.get("Id"), str)
-        or not document["Id"].startswith(identifier)
+        or document["Id"] != identifier
         or document.get("Image") != postgres_image
         or not isinstance(config, dict)
         or config.get("Image") != postgres_image
@@ -3516,6 +3907,16 @@ def _validate_database_container(
         or restart_policy.get("Name") != "unless-stopped"
         or not isinstance(networks, dict)
         or set(networks) != {expected_network}
+        or not isinstance(state, dict)
+        or type(running) is not bool
+        or (
+            running is True
+            and status != "running"
+        )
+        or (
+            running is False
+            and status not in {"created", "exited"}
+        )
     ):
         raise ProductionOperationError(
             "operation database container identity differs"
@@ -3528,17 +3929,20 @@ def _validate_database_container(
     mount = mounts[0]
     if (
         not isinstance(mount, dict)
-        or mount.get("Type") != "volume"
-        or mount.get("Name") != expected_volume
-        or mount.get("Source")
-        != f"/var/lib/docker/volumes/{expected_volume}/_data"
+        or mount.get("Type") != "bind"
+        or mount.get("Source") != str(canonical.postgres)
         or mount.get("Destination") != "/var/lib/postgresql/data"
-        or mount.get("Driver") != "local"
         or mount.get("RW") is not True
+        or mount.get("Propagation") != "rprivate"
     ):
         raise ProductionOperationError(
             "operation database container mount closure differs"
         )
+    _validate_postgres_bind_source(
+        manifest,
+        initialized=status != "created",
+    )
+    return bool(running)
 
 
 def _table_fingerprint_copy_sql(table: str) -> str:
@@ -3790,7 +4194,7 @@ def prepare_database(
             ],
             timeout=30,
         )
-        if value and not re.fullmatch(r"[0-9a-f]{12,64}", value):
+        if value and not re.fullmatch(r"[0-9a-f]{64}", value):
             raise ProductionOperationError(
                 "operation database container inventory is invalid"
             )
@@ -3803,16 +4207,31 @@ def prepare_database(
                 "nonempty operation PostgreSQL directory lacks its exact container"
             )
         adopted_existing = bool(existing_id)
-        if not existing_id:
+        if existing_id:
+            running = _validate_database_container(existing_id, manifest)
+            _validate_operation_network(
+                manifest,
+                expected_container_id=existing_id,
+                require_present=True,
+                require_attached=running,
+            )
+        else:
+            _validate_operation_network(
+                manifest,
+                expected_container_id=None,
+                require_present=False,
+                require_attached=False,
+            )
             _run(
                 [
                     *prefix,
                     "--profile",
                     "webapp-ir-data-ready",
-                    "up",
-                    "--detach",
+                    "create",
                     "--no-build",
-                    "--no-deps",
+                    "--pull",
+                    "never",
+                    "--no-recreate",
                     manifest.services["database"],
                 ],
                 timeout=300,
@@ -3822,7 +4241,42 @@ def prepare_database(
                 raise ProductionOperationError(
                     "operation database container was not created"
                 )
-        _validate_database_container(existing_id, manifest)
+            running = _validate_database_container(existing_id, manifest)
+            _validate_operation_network(
+                manifest,
+                expected_container_id=existing_id,
+                require_present=True,
+                require_attached=running,
+            )
+        if not running:
+            _run([DOCKER, "start", existing_id], timeout=300)
+            started = False
+            last_start_validation_error: ProductionOperationError | None = None
+            for attempt in range(40):
+                try:
+                    started = _validate_database_container(
+                        existing_id,
+                        manifest,
+                    )
+                    last_start_validation_error = None
+                except ProductionOperationError as exc:
+                    last_start_validation_error = exc
+                    started = False
+                if started:
+                    break
+                if attempt < 39:
+                    time.sleep(0.25)
+            if not started:
+                raise ProductionOperationError(
+                    "operation database container did not reach its exact "
+                    "initialized identity"
+                ) from last_start_validation_error
+            _validate_operation_network(
+                manifest,
+                expected_container_id=existing_id,
+                require_present=True,
+                require_attached=True,
+            )
         mark(
             "database-started",
             {
@@ -3837,7 +4291,16 @@ def prepare_database(
             raise ProductionOperationError(
                 "persisted database phase lacks its exact container"
             )
-        _validate_database_container(existing_id, manifest)
+        if not _validate_database_container(existing_id, manifest):
+            raise ProductionOperationError(
+                "persisted database container is not running"
+            )
+        _validate_operation_network(
+            manifest,
+            expected_container_id=existing_id,
+            require_present=True,
+            require_attached=True,
+        )
     ready = False
     for _attempt in range(60):
         try:
@@ -4110,13 +4573,18 @@ def prepare_database(
     postgres_image_id = next(
         image.image_id for image in manifest.images if image.role == "postgres"
     )
+    postgres_runtime_uid, postgres_runtime_gid = _postgres_runtime_identity(
+        manifest
+    )
     database_resource = {
         "container_id": existing_id,
         "image_id": postgres_image_id,
         "project": manifest.project_name,
         "service": manifest.services["database"],
-        "volume_name": f"{manifest.project_name}_webapp_ir_postgres",
+        "mount_type": "bind",
         "data_path": str(postgres_root),
+        "data_uid": postgres_runtime_uid,
+        "data_gid": postgres_runtime_gid,
     }
     return {
         "database_ready": True,
@@ -4221,6 +4689,7 @@ def execute(
     _ensure_canonical_operation_directories(
         canonical,
         required_uid=required_uid,
+        postgres_runtime_identity=_postgres_runtime_identity(manifest),
     )
     paths = verify_incoming(
         manifest,
@@ -4417,7 +4886,8 @@ def execute(
             _canonical_json(state)
         ).hexdigest(),
         "cleanup_policy": (
-            "retain persistent operation-owned database/network/volume resources; "
+            "retain the operation-owned database container, internal network, and "
+            "canonical bind data; "
             "remove only exact operation-labeled ephemeral one-shot containers and "
             "their anonymous volumes; never delete Object Storage versions"
         ),
