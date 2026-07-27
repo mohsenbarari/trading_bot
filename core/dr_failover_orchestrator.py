@@ -14,7 +14,13 @@ from uuid import UUID
 
 from core.canonical_json import canonical_json_bytes
 from core.dr_failover_recovery_policy import expired_plan_recovery_decision
-from core.human_approval import approval_subject, load_human_approval_policy, verify_human_approval
+from core.human_approval import (
+    RELAY_RECEIPT_SCHEMA,
+    approval_subject,
+    load_human_approval_policy,
+    staging_session_scope_sha256,
+    verify_human_approval,
+)
 from core.runtime_sites import SITE_WEBAPP_FI, SITE_WEBAPP_IR
 from core.secure_file_io import append_hash_chained_jsonl, read_secure_text, verify_hash_chained_jsonl
 
@@ -35,6 +41,11 @@ MAX_PLAN_LIFETIME = timedelta(minutes=15)
 MAX_PLAN_FUTURE_SKEW = timedelta(seconds=30)
 PINNED_APPROVER_POLICY_PATH = Path(
     "/etc/trading-bot/security/human-approval/human-approval-policy.json"
+)
+FULL_MATRIX_SESSION_ACTIONS = (
+    "failback_fi",
+    "promote_ir",
+    "start_full_matrix",
 )
 
 
@@ -353,10 +364,23 @@ def verify_human_failover_approval(
         raise DrOrchestrationError("failover human approval policy is invalid") from exc
     if policy.policy_hash != plan.approver_policy_hash:
         raise DrOrchestrationError("human approval policy is not pinned to the failover plan")
+    approval = plan.approvals[0]
+    if (
+        isinstance(approval, dict)
+        and approval.get("schema") == RELAY_RECEIPT_SCHEMA
+        and approval.get("session_scope_sha256")
+        != staging_session_scope_sha256(
+            release_sha=plan.release_sha,
+            allowed_actions=FULL_MATRIX_SESSION_ACTIONS,
+        )
+    ):
+        raise DrOrchestrationError(
+            "failover relay approval session scope is invalid"
+        )
     subject = failover_approval_subject(plan)
     try:
         verify_human_approval(
-            plan.approvals[0],
+            approval,
             policy_payload=policy_payload,
             expected_action=plan.action,
             expected_environment="staging",

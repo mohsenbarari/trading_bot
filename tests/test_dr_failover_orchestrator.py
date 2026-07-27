@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from core.dr_command_orchestration_adapter import TYPED_OPERATIONS, load_command_manifest
 from core.dr_event_protocol import canonical_json_bytes
-from core.human_approval import approval_subject
+from core.human_approval import RELAY_RECEIPT_SCHEMA, approval_subject
 from core.human_approval_issuer import (
     authenticate_and_issue,
     create_enrollment,
@@ -366,6 +366,22 @@ class DrFailoverOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         del policy
         with self.assertRaisesRegex(DrOrchestrationError, "RPO policy is invalid"):
             parse_plan(raw)
+
+    async def test_relay_failover_rejects_non_full_matrix_session_scope(self):
+        raw, policy = approved_plan()
+        raw["approvals"] = [
+            {
+                "schema": RELAY_RECEIPT_SCHEMA,
+                "session_scope_sha256": "0" * 64,
+            }
+        ]
+        plan = parse_plan(raw)
+        with self.assertRaisesRegex(DrOrchestrationError, "session scope"):
+            verify_human_failover_approval(
+                plan,
+                policy,
+                witness_relay_public_key="A" * 44,
+            )
 
     async def test_source_unavailable_tail_is_rejected_by_zero_loss_policy(self):
         raw, policy = approved_plan()
