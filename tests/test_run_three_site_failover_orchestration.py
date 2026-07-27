@@ -4,13 +4,14 @@ from pathlib import Path
 from types import SimpleNamespace
 import tempfile
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from core.dr_failover_orchestrator import DrOrchestrationError
 from core.secure_file_io import append_hash_chained_jsonl
 from scripts.run_three_site_failover_orchestration import (
     _journal_proves_operation_started,
     confirmation_phrase,
+    prepare,
     run,
 )
 
@@ -43,6 +44,65 @@ def _prepared():  # noqa: ANN202
 
 
 class ThreeSiteFailoverRunnerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_prepare_uses_backend_bound_witness_key_for_plan_approval(self):
+        plan, operations, backend = _prepared()
+        args = SimpleNamespace(
+            plan=Path("/secure/plan.json"),
+            human_approval_policy=Path("/secure/policy.json"),
+            journal=Path("/secure/journal.jsonl"),
+            backend_config=Path("/secure/backend.json"),
+            inventory=Path("/secure/inventory.json"),
+            inventory_approval=Path("/secure/inventory-approval.json"),
+            inventory_approval_policy=Path("/secure/inventory-policy.json"),
+            command_manifest=Path("/secure/commands.json"),
+        )
+        config = backend.config
+        typed_backend = SimpleNamespace(config=config, preflight=Mock())
+        with (
+            patch(
+                "scripts.run_three_site_failover_orchestration._strict_json",
+                side_effect=[
+                    {"plan": True},
+                    {"inventory": True},
+                    {"inventory_approval": True},
+                    {"inventory_policy": True},
+                ],
+            ),
+            patch(
+                "scripts.run_three_site_failover_orchestration.parse_plan",
+                return_value=plan,
+            ),
+            patch(
+                "scripts.run_three_site_failover_orchestration.load_approver_policy",
+                return_value={"policy": True},
+            ),
+            patch(
+                "scripts.run_three_site_failover_orchestration.load_staging_backend_config",
+                return_value=config,
+            ) as load_config,
+            patch(
+                "scripts.run_three_site_failover_orchestration.verify_human_failover_approval",
+            ) as verify_approval,
+            patch(
+                "scripts.run_three_site_failover_orchestration.load_typed_operation_manifest",
+                return_value=operations,
+            ),
+            patch(
+                "scripts.run_three_site_failover_orchestration.StagingTypedOperationBackend",
+                return_value=typed_backend,
+            ),
+        ):
+            prepared = prepare(args)
+        load_config.assert_called_once()
+        verify_approval.assert_called_once_with(
+            plan,
+            {"policy": True},
+            require_fresh=True,
+            witness_relay_public_key="public-key",
+        )
+        typed_backend.preflight.assert_called_once_with(plan)
+        self.assertEqual(prepared, (plan, operations, typed_backend))
+
     async def test_historical_approval_requires_exact_reserved_operation_journal(self):
         plan, _operations, _backend = _prepared()
         with tempfile.TemporaryDirectory() as temporary:
