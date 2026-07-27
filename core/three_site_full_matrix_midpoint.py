@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import json
@@ -16,6 +16,7 @@ from core.canonical_json import canonical_json_bytes
 from core.human_approval import (
     RELAY_RECEIPT_SCHEMA,
     approval_subject,
+    staging_session_scope_sha256,
     verify_human_approval,
 )
 from core.secure_file_io import read_secure_text
@@ -25,16 +26,64 @@ MIDPOINT_BUNDLE_SCHEMA = "three-site-full-matrix-midpoint-refresh-bundle-v1"
 MIDPOINT_PROBE_SCHEMA = "three-site-full-matrix-midpoint-refresh-probe-v1"
 MIDPOINT_ARTIFACT_TYPE = "three-site-full-matrix-midpoint-refresh-probe-v1"
 MIDPOINT_ACTIONS = ("start_full_matrix", "promote_ir", "failback_fi")
+MIDPOINT_SESSION_ACTIONS = tuple(sorted(MIDPOINT_ACTIONS))
 MIDPOINT_COMPLETED_ITERATION = 1
 MIDPOINT_NEXT_ITERATION = 2
 MIDPOINT_PAUSE_REASON = "witness_session_refresh_required"
 MIDPOINT_RESUME_REASON = "witness_session_refreshed"
+INITIAL_SESSION_MIN_RUNWAY = timedelta(hours=47)
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 class FullMatrixMidpointError(RuntimeError):
     """Raised when a midpoint session-refresh proof is not exact."""
+
+
+def full_matrix_session_scope_sha256(release_sha: str) -> str:
+    try:
+        return staging_session_scope_sha256(
+            release_sha=release_sha,
+            allowed_actions=MIDPOINT_SESSION_ACTIONS,
+        )
+    except Exception as exc:
+        raise FullMatrixMidpointError(
+            "Full Matrix Witness session scope is invalid"
+        ) from exc
+
+
+def verify_initial_session_runway(
+    receipt: dict[str, Any],
+    *,
+    release_sha: str,
+    now: datetime | None,
+) -> str:
+    """Require a near-fresh session before the first live journal mutation.
+
+    Iteration 1 contains a real 24-hour endurance window and two independent
+    one-hour backlog cycles.  The fixed 47-hour admission threshold preserves
+    a further 21-hour controller/operator buffer without increasing the
+    protocol's 48-hour maximum session lifetime.
+    """
+
+    if now is not None and now.tzinfo is None:
+        raise FullMatrixMidpointError(
+            "initial session runway time must include a timezone"
+        )
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    expiry = _utc(receipt.get("expires_at"), label="initial session expiry")
+    session_hash = str(receipt.get("session_token_sha256") or "")
+    if (
+        receipt.get("schema") != RELAY_RECEIPT_SCHEMA
+        or receipt.get("session_scope_sha256")
+        != full_matrix_session_scope_sha256(release_sha)
+        or SHA256.fullmatch(session_hash) is None
+        or expiry - current < INITIAL_SESSION_MIN_RUNWAY
+    ):
+        raise FullMatrixMidpointError(
+            "initial Full Matrix Witness session lacks the required runway"
+        )
+    return session_hash
 
 
 _JOURNAL_BASE_FIELDS = {
@@ -504,6 +553,7 @@ def verify_midpoint_bundle(
     pause_timestamp: str,
     policy_payload: dict[str, Any],
     witness_public_key: str,
+    prior_session_token_sha256: str | None,
     now: datetime | None,
     require_fresh: bool,
 ) -> dict[str, Any]:
@@ -547,6 +597,9 @@ def verify_midpoint_bundle(
     )
     pause_time = _utc(pause_timestamp, label="midpoint pause timestamp")
     campaign_expiry = _utc(campaign.get("expires_at"), label="campaign expiry")
+    expected_session_scope = full_matrix_session_scope_sha256(
+        str(campaign.get("release_sha") or "")
+    )
     session_hash: str | None = None
     approval_id: str | None = None
     expiry: datetime | None = None
@@ -568,6 +621,7 @@ def verify_midpoint_bundle(
             not isinstance(receipt, dict)
             or receipt.get("schema") != RELAY_RECEIPT_SCHEMA
             or receipt.get("subject") != expected_subjects[action]
+            or receipt.get("session_scope_sha256") != expected_session_scope
         ):
             raise FullMatrixMidpointError("midpoint probe receipt is not relay-bound")
         try:
@@ -620,10 +674,21 @@ def verify_midpoint_bundle(
         receipt_hashes[action] = verified.token_hash
     if session_hash is None or approval_id is None or expiry is None:
         raise FullMatrixMidpointError("midpoint session proof is incomplete")
+    if (
+        prior_session_token_sha256 is not None
+        and (
+            SHA256.fullmatch(prior_session_token_sha256) is None
+            or hmac.compare_digest(session_hash, prior_session_token_sha256)
+        )
+    ):
+        raise FullMatrixMidpointError(
+            "midpoint receipts did not rotate the initial Witness session"
+        )
     bundle_hash = hashlib.sha256(canonical_json_bytes(bundle)).hexdigest()
     return {
         "bundle_sha256": bundle_hash,
         "session_token_sha256": session_hash,
+        "session_scope_sha256": expected_session_scope,
         "approval_id": approval_id,
         "issued_after": min(issued_values).isoformat(),
         "expires_at": expiry.isoformat(),

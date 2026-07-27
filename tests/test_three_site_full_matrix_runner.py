@@ -52,6 +52,7 @@ from core.three_site_full_matrix_runner import (
 )
 from core.three_site_full_matrix_midpoint import (
     MIDPOINT_ACTIONS,
+    MIDPOINT_SESSION_ACTIONS,
     assemble_midpoint_bundle,
 )
 from core.three_site_execution_safety import SHARED_HOST_SAFE
@@ -514,6 +515,8 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
         issued_at: datetime | None = None,
         ttl_seconds: int = 48 * 60 * 60,
         witness_private_key: Ed25519PrivateKey | None = None,
+        allowed_actions: list[str] | None = None,
+        session_token: dict | None = None,
     ) -> dict:
         enrollment, bound_witness_private_key = self._midpoint_context[root]
         pause_time = datetime.fromisoformat(
@@ -527,19 +530,23 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
         )
         issued_at = issued_at or pause_time + timedelta(microseconds=1)
         witness_private_key = witness_private_key or bound_witness_private_key
-        session, _state, _audit = authenticate_and_issue_session(
-            secrets_payload=enrollment.secrets_payload,
-            state_payload=enrollment.state_payload,
-            policy_payload=enrollment.policy_payload,
-            private_key_envelope=enrollment.private_key_envelope,
-            password="test matrix approval passphrase",
-            totp=totp_code(enrollment.totp_secret, at=issued_at)[1],
-            recovery_code=None,
-            release_sha=campaign["release_sha"],
-            allowed_actions=list(MIDPOINT_ACTIONS),
-            ttl_seconds=ttl_seconds,
-            now=issued_at,
-        )
+        session = session_token
+        if session is None:
+            session, _state, _audit = authenticate_and_issue_session(
+                secrets_payload=enrollment.secrets_payload,
+                state_payload=enrollment.state_payload,
+                policy_payload=enrollment.policy_payload,
+                private_key_envelope=enrollment.private_key_envelope,
+                password="test matrix approval passphrase",
+                totp=totp_code(enrollment.totp_secret, at=issued_at)[1],
+                recovery_code=None,
+                release_sha=campaign["release_sha"],
+                allowed_actions=(
+                    allowed_actions or list(MIDPOINT_SESSION_ACTIONS)
+                ),
+                ttl_seconds=ttl_seconds,
+                now=issued_at,
+            )
         subjects = {
             item["action"]: item["subject"]
             for item in paused["refresh_subjects"]
@@ -571,6 +578,63 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
             pre_pause_journal_head=paused["pre_pause_journal_head"],
             receipts=receipts,
         )
+
+    def _set_relay_start_approval(
+        self,
+        *,
+        campaign: dict,
+        policy: dict,
+        root: Path,
+        issued_at: datetime,
+        ttl_seconds: int = 48 * 60 * 60,
+        allowed_actions: list[str] | None = None,
+    ) -> dict:
+        enrollment, witness_private_key = self._midpoint_context[root]
+        unsigned = {
+            key: value for key, value in campaign.items() if key != "approvals"
+        }
+        subject = approval_subject(
+            artifact_type=CAMPAIGN_SCHEMA,
+            artifact_sha256=hashlib.sha256(
+                canonical_json_bytes(unsigned)
+            ).hexdigest(),
+            release_sha=campaign["release_sha"],
+            bindings={
+                "campaign_id": campaign["campaign_id"],
+                "gate_group_id": campaign["gate_group_id"],
+                "execution_class": campaign["execution_class"],
+            },
+        )
+        session, _state, _audit = authenticate_and_issue_session(
+            secrets_payload=enrollment.secrets_payload,
+            state_payload=enrollment.state_payload,
+            policy_payload=enrollment.policy_payload,
+            private_key_envelope=enrollment.private_key_envelope,
+            password="test matrix approval passphrase",
+            totp=totp_code(enrollment.totp_secret, at=issued_at)[1],
+            recovery_code=None,
+            release_sha=campaign["release_sha"],
+            allowed_actions=allowed_actions or list(MIDPOINT_SESSION_ACTIONS),
+            ttl_seconds=ttl_seconds,
+            now=issued_at,
+        )
+        command = HumanApprovalRelayCommand(
+            action="start_full_matrix",
+            environment="staging",
+            subject=subject,
+            request_id=f"campaign-start-{uuid4()}",
+        )
+        campaign["approvals"] = [
+            issue_human_approval_relay_receipt(
+                session,
+                policy_payload=policy,
+                command=command,
+                witness_private_key=witness_private_key,
+                now=issued_at,
+                receipt_id=str(uuid4()),
+            )
+        ]
+        return session
 
     async def _run_to_completion(
         self,
@@ -783,52 +847,12 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
     async def test_campaign_start_relay_receipt_uses_bound_witness_key(self):
         stack, now, campaign, policy, bound, root, journal = self._inputs()
         with stack:
-            enrollment, witness_private_key = self._midpoint_context[root]
-            unsigned = {
-                key: value for key, value in campaign.items()
-                if key != "approvals"
-            }
-            subject = approval_subject(
-                artifact_type=CAMPAIGN_SCHEMA,
-                artifact_sha256=hashlib.sha256(
-                    canonical_json_bytes(unsigned)
-                ).hexdigest(),
-                release_sha=campaign["release_sha"],
-                bindings={
-                    "campaign_id": campaign["campaign_id"],
-                    "gate_group_id": campaign["gate_group_id"],
-                    "execution_class": campaign["execution_class"],
-                },
+            session = self._set_relay_start_approval(
+                campaign=campaign,
+                policy=policy,
+                root=root,
+                issued_at=now,
             )
-            session, _state, _audit = authenticate_and_issue_session(
-                secrets_payload=enrollment.secrets_payload,
-                state_payload=enrollment.state_payload,
-                policy_payload=enrollment.policy_payload,
-                private_key_envelope=enrollment.private_key_envelope,
-                password="test matrix approval passphrase",
-                totp=totp_code(enrollment.totp_secret, at=now)[1],
-                recovery_code=None,
-                release_sha=campaign["release_sha"],
-                allowed_actions=["start_full_matrix"],
-                ttl_seconds=48 * 60 * 60,
-                now=now,
-            )
-            command = HumanApprovalRelayCommand(
-                action="start_full_matrix",
-                environment="staging",
-                subject=subject,
-                request_id=f"campaign-start-{uuid4()}",
-            )
-            campaign["approvals"] = [
-                issue_human_approval_relay_receipt(
-                    session,
-                    policy_payload=policy,
-                    command=command,
-                    witness_private_key=witness_private_key,
-                    now=now,
-                    receipt_id=str(uuid4()),
-                )
-            ]
             paused = await run_full_matrix_campaign(
                 campaign=campaign,
                 approver_policy=policy,
@@ -839,6 +863,76 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                 now=now + timedelta(minutes=1),
             )
             self.assertEqual(paused["status"], "paused")
+            pause_time = datetime.fromisoformat(
+                next(
+                    row["timestamp"]
+                    for row in verify_hash_chained_jsonl(journal)
+                    if row["event"] == "campaign_paused"
+                )
+            )
+            old_session_bundle = self._midpoint_bundle(
+                paused=paused,
+                campaign=campaign,
+                policy=policy,
+                root=root,
+                issued_at=pause_time + timedelta(microseconds=1),
+                session_token=session,
+            )
+            before = journal.read_bytes()
+            rejected = await run_full_matrix_campaign(
+                campaign=campaign,
+                approver_policy=policy,
+                bound_artifacts=bound,
+                artifact_root=root,
+                journal=journal,
+                backend=FakeBackend(root),
+                midpoint_refresh_bundle=old_session_bundle,
+                now=now + timedelta(minutes=1),
+            )
+            self.assertEqual(rejected["refresh_bundle_status"], "rejected")
+            self.assertEqual(journal.read_bytes(), before)
+
+    async def test_initial_relay_session_requires_exact_scope_and_runway(self):
+        for name, ttl_seconds, actions, error in (
+            (
+                "short-runway",
+                46 * 60 * 60,
+                list(MIDPOINT_SESSION_ACTIONS),
+                "not fresh enough",
+            ),
+            (
+                "broad-scope",
+                48 * 60 * 60,
+                [*MIDPOINT_SESSION_ACTIONS, "approve_inventory"],
+                "session scope",
+            ),
+        ):
+            with self.subTest(name=name):
+                stack, now, campaign, policy, bound, root, journal = self._inputs()
+                with stack:
+                    self._set_relay_start_approval(
+                        campaign=campaign,
+                        policy=policy,
+                        root=root,
+                        issued_at=now,
+                        ttl_seconds=ttl_seconds,
+                        allowed_actions=actions,
+                    )
+                    backend = FakeBackend(root)
+                    with self.assertRaisesRegex(
+                        FullMatrixCampaignError, error
+                    ):
+                        await run_full_matrix_campaign(
+                            campaign=campaign,
+                            approver_policy=policy,
+                            bound_artifacts=bound,
+                            artifact_root=root,
+                            journal=journal,
+                            backend=backend,
+                            now=now + timedelta(minutes=1),
+                        )
+                    self.assertEqual(backend.preflight_calls, 0)
+                    self.assertFalse(journal.exists())
 
     async def test_midpoint_rejects_tamper_wrong_key_old_session_and_short_expiry(self):
         stack, now, campaign, policy, bound, root, journal = self._inputs()
@@ -887,6 +981,16 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                 root=root,
                 ttl_seconds=120,
             )
+            broad_scope = self._midpoint_bundle(
+                paused=paused,
+                campaign=campaign,
+                policy=policy,
+                root=root,
+                allowed_actions=[
+                    *MIDPOINT_SESSION_ACTIONS,
+                    "approve_inventory",
+                ],
+            )
             second_session = self._midpoint_bundle(
                 paused=paused, campaign=campaign, policy=policy, root=root
             )
@@ -900,6 +1004,7 @@ class ThreeSiteFullMatrixRunnerTests(unittest.IsolatedAsyncioTestCase):
                 "wrong-key": wrong_key,
                 "old-session": old_session,
                 "short-expiry": short_expiry,
+                "broad-scope": broad_scope,
                 "mixed-session": mixed_session,
             }.items():
                 with self.subTest(name=name):

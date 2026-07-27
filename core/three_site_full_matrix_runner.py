@@ -18,6 +18,7 @@ from typing import Any, Callable, Protocol
 from uuid import NAMESPACE_URL, uuid5
 
 from core.canonical_json import canonical_json_bytes
+from core.human_approval import RELAY_RECEIPT_SCHEMA
 from core.secure_file_io import (
     append_hash_chained_jsonl,
     sha256_secure_file,
@@ -47,6 +48,7 @@ from core.three_site_full_matrix_midpoint import (
     load_bound_witness_public_key,
     midpoint_subjects,
     validate_midpoint_journal,
+    verify_initial_session_runway,
     verify_midpoint_bundle,
 )
 
@@ -846,6 +848,7 @@ def _verify_refresh_bundle(
     identity: CampaignIdentity,
     pause: dict[str, Any],
     witness_public_key: str,
+    prior_session_token_sha256: str | None,
     now: datetime | None,
     require_fresh: bool,
 ) -> dict[str, Any]:
@@ -857,6 +860,7 @@ def _verify_refresh_bundle(
         pause_timestamp=str(pause["timestamp"]),
         policy_payload=approver_policy,
         witness_public_key=witness_public_key,
+        prior_session_token_sha256=prior_session_token_sha256,
         now=now,
         require_fresh=require_fresh,
     )
@@ -1079,6 +1083,27 @@ async def run_full_matrix_campaign(
         witness_relay_public_key=witness_public_key,
     )
     verify_bound_artifacts(campaign, bound_artifacts)
+    initial_approval = campaign["approvals"][0]
+    prior_session_token_sha256: str | None = None
+    if (
+        isinstance(initial_approval, dict)
+        and initial_approval.get("schema") == RELAY_RECEIPT_SCHEMA
+    ):
+        if not journal_exists:
+            try:
+                prior_session_token_sha256 = verify_initial_session_runway(
+                    initial_approval,
+                    release_sha=approved["release_sha"],
+                    now=now,
+                )
+            except FullMatrixMidpointError as exc:
+                raise FullMatrixRunnerError(
+                    "initial Full Matrix Witness session is not fresh enough"
+                ) from exc
+        else:
+            prior_session_token_sha256 = str(
+                initial_approval.get("session_token_sha256") or ""
+            )
     identity = CampaignIdentity(
         campaign_id=approved["campaign_id"],
         gate_group_id=approved["gate_group_id"],
@@ -1102,6 +1127,7 @@ async def run_full_matrix_campaign(
                 identity=identity,
                 pause=midpoint_pause,
                 witness_public_key=witness_public_key,
+                prior_session_token_sha256=prior_session_token_sha256,
                 now=now,
                 require_fresh=False,
             )
@@ -1466,6 +1492,9 @@ async def run_full_matrix_campaign(
                                 identity=identity,
                                 pause=midpoint_pause,
                                 witness_public_key=witness_public_key,
+                                prior_session_token_sha256=(
+                                    prior_session_token_sha256
+                                ),
                                 now=now,
                                 require_fresh=True,
                             )

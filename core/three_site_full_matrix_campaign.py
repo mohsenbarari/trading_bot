@@ -15,6 +15,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from core.canonical_json import canonical_json_bytes
 from core.human_approval import (
     HumanApprovalPolicy,
+    RELAY_RECEIPT_SCHEMA,
     approval_subject,
     load_human_approval_policy,
     verify_human_approval,
@@ -37,6 +38,7 @@ from core.three_site_execution_safety import (
 )
 from core.three_site_full_matrix_midpoint import (
     FullMatrixMidpointError,
+    full_matrix_session_scope_sha256,
     load_bound_witness_public_key,
     validate_midpoint_journal,
     verify_midpoint_bundle,
@@ -655,6 +657,15 @@ def verify_campaign(
     approvals = campaign["approvals"]
     if not isinstance(approvals, list) or len(approvals) != 1:
         raise FullMatrixCampaignError("Full Matrix campaign needs exactly one human approval")
+    if (
+        isinstance(approvals[0], dict)
+        and approvals[0].get("schema") == RELAY_RECEIPT_SCHEMA
+        and approvals[0].get("session_scope_sha256")
+        != full_matrix_session_scope_sha256(release)
+    ):
+        raise FullMatrixCampaignError(
+            "Full Matrix relay approval session scope is invalid"
+        )
     unsigned = {key: value for key, value in campaign.items() if key != "approvals"}
     campaign_hash = hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
     subject = approval_subject(
@@ -1417,6 +1428,13 @@ def _verify_execution_journal(
             pause_timestamp=str(midpoint_pause["timestamp"]),
             policy_payload=approver_policy,
             witness_public_key=witness_public_key,
+            prior_session_token_sha256=(
+                str(campaign["approvals"][0].get("session_token_sha256") or "")
+                if isinstance(campaign["approvals"][0], dict)
+                and campaign["approvals"][0].get("schema")
+                == RELAY_RECEIPT_SCHEMA
+                else None
+            ),
             now=now,
             require_fresh=False,
         )
