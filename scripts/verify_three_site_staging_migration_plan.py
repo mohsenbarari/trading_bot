@@ -38,6 +38,10 @@ TARGET_SEED_MAP = {
     "webapp_ir": ("webapp_fi", "clone"),
     "witness": (None, "empty"),
 }
+SOURCE_RECIPIENT_TARGETS = {
+    "bot_fi": {"bot_fi"},
+    "webapp_fi": {"webapp_fi", "webapp_ir"},
+}
 ORDERED_PHASES = (
     "validate_campaign_inputs",
     "attest_legacy_sources_quiesced",
@@ -411,43 +415,84 @@ def verify_migration_plan(
     seen_bundles: set[str] = set()
     inventory_storage = inventory["object_storage"]
     for row in bundle_rows:
-        expected = {
-            "source_role", "manifest_sha256", "object_prefix", "encryption",
-            "recipient_fingerprint", "readback_evidence_sha256",
-        }
-        if not isinstance(row, dict) or set(row) != expected:
-            raise MigrationPlanError("seed-bundle plan fields are invalid")
+        if not isinstance(row, dict):
+            raise MigrationPlanError("seed-bundle plan row is invalid")
         role = str(row["source_role"])
         if role not in SOURCE_ROLES or role in seen_bundles:
             raise MigrationPlanError("seed-bundle role is unknown or duplicate")
-        if (
-            row["encryption"] != "age-x25519"
-            or not str(row["object_prefix"]).startswith(str(inventory_storage["prefix"]))
-            or not SHA256_RE.fullmatch(str(row["manifest_sha256"]))
-            or not SHA256_RE.fullmatch(str(row["recipient_fingerprint"]))
-            or not SHA256_RE.fullmatch(str(row["readback_evidence_sha256"]))
-        ):
-            raise MigrationPlanError("encrypted seed-bundle identity is invalid")
         manifest = seed_manifests.get(role)
-        if manifest is None or hashlib.sha256(_canonical_bytes(manifest)).hexdigest() != row["manifest_sha256"]:
+        if (
+            manifest is None
+            or hashlib.sha256(_canonical_bytes(manifest)).hexdigest()
+            != row.get("manifest_sha256")
+        ):
             raise MigrationPlanError("seed manifest bytes differ from the signed plan")
-        required_manifest = {
-            "schema", "campaign_id", "release_sha", "source_role", "bucket",
-            "object_prefix", "encryption", "recipient_fingerprint", "objects",
-            "readback_evidence_sha256",
-        }
+        schema = manifest.get("schema") if isinstance(manifest, dict) else None
+        if schema == "three-site-staging-seed-manifest-v1":
+            expected_row = {
+                "source_role", "manifest_sha256", "object_prefix", "encryption",
+                "recipient_fingerprint", "readback_evidence_sha256",
+            }
+            required_manifest = {
+                "schema", "campaign_id", "release_sha", "source_role", "bucket",
+                "object_prefix", "encryption", "recipient_fingerprint", "objects",
+                "readback_evidence_sha256",
+            }
+            recipient_valid = (
+                row.get("encryption") == "age-x25519"
+                and SHA256_RE.fullmatch(str(row.get("recipient_fingerprint") or ""))
+                is not None
+                and manifest.get("recipient_fingerprint")
+                == row.get("recipient_fingerprint")
+            )
+            expected_object_fields = {
+                "kind", "object_key", "version_id", "plaintext_sha256",
+                "plaintext_bytes", "ciphertext_sha256", "ciphertext_bytes",
+            }
+        elif schema == "three-site-staging-seed-manifest-v2":
+            expected_row = {
+                "source_role", "manifest_sha256", "object_prefix", "encryption",
+                "recipient_fingerprints", "readback_evidence_sha256",
+            }
+            required_manifest = {
+                "schema", "campaign_id", "release_sha", "source_role", "bucket",
+                "object_prefix", "encryption", "recipient_fingerprints", "objects",
+                "readback_evidence_sha256",
+            }
+            fingerprints = row.get("recipient_fingerprints")
+            recipient_valid = (
+                row.get("encryption") == "age-x25519-multi-recipient"
+                and isinstance(fingerprints, dict)
+                and set(fingerprints) == SOURCE_RECIPIENT_TARGETS[role]
+                and all(
+                    SHA256_RE.fullmatch(str(value)) is not None
+                    for value in fingerprints.values()
+                )
+                and len(set(fingerprints.values())) == len(fingerprints)
+                and manifest.get("recipient_fingerprints") == fingerprints
+            )
+            expected_object_fields = {
+                "kind", "object_key", "version_id", "plaintext_sha256",
+                "plaintext_bytes", "ciphertext_sha256", "ciphertext_bytes",
+                "publication_intent",
+            }
+        else:
+            raise MigrationPlanError("seed manifest schema is unsupported")
         objects = manifest.get("objects") if isinstance(manifest, dict) else None
         if (
-            set(manifest) != required_manifest
-            or manifest["schema"] != "three-site-staging-seed-manifest-v1"
+            set(row) != expected_row
+            or set(manifest) != required_manifest
             or manifest["campaign_id"] != inventory_result["campaign_id"]
             or manifest["release_sha"] != inventory_result["release_sha"]
             or manifest["source_role"] != role
             or manifest["bucket"] != inventory_storage["bucket"]
             or manifest["object_prefix"] != row["object_prefix"]
             or manifest["encryption"] != row["encryption"]
-            or manifest["recipient_fingerprint"] != row["recipient_fingerprint"]
+            or not recipient_valid
             or manifest["readback_evidence_sha256"] != row["readback_evidence_sha256"]
+            or not str(row["object_prefix"]).startswith(str(inventory_storage["prefix"]))
+            or not SHA256_RE.fullmatch(str(row["manifest_sha256"]))
+            or not SHA256_RE.fullmatch(str(row["readback_evidence_sha256"]))
             or not isinstance(objects, list)
             or len(objects) != 3
         ):
@@ -455,10 +500,7 @@ def verify_migration_plan(
         kinds: set[str] = set()
         keys: set[str] = set()
         for item in objects:
-            if not isinstance(item, dict) or set(item) != {
-                "kind", "object_key", "version_id", "plaintext_sha256",
-                "plaintext_bytes", "ciphertext_sha256", "ciphertext_bytes",
-            }:
+            if not isinstance(item, dict) or set(item) != expected_object_fields:
                 raise MigrationPlanError("seed object fields are invalid")
             kind = str(item["kind"])
             key = str(item["object_key"])
@@ -471,6 +513,10 @@ def verify_migration_plan(
                 or not version
                 or not SHA256_RE.fullmatch(str(item["plaintext_sha256"]))
                 or not SHA256_RE.fullmatch(str(item["ciphertext_sha256"]))
+                or (
+                    schema == "three-site-staging-seed-manifest-v2"
+                    and SHA256_RE.fullmatch(str(item["publication_intent"])) is None
+                )
                 or type(item["plaintext_bytes"]) is not int
                 or int(item["plaintext_bytes"]) <= 0
                 or type(item["ciphertext_bytes"]) is not int

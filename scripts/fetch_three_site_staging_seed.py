@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
+import re
 import sys
 from typing import Any
 
@@ -43,6 +44,27 @@ class SeedFetchError(RuntimeError):
     pass
 
 
+def _manifest_recipient_fingerprint(
+    manifest: dict[str, Any],
+    *,
+    target_role: str,
+) -> str:
+    if manifest.get("schema") == "three-site-staging-seed-manifest-v1":
+        value = manifest.get("recipient_fingerprint")
+    elif manifest.get("schema") == "three-site-staging-seed-manifest-v2":
+        fingerprints = manifest.get("recipient_fingerprints")
+        if not isinstance(fingerprints, dict) or target_role not in fingerprints:
+            raise SeedFetchError(
+                "target role is not an authorized recipient in the seed manifest"
+            )
+        value = fingerprints[target_role]
+    else:
+        raise SeedFetchError("target seed manifest schema is unsupported")
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise SeedFetchError("target seed recipient fingerprint is malformed")
+    return value
+
+
 def confirmation_phrase(campaign_id: str, target_role: str, plan_hash: str) -> str:
     return f"fetch-seed:{campaign_id}:{target_role}:{plan_hash}"
 
@@ -61,14 +83,17 @@ def _fetch_one(
         Key=item["object_key"],
         VersionId=item["version_id"],
     )
+    expected_metadata = {
+        "plaintext-sha256": item["plaintext_sha256"],
+        "ciphertext-sha256": item["ciphertext_sha256"],
+        "artifact-kind": item["kind"],
+    }
+    if "publication_intent" in item:
+        expected_metadata["publication-intent"] = item["publication_intent"]
     if (
         str(response.get("VersionId") or "") != item["version_id"]
         or int(response.get("ContentLength") or -1) != item["ciphertext_bytes"]
-        or response.get("Metadata") != {
-            "plaintext-sha256": item["plaintext_sha256"],
-            "ciphertext-sha256": item["ciphertext_sha256"],
-            "artifact-kind": item["kind"],
-        }
+        or response.get("Metadata") != expected_metadata
     ):
         raise SeedFetchError("target seed provider identity/metadata differs from manifest")
     ciphertext_hash, ciphertext_size = _streaming_hash(response["Body"], encrypted)
@@ -155,8 +180,14 @@ def execute(
     else:
         manifest = seed_manifests[source_role]
         _recipient, recipient_fingerprint = _age_material(args.recipient, args.identity)
-        if recipient_fingerprint != manifest["recipient_fingerprint"]:
-            raise SeedFetchError("target age recipient differs from signed seed manifest")
+        expected_fingerprint = _manifest_recipient_fingerprint(
+            manifest,
+            target_role=args.target_role,
+        )
+        if recipient_fingerprint != expected_fingerprint:
+            raise SeedFetchError(
+                "target age recipient differs from its role-bound manifest recipient"
+            )
         access_key, secret_key = _credentials(args.credentials)
         client = _client(access_key=access_key, secret_key=secret_key)
         if client.get_bucket_versioning(Bucket=manifest["bucket"]).get("Status") != "Enabled":
