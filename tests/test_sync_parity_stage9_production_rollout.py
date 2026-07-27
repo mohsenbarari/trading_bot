@@ -85,6 +85,11 @@ class SyncParityStage9ProductionRolloutTests(unittest.TestCase):
         self.assertIn("production_predeploy_parity_compare_deep", preflight_names)
         self.assertIn("production_alerts_warning_only", preflight_names)
 
+        local_gate = plan["local_release_gates"]["commands"][0]
+        self.assertEqual(local_gate["args"][0], "env")
+        self.assertIn("DATABASE_URL=postgresql+asyncpg://matrix_gate:matrix_gate@127.0.0.1:1/matrix_gate", local_gate["args"])
+        self.assertIn("JWT_SECRET_KEY=matrix-gate-placeholder-jwt-secret-32-bytes", local_gate["args"])
+
     def test_iran_stage9_ssh_uses_accept_new_host_key_policy(self):
         ssh_command = stage9.iran_compose_exec(FAKE_SETTINGS, "python", "-V")
 

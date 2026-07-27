@@ -41,6 +41,17 @@ RELEASE_CONFIRM_VALUE = "execute-production-rollout"
 STRICT_ALERT_CONFIRM_ENV = "SYNC_PARITY_STAGE9_STRICT_ALERT_CONFIRM"
 STRICT_ALERT_CONFIRM_VALUE = "enable-strict-parity-alerts"
 SSH_STRICT_HOST_KEY_CHECKING = "accept-new"
+LOCAL_GATE_ENV = (
+    "PYTHONDONTWRITEBYTECODE=1",
+    "DATABASE_URL=postgresql+asyncpg://matrix_gate:matrix_gate@127.0.0.1:1/matrix_gate",
+    "SYNC_DATABASE_URL=postgresql://matrix_gate:matrix_gate@127.0.0.1:1/matrix_gate",
+    "POSTGRES_DB=matrix_gate",
+    "POSTGRES_USER=matrix_gate",
+    "POSTGRES_PASSWORD=matrix_gate",
+    "FRONTEND_URL=https://matrix-gate.invalid",
+    "REDIS_URL=redis://127.0.0.1:1/0",
+    "JWT_SECRET_KEY=matrix-gate-placeholder-jwt-secret-32-bytes",
+)
 
 
 @dataclass(frozen=True)
@@ -153,10 +164,11 @@ def parity_snapshot_command(
 
 def build_local_release_gates(args: argparse.Namespace) -> list[CommandSpec]:
     artifact_dir = args.artifact_dir
+    test_prefix = ["env", *LOCAL_GATE_ENV, sys.executable, "-m", "unittest"]
     return [
         CommandSpec(
             name="local_sync_guarantee_matrix",
-            args=[sys.executable, "-m", "unittest", "tests.test_sync_guarantee_matrix"],
+            args=[*test_prefix, "tests.test_sync_guarantee_matrix"],
             phase="local_release_gate",
             description="Synced-table receiver, payload, parity, repair, and rule coverage must remain complete.",
             timeout_seconds=900,
@@ -165,7 +177,7 @@ def build_local_release_gates(args: argparse.Namespace) -> list[CommandSpec]:
         ),
         CommandSpec(
             name="local_stage8_rollout_contract",
-            args=[sys.executable, "-m", "unittest", "tests.test_sync_parity_stage8_staging_rollout"],
+            args=[*test_prefix, "tests.test_sync_parity_stage8_staging_rollout"],
             phase="local_release_gate",
             description="The staging rollout gate must remain fail-closed before production rollout planning.",
             timeout_seconds=300,
@@ -174,7 +186,7 @@ def build_local_release_gates(args: argparse.Namespace) -> list[CommandSpec]:
         ),
         CommandSpec(
             name="local_stage9_rollout_contract",
-            args=[sys.executable, "-m", "unittest", "tests.test_sync_parity_stage9_production_rollout"],
+            args=[*test_prefix, "tests.test_sync_parity_stage9_production_rollout"],
             phase="local_release_gate",
             description="The production rollout gate itself must remain fail-closed.",
             timeout_seconds=300,
