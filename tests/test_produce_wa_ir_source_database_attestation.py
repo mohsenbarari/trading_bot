@@ -57,6 +57,30 @@ class SourceDatabaseAttestationTests(unittest.TestCase):
         }
         return name, volume, image, container, volume_document
 
+    def test_source_operation_lock_rejects_parallel_scratch_lifecycle(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            with PRODUCER._source_operation_lock(
+                OPERATION_ID,
+                lock_root=root,
+                required_uid=os.geteuid(),
+            ):
+                with self.assertRaises(
+                    PRODUCER.SourceDatabaseAttestationError
+                ):
+                    with PRODUCER._source_operation_lock(
+                        OPERATION_ID,
+                        lock_root=root,
+                        required_uid=os.geteuid(),
+                    ):
+                        self.fail("parallel scratch lifecycle acquired the lock")
+            with PRODUCER._source_operation_lock(
+                OPERATION_ID,
+                lock_root=root,
+                required_uid=os.geteuid(),
+            ):
+                pass
+
     def test_source_producer_and_restore_consumer_share_exact_contract(self) -> None:
         observed_sql: list[str] = []
 
@@ -131,24 +155,53 @@ class SourceDatabaseAttestationTests(unittest.TestCase):
     def test_consumer_compose_stream_pins_same_canonical_session(self) -> None:
         manifest = unittest.mock.Mock()
         manifest.operation_id = OPERATION_ID
+        manifest.release_sha = "a" * 40
         manifest.services = {"restore": "webapp_ir_restore_tool"}
+        project_prefix = Path(
+            "/srv/trading-bot-three-site-production-shadow"
+        )
+        secret_prefix = Path(
+            "/root/secure-envs/trading-bot/three-site-production-shadow"
+        )
         prefix = [
             CONSUMER.DOCKER,
             "compose",
             "--project-name",
             "fixture",
             "--env-file",
-            (
-                "/srv/trading-bot/dark-standby/operations/"
-                f"{OPERATION_ID}/secrets/webapp-ir/runtime.env.role"
+            str(
+                secret_prefix
+                / OPERATION_ID
+                / "webapp-ir"
+                / "runtime.env.role"
             ),
             "--file",
-            (
-                "/srv/trading-bot/dark-standby/operations/"
-                f"{OPERATION_ID}/rendered/webapp-ir/docker-compose.yml"
+            str(
+                project_prefix
+                / OPERATION_ID
+                / "rendered"
+                / "webapp-ir"
+                / "docker-compose.yml"
             ),
         ]
         with (
+            patch.object(
+                CONSUMER,
+                "PROJECT_ROOT_PREFIX",
+                project_prefix,
+            ),
+            patch.object(
+                CONSUMER,
+                "DATA_ROOT_PREFIX",
+                Path(
+                    "/srv/trading-bot-three-site-production-shadow-data"
+                ),
+            ),
+            patch.object(
+                CONSUMER,
+                "SECRET_ROOT_PREFIX",
+                secret_prefix,
+            ),
             patch.object(CONSUMER, "_oneoff_ids", return_value=[]),
             patch.object(
                 CONSUMER,
