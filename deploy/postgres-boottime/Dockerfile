@@ -16,4 +16,6 @@ COPY --from=builder /build/trading_bot_boottime--1.0.sql /usr/local/share/postgr
 
 LABEL org.opencontainers.image.title="trading-bot-postgres-boottime" \
       org.opencontainers.image.description="PostgreSQL 15 with clock-independent Writer fencing primitives" \
-      org.opencontainers.image.revision=${RELEASE_SHA}
+      org.opencontainers.image.revision=${RELEASE_SHA} \
+      trading-bot.postgres.runtime-uid="70" \
+      trading-bot.postgres.runtime-gid="70"

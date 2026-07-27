@@ -257,13 +257,15 @@ services:
       POSTGRES_USER: ${BOT_FI_POSTGRES_USER:?required}
       POSTGRES_PASSWORD: ${BOT_FI_POSTGRES_PASSWORD:?required}
       POSTGRES_DB: ${BOT_FI_POSTGRES_DB:?required}
-    volumes: [bot_fi_postgres:/var/lib/postgresql/data]
+    volumes:
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/bot-fi/postgres:/var/lib/postgresql/data
     networks: [bot_fi]
 
   bot_fi_redis:
     profiles: [bot-fi-data-ready, bot-fi-private, bot-fi-acceptance, bot-fi-public, bot-fi-worker]
     <<: *redis
-    volumes: [bot_fi_redis:/data]
+    volumes:
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/bot-fi/redis:/data
     networks: [bot_fi]
 
   bot_fi_restore_tool:
@@ -279,8 +281,8 @@ services:
       PGDATABASE: ${BOT_FI_POSTGRES_DB:?required}
     volumes:
       - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/restore-input/bot-fi:/run/restore-input:ro
-      - bot_fi_uploads:/run/restore-target/uploads
-      - bot_fi_audit:/run/restore-target/audit
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/bot-fi/uploads:/run/restore-target/uploads
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/bot-fi/audit:/run/restore-target/audit
     depends_on: {bot_fi_db: {condition: service_healthy}}
     networks: [bot_fi]
 
@@ -417,7 +419,7 @@ services:
       WEB_PUSH_VAPID_SUBJECT: ""
     volumes:
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/tls/ca.crt:/run/production-dr-ca/ca.crt:ro
-      - bot_fi_uploads:/app/uploads:ro
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/bot-fi/uploads:/app/uploads:ro
     depends_on:
       bot_fi_db: {condition: service_healthy}
       bot_fi_redis: {condition: service_healthy}
@@ -461,8 +463,8 @@ services:
       WEB_PUSH_VAPID_SUBJECT: ""
     volumes:
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/tls/ca.crt:/run/production-dr-ca/ca.crt:ro
-      - bot_fi_uploads:/app/uploads
-      - bot_fi_audit:/app/audit_trail
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/bot-fi/uploads:/app/uploads
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/bot-fi/audit:/app/audit_trail
     ports:
       - "127.0.0.1:${BOT_FI_SHADOW_API_PORT:?required}:8000"
     depends_on:
@@ -491,7 +493,7 @@ services:
       BACKGROUND_JOBS_ENABLED: "false"
     volumes:
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/tls/ca.crt:/run/production-dr-ca/ca.crt:ro
-      - bot_fi_audit:/app/audit_trail
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/bot-fi/audit:/app/audit_trail
     depends_on:
       bot_fi_db: {condition: service_healthy}
       bot_fi_redis: {condition: service_healthy}
@@ -525,13 +527,15 @@ services:
       POSTGRES_USER: ${WEBAPP_FI_POSTGRES_USER:?required}
       POSTGRES_PASSWORD: ${WEBAPP_FI_POSTGRES_PASSWORD:?required}
       POSTGRES_DB: ${WEBAPP_FI_POSTGRES_DB:?required}
-    volumes: [webapp_fi_postgres:/var/lib/postgresql/data]
+    volumes:
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-fi/postgres:/var/lib/postgresql/data
     networks: [webapp_fi]
 
   webapp_fi_redis:
     profiles: [webapp-fi-data-ready, webapp-fi-private, webapp-fi-acceptance, webapp-fi-activation, webapp-fi-effects]
     <<: *redis
-    volumes: [webapp_fi_redis:/data]
+    volumes:
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-fi/redis:/data
     networks: [webapp_fi]
 
   webapp_fi_restore_tool:
@@ -547,8 +551,8 @@ services:
       PGDATABASE: ${WEBAPP_FI_POSTGRES_DB:?required}
     volumes:
       - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/restore-input/webapp-fi:/run/restore-input:ro
-      - webapp_fi_uploads:/run/restore-target/uploads
-      - webapp_fi_audit:/run/restore-target/audit
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-fi/uploads:/run/restore-target/uploads
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-fi/audit:/run/restore-target/audit
     depends_on: {webapp_fi_db: {condition: service_healthy}}
     networks: [webapp_fi]
 
@@ -718,7 +722,7 @@ services:
       DR_BLOB_ENCRYPTION_KEYRING_FILE: /run/production-secrets/dr-blob-keyring.json
     volumes:
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/tls/ca.crt:/run/production-dr-ca/ca.crt:ro
-      - webapp_fi_uploads:/app/uploads
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-fi/uploads:/app/uploads
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/webapp-fi/dr-blob-s3.json:/run/production-secrets/dr-blob-s3.json:ro
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/webapp-fi/dr-blob-keyring.json:/run/production-secrets/dr-blob-keyring.json:ro
     depends_on: {webapp_fi_dr_receiver: {condition: service_healthy}}
@@ -793,7 +797,7 @@ services:
       TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN: ""
     volumes:
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/tls/ca.crt:/run/production-dr-ca/ca.crt:ro
-      - webapp_fi_uploads:/app/uploads:ro
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-fi/uploads:/app/uploads:ro
     depends_on:
       webapp_fi_db: {condition: service_healthy}
       webapp_fi_redis: {condition: service_healthy}
@@ -844,8 +848,8 @@ services:
       TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN: ""
     volumes:
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/tls/ca.crt:/run/production-dr-ca/ca.crt:ro
-      - webapp_fi_uploads:/app/uploads
-      - webapp_fi_audit:/app/audit_trail
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-fi/uploads:/app/uploads
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-fi/audit:/app/audit_trail
     ports:
       - "127.0.0.1:${WEBAPP_FI_SHADOW_API_PORT:?required}:8000"
     depends_on:
@@ -908,7 +912,7 @@ services:
       POSTGRES_PASSWORD: ${WEBAPP_FI_OBSERVER_DB_PASSWORD:?required}
     volumes:
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/tls/ca.crt:/run/production-dr-ca/ca.crt:ro
-      - webapp_fi_uploads:/app/uploads:ro
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-fi/uploads:/app/uploads:ro
     depends_on: {webapp_fi_db: {condition: service_healthy}}
     networks: [webapp_fi]
 
@@ -921,13 +925,15 @@ services:
       POSTGRES_USER: ${WEBAPP_IR_POSTGRES_USER:?required}
       POSTGRES_PASSWORD: ${WEBAPP_IR_POSTGRES_PASSWORD:?required}
       POSTGRES_DB: ${WEBAPP_IR_POSTGRES_DB:?required}
-    volumes: [webapp_ir_postgres:/var/lib/postgresql/data]
+    volumes:
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-ir/postgres:/var/lib/postgresql/data
     networks: [webapp_ir]
 
   webapp_ir_redis:
     profiles: [webapp-ir-data-ready, webapp-ir-private, webapp-ir-acceptance, webapp-ir-activation, webapp-ir-effects]
     <<: *redis
-    volumes: [webapp_ir_redis:/data]
+    volumes:
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-ir/redis:/data
     networks: [webapp_ir]
 
   webapp_ir_restore_tool:
@@ -1143,7 +1149,7 @@ services:
       DR_BLOB_ENCRYPTION_KEYRING_FILE: /run/production-secrets/dr-blob-keyring.json
     volumes:
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/tls/ca.crt:/run/production-dr-ca/ca.crt:ro
-      - webapp_ir_uploads:/app/uploads
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-ir/uploads:/app/uploads
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/webapp-ir/dr-blob-s3.json:/run/production-secrets/dr-blob-s3.json:ro
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/webapp-ir/dr-blob-keyring.json:/run/production-secrets/dr-blob-keyring.json:ro
     depends_on: {webapp_ir_dr_receiver: {condition: service_healthy}}
@@ -1217,7 +1223,7 @@ services:
       TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN: ""
     volumes:
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/tls/ca.crt:/run/production-dr-ca/ca.crt:ro
-      - webapp_ir_uploads:/app/uploads:ro
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-ir/uploads:/app/uploads:ro
     depends_on:
       webapp_ir_db: {condition: service_healthy}
       webapp_ir_redis: {condition: service_healthy}
@@ -1268,8 +1274,8 @@ services:
       TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN: ""
     volumes:
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/tls/ca.crt:/run/production-dr-ca/ca.crt:ro
-      - webapp_ir_uploads:/app/uploads
-      - webapp_ir_audit:/app/audit_trail
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-ir/uploads:/app/uploads
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-ir/audit:/app/audit_trail
     ports:
       - "127.0.0.1:${WEBAPP_IR_SHADOW_API_PORT:?required}:8000"
     depends_on:
@@ -1332,7 +1338,7 @@ services:
       POSTGRES_PASSWORD: ${WEBAPP_IR_OBSERVER_DB_PASSWORD:?required}
     volumes:
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/tls/ca.crt:/run/production-dr-ca/ca.crt:ro
-      - webapp_ir_uploads:/app/uploads:ro
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-ir/uploads:/app/uploads:ro
     depends_on: {webapp_ir_db: {condition: service_healthy}}
     networks: [webapp_ir]
 
@@ -1349,99 +1355,31 @@ services:
       POSTGRES_PASSWORD: ${WEBAPP_IR_OBSERVER_DB_PASSWORD:?required}
     volumes:
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/tls/ca.crt:/run/production-dr-ca/ca.crt:ro
-      - webapp_ir_uploads:/app/uploads:ro
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-ir/uploads:/app/uploads:ro
     depends_on: {webapp_ir_db: {condition: service_healthy}}
     networks: [webapp_ir, webapp_ir_observe_egress]
 
-networks:
-  bot_fi: {internal: true}
-  bot_fi_dr_egress: {}
-  bot_fi_api_egress: {}
-  bot_fi_bot_egress: {}
-  webapp_fi: {internal: true}
-  webapp_fi_dr_egress: {}
-  webapp_fi_blob_egress: {}
-  webapp_fi_witness_egress: {}
-  webapp_fi_api_egress: {}
-  webapp_fi_effect_egress: {}
-  webapp_ir: {internal: true}
-  webapp_ir_dr_egress: {}
-  webapp_ir_blob_egress: {}
-  webapp_ir_witness_egress: {}
-  webapp_ir_api_egress: {}
-  webapp_ir_effect_egress: {}
-  webapp_ir_observe_egress: {}
+x-operation-network: &operation_network
+  labels:
+    trading-bot.production.operation-id: ${PRODUCTION_SHADOW_OPERATION_ID:?operation UUID is required}
 
-volumes:
-  bot_fi_postgres:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/bot-fi/postgres
-  bot_fi_redis:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/bot-fi/redis
-  bot_fi_uploads:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/bot-fi/uploads
-  bot_fi_audit:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/bot-fi/audit
-  webapp_fi_postgres:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-fi/postgres
-  webapp_fi_redis:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-fi/redis
-  webapp_fi_uploads:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-fi/uploads
-  webapp_fi_audit:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-fi/audit
-  webapp_ir_postgres:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-ir/postgres
-  webapp_ir_redis:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-ir/redis
-  webapp_ir_uploads:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-ir/uploads
-  webapp_ir_audit:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-ir/audit
+networks:
+  bot_fi: {<<: *operation_network, internal: true}
+  bot_fi_dr_egress: {<<: *operation_network}
+  bot_fi_api_egress: {<<: *operation_network}
+  bot_fi_bot_egress: {<<: *operation_network}
+  webapp_fi: {<<: *operation_network, internal: true}
+  webapp_fi_dr_egress: {<<: *operation_network}
+  webapp_fi_blob_egress: {<<: *operation_network}
+  webapp_fi_witness_egress: {<<: *operation_network}
+  webapp_fi_api_egress: {<<: *operation_network}
+  webapp_fi_effect_egress: {<<: *operation_network}
+  webapp_ir: {<<: *operation_network, internal: true}
+  webapp_ir_dr_egress: {<<: *operation_network}
+  webapp_ir_blob_egress: {<<: *operation_network}
+  webapp_ir_witness_egress: {<<: *operation_network}
+  webapp_ir_api_egress: {<<: *operation_network}
+  webapp_ir_effect_egress: {<<: *operation_network}
+  webapp_ir_observe_egress: {<<: *operation_network}
+
+volumes: {}

@@ -576,12 +576,27 @@ class ThreeSiteProductionShadowComposeTests(unittest.TestCase):
 
     def test_rejects_unscoped_data_and_secret_mounts(self):
         document = copy.deepcopy(self.document)
-        document["volumes"]["webapp_fi_postgres"]["driver_opts"][
-            "device"
-        ] = "/srv/trading-bot/postgres"
+        document["services"]["webapp_fi_db"]["volumes"] = [
+            (
+                "${PRODUCTION_SHADOW_DATA_ROOT:"
+                "?operation-bound data root is required}"
+                "/bot-fi/postgres:/var/lib/postgresql/data"
+            )
+        ]
         self.assert_source_failure(
             document,
-            "volume webapp_fi_postgres must use an operation-scoped bind device",
+            "webapp_fi_db must bind only its exact canonical PostgreSQL directory",
+        )
+        self.assertIn(
+            "webapp_fi_db must bind only its exact canonical PostgreSQL directory",
+            collect_source_failures(document, self.source_text),
+        )
+
+        document = copy.deepcopy(self.document)
+        document["volumes"] = {"poisoned": {"driver": "local"}}
+        self.assert_source_failure(
+            document,
+            "top-level named volumes are forbidden; all stores must be exact direct binds",
         )
 
         document = copy.deepcopy(self.document)
@@ -791,15 +806,65 @@ class ThreeSiteProductionShadowComposeTests(unittest.TestCase):
             ):
                 validate_pristine_redis_targets(values)
 
-    def test_webapp_ir_restore_tool_is_stdin_only(self):
-        document = copy.deepcopy(self.document)
-        document["services"]["webapp_ir_restore_tool"]["volumes"] = [
-            "webapp_ir_uploads:/run/restore-target/uploads"
-        ]
-        self.assert_source_failure(
-            document,
-            "accept PostgreSQL restore only over stdin",
+    def test_fi_restore_tools_have_exact_binds_and_wa_is_stdin_only(self):
+        data_root = (
+            "${PRODUCTION_SHADOW_DATA_ROOT:"
+            "?operation-bound data root is required}"
         )
+        for role in ("bot_fi", "webapp_fi", "webapp_ir"):
+            role_path = role.replace("_", "-")
+            expected = (
+                set()
+                if role == "webapp_ir"
+                else {
+                    (
+                        f"{data_root}/restore-input/{role_path}:"
+                        "/run/restore-input:ro"
+                    ),
+                    (
+                        f"{data_root}/{role_path}/uploads:"
+                        "/run/restore-target/uploads"
+                    ),
+                    (
+                        f"{data_root}/{role_path}/audit:"
+                        "/run/restore-target/audit"
+                    ),
+                }
+            )
+            with self.subTest(role=role):
+                self.assertEqual(
+                    set(
+                        self.document["services"][
+                            f"{role}_restore_tool"
+                        ].get("volumes", [])
+                    ),
+                    expected,
+                )
+
+                swapped = copy.deepcopy(self.document)
+                if role == "webapp_ir":
+                    swapped["services"][f"{role}_restore_tool"]["volumes"] = [
+                        (
+                            f"{data_root}/restore-input/webapp-ir:"
+                            "/run/restore-input:ro"
+                        )
+                    ]
+                    expected_failure = (
+                        "webapp_ir_restore_tool must accept PostgreSQL restore "
+                        "only over stdin"
+                    )
+                else:
+                    swapped["services"][f"{role}_restore_tool"]["volumes"][1] = (
+                        f"{data_root}/webapp-ir/uploads:"
+                        "/run/restore-target/uploads"
+                    )
+                    expected_failure = (
+                        f"{role}_restore_tool must bind only its exact restore input"
+                    )
+                self.assert_source_failure(
+                    swapped,
+                    expected_failure,
+                )
 
 
 if __name__ == "__main__":

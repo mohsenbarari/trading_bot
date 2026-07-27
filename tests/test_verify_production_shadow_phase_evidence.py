@@ -25,8 +25,10 @@ from scripts.verify_production_shadow_phase_evidence import (
     PHASE_MANIFEST_CLAIM_BINDINGS,
     PHASE_PRIOR_CLAIM_BINDINGS,
     PhaseEvidenceError,
+    _validate_manifest_artifacts,
     _read_claim_source_records,
     _read_role_validation_records,
+    _manifest_artifact_binding_value,
     main,
     read_root_only_evidence,
     verify_phase_evidence,
@@ -66,7 +68,10 @@ def expected_dynamic_claims(phase: str) -> dict:
     bindings = PHASE_MANIFEST_CLAIM_BINDINGS.get(phase, {})
     result = {
         name: (
-            MANIFEST_ARTIFACTS[bindings[name]]
+            _manifest_artifact_binding_value(
+                MANIFEST_ARTIFACTS,
+                bindings[name],
+            )
             if name in bindings
             else _rule_value(rule)
         )
@@ -296,6 +301,62 @@ def verify(
 
 
 class ProductionShadowPhaseEvidenceTests(unittest.TestCase):
+    def test_manifest_artifact_schema_covers_all_images_sizes_and_role_materials(self):
+        validated = _validate_manifest_artifacts(
+            dict(MANIFEST_ARTIFACTS),
+            release_sha=RELEASE_SHA,
+        )
+        self.assertEqual(
+            validated["image_artifacts"]["redis"],
+            MANIFEST_ARTIFACTS["image_artifacts"]["redis"],
+        )
+        self.assertNotIn(
+            "witness",
+            validated["role_runtime_image_ids"],
+        )
+
+        for mutation in ("missing-redis", "bool-size", "duplicate-image", "bad-role"):
+            with self.subTest(mutation=mutation):
+                candidate = json.loads(json.dumps(MANIFEST_ARTIFACTS))
+                if mutation == "missing-redis":
+                    candidate["image_artifacts"].pop("redis")
+                elif mutation == "bool-size":
+                    candidate["image_artifacts"]["nginx"][
+                        "archive_bytes"
+                    ] = True
+                elif mutation == "duplicate-image":
+                    candidate["role_runtime_image_ids"]["webapp_fi"][
+                        "nginx"
+                    ] = candidate["role_runtime_image_ids"]["webapp_fi"][
+                        "redis"
+                    ]
+                else:
+                    candidate["role_materials"]["webapp_ir"]["format"] = (
+                        "production-shadow-witness-material-tar"
+                    )
+                with self.assertRaises(PhaseEvidenceError):
+                    _validate_manifest_artifacts(
+                        candidate,
+                        release_sha=RELEASE_SHA,
+                    )
+
+        swapped = json.loads(json.dumps(MANIFEST_ARTIFACTS))
+        swapped["role_runtime_image_ids"]["webapp_ir"]["redis"], swapped[
+            "role_runtime_image_ids"
+        ]["webapp_ir"]["nginx"] = (
+            swapped["role_runtime_image_ids"]["webapp_ir"]["nginx"],
+            swapped["role_runtime_image_ids"]["webapp_ir"]["redis"],
+        )
+        now = datetime.now(timezone.utc)
+        evidence = evidence_for("pre_freeze_evidence", captured_at=now)
+        evidence["manifest_artifact_bindings"] = swapped
+        with self.assertRaises(PhaseEvidenceError):
+            verify(
+                evidence,
+                phase="pre_freeze_evidence",
+                now=now,
+            )
+
     def test_contract_hash_is_canonical_and_covers_every_precommit_phase(self):
         expected = hashlib.sha256(
             json.dumps(

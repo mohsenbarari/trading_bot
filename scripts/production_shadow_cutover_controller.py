@@ -12,6 +12,7 @@ exist because rollback to the untouched legacy database ends at that boundary.
 from __future__ import annotations
 
 import argparse
+import base64
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import fcntl
@@ -36,6 +37,10 @@ from core.secure_file_io import (  # noqa: E402
     read_secure_bytes,
     write_secure_atomic_bytes,
     write_secure_new_bytes,
+)
+from core.docker_image_identity import (  # noqa: E402
+    DockerImageIdentityError,
+    verify_content_descriptor,
 )
 from core.three_site_topology import (  # noqa: E402
     BOT_FI_HOST,
@@ -77,7 +82,18 @@ SHADOW_REDIS_POLICY = "pristine-empty-no-restore"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
-PROJECT_RE = re.compile(r"^[a-z][a-z0-9_]{7,62}$")
+PROJECT_RE = re.compile(r"^[a-z][a-z0-9-]{7,62}$")
+IMAGE_KINDS = ("app", "postgres", "redis", "nginx")
+DOCKER_RUNTIME_ROLES = ("bot_fi", "webapp_fi", "webapp_ir")
+IMAGE_ARTIFACT_FIELDS = frozenset(
+    {
+        "archive_sha256",
+        "archive_bytes",
+        "config_digest",
+        "content_descriptor",
+        "content_identity",
+    }
+)
 PHASE_VERIFICATION_FIELDS = frozenset(
     {
         "schema",
@@ -134,9 +150,12 @@ DEPLOYMENT_FIELDS = frozenset(
 ARTIFACT_FIELDS = frozenset(
     {
         "release_bundle_sha256",
-        "role_material_sha256",
-        "app_image_id",
-        "postgres_image_id",
+        "release_bundle_bytes",
+        "role_materials",
+        "image_artifacts",
+        "role_runtime_image_ids",
+        "postgres_runtime_uid",
+        "postgres_runtime_gid",
         "postgres_image_ref",
         "legacy_bot_rollback_sha256",
         "legacy_webapp_rollback_sha256",
@@ -152,6 +171,9 @@ ARTIFACT_FIELDS = frozenset(
         "host_agent_contract_sha256",
         "phase_evidence_verifier_sha256",
     }
+)
+ROLE_MATERIAL_FIELDS = frozenset(
+    {"sha256", "bytes", "transport", "format"}
 )
 POLICY_FIELDS = frozenset(
     {
@@ -238,6 +260,45 @@ class VerifiedPhaseCompletion:
     receipt_sha256: str
 
 
+PREPARATION_SPECS: tuple[PhaseSpec, ...] = (
+    PhaseSpec(
+        "reversible_verify_installation",
+        "verify-installation",
+        ("bot_fi", "webapp_fi"),
+        "Verify the exact staged release, artifacts, images, role material, and Compose closure.",
+        False,
+    ),
+    PhaseSpec(
+        "reversible_bootstrap_database",
+        "bootstrap-database",
+        ("bot_fi", "webapp_fi"),
+        "Create or safely adopt only the operation-owned shadow database.",
+        True,
+    ),
+    PhaseSpec(
+        "reversible_restore_shadow",
+        "restore-shadow",
+        ("bot_fi", "webapp_fi"),
+        "Restore the bound PostgreSQL and file artifacts without restoring Redis.",
+        True,
+    ),
+    PhaseSpec(
+        "reversible_prepare_shadow",
+        "prepare-shadow",
+        ("bot_fi", "webapp_fi"),
+        "Apply the exact forward migration corridor, roles, and database fence.",
+        True,
+    ),
+    PhaseSpec(
+        "reversible_readonly_acceptance",
+        "readonly-acceptance",
+        ("bot_fi", "webapp_fi"),
+        "Run exact-release read-only acceptance with provider capabilities absent.",
+        True,
+    ),
+)
+
+
 # Every phase below remains before the first business write. The controller
 # renders commands and journals intent only; it never contacts a host.
 PHASE_SPECS: tuple[PhaseSpec, ...] = (
@@ -303,6 +364,10 @@ PHASE_SPECS: tuple[PhaseSpec, ...] = (
         ("bot_fi", "webapp_fi"),
         "Stop only legacy processes capable of authoritative writes.",
         True,
+        requirements=(
+            "stop every database writer and every process capable of mutating uploads or audit files",
+            "prove no GET, logging, sync, worker, or background path can mutate final file artifacts",
+        ),
     ),
     PhaseSpec(
         "zero_writer_surface_readback",
@@ -313,6 +378,7 @@ PHASE_SPECS: tuple[PhaseSpec, ...] = (
         requirements=(
             "external readback covers coin.362514.ir, mini-app.362514.ir, and coin.gold-trade.ir",
             "Bot-FI and WebApp-FI have zero legacy writer processes and DB writer clients",
+            "Bot-FI and WebApp-FI have zero file-mutating processes against uploads and audit trees",
         ),
     ),
     PhaseSpec(
@@ -323,6 +389,7 @@ PHASE_SPECS: tuple[PhaseSpec, ...] = (
         True,
         requirements=(
             "snapshot PostgreSQL, uploads, audit, and manifests for shadow restore",
+            "bind stable pre/post stat and tree hashes while file writers remain quiesced or use an atomic filesystem snapshot",
             "hash legacy Redis RDB/AOF as sealed rollback evidence only",
             "exclude every legacy Redis byte from shadow restore artifacts",
         ),
@@ -606,16 +673,19 @@ ROLLBACK_SPECS: tuple[PhaseSpec, ...] = (
 OPERATIONAL_GAPS = (
     {
         "component": REMOTE_AGENT_PATH,
-        "status": "request-contract-only",
+        "status": "reversible-precommit-only",
         "required_for": (
-            "Every rendered host argv; source validation exists, but bounded "
-            "operation implementations and host installation do not."
+            "Five reversible precommit operations are release-bound and executable; "
+            "freeze, cutover, rollback switching, and postcommit operations remain blocked."
         ),
     },
     {
         "component": "immutable-release-image-compose-verifier",
-        "status": "missing",
-        "required_for": "Pre-freeze release, image ID, compose hash, and host identity attestation.",
+        "status": "implemented-for-reversible-precommit",
+        "required_for": (
+            "The installed precommit worker verifies release tree, four image "
+            "archives/IDs, role Compose, role material, and operation identity."
+        ),
     },
     {
         "component": "coordinated-three-vhost-nginx-generation-worker",
@@ -635,10 +705,10 @@ OPERATIONAL_GAPS = (
     },
     {
         "component": "resume-safe-shadow-restore-migration-role-fence-worker",
-        "status": "missing",
+        "status": "implemented-for-reversible-precommit",
         "required_for": (
-            "Redis-free operation-owned restore plus on-chain crash-resumable "
-            "migration, post-migration roles, and fencing."
+            "Bot-FI/WebApp-FI use the root-only precommit journal; WA-IR uses "
+            "its independent operation state. Both prohibit legacy Redis restore."
         ),
     },
     {
@@ -693,6 +763,12 @@ def _canonical_json_bytes(payload: dict[str, Any]) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
+def _urlsafe_json(payload: dict[str, Any]) -> str:
+    return base64.urlsafe_b64encode(
+        _canonical_json_bytes(payload)
+    ).decode("ascii")
+
+
 def host_agent_contract_document() -> dict[str, Any]:
     return {
         "schema": HOST_AGENT_CONTRACT_SCHEMA,
@@ -716,7 +792,12 @@ def host_agent_contract_document() -> dict[str, Any]:
                 "business_write_allowed": spec.business_write_allowed,
                 "required_journal_status": spec.required_journal_status,
             }
-            for spec in (*PHASE_SPECS, *POSTCOMMIT_SPECS, *ROLLBACK_SPECS)
+            for spec in (
+                *PREPARATION_SPECS,
+                *PHASE_SPECS,
+                *POSTCOMMIT_SPECS,
+                *ROLLBACK_SPECS,
+            )
         ],
     }
 
@@ -772,16 +853,19 @@ def _canonical_campaign_id(value: Any) -> str:
     return value
 
 
-def _shadow_project(campaign_id: str) -> str:
-    return f"tb_prod_{campaign_id.replace('-', '')[:16]}"
+def _shadow_project(operation_id: str) -> str:
+    return f"tb3p-{operation_id.replace('-', '')}"
 
 
 def _secure_root(campaign_id: str) -> PurePosixPath:
     return PurePosixPath("/root/secure-envs/trading-bot/production-cutover") / campaign_id
 
 
-def _shadow_root(campaign_id: str) -> PurePosixPath:
-    return PurePosixPath("/srv/trading-bot-production-shadow") / campaign_id
+def _shadow_root(operation_id: str) -> PurePosixPath:
+    return (
+        PurePosixPath("/srv/trading-bot-three-site-production-shadow")
+        / operation_id
+    )
 
 
 def validate_manifest(document: Any) -> dict[str, Any]:
@@ -816,8 +900,8 @@ def validate_manifest(document: Any) -> dict[str, Any]:
     expected_deployment = {
         "production_hostname": PRODUCTION_HOSTNAME,
         "legacy_compose_project": LEGACY_COMPOSE_PROJECT,
-        "shadow_compose_project": _shadow_project(campaign_id),
-        "shadow_root": str(_shadow_root(campaign_id)),
+        "shadow_compose_project": _shadow_project(operation_id),
+        "shadow_root": str(_shadow_root(operation_id)),
         "controller_journal_path": str(_secure_root(campaign_id) / "journal.json"),
         "controller_evidence_root": str(_secure_root(campaign_id) / "evidence"),
     }
@@ -835,7 +919,6 @@ def validate_manifest(document: Any) -> dict[str, Any]:
     artifacts = _require_exact_fields(manifest["artifacts"], ARTIFACT_FIELDS, label="artifacts")
     for field in (
         "release_bundle_sha256",
-        "role_material_sha256",
         "legacy_bot_rollback_sha256",
         "legacy_webapp_rollback_sha256",
         "legacy_bot_redis_rollback_sha256",
@@ -860,13 +943,145 @@ def validate_manifest(document: Any) -> dict[str, Any]:
         raise CutoverContractError(
             "artifacts.host_agent_contract_sha256 differs from the controller contract"
         )
-    for field in ("app_image_id", "postgres_image_id"):
+    for field in (
+        "release_bundle_bytes",
+    ):
         if (
-            not isinstance(artifacts[field], str)
-            or IMAGE_ID_RE.fullmatch(artifacts[field]) is None
-            or artifacts[field] == f"sha256:{ZERO_SHA256}"
+            isinstance(artifacts[field], bool)
+            or not isinstance(artifacts[field], int)
+            or not 1 <= artifacts[field] <= 64 * 1024 * 1024 * 1024
         ):
-            raise CutoverContractError(f"artifacts.{field} is not an immutable image ID")
+            raise CutoverContractError(
+                f"artifacts.{field} is outside its size bound"
+            )
+    role_materials = artifacts["role_materials"]
+    if (
+        not isinstance(role_materials, dict)
+        or set(role_materials) != set(EXPECTED_TOPOLOGY)
+    ):
+        raise CutoverContractError(
+            "artifacts.role_materials roles are not exact"
+        )
+    for role, topology in EXPECTED_TOPOLOGY.items():
+        material = _require_exact_fields(
+            role_materials[role],
+            ROLE_MATERIAL_FIELDS,
+            label=f"artifacts.role_materials.{role}",
+        )
+        _nonzero_material_sha = material["sha256"]
+        if (
+            not isinstance(_nonzero_material_sha, str)
+            or SHA256_RE.fullmatch(_nonzero_material_sha) is None
+            or _nonzero_material_sha == ZERO_SHA256
+            or isinstance(material["bytes"], bool)
+            or not isinstance(material["bytes"], int)
+            or not 1 <= material["bytes"] <= 64 * 1024 * 1024 * 1024
+            or material["transport"] != topology["transport"]
+            or material["format"]
+            != (
+                "production-shadow-witness-material-tar"
+                if role == "witness"
+                else "production-shadow-role-material-tar"
+            )
+        ):
+            raise CutoverContractError(
+                f"artifacts.role_materials.{role} is invalid"
+            )
+    if len(
+        {role_materials[role]["sha256"] for role in role_materials}
+    ) != len(role_materials):
+        raise CutoverContractError(
+            "role material digests must be distinct per role"
+        )
+    image_artifacts = artifacts["image_artifacts"]
+    if (
+        not isinstance(image_artifacts, dict)
+        or set(image_artifacts) != set(IMAGE_KINDS)
+    ):
+        raise CutoverContractError("image artifact roles are not exact")
+    for kind in IMAGE_KINDS:
+        row = _require_exact_fields(
+            image_artifacts[kind],
+            IMAGE_ARTIFACT_FIELDS,
+            label=f"artifacts.image_artifacts.{kind}",
+        )
+        if (
+            not isinstance(row["archive_sha256"], str)
+            or SHA256_RE.fullmatch(row["archive_sha256"]) is None
+            or row["archive_sha256"] == ZERO_SHA256
+        ):
+            raise CutoverContractError(
+                f"image artifact {kind}.archive_sha256 is invalid"
+            )
+        if (
+            not isinstance(row["config_digest"], str)
+            or IMAGE_ID_RE.fullmatch(row["config_digest"]) is None
+            or row["config_digest"] == f"sha256:{ZERO_SHA256}"
+            or not isinstance(row["content_identity"], str)
+            or IMAGE_ID_RE.fullmatch(row["content_identity"]) is None
+            or row["content_identity"] == f"sha256:{ZERO_SHA256}"
+            or isinstance(row["archive_bytes"], bool)
+            or not isinstance(row["archive_bytes"], int)
+            or not 1 <= row["archive_bytes"] <= 64 * 1024 * 1024 * 1024
+        ):
+            raise CutoverContractError(
+                f"image artifact {kind} identity is invalid"
+            )
+        try:
+            observed_identity = verify_content_descriptor(
+                row["content_descriptor"]
+            )
+        except DockerImageIdentityError as exc:
+            raise CutoverContractError(
+                f"image artifact {kind} content descriptor is invalid"
+            ) from exc
+        if (
+            row["content_descriptor"]["architecture"] != "amd64"
+            or row["content_descriptor"]["os"] != "linux"
+            or observed_identity != row["content_identity"]
+        ):
+            raise CutoverContractError(
+                f"image artifact {kind} content identity differs"
+            )
+    for field in ("archive_sha256", "config_digest", "content_identity"):
+        if len(
+            {image_artifacts[kind][field] for kind in IMAGE_KINDS}
+        ) != len(IMAGE_KINDS):
+            raise CutoverContractError(
+                f"all four image {field} values must be distinct"
+            )
+
+    runtime_ids = artifacts["role_runtime_image_ids"]
+    if (
+        not isinstance(runtime_ids, dict)
+        or set(runtime_ids) != set(DOCKER_RUNTIME_ROLES)
+    ):
+        raise CutoverContractError(
+            "runtime image inventory must contain exactly the three Docker roles"
+        )
+    for role in DOCKER_RUNTIME_ROLES:
+        role_ids = runtime_ids[role]
+        if (
+            not isinstance(role_ids, dict)
+            or set(role_ids) != set(IMAGE_KINDS)
+            or any(
+                not isinstance(value, str)
+                or IMAGE_ID_RE.fullmatch(value) is None
+                or value == f"sha256:{ZERO_SHA256}"
+                for value in role_ids.values()
+            )
+            or len(set(role_ids.values())) != len(IMAGE_KINDS)
+        ):
+            raise CutoverContractError(
+                f"runtime image inventory for {role} is invalid"
+            )
+    if (
+        artifacts["postgres_runtime_uid"] != 70
+        or artifacts["postgres_runtime_gid"] != 70
+    ):
+        raise CutoverContractError(
+            "PostgreSQL runtime UID/GID must match the immutable image contract"
+        )
     expected_postgres_ref = f"trading_bot_postgres_boottime:15-{manifest['release_sha']}"
     if artifacts["postgres_image_ref"] != expected_postgres_ref:
         raise CutoverContractError("custom PostgreSQL image ref is not bound to the release")
@@ -936,6 +1151,7 @@ def _agent_args(
     operation: str,
     business_write_allowed: bool,
     required_journal_status: str,
+    execute: bool = False,
 ) -> list[str]:
     topology = manifest["topology"][role]
     agent = [
@@ -968,24 +1184,32 @@ def _agent_args(
         manifest["artifacts"]["cutover_approval_sha256"],
         "--release-bundle-sha256",
         manifest["artifacts"]["release_bundle_sha256"],
+        "--release-bundle-bytes",
+        str(manifest["artifacts"]["release_bundle_bytes"]),
         "--role-material-sha256",
-        manifest["artifacts"]["role_material_sha256"],
+        manifest["artifacts"]["role_materials"][role]["sha256"],
+        "--role-material-bytes",
+        str(manifest["artifacts"]["role_materials"][role]["bytes"]),
+        "--role-material-format",
+        manifest["artifacts"]["role_materials"][role]["format"],
+        "--image-artifacts-b64",
+        _urlsafe_json(manifest["artifacts"]["image_artifacts"]),
+        "--runtime-image-ids-b64",
+        _urlsafe_json(
+            manifest["artifacts"]["role_runtime_image_ids"].get(role, {})
+        ),
         "--shadow-compose-sha256",
         manifest["artifacts"]["shadow_compose_sha256"],
-        "--app-image-id",
-        manifest["artifacts"]["app_image_id"],
-        "--postgres-image-id",
-        manifest["artifacts"]["postgres_image_id"],
+        "--postgres-runtime-uid",
+        str(manifest["artifacts"]["postgres_runtime_uid"]),
+        "--postgres-runtime-gid",
+        str(manifest["artifacts"]["postgres_runtime_gid"]),
         "--shadow-project",
         manifest["deployment"]["shadow_compose_project"],
         "--shadow-root",
         manifest["deployment"]["shadow_root"],
-        "--production-vhosts-json",
-        json.dumps(
-            PRODUCTION_VHOSTS,
-            sort_keys=True,
-            separators=(",", ":"),
-        ),
+        "--production-vhosts-b64",
+        _urlsafe_json(PRODUCTION_VHOSTS),
         "--nginx-freeze-generation-sha256",
         manifest["artifacts"]["nginx_freeze_generation_sha256"],
         "--nginx-rollback-generation-sha256",
@@ -1005,6 +1229,8 @@ def _agent_args(
         "--host-agent-contract-sha256",
         manifest["artifacts"]["host_agent_contract_sha256"],
     ]
+    if execute:
+        agent.append("--execute")
     if topology["transport"] == "local-controller":
         return agent
     if topology["transport"] == "ssh-control-object-storage-payload-only":
@@ -1053,6 +1279,7 @@ def _render_specs(
     manifest_sha256: str,
     specs: tuple[PhaseSpec, ...],
     initial_prerequisite: str | None = None,
+    execution_supported: bool = False,
 ) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     previous = initial_prerequisite
@@ -1078,10 +1305,11 @@ def _render_specs(
                     operation=spec.operation,
                     business_write_allowed=spec.business_write_allowed,
                     required_journal_status=spec.required_journal_status,
+                    execute=execution_supported,
                 ),
                 "required": True,
-                "render_only": True,
-                "executor_available": False,
+                "render_only": not execution_supported,
+                "executor_available": execution_supported,
                 "requires_live_state_recheck": True,
                 "business_write_allowed": spec.business_write_allowed,
                 "required_journal_status": spec.required_journal_status,
@@ -1108,7 +1336,7 @@ def _render_specs(
                 "first_write_boundary": spec.first_write_boundary,
                 "required_journal_status": spec.required_journal_status,
                 "requirements": list(spec.requirements),
-                "execution_supported": False,
+                "execution_supported": execution_supported,
                 "journal_begin_required_before_commands": True,
                 "journal_completion_requires_release_verifier_receipt": True,
                 "commands": commands,
@@ -1134,6 +1362,12 @@ def render_plan(
         raise CutoverContractError("manifest SHA-256 is invalid")
     phases = _render_specs(
         manifest, manifest_sha256=manifest_sha256, specs=PHASE_SPECS
+    )
+    preparation = _render_specs(
+        manifest,
+        manifest_sha256=manifest_sha256,
+        specs=PREPARATION_SPECS,
+        execution_supported=True,
     )
     rollback = _render_specs(
         manifest, manifest_sha256=manifest_sha256, specs=ROLLBACK_SPECS
@@ -1172,6 +1406,14 @@ def render_plan(
         "legacy_release_sha": manifest["legacy_release_sha"],
         "topology": manifest["topology"],
         "production_vhosts": PRODUCTION_VHOSTS,
+        "reversible_preparation": {
+            "execution_supported": True,
+            "business_write_allowed": False,
+            "freeze_allowed": False,
+            "current_mutation_allowed": False,
+            "legacy_mutation_allowed": False,
+            "phases": preparation,
+        },
         "phases": phases,
         "postcommit_forward_recovery": {
             "execution_supported": False,
@@ -1248,6 +1490,7 @@ def render_plan(
             "self_hash_required": True,
             "local_host_identity_required": True,
             "operation_execution_supported": False,
+            "reversible_precommit_execution_supported": True,
         },
         "rollback": {
             "eligible_until_commit_gate": True,

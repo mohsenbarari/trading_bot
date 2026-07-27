@@ -159,18 +159,7 @@ class ThreeSiteProductionShadowRoleComposeTests(unittest.TestCase):
                 )
                 self.assertEqual(set(rendered["services"]), expected_services)
                 self.assertEqual(set(rendered["networks"]), {role.replace("-", "_")})
-                self.assertEqual(
-                    set(rendered["volumes"]),
-                    (
-                        {
-                            "webapp_fi_postgres",
-                            "webapp_fi_uploads",
-                            "webapp_fi_audit",
-                        }
-                        if role == "webapp-fi"
-                        else {"webapp_ir_postgres"}
-                    ),
-                )
+                self.assertNotIn("volumes", rendered)
                 self.assertNotIn("PRODUCTION_SHADOW_WITNESS_URL", json.dumps(rendered))
                 self.assertNotIn("ports", json.dumps(rendered["services"]))
                 for service in rendered["services"].values():
@@ -178,6 +167,47 @@ class ThreeSiteProductionShadowRoleComposeTests(unittest.TestCase):
                         set(service.get("depends_on", {}))
                         - expected_services
                     )
+
+    def test_precommit_scope_adds_only_readonly_observer(self):
+        expected = {
+            "bot-fi": {
+                "bot_fi_db",
+                "bot_fi_restore_tool",
+                "bot_fi_db_roles",
+                "bot_fi_migration",
+                "bot_fi_sync_observer",
+            },
+            "webapp-fi": {
+                "webapp_fi_db",
+                "webapp_fi_restore_tool",
+                "webapp_fi_db_roles",
+                "webapp_fi_migration",
+                "webapp_fi_db_roles_post_migration",
+                "webapp_fi_db_fencing",
+                "webapp_fi_sync_observer",
+            },
+        }
+        for role, expected_services in expected.items():
+            with self.subTest(role=role):
+                rendered = render_role_compose(
+                    self.payload,
+                    role=role,
+                    scope="precommit",
+                )
+                self.assertEqual(set(rendered["services"]), expected_services)
+                self.assertEqual(
+                    set(rendered["networks"]),
+                    {role.replace("-", "_")},
+                )
+                self.assertNotIn("volumes", rendered)
+                self.assertNotIn("ports", json.dumps(rendered["services"]))
+                observer = rendered["services"][
+                    role.replace("-", "_") + "_sync_observer"
+                ]
+                self.assertEqual(
+                    set(observer["depends_on"]),
+                    {role.replace("-", "_") + "_db"},
+                )
 
     def test_role_environment_contains_only_role_references(self):
         values = self.role_values()

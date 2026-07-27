@@ -301,11 +301,7 @@ EXPECTED_SERVICE_PROFILES = {
     "webapp_ir_writer_fence": {"webapp-ir-prepare"},
     "webapp_ir_convergence_exporter": {"webapp-ir-observe"},
 }
-EXPECTED_VOLUMES = {
-    f"{role}_{store}"
-    for role in ("bot_fi", "webapp_fi", "webapp_ir")
-    for store in ("postgres", "redis", "uploads", "audit")
-}
+EXPECTED_VOLUMES: set[str] = set()
 EXPECTED_NETWORKS = {
     "bot_fi",
     "bot_fi_dr_egress",
@@ -801,11 +797,6 @@ def collect_source_failures(
             rendered_command = json.dumps(service.get("command", []))
             if "explicit restore command" not in rendered_command or "exit 64" not in rendered_command:
                 failures.append(f"{name} default command must fail closed")
-            if name == "webapp_ir_restore_tool" and _service_volumes(service):
-                failures.append(
-                    "webapp_ir_restore_tool must accept PostgreSQL restore "
-                    "only over stdin and mount no restore/upload/audit path"
-                )
         if name.endswith(
             (
                 "_db_roles",
@@ -923,12 +914,63 @@ def collect_source_failures(
                 "background-disabled acceptance API"
             )
 
+    data_fragment = (
+        "${PRODUCTION_SHADOW_DATA_ROOT:"
+        "?operation-bound data root is required}/"
+    )
     for role in ("bot_fi", "webapp_fi", "webapp_ir"):
+        role_path = role.replace("_", "-")
         redis_service = services.get(f"{role}_redis", {})
-        if _service_volumes(redis_service) != [f"{role}_redis:/data"]:
+        expected_redis = f"{data_fragment}{role_path}/redis:/data"
+        expected_postgres = (
+            f"{data_fragment}{role_path}/postgres:"
+            "/var/lib/postgresql/data"
+        )
+        if _service_volumes(redis_service) != [expected_redis]:
             failures.append(
-                f"{role}_redis must use only its fresh operation-owned Redis volume"
+                f"{role}_redis must bind only its exact canonical Redis directory"
             )
+        if _service_volumes(services.get(f"{role}_db", {})) != [
+            expected_postgres
+        ]:
+            failures.append(
+                f"{role}_db must bind only its exact canonical PostgreSQL directory"
+            )
+        expected_restore_mounts = (
+            set()
+            if role == "webapp_ir"
+            else {
+                (
+                    f"{data_fragment}restore-input/{role_path}:"
+                    "/run/restore-input:ro"
+                ),
+                (
+                    f"{data_fragment}{role_path}/uploads:"
+                    "/run/restore-target/uploads"
+                ),
+                (
+                    f"{data_fragment}{role_path}/audit:"
+                    "/run/restore-target/audit"
+                ),
+            }
+        )
+        observed_restore_mounts = _service_volumes(
+            services.get(f"{role}_restore_tool", {})
+        )
+        if (
+            len(observed_restore_mounts) != len(expected_restore_mounts)
+            or set(observed_restore_mounts) != expected_restore_mounts
+        ):
+            if role == "webapp_ir":
+                failures.append(
+                    "webapp_ir_restore_tool must accept PostgreSQL restore "
+                    "only over stdin and mount no restore/upload/audit path"
+                )
+            else:
+                failures.append(
+                    f"{role}_restore_tool must bind only its exact restore input, "
+                    "uploads, and audit directories"
+                )
         restore_material = json.dumps(
             services.get(f"{role}_restore_tool", {}),
             sort_keys=True,
@@ -937,42 +979,99 @@ def collect_source_failures(
             failures.append(
                 f"{role}_restore_tool must not accept legacy Redis state"
             )
+        for service_name, service in services.items():
+            if not service_name.startswith(f"{role}_"):
+                continue
+            for mount in _service_volumes(service):
+                if mount.startswith("${"):
+                    closing = mount.find("}")
+                    separator = mount.find(":", closing + 1)
+                else:
+                    separator = mount.find(":")
+                if separator <= 0:
+                    failures.append(
+                        f"{service_name} contains an invalid volume mount"
+                    )
+                    continue
+                source = mount[:separator]
+                remainder = mount[separator + 1 :]
+                destination, mode_separator, mode = remainder.partition(":")
+                if (
+                    not destination
+                    or (mode_separator and mode != "ro")
+                ):
+                    failures.append(
+                        f"{service_name} contains an invalid volume mount"
+                    )
+                    continue
+                read_only = bool(mode_separator)
+                store = None
+                if destination == "/var/lib/postgresql/data":
+                    store = "postgres"
+                elif destination == "/data" and service_name == f"{role}_redis":
+                    store = "redis"
+                elif destination in {
+                    "/run/restore-target/uploads",
+                    "/app/uploads",
+                }:
+                    store = "uploads"
+                elif destination in {
+                    "/run/restore-target/audit",
+                    "/app/audit_trail",
+                }:
+                    store = "audit"
+                if store is not None:
+                    expected_source = f"{data_fragment}{role_path}/{store}"
+                    if source != expected_source:
+                        failures.append(
+                            f"{service_name} {store} mount must use "
+                            "its exact role/store directory"
+                        )
+                    if destination in {
+                        "/var/lib/postgresql/data",
+                        "/data",
+                        "/run/restore-target/uploads",
+                        "/run/restore-target/audit",
+                    } and read_only:
+                        failures.append(
+                            f"{service_name} required writable store is read-only"
+                        )
+                elif source.startswith(data_fragment):
+                    expected_restore = (
+                        f"{data_fragment}restore-input/{role_path}"
+                    )
+                    if (
+                        service_name != f"{role}_restore_tool"
+                        or source != expected_restore
+                        or destination != "/run/restore-input"
+                        or not read_only
+                    ):
+                        failures.append(
+                            f"{service_name} has an unapproved operation data bind"
+                        )
 
     volumes = document.get("volumes")
-    if not isinstance(volumes, dict) or set(volumes) != EXPECTED_VOLUMES:
-        failures.append("volume set must be the exact operation-scoped three-site store set")
-    else:
-        devices: set[str] = set()
-        for name, volume in volumes.items():
-            if not isinstance(volume, dict):
-                failures.append(f"volume {name} must be a mapping")
-                continue
-            if "name" in volume:
-                failures.append(f"volume {name} must remain project-scoped")
-            options = volume.get("driver_opts", {})
-            device = options.get("device") if isinstance(options, dict) else None
-            expected_prefix = (
-                "${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/"
-            )
-            if (
-                volume.get("driver") != "local"
-                or options.get("type") != "none"
-                or options.get("o") != "bind"
-                or not isinstance(device, str)
-                or not device.startswith(expected_prefix)
-            ):
-                failures.append(f"volume {name} must use an operation-scoped bind device")
-            elif device in devices:
-                failures.append(f"volume {name} reuses another bind device")
-            else:
-                devices.add(device)
+    if not isinstance(volumes, dict) or volumes:
+        failures.append(
+            "top-level named volumes are forbidden; all stores must be exact direct binds"
+        )
 
     networks = document.get("networks")
     if not isinstance(networks, dict) or set(networks) != EXPECTED_NETWORKS:
         failures.append("network set must be the exact project-scoped three-site set")
     else:
         for name, network in networks.items():
-            if not isinstance(network, dict) or "name" in network:
+            if (
+                not isinstance(network, dict)
+                or "name" in network
+                or network.get("labels")
+                != {
+                    "trading-bot.production.operation-id": (
+                        "${PRODUCTION_SHADOW_OPERATION_ID:"
+                        "?operation UUID is required}"
+                    )
+                }
+            ):
                 failures.append(f"network {name} must remain project-scoped")
         for role in ("bot_fi", "webapp_fi", "webapp_ir"):
             if networks.get(role, {}).get("internal") is not True:

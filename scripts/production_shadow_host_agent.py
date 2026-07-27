@@ -11,6 +11,8 @@ production operation implementations remain hard-disabled in this slice.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 from datetime import datetime, timezone
 import fcntl
 import hashlib
@@ -22,6 +24,7 @@ import re
 import socket
 import stat
 import struct
+import subprocess
 import sys
 from typing import Any
 from uuid import UUID
@@ -35,7 +38,28 @@ FIXED_CONTRACT_PATH = Path(
 SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
-PROJECT_RE = re.compile(r"^[a-z][a-z0-9_]{7,62}$")
+PROJECT_RE = re.compile(r"^[a-z][a-z0-9-]{7,62}$")
+IMAGE_KINDS = ("app", "postgres", "redis", "nginx")
+DOCKER_RUNTIME_ROLES = ("bot_fi", "webapp_fi", "webapp_ir")
+IMAGE_ARTIFACT_FIELDS = frozenset(
+    {
+        "archive_sha256",
+        "archive_bytes",
+        "config_digest",
+        "content_descriptor",
+        "content_identity",
+    }
+)
+CONTENT_DESCRIPTOR_FIELDS = frozenset(
+    {
+        "architecture",
+        "os",
+        "created",
+        "config_sha256",
+        "rootfs_type",
+        "rootfs_layers",
+    }
+)
 HOSTNAME_RE = re.compile(
     r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
     r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
@@ -45,6 +69,80 @@ BUSINESS_WRITE_FORBIDDEN = "forbid"
 BUSINESS_WRITE_FORWARD_ONLY = "allow-after-forward-only-commit"
 PRECOMMIT_JOURNAL_STATUS = "rollback-eligible-precommit"
 POSTCOMMIT_JOURNAL_STATUS = "forward-only-committed"
+PRECOMMIT_MANIFEST_SCHEMA = "production-shadow-precommit-operation-v1"
+PRECOMMIT_SECRET_ROOT = Path(
+    "/root/secure-envs/trading-bot/three-site-production-shadow"
+)
+PRECOMMIT_PROJECT_ROOT = Path(
+    "/srv/trading-bot-three-site-production-shadow"
+)
+PYTHON3 = "/usr/bin/python3"
+PRECOMMIT_ACTIONS = frozenset(
+    {
+        "verify-installation",
+        "bootstrap-database",
+        "restore-shadow",
+        "prepare-shadow",
+        "readonly-acceptance",
+    }
+)
+PRECOMMIT_MANIFEST_FIELDS = frozenset(
+    {
+        "schema",
+        "operation_id",
+        "role",
+        "release_sha",
+        "release_tree_sha",
+        "controller_manifest_sha256",
+        "approval_sha256",
+        "role_material_sha256",
+        "canonical_compose_sha256",
+        "role_compose_sha256",
+        "environment_sha256",
+        "worker_sha256",
+        "acceptance_producer_sha256",
+        "image_artifacts",
+        "runtime_image_ids",
+        "artifacts",
+        "source_database",
+        "target_migration_revision",
+        "postgres_runtime_uid",
+        "postgres_runtime_gid",
+    }
+)
+PRECOMMIT_IMAGE_FIELDS = frozenset(IMAGE_KINDS)
+PRECOMMIT_ARTIFACT_KINDS = frozenset(
+    {
+        "release-bundle",
+        "role-material",
+        "app-image-archive",
+        "postgres-image-archive",
+        "redis-image-archive",
+        "nginx-image-archive",
+        "database-backup",
+        "uploads-archive",
+        "audit-archive",
+    }
+)
+PRECOMMIT_ARTIFACT_FIELDS = frozenset(
+    {"sha256", "bytes", "restored_tree_sha256"}
+)
+PRECOMMIT_SOURCE_DATABASE_FIELDS = frozenset(
+    {
+        "alembic_revision",
+        "fingerprint_algorithm",
+        "database_fingerprint_sha256",
+        "row_count",
+        "table_count",
+    }
+)
+_EXEC_ENV = {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "/root",
+    "LANG": "C.UTF-8",
+    "LC_ALL": "C.UTF-8",
+    "PYTHONNOUSERSITE": "1",
+}
 
 REQUEST_FIELDS = frozenset(
     {
@@ -59,10 +157,15 @@ REQUEST_FIELDS = frozenset(
         "manifest_sha256",
         "approval_sha256",
         "release_bundle_sha256",
+        "release_bundle_bytes",
         "role_material_sha256",
+        "role_material_bytes",
+        "role_material_format",
+        "image_artifacts",
+        "runtime_image_ids",
         "shadow_compose_sha256",
-        "app_image_id",
-        "postgres_image_id",
+        "postgres_runtime_uid",
+        "postgres_runtime_gid",
         "shadow_project",
         "shadow_root",
         "production_vhosts",
@@ -135,6 +238,35 @@ def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _decode_urlsafe_json(raw: str, *, label: str) -> dict[str, Any]:
+    try:
+        encoded = raw.encode("ascii")
+        payload = base64.b64decode(
+            encoded,
+            altchars=b"-_",
+            validate=True,
+        )
+        document = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=_strict_object,
+        )
+    except (
+        UnicodeError,
+        ValueError,
+        binascii.Error,
+        json.JSONDecodeError,
+        HostAgentError,
+    ) as exc:
+        raise HostAgentError(f"{label} argument is invalid") from exc
+    if (
+        not isinstance(document, dict)
+        or base64.urlsafe_b64encode(payload).decode("ascii") != raw
+        or payload != _canonical_json(document)
+    ):
+        raise HostAgentError(f"{label} argument is not canonical")
+    return document
+
+
 def _canonical_json(payload: Any) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
@@ -159,6 +291,37 @@ def _nonzero_sha256(value: Any, *, label: str) -> str:
     ):
         raise HostAgentError(f"{label} must be a nonzero SHA-256")
     return value
+
+
+def _validate_content_descriptor(
+    descriptor: Any,
+    *,
+    expected_identity: Any,
+    label: str,
+) -> None:
+    if (
+        not isinstance(descriptor, dict)
+        or set(descriptor) != CONTENT_DESCRIPTOR_FIELDS
+        or descriptor["architecture"] != "amd64"
+        or descriptor["os"] != "linux"
+        or not isinstance(descriptor["created"], str)
+        or not descriptor["created"]
+        or not isinstance(descriptor["config_sha256"], str)
+        or IMAGE_ID_RE.fullmatch(descriptor["config_sha256"]) is None
+        or descriptor["rootfs_type"] != "layers"
+        or not isinstance(descriptor["rootfs_layers"], list)
+        or not descriptor["rootfs_layers"]
+        or any(
+            not isinstance(layer, str)
+            or IMAGE_ID_RE.fullmatch(layer) is None
+            for layer in descriptor["rootfs_layers"]
+        )
+        or not isinstance(expected_identity, str)
+        or IMAGE_ID_RE.fullmatch(expected_identity) is None
+        or expected_identity
+        != "sha256:" + hashlib.sha256(_canonical_json(descriptor)).hexdigest()
+    ):
+        raise HostAgentError(f"{label} content descriptor is invalid")
 
 
 def _read_stable_file(
@@ -289,7 +452,7 @@ def validate_contract(document: Any) -> dict[str, Any]:
         raise HostAgentError("host-agent contract policies are invalid")
 
     operations = document["operations"]
-    if not isinstance(operations, list) or len(operations) != 35:
+    if not isinstance(operations, list) or len(operations) != 40:
         raise HostAgentError("host-agent contract operation count is invalid")
     names: set[str] = set()
     for operation in operations:
@@ -467,24 +630,112 @@ def validate_request(
         "phase_evidence_schema_sha256",
     ):
         _nonzero_sha256(document[field], label=field)
-    for field in ("app_image_id", "postgres_image_id"):
+    for field in (
+        "release_bundle_bytes",
+        "role_material_bytes",
+    ):
         value = document[field]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or not 1 <= value <= 64 * 1024 * 1024 * 1024
+        ):
+            raise HostAgentError(f"{field} is outside its size bound")
+    image_artifacts = document["image_artifacts"]
+    if (
+        not isinstance(image_artifacts, dict)
+        or set(image_artifacts) != set(IMAGE_KINDS)
+    ):
+        raise HostAgentError("image artifact inventory is not exact")
+    for kind in IMAGE_KINDS:
+        row = image_artifacts[kind]
+        if (
+            not isinstance(row, dict)
+            or set(row) != IMAGE_ARTIFACT_FIELDS
+        ):
+            raise HostAgentError(
+                f"image artifact {kind} fields are not exact"
+            )
+        _nonzero_sha256(
+            row["archive_sha256"],
+            label=f"image artifact {kind} archive",
+        )
+        _nonzero_sha256(
+            row["content_identity"].removeprefix("sha256:")
+            if isinstance(row["content_identity"], str)
+            else row["content_identity"],
+            label=f"image artifact {kind} content identity",
+        )
+        _bounded_positive_int(
+            row["archive_bytes"],
+            label=f"image artifact {kind} bytes",
+        )
+        value = row["config_digest"]
         if (
             not isinstance(value, str)
             or IMAGE_ID_RE.fullmatch(value) is None
             or value == "sha256:" + "0" * 64
         ):
-            raise HostAgentError(f"{field} must be a nonzero immutable image ID")
+            raise HostAgentError(
+                f"image artifact {kind} config digest is invalid"
+            )
+        _validate_content_descriptor(
+            row["content_descriptor"],
+            expected_identity=row["content_identity"],
+            label=f"image artifact {kind}",
+        )
+    for field in ("archive_sha256", "config_digest", "content_identity"):
+        if len(
+            {image_artifacts[kind][field] for kind in IMAGE_KINDS}
+        ) != len(IMAGE_KINDS):
+            raise HostAgentError(
+                f"all four image {field} values must be distinct"
+            )
 
-    expected_project = f"tb_prod_{campaign_id.replace('-', '')[:16]}"
-    expected_root = f"/srv/trading-bot-production-shadow/{campaign_id}"
+    runtime_image_ids = document["runtime_image_ids"]
+    expected_runtime_keys = (
+        set(IMAGE_KINDS) if role in DOCKER_RUNTIME_ROLES else set()
+    )
+    if (
+        not isinstance(runtime_image_ids, dict)
+        or set(runtime_image_ids) != expected_runtime_keys
+        or any(
+            not isinstance(value, str)
+            or IMAGE_ID_RE.fullmatch(value) is None
+            or value == "sha256:" + "0" * 64
+            for value in runtime_image_ids.values()
+        )
+        or len(set(runtime_image_ids.values())) != len(runtime_image_ids)
+    ):
+        raise HostAgentError(
+            f"runtime image inventory for {role} is invalid"
+        )
+    if (
+        document["postgres_runtime_uid"] != 70
+        or document["postgres_runtime_gid"] != 70
+    ):
+        raise HostAgentError(
+            "PostgreSQL runtime UID/GID differs from the image contract"
+        )
+    expected_material_format = (
+        "production-shadow-witness-material-tar"
+        if role == "witness"
+        else "production-shadow-role-material-tar"
+    )
+    if document["role_material_format"] != expected_material_format:
+        raise HostAgentError("role material format differs from the role contract")
+
+    expected_project = f"tb3p-{operation_id.replace('-', '')}"
+    expected_root = (
+        f"/srv/trading-bot-three-site-production-shadow/{operation_id}"
+    )
     if (
         document["shadow_project"] != expected_project
         or PROJECT_RE.fullmatch(str(document["shadow_project"])) is None
     ):
-        raise HostAgentError("shadow project is not campaign-derived")
+        raise HostAgentError("shadow project is not operation-derived")
     if document["shadow_root"] != expected_root:
-        raise HostAgentError("shadow root is not campaign-derived")
+        raise HostAgentError("shadow root is not operation-derived")
     shadow_root = PurePosixPath(str(document["shadow_root"]))
     if (
         not shadow_root.is_absolute()
@@ -552,13 +803,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--manifest-sha256", required=True)
     parser.add_argument("--approval-sha256", required=True)
     parser.add_argument("--release-bundle-sha256", required=True)
+    parser.add_argument("--release-bundle-bytes", type=int, required=True)
     parser.add_argument("--role-material-sha256", required=True)
+    parser.add_argument("--role-material-bytes", type=int, required=True)
+    parser.add_argument("--role-material-format", required=True)
+    parser.add_argument("--image-artifacts-b64", required=True)
+    parser.add_argument("--runtime-image-ids-b64", required=True)
     parser.add_argument("--shadow-compose-sha256", required=True)
-    parser.add_argument("--app-image-id", required=True)
-    parser.add_argument("--postgres-image-id", required=True)
+    parser.add_argument("--postgres-runtime-uid", type=int, required=True)
+    parser.add_argument("--postgres-runtime-gid", type=int, required=True)
     parser.add_argument("--shadow-project", required=True)
     parser.add_argument("--shadow-root", required=True)
-    parser.add_argument("--production-vhosts-json", required=True)
+    parser.add_argument("--production-vhosts-b64", required=True)
     parser.add_argument("--nginx-freeze-generation-sha256", required=True)
     parser.add_argument("--nginx-rollback-generation-sha256", required=True)
     parser.add_argument("--legacy-redis-policy", required=True)
@@ -588,13 +844,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def request_from_args(args: argparse.Namespace) -> dict[str, Any]:
-    try:
-        vhosts = json.loads(
-            args.production_vhosts_json,
-            object_pairs_hook=_strict_object,
-        )
-    except (json.JSONDecodeError, HostAgentError) as exc:
-        raise HostAgentError("production vhost JSON is invalid") from exc
+    vhosts = _decode_urlsafe_json(
+        args.production_vhosts_b64,
+        label="production vhost",
+    )
+    image_artifacts = _decode_urlsafe_json(
+        args.image_artifacts_b64,
+        label="image artifact",
+    )
+    runtime_image_ids = _decode_urlsafe_json(
+        args.runtime_image_ids_b64,
+        label="runtime image",
+    )
     return {
         "schema": AGENT_SCHEMA,
         "operation": args.operation,
@@ -607,10 +868,15 @@ def request_from_args(args: argparse.Namespace) -> dict[str, Any]:
         "manifest_sha256": args.manifest_sha256,
         "approval_sha256": args.approval_sha256,
         "release_bundle_sha256": args.release_bundle_sha256,
+        "release_bundle_bytes": args.release_bundle_bytes,
         "role_material_sha256": args.role_material_sha256,
+        "role_material_bytes": args.role_material_bytes,
+        "role_material_format": args.role_material_format,
+        "image_artifacts": image_artifacts,
+        "runtime_image_ids": runtime_image_ids,
         "shadow_compose_sha256": args.shadow_compose_sha256,
-        "app_image_id": args.app_image_id,
-        "postgres_image_id": args.postgres_image_id,
+        "postgres_runtime_uid": args.postgres_runtime_uid,
+        "postgres_runtime_gid": args.postgres_runtime_gid,
         "shadow_project": args.shadow_project,
         "shadow_root": args.shadow_root,
         "production_vhosts": vhosts,
@@ -646,6 +912,290 @@ def parse_request_argv(
     )
 
 
+def _precommit_manifest_path(request: dict[str, Any]) -> Path:
+    role_path = str(request["role"]).replace("_", "-")
+    return (
+        PRECOMMIT_SECRET_ROOT
+        / str(request["operation_id"])
+        / role_path
+        / "precommit-operation.json"
+    )
+
+
+def _precommit_worker_path(request: dict[str, Any]) -> Path:
+    return (
+        PRECOMMIT_PROJECT_ROOT
+        / str(request["operation_id"])
+        / "releases"
+        / str(request["release_sha"])
+        / "scripts"
+        / "production_shadow_precommit_worker.py"
+    )
+
+
+def _precommit_acceptance_path(request: dict[str, Any]) -> Path:
+    return _precommit_worker_path(request).with_name(
+        "produce_production_shadow_readonly_acceptance.py"
+    )
+
+
+def _bounded_positive_int(value: Any, *, label: str) -> int:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 1 <= value <= 64 * 1024 * 1024 * 1024
+    ):
+        raise HostAgentError(f"{label} is outside its size bound")
+    return value
+
+
+def _load_precommit_manifest(request: dict[str, Any]) -> dict[str, Any]:
+    path = _precommit_manifest_path(request)
+    payload = _read_stable_file(
+        path,
+        label="precommit operation manifest",
+        require_mode=0o600,
+        max_size=2 * 1024 * 1024,
+    )
+    try:
+        document = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=_strict_object,
+        )
+    except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        raise HostAgentError("precommit operation manifest is invalid JSON") from exc
+    if (
+        not isinstance(document, dict)
+        or set(document) != PRECOMMIT_MANIFEST_FIELDS
+        or document.get("schema") != PRECOMMIT_MANIFEST_SCHEMA
+        or payload != _canonical_json(document) + b"\n"
+    ):
+        raise HostAgentError(
+            "precommit operation manifest fields or canonical bytes are not exact"
+        )
+    if (
+        document["operation_id"] != request["operation_id"]
+        or document["role"] != request["role"]
+        or document["release_sha"] != request["release_sha"]
+        or document["controller_manifest_sha256"] != request["manifest_sha256"]
+        or document["approval_sha256"] != request["approval_sha256"]
+        or document["role_material_sha256"]
+        != request["role_material_sha256"]
+        or document["canonical_compose_sha256"]
+        != request["shadow_compose_sha256"]
+        or document["postgres_runtime_uid"]
+        != request["postgres_runtime_uid"]
+        or document["postgres_runtime_gid"]
+        != request["postgres_runtime_gid"]
+        or not isinstance(document["release_tree_sha"], str)
+        or SHA40_RE.fullmatch(document["release_tree_sha"]) is None
+    ):
+        raise HostAgentError("precommit operation manifest differs from the request")
+    for field in (
+        "role_compose_sha256",
+        "environment_sha256",
+        "worker_sha256",
+        "acceptance_producer_sha256",
+    ):
+        _nonzero_sha256(document[field], label=f"precommit {field}")
+
+    image_artifacts = document["image_artifacts"]
+    if (
+        not isinstance(image_artifacts, dict)
+        or set(image_artifacts) != PRECOMMIT_IMAGE_FIELDS
+        or image_artifacts != request["image_artifacts"]
+    ):
+        raise HostAgentError(
+            "precommit image artifact inventory differs from the request"
+        )
+    runtime_image_ids = document["runtime_image_ids"]
+    if (
+        not isinstance(runtime_image_ids, dict)
+        or set(runtime_image_ids) != PRECOMMIT_IMAGE_FIELDS
+        or runtime_image_ids != request["runtime_image_ids"]
+    ):
+        raise HostAgentError(
+            "precommit runtime image inventory differs from the request"
+        )
+
+    artifacts = document["artifacts"]
+    if (
+        not isinstance(artifacts, dict)
+        or set(artifacts) != PRECOMMIT_ARTIFACT_KINDS
+    ):
+        raise HostAgentError("precommit artifact inventory is not exact")
+    expected_bindings = {
+        "release-bundle": (
+            request["release_bundle_sha256"],
+            request["release_bundle_bytes"],
+        ),
+        "role-material": (
+            request["role_material_sha256"],
+            request["role_material_bytes"],
+        ),
+        "app-image-archive": (
+            request["image_artifacts"]["app"]["archive_sha256"],
+            request["image_artifacts"]["app"]["archive_bytes"],
+        ),
+        "postgres-image-archive": (
+            request["image_artifacts"]["postgres"]["archive_sha256"],
+            request["image_artifacts"]["postgres"]["archive_bytes"],
+        ),
+        "redis-image-archive": (
+            request["image_artifacts"]["redis"]["archive_sha256"],
+            request["image_artifacts"]["redis"]["archive_bytes"],
+        ),
+        "nginx-image-archive": (
+            request["image_artifacts"]["nginx"]["archive_sha256"],
+            request["image_artifacts"]["nginx"]["archive_bytes"],
+        ),
+    }
+    for kind, row in artifacts.items():
+        if not isinstance(row, dict) or set(row) != PRECOMMIT_ARTIFACT_FIELDS:
+            raise HostAgentError("precommit artifact fields are not exact")
+        _nonzero_sha256(row["sha256"], label=f"precommit {kind}")
+        _bounded_positive_int(row["bytes"], label=f"precommit {kind} bytes")
+        if kind in {"uploads-archive", "audit-archive"}:
+            _nonzero_sha256(
+                row["restored_tree_sha256"],
+                label=f"precommit {kind} restored tree",
+            )
+        elif row["restored_tree_sha256"] is not None:
+            raise HostAgentError(
+                f"precommit {kind} must not bind a restored tree"
+            )
+        expected = expected_bindings.get(kind)
+        if expected is not None and (row["sha256"], row["bytes"]) != expected:
+            raise HostAgentError(
+                f"precommit {kind} differs from the host request"
+            )
+
+    source = document["source_database"]
+    if (
+        not isinstance(source, dict)
+        or set(source) != PRECOMMIT_SOURCE_DATABASE_FIELDS
+        or source["fingerprint_algorithm"]
+        != "pg-copy-jsonl-sha256-canonical-session-v1"
+        or not isinstance(source["alembic_revision"], str)
+        or not source["alembic_revision"]
+        or not isinstance(document["target_migration_revision"], str)
+        or not document["target_migration_revision"]
+    ):
+        raise HostAgentError("precommit source database binding is invalid")
+    _nonzero_sha256(
+        source["database_fingerprint_sha256"],
+        label="precommit source database fingerprint",
+    )
+    for field, minimum in (("row_count", 0), ("table_count", 1)):
+        value = source[field]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or not minimum <= value <= 10**15
+        ):
+            raise HostAgentError(
+                f"precommit source database {field} is outside its bound"
+            )
+
+    for source_path, expected_sha256, label in (
+        (
+            _precommit_worker_path(request),
+            document["worker_sha256"],
+            "precommit worker",
+        ),
+        (
+            _precommit_acceptance_path(request),
+            document["acceptance_producer_sha256"],
+            "precommit acceptance producer",
+        ),
+    ):
+        observed = hashlib.sha256(
+            _read_stable_file(
+                source_path,
+                label=label,
+                require_mode=None,
+                max_size=4 * 1024 * 1024,
+            )
+        ).hexdigest()
+        if observed != expected_sha256:
+            raise HostAgentError(f"{label} differs from the fixed manifest")
+    return document
+
+
+def execute_precommit_request(request: dict[str, Any]) -> dict[str, Any]:
+    operation = str(request["operation"])
+    if operation not in PRECOMMIT_ACTIONS:
+        raise HostAgentError(
+            "production execution is hard-disabled for this operation"
+        )
+    manifest = _load_precommit_manifest(request)
+    confirmation = (
+        f"prepare-precommit:{request['operation_id']}:{request['role']}:"
+        f"{operation}:{request['release_sha']}"
+    )
+    argv = [
+        PYTHON3,
+        str(_precommit_worker_path(request)),
+        "--manifest",
+        str(_precommit_manifest_path(request)),
+        "--action",
+        operation,
+        "--apply",
+        "--confirm",
+        confirmation,
+    ]
+    try:
+        completed = subprocess.run(
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=4 * 60 * 60,
+            env=_EXEC_ENV,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise HostAgentError("precommit worker could not be executed") from exc
+    if (
+        completed.returncode != 0
+        or len(completed.stdout) > 2 * 1024 * 1024
+        or len(completed.stderr) > 2 * 1024 * 1024
+    ):
+        raise HostAgentError("precommit worker failed closed")
+    try:
+        result = json.loads(
+            completed.stdout.decode("utf-8"),
+            object_pairs_hook=_strict_object,
+        )
+    except (UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        raise HostAgentError("precommit worker returned invalid JSON") from exc
+    if (
+        not isinstance(result, dict)
+        or result.get("status") not in {"completed", "already-completed"}
+        or result.get("action") != operation
+        or result.get("operation_id") != request["operation_id"]
+        or result.get("role") != request["role"]
+    ):
+        raise HostAgentError("precommit worker result binding is invalid")
+    return {
+        "schema": "production-shadow-host-agent-execution-v1",
+        "status": "executed-precommit",
+        "operation": operation,
+        "role": request["role"],
+        "operation_id": request["operation_id"],
+        "release_sha": request["release_sha"],
+        "manifest_sha256": hashlib.sha256(
+            _canonical_json(manifest)
+        ).hexdigest(),
+        "worker_result": result,
+        "business_write_allowed": False,
+        "freeze_performed": False,
+        "current_mutated": False,
+        "legacy_mutated": False,
+        "production_contacted": True,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     try:
         if os.geteuid() != 0:
@@ -669,10 +1219,9 @@ def main(argv: list[str] | None = None) -> int:
                 "local host identity differs from the manifest-bound role"
             )
         if args.execute:
-            raise HostAgentError(
-                "production execution is hard-disabled: no bounded operation "
-                "implementations are installed"
-            )
+            result = execute_precommit_request(request)
+            print(json.dumps(result, sort_keys=True))
+            return 0
         payload = {
             "schema": "production-shadow-host-agent-validation-v1",
             "status": "validated-request",
@@ -697,7 +1246,7 @@ def main(argv: list[str] | None = None) -> int:
             "transport": contract["topology"][request["role"]]["transport"],
             "observed_at": datetime.now(timezone.utc).isoformat(),
             "host_identity_observed": True,
-            "execution_supported": False,
+            "execution_supported": request["operation"] in PRECOMMIT_ACTIONS,
             "production_contacted": False,
         }
         print(json.dumps(payload, sort_keys=True))

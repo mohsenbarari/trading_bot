@@ -2,15 +2,18 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from contextlib import redirect_stdout
+import base64
 import hashlib
 import io
 import json
 import os
 from pathlib import Path
+import shlex
 import tempfile
 import unittest
 from unittest import mock
 
+from core.docker_image_identity import verify_content_descriptor
 from scripts.production_shadow_cutover_controller import (
     APPLY_CONFIRMATION,
     ARTIFACT_FIELDS,
@@ -27,6 +30,7 @@ from scripts.production_shadow_cutover_controller import (
     POSTCOMMIT_SPECS,
     POLICY_FIELDS,
     PRODUCTION_VHOSTS,
+    REMOTE_AGENT_PATH,
     ProductionCutoverJournal,
     VerifiedPhaseCompletion,
     _persist_phase_verification_receipt,
@@ -45,6 +49,21 @@ CAMPAIGN_ID = "11111111-1111-4111-8111-111111111111"
 OPERATION_ID = "22222222-2222-4222-8222-222222222222"
 RELEASE_SHA = "a" * 40
 LEGACY_RELEASE_SHA = "b" * 40
+
+
+def image_content_binding(seed: str) -> dict:
+    descriptor = {
+        "architecture": "amd64",
+        "os": "linux",
+        "created": f"2026-07-27T00:00:0{seed}Z",
+        "config_sha256": "sha256:" + seed * 64,
+        "rootfs_type": "layers",
+        "rootfs_layers": ["sha256:" + seed * 64],
+    }
+    return {
+        "content_descriptor": descriptor,
+        "content_identity": verify_content_descriptor(descriptor),
+    }
 
 
 def verified_completion(
@@ -99,16 +118,65 @@ def manifest_payload() -> dict:
         "deployment": {
             "production_hostname": "coin.gold-trade.ir",
             "legacy_compose_project": "trading_bot",
-            "shadow_compose_project": _shadow_project(CAMPAIGN_ID),
-            "shadow_root": str(_shadow_root(CAMPAIGN_ID)),
+            "shadow_compose_project": _shadow_project(OPERATION_ID),
+            "shadow_root": str(_shadow_root(OPERATION_ID)),
             "controller_journal_path": str(secure_root / "journal.json"),
             "controller_evidence_root": str(secure_root / "evidence"),
         },
         "artifacts": {
             "release_bundle_sha256": "d" * 64,
-            "role_material_sha256": "e" * 64,
-            "app_image_id": "sha256:" + "f" * 64,
-            "postgres_image_id": "sha256:" + "1" * 64,
+            "release_bundle_bytes": 101,
+            "role_materials": {
+                role: {
+                    "sha256": str(index) * 64,
+                    "bytes": 102 + index,
+                    "transport": EXPECTED_TOPOLOGY[role]["transport"],
+                    "format": (
+                        "production-shadow-witness-material-tar"
+                        if role == "witness"
+                        else "production-shadow-role-material-tar"
+                    ),
+                }
+                for index, role in enumerate(EXPECTED_TOPOLOGY, 1)
+            },
+            "image_artifacts": {
+                kind: {
+                    "archive_sha256": "0" * 63 + archive_suffix,
+                    "archive_bytes": 103 + index,
+                    "config_digest": "sha256:" + config_char * 64,
+                    **image_content_binding(content_char),
+                }
+                for index, (
+                    kind,
+                    archive_suffix,
+                    config_char,
+                    content_char,
+                ) in enumerate(
+                    (
+                        ("app", "1", "a", "5"),
+                        ("postgres", "2", "b", "6"),
+                        ("redis", "3", "c", "7"),
+                        ("nginx", "4", "d", "8"),
+                    )
+                )
+            },
+            "role_runtime_image_ids": {
+                role: {
+                    kind: "sha256:" + value * 64
+                    for kind, value in zip(
+                        ("app", "postgres", "redis", "nginx"),
+                        values,
+                        strict=True,
+                    )
+                }
+                for role, values in {
+                    "bot_fi": ("1", "2", "3", "4"),
+                    "webapp_fi": ("5", "6", "7", "8"),
+                    "webapp_ir": ("9", "a", "b", "c"),
+                }.items()
+            },
+            "postgres_runtime_uid": 70,
+            "postgres_runtime_gid": 70,
             "postgres_image_ref": f"trading_bot_postgres_boottime:15-{RELEASE_SHA}",
             "legacy_bot_rollback_sha256": "2" * 64,
             "legacy_webapp_rollback_sha256": "3" * 64,
@@ -227,7 +295,7 @@ class ProductionShadowManifestTests(unittest.TestCase):
         self.assertTrue(verification["exact_release_path_required"])
         self.assertTrue(
             verification["verifier_path"].startswith(
-                str(_shadow_root(CAMPAIGN_ID))
+                str(_shadow_root(OPERATION_ID))
             )
         )
         self.assertTrue(verification["executor_wired"])
@@ -263,6 +331,39 @@ class ProductionShadowManifestTests(unittest.TestCase):
         zero_artifact["artifacts"]["release_bundle_sha256"] = "0" * 64
         with self.assertRaisesRegex(CutoverContractError, "not a SHA-256"):
             validate_manifest(zero_artifact)
+
+        duplicate_image = manifest_payload()
+        duplicate_image["artifacts"]["role_runtime_image_ids"]["bot_fi"][
+            "nginx"
+        ] = duplicate_image["artifacts"]["role_runtime_image_ids"]["bot_fi"][
+            "redis"
+        ]
+        with self.assertRaisesRegex(CutoverContractError, "runtime image"):
+            validate_manifest(duplicate_image)
+
+        duplicate_archive = manifest_payload()
+        duplicate_archive["artifacts"]["image_artifacts"]["nginx"][
+            "archive_sha256"
+        ] = duplicate_archive["artifacts"]["image_artifacts"]["redis"][
+            "archive_sha256"
+        ]
+        with self.assertRaisesRegex(
+            CutoverContractError,
+            "archive_sha256",
+        ):
+            validate_manifest(duplicate_archive)
+
+        forged_content = manifest_payload()
+        forged_content["artifacts"]["image_artifacts"]["app"][
+            "content_descriptor"
+        ]["created"] = "2026-07-27T01:00:00Z"
+        with self.assertRaisesRegex(CutoverContractError, "identity differs"):
+            validate_manifest(forged_content)
+
+        witness_runtime = manifest_payload()
+        witness_runtime["artifacts"]["role_runtime_image_ids"]["witness"] = {}
+        with self.assertRaisesRegex(CutoverContractError, "three Docker roles"):
+            validate_manifest(witness_runtime)
 
     def test_topology_policy_and_paths_are_pinned(self):
         wrong_host = manifest_payload()
@@ -304,6 +405,38 @@ class ProductionShadowManifestTests(unittest.TestCase):
         )
         self.assertTrue(all(isinstance(command["argv"], list) for command in all_commands))
         self.assertTrue(all(command["render_only"] for command in all_commands))
+        for command in all_commands:
+            argv = command["argv"]
+            if argv[0] == "/usr/bin/ssh":
+                remote = argv[argv.index(REMOTE_AGENT_PATH) :]
+                self.assertEqual(
+                    shlex.split(" ".join(remote)),
+                    remote,
+                )
+            role = argv[argv.index("--role") + 1]
+            runtime_ids = json.loads(
+                base64.urlsafe_b64decode(
+                    argv[argv.index("--runtime-image-ids-b64") + 1]
+                ).decode("utf-8")
+            )
+            vhosts = json.loads(
+                base64.urlsafe_b64decode(
+                    argv[argv.index("--production-vhosts-b64") + 1]
+                ).decode("utf-8")
+            )
+            self.assertEqual(
+                vhosts,
+                json.loads(json.dumps(PRODUCTION_VHOSTS)),
+            )
+            if role == "witness":
+                self.assertEqual(runtime_ids, {})
+            else:
+                self.assertEqual(
+                    runtime_ids,
+                    manifest_payload()["artifacts"][
+                        "role_runtime_image_ids"
+                    ][role],
+                )
         self.assertTrue(all(not command["executor_available"] for command in all_commands))
         rendered = "\n".join(" ".join(command["argv"]) for command in all_commands).lower()
         for forbidden in (
@@ -317,9 +450,6 @@ class ProductionShadowManifestTests(unittest.TestCase):
             "downgrade",
         ):
             self.assertNotIn(forbidden, rendered)
-        self.assertIn("coin.362514.ir", rendered)
-        self.assertIn("mini-app.362514.ir", rendered)
-        self.assertIn("coin.gold-trade.ir", rendered)
         self.assertIn("sealed-rollback-evidence-only", rendered)
         self.assertIn("pristine-empty-no-restore", rendered)
         for command in all_commands:
@@ -329,6 +459,28 @@ class ProductionShadowManifestTests(unittest.TestCase):
                     "object-storage-private-versioned-age",
                 )
                 self.assertIn("object-storage-private-versioned-age", command["argv"])
+
+        preparation = [
+            command
+            for phase in plan["reversible_preparation"]["phases"]
+            for command in phase["commands"]
+        ]
+        self.assertEqual(
+            {
+                command["argv"][command["argv"].index("--operation") + 1]
+                for command in preparation
+            },
+            {
+                "verify-installation",
+                "bootstrap-database",
+                "restore-shadow",
+                "prepare-shadow",
+                "readonly-acceptance",
+            },
+        )
+        self.assertTrue(all("--execute" in command["argv"] for command in preparation))
+        self.assertTrue(all(command["executor_available"] for command in preparation))
+        self.assertTrue(all(not command["business_write_allowed"] for command in preparation))
 
     def test_freeze_rollback_and_forward_recovery_contracts_are_complete(self):
         plan = render_plan(

@@ -123,7 +123,7 @@ def render_role_compose(
     scope: str = "full",
 ) -> dict[str, Any]:
     prefix = ROLE_PREFIXES.get(role)
-    if prefix is None or scope not in {"full", "prepare"}:
+    if prefix is None or scope not in {"full", "prepare", "precommit"}:
         raise ProductionShadowRoleError("unknown production shadow role")
     services = payload.get("services")
     operation = payload.get("x-production-shadow-operation")
@@ -161,7 +161,7 @@ def render_role_compose(
             )
         if matching_roles[0] == role:
             selected[str(name)] = dict(raw_service)
-    if scope == "prepare":
+    if scope in {"prepare", "precommit"}:
         allowed = {
             f"{prefix}db",
             f"{prefix}restore_tool",
@@ -172,6 +172,8 @@ def render_role_compose(
         }
         if role == "webapp-ir":
             allowed.add("webapp_ir_writer_fence")
+        if scope == "precommit":
+            allowed.add(f"{prefix}sync_observer")
         selected = {
             name: service
             for name, service in selected.items()
@@ -216,7 +218,7 @@ def render_role_compose(
 
     operation_keys = (
         COMMON_OPERATION_KEYS
-        if scope == "prepare"
+        if scope in {"prepare", "precommit"}
         else ROLE_OPERATION_KEYS[role]
     )
     missing_operation_keys = operation_keys - set(operation)
@@ -447,7 +449,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--role", choices=sorted(ROLE_PREFIXES), required=True)
     parser.add_argument(
         "--scope",
-        choices=("full", "prepare"),
+        choices=("full", "prepare", "precommit"),
         default="full",
     )
     parser.add_argument(
