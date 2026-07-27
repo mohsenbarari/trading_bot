@@ -182,8 +182,10 @@ _DATABASE_CONTAINER_FIELDS = {
     "image_id",
     "project",
     "service",
-    "volume_name",
+    "mount_type",
     "data_path",
+    "data_uid",
+    "data_gid",
 }
 _REMOVED_EPHEMERAL_FIELDS = {
     "container_id",
@@ -239,7 +241,8 @@ _SOURCE_DATABASE_ATTESTATION_FIELDS = {
     "zero_residue",
 }
 _EXPECTED_CLEANUP_POLICY = (
-    "retain persistent operation-owned database/network/volume resources; "
+    "retain the operation-owned database container, internal network, and "
+    "canonical bind data; "
     "remove only exact operation-labeled ephemeral one-shot containers and "
     "their anonymous volumes; never delete Object Storage versions"
 )
@@ -2125,12 +2128,11 @@ def run_remote_operation(
             if isinstance(database, dict)
             else None
         )
-        expected_postgres_image = next(
-            image.image_id
+        expected_postgres = next(
+            image
             for image in manifest.images
             if image.role == "postgres"
         )
-        expected_volume = f"{manifest.project_name}_webapp_ir_postgres"
         expected_data_path = str(
             REMOTE_DATA_ROOT_PREFIX
             / canonical
@@ -2177,15 +2179,20 @@ def run_remote_operation(
             or set(database_container) != _DATABASE_CONTAINER_FIELDS
             or not isinstance(database_container.get("container_id"), str)
             or not re.fullmatch(
-                r"[0-9a-f]{12,64}",
+                r"[0-9a-f]{64}",
                 database_container["container_id"],
             )
-            or database_container.get("image_id") != expected_postgres_image
+            or database_container.get("image_id")
+            != expected_postgres.image_id
             or database_container.get("project") != manifest.project_name
             or database_container.get("service")
             != manifest.services["database"]
-            or database_container.get("volume_name") != expected_volume
+            or database_container.get("mount_type") != "bind"
             or database_container.get("data_path") != expected_data_path
+            or database_container.get("data_uid")
+            != expected_postgres.runtime_uid
+            or database_container.get("data_gid")
+            != expected_postgres.runtime_gid
             or not _validate_materialized_attestation(
                 document.get("materialized"),
                 manifest=manifest,
