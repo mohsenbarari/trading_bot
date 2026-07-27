@@ -198,19 +198,18 @@ def operation_apply(fixture: OperationFixture) -> dict[str, object]:
         "control_state": "fenced",
         "witness_lease_id": None,
     }
+    postgres_image = next(
+        image for image in fixture.manifest.images if image.role == "postgres"
+    )
     database_container = {
         "container_id": "a" * 64,
-        "image_id": next(
-            image.image_id
-            for image in fixture.manifest.images
-            if image.role == "postgres"
-        ),
+        "image_id": postgres_image.image_id,
         "project": fixture.manifest.project_name,
         "service": fixture.manifest.services["database"],
-        "volume_name": (
-            f"{fixture.manifest.project_name}_webapp_ir_postgres"
-        ),
+        "mount_type": "bind",
         "data_path": str(data_root / "webapp-ir" / "postgres"),
+        "data_uid": postgres_image.runtime_uid,
+        "data_gid": postgres_image.runtime_gid,
     }
     result.update(
         {
@@ -639,7 +638,7 @@ class ProductionArtifactOrchestratorTests(unittest.TestCase):
                     runner=runner_for(leaked),
                 )
 
-    def test_transfer_publishes_exact_nine_artifacts_and_resumes(self) -> None:
+    def test_transfer_publishes_exact_artifact_closure_and_resumes(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             fixture = OperationFixture(Path(raw))
             journal = fixture.root / "journal"
@@ -715,7 +714,10 @@ class ProductionArtifactOrchestratorTests(unittest.TestCase):
                     journal_directory=journal,
                     ssh_identity=identity,
                 )
-                self.assertEqual(result["object_count"], 9)
+                self.assertEqual(
+                    result["object_count"],
+                    len(MODULE.EXPECTED_ARTIFACTS) + 2,
+                )
                 self.assertEqual(
                     verified_source.call_args.args[0],
                     journal / "publish-database-backup.json",

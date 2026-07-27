@@ -68,16 +68,28 @@ def docker_archive(
     release_sha: str,
     *,
     repo_tags: list[str] | None = None,
+    runtime_uid: int | None = None,
+    runtime_gid: int | None = None,
 ) -> tuple[bytes, str]:
+    labels = {
+        "org.opencontainers.image.revision": release_sha,
+    }
+    if role == "postgres":
+        if runtime_uid is None or runtime_gid is None:
+            raise ValueError("PostgreSQL fixture runtime identity is required")
+        labels.update(
+            {
+                MODULE.POSTGRES_RUNTIME_UID_LABEL: str(runtime_uid),
+                MODULE.POSTGRES_RUNTIME_GID_LABEL: str(runtime_gid),
+            }
+        )
     config = json.dumps(
         {
             "architecture": "amd64",
             "os": "linux",
             "rootfs": {"type": "layers", "diff_ids": []},
             "config": {
-                "Labels": {
-                    "org.opencontainers.image.revision": release_sha,
-                }
+                "Labels": labels,
             },
             "fixture_role": role,
         },
@@ -140,7 +152,20 @@ class OperationFixture:
         )
         bootstrap_path.unlink()
         self.app_archive, self.app_id = docker_archive("app", self.release_sha)
-        self.db_archive, self.db_id = docker_archive("postgres", self.release_sha)
+        self.db_archive, self.db_id = docker_archive(
+            "postgres",
+            self.release_sha,
+            runtime_uid=999,
+            runtime_gid=999,
+        )
+        self.redis_archive, self.redis_id = docker_archive(
+            "redis",
+            self.release_sha,
+        )
+        self.nginx_archive, self.nginx_id = docker_archive(
+            "nginx",
+            self.release_sha,
+        )
         self.ca = b"test-only-ca\n"
         self.runtime_env = self._runtime_env()
         references = "\n".join(
@@ -167,6 +192,8 @@ class OperationFixture:
             "release-archive": self.release_bundle,
             "app-image-archive": self.app_archive,
             "db-image-archive": self.db_archive,
+            "redis-image-archive": self.redis_archive,
+            "nginx-image-archive": self.nginx_archive,
             "database-backup": b"PGDMP test fixture",
             "uploads-archive": tar_bytes({"avatar.bin": b"avatar"}, gzip=True),
             "audit-archive": tar_bytes({"audit.jsonl": b"{}\n"}, gzip=True),
@@ -273,6 +300,7 @@ class OperationFixture:
             "PRODUCTION_SHADOW_DR_TLS_ATTESTATION_SHA256": "2" * 64,
             "PRODUCTION_SHADOW_DR_TLS_ATTESTED_AT_EPOCH": "1785170000",
             "PRODUCTION_SHADOW_OPERATION_ID": OPERATION_ID,
+            "PRODUCTION_SHADOW_NGINX_IMAGE_ID": self.nginx_id,
             "PRODUCTION_SHADOW_POSTGRES_IMAGE_ID": self.db_id,
             "PRODUCTION_SHADOW_PROJECT": project,
             "PRODUCTION_SHADOW_PROJECT_ROOT": str(self.project_root),
@@ -280,6 +308,7 @@ class OperationFixture:
                 self.project_root / "releases" / self.release_sha
             ),
             "PRODUCTION_SHADOW_RELEASE_SHA": self.release_sha,
+            "PRODUCTION_SHADOW_REDIS_IMAGE_ID": self.redis_id,
             "PRODUCTION_SHADOW_SECRET_ROOT": str(self.secret_root),
             "WEBAPP_IR_APP_DB_PASSWORD": "app-password",
             "WEBAPP_IR_BLOB_DB_PASSWORD": "blob-password",
@@ -348,6 +377,24 @@ class OperationFixture:
                     "role": "postgres",
                     "artifact_kind": "db-image-archive",
                     "image_id": self.db_id,
+                    "repo_tags": [],
+                    "os": "linux",
+                    "architecture": "amd64",
+                    "runtime_uid": 999,
+                    "runtime_gid": 999,
+                },
+                {
+                    "role": "redis",
+                    "artifact_kind": "redis-image-archive",
+                    "image_id": self.redis_id,
+                    "repo_tags": [],
+                    "os": "linux",
+                    "architecture": "amd64",
+                },
+                {
+                    "role": "nginx",
+                    "artifact_kind": "nginx-image-archive",
+                    "image_id": self.nginx_id,
                     "repo_tags": [],
                     "os": "linux",
                     "architecture": "amd64",
@@ -609,8 +656,10 @@ def valid_compose_config(fixture: OperationFixture) -> dict[str, object]:
             }
             service["volumes"] = [
                 {
-                    "type": "volume",
-                    "source": "webapp_ir_postgres",
+                    "type": "bind",
+                    "source": str(
+                        fixture.data_root / "webapp-ir" / "postgres"
+                    ),
                     "target": "/var/lib/postgresql/data",
                 }
             ]
@@ -672,24 +721,125 @@ def valid_compose_config(fixture: OperationFixture) -> dict[str, object]:
         "services": services,
         "networks": {
             "webapp_ir": {
+                "ipam": {},
                 "internal": True,
+                "labels": {
+                    "trading-bot.production.operation-id": (
+                        manifest.operation_id
+                    ),
+                },
                 "name": f"{manifest.project_name}_webapp_ir",
             }
         },
-        "volumes": {
-            "webapp_ir_postgres": {
-                "driver": "local",
-                "driver_opts": {
-                    "type": "none",
-                    "o": "bind",
-                    "device": str(
-                        fixture.data_root / "webapp-ir" / "postgres"
-                    ),
-                },
-                "name": f"{manifest.project_name}_webapp_ir_postgres",
-            }
-        },
     }
+
+
+def valid_database_container_inspect(
+    fixture: OperationFixture,
+    *,
+    identifier: str = "d" * 64,
+    running: bool = False,
+) -> list[dict[str, object]]:
+    network_name = f"{fixture.manifest.project_name}_webapp_ir"
+    postgres = fixture.data_root / "webapp-ir" / "postgres"
+    return [
+        {
+            "Id": identifier,
+            "Image": fixture.db_id,
+            "Config": {
+                "Image": fixture.db_id,
+                "Labels": {
+                    "com.docker.compose.oneoff": "False",
+                    "com.docker.compose.project": fixture.manifest.project_name,
+                    "com.docker.compose.service": (
+                        fixture.manifest.services["database"]
+                    ),
+                    "trading-bot.production.operation-id": OPERATION_ID,
+                },
+            },
+            "HostConfig": {
+                "Binds": [
+                    f"{postgres}:/var/lib/postgresql/data:rw",
+                ],
+                "NetworkMode": network_name,
+                "PortBindings": {},
+                "Privileged": False,
+                "RestartPolicy": {"Name": "unless-stopped"},
+            },
+            "Mounts": [
+                {
+                    "Type": "bind",
+                    "Source": str(postgres),
+                    "Destination": "/var/lib/postgresql/data",
+                    "Mode": "rw",
+                    "RW": True,
+                    "Propagation": "rprivate",
+                },
+            ],
+            "NetworkSettings": {
+                "Networks": {
+                    network_name: {},
+                },
+            },
+            "State": {
+                "Running": running,
+                "Status": "running" if running else "created",
+            },
+        }
+    ]
+
+
+def valid_network_inspect(
+    fixture: OperationFixture,
+    *,
+    container_id: str | None = None,
+) -> list[dict[str, object]]:
+    network_name = f"{fixture.manifest.project_name}_webapp_ir"
+    containers = (
+        {}
+        if container_id is None
+        else {
+            container_id: {
+                "Name": (
+                    f"{fixture.manifest.project_name}-"
+                    f"{fixture.manifest.services['database']}-1"
+                ),
+            },
+        }
+    )
+    return [
+        {
+            "Name": network_name,
+            "Id": "e" * 64,
+            "Created": "2026-07-27T00:00:00Z",
+            "Scope": "local",
+            "Driver": "bridge",
+            "EnableIPv6": False,
+            "IPAM": {
+                "Driver": "default",
+                "Options": None,
+                "Config": [
+                    {
+                        "Subnet": "172.28.0.0/16",
+                        "Gateway": "172.28.0.1",
+                    },
+                ],
+            },
+            "Internal": True,
+            "Attachable": False,
+            "Ingress": False,
+            "ConfigFrom": {"Network": ""},
+            "ConfigOnly": False,
+            "Containers": containers,
+            "Options": {},
+            "Labels": {
+                "com.docker.compose.network": "webapp_ir",
+                "com.docker.compose.project": fixture.manifest.project_name,
+                "com.docker.compose.version": "5.1.4",
+                "trading-bot.production.operation-id": OPERATION_ID,
+            },
+        }
+    ]
 
 
 class ProductionOperationTests(unittest.TestCase):
@@ -1027,6 +1177,85 @@ class ProductionOperationTests(unittest.TestCase):
                     json.dumps(legacy_project).encode()
                 )
 
+    def test_manifest_requires_exact_four_image_archive_bindings(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = OperationFixture(Path(raw))
+
+            missing = json.loads(json.dumps(fixture.document))
+            missing["images"].pop()
+            with self.assertRaises(MODULE.ProductionOperationError):
+                MODULE._load_manifest_bytes(json.dumps(missing).encode())
+
+            duplicate_role = json.loads(json.dumps(fixture.document))
+            duplicate_role["images"][-1] = dict(duplicate_role["images"][0])
+            with self.assertRaises(MODULE.ProductionOperationError):
+                MODULE._load_manifest_bytes(json.dumps(duplicate_role).encode())
+
+            duplicate_id = json.loads(json.dumps(fixture.document))
+            duplicate_id["images"][-1]["image_id"] = duplicate_id["images"][0][
+                "image_id"
+            ]
+            with self.assertRaises(MODULE.ProductionOperationError):
+                MODULE._load_manifest_bytes(json.dumps(duplicate_id).encode())
+
+            missing_runtime_owner = json.loads(json.dumps(fixture.document))
+            postgres = next(
+                image
+                for image in missing_runtime_owner["images"]
+                if image["role"] == "postgres"
+            )
+            postgres.pop("runtime_uid")
+            with self.assertRaises(MODULE.ProductionOperationError):
+                MODULE._load_manifest_bytes(
+                    json.dumps(missing_runtime_owner).encode()
+                )
+
+            invalid_runtime_owner = json.loads(json.dumps(fixture.document))
+            postgres = next(
+                image
+                for image in invalid_runtime_owner["images"]
+                if image["role"] == "postgres"
+            )
+            postgres["runtime_gid"] = 0
+            with self.assertRaises(MODULE.ProductionOperationError):
+                MODULE._load_manifest_bytes(
+                    json.dumps(invalid_runtime_owner).encode()
+                )
+
+            swapped = json.loads(json.dumps(fixture.document))
+            redis = next(
+                image for image in swapped["images"] if image["role"] == "redis"
+            )
+            nginx = next(
+                image for image in swapped["images"] if image["role"] == "nginx"
+            )
+            redis["artifact_kind"], nginx["artifact_kind"] = (
+                nginx["artifact_kind"],
+                redis["artifact_kind"],
+            )
+            with self.assertRaises(MODULE.ProductionOperationError):
+                MODULE._load_manifest_bytes(json.dumps(swapped).encode())
+
+            wrong_archive_id = json.loads(json.dumps(fixture.document))
+            redis = next(
+                image
+                for image in wrong_archive_id["images"]
+                if image["role"] == "redis"
+            )
+            redis["image_id"] = "sha256:" + "a" * 64
+            manifest = MODULE._load_manifest_bytes(
+                json.dumps(wrong_archive_id).encode()
+            )
+            expected_redis = next(
+                image for image in manifest.images if image.role == "redis"
+            )
+            with self.assertRaises(MODULE.ProductionOperationError):
+                MODULE._docker_archive_identity(
+                    fixture.incoming / "redis-image.tar",
+                    expected_redis,
+                    release_sha=fixture.release_sha,
+                )
+
     def test_compose_validator_accepts_only_exact_prepare_contract(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             fixture = OperationFixture(Path(raw))
@@ -1084,6 +1313,40 @@ class ProductionOperationTests(unittest.TestCase):
                 "project_root"
             ] = str(fixture.operation_root)
             mutations.append(wrong_operation_root)
+            foreign_bind = json.loads(json.dumps(baseline))
+            foreign_bind["services"]["webapp_ir_db"]["volumes"][0][
+                "source"
+            ] = "/srv/foreign-postgres"
+            mutations.append(foreign_bind)
+            named_mount = json.loads(json.dumps(baseline))
+            named_mount["services"]["webapp_ir_db"]["volumes"][0].update(
+                {
+                    "type": "volume",
+                    "source": "webapp_ir_postgres",
+                }
+            )
+            named_mount["volumes"] = {
+                "webapp_ir_postgres": {
+                    "driver": "local",
+                    "driver_opts": {
+                        "type": "none",
+                        "o": "bind",
+                        "device": "/srv/foreign-postgres",
+                    },
+                    "name": (
+                        f"{fixture.manifest.project_name}_webapp_ir_postgres"
+                    ),
+                },
+            }
+            mutations.append(named_mount)
+            missing_network_label = json.loads(json.dumps(baseline))
+            missing_network_label["networks"]["webapp_ir"]["labels"] = {}
+            mutations.append(missing_network_label)
+            custom_network_ipam = json.loads(json.dumps(baseline))
+            custom_network_ipam["networks"]["webapp_ir"]["ipam"] = {
+                "driver": "custom",
+            }
+            mutations.append(custom_network_ipam)
             for mutation in mutations:
                 with self.subTest(mutation=mutations.index(mutation)):
                     with (
@@ -1093,6 +1356,317 @@ class ProductionOperationTests(unittest.TestCase):
                         MODULE._validate_compose_config(
                             fixture.manifest,
                             operation_root=fixture.operation_root,
+                        )
+
+    def test_database_container_requires_exact_secure_direct_bind(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = OperationFixture(Path(raw))
+            paths = MODULE.verify_incoming(
+                fixture.manifest,
+                operation_root=fixture.operation_root,
+                required_uid=os.geteuid(),
+            )
+            MODULE.materialize(
+                fixture.manifest,
+                paths,
+                operation_root=fixture.operation_root,
+                required_uid=os.geteuid(),
+            )
+            identifier = "d" * 64
+            stopped = valid_database_container_inspect(
+                fixture,
+                identifier=identifier,
+            )
+            with patch.object(
+                MODULE,
+                "_run",
+                return_value=json.dumps(stopped),
+            ):
+                self.assertFalse(
+                    MODULE._validate_database_container(
+                        identifier,
+                        fixture.manifest,
+                    )
+                )
+            running = valid_database_container_inspect(
+                fixture,
+                identifier=identifier,
+                running=True,
+            )
+            postgres = fixture.data_root / "webapp-ir" / "postgres"
+            with (
+                patch.object(
+                    MODULE,
+                    "_run",
+                    return_value=json.dumps(running),
+                ),
+                patch.object(
+                    MODULE,
+                    "_validate_postgres_bind_source",
+                ) as runtime_owner,
+            ):
+                self.assertTrue(
+                    MODULE._validate_database_container(
+                        identifier,
+                        fixture.manifest,
+                    )
+                )
+            runtime_owner.assert_called_once_with(
+                fixture.manifest,
+                initialized=True,
+            )
+
+            mutations = []
+            named_volume = json.loads(json.dumps(stopped))
+            named_volume[0]["HostConfig"]["Binds"] = None
+            named_volume[0]["Mounts"][0] = {
+                "Type": "volume",
+                "Name": (
+                    f"{fixture.manifest.project_name}_webapp_ir_postgres"
+                ),
+                "Source": (
+                    "/var/lib/docker/volumes/"
+                    f"{fixture.manifest.project_name}_webapp_ir_postgres/_data"
+                ),
+                "Destination": "/var/lib/postgresql/data",
+                "Driver": "local",
+                "RW": True,
+            }
+            mutations.append(named_volume)
+            foreign_bind = json.loads(json.dumps(stopped))
+            foreign_bind[0]["HostConfig"]["Binds"] = [
+                "/srv/foreign:/var/lib/postgresql/data:rw",
+            ]
+            foreign_bind[0]["Mounts"][0]["Source"] = "/srv/foreign"
+            mutations.append(foreign_bind)
+            extra_mount = json.loads(json.dumps(stopped))
+            extra_mount[0]["Mounts"].append(
+                {
+                    "Type": "bind",
+                    "Source": "/srv/foreign",
+                    "Destination": "/foreign",
+                    "RW": False,
+                    "Propagation": "rprivate",
+                }
+            )
+            mutations.append(extra_mount)
+            for mutation in mutations:
+                with self.subTest(mutation=mutations.index(mutation)):
+                    with (
+                        patch.object(
+                            MODULE,
+                            "_run",
+                            return_value=json.dumps(mutation),
+                        ),
+                        self.assertRaises(MODULE.ProductionOperationError),
+                    ):
+                        MODULE._validate_database_container(
+                            identifier,
+                            fixture.manifest,
+                        )
+
+            self.assertIsNotNone(
+                MODULE._validate_postgres_bind_source(
+                    fixture.manifest,
+                    initialized=False,
+                )
+            )
+            with self.assertRaises(MODULE.ProductionOperationError):
+                MODULE._validate_postgres_bind_source(
+                    fixture.manifest,
+                    initialized=True,
+                )
+
+            runtime_metadata = os.stat_result(
+                (
+                    stat.S_IFDIR | 0o700,
+                    1,
+                    1,
+                    1,
+                    999,
+                    999,
+                    0,
+                    0,
+                    0,
+                    0,
+                )
+            )
+            with (
+                patch.object(
+                    MODULE,
+                    "_require_real_owned_directory_chain",
+                ),
+                patch.object(
+                    Path,
+                    "stat",
+                    return_value=runtime_metadata,
+                ),
+            ):
+                self.assertEqual(
+                    MODULE._validate_postgres_bind_source(
+                        fixture.manifest,
+                        initialized=True,
+                    ).st_uid,
+                    999,
+                )
+
+            wrong_runtime_metadata = os.stat_result(
+                (
+                    stat.S_IFDIR | 0o700,
+                    1,
+                    1,
+                    1,
+                    998,
+                    999,
+                    0,
+                    0,
+                    0,
+                    0,
+                )
+            )
+            with (
+                patch.object(
+                    MODULE,
+                    "_require_real_owned_directory_chain",
+                ),
+                patch.object(
+                    Path,
+                    "stat",
+                    return_value=wrong_runtime_metadata,
+                ),
+                self.assertRaises(MODULE.ProductionOperationError),
+            ):
+                MODULE._validate_postgres_bind_source(
+                    fixture.manifest,
+                    initialized=True,
+                )
+
+            postgres.rmdir()
+            foreign = fixture.root / "foreign-postgres"
+            foreign.mkdir(mode=0o700)
+            postgres.symlink_to(foreign, target_is_directory=True)
+            with (
+                patch.object(
+                    MODULE,
+                    "_run",
+                    return_value=json.dumps(stopped),
+                ),
+                self.assertRaises(MODULE.ProductionOperationError),
+            ):
+                MODULE._validate_database_container(
+                    identifier,
+                    fixture.manifest,
+                )
+
+    def test_operation_network_rejects_foreign_identity_and_endpoints(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = OperationFixture(Path(raw))
+            expected_name = (
+                f"{fixture.manifest.project_name}_webapp_ir"
+            )
+            container_id = "d" * 64
+
+            with patch.object(MODULE, "_run", return_value=""):
+                self.assertIsNone(
+                    MODULE._validate_operation_network(
+                        fixture.manifest,
+                        expected_container_id=None,
+                        require_present=False,
+                        require_attached=False,
+                    )
+                )
+                with self.assertRaises(MODULE.ProductionOperationError):
+                    MODULE._validate_operation_network(
+                        fixture.manifest,
+                        expected_container_id=None,
+                        require_present=True,
+                        require_attached=False,
+                    )
+
+            exact = valid_network_inspect(
+                fixture,
+                container_id=container_id,
+            )
+
+            def network_run(arguments, *, timeout, stdin=-3):  # noqa: ANN001, ARG001
+                if arguments[1:3] == ["network", "ls"]:
+                    return expected_name
+                if arguments[1:3] == ["network", "inspect"]:
+                    return json.dumps(exact)
+                self.fail(f"unexpected Docker network command: {arguments}")
+
+            with patch.object(MODULE, "_run", side_effect=network_run):
+                observed = MODULE._validate_operation_network(
+                    fixture.manifest,
+                    expected_container_id=container_id,
+                    require_present=True,
+                    require_attached=True,
+                )
+            self.assertEqual(observed["network_id"], "e" * 64)
+
+            exact_oneoff = "c" * 64
+            exact[0]["Containers"][exact_oneoff] = {
+                "Name": "exact-operation-oneoff",
+            }
+            with patch.object(MODULE, "_run", side_effect=network_run):
+                MODULE._validate_operation_network(
+                    fixture.manifest,
+                    expected_container_id=container_id,
+                    allowed_container_ids={exact_oneoff},
+                    require_present=True,
+                    require_attached=True,
+                )
+            exact[0]["Containers"].pop(exact_oneoff)
+
+            mutations = []
+            unlabeled = json.loads(json.dumps(exact))
+            unlabeled[0]["Labels"] = {}
+            mutations.append(unlabeled)
+            foreign_label = json.loads(json.dumps(exact))
+            foreign_label[0]["Labels"]["foreign"] = "value"
+            mutations.append(foreign_label)
+            external = json.loads(json.dumps(exact))
+            external[0]["Internal"] = False
+            mutations.append(external)
+            wrong_driver = json.loads(json.dumps(exact))
+            wrong_driver[0]["Driver"] = "overlay"
+            mutations.append(wrong_driver)
+            custom_options = json.loads(json.dumps(exact))
+            custom_options[0]["Options"] = {"foreign": "value"}
+            mutations.append(custom_options)
+            custom_ipam = json.loads(json.dumps(exact))
+            custom_ipam[0]["IPAM"]["Options"] = {"foreign": "value"}
+            mutations.append(custom_ipam)
+            foreign_endpoint = json.loads(json.dumps(exact))
+            foreign_endpoint[0]["Containers"]["f" * 64] = {
+                "Name": "foreign",
+            }
+            mutations.append(foreign_endpoint)
+            for mutation in mutations:
+                with self.subTest(mutation=mutations.index(mutation)):
+                    def mutated_run(  # noqa: ANN001, ARG001
+                        arguments,
+                        *,
+                        timeout,
+                        stdin=-3,
+                    ):
+                        if arguments[1:3] == ["network", "ls"]:
+                            return expected_name
+                        return json.dumps(mutation)
+
+                    with (
+                        patch.object(
+                            MODULE,
+                            "_run",
+                            side_effect=mutated_run,
+                        ),
+                        self.assertRaises(MODULE.ProductionOperationError),
+                    ):
+                        MODULE._validate_operation_network(
+                            fixture.manifest,
+                            expected_container_id=container_id,
+                            require_present=True,
+                            require_attached=True,
                         )
 
     def test_prepare_runtime_rejects_private_plane_and_unused_env_material(self) -> None:
@@ -1225,6 +1799,97 @@ class ProductionOperationTests(unittest.TestCase):
                     operation_root=fixture.operation_root,
                 )
 
+    def test_project_inventory_rejects_missing_label_and_foreign_service(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = OperationFixture(Path(raw))
+            identifier = "f" * 64
+            inspection = [
+                {
+                    "Id": identifier,
+                    "Config": {
+                        "Image": fixture.app_id,
+                        "Labels": {
+                            "com.docker.compose.project": (
+                                fixture.manifest.project_name
+                            ),
+                            "com.docker.compose.oneoff": "True",
+                            "com.docker.compose.service": (
+                                fixture.manifest.services["roles"]
+                            ),
+                        },
+                    },
+                    "Mounts": [],
+                },
+            ]
+            with (
+                patch.object(
+                    MODULE,
+                    "_project_container_ids",
+                    return_value=[identifier],
+                ),
+                patch.object(
+                    MODULE,
+                    "_run",
+                    return_value=json.dumps(inspection),
+                ),
+                self.assertRaises(MODULE.ProductionOperationError),
+            ):
+                MODULE._oneoff_ids(
+                    fixture.manifest,
+                    operation_root=fixture.operation_root,
+                )
+
+            inspection[0]["Config"]["Labels"][
+                "trading-bot.production.operation-id"
+            ] = OPERATION_ID
+            inspection[0]["Config"]["Labels"][
+                "com.docker.compose.service"
+            ] = "webapp_ir_api"
+            with (
+                patch.object(
+                    MODULE,
+                    "_project_container_ids",
+                    return_value=[identifier],
+                ),
+                patch.object(
+                    MODULE,
+                    "_run",
+                    return_value=json.dumps(inspection),
+                ),
+                self.assertRaises(MODULE.ProductionOperationError),
+            ):
+                MODULE._oneoff_ids(
+                    fixture.manifest,
+                    operation_root=fixture.operation_root,
+                )
+
+            inspection[0]["Config"]["Labels"][
+                "com.docker.compose.service"
+            ] = fixture.manifest.services["database"]
+            inspection[0]["Config"]["Labels"][
+                "com.docker.compose.oneoff"
+            ] = "False"
+            inspection[0]["Config"]["Labels"].pop(
+                "trading-bot.production.operation-id"
+            )
+            with (
+                patch.object(
+                    MODULE,
+                    "_project_container_ids",
+                    return_value=[identifier],
+                ),
+                patch.object(
+                    MODULE,
+                    "_run",
+                    return_value=json.dumps(inspection),
+                ),
+                self.assertRaises(MODULE.ProductionOperationError),
+            ):
+                MODULE._oneoff_ids(
+                    fixture.manifest,
+                    operation_root=fixture.operation_root,
+                )
+
     def test_safe_dotenv_accepts_json_but_rejects_interpolation_and_ambiguity(self) -> None:
         parsed = MODULE.parse_safe_dotenv(
             b'PEERS_JSON=["https://one.invalid","https://two.invalid"]\nTOKEN=abc_123-DEF=\n'
@@ -1305,6 +1970,73 @@ class ProductionOperationTests(unittest.TestCase):
                     release_sha=fixture.release_sha,
                 )
 
+            postgres = next(
+                image
+                for image in fixture.manifest.images
+                if image.role == "postgres"
+            )
+            wrong_owner_archive, wrong_owner_id = docker_archive(
+                "postgres",
+                fixture.release_sha,
+                runtime_uid=998,
+                runtime_gid=999,
+            )
+            wrong_owner_path = fixture.root / "wrong-owner.tar"
+            secure_file(wrong_owner_path, wrong_owner_archive)
+            with self.assertRaises(MODULE.ProductionOperationError):
+                MODULE._docker_archive_identity(
+                    wrong_owner_path,
+                    MODULE.Image(
+                        role="postgres",
+                        artifact_kind="db-image-archive",
+                        image_id=wrong_owner_id,
+                        repo_tags=(),
+                        os="linux",
+                        architecture="amd64",
+                        runtime_uid=999,
+                        runtime_gid=999,
+                    ),
+                    release_sha=fixture.release_sha,
+                )
+
+            loaded_inspection = [
+                {
+                    "Id": postgres.image_id,
+                    "Os": "linux",
+                    "Architecture": "amd64",
+                    "Config": {
+                        "Labels": {
+                            MODULE.POSTGRES_RUNTIME_UID_LABEL: "999",
+                            MODULE.POSTGRES_RUNTIME_GID_LABEL: "999",
+                        },
+                    },
+                },
+            ]
+            with patch.object(
+                MODULE,
+                "_run",
+                return_value=json.dumps(loaded_inspection),
+            ):
+                MODULE._validate_loaded_image(
+                    postgres,
+                    release_sha=fixture.release_sha,
+                )
+            loaded_inspection[0]["Config"]["Labels"][
+                MODULE.POSTGRES_RUNTIME_UID_LABEL
+            ] = "998"
+            with (
+                patch.object(
+                    MODULE,
+                    "_run",
+                    return_value=json.dumps(loaded_inspection),
+                ),
+                self.assertRaises(MODULE.ProductionOperationError),
+            ):
+                MODULE._validate_loaded_image(
+                    postgres,
+                    release_sha=fixture.release_sha,
+                )
+
     def test_prepare_database_runs_only_db_restore_migration_and_exact_fence(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             fixture = OperationFixture(Path(raw))
@@ -1321,11 +2053,14 @@ class ProductionOperationTests(unittest.TestCase):
             )
             calls: list[list[str]] = []
             database_created = False
+            database_running = False
             migration_revision = SOURCE_REVISION
             writer_fenced = False
+            lifecycle_events: list[str] = []
 
             def fake_run(arguments, *, timeout, stdin=-3):  # noqa: ANN001, ARG001
-                nonlocal database_created, migration_revision, writer_fenced
+                nonlocal database_created, database_running
+                nonlocal migration_revision, writer_fenced
                 calls.append(list(arguments))
                 joined = " ".join(arguments)
                 sql = arguments[-1] if "-Atqc" in arguments else ""
@@ -1333,9 +2068,14 @@ class ProductionOperationTests(unittest.TestCase):
                     return ""
                 if " compose " in f" {joined} " and " ps " in f" {joined} ":
                     return "a" * 64 if database_created else ""
-                if " up " in f" {joined} ":
+                if " create " in f" {joined} ":
+                    lifecycle_events.append("compose-create")
                     database_created = True
                     return ""
+                if arguments[:2] == [MODULE.DOCKER, "start"]:
+                    lifecycle_events.append("docker-start")
+                    database_running = True
+                    return arguments[-1]
                 if (
                     " run " in f" {joined} "
                     and MODULE.EXPECTED_SERVICES["migration"] in arguments
@@ -1377,10 +2117,35 @@ class ProductionOperationTests(unittest.TestCase):
                     )
                 return ""
 
+            def validate_container(*_args, **_kwargs):  # noqa: ANN002, ANN003
+                lifecycle_events.append(
+                    "validate-running"
+                    if database_running
+                    else "validate-stopped"
+                )
+                return database_running
+
+            def validate_network(*_args, **kwargs):  # noqa: ANN002
+                lifecycle_events.append(
+                    "network-attached"
+                    if kwargs["require_attached"]
+                    else "network-preflight"
+                )
+                return None
+
             with (
                 patch.object(MODULE, "_run", side_effect=fake_run),
                 patch.object(MODULE, "_validate_compose_config"),
-                patch.object(MODULE, "_validate_database_container"),
+                patch.object(
+                    MODULE,
+                    "_validate_database_container",
+                    side_effect=validate_container,
+                ),
+                patch.object(
+                    MODULE,
+                    "_validate_operation_network",
+                    side_effect=validate_network,
+                ),
                 patch.object(
                     MODULE,
                     "_database_fingerprint",
@@ -1416,9 +2181,25 @@ class ProductionOperationTests(unittest.TestCase):
                 if "pg_restore" in call
             )
             self.assertIn("--single-transaction", restore_call)
-            up_calls = [call for call in calls if "up" in call]
-            self.assertEqual(len(up_calls), 1)
-            self.assertEqual(up_calls[0][-1], "webapp_ir_db")
+            create_calls = [call for call in calls if "create" in call]
+            self.assertEqual(len(create_calls), 1)
+            self.assertEqual(create_calls[0][-1], "webapp_ir_db")
+            self.assertIn("--pull", create_calls[0])
+            self.assertIn("never", create_calls[0])
+            self.assertIn("--no-recreate", create_calls[0])
+            self.assertFalse(any("up" in call for call in calls))
+            self.assertEqual(
+                lifecycle_events[:6],
+                [
+                    "network-preflight",
+                    "compose-create",
+                    "validate-stopped",
+                    "network-preflight",
+                    "docker-start",
+                    "validate-running",
+                ],
+            )
+            self.assertEqual(lifecycle_events[6], "network-attached")
             forbidden = (
                 "webapp_ir_api",
                 "webapp_ir_dr_receiver",
@@ -1573,7 +2354,12 @@ class ProductionOperationTests(unittest.TestCase):
                 with (
                     patch.object(MODULE, "_run", side_effect=fake_run),
                     patch.object(MODULE, "_validate_compose_config"),
-                    patch.object(MODULE, "_validate_database_container"),
+                    patch.object(
+                        MODULE,
+                        "_validate_database_container",
+                        return_value=True,
+                    ),
+                    patch.object(MODULE, "_validate_operation_network"),
                     patch.object(MODULE.time, "sleep"),
                 ):
                     result = MODULE.prepare_database(
@@ -1655,6 +2441,14 @@ class ProductionOperationTests(unittest.TestCase):
                 MODULE._concurrent_index_names(graph, corridor),
                 (CONCURRENT_INDEX,),
             )
+            self.assertEqual(
+                MODULE._migration_corridor(
+                    graph,
+                    source_revision=TARGET_REVISION,
+                    target_revision=TARGET_REVISION,
+                ),
+                (TARGET_REVISION,),
+            )
 
     def test_execute_resumes_from_durable_phase_without_reloading_images(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -1672,8 +2466,11 @@ class ProductionOperationTests(unittest.TestCase):
                     MODULE,
                     "load_images",
                     return_value=[
-                        {"role": "app", "image_id": fixture.app_id},
-                        {"role": "postgres", "image_id": fixture.db_id},
+                        {
+                            "role": image.role,
+                            "image_id": image.image_id,
+                        }
+                        for image in fixture.manifest.images
                     ],
                 ),
                 patch.object(
@@ -1704,6 +2501,34 @@ class ProductionOperationTests(unittest.TestCase):
                 ),
                 0o600,
             )
+            postgres_path = fixture.data_root / "webapp-ir" / "postgres"
+            original_path_stat = Path.stat
+            root_metadata = original_path_stat(
+                postgres_path,
+                follow_symlinks=False,
+            )
+            runtime_metadata = os.stat_result(
+                (
+                    root_metadata.st_mode,
+                    root_metadata.st_ino,
+                    root_metadata.st_dev,
+                    root_metadata.st_nlink,
+                    999,
+                    999,
+                    root_metadata.st_size,
+                    root_metadata.st_atime,
+                    root_metadata.st_mtime,
+                    root_metadata.st_ctime,
+                )
+            )
+
+            def runtime_postgres_stat(path, *args, **kwargs):  # noqa: ANN001
+                if (
+                    path == postgres_path
+                    and kwargs.get("follow_symlinks", True) is False
+                ):
+                    return runtime_metadata
+                return original_path_stat(path, *args, **kwargs)
 
             def complete_resume(*args, **kwargs):  # noqa: ANN002, ANN003
                 self.assertEqual(
@@ -1732,6 +2557,7 @@ class ProductionOperationTests(unittest.TestCase):
                 patch.object(MODULE, "materialize") as rematerialize,
                 patch.object(MODULE, "load_images") as reload_images,
                 patch.object(MODULE, "_validate_loaded_image"),
+                patch.object(Path, "stat", new=runtime_postgres_stat),
                 patch.object(
                     MODULE,
                     "prepare_database",
