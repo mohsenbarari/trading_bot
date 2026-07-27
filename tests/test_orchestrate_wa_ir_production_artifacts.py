@@ -749,6 +749,122 @@ class ProductionArtifactOrchestratorTests(unittest.TestCase):
                     runner=runner_for(leaked),
                 )
 
+    def test_stage_outputs_are_canonical_bound_and_exact_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = OperationFixture(Path(raw))
+            attestation_path = fixture.root / "evidence" / "stage.json"
+            binding_path = fixture.root / "evidence" / "binding.json"
+            document = operation_stage(fixture)
+
+            binding = MODULE.persist_stage_outputs(
+                document,
+                manifest=fixture.manifest,
+                stage_attestation_output=attestation_path,
+                stage_binding_output=binding_path,
+            )
+
+            expected_attestation = json.dumps(
+                document,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode()
+            self.assertEqual(attestation_path.read_bytes(), expected_attestation)
+            self.assertFalse(attestation_path.read_bytes().endswith(b"\n"))
+            self.assertEqual(
+                attestation_path.stat().st_mode & 0o777,
+                0o600,
+            )
+            self.assertEqual(binding_path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(
+                set(binding),
+                MODULE._ROLE_IMAGE_STAGE_BINDING_FIELDS,
+            )
+            self.assertEqual(
+                binding,
+                {
+                    "schema": MODULE.ROLE_IMAGE_STAGE_BINDING_SCHEMA,
+                    "operation_id": fixture.manifest.operation_id,
+                    "release_sha": fixture.manifest.release_sha,
+                    "role": "webapp_ir",
+                    "stage_operation_manifest_sha256": hashlib.sha256(
+                        expected_attestation
+                    ).hexdigest(),
+                    "stage_attestation_sha256": (
+                        fixture.stage_attestation_sha256
+                    ),
+                    "runtime_image_ids": fixture.runtime_image_ids,
+                },
+            )
+            self.assertEqual(
+                binding_path.read_bytes(),
+                json.dumps(
+                    binding,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode(),
+            )
+
+            repeated = MODULE.persist_stage_outputs(
+                document,
+                manifest=fixture.manifest,
+                stage_attestation_output=attestation_path,
+                stage_binding_output=binding_path,
+            )
+            self.assertEqual(repeated, binding)
+
+    def test_stage_output_conflicts_and_tampering_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = OperationFixture(Path(raw))
+            attestation_path = fixture.root / "stage.json"
+            binding_path = fixture.root / "binding.json"
+            secure_file(attestation_path, b"foreign")
+            with self.assertRaisesRegex(
+                MODULE.ProductionOrchestratorError,
+                "different bytes",
+            ):
+                MODULE.persist_stage_outputs(
+                    operation_stage(fixture),
+                    manifest=fixture.manifest,
+                    stage_attestation_output=attestation_path,
+                    stage_binding_output=binding_path,
+                )
+            self.assertFalse(binding_path.exists())
+
+            tampered = operation_stage(fixture)
+            tampered["stage_attestation_sha256"] = "0" * 64
+            with self.assertRaisesRegex(
+                MODULE.ProductionOrchestratorError,
+                "binding differs",
+            ):
+                MODULE.build_stage_binding(
+                    tampered,
+                    manifest=fixture.manifest,
+                )
+
+            relative = Path("relative-stage.json")
+            with self.assertRaisesRegex(
+                MODULE.ProductionOrchestratorError,
+                "distinct absolute paths",
+            ):
+                MODULE.persist_stage_outputs(
+                    operation_stage(fixture),
+                    manifest=fixture.manifest,
+                    stage_attestation_output=relative,
+                    stage_binding_output=binding_path,
+                )
+            with self.assertRaisesRegex(
+                MODULE.ProductionOrchestratorError,
+                "distinct absolute paths",
+            ):
+                MODULE.persist_stage_outputs(
+                    operation_stage(fixture),
+                    manifest=fixture.manifest,
+                    stage_attestation_output=binding_path,
+                    stage_binding_output=binding_path,
+                )
+
     def test_final_prepare_transfer_is_one_exact_post_stage_object(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             fixture = OperationFixture(Path(raw))

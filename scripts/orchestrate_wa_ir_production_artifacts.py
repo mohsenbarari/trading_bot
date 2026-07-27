@@ -80,6 +80,9 @@ from scripts.wa_ir_production_transport_contract import (
 
 ORCHESTRATOR_SCHEMA = "wa-ir-production-artifact-orchestrator-v1"
 ORCHESTRATOR_JOURNAL_SCHEMA = "wa-ir-production-orchestrator-journal-v1"
+ROLE_IMAGE_STAGE_BINDING_SCHEMA = (
+    "production-shadow-role-image-stage-binding-v1"
+)
 FINAL_TRANSFER_JOURNAL_SCHEMA = (
     "wa-ir-production-final-prepare-transfer-journal-v1"
 )
@@ -202,6 +205,15 @@ _IMAGE_STAGE_FIELDS = {
     "images",
     "containers_started",
     "services_started",
+}
+_ROLE_IMAGE_STAGE_BINDING_FIELDS = {
+    "schema",
+    "operation_id",
+    "release_sha",
+    "role",
+    "stage_operation_manifest_sha256",
+    "stage_attestation_sha256",
+    "runtime_image_ids",
 }
 _FINAL_PREPARE_EVIDENCE_FIELDS = {
     "final_prepare_manifest_sha256",
@@ -2556,6 +2568,145 @@ def _validate_stage_operation_attestation(
     return runtime_image_ids, stage_sha256
 
 
+def _canonical_mapping_bytes(value: Mapping[str, Any]) -> bytes:
+    try:
+        return json.dumps(
+            dict(value),
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ProductionOrchestratorError(
+            "stage evidence is not canonical JSON"
+        ) from exc
+
+
+def build_stage_binding(
+    document: Mapping[str, Any],
+    *,
+    manifest: OperationManifest,
+) -> Mapping[str, Any]:
+    runtime_image_ids, stage_attestation_sha256 = (
+        _validate_stage_operation_attestation(
+            document,
+            manifest=manifest,
+        )
+    )
+    stage_operation_payload = _canonical_mapping_bytes(document)
+    if _attestation_contains_sensitive_transport(stage_operation_payload):
+        raise ProductionOrchestratorError(
+            "stage operation attestation contains transport material"
+        )
+    binding = {
+        "schema": ROLE_IMAGE_STAGE_BINDING_SCHEMA,
+        "operation_id": manifest.operation_id,
+        "release_sha": manifest.release_sha,
+        "role": "webapp_ir",
+        "stage_operation_manifest_sha256": hashlib.sha256(
+            stage_operation_payload
+        ).hexdigest(),
+        "stage_attestation_sha256": stage_attestation_sha256,
+        "runtime_image_ids": dict(runtime_image_ids),
+    }
+    if set(binding) != _ROLE_IMAGE_STAGE_BINDING_FIELDS:
+        raise ProductionOrchestratorError(
+            "WA-IR controller stage binding fields differ"
+        )
+    return binding
+
+
+def _preflight_stage_output(path: Path, payload: bytes, *, label: str) -> bool:
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise ProductionOrchestratorError(
+            f"cannot inspect {label}"
+        ) from exc
+    try:
+        existing = read_secure_bytes(
+            path,
+            label=label,
+            max_size=MAX_ATTESTATION_BYTES,
+        )
+    except SecureFileError as exc:
+        raise ProductionOrchestratorError(
+            f"{label} is unsafe"
+        ) from exc
+    if existing != payload:
+        raise ProductionOrchestratorError(
+            f"{label} already exists with different bytes"
+        )
+    return True
+
+
+def persist_stage_outputs(
+    document: Mapping[str, Any],
+    *,
+    manifest: OperationManifest,
+    stage_attestation_output: Path,
+    stage_binding_output: Path,
+) -> Mapping[str, Any]:
+    if (
+        not stage_attestation_output.is_absolute()
+        or not stage_binding_output.is_absolute()
+        or stage_attestation_output == stage_binding_output
+    ):
+        raise ProductionOrchestratorError(
+            "stage evidence outputs must be distinct absolute paths"
+        )
+    binding = build_stage_binding(document, manifest=manifest)
+    outputs = (
+        (
+            stage_attestation_output,
+            _canonical_mapping_bytes(document),
+            "WA-IR stage operation attestation",
+        ),
+        (
+            stage_binding_output,
+            _canonical_mapping_bytes(binding),
+            "WA-IR controller stage binding",
+        ),
+    )
+    existing = {
+        path: _preflight_stage_output(path, payload, label=label)
+        for path, payload, label in outputs
+    }
+    for path, payload, label in outputs:
+        if existing[path]:
+            continue
+        try:
+            write_secure_new_bytes(
+                path,
+                payload,
+                label=label,
+                mode=0o600,
+                max_size=MAX_ATTESTATION_BYTES,
+            )
+        except SecureFileError as exc:
+            raise ProductionOrchestratorError(
+                f"{label} could not be persisted"
+            ) from exc
+    for path, payload, label in outputs:
+        try:
+            observed = read_secure_bytes(
+                path,
+                label=label,
+                max_size=MAX_ATTESTATION_BYTES,
+            )
+        except SecureFileError as exc:
+            raise ProductionOrchestratorError(
+                f"{label} could not be verified"
+            ) from exc
+        if observed != payload:
+            raise ProductionOrchestratorError(
+                f"{label} differs after publication"
+            )
+    return binding
+
+
 def _attestation_contains_sensitive_transport(payload: bytes) -> bool:
     lowered = payload.lower()
     return any(
@@ -3021,6 +3172,16 @@ def main(argv: list[str] | None = None) -> int:
         selected.add_argument("--ssh-identity", type=Path, required=True)
         selected.add_argument("--apply", action="store_true")
         selected.add_argument("--confirm")
+    stage_parser.add_argument(
+        "--stage-attestation-output",
+        type=Path,
+        required=True,
+    )
+    stage_parser.add_argument(
+        "--stage-binding-output",
+        type=Path,
+        required=True,
+    )
     final_transfer_parser.add_argument(
         "--manifest",
         type=Path,
@@ -3197,6 +3358,14 @@ def main(argv: list[str] | None = None) -> int:
                     apply=False,
                     stage=True,
                     confirm=args.confirm,
+                )
+                persist_stage_outputs(
+                    result,
+                    manifest=manifest,
+                    stage_attestation_output=(
+                        args.stage_attestation_output
+                    ),
+                    stage_binding_output=args.stage_binding_output,
                 )
             else:
                 result = run_remote_operation(
