@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import redirect_stdout
+from contextlib import nullcontext, redirect_stdout
 import copy
 import hashlib
 import io
@@ -51,7 +51,7 @@ class SnapshotFixture:
             "source_project": project,
             "containers": dict(MODULE.SOURCE_CONTAINERS),
             "images": {
-                **MODULE.SOURCE_IMAGE_REFERENCES,
+                **MODULE.SOURCE_IMAGE_REFERENCES[role],
                 "restore_postgres": (
                     "trading_bot_postgres_boottime:15-" + NEW_RELEASE_SHA
                 ),
@@ -295,6 +295,155 @@ class ProductionSourceSnapshotTests(unittest.TestCase):
         web = SnapshotFixture(self.root, role="webapp_fi")
         self.assertEqual(web.binding().source_project, "current")
 
+    def test_role_specific_application_image_bindings_are_exact(self):
+        expected = {
+            "bot_fi": "trading_bot_base",
+            "webapp_fi": "trading_bot_base_iran",
+        }
+        for role, application_image in expected.items():
+            with self.subTest(role=role):
+                fixture = SnapshotFixture(self.root, role=role)
+                binding = fixture.binding()
+                self.assertEqual(
+                    binding.images["application"],
+                    application_image,
+                )
+                self.assertEqual(
+                    binding.images["database"],
+                    "postgres:15-alpine",
+                )
+                self.assertEqual(
+                    binding.images["redis"],
+                    "redis:7-alpine",
+                )
+
+                fixture.document["images"]["application"] = expected[
+                    "webapp_fi" if role == "bot_fi" else "bot_fi"
+                ]
+                fixture.write_binding()
+                with self.assertRaisesRegex(
+                    MODULE.SourceSnapshotError,
+                    "image binding",
+                ):
+                    fixture.binding()
+
+    def test_legacy_application_revision_label_is_optional_but_exact(self):
+        for role in MODULE.ROLE_NAMES:
+            fixture = SnapshotFixture(self.root, role=role)
+            binding = fixture.binding()
+            for label, accepted in (
+                (None, True),
+                (LEGACY_RELEASE_SHA, True),
+                (NEW_RELEASE_SHA, False),
+            ):
+                with self.subTest(role=role, revision=label):
+                    identities = {
+                        kind: image_identity(
+                            fixture,
+                            kind,
+                            character,
+                        )
+                        for kind, character in zip(
+                            MODULE.IMAGE_KEYS,
+                            "1234",
+                        )
+                    }
+                    image_documents = {
+                        kind: {
+                            "Id": identity.image_id,
+                            "Config": {"Labels": {}},
+                        }
+                        for kind, identity in identities.items()
+                    }
+                    image_documents["application"]["Config"]["Labels"] = (
+                        None
+                        if label is None
+                        else {
+                            "org.opencontainers.image.revision": label,
+                        }
+                    )
+                    image_documents["restore_postgres"]["Config"][
+                        "Labels"
+                    ] = {
+                        "org.opencontainers.image.revision": NEW_RELEASE_SHA,
+                        "trading-bot.postgres.runtime-uid": "70",
+                        "trading-bot.postgres.runtime-gid": "70",
+                    }
+                    container_documents = {
+                        kind: container_document(
+                            fixture,
+                            kind,
+                            identities[kind],
+                            identifier_character=character,
+                        )
+                        for kind, character in zip(
+                            MODULE.SOURCE_CONTAINERS,
+                            "567",
+                        )
+                    }
+                    volume_documents = {
+                        kind: {
+                            "Name": name,
+                            "Driver": "local",
+                            "Scope": "local",
+                            "Mountpoint": (
+                                f"/var/lib/docker/volumes/{name}/_data"
+                            ),
+                            "Labels": {
+                                "com.docker.compose.project": (
+                                    binding.source_project
+                                ),
+                                "com.docker.compose.volume": (
+                                    MODULE.VOLUME_SUFFIXES[kind]
+                                ),
+                            },
+                            "Options": None,
+                        }
+                        for kind, name in binding.volumes.items()
+                    }
+                    documents = {
+                        "image": {
+                            binding.images[kind]: document
+                            for kind, document in image_documents.items()
+                        },
+                        "container": {
+                            binding.containers[kind]: document
+                            for kind, document in (
+                                container_documents.items()
+                            )
+                        },
+                        "volume": {
+                            binding.volumes[kind]: document
+                            for kind, document in volume_documents.items()
+                        },
+                    }
+
+                    def inspect(kind, name):
+                        return copy.deepcopy(documents[kind][name])
+
+                    context = (
+                        nullcontext()
+                        if accepted
+                        else self.assertRaisesRegex(
+                            MODULE.SourceSnapshotError,
+                            "release label differs",
+                        )
+                    )
+                    with (
+                        mock.patch.object(
+                            MODULE,
+                            "_inspect_required",
+                            side_effect=inspect,
+                        ),
+                        context,
+                    ):
+                        inventory = MODULE.inspect_source(binding)
+                    if accepted:
+                        self.assertEqual(
+                            inventory.images["application"].reference,
+                            binding.images["application"],
+                        )
+
     def test_final_requires_exact_all_vhost_zero_writer_freeze(self):
         final = SnapshotFixture(self.root, mode="frozen-final")
         captured = io.StringIO()
@@ -516,6 +665,27 @@ class ProductionSourceSnapshotTests(unittest.TestCase):
             ),
             self.assertRaisesRegex(
                 MODULE.SourceSnapshotError, "UID/GID"
+            ),
+        ):
+            MODULE._image_identity(
+                binding.images["restore_postgres"],
+                expected_release_sha=NEW_RELEASE_SHA,
+                require_postgres_runtime=True,
+            )
+        image_document["Config"]["Labels"][
+            "trading-bot.postgres.runtime-uid"
+        ] = "70"
+        del image_document["Config"]["Labels"][
+            "org.opencontainers.image.revision"
+        ]
+        with (
+            mock.patch.object(
+                MODULE,
+                "_inspect_required",
+                return_value=image_document,
+            ),
+            self.assertRaisesRegex(
+                MODULE.SourceSnapshotError, "release label differs"
             ),
         ):
             MODULE._image_identity(
