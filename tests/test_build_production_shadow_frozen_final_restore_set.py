@@ -520,7 +520,7 @@ class FrozenFinalRestoreSetFixture:
         claim = {
             "schema": MODULE.LIVE_LEASE_CLAIM_SCHEMA,
             "status": "active",
-            "owner_action": "restore-legacy-writers",
+            "owner_action": "capture-frozen-final-snapshots",
             "operation_id": self.controller["operation_id"],
             "release_sha": self.controller["release_sha"],
             "release_tree_sha": self.controller["release_tree_sha"],
@@ -915,6 +915,22 @@ class FrozenFinalRestoreSetTests(unittest.TestCase):
         with self.assertRaisesRegex(
             MODULE.FrozenFinalRestoreSetError,
             "transport binding differs|readback receipt differs",
+        ):
+            MODULE.build_restore_set(**self.fixture.inputs())
+
+    def test_legacy_restore_owner_action_cannot_authorize_snapshot_set(
+        self,
+    ) -> None:
+        claim = json.loads(self.fixture.claim_path.read_bytes())
+        claim["owner_action"] = "restore-legacy-writers"
+        secure_file(
+            self.fixture.claim_path,
+            canonical_json_bytes(claim),
+        )
+
+        with self.assertRaisesRegex(
+            MODULE.FrozenFinalRestoreSetError,
+            "snapshot-authorization claim",
         ):
             MODULE.build_restore_set(**self.fixture.inputs())
 

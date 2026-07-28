@@ -656,7 +656,7 @@ def _load_snapshot_authorization_claim(
         or set(document) != LIVE_LEASE_FIELDS
         or document["schema"] != LIVE_LEASE_CLAIM_SCHEMA
         or document["status"] != "active"
-        or document["owner_action"] != "restore-legacy-writers"
+        or document["owner_action"] != "capture-frozen-final-snapshots"
         or document["operation_id"] != operation_id
         or document["release_sha"] != controller["release_sha"]
         or document["release_tree_sha"] != controller["release_tree_sha"]
