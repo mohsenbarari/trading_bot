@@ -444,6 +444,225 @@ class CoordinatorTests(unittest.TestCase):
     def install(self) -> dict:
         return self.execute("install")
 
+    def inputs(self) -> coordinator.CoordinatorInputs:
+        return coordinator.load_inputs(
+            **self.paths,
+            known_hosts=self.known_hosts,
+        )
+
+    def live_checkpoint_transcript(
+        self,
+        *,
+        role: str,
+        lease: coordinator.CoordinatorLiveLease,
+        normalized_kinds: tuple[str, ...] = (),
+    ) -> list[dict]:
+        checkpoints = [
+            checkpoint
+            for kind in normalized_kinds
+            for checkpoint in (
+                f"before-stop:{kind}",
+                f"after-stop:{kind}",
+            )
+        ]
+        checkpoints.extend(
+            [
+                checkpoint
+                for kind in coordinator.LEGACY_WRITER_KINDS[role]
+                for checkpoint in (
+                    f"before-start:{kind}",
+                    f"after-start:{kind}",
+                )
+            ]
+        )
+        checkpoints.extend(
+            [
+                "readiness-http:1",
+                "readiness-stability:1",
+                "readiness-stability:2",
+                "readiness-stability:3",
+                "before-result",
+            ]
+        )
+        previous = "0" * 64
+        transcript = []
+        for sequence, checkpoint in enumerate(checkpoints, 1):
+            challenge = {
+                "schema": (
+                    coordinator.LEGACY_WRITER_LIVE_CHALLENGE_SCHEMA
+                ),
+                "status": "controller-response-required",
+                "operation_id": OPERATION_ID,
+                "release_sha": RELEASE_SHA,
+                "role": role,
+                "live_lease_claim_sha256": lease.claim_sha256,
+                "live_lease_claim_epoch": lease.claim["claim_epoch"],
+                "sequence": sequence,
+                "checkpoint": checkpoint,
+                "challenge_nonce": hashlib.sha256(
+                    f"challenge:{role}:{sequence}".encode("ascii")
+                ).hexdigest(),
+                "previous_transcript_sha256": previous,
+            }
+            response = {
+                "schema": (
+                    coordinator.LEGACY_WRITER_LIVE_RESPONSE_SCHEMA
+                ),
+                "status": "controller-flock-verified",
+                **{
+                    key: challenge[key]
+                    for key in challenge
+                    if key not in {"schema", "status"}
+                },
+                "challenge_sha256": hashlib.sha256(
+                    canonical_json_bytes(challenge)
+                ).hexdigest(),
+                "controller_flock_verified": True,
+                "response_nonce": hashlib.sha256(
+                    f"response:{role}:{sequence}".encode("ascii")
+                ).hexdigest(),
+            }
+            entry = {
+                "challenge": challenge,
+                "response": response,
+                "entry_sha256": "0" * 64,
+            }
+            entry["entry_sha256"] = (
+                coordinator._legacy_writer_transcript_entry_sha256(
+                    entry
+                )
+            )
+            transcript.append(entry)
+            previous = entry["entry_sha256"]
+        return transcript
+
+    def readiness_receipt(
+        self,
+        lease: coordinator.CoordinatorLiveLease,
+        name: str = "writers-ready",
+        normalized_kinds: dict[str, tuple[str, ...]] | None = None,
+    ) -> tuple[Path, str]:
+        path = self.root / f"{name}.json"
+        inputs = self.inputs()
+        claim = lease.claim
+        roles = {}
+        for role in coordinator.ROLE_ORDER:
+            expected_count = coordinator.LEGACY_WRITER_COUNTS[role]
+            transcript = self.live_checkpoint_transcript(
+                role=role,
+                lease=lease,
+                normalized_kinds=(
+                    normalized_kinds.get(role, ())
+                    if normalized_kinds is not None
+                    else ()
+                ),
+            )
+            restored_result = {
+                "schema": coordinator.LEGACY_WRITER_RESULT_SCHEMA,
+                "status": "restored-ready",
+                "action": "restore",
+                "operation_id": OPERATION_ID,
+                "release_sha": RELEASE_SHA,
+                "legacy_release_sha": "b" * 40,
+                "role": role,
+                "binding_sha256": (
+                    ("5" if role == "bot_fi" else "6") * 64
+                ),
+                "nginx_manifest_sha256": (
+                    inputs.roles[role].manifest_sha256
+                ),
+                "nginx_aggregate_sha256": inputs.aggregate_sha256,
+                "coordinated_state_receipt_sha256": claim[
+                    "legacy_frozen_receipt_sha256"
+                ],
+                "live_lease_claim_sha256": lease.claim_sha256,
+                "live_lease_claim_epoch": claim["claim_epoch"],
+                "role_freeze_generation_sha256": claim[
+                    "receipt_role_generation_sha256"
+                ][role],
+                "freeze_generation_sha256": claim[
+                    "receipt_global_generation_sha256"
+                ],
+                "journal_sha256": (
+                    ("7" if role == "bot_fi" else "8") * 64
+                ),
+                "freeze_evidence_sha256": None,
+                "freeze_evidence_revoked": True,
+                "all_exact_writer_containers_ready": True,
+                "expected_writer_container_count": expected_count,
+                "legacy_writer_process_count": None,
+                "writer_database_client_count": None,
+                "file_mutator_process_count": None,
+                "database_container_running": True,
+                "redis_container_running": True,
+                "application_http_status": 200,
+                "legacy_ready_for_nginx_restore": True,
+                "ready_writer_container_count": expected_count,
+                "readiness_sha256": (
+                    ("3" if role == "bot_fi" else "4") * 64
+                ),
+                "stable_sample_count": 3,
+                "interactive_lease_checkpoint_count": len(transcript),
+                "interactive_lease_transcript": transcript,
+                "interactive_lease_transcript_sha256": transcript[-1][
+                    "entry_sha256"
+                ],
+                "interactive_lease_authority_handoff_complete": True,
+                "production_mutated": True,
+            }
+            roles[role] = {
+                "restored_ready_result": restored_result,
+                "restored_ready_result_sha256": hashlib.sha256(
+                    canonical_json_bytes(restored_result)
+                ).hexdigest(),
+                **{
+                    field: restored_result[field]
+                    for field in (
+                        "status",
+                        "legacy_ready_for_nginx_restore",
+                        "freeze_evidence_sha256",
+                        "freeze_evidence_revoked",
+                        "all_exact_writer_containers_ready",
+                        "expected_writer_container_count",
+                        "ready_writer_container_count",
+                        "readiness_sha256",
+                        "stable_sample_count",
+                        "application_http_status",
+                        "database_container_running",
+                        "redis_container_running",
+                        "production_mutated",
+                    )
+                },
+            }
+        _write_private(
+            path,
+            canonical_json_bytes(
+                {
+                    "schema": (
+                        coordinator.LEGACY_WRITER_READINESS_SET_SCHEMA
+                    ),
+                    "status": "legacy-writers-ready",
+                    "operation_id": OPERATION_ID,
+                    "release_sha": RELEASE_SHA,
+                    "release_tree_sha": RELEASE_TREE_SHA,
+                    "aggregate_sha256": hashlib.sha256(
+                        self.aggregate.read_bytes()
+                    ).hexdigest(),
+                    "live_lease_claim_sha256": lease.claim_sha256,
+                    "live_lease_claim_nonce": claim["nonce"],
+                    "live_lease_claim_epoch": claim["claim_epoch"],
+                    "legacy_frozen_receipt_sha256": claim[
+                        "legacy_frozen_receipt_sha256"
+                    ],
+                    "roles": roles,
+                    "roles_sha256": hashlib.sha256(
+                        canonical_json_bytes(roles)
+                    ).hexdigest(),
+                }
+            ),
+        )
+        return path, hashlib.sha256(path.read_bytes()).hexdigest()
+
     def test_plan_and_cli_are_exact_and_inert(self) -> None:
         def forbidden_runner(argv, timeout):
             raise AssertionError((argv, timeout))
@@ -487,6 +706,23 @@ class CoordinatorTests(unittest.TestCase):
                 action="install",
                 apply=True,
                 confirm="wrong",
+                runner=forbidden_runner,
+            )
+
+        rollback_plan = coordinator.execute_coordinator(
+            **self.paths,
+            known_hosts=self.known_hosts,
+            action="rollback-freeze",
+            target_state="legacy-frozen",
+            runner=forbidden_runner,
+        )
+        self.assertEqual(rollback_plan["status"], "planned")
+        with self.assertRaises(coordinator.NginxCoordinatorError):
+            coordinator.execute_coordinator(
+                **self.paths,
+                known_hosts=self.known_hosts,
+                action="rollback-freeze",
+                target_state="shadow-readonly",
                 runner=forbidden_runner,
             )
 
@@ -673,9 +909,56 @@ class CoordinatorTests(unittest.TestCase):
                 hashlib.sha256(self.aggregate.read_bytes()).hexdigest(),
             )
 
-        restored = self.execute("restore")
-        self.assertEqual(restored["status"], "restored")
-        self.assertEqual(restored["state"], "legacy-normal")
+        inputs = self.inputs()
+        with coordinator.hold_coordinator_live_lease(
+            inputs=inputs,
+            owner_action="restore-legacy-writers",
+            legacy_frozen_receipt_path=receipt_path,
+            legacy_frozen_receipt_sha256=digest,
+        ) as lease:
+            verified = lease.verify()
+            self.assertEqual(verified["phase"], "legacy-frozen")
+            self.assertTrue(
+                verified["controller_lock_authority_observed"]
+            )
+            with self.assertRaisesRegex(
+                coordinator.NginxCoordinatorError,
+                "outside its owner action",
+            ):
+                lease.consume(
+                    outcome="handoff-shadow-readonly",
+                    outcome_sha256="8" * 64,
+                )
+            with self.assertRaisesRegex(
+                coordinator.NginxCoordinatorError,
+                "lock is busy",
+            ):
+                self.execute("readback")
+            with self.assertRaisesRegex(
+                coordinator.NginxCoordinatorError,
+                "lock is busy",
+            ):
+                with coordinator._CoordinatorLock(  # noqa: SLF001
+                    inputs.coordinator_root
+                ):
+                    pass
+            ready_path, ready_sha256 = self.readiness_receipt(lease)
+            restored = lease.restore_legacy_normal(
+                readiness_receipt_path=ready_path,
+                readiness_receipt_sha256=ready_sha256,
+                runner=self.runner,
+            )
+            self.assertEqual(restored["status"], "restored")
+            self.assertEqual(restored["state"], "legacy-normal")
+            consumption_path, consumption_sha256 = lease.consume(
+                outcome="legacy-restored",
+                outcome_sha256="8" * 64,
+            )
+            self.assertEqual(
+                stat.S_IMODE(consumption_path.stat().st_mode),
+                0o600,
+            )
+            self.assertRegex(consumption_sha256, r"^[0-9a-f]{64}$")
         self.assertEqual(set(self.runner.states.values()), {"legacy-normal"})
 
     def test_readonly_partial_stays_blocked_and_resumes_same_target(self) -> None:
@@ -769,42 +1052,616 @@ class CoordinatorTests(unittest.TestCase):
         self.assertEqual(resumed["status"], "activated")
         self.assertEqual(set(self.runner.states.values()), {"shadow-writable"})
 
-    def test_restore_partial_is_resumable_without_probing_normal_host_writes(
+    def test_readonly_rollback_freezes_first_then_ready_restore_is_resumable(
         self,
     ) -> None:
         self.install()
         self.execute("activate", "legacy-frozen")
-        self.execute("activate", "shadow-readonly")
-        self.runner.fail_once("webapp_fi", "restore", None)
-        partial = self.execute("restore")
-        self.assertEqual(partial["status"], "restore-partial-resumable")
+        readonly = self.execute("activate", "shadow-readonly")
+        readonly_path = Path(readonly["state_receipt_path"])
+        readonly_sha256 = readonly["state_receipt_sha256"]
+        inputs = self.inputs()
+
+        self.runner.fail_once(
+            "webapp_fi",
+            "rollback-freeze",
+            "legacy-frozen",
+        )
+        with self.assertRaises(
+            coordinator.NginxCoordinatorRollbackPending
+        ) as blocked:
+            with coordinator.hold_coordinator_rollback_live_lease(
+                inputs=inputs,
+                shadow_readonly_receipt_path=readonly_path,
+                shadow_readonly_receipt_sha256=readonly_sha256,
+                runner=self.runner,
+            ):
+                pass
+        partial = blocked.exception.result
+        self.assertEqual(
+            partial["status"],
+            "rollback-freeze-partial-resumable",
+        )
+        self.assertEqual(
+            partial["policy"],
+            "rollback-to-frozen-write-blocked",
+        )
         self.assertTrue(partial["active_configuration_mutated"])
         self.assertEqual(
             self.runner.states,
             {
-                "bot_fi": "legacy-normal",
+                "bot_fi": "legacy-frozen",
                 "webapp_fi": "shadow-readonly",
             },
         )
-        self.assertEqual(
-            set(
-                partial["external_readback"]["vhosts"][
-                    "coin.362514.ir"
-                ]
-            ),
-            {"get"},
-        )
-        self.assertEqual(
-            set(
-                partial["external_readback"]["vhosts"][
-                    "coin.gold-trade.ir"
-                ]
-            ),
-            {"get", "post", "websocket"},
-        )
-        resumed = self.execute("restore")
-        self.assertEqual(resumed["status"], "restored")
+        for probes in partial["external_readback"]["vhosts"].values():
+            self.assertEqual(
+                set(probes),
+                {"get", "post", "websocket"},
+            )
+            self.assertEqual(probes["post"], 503)
+            self.assertEqual(probes["websocket"], 503)
+        before_retry = len(self.runner.calls)
+        with self.assertRaisesRegex(
+            coordinator.NginxCoordinatorError,
+            "locked rollback live lease API",
+        ):
+            self.execute("readback")
+        self.assertEqual(len(self.runner.calls), before_retry)
+
+        with coordinator.hold_coordinator_rollback_live_lease(
+            inputs=inputs,
+            shadow_readonly_receipt_path=readonly_path,
+            shadow_readonly_receipt_sha256=readonly_sha256,
+            runner=self.runner,
+        ) as lease:
+            self.assertEqual(
+                lease.transition_result["status"],
+                "rollback-frozen",
+            )
+            self.assertEqual(
+                set(self.runner.states.values()),
+                {"legacy-frozen"},
+            )
+            before_restore = len(self.runner.host_calls)
+            with self.assertRaises(coordinator.NginxCoordinatorError):
+                lease.consume(
+                    outcome="legacy-restored",
+                    outcome_sha256="8" * 64,
+                )
+            self.assertEqual(
+                self.runner.host_calls[before_restore:],
+                [],
+            )
+            with self.assertRaises(coordinator.NginxCoordinatorError):
+                lease.restore_legacy_normal(
+                    readiness_receipt_path=(
+                        self.root / "missing-readiness.json"
+                    ),
+                    readiness_receipt_sha256="e" * 64,
+                    runner=self.runner,
+                )
+            self.assertEqual(
+                self.runner.host_calls[before_restore:],
+                [],
+            )
+            opaque_path = self.root / "opaque-readiness.json"
+            _write_private(
+                opaque_path,
+                canonical_json_bytes(
+                    {"schema": "opaque-v1", "status": "ready"}
+                ),
+            )
+            with self.assertRaisesRegex(
+                coordinator.NginxCoordinatorError,
+                "readiness set identity",
+            ):
+                lease.restore_legacy_normal(
+                    readiness_receipt_path=opaque_path,
+                    readiness_receipt_sha256=hashlib.sha256(
+                        opaque_path.read_bytes()
+                    ).hexdigest(),
+                    runner=self.runner,
+                )
+            self.assertEqual(
+                self.runner.host_calls[before_restore:],
+                [],
+            )
+            invalid_stop_path, invalid_stop_sha256 = self.readiness_receipt(
+                lease,
+                "invalid-stop-order",
+                normalized_kinds={
+                    "bot_fi": ("bot", "application"),
+                },
+            )
+            with self.assertRaisesRegex(
+                coordinator.NginxCoordinatorError,
+                "checkpoint semantics differ",
+            ):
+                lease.restore_legacy_normal(
+                    readiness_receipt_path=invalid_stop_path,
+                    readiness_receipt_sha256=invalid_stop_sha256,
+                    runner=self.runner,
+                )
+            self.assertEqual(
+                self.runner.host_calls[before_restore:],
+                [],
+            )
+            ready_path, ready_sha256 = self.readiness_receipt(
+                lease,
+                normalized_kinds={
+                    "bot_fi": ("application", "sync_worker"),
+                    "webapp_fi": ("application", "sync_worker"),
+                },
+            )
+            tampered_path = self.root / "tampered-readiness-set.json"
+            tampered_set = json.loads(ready_path.read_text())
+            tampered_row = tampered_set["roles"]["webapp_fi"]
+            tampered_row["ready_writer_container_count"] = 1
+            tampered_row["restored_ready_result"][
+                "ready_writer_container_count"
+            ] = 1
+            tampered_row["restored_ready_result_sha256"] = (
+                hashlib.sha256(
+                    canonical_json_bytes(
+                        tampered_row["restored_ready_result"]
+                    )
+                ).hexdigest()
+            )
+            tampered_set["roles_sha256"] = hashlib.sha256(
+                canonical_json_bytes(tampered_set["roles"])
+            ).hexdigest()
+            _write_private(
+                tampered_path,
+                canonical_json_bytes(tampered_set),
+            )
+            with self.assertRaisesRegex(
+                coordinator.NginxCoordinatorError,
+                "restored-ready result semantics",
+            ):
+                lease.restore_legacy_normal(
+                    readiness_receipt_path=tampered_path,
+                    readiness_receipt_sha256=hashlib.sha256(
+                        tampered_path.read_bytes()
+                    ).hexdigest(),
+                    runner=self.runner,
+                )
+            self.assertEqual(
+                self.runner.host_calls[before_restore:],
+                [],
+            )
+            transcript_tampered_path = (
+                self.root / "tampered-live-transcript.json"
+            )
+            transcript_tampered = json.loads(ready_path.read_text())
+            transcript_row = transcript_tampered["roles"]["bot_fi"]
+            transcript_row["restored_ready_result"][
+                "interactive_lease_transcript"
+            ][0]["challenge"]["challenge_nonce"] = "e" * 64
+            transcript_row["restored_ready_result_sha256"] = (
+                hashlib.sha256(
+                    canonical_json_bytes(
+                        transcript_row["restored_ready_result"]
+                    )
+                ).hexdigest()
+            )
+            transcript_tampered["roles_sha256"] = hashlib.sha256(
+                canonical_json_bytes(transcript_tampered["roles"])
+            ).hexdigest()
+            _write_private(
+                transcript_tampered_path,
+                canonical_json_bytes(transcript_tampered),
+            )
+            with self.assertRaisesRegex(
+                coordinator.NginxCoordinatorError,
+                "transcript binding differs",
+            ):
+                lease.restore_legacy_normal(
+                    readiness_receipt_path=transcript_tampered_path,
+                    readiness_receipt_sha256=hashlib.sha256(
+                        transcript_tampered_path.read_bytes()
+                    ).hexdigest(),
+                    runner=self.runner,
+                )
+            self.assertEqual(
+                self.runner.host_calls[before_restore:],
+                [],
+            )
+            self.runner.fail_once("webapp_fi", "restore", None)
+            restore_partial = lease.restore_legacy_normal(
+                readiness_receipt_path=ready_path,
+                readiness_receipt_sha256=ready_sha256,
+                runner=self.runner,
+            )
+            self.assertEqual(
+                restore_partial["status"],
+                "restore-partial-resumable",
+            )
+            self.assertEqual(
+                self.runner.states,
+                {
+                    "bot_fi": "legacy-normal",
+                    "webapp_fi": "legacy-frozen",
+                },
+            )
+            resumed = lease.restore_legacy_normal(
+                readiness_receipt_path=ready_path,
+                readiness_receipt_sha256=ready_sha256,
+                runner=self.runner,
+            )
+            self.assertEqual(resumed["status"], "restored")
+            lease.consume(
+                outcome="legacy-restored",
+                outcome_sha256="9" * 64,
+            )
         self.assertEqual(set(self.runner.states.values()), {"legacy-normal"})
+
+    def test_live_lease_crash_blocks_and_exact_resume_consumes_same_claim(
+        self,
+    ) -> None:
+        self.install()
+        frozen = self.execute("activate", "legacy-frozen")
+        receipt_path = Path(frozen["state_receipt_path"])
+        receipt_sha256 = frozen["state_receipt_sha256"]
+        inputs = self.inputs()
+        lease_identity: dict[str, object] = {}
+        with self.assertRaisesRegex(RuntimeError, "simulated crash"):
+            with coordinator.hold_coordinator_live_lease(
+                inputs=inputs,
+                owner_action="capture-frozen-final-snapshots",
+                legacy_frozen_receipt_path=receipt_path,
+                legacy_frozen_receipt_sha256=receipt_sha256,
+            ) as lease:
+                lease_identity = {
+                    "path": lease.claim_path,
+                    "sha256": lease.claim_sha256,
+                    "nonce": lease.claim["nonce"],
+                    "payload": lease.claim_payload,
+                }
+                observed = coordinator.load_unconsumed_live_lease_claim(
+                    inputs,
+                    claim_path=lease.claim_path,
+                    expected_claim_sha256=lease.claim_sha256,
+                    expected_nonce=lease.claim["nonce"],
+                )
+                self.assertEqual(observed["phase"], "legacy-frozen")
+                self.assertFalse(
+                    observed["controller_lock_authority_observed"]
+                )
+                with self.assertRaisesRegex(
+                    coordinator.NginxCoordinatorError,
+                    "cannot restore legacy writers",
+                ):
+                    lease.restore_legacy_normal(
+                        readiness_receipt_path=Path("/not-authorized"),
+                        readiness_receipt_sha256="7" * 64,
+                        runner=self.runner,
+                    )
+                with self.assertRaisesRegex(
+                    coordinator.NginxCoordinatorError,
+                    "outside its owner action",
+                ):
+                    lease.consume(
+                        outcome="legacy-restored",
+                        outcome_sha256="7" * 64,
+                    )
+                before = len(self.runner.calls)
+                with self.assertRaisesRegex(
+                    coordinator.NginxCoordinatorError,
+                    "lock is busy",
+                ):
+                    self.execute("readback")
+                self.assertEqual(len(self.runner.calls), before)
+                raise RuntimeError("simulated crash")
+
+        before = len(self.runner.calls)
+        with self.assertRaisesRegex(
+            coordinator.NginxCoordinatorError,
+            "reconciliation",
+        ):
+            self.execute("readback")
+        self.assertEqual(len(self.runner.calls), before)
+
+        remote_copy = self.root / "remote-live-lease-copy"
+        remote_copy.mkdir(mode=0o700)
+        copied_claim = (
+            remote_copy / f"{lease_identity['sha256']}.json"
+        )
+        _write_private(copied_claim, lease_identity["payload"])
+        copied_receipt = remote_copy / "legacy-frozen-receipt.json"
+        _write_private(copied_receipt, receipt_path.read_bytes())
+        copied, copied_sha256 = (
+            coordinator.load_live_lease_claim_material(
+                copied_claim,
+                state_receipt_path=copied_receipt,
+                expected_claim_sha256=lease_identity["sha256"],
+                expected_state_receipt_sha256=receipt_sha256,
+                operation_id=OPERATION_ID,
+                release_sha=RELEASE_SHA,
+                release_tree_sha=RELEASE_TREE_SHA,
+                aggregate_sha256=hashlib.sha256(
+                    self.aggregate.read_bytes()
+                ).hexdigest(),
+            )
+        )
+        self.assertEqual(copied["nonce"], lease_identity["nonce"])
+        self.assertEqual(copied_sha256, lease_identity["sha256"])
+
+        with self.assertRaisesRegex(
+            coordinator.NginxCoordinatorError,
+            "nonce differs",
+        ):
+            with coordinator.resume_coordinator_live_lease(
+                inputs=inputs,
+                expected_owner_action=(
+                    "capture-frozen-final-snapshots"
+                ),
+                claim_path=lease_identity["path"],
+                expected_claim_sha256=lease_identity["sha256"],
+                expected_nonce="f" * 64,
+            ):
+                pass
+        with self.assertRaisesRegex(
+            coordinator.NginxCoordinatorError,
+            "digest or nonce differs",
+        ):
+            with coordinator.resume_coordinator_live_lease(
+                inputs=inputs,
+                expected_owner_action="restore-legacy-writers",
+                claim_path=lease_identity["path"],
+                expected_claim_sha256=lease_identity["sha256"],
+                expected_nonce=lease_identity["nonce"],
+            ):
+                pass
+
+        claim_path = lease_identity["path"]
+        claim_path.chmod(0o644)
+        with self.assertRaises(coordinator.NginxCoordinatorError):
+            with coordinator.resume_coordinator_live_lease(
+                inputs=inputs,
+                expected_owner_action=(
+                    "capture-frozen-final-snapshots"
+                ),
+                claim_path=claim_path,
+                expected_claim_sha256=lease_identity["sha256"],
+                expected_nonce=lease_identity["nonce"],
+            ):
+                pass
+        claim_path.chmod(0o600)
+
+        saved = self.root / "saved-live-lease-claim.json"
+        claim_path.rename(saved)
+        claim_path.symlink_to(saved)
+        with self.assertRaises(coordinator.NginxCoordinatorError):
+            with coordinator.resume_coordinator_live_lease(
+                inputs=inputs,
+                expected_owner_action=(
+                    "capture-frozen-final-snapshots"
+                ),
+                claim_path=claim_path,
+                expected_claim_sha256=lease_identity["sha256"],
+                expected_nonce=lease_identity["nonce"],
+            ):
+                pass
+        claim_path.unlink()
+        saved.rename(claim_path)
+
+        original = claim_path.read_bytes()
+        tampered = json.loads(original)
+        tampered["controller_pid"] += 1
+        _write_private(claim_path, canonical_json_bytes(tampered))
+        with self.assertRaises(coordinator.NginxCoordinatorError):
+            with coordinator.resume_coordinator_live_lease(
+                inputs=inputs,
+                expected_owner_action=(
+                    "capture-frozen-final-snapshots"
+                ),
+                claim_path=claim_path,
+                expected_claim_sha256=lease_identity["sha256"],
+                expected_nonce=lease_identity["nonce"],
+            ):
+                pass
+        _write_private(claim_path, original)
+
+        resumed_handle = None
+        with coordinator.reconcile_coordinator_live_lease(
+            inputs=inputs,
+            expected_owner_action="capture-frozen-final-snapshots",
+            claim_path=claim_path,
+            expected_claim_sha256=lease_identity["sha256"],
+            expected_nonce=lease_identity["nonce"],
+        ) as resumed:
+            resumed_handle = resumed
+            self.assertEqual(resumed.claim_payload, lease_identity["payload"])
+            consumption_path = (
+                inputs.coordinator_root
+                / "live-leases"
+                / "consumptions"
+                / f"{resumed.claim_sha256}.json"
+            )
+            consumption_path.symlink_to(claim_path)
+            with self.assertRaises(coordinator.NginxCoordinatorError):
+                resumed.consume(
+                    outcome="handoff-shadow-readonly",
+                    outcome_sha256="a" * 64,
+                )
+            consumption_path.unlink()
+            resumed.consume(
+                outcome="handoff-shadow-readonly",
+                outcome_sha256="a" * 64,
+            )
+        with self.assertRaisesRegex(
+            coordinator.NginxCoordinatorError,
+            "lock is not held",
+        ):
+            resumed_handle.verify()
+        self.assertEqual(
+            len(
+                list(
+                    (
+                        inputs.coordinator_root
+                        / "live-leases"
+                        / "claims"
+                    ).glob("*.json")
+                )
+            ),
+            1,
+        )
+        with self.assertRaises(coordinator.NginxCoordinatorError):
+            coordinator.load_unconsumed_live_lease_claim(
+                inputs,
+                claim_path=claim_path,
+                expected_claim_sha256=lease_identity["sha256"],
+                expected_nonce=lease_identity["nonce"],
+            )
+        self.assertEqual(self.execute("readback")["state"], "legacy-frozen")
+
+    def test_final_shadow_restore_owner_is_least_privilege(self) -> None:
+        self.install()
+        frozen = self.execute("activate", "legacy-frozen")
+        receipt_path = Path(frozen["state_receipt_path"])
+        receipt_sha256 = frozen["state_receipt_sha256"]
+        inputs = self.inputs()
+        with coordinator.hold_coordinator_live_lease(
+            inputs=inputs,
+            owner_action="restore-shadow-frozen-final",
+            legacy_frozen_receipt_path=receipt_path,
+            legacy_frozen_receipt_sha256=receipt_sha256,
+        ) as lease:
+            self.assertEqual(lease.verify()["phase"], "legacy-frozen")
+            for forbidden_outcome in (
+                "handoff-shadow-readonly",
+                "legacy-restored",
+            ):
+                with self.assertRaisesRegex(
+                    coordinator.NginxCoordinatorError,
+                    "outside its owner action",
+                ):
+                    lease.consume(
+                        outcome=forbidden_outcome,
+                        outcome_sha256="c" * 64,
+                    )
+            consumption_path, consumption_sha256 = lease.consume(
+                outcome="frozen-final-shadow-restored",
+                outcome_sha256="c" * 64,
+            )
+            audit = json.loads(consumption_path.read_text())
+            self.assertEqual(audit["final_state"], "legacy-frozen")
+            self.assertEqual(
+                audit["final_state_receipt_sha256"],
+                receipt_sha256,
+            )
+            self.assertIsNone(audit["readiness_audit_sha256"])
+            self.assertRegex(consumption_sha256, r"^[0-9a-f]{64}$")
+        self.assertEqual(self.execute("readback")["state"], "legacy-frozen")
+
+    def test_rollback_r2_and_normal_receipt_crashes_resume_without_new_claim(
+        self,
+    ) -> None:
+        self.install()
+        self.execute("activate", "legacy-frozen")
+        readonly = self.execute("activate", "shadow-readonly")
+        readonly_path = Path(readonly["state_receipt_path"])
+        readonly_sha256 = readonly["state_receipt_sha256"]
+        inputs = self.inputs()
+
+        original_persist = coordinator._persist_state_receipt  # noqa: SLF001
+        with mock.patch.object(
+            coordinator,
+            "_persist_state_receipt",
+            side_effect=coordinator.NginxCoordinatorError(
+                "simulated R2 persistence crash"
+            ),
+        ):
+            with self.assertRaisesRegex(
+                coordinator.NginxCoordinatorError,
+                "simulated R2",
+            ):
+                with coordinator.hold_coordinator_rollback_live_lease(
+                    inputs=inputs,
+                    shadow_readonly_receipt_path=readonly_path,
+                    shadow_readonly_receipt_sha256=readonly_sha256,
+                    runner=self.runner,
+                ):
+                    pass
+        self.assertEqual(set(self.runner.states.values()), {"legacy-frozen"})
+        self.assertEqual(
+            list(
+                (
+                    inputs.coordinator_root
+                    / "live-leases"
+                    / "claims"
+                ).glob("*.json")
+            ),
+            [],
+        )
+
+        lease_identity: dict[str, object] = {}
+        with self.assertRaisesRegex(
+            coordinator.NginxCoordinatorError,
+            "unconsumed",
+        ):
+            with coordinator.hold_coordinator_rollback_live_lease(
+                inputs=inputs,
+                shadow_readonly_receipt_path=readonly_path,
+                shadow_readonly_receipt_sha256=readonly_sha256,
+                runner=self.runner,
+            ) as lease:
+                lease_identity = {
+                    "path": lease.claim_path,
+                    "sha256": lease.claim_sha256,
+                    "nonce": lease.claim["nonce"],
+                }
+                ready_path, ready_sha256 = self.readiness_receipt(
+                    lease,
+                    "writers-ready-after-r2"
+                )
+                with mock.patch.object(
+                    coordinator,
+                    "_persist_state_receipt",
+                    side_effect=coordinator.NginxCoordinatorError(
+                        "simulated normal receipt crash"
+                    ),
+                ):
+                    with self.assertRaisesRegex(
+                        coordinator.NginxCoordinatorError,
+                        "simulated normal",
+                    ):
+                        lease.restore_legacy_normal(
+                            readiness_receipt_path=ready_path,
+                            readiness_receipt_sha256=ready_sha256,
+                            runner=self.runner,
+                        )
+                self.assertEqual(
+                    set(self.runner.states.values()),
+                    {"legacy-normal"},
+                )
+        self.assertIs(
+            coordinator._persist_state_receipt,  # noqa: SLF001
+            original_persist,
+        )
+
+        with coordinator.resume_coordinator_live_lease(
+            inputs=inputs,
+            expected_owner_action="restore-legacy-writers",
+            claim_path=lease_identity["path"],
+            expected_claim_sha256=lease_identity["sha256"],
+            expected_nonce=lease_identity["nonce"],
+        ) as resumed:
+            ready_path, ready_sha256 = self.readiness_receipt(
+                resumed,
+                "writers-ready-after-r2"
+            )
+            result = resumed.restore_legacy_normal(
+                readiness_receipt_path=ready_path,
+                readiness_receipt_sha256=ready_sha256,
+                runner=self.runner,
+            )
+            self.assertEqual(result["status"], "already-restored")
+            resumed.consume(
+                outcome="legacy-restored",
+                outcome_sha256="b" * 64,
+            )
 
     def test_input_remote_worker_and_evidence_tampering_fail_closed(self) -> None:
         aggregate_document = json.loads(self.aggregate.read_text())

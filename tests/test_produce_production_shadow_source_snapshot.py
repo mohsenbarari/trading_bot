@@ -95,6 +95,7 @@ class SnapshotFixture:
                 "redis": "3" * 64,
             },
             "freeze_generation_sha256": "4" * 64,
+            "live_lease_claim_sha256": "5" * 64,
             "freeze_active": True,
             "write_capable_route_count": 0,
             "legacy_writer_process_count": 0,
@@ -457,7 +458,10 @@ class ProductionSourceSnapshotTests(unittest.TestCase):
                 ]
             )
         self.assertEqual(status, 1)
-        self.assertIn("requires --freeze-evidence", captured.getvalue())
+        self.assertIn(
+            "requires freeze evidence and live lease claim material",
+            captured.getvalue(),
+        )
 
         freeze_path = final.write_freeze()
         document, digest = MODULE.load_freeze_evidence(
@@ -469,6 +473,15 @@ class ProductionSourceSnapshotTests(unittest.TestCase):
             "webapp_fi": ["coin.gold-trade.ir"],
         })
         self.assertRegex(digest, r"^[0-9a-f]{64}$")
+        with self.assertRaisesRegex(
+            MODULE.SourceSnapshotError,
+            "live lease claim differs",
+        ):
+            MODULE.load_freeze_evidence(
+                freeze_path,
+                final.binding(),
+                live_lease_claim_sha256="6" * 64,
+            )
 
         poisoned = final.freeze_document()
         poisoned["writer_database_client_count"] = 1
@@ -491,6 +504,184 @@ class ProductionSourceSnapshotTests(unittest.TestCase):
                 freeze_path,
                 final.binding(),
             )
+
+    def test_frozen_final_execute_requires_live_freeze_verifier(self):
+        final = SnapshotFixture(self.root, mode="frozen-final")
+        output_root = self.root / "frozen-output"
+        output_root.mkdir(mode=0o700)
+        freeze_path = final.write_freeze()
+        _freeze, freeze_sha256 = MODULE.load_freeze_evidence(
+            freeze_path,
+            final.binding(),
+        )
+        with (
+            mock.patch.object(
+                MODULE,
+                "inspect_source",
+                side_effect=AssertionError(
+                    "source inspected before live freeze verification"
+                ),
+            ),
+            self.assertRaisesRegex(
+                MODULE.SourceSnapshotError,
+                "live freeze verifier",
+            ),
+        ):
+            MODULE.execute(
+                final.binding(),
+                output_root=output_root,
+                freeze_path=freeze_path,
+                freeze_sha256=freeze_sha256,
+            )
+
+    def test_frozen_final_reverifies_after_manifest_before_publish(self):
+        final = SnapshotFixture(self.root, mode="frozen-final")
+        binding = final.binding()
+        output_root = self.root / "frozen-publish-boundary"
+        output_root.mkdir(mode=0o700)
+        paths = MODULE.output_paths(output_root, binding)
+        freeze_path = final.write_freeze()
+        _freeze, freeze_sha256 = MODULE.load_freeze_evidence(
+            freeze_path,
+            binding,
+        )
+        inventory = MODULE.SourceInventory(
+            containers={
+                kind: {"id": character * 64}
+                for kind, character in zip(
+                    MODULE.SOURCE_CONTAINERS,
+                    "123",
+                )
+            },
+            images={
+                "restore_postgres": image_identity(
+                    final,
+                    "restore_postgres",
+                    "4",
+                )
+            },
+            volumes={
+                kind: {"mountpoint": f"/unused/{kind}"}
+                for kind in MODULE.VOLUME_KEYS
+            },
+            canonical_sha256="5" * 64,
+        )
+        descriptors = [
+            os.open("/dev/null", os.O_RDONLY)
+            for _kind in MODULE.VOLUME_KEYS
+        ]
+        held = [
+            MODULE.HeldVolume(
+                kind=kind,
+                name=binding.volumes[kind],
+                mountpoint=Path(f"/unused/{kind}"),
+                descriptor=descriptor,
+                stat_fields=(1,),
+                inspect_sha256="6" * 64,
+            )
+            for kind, descriptor in zip(MODULE.VOLUME_KEYS, descriptors)
+        ]
+        verifier_calls = 0
+
+        def verify_freeze() -> dict[str, int]:
+            nonlocal verifier_calls
+            verifier_calls += 1
+            if verifier_calls == 3:
+                self.assertTrue(
+                    (paths.staging / MODULE.MANIFEST_FILE).is_file()
+                )
+                raise MODULE.SourceSnapshotError(
+                    "freeze drift at publish boundary"
+                )
+            return {
+                "legacy_writer_process_count": 0,
+                "writer_database_client_count": 0,
+                "file_mutator_process_count": 0,
+            }
+
+        file_snapshot = MODULE.FileSnapshot(
+            artifact_sha256="7" * 64,
+            artifact_bytes=1,
+            tree_sha256="8" * 64,
+            member_count=1,
+            expanded_bytes=1,
+            stable_attempt=1,
+        )
+        with (
+            mock.patch.object(
+                MODULE,
+                "inspect_source",
+                side_effect=(inventory, inventory),
+            ),
+            mock.patch.object(MODULE, "_validate_output_separation"),
+            mock.patch.object(
+                MODULE,
+                "load_freeze_evidence",
+                return_value=(final.freeze_document(), freeze_sha256),
+            ),
+            mock.patch.object(
+                MODULE,
+                "hold_volume",
+                side_effect=held,
+            ),
+            mock.patch.object(
+                MODULE,
+                "_source_database_environment",
+                return_value=("trading_bot", "trading_bot"),
+            ),
+            mock.patch.object(
+                MODULE,
+                "create_database_dump",
+                return_value=("9" * 64, 1),
+            ),
+            mock.patch.object(
+                MODULE,
+                "snapshot_file_volume",
+                return_value=file_snapshot,
+            ),
+            mock.patch.object(
+                MODULE,
+                "redis_rollback_metadata",
+                return_value={"restore": False},
+            ),
+            mock.patch.object(
+                MODULE,
+                "restore_and_fingerprint",
+                return_value=(
+                    {"database_fingerprint_sha256": "a" * 64},
+                    {"status": "passed"},
+                ),
+            ),
+            mock.patch.object(MODULE, "verify_held_volume"),
+            mock.patch.object(
+                MODULE,
+                "_manifest_document",
+                return_value={"schema": "publish-boundary-fixture"},
+            ),
+            mock.patch.object(
+                MODULE,
+                "_publish_staging",
+                side_effect=AssertionError(
+                    "snapshot published before final freeze verification"
+                ),
+            ) as publish,
+            mock.patch.object(MODULE, "cleanup_exact_scratch") as cleanup,
+            self.assertRaisesRegex(
+                MODULE.SourceSnapshotError,
+                "freeze drift at publish boundary",
+            ),
+        ):
+            MODULE.execute(
+                binding,
+                output_root=output_root,
+                freeze_path=freeze_path,
+                freeze_sha256=freeze_sha256,
+                freeze_verify=verify_freeze,
+            )
+        self.assertEqual(verifier_calls, 3)
+        publish.assert_not_called()
+        cleanup.assert_called_once_with(binding)
+        self.assertFalse(paths.final.exists())
 
     def test_container_inspect_forgery_project_and_volume_mismatch_fail(self):
         binding = self.fixture.binding()

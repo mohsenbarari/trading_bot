@@ -2617,6 +2617,7 @@ def _activate(
     root: Path,
     target_state: str,
     restore: bool,
+    rollback_freeze: bool,
     manifest: Mapping[str, Any],
     members: Mapping[str, bytes],
     manifest_sha256: str,
@@ -2643,23 +2644,37 @@ def _activate(
     )
     if observed != journal["active_state"]:
         raise NginxGenerationError("active generation differs from durable journal")
+    action = (
+        "rollback-freeze"
+        if rollback_freeze
+        else ("restore" if restore else "activate")
+    )
     if observed == target_state:
         return _host_action_result(
             manifest,
             manifest_sha256=manifest_sha256,
-            action="restore" if restore else "activate",
+            action=action,
             generation=target_state,
             status="already-active",
             active_configuration_mutated=False,
             service_reloaded=False,
             journal_sha256=journal["state_sha256"],
         )
-    if restore:
-        if target_state != "legacy-normal" or observed not in {
-            "legacy-frozen",
-            "shadow-readonly",
-        }:
-            raise NginxGenerationError("restore is allowed only before shadow-writable")
+    if rollback_freeze:
+        if (
+            restore
+            or target_state != "legacy-frozen"
+            or observed != "shadow-readonly"
+        ):
+            raise NginxGenerationError(
+                "rollback-freeze is allowed only from shadow-readonly"
+            )
+    elif restore:
+        if target_state != "legacy-normal" or observed != "legacy-frozen":
+            raise NginxGenerationError(
+                "restore is allowed only before shadow-writable and "
+                "only from legacy-frozen"
+            )
     else:
         allowed = {
             ("legacy-normal", "legacy-frozen"),
@@ -2751,7 +2766,7 @@ def _activate(
     return _host_action_result(
         manifest,
         manifest_sha256=manifest_sha256,
-        action="restore" if restore else "activate",
+        action=action,
         generation=target_state,
         status="activated",
         active_configuration_mutated=True,
@@ -2784,6 +2799,7 @@ def execute_host_action(
         "install",
         "test",
         "activate",
+        "rollback-freeze",
         "readback",
         "restore",
     }:
@@ -2799,8 +2815,14 @@ def execute_host_action(
         raise NginxGenerationError("local host identity differs from expected host")
     if generation is not None and generation not in GENERATION_STATES:
         raise NginxGenerationError("host generation state is not allowlisted")
-    if action in {"test", "activate"} and generation is None:
-        raise NginxGenerationError("test and activate require an exact generation")
+    if action in {"test", "activate", "rollback-freeze"} and generation is None:
+        raise NginxGenerationError(
+            "test, activate, and rollback-freeze require an exact generation"
+        )
+    if action == "rollback-freeze" and generation != "legacy-frozen":
+        raise NginxGenerationError(
+            "rollback-freeze target is always legacy-frozen"
+        )
     if action == "restore" and generation not in {None, "legacy-normal"}:
         raise NginxGenerationError("restore target is always legacy-normal")
     if action in {"plan", "install", "readback"} and generation is not None:
@@ -2818,7 +2840,13 @@ def execute_host_action(
     )
     root = _operation_root(layout, operation_id, role)
     effective_generation = "legacy-normal" if action == "restore" else generation
-    mutating_action = action in {"install", "test", "activate", "restore"}
+    mutating_action = action in {
+        "install",
+        "test",
+        "activate",
+        "rollback-freeze",
+        "restore",
+    }
     required = (
         confirmation_phrase(
             action=action,
@@ -2900,6 +2928,19 @@ def execute_host_action(
                 root=root,
                 target_state=str(generation),
                 restore=False,
+                rollback_freeze=False,
+                manifest=manifest,
+                members=members,
+                manifest_sha256=expected_manifest_sha256,
+                layout=layout,
+                runner=runner,
+            )
+        if action == "rollback-freeze":
+            return _activate(
+                root=root,
+                target_state="legacy-frozen",
+                restore=False,
+                rollback_freeze=True,
                 manifest=manifest,
                 members=members,
                 manifest_sha256=expected_manifest_sha256,
@@ -2911,6 +2952,7 @@ def execute_host_action(
                 root=root,
                 target_state="legacy-normal",
                 restore=True,
+                rollback_freeze=False,
                 manifest=manifest,
                 members=members,
                 manifest_sha256=expected_manifest_sha256,
@@ -2981,7 +3023,15 @@ def build_parser() -> argparse.ArgumentParser:
     host.add_argument("--release-tree-sha", required=True)
     host.add_argument(
         "--action",
-        choices=("plan", "install", "test", "activate", "readback", "restore"),
+        choices=(
+            "plan",
+            "install",
+            "test",
+            "activate",
+            "rollback-freeze",
+            "readback",
+            "restore",
+        ),
         default="plan",
     )
     host.add_argument("--generation", choices=GENERATION_STATES)
