@@ -1281,6 +1281,112 @@ class FrozenFinalRestoreOrchestratorTests(unittest.TestCase):
             result["restore_result"],
         )
 
+    def test_completion_over_generic_document_limit_persists_and_recovers(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            MODULE.NGINX,
+            "CONTROLLER_SECRET_PREFIX",
+            Path(directory) / "controller",
+        ):
+            requests = {
+                role: request_for(role) for role in MODULE.ROLES
+            }
+            results = {
+                role: synthetic_host_result(requests[role])
+                for role in MODULE.ROLES
+            }
+            padding = "x" * (3 * 1024 * 1024)
+            for result in results.values():
+                result["transport"]["completion_padding"] = padding
+                self.assertLess(
+                    len(MODULE.canonical_json(result)),
+                    MODULE.MAX_HOST_RESULT_BYTES,
+                )
+                MODULE.validate_host_result(
+                    result,
+                    request=requests[result["role"]],
+                )
+            output = prepare_controller_output(requests)
+            journal = MODULE.ControllerJournalStore(output, requests)
+            for role in MODULE.ROLES:
+                journal.record_role(role, results[role])
+            completion, expected_sha256 = MODULE.build_completion(
+                requests,
+                results,
+            )
+            completion_payload = MODULE.canonical_json(completion)
+            self.assertGreater(
+                len(completion_payload),
+                MODULE.MAX_DOCUMENT_BYTES,
+            )
+            self.assertLessEqual(
+                len(completion_payload),
+                MODULE.MAX_COMPLETION_BYTES,
+            )
+            completion_path, completion_sha256 = (
+                MODULE.persist_completion(output, completion)
+            )
+            self.assertEqual(completion_sha256, expected_sha256)
+            journal.record_completion(
+                completion_path,
+                completion_sha256,
+            )
+            consumption_path = consumption_path_for(
+                requests["bot_fi"]
+            )
+            recovered = MODULE.recover_consumed_completion(
+                journal=journal,
+                consumption_readback=lambda *_args: (
+                    consumption_path,
+                    SHA_E,
+                    {"status": "consumed"},
+                ),
+            )
+            self.assertEqual(
+                recovered["status"],
+                "complete-recovered-after-consume",
+            )
+
+    def test_completion_and_host_result_oversize_fail_before_write(
+        self,
+    ) -> None:
+        request = request_for("bot_fi")
+        result = synthetic_host_result(request)
+        observed_size = len(MODULE.canonical_json(result))
+        with (
+            mock.patch.object(
+                MODULE,
+                "MAX_HOST_RESULT_BYTES",
+                observed_size - 1,
+            ),
+            self.assertRaisesRegex(
+                MODULE.FrozenFinalRestoreOrchestratorError,
+                "dedicated size bound",
+            ),
+        ):
+            MODULE.validate_host_result(result, request=request)
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            os.chmod(output, 0o700)
+            with (
+                mock.patch.object(
+                    MODULE,
+                    "MAX_COMPLETION_BYTES",
+                    1024,
+                ),
+                self.assertRaisesRegex(
+                    MODULE.FrozenFinalRestoreOrchestratorError,
+                    "dedicated size bound",
+                ),
+            ):
+                MODULE.persist_completion(
+                    output,
+                    {"padding": "x" * 2048},
+                )
+            self.assertEqual(list(output.iterdir()), [])
+
     def test_payload_preparation_failure_never_invokes_a_host(self) -> None:
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
             MODULE.NGINX,

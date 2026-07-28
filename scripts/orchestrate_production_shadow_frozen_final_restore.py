@@ -106,6 +106,13 @@ SSH = "/usr/bin/ssh"
 MAX_CONTROL_BYTES = 256 * 1024
 MAX_HOST_RESULT_BYTES = 16 * 1024 * 1024
 MAX_DOCUMENT_BYTES = 16 * 1024 * 1024
+# A completion contains each bounded host result plus a second copy of that
+# result's transport closure.  Reserve a bounded envelope for fixed identity
+# and digest fields without relaxing any individual document/control limit.
+MAX_COMPLETION_BYTES = (
+    len(ROLES) * 2 * MAX_HOST_RESULT_BYTES
+    + MAX_CONTROL_BYTES
+)
 MAX_TRANSCRIPT_ENTRIES = 20_000
 MAX_POST_RESULT_EXIT_SECONDS = 15.0
 ZERO_SHA256 = "0" * 64
@@ -2705,6 +2712,10 @@ def validate_host_result(
             "host apply result fields are not exact"
         )
     result = _json_clone(value)
+    if len(canonical_json(result)) > MAX_HOST_RESULT_BYTES:
+        raise FrozenFinalRestoreOrchestratorError(
+            "host apply result exceeds its dedicated size bound"
+        )
     if (
         result["schema"] != HOST_RESULT_SCHEMA
         or result["status"] != "restored-and-read-back"
@@ -2928,6 +2939,10 @@ def build_completion(
         "redis_restored": False,
     }
     payload = canonical_json(completion)
+    if len(payload) > MAX_COMPLETION_BYTES:
+        raise FrozenFinalRestoreOrchestratorError(
+            "three-role completion exceeds its dedicated size bound"
+        )
     return completion, _sha256(payload)
 
 
@@ -2936,12 +2951,22 @@ def persist_completion(
     completion: Mapping[str, Any],
 ) -> tuple[Path, str]:
     payload = canonical_json(completion)
+    if len(payload) > MAX_COMPLETION_BYTES:
+        raise FrozenFinalRestoreOrchestratorError(
+            "restore completion exceeds its dedicated size bound"
+        )
     digest = _sha256(payload)
     path = directory / f"completion-{digest}.json"
-    _persist_create_only(path, payload, label="restore completion")
+    _persist_create_only(
+        path,
+        payload,
+        label="restore completion",
+        maximum=MAX_COMPLETION_BYTES,
+    )
     observed = _read_document_file(
         path,
         label="persisted restore completion",
+        maximum=MAX_COMPLETION_BYTES,
         newline=False,
     )
     if observed.document != completion or observed.content_sha256 != digest:
@@ -3993,9 +4018,23 @@ def _write_atomic_no_follow(
             os.close(directory_fd)
 
 
-def _persist_create_only(path: Path, payload: bytes, *, label: str) -> None:
+def _persist_create_only(
+    path: Path,
+    payload: bytes,
+    *,
+    label: str,
+    maximum: int = MAX_DOCUMENT_BYTES,
+) -> None:
     directory_fd = -1
     try:
+        if (
+            type(maximum) is not int
+            or maximum < 1
+            or not 1 <= len(payload) <= maximum
+        ):
+            raise FrozenFinalRestoreOrchestratorError(
+                f"{label} exceeds its dedicated size bound"
+            )
         directory_fd, name = _open_parent_no_follow(
             path,
             label=label,
@@ -4025,6 +4064,7 @@ def _persist_create_only(path: Path, payload: bytes, *, label: str) -> None:
             observed = _read_document_file(
                 path,
                 label=f"existing {label}",
+                maximum=maximum,
                 newline=False,
                 allowed_modes=frozenset({0o600}),
             )
@@ -4039,6 +4079,7 @@ def _persist_create_only(path: Path, payload: bytes, *, label: str) -> None:
         observed = _read_document_file(
             path,
             label=f"new {label}",
+            maximum=maximum,
             newline=False,
             allowed_modes=frozenset({0o600}),
         )
@@ -4140,6 +4181,7 @@ def recover_consumed_completion(
     completion_readback = _read_document_file(
         Path(reference["path"]),
         label="recovery restore completion",
+        maximum=MAX_COMPLETION_BYTES,
         newline=False,
         allowed_modes=frozenset({0o600}),
     )
