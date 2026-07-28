@@ -100,11 +100,14 @@ server {
     ssl_certificate /etc/letsencrypt/live/gold/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/gold/privkey.pem;
     root /srv/trading-bot/current/mini_app_dist;
+    location ~ ^/api/invitations/(lookup|validate)/ {
+        proxy_pass http://trading_bot_api;
+    }
     location /api/ {
         proxy_pass http://trading_bot_api;
     }
     location /api/ws {
-        proxy_pass http://trading_bot_api;
+        proxy_pass http://127.0.0.1:8000;
         proxy_set_header Upgrade $http_upgrade;
     }
     location / {
@@ -189,7 +192,7 @@ class NginxParserAndRenderTests(unittest.TestCase):
                 operation_id=OPERATION_ID,
                 vhost="mini-app.362514.ir",
                 state=state,
-                legacy_upstream="http://127.0.0.1:8000",
+                legacy_upstreams=("http://127.0.0.1:8000",),
                 legacy_static_root=BOT_MINI_ROOT,
                 shadow_api_port=18001,
                 shadow_static_root=SHADOW_RELEASE_ROOT / "mini_app_dist",
@@ -255,11 +258,115 @@ class NginxParserAndRenderTests(unittest.TestCase):
                         operation_id=OPERATION_ID,
                         vhost="coin.362514.ir",
                         state="shadow-readonly",
-                        legacy_upstream="http://127.0.0.1:8000",
+                        legacy_upstreams=("http://127.0.0.1:8000",),
                         legacy_static_root=None,
                         shadow_api_port=18001,
                         shadow_static_root=SHADOW_RELEASE_ROOT / "mini_app_dist",
                     )
+
+    def test_webapp_mixed_upstream_closure_is_exact_and_rewritten_together(self):
+        legacy_upstreams = (
+            "http://trading_bot_api",
+            "http://127.0.0.1:8000",
+        )
+        rendered = {
+            state: render_generation(
+                WEBAPP,
+                operation_id=OPERATION_ID,
+                vhost="coin.gold-trade.ir",
+                state=state,
+                legacy_upstreams=legacy_upstreams,
+                legacy_static_root=(
+                    "/srv/trading-bot/current/mini_app_dist"
+                ),
+                shadow_api_port=18002,
+                shadow_static_root=SHADOW_RELEASE_ROOT / "mini_app_dist",
+            )
+            for state in GENERATION_STATES
+        }
+        self.assertEqual(rendered["legacy-normal"], WEBAPP)
+        frozen = rendered["legacy-frozen"].decode()
+        self.assertEqual(
+            frozen.count("proxy_pass http://trading_bot_api;"),
+            2,
+        )
+        self.assertEqual(
+            frozen.count("proxy_pass http://127.0.0.1:8000;"),
+            1,
+        )
+        for state in ("shadow-readonly", "shadow-writable"):
+            shadow = rendered[state].decode()
+            self.assertNotIn(
+                "proxy_pass http://trading_bot_api;",
+                shadow,
+            )
+            self.assertNotIn(
+                "proxy_pass http://127.0.0.1:8000;",
+                shadow,
+            )
+            self.assertEqual(
+                shadow.count("proxy_pass http://127.0.0.1:18002;"),
+                3,
+            )
+
+        invalid_declarations = (
+            (
+                "http://trading_bot_api",
+                "http://trading_bot_api",
+            ),
+            ("http://trading_bot_api",),
+            tuple(reversed(legacy_upstreams)),
+            (*legacy_upstreams, "http://outside"),
+        )
+        for declared in invalid_declarations:
+            with self.subTest(declared=declared), self.assertRaises(
+                NginxGenerationError
+            ):
+                render_generation(
+                    WEBAPP,
+                    operation_id=OPERATION_ID,
+                    vhost="coin.gold-trade.ir",
+                    state="shadow-readonly",
+                    legacy_upstreams=declared,
+                    legacy_static_root=(
+                        "/srv/trading-bot/current/mini_app_dist"
+                    ),
+                    shadow_api_port=18002,
+                    shadow_static_root=(
+                        SHADOW_RELEASE_ROOT / "mini_app_dist"
+                    ),
+                )
+
+        invalid_sources = (
+            WEBAPP.replace(
+                b"http://127.0.0.1:8000",
+                b"http://trading_bot_api",
+                1,
+            ),
+            WEBAPP.replace(
+                b"http://127.0.0.1:8000",
+                b"http://outside",
+                1,
+            ),
+        )
+        for source in invalid_sources:
+            with self.subTest(source=source), self.assertRaises(
+                NginxGenerationError
+            ):
+                render_generation(
+                    source,
+                    operation_id=OPERATION_ID,
+                    vhost="coin.gold-trade.ir",
+                    state="legacy-frozen",
+                    legacy_upstreams=legacy_upstreams,
+                    legacy_static_root=(
+                        "/srv/trading-bot/current/mini_app_dist"
+                    ),
+                    shadow_api_port=18002,
+                    shadow_static_root=(
+                        SHADOW_RELEASE_ROOT / "mini_app_dist"
+                    ),
+                )
 
     def test_unknown_or_missing_static_root_fails_closed(self):
         for source in (
@@ -272,7 +379,7 @@ class NginxParserAndRenderTests(unittest.TestCase):
                     operation_id=OPERATION_ID,
                     vhost="mini-app.362514.ir",
                     state="shadow-writable",
-                    legacy_upstream="http://127.0.0.1:8000",
+                    legacy_upstreams=("http://127.0.0.1:8000",),
                     legacy_static_root=BOT_MINI_ROOT,
                     shadow_api_port=18001,
                     shadow_static_root=SHADOW_RELEASE_ROOT / "mini_app_dist",
@@ -293,7 +400,7 @@ class NginxParserAndRenderTests(unittest.TestCase):
             operation_id=OPERATION_ID,
             vhost="mini-app.362514.ir",
             state="shadow-readonly",
-            legacy_upstream="http://127.0.0.1:8000",
+            legacy_upstreams=("http://127.0.0.1:8000",),
             legacy_static_root=BOT_MINI_ROOT,
             shadow_api_port=18001,
             shadow_static_root=SHADOW_RELEASE_ROOT / "mini_app_dist",
@@ -312,7 +419,7 @@ class NginxParserAndRenderTests(unittest.TestCase):
                 operation_id=OPERATION_ID,
                 vhost="mini-app.362514.ir",
                 state="shadow-readonly",
-                legacy_upstream="http://127.0.0.1:8000",
+                legacy_upstreams=("http://127.0.0.1:8000",),
                 legacy_static_root=BOT_MINI_ROOT,
                 shadow_api_port=18001,
                 shadow_static_root=SHADOW_RELEASE_ROOT / "mini_app_dist",
@@ -343,6 +450,19 @@ class NginxProducerTests(unittest.TestCase):
             )
             self.assertFalse(first["contains_tls_key_or_certificate_body"])
             self.assertFalse(first["production_contacted"])
+            self.assertEqual(
+                first["legacy_upstream_closure_sha256"],
+                sha256(
+                    canonical_json_bytes(
+                        {
+                            role: first["roles"][role][
+                                "legacy_upstream_closure_sha256"
+                            ]
+                            for role in ("bot_fi", "webapp_fi")
+                        }
+                    )
+                ),
+            )
             for role, expected_count in (("bot_fi", 8), ("webapp_fi", 4)):
                 first_archive = first_root / role / "nginx-generations.tar"
                 second_archive = second_root / role / "nginx-generations.tar"
@@ -359,6 +479,31 @@ class NginxProducerTests(unittest.TestCase):
                     manifest["nginx_legacy_normal_generation_sha256"],
                     manifest["nginx_rollback_generation_sha256"],
                 )
+                self.assertEqual(
+                    first["roles"][role][
+                        "legacy_upstream_closure_sha256"
+                    ],
+                    manifest["legacy_upstream_closure_sha256"],
+                )
+                for row in manifest["vhosts"]:
+                    self.assertEqual(
+                        row["legacy_upstreams"],
+                        list(
+                            nginx_generation.LEGACY_UPSTREAMS_BY_VHOST[
+                                row["vhost"]
+                            ]
+                        ),
+                    )
+                if role == "webapp_fi":
+                    self.assertEqual(
+                        manifest["vhosts"][0][
+                            "legacy_upstream_occurrences"
+                        ],
+                        {
+                            "http://trading_bot_api": 2,
+                            "http://127.0.0.1:8000": 1,
+                        },
+                    )
                 with tarfile.open(first_archive, "r:") as archive:
                     members = archive.getmembers()
                     self.assertEqual(len(members), expected_count)
@@ -371,6 +516,46 @@ class NginxProducerTests(unittest.TestCase):
                     )
                     self.assertNotIn(b"-----BEGIN CERTIFICATE-----", bodies)
                     self.assertNotIn(b"-----BEGIN PRIVATE KEY-----", bodies)
+
+    def test_role_archive_revalidates_upstream_occurrence_closure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = ProducerFixture(Path(temporary))
+            output, aggregate = fixture.produce()
+            role = "webapp_fi"
+            manifest_path = (
+                output / role / "nginx-generations-manifest.json"
+            )
+            document = json.loads(manifest_path.read_text())
+            document["vhosts"][0]["legacy_upstream_occurrences"][
+                "http://trading_bot_api"
+            ] += 1
+            document["legacy_upstream_closure_sha256"] = (
+                nginx_generation._legacy_upstream_closure_digest(
+                    document["vhosts"]
+                )
+            )
+            payload = canonical_json_bytes(document)
+            manifest_path.write_bytes(payload)
+            manifest_path.chmod(0o600)
+            with self.assertRaisesRegex(
+                NginxGenerationError,
+                "occurrence closure differs",
+            ):
+                nginx_generation.load_role_material(
+                    manifest_path=manifest_path,
+                    expected_manifest_sha256=sha256(payload),
+                    archive_path=(
+                        output / role / "nginx-generations.tar"
+                    ),
+                    expected_role=role,
+                    expected_host=aggregate["roles"][role][
+                        "expected_host"
+                    ],
+                    operation_id=OPERATION_ID,
+                    release_sha=RELEASE_SHA,
+                    release_tree_sha=RELEASE_TREE_SHA,
+                    owner_uid=os.geteuid(),
+                )
 
     def test_invalid_identity_ports_mapping_existing_output_and_unsafe_source_fail(self):
         with tempfile.TemporaryDirectory() as temporary:

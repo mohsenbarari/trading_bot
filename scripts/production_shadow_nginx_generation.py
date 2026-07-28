@@ -86,6 +86,15 @@ FIXED_DESTINATIONS = {
         "/etc/nginx/sites-available/trading-bot"
     ),
 }
+LEGACY_UPSTREAMS_BY_VHOST = {
+    "coin.362514.ir": ("http://127.0.0.1:8000",),
+    "mini-app.362514.ir": ("http://127.0.0.1:8000",),
+    "coin.gold-trade.ir": (
+        "http://trading_bot_api",
+        "http://127.0.0.1:8000",
+    ),
+}
+MAX_PROXY_PASS_DIRECTIVES = 64
 
 
 class NginxGenerationError(RuntimeError):
@@ -129,7 +138,7 @@ class VhostSource:
     vhost: str
     source_path: Path
     destination: Path
-    legacy_upstream: str
+    legacy_upstreams: tuple[str, ...]
     legacy_static_root: str | None
 
 
@@ -550,21 +559,11 @@ def _shadow_static_value(
     raise NginxGenerationError("static root or alias leaves the expected legacy subtree")
 
 
-def render_generation(
+def _parse_vhost_source(
     source: bytes,
     *,
-    operation_id: str,
     vhost: str,
-    state: str,
-    legacy_upstream: str,
-    legacy_static_root: str | None,
-    shadow_api_port: int,
-    shadow_static_root: Path,
-) -> bytes:
-    """Render exactly one state from an unmodified legacy source config."""
-
-    if state not in GENERATION_STATES:
-        raise NginxGenerationError("unknown Nginx generation state")
+) -> tuple[str, Directive]:
     if not source or len(source) > MAX_CONFIG_BYTES or b"\x00" in source:
         raise NginxGenerationError("Nginx source is empty, oversized, or contains NUL")
     if any(marker in source for marker in PEM_MARKERS):
@@ -575,19 +574,108 @@ def render_generation(
         raise NginxGenerationError("Nginx source is not UTF-8") from exc
     if MARKER in text:
         raise NginxGenerationError("Nginx source already contains a generation marker")
-    parsed = parse_nginx(text)
-    server = _find_ssl_server(parsed, vhost)
-    if state == "legacy-normal":
-        return source
+    return text, _find_ssl_server(parse_nginx(text), vhost)
 
-    proxy_directives = [
+
+def _canonical_legacy_upstreams(
+    vhost: str,
+    values: Sequence[str],
+) -> tuple[str, ...]:
+    if isinstance(values, (str, bytes)):
+        raise NginxGenerationError(
+            f"{vhost} legacy upstream closure is not an ordered sequence"
+        )
+    declared = tuple(values)
+    expected = LEGACY_UPSTREAMS_BY_VHOST.get(vhost)
+    if expected is None:
+        raise NginxGenerationError("legacy upstream closure vhost is unknown")
+    if (
+        not declared
+        or any(not isinstance(value, str) or not value for value in declared)
+    ):
+        raise NginxGenerationError(
+            f"{vhost} legacy upstream closure contains an invalid value"
+        )
+    if len(declared) != len(set(declared)):
+        raise NginxGenerationError(
+            f"{vhost} legacy upstream closure contains a duplicate"
+        )
+    if declared != expected:
+        raise NginxGenerationError(
+            f"{vhost} legacy upstream closure is outside the exact allowlist"
+        )
+    return expected
+
+
+def _proxy_upstream_closure(
+    server: Directive,
+    *,
+    vhost: str,
+    legacy_upstreams: Sequence[str],
+) -> tuple[list[Directive], tuple[str, ...], dict[str, int]]:
+    expected = _canonical_legacy_upstreams(vhost, legacy_upstreams)
+    directives = [
         item for item in _walk(server.children) if item.name == "proxy_pass"
     ]
-    if not proxy_directives:
+    if not directives:
         raise NginxGenerationError(f"{vhost} has no API proxy_pass directives")
-    for item in proxy_directives:
-        if len(item.args) != 1 or item.args[0].value != legacy_upstream:
-            raise NginxGenerationError(f"{vhost} contains an unknown API upstream")
+    if len(directives) > MAX_PROXY_PASS_DIRECTIVES:
+        raise NginxGenerationError(
+            f"{vhost} has too many API proxy_pass directives"
+        )
+    values: list[str] = []
+    for item in directives:
+        if len(item.args) != 1:
+            raise NginxGenerationError(
+                f"{vhost} contains an invalid API upstream directive"
+            )
+        value = item.args[0].value
+        if value not in expected:
+            raise NginxGenerationError(
+                f"{vhost} contains an unknown API upstream"
+            )
+        values.append(value)
+    if set(values) != set(expected):
+        raise NginxGenerationError(
+            f"{vhost} does not contain the exact legacy upstream closure"
+        )
+    occurrences = {
+        upstream: values.count(upstream) for upstream in expected
+    }
+    if (
+        set(occurrences) != set(expected)
+        or any(count < 1 for count in occurrences.values())
+        or sum(occurrences.values()) != len(values)
+    ):
+        raise NginxGenerationError(
+            f"{vhost} legacy upstream occurrence closure is invalid"
+        )
+    return directives, tuple(values), occurrences
+
+
+def render_generation(
+    source: bytes,
+    *,
+    operation_id: str,
+    vhost: str,
+    state: str,
+    legacy_upstreams: Sequence[str],
+    legacy_static_root: str | None,
+    shadow_api_port: int,
+    shadow_static_root: Path,
+) -> bytes:
+    """Render exactly one state from an unmodified legacy source config."""
+
+    if state not in GENERATION_STATES:
+        raise NginxGenerationError("unknown Nginx generation state")
+    text, server = _parse_vhost_source(source, vhost=vhost)
+    proxy_directives, source_proxy_values, _ = (
+        _proxy_upstream_closure(
+            server,
+            vhost=vhost,
+            legacy_upstreams=legacy_upstreams,
+        )
+    )
 
     static_directives = [
         item for item in _walk(server.children) if item.name in {"root", "alias"}
@@ -612,6 +700,9 @@ def render_generation(
                 legacy_root=legacy_static_root,
                 shadow_root=shadow_static_root,
             )
+
+    if state == "legacy-normal":
+        return source
 
     replacements: list[tuple[int, int, str]] = []
     if state in {"shadow-readonly", "shadow-writable"}:
@@ -661,17 +752,22 @@ def render_generation(
     observed_proxy = [
         item for item in _walk(rendered_server.children) if item.name == "proxy_pass"
     ]
-    expected_upstream = (
-        legacy_upstream
+    expected_upstreams = (
+        source_proxy_values
         if state == "legacy-frozen"
-        else f"http://127.0.0.1:{shadow_api_port}"
+        else tuple(
+            f"http://127.0.0.1:{shadow_api_port}"
+            for _item in proxy_directives
+        )
+    )
+    observed_proxy_values = tuple(
+        item.args[0].value
+        for item in observed_proxy
+        if len(item.args) == 1
     )
     if (
-        len(observed_proxy) != len(proxy_directives)
-        or any(
-            len(item.args) != 1 or item.args[0].value != expected_upstream
-            for item in observed_proxy
-        )
+        len(observed_proxy_values) != len(observed_proxy)
+        or observed_proxy_values != expected_upstreams
     ):
         raise NginxGenerationError("rendered API upstream count or value differs")
     observed_static = [
@@ -724,7 +820,7 @@ def default_sources(
             vhost="coin.362514.ir",
             source_path=bot_coin_source,
             destination=FIXED_DESTINATIONS[("bot_fi", "coin.362514.ir")],
-            legacy_upstream="http://127.0.0.1:8000",
+            legacy_upstreams=LEGACY_UPSTREAMS_BY_VHOST["coin.362514.ir"],
             legacy_static_root=None,
         ),
         VhostSource(
@@ -732,7 +828,9 @@ def default_sources(
             vhost="mini-app.362514.ir",
             source_path=bot_mini_source,
             destination=FIXED_DESTINATIONS[("bot_fi", "mini-app.362514.ir")],
-            legacy_upstream="http://127.0.0.1:8000",
+            legacy_upstreams=LEGACY_UPSTREAMS_BY_VHOST[
+                "mini-app.362514.ir"
+            ],
             legacy_static_root=bot_root,
         ),
         VhostSource(
@@ -740,7 +838,9 @@ def default_sources(
             vhost="coin.gold-trade.ir",
             source_path=webapp_source,
             destination=FIXED_DESTINATIONS[("webapp_fi", "coin.gold-trade.ir")],
-            legacy_upstream="http://trading_bot_api",
+            legacy_upstreams=LEGACY_UPSTREAMS_BY_VHOST[
+                "coin.gold-trade.ir"
+            ],
             legacy_static_root="/srv/trading-bot/current/mini_app_dist",
         ),
     )
@@ -758,11 +858,14 @@ def _validate_sources(sources: Sequence[VhostSource]) -> tuple[VhostSource, ...]
             raise NginxGenerationError("source destination differs from fixed production mapping")
         _safe_absolute_path(item.destination, label="Nginx destination")
         _safe_absolute_path(item.source_path, label="Nginx source")
-        if item.legacy_upstream not in {
-            "http://127.0.0.1:8000",
-            "http://trading_bot_api",
-        }:
-            raise NginxGenerationError("legacy API upstream is outside the exact allowlist")
+        if not isinstance(item.legacy_upstreams, tuple):
+            raise NginxGenerationError(
+                "legacy API upstream closure must be an immutable tuple"
+            )
+        _canonical_legacy_upstreams(
+            item.vhost,
+            item.legacy_upstreams,
+        )
         if item.legacy_static_root is not None:
             _safe_absolute_path(item.legacy_static_root, label="legacy static root")
     return tuple(sorted(sources, key=lambda item: (item.role, item.vhost)))
@@ -798,6 +901,25 @@ def _deterministic_tar(files: Mapping[str, bytes]) -> bytes:
 
 def _generation_digest(rows: Mapping[str, str]) -> str:
     return _sha256(canonical_json_bytes(dict(sorted(rows.items()))))
+
+
+def _legacy_upstream_closure_digest(
+    rows: Sequence[Mapping[str, Any]],
+) -> str:
+    closure: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        vhost = row["vhost"]
+        if vhost in closure:
+            raise NginxGenerationError(
+                "legacy upstream closure repeats a vhost"
+            )
+        closure[vhost] = {
+            "legacy_upstreams": list(row["legacy_upstreams"]),
+            "legacy_upstream_occurrences": dict(
+                sorted(row["legacy_upstream_occurrences"].items())
+            ),
+        }
+    return _sha256(canonical_json_bytes(dict(sorted(closure.items()))))
 
 
 def produce_generations(
@@ -851,6 +973,17 @@ def produce_generations(
             label=f"{item.role} {item.vhost} source",
             owner_uid=owner_uid,
         )
+        _, source_server = _parse_vhost_source(
+            source,
+            vhost=item.vhost,
+        )
+        _, _, upstream_occurrences = (
+            _proxy_upstream_closure(
+                source_server,
+                vhost=item.vhost,
+                legacy_upstreams=item.legacy_upstreams,
+            )
+        )
         states: dict[str, bytes] = {}
         for state in GENERATION_STATES:
             states[state] = render_generation(
@@ -858,7 +991,7 @@ def produce_generations(
                 operation_id=operation_id,
                 vhost=item.vhost,
                 state=state,
-                legacy_upstream=item.legacy_upstream,
+                legacy_upstreams=item.legacy_upstreams,
                 legacy_static_root=item.legacy_static_root,
                 shadow_api_port=ports[item.role],
                 shadow_static_root=shadow_static_root,
@@ -869,7 +1002,8 @@ def produce_generations(
             "destination": os.fspath(item.destination),
             "source_sha256": _sha256(source),
             "source_bytes": len(source),
-            "legacy_upstream": item.legacy_upstream,
+            "legacy_upstreams": list(item.legacy_upstreams),
+            "legacy_upstream_occurrences": upstream_occurrences,
             "legacy_static_root": item.legacy_static_root,
             "generation_sha256": {
                 state: _sha256(states[state]) for state in GENERATION_STATES
@@ -910,6 +1044,9 @@ def produce_generations(
             )
             for state in GENERATION_STATES
         }
+        legacy_upstream_closure_sha256 = (
+            _legacy_upstream_closure_digest(role_rows)
+        )
         role_document: dict[str, Any] = {
             "schema": ROLE_MANIFEST_SCHEMA,
             "operation_id": operation_id,
@@ -921,6 +1058,9 @@ def produce_generations(
             "shadow_static_root": os.fspath(shadow_static_root),
             "shadow_api_port": ports[role],
             "vhosts": role_rows,
+            "legacy_upstream_closure_sha256": (
+                legacy_upstream_closure_sha256
+            ),
             "generation_sha256": role_generation_sha256,
             "nginx_legacy_normal_generation_sha256": role_generation_sha256[
                 "legacy-normal"
@@ -977,6 +1117,9 @@ def produce_generations(
                 "manifest_bytes": role_documents[role]["manifest_bytes"],
                 "archive_sha256": role_documents[role]["manifest"]["archive"]["sha256"],
                 "archive_bytes": role_documents[role]["manifest"]["archive"]["bytes"],
+                "legacy_upstream_closure_sha256": role_documents[role][
+                    "manifest"
+                ]["legacy_upstream_closure_sha256"],
                 "generation_sha256": role_documents[role]["manifest"][
                     "generation_sha256"
                 ],
@@ -984,6 +1127,16 @@ def produce_generations(
             for role in ROLES
         },
         "generation_sha256": global_digests,
+        "legacy_upstream_closure_sha256": _sha256(
+            canonical_json_bytes(
+                {
+                    role: role_documents[role]["manifest"][
+                        "legacy_upstream_closure_sha256"
+                    ]
+                    for role in ROLES
+                }
+            )
+        ),
         "nginx_legacy_normal_generation_sha256": global_digests["legacy-normal"],
         "nginx_rollback_generation_sha256": global_digests["legacy-normal"],
         "nginx_freeze_generation_sha256": global_digests["legacy-frozen"],
@@ -1059,6 +1212,7 @@ def validate_role_manifest(
         "shadow_static_root",
         "shadow_api_port",
         "vhosts",
+        "legacy_upstream_closure_sha256",
         "generation_sha256",
         "nginx_legacy_normal_generation_sha256",
         "nginx_rollback_generation_sha256",
@@ -1118,7 +1272,8 @@ def validate_role_manifest(
         "destination",
         "source_sha256",
         "source_bytes",
-        "legacy_upstream",
+        "legacy_upstreams",
+        "legacy_upstream_occurrences",
         "legacy_static_root",
         "generation_sha256",
     }
@@ -1150,24 +1305,53 @@ def validate_role_manifest(
             raise NginxGenerationError("per-vhost generation hashes must be distinct")
         if row["generation_sha256"]["legacy-normal"] != row["source_sha256"]:
             raise NginxGenerationError("legacy-normal generation differs from source")
+        expected_upstreams = LEGACY_UPSTREAMS_BY_VHOST[row["vhost"]]
+        if row["legacy_upstreams"] != list(expected_upstreams):
+            raise NginxGenerationError(
+                f"{row['vhost']} role manifest legacy upstream closure differs"
+            )
+        occurrences = row["legacy_upstream_occurrences"]
+        if (
+            not isinstance(occurrences, dict)
+            or set(occurrences) != set(expected_upstreams)
+            or any(
+                isinstance(count, bool)
+                or not isinstance(count, int)
+                or count < 1
+                for count in occurrences.values()
+            )
+            or not 1
+            <= sum(occurrences.values())
+            <= MAX_PROXY_PASS_DIRECTIVES
+        ):
+            raise NginxGenerationError(
+                f"{row['vhost']} role manifest upstream occurrences differ"
+            )
         if key == ("bot_fi", "coin.362514.ir") and (
-            row["legacy_upstream"] != "http://127.0.0.1:8000"
-            or row["legacy_static_root"] is not None
+            row["legacy_static_root"] is not None
         ):
             raise NginxGenerationError("Bot-FI API vhost legacy binding differs")
         if key == ("bot_fi", "mini-app.362514.ir"):
-            if row["legacy_upstream"] != "http://127.0.0.1:8000":
-                raise NginxGenerationError("Bot-FI mini-app upstream differs")
             _safe_absolute_path(
                 row["legacy_static_root"],
                 label="Bot-FI mini-app legacy static root",
             )
         if key == ("webapp_fi", "coin.gold-trade.ir") and (
-            row["legacy_upstream"] != "http://trading_bot_api"
-            or row["legacy_static_root"]
+            row["legacy_static_root"]
             != "/srv/trading-bot/current/mini_app_dist"
         ):
             raise NginxGenerationError("WebApp-FI legacy vhost binding differs")
+    expected_closure_sha256 = _legacy_upstream_closure_digest(vhosts)
+    if (
+        _nonzero_sha256(
+            document["legacy_upstream_closure_sha256"],
+            label="legacy upstream closure",
+        )
+        != expected_closure_sha256
+    ):
+        raise NginxGenerationError(
+            "role manifest legacy upstream closure hash differs"
+        )
     generation_sha256 = document["generation_sha256"]
     if not isinstance(generation_sha256, dict) or set(generation_sha256) != set(
         GENERATION_STATES
@@ -1272,6 +1456,40 @@ def _read_archive(
         _sha256(payload) != expected_hashes[name] for name, payload in members.items()
     ):
         raise NginxGenerationError("role archive member content differs from manifest")
+    shadow_static_root = Path(str(manifest["shadow_static_root"]))
+    for row in manifest["vhosts"]:
+        destination = Path(row["destination"])
+        source = members[
+            _archive_member_name("legacy-normal", destination)
+        ]
+        _, source_server = _parse_vhost_source(
+            source,
+            vhost=row["vhost"],
+        )
+        _, _, occurrences = _proxy_upstream_closure(
+            source_server,
+            vhost=row["vhost"],
+            legacy_upstreams=row["legacy_upstreams"],
+        )
+        if occurrences != row["legacy_upstream_occurrences"]:
+            raise NginxGenerationError(
+                "role archive legacy upstream occurrence closure differs"
+            )
+        for state in GENERATION_STATES:
+            expected = render_generation(
+                source,
+                operation_id=manifest["operation_id"],
+                vhost=row["vhost"],
+                state=state,
+                legacy_upstreams=row["legacy_upstreams"],
+                legacy_static_root=row["legacy_static_root"],
+                shadow_api_port=manifest["shadow_api_port"],
+                shadow_static_root=shadow_static_root,
+            )
+            if members[_archive_member_name(state, destination)] != expected:
+                raise NginxGenerationError(
+                    "role archive generation differs from exact source rendering"
+                )
     return members
 
 
