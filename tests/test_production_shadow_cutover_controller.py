@@ -31,12 +31,14 @@ from scripts.production_shadow_cutover_controller import (
     POSTCOMMIT_SPECS,
     POLICY_FIELDS,
     PRODUCTION_VHOSTS,
-    REMOTE_AGENT_PATH,
+    _remote_agent_path,
     ProductionCutoverJournal,
     VerifiedPhaseCompletion,
     _persist_phase_verification_receipt,
     _validate_phase_verification_result,
     _secure_root,
+    _operation_release_root,
+    _remote_agent_contract_path,
     _shadow_project,
     _shadow_root,
     host_agent_contract_document,
@@ -303,6 +305,13 @@ class ProductionShadowManifestTests(unittest.TestCase):
                 str(_shadow_root(OPERATION_ID))
             )
         )
+        self.assertEqual(
+            verification["verifier_path"],
+            str(
+                _operation_release_root(OPERATION_ID, RELEASE_SHA)
+                / "scripts/verify_production_shadow_phase_evidence.py"
+            ),
+        )
         self.assertTrue(verification["executor_wired"])
         self.assertTrue(
             verification["controller_executes_release_bound_verifier"]
@@ -311,6 +320,14 @@ class ProductionShadowManifestTests(unittest.TestCase):
         self.assertEqual(
             agent_contract["sha256"],
             HOST_AGENT_CONTRACT_SHA256,
+        )
+        self.assertEqual(
+            agent_contract["path"],
+            str(_remote_agent_contract_path(OPERATION_ID)),
+        )
+        self.assertEqual(
+            agent_contract["agent_path"],
+            str(_remote_agent_path(OPERATION_ID, RELEASE_SHA)),
         )
         self.assertTrue(agent_contract["self_hash_required"])
         self.assertTrue(agent_contract["local_host_identity_required"])
@@ -438,8 +455,16 @@ class ProductionShadowManifestTests(unittest.TestCase):
         self.assertTrue(all(command["render_only"] for command in all_commands))
         for command in all_commands:
             argv = command["argv"]
+            remote_agent_path = str(
+                _remote_agent_path(OPERATION_ID, RELEASE_SHA)
+            )
+            agent_index = argv.index(remote_agent_path)
+            self.assertEqual(
+                argv[agent_index - 2 : agent_index],
+                ["/usr/bin/python3", "-I"],
+            )
             if argv[0] == "/usr/bin/ssh":
-                remote = argv[argv.index(REMOTE_AGENT_PATH) :]
+                remote = argv[agent_index - 2 :]
                 self.assertEqual(
                     shlex.split(" ".join(remote)),
                     remote,

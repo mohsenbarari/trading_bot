@@ -61,13 +61,15 @@ PHASE_VERIFICATION_SCHEMA = "production-shadow-phase-evidence-verification-v1"
 APPLY_CONFIRMATION = "APPLY-PRODUCTION-SHADOW-CUTOVER-JOURNAL"
 FIRST_WRITE_COMMIT_CONFIRMATION = "COMMIT-PRODUCTION-SHADOW-FIRST-BUSINESS-WRITE"
 CONTROLLER_PATH = "/usr/local/sbin/trading-bot-production-shadow-controller"
-REMOTE_AGENT_PATH = "/usr/local/sbin/trading-bot-production-shadow-agent"
-REMOTE_AGENT_CONTRACT_PATH = (
-    "/etc/trading-bot-production-shadow/host-agent-contract.json"
+REMOTE_AGENT_RELATIVE_PATH = PurePosixPath(
+    "scripts/production_shadow_host_agent.py"
+)
+REMOTE_AGENT_CONTRACT_ROOT = PurePosixPath(
+    "/root/secure-envs/trading-bot/three-site-production-shadow"
 )
 HOST_AGENT_CONTRACT_SCHEMA = "production-shadow-host-agent-contract-v1"
 PHASE_EVIDENCE_VERIFIER_RELATIVE_PATH = (
-    "release/scripts/verify_production_shadow_phase_evidence.py"
+    "scripts/verify_production_shadow_phase_evidence.py"
 )
 PRODUCTION_HOSTNAME = "coin.gold-trade.ir"
 LEGACY_COMPOSE_PROJECT = "trading_bot"
@@ -698,7 +700,7 @@ ROLLBACK_SPECS: tuple[PhaseSpec, ...] = (
 
 OPERATIONAL_GAPS = (
     {
-        "component": REMOTE_AGENT_PATH,
+        "component": str(REMOTE_AGENT_RELATIVE_PATH),
         "status": "reversible-precommit-only",
         "required_for": (
             "Five reversible precommit operations are release-bound and executable; "
@@ -892,6 +894,31 @@ def _shadow_root(operation_id: str) -> PurePosixPath:
     return (
         PurePosixPath("/srv/trading-bot-three-site-production-shadow")
         / operation_id
+    )
+
+
+def _operation_release_root(
+    operation_id: str,
+    release_sha: str,
+) -> PurePosixPath:
+    return _shadow_root(operation_id) / "releases" / release_sha
+
+
+def _remote_agent_path(
+    operation_id: str,
+    release_sha: str,
+) -> PurePosixPath:
+    return (
+        _operation_release_root(operation_id, release_sha)
+        / REMOTE_AGENT_RELATIVE_PATH
+    )
+
+
+def _remote_agent_contract_path(operation_id: str) -> PurePosixPath:
+    return (
+        REMOTE_AGENT_CONTRACT_ROOT
+        / operation_id
+        / "host-agent-contract.json"
     )
 
 
@@ -1192,8 +1219,19 @@ def _agent_args(
     execute: bool = False,
 ) -> list[str]:
     topology = manifest["topology"][role]
+    remote_agent_path = str(
+        _remote_agent_path(
+            manifest["operation_id"],
+            manifest["release_sha"],
+        )
+    )
+    remote_agent_contract_path = str(
+        _remote_agent_contract_path(manifest["operation_id"])
+    )
     agent = [
-        REMOTE_AGENT_PATH,
+        "/usr/bin/python3",
+        "-I",
+        remote_agent_path,
         "--operation",
         operation,
         "--business-write-policy",
@@ -1267,7 +1305,7 @@ def _agent_args(
         "--host-agent-sha256",
         manifest["artifacts"]["host_agent_sha256"],
         "--host-agent-contract",
-        REMOTE_AGENT_CONTRACT_PATH,
+        remote_agent_contract_path,
         "--host-agent-contract-sha256",
         manifest["artifacts"]["host_agent_contract_sha256"],
     ]
@@ -1543,7 +1581,10 @@ def render_plan(
         },
         "phase_evidence_verification": {
             "verifier_path": str(
-                PurePosixPath(manifest["deployment"]["shadow_root"])
+                _operation_release_root(
+                    manifest["operation_id"],
+                    manifest["release_sha"],
+                )
                 / PHASE_EVIDENCE_VERIFIER_RELATIVE_PATH
             ),
             "verifier_sha256": manifest["artifacts"][
@@ -1565,7 +1606,15 @@ def render_plan(
             "executor_wired": True,
         },
         "host_agent_contract": {
-            "path": REMOTE_AGENT_CONTRACT_PATH,
+            "path": str(
+                _remote_agent_contract_path(manifest["operation_id"])
+            ),
+            "agent_path": str(
+                _remote_agent_path(
+                    manifest["operation_id"],
+                    manifest["release_sha"],
+                )
+            ),
             "sha256": manifest["artifacts"]["host_agent_contract_sha256"],
             "agent_sha256": manifest["artifacts"]["host_agent_sha256"],
             "standalone_contract_sha256": HOST_AGENT_CONTRACT_SHA256,
@@ -1795,7 +1844,12 @@ def _run_release_phase_verifier(
                 f"phase verification {label} must be an absolute path"
             )
     verifier_path = (
-        Path(manifest["deployment"]["shadow_root"])
+        Path(
+            _operation_release_root(
+                manifest["operation_id"],
+                manifest["release_sha"],
+            )
+        )
         / PHASE_EVIDENCE_VERIFIER_RELATIVE_PATH
     )
     expected_verifier_sha256 = manifest["artifacts"][

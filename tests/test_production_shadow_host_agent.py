@@ -13,8 +13,8 @@ from scripts import production_shadow_host_agent as HOST_MODULE
 from scripts.production_shadow_cutover_controller import (
     POSTCOMMIT_JOURNAL_STATUS,
     PRECOMMIT_JOURNAL_STATUS,
-    REMOTE_AGENT_PATH,
     HOST_AGENT_CONTRACT_SHA256,
+    _remote_agent_path,
     host_agent_contract_document,
     render_plan,
     validate_manifest,
@@ -22,11 +22,11 @@ from scripts.production_shadow_cutover_controller import (
 from scripts.production_shadow_host_agent import (
     BUSINESS_WRITE_FORWARD_ONLY,
     BUSINESS_WRITE_FORBIDDEN,
-    FIXED_CONTRACT_PATH,
     HostAgentError,
     contract_sha256,
     execute_precommit_request,
     main,
+    operation_contract_path,
     parse_request_argv,
     request_sha256,
     validate_contract,
@@ -61,7 +61,13 @@ def rendered_preparation() -> list[dict]:
 
 def agent_argv(command: dict) -> list[str]:
     argv = command["argv"]
-    return argv[argv.index(REMOTE_AGENT_PATH) + 1 :]
+    remote_agent_path = str(
+        _remote_agent_path(
+            manifest_payload()["operation_id"],
+            manifest_payload()["release_sha"],
+        )
+    )
+    return argv[argv.index(remote_agent_path) + 1 :]
 
 
 class ProductionShadowHostAgentTests(unittest.TestCase):
@@ -580,7 +586,7 @@ class ProductionShadowHostAgentTests(unittest.TestCase):
         )
         self.assertEqual(
             request["host_agent_contract"],
-            str(FIXED_CONTRACT_PATH),
+            str(operation_contract_path(request["operation_id"])),
         )
         with self.assertRaisesRegex(HostAgentError, "executable differs"):
             validate_request(

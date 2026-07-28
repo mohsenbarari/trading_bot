@@ -58,8 +58,23 @@ class ProductionShadowOperationIdentityContractTests(unittest.TestCase):
         for phase in plan["reversible_preparation"]["phases"]:
             for command in phase["commands"]:
                 argv = command["argv"]
+                agent_path = str(
+                    CONTROLLER._remote_agent_path(
+                        operation_id,
+                        release_sha,
+                    )
+                )
+                self.assertIn(agent_path, argv)
+                agent_index = argv.index(agent_path)
+                self.assertEqual(
+                    argv[agent_index - 2 : agent_index],
+                    ["/usr/bin/python3", "-I"],
+                )
                 request, execute = HOST.parse_request_argv(
-                    argv[argv.index(CONTROLLER.REMOTE_AGENT_PATH) + 1 :],
+                    argv[
+                        agent_index
+                        + 1 :
+                    ],
                     contract=CONTROLLER.host_agent_contract_document(),
                     observed_agent_sha256="c" * 64,
                 )
@@ -67,6 +82,10 @@ class ProductionShadowOperationIdentityContractTests(unittest.TestCase):
                 self.assertEqual(request["operation_id"], operation_id)
                 self.assertEqual(request["shadow_project"], project_base)
                 self.assertEqual(request["shadow_root"], str(project_root))
+                self.assertEqual(
+                    request["host_agent_contract"],
+                    str(secret_root / "host-agent-contract.json"),
+                )
 
         for role in ("bot_fi", "webapp_fi"):
             paths = WORKER.operation_paths(

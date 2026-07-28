@@ -2,10 +2,11 @@
 """Validate one production-shadow host request without executing it.
 
 This file is deliberately standalone: a deployed copy does not import the
-application repository or trust ambient ``PYTHONPATH``.  It reads one fixed,
-root-only, manifest-bound request contract; verifies its own artifact hash and
-the local host address; validates the complete request; and then stops because
-production operation implementations remain hard-disabled in this slice.
+application repository or trust ambient ``PYTHONPATH``.  It reads one
+operation-scoped, root-only, manifest-bound request contract; verifies its own
+artifact hash and the local host address; validates the complete request; and
+then stops because production operation implementations remain hard-disabled
+in this slice.
 """
 
 from __future__ import annotations
@@ -32,8 +33,8 @@ from uuid import UUID
 
 AGENT_SCHEMA = "production-shadow-host-agent-request-v1"
 CONTRACT_SCHEMA = "production-shadow-host-agent-contract-v1"
-FIXED_CONTRACT_PATH = Path(
-    "/etc/trading-bot-production-shadow/host-agent-contract.json"
+CONTRACT_ROOT = Path(
+    "/root/secure-envs/trading-bot/three-site-production-shadow"
 )
 SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -236,6 +237,11 @@ EXPECTED_TRANSPORTS = frozenset(
 
 class HostAgentError(RuntimeError):
     """Raised when a host request differs from the bounded contract."""
+
+
+def operation_contract_path(operation_id: str) -> Path:
+    canonical = _canonical_uuid(operation_id, label="operation_id")
+    return CONTRACT_ROOT / canonical / "host-agent-contract.json"
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -523,9 +529,16 @@ def contract_sha256(document: dict[str, Any]) -> str:
     return hashlib.sha256(_canonical_json(validate_contract(document))).hexdigest()
 
 
-def read_contract(path: Path, *, expected_sha256: str) -> dict[str, Any]:
-    if path != FIXED_CONTRACT_PATH:
-        raise HostAgentError("host-agent contract path is not fixed")
+def read_contract(
+    path: Path,
+    *,
+    operation_id: str,
+    expected_sha256: str,
+) -> dict[str, Any]:
+    if path != operation_contract_path(operation_id):
+        raise HostAgentError(
+            "host-agent contract path is not operation-scoped"
+        )
     payload = _read_stable_file(
         path,
         label="host-agent contract",
@@ -612,8 +625,16 @@ def validate_request(
         raise HostAgentError("host-agent request fields are not exact")
     if document["schema"] != AGENT_SCHEMA:
         raise HostAgentError("host-agent request schema is invalid")
-    if document["host_agent_contract"] != str(FIXED_CONTRACT_PATH):
-        raise HostAgentError("host-agent request contract path is not fixed")
+    operation_id = _canonical_uuid(
+        document["operation_id"],
+        label="operation_id",
+    )
+    if document["host_agent_contract"] != str(
+        operation_contract_path(operation_id)
+    ):
+        raise HostAgentError(
+            "host-agent request contract path is not operation-scoped"
+        )
     expected_contract_sha256 = _nonzero_sha256(
         document["host_agent_contract_sha256"],
         label="host-agent contract",
@@ -639,7 +660,6 @@ def validate_request(
         raise HostAgentError("expected host differs from contract topology")
 
     campaign_id = _canonical_uuid(document["campaign_id"], label="campaign_id")
-    operation_id = _canonical_uuid(document["operation_id"], label="operation_id")
     if campaign_id == operation_id:
         raise HostAgentError("operation_id must differ from campaign_id")
     release_sha = str(document["release_sha"])
@@ -1252,11 +1272,17 @@ def main(argv: list[str] | None = None) -> int:
         if os.geteuid() != 0:
             raise HostAgentError("production-shadow host agent must run as root")
         args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
-        if args.host_agent_contract != FIXED_CONTRACT_PATH:
-            raise HostAgentError("host-agent contract path is not fixed")
+        expected_contract_path = operation_contract_path(
+            args.operation_id
+        )
+        if args.host_agent_contract != expected_contract_path:
+            raise HostAgentError(
+                "host-agent contract path is not operation-scoped"
+            )
         agent_sha256 = hash_agent_artifact(Path(__file__).resolve())
         contract = read_contract(
             args.host_agent_contract,
+            operation_id=args.operation_id,
             expected_sha256=args.host_agent_contract_sha256,
         )
         request = validate_request(
