@@ -936,24 +936,20 @@ def collect_source_failures(
             failures.append(
                 f"{role}_db must bind only its exact canonical PostgreSQL directory"
             )
-        expected_restore_mounts = (
-            set()
-            if role == "webapp_ir"
-            else {
-                (
-                    f"{data_fragment}restore-input/{role_path}:"
-                    "/run/restore-input:ro"
-                ),
-                (
-                    f"{data_fragment}{role_path}/uploads:"
-                    "/run/restore-target/uploads"
-                ),
-                (
-                    f"{data_fragment}{role_path}/audit:"
-                    "/run/restore-target/audit"
-                ),
-            }
-        )
+        expected_restore_mounts = {
+            (
+                f"{data_fragment}restore-input/{role_path}:"
+                "/run/restore-input:ro"
+            ),
+            (
+                f"{data_fragment}{role_path}/uploads:"
+                "/run/restore-target/uploads"
+            ),
+            (
+                f"{data_fragment}{role_path}/audit:"
+                "/run/restore-target/audit"
+            ),
+        }
         observed_restore_mounts = _service_volumes(
             services.get(f"{role}_restore_tool", {})
         )
@@ -961,16 +957,10 @@ def collect_source_failures(
             len(observed_restore_mounts) != len(expected_restore_mounts)
             or set(observed_restore_mounts) != expected_restore_mounts
         ):
-            if role == "webapp_ir":
-                failures.append(
-                    "webapp_ir_restore_tool must accept PostgreSQL restore "
-                    "only over stdin and mount no restore/upload/audit path"
-                )
-            else:
-                failures.append(
-                    f"{role}_restore_tool must bind only its exact restore input, "
-                    "uploads, and audit directories"
-                )
+            failures.append(
+                f"{role}_restore_tool must bind only its exact restore input, "
+                "uploads, and audit directories"
+            )
         restore_material = json.dumps(
             services.get(f"{role}_restore_tool", {}),
             sort_keys=True,

@@ -806,31 +806,27 @@ class ThreeSiteProductionShadowComposeTests(unittest.TestCase):
             ):
                 validate_pristine_redis_targets(values)
 
-    def test_fi_restore_tools_have_exact_binds_and_wa_is_stdin_only(self):
+    def test_restore_tools_have_exact_role_binds(self):
         data_root = (
             "${PRODUCTION_SHADOW_DATA_ROOT:"
             "?operation-bound data root is required}"
         )
         for role in ("bot_fi", "webapp_fi", "webapp_ir"):
             role_path = role.replace("_", "-")
-            expected = (
-                set()
-                if role == "webapp_ir"
-                else {
-                    (
-                        f"{data_root}/restore-input/{role_path}:"
-                        "/run/restore-input:ro"
-                    ),
-                    (
-                        f"{data_root}/{role_path}/uploads:"
-                        "/run/restore-target/uploads"
-                    ),
-                    (
-                        f"{data_root}/{role_path}/audit:"
-                        "/run/restore-target/audit"
-                    ),
-                }
-            )
+            expected = {
+                (
+                    f"{data_root}/restore-input/{role_path}:"
+                    "/run/restore-input:ro"
+                ),
+                (
+                    f"{data_root}/{role_path}/uploads:"
+                    "/run/restore-target/uploads"
+                ),
+                (
+                    f"{data_root}/{role_path}/audit:"
+                    "/run/restore-target/audit"
+                ),
+            }
             with self.subTest(role=role):
                 self.assertEqual(
                     set(
@@ -842,28 +838,42 @@ class ThreeSiteProductionShadowComposeTests(unittest.TestCase):
                 )
 
                 swapped = copy.deepcopy(self.document)
-                if role == "webapp_ir":
-                    swapped["services"][f"{role}_restore_tool"]["volumes"] = [
-                        (
-                            f"{data_root}/restore-input/webapp-ir:"
-                            "/run/restore-input:ro"
-                        )
-                    ]
-                    expected_failure = (
-                        "webapp_ir_restore_tool must accept PostgreSQL restore "
-                        "only over stdin"
-                    )
-                else:
-                    swapped["services"][f"{role}_restore_tool"]["volumes"][1] = (
-                        f"{data_root}/webapp-ir/uploads:"
-                        "/run/restore-target/uploads"
-                    )
-                    expected_failure = (
-                        f"{role}_restore_tool must bind only its exact restore input"
-                    )
+                swapped["services"][f"{role}_restore_tool"]["volumes"][1] = (
+                    f"{data_root}/wrong-role/uploads:"
+                    "/run/restore-target/uploads"
+                )
                 self.assert_source_failure(
                     swapped,
-                    expected_failure,
+                    f"{role}_restore_tool must bind only its exact restore input",
+                )
+
+    def test_restore_tools_reject_redis_and_legacy_source_mounts(self):
+        data_root = (
+            "${PRODUCTION_SHADOW_DATA_ROOT:"
+            "?operation-bound data root is required}"
+        )
+        for role in ("bot_fi", "webapp_fi", "webapp_ir"):
+            service_name = f"{role}_restore_tool"
+            role_path = role.replace("_", "-")
+
+            with self.subTest(role=role, source="redis"):
+                redis_mount = copy.deepcopy(self.document)
+                redis_mount["services"][service_name]["volumes"].append(
+                    f"{data_root}/{role_path}/redis:/run/restore-target/redis"
+                )
+                self.assert_source_failure(
+                    redis_mount,
+                    f"{service_name} must bind only its exact restore input",
+                )
+
+            with self.subTest(role=role, source="legacy"):
+                legacy_mount = copy.deepcopy(self.document)
+                legacy_mount["services"][service_name]["volumes"].append(
+                    "/srv/trading-bot/current/uploads:/run/legacy-input:ro"
+                )
+                self.assert_source_failure(
+                    legacy_mount,
+                    f"{service_name} must bind only its exact restore input",
                 )
 
 

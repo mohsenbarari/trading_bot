@@ -947,6 +947,10 @@ services:
       PGUSER: ${WEBAPP_IR_POSTGRES_USER:?required}
       PGPASSWORD: ${WEBAPP_IR_POSTGRES_PASSWORD:?required}
       PGDATABASE: ${WEBAPP_IR_POSTGRES_DB:?required}
+    volumes:
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/restore-input/webapp-ir:/run/restore-input:ro
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-ir/uploads:/run/restore-target/uploads
+      - ${PRODUCTION_SHADOW_DATA_ROOT:?operation-bound data root is required}/webapp-ir/audit:/run/restore-target/audit
     depends_on: {webapp_ir_db: {condition: service_healthy}}
     networks: [webapp_ir]
 
