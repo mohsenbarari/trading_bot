@@ -380,30 +380,204 @@ def synthetic_host_result(
         entry["challenge"]["boundary"]: entry for entry in transcript
     }
     if historical_result is None:
+        runtime = WORKER.runtime_paths(
+            OPERATION_ID,
+            RELEASE_SHA,
+            SHA_C,
+            role,
+        )
+        source_role = "bot_fi" if role == "bot_fi" else "webapp_fi"
+        postgres_image_id = "sha256:" + "1" * 64
+        app_image_id = "sha256:" + "2" * 64
+        artifacts = {
+            "database-backup": {
+                "path": str(runtime.restore_input_root / "database.dump"),
+                "sha256": SHA_A,
+                "bytes": 101,
+                "restored_tree_sha256": None,
+            },
+            "uploads-archive": {
+                "path": str(runtime.restore_input_root / "uploads.tar.gz"),
+                "sha256": SHA_B,
+                "bytes": 102,
+                "restored_tree_sha256": SHA_A,
+            },
+            "audit-archive": {
+                "path": str(runtime.restore_input_root / "audit.tar.gz"),
+                "sha256": SHA_C,
+                "bytes": 103,
+                "restored_tree_sha256": SHA_F,
+            },
+        }
+        file_bindings = {
+            "controller-manifest": {
+                "path": str(
+                    runtime.secret_generation_root
+                    / "controller-manifest.json"
+                ),
+                "sha256": SHA_A,
+                "bytes": 201,
+            },
+            "restore-set": {
+                "path": str(
+                    runtime.secret_generation_root
+                    / "frozen-final-restore-set.json"
+                ),
+                "sha256": SHA_B,
+                "bytes": 202,
+            },
+            "canonical-compose": {
+                "path": str(
+                    runtime.secret_generation_root
+                    / "canonical-compose.yml"
+                ),
+                "sha256": SHA_D,
+                "bytes": 203,
+            },
+            "role-compose": {
+                "path": str(
+                    runtime.secret_generation_root
+                    / "docker-compose.restore.yml"
+                ),
+                "sha256": SHA_E,
+                "bytes": 204,
+            },
+            "prepare-compose": {
+                "path": str(runtime.prepare_compose),
+                "sha256": SHA_F,
+                "bytes": 205,
+            },
+            "ca": {
+                "path": str(runtime.ca),
+                "sha256": SHA_A,
+                "bytes": 206,
+            },
+            "environment": {
+                "path": str(
+                    runtime.secret_generation_root / "runtime.env.role"
+                ),
+                "sha256": SHA_B,
+                "bytes": 207,
+            },
+            "worker": {
+                "path": request["worker_path"],
+                "sha256": request["worker_sha256"],
+                "bytes": 208,
+            },
+            **{
+                kind: {
+                    "path": row["path"],
+                    "sha256": row["sha256"],
+                    "bytes": row["bytes"],
+                }
+                for kind, row in artifacts.items()
+            },
+        }
         receipt_document = {
             "schema": WORKER.INSTALLER_RECEIPT_SCHEMA,
             "status": "installed",
+            "campaign_id": CAMPAIGN_ID,
+            "operation_id": OPERATION_ID,
             "role": role,
+            "release_sha": RELEASE_SHA,
+            "release_tree_sha": RELEASE_TREE_SHA,
+            "controller_manifest_sha256": SHA_A,
+            "restore_set_sha256": SHA_B,
+            "restore_generation_sha256": SHA_C,
+            "source_role": source_role,
+            "target_transport": WORKER.ROLE_TRANSPORTS[role],
+            "app_image_id": app_image_id,
+            "app_image_content_identity": "sha256:" + "3" * 64,
+            "target_migration_revision": "head",
+            "installed_files": file_bindings,
+            "data_generation_root": str(runtime.data_generation_root),
+            "secret_generation_root": str(
+                runtime.secret_generation_root
+            ),
+            "redis_restore_bytes": 0,
+            "current_mutated": False,
+            "legacy_mutated": False,
+            "object_storage_mutated": False,
         }
         receipt = readback(
-            f"/root/{role}/installer-receipt.json",
+            str(runtime.secret_generation_root / "installer-receipt.json"),
             receipt_document,
             newline=False,
         )
         manifest_document = {
             "schema": WORKER.ROLE_MANIFEST_SCHEMA,
             "status": "installed",
+            "campaign_id": CAMPAIGN_ID,
+            "operation_id": OPERATION_ID,
             "role": role,
+            "release_sha": RELEASE_SHA,
+            "release_tree_sha": RELEASE_TREE_SHA,
+            "controller_manifest_path": file_bindings[
+                "controller-manifest"
+            ]["path"],
+            "controller_manifest_sha256": SHA_A,
+            "restore_set_path": file_bindings["restore-set"]["path"],
+            "restore_set_sha256": SHA_B,
+            "restore_generation_sha256": SHA_C,
+            "source_role": source_role,
+            "target_transport": WORKER.ROLE_TRANSPORTS[role],
+            "legacy_frozen_receipt_sha256": SHA_D,
+            "snapshot_authorization_claim_sha256": SHA_E,
+            "installer_receipt_path": str(
+                runtime.secret_generation_root / "installer-receipt.json"
+            ),
             "installer_receipt_sha256": receipt[
                 "canonical_document_sha256"
             ],
-            "restore_set_sha256": request["restore_set_sha256"],
-            "restore_generation_sha256": request[
-                "restore_generation_sha256"
-            ],
+            "canonical_compose_path": file_bindings[
+                "canonical-compose"
+            ]["path"],
+            "canonical_compose_sha256": SHA_D,
+            "role_compose_path": file_bindings["role-compose"]["path"],
+            "role_compose_sha256": SHA_E,
+            "prepare_compose_path": file_bindings[
+                "prepare-compose"
+            ]["path"],
+            "prepare_compose_sha256": SHA_F,
+            "ca_path": file_bindings["ca"]["path"],
+            "ca_sha256": SHA_A,
+            "environment_path": file_bindings["environment"]["path"],
+            "environment_sha256": SHA_B,
+            "worker_path": request["worker_path"],
+            "worker_sha256": request["worker_sha256"],
+            "release_root": str(runtime.release_root),
+            "project_base": runtime.project_base,
+            "project_name": runtime.project_name,
+            "data_generation_root": str(runtime.data_generation_root),
+            "secret_generation_root": str(
+                runtime.secret_generation_root
+            ),
+            "postgres_image_id": postgres_image_id,
+            "postgres_image_content_identity": "sha256:" + "4" * 64,
+            "app_image_id": app_image_id,
+            "app_image_content_identity": "sha256:" + "3" * 64,
+            "target_migration_revision": "head",
+            "postgres_runtime_uid": 70,
+            "postgres_runtime_gid": 70,
+            "artifacts": artifacts,
+            "source_database": {
+                "alembic_revision": "head",
+                "fingerprint_algorithm": (
+                    "pg-copy-jsonl-sha256-canonical-session-v1"
+                ),
+                "database_fingerprint_sha256": SHA_E,
+                "row_count": 10,
+                "table_count": 2,
+            },
+            "constraints": {
+                field: True for field in WORKER.CONSTRAINT_FIELDS
+            },
         }
         manifest = readback(
-            f"/root/{role}/restore-role-manifest.json",
+            str(
+                runtime.secret_generation_root
+                / "restore-role-manifest.json"
+            ),
             manifest_document,
             newline=False,
         )
@@ -955,6 +1129,36 @@ class FrozenFinalRestoreOrchestratorTests(unittest.TestCase):
             "actual-byte",
         ):
             MODULE.validate_host_result(result, request=request)
+
+    def test_prepare_material_role_manifest_fields_are_exact(self) -> None:
+        request = request_for("bot_fi")
+        baseline = synthetic_host_result(request)
+        MODULE.validate_host_result(baseline, request=request)
+        self.assertIn(
+            "prepare-compose",
+            MODULE.INSTALLATION_PUBLICATION_FIELDS,
+        )
+        self.assertIn("ca", MODULE.INSTALLATION_PUBLICATION_FIELDS)
+
+        missing = copy.deepcopy(baseline)
+        del missing["role_manifest"]["document"][
+            "prepare_compose_sha256"
+        ]
+        refresh_readback(missing["role_manifest"])
+        with self.assertRaisesRegex(
+            MODULE.FrozenFinalRestoreOrchestratorError,
+            "role manifest exact identity",
+        ):
+            MODULE.validate_host_result(missing, request=request)
+
+        wrong_app = copy.deepcopy(baseline)
+        wrong_app["role_manifest"]["document"]["app_image_id"] = "wrong"
+        refresh_readback(wrong_app["role_manifest"])
+        with self.assertRaisesRegex(
+            MODULE.FrozenFinalRestoreOrchestratorError,
+            "app_image_id",
+        ):
+            MODULE.validate_host_result(wrong_app, request=request)
 
     def test_wrong_wa_version_in_result_is_rejected(self) -> None:
         request = request_for("webapp_ir")

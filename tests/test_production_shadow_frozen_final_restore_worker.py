@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 import copy
 import shutil
@@ -29,6 +30,9 @@ CONTROLLER_SHA256 = "e" * 64
 INSTALLER_SHA256 = "f" * 64
 POSTGRES_IMAGE_ID = "sha256:" + "1" * 64
 POSTGRES_CONTENT_ID = "sha256:" + "2" * 64
+APP_IMAGE_ID = "sha256:" + "8" * 64
+APP_CONTENT_ID = "sha256:" + "9" * 64
+TARGET_REVISION = "target_2"
 DATABASE_CONFIG_HASH = "3" * 64
 RESTORE_TOOL_CONFIG_HASH = "4" * 64
 NETWORK_ID = "5" * 64
@@ -107,6 +111,21 @@ class Fixture:
         ):
             path.mkdir(parents=True, exist_ok=True)
             path.chmod(0o700)
+        versions = self.paths.release_root / "migrations" / "versions"
+        versions.mkdir(parents=True, exist_ok=True)
+        write_root_file(
+            versions / "source.py",
+            b"revision = 'source_1'\ndown_revision = None\n",
+            0o644,
+        )
+        write_root_file(
+            versions / "target.py",
+            (
+                b"revision = 'target_2'\n"
+                b"down_revision = 'source_1'\n"
+            ),
+            0o644,
+        )
         role_path = MODULE.ROLE_PATHS[role]
         canonical_source = (
             Path(__file__).resolve().parents[1]
@@ -122,11 +141,30 @@ class Fixture:
         canonical_document = yaml.safe_load(
             self.canonical_compose.read_text(encoding="utf-8")
         )
-        role_document = MODULE.render_role_compose(
+        prepare_document = MODULE.render_role_compose(
             canonical_document,
             role=role_path,
             scope="prepare",
         )
+        prepare_document[
+            "x-production-shadow-runtime-image-ids"
+        ] = dict(MODULE.PREPARE.RUNTIME_IMAGE_COMPOSE_EXTENSION)
+        self.prepare_compose = self.paths.prepare_compose
+        write_root_file(
+            self.prepare_compose,
+            MODULE.canonical_role_compose_bytes(prepare_document),
+        )
+        self.ca = self.paths.ca
+        write_root_file(
+            self.ca,
+            (
+                b"-----BEGIN CERTIFICATE-----\n"
+                b"ZmFrZQ==\n"
+                b"-----END CERTIFICATE-----\n"
+            ),
+        )
+        role_document = copy.deepcopy(prepare_document)
+        role_document.pop("x-production-shadow-runtime-image-ids")
         names = {f"{role}_db", f"{role}_restore_tool"}
         role_document["services"] = {
             name: value
@@ -153,7 +191,9 @@ class Fixture:
         prefix = MODULE.ROLE_PREFIXES[role]
         env_values = {
             name: "x"
-            for name in MODULE.referenced_environment_names(role_document)
+            for name in MODULE.referenced_environment_names(
+                prepare_document
+            )
         }
         env_values.update(
             {
@@ -165,6 +205,7 @@ class Fixture:
                 "PRODUCTION_SHADOW_SECRET_ROOT": str(root / "rehearsal-secret"),
                 "PRODUCTION_SHADOW_CGROUP_PARENT": "/rehearsal",
                 "PRODUCTION_SHADOW_POSTGRES_IMAGE_ID": POSTGRES_IMAGE_ID,
+                "PRODUCTION_SHADOW_APP_IMAGE_ID": APP_IMAGE_ID,
                 "PRODUCTION_SHADOW_OPERATION_ID": OPERATION_ID,
                 "PRODUCTION_SHADOW_PROJECT_ROOT": str(
                     self.paths.project_root
@@ -215,6 +256,12 @@ class Fixture:
             "role_compose_sha256": hashlib.sha256(
                 self.role_compose.read_bytes()
             ).hexdigest(),
+            "prepare_compose_sha256": hashlib.sha256(
+                self.prepare_compose.read_bytes()
+            ).hexdigest(),
+            "ca_sha256": hashlib.sha256(
+                self.ca.read_bytes()
+            ).hexdigest(),
         }
         self.manifest = MODULE.RoleManifest(
             document=self.document,
@@ -232,6 +279,9 @@ class Fixture:
             installer_receipt_sha256=INSTALLER_SHA256,
             postgres_image_id=POSTGRES_IMAGE_ID,
             postgres_image_content_identity=POSTGRES_CONTENT_ID,
+            app_image_id=APP_IMAGE_ID,
+            app_image_content_identity=APP_CONTENT_ID,
+            target_migration_revision=TARGET_REVISION,
             artifacts=artifacts,
             source_database=MODULE.DatabaseExpectation(
                 alembic_revision="source_1",
@@ -252,6 +302,8 @@ class Fixture:
             ),
             canonical_compose_path=self.canonical_compose,
             role_compose_path=self.role_compose,
+            prepare_compose_path=self.prepare_compose,
+            ca_path=self.ca,
             environment_path=self.environment,
             worker_path=self.worker,
         )
@@ -795,7 +847,7 @@ class RuntimeDocker:
             )
         if args[1:3] == ["image", "inspect"]:
             if "--format" in args:
-                return POSTGRES_IMAGE_ID
+                return args[-1]
             return json.dumps([image_inspect_document()])
         if args[1] == "inspect":
             row = database_container_row(self.fixture)
@@ -1154,7 +1206,7 @@ class FrozenFinalRestoreWorkerTests(unittest.TestCase):
             if "config" in args:
                 return json.dumps(config)
             if args[1:3] == ["image", "inspect"]:
-                return POSTGRES_IMAGE_ID
+                return args[-1]
             return ""
 
         runner = FakeRunner(callback)
@@ -1217,6 +1269,163 @@ class FrozenFinalRestoreWorkerTests(unittest.TestCase):
             MODULE._verify_role_compose(
                 self.fixture.manifest,
                 FakeRunner(),
+            )
+
+    def test_prepare_inputs_are_exact_and_never_execute_app_service(self):
+        config = rendered_config(self.fixture)
+
+        def callback(args, _env, _stdin):
+            if "config" in args:
+                return json.dumps(config)
+            if args[1:3] == ["image", "inspect"]:
+                return args[-1]
+            return ""
+
+        runner = FakeRunner(callback)
+        evidence = MODULE._verify_inputs(self.fixture.manifest, runner)
+        self.assertEqual(
+            evidence["prepare_inputs"]["target_migration_revision"],
+            TARGET_REVISION,
+        )
+        self.assertFalse(
+            evidence["prepare_inputs"]["app_service_invoked"]
+        )
+        flattened = [argument for call, _env in runner.calls for argument in call]
+        self.assertNotIn("run", flattened)
+        self.assertNotIn("up", flattened)
+        self.assertNotIn("start", flattened)
+
+    def test_missing_and_tampered_prepare_inputs_are_rejected(self):
+        self.fixture.ca.unlink()
+        with self.assertRaisesRegex(
+            MODULE.FrozenFinalRestoreWorkerError,
+            "prepare CA.*unavailable|prepare CA",
+        ):
+            MODULE._verify_prepare_inputs(self.fixture.manifest)
+        write_root_file(self.fixture.ca, b"tampered-certificate")
+        with self.assertRaisesRegex(
+            MODULE.FrozenFinalRestoreWorkerError,
+            "digest differs|invalid",
+        ):
+            MODULE._verify_prepare_inputs(self.fixture.manifest)
+
+    def test_prepare_inputs_reject_mode_symlink_and_hardlink(self):
+        self.fixture.ca.chmod(0o640)
+        with self.assertRaisesRegex(
+            MODULE.FrozenFinalRestoreWorkerError,
+            "unavailable or unsafe",
+        ):
+            MODULE._verify_prepare_inputs(self.fixture.manifest)
+        self.fixture.ca.chmod(0o600)
+
+        hardlink = self.fixture.ca.with_name("ca-hardlink.crt")
+        os.link(self.fixture.ca, hardlink)
+        with self.assertRaisesRegex(
+            MODULE.FrozenFinalRestoreWorkerError,
+            "unavailable or unsafe",
+        ):
+            MODULE._verify_prepare_inputs(self.fixture.manifest)
+        hardlink.unlink()
+
+        original = self.fixture.prepare_compose.read_bytes()
+        replacement = self.fixture.prepare_compose.with_name(
+            "prepare-source.yml"
+        )
+        write_root_file(replacement, original)
+        self.fixture.prepare_compose.unlink()
+        self.fixture.prepare_compose.symlink_to(replacement)
+        with self.assertRaisesRegex(
+            MODULE.FrozenFinalRestoreWorkerError,
+            "unavailable or unsafe",
+        ):
+            MODULE._verify_prepare_inputs(self.fixture.manifest)
+
+    def test_prepare_ca_metadata_race_is_rejected(self):
+        ca_inode = self.fixture.ca.stat().st_ino
+        real_read = os.read
+        raced = False
+
+        def racing_read(descriptor, count):
+            nonlocal raced
+            payload = real_read(descriptor, count)
+            if (
+                payload
+                and not raced
+                and os.fstat(descriptor).st_ino == ca_inode
+            ):
+                raced = True
+                metadata = self.fixture.ca.stat()
+                os.utime(
+                    self.fixture.ca,
+                    ns=(
+                        metadata.st_atime_ns,
+                        metadata.st_mtime_ns + 1_000_000,
+                    ),
+                )
+            return payload
+
+        with mock.patch.object(MODULE.os, "read", side_effect=racing_read):
+            with self.assertRaisesRegex(
+                MODULE.FrozenFinalRestoreWorkerError,
+                "changed while being read",
+            ):
+                MODULE._verify_prepare_inputs(self.fixture.manifest)
+        self.assertTrue(raced)
+
+    def test_wrong_app_identity_is_rejected_by_prepare_binding(self):
+        wrong = replace(
+            self.fixture.manifest,
+            app_image_id="sha256:" + "f" * 64,
+        )
+        with self.assertRaisesRegex(
+            MODULE.FrozenFinalRestoreWorkerError,
+            "image identity differs",
+        ):
+            MODULE._verify_prepare_inputs(wrong)
+
+    def test_migration_head_must_be_unique(self):
+        self.assertEqual(
+            MODULE.target_migration_revision(
+                self.fixture.paths.release_root
+            ),
+            TARGET_REVISION,
+        )
+        write_root_file(
+            self.fixture.paths.release_root
+            / "migrations"
+            / "versions"
+            / "foreign.py",
+            b"revision = 'foreign_3'\ndown_revision = 'source_1'\n",
+            0o644,
+        )
+        with self.assertRaisesRegex(
+            MODULE.FrozenFinalRestoreWorkerError,
+            "one closed head",
+        ):
+            MODULE.target_migration_revision(
+                self.fixture.paths.release_root
+            )
+
+    def test_disconnected_migration_cycle_is_rejected(self):
+        versions = (
+            self.fixture.paths.release_root / "migrations" / "versions"
+        )
+        write_root_file(
+            versions / "cycle_a.py",
+            b"revision = 'cycle_a'\ndown_revision = 'cycle_b'\n",
+            0o644,
+        )
+        write_root_file(
+            versions / "cycle_b.py",
+            b"revision = 'cycle_b'\ndown_revision = 'cycle_a'\n",
+            0o644,
+        )
+        with self.assertRaisesRegex(
+            MODULE.FrozenFinalRestoreWorkerError,
+            "one closed lineage",
+        ):
+            MODULE.target_migration_revision(
+                self.fixture.paths.release_root
             )
 
     def test_role_manifest_fields_fail_closed_before_side_effects(self):

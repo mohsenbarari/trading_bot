@@ -199,6 +199,8 @@ INSTALLATION_PUBLICATION_FIELDS = frozenset(
         "restore-set",
         "canonical-compose",
         "role-compose",
+        "prepare-compose",
+        "ca",
         "environment",
         "database-backup",
         "uploads-archive",
@@ -2697,6 +2699,230 @@ def _validate_installation_attestation(
     return installation
 
 
+def _validate_installed_role_documents(
+    role_manifest: Mapping[str, Any],
+    receipt: Mapping[str, Any],
+    *,
+    request: Mapping[str, Any],
+) -> None:
+    manifest = role_manifest["document"]
+    installed = receipt["document"]
+    role = request["role"]
+    paths = WORKER.runtime_paths(
+        request["operation_id"],
+        request["release_sha"],
+        request["restore_generation_sha256"],
+        role,
+    )
+    expected_manifest_paths = {
+        "release_root": paths.release_root,
+        "data_generation_root": paths.data_generation_root,
+        "secret_generation_root": paths.secret_generation_root,
+        "controller_manifest_path": (
+            paths.secret_generation_root / "controller-manifest.json"
+        ),
+        "restore_set_path": (
+            paths.secret_generation_root / "frozen-final-restore-set.json"
+        ),
+        "installer_receipt_path": (
+            paths.secret_generation_root / "installer-receipt.json"
+        ),
+        "canonical_compose_path": (
+            paths.secret_generation_root / "canonical-compose.yml"
+        ),
+        "role_compose_path": (
+            paths.secret_generation_root / "docker-compose.restore.yml"
+        ),
+        "prepare_compose_path": paths.prepare_compose,
+        "ca_path": paths.ca,
+        "environment_path": (
+            paths.secret_generation_root / "runtime.env.role"
+        ),
+        "worker_path": request["worker_path"],
+    }
+    if (
+        not isinstance(manifest, dict)
+        or set(manifest) != WORKER.ROLE_MANIFEST_FIELDS
+        or manifest["schema"] != WORKER.ROLE_MANIFEST_SCHEMA
+        or manifest["status"] != "installed"
+        or manifest["campaign_id"] != request["campaign_id"]
+        or manifest["operation_id"] != request["operation_id"]
+        or manifest["role"] != role
+        or manifest["release_sha"] != request["release_sha"]
+        or manifest["release_tree_sha"] != request["release_tree_sha"]
+        or manifest["controller_manifest_sha256"]
+        != request["controller_manifest_sha256"]
+        or manifest["restore_set_sha256"]
+        != request["restore_set_sha256"]
+        or manifest["restore_generation_sha256"]
+        != request["restore_generation_sha256"]
+        or manifest["source_role"]
+        != WORKER.RESTORE_SET.TARGET_MAP[role]["source_role"]
+        or manifest["target_transport"] != WORKER.ROLE_TRANSPORTS[role]
+        or manifest["project_base"] != paths.project_base
+        or manifest["project_name"] != paths.project_name
+        or manifest["installer_receipt_sha256"]
+        != receipt["canonical_document_sha256"]
+        or manifest["worker_sha256"] != request["worker_sha256"]
+        or Path(str(role_manifest["path"]))
+        != paths.secret_generation_root / "restore-role-manifest.json"
+        or Path(str(receipt["path"]))
+        != paths.secret_generation_root / "installer-receipt.json"
+        or any(
+            Path(str(manifest[field])) != Path(expected)
+            for field, expected in expected_manifest_paths.items()
+        )
+    ):
+        raise FrozenFinalRestoreOrchestratorError(
+            "installed role manifest exact identity differs"
+        )
+    for field in (
+        "controller_manifest_sha256",
+        "restore_set_sha256",
+        "restore_generation_sha256",
+        "legacy_frozen_receipt_sha256",
+        "snapshot_authorization_claim_sha256",
+        "installer_receipt_sha256",
+        "canonical_compose_sha256",
+        "role_compose_sha256",
+        "prepare_compose_sha256",
+        "ca_sha256",
+        "environment_sha256",
+        "worker_sha256",
+    ):
+        _nonzero_sha256(manifest[field], label=f"role manifest {field}")
+    for field in (
+        "postgres_image_id",
+        "postgres_image_content_identity",
+        "app_image_id",
+        "app_image_content_identity",
+    ):
+        if (
+            not isinstance(manifest[field], str)
+            or WORKER.IMAGE_ID_RE.fullmatch(manifest[field]) is None
+            or manifest[field] == f"sha256:{ZERO_SHA256}"
+        ):
+            raise FrozenFinalRestoreOrchestratorError(
+                f"installed role manifest {field} is invalid"
+            )
+    if (
+        not isinstance(manifest["target_migration_revision"], str)
+        or WORKER.REVISION_RE.fullmatch(
+            manifest["target_migration_revision"]
+        )
+        is None
+        or not isinstance(manifest["constraints"], dict)
+        or set(manifest["constraints"]) != WORKER.CONSTRAINT_FIELDS
+        or any(value is not True for value in manifest["constraints"].values())
+        or manifest["postgres_runtime_uid"] != WORKER.POSTGRES_RUNTIME_UID
+        or manifest["postgres_runtime_gid"] != WORKER.POSTGRES_RUNTIME_GID
+        or not isinstance(manifest["source_database"], dict)
+        or set(manifest["source_database"])
+        != WORKER.SOURCE_DATABASE_FIELDS
+        or not isinstance(manifest["artifacts"], dict)
+        or set(manifest["artifacts"]) != set(WORKER.ARTIFACT_KINDS)
+    ):
+        raise FrozenFinalRestoreOrchestratorError(
+            "installed role manifest preparation closure differs"
+        )
+    artifact_paths = {
+        "database-backup": paths.restore_input_root / "database.dump",
+        "uploads-archive": paths.restore_input_root / "uploads.tar.gz",
+        "audit-archive": paths.restore_input_root / "audit.tar.gz",
+    }
+    for kind, expected_path in artifact_paths.items():
+        row = manifest["artifacts"][kind]
+        if (
+            not isinstance(row, dict)
+            or set(row) != WORKER.ARTIFACT_FIELDS
+            or Path(str(row["path"])) != expected_path
+            or type(row["bytes"]) is not int
+            or row["bytes"] < 1
+        ):
+            raise FrozenFinalRestoreOrchestratorError(
+                f"installed role manifest {kind} differs"
+            )
+        _nonzero_sha256(row["sha256"], label=f"{kind} SHA-256")
+    common_receipt_fields = (
+        "campaign_id",
+        "operation_id",
+        "role",
+        "release_sha",
+        "release_tree_sha",
+        "controller_manifest_sha256",
+        "restore_set_sha256",
+        "restore_generation_sha256",
+        "source_role",
+        "target_transport",
+        "app_image_id",
+        "app_image_content_identity",
+        "target_migration_revision",
+        "data_generation_root",
+        "secret_generation_root",
+    )
+    files = installed.get("installed_files")
+    if (
+        not isinstance(installed, dict)
+        or set(installed) != WORKER.INSTALLER_RECEIPT_FIELDS
+        or installed["schema"] != WORKER.INSTALLER_RECEIPT_SCHEMA
+        or installed["status"] != "installed"
+        or any(
+            installed[field] != manifest[field]
+            for field in common_receipt_fields
+        )
+        or installed["redis_restore_bytes"] != 0
+        or installed["current_mutated"] is not False
+        or installed["legacy_mutated"] is not False
+        or installed["object_storage_mutated"] is not False
+        or not isinstance(files, dict)
+        or set(files) != WORKER.INSTALLER_FILE_NAMES
+    ):
+        raise FrozenFinalRestoreOrchestratorError(
+            "installed receipt exact identity differs"
+        )
+    manifest_bindings = {
+        "controller-manifest": (
+            "controller_manifest_path",
+            "controller_manifest_sha256",
+        ),
+        "restore-set": ("restore_set_path", "restore_set_sha256"),
+        "canonical-compose": (
+            "canonical_compose_path",
+            "canonical_compose_sha256",
+        ),
+        "role-compose": ("role_compose_path", "role_compose_sha256"),
+        "prepare-compose": (
+            "prepare_compose_path",
+            "prepare_compose_sha256",
+        ),
+        "ca": ("ca_path", "ca_sha256"),
+        "environment": ("environment_path", "environment_sha256"),
+        "worker": ("worker_path", "worker_sha256"),
+    }
+    for name, row in files.items():
+        if (
+            not isinstance(row, dict)
+            or set(row) != WORKER.INSTALLER_FILE_FIELDS
+            or type(row["bytes"]) is not int
+            or row["bytes"] < 1
+        ):
+            raise FrozenFinalRestoreOrchestratorError(
+                f"installed receipt {name} file row differs"
+            )
+        if name in manifest_bindings:
+            path_field, hash_field = manifest_bindings[name]
+            expected = (manifest[path_field], manifest[hash_field])
+        else:
+            expected = (
+                manifest["artifacts"][name]["path"],
+                manifest["artifacts"][name]["sha256"],
+            )
+        if (row["path"], row["sha256"]) != expected:
+            raise FrozenFinalRestoreOrchestratorError(
+                f"installed receipt {name} binding differs"
+            )
+
+
 def validate_host_result(
     value: Mapping[str, Any],
     *,
@@ -2764,21 +2990,14 @@ def validate_host_result(
         label="restore result",
         newline=True,
     )
+    _validate_installed_role_documents(
+        role_manifest,
+        receipt,
+        request=request,
+    )
     if (
-        role_manifest["document"].get("schema")
-        != WORKER.ROLE_MANIFEST_SCHEMA
-        or role_manifest["document"].get("status") != "installed"
-        or role_manifest["document"].get("role") != request["role"]
-        or role_manifest["document"].get("installer_receipt_sha256")
+        role_manifest["document"]["installer_receipt_sha256"]
         != receipt["canonical_document_sha256"]
-        or role_manifest["document"].get("restore_set_sha256")
-        != request["restore_set_sha256"]
-        or role_manifest["document"].get("restore_generation_sha256")
-        != request["restore_generation_sha256"]
-        or receipt["document"].get("schema")
-        != WORKER.INSTALLER_RECEIPT_SCHEMA
-        or receipt["document"].get("status") != "installed"
-        or receipt["document"].get("role") != request["role"]
     ):
         raise FrozenFinalRestoreOrchestratorError(
             "installed manifest or receipt actual bytes differ"

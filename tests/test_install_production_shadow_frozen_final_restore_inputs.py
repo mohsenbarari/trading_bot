@@ -193,6 +193,16 @@ class Fixture:
         self.incoming = self.project_root / "incoming"
         self.incoming.mkdir(mode=0o700, parents=True)
         self.release_root.mkdir(mode=0o700, parents=True)
+        versions = self.release_root / "migrations" / "versions"
+        versions.mkdir(mode=0o700, parents=True)
+        secure_file(
+            versions / "fixture_head.py",
+            (
+                b"revision = 'fixture_head'\n"
+                b"down_revision = None\n"
+            ),
+            0o644,
+        )
         self.canonical_compose = (
             self.release_root / MODULE.TEMPLATE.CANONICAL_COMPOSE_RELATIVE_PATH
         )
@@ -261,6 +271,8 @@ class Fixture:
             b"ZmFrZQ==\n"
             b"-----END CERTIFICATE-----\n"
         )
+        self.prepare_compose_payload = role_compose
+        self.ca_payload = ca
         payloads = {
             "role-compose.yml": role_compose,
             "runtime.env.role": environment,
@@ -514,6 +526,16 @@ class Fixture:
         refresh_restore_set(self.restore_document)
         self._write_restore_set()
 
+    def rewrite_controller(self) -> None:
+        self.controller_sha256 = secure_file(
+            self.controller_path,
+            canonical(self.controller),
+        )
+        self.restore_document["controller_manifest_sha256"] = (
+            self.controller_sha256
+        )
+        self.rewrite_restore_set()
+
     def kwargs(self) -> dict:
         return {
             "controller_manifest": self.controller_path,
@@ -575,6 +597,42 @@ class FrozenFinalRestoreInputInstallerTests(unittest.TestCase):
                     ],
                     hashlib.sha256(fixture.worker.read_bytes()).hexdigest(),
                 )
+                self.assertEqual(
+                    plan.role_manifest["prepare_compose_path"],
+                    str(plan.paths.prepare_compose),
+                )
+                self.assertEqual(
+                    plan.role_manifest["ca_path"],
+                    str(plan.paths.ca),
+                )
+                self.assertEqual(
+                    plan.role_manifest["target_migration_revision"],
+                    "fixture_head",
+                )
+                self.assertEqual(
+                    plan.installer_receipt["target_migration_revision"],
+                    "fixture_head",
+                )
+                self.assertEqual(
+                    plan.role_manifest["app_image_id"],
+                    fixture.controller["artifacts"][
+                        "role_runtime_image_ids"
+                    ][role]["app"],
+                )
+                self.assertEqual(
+                    plan.installer_receipt["installed_files"][
+                        "prepare-compose"
+                    ]["sha256"],
+                    hashlib.sha256(
+                        fixture.prepare_compose_payload
+                    ).hexdigest(),
+                )
+                self.assertEqual(
+                    plan.installer_receipt["installed_files"]["ca"][
+                        "sha256"
+                    ],
+                    hashlib.sha256(fixture.ca_payload).hexdigest(),
+                )
 
     def test_wrong_caller_role_is_rejected(self) -> None:
         fixture = self.make_fixture()
@@ -586,6 +644,18 @@ class FrozenFinalRestoreInputInstallerTests(unittest.TestCase):
         ):
             MODULE.preflight_installation(**values)
 
+    def test_wrong_controller_app_identity_is_rejected(self) -> None:
+        fixture = self.make_fixture()
+        fixture.controller["artifacts"]["role_runtime_image_ids"][
+            fixture.role
+        ]["app"] = "sha256:" + "f" * 64
+        fixture.rewrite_controller()
+        with self.assertRaisesRegex(
+            MODULE.FrozenFinalRestoreInputInstallError,
+            "role material internal identity",
+        ):
+            MODULE.preflight_installation(**fixture.kwargs())
+
     def test_wrong_source_artifact_is_rejected(self) -> None:
         fixture = self.make_fixture()
         secure_file(
@@ -595,6 +665,45 @@ class FrozenFinalRestoreInputInstallerTests(unittest.TestCase):
         with self.assertRaisesRegex(
             MODULE.FrozenFinalRestoreInputInstallError,
             "identity differs",
+        ):
+            MODULE.preflight_installation(**fixture.kwargs())
+
+    def test_missing_and_tampered_ca_in_role_material_are_rejected(
+        self,
+    ) -> None:
+        fixture = self.make_fixture()
+        members = dict(
+            MODULE._read_role_material_members(  # noqa: SLF001
+                fixture.role_material.read_bytes()
+            )
+        )
+        missing = dict(members)
+        del missing["ca.crt"]
+        missing_payload = MODULE.PREPARE._tar_bytes(missing)  # noqa: SLF001
+        with self.assertRaisesRegex(
+            MODULE.FrozenFinalRestoreInputInstallError,
+            "member closure",
+        ):
+            MODULE._read_role_material_members(  # noqa: SLF001
+                missing_payload
+            )
+
+        members["ca.crt"] = (
+            b"-----BEGIN CERTIFICATE-----\n"
+            b"dGFtcGVyZWQ=\n"
+            b"-----END CERTIFICATE-----\n"
+        )
+        tampered = MODULE.PREPARE._tar_bytes(members)  # noqa: SLF001
+        material_sha = secure_file(fixture.role_material, tampered)
+        binding = fixture.controller["artifacts"]["role_materials"][
+            fixture.role
+        ]
+        binding["sha256"] = material_sha
+        binding["bytes"] = len(tampered)
+        fixture.rewrite_controller()
+        with self.assertRaisesRegex(
+            MODULE.FrozenFinalRestoreInputInstallError,
+            "ca.crt binding differs",
         ):
             MODULE.preflight_installation(**fixture.kwargs())
 
@@ -702,6 +811,60 @@ class FrozenFinalRestoreInputInstallerTests(unittest.TestCase):
         with self.assertRaisesRegex(
             MODULE.FrozenFinalRestoreInputInstallError,
             "identity differs|unsafe",
+        ):
+            MODULE.preflight_installation(**fixture.kwargs())
+
+    def test_tampered_prepare_compose_and_ca_outputs_are_rejected(
+        self,
+    ) -> None:
+        for kind in ("prepare-compose", "ca"):
+            with self.subTest(kind=kind):
+                fixture = self.make_fixture()
+                plan = MODULE.preflight_installation(**fixture.kwargs())
+                destination = next(
+                    spec.path for spec in plan.outputs if spec.kind == kind
+                )
+                secure_file(destination, b"tampered-prepare-input")
+                with self.assertRaisesRegex(
+                    MODULE.FrozenFinalRestoreInputInstallError,
+                    "identity differs|unsafe",
+                ):
+                    MODULE.preflight_installation(**fixture.kwargs())
+
+    def test_ca_output_symlink_and_hardlink_are_rejected(self) -> None:
+        for kind in ("symlink", "hardlink"):
+            with self.subTest(kind=kind):
+                fixture = self.make_fixture()
+                plan = MODULE.preflight_installation(**fixture.kwargs())
+                ca_spec = next(
+                    spec for spec in plan.outputs if spec.kind == "ca"
+                )
+                source = fixture.root / f"{kind}-ca-source.crt"
+                secure_file(source, fixture.ca_payload)
+                ca_spec.path.parent.mkdir(parents=True, mode=0o700)
+                ca_spec.path.parent.chmod(0o700)
+                if kind == "symlink":
+                    ca_spec.path.symlink_to(source)
+                else:
+                    os.link(source, ca_spec.path)
+                with self.assertRaises(
+                    MODULE.FrozenFinalRestoreInputInstallError,
+                ):
+                    MODULE.preflight_installation(**fixture.kwargs())
+
+    def test_release_with_multiple_migration_heads_is_rejected(self) -> None:
+        fixture = self.make_fixture()
+        secure_file(
+            fixture.release_root
+            / "migrations"
+            / "versions"
+            / "other_head.py",
+            b"revision = 'other_head'\ndown_revision = None\n",
+            0o644,
+        )
+        with self.assertRaisesRegex(
+            MODULE.FrozenFinalRestoreInputInstallError,
+            "target migration revision",
         ):
             MODULE.preflight_installation(**fixture.kwargs())
 
@@ -838,6 +1001,57 @@ class FrozenFinalRestoreInputInstallerTests(unittest.TestCase):
             "before-discard-incomplete:database-backup",
             boundaries,
         )
+
+    def test_ca_payload_hard_crash_resumes_create_only(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        root.chmod(0o700)
+        payload = (
+            b"-----BEGIN CERTIFICATE-----\n"
+            b"ZmFrZQ==\n"
+            b"-----END CERTIFICATE-----\n"
+        )
+        destination = root / "ca.crt"
+        spec = MODULE.OutputSpec(
+            kind="ca",
+            path=destination,
+            sha256=hashlib.sha256(payload).hexdigest(),
+            bytes=len(payload),
+            payload=payload,
+        )
+
+        class Gate:
+            def verify(self, _boundary):
+                return {}
+
+        class SimulatedHardCrash(BaseException):
+            pass
+
+        def crash_write(descriptor, _payload, *, label):
+            del label
+            os.write(descriptor, payload[:17])
+            os.fsync(descriptor)
+            raise SimulatedHardCrash("ca-copy-crash")
+
+        with mock.patch.object(
+            MODULE,
+            "_write_all",
+            side_effect=crash_write,
+        ):
+            with self.assertRaisesRegex(
+                SimulatedHardCrash,
+                "ca-copy-crash",
+            ):
+                MODULE._publish_spec(spec, gate=Gate())
+        partial = destination.with_name(MODULE._partial_name(spec))
+        self.assertEqual(partial.read_bytes(), payload[:17])
+        self.assertEqual(
+            MODULE._publish_spec(spec, gate=Gate()),
+            "created",
+        )
+        self.assertFalse(partial.exists())
+        self.assertEqual(destination.read_bytes(), payload)
 
     def test_corrupt_incomplete_partial_is_rejected_without_mutation(
         self,
@@ -1040,6 +1254,7 @@ class FrozenFinalRestoreInputInstallerTests(unittest.TestCase):
                 live_authority_verifier=live,
             )
         self.assertEqual(result["status"], "installed")
+        fixture.role_material.unlink()
         role_manifest = (
             plan.paths.secret_generation_root
             / "restore-role-manifest.json"
@@ -1055,6 +1270,11 @@ class FrozenFinalRestoreInputInstallerTests(unittest.TestCase):
             loaded.restore_generation_sha256,
             fixture.restore_document["restore_generation_sha256"],
         )
+        self.assertEqual(
+            loaded.prepare_compose_path.read_bytes(),
+            fixture.prepare_compose_payload,
+        )
+        self.assertEqual(loaded.ca_path.read_bytes(), fixture.ca_payload)
 
     def test_artifact_drift_is_detected_while_held_copy_runs(self) -> None:
         fixture = self.make_fixture()

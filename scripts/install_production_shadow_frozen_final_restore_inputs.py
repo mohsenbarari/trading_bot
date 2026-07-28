@@ -47,7 +47,9 @@ from scripts import (  # noqa: E402
 )
 from scripts import produce_production_shadow_prepare_material as PREPARE  # noqa: E402
 from scripts import production_shadow_cutover_controller as CONTROLLER  # noqa: E402
-from scripts import production_shadow_frozen_final_restore_worker as WORKER  # noqa: E402
+from scripts import (  # noqa: E402
+    production_shadow_frozen_final_restore_worker as WORKER,
+)
 from scripts.render_three_site_production_shadow_role_compose import (  # noqa: E402
     ProductionShadowRoleError,
     canonical_role_compose_bytes,
@@ -1530,6 +1532,10 @@ def _assert_root_contract(
         / "frozen-final-generations"
         / paths.data_generation_root.name
         / WORKER.ROLE_PATHS[role]
+        or paths.prepare_compose
+        != paths.secret_generation_root / "docker-compose.prepare.yml"
+        or paths.ca
+        != paths.secret_generation_root.parent / "tls" / "ca.crt"
     ):
         raise FrozenFinalRestoreInputInstallError(
             "generation roots are not digest-derived"
@@ -1689,8 +1695,11 @@ def _build_documents(
     paths: WORKER.RuntimePaths,
     canonical_compose_payload: bytes,
     role_compose_payload: bytes,
+    prepare_compose_payload: bytes,
+    ca_payload: bytes,
     environment_payload: bytes,
     worker_payload: bytes,
+    target_migration_revision: str,
     artifacts: Mapping[str, ArtifactSource],
 ) -> tuple[
     Mapping[str, Any],
@@ -1713,6 +1722,8 @@ def _build_documents(
     role_compose_destination = (
         paths.secret_generation_root / "docker-compose.restore.yml"
     )
+    prepare_compose_destination = paths.prepare_compose
+    ca_destination = paths.ca
     environment_destination = (
         paths.secret_generation_root / "runtime.env.role"
     )
@@ -1780,6 +1791,20 @@ def _build_documents(
             payload=role_compose_payload,
         ),
         OutputSpec(
+            kind="prepare-compose",
+            path=prepare_compose_destination,
+            sha256=_sha256(prepare_compose_payload),
+            bytes=len(prepare_compose_payload),
+            payload=prepare_compose_payload,
+        ),
+        OutputSpec(
+            kind="ca",
+            path=ca_destination,
+            sha256=_sha256(ca_payload),
+            bytes=len(ca_payload),
+            payload=ca_payload,
+        ),
+        OutputSpec(
             kind="environment",
             path=environment_destination,
             sha256=_sha256(environment_payload),
@@ -1822,6 +1847,13 @@ def _build_documents(
         ],
         "source_role": source_role,
         "target_transport": restore_set["target_map"][role]["transport"],
+        "app_image_id": controller["artifacts"][
+            "role_runtime_image_ids"
+        ][role]["app"],
+        "app_image_content_identity": controller["artifacts"][
+            "image_artifacts"
+        ]["app"]["content_identity"],
+        "target_migration_revision": target_migration_revision,
         "data_generation_root": os.fspath(paths.data_generation_root),
         "secret_generation_root": os.fspath(paths.secret_generation_root),
     }
@@ -1880,6 +1912,14 @@ def _build_documents(
         ),
         "role_compose_path": os.fspath(role_compose_destination),
         "role_compose_sha256": _sha256(role_compose_payload),
+        "prepare_compose_path": os.fspath(
+            prepare_compose_destination
+        ),
+        "prepare_compose_sha256": _sha256(
+            prepare_compose_payload
+        ),
+        "ca_path": os.fspath(ca_destination),
+        "ca_sha256": _sha256(ca_payload),
         "environment_path": os.fspath(environment_destination),
         "environment_sha256": _sha256(environment_payload),
         "worker_path": os.fspath(worker_destination),
@@ -1897,6 +1937,11 @@ def _build_documents(
         "postgres_image_content_identity": controller["artifacts"][
             "image_artifacts"
         ]["postgres"]["content_identity"],
+        "app_image_id": common["app_image_id"],
+        "app_image_content_identity": common[
+            "app_image_content_identity"
+        ],
+        "target_migration_revision": target_migration_revision,
         "postgres_runtime_uid": controller["artifacts"][
             "postgres_runtime_uid"
         ],
@@ -2044,6 +2089,14 @@ def preflight_installation(
         canonical_compose=canonical_compose,
         worker=worker,
     )
+    try:
+        target_migration_revision = WORKER.target_migration_revision(
+            paths.release_root
+        )
+    except WORKER.FrozenFinalRestoreWorkerError as exc:
+        raise FrozenFinalRestoreInputInstallError(
+            "immutable release target migration revision is invalid"
+        ) from exc
     worker_payload, worker_identity = _read_secure_file(
         worker,
         label="immutable frozen-final restore worker",
@@ -2088,8 +2141,11 @@ def preflight_installation(
         paths=paths,
         canonical_compose_payload=canonical_payload,
         role_compose_payload=role_compose_payload,
+        prepare_compose_payload=role_members["role-compose.yml"],
+        ca_payload=role_members["ca.crt"],
         environment_payload=role_members["runtime.env.role"],
         worker_payload=worker_payload,
+        target_migration_revision=target_migration_revision,
         artifacts=artifact_sources,
     )
     input_paths = [
@@ -2672,21 +2728,37 @@ def _inspect_generation_residue(
         for spec in outputs
         if spec.path.parent == paths.secret_generation_root
     ]
+    tls_specs = [
+        spec for spec in outputs if spec.path.parent == paths.ca.parent
+    ]
     restore_allowed = {
         spec.path.name for spec in restore_specs
     } | {_partial_name(spec) for spec in restore_specs}
     secret_allowed = {
         spec.path.name for spec in secret_specs
     } | {_partial_name(spec) for spec in secret_specs}
+    tls_allowed = {
+        spec.path.name for spec in tls_specs
+    } | {_partial_name(spec) for spec in tls_specs}
     _assert_directory_inventory(
         paths.restore_input_root,
         label="role restore-input root",
         allowed=frozenset(restore_allowed),
     )
     _assert_directory_inventory(
+        paths.secret_generation_root.parent,
+        label="secret generation base",
+        allowed=frozenset(allowed_roles | {"tls"}),
+    )
+    _assert_directory_inventory(
         paths.secret_generation_root,
         label="role secret generation root",
         allowed=frozenset(secret_allowed),
+    )
+    _assert_directory_inventory(
+        paths.ca.parent,
+        label="secret generation TLS root",
+        allowed=frozenset(tls_allowed),
     )
     states = {
         spec.kind: _inspect_spec(
@@ -3079,6 +3151,17 @@ def _create_generation_directories(
             role_path,
         ),
         label="role secret generation root",
+        gate=gate,
+    )
+    _create_chain(
+        WORKER.SECRET_ROOT_PREFIX,
+        (
+            operation_id,
+            "frozen-final-generations",
+            generation,
+            "tls",
+        ),
+        label="secret generation TLS root",
         gate=gate,
     )
 
@@ -3601,6 +3684,17 @@ def _plan_summary(plan: InstallationPlan) -> Mapping[str, Any]:
         ],
         "role_manifest_sha256": plan.role_manifest_sha256,
         "installer_receipt_sha256": plan.installer_receipt_sha256,
+        "prepare_compose_sha256": plan.role_manifest[
+            "prepare_compose_sha256"
+        ],
+        "ca_sha256": plan.role_manifest["ca_sha256"],
+        "app_image_id": plan.role_manifest["app_image_id"],
+        "app_image_content_identity": plan.role_manifest[
+            "app_image_content_identity"
+        ],
+        "target_migration_revision": plan.role_manifest[
+            "target_migration_revision"
+        ],
         "data_generation_root": os.fspath(
             plan.paths.data_generation_root
         ),

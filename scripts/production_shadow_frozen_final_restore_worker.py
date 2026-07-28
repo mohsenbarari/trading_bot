@@ -39,6 +39,7 @@ if str(REPO_ROOT) not in sys.path:
 from scripts import (  # noqa: E402
     build_production_shadow_frozen_final_restore_set as RESTORE_SET,
 )
+from scripts import produce_production_shadow_prepare_material as PREPARE  # noqa: E402
 from scripts import produce_production_shadow_source_snapshot as SOURCE  # noqa: E402
 from scripts.production_shadow_cutover_controller import (  # noqa: E402
     CutoverContractError,
@@ -46,6 +47,7 @@ from scripts.production_shadow_cutover_controller import (  # noqa: E402
 )
 from scripts.render_three_site_production_shadow_role_compose import (  # noqa: E402
     ProductionShadowRoleError,
+    canonical_role_compose_bytes,
     parse_env_values,
     referenced_environment_names,
     render_role_compose,
@@ -56,6 +58,8 @@ from scripts.wa_ir_production_operation import (  # noqa: E402
     ProductionOperationError,
     StreamDigest,
     _fingerprint_from_streams,
+    _load_migration_graph,
+    _migration_ancestors,
     _run_streaming_sha256,
 )
 
@@ -175,6 +179,10 @@ ROLE_MANIFEST_FIELDS = frozenset(
         "canonical_compose_sha256",
         "role_compose_path",
         "role_compose_sha256",
+        "prepare_compose_path",
+        "prepare_compose_sha256",
+        "ca_path",
+        "ca_sha256",
         "environment_path",
         "environment_sha256",
         "worker_path",
@@ -186,6 +194,9 @@ ROLE_MANIFEST_FIELDS = frozenset(
         "secret_generation_root",
         "postgres_image_id",
         "postgres_image_content_identity",
+        "app_image_id",
+        "app_image_content_identity",
+        "target_migration_revision",
         "postgres_runtime_uid",
         "postgres_runtime_gid",
         "artifacts",
@@ -235,6 +246,9 @@ INSTALLER_RECEIPT_FIELDS = frozenset(
         "restore_generation_sha256",
         "source_role",
         "target_transport",
+        "app_image_id",
+        "app_image_content_identity",
+        "target_migration_revision",
         "installed_files",
         "data_generation_root",
         "secret_generation_root",
@@ -250,6 +264,8 @@ INSTALLER_FILE_NAMES = frozenset(
         "restore-set",
         "canonical-compose",
         "role-compose",
+        "prepare-compose",
+        "ca",
         "environment",
         "worker",
         *ARTIFACT_KINDS,
@@ -404,6 +420,8 @@ class RuntimePaths:
     journal: Path
     evidence: Path
     lock: Path
+    prepare_compose: Path
+    ca: Path
 
 
 @dataclass(frozen=True)
@@ -421,6 +439,9 @@ class RoleManifest:
     installer_receipt_sha256: str
     postgres_image_id: str
     postgres_image_content_identity: str
+    app_image_id: str
+    app_image_content_identity: str
+    target_migration_revision: str
     artifacts: Mapping[str, ArtifactBinding]
     source_database: DatabaseExpectation
     paths: RuntimePaths
@@ -428,6 +449,8 @@ class RoleManifest:
     restore_set_path: Path
     canonical_compose_path: Path
     role_compose_path: Path
+    prepare_compose_path: Path
+    ca_path: Path
     environment_path: Path
     worker_path: Path
 
@@ -796,8 +819,20 @@ def _runtime_directory_specs(
             root_only,
         ),
         (
+            manifest.paths.secret_generation_root.parent,
+            "secret generation base",
+            0o700,
+            root_only,
+        ),
+        (
             manifest.paths.secret_generation_root,
             "secret generation root",
+            0o700,
+            root_only,
+        ),
+        (
+            manifest.paths.ca.parent,
+            "secret generation TLS root",
             0o700,
             root_only,
         ),
@@ -1356,7 +1391,46 @@ def runtime_paths(
         journal=secret_generation_root / "journal",
         evidence=secret_generation_root / "evidence",
         lock=secret_generation_root / "restore.lock",
+        prepare_compose=(
+            secret_generation_root / "docker-compose.prepare.yml"
+        ),
+        ca=secret_generation_root.parent / "tls" / "ca.crt",
     )
+
+
+def target_migration_revision(release_root: Path) -> str:
+    """Return the unique closed Alembic head from the immutable release."""
+    try:
+        graph = _load_migration_graph(release_root)
+    except ProductionOperationError as exc:
+        raise FrozenFinalRestoreWorkerError(
+            "immutable release migration graph is invalid"
+        ) from exc
+    children = {
+        parent
+        for parents in graph.parents.values()
+        for parent in parents
+    }
+    heads = set(graph.parents) - children
+    if len(heads) != 1:
+        raise FrozenFinalRestoreWorkerError(
+            "immutable release migration graph lacks one closed head"
+        )
+    revision = next(iter(heads))
+    try:
+        reachable = _migration_ancestors(revision, graph)
+    except ProductionOperationError as exc:
+        raise FrozenFinalRestoreWorkerError(
+            "immutable release migration graph is cyclic"
+        ) from exc
+    if (
+        REVISION_RE.fullmatch(revision) is None
+        or reachable != set(graph.parents)
+    ):
+        raise FrozenFinalRestoreWorkerError(
+            "immutable release migration graph is not one closed lineage"
+        )
+    return revision
 
 
 def _validate_source_database(value: Any) -> DatabaseExpectation:
@@ -1703,6 +1777,9 @@ def _validate_installer_receipt(
                 "restore_generation_sha256",
                 "source_role",
                 "target_transport",
+                "app_image_id",
+                "app_image_content_identity",
+                "target_migration_revision",
                 "data_generation_root",
                 "secret_generation_root",
             )
@@ -1733,6 +1810,14 @@ def _validate_installer_receipt(
         "role-compose": (
             role_document["role_compose_path"],
             role_document["role_compose_sha256"],
+        ),
+        "prepare-compose": (
+            role_document["prepare_compose_path"],
+            role_document["prepare_compose_sha256"],
+        ),
+        "ca": (
+            role_document["ca_path"],
+            role_document["ca_sha256"],
         ),
         "environment": (
             role_document["environment_path"],
@@ -1919,6 +2004,8 @@ def load_role_manifest(path: Path) -> RoleManifest:
         != controller["artifacts"]["role_runtime_image_ids"][role][
             "postgres"
         ]
+        or document["app_image_id"]
+        != controller["artifacts"]["role_runtime_image_ids"][role]["app"]
         or document["postgres_runtime_uid"]
         != controller["artifacts"]["postgres_runtime_uid"]
         or document["postgres_runtime_gid"]
@@ -1938,15 +2025,46 @@ def load_role_manifest(path: Path) -> RoleManifest:
         raise FrozenFinalRestoreWorkerError(
             "role manifest PostgreSQL runtime identity is invalid"
         )
-    image_binding = controller["artifacts"]["image_artifacts"]["postgres"]
-    content_identity = document["postgres_image_content_identity"]
+    app_image_id = document["app_image_id"]
     if (
-        content_identity != image_binding["content_identity"]
-        or not isinstance(content_identity, str)
-        or IMAGE_ID_RE.fullmatch(content_identity) is None
+        not isinstance(app_image_id, str)
+        or IMAGE_ID_RE.fullmatch(app_image_id) is None
+        or app_image_id == f"sha256:{ZERO_SHA256}"
+    ):
+        raise FrozenFinalRestoreWorkerError(
+            "role manifest application runtime identity is invalid"
+        )
+    postgres_binding = controller["artifacts"]["image_artifacts"][
+        "postgres"
+    ]
+    postgres_content_identity = document[
+        "postgres_image_content_identity"
+    ]
+    if (
+        postgres_content_identity != postgres_binding["content_identity"]
+        or not isinstance(postgres_content_identity, str)
+        or IMAGE_ID_RE.fullmatch(postgres_content_identity) is None
     ):
         raise FrozenFinalRestoreWorkerError(
             "role manifest PostgreSQL content identity differs"
+        )
+    app_binding = controller["artifacts"]["image_artifacts"]["app"]
+    app_content_identity = document["app_image_content_identity"]
+    if (
+        app_content_identity != app_binding["content_identity"]
+        or not isinstance(app_content_identity, str)
+        or IMAGE_ID_RE.fullmatch(app_content_identity) is None
+    ):
+        raise FrozenFinalRestoreWorkerError(
+            "role manifest application content identity differs"
+        )
+    target_revision = document["target_migration_revision"]
+    if (
+        not isinstance(target_revision, str)
+        or REVISION_RE.fullmatch(target_revision) is None
+    ):
+        raise FrozenFinalRestoreWorkerError(
+            "role manifest target migration revision is invalid"
         )
     canonical_compose_path = _absolute_path(
         document["canonical_compose_path"],
@@ -1956,6 +2074,11 @@ def load_role_manifest(path: Path) -> RoleManifest:
         document["role_compose_path"],
         label="role Compose",
     )
+    prepare_compose_path = _absolute_path(
+        document["prepare_compose_path"],
+        label="prepare Compose",
+    )
+    ca_path = _absolute_path(document["ca_path"], label="prepare CA")
     environment_path = _absolute_path(
         document["environment_path"],
         label="role environment",
@@ -1968,6 +2091,8 @@ def load_role_manifest(path: Path) -> RoleManifest:
         role_compose_path: (
             paths.secret_generation_root / "docker-compose.restore.yml"
         ),
+        prepare_compose_path: paths.prepare_compose,
+        ca_path: paths.ca,
         environment_path: (
             paths.secret_generation_root / "runtime.env.role"
         ),
@@ -1979,6 +2104,8 @@ def load_role_manifest(path: Path) -> RoleManifest:
     for installed, field in (
         (canonical_compose_path, "canonical_compose_sha256"),
         (role_compose_path, "role_compose_sha256"),
+        (prepare_compose_path, "prepare_compose_sha256"),
+        (ca_path, "ca_sha256"),
         (environment_path, "environment_sha256"),
     ):
         _read_root_file(
@@ -1998,6 +2125,10 @@ def load_role_manifest(path: Path) -> RoleManifest:
         worker_path=worker_path,
         worker_sha256=worker_sha256,
     )
+    if target_revision != target_migration_revision(paths.release_root):
+        raise FrozenFinalRestoreWorkerError(
+            "role manifest target migration revision differs"
+        )
     if RUNNING_WORKER_PATH != worker_path:
         raise FrozenFinalRestoreWorkerError(
             "running worker is not the installed generation-bound worker"
@@ -2082,7 +2213,7 @@ def load_role_manifest(path: Path) -> RoleManifest:
         installer_receipt_sha256,
         role_document=document,
     )
-    return RoleManifest(
+    manifest = RoleManifest(
         document=document,
         canonical_sha256=digest,
         operation_id=operation_id,
@@ -2097,7 +2228,10 @@ def load_role_manifest(path: Path) -> RoleManifest:
         ],
         installer_receipt_sha256=installer_receipt_sha256,
         postgres_image_id=postgres_image_id,
-        postgres_image_content_identity=content_identity,
+        postgres_image_content_identity=postgres_content_identity,
+        app_image_id=app_image_id,
+        app_image_content_identity=app_content_identity,
+        target_migration_revision=target_revision,
         artifacts=artifacts,
         source_database=source_database,
         paths=paths,
@@ -2105,9 +2239,13 @@ def load_role_manifest(path: Path) -> RoleManifest:
         restore_set_path=restore_set_path,
         canonical_compose_path=canonical_compose_path,
         role_compose_path=role_compose_path,
+        prepare_compose_path=prepare_compose_path,
+        ca_path=ca_path,
         environment_path=environment_path,
         worker_path=worker_path,
     )
+    _verify_prepare_inputs(manifest)
+    return manifest
 
 
 def load_live_lease(
@@ -2500,27 +2638,121 @@ def _verify_role_compose(
     }
 
 
+def _verify_prepare_inputs(manifest: RoleManifest) -> Mapping[str, Any]:
+    canonical_payload = _read_root_file(
+        manifest.canonical_compose_path,
+        label="canonical production Compose",
+        maximum=MAX_JSON_BYTES,
+        expected_sha256=manifest.document["canonical_compose_sha256"],
+    )
+    prepare_payload = _read_root_file(
+        manifest.prepare_compose_path,
+        label="frozen-final prepare Compose",
+        maximum=MAX_JSON_BYTES,
+        expected_sha256=manifest.document["prepare_compose_sha256"],
+    )
+    try:
+        canonical = yaml.safe_load(canonical_payload.decode("utf-8"))
+        expected = render_role_compose(
+            canonical,
+            role=ROLE_PATHS[manifest.role],
+            scope="prepare",
+        )
+        expected["x-production-shadow-runtime-image-ids"] = dict(
+            PREPARE.RUNTIME_IMAGE_COMPOSE_EXTENSION
+        )
+        expected_payload = canonical_role_compose_bytes(expected)
+    except (
+        UnicodeError,
+        yaml.YAMLError,
+        ProductionShadowRoleError,
+    ) as exc:
+        raise FrozenFinalRestoreWorkerError(
+            "canonical prepare Compose cannot be derived"
+        ) from exc
+    if prepare_payload != expected_payload:
+        raise FrozenFinalRestoreWorkerError(
+            "prepare Compose is not the exact canonical role projection"
+        )
+    ca_payload = _read_root_file(
+        manifest.ca_path,
+        label="frozen-final prepare CA",
+        maximum=MAX_JSON_BYTES,
+        expected_sha256=manifest.document["ca_sha256"],
+    )
+    if (
+        ca_payload.count(b"-----BEGIN CERTIFICATE-----") != 1
+        or ca_payload.count(b"-----END CERTIFICATE-----") != 1
+        or b"PRIVATE KEY" in ca_payload
+    ):
+        raise FrozenFinalRestoreWorkerError(
+            "frozen-final prepare CA is invalid"
+        )
+    environment_payload = _read_root_file(
+        manifest.environment_path,
+        label="frozen-final role environment",
+        maximum=MAX_JSON_BYTES,
+        expected_sha256=manifest.document["environment_sha256"],
+    )
+    try:
+        values = parse_env_values(environment_payload.decode("ascii"))
+    except (UnicodeError, ProductionShadowRoleError) as exc:
+        raise FrozenFinalRestoreWorkerError(
+            "frozen-final role environment is invalid"
+        ) from exc
+    expected_images = {
+        "PRODUCTION_SHADOW_APP_IMAGE_ID": manifest.app_image_id,
+        "PRODUCTION_SHADOW_POSTGRES_IMAGE_ID": (
+            manifest.postgres_image_id
+        ),
+    }
+    if any(values.get(key) != value for key, value in expected_images.items()):
+        raise FrozenFinalRestoreWorkerError(
+            "prepare environment image identity differs"
+        )
+    services = expected.get("services")
+    if not isinstance(services, dict) or not services:
+        raise FrozenFinalRestoreWorkerError(
+            "prepare Compose service closure is empty"
+        )
+    return {
+        "prepare_compose_sha256": manifest.document[
+            "prepare_compose_sha256"
+        ],
+        "ca_sha256": manifest.document["ca_sha256"],
+        "app_image_id": manifest.app_image_id,
+        "app_image_content_identity": manifest.app_image_content_identity,
+        "target_migration_revision": manifest.target_migration_revision,
+        "prepare_service_count": len(services),
+        "app_service_invoked": False,
+    }
+
+
 def _verify_image(
     manifest: RoleManifest,
     runner: DockerCommandRunner,
 ) -> None:
     command_env, _ = _compose_environment(manifest)
-    observed = runner.run(
-        [
-            DOCKER,
-            "image",
-            "inspect",
-            "--format",
-            "{{.Id}}",
-            manifest.postgres_image_id,
-        ],
-        timeout=30,
-        env=command_env,
-    )
-    if observed != manifest.postgres_image_id:
-        raise FrozenFinalRestoreWorkerError(
-            "local PostgreSQL image identity differs"
+    for label, image_id in (
+        ("PostgreSQL", manifest.postgres_image_id),
+        ("application", manifest.app_image_id),
+    ):
+        observed = runner.run(
+            [
+                DOCKER,
+                "image",
+                "inspect",
+                "--format",
+                "{{.Id}}",
+                image_id,
+            ],
+            timeout=30,
+            env=command_env,
         )
+        if observed != image_id:
+            raise FrozenFinalRestoreWorkerError(
+                f"local {label} image identity differs"
+            )
 
 
 def _string_vector(value: Any, *, label: str) -> tuple[str, ...] | None:
@@ -5652,6 +5884,7 @@ def _verify_inputs(
     runner: DockerCommandRunner,
 ) -> Mapping[str, Any]:
     compose = _verify_role_compose(manifest, runner)
+    prepare_inputs = _verify_prepare_inputs(manifest)
     _verify_image(manifest, runner)
     artifact_digests = {}
     for kind, binding in manifest.artifacts.items():
@@ -5664,10 +5897,16 @@ def _verify_inputs(
         artifact_digests[kind] = binding.sha256
     return {
         "compose": compose,
+        "prepare_inputs": prepare_inputs,
         "postgres_image_id": manifest.postgres_image_id,
         "postgres_image_content_identity": (
             manifest.postgres_image_content_identity
         ),
+        "app_image_id": manifest.app_image_id,
+        "app_image_content_identity": (
+            manifest.app_image_content_identity
+        ),
+        "target_migration_revision": manifest.target_migration_revision,
         "artifact_sha256": dict(sorted(artifact_digests.items())),
         "source_role": manifest.source_role,
         "target_transport": manifest.document["target_transport"],
