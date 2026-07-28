@@ -17,6 +17,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import secrets
 import stat
 import subprocess
 import sys
@@ -47,6 +48,27 @@ RESULT_SCHEMA = "production-shadow-nginx-coordinator-result-v1"
 STATE_RECEIPT_SCHEMA = (
     "production-shadow-nginx-coordinator-state-receipt-v1"
 )
+LIVE_LEASE_CLAIM_SCHEMA = (
+    "production-shadow-nginx-coordinator-live-lease-claim-v1"
+)
+LIVE_LEASE_CONSUMPTION_SCHEMA = (
+    "production-shadow-nginx-coordinator-live-lease-consumption-v1"
+)
+LIVE_LEASE_READINESS_SCHEMA = (
+    "production-shadow-nginx-coordinator-live-lease-readiness-v1"
+)
+LEGACY_WRITER_READINESS_SET_SCHEMA = (
+    "production-shadow-legacy-writer-readiness-set-v2"
+)
+LEGACY_WRITER_RESULT_SCHEMA = (
+    "production-shadow-legacy-writer-freeze-result-v3"
+)
+LEGACY_WRITER_LIVE_CHALLENGE_SCHEMA = (
+    "production-shadow-legacy-writer-live-checkpoint-challenge-v1"
+)
+LEGACY_WRITER_LIVE_RESPONSE_SCHEMA = (
+    "production-shadow-legacy-writer-live-checkpoint-response-v1"
+)
 PROJECT_ROOT_PREFIX = Path("/srv/trading-bot-three-site-production-shadow")
 CONTROLLER_SECRET_PREFIX = Path(
     "/root/secure-envs/trading-bot/three-site-production-shadow"
@@ -65,7 +87,26 @@ WORKER_RELATIVE_PATH = Path(
     "scripts/production_shadow_nginx_generation.py"
 )
 ROLE_ORDER = ("bot_fi", "webapp_fi")
-ACTIONS = ("install", "test", "activate", "readback", "restore")
+LEGACY_WRITER_COUNTS = {"bot_fi": 3, "webapp_fi": 2}
+LEGACY_WRITER_KINDS = {
+    "bot_fi": ("application", "bot", "sync_worker"),
+    "webapp_fi": ("application", "sync_worker"),
+}
+LEGACY_WRITER_CHECKPOINT_RE = re.compile(
+    r"^(?:before-stop|after-stop|before-start|after-start):"
+    r"(?:application|bot|sync_worker)$"
+    r"|^readiness-(?:http|stability):[1-9][0-9]{0,2}$"
+    r"|^before-result$"
+)
+ACTIONS = (
+    "install",
+    "test",
+    "activate",
+    "rollback-freeze",
+    "readback",
+    "restore",
+)
+STATE_RECEIPT_ACTIONS = ACTIONS
 SUCCESS_STATUSES = frozenset(
     {
         "planned",
@@ -113,6 +154,16 @@ DIRECTORY_MODE = 0o700
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SAFE_REMOTE_TOKEN_RE = re.compile(r"^[A-Za-z0-9_./:=%+-]+$")
 EVIDENCE_KIND_RE = re.compile(r"^[a-z0-9-]+$")
+LIVE_LEASE_NONCE_RE = re.compile(r"^[0-9a-f]{64}$")
+LIVE_LEASE_OWNER_OUTCOMES = {
+    "capture-frozen-final-snapshots": frozenset(
+        {"handoff-shadow-readonly"}
+    ),
+    "restore-legacy-writers": frozenset({"legacy-restored"}),
+    "restore-shadow-frozen-final": frozenset(
+        {"frozen-final-shadow-restored"}
+    ),
+}
 LOCAL_EXECUTABLES = frozenset({PYTHON, SSH, SCP, CURL})
 REMOTE_EXECUTABLES = frozenset(
     {
@@ -411,7 +462,7 @@ def load_state_receipt(
         set(document) != fields
         or document["schema"] != STATE_RECEIPT_SCHEMA
         or document["verification_status"] != "verified"
-        or document["source_action"] not in ACTIONS
+        or document["source_action"] not in STATE_RECEIPT_ACTIONS
         or not isinstance(document["coordinator_status"], str)
         or not document["coordinator_status"]
         or any(document.get(key) != value for key, value in identity.items())
@@ -435,11 +486,19 @@ def load_state_receipt(
         )
     requested = document["requested_target_state"]
     if (
-        document["source_action"] in {"test", "activate"}
+        document["source_action"] in {
+            "test",
+            "activate",
+            "rollback-freeze",
+        }
         and requested not in GENERATION.GENERATION_STATES
     ) or (
-        document["source_action"] not in {"test", "activate"}
+        document["source_action"]
+        not in {"test", "activate", "rollback-freeze"}
         and requested is not None
+    ) or (
+        document["source_action"] == "rollback-freeze"
+        and requested != "legacy-frozen"
     ):
         raise NginxCoordinatorError(
             "state receipt requested target differs"
@@ -1071,6 +1130,8 @@ def _validate_journal(
             "target_state",
             "from_state",
             "policy",
+            "source_receipt_sha256",
+            "lease_claim_sha256",
             "status",
             "completed_roles",
             "attempt",
@@ -1078,7 +1139,13 @@ def _validate_journal(
         if (
             not isinstance(pending, dict)
             or set(pending) != pending_fields
-            or pending["action"] not in {"install", "activate", "restore"}
+            or pending["action"]
+            not in {
+                "install",
+                "activate",
+                "rollback-freeze",
+                "restore",
+            }
             or pending["target_state"] not in {
                 None,
                 *GENERATION.GENERATION_STATES,
@@ -1092,8 +1159,50 @@ def _validate_journal(
                 "complete-both",
                 "compensate-legacy-normal",
                 "keep-write-blocked",
+                "rollback-to-frozen-write-blocked",
                 "forward-only-same-target",
             }
+            or (
+                pending["source_receipt_sha256"] is not None
+                and (
+                    not isinstance(
+                        pending["source_receipt_sha256"],
+                        str,
+                    )
+                    or SHA256_RE.fullmatch(
+                        pending["source_receipt_sha256"]
+                    )
+                    is None
+                    or pending["source_receipt_sha256"] == "0" * 64
+                )
+            )
+            or (
+                pending["action"] == "rollback-freeze"
+                and pending["source_receipt_sha256"] is None
+            )
+            or (
+                pending["action"] != "rollback-freeze"
+                and pending["source_receipt_sha256"] is not None
+            )
+            or (
+                pending["lease_claim_sha256"] is not None
+                and (
+                    not isinstance(pending["lease_claim_sha256"], str)
+                    or SHA256_RE.fullmatch(
+                        pending["lease_claim_sha256"]
+                    )
+                    is None
+                    or pending["lease_claim_sha256"] == "0" * 64
+                )
+            )
+            or (
+                pending["action"] == "restore"
+                and pending["lease_claim_sha256"] is None
+            )
+            or (
+                pending["action"] != "restore"
+                and pending["lease_claim_sha256"] is not None
+            )
             or pending["status"]
             not in {
                 "running",
@@ -1345,6 +1454,10 @@ class _CoordinatorLock:
         self.descriptor = -1
 
     def __enter__(self) -> "_CoordinatorLock":
+        if self.descriptor >= 0:
+            raise NginxCoordinatorError(
+                "coordinator lock is already held by this handle"
+            )
         path = self.root / "coordinator.lock"
         try:
             self.descriptor = os.open(
@@ -1366,7 +1479,15 @@ class _CoordinatorLock:
                 raise NginxCoordinatorError(
                     "coordinator lock is unsafe"
                 )
-            fcntl.flock(self.descriptor, fcntl.LOCK_EX)
+            try:
+                fcntl.flock(
+                    self.descriptor,
+                    fcntl.LOCK_EX | fcntl.LOCK_NB,
+                )
+            except BlockingIOError as exc:
+                raise NginxCoordinatorError(
+                    "coordinator lock is busy"
+                ) from exc
             return self
         except NginxCoordinatorError:
             if self.descriptor >= 0:
@@ -1381,9 +1502,14 @@ class _CoordinatorLock:
                 "coordinator lock is unavailable"
             ) from exc
 
+    @property
+    def held(self) -> bool:
+        return self.descriptor >= 0
+
     def __exit__(self, exc_type, exc, traceback) -> bool:  # noqa: ANN001
         if self.descriptor >= 0:
             os.close(self.descriptor)
+            self.descriptor = -1
         return False
 
 
@@ -1662,7 +1788,13 @@ def _worker_arguments(
     if generation is not None:
         arguments.extend(("--generation", generation))
     arguments.append("--apply")
-    if action in {"install", "test", "activate", "restore"}:
+    if action in {
+        "install",
+        "test",
+        "activate",
+        "rollback-freeze",
+        "restore",
+    }:
         effective = "legacy-normal" if action == "restore" else generation
         arguments.extend(
             (
@@ -1814,12 +1946,16 @@ def _validate_host_result(
         extra_fields = {"inventory_sha256", "candidate_sha256"}
         if status == "tested":
             extra_fields.add("command")
-    elif action in {"activate", "restore"} and status == "activated":
+    elif (
+        action in {"activate", "rollback-freeze", "restore"}
+        and status == "activated"
+    ):
         extra_fields = {"from_state", "commands"}
     expected_statuses = {
         "install": {"installed", "already-installed"},
         "test": {"tested", "already-tested"},
         "activate": {"activated", "already-active"},
+        "rollback-freeze": {"activated", "already-active"},
         "restore": {"activated", "already-active"},
     }
     effective = "legacy-normal" if action == "restore" else generation
@@ -1854,7 +1990,7 @@ def _validate_host_result(
             raise NginxCoordinatorError(
                 "candidate test unexpectedly mutated Nginx"
             )
-    if action in {"activate", "restore"}:
+    if action in {"activate", "rollback-freeze", "restore"}:
         if status == "activated":
             if (
                 document["active_configuration_mutated"] is not True
@@ -2713,6 +2849,8 @@ def _set_pending(
     from_state: str | None,
     policy: str,
     completed_roles: Sequence[str],
+    source_receipt_sha256: str | None = None,
+    lease_claim_sha256: str | None = None,
 ) -> None:
     previous = journal.get("pending")
     attempt = (
@@ -2727,6 +2865,8 @@ def _set_pending(
         "target_state": target_state,
         "from_state": from_state,
         "policy": policy,
+        "source_receipt_sha256": source_receipt_sha256,
+        "lease_claim_sha256": lease_claim_sha256,
         "status": "running",
         "completed_roles": [
             role for role in ROLE_ORDER if role in completed_roles
@@ -3148,12 +3288,261 @@ def _activate_action(
     }
 
 
+def _rollback_to_frozen_action(
+    inputs: CoordinatorInputs,
+    journal: dict[str, Any],
+    *,
+    source_receipt_sha256: str,
+    runner: RunFn,
+) -> dict[str, Any]:
+    source_receipt_sha256 = _nonzero_sha256(
+        source_receipt_sha256,
+        label="shadow-readonly source receipt SHA-256",
+    )
+    pending = journal.get("pending")
+    stable_state = journal.get("stable_state")
+    if stable_state == "shadow-writable" or (
+        isinstance(pending, dict)
+        and (
+            pending.get("target_state") == "shadow-writable"
+            or pending.get("policy") == "forward-only-same-target"
+        )
+    ):
+        raise NginxCoordinatorError(
+            "rollback-freeze is forbidden after shadow-writable"
+        )
+    resuming = (
+        isinstance(pending, dict)
+        and pending.get("action") == "rollback-freeze"
+        and pending.get("target_state") == "legacy-frozen"
+        and pending.get("from_state") == "shadow-readonly"
+        and pending.get("policy")
+        == "rollback-to-frozen-write-blocked"
+        and pending.get("source_receipt_sha256")
+        == source_receipt_sha256
+        and pending.get("status") in {"running", "partial-resumable"}
+    )
+    if not resuming:
+        if pending is not None:
+            raise NginxCoordinatorError(
+                "another Nginx transition must be resolved first"
+            )
+        if stable_state != "shadow-readonly":
+            raise NginxCoordinatorError(
+                "rollback-freeze requires durable shadow-readonly"
+            )
+    elif stable_state != "shadow-readonly":
+        raise NginxCoordinatorError(
+            "rollback-freeze durable predecessor differs"
+        )
+    readbacks, state, global_digest, external = _verified_readback(
+        inputs,
+        journal,
+        runner=runner,
+        action="rollback-freeze",
+        target_state="legacy-frozen",
+        allow_partial_states=(
+            frozenset({"legacy-frozen", "shadow-readonly"})
+            if resuming
+            else None
+        ),
+    )
+    states = {readbacks[role]["state"] for role in ROLE_ORDER}
+    if state == "legacy-frozen":
+        if not resuming:
+            raise NginxCoordinatorError(
+                "unjournaled rollback-freeze drifted to legacy-frozen"
+            )
+        journal["stable_state"] = "legacy-frozen"
+        journal["pending"] = None
+        _append_event(
+            journal,
+            "rollback-frozen-both",
+            data={
+                "from_state": "shadow-readonly",
+                "to_state": "legacy-frozen",
+                "source_receipt_sha256": source_receipt_sha256,
+                "global_generation_sha256": global_digest,
+            },
+        )
+        _write_journal(inputs.journal_path, journal, create=False)
+        return {
+            "status": "rollback-frozen",
+            "state": state,
+            "readbacks": readbacks,
+            "global_generation_sha256": global_digest,
+            "external_readback": external,
+            "active_configuration_mutated": True,
+            "current_mutated": False,
+            "container_mutated": False,
+            "volume_mutated": False,
+            "data_mutated": False,
+        }
+    if state == "shadow-readonly":
+        if stable_state != "shadow-readonly":
+            raise NginxCoordinatorError(
+                "rollback-freeze predecessor differs from durable state"
+            )
+    elif states != {"legacy-frozen", "shadow-readonly"} or not resuming:
+        raise NginxCoordinatorError(
+            "rollback-freeze mixed state is not resumable"
+        )
+    completed = [
+        role
+        for role in ROLE_ORDER
+        if readbacks[role]["state"] == "legacy-frozen"
+    ]
+    _set_pending(
+        journal,
+        action="rollback-freeze",
+        target_state="legacy-frozen",
+        from_state="shadow-readonly",
+        policy="rollback-to-frozen-write-blocked",
+        completed_roles=completed,
+        source_receipt_sha256=source_receipt_sha256,
+    )
+    _write_journal(inputs.journal_path, journal, create=False)
+    _test_both(
+        inputs,
+        journal,
+        state="legacy-frozen",
+        runner=runner,
+    )
+    host_results: dict[str, Any] = {}
+    for role in ROLE_ORDER:
+        if role in completed:
+            continue
+        try:
+            host_results[role] = _call_host_worker(
+                inputs,
+                journal,
+                role=role,
+                action="rollback-freeze",
+                generation="legacy-frozen",
+                runner=runner,
+            )
+            readback = _call_host_worker(
+                inputs,
+                journal,
+                role=role,
+                action="readback",
+                generation=None,
+                runner=runner,
+            )
+            if readback["state"] != "legacy-frozen":
+                raise NginxCoordinatorError(
+                    f"{role} rollback-freeze readback differs"
+                )
+            completed.append(role)
+            journal["pending"]["completed_roles"] = [
+                item for item in ROLE_ORDER if item in completed
+            ]
+            _write_journal(inputs.journal_path, journal, create=False)
+        except NginxCoordinatorError:
+            partial_readbacks, partial_state, partial_digest, partial_external = (
+                _verified_readback(
+                    inputs,
+                    journal,
+                    runner=runner,
+                    action="rollback-freeze",
+                    target_state="legacy-frozen",
+                    allow_partial_states=frozenset(
+                        {"legacy-frozen", "shadow-readonly"}
+                    ),
+                )
+            )
+            partial_states = {
+                partial_readbacks[item]["state"] for item in ROLE_ORDER
+            }
+            if not partial_states <= BLOCKED_STATES:
+                raise NginxCoordinatorError(
+                    "rollback-freeze partial state is not write-blocked"
+                )
+            completed = [
+                item
+                for item in ROLE_ORDER
+                if partial_readbacks[item]["state"] == "legacy-frozen"
+            ]
+            journal["pending"]["completed_roles"] = completed
+            journal["pending"]["status"] = "partial-resumable"
+            _append_event(
+                journal,
+                "rollback-freeze-partial",
+                data={
+                    "states": {
+                        item: partial_readbacks[item]["state"]
+                        for item in ROLE_ORDER
+                    },
+                    "policy": "rollback-to-frozen-write-blocked",
+                },
+            )
+            _write_journal(inputs.journal_path, journal, create=False)
+            return {
+                "status": "rollback-freeze-partial-resumable",
+                "policy": "rollback-to-frozen-write-blocked",
+                "state": partial_state,
+                "readbacks": partial_readbacks,
+                "global_generation_sha256": partial_digest,
+                "external_readback": partial_external,
+                "retry_target": "legacy-frozen",
+                "active_configuration_mutated": True,
+                "current_mutated": False,
+                "container_mutated": False,
+                "volume_mutated": False,
+                "data_mutated": False,
+            }
+    final_readbacks, final_state, final_digest, final_external = (
+        _verified_readback(
+            inputs,
+            journal,
+            runner=runner,
+            action="rollback-freeze",
+            target_state="legacy-frozen",
+        )
+    )
+    if final_state != "legacy-frozen":
+        raise NginxCoordinatorError(
+            "rollback-freeze did not converge both hosts"
+        )
+    journal["stable_state"] = "legacy-frozen"
+    journal["pending"] = None
+    _append_event(
+        journal,
+        "rollback-frozen-both",
+        data={
+            "from_state": "shadow-readonly",
+            "to_state": "legacy-frozen",
+            "source_receipt_sha256": source_receipt_sha256,
+            "global_generation_sha256": final_digest,
+        },
+    )
+    _write_journal(inputs.journal_path, journal, create=False)
+    return {
+        "status": "rollback-frozen",
+        "state": "legacy-frozen",
+        "host_results": host_results,
+        "readbacks": final_readbacks,
+        "global_generation_sha256": final_digest,
+        "external_readback": final_external,
+        "active_configuration_mutated": True,
+        "current_mutated": False,
+        "container_mutated": False,
+        "volume_mutated": False,
+        "data_mutated": False,
+    }
+
+
 def _restore_action(
     inputs: CoordinatorInputs,
     journal: dict[str, Any],
     *,
+    lease_claim_sha256: str,
     runner: RunFn,
 ) -> dict[str, Any]:
+    lease_claim_sha256 = _nonzero_sha256(
+        lease_claim_sha256,
+        label="live lease claim SHA-256",
+    )
     pending = journal.get("pending")
     stable_state = journal.get("stable_state")
     if stable_state == "shadow-writable" or (
@@ -3170,17 +3559,19 @@ def _restore_action(
         isinstance(pending, dict)
         and pending.get("action") == "restore"
         and pending.get("target_state") == "legacy-normal"
+        and pending.get("from_state") == "legacy-frozen"
+        and pending.get("lease_claim_sha256") == lease_claim_sha256
         and pending.get("status") in {"running", "partial-resumable"}
     )
     allow_partial: frozenset[str] | None = None
     if isinstance(pending, dict):
         if resuming_restore:
             allow_partial = frozenset(
-                {"legacy-normal", "legacy-frozen", "shadow-readonly"}
+                {"legacy-normal", "legacy-frozen"}
             )
-        elif pending.get("policy") == "keep-write-blocked":
-            allow_partial = frozenset(
-                {"legacy-frozen", "shadow-readonly"}
+        else:
+            raise NginxCoordinatorError(
+                "legacy restore requires its exact live lease transition"
             )
     readbacks, state, global_digest, external = _verified_readback(
         inputs,
@@ -3218,11 +3609,7 @@ def _restore_action(
             "global_generation_sha256": global_digest,
             "external_readback": external,
         }
-    if not states <= {
-        "legacy-normal",
-        "legacy-frozen",
-        "shadow-readonly",
-    }:
+    if not states <= {"legacy-normal", "legacy-frozen"}:
         raise NginxCoordinatorError(
             "legacy restore starting state is invalid"
         )
@@ -3230,23 +3617,12 @@ def _restore_action(
         state is not None
         and not resuming_restore
         and not (
-            state == stable_state
-            or (
-                isinstance(pending, dict)
-                and pending.get("policy") == "keep-write-blocked"
-                and state in {"legacy-frozen", "shadow-readonly"}
-            )
+            state == stable_state == "legacy-frozen"
         )
     ):
         raise NginxCoordinatorError(
             "restore starting state differs from durable state"
         )
-    _test_both(
-        inputs,
-        journal,
-        state="legacy-normal",
-        runner=runner,
-    )
     completed = [
         role
         for role in ROLE_ORDER
@@ -3256,11 +3632,18 @@ def _restore_action(
         journal,
         action="restore",
         target_state="legacy-normal",
-        from_state=state,
+        from_state="legacy-frozen",
         policy="complete-both",
         completed_roles=completed,
+        lease_claim_sha256=lease_claim_sha256,
     )
     _write_journal(inputs.journal_path, journal, create=False)
+    _test_both(
+        inputs,
+        journal,
+        state="legacy-normal",
+        runner=runner,
+    )
     results: dict[str, Any] = {}
     for role in ROLE_ORDER:
         if role in completed:
@@ -3283,11 +3666,7 @@ def _restore_action(
                     action="restore",
                     target_state="legacy-normal",
                     allow_partial_states=frozenset(
-                        {
-                            "legacy-normal",
-                            "legacy-frozen",
-                            "shadow-readonly",
-                        }
+                        {"legacy-normal", "legacy-frozen"}
                     ),
                 )
             )
@@ -3478,6 +3857,2188 @@ def _persist_state_receipt(
     return path, digest
 
 
+def _live_lease_paths(
+    inputs: CoordinatorInputs,
+) -> tuple[Path, Path, Path, Path]:
+    root = inputs.coordinator_root / "live-leases"
+    return (
+        root,
+        root / "claims",
+        root / "readiness",
+        root / "consumptions",
+    )
+
+
+def _prepare_live_lease_ledger(
+    inputs: CoordinatorInputs,
+    *,
+    create: bool,
+) -> bool:
+    root, claims, readiness, consumptions = _live_lease_paths(inputs)
+    try:
+        root.stat(follow_symlinks=False)
+    except FileNotFoundError:
+        if not create:
+            return False
+    _ensure_private_directory(root, create=create)
+    _ensure_private_directory(claims, create=create)
+    _ensure_private_directory(readiness, create=create)
+    _ensure_private_directory(consumptions, create=create)
+    return True
+
+
+def _canonical_receipt_path(
+    *,
+    operation_id: str,
+    state: str,
+    digest: str,
+) -> Path:
+    return (
+        CONTROLLER_SECRET_PREFIX
+        / operation_id
+        / "nginx-coordinator"
+        / "receipts"
+        / f"{state}-{digest}.json"
+    )
+
+
+def load_live_lease_claim_material(
+    claim_path: Path,
+    *,
+    state_receipt_path: Path,
+    expected_claim_sha256: str,
+    expected_state_receipt_sha256: str,
+    operation_id: str,
+    release_sha: str,
+    release_tree_sha: str,
+    aggregate_sha256: str,
+) -> tuple[dict[str, Any], str]:
+    """Validate copied lease material without claiming controller authority.
+
+    This validates an immutable claim and its copied state receipt. It cannot
+    prove that the controller flock remains held or that the controller has
+    not subsequently consumed the claim.
+    """
+    operation_id = _canonical_uuid4(operation_id)
+    release_sha = _release_sha(release_sha, label="lease release SHA")
+    release_tree_sha = _release_sha(
+        release_tree_sha,
+        label="lease release tree SHA",
+    )
+    aggregate_sha256 = _nonzero_sha256(
+        aggregate_sha256,
+        label="lease aggregate SHA-256",
+    )
+    expected_claim_sha256 = _nonzero_sha256(
+        expected_claim_sha256,
+        label="live lease claim SHA-256",
+    )
+    expected_state_receipt_sha256 = _nonzero_sha256(
+        expected_state_receipt_sha256,
+        label="legacy-frozen receipt SHA-256",
+    )
+    receipt, receipt_sha256 = load_state_receipt(
+        state_receipt_path,
+        "legacy-frozen",
+        operation_id,
+        release_sha,
+        release_tree_sha,
+        aggregate_sha256,
+    )
+    if receipt_sha256 != expected_state_receipt_sha256:
+        raise NginxCoordinatorError(
+            "legacy-frozen receipt digest differs"
+        )
+    document, payload = _load_canonical_json(
+        claim_path,
+        label="production Nginx live lease claim",
+    )
+    observed_sha256 = _sha256(payload)
+    fields = {
+        "schema",
+        "status",
+        "owner_action",
+        "operation_id",
+        "release_sha",
+        "release_tree_sha",
+        "aggregate_sha256",
+        "claim_epoch",
+        "previous_claim_sha256",
+        "nonce",
+        "controller_pid",
+        "controller_lock_path",
+        "controller_authoritative",
+        "remote_copy_authoritative",
+        "automatic_expiry_allowed",
+        "reconciliation_required_after_crash",
+        "legacy_frozen_receipt_path",
+        "legacy_frozen_receipt_sha256",
+        "receipt_journal_sha256",
+        "receipt_journal_sequence",
+        "receipt_journal_tail_sha256",
+        "controller_journal_event_count",
+        "receipt_state",
+        "receipt_global_generation_sha256",
+        "receipt_role_generation_sha256",
+        "receipt_role_bindings",
+        "receipt_readbacks",
+    }
+    identity = {
+        "operation_id": operation_id,
+        "release_sha": release_sha,
+        "release_tree_sha": release_tree_sha,
+        "aggregate_sha256": aggregate_sha256,
+    }
+    canonical_receipt_path = _canonical_receipt_path(
+        operation_id=operation_id,
+        state="legacy-frozen",
+        digest=expected_state_receipt_sha256,
+    )
+    coordinator_root = canonical_receipt_path.parent.parent
+    role_generation = {
+        role: receipt["readbacks"][role]["generation_sha256"]
+        for role in ROLE_ORDER
+    }
+    if (
+        observed_sha256 != expected_claim_sha256
+        or claim_path.name != f"{observed_sha256}.json"
+        or set(document) != fields
+        or document["schema"] != LIVE_LEASE_CLAIM_SCHEMA
+        or document["status"] != "active"
+        or document["owner_action"] not in LIVE_LEASE_OWNER_OUTCOMES
+        or any(document.get(key) != value for key, value in identity.items())
+        or type(document["claim_epoch"]) is not int
+        or document["claim_epoch"] < 1
+        or (
+            document["claim_epoch"] == 1
+            and document["previous_claim_sha256"] != "0" * 64
+        )
+        or (
+            document["claim_epoch"] > 1
+            and (
+                not isinstance(document["previous_claim_sha256"], str)
+                or SHA256_RE.fullmatch(
+                    document["previous_claim_sha256"]
+                )
+                is None
+                or document["previous_claim_sha256"] == "0" * 64
+            )
+        )
+        or not isinstance(document["nonce"], str)
+        or LIVE_LEASE_NONCE_RE.fullmatch(document["nonce"]) is None
+        or document["nonce"] == "0" * 64
+        or type(document["controller_pid"]) is not int
+        or document["controller_pid"] < 1
+        or document["controller_lock_path"]
+        != os.fspath(coordinator_root / "coordinator.lock")
+        or document["controller_authoritative"] is not True
+        or document["remote_copy_authoritative"] is not False
+        or document["automatic_expiry_allowed"] is not False
+        or document["reconciliation_required_after_crash"] is not True
+        or document["legacy_frozen_receipt_path"]
+        != os.fspath(canonical_receipt_path)
+        or document["legacy_frozen_receipt_sha256"]
+        != expected_state_receipt_sha256
+        or document["receipt_journal_sha256"]
+        != receipt["journal_sha256"]
+        or document["receipt_journal_sequence"]
+        != receipt["evidence_count"]
+        or document["receipt_journal_tail_sha256"]
+        != receipt["evidence_tail_sha256"]
+        or type(document["controller_journal_event_count"]) is not int
+        or document["controller_journal_event_count"]
+        < receipt["evidence_count"]
+        or document["receipt_state"] != "legacy-frozen"
+        or document["receipt_global_generation_sha256"]
+        != receipt["global_generation_sha256"]
+        or document["receipt_role_generation_sha256"]
+        != role_generation
+        or document["receipt_role_bindings"] != receipt["role_bindings"]
+        or document["receipt_readbacks"] != receipt["readbacks"]
+    ):
+        raise NginxCoordinatorError(
+            "production Nginx live lease claim differs"
+        )
+    return document, observed_sha256
+
+
+def _load_claim_from_controller(
+    inputs: CoordinatorInputs,
+    claim_path: Path,
+    expected_claim_sha256: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    expected_claim_sha256 = _nonzero_sha256(
+        expected_claim_sha256,
+        label="live lease claim SHA-256",
+    )
+    expected_path = (
+        _live_lease_paths(inputs)[1]
+        / f"{expected_claim_sha256}.json"
+    )
+    if claim_path != expected_path:
+        raise NginxCoordinatorError(
+            "live lease claim path is not canonical"
+        )
+    preliminary, _ = _load_canonical_json(
+        claim_path,
+        label="production Nginx live lease claim",
+    )
+    receipt_path_value = preliminary.get("legacy_frozen_receipt_path")
+    receipt_sha256 = preliminary.get("legacy_frozen_receipt_sha256")
+    if (
+        not isinstance(receipt_path_value, str)
+        or not isinstance(receipt_sha256, str)
+    ):
+        raise NginxCoordinatorError(
+            "live lease receipt binding is invalid"
+        )
+    receipt_path = Path(receipt_path_value)
+    claim, observed = load_live_lease_claim_material(
+        claim_path,
+        state_receipt_path=receipt_path,
+        expected_claim_sha256=expected_claim_sha256,
+        expected_state_receipt_sha256=receipt_sha256,
+        operation_id=inputs.operation_id,
+        release_sha=inputs.release_sha,
+        release_tree_sha=inputs.release_tree_sha,
+        aggregate_sha256=inputs.aggregate_sha256,
+    )
+    if observed != expected_claim_sha256:
+        raise NginxCoordinatorError("live lease claim digest differs")
+    receipt, _ = load_state_receipt(
+        receipt_path,
+        "legacy-frozen",
+        inputs.operation_id,
+        inputs.release_sha,
+        inputs.release_tree_sha,
+        inputs.aggregate_sha256,
+    )
+    return claim, receipt
+
+
+def _load_readiness_audit(
+    inputs: CoordinatorInputs,
+    *,
+    claim: Mapping[str, Any],
+    claim_sha256: str,
+) -> tuple[dict[str, Any], str] | None:
+    path = _live_lease_paths(inputs)[2] / f"{claim_sha256}.json"
+    try:
+        document, payload = _load_canonical_json(
+            path,
+            label="production Nginx live lease readiness audit",
+        )
+    except NginxCoordinatorError:
+        try:
+            path.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            return None
+        raise
+    fields = {
+        "schema",
+        "status",
+        "owner_action",
+        "operation_id",
+        "release_sha",
+        "release_tree_sha",
+        "aggregate_sha256",
+        "claim_sha256",
+        "claim_epoch",
+        "claim_nonce",
+        "readiness_receipt_path",
+        "readiness_receipt_sha256",
+        "readiness_set_roles_sha256",
+        "readiness_nonce",
+        "controller_lock_path",
+        "controller_authoritative",
+        "automatic",
+    }
+    if (
+        set(document) != fields
+        or document["schema"] != LIVE_LEASE_READINESS_SCHEMA
+        or document["status"] != "legacy-writers-ready"
+        or document["owner_action"] != claim["owner_action"]
+        or document["operation_id"] != inputs.operation_id
+        or document["release_sha"] != inputs.release_sha
+        or document["release_tree_sha"] != inputs.release_tree_sha
+        or document["aggregate_sha256"] != inputs.aggregate_sha256
+        or document["claim_sha256"] != claim_sha256
+        or document["claim_epoch"] != claim["claim_epoch"]
+        or document["claim_nonce"] != claim["nonce"]
+        or not isinstance(document["readiness_receipt_path"], str)
+        or not Path(document["readiness_receipt_path"]).is_absolute()
+        or Path(document["readiness_receipt_path"])
+        != Path(
+            os.path.abspath(document["readiness_receipt_path"])
+        )
+        or not isinstance(document["readiness_receipt_sha256"], str)
+        or SHA256_RE.fullmatch(
+            document["readiness_receipt_sha256"]
+        )
+        is None
+        or document["readiness_receipt_sha256"] == "0" * 64
+        or not isinstance(document["readiness_set_roles_sha256"], str)
+        or SHA256_RE.fullmatch(
+            document["readiness_set_roles_sha256"]
+        )
+        is None
+        or document["readiness_set_roles_sha256"] == "0" * 64
+        or not isinstance(document["readiness_nonce"], str)
+        or LIVE_LEASE_NONCE_RE.fullmatch(
+            document["readiness_nonce"]
+        )
+        is None
+        or document["readiness_nonce"] == "0" * 64
+        or document["controller_lock_path"]
+        != os.fspath(inputs.coordinator_root / "coordinator.lock")
+        or document["controller_authoritative"] is not True
+        or document["automatic"] is not False
+    ):
+        raise NginxCoordinatorError(
+            "production Nginx live lease readiness audit differs"
+        )
+    return document, _sha256(payload)
+
+
+def _load_consumption_audit(
+    inputs: CoordinatorInputs,
+    *,
+    claim: Mapping[str, Any],
+    claim_sha256: str,
+) -> tuple[dict[str, Any], str] | None:
+    path = _live_lease_paths(inputs)[3] / f"{claim_sha256}.json"
+    try:
+        document, payload = _load_canonical_json(
+            path,
+            label="production Nginx live lease consumption audit",
+        )
+    except NginxCoordinatorError:
+        try:
+            path.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            return None
+        raise
+    fields = {
+        "schema",
+        "status",
+        "owner_action",
+        "operation_id",
+        "release_sha",
+        "release_tree_sha",
+        "aggregate_sha256",
+        "claim_sha256",
+        "claim_epoch",
+        "claim_nonce",
+        "outcome",
+        "outcome_sha256",
+        "readiness_audit_sha256",
+        "final_state",
+        "final_state_receipt_sha256",
+        "controller_journal_sha256",
+        "controller_journal_event_count",
+        "controller_evidence_count",
+        "controller_evidence_tail_sha256",
+        "consumer_pid",
+        "consumption_nonce",
+        "adopted_after_crash",
+        "controller_lock_path",
+        "controller_authoritative",
+        "automatic",
+    }
+    if (
+        set(document) != fields
+        or document["schema"] != LIVE_LEASE_CONSUMPTION_SCHEMA
+        or document["status"] != "consumed"
+        or document["owner_action"] != claim["owner_action"]
+        or document["operation_id"] != inputs.operation_id
+        or document["release_sha"] != inputs.release_sha
+        or document["release_tree_sha"] != inputs.release_tree_sha
+        or document["aggregate_sha256"] != inputs.aggregate_sha256
+        or document["claim_sha256"] != claim_sha256
+        or document["claim_epoch"] != claim["claim_epoch"]
+        or document["claim_nonce"] != claim["nonce"]
+        or document["outcome"]
+        not in LIVE_LEASE_OWNER_OUTCOMES[claim["owner_action"]]
+        or not isinstance(document["outcome_sha256"], str)
+        or SHA256_RE.fullmatch(document["outcome_sha256"]) is None
+        or document["outcome_sha256"] == "0" * 64
+        or (
+            document["readiness_audit_sha256"] is not None
+            and (
+                not isinstance(
+                    document["readiness_audit_sha256"],
+                    str,
+                )
+                or SHA256_RE.fullmatch(
+                    document["readiness_audit_sha256"]
+                )
+                is None
+                or document["readiness_audit_sha256"] == "0" * 64
+            )
+        )
+        or document["final_state"]
+        not in {"legacy-frozen", "legacy-normal"}
+        or not isinstance(document["final_state_receipt_sha256"], str)
+        or SHA256_RE.fullmatch(
+            document["final_state_receipt_sha256"]
+        )
+        is None
+        or document["final_state_receipt_sha256"] == "0" * 64
+        or not isinstance(document["controller_journal_sha256"], str)
+        or SHA256_RE.fullmatch(
+            document["controller_journal_sha256"]
+        )
+        is None
+        or document["controller_journal_sha256"] == "0" * 64
+        or type(document["controller_journal_event_count"]) is not int
+        or document["controller_journal_event_count"] < 0
+        or type(document["controller_evidence_count"]) is not int
+        or document["controller_evidence_count"] < 1
+        or not isinstance(
+            document["controller_evidence_tail_sha256"],
+            str,
+        )
+        or SHA256_RE.fullmatch(
+            document["controller_evidence_tail_sha256"]
+        )
+        is None
+        or document["controller_evidence_tail_sha256"] == "0" * 64
+        or type(document["consumer_pid"]) is not int
+        or document["consumer_pid"] < 1
+        or not isinstance(document["consumption_nonce"], str)
+        or LIVE_LEASE_NONCE_RE.fullmatch(
+            document["consumption_nonce"]
+        )
+        is None
+        or document["consumption_nonce"] == "0" * 64
+        or type(document["adopted_after_crash"]) is not bool
+        or document["controller_lock_path"]
+        != os.fspath(inputs.coordinator_root / "coordinator.lock")
+        or document["controller_authoritative"] is not True
+        or document["automatic"] is not False
+        or (
+            document["outcome"]
+            in {
+                "handoff-shadow-readonly",
+                "frozen-final-shadow-restored",
+            }
+            and (
+                document["final_state"] != "legacy-frozen"
+                or document["readiness_audit_sha256"] is not None
+            )
+        )
+        or (
+            document["outcome"] == "legacy-restored"
+            and (
+                document["final_state"] != "legacy-normal"
+                or document["readiness_audit_sha256"] is None
+            )
+        )
+    ):
+        raise NginxCoordinatorError(
+            "production Nginx live lease consumption audit differs"
+        )
+    readiness = _load_readiness_audit(
+        inputs,
+        claim=claim,
+        claim_sha256=claim_sha256,
+    )
+    if (
+        (readiness is None)
+        != (document["readiness_audit_sha256"] is None)
+        or (
+            readiness is not None
+            and readiness[1] != document["readiness_audit_sha256"]
+        )
+    ):
+        raise NginxCoordinatorError(
+            "live lease consumption readiness binding differs"
+        )
+    final_receipt_path = _canonical_receipt_path(
+        operation_id=inputs.operation_id,
+        state=document["final_state"],
+        digest=document["final_state_receipt_sha256"],
+    )
+    final_receipt, final_receipt_sha256 = load_state_receipt(
+        final_receipt_path,
+        document["final_state"],
+        inputs.operation_id,
+        inputs.release_sha,
+        inputs.release_tree_sha,
+        inputs.aggregate_sha256,
+    )
+    if (
+        final_receipt_sha256
+        != document["final_state_receipt_sha256"]
+        or final_receipt["journal_sha256"]
+        != document["controller_journal_sha256"]
+        or final_receipt["evidence_count"]
+        != document["controller_evidence_count"]
+        or final_receipt["evidence_tail_sha256"]
+        != document["controller_evidence_tail_sha256"]
+        or (
+            document["outcome"]
+            in {
+                "handoff-shadow-readonly",
+                "frozen-final-shadow-restored",
+            }
+            and final_receipt_sha256
+            != claim["legacy_frozen_receipt_sha256"]
+        )
+    ):
+        raise NginxCoordinatorError(
+            "live lease consumption final receipt binding differs"
+        )
+    return document, _sha256(payload)
+
+
+def _scan_live_lease_ledger(
+    inputs: CoordinatorInputs,
+) -> tuple[
+    list[tuple[dict[str, Any], str, dict[str, Any]]],
+    list[tuple[dict[str, Any], str, dict[str, Any]]],
+]:
+    if not _prepare_live_lease_ledger(inputs, create=False):
+        return [], []
+    _, claims_root, readiness_root, consumptions_root = _live_lease_paths(
+        inputs
+    )
+    entries: list[tuple[dict[str, Any], str, dict[str, Any]]] = []
+    claim_names: set[str] = set()
+    for path in claims_root.iterdir():
+        if (
+            not path.name.endswith(".json")
+            or SHA256_RE.fullmatch(path.name[:-5]) is None
+        ):
+            raise NginxCoordinatorError(
+                "live lease claim ledger contains an unexpected entry"
+            )
+        digest = path.name[:-5]
+        claim, receipt = _load_claim_from_controller(
+            inputs,
+            path,
+            digest,
+        )
+        entries.append((claim, digest, receipt))
+        claim_names.add(digest)
+    entries.sort(key=lambda row: row[0]["claim_epoch"])
+    previous = "0" * 64
+    for index, (claim, digest, _) in enumerate(entries, 1):
+        if (
+            claim["claim_epoch"] != index
+            or claim["previous_claim_sha256"] != previous
+        ):
+            raise NginxCoordinatorError(
+                "live lease claim chain differs"
+            )
+        previous = digest
+    for root, label in (
+        (readiness_root, "readiness"),
+        (consumptions_root, "consumption"),
+    ):
+        for path in root.iterdir():
+            if (
+                not path.name.endswith(".json")
+                or SHA256_RE.fullmatch(path.name[:-5]) is None
+                or path.name[:-5] not in claim_names
+            ):
+                raise NginxCoordinatorError(
+                    f"live lease {label} ledger contains an unexpected entry"
+                )
+    unresolved: list[
+        tuple[dict[str, Any], str, dict[str, Any]]
+    ] = []
+    for claim, digest, receipt in entries:
+        _load_readiness_audit(
+            inputs,
+            claim=claim,
+            claim_sha256=digest,
+        )
+        consumed = _load_consumption_audit(
+            inputs,
+            claim=claim,
+            claim_sha256=digest,
+        )
+        if consumed is None:
+            unresolved.append((claim, digest, receipt))
+    if len(unresolved) > 1:
+        raise NginxCoordinatorError(
+            "multiple unresolved live lease claims require reconciliation"
+        )
+    return entries, unresolved
+
+
+def _lease_phase(
+    inputs: CoordinatorInputs,
+    journal: Mapping[str, Any],
+    *,
+    claim: Mapping[str, Any],
+    claim_sha256: str,
+) -> tuple[str, tuple[dict[str, Any], str] | None]:
+    readiness = _load_readiness_audit(
+        inputs,
+        claim=claim,
+        claim_sha256=claim_sha256,
+    )
+    pending = journal["pending"]
+    if (
+        journal["stable_state"] == "legacy-frozen"
+        and pending is None
+        and journal["state_sha256"]
+        == claim["receipt_journal_sha256"]
+        and journal["evidence_count"]
+        == claim["receipt_journal_sequence"]
+        and journal["evidence_tail_sha256"]
+        == claim["receipt_journal_tail_sha256"]
+        and len(journal["events"])
+        == claim["controller_journal_event_count"]
+    ):
+        return (
+            "legacy-frozen-ready"
+            if readiness is not None
+            else "legacy-frozen"
+        ), readiness
+    if (
+        readiness is not None
+        and journal["stable_state"] == "legacy-frozen"
+        and isinstance(pending, dict)
+        and pending.get("action") == "restore"
+        and pending.get("target_state") == "legacy-normal"
+        and pending.get("from_state") == "legacy-frozen"
+        and pending.get("policy") == "complete-both"
+        and pending.get("lease_claim_sha256") == claim_sha256
+        and pending.get("status") in {"running", "partial-resumable"}
+    ):
+        return "legacy-restore-pending", readiness
+    if (
+        readiness is not None
+        and journal["stable_state"] == "legacy-normal"
+        and pending is None
+    ):
+        return "legacy-restored", readiness
+    raise NginxCoordinatorError(
+        "unresolved live lease state requires explicit reconciliation"
+    )
+
+
+def load_unconsumed_live_lease_claim(
+    inputs: CoordinatorInputs,
+    *,
+    claim_path: Path,
+    expected_claim_sha256: str,
+    expected_nonce: str,
+) -> dict[str, Any]:
+    """Observe a current unconsumed controller claim without lock authority."""
+    if not isinstance(inputs, CoordinatorInputs):
+        raise NginxCoordinatorError(
+            "live lease inputs are invalid"
+        )
+    expected_claim_sha256 = _nonzero_sha256(
+        expected_claim_sha256,
+        label="live lease claim SHA-256",
+    )
+    if (
+        not isinstance(expected_nonce, str)
+        or LIVE_LEASE_NONCE_RE.fullmatch(expected_nonce) is None
+        or expected_nonce == "0" * 64
+    ):
+        raise NginxCoordinatorError("live lease nonce is invalid")
+    _, unresolved = _scan_live_lease_ledger(inputs)
+    if len(unresolved) != 1:
+        raise NginxCoordinatorError(
+            "exactly one unconsumed live lease claim is required"
+        )
+    claim, digest, receipt = unresolved[0]
+    if (
+        digest != expected_claim_sha256
+        or claim_path
+        != _live_lease_paths(inputs)[1] / f"{digest}.json"
+        or claim["nonce"] != expected_nonce
+    ):
+        raise NginxCoordinatorError(
+            "unconsumed live lease identity differs"
+        )
+    journal = _load_journal(inputs)
+    phase, readiness = _lease_phase(
+        inputs,
+        journal,
+        claim=claim,
+        claim_sha256=digest,
+    )
+    return {
+        "claim": claim,
+        "claim_path": os.fspath(claim_path),
+        "claim_sha256": digest,
+        "state_receipt": receipt,
+        "phase": phase,
+        "readiness_audit": (
+            readiness[0] if readiness is not None else None
+        ),
+        "controller_lock_authority_observed": False,
+        "unconsumed_observed": True,
+    }
+
+
+def _assert_no_unconsumed_live_lease(
+    inputs: CoordinatorInputs,
+) -> None:
+    _, unresolved = _scan_live_lease_ledger(inputs)
+    if unresolved:
+        raise NginxCoordinatorError(
+            "an unresolved live lease claim blocks coordinator transitions; "
+            "explicit lease resume and reconciliation are required"
+        )
+
+
+def _validate_current_receipt(
+    inputs: CoordinatorInputs,
+    journal: Mapping[str, Any],
+    *,
+    receipt_path: Path,
+    receipt_sha256: str,
+    state: str,
+) -> tuple[dict[str, Any], str]:
+    receipt_sha256 = _nonzero_sha256(
+        receipt_sha256,
+        label=f"{state} state receipt SHA-256",
+    )
+    expected_path = _canonical_receipt_path(
+        operation_id=inputs.operation_id,
+        state=state,
+        digest=receipt_sha256,
+    )
+    if receipt_path != expected_path:
+        raise NginxCoordinatorError(
+            f"{state} state receipt path is not canonical"
+        )
+    receipt, observed = load_state_receipt(
+        receipt_path,
+        state,
+        inputs.operation_id,
+        inputs.release_sha,
+        inputs.release_tree_sha,
+        inputs.aggregate_sha256,
+    )
+    if (
+        observed != receipt_sha256
+        or journal["stable_state"] != state
+        or journal["pending"] is not None
+        or journal["state_sha256"] != receipt["journal_sha256"]
+        or journal["evidence_count"] != receipt["evidence_count"]
+        or journal["evidence_tail_sha256"]
+        != receipt["evidence_tail_sha256"]
+    ):
+        raise NginxCoordinatorError(
+            f"{state} state receipt is not the current coordinator state"
+        )
+    return receipt, observed
+
+
+def _create_live_lease_claim(
+    inputs: CoordinatorInputs,
+    *,
+    owner_action: str,
+    journal: Mapping[str, Any],
+    receipt_path: Path,
+    receipt: Mapping[str, Any],
+    receipt_sha256: str,
+    entries: Sequence[
+        tuple[Mapping[str, Any], str, Mapping[str, Any]]
+    ],
+) -> tuple[dict[str, Any], Path, str]:
+    if owner_action not in LIVE_LEASE_OWNER_OUTCOMES:
+        raise NginxCoordinatorError(
+            "live lease owner action is not allowlisted"
+        )
+    epoch = len(entries) + 1
+    previous = entries[-1][1] if entries else "0" * 64
+    claim = {
+        "schema": LIVE_LEASE_CLAIM_SCHEMA,
+        "status": "active",
+        "owner_action": owner_action,
+        "operation_id": inputs.operation_id,
+        "release_sha": inputs.release_sha,
+        "release_tree_sha": inputs.release_tree_sha,
+        "aggregate_sha256": inputs.aggregate_sha256,
+        "claim_epoch": epoch,
+        "previous_claim_sha256": previous,
+        "nonce": secrets.token_hex(32),
+        "controller_pid": os.getpid(),
+        "controller_lock_path": os.fspath(
+            inputs.coordinator_root / "coordinator.lock"
+        ),
+        "controller_authoritative": True,
+        "remote_copy_authoritative": False,
+        "automatic_expiry_allowed": False,
+        "reconciliation_required_after_crash": True,
+        "legacy_frozen_receipt_path": os.fspath(receipt_path),
+        "legacy_frozen_receipt_sha256": receipt_sha256,
+        "receipt_journal_sha256": receipt["journal_sha256"],
+        "receipt_journal_sequence": receipt["evidence_count"],
+        "receipt_journal_tail_sha256": receipt[
+            "evidence_tail_sha256"
+        ],
+        "controller_journal_event_count": len(journal["events"]),
+        "receipt_state": "legacy-frozen",
+        "receipt_global_generation_sha256": receipt[
+            "global_generation_sha256"
+        ],
+        "receipt_role_generation_sha256": {
+            role: receipt["readbacks"][role]["generation_sha256"]
+            for role in ROLE_ORDER
+        },
+        "receipt_role_bindings": receipt["role_bindings"],
+        "receipt_readbacks": receipt["readbacks"],
+    }
+    payload = canonical_json_bytes(claim)
+    digest = _sha256(payload)
+    path = _live_lease_paths(inputs)[1] / f"{digest}.json"
+    try:
+        write_secure_new_bytes(
+            path,
+            payload,
+            label="production Nginx live lease claim",
+            mode=FILE_MODE,
+            max_size=GENERATION.MAX_JSON_BYTES,
+        )
+    except SecureFileError as exc:
+        raise NginxCoordinatorError(
+            "production Nginx live lease claim could not be created"
+        ) from exc
+    loaded, observed = load_live_lease_claim_material(
+        path,
+        state_receipt_path=receipt_path,
+        expected_claim_sha256=digest,
+        expected_state_receipt_sha256=receipt_sha256,
+        operation_id=inputs.operation_id,
+        release_sha=inputs.release_sha,
+        release_tree_sha=inputs.release_tree_sha,
+        aggregate_sha256=inputs.aggregate_sha256,
+    )
+    if loaded != claim or observed != digest:
+        raise NginxCoordinatorError(
+            "production Nginx live lease claim readback differs"
+        )
+    return claim, path, digest
+
+
+def _legacy_writer_transcript_entry_sha256(
+    entry: Mapping[str, Any],
+) -> str:
+    unsigned = dict(entry)
+    unsigned["entry_sha256"] = "0" * 64
+    return _sha256(canonical_json_bytes(unsigned))
+
+
+def _validate_legacy_writer_live_transcript(
+    restored_result: Mapping[str, Any],
+    *,
+    inputs: CoordinatorInputs,
+    role: str,
+    claim: Mapping[str, Any],
+    claim_sha256: str,
+) -> None:
+    transcript = restored_result["interactive_lease_transcript"]
+    count = restored_result["interactive_lease_checkpoint_count"]
+    expected_kinds = LEGACY_WRITER_KINDS[role]
+    if (
+        not isinstance(transcript, list)
+        or type(count) is not int
+        or not 1 <= count <= 10_000
+        or len(transcript) != count
+        or restored_result[
+            "interactive_lease_authority_handoff_complete"
+        ]
+        is not True
+    ):
+        raise NginxCoordinatorError(
+            f"{role} interactive live lease transcript differs"
+        )
+    previous = "0" * 64
+    checkpoints: list[str] = []
+    for sequence, entry in enumerate(transcript, 1):
+        if (
+            not isinstance(entry, dict)
+            or set(entry) != {"challenge", "response", "entry_sha256"}
+            or not isinstance(entry["challenge"], dict)
+            or not isinstance(entry["response"], dict)
+        ):
+            raise NginxCoordinatorError(
+                f"{role} interactive live lease transcript row differs"
+            )
+        challenge = entry["challenge"]
+        response = entry["response"]
+        checkpoint = challenge.get("checkpoint")
+        challenge_fields = {
+            "schema",
+            "status",
+            "operation_id",
+            "release_sha",
+            "role",
+            "live_lease_claim_sha256",
+            "live_lease_claim_epoch",
+            "sequence",
+            "checkpoint",
+            "challenge_nonce",
+            "previous_transcript_sha256",
+        }
+        response_fields = {
+            *challenge_fields,
+            "challenge_sha256",
+            "controller_flock_verified",
+            "response_nonce",
+        }
+        if (
+            set(challenge) != challenge_fields
+            or challenge["schema"]
+            != LEGACY_WRITER_LIVE_CHALLENGE_SCHEMA
+            or challenge["status"] != "controller-response-required"
+            or challenge["operation_id"] != inputs.operation_id
+            or challenge["release_sha"] != inputs.release_sha
+            or challenge["role"] != role
+            or challenge["live_lease_claim_sha256"] != claim_sha256
+            or challenge["live_lease_claim_epoch"]
+            != claim["claim_epoch"]
+            or challenge["sequence"] != sequence
+            or not isinstance(checkpoint, str)
+            or LEGACY_WRITER_CHECKPOINT_RE.fullmatch(checkpoint) is None
+            or not isinstance(challenge["challenge_nonce"], str)
+            or LIVE_LEASE_NONCE_RE.fullmatch(
+                challenge["challenge_nonce"]
+            )
+            is None
+            or challenge["challenge_nonce"] == "0" * 64
+            or challenge["previous_transcript_sha256"] != previous
+            or set(response) != response_fields
+            or response["schema"]
+            != LEGACY_WRITER_LIVE_RESPONSE_SCHEMA
+            or response["status"] != "controller-flock-verified"
+            or any(
+                response[field] != challenge[field]
+                for field in challenge_fields - {"schema", "status"}
+            )
+            or response["challenge_sha256"]
+            != _sha256(canonical_json_bytes(challenge))
+            or response["controller_flock_verified"] is not True
+            or not isinstance(response["response_nonce"], str)
+            or LIVE_LEASE_NONCE_RE.fullmatch(
+                response["response_nonce"]
+            )
+            is None
+            or response["response_nonce"] == "0" * 64
+            or entry["entry_sha256"]
+            != _legacy_writer_transcript_entry_sha256(entry)
+        ):
+            raise NginxCoordinatorError(
+                f"{role} interactive live lease transcript binding differs"
+            )
+        checkpoints.append(checkpoint)
+        previous = entry["entry_sha256"]
+    if (
+        restored_result["interactive_lease_transcript_sha256"] != previous
+        or checkpoints[-1] != "before-result"
+        or checkpoints.count("before-result") != 1
+    ):
+        raise NginxCoordinatorError(
+            f"{role} interactive live lease finalization differs"
+        )
+    observed_stop_checkpoints = [
+        checkpoint
+        for checkpoint in checkpoints
+        if checkpoint.startswith(("before-stop:", "after-stop:"))
+    ]
+    stopped_kinds: list[str] = []
+    if len(observed_stop_checkpoints) % 2 == 0:
+        for index in range(0, len(observed_stop_checkpoints), 2):
+            before = observed_stop_checkpoints[index]
+            after = observed_stop_checkpoints[index + 1]
+            kind = before.removeprefix("before-stop:")
+            if after != f"after-stop:{kind}":
+                stopped_kinds = []
+                break
+            stopped_kinds.append(kind)
+    expected_stop_checkpoints = [
+        checkpoint
+        for kind in stopped_kinds
+        for checkpoint in (f"before-stop:{kind}", f"after-stop:{kind}")
+    ]
+    expected_start_checkpoints = [
+        checkpoint
+        for kind in expected_kinds
+        for checkpoint in (f"before-start:{kind}", f"after-start:{kind}")
+    ]
+    observed_start_checkpoints = [
+        checkpoint
+        for checkpoint in checkpoints
+        if checkpoint.startswith(("before-start:", "after-start:"))
+    ]
+    http_samples = [
+        int(checkpoint.rsplit(":", 1)[1])
+        for checkpoint in checkpoints
+        if checkpoint.startswith("readiness-http:")
+    ]
+    stability_samples = [
+        int(checkpoint.rsplit(":", 1)[1])
+        for checkpoint in checkpoints
+        if checkpoint.startswith("readiness-stability:")
+    ]
+    expected_checkpoints = [
+        *expected_stop_checkpoints,
+        *expected_start_checkpoints,
+        *(
+            f"readiness-http:{sample}"
+            for sample in range(1, len(http_samples) + 1)
+        ),
+        *(
+            f"readiness-stability:{sample}"
+            for sample in range(1, len(stability_samples) + 1)
+        ),
+        "before-result",
+    ]
+    if (
+        observed_stop_checkpoints != expected_stop_checkpoints
+        or len(stopped_kinds) != len(set(stopped_kinds))
+        or tuple(stopped_kinds)
+        != tuple(kind for kind in expected_kinds if kind in stopped_kinds)
+        or observed_start_checkpoints != expected_start_checkpoints
+        or http_samples != list(range(1, len(http_samples) + 1))
+        or not http_samples
+        or stability_samples
+        != list(range(1, len(stability_samples) + 1))
+        or len(stability_samples)
+        < restored_result["stable_sample_count"]
+        or restored_result["stable_sample_count"] != 3
+        or checkpoints != expected_checkpoints
+    ):
+        raise NginxCoordinatorError(
+            f"{role} interactive live lease checkpoint semantics differ"
+        )
+
+
+def load_legacy_writer_readiness_set(
+    path: Path,
+    *,
+    inputs: CoordinatorInputs,
+    claim: Mapping[str, Any],
+    claim_sha256: str,
+    expected_sha256: str,
+) -> tuple[dict[str, Any], str]:
+    """Load the exact two-role readiness set required before Nginx restore."""
+    claim_sha256 = _nonzero_sha256(
+        claim_sha256,
+        label="readiness live lease claim SHA-256",
+    )
+    expected_sha256 = _nonzero_sha256(
+        expected_sha256,
+        label="legacy writer readiness set SHA-256",
+    )
+    document, payload = _load_canonical_json(
+        path,
+        label="legacy writer readiness set",
+    )
+    observed_sha256 = _sha256(payload)
+    fields = {
+        "schema",
+        "status",
+        "operation_id",
+        "release_sha",
+        "release_tree_sha",
+        "aggregate_sha256",
+        "live_lease_claim_sha256",
+        "live_lease_claim_nonce",
+        "live_lease_claim_epoch",
+        "legacy_frozen_receipt_sha256",
+        "roles",
+        "roles_sha256",
+    }
+    identity = {
+        "operation_id": inputs.operation_id,
+        "release_sha": inputs.release_sha,
+        "release_tree_sha": inputs.release_tree_sha,
+        "aggregate_sha256": inputs.aggregate_sha256,
+    }
+    if (
+        observed_sha256 != expected_sha256
+        or set(document) != fields
+        or document["schema"] != LEGACY_WRITER_READINESS_SET_SCHEMA
+        or document["status"] != "legacy-writers-ready"
+        or any(document.get(key) != value for key, value in identity.items())
+        or document["live_lease_claim_sha256"] != claim_sha256
+        or document["live_lease_claim_nonce"] != claim["nonce"]
+        or document["live_lease_claim_epoch"] != claim["claim_epoch"]
+        or document["legacy_frozen_receipt_sha256"]
+        != claim["legacy_frozen_receipt_sha256"]
+        or not isinstance(document["roles"], dict)
+        or set(document["roles"]) != set(ROLE_ORDER)
+        or document["roles_sha256"]
+        != _sha256(canonical_json_bytes(document["roles"]))
+    ):
+        raise NginxCoordinatorError(
+            "legacy writer readiness set identity differs"
+        )
+    role_fields = {
+        "restored_ready_result",
+        "restored_ready_result_sha256",
+        "status",
+        "legacy_ready_for_nginx_restore",
+        "freeze_evidence_sha256",
+        "freeze_evidence_revoked",
+        "all_exact_writer_containers_ready",
+        "expected_writer_container_count",
+        "ready_writer_container_count",
+        "readiness_sha256",
+        "stable_sample_count",
+        "application_http_status",
+        "database_container_running",
+        "redis_container_running",
+        "production_mutated",
+    }
+    restored_result_fields = {
+        "schema",
+        "status",
+        "action",
+        "operation_id",
+        "release_sha",
+        "legacy_release_sha",
+        "role",
+        "binding_sha256",
+        "nginx_manifest_sha256",
+        "nginx_aggregate_sha256",
+        "coordinated_state_receipt_sha256",
+        "live_lease_claim_sha256",
+        "live_lease_claim_epoch",
+        "role_freeze_generation_sha256",
+        "freeze_generation_sha256",
+        "journal_sha256",
+        "freeze_evidence_sha256",
+        "freeze_evidence_revoked",
+        "all_exact_writer_containers_ready",
+        "expected_writer_container_count",
+        "legacy_writer_process_count",
+        "writer_database_client_count",
+        "file_mutator_process_count",
+        "database_container_running",
+        "redis_container_running",
+        "application_http_status",
+        "legacy_ready_for_nginx_restore",
+        "ready_writer_container_count",
+        "stable_sample_count",
+        "readiness_sha256",
+        "interactive_lease_checkpoint_count",
+        "interactive_lease_transcript",
+        "interactive_lease_transcript_sha256",
+        "interactive_lease_authority_handoff_complete",
+        "production_mutated",
+    }
+    legacy_release_sha: str | None = None
+    binding_sha256: set[str] = set()
+    for role in ROLE_ORDER:
+        row = document["roles"][role]
+        expected_count = LEGACY_WRITER_COUNTS[role]
+        if not isinstance(row, dict) or set(row) != role_fields:
+            raise NginxCoordinatorError(
+                f"{role} legacy writer readiness semantics differ"
+            )
+        restored_result = row["restored_ready_result"]
+        if (
+            not isinstance(restored_result, dict)
+            or set(restored_result) != restored_result_fields
+        ):
+            raise NginxCoordinatorError(
+                f"{role} restored-ready result fields differ"
+            )
+        expected_result_sha256 = _nonzero_sha256(
+            row["restored_ready_result_sha256"],
+            label=f"{role} restored-ready result SHA-256",
+        )
+        if (
+            _sha256(canonical_json_bytes(restored_result))
+            != expected_result_sha256
+        ):
+            raise NginxCoordinatorError(
+                f"{role} restored-ready result digest differs"
+            )
+        observed_legacy_release_sha = _release_sha(
+            restored_result["legacy_release_sha"],
+            label=f"{role} legacy release SHA",
+        )
+        observed_binding_sha256 = _nonzero_sha256(
+            restored_result["binding_sha256"],
+            label=f"{role} source binding SHA-256",
+        )
+        if (
+            observed_legacy_release_sha == inputs.release_sha
+            or (
+                legacy_release_sha is not None
+                and observed_legacy_release_sha != legacy_release_sha
+            )
+            or observed_binding_sha256 in binding_sha256
+        ):
+            raise NginxCoordinatorError(
+                f"{role} restored-ready source binding differs"
+            )
+        legacy_release_sha = observed_legacy_release_sha
+        binding_sha256.add(observed_binding_sha256)
+        if (
+            restored_result["schema"] != LEGACY_WRITER_RESULT_SCHEMA
+            or restored_result["status"] != "restored-ready"
+            or restored_result["action"] != "restore"
+            or restored_result["operation_id"] != inputs.operation_id
+            or restored_result["release_sha"] != inputs.release_sha
+            or restored_result["role"] != role
+            or restored_result["nginx_manifest_sha256"]
+            != inputs.roles[role].manifest_sha256
+            or restored_result["nginx_aggregate_sha256"]
+            != inputs.aggregate_sha256
+            or restored_result["coordinated_state_receipt_sha256"]
+            != claim["legacy_frozen_receipt_sha256"]
+            or restored_result["live_lease_claim_sha256"]
+            != claim_sha256
+            or type(restored_result["live_lease_claim_epoch"]) is not int
+            or restored_result["live_lease_claim_epoch"]
+            != claim["claim_epoch"]
+            or restored_result["role_freeze_generation_sha256"]
+            != claim["receipt_role_generation_sha256"][role]
+            or restored_result["freeze_generation_sha256"]
+            != claim["receipt_global_generation_sha256"]
+            or restored_result["freeze_evidence_sha256"] is not None
+            or restored_result["freeze_evidence_revoked"] is not True
+            or restored_result["all_exact_writer_containers_ready"]
+            is not True
+            or restored_result["expected_writer_container_count"]
+            != expected_count
+            or restored_result["legacy_writer_process_count"] is not None
+            or restored_result["writer_database_client_count"] is not None
+            or restored_result["file_mutator_process_count"] is not None
+            or restored_result["database_container_running"] is not True
+            or restored_result["redis_container_running"] is not True
+            or type(restored_result["application_http_status"]) is not int
+            or not 200
+            <= restored_result["application_http_status"]
+            <= 299
+            or restored_result["legacy_ready_for_nginx_restore"]
+            is not True
+            or restored_result["ready_writer_container_count"]
+            != expected_count
+            or restored_result["stable_sample_count"] != 3
+            or type(
+                restored_result["interactive_lease_checkpoint_count"]
+            )
+            is not int
+            or not isinstance(
+                restored_result["interactive_lease_transcript"],
+                list,
+            )
+            or not isinstance(
+                restored_result[
+                    "interactive_lease_transcript_sha256"
+                ],
+                str,
+            )
+            or restored_result[
+                "interactive_lease_authority_handoff_complete"
+            ]
+            is not True
+            or restored_result["production_mutated"] is not True
+        ):
+            raise NginxCoordinatorError(
+                f"{role} restored-ready result semantics differ"
+            )
+        _nonzero_sha256(
+            restored_result["journal_sha256"],
+            label=f"{role} restored-ready journal SHA-256",
+        )
+        _nonzero_sha256(
+            restored_result["readiness_sha256"],
+            label=f"{role} exact writer readiness SHA-256",
+        )
+        _validate_legacy_writer_live_transcript(
+            restored_result,
+            inputs=inputs,
+            role=role,
+            claim=claim,
+            claim_sha256=claim_sha256,
+        )
+        row_result_fields = role_fields - {
+            "restored_ready_result",
+            "restored_ready_result_sha256",
+        }
+        if (
+            any(
+                row[field] != restored_result[field]
+                for field in row_result_fields
+            )
+            or row["status"] != "restored-ready"
+            or row["legacy_ready_for_nginx_restore"] is not True
+            or row["freeze_evidence_sha256"] is not None
+            or row["freeze_evidence_revoked"] is not True
+            or row["all_exact_writer_containers_ready"] is not True
+            or row["expected_writer_container_count"] != expected_count
+            or row["ready_writer_container_count"] != expected_count
+            or row["stable_sample_count"] != 3
+            or type(row["application_http_status"]) is not int
+            or not 200 <= row["application_http_status"] <= 299
+            or row["database_container_running"] is not True
+            or row["redis_container_running"] is not True
+            or row["production_mutated"] is not True
+        ):
+            raise NginxCoordinatorError(
+                f"{role} legacy writer readiness semantics differ"
+            )
+        _nonzero_sha256(
+            row["readiness_sha256"],
+            label=f"{role} exact writer readiness SHA-256",
+        )
+    return document, observed_sha256
+
+
+def _create_or_load_readiness_audit(
+    inputs: CoordinatorInputs,
+    *,
+    claim: Mapping[str, Any],
+    claim_sha256: str,
+    readiness_receipt_path: Path,
+    expected_readiness_receipt_sha256: str,
+) -> tuple[dict[str, Any], str]:
+    expected_readiness_receipt_sha256 = _nonzero_sha256(
+        expected_readiness_receipt_sha256,
+        label="legacy writer readiness receipt SHA-256",
+    )
+    readiness_set, observed_readiness_sha256 = (
+        load_legacy_writer_readiness_set(
+            readiness_receipt_path,
+            inputs=inputs,
+            claim=claim,
+            claim_sha256=claim_sha256,
+            expected_sha256=expected_readiness_receipt_sha256,
+        )
+    )
+    if observed_readiness_sha256 != expected_readiness_receipt_sha256:
+        raise NginxCoordinatorError(
+            "legacy writer readiness set digest differs"
+        )
+    existing = _load_readiness_audit(
+        inputs,
+        claim=claim,
+        claim_sha256=claim_sha256,
+    )
+    if existing is not None:
+        if (
+            existing[0]["readiness_receipt_path"]
+            != os.fspath(readiness_receipt_path)
+            or existing[0]["readiness_receipt_sha256"]
+            != expected_readiness_receipt_sha256
+            or existing[0]["readiness_set_roles_sha256"]
+            != readiness_set["roles_sha256"]
+        ):
+            raise NginxCoordinatorError(
+                "existing legacy writer readiness binding differs"
+            )
+        return existing
+    audit = {
+        "schema": LIVE_LEASE_READINESS_SCHEMA,
+        "status": "legacy-writers-ready",
+        "owner_action": claim["owner_action"],
+        "operation_id": inputs.operation_id,
+        "release_sha": inputs.release_sha,
+        "release_tree_sha": inputs.release_tree_sha,
+        "aggregate_sha256": inputs.aggregate_sha256,
+        "claim_sha256": claim_sha256,
+        "claim_epoch": claim["claim_epoch"],
+        "claim_nonce": claim["nonce"],
+        "readiness_receipt_path": os.fspath(readiness_receipt_path),
+        "readiness_receipt_sha256": expected_readiness_receipt_sha256,
+        "readiness_set_roles_sha256": readiness_set["roles_sha256"],
+        "readiness_nonce": secrets.token_hex(32),
+        "controller_lock_path": os.fspath(
+            inputs.coordinator_root / "coordinator.lock"
+        ),
+        "controller_authoritative": True,
+        "automatic": False,
+    }
+    payload = canonical_json_bytes(audit)
+    path = _live_lease_paths(inputs)[2] / f"{claim_sha256}.json"
+    try:
+        write_secure_new_bytes(
+            path,
+            payload,
+            label="production Nginx live lease readiness audit",
+            mode=FILE_MODE,
+            max_size=GENERATION.MAX_JSON_BYTES,
+        )
+    except SecureFileError as exc:
+        raise NginxCoordinatorError(
+            "legacy writer readiness audit could not be created"
+        ) from exc
+    loaded = _load_readiness_audit(
+        inputs,
+        claim=claim,
+        claim_sha256=claim_sha256,
+    )
+    if loaded is None or loaded[0] != audit:
+        raise NginxCoordinatorError(
+            "legacy writer readiness audit readback differs"
+        )
+    return loaded
+
+
+def _find_current_state_receipt(
+    inputs: CoordinatorInputs,
+    journal: Mapping[str, Any],
+    *,
+    state: str,
+) -> tuple[Path, dict[str, Any], str]:
+    matches: list[tuple[Path, dict[str, Any], str]] = []
+    for path in inputs.receipts_root.iterdir():
+        prefix = f"{state}-"
+        if (
+            not path.name.startswith(prefix)
+            or not path.name.endswith(".json")
+            or SHA256_RE.fullmatch(
+                path.name[len(prefix) : -5]
+            )
+            is None
+        ):
+            continue
+        expected = path.name[len(prefix) : -5]
+        receipt, digest = load_state_receipt(
+            path,
+            state,
+            inputs.operation_id,
+            inputs.release_sha,
+            inputs.release_tree_sha,
+            inputs.aggregate_sha256,
+        )
+        if digest != expected:
+            raise NginxCoordinatorError(
+                "state receipt filename digest differs"
+            )
+        if (
+            receipt["journal_sha256"] == journal["state_sha256"]
+            and receipt["evidence_count"] == journal["evidence_count"]
+            and receipt["evidence_tail_sha256"]
+            == journal["evidence_tail_sha256"]
+        ):
+            matches.append((path, receipt, digest))
+    if len(matches) != 1:
+        raise NginxCoordinatorError(
+            f"exactly one current {state} state receipt is required"
+        )
+    return matches[0]
+
+
+class NginxCoordinatorRollbackPending(NginxCoordinatorError):
+    """A write-blocked rollback-freeze transition must be resumed."""
+
+    def __init__(self, result: Mapping[str, Any]) -> None:
+        super().__init__(
+            "rollback-freeze is partial, write-blocked, and resumable"
+        )
+        self.result = json.loads(
+            canonical_json_bytes(result).decode("utf-8")
+        )
+
+
+class CoordinatorLiveLease:
+    """Controller-authoritative live lease held under `_CoordinatorLock`."""
+
+    def __init__(
+        self,
+        *,
+        inputs: CoordinatorInputs,
+        lock: _CoordinatorLock,
+        claim: Mapping[str, Any],
+        claim_path: Path,
+        claim_sha256: str,
+        adopted_after_crash: bool,
+        transition_result: Mapping[str, Any] | None = None,
+    ) -> None:
+        self._inputs = inputs
+        self._lock = lock
+        self._claim = json.loads(
+            canonical_json_bytes(claim).decode("utf-8")
+        )
+        self._claim_path = claim_path
+        self._claim_sha256 = claim_sha256
+        self._adopted_after_crash = adopted_after_crash
+        self._transition_result = (
+            json.loads(canonical_json_bytes(transition_result).decode("utf-8"))
+            if transition_result is not None
+            else None
+        )
+        self._consumed = False
+        self._consumption_path: Path | None = None
+        self._consumption_sha256: str | None = None
+
+    @property
+    def claim(self) -> dict[str, Any]:
+        return json.loads(
+            canonical_json_bytes(self._claim).decode("utf-8")
+        )
+
+    @property
+    def claim_path(self) -> Path:
+        return self._claim_path
+
+    @property
+    def claim_sha256(self) -> str:
+        return self._claim_sha256
+
+    @property
+    def claim_payload(self) -> bytes:
+        return _read_private_file(
+            self._claim_path,
+            label="production Nginx live lease claim",
+            maximum=GENERATION.MAX_JSON_BYTES,
+        )
+
+    @property
+    def verifier(self) -> Callable[[], dict[str, Any]]:
+        return self.verify
+
+    @property
+    def consumed(self) -> bool:
+        return self._consumed
+
+    @property
+    def transition_result(self) -> dict[str, Any] | None:
+        if self._transition_result is None:
+            return None
+        return json.loads(
+            canonical_json_bytes(self._transition_result).decode("utf-8")
+        )
+
+    @property
+    def consumption_path(self) -> Path | None:
+        return self._consumption_path
+
+    @property
+    def consumption_sha256(self) -> str | None:
+        return self._consumption_sha256
+
+    def _require_holder(self) -> None:
+        if not self._lock.held:
+            raise NginxCoordinatorError(
+                "live lease controller lock is not held"
+            )
+        if self._consumed:
+            raise NginxCoordinatorError(
+                "live lease claim has already been consumed"
+            )
+
+    def _observe(self) -> dict[str, Any]:
+        self._require_holder()
+        observation = load_unconsumed_live_lease_claim(
+            self._inputs,
+            claim_path=self._claim_path,
+            expected_claim_sha256=self._claim_sha256,
+            expected_nonce=self._claim["nonce"],
+        )
+        if observation["claim"] != self._claim:
+            raise NginxCoordinatorError(
+                "live lease claim changed while held"
+            )
+        observation["controller_lock_authority_observed"] = True
+        return observation
+
+    def verify(self) -> dict[str, Any]:
+        observation = self._observe()
+        if observation["phase"] not in {
+            "legacy-frozen",
+            "legacy-frozen-ready",
+        }:
+            raise NginxCoordinatorError(
+                "live lease callback requires current legacy-frozen state"
+            )
+        return observation
+
+    def restore_legacy_normal(
+        self,
+        *,
+        readiness_receipt_path: Path,
+        readiness_receipt_sha256: str,
+        runner: RunFn = _subprocess_runner,
+    ) -> dict[str, Any]:
+        if self._claim["owner_action"] != "restore-legacy-writers":
+            raise NginxCoordinatorError(
+                "live lease owner action cannot restore legacy writers"
+            )
+        observation = self._observe()
+        if observation["phase"] not in {
+            "legacy-frozen",
+            "legacy-frozen-ready",
+            "legacy-restore-pending",
+            "legacy-restored",
+        }:
+            raise NginxCoordinatorError(
+                "legacy restore lease phase is invalid"
+            )
+        readiness = _create_or_load_readiness_audit(
+            self._inputs,
+            claim=self._claim,
+            claim_sha256=self._claim_sha256,
+            readiness_receipt_path=readiness_receipt_path,
+            expected_readiness_receipt_sha256=(
+                readiness_receipt_sha256
+            ),
+        )
+        journal = _load_journal(self._inputs)
+        details = _restore_action(
+            self._inputs,
+            journal,
+            lease_claim_sha256=self._claim_sha256,
+            runner=runner,
+        )
+        final_journal = _load_journal(self._inputs)
+        receipt = _persist_state_receipt(
+            self._inputs,
+            final_journal,
+            action="restore",
+            target_state=None,
+            details=details,
+        )
+        return {
+            **details,
+            "readiness_audit_sha256": readiness[1],
+            "state_receipt_path": (
+                os.fspath(receipt[0]) if receipt is not None else None
+            ),
+            "state_receipt_sha256": (
+                receipt[1] if receipt is not None else None
+            ),
+        }
+
+    def consume(
+        self,
+        *,
+        outcome: str,
+        outcome_sha256: str,
+    ) -> tuple[Path, str]:
+        observation = self._observe()
+        if outcome not in LIVE_LEASE_OWNER_OUTCOMES[
+            self._claim["owner_action"]
+        ]:
+            raise NginxCoordinatorError(
+                "live lease outcome is outside its owner action"
+            )
+        outcome_sha256 = _nonzero_sha256(
+            outcome_sha256,
+            label="live lease outcome SHA-256",
+        )
+        journal = _load_journal(self._inputs)
+        readiness = _load_readiness_audit(
+            self._inputs,
+            claim=self._claim,
+            claim_sha256=self._claim_sha256,
+        )
+        if outcome in {
+            "handoff-shadow-readonly",
+            "frozen-final-shadow-restored",
+        }:
+            if (
+                observation["phase"] != "legacy-frozen"
+                or readiness is not None
+            ):
+                raise NginxCoordinatorError(
+                    "frozen-state outcome requires an untouched "
+                    "legacy-frozen lease"
+                )
+            final_state = "legacy-frozen"
+            final_receipt_sha256 = self._claim[
+                "legacy_frozen_receipt_sha256"
+            ]
+        elif outcome == "legacy-restored":
+            if (
+                observation["phase"] != "legacy-restored"
+                or readiness is None
+            ):
+                raise NginxCoordinatorError(
+                    "legacy-restored consumption requires ready writers "
+                    "and verified legacy-normal"
+                )
+            final_state = "legacy-normal"
+            _, _, final_receipt_sha256 = _find_current_state_receipt(
+                self._inputs,
+                journal,
+                state=final_state,
+            )
+        else:
+            raise NginxCoordinatorError(
+                "live lease outcome is not allowlisted"
+            )
+        audit = {
+            "schema": LIVE_LEASE_CONSUMPTION_SCHEMA,
+            "status": "consumed",
+            "owner_action": self._claim["owner_action"],
+            "operation_id": self._inputs.operation_id,
+            "release_sha": self._inputs.release_sha,
+            "release_tree_sha": self._inputs.release_tree_sha,
+            "aggregate_sha256": self._inputs.aggregate_sha256,
+            "claim_sha256": self._claim_sha256,
+            "claim_epoch": self._claim["claim_epoch"],
+            "claim_nonce": self._claim["nonce"],
+            "outcome": outcome,
+            "outcome_sha256": outcome_sha256,
+            "readiness_audit_sha256": (
+                readiness[1] if readiness is not None else None
+            ),
+            "final_state": final_state,
+            "final_state_receipt_sha256": final_receipt_sha256,
+            "controller_journal_sha256": journal["state_sha256"],
+            "controller_journal_event_count": len(journal["events"]),
+            "controller_evidence_count": journal["evidence_count"],
+            "controller_evidence_tail_sha256": journal[
+                "evidence_tail_sha256"
+            ],
+            "consumer_pid": os.getpid(),
+            "consumption_nonce": secrets.token_hex(32),
+            "adopted_after_crash": self._adopted_after_crash,
+            "controller_lock_path": os.fspath(
+                self._inputs.coordinator_root / "coordinator.lock"
+            ),
+            "controller_authoritative": True,
+            "automatic": False,
+        }
+        payload = canonical_json_bytes(audit)
+        path = (
+            _live_lease_paths(self._inputs)[3]
+            / f"{self._claim_sha256}.json"
+        )
+        try:
+            write_secure_new_bytes(
+                path,
+                payload,
+                label="production Nginx live lease consumption audit",
+                mode=FILE_MODE,
+                max_size=GENERATION.MAX_JSON_BYTES,
+            )
+        except SecureFileError as exc:
+            raise NginxCoordinatorError(
+                "live lease consumption audit could not be created"
+            ) from exc
+        loaded = _load_consumption_audit(
+            self._inputs,
+            claim=self._claim,
+            claim_sha256=self._claim_sha256,
+        )
+        if loaded is None or loaded[0] != audit:
+            raise NginxCoordinatorError(
+                "live lease consumption audit readback differs"
+            )
+        self._consumed = True
+        self._consumption_path = path
+        self._consumption_sha256 = loaded[1]
+        return path, loaded[1]
+
+
+class _CoordinatorLiveLeaseContext:
+    def __init__(
+        self,
+        *,
+        inputs: CoordinatorInputs,
+        mode: str,
+        owner_action: str,
+        receipt_path: Path | None = None,
+        receipt_sha256: str | None = None,
+        claim_path: Path | None = None,
+        claim_sha256: str | None = None,
+        claim_nonce: str | None = None,
+        runner: RunFn = _subprocess_runner,
+    ) -> None:
+        self._inputs = inputs
+        self._mode = mode
+        if owner_action not in LIVE_LEASE_OWNER_OUTCOMES:
+            raise NginxCoordinatorError(
+                "live lease owner action is not allowlisted"
+            )
+        self._owner_action = owner_action
+        self._receipt_path = receipt_path
+        self._receipt_sha256 = receipt_sha256
+        self._claim_path = claim_path
+        self._claim_sha256 = claim_sha256
+        self._claim_nonce = claim_nonce
+        self._runner = runner
+        self._lock = _CoordinatorLock(inputs.coordinator_root)
+        self._lease: CoordinatorLiveLease | None = None
+
+    def _enter_new(
+        self,
+        *,
+        entries: Sequence[
+            tuple[dict[str, Any], str, dict[str, Any]]
+        ],
+        unresolved: Sequence[
+            tuple[dict[str, Any], str, dict[str, Any]]
+        ],
+    ) -> CoordinatorLiveLease:
+        if unresolved:
+            raise NginxCoordinatorError(
+                "an unresolved live lease requires explicit resume"
+            )
+        if self._receipt_path is None or self._receipt_sha256 is None:
+            raise NginxCoordinatorError(
+                "legacy-frozen receipt binding is required"
+            )
+        journal = _load_journal(self._inputs)
+        receipt, digest = _validate_current_receipt(
+            self._inputs,
+            journal,
+            receipt_path=self._receipt_path,
+            receipt_sha256=self._receipt_sha256,
+            state="legacy-frozen",
+        )
+        claim, path, claim_sha256 = _create_live_lease_claim(
+            self._inputs,
+            owner_action=self._owner_action,
+            journal=journal,
+            receipt_path=self._receipt_path,
+            receipt=receipt,
+            receipt_sha256=digest,
+            entries=entries,
+        )
+        return CoordinatorLiveLease(
+            inputs=self._inputs,
+            lock=self._lock,
+            claim=claim,
+            claim_path=path,
+            claim_sha256=claim_sha256,
+            adopted_after_crash=False,
+        )
+
+    def _enter_resume(
+        self,
+        *,
+        unresolved: Sequence[
+            tuple[dict[str, Any], str, dict[str, Any]]
+        ],
+    ) -> CoordinatorLiveLease:
+        if (
+            self._claim_path is None
+            or self._claim_sha256 is None
+            or self._claim_nonce is None
+            or len(unresolved) != 1
+        ):
+            raise NginxCoordinatorError(
+                "resume requires the exact unresolved claim"
+            )
+        claim, digest, _ = unresolved[0]
+        if (
+            digest != self._claim_sha256
+            or self._claim_path
+            != _live_lease_paths(self._inputs)[1] / f"{digest}.json"
+            or claim["nonce"] != self._claim_nonce
+            or claim["owner_action"] != self._owner_action
+        ):
+            raise NginxCoordinatorError(
+                "resume claim digest or nonce differs"
+            )
+        journal = _load_journal(self._inputs)
+        _lease_phase(
+            self._inputs,
+            journal,
+            claim=claim,
+            claim_sha256=digest,
+        )
+        return CoordinatorLiveLease(
+            inputs=self._inputs,
+            lock=self._lock,
+            claim=claim,
+            claim_path=self._claim_path,
+            claim_sha256=digest,
+            adopted_after_crash=True,
+        )
+
+    def _enter_rollback(
+        self,
+        *,
+        entries: Sequence[
+            tuple[dict[str, Any], str, dict[str, Any]]
+        ],
+        unresolved: Sequence[
+            tuple[dict[str, Any], str, dict[str, Any]]
+        ],
+    ) -> CoordinatorLiveLease:
+        if unresolved:
+            raise NginxCoordinatorError(
+                "an unresolved live lease requires explicit resume"
+            )
+        if self._receipt_path is None or self._receipt_sha256 is None:
+            raise NginxCoordinatorError(
+                "shadow-readonly receipt binding is required"
+            )
+        receipt_sha256 = _nonzero_sha256(
+            self._receipt_sha256,
+            label="shadow-readonly receipt SHA-256",
+        )
+        expected_path = _canonical_receipt_path(
+            operation_id=self._inputs.operation_id,
+            state="shadow-readonly",
+            digest=receipt_sha256,
+        )
+        if self._receipt_path != expected_path:
+            raise NginxCoordinatorError(
+                "shadow-readonly receipt path is not canonical"
+            )
+        receipt, observed = load_state_receipt(
+            self._receipt_path,
+            "shadow-readonly",
+            self._inputs.operation_id,
+            self._inputs.release_sha,
+            self._inputs.release_tree_sha,
+            self._inputs.aggregate_sha256,
+        )
+        if observed != receipt_sha256:
+            raise NginxCoordinatorError(
+                "shadow-readonly receipt digest differs"
+            )
+        journal = _load_journal(self._inputs)
+        pending = journal["pending"]
+        completed_before_receipt = False
+        if pending is None:
+            if journal["stable_state"] == "shadow-readonly":
+                _validate_current_receipt(
+                    self._inputs,
+                    journal,
+                    receipt_path=self._receipt_path,
+                    receipt_sha256=receipt_sha256,
+                    state="shadow-readonly",
+                )
+            elif (
+                journal["stable_state"] == "legacy-frozen"
+                and any(
+                    event["kind"]
+                    in {
+                        "rollback-frozen-both",
+                        "rollback-frozen-reconciled",
+                    }
+                    and event["data"].get("source_receipt_sha256")
+                    == receipt_sha256
+                    for event in journal["events"]
+                )
+            ):
+                completed_before_receipt = True
+            else:
+                raise NginxCoordinatorError(
+                    "rollback-freeze source receipt is not current or "
+                    "durably linked to the frozen result"
+                )
+        elif not (
+            isinstance(pending, dict)
+            and journal["stable_state"] == "shadow-readonly"
+            and pending.get("action") == "rollback-freeze"
+            and pending.get("target_state") == "legacy-frozen"
+            and pending.get("from_state") == "shadow-readonly"
+            and pending.get("source_receipt_sha256")
+            == receipt_sha256
+            and pending.get("policy")
+            == "rollback-to-frozen-write-blocked"
+            and pending.get("status") in {"running", "partial-resumable"}
+        ):
+            raise NginxCoordinatorError(
+                "rollback-freeze resume journal differs"
+            )
+        if completed_before_receipt:
+            readbacks, state, digest, external = _verified_readback(
+                self._inputs,
+                journal,
+                runner=self._runner,
+                action="rollback-freeze",
+                target_state="legacy-frozen",
+            )
+            if state != "legacy-frozen":
+                raise NginxCoordinatorError(
+                    "durable rollback-freeze result no longer reads frozen"
+                )
+            _append_event(
+                journal,
+                "rollback-frozen-reconciled",
+                data={
+                    "source_receipt_sha256": receipt_sha256,
+                    "global_generation_sha256": digest,
+                },
+            )
+            _write_journal(
+                self._inputs.journal_path,
+                journal,
+                create=False,
+            )
+            details = {
+                "status": "rollback-frozen",
+                "state": "legacy-frozen",
+                "readbacks": readbacks,
+                "global_generation_sha256": digest,
+                "external_readback": external,
+                "active_configuration_mutated": False,
+                "current_mutated": False,
+                "container_mutated": False,
+                "volume_mutated": False,
+                "data_mutated": False,
+            }
+        else:
+            details = _rollback_to_frozen_action(
+                self._inputs,
+                journal,
+                source_receipt_sha256=receipt_sha256,
+                runner=self._runner,
+            )
+        if details["status"] == "rollback-freeze-partial-resumable":
+            raise NginxCoordinatorRollbackPending(details)
+        final_journal = _load_journal(self._inputs)
+        persisted = _persist_state_receipt(
+            self._inputs,
+            final_journal,
+            action="rollback-freeze",
+            target_state="legacy-frozen",
+            details=details,
+        )
+        if persisted is None:
+            raise NginxCoordinatorError(
+                "rollback-freeze did not produce a frozen R2 receipt"
+            )
+        r2_path, r2_sha256 = persisted
+        r2, _ = _validate_current_receipt(
+            self._inputs,
+            final_journal,
+            receipt_path=r2_path,
+            receipt_sha256=r2_sha256,
+            state="legacy-frozen",
+        )
+        claim, path, claim_sha256 = _create_live_lease_claim(
+            self._inputs,
+            owner_action="restore-legacy-writers",
+            journal=final_journal,
+            receipt_path=r2_path,
+            receipt=r2,
+            receipt_sha256=r2_sha256,
+            entries=entries,
+        )
+        return CoordinatorLiveLease(
+            inputs=self._inputs,
+            lock=self._lock,
+            claim=claim,
+            claim_path=path,
+            claim_sha256=claim_sha256,
+            adopted_after_crash=False,
+            transition_result=details,
+        )
+
+    def __enter__(self) -> CoordinatorLiveLease:
+        if not isinstance(self._inputs, CoordinatorInputs):
+            raise NginxCoordinatorError(
+                "live lease inputs are invalid"
+            )
+        self._lock.__enter__()
+        try:
+            _prepare_live_lease_ledger(self._inputs, create=True)
+            entries, unresolved = _scan_live_lease_ledger(self._inputs)
+            if self._mode == "new":
+                self._lease = self._enter_new(
+                    entries=entries,
+                    unresolved=unresolved,
+                )
+            elif self._mode == "resume":
+                self._lease = self._enter_resume(
+                    unresolved=unresolved,
+                )
+            elif self._mode == "rollback":
+                self._lease = self._enter_rollback(
+                    entries=entries,
+                    unresolved=unresolved,
+                )
+            else:
+                raise NginxCoordinatorError(
+                    "live lease context mode is invalid"
+                )
+            return self._lease
+        except BaseException:
+            self._lock.__exit__(None, None, None)
+            raise
+
+    def __exit__(self, exc_type, exc, traceback) -> bool:  # noqa: ANN001
+        unconsumed = (
+            self._lease is not None and not self._lease.consumed
+        )
+        self._lock.__exit__(exc_type, exc, traceback)
+        if unconsumed and exc_type is None:
+            raise NginxCoordinatorError(
+                "live lease exited unconsumed; explicit resume and "
+                "reconciliation are required"
+            )
+        return False
+
+
+def hold_coordinator_live_lease(
+    *,
+    inputs: CoordinatorInputs,
+    owner_action: str,
+    legacy_frozen_receipt_path: Path,
+    legacy_frozen_receipt_sha256: str,
+) -> _CoordinatorLiveLeaseContext:
+    """Create and hold a new controller-authoritative frozen-state lease."""
+    return _CoordinatorLiveLeaseContext(
+        inputs=inputs,
+        mode="new",
+        owner_action=owner_action,
+        receipt_path=legacy_frozen_receipt_path,
+        receipt_sha256=legacy_frozen_receipt_sha256,
+    )
+
+
+def resume_coordinator_live_lease(
+    *,
+    inputs: CoordinatorInputs,
+    expected_owner_action: str,
+    claim_path: Path,
+    expected_claim_sha256: str,
+    expected_nonce: str,
+) -> _CoordinatorLiveLeaseContext:
+    """Adopt the exact unresolved claim under the same controller flock."""
+    return _CoordinatorLiveLeaseContext(
+        inputs=inputs,
+        mode="resume",
+        owner_action=expected_owner_action,
+        claim_path=claim_path,
+        claim_sha256=expected_claim_sha256,
+        claim_nonce=expected_nonce,
+    )
+
+
+def reconcile_coordinator_live_lease(
+    *,
+    inputs: CoordinatorInputs,
+    expected_owner_action: str,
+    claim_path: Path,
+    expected_claim_sha256: str,
+    expected_nonce: str,
+) -> _CoordinatorLiveLeaseContext:
+    """Explicitly reconcile by adopting only the exact safe resume state."""
+    return resume_coordinator_live_lease(
+        inputs=inputs,
+        expected_owner_action=expected_owner_action,
+        claim_path=claim_path,
+        expected_claim_sha256=expected_claim_sha256,
+        expected_nonce=expected_nonce,
+    )
+
+
+def hold_coordinator_rollback_live_lease(
+    *,
+    inputs: CoordinatorInputs,
+    shadow_readonly_receipt_path: Path,
+    shadow_readonly_receipt_sha256: str,
+    runner: RunFn = _subprocess_runner,
+) -> _CoordinatorLiveLeaseContext:
+    """Rollback readonly to frozen R2 and claim it without releasing flock."""
+    return _CoordinatorLiveLeaseContext(
+        inputs=inputs,
+        mode="rollback",
+        owner_action="restore-legacy-writers",
+        receipt_path=shadow_readonly_receipt_path,
+        receipt_sha256=shadow_readonly_receipt_sha256,
+        runner=runner,
+    )
+
+
 def confirmation_phrase(
     *,
     operation_id: str,
@@ -3573,6 +6134,11 @@ def execute_coordinator(
             raise NginxCoordinatorError(
                 f"{action} requires an exact generation state"
             )
+    elif action == "rollback-freeze":
+        if target_state != "legacy-frozen":
+            raise NginxCoordinatorError(
+                "rollback-freeze target is always legacy-frozen"
+            )
     elif target_state is not None:
         raise NginxCoordinatorError(
             f"{action} does not accept a target state"
@@ -3608,7 +6174,20 @@ def execute_coordinator(
         )
     journal = _prepare_controller_state(inputs)
     with _CoordinatorLock(inputs.coordinator_root):
+        _assert_no_unconsumed_live_lease(inputs)
         journal = _load_journal(inputs)
+        if action in {"rollback-freeze", "restore"}:
+            raise NginxCoordinatorError(
+                f"{action} requires the locked live lease API"
+            )
+        if (
+            isinstance(journal["pending"], dict)
+            and journal["pending"].get("action") == "rollback-freeze"
+        ):
+            raise NginxCoordinatorError(
+                "pending rollback-freeze requires the locked rollback "
+                "live lease API"
+            )
         if action != "install" and journal["installed_roles"] != list(
             ROLE_ORDER
         ):
@@ -3675,8 +6254,6 @@ def execute_coordinator(
                 target_state=str(target_state),
                 runner=runner,
             )
-        elif action == "restore":
-            details = _restore_action(inputs, journal, runner=runner)
         else:
             if journal["pending"] is not None:
                 raise NginxCoordinatorError(

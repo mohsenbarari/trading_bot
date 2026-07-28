@@ -685,6 +685,7 @@ class HostFixture:
             "install",
             "test",
             "activate",
+            "rollback-freeze",
             "restore",
         }:
             confirm = confirmation_phrase(
@@ -1006,6 +1007,103 @@ class NginxHostWorkerTests(unittest.TestCase):
                 "only before shadow-writable",
             ):
                 fixture.call("restore")
+
+    def test_rollback_freeze_is_exact_reverse_and_never_accepts_writable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = HostFixture(Path(temporary))
+            fixture.call("install")
+            for state in ("legacy-frozen", "shadow-readonly"):
+                fixture.call("test", generation=state)
+            fixture.call("activate", generation="legacy-frozen")
+            fixture.call("activate", generation="shadow-readonly")
+            readonly = fixture.active_bytes()
+            with self.assertRaisesRegex(
+                NginxGenerationError,
+                "only from legacy-frozen",
+            ):
+                fixture.call("restore")
+
+            with self.assertRaisesRegex(
+                NginxGenerationError,
+                "exact host action confirmation",
+            ):
+                fixture.call(
+                    "rollback-freeze",
+                    generation="legacy-frozen",
+                    confirm=confirmation_phrase(
+                        action="activate",
+                        operation_id=OPERATION_ID,
+                        role=fixture.role,
+                        generation="legacy-frozen",
+                    ),
+                )
+            result = fixture.call(
+                "rollback-freeze",
+                generation="legacy-frozen",
+            )
+            self.assertEqual(result["action"], "rollback-freeze")
+            self.assertEqual(result["state"], "legacy-frozen")
+            self.assertEqual(result["from_state"], "shadow-readonly")
+            self.assertTrue(result["active_configuration_mutated"])
+            self.assertNotEqual(fixture.active_bytes(), readonly)
+            self.assertTrue(
+                all(
+                    b"return 503;" in payload
+                    for payload in fixture.active_bytes().values()
+                )
+            )
+            self.assertEqual(
+                fixture.call(
+                    "rollback-freeze",
+                    generation="legacy-frozen",
+                )["status"],
+                "already-active",
+            )
+
+            fixture.call("activate", generation="shadow-readonly")
+            fixture.call("test", generation="shadow-writable")
+            fixture.call("activate", generation="shadow-writable")
+            with self.assertRaisesRegex(
+                NginxGenerationError,
+                "only from shadow-readonly",
+            ):
+                fixture.call(
+                    "rollback-freeze",
+                    generation="legacy-frozen",
+                )
+
+    def test_rollback_freeze_reload_failure_restores_readonly_exactly(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = HostFixture(Path(temporary))
+            fixture.call("install")
+            for state in ("legacy-frozen", "shadow-readonly"):
+                fixture.call("test", generation=state)
+            fixture.call("activate", generation="legacy-frozen")
+            fixture.call("activate", generation="shadow-readonly")
+            readonly = fixture.active_bytes()
+            runner = FakeRunner(
+                [
+                    CommandResult(0, b"target syntax ok", b""),
+                    CommandResult(1, b"", b"target reload failed"),
+                    CommandResult(0, b"rollback syntax ok", b""),
+                    CommandResult(0, b"rollback reload ok", b""),
+                ]
+            )
+            with self.assertRaisesRegex(
+                NginxGenerationError,
+                "previous generation was restored",
+            ):
+                fixture.call(
+                    "rollback-freeze",
+                    generation="legacy-frozen",
+                    runner=runner,
+                )
+            self.assertEqual(fixture.active_bytes(), readonly)
+            journal = json.loads(
+                (fixture.operation_root / "journal.json").read_text()
+            )
+            self.assertEqual(journal["active_state"], "shadow-readonly")
+            self.assertIsNone(journal["transaction"])
 
     def test_crash_resume_rolls_partial_transaction_back_before_readback(self):
         with tempfile.TemporaryDirectory() as temporary:

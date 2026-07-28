@@ -42,7 +42,7 @@ from scripts.wa_ir_production_operation import (
 
 
 BINDING_SCHEMA = "production-shadow-source-snapshot-binding-v1"
-FREEZE_SCHEMA = "production-shadow-source-freeze-evidence-v1"
+FREEZE_SCHEMA = "production-shadow-source-freeze-evidence-v2"
 MANIFEST_SCHEMA = "production-shadow-source-snapshot-v1"
 DOCKER = "/usr/bin/docker"
 TAR = "/usr/bin/tar"
@@ -153,6 +153,7 @@ FREEZE_FIELDS = frozenset(
         "production_vhosts",
         "source_container_ids",
         "freeze_generation_sha256",
+        "live_lease_claim_sha256",
         "freeze_active",
         "write_capable_route_count",
         "legacy_writer_process_count",
@@ -581,6 +582,7 @@ def load_freeze_evidence(
     binding: SnapshotBinding,
     *,
     source_container_ids: Mapping[str, str] | None = None,
+    live_lease_claim_sha256: str | None = None,
 ) -> tuple[dict[str, Any], str]:
     document, digest = _secure_canonical_json(
         path,
@@ -614,6 +616,21 @@ def load_freeze_evidence(
         document["freeze_generation_sha256"],
         label="freeze generation hash",
     )
+    observed_live_lease_claim_sha256 = _nonzero_sha256(
+        document["live_lease_claim_sha256"],
+        label="live lease claim hash",
+    )
+    if (
+        live_lease_claim_sha256 is not None
+        and observed_live_lease_claim_sha256
+        != _nonzero_sha256(
+            live_lease_claim_sha256,
+            label="expected live lease claim hash",
+        )
+    ):
+        raise SourceSnapshotError(
+            "source freeze evidence live lease claim differs"
+        )
     ids = document["source_container_ids"]
     if (
         not isinstance(ids, dict)
@@ -3321,12 +3338,23 @@ def execute(
     output_root: Path,
     freeze_path: Path | None,
     freeze_sha256: str | None,
+    freeze_verify: Callable[[], Mapping[str, int]] | None = None,
 ) -> dict[str, Any]:
     paths = output_paths(output_root, binding)
     _secure_directory(output_root, label="snapshot output root")
     if any(_path_overlaps(output_root, path) for path in FORBIDDEN_OUTPUT_ROOTS):
         raise SourceSnapshotError(
             "snapshot output overlaps a source, current, or Docker data root"
+        )
+    if binding.mode == "frozen-final":
+        if freeze_verify is None:
+            raise SourceSnapshotError(
+                "frozen-final snapshot requires a live freeze verifier"
+            )
+        freeze_verify()
+    elif freeze_verify is not None:
+        raise SourceSnapshotError(
+            "live freeze verifier is valid only for frozen-final mode"
         )
     if paths.final.exists() and not paths.final.is_symlink():
         cleanup_exact_scratch(binding)
@@ -3335,6 +3363,8 @@ def execute(
             binding,
             freeze_sha256=freeze_sha256,
         )
+        if freeze_verify is not None:
+            freeze_verify()
         return {
             "schema": MANIFEST_SCHEMA,
             "status": "resume-verified",
@@ -3406,6 +3436,8 @@ def execute(
             raise SourceSnapshotError(
                 "source Docker identity changed during snapshot"
             )
+        if freeze_verify is not None:
+            freeze_verify()
         manifest = _manifest_document(
             binding,
             inventory=inventory_before,
@@ -3421,6 +3453,8 @@ def execute(
             paths.staging / MANIFEST_FILE,
             _canonical_json(manifest),
         )
+        if freeze_verify is not None:
+            freeze_verify()
         _publish_staging(paths)
         verified = verify_completed_output(
             paths,
@@ -3467,24 +3501,41 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--binding", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--freeze-evidence", type=Path)
+    parser.add_argument("--live-lease-claim", type=Path)
+    parser.add_argument("--live-lease-claim-sha256")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")
     args = parser.parse_args(argv)
     try:
         binding = load_binding(args.binding)
         freeze_sha256: str | None = None
+        live_lease_claim_sha256: str | None = None
         if binding.mode == "frozen-final":
-            if args.freeze_evidence is None:
+            if (
+                args.freeze_evidence is None
+                or args.live_lease_claim is None
+                or args.live_lease_claim_sha256 is None
+            ):
                 raise SourceSnapshotError(
-                    "frozen-final mode requires --freeze-evidence"
+                    "frozen-final mode requires freeze evidence and "
+                    "live lease claim material"
                 )
-            _freeze, freeze_sha256 = load_freeze_evidence(
+            freeze, freeze_sha256 = load_freeze_evidence(
                 args.freeze_evidence,
                 binding,
+                live_lease_claim_sha256=args.live_lease_claim_sha256,
             )
-        elif args.freeze_evidence is not None:
+            live_lease_claim_sha256 = freeze[
+                "live_lease_claim_sha256"
+            ]
+        elif (
+            args.freeze_evidence is not None
+            or args.live_lease_claim is not None
+            or args.live_lease_claim_sha256 is not None
+        ):
             raise SourceSnapshotError(
-                "freeze evidence is valid only for frozen-final mode"
+                "freeze and live lease evidence are valid only for "
+                "frozen-final mode"
             )
         if not args.apply:
             if args.confirm is not None:
@@ -3507,12 +3558,38 @@ def main(argv: list[str] | None = None) -> int:
                     "source snapshot apply must run as root"
                 )
             with operation_lock(binding):
-                result = execute(
-                    binding,
-                    output_root=args.output_root,
-                    freeze_path=args.freeze_evidence,
-                    freeze_sha256=freeze_sha256,
-                )
+                if binding.mode == "frozen-final":
+                    from scripts import (  # noqa: PLC0415
+                        production_shadow_legacy_writer_freeze as FREEZE,
+                    )
+
+                    try:
+                        with FREEZE.hold_verified_freeze(
+                            binding,
+                            freeze_path=args.freeze_evidence,
+                            live_lease_claim=args.live_lease_claim,
+                            live_lease_claim_sha256=(
+                                live_lease_claim_sha256
+                            ),
+                        ) as freeze_verify:
+                            result = execute(
+                                binding,
+                                output_root=args.output_root,
+                                freeze_path=args.freeze_evidence,
+                                freeze_sha256=freeze_sha256,
+                                freeze_verify=freeze_verify,
+                            )
+                    except FREEZE.LegacyWriterFreezeError as exc:
+                        raise SourceSnapshotError(
+                            "live frozen-final authorization failed"
+                        ) from exc
+                else:
+                    result = execute(
+                        binding,
+                        output_root=args.output_root,
+                        freeze_path=args.freeze_evidence,
+                        freeze_sha256=freeze_sha256,
+                    )
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0
     except SourceSnapshotError as exc:
