@@ -590,6 +590,17 @@ class SnapshotTransportTests(unittest.TestCase):
             snapshot.utc_now = old_utc_now
         self.assertFalse(any(key.endswith("/manifest.json.age") for key in self.client.objects))
 
+    def test_publish_rechecks_rpo_at_the_manifest_conditional_put_boundary(self) -> None:
+        old_utc_now = snapshot.utc_now
+        times = iter((NOW, NOW, NOW, NOW + dt.timedelta(seconds=30, microseconds=1)))
+        snapshot.utc_now = lambda: next(times)
+        try:
+            with self.assertRaisesRegex(snapshot.SnapshotTransportError, "at manifest PUT"):
+                self.publish(now=None)
+        finally:
+            snapshot.utc_now = old_utc_now
+        self.assertFalse(any(key.endswith("/manifest.json.age") for key in self.client.objects))
+
     def test_consume_rechecks_rpo_immediately_before_ready_rename(self) -> None:
         self.publish()
         old_utc_now = snapshot.utc_now

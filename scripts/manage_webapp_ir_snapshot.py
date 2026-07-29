@@ -862,10 +862,16 @@ def upload_immutable_object_in_workspace(
     key: str,
     file_path: Path,
     workspace: Path,
+    before_put: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     assert_object_absent(client, bucket=bucket, key=key)
     ciphertext_sha256, ciphertext_bytes = sha256_file(file_path)
     with file_path.open("rb") as handle:
+        # The manifest is the only activation/commit marker.  Its caller can
+        # bind a final freshness guard to the exact conditional PUT boundary,
+        # after the preliminary absence/hash work above has completed.
+        if before_put is not None:
+            before_put()
         try:
             response = client.put_object(
                 Bucket=bucket,
@@ -1301,12 +1307,25 @@ def publish_snapshot(
             maximum_snapshot_age_seconds=config.maximum_snapshot_age_seconds,
             error_message="source snapshot is outside the configured freshness bound at manifest upload",
         )
+
+        def assert_manifest_freshness_at_put() -> None:
+            manifest_put_time = now or utc_now()
+            if source_capture_time > manifest_put_time:
+                raise SnapshotTransportError("source_capture_completed_at is after the manifest PUT time")
+            assert_snapshot_freshness(
+                checked_at=manifest_put_time,
+                source_db_snapshot_started_at=source_db_snapshot_time,
+                maximum_snapshot_age_seconds=config.maximum_snapshot_age_seconds,
+                error_message="source snapshot is outside the configured freshness bound at manifest PUT",
+            )
+
         manifest_remote = upload_immutable_object_in_workspace(
             client,
             bucket=config.bucket,
             key=base + "/manifest.json.age",
             file_path=manifest_ciphertext,
             workspace=temporary,
+            before_put=assert_manifest_freshness_at_put,
         )
     result: dict[str, Any] = {
         "schema": "gold-trade-snapshot-publish-receipt-v1",
