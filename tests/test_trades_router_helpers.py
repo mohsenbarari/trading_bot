@@ -814,11 +814,18 @@ class TradesRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         logger.error.assert_called_once()
 
     async def test_queue_owner_short_circuits_all_legacy_channel_button_helpers(self):
-        runtime = SimpleNamespace(mode=TelegramDeliveryRuntimeMode.QUEUE_V1)
+        runtime = SimpleNamespace(
+            mode=TelegramDeliveryRuntimeMode.QUEUE_V1,
+            legacy_workers_enabled=False,
+            queue_worker_enabled=True,
+        )
         offer = SimpleNamespace(channel_message_id=123)
         with patch(
             "api.routers.trades.configured_telegram_delivery_runtime",
             return_value=runtime,
+        ), patch(
+            "api.routers.trades.configured_telegram_delivery_producer_mode",
+            return_value=TelegramDeliveryRuntimeMode.QUEUE_V1,
         ), patch(
             "core.telegram_gateway.httpx.AsyncClient",
         ) as client_ctor, patch(
