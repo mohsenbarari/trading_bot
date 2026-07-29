@@ -436,6 +436,62 @@ class RuntimeClosureBuilderTests(BuilderFixture):
         self.assertEqual(result, 1)
         self.assertIn("unavailable pending held-FD exact-release bootstrap", stderr.getvalue())
 
+    def test_held_preparation_reproves_without_path_reopen_or_output(self) -> None:
+        self.write_held_plan("f" * 64)
+        capability = self.held_capability()
+        with (
+            mock.patch.object(MODULE.Path, "resolve", side_effect=AssertionError("path resolution is forbidden")),
+            mock.patch.object(MODULE, "_read_absolute_regular", side_effect=AssertionError("path receipt read")),
+            mock.patch.object(MODULE, "_read_wheels", side_effect=AssertionError("path wheel read")),
+            mock.patch.object(MODULE, "_verify_exact_release", side_effect=AssertionError("path Git verification")),
+            mock.patch.object(MODULE, "_write_private", side_effect=AssertionError("runtime output write")),
+            mock.patch.object(VERIFY, "_open_root", side_effect=AssertionError("release path reopen")),
+            mock.patch.object(VERIFY, "attest_runtime_closure", side_effect=AssertionError("path attestation")),
+        ):
+            prepared = MODULE.prepare_held_runtime_closure(
+                held_bootstrap_capability=capability,
+            )
+
+        self.assertIsInstance(prepared, MODULE.HeldPreparedRuntimeClosure)
+        self.assertEqual(prepared.campaign_id, self.campaign_id)
+        self.assertEqual(prepared.release_sha, self.release_sha)
+        self.assertEqual(prepared.release_tree_sha, self.release_tree_sha)
+        self.assertEqual(prepared.held_plan_sha256, capability.binding.held_plan_sha256)
+        self.assertEqual(
+            prepared.materialization_state,
+            "blocked-pending-descriptor-native-runtime-attestation",
+        )
+        self.assertEqual(set(prepared.project_sources), VERIFY.CONTROL_SOURCE_PATHS)
+        self.assertFalse(hasattr(prepared, "release_root"))
+        self.assertFalse(hasattr(prepared, "descriptor"))
+        self.assertFalse(hasattr(prepared, "wheels"))
+        self.assertFalse(hasattr(prepared, "required_confirmation"))
+        self.assertFalse(self.output.exists())
+
+    def test_held_preparation_is_non_materializable_before_any_output_or_lease(self) -> None:
+        self.write_held_plan("f" * 64)
+        capability = self.held_capability()
+        prepared = MODULE.prepare_held_runtime_closure(
+            held_bootstrap_capability=capability,
+        )
+
+        with mock.patch.object(
+            MODULE,
+            "_claim_materialization_lease",
+            side_effect=AssertionError("materialization lease must not be consumed"),
+        ), self.assertRaisesRegex(
+            MODULE.RuntimeClosureBuildError,
+            "non-materializable pending descriptor-native runtime attestation",
+        ):
+            MODULE.build_runtime_closure(
+                prepared,
+                destination=self.output,
+                confirm="anything",
+                expected_uid=self.uid,
+                held_bootstrap_capability=capability,
+            )
+        self.assertFalse(self.output.exists())
+
     def test_builds_exact_closure_from_independently_digest_bound_input(self) -> None:
         prepared = self.prepare()
         capability = self.held_capability()

@@ -440,6 +440,74 @@ class ExactGitBootstrapTests(ExactGitBootstrapFixture):
                 held_plan_sha256=binding.held_plan_sha256,
             )
 
+    def test_preparation_lease_returns_one_reproved_canonical_input_set(self) -> None:
+        capability = MODULE.activate_verified_held_bootstrap(self.verified_inputs(), expected_uid=self.uid)
+        self.addCleanup(capability.close)
+        binding = capability.binding
+
+        lease = capability.consume_for(
+            operation="prepare-runtime-closure",
+            campaign_id=binding.campaign_id,
+            release_sha=binding.release_sha,
+            release_tree_sha=binding.release_tree_sha,
+            held_plan_sha256=binding.held_plan_sha256,
+        )
+        observed = lease.take_reproved_preparation_inputs()
+
+        self.assertEqual(observed.plan.campaign_id, binding.campaign_id)
+        self.assertEqual(observed.plan.release_sha, binding.release_sha)
+        self.assertEqual(observed.plan.release_tree_sha, binding.release_tree_sha)
+        self.assertEqual(observed.plan.sha256, binding.held_plan_sha256)
+        self.assertEqual(observed.source_graph_sha256, binding.source_graph_sha256)
+        self.assertTrue(MODULE._same_held_object(observed.release_identity, capability._release_identity))  # noqa: SLF001
+        self.assertTrue(MODULE._same_held_object(observed.plan_identity, capability._plan_identity))  # noqa: SLF001
+        self.assertTrue(MODULE._same_held_object(observed.bootstrap_identity, capability._bootstrap_identity))  # noqa: SLF001
+        with self.assertRaisesRegex(MODULE.SourceSetRuntimeBootstrapError, "preparation inputs are unavailable"):
+            lease.take_reproved_preparation_inputs()
+
+    def test_preparation_lease_rejects_replaced_held_plan(self) -> None:
+        capability = MODULE.activate_verified_held_bootstrap(self.verified_inputs(), expected_uid=self.uid)
+        self.addCleanup(capability.close)
+        binding = capability.binding
+        replacement = self.root / "replacement-plan.json"
+        replacement.write_bytes(self.plan_path.read_bytes())
+        replacement.chmod(0o600)
+        os.replace(replacement, self.plan_path)
+
+        with self.assertRaisesRegex(
+            MODULE.SourceSetRuntimeBootstrapError,
+            "root-controlled regular file|descriptor identity changed",
+        ):
+            capability.consume_for(
+                operation="prepare-runtime-closure",
+                campaign_id=binding.campaign_id,
+                release_sha=binding.release_sha,
+                release_tree_sha=binding.release_tree_sha,
+                held_plan_sha256=binding.held_plan_sha256,
+            )
+
+    def test_preparation_lease_rejects_replaced_release_source(self) -> None:
+        capability = MODULE.activate_verified_held_bootstrap(self.verified_inputs(), expected_uid=self.uid)
+        self.addCleanup(capability.close)
+        binding = capability.binding
+        target = self.release / MODULE.BUILDER_SOURCE
+        replacement = self.root / "replacement-builder.py"
+        replacement.write_bytes(b"VALUE = 'replacement'\n")
+        replacement.chmod(0o600)
+        os.replace(replacement, target)
+
+        with self.assertRaisesRegex(
+            MODULE.SourceSetRuntimeBootstrapError,
+            "descriptor identity changed|exact detached clean",
+        ):
+            capability.consume_for(
+                operation="prepare-runtime-closure",
+                campaign_id=binding.campaign_id,
+                release_sha=binding.release_sha,
+                release_tree_sha=binding.release_tree_sha,
+                held_plan_sha256=binding.held_plan_sha256,
+            )
+
     def test_capability_rejects_replaced_plan_and_wrong_release_descriptor(self) -> None:
         capability = MODULE.activate_verified_held_bootstrap(self.verified_inputs(), expected_uid=self.uid)
         self.addCleanup(capability.close)

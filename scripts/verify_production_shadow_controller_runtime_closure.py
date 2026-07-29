@@ -1164,6 +1164,115 @@ def _claim_held_bootstrap_capability(
     return binding
 
 
+def _claim_held_preparation_lease(capability: Any) -> Any:
+    """Consume exactly one descriptor-native preparation lease.
+
+    This intentionally derives the expected binding only from the exact
+    registered held-FD capability.  It accepts no release root, held-plan
+    path, or caller-selected identity; ``consume_for`` performs the fresh
+    descriptor/Git/blob proof inside the trusted bootstrap.
+    """
+
+    capability_type = _REGISTERED_HELD_BOOTSTRAP_CAPABILITY_TYPE
+    if capability_type is None:
+        raise RuntimeClosureError("runtime closure held-FD bootstrap types are not registered")
+    if type(capability) is not capability_type:
+        raise RuntimeClosureError("runtime closure held-FD bootstrap capability type differs")
+    try:
+        binding = capability.binding
+        campaign_id = _require_campaign_id(
+            getattr(binding, "campaign_id", None),
+            label="held preparation campaign",
+        )
+        release_sha = _require_sha40(
+            getattr(binding, "release_sha", None),
+            label="held preparation release commit",
+        )
+        release_tree_sha = _require_sha40(
+            getattr(binding, "release_tree_sha", None),
+            label="held preparation release tree",
+        )
+        held_plan_sha256 = _require_sha256(
+            getattr(binding, "held_plan_sha256", None),
+            label="held preparation held plan",
+        )
+    except (AttributeError, RuntimeClosureError) as exc:
+        raise RuntimeClosureError("runtime closure held preparation binding is invalid") from exc
+    return _claim_held_bootstrap_capability(
+        capability,
+        operation="prepare-runtime-closure",
+        campaign_id=campaign_id,
+        release_sha=release_sha,
+        release_tree_sha=release_tree_sha,
+        held_plan_sha256=held_plan_sha256,
+        release_root_descriptor=None,
+    )
+
+
+def _validate_descriptor_native_preparation(
+    *,
+    campaign_id: Any,
+    release_sha: Any,
+    release_tree_sha: Any,
+    held_plan_sha256: Any,
+    source_policy_sha256: Any,
+    wheelhouse_manifest_sha256: Any,
+    wheel_input_receipt_sha256: Any,
+    source_graph_sha256: Any,
+    required_blobs: Any,
+    reachable_blobs: Any,
+) -> Mapping[str, str]:
+    """Validate a no-path preparation binding from a fresh held-FD proof.
+
+    This has no filesystem or output side effects.  The bootstrap has already
+    proven the release and held plan by descriptor; this verifier merely keeps
+    the pre-runtime map exact before the builder creates its non-materializable
+    preparation record.
+    """
+
+    _require_campaign_id(campaign_id, label="held preparation campaign")
+    _require_sha40(release_sha, label="held preparation release commit")
+    _require_sha40(release_tree_sha, label="held preparation release tree")
+    _require_sha256(held_plan_sha256, label="held preparation held plan")
+    policy_sha256 = _require_sha256(
+        source_policy_sha256,
+        label="held preparation source policy",
+    )
+    wheelhouse_sha256 = _require_sha256(
+        wheelhouse_manifest_sha256,
+        label="held preparation wheelhouse manifest",
+    )
+    _require_sha256(
+        wheel_input_receipt_sha256,
+        label="held preparation wheel input receipt",
+    )
+    _require_sha256(source_graph_sha256, label="held preparation source graph")
+    if not isinstance(required_blobs, Mapping) or set(required_blobs) != HELD_RUNTIME_STATIC_BLOBS:
+        raise RuntimeClosureError("held preparation pre-runtime blob map differs")
+    normalized = {
+        path: _require_sha256(digest, label="held preparation blob")
+        for path, digest in required_blobs.items()
+        if isinstance(path, str)
+    }
+    if set(normalized) != HELD_RUNTIME_STATIC_BLOBS:
+        raise RuntimeClosureError("held preparation pre-runtime blob map differs")
+    if (
+        normalized.get(SOURCE_POLICY_RELATIVE) != policy_sha256
+        or normalized.get(WHEELHOUSE_MANIFEST_RELATIVE) != wheelhouse_sha256
+    ):
+        raise RuntimeClosureError("held preparation release binding differs")
+    expected_paths = tuple(sorted(normalized))
+    if not isinstance(reachable_blobs, tuple) or reachable_blobs != expected_paths:
+        raise RuntimeClosureError("held preparation source graph differs")
+    project_sources = {
+        path: normalized[path]
+        for path in sorted(CONTROL_SOURCE_PATHS)
+    }
+    if set(project_sources) != CONTROL_SOURCE_PATHS:
+        raise RuntimeClosureError("held preparation control source map differs")
+    return MappingProxyType(project_sources)
+
+
 def attest_held_runtime_closure(
     *,
     runtime_root_descriptor: int,

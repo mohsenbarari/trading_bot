@@ -37,6 +37,7 @@ import shutil
 import stat
 import subprocess
 import sys
+from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 import zipfile
 
@@ -147,6 +148,40 @@ class PreparedRuntimeClosure:
     project_sources: Mapping[str, str]
     wheels: tuple[ValidatedWheel, ...]
     required_confirmation: str
+
+
+@dataclass(frozen=True)
+class HeldPreparedRuntimeClosure:
+    """Descriptor-native proof record that cannot create a runtime output.
+
+    It deliberately carries no release path, descriptor, wheel archive,
+    destination, or confirmation.  A later separately reviewed bridge must
+    perform descriptor-native runtime attestation before this binding can ever
+    become materializable.
+    """
+
+    campaign_id: str
+    release_sha: str
+    release_tree_sha: str
+    source_policy_sha256: str
+    wheelhouse_manifest_sha256: str
+    held_plan_sha256: str
+    wheel_input_receipt_sha256: str
+    source_graph_sha256: str
+    project_sources: Mapping[str, str]
+
+    @property
+    def materialization_state(self) -> str:
+        return "blocked-pending-descriptor-native-runtime-attestation"
+
+    def __reduce__(self) -> object:
+        raise TypeError("held controller runtime preparation cannot be serialized")
+
+    def __copy__(self) -> object:
+        raise TypeError("held controller runtime preparation cannot be copied")
+
+    def __deepcopy__(self, memo: object) -> object:
+        raise TypeError("held controller runtime preparation cannot be copied")
 
 
 @dataclass(frozen=True)
@@ -667,6 +702,87 @@ def _confirmation(campaign_id: str, release_sha: str, held_plan_sha256: str) -> 
     return f"BUILD-CONTROLLER-RUNTIME-CLOSURE:{campaign_id}:{release_sha}:{held_plan_sha256}"
 
 
+def _take_reproved_preparation_inputs(lease: object) -> object:
+    take = getattr(lease, "take_reproved_preparation_inputs", None)
+    if not callable(take):
+        raise RuntimeClosureBuildError(
+            "controller runtime held preparation requires a descriptor-native preparation lease"
+        )
+    try:
+        return take()
+    except Exception as exc:
+        raise RuntimeClosureBuildError("controller runtime held preparation inputs were rejected") from exc
+
+
+def prepare_held_runtime_closure(
+    *,
+    held_bootstrap_capability: object,
+) -> HeldPreparedRuntimeClosure:
+    """Create one no-output preparation from freshly re-proved held inputs.
+
+    This route is intentionally separate from ``prepare_runtime_closure``.
+    It accepts no release, plan, wheelhouse, receipt, or destination path.  The
+    registered bootstrap consumes a dedicated lease and re-proves its retained
+    release/plan/bootstrap descriptors before handing the builder the exact
+    pre-runtime binding.  The result is deliberately non-materializable until
+    a future descriptor-native runtime attestation bridge is reviewed.
+    """
+
+    try:
+        lease = VERIFY._claim_held_preparation_lease(  # noqa: SLF001
+            held_bootstrap_capability,
+        )
+    except VERIFY.RuntimeClosureError as exc:
+        raise RuntimeClosureBuildError(str(exc)) from exc
+    inputs = _take_reproved_preparation_inputs(lease)
+    try:
+        plan = inputs.plan
+        identities = (
+            inputs.release_identity,
+            inputs.plan_identity,
+            inputs.bootstrap_identity,
+        )
+        if any(type(identity.descriptor) is not int or identity.descriptor < 3 for identity in identities):
+            raise RuntimeClosureBuildError("controller runtime held preparation input identity is invalid")
+        if (
+            plan.campaign_id != getattr(lease, "campaign_id", None)
+            or plan.release_sha != getattr(lease, "release_sha", None)
+            or plan.release_tree_sha != getattr(lease, "release_tree_sha", None)
+            or plan.sha256 != getattr(lease, "held_plan_sha256", None)
+            or plan.source_policy_sha256 != getattr(lease, "source_policy_sha256", None)
+            or plan.wheelhouse_manifest_sha256 != getattr(lease, "wheelhouse_manifest_sha256", None)
+            or plan.wheel_input_receipt_sha256 != getattr(lease, "wheel_input_receipt_sha256", None)
+            or inputs.source_graph_sha256 != getattr(lease, "source_graph_sha256", None)
+            or dict(plan.required_blobs) != dict(getattr(lease, "required_blobs", {}))
+        ):
+            raise RuntimeClosureBuildError("controller runtime held preparation binding differs")
+        project_sources = VERIFY._validate_descriptor_native_preparation(  # noqa: SLF001
+            campaign_id=plan.campaign_id,
+            release_sha=plan.release_sha,
+            release_tree_sha=plan.release_tree_sha,
+            held_plan_sha256=plan.sha256,
+            source_policy_sha256=plan.source_policy_sha256,
+            wheelhouse_manifest_sha256=plan.wheelhouse_manifest_sha256,
+            wheel_input_receipt_sha256=plan.wheel_input_receipt_sha256,
+            source_graph_sha256=inputs.source_graph_sha256,
+            required_blobs=plan.required_blobs,
+            reachable_blobs=inputs.reachable_blobs,
+        )
+    except (AttributeError, TypeError, VERIFY.RuntimeClosureError) as exc:
+        raise RuntimeClosureBuildError("controller runtime held preparation inputs differ") from exc
+    return HeldPreparedRuntimeClosure(
+        campaign_id=plan.campaign_id,
+        release_sha=plan.release_sha,
+        release_tree_sha=plan.release_tree_sha,
+        source_policy_sha256=plan.source_policy_sha256,
+        wheelhouse_manifest_sha256=plan.wheelhouse_manifest_sha256,
+        held_plan_sha256=plan.sha256,
+        wheel_input_receipt_sha256=plan.wheel_input_receipt_sha256,
+        source_graph_sha256=inputs.source_graph_sha256,
+        project_sources=MappingProxyType(dict(project_sources)),
+    )
+
+
 def prepare_runtime_closure(
     *,
     release_root: Path,
@@ -940,10 +1056,21 @@ def _assert_materialization_lease(
         raise RuntimeClosureBuildError("controller runtime project sources differ from held-FD plan")
 
 
+def _require_materializable_prepared_closure(prepared: object) -> PreparedRuntimeClosure:
+    if type(prepared) is HeldPreparedRuntimeClosure:
+        raise RuntimeClosureBuildError(
+            "controller runtime held preparation is non-materializable pending descriptor-native runtime attestation"
+        )
+    if type(prepared) is not PreparedRuntimeClosure:
+        raise RuntimeClosureBuildError("controller runtime materialization requires an exact prepared closure")
+    return prepared
+
+
 def _claim_materialization_lease(
     held_bootstrap_capability: object | None,
-    prepared: PreparedRuntimeClosure,
+    prepared: object,
 ) -> object:
+    prepared = _require_materializable_prepared_closure(prepared)
     try:
         lease = VERIFY._claim_held_bootstrap_capability(  # noqa: SLF001
             held_bootstrap_capability,
@@ -961,13 +1088,14 @@ def _claim_materialization_lease(
 
 
 def _materialize(
-    prepared: PreparedRuntimeClosure,
+    prepared: object,
     *,
     destination: Path,
     expected_uid: int | None,
     held_bootstrap_capability: object | None = None,
     _held_bootstrap_materialization_lease: object | None = None,
 ) -> dict[str, Any]:
+    prepared = _require_materializable_prepared_closure(prepared)
     lease = _held_bootstrap_materialization_lease
     if lease is None:
         lease = _claim_materialization_lease(held_bootstrap_capability, prepared)
@@ -1157,13 +1285,14 @@ def _materialize(
 
 
 def build_runtime_closure(
-    prepared: PreparedRuntimeClosure,
+    prepared: object,
     *,
     destination: Path,
     confirm: str,
     expected_uid: int | None = 0,
     held_bootstrap_capability: object | None = None,
 ) -> dict[str, Any]:
+    prepared = _require_materializable_prepared_closure(prepared)
     if confirm != prepared.required_confirmation:
         raise RuntimeClosureBuildError("controller runtime build requires exact digest-bound confirmation")
     lease = _claim_materialization_lease(held_bootstrap_capability, prepared)

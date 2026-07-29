@@ -1024,7 +1024,14 @@ def _duplicate_descriptor(descriptor: int, *, label: str) -> int:
 class HeldBootstrapLease:
     """One opaque operation lease emitted by a live held-FD capability."""
 
-    __slots__ = ("_binding", "_capability", "_marker", "_operation")
+    __slots__ = (
+        "_binding",
+        "_capability",
+        "_inputs",
+        "_inputs_taken",
+        "_marker",
+        "_operation",
+    )
 
     _MARKER = object()
 
@@ -1033,10 +1040,13 @@ class HeldBootstrapLease:
         binding: HeldBootstrapBinding,
         *,
         capability: "HeldFdBootstrapCapability",
+        inputs: VerifiedHeldBootstrapInputs,
         operation: str,
     ) -> None:
         self._binding = binding
         self._capability = capability
+        self._inputs = inputs
+        self._inputs_taken = False
         self._operation = operation
         self._marker = self._MARKER
 
@@ -1055,6 +1065,10 @@ class HeldBootstrapLease:
     @property
     def held_plan_sha256(self) -> str:
         return self._binding.held_plan_sha256
+
+    @property
+    def source_graph_sha256(self) -> str:
+        return self._binding.source_graph_sha256
 
     @property
     def source_policy_sha256(self) -> str:
@@ -1095,6 +1109,25 @@ class HeldBootstrapLease:
         if self._marker is not self._MARKER or capability is not self._capability:
             raise SourceSetRuntimeBootstrapError("held-FD bootstrap lease capability differs")
 
+    def take_reproved_preparation_inputs(self) -> VerifiedHeldBootstrapInputs:
+        """Return one fresh proof only to the descriptor-native prepare lease.
+
+        The returned descriptors are the capability's retained duplicates, not
+        caller-selected paths.  This is deliberately not a materialization
+        capability: a future separately reviewed descriptor-native attester
+        must establish that boundary before any runtime output can exist.
+        """
+
+        if (
+            self._marker is not self._MARKER
+            or self._operation != "prepare-runtime-closure"
+            or self._inputs_taken
+            or type(self._inputs) is not VerifiedHeldBootstrapInputs
+        ):
+            raise SourceSetRuntimeBootstrapError("held-FD preparation inputs are unavailable")
+        self._inputs_taken = True
+        return self._inputs
+
     def __reduce__(self) -> object:
         raise TypeError("held-FD bootstrap lease cannot be serialized")
 
@@ -1121,7 +1154,13 @@ class HeldFdBootstrapCapability:
     )
 
     _MARKER = object()
-    _OPERATIONS = frozenset({"attest-runtime-closure", "materialize-runtime-closure"})
+    _OPERATIONS = frozenset(
+        {
+            "attest-runtime-closure",
+            "materialize-runtime-closure",
+            "prepare-runtime-closure",
+        }
+    )
 
     def __init__(self, inputs: VerifiedHeldBootstrapInputs, *, expected_uid: int) -> None:
         self._marker = self._MARKER
@@ -1203,6 +1242,12 @@ class HeldFdBootstrapCapability:
         )
         if actual != expected:
             raise SourceSetRuntimeBootstrapError("held-FD bootstrap capability binding changed")
+        if (
+            not _same_held_object(observed.release_identity, self._release_identity)
+            or not _same_held_object(observed.plan_identity, self._plan_identity)
+            or not _same_held_object(observed.bootstrap_identity, self._bootstrap_identity)
+        ):
+            raise SourceSetRuntimeBootstrapError("held-FD bootstrap descriptor identity changed")
         return observed
 
     def consume_for(
@@ -1238,9 +1283,14 @@ class HeldFdBootstrapCapability:
             )
             if not _same_held_object(candidate, self._release_identity):
                 raise SourceSetRuntimeBootstrapError("runtime release descriptor differs from held bootstrap release")
-        self._reverify()
+        observed = self._reverify()
         self._consumed.add(operation)
-        return HeldBootstrapLease(binding, capability=self, operation=operation)
+        return HeldBootstrapLease(
+            binding,
+            capability=self,
+            inputs=observed,
+            operation=operation,
+        )
 
     def close(self) -> None:
         if self._closed:
