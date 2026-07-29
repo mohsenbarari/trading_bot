@@ -114,6 +114,10 @@ jobs:
           MARKET_STAGE14_TEST_REDIS_URL: redis://127.0.0.1:6379/14
           DATABASE_URL: postgresql+asyncpg://market_ci:market_ci@127.0.0.1:5432/postgres
           SYNC_DATABASE_URL: postgresql+psycopg2://market_ci:market_ci@127.0.0.1:5432/postgres
+          POSTGRES_DB: postgres
+          POSTGRES_USER: market_ci
+          POSTGRES_PASSWORD: market_ci
+          REDIS_URL: redis://127.0.0.1:6379/14
           FRONTEND_URL: http://127.0.0.1:4173
           JWT_SECRET_KEY: ci_market_postgres_gate_secret
         run: |
