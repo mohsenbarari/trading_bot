@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import io
 import json
 import hashlib
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from scripts.coordinate_three_site_staging_migration import (
     ACCEPTANCE_CHECKS,
@@ -13,7 +15,13 @@ from scripts.coordinate_three_site_staging_migration import (
     REQUIRED_PHASE,
     ROLE_SERVICES,
     ROLE_TLS,
+    _load_journals,
     build_documents,
+    main,
+    write_barrier_documents,
+)
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
 )
 from scripts.three_site_staging_migration_journal import MigrationJournal, ROLE_PHASES
 
@@ -189,7 +197,7 @@ def _routing(root: Path, *, observed_at: str) -> Path:
 
 
 def _acceptance(root: Path, *, role: str, routing: Path) -> Path:
-    revision = "003" if role == "witness" else "b986c7d8e0f1"
+    revision = "003" if role == "witness" else "c097d8e9f1a2"
     _bind_key, tls_port, tls_name = ROLE_TLS[role]
     observations = {
         "database_identity": {"role": role},
@@ -265,6 +273,42 @@ def _acceptance(root: Path, *, role: str, routing: Path) -> Path:
 
 
 class ThreeSiteStagingMigrationCoordinationTests(unittest.TestCase):
+    def test_apply_writer_and_all_cli_actions_stop_before_evidence_write_or_journal_read(self):
+        with patch(
+            "scripts.coordinate_three_site_staging_migration.write_secure_atomic_bytes"
+        ) as write:
+            with self.assertRaises(LegacyThreeSiteStagingRuntimeRetiredError):
+                write_barrier_documents(
+                    action="private-barrier",
+                    documents={"bot_fi": {"forged": True}},
+                    output_dir=Path("/forged/output"),
+                )
+            stdout = io.StringIO()
+            with patch("sys.stdout", stdout):
+                exit_code = main(
+                    [
+                        "private-barrier",
+                        "--journal",
+                        "bot_fi=/forged/journal.json",
+                        "--output-dir",
+                        "/forged/output",
+                    ]
+                )
+        write.assert_not_called()
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(
+            json.loads(stdout.getvalue())["status"],
+            "blocked_legacy_three_site_staging_runtime_retired",
+        )
+
+    def test_direct_journal_loader_stops_before_locking_or_path_parsing(self):
+        with patch(
+            "scripts.coordinate_three_site_staging_migration.MigrationJournal"
+        ) as journal:
+            with self.assertRaises(LegacyThreeSiteStagingRuntimeRetiredError):
+                _load_journals(["bot_fi=/forged/journal.json"])
+        journal.assert_not_called()
+
     def test_private_barrier_requires_all_cross_role_preconditions(self):
         with tempfile.TemporaryDirectory() as directory:
             journals, states = _journals(Path(directory))

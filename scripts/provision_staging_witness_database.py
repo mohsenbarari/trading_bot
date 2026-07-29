@@ -19,6 +19,12 @@ import psycopg2
 from psycopg2 import sql
 from sqlalchemy.engine import make_url
 
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
+
 
 ROLE_RE = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -134,6 +140,7 @@ def _validate_runtime_grants(cursor, runtime: str) -> None:  # noqa: ANN001
 
 
 def bootstrap_roles() -> dict[str, object]:
+    assert_retired(component="staging-witness-database-provision", operation="bootstrap roles")
     owner_dsn = _sync_dsn("WRITER_WITNESS_BOOTSTRAP_DATABASE_URL")
     migrator = _role("WRITER_WITNESS_MIGRATOR_DB_USER")
     runtime = _role("WRITER_WITNESS_RUNTIME_DB_USER")
@@ -221,6 +228,7 @@ def _apply_schema(cursor) -> str:  # noqa: ANN001
 
 
 def migrate_and_grant() -> dict[str, object]:
+    assert_retired(component="staging-witness-database-provision", operation="migrate and grant")
     migrator_dsn = _sync_dsn("WRITER_WITNESS_MIGRATOR_DATABASE_URL")
     migrator = _role("WRITER_WITNESS_MIGRATOR_DB_USER")
     runtime = _role("WRITER_WITNESS_RUNTIME_DB_USER")
@@ -279,6 +287,11 @@ def migrate_and_grant() -> dict[str, object]:
 
 
 def main() -> int:
+    try:
+        assert_retired(component="staging-witness-database-provision", operation="CLI")
+    except LegacyThreeSiteStagingRuntimeRetiredError:
+        print(json.dumps(blocked_payload(component="staging-witness-database-provision"), sort_keys=True))
+        return 2
     parser = argparse.ArgumentParser()
     parser.add_argument("phase", choices=("bootstrap", "migrate"))
     args = parser.parse_args()

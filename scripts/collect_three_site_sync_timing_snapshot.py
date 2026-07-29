@@ -30,6 +30,11 @@ from core.db import AsyncSessionLocal
 from core.runtime_identity import resolve_runtime_identity
 from core.three_site_full_matrix_campaign import secure_json
 from models.dr_event import DrEvent, DrEventDelivery, DrEventReceipt
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
 from scripts.measure_three_site_host_clock import SCHEMA as CLOCK_SCHEMA
 
 
@@ -93,6 +98,7 @@ def _receipt_hash(row: DrEventReceipt) -> str:
 
 
 async def collect(prefix: str, *, clock: dict[str, Any]) -> dict[str, Any]:
+    assert_retired(component="staging-sync-timing-snapshot", operation="collect database timing snapshot")
     identity = resolve_runtime_identity()
     if (
         set(clock) != {
@@ -225,6 +231,16 @@ async def collect(prefix: str, *, clock: dict[str, Any]) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        assert_retired(component="staging-sync-timing-snapshot", operation="CLI")
+    except LegacyThreeSiteStagingRuntimeRetiredError:
+        print(
+            json.dumps(
+                blocked_payload(component="staging-sync-timing-snapshot"),
+                sort_keys=True,
+            )
+        )
+        return 2
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--correlation-prefix", required=True)
     clock_group = parser.add_mutually_exclusive_group(required=True)

@@ -11,18 +11,26 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+import ctypes
+from dataclasses import dataclass
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
 import secrets
+import select
+import selectors
 import shlex
+import signal
 import stat
 import subprocess
 import sys
-from typing import Any, BinaryIO, Callable, Iterator, Mapping
+import threading
+import time
+from typing import Any, BinaryIO, Callable, Iterator, Mapping, Sequence
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -82,6 +90,12 @@ MAX_AGENT_BYTES = STAGE.MAX_AGENT_BYTES
 MAX_JOURNAL_BYTES = 2 * 1024 * 1024
 MAX_EVIDENCE_BYTES = 4 * 1024 * 1024
 MAX_COMMAND_OUTPUT_BYTES = 8 * 1024 * 1024
+PROCESS_GROUP_TERM_SECONDS = 1.0
+PROCESS_TREE_QUIESCENCE_SECONDS = 0.25
+CONTROLLER_LIVENESS_GRACE_SECONDS = (
+    STAGE.DOCKER_LOAD_RECONCILE_SECONDS + 5.0
+)
+PR_SET_CHILD_SUBREAPER = 36
 ZERO_SHA256 = "0" * 64
 SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -168,6 +182,16 @@ SAFE_ENV = {
 
 class FinlandArtifactOrchestratorError(RuntimeError):
     """Raised when controller inputs or a host result fail closed."""
+
+
+class FinlandArtifactOrchestratorCancellation(
+    FinlandArtifactOrchestratorError
+):
+    """Raised once when controller execution authority is lost."""
+
+
+class BoundedControllerRunnerError(FinlandArtifactOrchestratorError):
+    """Raised when a controller subprocess cannot be bounded."""
 
 
 Runner = Callable[..., subprocess.CompletedProcess[bytes]]
@@ -740,6 +764,8 @@ def ssh_arguments(
         str(WEBAPP_FI_PORT),
         "-i",
         identity,
+        "-F",
+        "/dev/null",
         "-o",
         "BatchMode=yes",
         "-o",
@@ -747,9 +773,19 @@ def ssh_arguments(
         "-o",
         "ExitOnForwardFailure=yes",
         "-o",
+        "ForwardAgent=no",
+        "-o",
+        "ForwardX11=no",
+        "-o",
         "IdentitiesOnly=yes",
         "-o",
         "PermitLocalCommand=no",
+        "-o",
+        "ProxyCommand=none",
+        "-o",
+        "ProxyJump=none",
+        "-o",
+        "ControlMaster=no",
         "-o",
         "RequestTTY=no",
         "-o",
@@ -757,7 +793,11 @@ def ssh_arguments(
         "-o",
         f"UserKnownHostsFile={KNOWN_HOSTS}",
         "-o",
+        "GlobalKnownHostsFile=/dev/null",
+        "-o",
         "LogLevel=ERROR",
+        "-o",
+        "AddressFamily=inet",
         f"{WEBAPP_FI_USER}@{WEBAPP_FI_HOST}",
         _remote_command(remote_arguments),
     ]
@@ -799,18 +839,36 @@ def scp_arguments(
         str(WEBAPP_FI_PORT),
         "-i",
         str(ssh_identity),
+        "-F",
+        "/dev/null",
         "-o",
         "BatchMode=yes",
         "-o",
         "ClearAllForwardings=yes",
         "-o",
+        "ForwardAgent=no",
+        "-o",
+        "ForwardX11=no",
+        "-o",
         "IdentitiesOnly=yes",
+        "-o",
+        "PermitLocalCommand=no",
+        "-o",
+        "ProxyCommand=none",
+        "-o",
+        "ProxyJump=none",
+        "-o",
+        "ControlMaster=no",
         "-o",
         "StrictHostKeyChecking=yes",
         "-o",
         f"UserKnownHostsFile={KNOWN_HOSTS}",
         "-o",
+        "GlobalKnownHostsFile=/dev/null",
+        "-o",
         "LogLevel=ERROR",
+        "-o",
+        "AddressFamily=inet",
         "--",
         str(source),
         f"{WEBAPP_FI_USER}@{WEBAPP_FI_HOST}:{destination}",
@@ -832,6 +890,8 @@ def _bootstrap_install_arguments(
     )
     return [
         PYTHON,
+        "-I",
+        "-B",
         str(partial),
         "--install-bootstrap-request-b64",
         STAGE.encode_request(request),
@@ -850,6 +910,8 @@ def _version_arguments(
     paths = STAGE.canonical_paths(operation_id, release_sha, role)
     return [
         PYTHON,
+        "-I",
+        "-B",
         str(paths["agent"]),
         "--version",
         "--expected-agent-sha256",
@@ -877,6 +939,8 @@ def _stage_arguments(
     )
     return [
         PYTHON,
+        "-I",
+        "-B",
         str(paths["agent"]),
         "--request-b64",
         STAGE.encode_request(request),
@@ -1091,10 +1155,693 @@ def _validate_plan_boundary(plan: Mapping[str, Any]) -> None:
         )
 
 
+def _anonymous_read_pipe_identity(
+    descriptor: int,
+    *,
+    label: str,
+) -> tuple[int, int]:
+    if type(descriptor) is not int or descriptor < 0:
+        raise FinlandArtifactOrchestratorError(
+            f"{label} descriptor is invalid"
+        )
+    try:
+        metadata = os.fstat(descriptor)
+        flags = fcntl.fcntl(descriptor, fcntl.F_GETFL)
+        target = os.readlink(f"/proc/self/fd/{descriptor}")
+    except OSError as exc:
+        raise FinlandArtifactOrchestratorError(
+            f"{label} descriptor is unavailable"
+        ) from exc
+    if (
+        not stat.S_ISFIFO(metadata.st_mode)
+        or flags & os.O_ACCMODE != os.O_RDONLY
+        or target != f"pipe:[{metadata.st_ino}]"
+    ):
+        raise FinlandArtifactOrchestratorError(
+            f"{label} must be an anonymous read-only pipe"
+        )
+    try:
+        entries = tuple(Path("/proc/self/fd").iterdir())
+    except OSError as exc:
+        raise FinlandArtifactOrchestratorError(
+            f"{label} descriptor closure cannot be inspected"
+        ) from exc
+    for entry in entries:
+        if not entry.name.isdecimal() or int(entry.name, 10) == descriptor:
+            continue
+        candidate = int(entry.name, 10)
+        try:
+            observed = os.fstat(candidate)
+            observed_flags = fcntl.fcntl(candidate, fcntl.F_GETFL)
+        except OSError:
+            continue
+        if (
+            (observed.st_dev, observed.st_ino)
+            == (metadata.st_dev, metadata.st_ino)
+            and observed_flags & os.O_ACCMODE in {os.O_WRONLY, os.O_RDWR}
+        ):
+            raise FinlandArtifactOrchestratorError(
+                f"{label} writer end is held by the controller process"
+            )
+    return metadata.st_dev, metadata.st_ino
+
+
+class ExecutionAuthority:
+    """Deliver one cancellation while controller work is active."""
+
+    _WAKE_SIGNAL = signal.SIGUSR1
+    _HANDLED_SIGNALS = (
+        signal.SIGHUP,
+        signal.SIGTERM,
+        signal.SIGINT,
+        _WAKE_SIGNAL,
+    )
+
+    def __init__(self, control_fd: int | None) -> None:
+        if threading.current_thread() is not threading.main_thread():
+            raise FinlandArtifactOrchestratorError(
+                "Finland artifact orchestration must run in the main thread"
+            )
+        self._fd: int | None = None
+        if control_fd is not None:
+            _anonymous_read_pipe_identity(
+                control_fd,
+                label="controller liveness",
+            )
+            try:
+                self._fd = os.dup(control_fd)
+                os.set_inheritable(self._fd, False)
+                os.set_blocking(self._fd, False)
+            except OSError as exc:
+                raise FinlandArtifactOrchestratorError(
+                    "controller liveness pipe cannot be secured"
+                ) from exc
+        self._cancelled = threading.Event()
+        self._exception_delivered = threading.Event()
+        self._stopping = threading.Event()
+        self._reason = "controller execution authority was lost"
+        self._old_handlers: dict[int, Any] = {}
+        self._monitor: threading.Thread | None = None
+
+    def _cancel(self, reason: str, *, wake_main: bool) -> None:
+        if self._cancelled.is_set():
+            return
+        self._reason = reason
+        self._cancelled.set()
+        if wake_main:
+            main_ident = threading.main_thread().ident
+            if main_ident is not None:
+                try:
+                    signal.pthread_kill(main_ident, self._WAKE_SIGNAL)
+                except (OSError, RuntimeError):
+                    pass
+
+    def _sample(self) -> None:
+        if self._fd is None:
+            return
+        ready, _write, _error = select.select([self._fd], [], [], 0)
+        if not ready:
+            return
+        try:
+            payload = os.read(self._fd, 1)
+        except BlockingIOError:
+            return
+        self._cancel(
+            (
+                "controller liveness pipe reached EOF"
+                if payload == b""
+                else "controller liveness pipe carried forbidden data"
+            ),
+            wake_main=False,
+        )
+        self.check()
+
+    def _handle_signal(self, signum: int, _frame: Any) -> None:
+        if signum == self._WAKE_SIGNAL and self._cancelled.is_set():
+            pass
+        else:
+            self._cancel(
+                f"Finland artifact controller received signal {signum}",
+                wake_main=False,
+            )
+        self.check()
+
+    def _monitor_control(self) -> None:
+        assert self._fd is not None
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(self._fd, selectors.EVENT_READ)
+            while not self._stopping.is_set():
+                if not selector.select(0.05):
+                    continue
+                try:
+                    payload = os.read(self._fd, 1)
+                except BlockingIOError:
+                    continue
+                except OSError:
+                    if self._stopping.is_set():
+                        return
+                    payload = b""
+                self._cancel(
+                    (
+                        "controller liveness pipe reached EOF"
+                        if payload == b""
+                        else "controller liveness pipe carried forbidden data"
+                    ),
+                    wake_main=True,
+                )
+                return
+        finally:
+            selector.close()
+
+    def __enter__(self) -> ExecutionAuthority:
+        try:
+            for signum in self._HANDLED_SIGNALS:
+                self._old_handlers[signum] = signal.getsignal(signum)
+                signal.signal(signum, self._handle_signal)
+            self._sample()
+            if self._fd is not None:
+                self._monitor = threading.Thread(
+                    target=self._monitor_control,
+                    name="finland-artifact-controller-liveness",
+                    daemon=True,
+                )
+                self._monitor.start()
+            self.check()
+            return self
+        except BaseException:
+            self._restore()
+            raise
+
+    def check(self) -> None:
+        if (
+            self._cancelled.is_set()
+            and not self._exception_delivered.is_set()
+        ):
+            self._exception_delivered.set()
+            raise FinlandArtifactOrchestratorCancellation(self._reason)
+
+    def _restore(self) -> None:
+        self._stopping.set()
+        if self._monitor is not None:
+            self._monitor.join(timeout=1)
+        if self._fd is not None:
+            try:
+                os.close(self._fd)
+            except OSError:
+                pass
+            self._fd = None
+        for signum, handler in self._old_handlers.items():
+            signal.signal(signum, handler)
+        self._old_handlers.clear()
+
+    def __exit__(self, error_type: Any, _value: Any, _traceback: Any) -> None:
+        deliver_after_restore = (
+            self._cancelled.is_set()
+            and error_type is None
+            and not self._exception_delivered.is_set()
+        )
+        reason = self._reason
+        self._exception_delivered.set()
+        self._restore()
+        if deliver_after_restore:
+            raise FinlandArtifactOrchestratorCancellation(reason)
+
+
+_ACTIVE_EXECUTION_AUTHORITY: ExecutionAuthority | None = None
+
+
+@contextmanager
+def _execution_authority(
+    control_fd: int | None = None,
+) -> Iterator[ExecutionAuthority]:
+    global _ACTIVE_EXECUTION_AUTHORITY
+    if _ACTIVE_EXECUTION_AUTHORITY is not None:
+        if control_fd is not None:
+            raise FinlandArtifactOrchestratorError(
+                "controller execution authority is already active"
+            )
+        yield _ACTIVE_EXECUTION_AUTHORITY
+        return
+    authority = ExecutionAuthority(control_fd)
+    with authority:
+        _ACTIVE_EXECUTION_AUTHORITY = authority
+        try:
+            yield authority
+        finally:
+            _ACTIVE_EXECUTION_AUTHORITY = None
+
+
+def _enable_child_subreaper() -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise BoundedControllerRunnerError(
+            f"controller child subreaper setup failed with errno {error}"
+        )
+
+
+@dataclass(frozen=True)
+class ProcessIdentity:
+    process_id: int
+    parent_id: int
+    process_group: int
+    session_id: int
+    starttime: int
+    state: str
+
+    @property
+    def key(self) -> tuple[int, int]:
+        return self.process_id, self.starttime
+
+
+def _proc_identity(process_id: int) -> tuple[int, int, int, int, str]:
+    try:
+        payload = Path(f"/proc/{process_id}/stat").read_text(
+            encoding="ascii"
+        )
+        fields = payload[payload.rindex(") ") + 2 :].split()
+        if len(fields) < 20:
+            raise ValueError("short process stat")
+        state = fields[0]
+        parent = int(fields[1], 10)
+        group = int(fields[2], 10)
+        session = int(fields[3], 10)
+        starttime = int(fields[19], 10)
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise BoundedControllerRunnerError(
+            "controller subprocess identity is unavailable"
+        ) from exc
+    return parent, group, session, starttime, state
+
+
+def _process_snapshot() -> dict[int, ProcessIdentity]:
+    try:
+        entries = tuple(Path("/proc").iterdir())
+    except OSError as exc:
+        raise BoundedControllerRunnerError(
+            "controller process closure cannot be enumerated"
+        ) from exc
+    observed: dict[int, ProcessIdentity] = {}
+    for entry in entries:
+        if not entry.name.isdecimal():
+            continue
+        process_id = int(entry.name, 10)
+        try:
+            parent, group, session, starttime, state = _proc_identity(
+                process_id
+            )
+        except BoundedControllerRunnerError:
+            continue
+        observed[process_id] = ProcessIdentity(
+            process_id=process_id,
+            parent_id=parent,
+            process_group=group,
+            session_id=session,
+            starttime=starttime,
+            state=state,
+        )
+    return observed
+
+
+def _direct_child_baseline() -> frozenset[tuple[int, int]]:
+    owner = os.getpid()
+    return frozenset(
+        identity.key
+        for identity in _process_snapshot().values()
+        if identity.parent_id == owner
+    )
+
+
+def _owned_processes(
+    root_process_id: int,
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+    include_zombies: bool = False,
+) -> tuple[ProcessIdentity, ...]:
+    snapshot = _process_snapshot()
+    owned_ids = {root_process_id}
+    changed = True
+    while changed:
+        changed = False
+        for identity in snapshot.values():
+            if (
+                identity.process_id not in owned_ids
+                and identity.parent_id in owned_ids
+            ):
+                owned_ids.add(identity.process_id)
+                changed = True
+    owner = os.getpid()
+    for identity in snapshot.values():
+        if (
+            identity.parent_id == owner
+            and identity.key not in baseline_children
+        ):
+            owned_ids.add(identity.process_id)
+    return tuple(
+        identity
+        for process_id, identity in snapshot.items()
+        if process_id in owned_ids
+        and (include_zombies or identity.state != "Z")
+    )
+
+
+def _signal_process_identity(
+    identity: ProcessIdentity,
+    signum: int,
+) -> None:
+    try:
+        current = _proc_identity(identity.process_id)
+    except BoundedControllerRunnerError:
+        return
+    if current[3] != identity.starttime:
+        return
+    try:
+        descriptor = os.pidfd_open(identity.process_id, 0)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise BoundedControllerRunnerError(
+            "controller identity-bound process handle cannot be opened"
+        ) from exc
+    try:
+        refreshed = _proc_identity(identity.process_id)
+        if refreshed[3] != identity.starttime:
+            return
+        signal.pidfd_send_signal(descriptor, signum)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise BoundedControllerRunnerError(
+            "controller identity-bound process signal failed"
+        ) from exc
+    finally:
+        os.close(descriptor)
+
+
+def _reap_owned_zombies(
+    root_process_id: int,
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+) -> None:
+    owner = os.getpid()
+    while True:
+        reaped = False
+        for identity in _owned_processes(
+            root_process_id,
+            baseline_children=baseline_children,
+            include_zombies=True,
+        ):
+            if (
+                identity.process_id == root_process_id
+                or identity.parent_id != owner
+                or identity.state != "Z"
+            ):
+                continue
+            try:
+                waited, _status = os.waitpid(
+                    identity.process_id,
+                    os.WNOHANG,
+                )
+            except (ChildProcessError, ProcessLookupError):
+                continue
+            except OSError as exc:
+                raise BoundedControllerRunnerError(
+                    "controller adopted child could not be reaped"
+                ) from exc
+            reaped |= waited == identity.process_id
+        if not reaped:
+            return
+
+
+def _terminate_process_group(
+    process: subprocess.Popen[bytes],
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+    allow_liveness_grace: bool,
+) -> None:
+    if process.stdin is not None:
+        try:
+            process.stdin.close()
+        except OSError:
+            pass
+    if allow_liveness_grace:
+        grace_deadline = (
+            time.monotonic() + CONTROLLER_LIVENESS_GRACE_SECONDS
+        )
+        while (
+            _owned_processes(
+                process.pid,
+                baseline_children=baseline_children,
+            )
+            and time.monotonic() < grace_deadline
+        ):
+            process.poll()
+            _reap_owned_zombies(
+                process.pid,
+                baseline_children=baseline_children,
+            )
+            time.sleep(
+                min(0.01, max(0.0, grace_deadline - time.monotonic()))
+            )
+    for identity in reversed(
+        _owned_processes(
+            process.pid,
+            baseline_children=baseline_children,
+        )
+    ):
+        _signal_process_identity(identity, signal.SIGTERM)
+    deadline = time.monotonic() + PROCESS_GROUP_TERM_SECONDS
+    while (
+        _owned_processes(
+            process.pid,
+            baseline_children=baseline_children,
+        )
+        and time.monotonic() < deadline
+    ):
+        process.poll()
+        _reap_owned_zombies(
+            process.pid,
+            baseline_children=baseline_children,
+        )
+        time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
+    for identity in reversed(
+        _owned_processes(
+            process.pid,
+            baseline_children=baseline_children,
+        )
+    ):
+        _signal_process_identity(identity, signal.SIGKILL)
+    try:
+        process.wait(timeout=PROCESS_GROUP_TERM_SECONDS)
+    except subprocess.TimeoutExpired:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=PROCESS_GROUP_TERM_SECONDS)
+    absence_deadline = (
+        time.monotonic()
+        + PROCESS_GROUP_TERM_SECONDS
+        + PROCESS_TREE_QUIESCENCE_SECONDS
+    )
+    stable_since: float | None = None
+    while time.monotonic() < absence_deadline:
+        _reap_owned_zombies(
+            process.pid,
+            baseline_children=baseline_children,
+        )
+        owned = _owned_processes(
+            process.pid,
+            baseline_children=baseline_children,
+            include_zombies=True,
+        )
+        if owned:
+            stable_since = None
+            for identity in reversed(owned):
+                if identity.state != "Z":
+                    _signal_process_identity(identity, signal.SIGKILL)
+        else:
+            if stable_since is None:
+                stable_since = time.monotonic()
+            elif (
+                time.monotonic() - stable_since
+                >= PROCESS_TREE_QUIESCENCE_SECONDS
+            ):
+                return
+        time.sleep(0.01)
+    _reap_owned_zombies(
+        process.pid,
+        baseline_children=baseline_children,
+    )
+    if _owned_processes(
+        process.pid,
+        baseline_children=baseline_children,
+        include_zombies=True,
+    ):
+        raise BoundedControllerRunnerError(
+            "controller subprocess descendants survived forced cleanup"
+        )
+
+
+def _default_runner(
+    arguments: Sequence[str],
+    *,
+    input: bytes | None,
+    capture_output: bool,
+    check: bool,
+    timeout: int | float,
+    env: Mapping[str, str],
+) -> subprocess.CompletedProcess[bytes]:
+    if (
+        input is not None
+        or capture_output is not True
+        or check is not False
+        or type(timeout) not in {int, float}
+        or not math.isfinite(timeout)
+        or timeout <= 0
+    ):
+        raise BoundedControllerRunnerError(
+            "controller subprocess execution options are invalid"
+        )
+    if _ACTIVE_EXECUTION_AUTHORITY is None:
+        with _execution_authority():
+            return _default_runner(
+                arguments,
+                input=input,
+                capture_output=capture_output,
+                check=check,
+                timeout=timeout,
+                env=env,
+            )
+    _ACTIVE_EXECUTION_AUTHORITY.check()
+    _enable_child_subreaper()
+    baseline_children = _direct_child_baseline()
+    process: subprocess.Popen[bytes] | None = None
+    selector = selectors.DefaultSelector()
+    buffers = {"stdout": bytearray(), "stderr": bytearray()}
+    deadline = time.monotonic() + timeout
+    group_cleaned = False
+    try:
+        process = subprocess.Popen(  # noqa: S603
+            list(arguments),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=dict(env),
+            close_fds=True,
+            shell=False,
+            start_new_session=True,
+        )
+        if (
+            process.stdin is None
+            or process.stdout is None
+            or process.stderr is None
+        ):
+            raise BoundedControllerRunnerError(
+                "controller subprocess pipes are unavailable"
+            )
+        for label, stream in (
+            ("stdout", process.stdout),
+            ("stderr", process.stderr),
+        ):
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, label)
+        while selector.get_map():
+            _ACTIVE_EXECUTION_AUTHORITY.check()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BoundedControllerRunnerError(
+                    "controller subprocess timed out"
+                )
+            events = selector.select(min(0.1, remaining))
+            if not events:
+                if process.poll() is not None and not group_cleaned:
+                    _terminate_process_group(
+                        process,
+                        baseline_children=baseline_children,
+                        allow_liveness_grace=False,
+                    )
+                    group_cleaned = True
+                continue
+            for key, _mask in events:
+                try:
+                    chunk = os.read(key.fileobj.fileno(), 64 * 1024)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                buffer = buffers[key.data]
+                if len(buffer) + len(chunk) > MAX_COMMAND_OUTPUT_BYTES:
+                    raise BoundedControllerRunnerError(
+                        f"controller subprocess {key.data} is oversized"
+                    )
+                buffer.extend(chunk)
+            if process.poll() is not None and not group_cleaned:
+                _terminate_process_group(
+                    process,
+                    baseline_children=baseline_children,
+                    allow_liveness_grace=False,
+                )
+                group_cleaned = True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise BoundedControllerRunnerError(
+                "controller subprocess timed out"
+            )
+        returncode = process.wait(timeout=remaining)
+        return subprocess.CompletedProcess(
+            args=list(arguments),
+            returncode=returncode,
+            stdout=bytes(buffers["stdout"]),
+            stderr=bytes(buffers["stderr"]),
+        )
+    except (
+        FinlandArtifactOrchestratorCancellation,
+        BoundedControllerRunnerError,
+    ):
+        raise
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise BoundedControllerRunnerError(
+            "controller subprocess execution failed"
+        ) from exc
+    finally:
+        original_error = sys.exception()
+        selector.close()
+        cleanup_error: BaseException | None = None
+        if process is not None:
+            try:
+                if not group_cleaned:
+                    executable = (
+                        str(process.args[0])
+                        if isinstance(process.args, (list, tuple))
+                        and process.args
+                        else ""
+                    )
+                    _terminate_process_group(
+                        process,
+                        baseline_children=baseline_children,
+                        allow_liveness_grace=(
+                            original_error is not None
+                            and executable in {PYTHON, SSH}
+                        ),
+                    )
+            except BaseException as exc:
+                cleanup_error = exc
+            finally:
+                if process.stdout is not None:
+                    process.stdout.close()
+                if process.stderr is not None:
+                    process.stderr.close()
+        if cleanup_error is not None:
+            if original_error is not None:
+                raise original_error from cleanup_error
+            raise cleanup_error
+
+
 def _run_command(
     arguments: list[str],
     *,
-    runner: Runner,
+    runner: Runner | None,
     timeout: int,
 ) -> bytes:
     if not arguments or any(not isinstance(value, str) or not value for value in arguments):
@@ -1105,8 +1852,9 @@ def _run_command(
         raise FinlandArtifactOrchestratorError(
             "controller command is outside the executable allowlist"
         )
+    active_runner = _default_runner if runner is None else runner
     try:
-        completed = runner(
+        completed = active_runner(
             arguments,
             input=None,
             capture_output=True,
@@ -2141,9 +2889,10 @@ def orchestrate(
     apply: bool = False,
     confirm: str | None = None,
     required_uid: int = 0,
-    runner: Runner = subprocess.run,
+    runner: Runner | None = None,
     checkpoint: Checkpoint | None = None,
     observed_host_addresses: set[str] | None = None,
+    control_fd: int | None = None,
 ) -> dict[str, Any]:
     callback = checkpoint if checkpoint is not None else (lambda _name: None)
     STAGE._canonical_uuid4(operation_id, label="operation_id")
@@ -2185,11 +2934,36 @@ def orchestrate(
         ssh_identity=ssh_identity,
     )
     if not apply:
+        if control_fd is not None:
+            raise FinlandArtifactOrchestratorError(
+                "controller liveness is valid only in apply mode"
+            )
         return plan
     if confirm != confirmation_phrase(operation_id, release_sha):
         raise FinlandArtifactOrchestratorError(
             "Finland production-shadow stage confirmation mismatch"
         )
+    if _ACTIVE_EXECUTION_AUTHORITY is None:
+        with _execution_authority(control_fd):
+            return orchestrate(
+                operation_id=operation_id,
+                release_sha=release_sha,
+                release_tree_sha=release_tree_sha,
+                closure_manifest=closure_manifest,
+                stage_agent=stage_agent,
+                ssh_identity=ssh_identity,
+                apply=apply,
+                confirm=confirm,
+                required_uid=required_uid,
+                runner=runner,
+                checkpoint=checkpoint,
+                observed_host_addresses=observed_host_addresses,
+            )
+    if control_fd is not None:
+        raise FinlandArtifactOrchestratorError(
+            "controller execution authority is already active"
+        )
+    _ACTIVE_EXECUTION_AUTHORITY.check()
     if os.geteuid() != required_uid or required_uid != 0:
         raise FinlandArtifactOrchestratorError(
             "Finland artifact controller must run as root"

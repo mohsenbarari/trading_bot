@@ -4,7 +4,11 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import signal
+import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -30,6 +34,33 @@ def canonical(value: object) -> bytes:
         sort_keys=True,
         separators=(",", ":"),
     ).encode("ascii")
+
+
+def external_liveness_pipe() -> tuple[int, subprocess.Popen[bytes]]:
+    read_fd, write_fd = os.pipe()
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            "import os,sys,time; os.fstat(int(sys.argv[1])); time.sleep(300)",
+            str(write_fd),
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        pass_fds=(write_fd,),
+        close_fds=True,
+    )
+    os.close(write_fd)
+    return read_fd, holder
+
+
+def stop_liveness_holder(holder: subprocess.Popen[bytes]) -> None:
+    if holder.poll() is None:
+        holder.terminate()
+    holder.wait(timeout=5)
 
 
 class BindingFixture:
@@ -122,7 +153,7 @@ class FakeRuntime:
             canonical_sha256="9" * 64,
         )
 
-    def refresh(self, _binding):
+    def refresh(self, _binding, **_kwargs):
         self.inventory.containers["application"]["running"] = self.running[
             "application"
         ]
@@ -132,7 +163,7 @@ class FakeRuntime:
             dict(self.running),
         )
 
-    def inspect(self, kind: str, identity: str):
+    def inspect(self, kind: str, identity: str, **_kwargs):
         if kind != "container":
             raise AssertionError((kind, identity))
         for writer_kind, row in self.writers.items():
@@ -241,10 +272,85 @@ class LegacyWriterFreezeTests(unittest.TestCase):
             ),
         )
         self.claim_patcher.start()
+        self.control_read_fd, self.control_holder = external_liveness_pipe()
 
     def tearDown(self) -> None:
         self.claim_patcher.stop()
+        os.close(self.control_read_fd)
+        stop_liveness_holder(self.control_holder)
         self.temporary.cleanup()
+
+    def test_bounded_command_preserves_subsecond_wait_budget(self):
+        process = mock.Mock()
+        process.pid = 42
+        process.stdout.fileno.return_value = 10
+        process.stderr.fileno.return_value = 11
+        process.wait.return_value = 0
+        selector = mock.Mock()
+        selector.get_map.return_value = {}
+        with (
+            mock.patch.object(
+                MODULE.subprocess,
+                "Popen",
+                return_value=process,
+            ),
+            mock.patch.object(
+                MODULE.selectors,
+                "DefaultSelector",
+                return_value=selector,
+            ),
+            mock.patch.object(MODULE.os, "set_blocking"),
+            mock.patch.object(MODULE.time, "monotonic", side_effect=(10, 10.75)),
+            mock.patch.object(MODULE, "_terminate_process_group"),
+        ):
+            result = MODULE._bounded_command(
+                ["/usr/bin/true"],
+                timeout=1,
+            )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(process.wait.call_args, mock.call(timeout=0.25))
+
+    def test_bounded_command_kills_forked_descendant_on_oversize(self):
+        sentinel = self.root / "legacy-descendant-survived"
+        descendant_pid = self.root / "legacy-descendant-pid"
+        program = (
+            "import os,signal,time\n"
+            "if os.fork() == 0:\n"
+            " os.setsid()\n"
+            " if os.fork() != 0: time.sleep(60);os._exit(0)\n"
+            " signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            f" open({str(descendant_pid)!r},'w').write(str(os.getpid()))\n"
+            " time.sleep(0.5)\n"
+            f" open({str(sentinel)!r},'wb').write(b'survived')\n"
+            " os._exit(0)\n"
+            f"while not os.path.exists({str(descendant_pid)!r}):time.sleep(0.005)\n"
+            "os.write(1,b'x'*4096)\n"
+            "time.sleep(60)\n"
+        )
+        with (
+            mock.patch.object(
+                MODULE,
+                "MAX_COMMAND_OUTPUT_BYTES",
+                1024,
+            ),
+            mock.patch.object(
+                MODULE,
+                "PROCESS_GROUP_TERM_SECONDS",
+                0.1,
+            ),
+            self.assertRaises(MODULE.BoundedCommandError),
+        ):
+            MODULE._bounded_command(
+                [sys.executable, "-I", "-B", "-c", program],
+                timeout=5,
+            )
+        time.sleep(0.6)
+        self.assertFalse(sentinel.exists())
+        self.assertFalse(
+            Path(
+                f"/proc/{descendant_pid.read_text(encoding='ascii')}"
+            ).exists()
+        )
 
     def _nginx_result(self) -> dict:
         return {
@@ -291,7 +397,11 @@ class LegacyWriterFreezeTests(unittest.TestCase):
             else (
                 MODULE.RESTORE_OWNER_ACTION
                 if action == "restore"
-                else MODULE.CAPTURE_OWNER_ACTION
+                else (
+                    MODULE.VERIFY_CURRENT_OWNER_ACTION
+                    if action == "verify-current"
+                    else MODULE.CAPTURE_OWNER_ACTION
+                )
             )
         )
         receipt = MODULE.coordinated_receipt_path(
@@ -352,6 +462,17 @@ class LegacyWriterFreezeTests(unittest.TestCase):
             "sleep_fn": lambda _seconds: None,
             "proc_root": self.root / "proc",
             "checkpoint_exchange": checkpoint_exchange,
+            "control_fd": (
+                self.control_read_fd
+                if apply
+                and action in {
+                    "freeze",
+                    "verify",
+                    "verify-current",
+                    "restore",
+                }
+                else None
+            ),
         }
 
     def test_default_plan_does_not_contact_docker_or_nginx(self):
@@ -367,8 +488,8 @@ class LegacyWriterFreezeTests(unittest.TestCase):
                 side_effect=AssertionError("plan loaded coordinator receipt"),
             ),
             mock.patch.object(
-                SOURCE,
-                "inspect_source",
+                MODULE,
+                "_inspect_source",
                 side_effect=AssertionError("plan contacted Docker"),
             ),
         ):
@@ -407,6 +528,129 @@ class LegacyWriterFreezeTests(unittest.TestCase):
                 ),
                 live_lease_claim_sha256=LIVE_LEASE_CLAIM_SHA256,
             ),
+        )
+
+    def test_mutating_apply_requires_liveness_before_any_mutation(self):
+        for action in ("freeze", "verify", "verify-current", "restore"):
+            with self.subTest(action=action):
+                arguments = self._arguments(action, apply=True)
+                arguments["control_fd"] = None
+                with self.assertRaisesRegex(
+                    MODULE.LegacyWriterFreezeError,
+                    "requires controller liveness",
+                ):
+                    MODULE.execute(**arguments)
+        self.assertFalse(
+            MODULE.state_directory(
+                self.binding,
+                secret_root=self.secret_root,
+            ).exists()
+        )
+
+    def test_liveness_guard_delivers_sigint_cancellation_only_once(self):
+        read_fd, holder = external_liveness_pipe()
+        try:
+            with MODULE.ControllerLivenessGuard(read_fd) as guard:
+                with self.assertRaisesRegex(
+                    MODULE.LegacyWriterFreezeCancellation,
+                    f"received signal {signal.SIGINT}",
+                ):
+                    guard._handle_signal(signal.SIGINT, None)  # noqa: SLF001
+                guard._handle_signal(signal.SIGTERM, None)  # noqa: SLF001
+                guard.check()
+        finally:
+            os.close(read_fd)
+            stop_liveness_holder(holder)
+
+    def test_controller_eof_mid_freeze_records_exact_stopped_state(self):
+        runtime = FakeRuntime(self.binding)
+        (self.root / "proc").mkdir()
+        zero = {
+            "legacy_writer_process_count": 0,
+            "writer_database_client_count": 0,
+            "file_mutator_process_count": 0,
+        }
+        read_fd, holder = external_liveness_pipe()
+        disconnected = False
+
+        def disconnecting_runner(arguments, timeout):
+            nonlocal disconnected
+            result = runtime.runner(arguments, timeout)
+            if (
+                not disconnected
+                and len(arguments) > 1
+                and arguments[1] == "stop"
+            ):
+                disconnected = True
+                stop_liveness_holder(holder)
+                time.sleep(1)
+            return result
+
+        arguments = self._arguments("freeze", apply=True)
+        arguments["control_fd"] = read_fd
+        try:
+            with (
+                mock.patch.object(
+                    MODULE,
+                    "_load_coordinated_receipt",
+                    return_value=(
+                        self._receipt(),
+                        COORDINATED_RECEIPT_SHA256,
+                    ),
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "_nginx_readback",
+                    return_value=self._nginx_result(),
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "_refresh_runtime",
+                    side_effect=runtime.refresh,
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "_source_inspect_required",
+                    side_effect=runtime.inspect,
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "_zero_writer_readback",
+                    return_value=zero,
+                ),
+                self.assertRaisesRegex(
+                    MODULE.LegacyWriterFreezeCancellation,
+                    "controller liveness pipe reached EOF",
+                ),
+            ):
+                MODULE.execute(
+                    **arguments,
+                    runner=disconnecting_runner,
+                )
+        finally:
+            os.close(read_fd)
+            stop_liveness_holder(holder)
+        self.assertTrue(disconnected)
+        self.assertFalse(runtime.running["application"])
+        self.assertTrue(runtime.running["bot"])
+        self.assertTrue(runtime.running["sync_worker"])
+        journal = MODULE._strict_json(
+            (
+                MODULE.state_directory(
+                    self.binding,
+                    secret_root=self.secret_root,
+                )
+                / MODULE.JOURNAL_FILENAME
+            ).read_bytes(),
+            label="journal",
+        )
+        self.assertEqual(journal["status"], "reconciliation-required")
+        self.assertEqual(journal["stopped"], ["application"])
+        self.assertFalse(
+            any(
+                len(call) > 1 and call[1] == "start"
+                for call in runtime.calls
+            )
         )
 
     def test_writer_identity_is_exact_and_does_not_emit_environment(self):
@@ -500,6 +744,7 @@ class LegacyWriterFreezeTests(unittest.TestCase):
             RELEASE_SHA,
             RELEASE_TREE_SHA,
             NGINX_AGGREGATE_SHA256,
+            allow_historical=True,
         )
         with self.assertRaisesRegex(
             MODULE.LegacyWriterFreezeError,
@@ -523,8 +768,8 @@ class LegacyWriterFreezeTests(unittest.TestCase):
             "1000 \t",
         )
         with mock.patch.object(
-            SOURCE,
-            "_inspect_required",
+            MODULE,
+            "_source_inspect_required",
             side_effect=runtime.inspect,
         ):
             for output in malformed_outputs:
@@ -541,7 +786,11 @@ class LegacyWriterFreezeTests(unittest.TestCase):
                         runner=lambda _arguments, _timeout: output,
                     )
 
-        def configured_without_state(kind: str, identity: str):
+        def configured_without_state(
+            kind: str,
+            identity: str,
+            **_kwargs,
+        ):
             document = runtime.inspect(kind, identity)
             document["Config"]["Healthcheck"] = {
                 "Test": ["CMD", "health-probe"],
@@ -550,8 +799,8 @@ class LegacyWriterFreezeTests(unittest.TestCase):
 
         with (
             mock.patch.object(
-                SOURCE,
-                "_inspect_required",
+                MODULE,
+                "_source_inspect_required",
                 side_effect=configured_without_state,
             ),
             self.assertRaisesRegex(
@@ -581,8 +830,8 @@ class LegacyWriterFreezeTests(unittest.TestCase):
 
         with (
             mock.patch.object(
-                SOURCE,
-                "_inspect_required",
+                MODULE,
+                "_source_inspect_required",
                 side_effect=runtime.inspect,
             ),
             self.assertRaisesRegex(
@@ -659,8 +908,8 @@ class LegacyWriterFreezeTests(unittest.TestCase):
                 side_effect=runtime.refresh,
             ),
             mock.patch.object(
-                SOURCE,
-                "_inspect_required",
+                MODULE,
+                "_source_inspect_required",
                 side_effect=runtime.inspect,
             ),
             mock.patch.object(
@@ -827,8 +1076,8 @@ class LegacyWriterFreezeTests(unittest.TestCase):
                 side_effect=runtime.refresh,
             ),
             mock.patch.object(
-                SOURCE,
-                "_inspect_required",
+                MODULE,
+                "_source_inspect_required",
                 side_effect=runtime.inspect,
             ),
             mock.patch.object(
@@ -910,8 +1159,8 @@ class LegacyWriterFreezeTests(unittest.TestCase):
                 side_effect=runtime.refresh,
             ),
             mock.patch.object(
-                SOURCE,
-                "_inspect_required",
+                MODULE,
+                "_source_inspect_required",
                 side_effect=runtime.inspect,
             ),
             mock.patch.object(
@@ -1004,8 +1253,8 @@ class LegacyWriterFreezeTests(unittest.TestCase):
                 side_effect=runtime.refresh,
             ),
             mock.patch.object(
-                SOURCE,
-                "_inspect_required",
+                MODULE,
+                "_source_inspect_required",
                 side_effect=runtime.inspect,
             ),
             mock.patch.object(
@@ -1108,8 +1357,8 @@ class LegacyWriterFreezeTests(unittest.TestCase):
                 side_effect=runtime.refresh,
             ),
             mock.patch.object(
-                SOURCE,
-                "_inspect_required",
+                MODULE,
+                "_source_inspect_required",
                 side_effect=runtime.inspect,
             ),
             mock.patch.object(
@@ -1343,8 +1592,8 @@ class LegacyWriterFreezeTests(unittest.TestCase):
                 side_effect=runtime.refresh,
             ),
             mock.patch.object(
-                SOURCE,
-                "_inspect_required",
+                MODULE,
+                "_source_inspect_required",
                 side_effect=runtime.inspect,
             ),
             mock.patch.object(
@@ -1439,8 +1688,8 @@ class LegacyWriterFreezeTests(unittest.TestCase):
                 side_effect=runtime.refresh,
             ),
             mock.patch.object(
-                SOURCE,
-                "_inspect_required",
+                MODULE,
+                "_source_inspect_required",
                 side_effect=runtime.inspect,
             ),
             mock.patch.object(
@@ -1584,8 +1833,8 @@ class LegacyWriterFreezeTests(unittest.TestCase):
                 side_effect=runtime.refresh,
             ),
             mock.patch.object(
-                SOURCE,
-                "_inspect_required",
+                MODULE,
+                "_source_inspect_required",
                 side_effect=runtime.inspect,
             ),
             mock.patch.object(
@@ -1653,8 +1902,8 @@ class LegacyWriterFreezeTests(unittest.TestCase):
                 side_effect=runtime.refresh,
             ),
             mock.patch.object(
-                SOURCE,
-                "_inspect_required",
+                MODULE,
+                "_source_inspect_required",
                 side_effect=runtime.inspect,
             ),
             mock.patch.object(
@@ -1841,8 +2090,8 @@ class LegacyWriterFreezeTests(unittest.TestCase):
                 side_effect=runtime.refresh,
             ),
             mock.patch.object(
-                SOURCE,
-                "_inspect_required",
+                MODULE,
+                "_source_inspect_required",
                 side_effect=runtime.inspect,
             ),
             mock.patch.object(
@@ -1867,6 +2116,295 @@ class LegacyWriterFreezeTests(unittest.TestCase):
                 runtime.writers["sync_worker"]["id"],
             ],
         )
+
+    def test_verify_current_adopts_only_fresh_strictly_chained_r2(self):
+        runtime = FakeRuntime(self.binding)
+        (self.root / "proc").mkdir()
+        zero = {
+            "legacy_writer_process_count": 0,
+            "writer_database_client_count": 0,
+            "file_mutator_process_count": 0,
+        }
+        fresh_receipt_sha256 = "1" * 64
+        fresh_claim_sha256 = "2" * 64
+        challenge_sha256 = "3" * 64
+        fresh_readback = {
+            **self._nginx_result(),
+            "schema": MODULE.NGINX.HOST_FRESH_READBACK_SCHEMA,
+            "readback_challenge_nonce": "4" * 64,
+            "readback_challenge_sha256": challenge_sha256,
+            "issued_at_epoch": 100,
+            "expires_at_epoch": 200,
+            "captured_at_epoch": 120,
+        }
+        fresh_receipt = {
+            "role_bindings": {
+                self.binding.role: {
+                    "manifest_sha256": self.nginx_manifest_sha256,
+                },
+            },
+            "readbacks": {self.binding.role: fresh_readback},
+            "global_generation_sha256": GLOBAL_FREEZE_SHA256,
+            "readback_challenge_sha256": challenge_sha256,
+            "issued_at_epoch": 100,
+            "expires_at_epoch": 200,
+            "captured_at_epoch": 125,
+        }
+        with (
+            mock.patch.object(
+                MODULE,
+                "_load_coordinated_receipt",
+                return_value=(
+                    self._receipt(),
+                    COORDINATED_RECEIPT_SHA256,
+                ),
+            ),
+            mock.patch.object(
+                MODULE,
+                "_nginx_readback",
+                side_effect=lambda **_kwargs: (
+                    fresh_readback
+                    if self.claim_document.get("claim_epoch") == 2
+                    else self._nginx_result()
+                ),
+            ),
+            mock.patch.object(
+                MODULE,
+                "_refresh_runtime",
+                side_effect=runtime.refresh,
+            ),
+            mock.patch.object(
+                MODULE,
+                "_source_inspect_required",
+                side_effect=runtime.inspect,
+            ),
+            mock.patch.object(
+                MODULE,
+                "_zero_writer_readback",
+                return_value=zero,
+            ),
+        ):
+            frozen = MODULE.execute(
+                **self._arguments("freeze", apply=True),
+                runner=runtime.runner,
+            )
+            self.assertEqual(frozen["status"], "frozen")
+            journal_path = (
+                MODULE.state_directory(
+                    self.binding,
+                    secret_root=self.secret_root,
+                )
+                / MODULE.JOURNAL_FILENAME
+            )
+            before = MODULE._strict_json(
+                journal_path.read_bytes(),
+                label="journal",
+            )
+            self.assertEqual(
+                before["freeze_evidence_live_lease_claim_sha256"],
+                LIVE_LEASE_CLAIM_SHA256,
+            )
+            self.assertEqual(
+                before["freeze_evidence_sha256"],
+                frozen["freeze_evidence_sha256"],
+            )
+            fresh_receipt_path = MODULE.coordinated_receipt_path(
+                self.binding,
+                fresh_receipt_sha256,
+                secret_root=self.secret_root,
+            )
+            self.claim_document = {
+                "owner_action": MODULE.VERIFY_CURRENT_OWNER_ACTION,
+                "claim_epoch": 2,
+                "previous_claim_sha256": LIVE_LEASE_CLAIM_SHA256,
+                "legacy_frozen_receipt_path": str(fresh_receipt_path),
+                "legacy_frozen_receipt_sha256": fresh_receipt_sha256,
+            }
+            with (
+                mock.patch.object(
+                    MODULE,
+                    "_load_fresh_transferred_receipt_and_claim",
+                    side_effect=lambda **_kwargs: (
+                        dict(fresh_receipt),
+                        dict(self.claim_document),
+                    ),
+                ),
+                mock.patch.object(
+                    MODULE.time,
+                    "time",
+                    return_value=130,
+                ),
+            ):
+                with (
+                    mock.patch.object(
+                        MODULE,
+                        "_write_precomputed_journal",
+                        side_effect=RuntimeError(
+                            "simulated crash after durable result"
+                        ),
+                    ),
+                    self.assertRaisesRegex(
+                        RuntimeError,
+                        "after durable result",
+                    ),
+                ):
+                    MODULE.execute(
+                        **self._arguments(
+                            "verify-current",
+                            apply=True,
+                            receipt_sha256=fresh_receipt_sha256,
+                            claim_sha256=fresh_claim_sha256,
+                        ),
+                        runner=runtime.runner,
+                    )
+                result_path = MODULE.current_verification_result_path(
+                    self.binding,
+                    fresh_claim_sha256,
+                    secret_root=self.secret_root,
+                )
+                self.assertTrue(result_path.is_file())
+                after_crash = MODULE._strict_json(
+                    journal_path.read_bytes(),
+                    label="journal after result publication crash",
+                )
+                self.assertEqual(
+                    after_crash["live_lease_claim_sha256"],
+                    LIVE_LEASE_CLAIM_SHA256,
+                )
+                verified = MODULE.execute(
+                    **self._arguments(
+                        "verify-current",
+                        apply=True,
+                        receipt_sha256=fresh_receipt_sha256,
+                        claim_sha256=fresh_claim_sha256,
+                    ),
+                    runner=runtime.runner,
+                )
+                self.assertEqual(
+                    verified["status"],
+                    "verified-current-frozen",
+                )
+                self.assertEqual(
+                    verified[
+                        "freeze_evidence_live_lease_claim_sha256"
+                    ],
+                    LIVE_LEASE_CLAIM_SHA256,
+                )
+                self.assertEqual(
+                    verified["live_lease_claim_sha256"],
+                    fresh_claim_sha256,
+                )
+                resumed = MODULE.execute(
+                    **self._arguments(
+                        "verify-current",
+                        apply=True,
+                        receipt_sha256=fresh_receipt_sha256,
+                        claim_sha256=fresh_claim_sha256,
+                    ),
+                    runner=runtime.runner,
+                )
+                self.assertEqual(resumed, verified)
+
+    def test_verify_current_rejects_broken_claim_chain_before_zero_proof(self):
+        runtime = FakeRuntime(self.binding)
+        (self.root / "proc").mkdir()
+        zero = {
+            "legacy_writer_process_count": 0,
+            "writer_database_client_count": 0,
+            "file_mutator_process_count": 0,
+        }
+        with (
+            mock.patch.object(
+                MODULE,
+                "_load_coordinated_receipt",
+                return_value=(
+                    self._receipt(),
+                    COORDINATED_RECEIPT_SHA256,
+                ),
+            ),
+            mock.patch.object(
+                MODULE,
+                "_nginx_readback",
+                return_value=self._nginx_result(),
+            ),
+            mock.patch.object(
+                MODULE,
+                "_refresh_runtime",
+                side_effect=runtime.refresh,
+            ),
+            mock.patch.object(
+                MODULE,
+                "_source_inspect_required",
+                side_effect=runtime.inspect,
+            ),
+            mock.patch.object(
+                MODULE,
+                "_zero_writer_readback",
+                return_value=zero,
+            ),
+        ):
+            MODULE.execute(
+                **self._arguments("freeze", apply=True),
+                runner=runtime.runner,
+            )
+        fresh_receipt_sha256 = "1" * 64
+        fresh_claim_sha256 = "2" * 64
+        fresh_receipt_path = MODULE.coordinated_receipt_path(
+            self.binding,
+            fresh_receipt_sha256,
+            secret_root=self.secret_root,
+        )
+        broken_claim = {
+            "owner_action": MODULE.VERIFY_CURRENT_OWNER_ACTION,
+            "claim_epoch": 3,
+            "previous_claim_sha256": "9" * 64,
+            "legacy_frozen_receipt_path": str(fresh_receipt_path),
+            "legacy_frozen_receipt_sha256": fresh_receipt_sha256,
+        }
+        fresh_receipt = {
+            "role_bindings": {
+                self.binding.role: {
+                    "manifest_sha256": self.nginx_manifest_sha256,
+                },
+            },
+            "readbacks": {self.binding.role: self._nginx_result()},
+            "global_generation_sha256": GLOBAL_FREEZE_SHA256,
+        }
+        with (
+            mock.patch.object(
+                MODULE,
+                "_load_fresh_transferred_receipt_and_claim",
+                return_value=(fresh_receipt, broken_claim),
+            ),
+            mock.patch.object(
+                MODULE,
+                "_nginx_readback",
+                return_value=self._nginx_result(),
+            ),
+            mock.patch.object(
+                MODULE,
+                "_refresh_runtime",
+                side_effect=runtime.refresh,
+            ),
+            mock.patch.object(
+                MODULE,
+                "_zero_writer_readback",
+                side_effect=AssertionError("zero proof ran"),
+            ),
+            self.assertRaisesRegex(
+                MODULE.LegacyWriterFreezeError,
+                "stale",
+            ),
+        ):
+            MODULE.execute(
+                **self._arguments(
+                    "verify-current",
+                    apply=True,
+                    receipt_sha256=fresh_receipt_sha256,
+                    claim_sha256=fresh_claim_sha256,
+                ),
+                runner=runtime.runner,
+            )
 
     def test_journal_rejects_tampering_and_unknown_stopped_kind(self):
         journal = MODULE._base_journal(

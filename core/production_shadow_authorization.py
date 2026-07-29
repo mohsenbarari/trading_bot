@@ -24,7 +24,7 @@ from core.human_approval import (
 
 
 AUTHORIZATION_BASIS_SCHEMA = (
-    "production-shadow-cutover-authorization-basis-v1"
+    "production-shadow-cutover-authorization-basis-v2"
 )
 AUTHORIZATION_ACTION = "deploy_three_site_production"
 AUTHORIZATION_ENVIRONMENT = "production"
@@ -34,6 +34,7 @@ ZERO_SHA256 = "0" * 64
 MANIFEST_FIELDS = frozenset(
     {
         "schema",
+        "capabilities",
         "campaign_id",
         "operation_id",
         "created_at",
@@ -134,6 +135,7 @@ def authorization_basis_from_manifest(
         "release_sha": normalized["release_sha"],
         "release_tree_sha": normalized["release_tree_sha"],
         "legacy_release_sha": normalized["legacy_release_sha"],
+        "capabilities": normalized["capabilities"],
         "topology": normalized["topology"],
         "deployment": normalized["deployment"],
         "artifacts": normalized_artifacts,

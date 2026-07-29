@@ -4,9 +4,13 @@ import hashlib
 import io
 import json
 import os
+import fcntl
 from pathlib import Path
 import stat
+import subprocess
 import tempfile
+import threading
+import time
 import unittest
 from unittest import mock
 
@@ -47,6 +51,8 @@ class TwoHostRunner:
         self.known_hosts = known_hosts
         self.ssh_identity = ssh_identity
         self.calls: list[tuple[tuple[str, ...], int]] = []
+        self.call_options: list[dict[str, object]] = []
+        self.host_liveness: list[tuple[str, bool]] = []
         self.host_calls: list[tuple[str, str, str | None]] = []
         self.curl_calls: list[tuple[str, str]] = []
         self.states = {role: "legacy-normal" for role in coordinator.ROLE_ORDER}
@@ -122,6 +128,7 @@ class TwoHostRunner:
         role: str,
         action: str,
         generation: str | None,
+        readback_challenge: dict[str, object] | None = None,
     ) -> coordinator.CommandResult:
         self.host_calls.append((role, action, generation))
         if self._consume_failure(role, action, generation):
@@ -129,9 +136,11 @@ class TwoHostRunner:
         manifest = self.role_manifests[role]
         identity = self._identity(role)
         if action == "readback":
+            if readback_challenge is None:
+                raise AssertionError("readback challenge is absent")
             state = self.states[role]
             document = {
-                "schema": "production-shadow-nginx-host-readback-v1",
+                "schema": coordinator.GENERATION.HOST_FRESH_READBACK_SCHEMA,
                 "status": "read-back",
                 **identity,
                 "state": state,
@@ -141,6 +150,8 @@ class TwoHostRunner:
                 "active_configuration_mutated": False,
                 "service_reloaded": False,
                 "journal_sha256": "5" * 64,
+                **readback_challenge,
+                "captured_at_epoch": int(time.time()),
             }
         elif action == "install":
             already = role in self.installed
@@ -201,6 +212,15 @@ class TwoHostRunner:
                 document["commands"] = {
                     "test": self._command_evidence(),
                     "reload": self._command_evidence(),
+                    "stability": [
+                        {
+                            "index": index,
+                            "service": self._command_evidence(),
+                            "nginx_test": self._command_evidence(),
+                            "state": target,
+                        }
+                        for index in range(1, 4)
+                    ],
                 }
         return coordinator.CommandResult(
             0,
@@ -208,10 +228,45 @@ class TwoHostRunner:
             b"",
         )
 
+    @staticmethod
+    def _readback_challenge(
+        arguments: tuple[str, ...],
+    ) -> dict[str, object] | None:
+        if "--readback-challenge-nonce" not in arguments:
+            return None
+        return {
+            "readback_challenge_nonce": arguments[
+                arguments.index("--readback-challenge-nonce") + 1
+            ],
+            "readback_challenge_sha256": arguments[
+                arguments.index("--readback-challenge-sha256") + 1
+            ],
+            "issued_at_epoch": int(
+                arguments[arguments.index("--issued-at-epoch") + 1]
+            ),
+            "expires_at_epoch": int(
+                arguments[arguments.index("--expires-at-epoch") + 1]
+            ),
+        }
+
     def _remote_command(
         self,
         arguments: tuple[str, ...],
     ) -> coordinator.CommandResult:
+        if arguments[0] == coordinator.ENV:
+            expected = (
+                coordinator.ENV,
+                "-i",
+                "PATH=/usr/bin:/bin",
+                "HOME=/root",
+                "LANG=C.UTF-8",
+                "LC_ALL=C.UTF-8",
+                "PYTHONDONTWRITEBYTECODE=1",
+                "GIT_NO_REPLACE_OBJECTS=1",
+            )
+            if arguments[: len(expected)] != expected:
+                raise AssertionError("host worker environment is not isolated")
+            arguments = arguments[len(expected) :]
         command = arguments[0]
         if command == coordinator.PYTHON:
             role = arguments[arguments.index("--role") + 1]
@@ -221,7 +276,12 @@ class TwoHostRunner:
                 if "--generation" in arguments
                 else None
             )
-            return self._host_result(role, action, generation)
+            return self._host_result(
+                role,
+                action,
+                generation,
+                self._readback_challenge(arguments),
+            )
         if command == "/usr/bin/stat":
             path = arguments[-1]
             output_format = arguments[1]
@@ -280,10 +340,36 @@ class TwoHostRunner:
         self,
         argv,
         timeout: int,
+        **options,
     ) -> coordinator.CommandResult:
         arguments = tuple(argv)
         self.calls.append((arguments, timeout))
+        self.call_options.append(dict(options))
         self.assert_safe_argv(arguments)
+        if "--role" in arguments and "--action" in arguments:
+            action = arguments[arguments.index("--action") + 1]
+            controlled = action in coordinator.GENERATION.CONTROLLED_HOST_ACTIONS
+            stdin = options.get("stdin", subprocess.DEVNULL)
+            if controlled:
+                if type(stdin) is not int or stdin < 0:
+                    raise AssertionError("mutating worker lacks liveness pipe")
+                metadata = os.fstat(stdin)
+                flags = fcntl.fcntl(stdin, fcntl.F_GETFL)
+                if (
+                    not stat.S_ISFIFO(metadata.st_mode)
+                    or flags & os.O_ACCMODE != os.O_RDONLY
+                    or "--control-fd" not in arguments
+                    or arguments[arguments.index("--control-fd") + 1] != "0"
+                ):
+                    raise AssertionError("worker liveness pipe is invalid")
+            elif (
+                stdin != subprocess.DEVNULL
+                or "--control-fd" in arguments
+            ):
+                raise AssertionError("readback inherited liveness authority")
+            if options.get("pass_fds", ()) != ():
+                raise AssertionError("worker inherited unexpected descriptors")
+            self.host_liveness.append((action, controlled))
         if arguments[0] == coordinator.CURL:
             resolve = arguments[arguments.index("--resolve") + 1]
             vhost = resolve.split(":", 1)[0]
@@ -313,6 +399,8 @@ class TwoHostRunner:
             )
             start = arguments.index(remote_host) + 1
             return self._remote_command(arguments[start:])
+        if arguments[0] == coordinator.ENV:
+            return self._remote_command(arguments)
         if arguments[0] == coordinator.PYTHON:
             role = arguments[arguments.index("--role") + 1]
             action = arguments[arguments.index("--action") + 1]
@@ -321,7 +409,12 @@ class TwoHostRunner:
                 if "--generation" in arguments
                 else None
             )
-            return self._host_result(role, action, generation)
+            return self._host_result(
+                role,
+                action,
+                generation,
+                self._readback_challenge(arguments),
+            )
         raise AssertionError(f"unexpected coordinator command: {arguments!r}")
 
     def assert_safe_argv(self, arguments: tuple[str, ...]) -> None:
@@ -330,6 +423,11 @@ class TwoHostRunner:
         self_test.assertNotIn("/bin/bash", arguments)
         self_test.assertNotIn("-c", arguments)
         if arguments[0] in {coordinator.SSH, coordinator.SCP}:
+            option = arguments.index("-F")
+            self_test.assertEqual(
+                arguments[option : option + 2],
+                ("-F", "/dev/null"),
+            )
             self_test.assertIn("BatchMode=yes", arguments)
             self_test.assertIn("IdentitiesOnly=yes", arguments)
             self_test.assertIn("StrictHostKeyChecking=yes", arguments)
@@ -664,8 +762,8 @@ class CoordinatorTests(unittest.TestCase):
         return path, hashlib.sha256(path.read_bytes()).hexdigest()
 
     def test_plan_and_cli_are_exact_and_inert(self) -> None:
-        def forbidden_runner(argv, timeout):
-            raise AssertionError((argv, timeout))
+        def forbidden_runner(argv, timeout, **options):
+            raise AssertionError((argv, timeout, options))
 
         result = coordinator.execute_coordinator(
             **self.paths,
@@ -755,6 +853,243 @@ class CoordinatorTests(unittest.TestCase):
         )
         self.assertEqual(document["status"], "planned")
 
+    def test_apply_rejects_non_main_thread_before_runner_or_mutation(self):
+        outcomes: list[object] = []
+
+        def invoke() -> None:
+            try:
+                outcomes.append(self.execute("install"))
+            except BaseException as exc:
+                outcomes.append(exc)
+
+        worker = threading.Thread(target=invoke)
+        worker.start()
+        worker.join(timeout=5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(len(outcomes), 1)
+        self.assertIsInstance(outcomes[0], coordinator.NginxCoordinatorError)
+        self.assertIn("main thread", str(outcomes[0]))
+        self.assertEqual(self.runner.calls, [])
+        self.assertFalse(
+            (
+                self.controller_secret
+                / OPERATION_ID
+                / "nginx-coordinator"
+            ).exists()
+        )
+
+    def test_host_worker_launch_isolated_for_local_and_remote_roles(self):
+        inputs = self.inputs()
+        local_challenge = coordinator._new_host_readback_challenge(
+            inputs,
+            role="bot_fi",
+        )
+        remote_challenge = coordinator._new_host_readback_challenge(
+            inputs,
+            role="webapp_fi",
+        )
+        expected = (
+            coordinator.ENV,
+            "-i",
+            "PATH=/usr/bin:/bin",
+            "HOME=/root",
+            "LANG=C.UTF-8",
+            "LC_ALL=C.UTF-8",
+            "PYTHONDONTWRITEBYTECODE=1",
+            "GIT_NO_REPLACE_OBJECTS=1",
+            coordinator.PYTHON,
+            "-I",
+            "-B",
+        )
+        local = coordinator._worker_arguments(
+            inputs,
+            role="bot_fi",
+            action="readback",
+            generation=None,
+            remote=False,
+            readback_challenge=local_challenge,
+        )
+        self.assertEqual(local[: len(expected)], expected)
+        remote = coordinator._worker_arguments(
+            inputs,
+            role="webapp_fi",
+            action="readback",
+            generation=None,
+            remote=True,
+            readback_challenge=remote_challenge,
+        )
+        remote_host = (
+            f"{coordinator.WEBAPP_FI_SSH_USER}@"
+            f"{coordinator.WEBAPP_FI_HOST}"
+        )
+        start = remote.index(remote_host) + 1
+        self.assertEqual(remote[start : start + len(expected)], expected)
+        mutating = coordinator._worker_arguments(
+            inputs,
+            role="webapp_fi",
+            action="install",
+            generation=None,
+            remote=True,
+        )
+        self.assertEqual(
+            mutating[mutating.index("--control-fd") :][0:2],
+            ("--control-fd", "0"),
+        )
+        self.assertEqual(
+            local[local.index("--control-fd") :][0:2],
+            ("--control-fd", "0"),
+        )
+        self.assertIn(
+            local_challenge["readback_challenge_sha256"],
+            local,
+        )
+
+    def test_subprocess_output_is_bounded_while_process_runs(self):
+        with self.assertRaisesRegex(
+            coordinator.NginxCoordinatorError,
+            "stdout is oversized",
+        ):
+            coordinator._subprocess_runner(
+                (
+                    "/usr/bin/python3",
+                    "-I",
+                    "-c",
+                    "import os; os.write(1, b'x' * 3145728)",
+                ),
+                10,
+            )
+        with self.assertRaisesRegex(
+            coordinator.NginxCoordinatorError,
+            "stderr is oversized",
+        ):
+            coordinator._subprocess_runner(
+                (
+                    "/usr/bin/python3",
+                    "-I",
+                    "-c",
+                    "import os; os.write(2, b'x' * 3145728)",
+                ),
+                10,
+            )
+
+    def test_subprocess_runner_rejects_invalid_timeout_before_start(self):
+        for timeout in (0, True, 301):
+            with self.subTest(timeout=timeout), self.assertRaisesRegex(
+                coordinator.NginxCoordinatorError,
+                "timeout is outside",
+            ):
+                coordinator._subprocess_runner(
+                    ("/usr/bin/python3", "-I", "-c", "pass"),
+                    timeout,
+                )
+        with tempfile.NamedTemporaryFile() as regular:
+            with self.assertRaisesRegex(
+                coordinator.NginxCoordinatorError,
+                "not an anonymous read pipe",
+            ):
+                coordinator._subprocess_runner(
+                    ("/usr/bin/python3", "-I", "-c", "pass"),
+                    10,
+                    stdin=regular.fileno(),
+                )
+
+    def test_subprocess_runner_kills_forked_descendant_after_parent_exit(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as directory:
+            sentinel = Path(directory) / "runner-descendant-survived"
+            code = (
+                "import os,time\n"
+                "if os.fork() == 0:\n"
+                " os.close(1)\n"
+                " os.close(2)\n"
+                " time.sleep(0.5)\n"
+                f" open({str(sentinel)!r},'wb').write(b'survived')\n"
+                " os._exit(0)\n"
+                "print('ok',flush=True)\n"
+            )
+            result = coordinator._subprocess_runner(
+                ("/usr/bin/python3", "-I", "-B", "-c", code),
+                10,
+            )
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.stdout, b"ok\n")
+            self.assertEqual(result.stderr, b"")
+            time.sleep(0.7)
+            self.assertFalse(sentinel.exists())
+
+    def test_subprocess_runner_reaps_rapid_setsid_double_fork(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pid_path = root / "adopted-pid"
+            survived = root / "adopted-survived"
+            code = (
+                "import os,time\n"
+                "if os.fork() == 0:\n"
+                " os.setsid()\n"
+                " if os.fork() == 0:\n"
+                "  os.close(1)\n"
+                "  os.close(2)\n"
+                f"  open({str(pid_path)!r},'w').write(str(os.getpid()))\n"
+                "  time.sleep(0.6)\n"
+                f"  open({str(survived)!r},'wb').write(b'survived')\n"
+                "  os._exit(0)\n"
+                " os._exit(0)\n"
+                "deadline=time.monotonic()+0.5\n"
+                f"while not os.path.exists({str(pid_path)!r}) and time.monotonic()<deadline: time.sleep(0.005)\n"
+                "print('ok',flush=True)\n"
+            )
+            result = coordinator._subprocess_runner(
+                ("/usr/bin/python3", "-I", "-B", "-c", code),
+                10,
+            )
+            self.assertEqual(result, coordinator.CommandResult(0, b"ok\n", b""))
+            self.assertTrue(pid_path.is_file())
+            adopted_pid = int(pid_path.read_text(), 10)
+            self.assertFalse(Path(f"/proc/{adopted_pid}").exists())
+            with self.assertRaises(ChildProcessError):
+                os.waitpid(adopted_pid, os.WNOHANG)
+            time.sleep(0.7)
+            self.assertFalse(survived.exists())
+
+    def test_remote_worker_loss_closes_controller_liveness_writer(self):
+        inputs = self.inputs()
+        journal = coordinator._prepare_controller_state(inputs)
+        retained: list[int] = []
+
+        def lost_ssh(argv, timeout, **options):
+            self.assertEqual(argv[0], coordinator.SSH)
+            descriptor = options["stdin"]
+            self.assertTrue(stat.S_ISFIFO(os.fstat(descriptor).st_mode))
+            retained.append(os.dup(descriptor))
+            raise coordinator.NginxCoordinatorError("SSH channel lost")
+
+        with self.assertRaisesRegex(
+            coordinator.NginxCoordinatorError,
+            "SSH channel lost",
+        ):
+            coordinator._call_host_worker(
+                inputs,
+                journal,
+                role="webapp_fi",
+                action="install",
+                generation=None,
+                runner=lost_ssh,
+            )
+        self.assertEqual(len(retained), 1)
+        try:
+            self.assertEqual(os.read(retained[0], 1), b"")
+        finally:
+            os.close(retained[0])
+
+    def test_external_probe_disables_ambient_curl_configuration(self):
+        arguments = coordinator._curl_arguments(
+            vhost="coin.gold-trade.ir",
+            address="65.109.216.187",
+            probe="get",
+        )
+        self.assertEqual(arguments[:2], (coordinator.CURL, "--disable"))
+
     def test_install_is_create_only_idempotent_and_evidence_is_bounded(self) -> None:
         installed = self.install()
         self.assertEqual(installed["status"], "installed")
@@ -828,6 +1163,8 @@ class CoordinatorTests(unittest.TestCase):
         self.assertEqual(result["status"], "compensated-failed")
         self.assertEqual(result["state"], "legacy-normal")
         self.assertFalse(result["active_configuration_mutated"])
+        self.assertIsNone(result["state_receipt_path"])
+        self.assertIsNone(result["state_receipt_sha256"])
         self.assertEqual(
             self.runner.states,
             {"bot_fi": "legacy-normal", "webapp_fi": "legacy-normal"},
@@ -850,6 +1187,51 @@ class CoordinatorTests(unittest.TestCase):
                 row["state"] for row in result["readbacks"].values()
             },
             {"legacy-normal"},
+        )
+
+    def test_baseexception_during_second_host_activation_compensates_then_reraises(
+        self,
+    ) -> None:
+        self.install()
+        interrupted = False
+
+        def interrupt_second_host(argv, timeout, **options):
+            nonlocal interrupted
+            arguments = tuple(argv)
+            if (
+                not interrupted
+                and "--role" in arguments
+                and arguments[arguments.index("--role") + 1] == "webapp_fi"
+                and arguments[arguments.index("--action") + 1] == "activate"
+            ):
+                interrupted = True
+                raise KeyboardInterrupt()
+            return self.runner(argv, timeout, **options)
+
+        with self.assertRaises(KeyboardInterrupt):
+            self.execute(
+                "activate",
+                "legacy-frozen",
+                runner=interrupt_second_host,
+            )
+        self.assertTrue(interrupted)
+        self.assertEqual(
+            self.runner.states,
+            {"bot_fi": "legacy-normal", "webapp_fi": "legacy-normal"},
+        )
+        journal = json.loads(
+            (
+                self.controller_secret
+                / OPERATION_ID
+                / "nginx-coordinator"
+                / "journal.json"
+            ).read_text()
+        )
+        self.assertEqual(journal["stable_state"], "legacy-normal")
+        self.assertEqual(journal["pending"]["status"], "compensated-failed")
+        self.assertEqual(
+            journal["events"][-1]["kind"],
+            "legacy-frozen-compensated",
         )
 
     def test_freeze_receipt_public_validator_and_legal_restore(self) -> None:
@@ -916,6 +1298,52 @@ class CoordinatorTests(unittest.TestCase):
             legacy_frozen_receipt_path=receipt_path,
             legacy_frozen_receipt_sha256=digest,
         ) as lease:
+            transferred = self.root / "transferred-fresh"
+            transferred.mkdir(mode=0o700)
+            receipt_copy = transferred / receipt_path.name
+            claim_copy = transferred / lease.claim_path.name
+            _write_private(receipt_copy, receipt_path.read_bytes())
+            _write_private(claim_copy, lease.claim_path.read_bytes())
+            (
+                transferred_receipt,
+                transferred_receipt_sha256,
+                transferred_claim,
+                transferred_claim_sha256,
+            ) = coordinator.load_transferred_fresh_state_receipt(
+                receipt_copy,
+                "legacy-frozen",
+                OPERATION_ID,
+                RELEASE_SHA,
+                RELEASE_TREE_SHA,
+                hashlib.sha256(self.aggregate.read_bytes()).hexdigest(),
+                live_lease_claim_path=claim_copy,
+                expected_state_receipt_sha256=digest,
+                expected_live_lease_claim_sha256=lease.claim_sha256,
+                expected_owner_action="restore-legacy-writers",
+            )
+            self.assertEqual(transferred_receipt["state"], "legacy-frozen")
+            self.assertEqual(transferred_receipt_sha256, digest)
+            self.assertEqual(transferred_claim, lease.claim)
+            self.assertEqual(
+                transferred_claim_sha256,
+                lease.claim_sha256,
+            )
+            with self.assertRaisesRegex(
+                coordinator.NginxCoordinatorError,
+                "lease binding",
+            ):
+                coordinator.load_transferred_fresh_state_receipt(
+                    receipt_copy,
+                    "legacy-frozen",
+                    OPERATION_ID,
+                    RELEASE_SHA,
+                    RELEASE_TREE_SHA,
+                    hashlib.sha256(self.aggregate.read_bytes()).hexdigest(),
+                    live_lease_claim_path=claim_copy,
+                    expected_state_receipt_sha256=digest,
+                    expected_live_lease_claim_sha256=lease.claim_sha256,
+                    expected_owner_action="capture-frozen-final-snapshots",
+                )
             verified = lease.verify()
             self.assertEqual(verified["phase"], "legacy-frozen")
             self.assertTrue(
@@ -960,6 +1388,297 @@ class CoordinatorTests(unittest.TestCase):
             )
             self.assertRegex(consumption_sha256, r"^[0-9a-f]{64}$")
         self.assertEqual(set(self.runner.states.values()), {"legacy-normal"})
+
+    def test_fresh_readback_replay_touch_and_copy_fail_after_expiry(
+        self,
+    ) -> None:
+        self.install()
+        result = self.execute("readback")
+        receipt_path = Path(result["state_receipt_path"])
+        receipt = json.loads(receipt_path.read_text())
+        aggregate_sha256 = hashlib.sha256(
+            self.aggregate.read_bytes()
+        ).hexdigest()
+        copied = self.root / "copied-and-touched-receipt.json"
+        _write_private(copied, receipt_path.read_bytes())
+        os.utime(copied, None)
+        with self.assertRaisesRegex(
+            coordinator.NginxCoordinatorError,
+            "not controller-canonical",
+        ):
+            coordinator.load_state_receipt(
+                copied,
+                "legacy-normal",
+                OPERATION_ID,
+                RELEASE_SHA,
+                RELEASE_TREE_SHA,
+                aggregate_sha256,
+            )
+        expired_observation = receipt["expires_at_epoch"] + 1
+        os.utime(receipt_path, None)
+        touched, _ = coordinator.load_state_receipt(
+            receipt_path,
+            "legacy-normal",
+            OPERATION_ID,
+            RELEASE_SHA,
+            RELEASE_TREE_SHA,
+            aggregate_sha256,
+        )
+        self.assertEqual(touched, receipt)
+        with self.assertRaisesRegex(
+            coordinator.NginxCoordinatorError,
+            "window is not current",
+        ):
+            coordinator.load_state_receipt(
+                receipt_path,
+                "legacy-normal",
+                OPERATION_ID,
+                RELEASE_SHA,
+                RELEASE_TREE_SHA,
+                aggregate_sha256,
+                observed_at_epoch=expired_observation,
+            )
+        with self.assertRaisesRegex(
+            coordinator.NginxCoordinatorError,
+            "window is not current",
+        ):
+            coordinator.load_state_receipt(
+                copied,
+                "legacy-normal",
+                OPERATION_ID,
+                RELEASE_SHA,
+                RELEASE_TREE_SHA,
+                aggregate_sha256,
+                observed_at_epoch=expired_observation,
+            )
+        historical, historical_digest = coordinator.load_state_receipt(
+            copied,
+            "legacy-normal",
+            OPERATION_ID,
+            RELEASE_SHA,
+            RELEASE_TREE_SHA,
+            aggregate_sha256,
+            allow_historical=True,
+        )
+        self.assertEqual(historical, receipt)
+        self.assertEqual(
+            historical_digest,
+            result["state_receipt_sha256"],
+        )
+
+    def test_identical_state_fresh_readbacks_have_distinct_challenges_and_paths(
+        self,
+    ) -> None:
+        self.install()
+        first = self.execute("readback")
+        second = self.execute("readback")
+        self.assertEqual(first["state"], second["state"])
+        self.assertNotEqual(
+            first["state_receipt_sha256"],
+            second["state_receipt_sha256"],
+        )
+        self.assertNotEqual(
+            first["state_receipt_path"],
+            second["state_receipt_path"],
+        )
+        first_receipt = json.loads(
+            Path(first["state_receipt_path"]).read_text()
+        )
+        second_receipt = json.loads(
+            Path(second["state_receipt_path"]).read_text()
+        )
+        self.assertNotEqual(
+            first_receipt["readback_challenge_sha256"],
+            second_receipt["readback_challenge_sha256"],
+        )
+        for role in coordinator.ROLE_ORDER:
+            self.assertNotEqual(
+                first_receipt["readbacks"][role][
+                    "readback_challenge_nonce"
+                ],
+                second_receipt["readbacks"][role][
+                    "readback_challenge_nonce"
+                ],
+            )
+        with self.assertRaisesRegex(
+            coordinator.NginxCoordinatorError,
+            "not bound to the current journal",
+        ):
+            coordinator.load_state_receipt(
+                Path(first["state_receipt_path"]),
+                "legacy-normal",
+                OPERATION_ID,
+                RELEASE_SHA,
+                RELEASE_TREE_SHA,
+                hashlib.sha256(self.aggregate.read_bytes()).hexdigest(),
+            )
+        historical, _ = coordinator.load_state_receipt(
+            Path(first["state_receipt_path"]),
+            "legacy-normal",
+            OPERATION_ID,
+            RELEASE_SHA,
+            RELEASE_TREE_SHA,
+            hashlib.sha256(self.aggregate.read_bytes()).hexdigest(),
+            allow_historical=True,
+        )
+        self.assertEqual(
+            historical["readback_challenge_sha256"],
+            first_receipt["readback_challenge_sha256"],
+        )
+
+    def test_readback_challenge_substitution_and_host_swap_fail_closed(
+        self,
+    ) -> None:
+        self.install()
+
+        def substitute(argv, timeout, **options):
+            result = self.runner(argv, timeout, **options)
+            arguments = tuple(argv)
+            if (
+                result.returncode == 0
+                and "--action" in arguments
+                and arguments[arguments.index("--action") + 1]
+                == "readback"
+            ):
+                document = json.loads(result.stdout)
+                document["readback_challenge_nonce"] = "f" * 64
+                return coordinator.CommandResult(
+                    0,
+                    json.dumps(document, sort_keys=True).encode() + b"\n",
+                    b"",
+                )
+            return result
+
+        with self.assertRaisesRegex(
+            coordinator.NginxCoordinatorError,
+            "host readback output differs",
+        ):
+            self.execute("readback", runner=substitute)
+
+        bot_response: bytes | None = None
+
+        def swap(argv, timeout, **options):
+            nonlocal bot_response
+            result = self.runner(argv, timeout, **options)
+            arguments = tuple(argv)
+            if (
+                result.returncode == 0
+                and "--action" in arguments
+                and arguments[arguments.index("--action") + 1]
+                == "readback"
+            ):
+                role = arguments[arguments.index("--role") + 1]
+                if role == "bot_fi":
+                    bot_response = result.stdout
+                elif bot_response is not None:
+                    return coordinator.CommandResult(
+                        0,
+                        bot_response,
+                        b"",
+                    )
+            return result
+
+        with self.assertRaisesRegex(
+            coordinator.NginxCoordinatorError,
+            "host readback output differs",
+        ):
+            self.execute("readback", runner=swap)
+
+    def test_partial_host_readback_publishes_no_state_receipt(self) -> None:
+        self.install()
+        receipts_root = (
+            self.controller_secret
+            / OPERATION_ID
+            / "nginx-coordinator"
+            / "receipts"
+        )
+        before = set(receipts_root.iterdir())
+        self.runner.fail_once("webapp_fi", "readback", None)
+        with self.assertRaisesRegex(
+            coordinator.NginxCoordinatorError,
+            "command failed",
+        ):
+            self.execute("readback")
+        self.assertEqual(set(receipts_root.iterdir()), before)
+
+    def test_state_receipt_create_only_collision_fails_closed(self) -> None:
+        self.install()
+        original = coordinator.write_secure_new_bytes
+
+        def collide(path, payload, *, label, mode, max_size):
+            if label == "Nginx coordinator state receipt":
+                _write_private(path, b"{}\n")
+            return original(
+                path,
+                payload,
+                label=label,
+                mode=mode,
+                max_size=max_size,
+            )
+
+        with mock.patch.object(
+            coordinator,
+            "write_secure_new_bytes",
+            side_effect=collide,
+        ), self.assertRaisesRegex(
+            coordinator.NginxCoordinatorError,
+            "could not be persisted",
+        ):
+            self.execute("readback")
+
+    def test_legacy_unchallenged_receipt_requires_historical_policy(
+        self,
+    ) -> None:
+        self.install()
+        result = self.execute("readback")
+        fresh = json.loads(Path(result["state_receipt_path"]).read_text())
+        legacy = dict(fresh)
+        legacy["schema"] = coordinator.STATE_RECEIPT_SCHEMA
+        for field in (
+            "readback_challenge_sha256",
+            "issued_at_epoch",
+            "expires_at_epoch",
+            "captured_at_epoch",
+        ):
+            legacy.pop(field)
+            legacy["external_readback"].pop(field)
+        for row in legacy["readbacks"].values():
+            row["schema"] = "production-shadow-nginx-host-readback-v1"
+            for field in (
+                "readback_challenge_nonce",
+                "readback_challenge_sha256",
+                "issued_at_epoch",
+                "expires_at_epoch",
+                "captured_at_epoch",
+            ):
+                row.pop(field)
+        path = self.root / "legacy-state-receipt.json"
+        _write_private(path, canonical_json_bytes(legacy))
+        aggregate_sha256 = hashlib.sha256(
+            self.aggregate.read_bytes()
+        ).hexdigest()
+        with self.assertRaisesRegex(
+            coordinator.NginxCoordinatorError,
+            "state receipt differs",
+        ):
+            coordinator.load_state_receipt(
+                path,
+                "legacy-normal",
+                OPERATION_ID,
+                RELEASE_SHA,
+                RELEASE_TREE_SHA,
+                aggregate_sha256,
+            )
+        loaded, _ = coordinator.load_state_receipt(
+            path,
+            "legacy-normal",
+            OPERATION_ID,
+            RELEASE_SHA,
+            RELEASE_TREE_SHA,
+            aggregate_sha256,
+            allow_historical=True,
+        )
+        self.assertEqual(loaded, legacy)
 
     def test_readonly_partial_stays_blocked_and_resumes_same_target(self) -> None:
         self.install()
@@ -1544,6 +2263,46 @@ class CoordinatorTests(unittest.TestCase):
             consumption_path, consumption_sha256 = lease.consume(
                 outcome="frozen-final-shadow-restored",
                 outcome_sha256="c" * 64,
+            )
+            audit = json.loads(consumption_path.read_text())
+            self.assertEqual(audit["final_state"], "legacy-frozen")
+            self.assertEqual(
+                audit["final_state_receipt_sha256"],
+                receipt_sha256,
+            )
+            self.assertIsNone(audit["readiness_audit_sha256"])
+            self.assertRegex(consumption_sha256, r"^[0-9a-f]{64}$")
+        self.assertEqual(self.execute("readback")["state"], "legacy-frozen")
+
+    def test_current_verification_owner_is_least_privilege(self) -> None:
+        self.install()
+        frozen = self.execute("activate", "legacy-frozen")
+        receipt_path = Path(frozen["state_receipt_path"])
+        receipt_sha256 = frozen["state_receipt_sha256"]
+        inputs = self.inputs()
+        with coordinator.hold_coordinator_live_lease(
+            inputs=inputs,
+            owner_action="verify-current-frozen-writers",
+            legacy_frozen_receipt_path=receipt_path,
+            legacy_frozen_receipt_sha256=receipt_sha256,
+        ) as lease:
+            self.assertEqual(lease.verify()["phase"], "legacy-frozen")
+            for forbidden_outcome in (
+                "handoff-shadow-readonly",
+                "legacy-restored",
+                "frozen-final-shadow-restored",
+            ):
+                with self.assertRaisesRegex(
+                    coordinator.NginxCoordinatorError,
+                    "outside its owner action",
+                ):
+                    lease.consume(
+                        outcome=forbidden_outcome,
+                        outcome_sha256="d" * 64,
+                    )
+            consumption_path, consumption_sha256 = lease.consume(
+                outcome="current-frozen-verified",
+                outcome_sha256="d" * 64,
             )
             audit = json.loads(consumption_path.read_text())
             self.assertEqual(audit["final_state"], "legacy-frozen")

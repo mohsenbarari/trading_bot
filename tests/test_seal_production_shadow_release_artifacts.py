@@ -700,6 +700,68 @@ class ReleaseArtifactProducerTests(unittest.TestCase):
         self.assertIn("pull", plan["forbidden"])
         self.assertIn("push", plan["forbidden"])
 
+    def test_default_executor_delegates_to_identity_bounded_execution(self):
+        arguments = [MODULE.GIT, "--version"]
+        bounded_result = MODULE.BoundedCommandResult(
+            returncode=0,
+            stdout=b"git version\n",
+            stderr=b"",
+        )
+        with mock.patch.object(
+            MODULE,
+            "_bounded_command",
+            return_value=bounded_result,
+        ) as bounded:
+            completed = self.real_execute(
+                arguments,
+                timeout=17,
+                env=MODULE.SAFE_GIT_ENV,
+            )
+
+        self.assertEqual(completed.args, arguments)
+        self.assertEqual(completed.returncode, 0)
+        self.assertEqual(completed.stdout, b"git version\n")
+        self.assertEqual(completed.stderr, b"")
+        bounded.assert_called_once_with(
+            arguments,
+            timeout=17,
+            env=dict(MODULE.SAFE_GIT_ENV),
+            stdout_limit=MODULE.MAX_COMMAND_OUTPUT_BYTES,
+            stderr_limit=MODULE.MAX_COMMAND_OUTPUT_BYTES,
+        )
+
+    def test_default_executor_maps_bounded_failure_but_not_baseexception(self):
+        arguments = [MODULE.GIT, "--version"]
+        with (
+            mock.patch.object(
+                MODULE,
+                "_bounded_command",
+                side_effect=MODULE.BoundedCommandError("timed out"),
+            ),
+            self.assertRaisesRegex(
+                MODULE.ReleaseArtifactError,
+                "required local command is unavailable",
+            ),
+        ):
+            self.real_execute(
+                arguments,
+                timeout=1,
+                env=MODULE.SAFE_GIT_ENV,
+            )
+        with (
+            mock.patch.object(
+                MODULE,
+                "_bounded_command",
+                side_effect=KeyboardInterrupt,
+            ),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            self.real_execute(
+                arguments,
+                timeout=1,
+                env=MODULE.SAFE_GIT_ENV,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

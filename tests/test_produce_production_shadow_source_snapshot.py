@@ -7,10 +7,12 @@ import io
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
+import sys
 import tarfile
 import tempfile
-import types
+import time
 import unittest
 from unittest import mock
 
@@ -29,6 +31,30 @@ def canonical_bytes(value: object) -> bytes:
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
+
+
+def external_liveness_pipe(
+    hold_seconds: float,
+) -> tuple[int, subprocess.Popen[bytes]]:
+    read_fd, write_fd = os.pipe()
+    try:
+        holder = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import time,sys; time.sleep(float(sys.argv[1]))",
+                str(hold_seconds),
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            pass_fds=(write_fd,),
+            start_new_session=True,
+        )
+    finally:
+        os.close(write_fd)
+    return read_fd, holder
 
 
 class SnapshotFixture:
@@ -167,12 +193,48 @@ def container_document(
 
 
 class ProductionSourceSnapshotTests(unittest.TestCase):
+    def test_cli_imports_from_immutable_root_under_isolated_python(self):
+        with tempfile.TemporaryDirectory() as directory:
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    str(Path(MODULE.__file__).resolve()),
+                    "--help",
+                ],
+                cwd=directory,
+                env={
+                    "PATH": "/usr/bin:/bin",
+                    "HOME": "/nonexistent",
+                    "LANG": "C.UTF-8",
+                    "LC_ALL": "C.UTF-8",
+                    "PYTHONDONTWRITEBYTECODE": "1",
+                },
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=10,
+            )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertTrue(completed.stdout.startswith(b"usage:"))
+        self.assertEqual(completed.stderr, b"")
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
+        self.reconciliation_root = self.root / "reconciliation"
+        self.reconciliation_patch = mock.patch.object(
+            MODULE,
+            "SCRATCH_RECONCILIATION_ROOT",
+            self.reconciliation_root,
+        )
+        self.reconciliation_patch.start()
         self.fixture = SnapshotFixture(self.root)
 
     def tearDown(self) -> None:
+        self.reconciliation_patch.stop()
         self.temporary.cleanup()
 
     def test_default_is_a_nonexecuting_plan_with_exact_paths_and_argv(self):
@@ -1268,9 +1330,15 @@ class ProductionSourceSnapshotTests(unittest.TestCase):
                 MODULE, "_inspect_required", side_effect=inspect
             ),
             mock.patch.object(
-                MODULE.subprocess,
-                "run",
-                return_value=types.SimpleNamespace(returncode=0),
+                MODULE,
+                "_bounded_process",
+                return_value=MODULE.BoundedCommandResult(
+                    returncode=0,
+                    stdout=b"",
+                    stderr=b"",
+                    stdout_bytes=0,
+                    stdout_records=0,
+                ),
             ),
             mock.patch.object(
                 MODULE,
@@ -1359,9 +1427,18 @@ class ProductionSourceSnapshotTests(unittest.TestCase):
                     volume_document,
                     None,
                     None,
+                    None,
+                    None,
+                    None,
+                    None,
                 ],
             ),
             mock.patch.object(MODULE, "_run", return_value="") as run,
+            mock.patch.object(
+                MODULE,
+                "SCRATCH_CLEANUP_QUIESCENCE_SECONDS",
+                0.0,
+            ),
         ):
             self.assertTrue(MODULE.cleanup_exact_scratch(binding))
         self.assertEqual(
@@ -1395,6 +1472,460 @@ class ProductionSourceSnapshotTests(unittest.TestCase):
         ):
             MODULE.cleanup_exact_scratch(binding)
         run.assert_not_called()
+
+    def test_cleanup_quiescence_removes_late_exact_scratch(self):
+        binding = self.fixture.binding()
+        container, volume = MODULE._scratch_names(binding)
+        container_document = {
+            "Id": "8" * 64,
+            "Name": f"/{container}",
+            "Image": "sha256:" + "9" * 64,
+            "Config": {
+                "Image": "sha256:" + "9" * 64,
+                "Labels": MODULE._scratch_labels(binding),
+            },
+            "HostConfig": {
+                "NetworkMode": "none",
+                "PortBindings": {},
+                "Privileged": False,
+                "RestartPolicy": {
+                    "Name": "no",
+                    "MaximumRetryCount": 0,
+                },
+            },
+            "Mounts": [
+                {
+                    "Type": "volume",
+                    "Name": volume,
+                    "Destination": "/var/lib/postgresql/data",
+                    "RW": True,
+                }
+            ],
+        }
+        volume_document = {
+            "Name": volume,
+            "Driver": "local",
+            "Labels": MODULE._scratch_labels(binding),
+            "Options": None,
+        }
+        observations = iter(
+            [
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                container_document,
+                volume_document,
+            ]
+        )
+
+        def inspect(*_args, **_kwargs):
+            return next(observations, None)
+
+        with (
+            mock.patch.object(
+                MODULE,
+                "_inspect_optional",
+                side_effect=inspect,
+            ),
+            mock.patch.object(MODULE, "_run", return_value="") as run,
+            mock.patch.object(MODULE, "PROCESS_POLL_SECONDS", 0.001),
+            mock.patch.object(
+                MODULE,
+                "SCRATCH_CLEANUP_QUIESCENCE_SECONDS",
+                0.01,
+            ),
+        ):
+            self.assertTrue(MODULE.cleanup_exact_scratch(binding))
+        self.assertEqual(run.call_count, 2)
+        record = (
+            self.reconciliation_root
+            / OPERATION_ID
+            / "source-snapshot-reconciliation"
+            / "bot_fi-live-baseline.json"
+        )
+        self.assertEqual(record.stat().st_mode & 0o777, 0o600)
+        self.assertTrue(json.loads(record.read_bytes())["zero_residue"])
+
+    def test_nonzero_scratch_persists_fail_closed_reconciliation(self):
+        binding = self.fixture.binding()
+        container, volume = MODULE._scratch_names(binding)
+        container_document = {
+            "Id": "8" * 64,
+            "Name": f"/{container}",
+            "Image": "sha256:" + "9" * 64,
+            "Config": {
+                "Image": "sha256:" + "9" * 64,
+                "Labels": MODULE._scratch_labels(binding),
+            },
+            "HostConfig": {
+                "NetworkMode": "none",
+                "PortBindings": {},
+                "Privileged": False,
+                "RestartPolicy": {
+                    "Name": "no",
+                    "MaximumRetryCount": 0,
+                },
+            },
+            "Mounts": [
+                {
+                    "Type": "volume",
+                    "Name": volume,
+                    "Destination": "/var/lib/postgresql/data",
+                    "RW": True,
+                }
+            ],
+        }
+
+        def inspect(kind, _name, **_kwargs):
+            return container_document if kind == "container" else None
+
+        with (
+            mock.patch.object(
+                MODULE,
+                "_inspect_optional",
+                side_effect=inspect,
+            ),
+            mock.patch.object(MODULE, "_run", return_value=""),
+            mock.patch.object(
+                MODULE,
+                "SCRATCH_CLEANUP_TIMEOUT_SECONDS",
+                0.05,
+            ),
+            mock.patch.object(MODULE, "PROCESS_POLL_SECONDS", 0.001),
+            self.assertRaisesRegex(
+                MODULE.SourceSnapshotError,
+                "cleanup timed out|quiesce",
+            ),
+        ):
+            MODULE.cleanup_exact_scratch(binding)
+        record = (
+            self.reconciliation_root
+            / OPERATION_ID
+            / "source-snapshot-reconciliation"
+            / "bot_fi-live-baseline.json"
+        )
+        document = json.loads(record.read_bytes())
+        self.assertFalse(document["zero_residue"])
+        self.assertRegex(document["cleanup_error_sha256"], r"^[0-9a-f]{64}$")
+        self.assertEqual(record.stat().st_mode & 0o777, 0o600)
+
+    def test_bounded_process_rejects_flood_timeout_and_setsid_survivor(self):
+        with self.assertRaisesRegex(
+            MODULE.SourceSnapshotError,
+            "output exceeds",
+        ):
+            MODULE._bounded_process(
+                [
+                    sys.executable,
+                    "-c",
+                    (
+                        "import os\n"
+                        "while True:\n"
+                        " os.write(1, b'x' * 65536)\n"
+                    ),
+                ],
+                timeout=2,
+                stdout_limit=1024,
+            )
+        with self.assertRaisesRegex(
+            MODULE.SourceSnapshotError,
+            "timed out",
+        ):
+            MODULE._bounded_process(
+                [sys.executable, "-c", "import time; time.sleep(5)"],
+                timeout=0.05,
+            )
+
+        sentinel = self.root / "setsid-survivor"
+        program = (
+            "import os,signal,sys,time\n"
+            "child=os.fork()\n"
+            "if child == 0:\n"
+            " os.setsid()\n"
+            " signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            " time.sleep(0.5)\n"
+            " open(sys.argv[1], 'wb').write(b'survived')\n"
+            " os._exit(0)\n"
+            "time.sleep(5)\n"
+        )
+        with (
+            mock.patch.object(
+                MODULE,
+                "PROCESS_GROUP_TERM_SECONDS",
+                0.05,
+            ),
+            mock.patch.object(MODULE, "PROCESS_POLL_SECONDS", 0.005),
+            self.assertRaisesRegex(
+                MODULE.SourceSnapshotError,
+                "timed out",
+            ),
+        ):
+            MODULE._bounded_process(
+                [sys.executable, "-c", program, str(sentinel)],
+                timeout=0.1,
+            )
+        time.sleep(0.6)
+        self.assertFalse(sentinel.exists())
+
+        rapid_sentinel = self.root / "rapid-setsid-survivor"
+        rapid_program = (
+            "import os,signal,sys,time\n"
+            "child=os.fork()\n"
+            "if child == 0:\n"
+            " os.setsid()\n"
+            " os.close(1); os.close(2)\n"
+            " signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            " time.sleep(0.4)\n"
+            " open(sys.argv[1], 'wb').write(b'survived')\n"
+            " os._exit(0)\n"
+            "os._exit(0)\n"
+        )
+        result = MODULE._bounded_process(
+            [
+                sys.executable,
+                "-c",
+                rapid_program,
+                str(rapid_sentinel),
+            ],
+            timeout=2,
+        )
+        self.assertEqual(result.returncode, 0)
+        time.sleep(0.5)
+        self.assertFalse(rapid_sentinel.exists())
+
+    def test_bounded_process_reaps_adopted_double_fork_zombies(self):
+        baseline = MODULE._direct_child_baseline()
+        program = (
+            "import os\n"
+            "if os.fork() == 0:\n"
+            " if os.fork() == 0:\n"
+            "  os._exit(0)\n"
+            " os._exit(0)\n"
+            "os._exit(0)\n"
+        )
+        result = MODULE._bounded_process(
+            [sys.executable, "-c", program],
+            timeout=2,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(
+            MODULE._direct_child_baseline() - baseline,
+            frozenset(),
+        )
+
+    def test_controller_disconnect_cancels_source_and_control_fd_does_not_leak(self):
+        read_fd, holder = external_liveness_pipe(5)
+        try:
+            with MODULE.ControllerLivenessGuard(read_fd):
+                identity = os.fstat(read_fd)
+                program = (
+                    "import os,stat,sys\n"
+                    "target=(int(sys.argv[1]),int(sys.argv[2]))\n"
+                    "leaked=False\n"
+                    "for name in os.listdir('/proc/self/fd'):\n"
+                    " try:\n"
+                    "  row=os.fstat(int(name))\n"
+                    " except OSError:\n"
+                    "  continue\n"
+                    " if stat.S_ISFIFO(row.st_mode) and "
+                    "(row.st_dev,row.st_ino)==target:\n"
+                    "  leaked=True\n"
+                    "print('leaked' if leaked else 'clean')\n"
+                )
+                self.assertEqual(
+                    MODULE._run(
+                        [
+                            sys.executable,
+                            "-c",
+                            program,
+                            str(identity.st_dev),
+                            str(identity.st_ino),
+                        ]
+                    ),
+                    "clean",
+                )
+        finally:
+            os.close(read_fd)
+            holder.terminate()
+            holder.wait(timeout=1)
+
+        read_fd, holder = external_liveness_pipe(0.05)
+        try:
+            with (
+                mock.patch.object(MODULE, "PROCESS_POLL_SECONDS", 0.005),
+                MODULE.ControllerLivenessGuard(read_fd),
+            ):
+                with self.assertRaises(
+                    MODULE.SourceSnapshotCancellation
+                ):
+                    MODULE._run(
+                        [
+                            sys.executable,
+                            "-c",
+                            "import time; time.sleep(5)",
+                        ],
+                        timeout=5,
+                    )
+        finally:
+            os.close(read_fd)
+            holder.wait(timeout=1)
+
+    def test_source_liveness_rejects_worker_held_writer_end(self):
+        read_fd, write_fd = os.pipe()
+        try:
+            with self.assertRaisesRegex(
+                MODULE.SourceSnapshotError,
+                "writer end",
+            ):
+                MODULE.ControllerLivenessGuard(read_fd)
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+    def test_liveness_enter_failure_restores_handlers_and_descriptor(self):
+        read_fd, write_fd = os.pipe()
+        os.close(write_fd)
+        originals = {
+            signum: signal.getsignal(signum)
+            for signum in MODULE.ControllerLivenessGuard._HANDLED_SIGNALS
+        }
+        try:
+            guard = MODULE.ControllerLivenessGuard(read_fd)
+            secured_fd = guard._fd
+            with self.assertRaises(
+                MODULE.SourceSnapshotCancellation
+            ):
+                guard.__enter__()
+            with self.assertRaises(OSError):
+                os.fstat(secured_fd)
+            self.assertEqual(
+                {
+                    signum: signal.getsignal(signum)
+                    for signum in originals
+                },
+                originals,
+            )
+        finally:
+            os.close(read_fd)
+
+    def test_sigterm_and_sigint_are_catchable_cancellation(self):
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            with self.subTest(signum=signum):
+                read_fd, holder = external_liveness_pipe(5)
+                try:
+                    with MODULE.ControllerLivenessGuard(read_fd) as guard:
+                        with self.assertRaises(
+                            MODULE.SourceSnapshotCancellation
+                        ):
+                            guard._handle_signal(signum, None)
+                        other = (
+                            signal.SIGINT
+                            if signum == signal.SIGTERM
+                            else signal.SIGTERM
+                        )
+                        self.assertIsNone(
+                            guard._handle_signal(other, None)
+                        )
+                finally:
+                    os.close(read_fd)
+                    holder.terminate()
+                    holder.wait(timeout=1)
+
+    def test_apply_requires_real_controller_liveness_pipe(self):
+        captured = io.StringIO()
+        with redirect_stdout(captured):
+            status = MODULE.main(
+                [
+                    "--binding",
+                    str(self.fixture.binding_path),
+                    "--output-root",
+                    str(self.root / "output"),
+                    "--apply",
+                    "--confirm",
+                    MODULE.confirmation_phrase(self.fixture.binding()),
+                ]
+            )
+        self.assertEqual(status, 1)
+        self.assertIn("requires --control-fd", captured.getvalue())
+
+    def test_source_producer_cli_disconnect_is_fail_closed(self):
+        read_fd, holder = external_liveness_pipe(0.05)
+        captured = io.StringIO()
+
+        def execute(*_args, **_kwargs):
+            MODULE._run(
+                [
+                    sys.executable,
+                    "-c",
+                    "import time; time.sleep(5)",
+                ],
+                timeout=5,
+            )
+            self.fail("disconnected source command unexpectedly completed")
+
+        try:
+            with (
+                mock.patch.object(
+                    MODULE,
+                    "operation_lock",
+                    return_value=nullcontext(),
+                ),
+                mock.patch.object(MODULE, "execute", side_effect=execute),
+                mock.patch.object(MODULE, "PROCESS_POLL_SECONDS", 0.005),
+                redirect_stdout(captured),
+            ):
+                status = MODULE.main(
+                    [
+                        "--binding",
+                        str(self.fixture.binding_path),
+                        "--output-root",
+                        str(self.root / "output"),
+                        "--apply",
+                        "--confirm",
+                        MODULE.confirmation_phrase(
+                            self.fixture.binding()
+                        ),
+                        "--control-fd",
+                        str(read_fd),
+                    ]
+                )
+        finally:
+            os.close(read_fd)
+            holder.wait(timeout=1)
+        self.assertEqual(status, 1)
+        self.assertIn("liveness pipe reached EOF", captured.getvalue())
+
+    def test_execute_cleanup_is_baseexception_safe(self):
+        class HostileCancellation(BaseException):
+            pass
+
+        binding = self.fixture.binding()
+        output_root = self.root / "baseexception-output"
+        output_root.mkdir(mode=0o700)
+        with (
+            mock.patch.object(
+                MODULE,
+                "inspect_source",
+                side_effect=HostileCancellation("stop"),
+            ),
+            mock.patch.object(
+                MODULE,
+                "cleanup_exact_scratch",
+            ) as cleanup,
+            self.assertRaises(HostileCancellation),
+        ):
+            MODULE.execute(
+                binding,
+                output_root=output_root,
+                freeze_path=None,
+                freeze_sha256=None,
+            )
+        cleanup.assert_called_once_with(binding)
 
     def test_create_only_output_and_crash_stage_retry(self):
         binding = self.fixture.binding()

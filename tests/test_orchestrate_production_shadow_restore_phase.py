@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import unittest
 from unittest import mock
 
+from core.canonical_json import canonical_json_bytes
 from scripts import orchestrate_production_shadow_restore_phase as MODULE
 
 
@@ -32,6 +33,7 @@ LIVE_LEASE_CLAIM = {
     "release_sha": SHA40,
     "nonce": "6" * 64,
 }
+TRUSTED_TEST_TEMP_ROOT = Path("/root/trading-bot/trading_bot/tmp")
 
 
 def private_directory(path: Path) -> Path:
@@ -289,6 +291,9 @@ def completion(ctx: MODULE.CoordinatorContext) -> dict:
                         "document": {
                             "semantic": {
                                 "database_container_id": str(index) * 64,
+                                "database_host_config_sha256": (
+                                    str(index + 3) * 64
+                                ),
                             }
                         }
                     }
@@ -320,7 +325,11 @@ class FakeLease:
 class RestorePhaseCoordinatorTests(unittest.TestCase):
     def setUp(self) -> None:
         global KNOWN_HOSTS, SSH_IDENTITY
-        self.temporary = tempfile.TemporaryDirectory()
+        # The real immutable-release check rejects /tmp because its ancestor
+        # is world-writable. Keep this integration fixture below the
+        # root-owned primary checkout instead of weakening that production
+        # guard for a test-only path.
+        self.temporary = tempfile.TemporaryDirectory(dir=TRUSTED_TEST_TEMP_ROOT)
         self.root = private_directory(Path(self.temporary.name))
         self.original_ssh_identity = SSH_IDENTITY
         self.original_known_hosts = KNOWN_HOSTS
@@ -579,6 +588,31 @@ class RestorePhaseCoordinatorTests(unittest.TestCase):
         ):
             MODULE._database_container_ids(tampered)
 
+    def test_database_host_config_digests_are_completion_bound(self) -> None:
+        document = completion(self.context)
+        observed = MODULE._database_host_config_sha256s(document)
+        self.assertEqual(
+            observed,
+            {
+                role: str(index + 3) * 64
+                for index, role in enumerate(MODULE.ROLES, 1)
+            },
+        )
+        for value in (None, "0" * 64, "short"):
+            with self.subTest(value=value):
+                tampered = copy.deepcopy(document)
+                semantic = tampered["roles"]["bot_fi"]["host_result"][
+                    "action_evidence"
+                ]["verify-final"]["document"]["semantic"]
+                if value is None:
+                    del semantic["database_host_config_sha256"]
+                else:
+                    semantic["database_host_config_sha256"] = value
+                with self.assertRaises(
+                    MODULE.RestorePhaseCoordinatorError
+                ):
+                    MODULE._database_host_config_sha256s(tampered)
+
     def test_inventory_request_is_exact_release_and_role_derived(self) -> None:
         request = MODULE._inventory_request(
             self.context,
@@ -586,6 +620,7 @@ class RestorePhaseCoordinatorTests(unittest.TestCase):
             action="capture-before",
             inventory_agent_sha256=SHA256,
             expected_operation_container_id=None,
+            expected_operation_host_config_sha256=None,
             role_manifest_path=None,
             role_manifest_sha256=None,
         )
@@ -641,6 +676,7 @@ class RestorePhaseCoordinatorTests(unittest.TestCase):
             action="capture-before",
             inventory_agent_sha256=SHA256,
             expected_operation_container_id=None,
+            expected_operation_host_config_sha256=None,
             role_manifest_path=None,
             role_manifest_sha256=None,
         )
@@ -834,14 +870,23 @@ class RestorePhaseCoordinatorTests(unittest.TestCase):
         prepare_callback.assert_not_called()
 
     def test_claim_values_bind_completion_snapshot_redis_and_inventory(self) -> None:
+        inventory_closure = {"non_operation_resource_delta_count": 0}
+        inventory_closure_sha256 = hashlib.sha256(
+            MODULE._canonical_json(inventory_closure) + b"\n"
+        ).hexdigest()
         values = MODULE._derive_claim_values(
             self.context,
             completion=completion(self.context),
             completion_sha256="8" * 64,
-            inventory_closure={"non_operation_resource_delta_count": 0},
+            inventory_closure=inventory_closure,
+            inventory_closure_sha256=inventory_closure_sha256,
         )
         self.assertEqual(set(values), set(MODULE.CLAIMS))
         self.assertEqual(values["restore_result_set_sha256"], "8" * 64)
+        self.assertEqual(
+            values["inventory_closure_sha256"],
+            inventory_closure_sha256,
+        )
         self.assertEqual(values["legacy_redis_restore_byte_count"], 0)
         with self.assertRaisesRegex(
             MODULE.RestorePhaseCoordinatorError,
@@ -854,6 +899,23 @@ class RestorePhaseCoordinatorTests(unittest.TestCase):
                 inventory_closure={
                     "non_operation_resource_delta_count": 1
                 },
+                inventory_closure_sha256=hashlib.sha256(
+                    MODULE._canonical_json(
+                        {"non_operation_resource_delta_count": 1}
+                    )
+                    + b"\n"
+                ).hexdigest(),
+            )
+        with self.assertRaisesRegex(
+            MODULE.RestorePhaseCoordinatorError,
+            "inventory closure",
+        ):
+            MODULE._derive_claim_values(
+                self.context,
+                completion=completion(self.context),
+                completion_sha256="8" * 64,
+                inventory_closure=inventory_closure,
+                inventory_closure_sha256="7" * 64,
             )
 
     def test_inventory_control_is_bounded_and_has_no_application_payload(
@@ -920,6 +982,7 @@ class RestorePhaseCoordinatorTests(unittest.TestCase):
             "reviewed_file_restore_verified": True,
             "legacy_redis_restore_byte_count": 0,
             "non_operation_resource_delta_count": 0,
+            "inventory_closure_sha256": "0" * 63 + "1",
             "restored_postgres_snapshot_set_sha256": "a" * 64,
             "restored_reviewed_file_snapshot_set_sha256": "b" * 64,
             "restore_result_set_sha256": "8" * 64,
@@ -1053,7 +1116,7 @@ class RestorePhaseCoordinatorTests(unittest.TestCase):
             MODULE.VERIFY.PHASE_EVIDENCE_CONTRACT_SHA256
         )
         manifest_sha256 = hashlib.sha256(
-            producer_fixture.canonical_bytes(manifest)
+            canonical_json_bytes(manifest)
         ).hexdigest()
 
         restore_set = worker_fixture.restore_set_document()
@@ -1316,6 +1379,9 @@ class RestorePhaseCoordinatorTests(unittest.TestCase):
             final["document"]["semantic"][
                 "database_container_id"
             ] = container_ids[role]
+            final["document"]["semantic"][
+                "database_host_config_sha256"
+            ] = str(MODULE.ROLES.index(role) + 4) * 64
             restore_fixture.refresh_readback(final)
             final_sha256 = final["canonical_document_sha256"]
             restored = result["restore_result"]
@@ -1513,6 +1579,13 @@ class RestorePhaseCoordinatorTests(unittest.TestCase):
                 mock.patch.object(
                     MODULE.INVENTORY,
                     "_validate_operation_closure",
+                    return_value=(
+                        request[
+                            "expected_operation_host_config_sha256"
+                        ]
+                        if after
+                        else None
+                    ),
                 ),
             ):
                 snapshot = inventory_fixture._snapshot(
@@ -1535,6 +1608,7 @@ class RestorePhaseCoordinatorTests(unittest.TestCase):
                 action="capture-before",
                 inventory_agent_sha256=inventory_agent_sha256,
                 expected_operation_container_id=None,
+                expected_operation_host_config_sha256=None,
                 role_manifest_path=None,
                 role_manifest_sha256=None,
             )
@@ -1552,6 +1626,11 @@ class RestorePhaseCoordinatorTests(unittest.TestCase):
                 action="capture-after",
                 inventory_agent_sha256=inventory_agent_sha256,
                 expected_operation_container_id=container_ids[role],
+                expected_operation_host_config_sha256=(
+                    results[role]["action_evidence"]["verify-final"][
+                        "document"
+                    ]["semantic"]["database_host_config_sha256"]
+                ),
                 role_manifest_path=Path(role_manifest["path"]),
                 role_manifest_sha256=role_manifest[
                     "canonical_document_sha256"
@@ -1601,6 +1680,7 @@ class RestorePhaseCoordinatorTests(unittest.TestCase):
             completion=completion_document,
             completion_sha256=completion_sha256,
             inventory_closure=closure,
+            inventory_closure_sha256=closure_sha256,
         )
         role_validation_paths = {}
         role_validation_sha256 = {}
@@ -2279,6 +2359,7 @@ class RestorePhaseCoordinatorTests(unittest.TestCase):
                     "reviewed_file_restore_verified": True,
                     "legacy_redis_restore_byte_count": 0,
                     "non_operation_resource_delta_count": 0,
+                    "inventory_closure_sha256": "a" * 64,
                     "restored_postgres_snapshot_set_sha256": "a" * 64,
                     "restored_reviewed_file_snapshot_set_sha256": "b" * 64,
                     "restore_result_set_sha256": "d" * 64,
@@ -2816,7 +2897,7 @@ class RestorePhaseCoordinatorTests(unittest.TestCase):
         for callback in callbacks:
             callback.assert_not_called()
 
-    def test_unconsumed_resume_reuses_preconsume_inventory_reference(
+    def test_unconsumed_resume_recaptures_preconsume_inventory_closure(
         self,
     ) -> None:
         private_directory(self.context.restore_output_directory)
@@ -2835,7 +2916,13 @@ class RestorePhaseCoordinatorTests(unittest.TestCase):
             "{}\n",
             encoding="utf-8",
         )
-        capture = mock.Mock()
+        capture = mock.Mock(
+            return_value=(
+                {"non_operation_resource_delta_count": 0},
+                self.root / "zero-delta.json",
+                SHA256,
+            )
+        )
         load_reference = mock.Mock(
             return_value=(
                 {"non_operation_resource_delta_count": 0},
@@ -2931,8 +3018,8 @@ class RestorePhaseCoordinatorTests(unittest.TestCase):
                 evidence_publisher=mock.Mock(),
                 confirm="exact",
             )
-        capture.assert_not_called()
-        load_reference.assert_called_once()
+        capture.assert_called_once()
+        load_reference.assert_not_called()
 
     def test_consumed_recovery_does_not_require_or_consume_second_lease(
         self,
@@ -3144,6 +3231,73 @@ class RestorePhaseCoordinatorTests(unittest.TestCase):
         self.assertTrue(result.process_group_cleanup_performed)
         self.assertTrue(result.process_group_terminated)
 
+    def test_bounded_runner_root_pidfd_contains_identity_failure(self) -> None:
+        opened: list[tuple[int, int]] = []
+        real_pidfd_open = os.pidfd_open
+
+        def capture_pidfd(pid: int, flags: int = 0) -> int:
+            descriptor = real_pidfd_open(pid, flags)
+            opened.append((pid, descriptor))
+            return descriptor
+
+        with (
+            mock.patch.object(
+                MODULE,
+                "_direct_child_baseline",
+                return_value=frozenset(),
+            ),
+            mock.patch.object(
+                MODULE,
+                "_process_identity",
+                return_value=None,
+            ),
+            mock.patch.object(
+                MODULE.os,
+                "pidfd_open",
+                side_effect=capture_pidfd,
+            ),
+            self.assertRaisesRegex(
+                MODULE.RestorePhaseCoordinatorError,
+                "identity is unavailable",
+            ),
+        ):
+            MODULE.run_bounded_process(
+                isolated_python_control(
+                    "import time;time.sleep(60)",
+                    timeout_seconds=5,
+                )
+            )
+        self.assertEqual(len(opened), 1)
+        pid, descriptor = opened[0]
+        self.assertFalse(Path(f"/proc/{pid}").exists())
+        with self.assertRaises(OSError):
+            os.fstat(descriptor)
+
+    def test_bounded_runner_cleanup_close_preserves_interrupt(self) -> None:
+        selector = mock.Mock()
+        selector.get_map.return_value = {
+            "active": SimpleNamespace(data="stdout")
+        }
+        selector.select.side_effect = KeyboardInterrupt
+        selector.close.side_effect = RuntimeError(
+            "forced selector close failure"
+        )
+        with (
+            mock.patch.object(
+                MODULE.selectors,
+                "DefaultSelector",
+                return_value=selector,
+            ),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            MODULE.run_bounded_process(
+                isolated_python_control(
+                    "import time;time.sleep(60)",
+                    timeout_seconds=5,
+                )
+            )
+        selector.close.assert_called_once_with()
+
     def test_bounded_runner_terminates_forked_descendant(self) -> None:
         ready = self.root / "forked-descendant-ready"
         source = "\n".join(
@@ -3159,7 +3313,7 @@ class RestorePhaseCoordinatorTests(unittest.TestCase):
                 "        stream.write(b'ready\\n')",
                 "    time.sleep(30)",
                 "    os._exit(0)",
-                "deadline = time.monotonic() + 2",
+                "deadline = time.monotonic() + 10",
                 "while not os.path.exists(ready):",
                 "    if time.monotonic() >= deadline:",
                 "        raise RuntimeError('descendant did not start')",
@@ -3168,28 +3322,70 @@ class RestorePhaseCoordinatorTests(unittest.TestCase):
             )
         )
         result = MODULE.run_bounded_process(
-            isolated_python_control(source, timeout_seconds=5.0)
+            isolated_python_control(source, timeout_seconds=15.0)
         )
         child_pid = int(result.stdout.decode("ascii"))
         self.assertEqual(result.returncode, 0)
         self.assertTrue(ready.is_file())
         self.assertTrue(result.process_group_cleanup_performed)
         self.assertTrue(result.process_group_terminated)
-        stopped = False
         deadline = time.monotonic() + 2
-        while time.monotonic() < deadline:
-            try:
-                status = Path(f"/proc/{child_pid}/stat").read_text(
-                    encoding="ascii"
-                )
-            except FileNotFoundError:
-                stopped = True
-                break
-            if status.split()[2] == "Z":
-                stopped = True
-                break
+        child_path = Path(f"/proc/{child_pid}")
+        while child_path.exists() and time.monotonic() < deadline:
             time.sleep(0.01)
-        self.assertTrue(stopped, "forked descendant remained executable")
+        self.assertFalse(
+            child_path.exists(),
+            "forked descendant or adopted zombie remained in /proc",
+        )
+
+    def test_bounded_runner_reaps_rapid_detached_double_fork(self) -> None:
+        ready = self.root / "detached-grandchild-pid"
+        source = "\n".join(
+            (
+                "import os",
+                "import signal",
+                "import time",
+                f"ready = {os.fspath(ready)!r}",
+                "middle = os.fork()",
+                "if middle == 0:",
+                "    os.setsid()",
+                "    grandchild = os.fork()",
+                "    if grandchild == 0:",
+                "        signal.signal(signal.SIGTERM, signal.SIG_IGN)",
+                "        partial = ready + '.partial'",
+                "        with open(partial, 'w', encoding='ascii') as stream:",
+                "            stream.write(str(os.getpid()) + '\\n')",
+                "            stream.flush()",
+                "            os.fsync(stream.fileno())",
+                "        os.replace(partial, ready)",
+                "        time.sleep(30)",
+                "        os._exit(0)",
+                "    os._exit(0)",
+                "deadline = time.monotonic() + 10",
+                "while not os.path.exists(ready):",
+                "    if time.monotonic() >= deadline:",
+                "        raise RuntimeError('grandchild did not start')",
+                "    time.sleep(0.005)",
+                "with open(ready, encoding='ascii') as stream:",
+                "    grandchild = int(stream.read().strip())",
+                "os.write(1, (str(grandchild) + '\\n').encode('ascii'))",
+            )
+        )
+        result = MODULE.run_bounded_process(
+            isolated_python_control(source, timeout_seconds=15.0)
+        )
+        grandchild_pid = int(result.stdout.decode("ascii"))
+        self.assertEqual(result.returncode, 0)
+        self.assertTrue(result.process_group_cleanup_performed)
+        self.assertTrue(result.process_group_terminated)
+        grandchild_path = Path(f"/proc/{grandchild_pid}")
+        deadline = time.monotonic() + 2
+        while grandchild_path.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertFalse(
+            grandchild_path.exists(),
+            "detached grandchild or adopted zombie remained in /proc",
+        )
 
     def test_injected_runners_must_return_complete_typed_contract(
         self,
@@ -3241,6 +3437,7 @@ class RestorePhaseCoordinatorTests(unittest.TestCase):
         self.assertIn("start_new_session=control.start_new_session", source)
         self.assertIn("env={}", source)
         self.assertNotIn("subprocess.run(", source)
+        self.assertNotIn("os.killpg(", source)
         self.assertNotIn("/usr/bin/scp", source)
 
 

@@ -23,7 +23,7 @@ import re
 import stat
 import sys
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -33,7 +33,6 @@ from core.secure_file_io import read_secure_text, write_secure_atomic_bytes
 from scripts.build_three_site_staging_convergence_evidence import (
     SITES,
     SHA256,
-    SHA40,
     ConvergenceEvidenceError,
     build,
 )
@@ -62,6 +61,34 @@ SAFE_PATH = re.compile(r"^/[A-Za-z0-9_./-]{1,511}$")
 
 class ConvergenceObserverError(RuntimeError):
     pass
+
+
+LEGACY_THREE_SITE_CONVERGENCE_OBSERVER_RETIREMENT_REASON = (
+    "legacy three-site staging convergence observer is retired; use the "
+    "production-shadow, exact-release convergence observer path"
+)
+
+
+class LegacyThreeSiteConvergenceObserverRetiredError(ConvergenceObserverError):
+    """Raised before the retired observer can contact SSH or Object Storage."""
+
+
+def assert_legacy_three_site_convergence_observer_retired(operation: str) -> None:
+    """Keep the former cross-host observer unavailable on every import path."""
+
+    raise LegacyThreeSiteConvergenceObserverRetiredError(
+        f"{LEGACY_THREE_SITE_CONVERGENCE_OBSERVER_RETIREMENT_REASON}: {operation}"
+    )
+
+
+def legacy_three_site_convergence_observer_blocked_payload() -> dict[str, object]:
+    """Return the side-effect-free retirement result used by the CLI."""
+
+    return {
+        "status": "blocked_legacy_three_site_convergence_observer_retired",
+        "reason": LEGACY_THREE_SITE_CONVERGENCE_OBSERVER_RETIREMENT_REASON,
+        "replacement": "production-shadow exact-release convergence observer path",
+    }
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -228,6 +255,9 @@ def _remote_command(config: dict[str, Any], site: str, script: str, *arguments: 
 
 
 def _finland_snapshot(config: dict[str, Any], site: str) -> dict[str, Any]:
+    assert_legacy_three_site_convergence_observer_retired(
+        "collect Finland convergence snapshot"
+    )
     return _run_json(
         _remote_command(
             config, site, "scripts/collect_three_site_staging_convergence_snapshot.py",
@@ -242,6 +272,9 @@ def _finland_snapshot(config: dict[str, Any], site: str) -> dict[str, Any]:
 
 
 def _put_descriptor(config: dict[str, Any], *, client, bucket: str, key: str) -> str:  # noqa: ANN001
+    assert_legacy_three_site_convergence_observer_retired(
+        "create Object Storage upload descriptor"
+    )
     try:
         post = client.generate_presigned_post(
             bucket,
@@ -271,6 +304,9 @@ def _put_descriptor(config: dict[str, Any], *, client, bucket: str, key: str) ->
 
 
 def _iran_snapshot(config: dict[str, Any], *, client, bucket: str, key: str) -> tuple[dict[str, Any], bytes, str]:  # noqa: ANN001
+    assert_legacy_three_site_convergence_observer_retired(
+        "collect WebApp-IR convergence snapshot"
+    )
     descriptor = _put_descriptor(config, client=client, bucket=bucket, key=key)
     receipt = _run_json(
         _remote_command(
@@ -324,6 +360,9 @@ def _iran_snapshot(config: dict[str, Any], *, client, bucket: str, key: str) -> 
 
 
 def _write_snapshot(root: Path, site: str, snapshot: dict[str, Any]) -> Path:
+    assert_legacy_three_site_convergence_observer_retired(
+        "write legacy convergence evidence"
+    )
     directory = root / "raw-snapshots"
     directory.mkdir(mode=0o700, exist_ok=True)
     _private_directory(directory, label="convergence raw-snapshot directory")
@@ -339,6 +378,9 @@ def _write_snapshot(root: Path, site: str, snapshot: dict[str, Any]) -> Path:
 
 
 def observe(*, config: dict[str, Any], output: Path) -> dict[str, Any]:
+    assert_legacy_three_site_convergence_observer_retired(
+        "observe three-site convergence"
+    )
     values = object_storage_config(Path(str(config["object_storage"]["transport_config"])))
     credentials = (
         values["ARVAN_S3_ACCESS_KEY"], values["ARVAN_S3_SECRET_KEY"],
@@ -419,31 +461,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--plan-sha256", required=True)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args(argv)
-    try:
-        if (
-            str(UUID(args.campaign_id)) != args.campaign_id
-            or SHA40.fullmatch(args.release_sha) is None
-            or SHA256.fullmatch(args.plan_sha256) is None
-        ):
-            raise ValueError
-        config = load_config(
-            args.config,
-            campaign_id=args.campaign_id,
-            release_sha=args.release_sha,
-            plan_sha256=args.plan_sha256,
-            output=args.output,
-        )
-        summary = observe(config=config, output=args.output)
-        print(json.dumps({
-            "status": summary["status"],
-            "artifact_sha256": hashlib.sha256(args.output.read_bytes()).hexdigest(),
-            "artifacts": summary["artifacts"],
-        }, sort_keys=True))
-        return 0
-    except Exception as exc:
-        print(json.dumps({"status": "blocked", "error": str(exc), "error_class": type(exc).__name__}, sort_keys=True), file=sys.stderr)
-        return 1
+    parser.parse_args(argv)
+    print(
+        json.dumps(legacy_three_site_convergence_observer_blocked_payload(), sort_keys=True),
+        file=sys.stderr,
+    )
+    return 2
 
 
 if __name__ == "__main__":

@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 import io
 import json
 import os
 from pathlib import Path
+import signal
+import subprocess
+import sys
 import tempfile
 import tarfile
+import threading
+import time
 import unittest
 from unittest import mock
 
@@ -21,6 +27,135 @@ from scripts.render_three_site_production_shadow_role_compose import (
 OPERATION_ID = "22222222-2222-4222-8222-222222222222"
 RELEASE_SHA = "a" * 40
 RELEASE_TREE_SHA = "b" * 40
+
+
+@contextmanager
+def controller_execution_pipes(transcript: Path | None = None):
+    control_read, control_write = os.pipe()
+    normal_report_read, normal_report_write = os.pipe()
+    normal_ack_read, normal_ack_write = os.pipe()
+    cleanup_report_read, cleanup_report_write = os.pipe()
+    cleanup_ack_read, cleanup_ack_write = os.pipe()
+    host = subprocess.Popen(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            (
+                "import os,selectors,sys\n"
+                "control=int(sys.argv[1]);path=sys.argv[2]\n"
+                "channels={int(sys.argv[3]):int(sys.argv[4]),"
+                "int(sys.argv[5]):int(sys.argv[6])}\n"
+                "buffers={fd:bytearray() for fd in channels}\n"
+                "lines=[];selector=selectors.DefaultSelector()\n"
+                "for fd in channels: selector.register(fd,selectors.EVENT_READ)\n"
+                "while channels:\n"
+                " for key,_mask in selector.select(1):\n"
+                "  fd=key.fd;chunk=os.read(fd,4096)\n"
+                "  if not chunk:\n"
+                "   selector.unregister(fd);del channels[fd];continue\n"
+                "  buffers[fd].extend(chunk)\n"
+                "  while b'\\n' in buffers[fd]:\n"
+                "   raw,_,rest=buffers[fd].partition(b'\\n')\n"
+                "   buffers[fd][:]=rest;lines.append(raw+b'\\n')\n"
+                "   if raw.startswith(b'S:'):\n"
+                "    ack=b'A'+raw[1:]+b'\\n'\n"
+                "    if os.write(channels[fd],ack)!=len(ack): raise SystemExit(2)\n"
+                "selector.close();os.close(control)\n"
+                "if any(buffers.values()): raise SystemExit(3)\n"
+                "if path!='-':\n"
+                " fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)\n"
+                " try: os.write(fd,b''.join(lines))\n"
+                " finally: os.close(fd)\n"
+            ),
+            str(control_write),
+            "-" if transcript is None else str(transcript),
+            str(normal_report_read),
+            str(normal_ack_write),
+            str(cleanup_report_read),
+            str(cleanup_ack_write),
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+        pass_fds=(
+            control_write,
+            normal_report_read,
+            normal_ack_write,
+            cleanup_report_read,
+            cleanup_ack_write,
+        ),
+    )
+    for descriptor in (
+        control_write,
+        normal_report_read,
+        normal_ack_write,
+        cleanup_report_read,
+        cleanup_ack_write,
+    ):
+        os.close(descriptor)
+    try:
+        yield (
+            control_read,
+            normal_report_write,
+            normal_ack_read,
+            cleanup_report_write,
+            cleanup_ack_read,
+        )
+    finally:
+        for descriptor in (
+            control_read,
+            normal_report_write,
+            normal_ack_read,
+            cleanup_report_write,
+            cleanup_ack_read,
+        ):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        try:
+            host.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            host.kill()
+            host.wait(timeout=2)
+        if host.returncode != 0:
+            raise AssertionError(
+                f"controller pipe host failed with {host.returncode}"
+            )
+
+
+def external_liveness_pipe() -> tuple[int, subprocess.Popen[bytes]]:
+    read_fd, write_fd = os.pipe()
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            "import os,sys,time;os.fstat(int(sys.argv[1]));time.sleep(300)",
+            str(write_fd),
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+        pass_fds=(write_fd,),
+    )
+    os.close(write_fd)
+    return read_fd, holder
+
+
+def stop_liveness_holder(holder: subprocess.Popen[bytes]) -> None:
+    if holder.poll() is None:
+        holder.terminate()
+    try:
+        holder.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        holder.kill()
+        holder.wait(timeout=2)
 
 
 def image_content_binding(seed: str) -> dict:
@@ -164,6 +299,25 @@ class PrecommitFixture:
 
 
 class ProductionShadowPrecommitWorkerTests(unittest.TestCase):
+    def test_git_commands_disable_repo_side_effects_and_replace_refs(self):
+        argv = MODULE._git_argv("-C", "/safe/release", "rev-parse", "HEAD")
+        self.assertEqual(argv[0], MODULE.GIT)
+        self.assertIn("--no-optional-locks", argv)
+        self.assertIn("core.fsmonitor=false", argv)
+        self.assertIn("core.untrackedCache=false", argv)
+        self.assertIn("core.hooksPath=/dev/null", argv)
+        self.assertIn("core.fileMode=true", argv)
+        self.assertEqual(MODULE._SAFE_GIT_ENV["GIT_CONFIG_NOSYSTEM"], "1")
+        self.assertEqual(
+            MODULE._SAFE_GIT_ENV["GIT_CONFIG_GLOBAL"],
+            "/dev/null",
+        )
+        self.assertEqual(MODULE._SAFE_GIT_ENV["GIT_OPTIONAL_LOCKS"], "0")
+        self.assertEqual(
+            MODULE._SAFE_GIT_ENV["GIT_NO_REPLACE_OBJECTS"],
+            "1",
+        )
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.fixture = PrecommitFixture(Path(self.temporary.name))
@@ -280,6 +434,317 @@ class ProductionShadowPrecommitWorkerTests(unittest.TestCase):
         self.assertFalse(result["freeze_allowed"])
         self.assertFalse(self.fixture.paths.journal_directory.exists())
 
+    def test_mutating_action_requires_controller_liveness_before_mutation(
+        self,
+    ):
+        manifest = MODULE.load_manifest(self.fixture.paths.manifest)
+        with self.assertRaisesRegex(
+            MODULE.PrecommitWorkerError,
+            "requires controller liveness",
+        ):
+            MODULE.execute_action(
+                self.fixture.paths.manifest,
+                action="bootstrap-database",
+                apply=True,
+                confirm=MODULE.confirmation_phrase(
+                    manifest,
+                    "bootstrap-database",
+                ),
+            )
+        self.assertFalse(self.fixture.paths.journal_directory.exists())
+
+    def test_bounded_command_preserves_subsecond_wait_budget(self):
+        process = mock.Mock()
+        process.pid = 42
+        process.stdout.fileno.return_value = 10
+        process.stderr.fileno.return_value = 11
+        process.wait.return_value = 0
+        selector = mock.Mock()
+        selector.get_map.return_value = {}
+        with (
+            mock.patch.object(
+                MODULE.subprocess,
+                "Popen",
+                return_value=process,
+            ),
+            mock.patch.object(
+                MODULE.selectors,
+                "DefaultSelector",
+                return_value=selector,
+            ),
+            mock.patch.object(MODULE.os, "set_blocking"),
+            mock.patch.object(MODULE.time, "monotonic", side_effect=(10, 10.75)),
+            mock.patch.object(MODULE, "_terminate_process_group"),
+        ):
+            result = MODULE._bounded_command(
+                ["/usr/bin/true"],
+                timeout=1,
+                env={"PATH": "/usr/bin:/bin"},
+                stdin=subprocess.DEVNULL,
+                stdout_limit=1024,
+                stderr_limit=1024,
+            )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(process.wait.call_args, mock.call(timeout=0.25))
+
+    def test_bounded_runners_kill_forked_descendants(self):
+        for name, streaming in (
+            ("buffered", False),
+            ("streaming", True),
+        ):
+            with self.subTest(name=name):
+                sentinel = self.fixture.root / f"{name}-survived"
+                descendant_pid = self.fixture.root / f"{name}-pid"
+                output_fd = 2 if streaming else 1
+                program = (
+                    "import os,signal,time\n"
+                    "if os.fork() == 0:\n"
+                    " os.setsid()\n"
+                    " if os.fork() != 0: time.sleep(60);os._exit(0)\n"
+                    " signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                    f" open({str(descendant_pid)!r},'w').write(str(os.getpid()))\n"
+                    " time.sleep(0.5)\n"
+                    f" open({str(sentinel)!r},'wb').write(b'survived')\n"
+                    " os._exit(0)\n"
+                    f"while not os.path.exists({str(descendant_pid)!r}):"
+                    " time.sleep(0.005)\n"
+                    f"os.write({output_fd}, b'x' * 4096)\n"
+                    "time.sleep(60)\n"
+                )
+                command = [
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    "-c",
+                    program,
+                ]
+                with (
+                    mock.patch.object(
+                        MODULE,
+                        "PROCESS_GROUP_TERM_SECONDS",
+                        0.1,
+                    ),
+                    mock.patch.object(
+                        MODULE,
+                        "MAX_COMMAND_STDERR_BYTES",
+                        1024,
+                    ),
+                    self.assertRaises(MODULE.BoundedCommandError),
+                ):
+                    if streaming:
+                        MODULE._bounded_streaming_sha256(
+                            command,
+                            timeout=5,
+                            stdin=subprocess.DEVNULL,
+                            env={"PATH": "/usr/bin:/bin"},
+                        )
+                    else:
+                        MODULE._bounded_command(
+                            command,
+                            timeout=5,
+                            stdin=subprocess.DEVNULL,
+                            env={"PATH": "/usr/bin:/bin"},
+                            stdout_limit=1024,
+                            stderr_limit=1024,
+                        )
+                time.sleep(0.6)
+                self.assertFalse(sentinel.exists())
+                self.assertFalse(
+                    Path(
+                        f"/proc/{descendant_pid.read_text(encoding='ascii')}"
+                    ).exists()
+                )
+
+    def test_reported_command_waits_for_ack_and_drops_protocol_fds(self):
+        marker = self.fixture.root / "reported-command-ran"
+        transcript_path = self.fixture.root / "authorization-transcript"
+        with controller_execution_pipes(transcript_path) as (
+            control_read,
+            normal_report_write,
+            normal_ack_read,
+            cleanup_report_write,
+            cleanup_ack_read,
+        ):
+            guard = MODULE.ControllerLivenessGuard(control_read)
+            identities = [
+                (descriptor, *(
+                    lambda metadata: (metadata.st_dev, metadata.st_ino)
+                )(os.fstat(descriptor)))
+                for descriptor in (
+                    control_read,
+                    guard._fd,
+                    normal_report_write,
+                    normal_ack_read,
+                    cleanup_report_write,
+                    cleanup_ack_read,
+                )
+            ]
+            program = (
+                "import os\n"
+                "leaked=[]\n"
+                f"for fd,dev,ino in {identities!r}:\n"
+                " try: observed=os.fstat(fd)\n"
+                " except OSError: continue\n"
+                " if (observed.st_dev,observed.st_ino)==(dev,ino):"
+                " leaked.append(fd)\n"
+                f"open({str(marker)!r},'w').write(str(len(leaked)))\n"
+            )
+            with (
+                guard,
+                MODULE.ProcessGroupReporter(
+                    normal_report_write,
+                    normal_ack_read,
+                    cleanup_report_write,
+                    cleanup_ack_read,
+                ),
+            ):
+                result = MODULE._bounded_command(
+                    [sys.executable, "-I", "-B", "-c", program],
+                    timeout=5,
+                    stdin=subprocess.DEVNULL,
+                    env={"PATH": "/usr/bin:/bin"},
+                    stdout_limit=1024,
+                    stderr_limit=1024,
+                )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(marker.read_text(encoding="ascii"), "0")
+        transcript = transcript_path.read_bytes().splitlines()
+        self.assertEqual(len(transcript), 2)
+        fields = transcript[0].decode("ascii").split(":")
+        self.assertEqual(fields[0], "S")
+        self.assertEqual(fields[1], MODULE.COMMAND_MODE_NORMAL)
+        self.assertRegex(fields[2], r"^[0-9a-f]{32}$")
+        self.assertEqual(fields[3], fields[5])
+        self.assertEqual(fields[3], fields[6])
+        self.assertEqual(fields[7], "normal-command")
+        self.assertRegex(fields[8], r"^[0-9a-f]{64}$")
+        self.assertEqual(
+            transcript[1],
+            f"D:{fields[1]}:{fields[2]}:{fields[3]}".encode("ascii"),
+        )
+
+    def test_failed_group_cleanup_never_reports_completion(self):
+        process = mock.Mock()
+        process.pid = 42
+        process.stdout.fileno.return_value = 10
+        process.stderr.fileno.return_value = 11
+        process.wait.return_value = 0
+        selector = mock.Mock()
+        selector.get_map.return_value = {}
+        authorization = MODULE.CommandAuthorization(
+            mode=MODULE.COMMAND_MODE_NORMAL,
+            nonce="1" * 32,
+            purpose="normal-command",
+            argv_sha256="2" * 64,
+        )
+        reporter = mock.Mock()
+        reporter.authorize.return_value = (
+            authorization,
+            ["/usr/bin/true"],
+            (),
+        )
+        with (
+            mock.patch.object(MODULE, "_ACTIVE_GROUP_REPORTER", reporter),
+            mock.patch.object(
+                MODULE.subprocess,
+                "Popen",
+                return_value=process,
+            ),
+            mock.patch.object(
+                MODULE.selectors,
+                "DefaultSelector",
+                return_value=selector,
+            ),
+            mock.patch.object(MODULE.os, "set_blocking"),
+            mock.patch.object(
+                MODULE,
+                "_terminate_process_group",
+                side_effect=MODULE.BoundedCommandError("group survived"),
+            ),
+            self.assertRaisesRegex(
+                MODULE.BoundedCommandError,
+                "group survived",
+            ),
+        ):
+            MODULE._bounded_command(
+                ["/usr/bin/true"],
+                timeout=1,
+                stdin=subprocess.DEVNULL,
+                env={"PATH": "/usr/bin:/bin"},
+                stdout_limit=1024,
+                stderr_limit=1024,
+            )
+        reporter.complete.assert_not_called()
+
+    def test_controller_eof_cancels_command_and_runs_oneoff_cleanup(self):
+        manifest = MODULE.load_manifest(self.fixture.paths.manifest)
+        sentinel = self.fixture.root / "cancelled-oneoff-survived"
+        program = (
+            "import os,signal,time\n"
+            "if os.fork() == 0:\n"
+            " signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            " time.sleep(0.8)\n"
+            f" open({str(sentinel)!r},'wb').write(b'survived')\n"
+            " os._exit(0)\n"
+            "time.sleep(60)\n"
+        )
+        command = [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            program,
+        ]
+        real_run = MODULE._run
+        cleanup = mock.Mock(return_value=[])
+        read_fd, holder = external_liveness_pipe()
+        closer = threading.Thread(
+            target=lambda: (time.sleep(0.1), stop_liveness_holder(holder)),
+            daemon=True,
+        )
+        closer.start()
+        try:
+            with (
+                mock.patch.object(MODULE, "_oneoff_ids", return_value=[]),
+                mock.patch.object(MODULE, "_cleanup_oneoffs", cleanup),
+                mock.patch.object(
+                    MODULE,
+                    "_run",
+                    side_effect=lambda *_args, **_kwargs: real_run(
+                        command,
+                        timeout=5,
+                        env={"PATH": "/usr/bin:/bin"},
+                    ),
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "PROCESS_GROUP_TERM_SECONDS",
+                    0.1,
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    MODULE.PrecommitWorkerCancellation,
+                    "liveness pipe reached EOF",
+                ):
+                    with MODULE.ControllerLivenessGuard(read_fd):
+                        MODULE._compose_oneoff(
+                            manifest,
+                            self.fixture.paths,
+                            profile="bot-fi-restore",
+                            service="bot_fi_restore_tool",
+                            timeout=5,
+                        )
+            closer.join(timeout=1)
+            cleanup.assert_called_once_with(manifest, self.fixture.paths)
+            time.sleep(0.9)
+            self.assertFalse(sentinel.exists())
+        finally:
+            try:
+                os.close(read_fd)
+            except OSError:
+                pass
+            stop_liveness_holder(holder)
+
         with self.assertRaisesRegex(MODULE.PrecommitWorkerError, "requires"):
             MODULE.execute_action(
                 self.fixture.paths.manifest,
@@ -289,6 +754,64 @@ class ProductionShadowPrecommitWorkerTests(unittest.TestCase):
             )
         self.assertFalse(self.fixture.paths.journal_directory.exists())
 
+    def test_liveness_guard_handles_sigint_and_restores_handler(self):
+        read_fd, holder = external_liveness_pipe()
+        previous = signal.getsignal(signal.SIGINT)
+        try:
+            guard = MODULE.ControllerLivenessGuard(read_fd)
+            with guard:
+                with self.assertRaisesRegex(
+                    MODULE.PrecommitWorkerCancellation,
+                    f"received signal {signal.SIGINT}",
+                ):
+                    guard._handle_signal(signal.SIGINT, None)  # noqa: SLF001
+                guard._handle_signal(signal.SIGTERM, None)  # noqa: SLF001
+                guard.check()
+            self.assertIs(signal.getsignal(signal.SIGINT), previous)
+        finally:
+            try:
+                os.close(read_fd)
+            except OSError:
+                pass
+            stop_liveness_holder(holder)
+
+    def test_process_authorization_requires_directional_distinct_channels(self):
+        read_fd, write_fd = os.pipe()
+        try:
+            with self.assertRaisesRegex(
+                MODULE.PrecommitWorkerError,
+                "writer end is held",
+            ):
+                MODULE.ControllerLivenessGuard(read_fd)
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+        with controller_execution_pipes() as (
+            _control_fd,
+            normal_report_fd,
+            normal_ack_fd,
+            cleanup_report_fd,
+            cleanup_ack_fd,
+        ):
+            with self.assertRaisesRegex(
+                MODULE.PrecommitWorkerError,
+                "must be distinct",
+            ):
+                MODULE.ProcessGroupReporter(
+                    normal_report_fd,
+                    normal_ack_fd,
+                    normal_report_fd,
+                    cleanup_ack_fd,
+                )
+            with MODULE.ProcessGroupReporter(
+                normal_report_fd,
+                normal_ack_fd,
+                cleanup_report_fd,
+                cleanup_ack_fd,
+            ):
+                self.assertIsNotNone(MODULE._ACTIVE_GROUP_REPORTER)
+
     def test_apply_enforces_order_and_persists_root_only_evidence(self):
         manifest = MODULE.load_manifest(self.fixture.paths.manifest)
         fake = mock.Mock(
@@ -297,12 +820,21 @@ class ProductionShadowPrecommitWorkerTests(unittest.TestCase):
                 "semantic_marker": "exact",
             }
         )
-        with mock.patch.dict(
-            MODULE.ACTION_IMPLEMENTATIONS,
-            {
-                "verify-installation": fake,
-                "bootstrap-database": fake,
-            },
+        with (
+            mock.patch.dict(
+                MODULE.ACTION_IMPLEMENTATIONS,
+                {
+                    "verify-installation": fake,
+                    "bootstrap-database": fake,
+                },
+            ),
+            controller_execution_pipes() as (
+                control_fd,
+                normal_report_fd,
+                normal_ack_fd,
+                cleanup_report_fd,
+                cleanup_ack_fd,
+            ),
         ):
             with self.assertRaisesRegex(
                 MODULE.PrecommitWorkerError,
@@ -316,6 +848,11 @@ class ProductionShadowPrecommitWorkerTests(unittest.TestCase):
                         manifest,
                         "bootstrap-database",
                     ),
+                    control_fd=control_fd,
+                    process_group_report_fd=normal_report_fd,
+                    process_group_ack_fd=normal_ack_fd,
+                    cleanup_process_report_fd=cleanup_report_fd,
+                    cleanup_process_ack_fd=cleanup_ack_fd,
                 )
             first = MODULE.execute_action(
                 self.fixture.paths.manifest,
@@ -334,6 +871,11 @@ class ProductionShadowPrecommitWorkerTests(unittest.TestCase):
                     manifest,
                     "bootstrap-database",
                 ),
+                control_fd=control_fd,
+                process_group_report_fd=normal_report_fd,
+                process_group_ack_fd=normal_ack_fd,
+                cleanup_process_report_fd=cleanup_report_fd,
+                cleanup_process_ack_fd=cleanup_ack_fd,
             )
         self.assertEqual(first["status"], "completed")
         self.assertEqual(second["status"], "completed")
@@ -970,7 +1512,7 @@ class ProductionShadowPrecommitWorkerTests(unittest.TestCase):
                     manifest,
                     self.fixture.paths,
                 ),
-                [foreign],
+                [database, foreign],
             )
 
     def test_bootstrap_inspects_created_database_before_start(self):

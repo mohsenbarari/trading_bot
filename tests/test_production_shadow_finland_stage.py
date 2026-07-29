@@ -6,10 +6,14 @@ import io
 import json
 import os
 from pathlib import Path
+import signal
 import stat
 import subprocess
+import sys
 import tarfile
 import tempfile
+import threading
+import time
 from unittest import mock
 import unittest
 
@@ -33,6 +37,48 @@ def canonical(value: object) -> bytes:
 def secure_file(path: Path, payload: bytes, mode: int) -> None:
     path.write_bytes(payload)
     path.chmod(mode)
+
+
+def external_liveness_pipe():
+    control_read, control_write = os.pipe()
+    stop_read, stop_write = os.pipe()
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            "import os,sys;os.read(int(sys.argv[1]),1)",
+            str(stop_read),
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        pass_fds=(control_write, stop_read),
+        close_fds=True,
+    )
+    os.close(control_write)
+    os.close(stop_read)
+    return control_read, holder, stop_write
+
+
+def stop_liveness_holder(
+    holder: subprocess.Popen[bytes],
+    stop_write: int,
+) -> None:
+    try:
+        os.write(stop_write, b"x")
+    except OSError:
+        pass
+    try:
+        os.close(stop_write)
+    except OSError:
+        pass
+    try:
+        holder.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        holder.kill()
+        holder.wait(timeout=2)
 
 
 def image_archive(
@@ -491,16 +537,19 @@ class ProductionShadowFinlandStageTests(unittest.TestCase):
                 expected=forged,
             )
 
-    def test_crash_after_load_resumes_without_reloading(self):
+    def test_baseexception_after_load_reconciles_without_reloading(self):
         crashed = False
 
         def checkpoint(name: str) -> None:
             nonlocal crashed
             if name == "after-load:app" and not crashed:
                 crashed = True
-                raise RuntimeError("simulated crash")
+                raise KeyboardInterrupt("simulated catchable interruption")
 
-        with self.assertRaisesRegex(RuntimeError, "simulated crash"):
+        with self.assertRaisesRegex(
+            KeyboardInterrupt,
+            "catchable interruption",
+        ):
             MODULE.stage_operation(
                 self.fixture.request,
                 runner=self.fixture.runner,
@@ -737,6 +786,355 @@ class ProductionShadowFinlandStageTests(unittest.TestCase):
             MODULE._decode_request(
                 MODULE.encode_request(malicious),
                 bootstrap=False,
+            )
+
+    def test_signal_cancellation_is_catchable_reentrant_and_one_shot(self):
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            with self.subTest(signum=signum):
+                previous = signal.getsignal(signum)
+                guard = MODULE.ControllerLivenessGuard(None)
+                with guard:
+                    with self.assertRaisesRegex(
+                        MODULE.FinlandStageCancellation,
+                        f"received signal {signum}",
+                    ):
+                        guard._handle_signal(  # noqa: SLF001
+                            signum,
+                            None,
+                        )
+                    guard._handle_signal(signum, None)  # noqa: SLF001
+                    guard.check()
+                self.assertIs(signal.getsignal(signum), previous)
+
+    def test_liveness_rejects_a_writer_held_by_the_stage_process(self):
+        read_fd, write_fd = os.pipe()
+        try:
+            with self.assertRaisesRegex(
+                MODULE.FinlandStageError,
+                "writer end is held",
+            ):
+                MODULE.ControllerLivenessGuard(read_fd)
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+    def test_controller_eof_cancels_runner_and_reaps_double_fork(self):
+        descendant_pid = self.fixture.root / "stage-descendant-pid"
+        sentinel = self.fixture.root / "stage-descendant-survived"
+        program = (
+            "import os,signal,time\n"
+            "if os.fork() == 0:\n"
+            " os.setsid()\n"
+            " if os.fork() != 0: time.sleep(60);os._exit(0)\n"
+            " signal.signal(signal.SIGTERM,signal.SIG_IGN)\n"
+            f" open({str(descendant_pid)!r},'w').write(str(os.getpid()))\n"
+            " time.sleep(0.7)\n"
+            f" open({str(sentinel)!r},'wb').write(b'survived')\n"
+            " os._exit(0)\n"
+            f"while not os.path.exists({str(descendant_pid)!r}):"
+            " time.sleep(0.005)\n"
+            "time.sleep(60)\n"
+        )
+        control_read, holder, stop_write = external_liveness_pipe()
+
+        def disconnect_when_ready() -> None:
+            deadline = time.monotonic() + 2
+            while (
+                not descendant_pid.exists()
+                and time.monotonic() < deadline
+            ):
+                time.sleep(0.01)
+            stop_liveness_holder(holder, stop_write)
+
+        closer = threading.Thread(
+            target=disconnect_when_ready,
+            daemon=True,
+        )
+        closer.start()
+        try:
+            with (
+                mock.patch.object(
+                    MODULE,
+                    "PROCESS_GROUP_TERM_SECONDS",
+                    0.1,
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "PROCESS_TREE_QUIESCENCE_SECONDS",
+                    0.05,
+                ),
+                self.assertRaisesRegex(
+                    MODULE.FinlandStageCancellation,
+                    "liveness pipe reached EOF",
+                ),
+            ):
+                with MODULE._execution_authority(control_read):
+                    MODULE._default_runner(
+                        [sys.executable, "-I", "-B", "-c", program],
+                        input=None,
+                        capture_output=True,
+                        check=False,
+                        timeout=5,
+                        env={"PATH": "/usr/bin:/bin"},
+                    )
+            closer.join(timeout=2)
+            time.sleep(0.8)
+            self.assertFalse(sentinel.exists())
+            self.assertTrue(descendant_pid.is_file())
+            self.assertFalse(
+                Path(
+                    f"/proc/{descendant_pid.read_text(encoding='ascii')}"
+                ).exists()
+            )
+        finally:
+            try:
+                os.close(control_read)
+            except OSError:
+                pass
+            if closer.is_alive():
+                stop_liveness_holder(holder, stop_write)
+                closer.join(timeout=2)
+
+    def test_default_runner_bounds_each_stream_and_timeout(self):
+        for descriptor, label in ((1, "stdout"), (2, "stderr")):
+            with (
+                self.subTest(stream=label),
+                mock.patch.object(
+                    MODULE,
+                    "MAX_COMMAND_OUTPUT_BYTES",
+                    1024,
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "PROCESS_GROUP_TERM_SECONDS",
+                    0.1,
+                ),
+                self.assertRaisesRegex(
+                    MODULE.BoundedStageRunnerError,
+                    f"{label} is oversized",
+                ),
+            ):
+                MODULE._default_runner(
+                    [
+                        sys.executable,
+                        "-I",
+                        "-B",
+                        "-c",
+                        f"import os,time;os.write({descriptor},b'x'*4096);"
+                        "time.sleep(60)",
+                    ],
+                    input=None,
+                    capture_output=True,
+                    check=False,
+                    timeout=5,
+                    env={"PATH": "/usr/bin:/bin"},
+                )
+        with (
+            mock.patch.object(
+                MODULE,
+                "PROCESS_GROUP_TERM_SECONDS",
+                0.1,
+            ),
+            self.assertRaisesRegex(
+                MODULE.BoundedStageRunnerError,
+                "timed out",
+            ),
+        ):
+            MODULE._default_runner(
+                [sys.executable, "-I", "-B", "-c", "import time;time.sleep(60)"],
+                input=None,
+                capture_output=True,
+                check=False,
+                timeout=0.1,
+                env={"PATH": "/usr/bin:/bin"},
+            )
+
+    def test_cancelled_docker_load_reconciles_late_daemon_image(self):
+        fixture = self.fixture
+
+        class DelayedLoadRunner(FakeRunner):
+            def __init__(self) -> None:
+                super().__init__(fixture)
+                self.pending_role: str | None = None
+                self.polls = 0
+                self.cancelled = False
+
+            def __call__(self, arguments, **kwargs):  # noqa: ANN001
+                argv = [str(value) for value in arguments]
+                if (
+                    argv[0] == MODULE.DOCKER
+                    and argv[1:3] == ["image", "load"]
+                    and not self.cancelled
+                ):
+                    self.calls.append(argv)
+                    archive = Path(argv[argv.index("--input") + 1])
+                    self.pending_role = archive.name.removesuffix(
+                        "-image.tar"
+                    )
+                    self.cancelled = True
+                    raise MODULE.FinlandStageCancellation(
+                        "simulated controller cancellation"
+                    )
+                if (
+                    self.pending_role is not None
+                    and argv[0] == MODULE.DOCKER
+                    and argv[1:3] == ["image", "ls"]
+                ):
+                    self.polls += 1
+                    if self.polls == 3:
+                        role = self.pending_role
+                        image_id = self.runtime_ids[role]
+                        image = dict(fixture.inspect_documents[role])
+                        image["Id"] = image_id
+                        self.loaded[image_id] = image
+                        self.pending_role = None
+                return super().__call__(arguments, **kwargs)
+
+        runner = DelayedLoadRunner()
+        with (
+            mock.patch.object(
+                MODULE,
+                "DOCKER_LOAD_RECONCILE_SECONDS",
+                0.5,
+            ),
+            mock.patch.object(
+                MODULE,
+                "DOCKER_LOAD_RECONCILE_INTERVAL_SECONDS",
+                0.01,
+            ),
+            self.assertRaisesRegex(
+                MODULE.FinlandStageCancellation,
+                "simulated controller cancellation",
+            ),
+        ):
+            MODULE.stage_operation(
+                self.fixture.request,
+                runner=runner,
+            )
+        evidence_path = MODULE.image_load_reconciliation_path(
+            self.fixture.paths,
+            "app",
+        )
+        evidence_payload = evidence_path.read_bytes()
+        evidence = json.loads(evidence_payload)
+        self.assertEqual(
+            set(evidence),
+            MODULE.IMAGE_LOAD_RECONCILIATION_FIELDS,
+        )
+        self.assertEqual(
+            evidence["runtime_image_id"],
+            runner.runtime_ids["app"],
+        )
+        self.assertEqual(stat.S_IMODE(evidence_path.stat().st_mode), 0o600)
+        journal = json.loads(self.fixture.paths["journal"].read_bytes())
+        self.assertEqual(
+            journal["runtime_image_ids"]["app"],
+            runner.runtime_ids["app"],
+        )
+        secure_file(evidence_path, b"{}", 0o600)
+        with self.assertRaisesRegex(
+            MODULE.FinlandStageError,
+            "create-only destination differs",
+        ):
+            MODULE.stage_operation(
+                self.fixture.request,
+                runner=runner,
+            )
+        secure_file(evidence_path, evidence_payload, 0o600)
+
+        result = MODULE.stage_operation(
+            self.fixture.request,
+            runner=runner,
+        )
+        self.assertEqual(result["status"], "staged")
+        app_loads = [
+            call
+            for call in runner.calls
+            if call[0] == MODULE.DOCKER
+            and call[1:3] == ["image", "load"]
+            and call[-1].endswith("app-image.tar")
+        ]
+        self.assertEqual(len(app_loads), 1)
+        forbidden = {
+            "build",
+            "pull",
+            "tag",
+            "run",
+            "create",
+            "start",
+            "stop",
+            "compose",
+            "service",
+            "network",
+            "volume",
+            "rm",
+            "rmi",
+        }
+        self.assertFalse(
+            any(token in forbidden for call in runner.calls for token in call)
+        )
+
+    def test_late_daemon_reconciliation_window_is_bounded(self):
+        calls = 0
+
+        def no_match(*_args, **_kwargs):  # noqa: ANN002, ANN003
+            nonlocal calls
+            calls += 1
+            return []
+
+        started = time.monotonic()
+        with (
+            mock.patch.object(
+                MODULE,
+                "_runtime_semantic_matches",
+                side_effect=no_match,
+            ),
+            mock.patch.object(
+                MODULE,
+                "DOCKER_LOAD_RECONCILE_SECONDS",
+                0.03,
+            ),
+            mock.patch.object(
+                MODULE,
+                "DOCKER_LOAD_RECONCILE_INTERVAL_SECONDS",
+                0.005,
+            ),
+        ):
+            matches = MODULE._poll_late_runtime_image(
+                self.fixture.image_bindings["app"],
+                runner=self.fixture.runner,
+            )
+        self.assertEqual(matches, [])
+        self.assertGreaterEqual(calls, 2)
+        self.assertLess(time.monotonic() - started, 0.5)
+
+    def test_git_and_docker_argv_environments_are_exact(self):
+        with self.assertRaisesRegex(
+            MODULE.FinlandStageError,
+            "Git command argv",
+        ):
+            MODULE._run(
+                [MODULE.GIT, "status"],
+                timeout=1,
+                env=MODULE.SAFE_GIT_ENV,
+                runner=self.fixture.runner,
+            )
+        with self.assertRaisesRegex(
+            MODULE.FinlandStageError,
+            "Docker command environment",
+        ):
+            MODULE._run(
+                [
+                    MODULE.DOCKER,
+                    "image",
+                    "ls",
+                    "--all",
+                    "--no-trunc",
+                    "--quiet",
+                ],
+                timeout=1,
+                env={"PATH": "/usr/bin:/bin"},
+                runner=self.fixture.runner,
             )
 
 

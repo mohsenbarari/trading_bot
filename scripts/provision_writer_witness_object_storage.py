@@ -45,6 +45,30 @@ class ProvisioningError(RuntimeError):
     """A safe, redacted provisioning failure."""
 
 
+RETIREMENT_REASON = (
+    "legacy Writer-Witness Object Storage provisioning is retired; it cannot "
+    "consume credential, bucket, policy, or output inputs for provider, "
+    "network, or storage operations"
+)
+
+
+def _assert_retired(operation: str) -> None:
+    """Deny every legacy effectful boundary, including direct imports."""
+
+    raise ProvisioningError(
+        f"{RETIREMENT_REASON}: writer-witness-object-storage ({operation})"
+    )
+
+
+def _blocked_payload() -> dict[str, str]:
+    return {
+        "status": "blocked_legacy_three_site_staging_runtime_retired",
+        "component": "writer-witness-object-storage",
+        "error": RETIREMENT_REASON,
+        "error_class": ProvisioningError.__name__,
+    }
+
+
 @dataclass(frozen=True)
 class Credential:
     access_key: str
@@ -70,6 +94,7 @@ class S3Response:
 
 
 def read_env(path: Path, *, required: Iterable[str]) -> dict[str, str]:
+    _assert_retired("read credential environment")
     if not path.is_file():
         raise ProvisioningError(f"missing credential file: {path}")
     mode = stat.S_IMODE(path.stat().st_mode)
@@ -133,6 +158,7 @@ class SignedS3Client:
         headers: dict[str, str] | None = None,
         body: bytes = b"",
     ) -> S3Response:
+        _assert_retired("send Object Storage request")
         now = datetime.now(timezone.utc)
         amz_date = now.strftime("%Y%m%dT%H%M%SZ")
         date_stamp = now.strftime("%Y%m%d")
@@ -230,6 +256,7 @@ def require_status(response: S3Response, expected: set[int], operation: str) -> 
 
 
 def create_bucket(client: SignedS3Client, bucket: str, region: str) -> None:
+    _assert_retired("create bucket")
     body = (
         f'<CreateBucketConfiguration xmlns="{S3_XML_NAMESPACE}">'
         f"<LocationConstraint>{region}</LocationConstraint>"
@@ -249,6 +276,7 @@ def create_bucket(client: SignedS3Client, bucket: str, region: str) -> None:
 
 
 def configure_object_lock(client: SignedS3Client, bucket: str) -> None:
+    _assert_retired("configure object lock")
     body = (
         f'<ObjectLockConfiguration xmlns="{S3_XML_NAMESPACE}">'
         "<ObjectLockEnabled>Enabled</ObjectLockEnabled>"
@@ -273,6 +301,7 @@ def configure_object_lock(client: SignedS3Client, bucket: str) -> None:
 
 
 def verify_object_lock(client: SignedS3Client, bucket: str) -> None:
+    _assert_retired("verify object lock")
     response = client.request(
         "GET", f"/{bucket}", query=(("object-lock", ""),)
     )
@@ -300,6 +329,7 @@ def configure_uploader_policy(
     admin_access_key: str,
     uploader_access_key: str,
 ) -> None:
+    _assert_retired("configure uploader policy")
     admin_principal = f"arn:aws:iam:::user/p{project_id}:{admin_access_key}"
     uploader_principal = f"arn:aws:iam:::user/p{project_id}:{uploader_access_key}"
     bucket_arn = f"arn:aws:s3:::{bucket}"
@@ -383,6 +413,7 @@ def configure_uploader_policy(
 
 
 def verify_private_acl(client: SignedS3Client, bucket: str) -> None:
+    _assert_retired("verify private bucket ACL")
     response = client.request("GET", f"/{bucket}", query=(("acl", ""),))
     require_status(response, {200}, "read bucket ACL")
     if b"AllUsers" in response.body or b"AuthenticatedUsers" in response.body:
@@ -395,6 +426,7 @@ def verify_uploader_boundary(
     *,
     bucket: str,
 ) -> dict[str, object]:
+    _assert_retired("verify uploader boundary")
     key = f"witness/security-probe/{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:8]}.bin"
     outside_key = f"security-probe/{uuid.uuid4().hex[:8]}.bin"
     body = b"writer-witness-object-storage-policy-probe-v1\n"
@@ -460,6 +492,7 @@ def verify_uploader_boundary(
 
 
 def write_bucket_env(path: Path, *, bucket: str, endpoint: str, region: str) -> None:
+    _assert_retired("write bucket environment")
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     content = (
         f"HETZNER_S3_BUCKET={bucket}\n"
@@ -489,6 +522,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    try:
+        _assert_retired("CLI")
+    except ProvisioningError:
+        print(json.dumps(_blocked_payload(), sort_keys=True))
+        return 2
     args = parse_args()
     admin_values = read_env(
         args.admin_env,

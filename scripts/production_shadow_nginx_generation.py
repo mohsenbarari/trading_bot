@@ -12,6 +12,7 @@ the production cutover controller.
 from __future__ import annotations
 
 import argparse
+import ctypes
 from dataclasses import dataclass
 import fcntl
 import hashlib
@@ -21,12 +22,16 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import secrets
+import selectors
+import signal
 import socket
 import stat
 import struct
 import subprocess
 import sys
 import tarfile
+import threading
+import time
 from typing import Any, Callable, Iterable, Mapping, Sequence
 from uuid import UUID
 
@@ -49,6 +54,10 @@ ROLE_MANIFEST_SCHEMA = "production-shadow-nginx-role-generation-manifest-v1"
 JOURNAL_SCHEMA = "production-shadow-nginx-host-journal-v1"
 ARCHIVE_FORMAT = "production-shadow-nginx-role-generations-tar-v1"
 HOST_ACTION_RESULT_SCHEMA = "production-shadow-nginx-host-action-result-v1"
+HOST_FRESH_READBACK_SCHEMA = "production-shadow-nginx-host-fresh-readback-v2"
+HOST_READBACK_CHALLENGE_SCHEMA = (
+    "production-shadow-nginx-host-readback-challenge-v1"
+)
 GENERATION_STATES = (
     "legacy-normal",
     "legacy-frozen",
@@ -63,6 +72,16 @@ MARKER = "# production-shadow-generation:"
 MAX_CONFIG_BYTES = 2 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 32 * 1024 * 1024
 MAX_JSON_BYTES = 2 * 1024 * 1024
+MAX_COMMAND_STREAM_BYTES = 1024 * 1024
+MAX_COMMAND_TIMEOUT_SECONDS = 30
+COMMAND_TERM_GRACE_SECONDS = 2.0
+PROCESS_POLL_SECONDS = 0.05
+PROCESS_TREE_QUIESCENCE_SECONDS = 0.1
+PR_SET_CHILD_SUBREAPER = 36
+DEFAULT_RELOAD_STABILITY_OBSERVATIONS = 3
+DEFAULT_RELOAD_STABILITY_INTERVAL_SECONDS = 1.0
+READBACK_CHALLENGE_TTL_SECONDS = 300
+READBACK_MAX_CLOCK_SKEW_SECONDS = 5
 DEFAULT_OPERATION_BASE = Path("/etc/trading-bot-production-shadow/nginx-generations")
 DEFAULT_NGINX = Path("/usr/sbin/nginx")
 DEFAULT_NGINX_CONF = Path("/etc/nginx/nginx.conf")
@@ -95,10 +114,18 @@ LEGACY_UPSTREAMS_BY_VHOST = {
     ),
 }
 MAX_PROXY_PASS_DIRECTIVES = 64
+MUTATING_HOST_ACTIONS = frozenset(
+    {"install", "test", "activate", "rollback-freeze", "restore"}
+)
+CONTROLLED_HOST_ACTIONS = MUTATING_HOST_ACTIONS | {"readback"}
 
 
 class NginxGenerationError(RuntimeError):
     """Raised when a generation or host transition is not provably bounded."""
+
+
+class NginxGenerationCancellation(NginxGenerationError):
+    """The controller connection or host process authority was lost."""
 
 
 class NginxCommandError(NginxGenerationError):
@@ -151,6 +178,12 @@ class HostLayout:
     sites_available: Path = DEFAULT_SITES_AVAILABLE
     sites_enabled: Path = DEFAULT_SITES_ENABLED
     reload_argv: tuple[str, ...] = DEFAULT_RELOAD_ARGV
+    reload_stability_observations: int = (
+        DEFAULT_RELOAD_STABILITY_OBSERVATIONS
+    )
+    reload_stability_interval_seconds: float = (
+        DEFAULT_RELOAD_STABILITY_INTERVAL_SECONDS
+    )
     owner_uid: int = 0
     identity_addresses: tuple[str, ...] | None = None
 
@@ -163,6 +196,218 @@ class CommandResult:
 
 
 RunFn = Callable[[Sequence[str], int], CommandResult]
+
+
+def _anonymous_read_pipe_identity(
+    descriptor: int,
+    *,
+    label: str,
+) -> tuple[int, int]:
+    if type(descriptor) is not int or descriptor < 0:
+        raise NginxGenerationError(f"{label} descriptor is invalid")
+    try:
+        metadata = os.fstat(descriptor)
+        flags = fcntl.fcntl(descriptor, fcntl.F_GETFL)
+        target = os.readlink(f"/proc/self/fd/{descriptor}")
+    except OSError as exc:
+        raise NginxGenerationError(f"{label} pipe is unavailable") from exc
+    if (
+        not stat.S_ISFIFO(metadata.st_mode)
+        or flags & os.O_ACCMODE != os.O_RDONLY
+        or target != f"pipe:[{metadata.st_ino}]"
+    ):
+        raise NginxGenerationError(
+            f"{label} must be an anonymous read-only pipe"
+        )
+    try:
+        entries = tuple(Path("/proc/self/fd").iterdir())
+    except OSError as exc:
+        raise NginxGenerationError(
+            f"{label} descriptor closure cannot be inspected"
+        ) from exc
+    for entry in entries:
+        if not entry.name.isdecimal() or int(entry.name, 10) == descriptor:
+            continue
+        candidate = int(entry.name, 10)
+        try:
+            observed = os.fstat(candidate)
+            observed_flags = fcntl.fcntl(candidate, fcntl.F_GETFL)
+        except OSError:
+            continue
+        if (
+            (observed.st_dev, observed.st_ino)
+            == (metadata.st_dev, metadata.st_ino)
+            and observed_flags & os.O_ACCMODE
+            in {os.O_WRONLY, os.O_RDWR}
+        ):
+            raise NginxGenerationError(
+                f"{label} writer end is held by the host worker"
+            )
+    return metadata.st_dev, metadata.st_ino
+
+
+class ControllerLivenessGuard:
+    """Keep host mutations bound to one controller-owned pipe."""
+
+    _WAKE_SIGNAL = signal.SIGUSR1
+    _HANDLED_SIGNALS = (
+        signal.SIGHUP,
+        signal.SIGTERM,
+        signal.SIGINT,
+        _WAKE_SIGNAL,
+    )
+
+    def __init__(self, control_fd: int) -> None:
+        _anonymous_read_pipe_identity(
+            control_fd,
+            label="controller liveness",
+        )
+        if threading.current_thread() is not threading.main_thread():
+            raise NginxGenerationError(
+                "mutating Nginx host action must run in the main thread"
+            )
+        try:
+            self._fd = os.dup(control_fd)
+            os.set_inheritable(self._fd, False)
+            os.set_blocking(self._fd, False)
+        except OSError as exc:
+            raise NginxGenerationError(
+                "controller liveness pipe cannot be secured"
+            ) from exc
+        self._cancelled = threading.Event()
+        self._stopping = threading.Event()
+        self._reason = "controller liveness was lost"
+        self._exception_delivered = False
+        self._closed = False
+        self._old_handlers: dict[int, Any] = {}
+        self._monitor: threading.Thread | None = None
+
+    @property
+    def control_fd(self) -> int:
+        return self._fd
+
+    def _cancel(self, reason: str, *, wake_main: bool) -> None:
+        if self._cancelled.is_set():
+            return
+        self._reason = reason
+        self._cancelled.set()
+        if wake_main:
+            main_ident = threading.main_thread().ident
+            if main_ident is not None:
+                try:
+                    signal.pthread_kill(main_ident, self._WAKE_SIGNAL)
+                except (OSError, RuntimeError):
+                    pass
+
+    def _sample(self) -> None:
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(self._fd, selectors.EVENT_READ)
+            if not selector.select(0):
+                return
+            try:
+                payload = os.read(self._fd, 1)
+            except BlockingIOError:
+                return
+        finally:
+            selector.close()
+        reason = (
+            "controller liveness pipe reached EOF"
+            if payload == b""
+            else "controller liveness pipe carried forbidden data"
+        )
+        self._cancel(reason, wake_main=False)
+        self.check()
+
+    def _handle_signal(self, signum: int, _frame: Any) -> None:
+        if self._exception_delivered:
+            return
+        self._exception_delivered = True
+        if signum == self._WAKE_SIGNAL:
+            reason = self._reason
+        else:
+            reason = f"Nginx host worker received signal {signum}"
+            self._cancel(reason, wake_main=False)
+        raise NginxGenerationCancellation(reason)
+
+    def _monitor_control(self) -> None:
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(self._fd, selectors.EVENT_READ)
+            while not self._stopping.is_set():
+                if not selector.select(PROCESS_POLL_SECONDS):
+                    continue
+                try:
+                    payload = os.read(self._fd, 1)
+                except BlockingIOError:
+                    continue
+                except OSError:
+                    if self._stopping.is_set():
+                        return
+                    payload = b""
+                reason = (
+                    "controller liveness pipe reached EOF"
+                    if payload == b""
+                    else "controller liveness pipe carried forbidden data"
+                )
+                self._cancel(reason, wake_main=True)
+                return
+        finally:
+            selector.close()
+
+    def __enter__(self) -> ControllerLivenessGuard:
+        try:
+            for signum in self._HANDLED_SIGNALS:
+                self._old_handlers[signum] = signal.getsignal(signum)
+                signal.signal(signum, self._handle_signal)
+            self._sample()
+            self._monitor = threading.Thread(
+                target=self._monitor_control,
+                name="nginx-generation-controller-liveness",
+                daemon=True,
+            )
+            self._monitor.start()
+            self.check()
+            return self
+        except BaseException:
+            self._restore()
+            raise
+
+    def check(self) -> None:
+        if self._cancelled.is_set() and not self._exception_delivered:
+            self._exception_delivered = True
+            raise NginxGenerationCancellation(self._reason)
+
+    def _restore(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._exception_delivered = True
+        self._stopping.set()
+        if self._monitor is not None:
+            self._monitor.join(timeout=1)
+        try:
+            os.close(self._fd)
+        except OSError:
+            pass
+        for signum, handler in self._old_handlers.items():
+            signal.signal(signum, handler)
+        self._old_handlers.clear()
+
+    def __exit__(
+        self,
+        error_type: Any,
+        _value: Any,
+        _traceback: Any,
+    ) -> None:
+        already_delivered = self._exception_delivered
+        self._restore()
+        if (
+            error_type is None
+            and self._cancelled.is_set()
+            and not already_delivered
+        ):
+            raise NginxGenerationCancellation(self._reason)
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -186,6 +431,68 @@ def _nonzero_sha256(value: Any, *, label: str) -> str:
     ):
         raise NginxGenerationError(f"{label} is not a nonzero SHA-256 digest")
     return value
+
+
+def _readback_challenge(
+    *,
+    operation_id: str,
+    role: str,
+    expected_host: str,
+    release_sha: str,
+    release_tree_sha: str,
+    manifest_sha256: str,
+    archive_sha256: str,
+    challenge_nonce: str | None,
+    challenge_sha256: str | None,
+    issued_at_epoch: int | None,
+    expires_at_epoch: int | None,
+    observed_at_epoch: int,
+) -> tuple[dict[str, Any], str]:
+    if (
+        not isinstance(challenge_nonce, str)
+        or SHA256_RE.fullmatch(challenge_nonce) is None
+        or challenge_nonce == "0" * 64
+    ):
+        raise NginxGenerationError(
+            "fresh readback challenge nonce is invalid"
+        )
+    challenge_sha256 = _nonzero_sha256(
+        challenge_sha256,
+        label="fresh readback challenge SHA-256",
+    )
+    if (
+        type(issued_at_epoch) is not int
+        or type(expires_at_epoch) is not int
+        or type(observed_at_epoch) is not int
+        or issued_at_epoch < 1
+        or expires_at_epoch
+        != issued_at_epoch + READBACK_CHALLENGE_TTL_SECONDS
+        or observed_at_epoch
+        < issued_at_epoch - READBACK_MAX_CLOCK_SKEW_SECONDS
+        or observed_at_epoch > expires_at_epoch
+    ):
+        raise NginxGenerationError(
+            "fresh readback challenge time window is invalid"
+        )
+    challenge = {
+        "schema": HOST_READBACK_CHALLENGE_SCHEMA,
+        "operation_id": operation_id,
+        "role": role,
+        "expected_host": expected_host,
+        "release_sha": release_sha,
+        "release_tree_sha": release_tree_sha,
+        "manifest_sha256": manifest_sha256,
+        "archive_sha256": archive_sha256,
+        "readback_challenge_nonce": challenge_nonce,
+        "issued_at_epoch": issued_at_epoch,
+        "expires_at_epoch": expires_at_epoch,
+    }
+    observed_sha256 = _sha256(canonical_json_bytes(challenge))
+    if observed_sha256 != challenge_sha256:
+        raise NginxGenerationError(
+            "fresh readback challenge binding differs"
+        )
+    return challenge, observed_sha256
 
 
 def _canonical_uuid4(value: str, *, label: str) -> str:
@@ -2103,27 +2410,412 @@ def _candidate_files(
     return candidate_top_path, _sha256(canonical_json_bytes(candidate_binding))
 
 
-def _subprocess_runner(argv: Sequence[str], timeout: int) -> CommandResult:
+@dataclass(frozen=True)
+class ProcessIdentity:
+    pid: int
+    parent_pid: int
+    process_group: int
+    start_time: int
+    state: str
+
+    @property
+    def key(self) -> tuple[int, int]:
+        return self.pid, self.start_time
+
+
+def _process_identity(pid: int) -> ProcessIdentity | None:
     try:
-        result = subprocess.run(
+        payload = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+        fields = payload[payload.rindex(") ") + 2 :].split()
+        if len(fields) < 20:
+            return None
+        return ProcessIdentity(
+            pid=pid,
+            parent_pid=int(fields[1], 10),
+            process_group=int(fields[2], 10),
+            start_time=int(fields[19], 10),
+            state=fields[0],
+        )
+    except (OSError, UnicodeError, ValueError):
+        return None
+
+
+def _process_snapshot() -> dict[int, ProcessIdentity]:
+    try:
+        entries = tuple(Path("/proc").iterdir())
+    except OSError as exc:
+        raise NginxGenerationError(
+            "subprocess ownership inventory is unavailable"
+        ) from exc
+    return {
+        identity.pid: identity
+        for entry in entries
+        if entry.name.isdecimal()
+        for identity in (_process_identity(int(entry.name, 10)),)
+        if identity is not None
+    }
+
+
+def _enable_child_subreaper() -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise NginxGenerationError(
+            f"child subreaper setup failed with errno {error}"
+        )
+
+
+def _direct_child_baseline() -> frozenset[tuple[int, int]]:
+    owner = os.getpid()
+    return frozenset(
+        identity.key
+        for identity in _process_snapshot().values()
+        if identity.parent_pid == owner
+    )
+
+
+def _owned_processes(
+    root: ProcessIdentity,
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+) -> set[ProcessIdentity]:
+    snapshot = _process_snapshot()
+    observed_root = snapshot.get(root.pid)
+    owned_ids: set[int] = set()
+    if (
+        observed_root is not None
+        and observed_root.start_time == root.start_time
+    ):
+        owned_ids.add(root.pid)
+    changed = True
+    while changed:
+        changed = False
+        for identity in snapshot.values():
+            if (
+                identity.pid not in owned_ids
+                and identity.parent_pid in owned_ids
+            ):
+                owned_ids.add(identity.pid)
+                changed = True
+    owner = os.getpid()
+    for identity in snapshot.values():
+        if (
+            identity.parent_pid == owner
+            and identity.key not in baseline_children
+        ):
+            owned_ids.add(identity.pid)
+    return {
+        identity
+        for pid, identity in snapshot.items()
+        if pid in owned_ids
+    }
+
+
+def _identity_is_live(identity: ProcessIdentity) -> bool:
+    current = _process_identity(identity.pid)
+    return (
+        current is not None
+        and current.start_time == identity.start_time
+        and current.state != "Z"
+    )
+
+
+def _identity_is_current(identity: ProcessIdentity) -> bool:
+    current = _process_identity(identity.pid)
+    return (
+        current is not None
+        and current.start_time == identity.start_time
+    )
+
+
+def _reap_adopted_zombies(
+    tracked: set[ProcessIdentity],
+    *,
+    root_pid: int,
+) -> None:
+    for identity in tuple(tracked):
+        if identity.pid == root_pid:
+            continue
+        current = _process_identity(identity.pid)
+        if (
+            current is None
+            or current.start_time != identity.start_time
+            or current.parent_pid != os.getpid()
+            or current.state != "Z"
+        ):
+            continue
+        try:
+            reaped, _status = os.waitpid(identity.pid, os.WNOHANG)
+        except ChildProcessError:
+            continue
+        except OSError as exc:
+            raise NginxGenerationError(
+                "identity-bound adopted subprocess could not be reaped"
+            ) from exc
+        if reaped not in {0, identity.pid}:
+            raise NginxGenerationError(
+                "identity-bound adopted subprocess reap differed"
+            )
+
+
+def _signal_process_identity(
+    identity: ProcessIdentity,
+    signum: int,
+) -> None:
+    current = _process_identity(identity.pid)
+    if current is None or current.start_time != identity.start_time:
+        return
+    try:
+        descriptor = os.pidfd_open(identity.pid, 0)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise NginxGenerationError(
+            "identity-bound subprocess handle cannot be opened"
+        ) from exc
+    try:
+        refreshed = _process_identity(identity.pid)
+        if refreshed is None or refreshed.start_time != identity.start_time:
+            return
+        signal.pidfd_send_signal(descriptor, signum)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise NginxGenerationError(
+            "identity-bound subprocess signal failed"
+        ) from exc
+    finally:
+        os.close(descriptor)
+
+
+def _terminate_process_tree(
+    process: subprocess.Popen[bytes],
+    root: ProcessIdentity,
+    tracked: set[ProcessIdentity],
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+) -> None:
+    def refresh() -> None:
+        tracked.update(
+            _owned_processes(
+                root,
+                baseline_children=baseline_children,
+            )
+        )
+        _reap_adopted_zombies(tracked, root_pid=root.pid)
+
+    def signal_live(*, force: bool) -> None:
+        refresh()
+        for identity in tuple(tracked):
+            if _identity_is_live(identity):
+                _signal_process_identity(
+                    identity,
+                    (
+                        signal.SIGKILL
+                        if force
+                        or identity.process_group != root.process_group
+                        else signal.SIGTERM
+                    ),
+                )
+
+    signal_live(force=False)
+    deadline = time.monotonic() + COMMAND_TERM_GRACE_SECONDS
+    while time.monotonic() < deadline:
+        process.poll()
+        signal_live(force=False)
+        if process.poll() is not None and not any(
+            _identity_is_live(identity) for identity in tracked
+        ):
+            break
+        time.sleep(
+            min(
+                PROCESS_POLL_SECONDS,
+                max(0.0, deadline - time.monotonic()),
+            )
+        )
+    signal_live(force=True)
+    try:
+        process.wait(timeout=COMMAND_TERM_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=COMMAND_TERM_GRACE_SECONDS)
+    absence_deadline = (
+        time.monotonic()
+        + COMMAND_TERM_GRACE_SECONDS
+        + PROCESS_TREE_QUIESCENCE_SECONDS
+    )
+    stable_since: float | None = None
+    while time.monotonic() < absence_deadline:
+        refresh()
+        live = {
+            identity for identity in tracked if _identity_is_live(identity)
+        }
+        if live:
+            stable_since = None
+            for identity in live:
+                _signal_process_identity(identity, signal.SIGKILL)
+        elif stable_since is None:
+            stable_since = time.monotonic()
+        elif (
+            time.monotonic() - stable_since
+            >= PROCESS_TREE_QUIESCENCE_SECONDS
+        ):
+            return
+        time.sleep(
+            min(
+                PROCESS_POLL_SECONDS,
+                max(0.0, absence_deadline - time.monotonic()),
+            )
+        )
+    refresh()
+    if any(
+        identity.pid != root.pid and _identity_is_current(identity)
+        for identity in tracked
+    ):
+        raise NginxGenerationError(
+            "subprocess process tree survived forced cleanup"
+        )
+
+
+def _subprocess_runner(argv: Sequence[str], timeout: int) -> CommandResult:
+    if (
+        type(timeout) is not int
+        or not 1 <= timeout <= MAX_COMMAND_TIMEOUT_SECONDS
+    ):
+        raise NginxGenerationError(
+            "bounded Nginx command timeout is outside its contract"
+        )
+    process: subprocess.Popen[bytes] | None = None
+    selector = selectors.DefaultSelector()
+    buffers = {"stdout": bytearray(), "stderr": bytearray()}
+    tracked: set[ProcessIdentity] = set()
+    root: ProcessIdentity | None = None
+    cleaned = False
+    deadline = time.monotonic() + timeout
+    _enable_child_subreaper()
+    baseline_children = _direct_child_baseline()
+    try:
+        process = subprocess.Popen(  # noqa: S603
             list(argv),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            timeout=timeout,
             env={
                 "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
-                "HOME": "/root",
+                "HOME": "/nonexistent",
                 "LANG": "C.UTF-8",
                 "LC_ALL": "C.UTF-8",
             },
-            check=False,
+            close_fds=True,
+            pass_fds=(),
+            start_new_session=True,
         )
+        root = _process_identity(process.pid)
+        if root is None:
+            process.poll()
+            root = ProcessIdentity(
+                pid=process.pid,
+                parent_pid=os.getpid(),
+                process_group=process.pid,
+                start_time=-1,
+                state="?",
+            )
+        if process.stdout is None or process.stderr is None:
+            raise NginxGenerationError(
+                "bounded Nginx command pipes are unavailable"
+            )
+        for label, stream in (
+            ("stdout", process.stdout),
+            ("stderr", process.stderr),
+        ):
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, label)
+        while selector.get_map():
+            tracked.update(
+                _owned_processes(
+                    root,
+                    baseline_children=baseline_children,
+                )
+            )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise NginxGenerationError(
+                    "bounded Nginx command timed out"
+                )
+            events = selector.select(
+                min(PROCESS_POLL_SECONDS, remaining)
+            )
+            if not events:
+                if process.poll() is not None and not cleaned:
+                    _terminate_process_tree(
+                        process,
+                        root,
+                        tracked,
+                        baseline_children=baseline_children,
+                    )
+                    cleaned = True
+                continue
+            for key, _mask in events:
+                try:
+                    chunk = os.read(key.fileobj.fileno(), 64 * 1024)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                label = key.data
+                if (
+                    len(buffers[label]) + len(chunk)
+                    > MAX_COMMAND_STREAM_BYTES
+                ):
+                    raise NginxGenerationError(
+                        f"bounded Nginx command {label} is oversized"
+                    )
+                buffers[label].extend(chunk)
+            if process.poll() is not None and not cleaned:
+                _terminate_process_tree(
+                    process,
+                    root,
+                    tracked,
+                    baseline_children=baseline_children,
+                )
+                cleaned = True
+        returncode = process.poll()
+        if returncode is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise NginxGenerationError(
+                    "bounded Nginx command timed out"
+                )
+            returncode = process.wait(timeout=remaining)
+    except NginxGenerationError:
+        raise
     except (OSError, subprocess.SubprocessError) as exc:
-        raise NginxGenerationError("bounded Nginx command could not execute") from exc
-    return CommandResult(result.returncode, bytes(result.stdout), bytes(result.stderr))
-
-
+        raise NginxGenerationError(
+            "bounded Nginx command could not execute"
+        ) from exc
+    finally:
+        selector.close()
+        if process is not None and root is not None:
+            try:
+                if not cleaned:
+                    _terminate_process_tree(
+                        process,
+                        root,
+                        tracked,
+                        baseline_children=baseline_children,
+                    )
+            finally:
+                if process.stdout is not None:
+                    process.stdout.close()
+                if process.stderr is not None:
+                    process.stderr.close()
+    return CommandResult(
+        returncode,
+        bytes(buffers["stdout"]),
+        bytes(buffers["stderr"]),
+    )
 def _run_checked(
     argv: Sequence[str],
     *,
@@ -2480,7 +3172,29 @@ def _test_generation(
     )
 
 
-def _active_test_and_reload(*, layout: HostLayout, runner: RunFn) -> dict[str, Any]:
+def _active_test_and_reload(
+    *,
+    manifest: Mapping[str, Any],
+    members: Mapping[str, bytes],
+    expected_state: str,
+    layout: HostLayout,
+    runner: RunFn,
+) -> dict[str, Any]:
+    if (
+        type(layout.reload_stability_observations) is not int
+        or not 2 <= layout.reload_stability_observations <= 10
+        or isinstance(layout.reload_stability_interval_seconds, bool)
+        or not isinstance(
+            layout.reload_stability_interval_seconds,
+            (int, float),
+        )
+        or not 0
+        <= layout.reload_stability_interval_seconds
+        <= 30
+    ):
+        raise NginxGenerationError(
+            "Nginx reload stability contract is invalid"
+        )
     test = _run_checked(
         (
             os.fspath(layout.nginx_bin),
@@ -2507,7 +3221,61 @@ def _active_test_and_reload(*, layout: HostLayout, runner: RunFn) -> dict[str, A
         runner=runner,
         label="Nginx reload",
     )
-    return {"test": test, "reload": reload_result}
+    service_status_argv = (
+        layout.reload_argv[0],
+        "is-active",
+        "--quiet",
+        "nginx",
+    )
+    stability: list[dict[str, Any]] = []
+    started = time.monotonic()
+    for index in range(1, layout.reload_stability_observations + 1):
+        target = (
+            started + index * layout.reload_stability_interval_seconds
+        )
+        remaining = target - time.monotonic()
+        if remaining > 0:
+            time.sleep(remaining)
+        service = _run_checked(
+            service_status_argv,
+            runner=runner,
+            label=f"Nginx service stability observation {index}",
+        )
+        nginx_test = _run_checked(
+            (
+                os.fspath(layout.nginx_bin),
+                "-t",
+                "-c",
+                os.fspath(layout.nginx_conf),
+                "-p",
+                "/",
+            ),
+            runner=runner,
+            label=f"Nginx config stability observation {index}",
+        )
+        readback = _active_state(
+            manifest,
+            members,
+            layout=layout,
+            owner_uid=layout.owner_uid,
+        )
+        if readback != expected_state:
+            raise NginxGenerationError(
+                "Nginx reload stability readback differs"
+            )
+        stability.append(
+            {
+                "index": index,
+                "service": service,
+                "nginx_test": nginx_test,
+                "state": readback,
+            }
+        )
+    return {
+        "test": test,
+        "reload": reload_result,
+        "stability": stability,
+    }
 
 
 def _rollback_transaction(
@@ -2538,23 +3306,32 @@ def _rollback_transaction(
         dict(failure_evidence) if failure_evidence is not None else None
     )
     _write_journal(journal_path, journal, create=False)
-    for path in sorted(previous, key=os.fspath):
-        _atomic_replace_destination(
-            path,
-            previous[path],
-            expected_sha256={_sha256(previous[path]), _sha256(target[path])},
-            owner_uid=layout.owner_uid,
-        )
-    transaction["status"] = "rollback-validating"
-    _write_journal(journal_path, journal, create=False)
     try:
-        commands = _active_test_and_reload(layout=layout, runner=runner)
+        for path in sorted(previous, key=os.fspath):
+            _atomic_replace_destination(
+                path,
+                previous[path],
+                expected_sha256={
+                    _sha256(previous[path]),
+                    _sha256(target[path]),
+                },
+                owner_uid=layout.owner_uid,
+            )
+        transaction["status"] = "rollback-validating"
+        _write_journal(journal_path, journal, create=False)
+        commands = _active_test_and_reload(
+            manifest=manifest,
+            members=members,
+            expected_state=from_state,
+            layout=layout,
+            runner=runner,
+        )
         observed = _active_state(
             manifest, members, layout=layout, owner_uid=layout.owner_uid
         )
         if observed != from_state:
             raise NginxGenerationError("rollback readback differs from previous generation")
-    except NginxGenerationError as exc:
+    except BaseException as exc:
         transaction["status"] = "rollback-failed"
         transaction["rollback_failure_evidence"] = (
             exc.evidence if isinstance(exc, NginxCommandError) else None
@@ -2723,13 +3500,19 @@ def _activate(
             )
         journal["transaction"]["status"] = "validating"
         _write_journal(journal_path, journal, create=False)
-        commands = _active_test_and_reload(layout=layout, runner=runner)
+        commands = _active_test_and_reload(
+            manifest=manifest,
+            members=members,
+            expected_state=target_state,
+            layout=layout,
+            runner=runner,
+        )
         readback = _active_state(
             manifest, members, layout=layout, owner_uid=layout.owner_uid
         )
         if readback != target_state:
             raise NginxGenerationError("activated Nginx generation readback differs")
-    except (NginxGenerationError, OSError) as exc:
+    except BaseException as exc:
         try:
             _rollback_transaction(
                 journal=journal,
@@ -2738,15 +3521,24 @@ def _activate(
                 members=members,
                 layout=layout,
                 runner=runner,
-                reason=str(exc),
+                reason=(
+                    f"{type(exc).__name__}: {exc}"
+                    if str(exc)
+                    else type(exc).__name__
+                ),
                 failure_evidence=(
                     exc.evidence if isinstance(exc, NginxCommandError) else None
                 ),
             )
-        except NginxGenerationError as rollback_exc:
+        except BaseException as rollback_exc:
             raise NginxGenerationError(
                 "Nginx activation failed and rollback validation also failed"
             ) from rollback_exc
+        if (
+            isinstance(exc, NginxGenerationCancellation)
+            or not isinstance(exc, Exception)
+        ):
+            raise
         raise NginxGenerationError(
             "Nginx activation failed; previous generation was restored"
         ) from exc
@@ -2777,7 +3569,7 @@ def _activate(
     )
 
 
-def execute_host_action(
+def _execute_host_action_under_contract(
     *,
     manifest_path: Path,
     expected_manifest_sha256: str,
@@ -2791,6 +3583,10 @@ def execute_host_action(
     generation: str | None = None,
     apply: bool = False,
     confirm: str | None = None,
+    readback_challenge_nonce: str | None = None,
+    readback_challenge_sha256: str | None = None,
+    issued_at_epoch: int | None = None,
+    expires_at_epoch: int | None = None,
     layout: HostLayout = HostLayout(),
     runner: RunFn = _subprocess_runner,
 ) -> dict[str, Any]:
@@ -2882,6 +3678,18 @@ def execute_host_action(
         raise NginxGenerationError("exact host action confirmation is required")
     if not mutating_action and confirm is not None:
         raise NginxGenerationError("readback does not accept a confirmation")
+    if action != "readback" and any(
+        value is not None
+        for value in (
+            readback_challenge_nonce,
+            readback_challenge_sha256,
+            issued_at_epoch,
+            expires_at_epoch,
+        )
+    ):
+        raise NginxGenerationError(
+            "fresh readback challenge is valid only for readback"
+        )
 
     if action == "install":
         _ensure_private_directory(
@@ -2959,6 +3767,20 @@ def execute_host_action(
                 layout=layout,
                 runner=runner,
             )
+        _readback_challenge(
+            operation_id=operation_id,
+            role=role,
+            expected_host=expected_host,
+            release_sha=release_sha,
+            release_tree_sha=release_tree_sha,
+            manifest_sha256=expected_manifest_sha256,
+            archive_sha256=manifest["archive"]["sha256"],
+            challenge_nonce=readback_challenge_nonce,
+            challenge_sha256=readback_challenge_sha256,
+            issued_at_epoch=issued_at_epoch,
+            expires_at_epoch=expires_at_epoch,
+            observed_at_epoch=int(time.time()),
+        )
         journal = _load_journal(
             root / "journal.json",
             manifest=manifest,
@@ -2976,8 +3798,23 @@ def execute_host_action(
         if observed != journal["active_state"]:
             raise NginxGenerationError("active Nginx readback differs from journal")
         inventory, inventory_sha256 = _enabled_inventory(manifest, layout=layout)
+        captured_at_epoch = int(time.time())
+        _readback_challenge(
+            operation_id=operation_id,
+            role=role,
+            expected_host=expected_host,
+            release_sha=release_sha,
+            release_tree_sha=release_tree_sha,
+            manifest_sha256=expected_manifest_sha256,
+            archive_sha256=manifest["archive"]["sha256"],
+            challenge_nonce=readback_challenge_nonce,
+            challenge_sha256=readback_challenge_sha256,
+            issued_at_epoch=issued_at_epoch,
+            expires_at_epoch=expires_at_epoch,
+            observed_at_epoch=captured_at_epoch,
+        )
         return {
-            "schema": "production-shadow-nginx-host-readback-v1",
+            "schema": HOST_FRESH_READBACK_SCHEMA,
             "status": "read-back",
             "operation_id": operation_id,
             "role": role,
@@ -2993,7 +3830,76 @@ def execute_host_action(
             "active_configuration_mutated": False,
             "service_reloaded": False,
             "journal_sha256": journal["state_sha256"],
+            "readback_challenge_nonce": readback_challenge_nonce,
+            "readback_challenge_sha256": readback_challenge_sha256,
+            "issued_at_epoch": issued_at_epoch,
+            "expires_at_epoch": expires_at_epoch,
+            "captured_at_epoch": captured_at_epoch,
         }
+
+
+def execute_host_action(
+    *,
+    manifest_path: Path,
+    expected_manifest_sha256: str,
+    archive_path: Path,
+    role: str,
+    expected_host: str,
+    operation_id: str,
+    release_sha: str,
+    release_tree_sha: str,
+    action: str,
+    generation: str | None = None,
+    apply: bool = False,
+    confirm: str | None = None,
+    readback_challenge_nonce: str | None = None,
+    readback_challenge_sha256: str | None = None,
+    issued_at_epoch: int | None = None,
+    expires_at_epoch: int | None = None,
+    control_fd: int | None = None,
+    layout: HostLayout = HostLayout(),
+    runner: RunFn = _subprocess_runner,
+) -> dict[str, Any]:
+    arguments = {
+        "manifest_path": manifest_path,
+        "expected_manifest_sha256": expected_manifest_sha256,
+        "archive_path": archive_path,
+        "role": role,
+        "expected_host": expected_host,
+        "operation_id": operation_id,
+        "release_sha": release_sha,
+        "release_tree_sha": release_tree_sha,
+        "action": action,
+        "generation": generation,
+        "apply": apply,
+        "confirm": confirm,
+        "readback_challenge_nonce": readback_challenge_nonce,
+        "readback_challenge_sha256": readback_challenge_sha256,
+        "issued_at_epoch": issued_at_epoch,
+        "expires_at_epoch": expires_at_epoch,
+        "layout": layout,
+        "runner": runner,
+    }
+    if apply and action in CONTROLLED_HOST_ACTIONS:
+        if layout.owner_uid != 0 or os.geteuid() != 0:
+            raise NginxGenerationError(
+                "controlled Nginx host action requires root ownership"
+            )
+        if threading.current_thread() is not threading.main_thread():
+            raise NginxGenerationError(
+                "controlled Nginx host action must run in the main thread"
+            )
+        if control_fd is None:
+            raise NginxGenerationError(
+                "controlled Nginx host action requires controller liveness"
+            )
+        with ControllerLivenessGuard(control_fd):
+            return _execute_host_action_under_contract(**arguments)
+    if control_fd is not None:
+        raise NginxGenerationError(
+            "non-mutating Nginx host action rejects controller liveness"
+        )
+    return _execute_host_action_under_contract(**arguments)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -3037,6 +3943,11 @@ def build_parser() -> argparse.ArgumentParser:
     host.add_argument("--generation", choices=GENERATION_STATES)
     host.add_argument("--apply", action="store_true")
     host.add_argument("--confirm")
+    host.add_argument("--readback-challenge-nonce")
+    host.add_argument("--readback-challenge-sha256")
+    host.add_argument("--issued-at-epoch", type=int)
+    host.add_argument("--expires-at-epoch", type=int)
+    host.add_argument("--control-fd", type=int, help=argparse.SUPPRESS)
     return parser
 
 
@@ -3077,6 +3988,11 @@ def main(argv: list[str] | None = None) -> int:
                 generation=args.generation,
                 apply=args.apply,
                 confirm=args.confirm,
+                readback_challenge_nonce=args.readback_challenge_nonce,
+                readback_challenge_sha256=args.readback_challenge_sha256,
+                issued_at_epoch=args.issued_at_epoch,
+                expires_at_epoch=args.expires_at_epoch,
+                control_fd=args.control_fd,
             )
         print(json.dumps(result, sort_keys=True))
         return 0

@@ -1,5 +1,7 @@
 import importlib.util
 import asyncio
+import io
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -18,6 +20,90 @@ spec.loader.exec_module(matrix_runner)
 
 
 class BotWebAppComprehensiveLoadMatrixTests(unittest.TestCase):
+    def setUp(self):
+        # Historical helper tests exercise retained algorithm behavior only.
+        # Runtime use is covered separately with the real unconditional guard.
+        self._runtime_guard = patch.object(
+            matrix_runner,
+            "assert_legacy_two_server_comprehensive_matrix_execution_retired",
+            return_value=None,
+        )
+        self._runtime_guard.start()
+
+    def tearDown(self):
+        self._runtime_guard.stop()
+
+    def test_cli_execution_is_retired_before_async_runner_or_fixture_access(self):
+        with patch.dict(
+            matrix_runner.os.environ,
+            {
+                "ENVIRONMENT": "development",
+                matrix_runner.worker.PRODUCTION_ROLE_WORKER_CONFIRM_ENV: (
+                    matrix_runner.worker.PRODUCTION_ROLE_WORKER_CONFIRM_VALUE
+                ),
+            },
+            clear=False,
+        ), patch.object(
+            matrix_runner,
+            "run_async_entrypoint",
+            side_effect=AssertionError("retired matrix must not start the async runner"),
+        ), patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            exit_code = matrix_runner.main(
+                [
+                    "--prefix",
+                    "PFM_20260728_legacy_fence_",
+                    "--allow-production-execution",
+                    "--allow-production-cleanup",
+                ]
+            )
+
+        self.assertEqual(exit_code, 2)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["status"], "blocked_legacy_two_server_full_matrix_retired")
+
+    def test_imported_runtime_helpers_stay_retired_despite_environment_spoofing(self):
+        self._runtime_guard.stop()
+        users = [matrix_runner.worker.LoadUserRef(user_id=9, telegram_id=9009)]
+        unsafe_attempt = AsyncMock(return_value="success")
+        redis_cleanup = AsyncMock(return_value=1)
+
+        async def run_probe():
+            with patch.object(matrix_runner.worker, "cleanup_redis_for_user_ids", redis_cleanup):
+                with self.assertRaises(matrix_runner.LegacyTwoServerComprehensiveMatrixRuntimeRetiredError):
+                    await matrix_runner.reset_scenario_user_runtime_state(users)
+                with self.assertRaises(matrix_runner.LegacyTwoServerComprehensiveMatrixRuntimeRetiredError):
+                    await matrix_runner.run_scheduled_attempts(
+                        total=1,
+                        target_rps=1,
+                        attempt=unsafe_attempt,
+                    )
+                with self.assertRaises(matrix_runner.LegacyTwoServerComprehensiveMatrixRuntimeRetiredError):
+                    await matrix_runner.create_offer(
+                        origin="webapp",
+                        owner=users[0],
+                        commodity_id=1,
+                        commodity_name="legacy",
+                        shape=matrix_runner.SHAPES["wholesale_full"],
+                        offer_type="sell",
+                        prefix="PFM_legacy_",
+                        index=1,
+                    )
+
+        with patch.dict(
+            matrix_runner.os.environ,
+            {
+                "ENVIRONMENT": "development",
+                matrix_runner.worker.PRODUCTION_ROLE_WORKER_CONFIRM_ENV: (
+                    matrix_runner.worker.PRODUCTION_ROLE_WORKER_CONFIRM_VALUE
+                ),
+            },
+            clear=False,
+        ):
+            asyncio.run(run_probe())
+
+        self.assertFalse(redis_cleanup.called)
+        unsafe_attempt.assert_not_awaited()
+
     def test_matrix_covers_required_scenario_families(self):
         scenarios = matrix_runner.build_comprehensive_scenarios()
         family_counts = {}

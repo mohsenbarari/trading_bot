@@ -1,3 +1,5 @@
+import io
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,6 +23,64 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
             runner.parse_args(
                 ["--iran-ssh-host", "ubuntu@95.38.164.29", "--iran-ssh-port", "22"]
             )
+
+    def test_direct_runtime_entrypoints_deny_before_network_or_container_access(self):
+        invocations = {
+            "preflight_checks": lambda: runner.preflight_checks(SimpleNamespace(), {}),
+            "sync_health": lambda: runner.capture_sync_health(SimpleNamespace(), label="unit"),
+            "parity": lambda: runner.capture_parity(SimpleNamespace(), label="unit"),
+            "preflight": lambda: runner.run_preflight(SimpleNamespace()),
+            "driver_suite": lambda: runner.run_driver_suite(SimpleNamespace(), {}),
+            "execute": lambda: runner.run_execute(SimpleNamespace()),
+        }
+
+        with patch.object(
+            runner,
+            "build_plan",
+            side_effect=AssertionError("retired runner reached plan/runtime setup"),
+        ), patch.object(
+            runner,
+            "fetch_observability_json",
+            side_effect=AssertionError("retired runner reached HTTP"),
+        ), patch.object(
+            runner,
+            "run_json_command",
+            side_effect=AssertionError("retired runner reached SSH/container"),
+        ):
+            for name, invocation in invocations.items():
+                with self.subTest(name=name), self.assertRaisesRegex(
+                    runner.LegacyTwoServerStagingMatrixRetiredError,
+                    "hard-disabled",
+                ):
+                    invocation()
+
+    def test_cli_runtime_mode_denies_before_plan_build(self):
+        with patch.object(
+            runner,
+            "build_plan",
+            side_effect=AssertionError("retired CLI reached build_plan"),
+        ), patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            exit_code = runner.main(["--mode", "preflight"])
+
+        self.assertEqual(exit_code, 2)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["status"], "blocked_legacy_two_server_staging_matrix_retired")
+
+    def test_cli_plan_denies_before_parsing_or_caller_path_cleanup(self):
+        with patch.object(
+            runner,
+            "parse_args",
+            side_effect=AssertionError("retired CLI parsed caller-controlled run id"),
+        ), patch.object(
+            runner.shutil,
+            "rmtree",
+            side_effect=AssertionError("retired CLI reached caller-derived cleanup"),
+        ), patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            exit_code = runner.main(["--mode", "plan", "--run-id", "../escape"])
+
+        self.assertEqual(exit_code, 2)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["status"], "blocked_legacy_two_server_staging_matrix_retired")
 
     def test_expected_branch_can_be_selected_for_a_candidate_validation(self):
         args = runner.parse_args(["--expected-branch", "candidate/iran-server-replacement-20260710"])
@@ -72,7 +132,8 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
 
         self.assertEqual(args.expected_branch, "candidate/sync-parity-hardening")
 
-    def test_preflight_fails_when_release_label_is_not_current_commit(self):
+    @patch.object(runner, "assert_legacy_two_server_staging_matrix_execution_retired", return_value=None)
+    def test_preflight_fails_when_release_label_is_not_current_commit(self, _retirement_guard):
         args = runner.parse_args(["--expected-release-sha", "wrong-release"])
         with patch.object(runner, "run_git_value") as git_value, patch.object(
             runner, "check_tls", return_value=runner.CheckResult("tls", "passed", "ok")
@@ -104,59 +165,105 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         binding = next(check for check in checks if check.name == "release_commit_binding")
         self.assertEqual(binding.status, "failed")
 
-    def test_plan_writes_equivalent_agent_log_directories(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmp_path = Path(tmpdir)
-            original_claude_root = runner.CLAUDE_LOG_ROOT
-            original_chatgpt_root = runner.CHATGPT_LOG_ROOT
-            try:
-                runner.CLAUDE_LOG_ROOT = tmp_path / "claude" / "full_matrix_logs"
-                runner.CHATGPT_LOG_ROOT = tmp_path / "chatgpt" / "full_matrix_logs"
-                args = runner.parse_args(
-                    [
-                        "--mode",
-                        "plan",
-                        "--run-id",
-                        "S2FM-UNIT",
-                        "--prefix",
-                        "FMX_STAGE_UNIT_20260629_",
-                        "--artifact-dir",
-                        str(tmp_path / "artifacts"),
-                    ]
-                )
-                payload = runner.build_plan(args)
-            finally:
-                runner.CLAUDE_LOG_ROOT = original_claude_root
-                runner.CHATGPT_LOG_ROOT = original_chatgpt_root
+    def test_direct_plan_and_log_publishers_deny_before_caller_path_access(self):
+        unsafe = SimpleNamespace(run_id="../escape")
+        with patch.object(
+            runner,
+            "build_manifest",
+            side_effect=AssertionError("retired plan builder inspected caller input"),
+        ), patch.object(
+            runner.shutil,
+            "rmtree",
+            side_effect=AssertionError("retired runner reached caller-derived cleanup"),
+        ):
+            with self.assertRaisesRegex(
+                runner.LegacyTwoServerStagingMatrixRetiredError,
+                "hard-disabled",
+            ):
+                runner.build_plan(unsafe)
+            with self.assertRaisesRegex(
+                runner.LegacyTwoServerStagingMatrixRetiredError,
+                "hard-disabled",
+            ):
+                runner.publish_agent_logs(Path("/tmp/unused"), unsafe, {}, status="plan_ready")
 
-            self.assertEqual(payload["summary"]["status"], "plan_ready")
-            for root in (tmp_path / "claude" / "full_matrix_logs", tmp_path / "chatgpt" / "full_matrix_logs"):
-                log_dir = root / "S2FM-UNIT"
-                self.assertTrue((log_dir / "README.md").exists())
-                self.assertTrue((log_dir / "run-metadata.json").exists())
-                self.assertTrue((log_dir / "manifest.json").exists())
-                self.assertTrue((log_dir / "scenario-results.jsonl").exists())
-                self.assertTrue((log_dir / "summary.json").exists())
-                self.assertTrue((log_dir / "redaction-report.json").exists())
+    def test_direct_writer_and_driver_entrypoints_deny_before_io_or_subprocess(self):
+        target = Path("/tmp/retired-two-server-matrix/../escape")
+        scenario = {"id": "DRIVER-UNTRUSTED"}
+        with patch.object(
+            Path,
+            "mkdir",
+            side_effect=AssertionError("retired writer created a caller-derived directory"),
+        ) as mkdir, patch.object(
+            Path,
+            "write_text",
+            side_effect=AssertionError("retired writer wrote a caller-derived file"),
+        ) as write_text, patch.object(
+            Path,
+            "open",
+            side_effect=AssertionError("retired writer opened a caller-derived file"),
+        ) as open_path, patch.object(
+            Path,
+            "exists",
+            side_effect=AssertionError("retired scenario writer inspected a caller-derived path"),
+        ) as exists, patch.object(
+            Path,
+            "unlink",
+            side_effect=AssertionError("retired scenario writer unlinked a caller-derived path"),
+        ) as unlink, patch.object(
+            runner.subprocess,
+            "run",
+            side_effect=AssertionError("retired git helper started a subprocess"),
+        ) as subprocess_run, patch.object(
+            runner,
+            "run_cleanup_on_both_sides",
+            side_effect=AssertionError("retired driver started scenario execution"),
+        ) as cleanup:
+            invocations = {
+                "write_json": lambda: runner.write_json(target, {"value": "untrusted"}),
+                "append_jsonl": lambda: runner.append_jsonl(target, {"value": "untrusted"}),
+                "write_text": lambda: runner.write_text(target, "untrusted"),
+                "write_scenario_plan_jsonl": lambda: runner.write_scenario_plan_jsonl(
+                    target,
+                    {"summary": {}, "sections": {}},
+                ),
+                "execute_driver_scenario": lambda: runner.execute_driver_scenario(
+                    SimpleNamespace(prefix="FMX", run_id="unsafe"),
+                    scenario,
+                    suite_dir=target,
+                    remote_root="/remote/unsafe",
+                ),
+                "run_git_value": lambda: runner.run_git_value(["status", "--short"]),
+            }
+            for name, invocation in invocations.items():
+                with self.subTest(name=name), self.assertRaisesRegex(
+                    runner.LegacyTwoServerStagingMatrixRetiredError,
+                    "hard-disabled",
+                ):
+                    invocation()
 
-    def test_json_artifacts_are_sanitized_before_publication(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "artifact.json"
-            runner.write_json(
-                path,
-                {
-                    "api_key": "plain-secret-value",
-                    "nested": {"mobile_number": "09370809280"},
-                    "text": "BOT_TOKEN=1234567890:abcdefghijklmnopqrstuvwxyz",
-                },
-            )
-            text = path.read_text(encoding="utf-8")
+        mkdir.assert_not_called()
+        write_text.assert_not_called()
+        open_path.assert_not_called()
+        exists.assert_not_called()
+        unlink.assert_not_called()
+        subprocess_run.assert_not_called()
+        cleanup.assert_not_called()
 
-            self.assertIn("[REDACTED]", text)
-            self.assertNotIn("plain-secret-value", text)
-            self.assertNotIn("09370809280", text)
-            self.assertNotIn("abcdefghijklmnopqrstuvwxyz", text)
-            self.assertFalse(runner.detect_forbidden_secret_like_values(Path(tmpdir))["detected"])
+    def test_payload_sanitizer_redacts_secret_like_values(self):
+        payload = runner.sanitize_payload(
+            {
+                "api_key": "plain-secret-value",
+                "nested": {"mobile_number": "09370809280"},
+                "text": "BOT_TOKEN=1234567890:abcdefghijklmnopqrstuvwxyz",
+            }
+        )
+        text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+        self.assertIn("[REDACTED]", text)
+        self.assertNotIn("plain-secret-value", text)
+        self.assertNotIn("09370809280", text)
+        self.assertNotIn("abcdefghijklmnopqrstuvwxyz", text)
 
     def test_expected_branch_can_be_overridden_for_candidate_release_gates(self):
         args = runner.parse_args(["--expected-branch", "candidate/webapp-ui-ux-unification"])
@@ -214,7 +321,8 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             runner.assert_observability_clean([result], label="post_trade_catchup")
 
-    def test_sync_health_capture_fails_on_nonzero_queue(self):
+    @patch.object(runner, "assert_legacy_two_server_staging_matrix_execution_retired", return_value=None)
+    def test_sync_health_capture_fails_on_nonzero_queue(self, _retirement_guard):
         def fake_fetch(url, *_args, **_kwargs):
             server_mode = "foreign" if "/foreign-sync/" in url else "iran"
             return (
@@ -255,7 +363,8 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         self.assertIn("iran", payload["failed_peers"])
         self.assertIn("sync:outbound=1", "; ".join(payload["gate_failures"]["iran"]))
 
-    def test_sync_health_capture_fails_on_stale_final_parity(self):
+    @patch.object(runner, "assert_legacy_two_server_staging_matrix_execution_retired", return_value=None)
+    def test_sync_health_capture_fails_on_stale_final_parity(self, _retirement_guard):
         def fake_fetch(url, *_args, **_kwargs):
             server_mode = "foreign" if "/foreign-sync/" in url else "iran"
             return (
@@ -297,7 +406,8 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         self.assertEqual(payload["status"], "failed")
         self.assertIn("parity_status.fresh=false", "; ".join(payload["gate_failures"]["iran"]))
 
-    def test_capture_parity_uses_foreign_sync_paths_and_validates_roles(self):
+    @patch.object(runner, "assert_legacy_two_server_staging_matrix_execution_retired", return_value=None)
+    def test_capture_parity_uses_foreign_sync_paths_and_validates_roles(self, _retirement_guard):
         calls = []
 
         def fake_fetch(url, _key, *, method="GET", **_kwargs):
@@ -353,7 +463,8 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
             get_urls,
         )
 
-    def test_capture_parity_fails_when_foreign_snapshot_returns_iran_mode(self):
+    @patch.object(runner, "assert_legacy_two_server_staging_matrix_execution_retired", return_value=None)
+    def test_capture_parity_fails_when_foreign_snapshot_returns_iran_mode(self, _retirement_guard):
         def fake_fetch(url, _key, *, method="GET", **_kwargs):
             if method == "POST":
                 return (200, {"stored": True}, "{}")
@@ -396,7 +507,8 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         )
         self.assertNotIn("comparison", payload)
 
-    def test_execute_records_parity_before_final_sync_health(self):
+    @patch.object(runner, "assert_legacy_two_server_staging_matrix_execution_retired", return_value=None)
+    def test_execute_records_parity_before_final_sync_health(self, _retirement_guard):
         call_order = []
 
         def fake_capture_parity(_args, *, label):
@@ -509,7 +621,8 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
 
         self.assertEqual(result.status, "passed")
 
-    def test_capture_parity_uses_role_specific_sync_routes(self):
+    @patch.object(runner, "assert_legacy_two_server_staging_matrix_execution_retired", return_value=None)
+    def test_capture_parity_uses_role_specific_sync_routes(self, _retirement_guard):
         requested_urls = []
 
         def fake_fetch(url, *_args, method="GET", **_kwargs):
@@ -895,7 +1008,8 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         self.assertIn("verify-dual-role-users", local.call_args.kwargs["worker_args"])
         copy.assert_called_once()
 
-    def test_driver_invokes_seed_convergence_before_prepare_and_records_failure(self):
+    @patch.object(runner, "assert_legacy_two_server_staging_matrix_execution_retired", return_value=None)
+    def test_driver_invokes_seed_convergence_before_prepare_and_records_failure(self, _retirement_guard):
         scenario = {
             "id": "DRIVER-STAGE9-SEED-UNIT",
             "offer_origin": "webapp",
@@ -944,7 +1058,8 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         self.assertIn("stop after seed", result["error"])
 
-    def test_driver_suite_can_filter_to_one_driver_scenario(self):
+    @patch.object(runner, "assert_legacy_two_server_staging_matrix_execution_retired", return_value=None)
+    def test_driver_suite_can_filter_to_one_driver_scenario(self, _retirement_guard):
         calls = []
 
         def fake_execute_driver_scenario(args, scenario, *, suite_dir, remote_root):

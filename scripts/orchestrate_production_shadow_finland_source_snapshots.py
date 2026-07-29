@@ -14,17 +14,24 @@ from __future__ import annotations
 import argparse
 import base64
 from contextlib import contextmanager
+import ctypes
+from dataclasses import dataclass
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
 import secrets
+import selectors
+import signal
 import stat
 import subprocess
 import sys
-from typing import Any, BinaryIO, Callable, Iterator, Mapping
+import threading
+import time
+from typing import Any, BinaryIO, Callable, Iterator, Mapping, Sequence
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -88,12 +95,22 @@ SNAPSHOT_FILENAMES = (
 MAX_JSON_BYTES = 2 * 1024 * 1024
 MAX_ARTIFACT_BYTES = SOURCE.MAX_ARTIFACT_BYTES
 MAX_COMMAND_OUTPUT_BYTES = 8 * 1024 * 1024
+MAX_COMMAND_ERROR_BYTES = 256 * 1024
 MAX_JOURNAL_BYTES = 8 * 1024 * 1024
+PROCESS_GROUP_TERM_SECONDS = 5.0
+PROCESS_POLL_SECONDS = 0.05
+PROCESS_TREE_QUIESCENCE_SECONDS = 0.1
+MAX_PROCESS_SNAPSHOT_MEMBERS = 131_072
+MAX_PROCESS_TREE_MEMBERS = 4_096
+HOST_COMMAND_TIMEOUT_SECONDS = 6 * 60 * 60
+SOURCE_COMMAND_TIMEOUT_SECONDS = 6 * 60 * 60
+PR_SET_CHILD_SUBREAPER = 36
 ZERO_SHA256 = "0" * 64
 SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 REMOTE_TOKEN_RE = re.compile(r"^[A-Za-z0-9_./:=+-]+$")
 JOURNAL_TEMP_RE_TEMPLATE = r"^\.{name}\.[1-9][0-9]*\.[0-9a-f]{{16}}\.tmp$"
+_BOUNDED_COMMAND_LOCK = threading.Lock()
 
 HOST_REQUEST_FIELDS = frozenset(
     {
@@ -164,16 +181,815 @@ SAFE_ENV = {
     "LANG": "C.UTF-8",
     "LC_ALL": "C.UTF-8",
     "DOCKER_CONFIG": "/nonexistent",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_CONFIG_SYSTEM": "/dev/null",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_NO_REPLACE_OBJECTS": "1",
     "PYTHONDONTWRITEBYTECODE": "1",
 }
+GIT_CONFIG_ARGUMENTS = (
+    "--no-optional-locks",
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.untrackedCache=false",
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "core.fileMode=true",
+)
 
 
 class FinlandSourceSnapshotOrchestratorError(RuntimeError):
     """The bounded Finland source snapshot orchestration failed closed."""
 
 
+class FinlandSourceSnapshotCancellation(
+    FinlandSourceSnapshotOrchestratorError
+):
+    """The controller connection or host process authority was lost."""
+
+
 Runner = Callable[..., subprocess.CompletedProcess[bytes]]
 Checkpoint = Callable[[str], None]
+
+
+def _anonymous_read_pipe_identity(
+    descriptor: int,
+    *,
+    label: str,
+) -> tuple[int, int]:
+    if type(descriptor) is not int or descriptor < 0:
+        raise FinlandSourceSnapshotOrchestratorError(
+            f"{label} descriptor is invalid"
+        )
+    try:
+        metadata = os.fstat(descriptor)
+        flags = fcntl.fcntl(descriptor, fcntl.F_GETFL)
+        target = os.readlink(f"/proc/self/fd/{descriptor}")
+    except OSError as exc:
+        raise FinlandSourceSnapshotOrchestratorError(
+            f"{label} pipe is unavailable"
+        ) from exc
+    if (
+        not stat.S_ISFIFO(metadata.st_mode)
+        or flags & os.O_ACCMODE != os.O_RDONLY
+        or target != f"pipe:[{metadata.st_ino}]"
+    ):
+        raise FinlandSourceSnapshotOrchestratorError(
+            f"{label} must be an anonymous read-only pipe"
+        )
+    try:
+        entries = tuple(Path("/proc/self/fd").iterdir())
+    except OSError as exc:
+        raise FinlandSourceSnapshotOrchestratorError(
+            f"{label} descriptor closure cannot be inspected"
+        ) from exc
+    for entry in entries:
+        if not entry.name.isdecimal() or int(entry.name, 10) == descriptor:
+            continue
+        candidate = int(entry.name, 10)
+        try:
+            observed = os.fstat(candidate)
+            observed_flags = fcntl.fcntl(candidate, fcntl.F_GETFL)
+        except OSError:
+            continue
+        if (
+            (observed.st_dev, observed.st_ino)
+            == (metadata.st_dev, metadata.st_ino)
+            and observed_flags & os.O_ACCMODE
+            in {os.O_WRONLY, os.O_RDWR}
+        ):
+            raise FinlandSourceSnapshotOrchestratorError(
+                f"{label} writer end is held by the host worker"
+            )
+    return metadata.st_dev, metadata.st_ino
+
+
+@dataclass(frozen=True)
+class BoundedCommandResult:
+    returncode: int
+    stdout: bytes
+    stderr: bytes
+
+
+@dataclass(frozen=True)
+class ProcessIdentity:
+    pid: int
+    parent_pid: int
+    process_group: int
+    start_time: int
+    state: str
+
+    @property
+    def key(self) -> tuple[int, int]:
+        return self.pid, self.start_time
+
+
+def _process_identity(pid: int) -> ProcessIdentity | None:
+    try:
+        payload = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+        fields = payload[payload.rindex(") ") + 2 :].split()
+        if len(fields) < 20:
+            return None
+        return ProcessIdentity(
+            pid=pid,
+            parent_pid=int(fields[1], 10),
+            process_group=int(fields[2], 10),
+            start_time=int(fields[19], 10),
+            state=fields[0],
+        )
+    except (OSError, UnicodeError, ValueError):
+        return None
+
+
+def _process_snapshot() -> dict[int, ProcessIdentity]:
+    observed: dict[int, ProcessIdentity] = {}
+    scanned = 0
+    try:
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdecimal():
+                continue
+            scanned += 1
+            if scanned > MAX_PROCESS_SNAPSHOT_MEMBERS:
+                raise FinlandSourceSnapshotOrchestratorError(
+                    "subprocess inventory exceeds its process bound"
+                )
+            identity = _process_identity(int(entry.name, 10))
+            if identity is not None:
+                observed[identity.pid] = identity
+    except FinlandSourceSnapshotOrchestratorError:
+        raise
+    except OSError as exc:
+        raise FinlandSourceSnapshotOrchestratorError(
+            "subprocess ownership inventory is unavailable"
+        ) from exc
+    return observed
+
+
+def _enable_child_subreaper() -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise FinlandSourceSnapshotOrchestratorError(
+            f"child subreaper setup failed with errno {error}"
+        )
+
+
+def _direct_child_baseline() -> frozenset[tuple[int, int]]:
+    owner = os.getpid()
+    return frozenset(
+        identity.key
+        for identity in _process_snapshot().values()
+        if identity.parent_pid == owner
+    )
+
+
+def _owned_processes(
+    root_identity: ProcessIdentity,
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+    tracked: set[ProcessIdentity] | None = None,
+) -> set[ProcessIdentity]:
+    snapshot = _process_snapshot()
+    owned_ids: set[int] = set()
+    observed_root = snapshot.get(root_identity.pid)
+    if (
+        observed_root is not None
+        and observed_root.start_time == root_identity.start_time
+    ):
+        owned_ids.add(root_identity.pid)
+    if tracked is not None:
+        for identity in tracked:
+            current = snapshot.get(identity.pid)
+            if (
+                current is not None
+                and current.start_time == identity.start_time
+            ):
+                owned_ids.add(identity.pid)
+    owner = os.getpid()
+    for identity in snapshot.values():
+        if (
+            identity.pid != root_identity.pid
+            and identity.parent_pid == owner
+            and identity.key not in baseline_children
+        ):
+            owned_ids.add(identity.pid)
+    changed = True
+    while changed:
+        changed = False
+        for identity in snapshot.values():
+            if (
+                identity.pid not in owned_ids
+                and identity.parent_pid in owned_ids
+            ):
+                owned_ids.add(identity.pid)
+                changed = True
+    owned = {
+        identity
+        for pid, identity in snapshot.items()
+        if pid in owned_ids
+    }
+    if tracked is not None:
+        if len(tracked | owned) > MAX_PROCESS_TREE_MEMBERS:
+            raise FinlandSourceSnapshotOrchestratorError(
+                "subprocess tree exceeds its process bound"
+            )
+        tracked.update(owned)
+    return owned
+
+
+def _identity_exists(identity: ProcessIdentity) -> bool:
+    current = _process_identity(identity.pid)
+    return (
+        current is not None
+        and current.start_time == identity.start_time
+    )
+
+
+def _identity_is_live(identity: ProcessIdentity) -> bool:
+    current = _process_identity(identity.pid)
+    return (
+        current is not None
+        and current.start_time == identity.start_time
+        and current.state != "Z"
+    )
+
+
+def _reap_owned_zombies(
+    tracked: set[ProcessIdentity],
+    *,
+    root_pid: int,
+) -> None:
+    for identity in tuple(tracked):
+        if identity.pid == root_pid:
+            continue
+        current = _process_identity(identity.pid)
+        if (
+            current is None
+            or current.start_time != identity.start_time
+            or current.state != "Z"
+        ):
+            continue
+        try:
+            waited, _status = os.waitpid(identity.pid, os.WNOHANG)
+        except ChildProcessError:
+            continue
+        except OSError as exc:
+            raise FinlandSourceSnapshotOrchestratorError(
+                "owned subprocess zombie could not be reaped"
+            ) from exc
+        if waited not in {0, identity.pid}:
+            raise FinlandSourceSnapshotOrchestratorError(
+                "owned subprocess reap returned an unexpected PID"
+            )
+
+
+def _signal_process_identity(
+    identity: ProcessIdentity,
+    signum: int,
+) -> None:
+    current = _process_identity(identity.pid)
+    if current is None or current.start_time != identity.start_time:
+        return
+    try:
+        descriptor = os.pidfd_open(identity.pid, 0)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise FinlandSourceSnapshotOrchestratorError(
+            "identity-bound subprocess handle cannot be opened"
+        ) from exc
+    try:
+        refreshed = _process_identity(identity.pid)
+        if refreshed is None or refreshed.start_time != identity.start_time:
+            return
+        _signal_process_handle(descriptor, signum)
+    except ProcessLookupError:
+        return
+    finally:
+        os.close(descriptor)
+
+
+def _signal_process_handle(descriptor: int, signum: int) -> None:
+    try:
+        signal.pidfd_send_signal(descriptor, signum)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise FinlandSourceSnapshotOrchestratorError(
+            "identity-bound subprocess signal failed"
+        ) from exc
+
+
+def _signal_owned_process(
+    identity: ProcessIdentity,
+    signum: int,
+    *,
+    root_identity: ProcessIdentity,
+    root_descriptor: int | None,
+) -> None:
+    if identity.key == root_identity.key and root_descriptor is not None:
+        _signal_process_handle(root_descriptor, signum)
+        return
+    _signal_process_identity(identity, signum)
+
+
+def _terminate_process_tree(
+    process: subprocess.Popen[bytes],
+    tracked: set[ProcessIdentity],
+    *,
+    root_identity: ProcessIdentity,
+    root_descriptor: int | None,
+    baseline_children: frozenset[tuple[int, int]],
+) -> None:
+    _owned_processes(
+        root_identity,
+        baseline_children=baseline_children,
+        tracked=tracked,
+    )
+    root_group = root_identity.process_group
+
+    def request_shutdown() -> None:
+        _owned_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+        _reap_owned_zombies(tracked, root_pid=process.pid)
+        for identity in tracked:
+            _signal_owned_process(
+                identity,
+                (
+                    signal.SIGKILL
+                    if identity.process_group != root_group
+                    else signal.SIGTERM
+                ),
+                root_identity=root_identity,
+                root_descriptor=root_descriptor,
+            )
+
+    request_shutdown()
+    deadline = time.monotonic() + PROCESS_GROUP_TERM_SECONDS
+    while time.monotonic() < deadline:
+        process.poll()
+        request_shutdown()
+        if process.poll() is not None and not any(
+            _identity_is_live(identity) for identity in tracked
+        ):
+            break
+        time.sleep(
+            min(
+                PROCESS_POLL_SECONDS,
+                max(0.0, deadline - time.monotonic()),
+            )
+        )
+    _owned_processes(
+        root_identity,
+        baseline_children=baseline_children,
+        tracked=tracked,
+    )
+    for identity in tracked:
+        _signal_owned_process(
+            identity,
+            signal.SIGKILL,
+            root_identity=root_identity,
+            root_descriptor=root_descriptor,
+        )
+    try:
+        process.wait(timeout=PROCESS_GROUP_TERM_SECONDS)
+    except subprocess.TimeoutExpired:
+        _signal_owned_process(
+            root_identity,
+            signal.SIGKILL,
+            root_identity=root_identity,
+            root_descriptor=root_descriptor,
+        )
+        try:
+            process.wait(timeout=PROCESS_GROUP_TERM_SECONDS)
+        except subprocess.TimeoutExpired as exc:
+            raise FinlandSourceSnapshotOrchestratorError(
+                "subprocess root survived identity-bound cleanup"
+            ) from exc
+    absence_deadline = (
+        time.monotonic()
+        + PROCESS_GROUP_TERM_SECONDS
+        + PROCESS_TREE_QUIESCENCE_SECONDS
+    )
+    stable_since: float | None = None
+    while time.monotonic() < absence_deadline:
+        _owned_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+        _reap_owned_zombies(tracked, root_pid=process.pid)
+        live = {
+            identity for identity in tracked if _identity_is_live(identity)
+        }
+        residue = {
+            identity for identity in tracked if _identity_exists(identity)
+        }
+        if live or residue:
+            stable_since = None
+            for identity in live:
+                _signal_owned_process(
+                    identity,
+                    signal.SIGKILL,
+                    root_identity=root_identity,
+                    root_descriptor=root_descriptor,
+                )
+        elif stable_since is None:
+            stable_since = time.monotonic()
+        elif (
+            time.monotonic() - stable_since
+            >= PROCESS_TREE_QUIESCENCE_SECONDS
+        ):
+            return
+        time.sleep(
+            min(
+                PROCESS_POLL_SECONDS,
+                max(0.0, absence_deadline - time.monotonic()),
+            )
+        )
+    _reap_owned_zombies(tracked, root_pid=process.pid)
+    if any(_identity_exists(identity) for identity in tracked):
+        raise FinlandSourceSnapshotOrchestratorError(
+            "subprocess process tree survived forced cleanup"
+        )
+
+
+def _bounded_command_locked(
+    arguments: Sequence[str],
+    *,
+    timeout: float,
+    stdin: int | None = subprocess.DEVNULL,
+    pass_fds: Sequence[int] = (),
+) -> BoundedCommandResult:
+    if (
+        type(timeout) not in {int, float}
+        or not math.isfinite(timeout)
+        or timeout <= 0
+    ):
+        raise FinlandSourceSnapshotOrchestratorError(
+            "controller command timeout is invalid"
+        )
+    process: subprocess.Popen[bytes] | None = None
+    root_identity: ProcessIdentity | None = None
+    root_descriptor: int | None = None
+    selector = selectors.DefaultSelector()
+    buffers = {"stdout": bytearray(), "stderr": bytearray()}
+    tracked: set[ProcessIdentity] = set()
+    deadline = time.monotonic() + timeout
+    cleaned = False
+    _enable_child_subreaper()
+    baseline_children = _direct_child_baseline()
+    try:
+        process = subprocess.Popen(  # noqa: S603
+            list(arguments),
+            stdin=stdin,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=SAFE_ENV,
+            close_fds=True,
+            pass_fds=tuple(pass_fds),
+            start_new_session=True,
+        )
+        root_descriptor = os.pidfd_open(process.pid, 0)
+        root_identity = _process_identity(process.pid)
+        if root_identity is None:
+            raise FinlandSourceSnapshotOrchestratorError(
+                "controller command root identity is unavailable"
+            )
+        tracked.add(root_identity)
+        if process.stdout is None or process.stderr is None:
+            raise FinlandSourceSnapshotOrchestratorError(
+                "controller command pipes are unavailable"
+            )
+        for label, stream in (
+            ("stdout", process.stdout),
+            ("stderr", process.stderr),
+        ):
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, label)
+        while selector.get_map():
+            _owned_processes(
+                root_identity,
+                baseline_children=baseline_children,
+                tracked=tracked,
+            )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise FinlandSourceSnapshotOrchestratorError(
+                    "controller command timed out"
+                )
+            events = selector.select(
+                min(PROCESS_POLL_SECONDS, remaining)
+            )
+            if not events:
+                if process.poll() is not None and not cleaned:
+                    _terminate_process_tree(
+                        process,
+                        tracked,
+                        root_identity=root_identity,
+                        root_descriptor=root_descriptor,
+                        baseline_children=baseline_children,
+                    )
+                    cleaned = True
+                continue
+            for key, _mask in events:
+                try:
+                    chunk = os.read(key.fileobj.fileno(), 64 * 1024)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                label = str(key.data)
+                buffer = buffers[label]
+                limit = (
+                    MAX_COMMAND_OUTPUT_BYTES
+                    if label == "stdout"
+                    else MAX_COMMAND_ERROR_BYTES
+                )
+                if len(buffer) + len(chunk) > limit:
+                    raise FinlandSourceSnapshotOrchestratorError(
+                        f"controller command {label} exceeded its byte limit"
+                    )
+                buffer.extend(chunk)
+            if process.poll() is not None and not cleaned:
+                _terminate_process_tree(
+                    process,
+                    tracked,
+                    root_identity=root_identity,
+                    root_descriptor=root_descriptor,
+                    baseline_children=baseline_children,
+                )
+                cleaned = True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise FinlandSourceSnapshotOrchestratorError(
+                "controller command timed out"
+            )
+        returncode = process.wait(timeout=remaining)
+        return BoundedCommandResult(
+            returncode=returncode,
+            stdout=bytes(buffers["stdout"]),
+            stderr=bytes(buffers["stderr"]),
+        )
+    except FinlandSourceSnapshotOrchestratorError:
+        raise
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise FinlandSourceSnapshotOrchestratorError(
+            "controller command execution failed"
+        ) from exc
+    finally:
+        original_error = sys.exception()
+        cleanup_errors: list[BaseException] = []
+        if process is not None and not cleaned:
+            try:
+                if root_identity is None:
+                    if root_descriptor is None:
+                        root_identity = _process_identity(process.pid)
+                    else:
+                        _signal_process_handle(
+                            root_descriptor,
+                            signal.SIGKILL,
+                        )
+                        try:
+                            process.wait(
+                                timeout=PROCESS_GROUP_TERM_SECONDS
+                            )
+                        except subprocess.TimeoutExpired as exc:
+                            raise FinlandSourceSnapshotOrchestratorError(
+                                "unidentified controller command survived "
+                                "forced cleanup"
+                            ) from exc
+                        root_identity = ProcessIdentity(
+                            pid=process.pid,
+                            parent_pid=os.getpid(),
+                            process_group=process.pid,
+                            start_time=-1,
+                            state="?",
+                        )
+                    if root_identity is None:
+                        raise FinlandSourceSnapshotOrchestratorError(
+                            "controller command root could not be bound "
+                            "for cleanup"
+                        )
+                _terminate_process_tree(
+                    process,
+                    tracked,
+                    root_identity=root_identity,
+                    root_descriptor=root_descriptor,
+                    baseline_children=baseline_children,
+                )
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+        try:
+            selector.close()
+        except BaseException as exc:
+            cleanup_errors.append(exc)
+        if process is not None:
+            for stream in (process.stdout, process.stderr):
+                if stream is None:
+                    continue
+                try:
+                    stream.close()
+                except BaseException as exc:
+                    cleanup_errors.append(exc)
+        if root_descriptor is not None:
+            try:
+                os.close(root_descriptor)
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+        if cleanup_errors:
+            cleanup_error = cleanup_errors[0]
+            if original_error is not None:
+                raise original_error from cleanup_error
+            raise cleanup_error
+
+
+def _bounded_command(
+    arguments: Sequence[str],
+    *,
+    timeout: float,
+    stdin: int | None = subprocess.DEVNULL,
+    pass_fds: Sequence[int] = (),
+) -> BoundedCommandResult:
+    with _BOUNDED_COMMAND_LOCK:
+        return _bounded_command_locked(
+            arguments,
+            timeout=timeout,
+            stdin=stdin,
+            pass_fds=pass_fds,
+        )
+
+
+class ControllerLivenessGuard:
+    """Keep host mutations bound to the controller-owned pipe."""
+
+    _WAKE_SIGNAL = signal.SIGUSR1
+    _HANDLED_SIGNALS = (
+        signal.SIGHUP,
+        signal.SIGTERM,
+        signal.SIGINT,
+        _WAKE_SIGNAL,
+    )
+
+    def __init__(self, control_fd: int) -> None:
+        _anonymous_read_pipe_identity(
+            control_fd,
+            label="controller liveness",
+        )
+        if threading.current_thread() is not threading.main_thread():
+            raise FinlandSourceSnapshotOrchestratorError(
+                "host action must run in the main thread"
+            )
+        try:
+            self._fd = os.dup(control_fd)
+            os.set_inheritable(self._fd, False)
+            os.set_blocking(self._fd, False)
+        except OSError as exc:
+            raise FinlandSourceSnapshotOrchestratorError(
+                "controller liveness pipe cannot be secured"
+            ) from exc
+        self._cancelled = threading.Event()
+        self._stopping = threading.Event()
+        self._reason = "controller liveness was lost"
+        self._exception_delivered = False
+        self._closed = False
+        self._old_handlers: dict[int, Any] = {}
+        self._monitor: threading.Thread | None = None
+
+    @property
+    def control_fd(self) -> int:
+        return self._fd
+
+    def _cancel(self, reason: str, *, wake_main: bool) -> None:
+        if self._cancelled.is_set():
+            return
+        self._reason = reason
+        self._cancelled.set()
+        if wake_main:
+            main_ident = threading.main_thread().ident
+            if main_ident is not None:
+                try:
+                    signal.pthread_kill(main_ident, self._WAKE_SIGNAL)
+                except (OSError, RuntimeError):
+                    pass
+
+    def _sample(self) -> None:
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(self._fd, selectors.EVENT_READ)
+            if not selector.select(0):
+                return
+            try:
+                payload = os.read(self._fd, 1)
+            except BlockingIOError:
+                return
+        finally:
+            selector.close()
+        reason = (
+            "controller liveness pipe reached EOF"
+            if payload == b""
+            else "controller liveness pipe carried forbidden data"
+        )
+        self._cancel(reason, wake_main=False)
+        self.check()
+
+    def _handle_signal(self, signum: int, _frame: Any) -> None:
+        if self._exception_delivered:
+            return
+        self._exception_delivered = True
+        if signum == self._WAKE_SIGNAL:
+            reason = self._reason
+        else:
+            reason = f"Finland source snapshot host received signal {signum}"
+            self._cancel(reason, wake_main=False)
+        raise FinlandSourceSnapshotCancellation(reason)
+
+    def _monitor_control(self) -> None:
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(self._fd, selectors.EVENT_READ)
+            while not self._stopping.is_set():
+                if not selector.select(PROCESS_POLL_SECONDS):
+                    continue
+                try:
+                    payload = os.read(self._fd, 1)
+                except BlockingIOError:
+                    continue
+                except OSError:
+                    if self._stopping.is_set():
+                        return
+                    payload = b""
+                reason = (
+                    "controller liveness pipe reached EOF"
+                    if payload == b""
+                    else "controller liveness pipe carried forbidden data"
+                )
+                self._cancel(reason, wake_main=True)
+                return
+        finally:
+            selector.close()
+
+    def __enter__(self) -> ControllerLivenessGuard:
+        try:
+            for signum in self._HANDLED_SIGNALS:
+                self._old_handlers[signum] = signal.getsignal(signum)
+                signal.signal(signum, self._handle_signal)
+            self._sample()
+            self._monitor = threading.Thread(
+                target=self._monitor_control,
+                name="Finland-source-snapshot-controller-liveness",
+                daemon=True,
+            )
+            self._monitor.start()
+            self.check()
+            return self
+        except BaseException:
+            self._restore()
+            raise
+
+    def check(self) -> None:
+        if self._cancelled.is_set() and not self._exception_delivered:
+            self._exception_delivered = True
+            raise FinlandSourceSnapshotCancellation(self._reason)
+
+    def _restore(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._exception_delivered = True
+        self._stopping.set()
+        if self._monitor is not None:
+            self._monitor.join(timeout=1)
+        try:
+            os.close(self._fd)
+        except OSError:
+            pass
+        for signum, handler in self._old_handlers.items():
+            signal.signal(signum, handler)
+        self._old_handlers.clear()
+
+    def __exit__(
+        self,
+        error_type: Any,
+        _value: Any,
+        _traceback: Any,
+    ) -> None:
+        already_delivered = self._exception_delivered
+        self._restore()
+        if (
+            error_type is None
+            and self._cancelled.is_set()
+            and not already_delivered
+        ):
+            raise FinlandSourceSnapshotCancellation(self._reason)
 
 
 def canonical_json(value: Any) -> bytes:
@@ -900,11 +1716,13 @@ def scp_download_arguments(
 
 
 def _run_command(
-    arguments: list[str],
+    arguments: Sequence[str],
     *,
-    runner: Runner,
+    runner: Runner | None,
     timeout: int,
     allowed: frozenset[str],
+    stdin: int | None = subprocess.DEVNULL,
+    pass_fds: Sequence[int] = (),
 ) -> bytes:
     if (
         not arguments
@@ -914,22 +1732,34 @@ def _run_command(
         raise FinlandSourceSnapshotOrchestratorError(
             "controller command argv is outside its allowlist"
         )
-    try:
-        completed = runner(
+    if runner is None:
+        completed = _bounded_command(
             arguments,
-            input=None,
-            capture_output=True,
-            check=False,
             timeout=timeout,
-            env=SAFE_ENV,
+            stdin=stdin,
+            pass_fds=pass_fds,
         )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise FinlandSourceSnapshotOrchestratorError(
-            f"command is unavailable: {Path(arguments[0]).name}"
-        ) from exc
+    else:
+        try:
+            completed = runner(
+                list(arguments),
+                stdin=stdin,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=timeout,
+                env=SAFE_ENV,
+                close_fds=True,
+                pass_fds=tuple(pass_fds),
+                start_new_session=True,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise FinlandSourceSnapshotOrchestratorError(
+                f"command is unavailable: {Path(arguments[0]).name}"
+            ) from exc
     if (
         len(completed.stdout) > MAX_COMMAND_OUTPUT_BYTES
-        or len(completed.stderr) > MAX_COMMAND_OUTPUT_BYTES
+        or len(completed.stderr) > MAX_COMMAND_ERROR_BYTES
     ):
         raise FinlandSourceSnapshotOrchestratorError(
             "command output exceeded its bound"
@@ -977,7 +1807,7 @@ def _validate_exact_release(
     release_root: Path,
     release_sha: str,
     *,
-    runner: Runner,
+    runner: Runner | None,
     required_uid: int,
     agent_path: Path,
 ) -> None:
@@ -1012,10 +1842,24 @@ def _validate_exact_release(
             raise FinlandSourceSnapshotOrchestratorError(
                 f"{label} ownership or mode is unsafe"
             )
+    git_prefix = [
+        GIT,
+        *GIT_CONFIG_ARGUMENTS,
+        "-C",
+        str(release_root),
+    ]
     commands = (
-        ([GIT, "-C", str(release_root), "rev-parse", "--show-toplevel"], str(release_root)),
-        ([GIT, "-C", str(release_root), "rev-parse", "HEAD"], release_sha),
-        ([GIT, "-C", str(release_root), "status", "--porcelain=v1", "--untracked-files=all"], ""),
+        ([*git_prefix, "rev-parse", "--show-toplevel"], str(release_root)),
+        ([*git_prefix, "rev-parse", "HEAD"], release_sha),
+        (
+            [
+                *git_prefix,
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+            ],
+            "",
+        ),
     )
     for arguments, expected in commands:
         observed = _run_command(
@@ -1028,23 +1872,36 @@ def _validate_exact_release(
             raise FinlandSourceSnapshotOrchestratorError(
                 "operation release is not exact, detached, and clean"
             )
-    try:
-        detached = runner(
-            [GIT, "-C", str(release_root), "symbolic-ref", "-q", "HEAD"],
-            input=None,
-            capture_output=True,
-            check=False,
-            timeout=60,
-            env=SAFE_ENV,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise FinlandSourceSnapshotOrchestratorError(
-            "operation release detached-state check failed"
-        ) from exc
+    detached_arguments = [
+        *git_prefix,
+        "symbolic-ref",
+        "-q",
+        "HEAD",
+    ]
+    if runner is None:
+        detached = _bounded_command(detached_arguments, timeout=60)
+    else:
+        try:
+            detached = runner(
+                detached_arguments,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=60,
+                env=SAFE_ENV,
+                close_fds=True,
+                pass_fds=(),
+                start_new_session=True,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise FinlandSourceSnapshotOrchestratorError(
+                "operation release detached-state check failed"
+            ) from exc
     if (
         detached.returncode != 1
         or detached.stdout
-        or len(detached.stderr) > MAX_COMMAND_OUTPUT_BYTES
+        or len(detached.stderr) > MAX_COMMAND_ERROR_BYTES
     ):
         raise FinlandSourceSnapshotOrchestratorError(
             "operation release is not detached"
@@ -1314,11 +2171,37 @@ def _snapshot_file_inventory(
 def host_agent(
     encoded_request: str,
     *,
-    runner: Runner = subprocess.run,
+    runner: Runner | None = None,
     required_uid: int = 0,
     observed_host_addresses: set[str] | None = None,
     agent_path: Path | None = None,
+    control_fd: int | None = None,
 ) -> dict[str, Any]:
+    if control_fd is None:
+        raise FinlandSourceSnapshotOrchestratorError(
+            "host action requires controller liveness"
+        )
+    with ControllerLivenessGuard(control_fd) as liveness:
+        return _host_agent_under_liveness(
+            encoded_request,
+            runner=runner,
+            required_uid=required_uid,
+            observed_host_addresses=observed_host_addresses,
+            agent_path=agent_path,
+            controller_liveness=liveness,
+        )
+
+
+def _host_agent_under_liveness(
+    encoded_request: str,
+    *,
+    runner: Runner | None,
+    required_uid: int,
+    observed_host_addresses: set[str] | None,
+    agent_path: Path | None,
+    controller_liveness: ControllerLivenessGuard,
+) -> dict[str, Any]:
+    controller_liveness.check()
     if os.geteuid() != required_uid or required_uid != 0:
         raise FinlandSourceSnapshotOrchestratorError(
             "source snapshot host agent must run as root"
@@ -1351,12 +2234,16 @@ def host_agent(
         agent_path=actual_agent,
     )
     if request["action"] == "prepare-binding":
-        return _prepare_host_binding(request, required_uid=required_uid)
+        result = _prepare_host_binding(request, required_uid=required_uid)
+        controller_liveness.check()
+        return result
 
     binding = _promote_host_binding(request, required_uid=required_uid)
+    controller_liveness.check()
     _ensure_host_output_root(required_uid=required_uid)
     producer_arguments = [
         PYTHON,
+        "-I",
         "-B",
         str(paths["producer"]),
         "--binding",
@@ -1364,14 +2251,17 @@ def host_agent(
         "--output-root",
         str(SOURCE_OUTPUT_ROOT),
         "--apply",
+        "--control-fd",
+        str(controller_liveness.control_fd),
         "--confirm",
         SOURCE.confirmation_phrase(binding),
     ]
     raw = _run_command(
         producer_arguments,
         runner=runner,
-        timeout=6 * 60 * 60,
+        timeout=SOURCE_COMMAND_TIMEOUT_SECONDS,
         allowed=frozenset({PYTHON}),
+        pass_fds=(controller_liveness.control_fd,),
     )
     producer_result = _parse_command_json(
         raw,
@@ -1406,7 +2296,7 @@ def host_agent(
         manifest,
         required_uid=required_uid,
     )
-    return {
+    result = {
         "schema": HOST_RESULT_SCHEMA,
         "status": "snapshotted",
         "snapshot_status": producer_result["status"],
@@ -1424,6 +2314,8 @@ def host_agent(
         "source_stopped_or_restarted": False,
         "redis_restored": False,
     }
+    controller_liveness.check()
+    return result
 
 
 def _validate_prepare_result(
@@ -1819,15 +2711,18 @@ def _invoke_host(
     request: Mapping[str, Any],
     paths: Mapping[str, Any],
     ssh_identity: Path,
-    runner: Runner,
+    runner: Runner | None,
 ) -> dict[str, Any]:
     encoded = encode_host_request(request)
     arguments = [
         PYTHON,
+        "-I",
         "-B",
         str(paths["agent"]),
         "--host-request-b64",
         encoded,
+        "--control-fd",
+        "0",
     ]
     if role == "webapp_fi":
         arguments = ssh_arguments(
@@ -1837,12 +2732,30 @@ def _invoke_host(
         allowed = frozenset({SSH})
     else:
         allowed = frozenset({PYTHON})
-    raw = _run_command(
-        arguments,
-        runner=runner,
-        timeout=6 * 60 * 60,
-        allowed=allowed,
-    )
+    control_read_fd = -1
+    control_write_fd = -1
+    try:
+        control_read_fd, control_write_fd = os.pipe()
+        os.set_inheritable(control_read_fd, False)
+        os.set_inheritable(control_write_fd, False)
+        raw = _run_command(
+            arguments,
+            runner=runner,
+            timeout=HOST_COMMAND_TIMEOUT_SECONDS,
+            allowed=allowed,
+            stdin=control_read_fd,
+        )
+    except OSError as exc:
+        raise FinlandSourceSnapshotOrchestratorError(
+            "controller liveness pipe could not be created"
+        ) from exc
+    finally:
+        for descriptor in (control_read_fd, control_write_fd):
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
     return _parse_command_json(raw, label=f"{role} host agent")
 
 
@@ -1852,7 +2765,7 @@ def _collect_role(
     host_result: Mapping[str, Any],
     paths: Mapping[str, Any],
     ssh_identity: Path,
-    runner: Runner,
+    runner: Runner | None,
     required_uid: int,
 ) -> dict[str, Any]:
     collection = paths["roles"][role]["collection"]
@@ -2402,6 +3315,7 @@ def render_plan(
         )
         prepare_argv = [
             PYTHON,
+            "-I",
             "-B",
             str(paths["agent"]),
             "--host-request-b64",
@@ -2409,6 +3323,7 @@ def render_plan(
         ]
         snapshot_argv = [
             PYTHON,
+            "-I",
             "-B",
             str(paths["agent"]),
             "--host-request-b64",
@@ -2473,7 +3388,7 @@ def orchestrate(
     ssh_identity: Path = DEFAULT_SSH_IDENTITY,
     apply: bool = False,
     confirm: str | None = None,
-    runner: Runner = subprocess.run,
+    runner: Runner | None = None,
     required_uid: int = 0,
     checkpoint: Checkpoint | None = None,
     observed_host_addresses: set[str] | None = None,
@@ -2510,6 +3425,10 @@ def orchestrate(
     if os.geteuid() != required_uid or required_uid != 0:
         raise FinlandSourceSnapshotOrchestratorError(
             "Finland source snapshot controller must run as root"
+        )
+    if threading.current_thread() is not threading.main_thread():
+        raise FinlandSourceSnapshotOrchestratorError(
+            "Finland source snapshot controller must run in the main thread"
         )
     try:
         FINLAND_STAGE._verify_role_host(
@@ -2689,6 +3608,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")
     parser.add_argument("--host-request-b64", help=argparse.SUPPRESS)
+    parser.add_argument("--control-fd", type=int, help=argparse.SUPPRESS)
     return parser
 
 
@@ -2707,12 +3627,24 @@ def main(argv: list[str] | None = None) -> int:
                 args.webapp_fi_binding,
                 args.confirm,
             )
-            if any(value is not None for value in forbidden) or args.apply:
+            if (
+                any(value is not None for value in forbidden)
+                or args.apply
+                or args.control_fd is None
+            ):
                 raise FinlandSourceSnapshotOrchestratorError(
-                    "host request cannot be combined with controller arguments"
+                    "host request requires liveness and cannot be combined "
+                    "with controller arguments"
                 )
-            result = host_agent(args.host_request_b64)
+            result = host_agent(
+                args.host_request_b64,
+                control_fd=args.control_fd,
+            )
         else:
+            if args.control_fd is not None:
+                raise FinlandSourceSnapshotOrchestratorError(
+                    "--control-fd is valid only for a host request"
+                )
             if (
                 args.operation_id is None
                 or args.release_sha is None

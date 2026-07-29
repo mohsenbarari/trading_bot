@@ -60,12 +60,29 @@ from scripts import trading_core_probe_worker as worker
 
 SCHEMA_VERSION = "trade_delivery_targeted_join_matrix_v1"
 EXPECTED_BRANCH = "candidate/bot-webapp-integration"
+LEGACY_TWO_SERVER_TARGETED_JOIN_RETIREMENT_REASON = (
+    "legacy_two_server_targeted_join_matrix_retired_use_three_site_sealed_campaign"
+)
 OUTAGE_NOW_OFFSETS = {
     "stable": timedelta(seconds=5),
     "short_under_2m": timedelta(seconds=75),
     "medium_around_60m": timedelta(seconds=180),
 }
 SUPPORTED_SURFACES = {"webapp", "telegram"}
+
+
+class LegacyTwoServerTargetedJoinRuntimeRetiredError(RuntimeError):
+    """Raised before a retained targeted-join helper can reach runtime state."""
+
+
+def assert_legacy_two_server_targeted_join_execution_retired(operation: str) -> None:
+    """Hard-deny importable legacy targeted-join runtime helpers."""
+
+    raise LegacyTwoServerTargetedJoinRuntimeRetiredError(
+        "Legacy two-server targeted-join Full Matrix execution is retired and hard-disabled "
+        f"before fixture, cleanup, router, Redis, or database access: operation={operation}; "
+        "use a sealed three-site campaign verifier."
+    )
 
 
 @dataclass(frozen=True)
@@ -285,6 +302,7 @@ async def available_fixture_identity(
     offset: int,
     telegram_linked: bool,
 ) -> tuple[str, int | None]:
+    assert_legacy_two_server_targeted_join_execution_retired("available_fixture_identity")
     for attempt in range(10):
         mobile_number = phone_for(prefix, scenario_index, offset, attempt=attempt)
         telegram_id = telegram_id_for(prefix, scenario_index, offset, attempt=attempt) if telegram_linked else None
@@ -317,6 +335,7 @@ async def create_fixture_user(
     home_server: str,
     telegram_linked: bool = True,
 ) -> User:
+    assert_legacy_two_server_targeted_join_execution_retired("create_fixture_user")
     mobile_number, telegram_id = await available_fixture_identity(
         db,
         prefix=prefix,
@@ -357,6 +376,7 @@ async def create_customer_relation(
     customer: User,
     tier: CustomerTier,
 ) -> CustomerRelation:
+    assert_legacy_two_server_targeted_join_execution_retired("create_customer_relation")
     now = utc_now()
     relation = CustomerRelation(
         owner_user_id=owner.id,
@@ -387,6 +407,7 @@ async def create_accountant_relation(
     offset: int,
     owner: User,
 ) -> User:
+    assert_legacy_two_server_targeted_join_execution_retired("create_accountant_relation")
     accountant = await create_fixture_user(
         db,
         prefix=account_prefix,
@@ -423,6 +444,7 @@ async def build_actor_fixture(
     scenario_index: int,
     prefix: str,
 ) -> ActorFixture:
+    assert_legacy_two_server_targeted_join_execution_retired("build_actor_fixture")
     account_prefix = scenario_account_prefix(prefix, scenario)
     source_user = await create_fixture_user(
         db,
@@ -566,6 +588,7 @@ async def create_scenario_offer(
     scenario_index: int,
     prefix: str,
 ) -> int:
+    assert_legacy_two_server_targeted_join_execution_retired("create_scenario_offer")
     commodity_id, commodity_name = await worker.resolve_commodity()
     origin = "bot" if scenario.offer_surface == "telegram" else "webapp"
     shape = market_matrix.SHAPES["wholesale_full"]
@@ -594,6 +617,7 @@ async def execute_scenario_trade(
     scenario_index: int,
     prefix: str,
 ) -> dict[str, Any]:
+    assert_legacy_two_server_targeted_join_execution_retired("execute_scenario_trade")
     source_surface = (
         OfferRequestSourceSurface.TELEGRAM_BOT
         if scenario.request_surface == "telegram"
@@ -691,6 +715,7 @@ async def repair_and_collect_delivery(
     scenario: TargetedJoinScenario,
     trade_ids: list[int],
 ) -> dict[str, Any]:
+    assert_legacy_two_server_targeted_join_execution_retired("repair_and_collect_delivery")
     probes: list[TelegramSendProbe] = []
     now_offset = OUTAGE_NOW_OFFSETS[scenario.outage_id]
     async with AsyncSessionLocal() as db:
@@ -864,6 +889,7 @@ async def execute_scenario(
     scenario_index: int,
     prefix: str,
 ) -> dict[str, Any]:
+    assert_legacy_two_server_targeted_join_execution_retired("execute_scenario")
     if not scenario.policy_supported:
         return {
             "scenario_id": scenario.scenario_id,
@@ -946,6 +972,8 @@ async def execute_scenario(
 
 
 async def execute_matrix(args: argparse.Namespace, scenarios: list[TargetedJoinScenario]) -> dict[str, Any]:
+    assert_legacy_two_server_targeted_join_execution_retired("execute_matrix")
+
     if not args.allow_any_branch and run_git_value(["branch", "--show-current"]) != EXPECTED_BRANCH:
         return {
             **planned_payload(args, scenarios),
@@ -1050,12 +1078,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--allow-production-execution",
         action="store_true",
-        help="Allow production targeted-join fixture creation only with the production full-matrix confirmation env.",
+        help="Retired legacy option. It cannot enable targeted-join Full Matrix execution.",
     )
     parser.add_argument(
         "--allow-production-cleanup",
         action="store_true",
-        help="Allow production targeted-join cleanup only with the cleanup confirmation env.",
+        help="Retired legacy option. It cannot enable targeted-join Full Matrix cleanup.",
     )
     args = parser.parse_args(argv)
     if args.output is None:
@@ -1065,6 +1093,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if not args.dry_run:
+        print(
+            json.dumps(
+                {
+                    "status": "blocked_legacy_two_server_full_matrix_retired",
+                    "reason": LEGACY_TWO_SERVER_TARGETED_JOIN_RETIREMENT_REASON,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+        return 2
     scenarios = filter_scenarios(
         build_targeted_join_scenarios(),
         scenario_ids=set(args.scenario or []),

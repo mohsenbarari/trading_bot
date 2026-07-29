@@ -58,6 +58,9 @@ from core.docker_image_identity import (
     DockerImageIdentityError,
     verify_content_descriptor,
 )
+from scripts import production_shadow_convergence_runtime_targets as runtime_targets
+from scripts import production_shadow_cutover_controller as cutover_controller
+from scripts import production_shadow_remote_receiver_signing_policy as receiver_policy
 
 
 SCHEMA_PREFIX = "trading-bot.webapp-ir-public-tls"
@@ -82,7 +85,8 @@ MAX_CERTIFICATE_BYTES = 1024 * 1024
 MIN_CERTIFICATE_VALIDITY_SECONDS = 21 * 24 * 60 * 60
 MAX_PROCESS_STATE_BYTES = 64 * 1024
 
-CUTOVER_MANIFEST_SCHEMA = "production-shadow-cutover-manifest-v1"
+CUTOVER_MANIFEST_SCHEMA = runtime_targets.CUTOVER_MANIFEST_SCHEMA
+LEGACY_CUTOVER_MANIFEST_SCHEMA = runtime_targets.LEGACY_CUTOVER_MANIFEST_SCHEMA
 ACTIVATION_PRECONDITION_SCHEMA = (
     "production-shadow-phase-evidence-verification-v1"
 )
@@ -91,6 +95,7 @@ ACTIVATION_PRECONDITION_OPERATION = "verify-pre-first-write-acceptance"
 EXPECTED_ACTIVATION_ROLES = ["bot_fi", "webapp_fi", "webapp_ir", "witness"]
 CUTOVER_MANIFEST_FIELDS = {
     "schema",
+    "capabilities",
     "campaign_id",
     "operation_id",
     "created_at",
@@ -165,32 +170,20 @@ CUTOVER_DEPLOYMENT_FIELDS = {
     "controller_journal_path",
     "controller_evidence_root",
 }
-CUTOVER_ARTIFACT_FIELDS = {
-    "release_bundle_sha256",
-    "release_bundle_bytes",
-    "role_materials",
-    "image_artifacts",
-    "role_runtime_image_ids",
-    "postgres_runtime_uid",
-    "postgres_runtime_gid",
-    "postgres_image_ref",
-    "legacy_bot_rollback_sha256",
-    "legacy_webapp_rollback_sha256",
-    "legacy_bot_redis_rollback_sha256",
-    "legacy_webapp_redis_rollback_sha256",
-    "shadow_compose_sha256",
-    "cutover_approval_sha256",
-    "human_approval_policy_sha256",
-    "nginx_freeze_generation_sha256",
-    "nginx_rollback_generation_sha256",
-    "nginx_shadow_readonly_generation_sha256",
-    "nginx_shadow_writable_generation_sha256",
-    "postcommit_executor_contract_sha256",
-    "phase_evidence_schema_sha256",
-    "host_agent_sha256",
-    "host_agent_contract_sha256",
-    "phase_evidence_verifier_sha256",
-}
+CONVERGENCE_RUNTIME_TARGET_SET_SCHEMA = (
+    runtime_targets.CONVERGENCE_RUNTIME_TARGET_SET_SCHEMA
+)
+CONVERGENCE_RUNTIME_TARGETS_FILENAME = (
+    runtime_targets.CONVERGENCE_RUNTIME_TARGETS_FILENAME
+)
+CONVERGENCE_RUNTIME_TARGET_DESCRIPTOR_FIELDS = set(
+    runtime_targets.CONVERGENCE_RUNTIME_TARGET_DESCRIPTOR_FIELDS
+)
+CUTOVER_ARTIFACT_FIELDS = set(cutover_controller.ARTIFACT_FIELDS)
+REMOTE_RECEIVER_POLICY_ROLES = cutover_controller.REMOTE_RECEIVER_POLICY_ROLES
+REMOTE_RECEIVER_POLICY_CONTRACT_FIELDS = (
+    cutover_controller.REMOTE_RECEIVER_POLICY_CONTRACT_FIELDS
+)
 IMAGE_KINDS = ("app", "postgres", "redis", "nginx")
 DOCKER_RUNTIME_ROLES = ("bot_fi", "webapp_fi", "webapp_ir")
 IMAGE_ARTIFACT_FIELDS = {
@@ -4242,6 +4235,8 @@ def _validate_cutover_manifest_source(
     operation_id: str,
     release_sha: str,
 ) -> dict[str, Any]:
+    if runtime_targets.is_legacy_cutover_manifest_schema(document):
+        raise WebAppIrTlsError(runtime_targets.CUTOVER_V2_MIGRATION_MESSAGE)
     manifest = _require_exact_fields(
         document,
         CUTOVER_MANIFEST_FIELDS,
@@ -4255,6 +4250,13 @@ def _validate_cutover_manifest_source(
     }
     if any(manifest.get(key) != value for key, value in expected_identity.items()):
         raise WebAppIrTlsError("cutover manifest identity binding mismatch")
+    try:
+        runtime_targets.validate_runtime_target_capabilities(
+            manifest["capabilities"],
+            label="cutover manifest capabilities",
+        )
+    except runtime_targets.ConvergenceRuntimeTargetDescriptorError as exc:
+        raise WebAppIrTlsError("cutover manifest capabilities are invalid") from exc
     if not _valid_timestamp(manifest.get("created_at")):
         raise WebAppIrTlsError("cutover manifest timestamp is invalid")
     release_tree_sha = validate_release_sha(str(manifest.get("release_tree_sha", "")))
@@ -4311,6 +4313,8 @@ def _validate_cutover_manifest_source(
         "role_materials",
         "image_artifacts",
         "role_runtime_image_ids",
+        "convergence_runtime_targets",
+        "remote_receiver_signing_policies",
         "postgres_runtime_uid",
         "postgres_runtime_gid",
         "postgres_image_ref",
@@ -4387,6 +4391,45 @@ def _validate_cutover_manifest_source(
         role_material_digests.add(digest)
     if len(role_material_digests) != len(EXPECTED_CUTOVER_TOPOLOGY):
         raise WebAppIrTlsError("cutover role material digests are not distinct")
+
+    remote_receiver_policies = _require_exact_fields(
+        artifacts["remote_receiver_signing_policies"],
+        set(REMOTE_RECEIVER_POLICY_ROLES),
+        label="cutover remote receiver signing-policy roles",
+    )
+    for role in REMOTE_RECEIVER_POLICY_ROLES:
+        contract = _require_exact_fields(
+            remote_receiver_policies[role],
+            set(REMOTE_RECEIVER_POLICY_CONTRACT_FIELDS),
+            label=f"cutover remote receiver signing policy {role}",
+        )
+        for field in (
+            "policy_file_sha256",
+            "policy_sha256",
+            "public_key_sha256",
+            "receiver_sha256",
+            "worker_sha256",
+        ):
+            digest = validate_sha256(
+                str(contract.get(field, "")),
+                label=f"cutover remote receiver {role} {field}",
+            )
+            if digest == "0" * 64:
+                raise WebAppIrTlsError(
+                    f"cutover remote receiver {role} {field} is zero"
+                )
+        key_id = contract["key_id"]
+        if (
+            not isinstance(key_id, str)
+            or receiver_policy.IDENTIFIER_RE.fullmatch(key_id) is None
+        ):
+            raise WebAppIrTlsError(
+                f"cutover remote receiver {role} key id is invalid"
+            )
+        if contract["receiver_sha256"] == contract["worker_sha256"]:
+            raise WebAppIrTlsError(
+                f"cutover remote receiver {role} source digests alias"
+            )
 
     image_artifacts = _require_exact_fields(
         artifacts["image_artifacts"],
@@ -4483,6 +4526,15 @@ def _validate_cutover_manifest_source(
             raise WebAppIrTlsError(
                 f"cutover runtime image inventory {role} is invalid"
             )
+    try:
+        runtime_targets.validate_runtime_target_descriptor(
+            artifacts["convergence_runtime_targets"],
+            label="cutover convergence runtime target descriptor",
+        )
+    except runtime_targets.ConvergenceRuntimeTargetDescriptorError as exc:
+        raise WebAppIrTlsError(
+            "cutover convergence runtime target descriptor is invalid"
+        ) from exc
     if (
         artifacts["postgres_runtime_uid"] != 70
         or artifacts["postgres_runtime_gid"] != 70

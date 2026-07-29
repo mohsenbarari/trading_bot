@@ -5,9 +5,14 @@ import io
 import json
 import os
 from pathlib import Path
+import signal
 import stat
+import subprocess
+import sys
 import tarfile
 import tempfile
+import threading
+import time
 import unittest
 from unittest import mock
 
@@ -663,6 +668,7 @@ class HostFixture:
             sites_available=self.sites_available,
             sites_enabled=self.sites_enabled,
             reload_argv=("/test/usr/bin/systemctl", "reload", "nginx"),
+            reload_stability_interval_seconds=0.001,
             owner_uid=os.geteuid(),
             identity_addresses=(self.expected_host,),
         )
@@ -679,6 +685,12 @@ class HostFixture:
         apply: bool = True,
         confirm: str | None = None,
         runner=None,
+        control_fd: int | None = None,
+        provide_control: bool = True,
+        readback_challenge_nonce: str | None = None,
+        readback_challenge_sha256: str | None = None,
+        issued_at_epoch: int | None = None,
+        expires_at_epoch: int | None = None,
     ):
         effective = "legacy-normal" if action == "restore" else generation
         if confirm is None and apply and action in {
@@ -694,22 +706,95 @@ class HostFixture:
                 role=self.role,
                 generation=effective,
             )
-        return execute_host_action(
-            manifest_path=self.manifest_path,
-            expected_manifest_sha256=self.manifest_sha256,
-            archive_path=self.archive_path,
-            role=self.role,
-            expected_host=self.expected_host,
-            operation_id=OPERATION_ID,
-            release_sha=RELEASE_SHA,
-            release_tree_sha=RELEASE_TREE_SHA,
-            action=action,
-            generation=generation,
-            apply=apply,
-            confirm=confirm,
-            layout=self.layout,
-            runner=runner or FakeRunner(),
-        )
+        if apply and action == "readback":
+            issued_at_epoch = (
+                int(time.time())
+                if issued_at_epoch is None
+                else issued_at_epoch
+            )
+            expires_at_epoch = (
+                issued_at_epoch
+                + nginx_generation.READBACK_CHALLENGE_TTL_SECONDS
+                if expires_at_epoch is None
+                else expires_at_epoch
+            )
+            readback_challenge_nonce = (
+                "a" * 64
+                if readback_challenge_nonce is None
+                else readback_challenge_nonce
+            )
+            challenge = {
+                "schema": nginx_generation.HOST_READBACK_CHALLENGE_SCHEMA,
+                "operation_id": OPERATION_ID,
+                "role": self.role,
+                "expected_host": self.expected_host,
+                "release_sha": RELEASE_SHA,
+                "release_tree_sha": RELEASE_TREE_SHA,
+                "manifest_sha256": self.manifest_sha256,
+                "archive_sha256": json.loads(
+                    self.manifest_path.read_text()
+                )["archive"]["sha256"],
+                "readback_challenge_nonce": readback_challenge_nonce,
+                "issued_at_epoch": issued_at_epoch,
+                "expires_at_epoch": expires_at_epoch,
+            }
+            if readback_challenge_sha256 is None:
+                readback_challenge_sha256 = hashlib.sha256(
+                    canonical_json_bytes(challenge)
+                ).hexdigest()
+        holder: subprocess.Popen[bytes] | None = None
+        owned_read_fd: int | None = None
+        if (
+            control_fd is None
+            and provide_control
+            and apply
+            and action in nginx_generation.CONTROLLED_HOST_ACTIONS
+        ):
+            owned_read_fd, write_fd = os.pipe()
+            holder = subprocess.Popen(
+                (
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    "-c",
+                    "import time;time.sleep(60)",
+                ),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+                pass_fds=(write_fd,),
+            )
+            os.close(write_fd)
+            control_fd = owned_read_fd
+        try:
+            return execute_host_action(
+                manifest_path=self.manifest_path,
+                expected_manifest_sha256=self.manifest_sha256,
+                archive_path=self.archive_path,
+                role=self.role,
+                expected_host=self.expected_host,
+                operation_id=OPERATION_ID,
+                release_sha=RELEASE_SHA,
+                release_tree_sha=RELEASE_TREE_SHA,
+                action=action,
+                generation=generation,
+                apply=apply,
+                confirm=confirm,
+                readback_challenge_nonce=readback_challenge_nonce,
+                readback_challenge_sha256=readback_challenge_sha256,
+                issued_at_epoch=issued_at_epoch,
+                expires_at_epoch=expires_at_epoch,
+                control_fd=control_fd,
+                layout=self.layout,
+                runner=runner or FakeRunner(),
+            )
+        finally:
+            if owned_read_fd is not None:
+                os.close(owned_read_fd)
+            if holder is not None:
+                holder.terminate()
+                holder.wait(timeout=5)
 
     def active_bytes(self) -> dict[str, bytes]:
         manifest = json.loads(self.manifest_path.read_text())
@@ -722,6 +807,184 @@ class HostFixture:
 
 
 class NginxHostWorkerTests(unittest.TestCase):
+    def test_real_runner_bounds_deadline_and_output(self):
+        with self.assertRaisesRegex(
+            NginxGenerationError,
+            "timed out",
+        ):
+            nginx_generation._subprocess_runner(  # noqa: SLF001
+                (sys.executable, "-I", "-B", "-c", "import time;time.sleep(60)"),
+                1,
+            )
+        with self.assertRaisesRegex(
+            NginxGenerationError,
+            "stdout is oversized",
+        ):
+            nginx_generation._subprocess_runner(  # noqa: SLF001
+                (
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    "-c",
+                    "import os;os.write(1,b'x'*(1024*1024+1))",
+                ),
+                10,
+            )
+        with self.assertRaisesRegex(
+            NginxGenerationError,
+            "stderr is oversized",
+        ):
+            nginx_generation._subprocess_runner(  # noqa: SLF001
+                (
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    "-c",
+                    "import os;os.write(2,b'x'*(1024*1024+1))",
+                ),
+                10,
+            )
+        for timeout in (0, True, 31):
+            with self.subTest(timeout=timeout), self.assertRaisesRegex(
+                NginxGenerationError,
+                "timeout is outside",
+            ):
+                nginx_generation._subprocess_runner(  # noqa: SLF001
+                    (sys.executable, "-I", "-B", "-c", "pass"),
+                    timeout,
+                )
+
+    def test_real_runner_kills_forked_descendant_after_parent_exit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            sentinel = Path(directory) / "nginx-descendant-survived"
+            code = (
+                "import os,time\n"
+                "if os.fork() == 0:\n"
+                " os.close(1)\n"
+                " os.close(2)\n"
+                " time.sleep(0.5)\n"
+                f" open({str(sentinel)!r},'wb').write(b'survived')\n"
+                " os._exit(0)\n"
+                "print('ok',flush=True)\n"
+            )
+            result = nginx_generation._subprocess_runner(  # noqa: SLF001
+                (sys.executable, "-I", "-B", "-c", code),
+                10,
+            )
+            self.assertEqual(result, CommandResult(0, b"ok\n", b""))
+            time.sleep(0.7)
+            self.assertFalse(sentinel.exists())
+
+    def test_real_runner_reaps_rapid_setsid_double_fork(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pid_path = root / "adopted-pid"
+            survived = root / "adopted-survived"
+            code = (
+                "import os,time\n"
+                "if os.fork() == 0:\n"
+                " os.setsid()\n"
+                " if os.fork() == 0:\n"
+                "  os.close(1)\n"
+                "  os.close(2)\n"
+                f"  open({str(pid_path)!r},'w').write(str(os.getpid()))\n"
+                "  time.sleep(0.6)\n"
+                f"  open({str(survived)!r},'wb').write(b'survived')\n"
+                "  os._exit(0)\n"
+                " os._exit(0)\n"
+                "deadline=time.monotonic()+0.5\n"
+                f"while not os.path.exists({str(pid_path)!r}) and time.monotonic()<deadline: time.sleep(0.005)\n"
+                "print('ok',flush=True)\n"
+            )
+            result = nginx_generation._subprocess_runner(  # noqa: SLF001
+                (sys.executable, "-I", "-B", "-c", code),
+                10,
+            )
+            self.assertEqual(result, CommandResult(0, b"ok\n", b""))
+            self.assertTrue(pid_path.is_file())
+            adopted_pid = int(pid_path.read_text(), 10)
+            self.assertFalse(Path(f"/proc/{adopted_pid}").exists())
+            with self.assertRaises(ChildProcessError):
+                os.waitpid(adopted_pid, os.WNOHANG)
+            time.sleep(0.7)
+            self.assertFalse(survived.exists())
+
+    def test_mutating_actions_require_live_external_controller_pipe(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = HostFixture(Path(temporary))
+            with self.assertRaisesRegex(
+                NginxGenerationError,
+                "requires controller liveness",
+            ):
+                fixture.call("install", provide_control=False)
+            self.assertFalse(fixture.operation_root.exists())
+
+            read_fd, write_fd = os.pipe()
+            try:
+                with self.assertRaisesRegex(
+                    NginxGenerationError,
+                    "writer end is held",
+                ):
+                    fixture.call("install", control_fd=read_fd)
+            finally:
+                os.close(read_fd)
+                os.close(write_fd)
+            self.assertFalse(fixture.operation_root.exists())
+
+            read_fd, write_fd = os.pipe()
+            os.close(write_fd)
+            try:
+                with self.assertRaisesRegex(
+                    NginxGenerationError,
+                    "reached EOF",
+                ):
+                    fixture.call("install", control_fd=read_fd)
+            finally:
+                os.close(read_fd)
+            self.assertFalse(fixture.operation_root.exists())
+
+            read_fd, write_fd = os.pipe()
+            try:
+                with self.assertRaisesRegex(
+                    NginxGenerationError,
+                    "rejects controller liveness",
+                ):
+                    fixture.call(
+                        "readback",
+                        apply=False,
+                        control_fd=read_fd,
+                    )
+            finally:
+                os.close(read_fd)
+                os.close(write_fd)
+
+    def test_mutating_action_rejects_non_main_thread_but_plan_is_inert(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = HostFixture(Path(temporary))
+            outcomes: list[object] = []
+
+            def invoke() -> None:
+                try:
+                    outcomes.append(
+                        fixture.call(
+                            "install",
+                            provide_control=False,
+                        )
+                    )
+                except BaseException as exc:
+                    outcomes.append(exc)
+                outcomes.append(fixture.call("install", apply=False))
+
+            worker = threading.Thread(target=invoke)
+            worker.start()
+            worker.join(timeout=5)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(len(outcomes), 2)
+            self.assertIsInstance(outcomes[0], NginxGenerationError)
+            self.assertIn("main thread", str(outcomes[0]))
+            self.assertEqual(outcomes[1]["status"], "planned")
+            self.assertFalse(fixture.operation_root.exists())
+
     def test_plan_is_default_and_does_not_create_operation_directory(self):
         with tempfile.TemporaryDirectory() as temporary:
             fixture = HostFixture(Path(temporary))
@@ -750,6 +1013,7 @@ class NginxHostWorkerTests(unittest.TestCase):
             self.assertFalse(installed["active_configuration_mutated"])
             self.assertEqual(fixture.call("install")["status"], "already-installed")
             self.assertEqual(fixture.active_bytes(), before)
+
             self.assertEqual(fixture.foreign.read_bytes(), foreign_before)
 
             candidate_runner = FakeRunner()
@@ -784,7 +1048,18 @@ class NginxHostWorkerTests(unittest.TestCase):
             self.assertEqual(activated["status"], "activated")
             self.assertTrue(activated["active_configuration_mutated"])
             self.assertTrue(activated["service_reloaded"])
-            self.assertEqual(len(activation_runner.calls), 2)
+            self.assertEqual(len(activation_runner.calls), 8)
+            self.assertEqual(
+                [row["index"] for row in activated["commands"]["stability"]],
+                [1, 2, 3],
+            )
+            self.assertEqual(
+                {
+                    row["state"]
+                    for row in activated["commands"]["stability"]
+                },
+                {"legacy-frozen"},
+            )
             self.assertEqual(
                 activation_runner.calls[1][0],
                 fixture.layout.reload_argv,
@@ -825,6 +1100,89 @@ class NginxHostWorkerTests(unittest.TestCase):
             self.assertEqual(restored["state"], "legacy-normal")
             self.assertEqual(fixture.active_bytes(), before)
             self.assertEqual(fixture.foreign.read_bytes(), foreign_before)
+
+    def test_fresh_readback_rejects_expired_future_and_substituted_challenge(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = HostFixture(Path(temporary), "bot_fi")
+            fixture.call("install")
+            now_epoch = int(time.time())
+            with self.assertRaisesRegex(
+                NginxGenerationError,
+                "time window",
+            ):
+                fixture.call(
+                    "readback",
+                    issued_at_epoch=(
+                        now_epoch
+                        - nginx_generation.READBACK_CHALLENGE_TTL_SECONDS
+                        - 1
+                    ),
+                    expires_at_epoch=now_epoch - 1,
+                )
+            future_issued = (
+                now_epoch
+                + nginx_generation.READBACK_MAX_CLOCK_SKEW_SECONDS
+                + 2
+            )
+            with self.assertRaisesRegex(
+                NginxGenerationError,
+                "time window",
+            ):
+                fixture.call(
+                    "readback",
+                    issued_at_epoch=future_issued,
+                    expires_at_epoch=(
+                        future_issued
+                        + nginx_generation.READBACK_CHALLENGE_TTL_SECONDS
+                    ),
+                )
+            with self.assertRaisesRegex(
+                NginxGenerationError,
+                "challenge binding",
+            ):
+                fixture.call(
+                    "readback",
+                    readback_challenge_sha256="b" * 64,
+                )
+
+    def test_fresh_readback_fails_on_controller_eof_and_signal(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = HostFixture(Path(temporary), "bot_fi")
+            fixture.call("install")
+            read_fd, write_fd = os.pipe()
+            os.close(write_fd)
+            try:
+                with self.assertRaisesRegex(
+                    nginx_generation.NginxGenerationCancellation,
+                    "EOF",
+                ):
+                    fixture.call(
+                        "readback",
+                        control_fd=read_fd,
+                        provide_control=False,
+                    )
+            finally:
+                os.close(read_fd)
+
+            original = nginx_generation._active_state
+
+            def interrupt(*args, **kwargs):
+                signal.raise_signal(signal.SIGTERM)
+                return original(*args, **kwargs)
+
+            with mock.patch.object(
+                nginx_generation,
+                "_active_state",
+                side_effect=interrupt,
+            ), self.assertRaisesRegex(
+                nginx_generation.NginxGenerationCancellation,
+                "signal",
+            ):
+                fixture.call("readback")
 
     def test_candidate_test_failure_makes_no_active_change(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -869,7 +1227,7 @@ class NginxHostWorkerTests(unittest.TestCase):
                     generation="legacy-frozen",
                     runner=runner,
                 )
-            self.assertEqual(len(runner.calls), 4)
+            self.assertEqual(len(runner.calls), 10)
             self.assertEqual(fixture.active_bytes(), before)
             journal = json.loads((fixture.operation_root / "journal.json").read_text())
             self.assertEqual(journal["active_state"], "legacy-normal")
@@ -879,6 +1237,171 @@ class NginxHostWorkerTests(unittest.TestCase):
                 journal["events"][-1]["failure_evidence"]["returncode"],
                 1,
             )
+
+    def test_delayed_reload_instability_rolls_back_before_success(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = HostFixture(Path(temporary))
+            before = fixture.active_bytes()
+            fixture.call("install")
+            fixture.call("test", generation="legacy-frozen")
+            runner = FakeRunner(
+                [
+                    CommandResult(0, b"target syntax ok", b""),
+                    CommandResult(0, b"reload accepted", b""),
+                    CommandResult(1, b"", b"service became inactive"),
+                ]
+            )
+
+            with self.assertRaisesRegex(
+                NginxGenerationError,
+                "previous generation was restored",
+            ):
+                fixture.call(
+                    "activate",
+                    generation="legacy-frozen",
+                    runner=runner,
+                )
+            self.assertEqual(len(runner.calls), 11)
+            self.assertEqual(
+                runner.calls[2][0],
+                (
+                    fixture.layout.reload_argv[0],
+                    "is-active",
+                    "--quiet",
+                    "nginx",
+                ),
+            )
+            self.assertEqual(fixture.active_bytes(), before)
+            journal = json.loads(
+                (fixture.operation_root / "journal.json").read_text()
+            )
+            self.assertIsNone(journal["transaction"])
+            self.assertEqual(journal["events"][-1]["kind"], "rolled-back")
+            self.assertEqual(
+                journal["events"][-1]["failure_evidence"]["returncode"],
+                1,
+            )
+
+    def test_controller_eof_during_replace_rolls_back_exact_bytes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = HostFixture(Path(temporary))
+            before = fixture.active_bytes()
+            fixture.call("install")
+            fixture.call("test", generation="legacy-frozen")
+            trigger = Path(temporary) / "release-controller"
+            read_fd, write_fd = os.pipe()
+            holder = subprocess.Popen(
+                (
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    "-c",
+                    (
+                        "import pathlib,time\n"
+                        f"p=pathlib.Path({str(trigger)!r})\n"
+                        "while not p.exists(): time.sleep(0.005)\n"
+                    ),
+                ),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+                pass_fds=(write_fd,),
+            )
+            os.close(write_fd)
+            original = nginx_generation._atomic_replace_destination
+            calls = 0
+
+            def injected(path, payload, *, expected_sha256, owner_uid):
+                nonlocal calls
+                calls += 1
+                result = original(
+                    path,
+                    payload,
+                    expected_sha256=expected_sha256,
+                    owner_uid=owner_uid,
+                )
+                if calls == 1:
+                    trigger.write_bytes(b"go")
+                    time.sleep(1)
+                return result
+
+            try:
+                with mock.patch.object(
+                    nginx_generation,
+                    "_atomic_replace_destination",
+                    side_effect=injected,
+                ):
+                    with self.assertRaisesRegex(
+                        nginx_generation.NginxGenerationCancellation,
+                        "reached EOF",
+                    ):
+                        fixture.call(
+                            "activate",
+                            generation="legacy-frozen",
+                            control_fd=read_fd,
+                        )
+            finally:
+                os.close(read_fd)
+                if holder.poll() is None:
+                    holder.terminate()
+                holder.wait(timeout=5)
+            self.assertEqual(fixture.active_bytes(), before)
+            journal = json.loads(
+                (fixture.operation_root / "journal.json").read_text()
+            )
+            self.assertIsNone(journal["transaction"])
+            self.assertEqual(journal["events"][-1]["kind"], "rolled-back")
+
+    def test_catchable_signals_are_nonreentrant_and_roll_back(self):
+        for signum in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
+            with self.subTest(signum=signum), tempfile.TemporaryDirectory() as temporary:
+                fixture = HostFixture(Path(temporary))
+                before = fixture.active_bytes()
+                fixture.call("install")
+                fixture.call("test", generation="legacy-frozen")
+                original = nginx_generation._atomic_replace_destination
+                delivered = False
+
+                def injected(path, payload, *, expected_sha256, owner_uid):
+                    nonlocal delivered
+                    result = original(
+                        path,
+                        payload,
+                        expected_sha256=expected_sha256,
+                        owner_uid=owner_uid,
+                    )
+                    if not delivered:
+                        delivered = True
+                        try:
+                            os.kill(os.getpid(), signum)
+                        except nginx_generation.NginxGenerationCancellation as exc:
+                            os.kill(os.getpid(), signum)
+                            raise exc
+                    return result
+
+                with mock.patch.object(
+                    nginx_generation,
+                    "_atomic_replace_destination",
+                    side_effect=injected,
+                ):
+                    with self.assertRaisesRegex(
+                        nginx_generation.NginxGenerationCancellation,
+                        "received signal",
+                    ):
+                        fixture.call(
+                            "activate",
+                            generation="legacy-frozen",
+                        )
+                self.assertEqual(fixture.active_bytes(), before)
+                journal = json.loads(
+                    (fixture.operation_root / "journal.json").read_text()
+                )
+                self.assertIsNone(journal["transaction"])
+                self.assertEqual(
+                    journal["events"][-1]["kind"],
+                    "rolled-back",
+                )
 
     def test_raw_filesystem_error_after_first_replace_also_rolls_back(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -1147,7 +1670,7 @@ class NginxHostWorkerTests(unittest.TestCase):
             result = fixture.call("restore", runner=runner)
             self.assertEqual(result["state"], "legacy-normal")
             self.assertEqual(fixture.active_bytes(), before)
-            self.assertEqual(len(runner.calls), 2)
+            self.assertEqual(len(runner.calls), 8)
 
     def test_symlink_destination_enabled_escape_and_manifest_or_archive_tamper_block(self):
         with tempfile.TemporaryDirectory() as temporary:

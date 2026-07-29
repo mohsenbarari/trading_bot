@@ -911,17 +911,56 @@ def _readback_exact_version(
         )
 
 
-def _recover_current_exact_version(
+def recover_create_only_exact_version(
     client: Any,
-    published: PublishedObject,
+    *,
+    bucket: str,
+    object_key: str,
+    expected_sha256: str,
+    expected_bytes: int,
+    expected_metadata: Mapping[str, str],
 ) -> str | None:
-    """Recover an accepted PUT without issuing another write."""
+    """Read-only recovery for a possibly accepted create-only PUT.
 
-    try:
-        head = client.head_object(
-            Bucket=published.bucket,
-            Key=published.object_key,
+    A caller must retain its exact key, ciphertext identity and metadata before
+    attempting a create-only PUT.  If the response is lost, this helper does
+    not retry the write.  It inspects only the current version at that exact
+    key, then proves the returned VersionId with an exact HEAD and GET.  A
+    missing object is the only non-error recovery outcome.
+
+    The helper is deliberately public so adjacent private/versioned transports
+    can use the same recovery semantics without reaching into this module's
+    private journal implementation.
+    """
+
+    if (
+        bucket != PRODUCTION_BUCKET
+        or not isinstance(object_key, str)
+        or not 1 <= len(object_key) <= 2048
+        or not object_key.isascii()
+        or object_key.startswith("/")
+        or any(character in object_key for character in "\r\n\x00?#")
+        or not isinstance(expected_sha256, str)
+        or _SHA256_RE.fullmatch(expected_sha256) is None
+        or isinstance(expected_bytes, bool)
+        or not isinstance(expected_bytes, int)
+        or not 1 <= expected_bytes <= MAX_READBACK_BYTES
+        or not isinstance(expected_metadata, Mapping)
+        or any(
+            not isinstance(key, str)
+            or not isinstance(value, str)
+            or not key.isascii()
+            or not value.isascii()
+            or any(character in key + value for character in "\r\n\x00")
+            for key, value in expected_metadata.items()
         )
+    ):
+        raise ProductionTransportError(
+            "production WA-IR create-only recovery inputs are invalid"
+        )
+    metadata = dict(expected_metadata)
+    try:
+        head = client.head_object(Bucket=bucket, Key=object_key)
     except Exception as exc:
         if _provider_error_code(exc) in _MISSING_OBJECT_CODES:
             return None
@@ -936,8 +975,8 @@ def _recover_current_exact_version(
             and not any(character.isspace() for character in version_id)
             and version_id.isprintable()
             and version_id.lower() != "null"
-            and int(head.get("ContentLength", -1)) == published.ciphertext_bytes
-            and head.get("Metadata") == dict(published.metadata)
+            and int(head.get("ContentLength", -1)) == expected_bytes
+            and head.get("Metadata") == metadata
         )
     except (TypeError, ValueError):
         valid = False
@@ -947,14 +986,30 @@ def _recover_current_exact_version(
         )
     _readback_exact_version(
         client,
+        bucket=bucket,
+        object_key=object_key,
+        version_id=version_id,
+        expected_sha256=expected_sha256,
+        expected_bytes=expected_bytes,
+        expected_metadata=metadata,
+    )
+    return version_id
+
+
+def _recover_current_exact_version(
+    client: Any,
+    published: PublishedObject,
+) -> str | None:
+    """Recover an accepted PUT without issuing another write."""
+
+    return recover_create_only_exact_version(
+        client,
         bucket=published.bucket,
         object_key=published.object_key,
-        version_id=version_id,
         expected_sha256=published.ciphertext_sha256,
         expected_bytes=published.ciphertext_bytes,
         expected_metadata=published.metadata,
     )
-    return version_id
 
 
 def publish_age_encrypted(

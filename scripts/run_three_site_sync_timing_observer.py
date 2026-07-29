@@ -30,8 +30,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.secure_file_io import read_secure_text, write_secure_atomic_bytes
-from core.three_site_full_matrix_campaign import secure_json
+from core.secure_file_io import read_secure_text
 from core.three_site_sync_timing import SyncTimingEvidenceError, sync_timing_policy
 from scripts.build_three_site_sync_timing_evidence import (
     MANIFEST_SCHEMA,
@@ -53,7 +52,6 @@ SITE_SERVICE = {
 SAFE_NAME = re.compile(r"^[a-z_][a-z0-9_-]{0,62}$")
 SAFE_PATH = re.compile(r"^/[A-Za-z0-9_./-]{1,511}$")
 SAFE_CORRELATION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$")
-SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 SAFE_ENV = {
     "PATH": "/usr/bin:/bin",
@@ -65,6 +63,34 @@ SAFE_ENV = {
 
 class SyncObserverError(RuntimeError):
     pass
+
+
+LEGACY_THREE_SITE_SYNC_TIMING_OBSERVER_RETIREMENT_REASON = (
+    "legacy three-site staging sync-timing observer is retired; use the "
+    "production-shadow, exact-release observer path"
+)
+
+
+class LegacyThreeSiteSyncTimingObserverRetiredError(SyncObserverError):
+    """Raised before the retired observer can open a process or network path."""
+
+
+def assert_legacy_three_site_sync_timing_observer_retired(operation: str) -> None:
+    """Keep the former SSH/Docker observer unavailable on every import path."""
+
+    raise LegacyThreeSiteSyncTimingObserverRetiredError(
+        f"{LEGACY_THREE_SITE_SYNC_TIMING_OBSERVER_RETIREMENT_REASON}: {operation}"
+    )
+
+
+def legacy_three_site_sync_timing_observer_blocked_payload() -> dict[str, object]:
+    """Return the side-effect-free retirement result used by the CLI."""
+
+    return {
+        "status": "blocked_legacy_three_site_sync_timing_observer_retired",
+        "reason": LEGACY_THREE_SITE_SYNC_TIMING_OBSERVER_RETIREMENT_REASON,
+        "replacement": "production-shadow exact-release observer path",
+    }
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -281,6 +307,7 @@ def _ssh_base(config: dict[str, Any], site: str) -> list[str]:
 
 
 def _run_json(arguments: list[str], *, timeout: int, label: str) -> dict[str, Any]:
+    assert_legacy_three_site_sync_timing_observer_retired("run JSON command")
     try:
         result = subprocess.run(
             arguments,
@@ -305,6 +332,7 @@ def _run_json(arguments: list[str], *, timeout: int, label: str) -> dict[str, An
 
 
 def _clock(config: dict[str, Any], site: str) -> dict[str, Any]:
+    assert_legacy_three_site_sync_timing_observer_retired("collect host clock")
     remote = config["sites"][site]
     value = _run_json(
         [
@@ -329,6 +357,9 @@ def _snapshot(
     correlation_prefix: str,
     clock: dict[str, Any],
 ) -> dict[str, Any]:
+    assert_legacy_three_site_sync_timing_observer_retired(
+        "collect remote timing snapshot"
+    )
     remote = config["sites"][site]
     clock_bytes = json.dumps(
         clock, sort_keys=True, separators=(",", ":"), ensure_ascii=False
@@ -358,6 +389,7 @@ def observe(
     manifest: dict[str, Any],
     scenario_id: str,
 ) -> dict[str, Any]:
+    assert_legacy_three_site_sync_timing_observer_retired("observe synchronization timing")
     policy = sync_timing_policy(scenario_id)
     if policy is None:
         raise SyncObserverError("scenario has no synchronization timing policy")
@@ -512,46 +544,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--probe-manifest", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args(argv)
-    if SHA40.fullmatch(args.release_sha) is None:
-        parser.error("--release-sha must be lowercase 40-hex")
-    try:
-        config = load_config(
-            args.config,
-            campaign_id=args.campaign_id,
-            release_sha=args.release_sha,
-            output=args.output,
-        )
-        manifest = secure_json(
-            args.probe_manifest,
-            label="sync probe manifest",
-            max_size=16 * 1024 * 1024,
-        )
-        artifact = observe(
-            config=config,
-            manifest=manifest,
-            scenario_id=args.scenario_id,
-        )
-        write_secure_atomic_bytes(
-            args.output,
-            (json.dumps(artifact, sort_keys=True, ensure_ascii=False) + "\n").encode(),
-            label="three-site timing observer output",
-            mode=0o600,
-            max_size=32 * 1024 * 1024,
-        )
-        print(json.dumps({
-            "status": "passed",
-            "scenario_id": args.scenario_id,
-            "sample_count": len(artifact["samples"]),
-            "output_sha256": hashlib.sha256(args.output.read_bytes()).hexdigest(),
-            "captured_at": datetime.now(timezone.utc).isoformat(),
-        }, sort_keys=True))
-        return 0
-    except Exception as exc:
-        print(json.dumps({
-            "status": "blocked", "error": str(exc), "error_class": type(exc).__name__
-        }, sort_keys=True), file=sys.stderr)
-        return 1
+    parser.parse_args(argv)
+    print(json.dumps(legacy_three_site_sync_timing_observer_blocked_payload(), sort_keys=True), file=sys.stderr)
+    return 2
 
 
 if __name__ == "__main__":

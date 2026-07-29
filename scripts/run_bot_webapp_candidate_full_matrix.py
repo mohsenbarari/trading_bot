@@ -25,6 +25,23 @@ DEFAULT_TELEGRAM_RATIO = 0.6
 DEFAULT_DB_POOL_SIZE = 8
 DEFAULT_DB_MAX_OVERFLOW = 8
 DEFAULT_WRITE_MAX_CONCURRENCY = 4
+LEGACY_CANDIDATE_MATRIX_RETIREMENT_REASON = (
+    "legacy_two_server_candidate_matrix_retired_use_three_site_sealed_campaign"
+)
+
+
+class LegacyCandidateMatrixRuntimeRetiredError(RuntimeError):
+    """Raised before a retained candidate-matrix helper can execute a command."""
+
+
+def assert_legacy_candidate_matrix_execution_retired(operation: str) -> None:
+    """Hard-deny retained command execution while keeping artifact-only planning."""
+
+    raise LegacyCandidateMatrixRuntimeRetiredError(
+        "Legacy two-server candidate Full Matrix execution is retired and hard-disabled "
+        f"before subprocess, container, or staging access: operation={operation}; "
+        "use a sealed three-site campaign verifier."
+    )
 
 
 def env_int(name: str, default: int) -> int:
@@ -166,6 +183,7 @@ def build_stage11_command(args: argparse.Namespace) -> list[str]:
 def run_streamed(command: list[str], *, env: dict[str, str], dry_run: bool) -> dict[str, Any]:
     if dry_run:
         return {"status": "planned", "command": command}
+    assert_legacy_candidate_matrix_execution_retired("run_streamed")
     result = subprocess.run(command, cwd=REPO_ROOT, env=env, check=False)
     if result.returncode != 0:
         return {"status": "failed", "returncode": result.returncode, "command": command}
@@ -175,6 +193,7 @@ def run_streamed(command: list[str], *, env: dict[str, str], dry_run: bool) -> d
 def run_captured(command: list[str], *, stdout_path: Path, stderr_path: Path, dry_run: bool) -> dict[str, Any]:
     if dry_run:
         return {"status": "planned", "command": command}
+    assert_legacy_candidate_matrix_execution_retired("run_captured")
     result = subprocess.run(command, cwd=REPO_ROOT, capture_output=True, text=True, check=False)
     stdout_path.write_text(result.stdout, encoding="utf-8")
     stderr_path.write_text(result.stderr, encoding="utf-8")
@@ -316,6 +335,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if not args.dry_run:
+        print(
+            json.dumps(
+                {
+                    "status": "blocked_legacy_two_server_candidate_matrix_retired",
+                    "reason": LEGACY_CANDIDATE_MATRIX_RETIREMENT_REASON,
+                    "required_replacement": "sealed_three_site_campaign_verifier",
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+        return 2
     args.artifact_dir.mkdir(parents=True, exist_ok=True)
 
     env = os.environ.copy()
@@ -333,7 +365,7 @@ def main(argv: list[str] | None = None) -> int:
         build_targeted_join_command(args),
         stdout_path=args.artifact_dir / "trade-delivery-targeted-join-matrix.stdout.json",
         stderr_path=args.artifact_dir / "trade-delivery-targeted-join-matrix.stderr.log",
-        dry_run=False,
+        dry_run=args.dry_run,
     )
     stage11_run = run_captured(
         build_stage11_command(args),

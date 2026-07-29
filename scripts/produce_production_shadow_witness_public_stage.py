@@ -21,7 +21,6 @@ import re
 import socket
 import ssl
 import stat
-import subprocess
 import sys
 from typing import Any, Callable, Mapping, Sequence
 from uuid import UUID
@@ -44,6 +43,11 @@ if str(REPO_ROOT) not in sys.path:
 from core.secure_file_io import (  # noqa: E402
     SecureFileError,
     write_secure_new_bytes,
+)
+from scripts.production_shadow_global_docker_inventory_agent import (  # noqa: E402
+    BoundedCommandError,
+    BoundedCommandResult,
+    _bounded_command,
 )
 
 
@@ -464,29 +468,21 @@ def _default_command_runner(
     timeout: float,
 ) -> CommandResult:
     try:
-        completed = subprocess.run(
+        completed = _bounded_command(
             argv,
-            cwd="/",
             env={
                 "GIT_NO_REPLACE_OBJECTS": "1",
                 "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
                 "LC_ALL": "C",
             },
-            capture_output=True,
-            check=False,
             timeout=timeout,
+            stdout_limit=MAX_COMMAND_OUTPUT_BYTES,
+            stderr_limit=MAX_COMMAND_OUTPUT_BYTES,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except BoundedCommandError as exc:
         raise WitnessPublicStageError(
             "fixed local command did not complete safely"
         ) from exc
-    if (
-        len(completed.stdout) > MAX_COMMAND_OUTPUT_BYTES
-        or len(completed.stderr) > MAX_COMMAND_OUTPUT_BYTES
-    ):
-        raise WitnessPublicStageError(
-            "fixed local command output exceeded its bound"
-        )
     return CommandResult(
         argv=argv,
         returncode=completed.returncode,

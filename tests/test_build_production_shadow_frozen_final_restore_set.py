@@ -32,7 +32,10 @@ from scripts import build_production_shadow_frozen_final_restore_set as MODULE
 from scripts import orchestrate_production_shadow_nginx_generations as NGINX
 from scripts import produce_production_shadow_source_snapshot as SOURCE
 from scripts.build_production_shadow_source_snapshot_binding import build_binding
-from tests.test_production_shadow_cutover_controller import manifest_payload
+from tests.test_production_shadow_cutover_controller import (
+    manifest_payload,
+    write_controller_manifest,
+)
 
 
 def secure_file(path: Path, payload: bytes) -> None:
@@ -158,10 +161,7 @@ class FrozenFinalRestoreSetFixture:
 
     def _write_controller(self) -> None:
         self.controller_path = self.input_root / "controller.json"
-        secure_file(
-            self.controller_path,
-            canonical_json_bytes(self.controller),
-        )
+        write_controller_manifest(self.controller_path, self.controller)
 
     def _receipt(self) -> dict:
         vhost_rows: dict[str, dict] = {}

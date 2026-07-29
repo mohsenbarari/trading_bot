@@ -32,6 +32,11 @@ from core.dr_staging_operation_backend import (
     load_staging_backend_config,
 )
 from core.secure_file_io import read_secure_text, verify_hash_chained_jsonl
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -75,6 +80,7 @@ def _journal_proves_operation_started(path: Path, plan: Any) -> bool:
 
 
 def prepare(args: argparse.Namespace):  # noqa: ANN202
+    assert_retired(component="staging-failover-orchestration", operation="prepare")
     plan = parse_plan(_strict_json(args.plan, "orchestration plan"))
     policy = load_approver_policy(args.human_approval_policy)
     operation_started = _journal_proves_operation_started(args.journal, plan)
@@ -96,6 +102,7 @@ def prepare(args: argparse.Namespace):  # noqa: ANN202
 
 
 async def run(args: argparse.Namespace) -> dict[str, Any]:
+    assert_retired(component="staging-failover-orchestration", operation="run")
     plan, operations, backend = prepare(args)
     required = confirmation_phrase(plan.operation_id, plan.plan_hash)
     if not args.apply:
@@ -142,6 +149,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        assert_retired(component="staging-failover-orchestration", operation="CLI")
+    except LegacyThreeSiteStagingRuntimeRetiredError:
+        print(json.dumps(blocked_payload(component="staging-failover-orchestration"), sort_keys=True))
+        return 2
     args = build_parser().parse_args(argv)
     try:
         result = asyncio.run(run(args))

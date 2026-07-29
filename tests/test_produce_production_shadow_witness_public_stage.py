@@ -10,6 +10,7 @@ import stat
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -785,6 +786,69 @@ class ProductionShadowWitnessPublicStageTests(unittest.TestCase):
             "CA certificate metadata is unsafe",
         ):
             fixture.produce()
+
+    def test_default_runner_delegates_to_identity_bounded_execution(
+        self,
+    ) -> None:
+        command = ("/usr/bin/git", "--version")
+        bounded_result = MODULE.BoundedCommandResult(
+            returncode=0,
+            stdout=b"git version\n",
+            stderr=b"",
+        )
+        with mock.patch.object(
+            MODULE,
+            "_bounded_command",
+            return_value=bounded_result,
+        ) as bounded:
+            result = MODULE._default_command_runner(command, 1.25)
+
+        self.assertEqual(
+            result,
+            MODULE.CommandResult(
+                argv=command,
+                returncode=0,
+                stdout=b"git version\n",
+                stderr=b"",
+            ),
+        )
+        bounded.assert_called_once_with(
+            command,
+            env={
+                "GIT_NO_REPLACE_OBJECTS": "1",
+                "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
+                "LC_ALL": "C",
+            },
+            timeout=1.25,
+            stdout_limit=MODULE.MAX_COMMAND_OUTPUT_BYTES,
+            stderr_limit=MODULE.MAX_COMMAND_OUTPUT_BYTES,
+        )
+
+    def test_default_runner_maps_bounded_failure_but_not_baseexception(
+        self,
+    ) -> None:
+        command = ("/usr/bin/git", "--version")
+        with (
+            mock.patch.object(
+                MODULE,
+                "_bounded_command",
+                side_effect=MODULE.BoundedCommandError("timed out"),
+            ),
+            self.assertRaisesRegex(
+                MODULE.WitnessPublicStageError,
+                "did not complete safely",
+            ),
+        ):
+            MODULE._default_command_runner(command, 0.1)
+        with (
+            mock.patch.object(
+                MODULE,
+                "_bounded_command",
+                side_effect=KeyboardInterrupt,
+            ),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            MODULE._default_command_runner(command, 0.1)
 
 
 if __name__ == "__main__":

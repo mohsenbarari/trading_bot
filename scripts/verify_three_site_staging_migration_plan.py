@@ -73,6 +73,7 @@ SUPPORTED_SOURCE_REVISIONS = frozenset(
         "f764a5b6c8d9",  # sealed stream-contract head (repeat/recovery input)
         "a875b6c7d9e0",  # synchronization-timing evidence head
         "b986c7d8e0f1",  # locked DR history-boundary head
+        "c097d8e9f1a2",  # complete projection policy head
         "f2c7d8e9a0b1",  # deployed repeat-offer staging source before queue merge
     }
 )

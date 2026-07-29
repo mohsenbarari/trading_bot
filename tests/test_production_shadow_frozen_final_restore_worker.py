@@ -8,10 +8,12 @@ from dataclasses import replace
 from pathlib import Path
 import copy
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -35,6 +37,7 @@ APP_CONTENT_ID = "sha256:" + "9" * 64
 TARGET_REVISION = "target_2"
 DATABASE_CONFIG_HASH = "3" * 64
 RESTORE_TOOL_CONFIG_HASH = "4" * 64
+RESTORE_ONEOFF_CONFIG_HASH = "5" * 64
 NETWORK_ID = "5" * 64
 ENDPOINT_ID = "6" * 64
 COMPOSE_VERSION = "5.1.4"
@@ -72,17 +75,50 @@ class FakeRunner:
 
     def run(self, arguments, *, timeout, env, stdin=MODULE.subprocess.DEVNULL):
         args = list(arguments)
+        if tuple(args[: len(MODULE.DOCKER_BASE)]) != MODULE.DOCKER_BASE:
+            raise AssertionError("Docker command is not local-socket bound")
         self.calls.append((args, dict(env)))
         if self.callback is None:
             return ""
-        return self.callback(args, dict(env), stdin)
+        callback_args = [
+            MODULE.DOCKER,
+            *args[len(MODULE.DOCKER_BASE) :],
+        ]
+        return self.callback(callback_args, dict(env), stdin)
 
     def stream(self, arguments, *, timeout, env):
         args = list(arguments)
+        if tuple(args[: len(MODULE.DOCKER_BASE)]) != MODULE.DOCKER_BASE:
+            raise AssertionError("Docker command is not local-socket bound")
         self.stream_calls.append(args)
         if self.stream_callback is None:
             return MODULE.StreamDigest("3" * 64, 0, 0)
-        return self.stream_callback(args, dict(env))
+        callback_args = [
+            MODULE.DOCKER,
+            *args[len(MODULE.DOCKER_BASE) :],
+        ]
+        return self.stream_callback(callback_args, dict(env))
+
+
+class DockerHostConfigContractTests(unittest.TestCase):
+    def test_masked_path_base_order_matches_docker_api_v1_52(self):
+        self.assertEqual(
+            MODULE.BASE_MASKED_PATHS,
+            (
+                "/proc/asound",
+                "/proc/acpi",
+                "/proc/interrupts",
+                "/proc/kcore",
+                "/proc/keys",
+                "/proc/latency_stats",
+                "/proc/timer_list",
+                "/proc/timer_stats",
+                "/proc/sched_debug",
+                "/proc/scsi",
+                "/sys/firmware",
+                "/sys/devices/virtual/powercap",
+            ),
+        )
 
 
 class Fixture:
@@ -436,6 +472,13 @@ def rendered_config(fixture: Fixture) -> dict:
                         "PGDATABASE": "database",
                     },
                     "healthcheck": {"disable": True},
+                    "depends_on": {
+                        f"{manifest.role}_db": {
+                            "condition": "service_healthy",
+                            "required": True,
+                            "restart": False,
+                        }
+                    },
                 }
             )
     return {
@@ -475,6 +518,149 @@ def image_inspect_document() -> dict:
     }
 
 
+def container_config_defaults(identifier: str) -> dict:
+    return {
+        "Hostname": identifier[:12],
+        "Domainname": "",
+        "User": "",
+        "AttachStdin": False,
+        "AttachStdout": True,
+        "AttachStderr": True,
+        "ExposedPorts": {},
+        "Tty": False,
+        "OpenStdin": False,
+        "StdinOnce": False,
+        "Env": [],
+        "Cmd": None,
+        "Healthcheck": None,
+        "ArgsEscaped": False,
+        "Image": POSTGRES_IMAGE_ID,
+        "Volumes": {},
+        "WorkingDir": "",
+        "Entrypoint": None,
+        "NetworkDisabled": False,
+        "OnBuild": None,
+        "Labels": {},
+        "StopSignal": "SIGINT",
+        "StopTimeout": 10,
+        "Shell": None,
+    }
+
+
+def host_config_defaults() -> dict:
+    return {
+        field: None
+        for field in MODULE.HOST_CONFIG_FIELDS
+    } | {
+        "CpuShares": 0,
+        "Memory": 2 * 1024**3,
+        "CgroupParent": "",
+        "BlkioWeight": 0,
+        "BlkioWeightDevice": [],
+        "BlkioDeviceReadBps": [],
+        "BlkioDeviceWriteBps": [],
+        "BlkioDeviceReadIOps": [],
+        "BlkioDeviceWriteIOps": [],
+        "CpuPeriod": 0,
+        "CpuQuota": 0,
+        "CpuRealtimePeriod": 0,
+        "CpuRealtimeRuntime": 0,
+        "CpusetCpus": "",
+        "CpusetMems": "",
+        "Devices": [],
+        "DeviceCgroupRules": None,
+        "DeviceRequests": None,
+        "MemoryReservation": 0,
+        "MemorySwap": 2 * 1024**3,
+        "MemorySwappiness": None,
+        "NanoCpus": 2_000_000_000,
+        "OomKillDisable": False,
+        "Init": False,
+        "PidsLimit": 512,
+        "Ulimits": [],
+        "CpuCount": 0,
+        "CpuPercent": 0,
+        "IOMaximumIOps": 0,
+        "IOMaximumBandwidth": 0,
+        "Binds": [],
+        "ContainerIDFile": "",
+        "LogConfig": {
+            "Type": "json-file",
+            "Config": {"max-file": "5", "max-size": "20m"},
+        },
+        "NetworkMode": "",
+        "PortBindings": {},
+        "RestartPolicy": {"Name": "no", "MaximumRetryCount": 0},
+        "AutoRemove": False,
+        "VolumeDriver": "",
+        "VolumesFrom": None,
+        "Mounts": None,
+        "ConsoleSize": [0, 0],
+        "Annotations": {},
+        "CapAdd": None,
+        "CapDrop": None,
+        "CgroupnsMode": "private",
+        "Dns": [],
+        "DnsOptions": [],
+        "DnsSearch": [],
+        "ExtraHosts": None,
+        "GroupAdd": None,
+        "IpcMode": "private",
+        "Cgroup": "",
+        "Links": None,
+        "OomScoreAdj": 0,
+        "PidMode": "",
+        "Privileged": False,
+        "PublishAllPorts": False,
+        "ReadonlyRootfs": False,
+        "SecurityOpt": None,
+        "StorageOpt": {},
+        "Tmpfs": {},
+        "UTSMode": "",
+        "UsernsMode": "",
+        "ShmSize": 64 * 1024 * 1024,
+        "Sysctls": {},
+        "Runtime": "runc",
+        "Isolation": "",
+        "MaskedPaths": list(MODULE.BASE_MASKED_PATHS),
+        "ReadonlyPaths": list(MODULE.READONLY_PATHS),
+    }
+
+
+def compose_container_labels(
+    fixture: Fixture,
+    *,
+    service: str,
+    config_hash: str,
+    oneoff: bool,
+    dependencies: str,
+    slug: str | None = None,
+) -> dict[str, str]:
+    labels = {
+        "com.docker.compose.config-hash": config_hash,
+        "com.docker.compose.depends_on": dependencies,
+        "com.docker.compose.image": POSTGRES_IMAGE_ID,
+        "com.docker.compose.oneoff": str(oneoff),
+        "com.docker.compose.project": fixture.manifest.paths.project_name,
+        "com.docker.compose.project.config_files": str(
+            fixture.manifest.role_compose_path
+        ),
+        "com.docker.compose.project.environment_file": str(
+            fixture.manifest.environment_path
+        ),
+        "com.docker.compose.project.working_dir": str(
+            fixture.manifest.role_compose_path.parent
+        ),
+        "com.docker.compose.service": service,
+        "com.docker.compose.version": COMPOSE_VERSION,
+    }
+    if not oneoff:
+        labels["com.docker.compose.container-number"] = "1"
+    if slug is not None:
+        labels["com.docker.compose.slug"] = slug
+    return labels
+
+
 def database_container_row(
     fixture: Fixture,
     *,
@@ -502,6 +688,7 @@ def database_container_row(
         ),
         "Image": POSTGRES_IMAGE_ID,
         "Config": {
+            **container_config_defaults(identifier),
             "Image": POSTGRES_IMAGE_ID,
             "Cmd": [
                 "postgres",
@@ -535,19 +722,20 @@ def database_container_row(
             "Labels": {
                 "org.opencontainers.image.title": "postgres",
                 "trading-bot.production.operation-id": OPERATION_ID,
-                "com.docker.compose.project": (
-                    manifest.paths.project_name
+                **compose_container_labels(
+                    fixture,
+                    service=f"{manifest.role}_db",
+                    config_hash=config_hash,
+                    oneoff=False,
+                    dependencies="",
                 ),
-                "com.docker.compose.service": f"{manifest.role}_db",
-                "com.docker.compose.oneoff": "False",
-                "com.docker.compose.container-number": "1",
-                "com.docker.compose.config-hash": config_hash,
             },
             "User": "",
             "WorkingDir": "",
             "StopSignal": "SIGINT",
         },
         "HostConfig": {
+            **host_config_defaults(),
             "RestartPolicy": {
                 "Name": "unless-stopped",
                 "MaximumRetryCount": 0,
@@ -558,7 +746,7 @@ def database_container_row(
             "NanoCpus": 2_000_000_000,
             "Memory": 2 * 1024**3,
             "MemoryReservation": 0,
-            "MemorySwap": 0,
+            "MemorySwap": 2 * 1024**3,
             "PidsLimit": 512,
             "CpuShares": 0,
             "CpuPeriod": 0,
@@ -585,8 +773,8 @@ def database_container_row(
             "DnsOptions": [],
             "DnsSearch": [],
             "GroupAdd": None,
-            "Sysctls": None,
-            "Tmpfs": None,
+            "Sysctls": {},
+            "Tmpfs": {},
             "NetworkMode": network_name,
             "Binds": [
                 f"{manifest.paths.postgres}:"
@@ -618,7 +806,8 @@ def restore_oneoff_row(
     fixture: Fixture,
     *,
     identifier: str = "7" * 64,
-    config_hash: str = RESTORE_TOOL_CONFIG_HASH,
+    config_hash: str = RESTORE_ONEOFF_CONFIG_HASH,
+    slug: str = "a" * 64,
 ) -> dict:
     manifest = fixture.manifest
     network_name = f"{manifest.paths.project_name}_{manifest.role}"
@@ -626,10 +815,11 @@ def restore_oneoff_row(
         "Id": identifier,
         "Name": (
             f"/{manifest.paths.project_name}-"
-            f"{manifest.role}_restore_tool-run-abcd1234"
+            f"{manifest.role}_restore_tool-run-{slug[:12]}"
         ),
         "Image": POSTGRES_IMAGE_ID,
         "Config": {
+            **container_config_defaults(identifier),
             "Image": POSTGRES_IMAGE_ID,
             "Cmd": [
                 "psql",
@@ -660,20 +850,23 @@ def restore_oneoff_row(
                 "org.opencontainers.image.title": "postgres",
                 "trading-bot.production.operation-id": OPERATION_ID,
                 "trading-bot.production.restore-generation": GENERATION,
-                "com.docker.compose.project": (
-                    manifest.paths.project_name
+                **compose_container_labels(
+                    fixture,
+                    service=f"{manifest.role}_restore_tool",
+                    config_hash=config_hash,
+                    oneoff=True,
+                    dependencies=(
+                        f"{manifest.role}_db:service_healthy:false"
+                    ),
+                    slug=slug,
                 ),
-                "com.docker.compose.service": (
-                    f"{manifest.role}_restore_tool"
-                ),
-                "com.docker.compose.oneoff": "True",
-                "com.docker.compose.config-hash": config_hash,
             },
             "User": "",
             "WorkingDir": "",
             "StopSignal": "SIGINT",
         },
         "HostConfig": {
+            **host_config_defaults(),
             "RestartPolicy": {
                 "Name": "no",
                 "MaximumRetryCount": 0,
@@ -684,7 +877,7 @@ def restore_oneoff_row(
             "NanoCpus": 2_000_000_000,
             "Memory": 2 * 1024**3,
             "MemoryReservation": 0,
-            "MemorySwap": 0,
+            "MemorySwap": 2 * 1024**3,
             "PidsLimit": 512,
             "CpuShares": 0,
             "CpuPeriod": 0,
@@ -711,8 +904,8 @@ def restore_oneoff_row(
             "DnsOptions": [],
             "DnsSearch": [],
             "GroupAdd": None,
-            "Sysctls": None,
-            "Tmpfs": None,
+            "Sysctls": {},
+            "Tmpfs": {},
             "NetworkMode": network_name,
             "Binds": [
                 f"{manifest.paths.restore_input_root}:"
@@ -1130,9 +1323,28 @@ class FrozenFinalRestoreWorkerTests(unittest.TestCase):
         self.assertEqual(project, f"{base}-webapp-ir")
 
     def test_release_worker_imports_with_repo_dependencies(self):
+        hostile = Path(self.temporary.name) / "hostile-python"
+        (hostile / "scripts").mkdir(parents=True)
+        (hostile / "scripts" / "__init__.py").write_text(
+            "raise RuntimeError('hostile scripts package imported')\n",
+            encoding="ascii",
+        )
+        (hostile / "yaml.py").write_text(
+            "raise RuntimeError('hostile yaml module imported')\n",
+            encoding="ascii",
+        )
+        env = dict(os.environ)
+        env["PYTHONPATH"] = os.fspath(hostile)
         result = subprocess.run(
-            [sys.executable, str(MODULE.RUNNING_WORKER_PATH), "--help"],
+            [
+                sys.executable,
+                "-I",
+                "-B",
+                str(MODULE.RUNNING_WORKER_PATH),
+                "--help",
+            ],
             cwd="/tmp",
+            env=env,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -1145,6 +1357,417 @@ class FrozenFinalRestoreWorkerTests(unittest.TestCase):
             result.stderr.decode("utf-8", errors="replace"),
         )
         self.assertIn(b"--role-manifest", result.stdout)
+
+    def test_reserved_docker_and_compose_material_environment_is_rejected(
+        self,
+    ):
+        original = self.fixture.environment.read_bytes()
+        for name in (
+            "DOCKER_HOST",
+            "DOCKER_CONTEXT",
+            "DOCKER_CONFIG",
+            "COMPOSE_FILE",
+            "COMPOSE_PROFILES",
+        ):
+            with self.subTest(name=name):
+                payload = original + f"{name}=hostile\n".encode("ascii")
+                write_root_file(self.fixture.environment, payload)
+                self.fixture.document["environment_sha256"] = (
+                    hashlib.sha256(payload).hexdigest()
+                )
+                with self.assertRaisesRegex(
+                    MODULE.FrozenFinalRestoreWorkerError,
+                    "reserved controls",
+                ):
+                    MODULE._compose_environment(self.fixture.manifest)
+        write_root_file(self.fixture.environment, original)
+        self.fixture.document["environment_sha256"] = hashlib.sha256(
+            original
+        ).hexdigest()
+
+    def test_role_material_never_becomes_root_docker_process_environment(
+        self,
+    ):
+        original = self.fixture.environment.read_bytes()
+        payload = original + b"LD_PRELOAD=/tmp/hostile-loader.so\n"
+        write_root_file(self.fixture.environment, payload)
+        self.fixture.document["environment_sha256"] = hashlib.sha256(
+            payload
+        ).hexdigest()
+        command_env, _overrides = MODULE._compose_environment(
+            self.fixture.manifest
+        )
+        self.assertEqual(
+            command_env,
+            {**MODULE.SAFE_ENV, **_overrides},
+        )
+        self.assertNotIn("LD_PRELOAD", command_env)
+
+    def test_docker_commands_require_stable_safe_local_socket(self):
+        self.assertEqual(
+            MODULE.DOCKER_BASE,
+            (
+                "/usr/bin/docker",
+                "--host=unix:///run/docker.sock",
+            ),
+        )
+        safe = mock.Mock(
+            st_dev=1,
+            st_ino=2,
+            st_uid=0,
+            st_gid=999,
+            st_mode=stat.S_IFSOCK | 0o660,
+        )
+        unsafe = mock.Mock(
+            st_dev=1,
+            st_ino=2,
+            st_uid=0,
+            st_gid=999,
+            st_mode=stat.S_IFSOCK | 0o662,
+        )
+        replacement = mock.Mock(
+            st_dev=1,
+            st_ino=3,
+            st_uid=0,
+            st_gid=999,
+            st_mode=stat.S_IFSOCK | 0o660,
+        )
+        with mock.patch.object(MODULE.os, "lstat", return_value=safe):
+            identity = MODULE._docker_socket_identity()
+            MODULE._assert_docker_socket_identity(identity)
+        with mock.patch.object(MODULE.os, "lstat", return_value=unsafe):
+            with self.assertRaisesRegex(
+                MODULE.FrozenFinalRestoreWorkerError,
+                "unsafe",
+            ):
+                MODULE._docker_socket_identity()
+        with mock.patch.object(MODULE.os, "lstat", return_value=replacement):
+            with self.assertRaisesRegex(
+                MODULE.FrozenFinalRestoreWorkerError,
+                "changed",
+            ):
+                MODULE._assert_docker_socket_identity(identity)
+        with self.assertRaisesRegex(
+            MODULE.FrozenFinalRestoreWorkerError,
+            "local socket",
+        ):
+            MODULE._validate_docker_execution(
+                [MODULE.DOCKER, "ps"],
+                MODULE.SAFE_ENV,
+            )
+        with (
+            mock.patch.object(
+                MODULE.os,
+                "lstat",
+                side_effect=(safe, safe, replacement),
+            ),
+            mock.patch.object(
+                MODULE,
+                "_bounded_command",
+                return_value=MODULE.BoundedCommandResult(0, b"", b""),
+            ),
+        ):
+            runner = MODULE.SubprocessDockerRunner()
+            with self.assertRaisesRegex(
+                MODULE.FrozenFinalRestoreWorkerError,
+                "changed",
+            ):
+                runner.run(
+                    [*MODULE.DOCKER_BASE, "image", "inspect", POSTGRES_IMAGE_ID],
+                    timeout=30,
+                    env=MODULE.SAFE_ENV,
+                )
+
+    def test_worker_bounded_command_stops_oversized_output(self):
+        with self.assertRaisesRegex(
+            MODULE.BoundedCommandError,
+            "stdout exceeded",
+        ):
+            MODULE._bounded_command(
+                [
+                    "/usr/bin/python3",
+                    "-I",
+                    "-c",
+                    "import os; os.write(1, b'x' * 131072)",
+                ],
+                timeout=10,
+                env={"PATH": "/usr/bin:/bin"},
+                stdin=subprocess.DEVNULL,
+                stdout_limit=1024,
+                stderr_limit=1024,
+            )
+
+    def test_worker_bounded_command_preserves_subsecond_wait_budget(self):
+        process = mock.Mock()
+        process.pid = 42
+        process.stdout.fileno.return_value = 10
+        process.stderr.fileno.return_value = 11
+        process.wait.return_value = 0
+        process.poll.return_value = 0
+        selector = mock.Mock()
+        selector.get_map.return_value = {}
+        with (
+            mock.patch.object(
+                MODULE.subprocess,
+                "Popen",
+                return_value=process,
+            ),
+            mock.patch.object(
+                MODULE.selectors,
+                "DefaultSelector",
+                return_value=selector,
+            ),
+            mock.patch.object(MODULE.os, "set_blocking"),
+            mock.patch.object(MODULE.os, "pidfd_open", return_value=99),
+            mock.patch.object(MODULE.os, "close"),
+            mock.patch.object(MODULE, "_enable_child_subreaper"),
+            mock.patch.object(
+                MODULE,
+                "_process_identity",
+                return_value=MODULE.ProcessIdentity(
+                    pid=42,
+                    parent_pid=os.getpid(),
+                    start_time=100,
+                    state="S",
+                ),
+            ),
+            mock.patch.object(
+                MODULE,
+                "_direct_child_baseline",
+                return_value=frozenset(),
+            ),
+            mock.patch.object(MODULE, "_terminate_process_tree"),
+            mock.patch.object(
+                MODULE.time,
+                "monotonic",
+                side_effect=(10.0, 10.75),
+            ),
+        ):
+            result = MODULE._bounded_command(
+                ["/usr/bin/true"],
+                timeout=1,
+                env={"PATH": "/usr/bin:/bin"},
+                stdin=subprocess.DEVNULL,
+                stdout_limit=1024,
+                stderr_limit=1024,
+            )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(
+            process.wait.call_args_list[0],
+            mock.call(timeout=0.25),
+        )
+
+    def test_worker_root_pidfd_contains_identity_acquisition_failure(self):
+        real_pidfd_open = os.pidfd_open
+        for name, streaming in (
+            ("buffered", False),
+            ("streaming", True),
+        ):
+            with self.subTest(name=name):
+                opened: list[tuple[int, int]] = []
+
+                def capture_pidfd(pid: int, flags: int = 0) -> int:
+                    descriptor = real_pidfd_open(pid, flags)
+                    opened.append((pid, descriptor))
+                    return descriptor
+
+                with (
+                    mock.patch.object(
+                        MODULE,
+                        "_direct_child_baseline",
+                        return_value=frozenset(),
+                    ),
+                    mock.patch.object(
+                        MODULE,
+                        "_process_identity",
+                        return_value=None,
+                    ),
+                    mock.patch.object(
+                        MODULE.os,
+                        "pidfd_open",
+                        side_effect=capture_pidfd,
+                    ),
+                    self.assertRaisesRegex(
+                        MODULE.BoundedCommandError,
+                        "identity is unavailable",
+                    ),
+                ):
+                    command = [
+                        sys.executable,
+                        "-I",
+                        "-B",
+                        "-c",
+                        "import time;time.sleep(60)",
+                    ]
+                    if streaming:
+                        MODULE._bounded_streaming_sha256(
+                            command,
+                            timeout=5,
+                            env={"PATH": "/usr/bin:/bin"},
+                        )
+                    else:
+                        MODULE._bounded_command(
+                            command,
+                            timeout=5,
+                            env={"PATH": "/usr/bin:/bin"},
+                            stdin=subprocess.DEVNULL,
+                            stdout_limit=1024,
+                            stderr_limit=1024,
+                        )
+                self.assertEqual(len(opened), 1)
+                pid, descriptor = opened[0]
+                self.assertFalse(Path(f"/proc/{pid}").exists())
+                with self.assertRaises(OSError):
+                    os.fstat(descriptor)
+
+    def test_worker_cleanup_close_preserves_keyboard_interrupt(self):
+        for name, streaming in (
+            ("buffered", False),
+            ("streaming", True),
+        ):
+            with self.subTest(name=name):
+                selector = mock.Mock()
+                selector.get_map.return_value = {"active": object()}
+                selector.select.side_effect = KeyboardInterrupt
+                selector.close.side_effect = RuntimeError(
+                    "forced selector close failure"
+                )
+                command = [
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    "-c",
+                    "import time;time.sleep(60)",
+                ]
+                with (
+                    mock.patch.object(
+                        MODULE.selectors,
+                        "DefaultSelector",
+                        return_value=selector,
+                    ),
+                    self.assertRaises(KeyboardInterrupt),
+                ):
+                    if streaming:
+                        MODULE._bounded_streaming_sha256(
+                            command,
+                            timeout=5,
+                            env={"PATH": "/usr/bin:/bin"},
+                        )
+                    else:
+                        MODULE._bounded_command(
+                            command,
+                            timeout=5,
+                            env={"PATH": "/usr/bin:/bin"},
+                            stdin=subprocess.DEVNULL,
+                            stdout_limit=1024,
+                            stderr_limit=1024,
+                        )
+                selector.close.assert_called_once_with()
+
+    def test_worker_bounded_runners_kill_forked_descendants(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name, streaming in (
+                ("buffered", False),
+                ("streaming", True),
+            ):
+                with self.subTest(name=name):
+                    child_pid_path = root / f"{name}.child-pid"
+                    output_fd = 2 if streaming else 1
+                    output_bytes = (
+                        MODULE.MAX_ERROR_BYTES + 1024 * 1024
+                        if streaming
+                        else 128 * 1024
+                    )
+                    program = (
+                        "import os,signal,time\n"
+                        "if os.fork() == 0:\n"
+                        " os.setsid()\n"
+                        " if os.fork() == 0:\n"
+                        "  signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                        f"  with open({str(child_pid_path)!r},'w') as stream:\n"
+                        "   stream.write(str(os.getpid()) + '\\n')\n"
+                        "   stream.flush()\n"
+                        "   os.fsync(stream.fileno())\n"
+                        "  time.sleep(30)\n"
+                        "  os._exit(0)\n"
+                        " os._exit(0)\n"
+                        "deadline=time.monotonic()+2\n"
+                        f"while not os.path.exists({str(child_pid_path)!r}):\n"
+                        " if time.monotonic() >= deadline:\n"
+                        "  raise RuntimeError('detached child did not start')\n"
+                        " time.sleep(0.005)\n"
+                        f"os.write({output_fd}, b'x' * {output_bytes})\n"
+                        "time.sleep(10)\n"
+                    )
+                    command = [
+                        "/usr/bin/python3",
+                        "-I",
+                        "-c",
+                        program,
+                    ]
+                    with self.assertRaises(MODULE.BoundedCommandError):
+                        if streaming:
+                            MODULE._bounded_streaming_sha256(  # noqa: SLF001
+                                command,
+                                timeout=10,
+                                env={"PATH": "/usr/bin:/bin"},
+                            )
+                        else:
+                            MODULE._bounded_command(
+                                command,
+                                timeout=10,
+                                env={"PATH": "/usr/bin:/bin"},
+                                stdin=subprocess.DEVNULL,
+                                stdout_limit=1024,
+                                stderr_limit=1024,
+                            )
+                    child_pid = int(
+                        child_pid_path.read_text(encoding="ascii").strip()
+                    )
+                    child_path = Path(f"/proc/{child_pid}")
+                    deadline = time.monotonic() + 2
+                    while (
+                        child_path.exists()
+                        and time.monotonic() < deadline
+                    ):
+                        time.sleep(0.01)
+                    self.assertFalse(
+                        child_path.exists(),
+                        "detached descendant or zombie remained in /proc",
+                    )
+
+    def test_worker_git_probe_neutralizes_config_and_rejects_index_flags(
+        self,
+    ):
+        result = MODULE.BoundedCommandResult(0, b"HEAD\n", b"")
+        with mock.patch.object(
+            MODULE,
+            "_bounded_command",
+            return_value=result,
+        ) as bounded:
+            self.assertEqual(
+                MODULE._run_readonly(
+                    [MODULE.GIT, "-C", "/release", "rev-parse", "HEAD"]
+                ),
+                "HEAD",
+            )
+        command = bounded.call_args.args[0]
+        self.assertIn("core.fsmonitor=false", command)
+        self.assertIn("core.hooksPath=/dev/null", command)
+        self.assertIn("--git-dir=/release/.git", command)
+        self.assertIn("--work-tree=/release", command)
+        self.assertNotIn("-C", command)
+        with mock.patch.object(
+            MODULE,
+            "_run_readonly",
+            return_value="h scripts/hidden.py",
+        ):
+            with self.assertRaisesRegex(
+                MODULE.FrozenFinalRestoreWorkerError,
+                "hidden tracked state",
+            ):
+                MODULE._verify_git_index_visibility(Path("/release"))
 
     def test_worker_path_must_be_exact_tracked_immutable_release_file(self):
         tracked = (
@@ -1164,6 +1787,10 @@ class FrozenFinalRestoreWorkerTests(unittest.TestCase):
                     "",
                     "",
                     "",
+                    (
+                        "H scripts/"
+                        "production_shadow_frozen_final_restore_worker.py"
+                    ),
                     tracked,
                 ],
             ),
@@ -2188,6 +2815,16 @@ class FrozenFinalRestoreWorkerTests(unittest.TestCase):
                 "com.docker.compose.config-hash"
             ] = "9" * 64
 
+        def extra_compose_label(row):
+            row["Config"]["Labels"][
+                "com.docker.compose.future-owner"
+            ] = "foreign"
+
+        def compose_path(row):
+            row["Config"]["Labels"][
+                "com.docker.compose.project.working_dir"
+            ] = "/foreign"
+
         def resource(row):
             row["HostConfig"]["MemorySwap"] = 1
 
@@ -2202,6 +2839,8 @@ class FrozenFinalRestoreWorkerTests(unittest.TestCase):
             ("cgroup", cgroup),
             ("restart", restart),
             ("config-hash", config_hash),
+            ("extra-compose-label", extra_compose_label),
+            ("compose-path", compose_path),
             ("resource", resource),
             ("isolation", isolation),
         ):
@@ -2217,6 +2856,343 @@ class FrozenFinalRestoreWorkerTests(unittest.TestCase):
                         self.fixture.manifest,
                         contract,
                     )
+
+    def test_restore_oneoff_requires_exact_compose_label_closure(self):
+        self.fixture.initialize_stores()
+        runtime = RuntimeDocker(
+            self.fixture,
+            container_present=True,
+            network_present=True,
+        )
+        runner = FakeRunner(runtime)
+        exact = restore_oneoff_row(self.fixture)
+        MODULE._validate_restore_oneoff_runtime(
+            exact,
+            self.fixture.manifest,
+            runner,
+        )
+        mutations = {
+            "extra": (
+                "com.docker.compose.future-owner",
+                "foreign",
+            ),
+            "slug": ("com.docker.compose.slug", "wrongslug"),
+            "malformed-config-hash": (
+                "com.docker.compose.config-hash",
+                "not-a-hash",
+            ),
+            "zero-config-hash": (
+                "com.docker.compose.config-hash",
+                "0" * 64,
+            ),
+            "depends": (
+                "com.docker.compose.depends_on",
+                "foreign:service_started:false",
+            ),
+            "environment-file": (
+                "com.docker.compose.project.environment_file",
+                "/foreign",
+            ),
+            "container-number": (
+                "com.docker.compose.container-number",
+                "1",
+            ),
+        }
+        for label, (field, value) in mutations.items():
+            with self.subTest(label=label):
+                row = copy.deepcopy(exact)
+                row["Config"]["Labels"][field] = value
+                with self.assertRaises(
+                    MODULE.FrozenFinalRestoreWorkerError
+                ):
+                    MODULE._validate_restore_oneoff_runtime(
+                        row,
+                        self.fixture.manifest,
+                        runner,
+                    )
+        missing_hash = copy.deepcopy(exact)
+        del missing_hash["Config"]["Labels"][
+            "com.docker.compose.config-hash"
+        ]
+        with self.assertRaises(
+            MODULE.FrozenFinalRestoreWorkerError
+        ):
+            MODULE._validate_restore_oneoff_runtime(
+                missing_hash,
+                self.fixture.manifest,
+                runner,
+            )
+
+        mismatched = restore_oneoff_row(self.fixture, slug="b" * 64)
+        mismatched["Name"] = mismatched["Name"][:-12] + ("c" * 12)
+        with self.assertRaisesRegex(
+            MODULE.FrozenFinalRestoreWorkerError,
+            "identity binding",
+        ):
+            MODULE._validate_restore_oneoff_runtime(
+                mismatched,
+                self.fixture.manifest,
+                runner,
+            )
+
+    def test_compose_container_number_exists_only_for_persistent_service(self):
+        self.fixture.initialize_stores()
+        runtime = RuntimeDocker(
+            self.fixture,
+            container_present=True,
+            network_present=True,
+        )
+        runner = FakeRunner(runtime)
+        contract = MODULE._database_runtime_contract(
+            self.fixture.manifest,
+            runner,
+        )
+        persistent = MODULE._expected_compose_container_labels(
+            self.fixture.manifest,
+            contract,
+            oneoff=False,
+            slug=None,
+        )
+        oneoff = MODULE._expected_compose_container_labels(
+            self.fixture.manifest,
+            MODULE._service_runtime_contract(
+                self.fixture.manifest,
+                runner,
+                service_name=f"{self.fixture.manifest.role}_restore_tool",
+                expected_restart="no",
+            ),
+            oneoff=True,
+            slug="a" * 64,
+            config_hash=RESTORE_ONEOFF_CONFIG_HASH,
+        )
+        self.assertEqual(
+            persistent["com.docker.compose.container-number"],
+            "1",
+        )
+        self.assertNotIn("com.docker.compose.container-number", oneoff)
+
+    def test_host_config_v152_rejects_every_previously_omitted_control(self):
+        self.fixture.initialize_stores()
+        runtime = RuntimeDocker(
+            self.fixture,
+            container_present=True,
+            network_present=True,
+        )
+        contract = MODULE._database_runtime_contract(
+            self.fixture.manifest,
+            FakeRunner(runtime),
+        )
+        exact = database_container_row(self.fixture)
+        replacements = {
+            "BlkioWeight": 1,
+            "BlkioWeightDevice": [{"Path": "/dev/sda", "Weight": 1}],
+            "BlkioDeviceReadBps": [{"Path": "/dev/sda", "Rate": 1}],
+            "BlkioDeviceWriteBps": [{"Path": "/dev/sda", "Rate": 1}],
+            "BlkioDeviceReadIOps": [{"Path": "/dev/sda", "Rate": 1}],
+            "BlkioDeviceWriteIOps": [{"Path": "/dev/sda", "Rate": 1}],
+            "CpuRealtimePeriod": 1,
+            "CpuRealtimeRuntime": 1,
+            "DeviceCgroupRules": ["c 1:3 rwm"],
+            "MemorySwappiness": 1,
+            "OomKillDisable": True,
+            "Init": True,
+            "Ulimits": [{"Name": "nofile", "Soft": 1, "Hard": 1}],
+            "CpuCount": 1,
+            "CpuPercent": 1,
+            "IOMaximumIOps": 1,
+            "IOMaximumBandwidth": 1,
+            "ContainerIDFile": "/tmp/container-id",
+            "VolumeDriver": "local",
+            "VolumesFrom": ["foreign:rw"],
+            "Mounts": [{"Type": "bind"}],
+            "ConsoleSize": [80, 24],
+            "Annotations": {"unsafe": "value"},
+            "CgroupnsMode": "host",
+            "Cgroup": "foreign",
+            "OomScoreAdj": 1,
+            "StorageOpt": {"size": "1G"},
+            "ShmSize": 128 * 1024 * 1024,
+            "Runtime": "foreign",
+            "Isolation": "process",
+            "MaskedPaths": ["/proc/kcore"],
+            "ReadonlyPaths": ["/proc/sys"],
+        }
+        for field, replacement in replacements.items():
+            with self.subTest(field=field):
+                row = copy.deepcopy(exact)
+                row["HostConfig"][field] = replacement
+                with self.assertRaises(
+                    MODULE.FrozenFinalRestoreWorkerError
+                ):
+                    MODULE._validate_database_runtime(
+                        row,
+                        self.fixture.manifest,
+                        contract,
+                    )
+
+    def test_host_config_v152_rejects_unknown_missing_and_swap_drift(self):
+        self.fixture.initialize_stores()
+        runtime = RuntimeDocker(
+            self.fixture,
+            container_present=True,
+            network_present=True,
+        )
+        contract = MODULE._database_runtime_contract(
+            self.fixture.manifest,
+            FakeRunner(runtime),
+        )
+        exact = database_container_row(self.fixture)
+        digest = MODULE._validate_exact_host_config(
+            exact["HostConfig"],
+            binds=exact["HostConfig"]["Binds"],
+            network_mode=exact["HostConfig"]["NetworkMode"],
+            cgroup_parent=contract.cgroup_parent,
+            nano_cpus=contract.nano_cpus,
+            memory=contract.memory,
+            pids_limit=contract.pids_limit,
+            auto_remove=False,
+            restart_policy=contract.restart_policy,
+            log_config=contract.log_config,
+        )
+        self.assertEqual(
+            digest,
+            hashlib.sha256(
+                MODULE._canonical_json(exact["HostConfig"])
+            ).hexdigest(),
+        )
+        explicit_zero = copy.deepcopy(exact)
+        explicit_zero["HostConfig"]["MemorySwappiness"] = 0
+        self.assertEqual(
+            MODULE._validate_exact_host_config(
+                explicit_zero["HostConfig"],
+                binds=explicit_zero["HostConfig"]["Binds"],
+                network_mode=explicit_zero["HostConfig"]["NetworkMode"],
+                cgroup_parent=contract.cgroup_parent,
+                nano_cpus=contract.nano_cpus,
+                memory=contract.memory,
+                pids_limit=contract.pids_limit,
+                auto_remove=False,
+                restart_policy=contract.restart_policy,
+                log_config=contract.log_config,
+            ),
+            hashlib.sha256(
+                MODULE._canonical_json(explicit_zero["HostConfig"])
+            ).hexdigest(),
+        )
+        mutations = []
+        unknown = copy.deepcopy(exact)
+        unknown["HostConfig"]["FuturePrivilege"] = True
+        mutations.append(("unknown", unknown))
+        for field in ("Runtime", "Privileged", "MemorySwap"):
+            missing = copy.deepcopy(exact)
+            del missing["HostConfig"][field]
+            mutations.append((f"missing-{field}", missing))
+        for value in (0, contract.memory * 2):
+            swap = copy.deepcopy(exact)
+            swap["HostConfig"]["MemorySwap"] = value
+            mutations.append((f"swap-{value}", swap))
+        invalid_swappiness = copy.deepcopy(exact)
+        invalid_swappiness["HostConfig"]["MemorySwappiness"] = False
+        mutations.append(("swappiness-bool", invalid_swappiness))
+        for label, row in mutations:
+            with self.subTest(label=label):
+                with self.assertRaises(
+                    MODULE.FrozenFinalRestoreWorkerError
+                ):
+                    MODULE._validate_database_runtime(
+                        row,
+                        self.fixture.manifest,
+                        contract,
+                    )
+
+    def test_container_config_v152_rejects_every_omitted_field(self):
+        self.fixture.initialize_stores()
+        runtime = RuntimeDocker(
+            self.fixture,
+            container_present=True,
+            network_present=True,
+        )
+        contract = MODULE._database_runtime_contract(
+            self.fixture.manifest,
+            FakeRunner(runtime),
+        )
+        exact = database_container_row(self.fixture)
+        self.assertEqual(
+            set(exact["Config"]),
+            MODULE.CONTAINER_CONFIG_FIELDS,
+        )
+        for field in sorted(MODULE.CONTAINER_CONFIG_FIELDS):
+            with self.subTest(field=field):
+                row = copy.deepcopy(exact)
+                del row["Config"][field]
+                with self.assertRaises(
+                    MODULE.FrozenFinalRestoreWorkerError
+                ):
+                    MODULE._validate_database_runtime(
+                        row,
+                        self.fixture.manifest,
+                        contract,
+                    )
+        row = copy.deepcopy(exact)
+        row["Config"]["FuturePortablePrivilege"] = True
+        with self.assertRaises(MODULE.FrozenFinalRestoreWorkerError):
+            MODULE._validate_database_runtime(
+                row,
+                self.fixture.manifest,
+                contract,
+            )
+
+    def test_masked_paths_require_exact_trusted_sysfs_capability_set(self):
+        self.fixture.initialize_stores()
+        runtime = RuntimeDocker(
+            self.fixture,
+            container_present=True,
+            network_present=True,
+        )
+        contract = MODULE._database_runtime_contract(
+            self.fixture.manifest,
+            FakeRunner(runtime),
+        )
+        cpu0 = (
+            "/sys/devices/system/cpu/cpu0/thermal_throttle"
+        )
+        cpu2 = (
+            "/sys/devices/system/cpu/cpu2/thermal_throttle"
+        )
+        expected = [*MODULE.BASE_MASKED_PATHS, cpu0, cpu2]
+        exact = database_container_row(self.fixture)
+        exact["HostConfig"]["MaskedPaths"] = expected
+        invalid = {
+            "missing": [*MODULE.BASE_MASKED_PATHS, cpu0],
+            "extra-plausible-but-nonexistent": [
+                *expected,
+                "/sys/devices/system/cpu/cpu3/thermal_throttle",
+            ],
+            "duplicate": [*expected, cpu2],
+            "out-of-order": [*MODULE.BASE_MASKED_PATHS, cpu2, cpu0],
+        }
+        with mock.patch.object(
+            MODULE,
+            "_expected_masked_paths",
+            return_value=expected,
+        ):
+            MODULE._validate_database_runtime(
+                exact,
+                self.fixture.manifest,
+                contract,
+            )
+            for label, paths in invalid.items():
+                with self.subTest(label=label):
+                    row = copy.deepcopy(exact)
+                    row["HostConfig"]["MaskedPaths"] = paths
+                    with self.assertRaises(
+                        MODULE.FrozenFinalRestoreWorkerError
+                    ):
+                        MODULE._validate_database_runtime(
+                            row,
+                            self.fixture.manifest,
+                            contract,
+                        )
 
     def test_post_up_runtime_drift_is_rejected_before_restore_query(self):
         self.fixture.initialize_stores()
@@ -2313,7 +3289,7 @@ class FrozenFinalRestoreWorkerTests(unittest.TestCase):
                         containers,
                     )
 
-    def test_oneoff_cleanup_requires_exact_restore_tool_config_hash(self):
+    def test_oneoff_cleanup_accepts_only_well_formed_dynamic_config_hash(self):
         self.fixture.initialize_stores()
 
         def run_cleanup(row):
@@ -2345,18 +3321,27 @@ class FrozenFinalRestoreWorkerTests(unittest.TestCase):
         removed, _base, runner = run_cleanup(exact)
         self.assertEqual(removed[0]["container_id"], exact["Id"])
         self.assertTrue(
-            any(args[1] == "rm" for args, _env in runner.calls)
+            any(
+                args[len(MODULE.DOCKER_BASE)] == "rm"
+                for args, _env in runner.calls
+            )
         )
 
         drifted = restore_oneoff_row(
             self.fixture,
             config_hash="9" * 64,
         )
-        with self.assertRaisesRegex(
+        removed, _base, _runner = run_cleanup(drifted)
+        self.assertEqual(removed[0]["container_id"], drifted["Id"])
+
+        malformed = restore_oneoff_row(
+            self.fixture,
+            config_hash="not-a-config-hash",
+        )
+        with self.assertRaises(
             MODULE.FrozenFinalRestoreWorkerError,
-            "immutable runtime config differs",
         ):
-            run_cleanup(drifted)
+            run_cleanup(malformed)
 
     def test_intermediate_symlink_is_rejected_before_docker_mutation(self):
         self.fixture.initialize_stores()
@@ -2621,7 +3606,11 @@ class FrozenFinalRestoreWorkerTests(unittest.TestCase):
             ),
             [full_identifier],
         )
-        ps_call = next(args for args, _env in runner.calls if args[1] == "ps")
+        ps_call = next(
+            args
+            for args, _env in runner.calls
+            if args[len(MODULE.DOCKER_BASE)] == "ps"
+        )
         self.assertIn("--no-trunc", ps_call)
 
         broken = FakeRunner(

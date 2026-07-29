@@ -21,9 +21,15 @@ from core.config import settings
 from core.dr_event_protocol import canonical_json_bytes
 from core.runtime_identity import resolve_runtime_identity
 from core.writer_witness_client import WriterWitnessClientError, writer_witness_client_from_settings
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
 
 
 async def run(args: argparse.Namespace) -> dict:
+    assert_retired(component="staging-writer-witness-inspection", operation="read Witness status")
     try:
         request_id = str(UUID(args.request_id))
     except ValueError as exc:
@@ -58,6 +64,16 @@ async def run(args: argparse.Namespace) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        assert_retired(component="staging-writer-witness-inspection", operation="CLI")
+    except LegacyThreeSiteStagingRuntimeRetiredError:
+        print(
+            json.dumps(
+                blocked_payload(component="staging-writer-witness-inspection"),
+                sort_keys=True,
+            )
+        )
+        return 2
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--request-id", required=True)
     parser.add_argument("--expected-release-sha", required=True)

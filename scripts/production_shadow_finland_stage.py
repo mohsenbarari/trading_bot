@@ -13,20 +13,28 @@ import argparse
 import base64
 import binascii
 from contextlib import contextmanager
+import ctypes
+from dataclasses import dataclass
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
 import secrets
+import select
+import selectors
+import signal
 import socket
 import stat
 import struct
 import subprocess
 import sys
 import tarfile
-from typing import Any, BinaryIO, Callable, Iterator, Mapping
+import threading
+import time
+from typing import Any, BinaryIO, Callable, Iterator, Mapping, Sequence
 from uuid import UUID
 
 
@@ -146,6 +154,22 @@ IMAGE_ATTESTATION_FIELDS = frozenset(
         "source",
     }
 )
+IMAGE_LOAD_RECONCILIATION_FIELDS = frozenset(
+    {
+        "schema",
+        "operation_id",
+        "release_sha",
+        "release_tree_sha",
+        "role",
+        "operation_manifest_sha256",
+        "image_role",
+        "archive_sha256",
+        "content_identity",
+        "baseline_runtime_image_ids",
+        "runtime_image_id",
+        "image",
+    }
+)
 ATTESTATION_FIELDS = frozenset(
     {
         "schema",
@@ -212,6 +236,17 @@ MAX_ARCHIVE_MEMBERS = 250_000
 MAX_ARCHIVE_CONFIG_BYTES = 16 * 1024 * 1024
 MAX_ARCHIVE_MANIFEST_BYTES = 1024 * 1024
 MAX_COMMAND_OUTPUT_BYTES = 8 * 1024 * 1024
+MAX_DOCKER_IMAGE_IDS = 4096
+MAX_RECONCILIATION_EVIDENCE_BYTES = 2 * 1024 * 1024
+PROCESS_GROUP_TERM_SECONDS = 1.0
+PROCESS_TREE_QUIESCENCE_SECONDS = 0.25
+DOCKER_INVENTORY_SCAN_SECONDS = 300.0
+DOCKER_LOAD_RECONCILE_SECONDS = 30.0
+DOCKER_LOAD_RECONCILE_INTERVAL_SECONDS = 0.1
+PR_SET_CHILD_SUBREAPER = 36
+IMAGE_LOAD_RECONCILIATION_SCHEMA = (
+    "production-shadow-finland-image-load-reconciliation-v1"
+)
 SAFE_ENV = {
     "PATH": "/usr/bin:/bin",
     "HOME": "/nonexistent",
@@ -231,6 +266,14 @@ SAFE_GIT_ENV = {
 
 class FinlandStageError(RuntimeError):
     """Raised when the bounded stage/load contract cannot be proven."""
+
+
+class FinlandStageCancellation(FinlandStageError):
+    """Raised once when controller liveness or a catchable signal is lost."""
+
+
+class BoundedStageRunnerError(FinlandStageError):
+    """Raised when an isolated stage subprocess cannot be bounded."""
 
 
 Checkpoint = Callable[[str], None]
@@ -420,6 +463,18 @@ def canonical_paths(
         "journal": secret_role_root / JOURNAL_FILENAME,
         "lock": secret_role_root / LOCK_FILENAME,
     }
+
+
+def image_load_reconciliation_path(
+    paths: Mapping[str, Path | str],
+    image_role: str,
+) -> Path:
+    if image_role not in IMAGE_ROLES:
+        raise FinlandStageError("image reconciliation role is invalid")
+    root = paths.get("secret_role_root")
+    if not isinstance(root, Path) or not root.is_absolute():
+        raise FinlandStageError("image reconciliation root is invalid")
+    return root / f"image-load-{image_role}-reconciliation.json"
 
 
 def validate_manifest(document: dict[str, Any]) -> dict[str, Any]:
@@ -1155,47 +1210,761 @@ def _agent_version(
     }
 
 
+def _anonymous_read_pipe_identity(
+    descriptor: int,
+    *,
+    label: str,
+) -> tuple[int, int]:
+    if type(descriptor) is not int or descriptor < 0:
+        raise FinlandStageError(f"{label} descriptor is invalid")
+    try:
+        metadata = os.fstat(descriptor)
+        flags = fcntl.fcntl(descriptor, fcntl.F_GETFL)
+        target = os.readlink(f"/proc/self/fd/{descriptor}")
+    except OSError as exc:
+        raise FinlandStageError(f"{label} descriptor is unavailable") from exc
+    if (
+        not stat.S_ISFIFO(metadata.st_mode)
+        or flags & os.O_ACCMODE != os.O_RDONLY
+        or target != f"pipe:[{metadata.st_ino}]"
+    ):
+        raise FinlandStageError(
+            f"{label} must be an anonymous read-only pipe"
+        )
+    try:
+        entries = tuple(Path("/proc/self/fd").iterdir())
+    except OSError as exc:
+        raise FinlandStageError(
+            f"{label} descriptor closure cannot be inspected"
+        ) from exc
+    for entry in entries:
+        if not entry.name.isdecimal() or int(entry.name, 10) == descriptor:
+            continue
+        candidate = int(entry.name, 10)
+        try:
+            observed = os.fstat(candidate)
+            observed_flags = fcntl.fcntl(candidate, fcntl.F_GETFL)
+        except OSError:
+            continue
+        if (
+            (observed.st_dev, observed.st_ino)
+            == (metadata.st_dev, metadata.st_ino)
+            and observed_flags & os.O_ACCMODE in {os.O_WRONLY, os.O_RDWR}
+        ):
+            raise FinlandStageError(
+                f"{label} writer end is held by the stage process"
+            )
+    return metadata.st_dev, metadata.st_ino
+
+
+class ControllerLivenessGuard:
+    """Deliver one catchable cancellation when controller authority is lost."""
+
+    _WAKE_SIGNAL = signal.SIGUSR1
+    _HANDLED_SIGNALS = (
+        signal.SIGHUP,
+        signal.SIGTERM,
+        signal.SIGINT,
+        _WAKE_SIGNAL,
+    )
+
+    def __init__(self, control_fd: int | None) -> None:
+        if threading.current_thread() is not threading.main_thread():
+            raise FinlandStageError(
+                "Finland stage execution must run in the main thread"
+            )
+        self._fd: int | None = None
+        if control_fd is not None:
+            _anonymous_read_pipe_identity(
+                control_fd,
+                label="controller liveness",
+            )
+            try:
+                self._fd = os.dup(control_fd)
+                os.set_inheritable(self._fd, False)
+                os.set_blocking(self._fd, False)
+            except OSError as exc:
+                raise FinlandStageError(
+                    "controller liveness pipe cannot be secured"
+                ) from exc
+        self._cancelled = threading.Event()
+        self._exception_delivered = threading.Event()
+        self._stopping = threading.Event()
+        self._reason = "controller liveness was lost"
+        self._old_handlers: dict[int, Any] = {}
+        self._monitor: threading.Thread | None = None
+
+    def _cancel(self, reason: str, *, wake_main: bool) -> None:
+        if self._cancelled.is_set():
+            return
+        self._reason = reason
+        self._cancelled.set()
+        if wake_main:
+            main_ident = threading.main_thread().ident
+            if main_ident is not None:
+                try:
+                    signal.pthread_kill(main_ident, self._WAKE_SIGNAL)
+                except (OSError, RuntimeError):
+                    pass
+
+    def _sample(self) -> None:
+        if self._fd is None:
+            return
+        ready, _write, _error = select.select([self._fd], [], [], 0)
+        if not ready:
+            return
+        try:
+            payload = os.read(self._fd, 1)
+        except BlockingIOError:
+            return
+        self._cancel(
+            (
+                "controller liveness pipe reached EOF"
+                if payload == b""
+                else "controller liveness pipe carried forbidden data"
+            ),
+            wake_main=False,
+        )
+        self.check()
+
+    def _handle_signal(self, signum: int, _frame: Any) -> None:
+        if signum == self._WAKE_SIGNAL and self._cancelled.is_set():
+            pass
+        else:
+            self._cancel(
+                f"Finland stage agent received signal {signum}",
+                wake_main=False,
+            )
+        self.check()
+
+    def _monitor_control(self) -> None:
+        assert self._fd is not None
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(self._fd, selectors.EVENT_READ)
+            while not self._stopping.is_set():
+                if not selector.select(0.05):
+                    continue
+                try:
+                    payload = os.read(self._fd, 1)
+                except BlockingIOError:
+                    continue
+                except OSError:
+                    if self._stopping.is_set():
+                        return
+                    payload = b""
+                self._cancel(
+                    (
+                        "controller liveness pipe reached EOF"
+                        if payload == b""
+                        else "controller liveness pipe carried forbidden data"
+                    ),
+                    wake_main=True,
+                )
+                return
+        finally:
+            selector.close()
+
+    def __enter__(self) -> ControllerLivenessGuard:
+        try:
+            for signum in self._HANDLED_SIGNALS:
+                self._old_handlers[signum] = signal.getsignal(signum)
+                signal.signal(signum, self._handle_signal)
+            self._sample()
+            if self._fd is not None:
+                self._monitor = threading.Thread(
+                    target=self._monitor_control,
+                    name="finland-stage-controller-liveness",
+                    daemon=True,
+                )
+                self._monitor.start()
+            self.check()
+            return self
+        except BaseException:
+            self._restore()
+            raise
+
+    def check(self) -> None:
+        if (
+            self._cancelled.is_set()
+            and not self._exception_delivered.is_set()
+        ):
+            self._exception_delivered.set()
+            raise FinlandStageCancellation(self._reason)
+
+    def _restore(self) -> None:
+        self._stopping.set()
+        if self._monitor is not None:
+            self._monitor.join(timeout=1)
+        if self._fd is not None:
+            try:
+                os.close(self._fd)
+            except OSError:
+                pass
+            self._fd = None
+        for signum, handler in self._old_handlers.items():
+            signal.signal(signum, handler)
+        self._old_handlers.clear()
+
+    def __exit__(self, error_type: Any, _value: Any, _traceback: Any) -> None:
+        deliver_after_restore = (
+            self._cancelled.is_set()
+            and error_type is None
+            and not self._exception_delivered.is_set()
+        )
+        reason = self._reason
+        self._exception_delivered.set()
+        self._restore()
+        if deliver_after_restore:
+            raise FinlandStageCancellation(reason)
+
+
+_ACTIVE_EXECUTION_AUTHORITY: ControllerLivenessGuard | None = None
+
+
+@contextmanager
+def _execution_authority(
+    control_fd: int | None = None,
+) -> Iterator[ControllerLivenessGuard]:
+    global _ACTIVE_EXECUTION_AUTHORITY
+    if _ACTIVE_EXECUTION_AUTHORITY is not None:
+        if control_fd is not None:
+            raise FinlandStageError(
+                "controller liveness guard is already active"
+            )
+        yield _ACTIVE_EXECUTION_AUTHORITY
+        return
+    authority = ControllerLivenessGuard(control_fd)
+    with authority:
+        _ACTIVE_EXECUTION_AUTHORITY = authority
+        try:
+            yield authority
+        finally:
+            _ACTIVE_EXECUTION_AUTHORITY = None
+
+
+def _enable_child_subreaper() -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise BoundedStageRunnerError(
+            f"stage child subreaper setup failed with errno {error}"
+        )
+
+
+@dataclass(frozen=True)
+class ProcessIdentity:
+    process_id: int
+    parent_id: int
+    process_group: int
+    session_id: int
+    starttime: int
+    state: str
+
+    @property
+    def key(self) -> tuple[int, int]:
+        return self.process_id, self.starttime
+
+
+def _proc_identity(process_id: int) -> tuple[int, int, int, int, str]:
+    try:
+        payload = Path(f"/proc/{process_id}/stat").read_text(
+            encoding="ascii"
+        )
+        fields = payload[payload.rindex(") ") + 2 :].split()
+        if len(fields) < 20:
+            raise ValueError("short process stat")
+        state = fields[0]
+        parent = int(fields[1], 10)
+        group = int(fields[2], 10)
+        session = int(fields[3], 10)
+        starttime = int(fields[19], 10)
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise BoundedStageRunnerError(
+            "stage subprocess identity is unavailable"
+        ) from exc
+    return parent, group, session, starttime, state
+
+
+def _process_snapshot() -> dict[int, ProcessIdentity]:
+    try:
+        entries = tuple(Path("/proc").iterdir())
+    except OSError as exc:
+        raise BoundedStageRunnerError(
+            "stage process closure cannot be enumerated"
+        ) from exc
+    observed: dict[int, ProcessIdentity] = {}
+    for entry in entries:
+        if not entry.name.isdecimal():
+            continue
+        process_id = int(entry.name, 10)
+        try:
+            parent, group, session, starttime, state = _proc_identity(
+                process_id
+            )
+        except BoundedStageRunnerError:
+            continue
+        observed[process_id] = ProcessIdentity(
+            process_id=process_id,
+            parent_id=parent,
+            process_group=group,
+            session_id=session,
+            starttime=starttime,
+            state=state,
+        )
+    return observed
+
+
+def _direct_child_baseline() -> frozenset[tuple[int, int]]:
+    owner = os.getpid()
+    return frozenset(
+        identity.key
+        for identity in _process_snapshot().values()
+        if identity.parent_id == owner
+    )
+
+
+def _owned_processes(
+    root_process_id: int,
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+    include_zombies: bool = False,
+) -> tuple[ProcessIdentity, ...]:
+    snapshot = _process_snapshot()
+    owned_ids = {root_process_id}
+    changed = True
+    while changed:
+        changed = False
+        for identity in snapshot.values():
+            if (
+                identity.process_id not in owned_ids
+                and identity.parent_id in owned_ids
+            ):
+                owned_ids.add(identity.process_id)
+                changed = True
+    owner = os.getpid()
+    for identity in snapshot.values():
+        if (
+            identity.parent_id == owner
+            and identity.key not in baseline_children
+        ):
+            owned_ids.add(identity.process_id)
+    return tuple(
+        identity
+        for process_id, identity in snapshot.items()
+        if process_id in owned_ids
+        and (include_zombies or identity.state != "Z")
+    )
+
+
+def _signal_process_identity(
+    identity: ProcessIdentity,
+    signum: int,
+) -> None:
+    try:
+        current = _proc_identity(identity.process_id)
+    except BoundedStageRunnerError:
+        return
+    if current[3] != identity.starttime:
+        return
+    try:
+        descriptor = os.pidfd_open(identity.process_id, 0)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise BoundedStageRunnerError(
+            "stage identity-bound process handle cannot be opened"
+        ) from exc
+    try:
+        refreshed = _proc_identity(identity.process_id)
+        if refreshed[3] != identity.starttime:
+            return
+        signal.pidfd_send_signal(descriptor, signum)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise BoundedStageRunnerError(
+            "stage identity-bound process signal failed"
+        ) from exc
+    finally:
+        os.close(descriptor)
+
+
+def _reap_owned_zombies(
+    root_process_id: int,
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+) -> None:
+    owner = os.getpid()
+    while True:
+        reaped = False
+        for identity in _owned_processes(
+            root_process_id,
+            baseline_children=baseline_children,
+            include_zombies=True,
+        ):
+            if (
+                identity.process_id == root_process_id
+                or identity.parent_id != owner
+                or identity.state != "Z"
+            ):
+                continue
+            try:
+                waited, _status = os.waitpid(
+                    identity.process_id,
+                    os.WNOHANG,
+                )
+            except (ChildProcessError, ProcessLookupError):
+                continue
+            except OSError as exc:
+                raise BoundedStageRunnerError(
+                    "stage adopted child could not be reaped"
+                ) from exc
+            reaped |= waited == identity.process_id
+        if not reaped:
+            return
+
+
+def _terminate_process_group(
+    process: subprocess.Popen[bytes],
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+) -> None:
+    for identity in reversed(
+        _owned_processes(
+            process.pid,
+            baseline_children=baseline_children,
+        )
+    ):
+        _signal_process_identity(identity, signal.SIGTERM)
+    deadline = time.monotonic() + PROCESS_GROUP_TERM_SECONDS
+    while (
+        _owned_processes(
+            process.pid,
+            baseline_children=baseline_children,
+        )
+        and time.monotonic() < deadline
+    ):
+        process.poll()
+        _reap_owned_zombies(
+            process.pid,
+            baseline_children=baseline_children,
+        )
+        time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
+    for identity in reversed(
+        _owned_processes(
+            process.pid,
+            baseline_children=baseline_children,
+        )
+    ):
+        _signal_process_identity(identity, signal.SIGKILL)
+    try:
+        process.wait(timeout=PROCESS_GROUP_TERM_SECONDS)
+    except subprocess.TimeoutExpired:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=PROCESS_GROUP_TERM_SECONDS)
+    absence_deadline = (
+        time.monotonic()
+        + PROCESS_GROUP_TERM_SECONDS
+        + PROCESS_TREE_QUIESCENCE_SECONDS
+    )
+    stable_since: float | None = None
+    while time.monotonic() < absence_deadline:
+        _reap_owned_zombies(
+            process.pid,
+            baseline_children=baseline_children,
+        )
+        owned = _owned_processes(
+            process.pid,
+            baseline_children=baseline_children,
+            include_zombies=True,
+        )
+        if owned:
+            stable_since = None
+            for identity in reversed(owned):
+                if identity.state != "Z":
+                    _signal_process_identity(identity, signal.SIGKILL)
+        else:
+            if stable_since is None:
+                stable_since = time.monotonic()
+            elif (
+                time.monotonic() - stable_since
+                >= PROCESS_TREE_QUIESCENCE_SECONDS
+            ):
+                return
+        time.sleep(0.01)
+    _reap_owned_zombies(
+        process.pid,
+        baseline_children=baseline_children,
+    )
+    if _owned_processes(
+        process.pid,
+        baseline_children=baseline_children,
+        include_zombies=True,
+    ):
+        raise BoundedStageRunnerError(
+            "stage subprocess descendants survived forced cleanup"
+        )
+
+
+def _default_runner(
+    arguments: Sequence[str],
+    *,
+    input: bytes | None,
+    capture_output: bool,
+    check: bool,
+    timeout: int | float,
+    env: Mapping[str, str],
+) -> subprocess.CompletedProcess[bytes]:
+    if (
+        input is not None
+        or capture_output is not True
+        or check is not False
+        or type(timeout) not in {int, float}
+        or not math.isfinite(timeout)
+        or timeout <= 0
+    ):
+        raise BoundedStageRunnerError(
+            "stage subprocess execution options are invalid"
+        )
+    if _ACTIVE_EXECUTION_AUTHORITY is None:
+        with _execution_authority():
+            return _default_runner(
+                arguments,
+                input=input,
+                capture_output=capture_output,
+                check=check,
+                timeout=timeout,
+                env=env,
+            )
+    _ACTIVE_EXECUTION_AUTHORITY.check()
+    _enable_child_subreaper()
+    baseline_children = _direct_child_baseline()
+    process: subprocess.Popen[bytes] | None = None
+    selector = selectors.DefaultSelector()
+    buffers = {"stdout": bytearray(), "stderr": bytearray()}
+    deadline = time.monotonic() + timeout
+    group_cleaned = False
+    try:
+        process = subprocess.Popen(  # noqa: S603
+            list(arguments),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=dict(env),
+            close_fds=True,
+            shell=False,
+            start_new_session=True,
+        )
+        if process.stdout is None or process.stderr is None:
+            raise BoundedStageRunnerError(
+                "stage subprocess output pipes are unavailable"
+            )
+        for label, stream in (
+            ("stdout", process.stdout),
+            ("stderr", process.stderr),
+        ):
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, label)
+        while selector.get_map():
+            _ACTIVE_EXECUTION_AUTHORITY.check()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BoundedStageRunnerError(
+                    "stage subprocess timed out"
+                )
+            events = selector.select(min(0.1, remaining))
+            if not events:
+                if process.poll() is not None and not group_cleaned:
+                    _terminate_process_group(
+                        process,
+                        baseline_children=baseline_children,
+                    )
+                    group_cleaned = True
+                continue
+            for key, _mask in events:
+                try:
+                    chunk = os.read(key.fileobj.fileno(), 64 * 1024)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                buffer = buffers[key.data]
+                if len(buffer) + len(chunk) > MAX_COMMAND_OUTPUT_BYTES:
+                    raise BoundedStageRunnerError(
+                        f"stage subprocess {key.data} is oversized"
+                    )
+                buffer.extend(chunk)
+            if process.poll() is not None and not group_cleaned:
+                _terminate_process_group(
+                    process,
+                    baseline_children=baseline_children,
+                )
+                group_cleaned = True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise BoundedStageRunnerError("stage subprocess timed out")
+        returncode = process.wait(timeout=remaining)
+        return subprocess.CompletedProcess(
+            args=list(arguments),
+            returncode=returncode,
+            stdout=bytes(buffers["stdout"]),
+            stderr=bytes(buffers["stderr"]),
+        )
+    except (FinlandStageCancellation, BoundedStageRunnerError):
+        raise
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise BoundedStageRunnerError(
+            "stage subprocess execution failed"
+        ) from exc
+    finally:
+        original_error = sys.exception()
+        selector.close()
+        cleanup_error: BaseException | None = None
+        if process is not None:
+            try:
+                if not group_cleaned:
+                    _terminate_process_group(
+                        process,
+                        baseline_children=baseline_children,
+                    )
+            except BaseException as exc:
+                cleanup_error = exc
+            finally:
+                if process.stdout is not None:
+                    process.stdout.close()
+                if process.stderr is not None:
+                    process.stderr.close()
+        if cleanup_error is not None:
+            if original_error is not None:
+                raise original_error from cleanup_error
+            raise cleanup_error
+
+
+def _safe_absolute_command_path(value: str, *, label: str) -> None:
+    path = Path(value)
+    if (
+        not path.is_absolute()
+        or ".." in path.parts
+        or "\x00" in value
+        or "\n" in value
+        or "\r" in value
+    ):
+        raise FinlandStageError(f"{label} path is invalid")
+
+
+def _validate_stage_command(
+    arguments: list[str],
+    env: Mapping[str, str],
+) -> None:
+    if (
+        not arguments
+        or any(
+            not isinstance(token, str)
+            or not token
+            or "\x00" in token
+            or "\n" in token
+            or "\r" in token
+            for token in arguments
+        )
+        or arguments[0] not in {GIT, DOCKER}
+    ):
+        raise FinlandStageError(
+            "stage command is outside the executable allowlist"
+        )
+    if arguments[0] == DOCKER:
+        if dict(env) != SAFE_ENV:
+            raise FinlandStageError("Docker command environment is unsafe")
+        tail = arguments[1:]
+        if tail == ["image", "ls", "--all", "--no-trunc", "--quiet"]:
+            return
+        if (
+            len(tail) == 3
+            and tail[:2] == ["image", "inspect"]
+            and IMAGE_ID_RE.fullmatch(tail[2]) is not None
+        ):
+            return
+        if (
+            len(tail) == 4
+            and tail[:3] == ["image", "load", "--input"]
+        ):
+            _safe_absolute_command_path(
+                tail[3],
+                label="Docker archive",
+            )
+            return
+        raise FinlandStageError(
+            "Docker command is outside stage/load boundary"
+        )
+    if dict(env) != SAFE_GIT_ENV:
+        raise FinlandStageError("Git command environment is unsafe")
+    tail = arguments[1:]
+    if len(tail) == 3 and tail[:2] == ["bundle", "list-heads"]:
+        _safe_absolute_command_path(tail[2], label="Git bundle")
+        return
+    if (
+        len(tail) == 7
+        and tail[:5]
+        == [
+            "-c",
+            "core.hooksPath=/dev/null",
+            "clone",
+            "--no-checkout",
+            "--no-hardlinks",
+        ]
+    ):
+        _safe_absolute_command_path(tail[5], label="Git clone bundle")
+        _safe_absolute_command_path(tail[6], label="Git clone destination")
+        return
+    if len(tail) < 3 or tail[0] != "-C":
+        raise FinlandStageError("Git command argv is outside the allowlist")
+    _safe_absolute_command_path(tail[1], label="Git working tree")
+    command = tail[2:]
+    if command in (
+        ["rev-parse", "--show-toplevel"],
+        ["rev-parse", "HEAD"],
+        ["rev-parse", "HEAD^{tree}"],
+        ["rev-parse", "--abbrev-ref", "HEAD"],
+        ["status", "--porcelain=v1", "--untracked-files=all"],
+        ["remote"],
+        ["remote", "remove", "origin"],
+        ["config", "--local", "core.hooksPath", "/dev/null"],
+    ):
+        return
+    if len(command) == 3 and command[:2] == ["bundle", "verify"]:
+        _safe_absolute_command_path(
+            command[2],
+            label="Git verification bundle",
+        )
+        return
+    if (
+        len(command) == 5
+        and command[:4]
+        == [
+            "-c",
+            "core.hooksPath=/dev/null",
+            "checkout",
+            "--detach",
+        ]
+        and SHA40_RE.fullmatch(command[4]) is not None
+    ):
+        return
+    raise FinlandStageError("Git command argv is outside the allowlist")
+
+
 def _run(
     arguments: list[str],
     *,
     timeout: int,
     env: Mapping[str, str],
-    runner: Runner,
+    runner: Runner | None,
 ) -> bytes:
-    if (
-        not arguments
-        or any(not isinstance(token, str) or not token for token in arguments)
-        or arguments[0] not in {GIT, DOCKER}
-    ):
-        raise FinlandStageError("stage command is outside the executable allowlist")
-    lowered = [token.lower() for token in arguments]
-    if arguments[0] == DOCKER:
-        allowed = (
-            lowered[1:3] in (["image", "inspect"], ["image", "ls"], ["image", "load"])
-            and not any(
-                token
-                in {
-                    "build",
-                    "pull",
-                    "tag",
-                    "run",
-                    "create",
-                    "start",
-                    "stop",
-                    "compose",
-                    "service",
-                    "network",
-                    "volume",
-                    "rm",
-                    "rmi",
-                }
-                for token in lowered[1:]
-            )
-        )
-        if not allowed:
-            raise FinlandStageError("Docker command is outside stage/load boundary")
+    _validate_stage_command(arguments, env)
+    active_runner = _default_runner if runner is None else runner
     try:
-        completed = runner(
+        completed = active_runner(
             arguments,
             input=None,
             capture_output=True,
@@ -1651,25 +2420,50 @@ def _materialize_release(
     )
 
 
-def _docker_image_ids(*, runner: Runner) -> list[str]:
+def _docker_command_timeout(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise FinlandStageError(
+            "Docker image inventory exceeded its deadline"
+        )
+    return min(60.0, remaining)
+
+
+def _docker_image_ids(
+    *,
+    runner: Runner | None,
+    deadline: float,
+) -> list[str]:
     raw = _run_text(
         [DOCKER, "image", "ls", "--all", "--no-trunc", "--quiet"],
-        timeout=60,
+        timeout=_docker_command_timeout(deadline),
         env=SAFE_ENV,
         runner=runner,
     )
     values = sorted(set(raw.splitlines())) if raw else []
-    if any(IMAGE_ID_RE.fullmatch(value) is None for value in values):
+    if (
+        len(values) > MAX_DOCKER_IMAGE_IDS
+        or any(IMAGE_ID_RE.fullmatch(value) is None for value in values)
+    ):
         raise FinlandStageError("Docker image inventory returned an invalid ID")
     return values
 
 
-def _inspect_image_raw(image_id: str, *, runner: Runner) -> dict[str, Any]:
+def _inspect_image_raw(
+    image_id: str,
+    *,
+    runner: Runner | None,
+    deadline: float | None = None,
+) -> dict[str, Any]:
     if IMAGE_ID_RE.fullmatch(image_id) is None:
         raise FinlandStageError("runtime image ID is invalid")
     raw = _run_text(
         [DOCKER, "image", "inspect", image_id],
-        timeout=60,
+        timeout=(
+            60
+            if deadline is None
+            else _docker_command_timeout(deadline)
+        ),
         env=SAFE_ENV,
         runner=runner,
     )
@@ -1690,11 +2484,24 @@ def _inspect_image_raw(image_id: str, *, runner: Runner) -> dict[str, Any]:
 def _runtime_semantic_matches(
     expected: Mapping[str, Any],
     *,
-    runner: Runner,
+    runner: Runner | None,
+    deadline: float | None = None,
 ) -> list[str]:
+    scan_deadline = (
+        time.monotonic() + DOCKER_INVENTORY_SCAN_SECONDS
+        if deadline is None
+        else deadline
+    )
     matches: list[str] = []
-    for image_id in _docker_image_ids(runner=runner):
-        image = _inspect_image_raw(image_id, runner=runner)
+    for image_id in _docker_image_ids(
+        runner=runner,
+        deadline=scan_deadline,
+    ):
+        image = _inspect_image_raw(
+            image_id,
+            runner=runner,
+            deadline=scan_deadline,
+        )
         try:
             descriptor, identity = image_content_descriptor_from_inspect(image)
         except FinlandStageError:
@@ -1713,7 +2520,7 @@ def _verify_runtime_image(
     image_role: str,
     expected: Mapping[str, Any],
     release_sha: str,
-    runner: Runner,
+    runner: Runner | None,
 ) -> dict[str, Any]:
     image = _inspect_image_raw(image_id, runner=runner)
     descriptor, identity = image_content_descriptor_from_inspect(image)
@@ -2157,6 +2964,170 @@ def _attestation_document(
     return document
 
 
+def _validated_load_intent(
+    intent: Any,
+    *,
+    expected: Mapping[str, Any],
+) -> list[str]:
+    if (
+        not isinstance(intent, dict)
+        or set(intent)
+        != {
+            "baseline_runtime_image_ids",
+            "archive_sha256",
+            "content_identity",
+        }
+        or intent["archive_sha256"] != expected["archive_sha256"]
+        or intent["content_identity"] != expected["content_identity"]
+        or not isinstance(intent["baseline_runtime_image_ids"], list)
+        or len(intent["baseline_runtime_image_ids"])
+        != len(set(intent["baseline_runtime_image_ids"]))
+        or any(
+            not isinstance(value, str)
+            or IMAGE_ID_RE.fullmatch(value) is None
+            for value in intent["baseline_runtime_image_ids"]
+        )
+    ):
+        raise FinlandStageError("stage image load intent is invalid")
+    return list(intent["baseline_runtime_image_ids"])
+
+
+def _image_load_reconciliation_document(
+    *,
+    image_role: str,
+    manifest: Mapping[str, Any],
+    journal: Mapping[str, Any],
+    baseline_runtime_image_ids: list[str],
+    runtime_image_id: str,
+    image: Mapping[str, Any],
+) -> dict[str, Any]:
+    document = {
+        "schema": IMAGE_LOAD_RECONCILIATION_SCHEMA,
+        "operation_id": manifest["operation_id"],
+        "release_sha": manifest["release_sha"],
+        "release_tree_sha": manifest["release_tree_sha"],
+        "role": manifest["role"],
+        "operation_manifest_sha256": journal[
+            "operation_manifest_sha256"
+        ],
+        "image_role": image_role,
+        "archive_sha256": manifest["image_artifacts"][image_role][
+            "archive_sha256"
+        ],
+        "content_identity": manifest["image_artifacts"][image_role][
+            "content_identity"
+        ],
+        "baseline_runtime_image_ids": sorted(
+            baseline_runtime_image_ids
+        ),
+        "runtime_image_id": runtime_image_id,
+        "image": dict(image),
+    }
+    if (
+        set(document) != IMAGE_LOAD_RECONCILIATION_FIELDS
+        or set(document["image"]) != IMAGE_ATTESTATION_FIELDS
+        or IMAGE_ID_RE.fullmatch(runtime_image_id) is None
+        or runtime_image_id in baseline_runtime_image_ids
+    ):
+        raise FinlandStageError(
+            "image load reconciliation evidence is invalid"
+        )
+    return document
+
+
+def _record_runtime_image(
+    *,
+    image_role: str,
+    runtime_image_id: str,
+    manifest: Mapping[str, Any],
+    paths: Mapping[str, Path | str],
+    journal: dict[str, Any],
+    journal_path: Path,
+    baseline_runtime_image_ids: list[str],
+    required_uid: int,
+    runner: Runner | None,
+) -> None:
+    if runtime_image_id in baseline_runtime_image_ids:
+        raise FinlandStageError(
+            f"{image_role} runtime image was present before the load intent"
+        )
+    evidence = _verify_runtime_image(
+        runtime_image_id,
+        image_role=image_role,
+        expected=manifest["image_artifacts"][image_role],
+        release_sha=manifest["release_sha"],
+        runner=runner,
+    )
+    other_runtime_ids = {
+        value
+        for role_name, value in journal["runtime_image_ids"].items()
+        if role_name != image_role
+    }
+    if runtime_image_id in other_runtime_ids:
+        raise FinlandStageError(
+            "runtime image IDs must be distinct across roles"
+        )
+    reconciliation = _image_load_reconciliation_document(
+        image_role=image_role,
+        manifest=manifest,
+        journal=journal,
+        baseline_runtime_image_ids=baseline_runtime_image_ids,
+        runtime_image_id=runtime_image_id,
+        image=evidence,
+    )
+    _write_create_only(
+        image_load_reconciliation_path(paths, image_role),
+        canonical_json(reconciliation),
+        required_uid=required_uid,
+        mode=0o600,
+        maximum=MAX_RECONCILIATION_EVIDENCE_BYTES,
+    )
+    existing_runtime_id = journal["runtime_image_ids"].get(image_role)
+    existing_evidence = journal["images"].get(image_role)
+    if existing_runtime_id is not None and (
+        existing_runtime_id != runtime_image_id
+        or existing_evidence != evidence
+    ):
+        raise FinlandStageError(
+            "loaded image differs from stage journal"
+        )
+    if existing_runtime_id is None:
+        journal["runtime_image_ids"][image_role] = runtime_image_id
+        journal["images"][image_role] = evidence
+        _write_journal(
+            journal_path,
+            journal,
+            create=False,
+            required_uid=required_uid,
+        )
+
+
+def _poll_late_runtime_image(
+    expected: Mapping[str, Any],
+    *,
+    runner: Runner | None,
+) -> list[str]:
+    deadline = time.monotonic() + DOCKER_LOAD_RECONCILE_SECONDS
+    while True:
+        matches = _runtime_semantic_matches(
+            expected,
+            runner=runner,
+            deadline=deadline,
+        )
+        if len(matches) > 1:
+            raise FinlandStageError(
+                "late Docker image reconciliation is ambiguous"
+            )
+        if matches or time.monotonic() >= deadline:
+            return matches
+        time.sleep(
+            min(
+                DOCKER_LOAD_RECONCILE_INTERVAL_SECONDS,
+                max(0.0, deadline - time.monotonic()),
+            )
+        )
+
+
 def _stage_image(
     image_role: str,
     *,
@@ -2165,25 +3136,33 @@ def _stage_image(
     journal: dict[str, Any],
     journal_path: Path,
     required_uid: int,
-    runner: Runner,
+    runner: Runner | None,
     checkpoint: Checkpoint,
 ) -> None:
     expected = manifest["image_artifacts"][image_role]
-    phase = f"{image_role}-loaded"
     if image_role in journal["runtime_image_ids"]:
-        evidence = _verify_runtime_image(
-            journal["runtime_image_ids"][image_role],
-            image_role=image_role,
+        baseline = _validated_load_intent(
+            journal["load_intents"].get(image_role),
             expected=expected,
-            release_sha=manifest["release_sha"],
+        )
+        _record_runtime_image(
+            image_role=image_role,
+            runtime_image_id=journal["runtime_image_ids"][image_role],
+            manifest=manifest,
+            paths=paths,
+            journal=journal,
+            journal_path=journal_path,
+            baseline_runtime_image_ids=baseline,
+            required_uid=required_uid,
             runner=runner,
         )
-        if evidence != journal["images"][image_role]:
-            raise FinlandStageError("loaded image differs from stage journal")
         return
     intent = journal["load_intents"].get(image_role)
     if intent is None:
-        baseline = _docker_image_ids(runner=runner)
+        baseline = _docker_image_ids(
+            runner=runner,
+            deadline=time.monotonic() + DOCKER_INVENTORY_SCAN_SECONDS,
+        )
         matches = _runtime_semantic_matches(expected, runner=runner)
         if matches:
             raise FinlandStageError(
@@ -2202,62 +3181,60 @@ def _stage_image(
             required_uid=required_uid,
         )
         checkpoint(f"after-intent:{image_role}")
-    elif (
-        not isinstance(intent, dict)
-        or set(intent)
-        != {
-            "baseline_runtime_image_ids",
-            "archive_sha256",
-            "content_identity",
-        }
-        or intent["archive_sha256"] != expected["archive_sha256"]
-        or intent["content_identity"] != expected["content_identity"]
-        or not isinstance(intent["baseline_runtime_image_ids"], list)
-        or any(
-            IMAGE_ID_RE.fullmatch(value) is None
-            for value in intent["baseline_runtime_image_ids"]
-        )
-    ):
-        raise FinlandStageError("stage image load intent is invalid")
+    baseline = _validated_load_intent(intent, expected=expected)
 
     matches = _runtime_semantic_matches(expected, runner=runner)
     if not matches:
         archive_path = (
             paths["incoming_root"] / ARTIFACT_FILENAMES[f"{image_role}-image-archive"]  # type: ignore[operator]
         )
-        _run(
-            [DOCKER, "image", "load", "--input", str(archive_path)],
-            timeout=1800,
-            env=SAFE_ENV,
-            runner=runner,
-        )
-        checkpoint(f"after-load:{image_role}")
-        matches = _runtime_semantic_matches(expected, runner=runner)
+        try:
+            _run(
+                [DOCKER, "image", "load", "--input", str(archive_path)],
+                timeout=1800,
+                env=SAFE_ENV,
+                runner=runner,
+            )
+            checkpoint(f"after-load:{image_role}")
+            matches = _poll_late_runtime_image(
+                expected,
+                runner=runner,
+            )
+        except BaseException as load_error:
+            try:
+                matches = _poll_late_runtime_image(
+                    expected,
+                    runner=runner,
+                )
+                if len(matches) == 1:
+                    _record_runtime_image(
+                        image_role=image_role,
+                        runtime_image_id=matches[0],
+                        manifest=manifest,
+                        paths=paths,
+                        journal=journal,
+                        journal_path=journal_path,
+                        baseline_runtime_image_ids=baseline,
+                        required_uid=required_uid,
+                        runner=runner,
+                    )
+            except BaseException as reconciliation_error:
+                raise load_error from reconciliation_error
+            raise load_error
     if len(matches) != 1:
         raise FinlandStageError(
             f"{image_role} loaded semantic image match is not unique"
         )
-    runtime_id = matches[0]
-    if runtime_id in intent["baseline_runtime_image_ids"]:
-        raise FinlandStageError(
-            f"{image_role} runtime image was present before the load intent"
-        )
-    evidence = _verify_runtime_image(
-        runtime_id,
+    _record_runtime_image(
         image_role=image_role,
-        expected=expected,
-        release_sha=manifest["release_sha"],
-        runner=runner,
-    )
-    if runtime_id in journal["runtime_image_ids"].values():
-        raise FinlandStageError("runtime image IDs must be distinct across roles")
-    journal["runtime_image_ids"][image_role] = runtime_id
-    journal["images"][image_role] = evidence
-    _write_journal(
-        journal_path,
-        journal,
-        create=False,
+        runtime_image_id=matches[0],
+        manifest=manifest,
+        paths=paths,
+        journal=journal,
+        journal_path=journal_path,
+        baseline_runtime_image_ids=baseline,
         required_uid=required_uid,
+        runner=runner,
     )
 
 
@@ -2351,10 +3328,25 @@ def stage_operation(
     request: Mapping[str, Any],
     *,
     required_uid: int = 0,
-    runner: Runner = subprocess.run,
+    runner: Runner | None = None,
     checkpoint: Checkpoint | None = None,
     observed_host_addresses: set[str] | None = None,
+    control_fd: int | None = None,
 ) -> dict[str, Any]:
+    if _ACTIVE_EXECUTION_AUTHORITY is None:
+        with _execution_authority(control_fd):
+            return stage_operation(
+                request,
+                required_uid=required_uid,
+                runner=runner,
+                checkpoint=checkpoint,
+                observed_host_addresses=observed_host_addresses,
+            )
+    if control_fd is not None:
+        raise FinlandStageError(
+            "controller liveness guard is already active"
+        )
+    _ACTIVE_EXECUTION_AUTHORITY.check()
     if os.geteuid() != required_uid or required_uid != 0:
         raise FinlandStageError("Finland stage agent must run as root")
     request = _decode_request(
@@ -2607,23 +3599,30 @@ def main(argv: list[str] | None = None) -> int:
                 required_uid=0,
             )
         elif args.install_bootstrap_request_b64 is not None:
-            request = _decode_request(
-                args.install_bootstrap_request_b64,
-                bootstrap=True,
-            )
-            result = install_bootstrap(
-                request,
-                executing_path=Path(__file__),
-                required_uid=0,
-            )
+            with _execution_authority(control_fd=0):
+                request = _decode_request(
+                    args.install_bootstrap_request_b64,
+                    bootstrap=True,
+                )
+                result = install_bootstrap(
+                    request,
+                    executing_path=Path(__file__),
+                    required_uid=0,
+                )
         else:
-            request = _decode_request(str(args.request_b64), bootstrap=False)
-            if args.expected_agent_sha256 not in {
-                None,
-                request["agent_sha256"],
-            }:
-                raise FinlandStageError("CLI agent SHA-256 differs from request")
-            result = stage_operation(request, required_uid=0)
+            with _execution_authority(control_fd=0):
+                request = _decode_request(
+                    str(args.request_b64),
+                    bootstrap=False,
+                )
+                if args.expected_agent_sha256 not in {
+                    None,
+                    request["agent_sha256"],
+                }:
+                    raise FinlandStageError(
+                        "CLI agent SHA-256 differs from request"
+                    )
+                result = stage_operation(request, required_uid=0)
         print(canonical_json(result).decode("ascii"))
         return 0
     except FinlandStageError as exc:

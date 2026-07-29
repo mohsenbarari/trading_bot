@@ -6,8 +6,12 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import signal
+import stat
 import subprocess
+import sys
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest import mock
@@ -26,6 +30,7 @@ CLAIM_SHA = "5" * 64
 CLAIM_NONCE = "6" * 64
 CONSUMPTION_SHA = "7" * 64
 OUTCOME_SHA = "8" * 64
+CAMPAIGN_ID = "123e4567-e89b-42d3-a456-426614174001"
 BINDING_SHA = {"bot_fi": "9" * 64, "webapp_fi": "a" * 64}
 FREEZE_SHA = {"bot_fi": "b" * 64, "webapp_fi": "c" * 64}
 RELEASE_FILE_SHA = {
@@ -34,6 +39,30 @@ RELEASE_FILE_SHA = {
     "freeze_worker": "f" * 64,
     "lease_worker": "1" * 64,
 }
+
+
+def external_liveness_pipe(
+    hold_seconds: float,
+) -> tuple[int, subprocess.Popen[bytes]]:
+    read_fd, write_fd = os.pipe()
+    try:
+        holder = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import time,sys; time.sleep(float(sys.argv[1]))",
+                str(hold_seconds),
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            pass_fds=(write_fd,),
+            start_new_session=True,
+        )
+    finally:
+        os.close(write_fd)
+    return read_fd, holder
 
 
 def file_rows(role: str) -> dict[str, dict[str, object]]:
@@ -88,6 +117,42 @@ def inputs(tmp: Path) -> SimpleNamespace:
     )
 
 
+def started_public_phase_handoff() -> dict[str, object]:
+    return {
+        "schema": FROZEN.PUBLIC_PHASE_HANDOFF_SCHEMA,
+        "status": "started",
+        "phase": FROZEN.PUBLIC_PHASE,
+        "manifest_sha256": "d" * 64,
+        "plan_sha256": "e" * 64,
+        "campaign_id": CAMPAIGN_ID,
+        "operation_id": OPERATION_ID,
+        "release_sha": RELEASE_SHA,
+        "legacy_release_sha": "0" * 39 + "1",
+        "nginx_aggregate_sha256": AGGREGATE_SHA,
+        "approval_sha256": "f" * 64,
+        "approval_policy_sha256": "1" * 64,
+        "prestart_journal_state_sha256": "2" * 64,
+        "prestart_journal_event_tail_sha256": "3" * 64,
+        "prestart_journal_event_count": 5,
+        "started_journal_state_sha256": "4" * 64,
+        "started_journal_event_tail_sha256": "5" * 64,
+        "started_journal_event_count": 6,
+    }
+
+
+def intent_public_phase_handoff() -> dict[str, object]:
+    handoff = started_public_phase_handoff()
+    handoff.update(
+        {
+            "status": "intent",
+            "started_journal_state_sha256": None,
+            "started_journal_event_tail_sha256": None,
+            "started_journal_event_count": None,
+        }
+    )
+    return handoff
+
+
 class FakeLease:
     def __init__(self, claim_path: Path) -> None:
         self.claim_path = claim_path
@@ -125,9 +190,11 @@ class FakeLease:
 class LeaseContext:
     def __init__(self, lease: FakeLease) -> None:
         self.lease = lease
+        self.enter_count = 0
         self.exited_with: type[BaseException] | None = None
 
     def __enter__(self) -> FakeLease:
+        self.enter_count += 1
         return self.lease
 
     def __exit__(self, exc_type, _exc, _traceback) -> bool:
@@ -305,6 +372,30 @@ class ControllerHarness:
                 return_value=OUTCOME_SHA,
             )
         )
+        self.stack.enter_context(
+            mock.patch.object(
+                FROZEN,
+                "_ensure_public_phase_started",
+                side_effect=self._start_public_phase,
+            )
+        )
+        self.stack.enter_context(
+            mock.patch.object(
+                FROZEN,
+                "_load_public_cutover_context",
+                return_value=SimpleNamespace(),
+            )
+        )
+        self.authorize = self.stack.enter_context(
+            mock.patch.object(FROZEN, "_verify_public_cutover_authorization")
+        )
+        self.stack.enter_context(
+            mock.patch.object(
+                FROZEN,
+                "_persist_controller_result",
+                return_value=self.tmp / "result.json",
+            )
+        )
 
     def close(self) -> None:
         self.stack.close()
@@ -355,6 +446,9 @@ class ControllerHarness:
             "files": file_rows(role),
         }
 
+    def _start_public_phase(self, *, journal, **_kwargs) -> None:
+        journal["public_phase_handoff"] = started_public_phase_handoff()
+
     def call(self, *, resume: bool = False, apply: bool = True):
         confirmation = FROZEN.confirmation_phrase(
             OPERATION_ID,
@@ -403,6 +497,60 @@ class FrozenSnapshotContractTests(unittest.TestCase):
         harness.hold.assert_not_called()
         harness.resume.assert_not_called()
 
+    def test_expired_authorization_before_live_lease_entry_blocks_new_and_resume(
+        self,
+    ) -> None:
+        for resume in (False, True):
+            with (
+                self.subTest(resume=resume),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                harness = ControllerHarness(self, Path(directory))
+                if resume:
+                    journal = FROZEN._initial_journal(
+                        inputs=harness.inputs,
+                        bindings=harness.bindings,
+                        state_receipt_sha256=RECEIPT_SHA,
+                    )
+                    journal["lease"] = {
+                        "claim_path": str(harness.claim_path),
+                        "claim_sha256": CLAIM_SHA,
+                        "claim_epoch": 1,
+                    }
+                    journal["status"] = "reconciliation-required"
+                    journal["state_sha256"] = FROZEN._state_sha256(journal)
+                    harness.store = journal
+                authorization_calls: list[int] = []
+
+                def authorization(_context) -> None:  # noqa: ANN001
+                    authorization_calls.append(len(authorization_calls) + 1)
+                    if len(authorization_calls) == 2:
+                        raise FROZEN.FrozenSnapshotOrchestratorError(
+                            "production approval is invalid or expired"
+                        )
+
+                harness.authorize.side_effect = authorization
+                try:
+                    with self.assertRaisesRegex(
+                        FROZEN.FrozenSnapshotOrchestratorError,
+                        "invalid or expired",
+                    ):
+                        harness.call(resume=resume)
+                finally:
+                    harness.close()
+                self.assertEqual(authorization_calls, [1, 2])
+                self.assertEqual(harness.context.enter_count, 0)
+                self.assertEqual(harness.actions, [])
+                self.assertEqual(harness.material_roles, [])
+                self.assertEqual(harness.lease.consume_calls, [])
+                self.assertIsNone(harness.context.exited_with)
+                if resume:
+                    harness.hold.assert_not_called()
+                    harness.resume.assert_called_once()
+                else:
+                    harness.hold.assert_called_once()
+                    harness.resume.assert_not_called()
+
     def test_fake_success_freezes_both_before_snapshot_and_consumes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             harness = ControllerHarness(self, Path(directory))
@@ -432,6 +580,182 @@ class FrozenSnapshotContractTests(unittest.TestCase):
         self.assertFalse(result["object_storage_used"])
         self.assertFalse(result["wa_contacted"])
 
+    def test_public_phase_handoff_recovers_after_public_start_crash(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fake_inputs = inputs(root)
+            bindings = {role: binding(role) for role in FROZEN.ROLES}
+            frozen_journal = FROZEN._initial_journal(
+                inputs=fake_inputs,
+                bindings=bindings,
+                state_receipt_sha256=RECEIPT_SHA,
+            )
+            public_context = FROZEN.PublicCutoverContext(
+                manifest={
+                    "campaign_id": CAMPAIGN_ID,
+                    "operation_id": OPERATION_ID,
+                    "release_sha": RELEASE_SHA,
+                    "legacy_release_sha": "0" * 39 + "1",
+                    "deployment": {"controller_journal_path": str(root / "public.json")},
+                },
+                manifest_sha256="d" * 64,
+                plan_sha256="e" * 64,
+                approval_path=root / "approval.json",
+                approval_sha256="f" * 64,
+                approval_policy_path=root / "policy.json",
+                approval_policy_sha256="1" * 64,
+            )
+
+            class PublicJournal:
+                def __init__(self) -> None:
+                    self.state = {
+                        **FROZEN._public_journal_bindings(public_context),
+                        "status": "active",
+                        "completed_phases": FROZEN._public_phase_prefix(),
+                        "started_phase": None,
+                        "rollback_eligible": True,
+                        "first_business_write_allowed": False,
+                        "events": [
+                            {
+                                "kind": "journal_created",
+                                "phase": None,
+                                "event_hash": "2" * 64,
+                            }
+                        ],
+                        "state_sha256": "3" * 64,
+                        "event_tail_sha256": "2" * 64,
+                    }
+                    self.begin_calls = 0
+                    self.crash_once = True
+                    self.intent_was_durable = False
+
+                def assert_bindings(self, **_bindings):  # noqa: ANN003, ANN202
+                    return copy.deepcopy(self.state)
+
+                def begin_phase(self, phase: str):  # noqa: ANN201
+                    self.begin_calls += 1
+                    self.intent_was_durable = bool(writes) and writes[-1][
+                        "public_phase_handoff"
+                    ]["status"] == "intent"
+                    self.state.update(
+                        {
+                            "status": "phase_started",
+                            "started_phase": phase,
+                            "events": [
+                                *self.state["events"],
+                                {
+                                    "kind": "phase_started",
+                                    "phase": phase,
+                                    "previous_hash": "2" * 64,
+                                    "event_hash": "4" * 64,
+                                },
+                            ],
+                            "state_sha256": "5" * 64,
+                            "event_tail_sha256": "4" * 64,
+                        }
+                    )
+                    if self.crash_once:
+                        self.crash_once = False
+                        raise RuntimeError("simulated crash after public start")
+                    return copy.deepcopy(self.state)
+
+            writes: list[dict[str, object]] = []
+            public = PublicJournal()
+            with (
+                mock.patch.object(
+                    FROZEN.CONTROLLER,
+                    "ProductionCutoverJournal",
+                    return_value=public,
+                ),
+                mock.patch.object(FROZEN, "_verify_public_cutover_authorization"),
+                mock.patch.object(
+                    FROZEN,
+                    "_journal_write_existing",
+                    side_effect=lambda *, journal, **_kwargs: writes.append(
+                        copy.deepcopy(journal)
+                    ),
+                ),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "simulated crash"):
+                    FROZEN._ensure_public_phase_started(
+                        journal=frozen_journal,
+                        paths={"journal": root / "frozen.json"},
+                        inputs=fake_inputs,
+                        bindings=bindings,
+                        state_receipt_sha256=RECEIPT_SHA,
+                        required_uid=0,
+                        context=public_context,
+                    )
+                self.assertEqual(
+                    frozen_journal["public_phase_handoff"]["status"],
+                    "intent",
+                )
+                FROZEN._ensure_public_phase_started(
+                    journal=frozen_journal,
+                    paths={"journal": root / "frozen.json"},
+                    inputs=fake_inputs,
+                    bindings=bindings,
+                    state_receipt_sha256=RECEIPT_SHA,
+                    required_uid=0,
+                    context=public_context,
+                )
+                public.state["state_sha256"] = "6" * 64
+                with self.assertRaisesRegex(
+                    FROZEN.FrozenSnapshotOrchestratorError,
+                    "does not match",
+                ):
+                    FROZEN._ensure_public_phase_started(
+                        journal=frozen_journal,
+                        paths={"journal": root / "frozen.json"},
+                        inputs=fake_inputs,
+                        bindings=bindings,
+                        state_receipt_sha256=RECEIPT_SHA,
+                        required_uid=0,
+                        context=public_context,
+                    )
+            self.assertTrue(public.intent_was_durable)
+            self.assertEqual(public.begin_calls, 1)
+            self.assertEqual(
+                frozen_journal["public_phase_handoff"]["status"],
+                "started",
+            )
+            self.assertEqual(
+                frozen_journal["public_phase_handoff"][
+                    "started_journal_event_tail_sha256"
+                ],
+                "4" * 64,
+            )
+
+    def test_controller_result_is_create_only_and_read_back(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            result_root = root / "results"
+            result_root.mkdir(mode=0o700)
+            result = {"schema": FROZEN.RESULT_SCHEMA, "status": "complete"}
+            path = FROZEN._persist_controller_result(
+                paths={"results": result_root},
+                result=result,
+                required_uid=0,
+            )
+            metadata = path.stat(follow_symlinks=False)
+            self.assertEqual(stat.S_IMODE(metadata.st_mode), 0o600)
+            self.assertEqual(metadata.st_nlink, 1)
+            self.assertEqual(
+                path.read_bytes(),
+                FROZEN.canonical_json(result),
+            )
+            path.write_bytes(b"{}")
+            path.chmod(0o600)
+            with self.assertRaisesRegex(
+                FROZEN.FrozenSnapshotOrchestratorError,
+                "existing frozen snapshot coordinator result differs",
+            ):
+                FROZEN._persist_controller_result(
+                    paths={"results": result_root},
+                    result=result,
+                    required_uid=0,
+                )
+
     def test_partial_freeze_failure_is_unresolved_and_never_restores(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             harness = ControllerHarness(
@@ -458,6 +782,74 @@ class FrozenSnapshotContractTests(unittest.TestCase):
         self.assertNotIn(("restore", "webapp_fi"), harness.actions)
         self.assertEqual(harness.lease.consume_calls, [])
         self.assertIsNotNone(harness.context.exited_with)
+
+    def test_expired_authorization_between_role_freezes_blocks_later_rpc_and_consume(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            harness = ControllerHarness(self, Path(directory))
+            authorization_calls: list[int] = []
+
+            def authorization(_context) -> None:  # noqa: ANN001
+                authorization_calls.append(len(authorization_calls) + 1)
+                if len(authorization_calls) == 4:
+                    raise FROZEN.FrozenSnapshotOrchestratorError(
+                        "production approval is invalid or expired"
+                    )
+
+            def checked_action(*, authorization, **kwargs):  # noqa: ANN003
+                authorization()
+                return harness._action(**kwargs)
+
+            harness.authorize.side_effect = authorization
+            try:
+                with (
+                    mock.patch.object(
+                        FROZEN,
+                        "_invoke_bound_action",
+                        side_effect=checked_action,
+                    ),
+                    self.assertRaisesRegex(
+                        FROZEN.FrozenSnapshotOrchestratorError,
+                        "invalid or expired",
+                    ),
+                ):
+                    harness.call()
+                journal = copy.deepcopy(harness.store)
+            finally:
+                harness.close()
+        self.assertEqual(authorization_calls, [1, 2, 3, 4])
+        self.assertEqual(harness.actions, [("freeze", "bot_fi")])
+        self.assertEqual(harness.lease.consume_calls, [])
+        self.assertEqual(journal["status"], "reconciliation-required")
+
+    def test_expired_authorization_immediately_before_consume_blocks_consumption(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            harness = ControllerHarness(self, Path(directory))
+            authorization_calls: list[int] = []
+
+            def authorization(_context) -> None:  # noqa: ANN001
+                authorization_calls.append(len(authorization_calls) + 1)
+                if len(authorization_calls) == 3:
+                    raise FROZEN.FrozenSnapshotOrchestratorError(
+                        "production approval is invalid or expired"
+                    )
+
+            harness.authorize.side_effect = authorization
+            try:
+                with self.assertRaisesRegex(
+                    FROZEN.FrozenSnapshotOrchestratorError,
+                    "invalid or expired",
+                ):
+                    harness.call()
+                journal = copy.deepcopy(harness.store)
+            finally:
+                harness.close()
+        self.assertEqual(authorization_calls, [1, 2, 3])
+        self.assertEqual(harness.lease.consume_calls, [])
+        self.assertEqual(journal["status"], "reconciliation-required")
 
     def test_resume_adopts_exact_claim_and_skips_recorded_freeze(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -609,6 +1001,54 @@ class FrozenSnapshotContractTests(unittest.TestCase):
                         FROZEN, "_journal_write_existing"
                     ) as write_journal,
                 ):
+                    with self.assertRaisesRegex(
+                        FROZEN.FrozenSnapshotOrchestratorError,
+                        "lacks a started public phase handoff",
+                    ):
+                        FROZEN._recover_consumed_lease(
+                            journal=journal,
+                            inputs=fake_inputs,
+                            bindings=bindings,
+                            state_receipt_path=paths["state_receipt"],
+                            state_receipt_sha256=RECEIPT_SHA,
+                            paths=paths,
+                            required_uid=0,
+                        )
+                    journal["public_phase_handoff"] = (
+                        intent_public_phase_handoff()
+                    )
+                    with self.assertRaisesRegex(
+                        FROZEN.FrozenSnapshotOrchestratorError,
+                        "lacks a started public phase handoff",
+                    ):
+                        FROZEN._recover_consumed_lease(
+                            journal=journal,
+                            inputs=fake_inputs,
+                            bindings=bindings,
+                            state_receipt_path=paths["state_receipt"],
+                            state_receipt_sha256=RECEIPT_SHA,
+                            paths=paths,
+                            required_uid=0,
+                        )
+                    malformed = started_public_phase_handoff()
+                    malformed["started_journal_event_count"] = 5
+                    journal["public_phase_handoff"] = malformed
+                    with self.assertRaisesRegex(
+                        FROZEN.FrozenSnapshotOrchestratorError,
+                        "started journal event count differs",
+                    ):
+                        FROZEN._recover_consumed_lease(
+                            journal=journal,
+                            inputs=fake_inputs,
+                            bindings=bindings,
+                            state_receipt_path=paths["state_receipt"],
+                            state_receipt_sha256=RECEIPT_SHA,
+                            paths=paths,
+                            required_uid=0,
+                        )
+                    journal["public_phase_handoff"] = (
+                        started_public_phase_handoff()
+                    )
                     recovered = FROZEN._recover_consumed_lease(
                         journal=journal,
                         inputs=fake_inputs,
@@ -626,7 +1066,7 @@ class FrozenSnapshotContractTests(unittest.TestCase):
         )
         write_journal.assert_called_once()
 
-    def test_leased_call_verifies_immediately_around_rpc(self) -> None:
+    def test_leased_call_verifies_and_authorizes_immediately_around_rpc(self) -> None:
         events: list[str] = []
 
         class Lease:
@@ -638,17 +1078,49 @@ class FrozenSnapshotContractTests(unittest.TestCase):
             label="fake",
             call=lambda: events.append("rpc") or 17,
             checkpoint=lambda name: events.append(name),
+            authorization=lambda: events.append("authorize"),
         )
         self.assertEqual(result, 17)
         self.assertEqual(
             events,
             [
+                "authorize",
                 "verify",
                 "before-rpc:fake",
+                "authorize",
                 "rpc",
                 "verify",
                 "after-rpc:fake",
             ],
+        )
+
+    def test_leased_call_denies_rpc_when_authorization_expires(self) -> None:
+        events: list[str] = []
+
+        class Lease:
+            def verify(self):
+                events.append("verify")
+
+        def authorization() -> None:
+            events.append("authorize")
+            raise FROZEN.FrozenSnapshotOrchestratorError(
+                "production approval is invalid or expired"
+            )
+
+        with self.assertRaisesRegex(
+            FROZEN.FrozenSnapshotOrchestratorError,
+            "invalid or expired",
+        ):
+            FROZEN._leased_call(
+                Lease(),
+                label="fake",
+                call=lambda: events.append("rpc"),
+                checkpoint=lambda name: events.append(name),
+                authorization=authorization,
+            )
+        self.assertEqual(
+            events,
+            ["authorize"],
         )
 
     def test_binding_mode_must_be_frozen_final(self) -> None:
@@ -843,19 +1315,309 @@ class FrozenSnapshotContractTests(unittest.TestCase):
                 stderr=b"",
             )
 
-        result = FROZEN._call_freeze_worker(
-            request,
-            action="freeze",
-            binding=binding("bot_fi"),
-            runner=runner,
-            paths={"freeze_worker": Path("/safe/freeze.py")},
-        )
+        control_read, control_write = os.pipe()
+        try:
+            result = FROZEN._call_freeze_worker(
+                request,
+                action="freeze",
+                binding=binding("bot_fi"),
+                control_fd=control_read,
+                runner=runner,
+                paths={"freeze_worker": Path("/safe/freeze.py")},
+            )
+        finally:
+            os.close(control_read)
+            os.close(control_write)
         self.assertEqual(result["live_lease_claim_sha256"], CLAIM_SHA)
         claim_index = observed.index("--live-lease-claim")
         self.assertEqual(observed[claim_index + 1], "/safe/claim.json")
         digest_index = observed.index("--live-lease-claim-sha256")
         self.assertEqual(observed[digest_index + 1], CLAIM_SHA)
+        control_index = observed.index("--control-fd")
+        self.assertEqual(observed[control_index + 1], str(control_read))
         self.assertNotIn("--restore", observed)
+
+
+class FrozenSnapshotProcessFencingTests(unittest.TestCase):
+    def test_host_liveness_rejects_worker_held_writer_end(self) -> None:
+        read_fd, write_fd = os.pipe()
+        try:
+            with self.assertRaisesRegex(
+                FROZEN.FrozenSnapshotOrchestratorError,
+                "writer end",
+            ):
+                FROZEN.ControllerLivenessGuard(read_fd)
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+    def test_host_sigterm_and_sigint_are_single_catchable_cancellation(self):
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            with self.subTest(signum=signum):
+                read_fd, holder = external_liveness_pipe(5)
+                try:
+                    with FROZEN.ControllerLivenessGuard(read_fd) as guard:
+                        with self.assertRaises(
+                            FROZEN.FrozenSnapshotCancellation
+                        ):
+                            guard._handle_signal(signum, None)
+                        other = (
+                            signal.SIGINT
+                            if signum == signal.SIGTERM
+                            else signal.SIGTERM
+                        )
+                        self.assertIsNone(
+                            guard._handle_signal(other, None)
+                        )
+                finally:
+                    os.close(read_fd)
+                    holder.terminate()
+                    holder.wait(timeout=1)
+
+    def test_controller_host_invocation_uses_real_liveness_pipe(self) -> None:
+        observed: dict[str, object] = {}
+
+        def runner(argv, **kwargs):
+            observed["argv"] = list(argv)
+            observed["stdin"] = kwargs["stdin"]
+            metadata = os.fstat(kwargs["stdin"])
+            self.assertTrue(stat.S_ISFIFO(metadata.st_mode))
+            self.assertTrue(kwargs["close_fds"])
+            self.assertTrue(kwargs["start_new_session"])
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=FROZEN.canonical_json({"status": "ok"}),
+                stderr=b"",
+            )
+
+        with mock.patch.object(
+            FROZEN,
+            "encode_host_request",
+            return_value="encoded",
+        ):
+            result = FROZEN._invoke_host(
+                role="bot_fi",
+                request={},
+                paths={"agent": Path("/safe/agent.py")},
+                ssh_identity=Path("/safe/id"),
+                known_hosts=Path("/safe/known-hosts"),
+                runner=runner,
+            )
+        self.assertEqual(result, {"status": "ok"})
+        argv = observed["argv"]
+        self.assertIn("--control-fd", argv)
+        index = argv.index("--control-fd")
+        self.assertEqual(argv[index + 1], "0")
+
+    def test_host_transport_failure_closes_liveness_writer(self) -> None:
+        retained_read = -1
+
+        def runner(_argv, **kwargs):
+            nonlocal retained_read
+            retained_read = os.dup(kwargs["stdin"])
+            raise OSError("simulated SSH loss")
+
+        with (
+            mock.patch.object(
+                FROZEN,
+                "encode_host_request",
+                return_value="encoded",
+            ),
+            self.assertRaises(
+                FROZEN.FrozenSnapshotOrchestratorError
+            ),
+        ):
+            FROZEN._invoke_host(
+                role="webapp_fi",
+                request={},
+                paths={"agent": Path("/safe/agent.py")},
+                ssh_identity=Path("/safe/id"),
+                known_hosts=Path("/safe/known-hosts"),
+                runner=runner,
+            )
+        try:
+            self.assertGreaterEqual(retained_read, 0)
+            os.set_blocking(retained_read, False)
+            self.assertEqual(os.read(retained_read, 1), b"")
+        finally:
+            if retained_read >= 0:
+                os.close(retained_read)
+
+    def test_bounded_command_rejects_flood_timeout_and_setsid_survivor(self):
+        with (
+            mock.patch.object(FROZEN, "MAX_COMMAND_OUTPUT_BYTES", 1024),
+            self.assertRaisesRegex(
+                FROZEN.FrozenSnapshotOrchestratorError,
+                "byte limit",
+            ),
+        ):
+            FROZEN._bounded_command(
+                [
+                    sys.executable,
+                    "-c",
+                    (
+                        "import os\n"
+                        "while True:\n"
+                        " os.write(1, b'x' * 65536)\n"
+                    ),
+                ],
+                timeout=2,
+            )
+        with self.assertRaisesRegex(
+            FROZEN.FrozenSnapshotOrchestratorError,
+            "timed out",
+        ):
+            FROZEN._bounded_command(
+                [sys.executable, "-c", "import time; time.sleep(5)"],
+                timeout=0.05,
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            sentinel = Path(directory) / "setsid-survivor"
+            program = (
+                "import os,signal,sys,time\n"
+                "child=os.fork()\n"
+                "if child == 0:\n"
+                " os.setsid()\n"
+                " signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                " time.sleep(0.5)\n"
+                " open(sys.argv[1], 'wb').write(b'survived')\n"
+                " os._exit(0)\n"
+                "time.sleep(5)\n"
+            )
+            with (
+                mock.patch.object(
+                    FROZEN,
+                    "PROCESS_GROUP_TERM_SECONDS",
+                    0.05,
+                ),
+                mock.patch.object(FROZEN, "PROCESS_POLL_SECONDS", 0.005),
+                self.assertRaisesRegex(
+                    FROZEN.FrozenSnapshotOrchestratorError,
+                    "timed out",
+                ),
+            ):
+                FROZEN._bounded_command(
+                    [sys.executable, "-c", program, str(sentinel)],
+                    timeout=0.1,
+                )
+            time.sleep(0.6)
+            self.assertFalse(sentinel.exists())
+
+            rapid_sentinel = Path(directory) / "rapid-setsid-survivor"
+            rapid_program = (
+                "import os,signal,sys,time\n"
+                "child=os.fork()\n"
+                "if child == 0:\n"
+                " os.setsid()\n"
+                " os.close(1); os.close(2)\n"
+                " signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                " time.sleep(0.4)\n"
+                " open(sys.argv[1], 'wb').write(b'survived')\n"
+                " os._exit(0)\n"
+                "os._exit(0)\n"
+            )
+            result = FROZEN._bounded_command(
+                [
+                    sys.executable,
+                    "-c",
+                    rapid_program,
+                    str(rapid_sentinel),
+                ],
+                timeout=2,
+            )
+            self.assertEqual(result.returncode, 0)
+            time.sleep(0.5)
+            self.assertFalse(rapid_sentinel.exists())
+
+    def test_bounded_command_reaps_adopted_double_fork_zombies(self) -> None:
+        baseline = FROZEN._direct_child_baseline()
+        program = (
+            "import os\n"
+            "if os.fork() == 0:\n"
+            " if os.fork() == 0:\n"
+            "  os._exit(0)\n"
+            " os._exit(0)\n"
+            "os._exit(0)\n"
+        )
+        result = FROZEN._bounded_command(
+            [sys.executable, "-c", program],
+            timeout=2,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(
+            FROZEN._direct_child_baseline() - baseline,
+            frozenset(),
+        )
+
+    def test_disconnect_during_freeze_kills_worker_tree(self) -> None:
+        request = {
+            "operation_id": OPERATION_ID,
+            "release_sha": RELEASE_SHA,
+            "release_tree_sha": RELEASE_TREE_SHA,
+            "role": "bot_fi",
+            "binding_path": "/safe/binding.json",
+            "binding_sha256": BINDING_SHA["bot_fi"],
+            "state_receipt_path": "/safe/receipt.json",
+            "state_receipt_sha256": RECEIPT_SHA,
+            "lease_claim_path": "/safe/claim.json",
+            "lease_claim_sha256": CLAIM_SHA,
+            "nginx_aggregate_sha256": AGGREGATE_SHA,
+            "nginx_manifest_path": "/safe/manifest.json",
+            "nginx_manifest_sha256": "d" * 64,
+            "nginx_archive_path": "/safe/archive.tar",
+            "nginx_archive_sha256": "e" * 64,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sentinel = root / "freeze-survivor"
+            worker = root / "freeze-worker.py"
+            worker.write_text(
+                (
+                    "import os,signal,sys,time\n"
+                    "child=os.fork()\n"
+                    "if child == 0:\n"
+                    " os.setsid()\n"
+                    " signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                    " time.sleep(0.5)\n"
+                    f" open({str(sentinel)!r}, 'wb').write(b'survived')\n"
+                    " os._exit(0)\n"
+                    "time.sleep(5)\n"
+                ),
+                encoding="ascii",
+            )
+            read_fd, holder = external_liveness_pipe(0.05)
+            try:
+                with (
+                    mock.patch.object(
+                        FROZEN,
+                        "PROCESS_GROUP_TERM_SECONDS",
+                        0.05,
+                    ),
+                    mock.patch.object(
+                        FROZEN,
+                        "PROCESS_POLL_SECONDS",
+                        0.005,
+                    ),
+                    FROZEN.ControllerLivenessGuard(read_fd) as guard,
+                ):
+                    with self.assertRaises(
+                        FROZEN.FrozenSnapshotCancellation
+                    ):
+                        FROZEN._call_freeze_worker(
+                            request,
+                            action="freeze",
+                            binding=binding("bot_fi"),
+                            control_fd=guard.control_fd,
+                            runner=None,
+                            paths={"freeze_worker": worker},
+                        )
+            finally:
+                os.close(read_fd)
+                holder.wait(timeout=1)
+            time.sleep(0.6)
+            self.assertFalse(sentinel.exists())
 
 
 class FrozenSnapshotPublicationTests(unittest.TestCase):
@@ -957,6 +1719,37 @@ class FrozenSnapshotPublicationTests(unittest.TestCase):
         ):
             FROZEN._validate_journal(
                 tampered,
+                inputs=fake_inputs,
+                bindings=bindings,
+                state_receipt_sha256=RECEIPT_SHA,
+            )
+
+    def test_journal_rejects_a_live_lease_without_public_handoff(self) -> None:
+        fake_inputs = inputs(Path("/tmp"))
+        bindings = {role: binding(role) for role in FROZEN.ROLES}
+        journal = FROZEN._initial_journal(
+            inputs=fake_inputs,
+            bindings=bindings,
+            state_receipt_sha256=RECEIPT_SHA,
+        )
+        journal["lease"] = {
+            "claim_path": str(
+                FROZEN.canonical_paths(
+                    OPERATION_ID,
+                    RELEASE_SHA,
+                    lease_claim_sha256=CLAIM_SHA,
+                )["lease_claim"]
+            ),
+            "claim_sha256": CLAIM_SHA,
+            "claim_epoch": 1,
+        }
+        journal["state_sha256"] = FROZEN._state_sha256(journal)
+        with self.assertRaisesRegex(
+            FROZEN.FrozenSnapshotOrchestratorError,
+            "lacks a public phase handoff",
+        ):
+            FROZEN._validate_journal(
+                journal,
                 inputs=fake_inputs,
                 bindings=bindings,
                 state_receipt_sha256=RECEIPT_SHA,

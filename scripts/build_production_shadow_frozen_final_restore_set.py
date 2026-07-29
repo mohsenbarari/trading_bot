@@ -599,6 +599,7 @@ def _load_freeze_receipt(
             controller["release_sha"],
             controller["release_tree_sha"],
             aggregate_sha256,
+            allow_historical=True,
         )
     except NGINX.NginxCoordinatorError as exc:
         raise FrozenFinalRestoreSetError(

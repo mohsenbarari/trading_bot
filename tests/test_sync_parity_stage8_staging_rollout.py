@@ -39,7 +39,7 @@ class SyncParityStage8StagingRolloutTests(unittest.TestCase):
             ]
         )
 
-    def test_default_plan_is_non_mutating_and_keeps_execution_blocked(self):
+    def test_default_plan_is_artifact_only_and_marks_execution_hard_disabled(self):
         with tempfile.TemporaryDirectory() as tmp_dir, patch.object(stage8, "run_git_value", side_effect=fake_git_value):
             plan = stage8.build_plan(self.build_args(Path(tmp_dir)))
 
@@ -48,7 +48,8 @@ class SyncParityStage8StagingRolloutTests(unittest.TestCase):
         self.assertTrue(plan["branch_gate"]["passed"])
         self.assertFalse(plan["execute_requested"])
         self.assertFalse(plan["execution_contract"]["production_deploy_allowed"])
-        self.assertEqual(plan["execution_plan"]["status"], "blocked_until_explicit_confirm")
+        self.assertTrue(plan["execution_contract"]["legacy_two_server_staging_execution_hard_disabled"])
+        self.assertEqual(plan["execution_plan"]["status"], "hard_disabled")
         self.assertEqual(
             plan["coverage_contract"]["market_surface_pairs"],
             [
@@ -95,37 +96,60 @@ class SyncParityStage8StagingRolloutTests(unittest.TestCase):
         self.assertEqual(comparison["status"], "business_drift")
         self.assertEqual(comparison["severity_counts"]["business_drift"], 1)
 
-    def test_execute_mode_requires_explicit_confirmation(self):
+    def test_execute_mode_stays_retired_even_with_the_legacy_confirmation_value(self):
         with tempfile.TemporaryDirectory() as tmp_dir, patch.object(stage8, "run_git_value", side_effect=fake_git_value):
             args = self.build_args(Path(tmp_dir), "--mode", "execute")
             plan = stage8.build_plan(args)
 
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(
+            os.environ,
+            {stage8.EXECUTION_CONFIRM_ENV: stage8.EXECUTION_CONFIRM_VALUE},
+            clear=True,
+        ):
             executed, exit_code = stage8.execute_plan(plan, include_mutating=True)
 
         self.assertEqual(exit_code, 2)
-        self.assertEqual(executed["status"], "blocked_execution_confirmation_missing")
-        self.assertEqual(executed["execution_plan"]["status"], "blocked_confirmation_missing")
+        self.assertEqual(executed["status"], "blocked_legacy_two_server_stage8_runtime_retired")
+        self.assertEqual(executed["execution_plan"]["status"], "hard_disabled")
+        self.assertEqual(executed["preflight"]["status"], "hard_disabled")
+        self.assertEqual(executed["post_execution_checks"]["status"], "hard_disabled")
 
-    def test_preflight_mode_runs_only_non_mutating_commands(self):
+    def test_preflight_mode_stays_retired_without_calling_the_command_helper(self):
         with tempfile.TemporaryDirectory() as tmp_dir, patch.object(stage8, "run_git_value", side_effect=fake_git_value):
             args = self.build_args(Path(tmp_dir), "--mode", "preflight")
             plan = stage8.build_plan(args)
 
-        seen_names = []
-
-        def fake_run(command):
-            seen_names.append(command["name"])
-            self.assertFalse(command["mutates_staging"])
-            return {"name": command["name"], "status": "passed", "returncode": 0}
-
-        with patch.object(stage8, "run_command", side_effect=fake_run):
+        with patch.object(stage8, "run_command") as run_command:
             executed, exit_code = stage8.execute_plan(plan, include_mutating=False)
 
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(executed["status"], "passed")
-        self.assertEqual(seen_names, [command["name"] for command in plan["preflight"]["commands"]])
-        self.assertNotIn("staging_candidate_full_matrix_no_pressure", seen_names)
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(executed["status"], "blocked_legacy_two_server_stage8_runtime_retired")
+        self.assertFalse(run_command.called)
+
+    def test_direct_command_helper_cannot_be_reenabled_by_importers(self):
+        command = {
+            "name": "unsafe-direct-import",
+            "args": ["unsafe-command"],
+            "timeout_seconds": 1,
+        }
+        with patch.object(stage8.subprocess, "run") as run:
+            with self.assertRaises(stage8.LegacyTwoServerStage8RuntimeRetiredError):
+                stage8.run_command(command)
+
+        self.assertFalse(run.called)
+
+    def test_main_preflight_blocks_before_artifact_or_subprocess_access(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            artifact_dir = Path(tmp_dir) / "would-be-runtime-artifact"
+            with patch.object(stage8.subprocess, "run") as run, patch(
+                "sys.stdout", new_callable=io.StringIO
+            ) as stdout:
+                exit_code = stage8.main(["--mode", "preflight", "--artifact-dir", str(artifact_dir)])
+            self.assertFalse(artifact_dir.exists())
+
+        self.assertEqual(exit_code, 2)
+        self.assertFalse(run.called)
+        self.assertIn("blocked_legacy_two_server_stage8_runtime_retired", stdout.getvalue())
 
     def test_main_writes_plan_artifact_without_subprocess_execution(self):
         with tempfile.TemporaryDirectory() as tmp_dir, patch.object(stage8, "run_git_value", side_effect=fake_git_value):

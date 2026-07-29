@@ -35,6 +35,7 @@ from scripts.finalize_production_shadow_cutover_manifest import (
     build_subject,
     finalize_manifest,
 )
+from scripts import production_shadow_convergence_runtime_targets as TARGETS
 from scripts.production_shadow_cutover_controller import validate_manifest
 from tests.test_production_shadow_cutover_controller import manifest_payload
 
@@ -81,6 +82,28 @@ class ProductionShadowAuthorizationTests(unittest.TestCase):
         secure_file(
             self.template_path,
             canonical_json_bytes(self.template),
+        )
+        self.derivation_receipt_path = TARGETS.runtime_target_derivation_receipt_path(
+            self.template_path
+        )
+        receipt = TARGETS.build_runtime_target_derivation_receipt(
+            campaign_id=self.template["campaign_id"],
+            operation_id=self.template["operation_id"],
+            release_sha=self.template["release_sha"],
+            template_sha256=hashlib.sha256(
+                canonical_json_bytes(self.template)
+            ).hexdigest(),
+            authorization_basis_sha256=authorization_basis_sha256(self.template),
+            canonical_compose_sha256=self.template["artifacts"][
+                "shadow_compose_sha256"
+            ],
+            convergence_runtime_targets=self.template["artifacts"][
+                "convergence_runtime_targets"
+            ],
+        )
+        secure_file(
+            self.derivation_receipt_path,
+            canonical_json_bytes(receipt),
         )
 
     def tearDown(self) -> None:
@@ -144,6 +167,16 @@ class ProductionShadowAuthorizationTests(unittest.TestCase):
             authorization_basis_sha256(final),
             authorization_basis_sha256(changed),
         )
+        capability_changed = json.loads(canonical_json_bytes(final))
+        capability_changed["capabilities"] = []
+        self.assertNotEqual(
+            authorization_basis_sha256(final),
+            authorization_basis_sha256(capability_changed),
+        )
+        self.assertNotEqual(
+            authorization_subject_from_manifest(final),
+            authorization_subject_from_manifest(capability_changed),
+        )
         for field, replacement in (
             ("nginx_shadow_readonly_generation_sha256", "a" * 64),
             ("nginx_shadow_writable_generation_sha256", "b" * 64),
@@ -166,6 +199,7 @@ class ProductionShadowAuthorizationTests(unittest.TestCase):
         subject_output = self.root / "subject.json"
         subject_result = build_subject(
             template_path=self.template_path,
+            derivation_receipt_path=self.derivation_receipt_path,
             output_path=subject_output,
             required_uid=self.required_uid,
         )
@@ -190,11 +224,15 @@ class ProductionShadowAuthorizationTests(unittest.TestCase):
             approval_source,
             (json.dumps(token, sort_keys=True, indent=2) + "\n").encode(),
         )
-        manifest_output = self.root / "manifest.json"
-        policy_output = self.root / "policy.json"
-        approval_output = self.root / "approval.json"
+        final_directory = self.root / "final"
+        final_directory.mkdir(mode=0o700)
+        final_directory.chmod(0o700)
+        manifest_output = final_directory / "manifest.json"
+        policy_output = final_directory / "policy.json"
+        approval_output = final_directory / "approval.json"
         result = finalize_manifest(
             template_path=self.template_path,
+            derivation_receipt_path=self.derivation_receipt_path,
             policy_path=policy_source,
             approval_path=approval_source,
             manifest_output=manifest_output,
@@ -223,11 +261,28 @@ class ProductionShadowAuthorizationTests(unittest.TestCase):
             manifest["artifacts"][POLICY_HASH_FIELD],
             hashlib.sha256(policy_output.read_bytes()).hexdigest(),
         )
-        for path in (manifest_output, policy_output, approval_output):
+        final_receipt_path = TARGETS.runtime_target_derivation_receipt_path(
+            manifest_output
+        )
+        self.assertEqual(
+            final_receipt_path.read_bytes(),
+            self.derivation_receipt_path.read_bytes(),
+        )
+        self.assertEqual(
+            result["publications"]["runtime_target_derivation_receipt"],
+            "created",
+        )
+        for path in (
+            manifest_output,
+            policy_output,
+            approval_output,
+            final_receipt_path,
+        ):
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
         repeated = finalize_manifest(
             template_path=self.template_path,
+            derivation_receipt_path=self.derivation_receipt_path,
             policy_path=policy_source,
             approval_path=approval_source,
             manifest_output=manifest_output,
@@ -240,6 +295,85 @@ class ProductionShadowAuthorizationTests(unittest.TestCase):
             {"existing-exact"},
         )
 
+    def test_finalizer_rejects_missing_or_wrong_derivation_receipt_before_output(
+        self,
+    ) -> None:
+        token = self.token()
+        policy_source = self.root / "policy-source.json"
+        approval_source = self.root / "approval-source.json"
+        secure_file(policy_source, self.policy_bytes)
+        secure_file(approval_source, canonical_json_bytes(token))
+        final_directory = self.root / "final"
+        final_directory.mkdir(mode=0o700)
+        final_directory.chmod(0o700)
+        manifest_output = final_directory / "manifest.json"
+        policy_output = final_directory / "policy.json"
+        approval_output = final_directory / "approval.json"
+
+        self.derivation_receipt_path.unlink()
+        with self.assertRaisesRegex(
+            CutoverManifestFinalizationError,
+            "runtime target derivation receipt",
+        ):
+            finalize_manifest(
+                template_path=self.template_path,
+                derivation_receipt_path=self.derivation_receipt_path,
+                policy_path=policy_source,
+                approval_path=approval_source,
+                manifest_output=manifest_output,
+                policy_output=policy_output,
+                approval_output=approval_output,
+                required_uid=self.required_uid,
+            )
+        for path in (
+            manifest_output,
+            policy_output,
+            approval_output,
+            TARGETS.runtime_target_derivation_receipt_path(manifest_output),
+        ):
+            self.assertFalse(path.exists())
+
+        receipt = TARGETS.build_runtime_target_derivation_receipt(
+            campaign_id=self.template["campaign_id"],
+            operation_id=self.template["operation_id"],
+            release_sha=self.template["release_sha"],
+            template_sha256="f" * 64,
+            authorization_basis_sha256=authorization_basis_sha256(
+                self.template
+            ),
+            canonical_compose_sha256=self.template["artifacts"][
+                "shadow_compose_sha256"
+            ],
+            convergence_runtime_targets=self.template["artifacts"][
+                "convergence_runtime_targets"
+            ],
+        )
+        secure_file(
+            self.derivation_receipt_path,
+            canonical_json_bytes(receipt),
+        )
+        with self.assertRaisesRegex(
+            CutoverManifestFinalizationError,
+            "does not bind the exact template",
+        ):
+            finalize_manifest(
+                template_path=self.template_path,
+                derivation_receipt_path=self.derivation_receipt_path,
+                policy_path=policy_source,
+                approval_path=approval_source,
+                manifest_output=manifest_output,
+                policy_output=policy_output,
+                approval_output=approval_output,
+                required_uid=self.required_uid,
+            )
+        for path in (
+            manifest_output,
+            policy_output,
+            approval_output,
+            TARGETS.runtime_target_derivation_receipt_path(manifest_output),
+        ):
+            self.assertFalse(path.exists())
+
     def test_finalize_rejects_token_after_any_basis_change(self) -> None:
         token = self.token()
         changed = json.loads(canonical_json_bytes(self.template))
@@ -248,6 +382,31 @@ class ProductionShadowAuthorizationTests(unittest.TestCase):
         ] = "b" * 64
         changed_path = self.root / "changed-template.json"
         secure_file(changed_path, canonical_json_bytes(changed))
+        changed_receipt_path = TARGETS.runtime_target_derivation_receipt_path(
+            changed_path
+        )
+        secure_file(
+            changed_receipt_path,
+            canonical_json_bytes(
+                TARGETS.build_runtime_target_derivation_receipt(
+                    campaign_id=changed["campaign_id"],
+                    operation_id=changed["operation_id"],
+                    release_sha=changed["release_sha"],
+                    template_sha256=hashlib.sha256(
+                        canonical_json_bytes(changed)
+                    ).hexdigest(),
+                    authorization_basis_sha256=authorization_basis_sha256(
+                        changed
+                    ),
+                    canonical_compose_sha256=changed["artifacts"][
+                        "shadow_compose_sha256"
+                    ],
+                    convergence_runtime_targets=changed["artifacts"][
+                        "convergence_runtime_targets"
+                    ],
+                )
+            ),
+        )
         policy_path = self.root / "policy-source.json"
         token_path = self.root / "approval-source.json"
         secure_file(policy_path, self.policy_bytes)
@@ -259,6 +418,7 @@ class ProductionShadowAuthorizationTests(unittest.TestCase):
         ):
             finalize_manifest(
                 template_path=changed_path,
+                derivation_receipt_path=changed_receipt_path,
                 policy_path=policy_path,
                 approval_path=token_path,
                 manifest_output=self.root / "manifest.json",
@@ -284,6 +444,7 @@ class ProductionShadowAuthorizationTests(unittest.TestCase):
         ):
             finalize_manifest(
                 template_path=self.template_path,
+                derivation_receipt_path=self.derivation_receipt_path,
                 policy_path=policy_source,
                 approval_path=approval_source,
                 manifest_output=manifest_output,

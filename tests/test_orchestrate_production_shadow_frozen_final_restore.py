@@ -3,8 +3,14 @@ from __future__ import annotations
 import copy
 import hashlib
 import io
+import json
 import os
+import signal
+import subprocess
+import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from typing import Any, Mapping
@@ -39,10 +45,15 @@ def wa_version(
         "private": True,
         "versioned": True,
         "encryption": "age",
+        "bucket": "production-shadow-private",
+        "recipient": "age1" + "q" * 58,
         "object_key": (
             object_key
             if object_key is not None
-            else f"production/{version_id}/bundle.age"
+            else (
+                f"production-shadow/{CAMPAIGN_ID}/{OPERATION_ID}/"
+                f"{version_id}/bundle.age"
+            )
         ),
         "version_id": version_id,
         "ciphertext_sha256": SHA_E,
@@ -170,7 +181,10 @@ def request_for(
         control_version = {
             **wa_version(
                 "v-control-002",
-                object_key=f"production/control/{binding}.age",
+                object_key=(
+                    f"production-shadow/{CAMPAIGN_ID}/{OPERATION_ID}/"
+                    f"control/{binding}.age"
+                ),
             ),
             "publication_mode": "create-if-absent",
             "object_key_binding_sha256": binding,
@@ -1001,6 +1015,18 @@ class FrozenFinalRestoreOrchestratorTests(unittest.TestCase):
             "VersionId",
         ):
             MODULE.validate_host_request(request)
+        for field, value in (
+            ("bucket", "../unsafe"),
+            ("recipient", "age1invalid0recipient"),
+        ):
+            with self.subTest(field=field):
+                request = request_for("webapp_ir")
+                request["wa_exact_version"][field] = value
+                with self.assertRaisesRegex(
+                    MODULE.FrozenFinalRestoreOrchestratorError,
+                    "VersionId",
+                ):
+                    MODULE.validate_host_request(request)
         request = request_for("webapp_ir")
         request["wa_fresh_control_exact_version"] = None
         with self.assertRaisesRegex(
@@ -1008,6 +1034,35 @@ class FrozenFinalRestoreOrchestratorTests(unittest.TestCase):
             "VersionId",
         ):
             MODULE.validate_host_request(request)
+
+    def test_request_rejects_unsafe_or_cross_operation_object_keys(
+        self,
+    ) -> None:
+        namespace = (
+            f"production-shadow/{CAMPAIGN_ID}/{OPERATION_ID}/"
+        )
+        for object_key in (
+            f"{namespace}bad\nname.age",
+            f"{namespace}nonascii-\N{LATIN SMALL LETTER E WITH ACUTE}.age",
+            f"{namespace}/empty.age",
+            f"{namespace}../parent.age",
+            f"{namespace}back\\slash.age",
+            f"{namespace}not-encrypted.json",
+            (
+                "production-shadow/"
+                "cfb39031-ff3c-4b89-82cd-52cb85583976/"
+                f"{OPERATION_ID}/bundle.age"
+            ),
+            f"{namespace}{'x' * 256}.age",
+        ):
+            with self.subTest(object_key=repr(object_key)):
+                request = request_for("webapp_ir")
+                request["wa_exact_version"]["object_key"] = object_key
+                with self.assertRaisesRegex(
+                    MODULE.FrozenFinalRestoreOrchestratorError,
+                    "object key|namespace",
+                ):
+                    MODULE.validate_host_request(request)
 
     def test_protocol_uses_unpredictable_ordered_challenges(self) -> None:
         request = request_for("webapp_fi")
@@ -1106,7 +1161,21 @@ class FrozenFinalRestoreOrchestratorTests(unittest.TestCase):
             ssh_identity=Path("/root/.ssh/id_ed25519"),
             known_hosts=Path("/root/.ssh/known_hosts"),
         )
+        self.assertEqual(
+            local[:8],
+            [
+                MODULE.ENV,
+                "-i",
+                "PATH=/usr/bin:/bin",
+                "HOME=/root",
+                "LANG=C.UTF-8",
+                "LC_ALL=C.UTF-8",
+                "PYTHONDONTWRITEBYTECODE=1",
+                MODULE.PYTHON,
+            ],
+        )
         self.assertIn("PYTHONDONTWRITEBYTECODE=1", local)
+        self.assertIn("-I", local)
         self.assertIn("-B", local)
         self.assertNotIn(MODULE.encode_host_request(request_for("bot_fi")), local)
         remote = MODULE.session_arguments(
@@ -1115,7 +1184,13 @@ class FrozenFinalRestoreOrchestratorTests(unittest.TestCase):
             known_hosts=Path("/root/.ssh/known_hosts"),
         )
         self.assertEqual(remote[0], MODULE.SSH)
+        self.assertEqual(
+            remote[remote.index("-F") : remote.index("-F") + 2],
+            ["-F", "/dev/null"],
+        )
         self.assertIn("StrictHostKeyChecking=yes", remote)
+        self.assertIn("/usr/bin/env -i", remote[-1])
+        self.assertIn("/usr/bin/python3 -I -B", remote[-1])
         self.assertIn("PYTHONDONTWRITEBYTECODE=1", remote[-1])
         self.assertNotIn("https://", " ".join(remote))
 
@@ -1170,6 +1245,18 @@ class FrozenFinalRestoreOrchestratorTests(unittest.TestCase):
             "VersionId",
         ):
             MODULE.validate_host_result(result, request=request)
+        for field, value in (
+            ("bucket", "different-private-bucket"),
+            ("recipient", "age1" + "p" * 58),
+        ):
+            with self.subTest(field=field):
+                result = synthetic_host_result(request)
+                result["transport"][field] = value
+                with self.assertRaisesRegex(
+                    MODULE.FrozenFinalRestoreOrchestratorError,
+                    "VersionId",
+                ):
+                    MODULE.validate_host_result(result, request=request)
 
     def test_installation_attestation_is_an_exact_transcript_prefix(
         self,
@@ -1277,6 +1364,418 @@ class FrozenFinalRestoreOrchestratorTests(unittest.TestCase):
             os.close(write_fd)
             stream.close()
 
+    def test_next_frame_deadline_covers_exact_long_running_action(self) -> None:
+        self.assertEqual(
+            MODULE._frame_timeout_after_boundary(  # noqa: SLF001
+                "before:bot_fi:restore-postgres",
+                base_timeout=120.0,
+            ),
+            2 * 60 * 60.0,
+        )
+        self.assertEqual(
+            MODULE._frame_timeout_after_boundary(  # noqa: SLF001
+                "before-copy-source:database-backup",
+                base_timeout=120.0,
+            ),
+            7 * 60 * 60.0,
+        )
+        self.assertEqual(
+            MODULE._frame_timeout_after_boundary(  # noqa: SLF001
+                "after:bot_fi:restore-postgres",
+                base_timeout=120.0,
+            ),
+            120.0,
+        )
+        maximum_sequential_work = (
+            3 * MODULE.INSTALLER_COPY_FRAME_TIMEOUT_SECONDS
+            + sum(MODULE.ACTION_FRAME_TIMEOUT_SECONDS.values())
+        )
+        self.assertGreaterEqual(
+            MODULE.MAX_HOST_SESSION_SECONDS,
+            maximum_sequential_work,
+        )
+
+    def test_controller_cannot_relax_base_or_overall_deadline(self) -> None:
+        request = request_for("bot_fi")
+        for kwargs in (
+            {"line_timeout": 121.0},
+            {"line_timeout": float("nan")},
+            {"timeout": MODULE.MAX_HOST_SESSION_SECONDS + 1},
+            {"timeout": float("inf")},
+        ):
+            with (
+                self.subTest(kwargs=kwargs),
+                self.assertRaisesRegex(
+                    MODULE.FrozenFinalRestoreOrchestratorError,
+                    "deadlines",
+                ),
+            ):
+                MODULE.run_interactive_host_with_authority(
+                    request,
+                    authority_responder=controller_exchange,
+                    ssh_identity=Path("/root/.ssh/id_ed25519"),
+                    known_hosts=Path("/root/.ssh/known_hosts"),
+                    session_factory=lambda _arguments: FakeProcess(b""),
+                    **kwargs,
+                )
+
+    def test_default_session_discards_untrusted_remote_stderr(self) -> None:
+        process = mock.Mock()
+        process.pid = 43210
+        process.stdin = io.BytesIO()
+        process.stdout = io.BytesIO()
+        root_identity = MODULE.ProcessIdentity(
+            pid=43210,
+            parent_pid=os.getpid(),
+            process_group=43210,
+            start_time=12345,
+            state="S",
+        )
+        with (
+            mock.patch.object(
+                MODULE.subprocess,
+                "Popen",
+                return_value=process,
+            ) as popen,
+            mock.patch.object(MODULE, "_enable_child_subreaper"),
+            mock.patch.object(
+                MODULE,
+                "_direct_child_baseline",
+                return_value=frozenset(),
+            ),
+            mock.patch.object(
+                MODULE,
+                "_process_identity",
+                return_value=root_identity,
+            ),
+        ):
+            observed = MODULE._default_session_factory(  # noqa: SLF001
+                ["/usr/bin/ssh", "bounded-host"]
+            )
+        self.assertIs(observed, process)
+        self.assertEqual(
+            popen.call_args.kwargs["stderr"],
+            MODULE.subprocess.DEVNULL,
+        )
+        self.assertTrue(popen.call_args.kwargs["start_new_session"])
+        self.assertTrue(popen.call_args.kwargs["close_fds"])
+        self.assertEqual(popen.call_args.kwargs["pass_fds"], ())
+        ownership = process._production_shadow_process_ownership  # noqa: SLF001
+        self.assertIsInstance(
+            ownership,
+            MODULE.InteractiveProcessOwnership,
+        )
+        self.assertEqual(ownership.root, root_identity)
+        self.assertNotIn(
+            "_production_shadow_process_group",
+            process.__dict__,
+        )
+
+    def test_devnull_remote_stderr_cannot_deadlock_session(self) -> None:
+        process = MODULE._default_session_factory(  # noqa: SLF001
+            [
+                sys.executable,
+                "-I",
+                "-B",
+                "-c",
+                (
+                    "import os;"
+                    "os.write(2,b'x'*(4*1024*1024));"
+                    "os.write(1,b'ready\\n')"
+                ),
+            ]
+        )
+        assert process.stdout is not None
+        try:
+            self.assertEqual(process.stdout.readline(), b"ready\n")
+            self.assertEqual(process.wait(timeout=5), 0)
+        finally:
+            MODULE._terminate_interactive_process(  # noqa: SLF001
+                process,
+                kill_direct=True,
+            )
+            process.stdin.close()
+            process.stdout.close()
+
+    def test_session_cleanup_terminates_a_forked_descendant(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            sentinel = Path(directory) / "descendant-survived"
+            child_code = (
+                "import os,time\n"
+                "pid=os.fork()\n"
+                "if pid == 0:\n"
+                " time.sleep(0.4)\n"
+                f" open({str(sentinel)!r},'wb').write(b'survived')\n"
+                " os._exit(0)\n"
+                "print(pid,flush=True)\n"
+                "time.sleep(60)\n"
+            )
+            process = MODULE._default_session_factory(  # noqa: SLF001
+                [sys.executable, "-I", "-B", "-c", child_code],
+            )
+            assert process.stdout is not None
+            cleaned = False
+            try:
+                self.assertTrue(process.stdout.readline().strip())
+                MODULE._terminate_interactive_process(  # noqa: SLF001
+                    process,
+                    kill_direct=True,
+                )
+                cleaned = True
+                time.sleep(0.6)
+                self.assertFalse(sentinel.exists())
+            finally:
+                if not cleaned:
+                    process.kill()
+                    process.wait(timeout=5)
+                process.stdin.close()
+                process.stdout.close()
+
+    def test_session_cleanup_reaps_rapid_setsid_double_fork(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            parent_pid_path = root / "adopted-parent-pid"
+            pid_path = root / "adopted-pid"
+            survived = root / "adopted-survived"
+            child_code = (
+                "import os,time\n"
+                "if os.fork() == 0:\n"
+                " os.setsid()\n"
+                f" open({str(parent_pid_path)!r},'w').write(str(os.getpid()))\n"
+                " if os.fork() == 0:\n"
+                "  os.close(0)\n"
+                "  os.close(1)\n"
+                "  os.close(2)\n"
+                f"  open({str(pid_path)!r},'w').write(str(os.getpid()))\n"
+                "  time.sleep(0.8)\n"
+                f"  open({str(survived)!r},'wb').write(b'survived')\n"
+                "  os._exit(0)\n"
+                " os._exit(0)\n"
+                "deadline=time.monotonic()+0.5\n"
+                f"while (not os.path.exists({str(parent_pid_path)!r}) or not os.path.exists({str(pid_path)!r})) and time.monotonic()<deadline: time.sleep(0.005)\n"
+                "print('ready',flush=True)\n"
+                "time.sleep(60)\n"
+            )
+            process = MODULE._default_session_factory(  # noqa: SLF001
+                [sys.executable, "-I", "-B", "-c", child_code],
+            )
+            assert process.stdout is not None
+            cleaned = False
+            try:
+                self.assertEqual(
+                    process.stdout.readline().strip(),
+                    b"ready",
+                )
+                self.assertTrue(parent_pid_path.is_file())
+                self.assertTrue(pid_path.is_file())
+                adopted_parent_pid = int(
+                    parent_pid_path.read_text(),
+                    10,
+                )
+                adopted_pid = int(pid_path.read_text(), 10)
+                MODULE._terminate_interactive_process(  # noqa: SLF001
+                    process,
+                    kill_direct=True,
+                )
+                cleaned = True
+                for candidate in (adopted_parent_pid, adopted_pid):
+                    self.assertFalse(Path(f"/proc/{candidate}").exists())
+                    with self.assertRaises(ChildProcessError):
+                        os.waitpid(candidate, os.WNOHANG)
+                time.sleep(1.0)
+                self.assertFalse(survived.exists())
+            finally:
+                if not cleaned:
+                    process.kill()
+                    process.wait(timeout=5)
+                process.stdin.close()
+                process.stdout.close()
+
+    def test_control_disconnect_cancels_active_worker_process_group(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            sentinel = Path(directory) / "worker-descendant-survived"
+            program = (
+                "import os,time\n"
+                "if os.fork() == 0:\n"
+                " time.sleep(0.8)\n"
+                f" open({str(sentinel)!r},'wb').write(b'survived')\n"
+                " os._exit(0)\n"
+                "time.sleep(60)\n"
+            )
+            read_fd, write_fd = os.pipe()
+            input_stream = os.fdopen(read_fd, "rb", buffering=0)
+            closer = threading.Thread(
+                target=lambda: (time.sleep(0.2), os.close(write_fd)),
+                daemon=True,
+            )
+            closer.start()
+            try:
+                with (
+                    self.assertRaisesRegex(
+                        MODULE.FrozenFinalRestoreOrchestratorError,
+                        "connection was cancelled",
+                    ),
+                    MODULE._host_control_disconnect_guard(  # noqa: SLF001
+                        input_stream
+                    ),
+                ):
+                    WORKER._bounded_command(  # noqa: SLF001
+                        [
+                            "/usr/bin/python3",
+                            "-I",
+                            "-B",
+                            "-c",
+                            program,
+                        ],
+                        timeout=10,
+                        env={"PATH": "/usr/bin:/bin"},
+                        stdin=subprocess.DEVNULL,
+                        stdout_limit=1024,
+                        stderr_limit=1024,
+                    )
+                closer.join(timeout=1)
+                time.sleep(1.0)
+                self.assertFalse(sentinel.exists())
+            finally:
+                input_stream.close()
+
+    def test_preclosed_host_control_is_rejected_before_body(self) -> None:
+        read_fd, write_fd = os.pipe()
+        os.close(write_fd)
+        input_stream = os.fdopen(read_fd, "rb", buffering=0)
+        entered = False
+        try:
+            with self.assertRaisesRegex(
+                MODULE.FrozenFinalRestoreCancellation,
+                "SIGHUP",
+            ):
+                with MODULE._host_control_disconnect_guard(  # noqa: SLF001
+                    input_stream
+                ):
+                    entered = True
+            self.assertFalse(entered)
+        finally:
+            input_stream.close()
+
+    def test_host_signals_are_catchable_and_cleanup_active_worker(
+        self,
+    ) -> None:
+        for signum in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
+            with self.subTest(signum=signum), tempfile.TemporaryDirectory() as directory:
+                sentinel = Path(directory) / "worker-survived"
+                program = (
+                    "import time\n"
+                    "time.sleep(0.8)\n"
+                    f"open({str(sentinel)!r},'wb').write(b'survived')\n"
+                )
+                read_fd, write_fd = os.pipe()
+                input_stream = os.fdopen(read_fd, "rb", buffering=0)
+
+                def send_signals() -> None:
+                    time.sleep(0.15)
+                    os.kill(os.getpid(), signum)
+
+                sender = threading.Thread(
+                    target=send_signals,
+                    daemon=True,
+                )
+                sender.start()
+                try:
+                    with (
+                        self.assertRaisesRegex(
+                            MODULE.FrozenFinalRestoreCancellation,
+                            "was cancelled",
+                        ),
+                        MODULE._host_control_disconnect_guard(  # noqa: SLF001
+                            input_stream
+                        ),
+                    ):
+                        WORKER._bounded_command(  # noqa: SLF001
+                            [
+                                "/usr/bin/python3",
+                                "-I",
+                                "-B",
+                                "-c",
+                                program,
+                            ],
+                            timeout=10,
+                            env={"PATH": "/usr/bin:/bin"},
+                            stdin=subprocess.DEVNULL,
+                            stdout_limit=1024,
+                            stderr_limit=1024,
+                        )
+                    sender.join(timeout=1)
+                    self.assertFalse(sender.is_alive())
+                    time.sleep(1.0)
+                    self.assertFalse(sentinel.exists())
+                finally:
+                    os.close(write_fd)
+                    input_stream.close()
+
+    def test_host_signal_handler_is_one_shot_under_reentrant_signals(
+        self,
+    ) -> None:
+        for signum in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
+            with self.subTest(signum=signum):
+                read_fd, write_fd = os.pipe()
+                input_stream = os.fdopen(read_fd, "rb", buffering=0)
+                try:
+                    with (
+                        self.assertRaises(
+                            MODULE.FrozenFinalRestoreCancellation
+                        ),
+                        MODULE._host_control_disconnect_guard(  # noqa: SLF001
+                            input_stream
+                        ),
+                    ):
+                        try:
+                            os.kill(os.getpid(), signum)
+                        except MODULE.FrozenFinalRestoreCancellation as exc:
+                            os.kill(os.getpid(), signal.SIGINT)
+                            raise exc
+                finally:
+                    os.close(write_fd)
+                    input_stream.close()
+
+    def test_unterminated_output_flood_is_bounded_and_process_is_killed(
+        self,
+    ) -> None:
+        request = request_for("bot_fi")
+
+        def factory(_arguments):
+            return MODULE._default_session_factory(  # noqa: SLF001
+                [
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    "-c",
+                    (
+                        "import os,time;"
+                        "os.write(1,b'x'*131072);"
+                        "time.sleep(60)"
+                    ),
+                ]
+            )
+
+        with (
+            mock.patch.object(MODULE, "MAX_HOST_RESULT_BYTES", 64 * 1024),
+            self.assertRaisesRegex(
+                MODULE.FrozenFinalRestoreOrchestratorError,
+                "oversized",
+            ),
+        ):
+            MODULE.run_interactive_host(
+                request,
+                lease=FakeControllerLease(),
+                ssh_identity=Path("/root/.ssh/id_ed25519"),
+                known_hosts=Path("/root/.ssh/known_hosts"),
+                session_factory=factory,
+                timeout=10,
+                line_timeout=2,
+            )
+
     def test_trailing_host_frame_is_rejected(self) -> None:
         request = request_for("bot_fi")
         first = MODULE.canonical_json(
@@ -1311,6 +1810,29 @@ class FrozenFinalRestoreOrchestratorTests(unittest.TestCase):
             "challenge|sequence|chain",
         ):
             session.respond(challenge)
+
+    def test_controller_session_enforces_transcript_bound_before_response(
+        self,
+    ) -> None:
+        request = request_for("bot_fi")
+        lease = FakeControllerLease()
+        session = MODULE.ControllerAuthoritySession(
+            lease=lease,
+            request=request,
+        )
+        session.transcript = [{}] * MODULE.MAX_TRANSCRIPT_ENTRIES
+        challenge = transcript_for(request)[0]["challenge"]
+        verify_count = lease.verify_count
+        with self.assertRaisesRegex(
+            MODULE.FrozenFinalRestoreOrchestratorError,
+            "transcript entry limit",
+        ):
+            session.respond(challenge)
+        self.assertEqual(lease.verify_count, verify_count)
+        self.assertEqual(
+            len(session.transcript),
+            MODULE.MAX_TRANSCRIPT_ENTRIES,
+        )
 
     def test_generic_invoker_must_use_current_authority_callback(
         self,
@@ -1429,6 +1951,333 @@ class FrozenFinalRestoreOrchestratorTests(unittest.TestCase):
                         ),
                     )
                 ensure.assert_not_called()
+
+    def test_controller_apply_requires_main_thread_before_any_write(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            MODULE.NGINX,
+            "CONTROLLER_SECRET_PREFIX",
+            Path(directory) / "controller",
+        ):
+            plans = {
+                role: request_for(role, action="plan")
+                for role in MODULE.ROLES
+            }
+            output = prepare_controller_output(plans)
+            outcomes: list[BaseException | Mapping[str, Any]] = []
+            prepare = mock.Mock()
+            invoke = mock.Mock()
+
+            def run() -> None:
+                try:
+                    outcomes.append(
+                        MODULE.run_three_roles_under_lease(
+                            lease=FakeControllerLease(),
+                            requests=plans,
+                            prepare_request=prepare,
+                            invoke=invoke,
+                            output_directory=output,
+                            consumption_readback=mock.Mock(),
+                        )
+                    )
+                except BaseException as exc:
+                    outcomes.append(exc)
+
+            thread = threading.Thread(target=run)
+            thread.start()
+            thread.join(timeout=5)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(len(outcomes), 1)
+            self.assertIsInstance(
+                outcomes[0],
+                MODULE.FrozenFinalRestoreOrchestratorError,
+            )
+            self.assertIn("main thread", str(outcomes[0]))
+            prepare.assert_not_called()
+            invoke.assert_not_called()
+            self.assertFalse(output.exists())
+
+    def test_controller_signals_interrupt_active_role_once_and_resume(
+        self,
+    ) -> None:
+        for signum in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
+            with (
+                self.subTest(signum=signum),
+                tempfile.TemporaryDirectory() as directory,
+                mock.patch.object(
+                    MODULE.NGINX,
+                    "CONTROLLER_SECRET_PREFIX",
+                    Path(directory) / "controller",
+                ),
+            ):
+                plans = {
+                    role: request_for(role, action="plan")
+                    for role in MODULE.ROLES
+                }
+                apply_requests = {
+                    role: request_for(role) for role in MODULE.ROLES
+                }
+                output = prepare_controller_output(plans)
+                consumption_path = consumption_path_for(
+                    apply_requests["bot_fi"]
+                )
+                lease = FakeControllerLease(consumption_path)
+                original_handlers = {
+                    item: signal.getsignal(item)
+                    for item in (
+                        signal.SIGHUP,
+                        signal.SIGTERM,
+                        signal.SIGINT,
+                    )
+                }
+                interrupted: list[str] = []
+
+                def interrupt(
+                    request: Mapping[str, Any],
+                    _exchange: Any,
+                ) -> Mapping[str, Any]:
+                    interrupted.append(request["role"])
+                    try:
+                        os.kill(os.getpid(), signum)
+                    except MODULE.FrozenFinalRestoreCancellation as exc:
+                        os.kill(os.getpid(), signal.SIGINT)
+                        raise exc
+                    self.fail("signal did not interrupt the active role")
+
+                with self.assertRaisesRegex(
+                    MODULE.FrozenFinalRestoreCancellation,
+                    "controller operation was cancelled",
+                ):
+                    MODULE.run_three_roles_under_lease(
+                        lease=lease,
+                        requests=plans,
+                        prepare_request=lambda role, *_args: apply_requests[
+                            role
+                        ],
+                        invoke=interrupt,
+                        output_directory=output,
+                        consumption_readback=mock.Mock(),
+                    )
+                self.assertEqual(interrupted, ["bot_fi"])
+                self.assertEqual(lease.consume_calls, [])
+                for item, handler in original_handlers.items():
+                    self.assertIs(signal.getsignal(item), handler)
+                journal_document = json.loads(
+                    (output / "controller-journal.json").read_text()
+                )
+                self.assertTrue(
+                    all(
+                        value is None
+                        for value in journal_document["roles"].values()
+                    )
+                )
+
+                resumed_roles: list[str] = []
+
+                def resumed(
+                    request: Mapping[str, Any],
+                    exchange: Any,
+                ) -> Mapping[str, Any]:
+                    resumed_roles.append(request["role"])
+                    return synthetic_host_result(
+                        request,
+                        exchange=exchange,
+                        nonce_salt=f"resume-{request['role']}",
+                    )
+
+                outcome = MODULE.run_three_roles_under_lease(
+                    lease=lease,
+                    requests=plans,
+                    prepare_request=lambda *_args: self.fail(
+                        "prepared request should be reused"
+                    ),
+                    invoke=resumed,
+                    output_directory=output,
+                    consumption_readback=(
+                        lambda claimed_path, claimed_sha256, *_args: (
+                            claimed_path,
+                            claimed_sha256,
+                            {"status": "consumed"},
+                        )
+                    ),
+                )
+                self.assertEqual(outcome["status"], "complete")
+                self.assertEqual(resumed_roles, list(MODULE.ROLES))
+                self.assertEqual(len(lease.consume_calls), 1)
+
+    def test_host_signal_install_failure_restores_prior_handlers(
+        self,
+    ) -> None:
+        read_fd, write_fd = os.pipe()
+        input_stream = os.fdopen(read_fd, "rb", buffering=0)
+        originals = {
+            item: signal.getsignal(item)
+            for item in (
+                signal.SIGHUP,
+                signal.SIGTERM,
+                signal.SIGINT,
+            )
+        }
+        real_signal = signal.signal
+        failed = False
+
+        def flaky(signum: int, handler: Any):
+            nonlocal failed
+            owner = getattr(handler, "__self__", None)
+            if (
+                not failed
+                and signum == signal.SIGTERM
+                and isinstance(owner, MODULE._OneShotSignalGuard)  # noqa: SLF001
+            ):
+                failed = True
+                raise OSError("injected handler install failure")
+            return real_signal(signum, handler)
+
+        try:
+            with (
+                mock.patch.object(
+                    MODULE.signal,
+                    "signal",
+                    side_effect=flaky,
+                ),
+                self.assertRaisesRegex(
+                    MODULE.FrozenFinalRestoreOrchestratorError,
+                    "could not be installed",
+                ),
+            ):
+                with MODULE._host_control_disconnect_guard(  # noqa: SLF001
+                    input_stream
+                ):
+                    self.fail("host guard should not enter")
+            self.assertTrue(failed)
+            for item, handler in originals.items():
+                self.assertIs(signal.getsignal(item), handler)
+        finally:
+            os.close(write_fd)
+            input_stream.close()
+
+    def test_controller_signal_install_failure_precedes_journal_write(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            MODULE.NGINX,
+            "CONTROLLER_SECRET_PREFIX",
+            Path(directory) / "controller",
+        ):
+            plans = {
+                role: request_for(role, action="plan")
+                for role in MODULE.ROLES
+            }
+            output = prepare_controller_output(plans)
+            originals = {
+                item: signal.getsignal(item)
+                for item in (
+                    signal.SIGHUP,
+                    signal.SIGTERM,
+                    signal.SIGINT,
+                )
+            }
+            real_signal = signal.signal
+            failed = False
+
+            def flaky(signum: int, handler: Any):
+                nonlocal failed
+                owner = getattr(handler, "__self__", None)
+                if (
+                    not failed
+                    and signum == signal.SIGTERM
+                    and isinstance(owner, MODULE._OneShotSignalGuard)  # noqa: SLF001
+                ):
+                    failed = True
+                    raise OSError("injected controller handler failure")
+                return real_signal(signum, handler)
+
+            prepare = mock.Mock()
+            invoke = mock.Mock()
+            with (
+                mock.patch.object(
+                    MODULE.signal,
+                    "signal",
+                    side_effect=flaky,
+                ),
+                self.assertRaisesRegex(
+                    MODULE.FrozenFinalRestoreOrchestratorError,
+                    "could not be installed",
+                ),
+            ):
+                MODULE.run_three_roles_under_lease(
+                    lease=FakeControllerLease(),
+                    requests=plans,
+                    prepare_request=prepare,
+                    invoke=invoke,
+                    output_directory=output,
+                    consumption_readback=mock.Mock(),
+                )
+            self.assertTrue(failed)
+            prepare.assert_not_called()
+            invoke.assert_not_called()
+            self.assertFalse(output.exists())
+            for item, handler in originals.items():
+                self.assertIs(signal.getsignal(item), handler)
+
+    def test_host_signal_restore_failure_is_fail_closed_and_best_effort(
+        self,
+    ) -> None:
+        read_fd, write_fd = os.pipe()
+        input_stream = os.fdopen(read_fd, "rb", buffering=0)
+        originals = {
+            item: signal.getsignal(item)
+            for item in (
+                signal.SIGHUP,
+                signal.SIGTERM,
+                signal.SIGINT,
+            )
+        }
+        real_signal = signal.signal
+        failed = False
+
+        def flaky(signum: int, handler: Any):
+            nonlocal failed
+            if (
+                not failed
+                and signum == signal.SIGHUP
+                and handler is originals[signal.SIGHUP]
+            ):
+                failed = True
+                raise OSError("injected handler restore failure")
+            return real_signal(signum, handler)
+
+        try:
+            with (
+                mock.patch.object(
+                    MODULE.signal,
+                    "signal",
+                    side_effect=flaky,
+                ),
+                self.assertRaisesRegex(
+                    MODULE.FrozenFinalRestoreOrchestratorError,
+                    "could not be restored",
+                ),
+            ):
+                with MODULE._host_control_disconnect_guard(  # noqa: SLF001
+                    input_stream
+                ):
+                    pass
+            self.assertTrue(failed)
+            self.assertIs(
+                signal.getsignal(signal.SIGTERM),
+                originals[signal.SIGTERM],
+            )
+            self.assertIs(
+                signal.getsignal(signal.SIGINT),
+                originals[signal.SIGINT],
+            )
+        finally:
+            for item, handler in originals.items():
+                real_signal(item, handler)
+            os.close(write_fd)
+            input_stream.close()
 
     def test_host_result_can_exceed_control_frame_but_not_result_bound(
         self,

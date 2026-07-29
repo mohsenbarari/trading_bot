@@ -1,0 +1,96 @@
+#!/bin/sh
+#
+# Fixed production-shadow convergence observer launcher.
+#
+# Installation invariant (enforced by the worker before evidence is emitted):
+# install this exact release file as root:root mode 0700.  Invoke it only from
+# a root-owned service/unit.  Root and the kernel/loader chain are the host
+# TCB; this launcher prevents a direct shell/Python invocation from silently
+# inheriting caller environment or site-package state.
+#
+# The launcher deliberately accepts only the read-only observer shape.  It
+# opens the launcher, release root, and worker before Python starts, then a
+# tiny isolated bootstrap closes every inherited FD except 0, 1, 2, and those
+# three held capabilities.  The worker compares all three held inodes to the
+# exact release Git blobs before it observes anything.
+
+set -eu
+
+if [ "$#" -ne 6 ] \
+    || [ "$1" != "--release-root" ] \
+    || [ "$3" != "observe" ] \
+    || [ "$4" != "--request" ] \
+    || [ "$6" != "--execute-read-only" ] \
+    || [ -z "$2" ] \
+    || [ -z "$5" ]; then
+    printf '%s\n' 'blocked: launcher requires --release-root ROOT observe --request REQUEST --execute-read-only' >&2
+    exit 64
+fi
+
+release_root=$2
+request_path=$5
+worker_relative=scripts/production_shadow_convergence_observer_worker.py
+
+# Shell descriptors are inherited across exec.  The worker validates no-follow
+# canonical paths and exact Git blobs after startup; no caller-provided path or
+# environment value is an evidence claim by itself.
+exec 3<"$0"
+exec 4<"$release_root"
+exec 5<"$release_root/$worker_relative"
+
+# ``env -i`` does not close descriptors inherited from a service manager or a
+# caller.  Run no project code until this fixed ``-I -S`` bootstrap has closed
+# them.  The bootstrap is intentionally stdlib-only and receives the request
+# as an argv value, not interpolated source text.
+bootstrap='import os, runpy, sys
+allowed = {0, 1, 2, 3, 4, 5}
+errors = []
+for entry in os.listdir("/proc/self/fd"):
+    if not entry.isdecimal():
+        errors.append("invalid descriptor table entry")
+        continue
+    descriptor = int(entry)
+    if descriptor in allowed:
+        continue
+    try:
+        os.close(descriptor)
+    except OSError as exc:
+        if exc.errno != 9:
+            errors.append("cannot close inherited descriptor")
+if errors:
+    raise SystemExit("blocked: observer bootstrap descriptor cleanup failed")
+remaining = set()
+for entry in os.listdir("/proc/self/fd"):
+    if not entry.isdecimal():
+        continue
+    descriptor = int(entry)
+    try:
+        os.fstat(descriptor)
+    except OSError as exc:
+        if exc.errno == 9:
+            continue
+        raise SystemExit("blocked: observer bootstrap descriptor inspection failed")
+    remaining.add(descriptor)
+if remaining - allowed:
+    raise SystemExit("blocked: observer bootstrap retained inherited descriptors")
+sys.argv = ["/proc/self/fd/5", "observe", "--request", sys.argv[1], "--execute-read-only"]
+runpy.run_path("/proc/self/fd/5", run_name="__main__")'
+
+exec /usr/bin/env -i \
+    PATH=/usr/bin:/bin \
+    HOME=/nonexistent \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    GIT_CONFIG_NOSYSTEM=1 \
+    GIT_CONFIG_GLOBAL=/dev/null \
+    GIT_CONFIG_SYSTEM=/dev/null \
+    GIT_TERMINAL_PROMPT=0 \
+    GIT_OPTIONAL_LOCKS=0 \
+    GIT_NO_REPLACE_OBJECTS=1 \
+    GIT_PAGER=cat \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONNOUSERSITE=1 \
+    PRODUCTION_SHADOW_HELD_RELEASE_ROOT_FD=4 \
+    PRODUCTION_SHADOW_HELD_CONVERGENCE_OBSERVER_WORKER_FD=5 \
+    PRODUCTION_SHADOW_HELD_CONVERGENCE_OBSERVER_LAUNCHER_FD=3 \
+    /usr/bin/python3 -I -S -c "$bootstrap" "$request_path"

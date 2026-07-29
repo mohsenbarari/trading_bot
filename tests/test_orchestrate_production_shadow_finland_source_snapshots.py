@@ -6,8 +6,12 @@ import io
 import json
 import os
 from pathlib import Path
+import signal
+import stat
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -61,6 +65,30 @@ def completed(returncode: int = 0, stdout: bytes = b"", stderr: bytes = b""):
         stdout=stdout,
         stderr=stderr,
     )
+
+
+def external_liveness_pipe(
+    hold_seconds: float,
+) -> tuple[int, subprocess.Popen[bytes]]:
+    read_fd, write_fd = os.pipe()
+    try:
+        holder = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "import time,sys; time.sleep(float(sys.argv[1]))",
+                str(hold_seconds),
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            pass_fds=(write_fd,),
+            start_new_session=True,
+        )
+    finally:
+        os.close(write_fd)
+    return read_fd, holder
 
 
 class Fixture:
@@ -148,6 +176,34 @@ class FinlandSourceSnapshotOrchestratorTests(unittest.TestCase):
             "ssh_identity": self.fixture.identity,
         }
 
+    def test_host_cli_imports_under_isolated_python_outside_release_cwd(self):
+        with tempfile.TemporaryDirectory() as directory:
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    str(Path(MODULE.__file__).resolve()),
+                    "--help",
+                ],
+                cwd=directory,
+                env={
+                    "PATH": "/usr/bin:/bin",
+                    "HOME": "/nonexistent",
+                    "LANG": "C.UTF-8",
+                    "LC_ALL": "C.UTF-8",
+                    "PYTHONDONTWRITEBYTECODE": "1",
+                },
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=10,
+            )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertTrue(completed.stdout.startswith(b"usage:"))
+        self.assertEqual(completed.stderr, b"")
+
     def test_default_plan_has_no_commands_io_or_mutation(self):
         runner = mock.Mock(side_effect=AssertionError("plan executed a command"))
         result = MODULE.orchestrate(**self.base_arguments(), runner=runner)
@@ -155,6 +211,31 @@ class FinlandSourceSnapshotOrchestratorTests(unittest.TestCase):
         self.assertEqual(result["status"], "planned")
         self.assertFalse(result["docker_contacted"])
         self.assertFalse(result["network_io"])
+        self.assertEqual(MODULE.SAFE_ENV["GIT_CONFIG_NOSYSTEM"], "1")
+        self.assertEqual(
+            MODULE.SAFE_ENV["GIT_CONFIG_GLOBAL"],
+            "/dev/null",
+        )
+        self.assertEqual(
+            MODULE.SAFE_ENV["GIT_CONFIG_SYSTEM"],
+            "/dev/null",
+        )
+        self.assertEqual(MODULE.SAFE_ENV["GIT_TERMINAL_PROMPT"], "0")
+        self.assertEqual(MODULE.SAFE_ENV["GIT_OPTIONAL_LOCKS"], "0")
+        self.assertEqual(MODULE.SAFE_ENV["GIT_NO_REPLACE_OBJECTS"], "1")
+        self.assertIn("--no-optional-locks", MODULE.GIT_CONFIG_ARGUMENTS)
+        self.assertIn(
+            "core.fsmonitor=false",
+            MODULE.GIT_CONFIG_ARGUMENTS,
+        )
+        self.assertIn(
+            "core.untrackedCache=false",
+            MODULE.GIT_CONFIG_ARGUMENTS,
+        )
+        self.assertIn(
+            "core.hooksPath=/dev/null",
+            MODULE.GIT_CONFIG_ARGUMENTS,
+        )
         self.assertFalse(result["filesystem_mutated"])
         self.assertFalse(result["production_mutated"])
         self.assertEqual(result["pull_policy"], "never")
@@ -176,6 +257,60 @@ class FinlandSourceSnapshotOrchestratorTests(unittest.TestCase):
         self.assertIn("IdentitiesOnly=yes", remote["snapshot_argv"])
         self.assertIn("StrictHostKeyChecking=yes", remote["snapshot_argv"])
         self.assertIn(str(MODULE.WEBAPP_FI_PORT), remote["snapshot_argv"])
+        self.assertNotIn("--control-fd", remote["snapshot_argv"])
+        self.assertNotIn(
+            "--control-fd",
+            result["roles"]["bot_fi"]["snapshot_argv"],
+        )
+
+    def test_exact_release_git_checks_are_read_only_and_isolated(self):
+        release_root = self.root / "release"
+        scripts = release_root / "scripts"
+        scripts.mkdir(parents=True, mode=0o700)
+        release_root.chmod(0o700)
+        agent = scripts / MODULE.AGENT_RELATIVE.name
+        producer = scripts / MODULE.PRODUCER_RELATIVE.name
+        agent.write_bytes(b"# agent\n")
+        producer.write_bytes(b"# producer\n")
+        agent.chmod(0o700)
+        producer.chmod(0o700)
+        calls: list[tuple[list[str], dict[str, object]]] = []
+
+        def runner(arguments, **kwargs):
+            argv = list(arguments)
+            calls.append((argv, dict(kwargs)))
+            if "symbolic-ref" in argv:
+                return completed(returncode=1)
+            if "--show-toplevel" in argv:
+                return completed(stdout=f"{release_root}\n".encode("ascii"))
+            if "HEAD" in argv:
+                return completed(stdout=f"{RELEASE_SHA}\n".encode("ascii"))
+            return completed(stdout=b"")
+
+        MODULE._validate_exact_release(
+            release_root,
+            RELEASE_SHA,
+            runner=runner,
+            required_uid=os.getuid(),
+            agent_path=agent,
+        )
+
+        self.assertEqual(len(calls), 4)
+        for argv, kwargs in calls:
+            self.assertEqual(argv[0], MODULE.GIT)
+            self.assertIn("--no-optional-locks", argv)
+            self.assertIn("core.fsmonitor=false", argv)
+            self.assertIn("core.untrackedCache=false", argv)
+            self.assertIn("core.hooksPath=/dev/null", argv)
+            self.assertIn("core.fileMode=true", argv)
+            self.assertEqual(
+                kwargs["env"]["GIT_CONFIG_GLOBAL"],
+                "/dev/null",
+            )
+            self.assertEqual(kwargs["env"]["GIT_CONFIG_NOSYSTEM"], "1")
+            self.assertEqual(kwargs["env"]["GIT_TERMINAL_PROMPT"], "0")
+            self.assertEqual(kwargs["env"]["GIT_OPTIONAL_LOCKS"], "0")
+            self.assertEqual(kwargs["env"]["GIT_NO_REPLACE_OBJECTS"], "1")
 
     def test_plan_rejects_confirm_and_cross_controller_bindings(self):
         with self.assertRaisesRegex(
@@ -480,9 +615,11 @@ class FinlandSourceSnapshotOrchestratorTests(unittest.TestCase):
             "zero_residue": True,
         }
         calls: list[list[str]] = []
+        runner_options: list[dict[str, object]] = []
 
-        def runner(arguments, **_kwargs):
+        def runner(arguments, **kwargs):
             calls.append(list(arguments))
+            runner_options.append(dict(kwargs))
             return completed(stdout=canonical_bytes(producer_result) + b"\n")
 
         manifest = {
@@ -506,42 +643,60 @@ class FinlandSourceSnapshotOrchestratorTests(unittest.TestCase):
             filename: {"sha256": str(index + 6) * 64, "bytes": index + 10}
             for index, filename in enumerate(MODULE.SNAPSHOT_FILENAMES)
         }
-        with (
-            mock.patch.object(MODULE, "_validate_exact_release"),
-            mock.patch.object(
-                MODULE.FINLAND_STAGE,
-                "_verify_role_host",
-            ),
-            mock.patch.object(MODULE, "_ensure_host_output_root"),
-            mock.patch.object(
-                SOURCE,
-                "verify_completed_output",
-                return_value=manifest,
-            ),
-            mock.patch.object(
-                MODULE,
-                "_snapshot_file_inventory",
-                return_value=fake_files,
-            ),
-        ):
-            result = MODULE.host_agent(
-                MODULE.encode_host_request(request),
-                runner=runner,
-                observed_host_addresses={MODULE.BOT_FI_HOST},
-                agent_path=paths["agent"],
-            )
+        read_fd, holder = external_liveness_pipe(5)
+        try:
+            with (
+                mock.patch.object(MODULE, "_validate_exact_release"),
+                mock.patch.object(
+                    MODULE.FINLAND_STAGE,
+                    "_verify_role_host",
+                ),
+                mock.patch.object(MODULE, "_ensure_host_output_root"),
+                mock.patch.object(
+                    SOURCE,
+                    "verify_completed_output",
+                    return_value=manifest,
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "_snapshot_file_inventory",
+                    return_value=fake_files,
+                ),
+            ):
+                result = MODULE.host_agent(
+                    MODULE.encode_host_request(request),
+                    runner=runner,
+                    observed_host_addresses={MODULE.BOT_FI_HOST},
+                    agent_path=paths["agent"],
+                    control_fd=read_fd,
+                )
+        finally:
+            os.close(read_fd)
+            holder.terminate()
+            holder.wait(timeout=1)
         self.assertEqual(result["status"], "snapshotted")
         self.assertFalse(result["source_mutated"])
         self.assertEqual(len(calls), 1)
         argv = calls[0]
         self.assertEqual(argv[0], MODULE.PYTHON)
-        self.assertEqual(argv[1:3], ["-B", str(paths["producer"])])
+        self.assertEqual(
+            argv[1:4],
+            ["-I", "-B", str(paths["producer"])],
+        )
         self.assertIn("--output-root", argv)
         self.assertEqual(argv[argv.index("--output-root") + 1], str(MODULE.SOURCE_OUTPUT_ROOT))
         self.assertEqual(
             argv[argv.index("--confirm") + 1],
             SOURCE.confirmation_phrase(binding),
         )
+        control_index = argv.index("--control-fd")
+        passed_control = int(argv[control_index + 1], 10)
+        self.assertEqual(
+            runner_options[0]["pass_fds"],
+            (passed_control,),
+        )
+        self.assertTrue(runner_options[0]["close_fds"])
+        self.assertTrue(runner_options[0]["start_new_session"])
         self.assertNotIn("pull", " ".join(argv).lower())
         self.assertNotIn("build", " ".join(argv).lower())
 
@@ -602,7 +757,10 @@ class FinlandSourceSnapshotOrchestratorTests(unittest.TestCase):
                     destination.chmod(0o600)
                 return completed()
             if arguments[0] == MODULE.SSH:
-                encoded = arguments[-1].split()[-1]
+                remote_arguments = arguments[-1].split()
+                encoded = remote_arguments[
+                    remote_arguments.index("--host-request-b64") + 1
+                ]
             else:
                 encoded = arguments[arguments.index("--host-request-b64") + 1]
             request = MODULE.decode_host_request(encoded)
@@ -717,6 +875,47 @@ class FinlandSourceSnapshotOrchestratorTests(unittest.TestCase):
             ).exists()
         )
 
+    def test_apply_requires_root_main_thread_before_io(self):
+        confirmation = MODULE.confirmation_phrase(
+            OPERATION_ID,
+            RELEASE_SHA,
+        )
+        runner = mock.Mock(side_effect=AssertionError("command executed"))
+        with self.assertRaisesRegex(
+            MODULE.FinlandSourceSnapshotOrchestratorError,
+            "must run as root",
+        ):
+            MODULE.orchestrate(
+                **self.base_arguments(),
+                apply=True,
+                confirm=confirmation,
+                runner=runner,
+                required_uid=1,
+            )
+        with (
+            mock.patch.object(
+                MODULE.threading,
+                "current_thread",
+                return_value=object(),
+            ),
+            mock.patch.object(
+                MODULE.threading,
+                "main_thread",
+                return_value=object(),
+            ),
+            self.assertRaisesRegex(
+                MODULE.FinlandSourceSnapshotOrchestratorError,
+                "main thread",
+            ),
+        ):
+            MODULE.orchestrate(
+                **self.base_arguments(),
+                apply=True,
+                confirm=confirmation,
+                runner=runner,
+            )
+        self.assertFalse(runner.called)
+
     def test_main_blocks_mixed_host_and_controller_arguments(self):
         request = MODULE.build_host_request(
             action="prepare-binding",
@@ -740,6 +939,62 @@ class FinlandSourceSnapshotOrchestratorTests(unittest.TestCase):
         self.assertEqual(result["status"], "blocked")
         self.assertNotIn("binding_sha256", result)
         self.assertNotIn("http", stderr.getvalue().lower())
+
+    def test_main_requires_host_control_fd_and_rejects_it_for_controller(
+        self,
+    ):
+        request = MODULE.build_host_request(
+            action="prepare-binding",
+            operation_id=OPERATION_ID,
+            release_sha=RELEASE_SHA,
+            role="bot_fi",
+            binding_sha256=self.binding("bot_fi").canonical_sha256,
+        )
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            status = MODULE.main(
+                [
+                    "--host-request-b64",
+                    MODULE.encode_host_request(request),
+                ]
+            )
+        self.assertEqual(status, 1)
+        self.assertIn("requires liveness", stderr.getvalue())
+
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            status = MODULE.main(["--control-fd", "0"])
+        self.assertEqual(status, 1)
+        self.assertIn("valid only for a host request", stderr.getvalue())
+
+        read_fd, holder = external_liveness_pipe(5)
+        stdout = io.StringIO()
+        try:
+            with (
+                mock.patch.object(
+                    MODULE,
+                    "host_agent",
+                    return_value={"status": "prepared"},
+                ) as host_agent,
+                redirect_stdout(stdout),
+            ):
+                status = MODULE.main(
+                    [
+                        "--host-request-b64",
+                        MODULE.encode_host_request(request),
+                        "--control-fd",
+                        str(read_fd),
+                    ]
+                )
+            self.assertEqual(status, 0)
+            host_agent.assert_called_once_with(
+                MODULE.encode_host_request(request),
+                control_fd=read_fd,
+            )
+        finally:
+            os.close(read_fd)
+            holder.terminate()
+            holder.wait(timeout=1)
 
     def test_main_redacts_unexpected_failure(self):
         stdout = io.StringIO()
@@ -770,6 +1025,425 @@ class FinlandSourceSnapshotOrchestratorTests(unittest.TestCase):
         result = json.loads(stderr.getvalue())
         self.assertEqual(result["status"], "blocked")
         self.assertNotIn("private token", stderr.getvalue())
+
+
+class FinlandSourceSnapshotProcessFencingTests(unittest.TestCase):
+    def test_host_liveness_rejects_worker_held_writer_end(self) -> None:
+        read_fd, write_fd = os.pipe()
+        try:
+            with self.assertRaisesRegex(
+                MODULE.FinlandSourceSnapshotOrchestratorError,
+                "writer end",
+            ):
+                MODULE.ControllerLivenessGuard(read_fd)
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+    def test_preclosed_liveness_fails_before_host_work_and_restores_signals(
+        self,
+    ) -> None:
+        old_handlers = {
+            signum: signal.getsignal(signum)
+            for signum in MODULE.ControllerLivenessGuard._HANDLED_SIGNALS
+        }
+        read_fd, write_fd = os.pipe()
+        os.close(write_fd)
+        try:
+            with self.assertRaisesRegex(
+                MODULE.FinlandSourceSnapshotCancellation,
+                "EOF",
+            ):
+                with MODULE.ControllerLivenessGuard(read_fd):
+                    self.fail("preclosed liveness entered host work")
+        finally:
+            os.close(read_fd)
+        self.assertEqual(
+            {
+                signum: signal.getsignal(signum)
+                for signum in MODULE.ControllerLivenessGuard._HANDLED_SIGNALS
+            },
+            old_handlers,
+        )
+
+    def test_host_signals_are_single_catchable_cancellation(self) -> None:
+        for signum in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT):
+            with self.subTest(signum=signum):
+                read_fd, holder = external_liveness_pipe(5)
+                try:
+                    with MODULE.ControllerLivenessGuard(read_fd) as guard:
+                        with self.assertRaises(
+                            MODULE.FinlandSourceSnapshotCancellation
+                        ):
+                            guard._handle_signal(signum, None)
+                        self.assertIsNone(
+                            guard._handle_signal(signal.SIGTERM, None)
+                        )
+                finally:
+                    os.close(read_fd)
+                    holder.terminate()
+                    holder.wait(timeout=1)
+
+    def test_controller_host_invocation_uses_pipe_without_writer_leak(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            helper = Path(directory) / "inspect-control.py"
+            helper.write_text(
+                (
+                    "import fcntl,json,os,stat,sys\n"
+                    "index=sys.argv.index('--control-fd')\n"
+                    "fd=int(sys.argv[index+1])\n"
+                    "target=os.fstat(fd)\n"
+                    "writers=[]\n"
+                    "for name in os.listdir('/proc/self/fd'):\n"
+                    " try:\n"
+                    "  candidate=int(name)\n"
+                    "  row=os.fstat(candidate)\n"
+                    "  flags=fcntl.fcntl(candidate, fcntl.F_GETFL)\n"
+                    " except (OSError,ValueError):\n"
+                    "  continue\n"
+                    " if ((row.st_dev,row.st_ino)=="
+                    "(target.st_dev,target.st_ino) and "
+                    "flags & os.O_ACCMODE in (os.O_WRONLY,os.O_RDWR)):\n"
+                    "  writers.append(candidate)\n"
+                    "result={'control_fd':fd,'fifo':"
+                    "stat.S_ISFIFO(target.st_mode),'writers':writers}\n"
+                    "print(json.dumps(result,sort_keys=True,"
+                    "separators=(',',':')))\n"
+                ),
+                encoding="ascii",
+            )
+            with (
+                mock.patch.object(MODULE, "PYTHON", sys.executable),
+                mock.patch.object(
+                    MODULE,
+                    "encode_host_request",
+                    return_value="encoded",
+                ),
+            ):
+                result = MODULE._invoke_host(
+                    role="bot_fi",
+                    request={},
+                    paths={"agent": helper},
+                    ssh_identity=Path("/unused"),
+                    runner=None,
+                )
+        self.assertEqual(result["control_fd"], 0)
+        self.assertTrue(result["fifo"])
+        self.assertEqual(result["writers"], [])
+
+    def test_transport_baseexception_closes_liveness_writer(self) -> None:
+        class HostAbort(BaseException):
+            pass
+
+        retained_read = -1
+
+        def runner(_arguments, **kwargs):
+            nonlocal retained_read
+            retained_read = os.dup(kwargs["stdin"])
+            raise HostAbort()
+
+        with (
+            mock.patch.object(
+                MODULE,
+                "encode_host_request",
+                return_value="encoded",
+            ),
+            self.assertRaises(HostAbort),
+        ):
+            MODULE._invoke_host(
+                role="webapp_fi",
+                request={},
+                paths={"agent": Path("/safe/agent.py")},
+                ssh_identity=Path("/safe/id"),
+                runner=runner,
+            )
+        try:
+            self.assertGreaterEqual(retained_read, 0)
+            os.set_blocking(retained_read, False)
+            self.assertEqual(os.read(retained_read, 1), b"")
+        finally:
+            if retained_read >= 0:
+                os.close(retained_read)
+
+    def test_bounded_command_handles_flood_timeout_and_detached_children(
+        self,
+    ) -> None:
+        for descriptor, label in ((1, "stdout"), (2, "stderr")):
+            with (
+                self.subTest(label=label),
+                mock.patch.object(
+                    MODULE,
+                    (
+                        "MAX_COMMAND_OUTPUT_BYTES"
+                        if descriptor == 1
+                        else "MAX_COMMAND_ERROR_BYTES"
+                    ),
+                    1024,
+                ),
+                self.assertRaisesRegex(
+                    MODULE.FinlandSourceSnapshotOrchestratorError,
+                    label,
+                ),
+            ):
+                MODULE._bounded_command(
+                    [
+                        sys.executable,
+                        "-c",
+                        (
+                            "import os,sys\n"
+                            f"descriptor={descriptor}\n"
+                            "while True:\n"
+                            " os.write(descriptor, b'x' * 65536)\n"
+                        ),
+                    ],
+                    timeout=2,
+                )
+        with self.assertRaisesRegex(
+            MODULE.FinlandSourceSnapshotOrchestratorError,
+            "timed out",
+        ):
+            MODULE._bounded_command(
+                [sys.executable, "-c", "import time; time.sleep(5)"],
+                timeout=0.05,
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            sentinel = Path(directory) / "delayed-setsid-survivor"
+            program = (
+                "import os,signal,sys,time\n"
+                "child=os.fork()\n"
+                "if child == 0:\n"
+                " os.setsid()\n"
+                " signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                " time.sleep(0.5)\n"
+                " open(sys.argv[1], 'wb').write(b'survived')\n"
+                " os._exit(0)\n"
+                "time.sleep(5)\n"
+            )
+            with (
+                mock.patch.object(
+                    MODULE,
+                    "PROCESS_GROUP_TERM_SECONDS",
+                    0.05,
+                ),
+                mock.patch.object(MODULE, "PROCESS_POLL_SECONDS", 0.005),
+                self.assertRaisesRegex(
+                    MODULE.FinlandSourceSnapshotOrchestratorError,
+                    "timed out",
+                ),
+            ):
+                MODULE._bounded_command(
+                    [sys.executable, "-c", program, str(sentinel)],
+                    timeout=0.1,
+                )
+            time.sleep(0.6)
+            self.assertFalse(sentinel.exists())
+
+            rapid_sentinel = Path(directory) / "rapid-setsid-survivor"
+            rapid_program = (
+                "import os,signal,sys,time\n"
+                "child=os.fork()\n"
+                "if child == 0:\n"
+                " os.setsid()\n"
+                " os.close(1); os.close(2)\n"
+                " signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                " time.sleep(0.4)\n"
+                " open(sys.argv[1], 'wb').write(b'survived')\n"
+                " os._exit(0)\n"
+                "os._exit(0)\n"
+            )
+            result = MODULE._bounded_command(
+                [
+                    sys.executable,
+                    "-c",
+                    rapid_program,
+                    str(rapid_sentinel),
+                ],
+                timeout=2,
+            )
+            self.assertEqual(result.returncode, 0)
+            time.sleep(0.5)
+            self.assertFalse(rapid_sentinel.exists())
+
+    def test_bounded_command_reaps_adopted_double_fork_zombies(self) -> None:
+        baseline = MODULE._direct_child_baseline()
+        program = (
+            "import os\n"
+            "if os.fork() == 0:\n"
+            " if os.fork() == 0:\n"
+            "  os._exit(0)\n"
+            " os._exit(0)\n"
+            "os._exit(0)\n"
+        )
+        result = MODULE._bounded_command(
+            [sys.executable, "-c", program],
+            timeout=2,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(
+            MODULE._direct_child_baseline() - baseline,
+            frozenset(),
+        )
+
+    def test_source_control_fd_does_not_leak_other_descriptors(self) -> None:
+        control_read, control_write = os.pipe()
+        secret_read, secret_write = os.pipe()
+        try:
+            secret = os.fstat(secret_read)
+            program = (
+                "import json,os,sys\n"
+                "target=(int(sys.argv[1]),int(sys.argv[2]))\n"
+                "leaked=[]\n"
+                "for name in os.listdir('/proc/self/fd'):\n"
+                " try:\n"
+                "  fd=int(name); row=os.fstat(fd)\n"
+                " except (OSError,ValueError):\n"
+                "  continue\n"
+                " if (row.st_dev,row.st_ino)==target:\n"
+                "  leaked.append(fd)\n"
+                "print(json.dumps({'leaked':leaked},sort_keys=True,"
+                "separators=(',',':')))\n"
+            )
+            result = MODULE._bounded_command(
+                [
+                    sys.executable,
+                    "-c",
+                    program,
+                    str(secret.st_dev),
+                    str(secret.st_ino),
+                ],
+                timeout=2,
+                pass_fds=(control_read,),
+            )
+            self.assertEqual(json.loads(result.stdout), {"leaked": []})
+        finally:
+            for descriptor in (
+                control_read,
+                control_write,
+                secret_read,
+                secret_write,
+            ):
+                os.close(descriptor)
+
+    def test_controller_eof_during_source_kills_detached_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sentinel = root / "source-survivor"
+            producer = root / "source-producer.py"
+            producer.write_text(
+                (
+                    "import os,signal,sys,time\n"
+                    "index=sys.argv.index('--control-fd')\n"
+                    "os.fstat(int(sys.argv[index+1]))\n"
+                    "child=os.fork()\n"
+                    "if child == 0:\n"
+                    " os.setsid()\n"
+                    " signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                    " time.sleep(0.5)\n"
+                    f" open({str(sentinel)!r}, 'wb').write(b'survived')\n"
+                    " os._exit(0)\n"
+                    "time.sleep(5)\n"
+                ),
+                encoding="ascii",
+            )
+            read_fd, holder = external_liveness_pipe(0.05)
+            try:
+                with (
+                    mock.patch.object(
+                        MODULE,
+                        "PROCESS_GROUP_TERM_SECONDS",
+                        0.05,
+                    ),
+                    mock.patch.object(
+                        MODULE,
+                        "PROCESS_POLL_SECONDS",
+                        0.005,
+                    ),
+                    MODULE.ControllerLivenessGuard(read_fd) as guard,
+                ):
+                    with self.assertRaises(
+                        MODULE.FinlandSourceSnapshotCancellation
+                    ):
+                        MODULE._run_command(
+                            [
+                                sys.executable,
+                                str(producer),
+                                "--control-fd",
+                                str(guard.control_fd),
+                            ],
+                            runner=None,
+                            timeout=2,
+                            allowed=frozenset({sys.executable}),
+                            pass_fds=(guard.control_fd,),
+                        )
+            finally:
+                os.close(read_fd)
+                holder.wait(timeout=1)
+            time.sleep(0.6)
+            self.assertFalse(sentinel.exists())
+
+    def test_remote_ssh_timeout_kills_detached_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sentinel = root / "ssh-survivor"
+            transport = root / "ssh-transport.py"
+            transport.write_text(
+                (
+                    "import os,signal,sys,time\n"
+                    "child=os.fork()\n"
+                    "if child == 0:\n"
+                    " os.setsid()\n"
+                    " signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                    " time.sleep(0.5)\n"
+                    " open(sys.argv[1], 'wb').write(b'survived')\n"
+                    " os._exit(0)\n"
+                    "time.sleep(5)\n"
+                ),
+                encoding="ascii",
+            )
+            with (
+                mock.patch.object(MODULE, "SSH", sys.executable),
+                mock.patch.object(
+                    MODULE,
+                    "encode_host_request",
+                    return_value="encoded",
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "ssh_arguments",
+                    return_value=[
+                        sys.executable,
+                        str(transport),
+                        str(sentinel),
+                    ],
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "HOST_COMMAND_TIMEOUT_SECONDS",
+                    0.1,
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "PROCESS_GROUP_TERM_SECONDS",
+                    0.05,
+                ),
+                mock.patch.object(MODULE, "PROCESS_POLL_SECONDS", 0.005),
+                self.assertRaisesRegex(
+                    MODULE.FinlandSourceSnapshotOrchestratorError,
+                    "timed out",
+                ),
+            ):
+                MODULE._invoke_host(
+                    role="webapp_fi",
+                    request={},
+                    paths={"agent": Path("/safe/agent.py")},
+                    ssh_identity=Path("/safe/id"),
+                    runner=None,
+                )
+            time.sleep(0.6)
+            self.assertFalse(sentinel.exists())
 
 
 if __name__ == "__main__":

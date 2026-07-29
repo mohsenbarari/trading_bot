@@ -13,18 +13,25 @@ from __future__ import annotations
 
 import argparse
 import base64
+import ctypes
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
+import shlex
+import selectors
+import signal
 import stat
 import subprocess
 import sys
-from typing import Any, Iterable
+import threading
+import time
+from typing import Any, Iterable, Mapping, Sequence
 from uuid import UUID
 
 
@@ -44,23 +51,29 @@ from core.docker_image_identity import (  # noqa: E402
 )
 from core.production_shadow_authorization import (  # noqa: E402
     ProductionShadowAuthorizationError,
+    authorization_basis_sha256,
     verify_authorization_documents,
 )
+from core.canonical_json import canonical_json_bytes  # noqa: E402
 from core.three_site_topology import (  # noqa: E402
     BOT_FI_HOST,
     PRODUCTION_WITNESS_HOST,
     WEBAPP_FI_HOST,
     WEBAPP_IR_HOST,
 )
+from scripts import production_shadow_convergence_runtime_targets as runtime_targets  # noqa: E402
+from scripts import production_shadow_remote_receiver_signing_policy as receiver_policy  # noqa: E402
 
 
-MANIFEST_SCHEMA = "production-shadow-cutover-manifest-v1"
+MANIFEST_SCHEMA = runtime_targets.CUTOVER_MANIFEST_SCHEMA
+LEGACY_MANIFEST_SCHEMA = runtime_targets.LEGACY_CUTOVER_MANIFEST_SCHEMA
 PLAN_SCHEMA = "production-shadow-cutover-plan-v1"
 JOURNAL_SCHEMA = "production-shadow-cutover-journal-v1"
 PHASE_VERIFICATION_SCHEMA = "production-shadow-phase-evidence-verification-v1"
 APPLY_CONFIRMATION = "APPLY-PRODUCTION-SHADOW-CUTOVER-JOURNAL"
 FIRST_WRITE_COMMIT_CONFIRMATION = "COMMIT-PRODUCTION-SHADOW-FIRST-BUSINESS-WRITE"
 CONTROLLER_PATH = "/usr/local/sbin/trading-bot-production-shadow-controller"
+PYTHON = "/usr/bin/python3"
 REMOTE_AGENT_RELATIVE_PATH = PurePosixPath(
     "scripts/production_shadow_host_agent.py"
 )
@@ -75,6 +88,15 @@ PRODUCTION_HOSTNAME = "coin.gold-trade.ir"
 LEGACY_COMPOSE_PROJECT = "trading_bot"
 ZERO_SHA256 = "0" * 64
 IRREVERSIBLE_COMMIT_ENABLED = False
+MAX_RELEASE_VERIFIER_STREAM_BYTES = 64 * 1024
+RELEASE_VERIFIER_TIMEOUT_SECONDS = 120.0
+RELEASE_VERIFIER_TERM_SECONDS = 2.0
+RELEASE_VERIFIER_POLL_SECONDS = 0.01
+RELEASE_VERIFIER_TREE_QUIESCENCE_SECONDS = 0.05
+MAX_RELEASE_VERIFIER_PROCESS_SNAPSHOT_MEMBERS = 65536
+MAX_RELEASE_VERIFIER_PROCESS_TREE_MEMBERS = 8192
+PR_SET_CHILD_SUBREAPER = 36
+_RELEASE_VERIFIER_RUN_LOCK = threading.Lock()
 FORWARD_ONLY_COMMIT_GATE = "journal_forward_only_commit_gate"
 PRECOMMIT_JOURNAL_STATUS = "rollback-eligible-precommit"
 POSTCOMMIT_JOURNAL_STATUS = "forward-only-committed"
@@ -97,6 +119,16 @@ IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 PROJECT_RE = re.compile(r"^[a-z][a-z0-9-]{7,62}$")
 IMAGE_KINDS = ("app", "postgres", "redis", "nginx")
 DOCKER_RUNTIME_ROLES = ("bot_fi", "webapp_fi", "webapp_ir")
+CONVERGENCE_RUNTIME_TARGET_SET_SCHEMA = (
+    runtime_targets.CONVERGENCE_RUNTIME_TARGET_SET_SCHEMA
+)
+CONVERGENCE_RUNTIME_TARGETS_FILENAME = (
+    runtime_targets.CONVERGENCE_RUNTIME_TARGETS_FILENAME
+)
+CONVERGENCE_RUNTIME_TARGET_DESCRIPTOR_FIELDS = (
+    runtime_targets.CONVERGENCE_RUNTIME_TARGET_DESCRIPTOR_FIELDS
+)
+MANIFEST_CAPABILITIES = runtime_targets.RUNTIME_TARGET_CAPABILITIES
 IMAGE_ARTIFACT_FIELDS = frozenset(
     {
         "archive_sha256",
@@ -136,6 +168,7 @@ PHASE_VERIFICATION_FIELDS = frozenset(
 MANIFEST_FIELDS = frozenset(
     {
         "schema",
+        "capabilities",
         "campaign_id",
         "operation_id",
         "created_at",
@@ -166,6 +199,8 @@ ARTIFACT_FIELDS = frozenset(
         "role_materials",
         "image_artifacts",
         "role_runtime_image_ids",
+        "convergence_runtime_targets",
+        "remote_receiver_signing_policies",
         "postgres_runtime_uid",
         "postgres_runtime_gid",
         "postgres_image_ref",
@@ -185,6 +220,17 @@ ARTIFACT_FIELDS = frozenset(
         "host_agent_sha256",
         "host_agent_contract_sha256",
         "phase_evidence_verifier_sha256",
+    }
+)
+REMOTE_RECEIVER_POLICY_ROLES = ("webapp_ir", "witness")
+REMOTE_RECEIVER_POLICY_CONTRACT_FIELDS = frozenset(
+    {
+        "policy_file_sha256",
+        "policy_sha256",
+        "key_id",
+        "public_key_sha256",
+        "receiver_sha256",
+        "worker_sha256",
     }
 )
 ROLE_MATERIAL_FIELDS = frozenset(
@@ -923,9 +969,20 @@ def _remote_agent_contract_path(operation_id: str) -> PurePosixPath:
 
 
 def validate_manifest(document: Any) -> dict[str, Any]:
+    if runtime_targets.is_legacy_cutover_manifest_schema(document):
+        raise CutoverContractError(runtime_targets.CUTOVER_V4_MIGRATION_MESSAGE)
     manifest = _require_exact_fields(document, MANIFEST_FIELDS, label="manifest")
     if manifest["schema"] != MANIFEST_SCHEMA:
-        raise CutoverContractError("manifest schema is invalid")
+        raise CutoverContractError(
+            "manifest schema is invalid; a fresh v4 template and fresh approval are required"
+        )
+    try:
+        runtime_targets.validate_runtime_target_capabilities(
+            manifest["capabilities"],
+            label="manifest capabilities",
+        )
+    except runtime_targets.ConvergenceRuntimeTargetDescriptorError as exc:
+        raise CutoverContractError("manifest capabilities are invalid") from exc
     campaign_id = _canonical_campaign_id(manifest["campaign_id"])
     operation_id = _canonical_campaign_id(manifest["operation_id"])
     if operation_id == campaign_id:
@@ -1058,6 +1115,47 @@ def validate_manifest(document: Any) -> dict[str, Any]:
         raise CutoverContractError(
             "role material digests must be distinct per role"
         )
+    remote_receiver_policies = artifacts["remote_receiver_signing_policies"]
+    if (
+        not isinstance(remote_receiver_policies, dict)
+        or set(remote_receiver_policies) != set(REMOTE_RECEIVER_POLICY_ROLES)
+    ):
+        raise CutoverContractError(
+            "remote receiver signing-policy roles are not exact"
+        )
+    for role in REMOTE_RECEIVER_POLICY_ROLES:
+        contract = _require_exact_fields(
+            remote_receiver_policies[role],
+            REMOTE_RECEIVER_POLICY_CONTRACT_FIELDS,
+            label=f"artifacts.remote_receiver_signing_policies.{role}",
+        )
+        for field in (
+            "policy_file_sha256",
+            "policy_sha256",
+            "public_key_sha256",
+            "receiver_sha256",
+            "worker_sha256",
+        ):
+            if (
+                not isinstance(contract[field], str)
+                or SHA256_RE.fullmatch(contract[field]) is None
+                or contract[field] == ZERO_SHA256
+            ):
+                raise CutoverContractError(
+                    f"{role} remote receiver {field} is not a SHA-256 digest"
+                )
+        if (
+            not isinstance(contract["key_id"], str)
+            or receiver_policy.IDENTIFIER_RE.fullmatch(contract["key_id"])
+            is None
+        ):
+            raise CutoverContractError(
+                f"{role} remote receiver key id is invalid"
+            )
+        if contract["receiver_sha256"] == contract["worker_sha256"]:
+            raise CutoverContractError(
+                f"{role} remote receiver and worker source digests must differ"
+            )
     image_artifacts = artifacts["image_artifacts"]
     if (
         not isinstance(image_artifacts, dict)
@@ -1140,6 +1238,15 @@ def validate_manifest(document: Any) -> dict[str, Any]:
             raise CutoverContractError(
                 f"runtime image inventory for {role} is invalid"
             )
+    try:
+        runtime_targets.validate_runtime_target_descriptor(
+            artifacts["convergence_runtime_targets"],
+            label="artifacts.convergence_runtime_targets",
+        )
+    except runtime_targets.ConvergenceRuntimeTargetDescriptorError as exc:
+        raise CutoverContractError(
+            "convergence runtime target descriptor is invalid"
+        ) from exc
     if (
         artifacts["postgres_runtime_uid"] != 70
         or artifacts["postgres_runtime_gid"] != 70
@@ -1205,7 +1312,95 @@ def read_root_only_manifest(
         document = json.loads(payload.decode("utf-8"), object_pairs_hook=_strict_object)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise CutoverContractError("production cutover manifest is not strict UTF-8 JSON") from exc
-    return validate_manifest(document), hashlib.sha256(payload).hexdigest()
+    if payload != canonical_json_bytes(document):
+        raise CutoverContractError(
+            "production cutover manifest is not canonical JSON"
+        )
+    manifest = validate_manifest(document)
+    read_runtime_target_derivation_receipt(
+        manifest,
+        manifest_path=path,
+        owner_uid=owner_uid,
+    )
+    return manifest, hashlib.sha256(payload).hexdigest()
+
+
+def read_runtime_target_derivation_receipt(
+    manifest: Mapping[str, Any],
+    *,
+    manifest_path: Path,
+    owner_uid: int = 0,
+) -> bytes:
+    """Reopen the exact root-only receipt for an already validated manifest."""
+
+    return _validate_runtime_target_derivation_receipt_for_manifest(
+        manifest,
+        manifest_path=manifest_path,
+        owner_uid=owner_uid,
+    )
+
+
+def _validate_runtime_target_derivation_receipt_for_manifest(
+    manifest: Mapping[str, Any],
+    *,
+    manifest_path: Path,
+    owner_uid: int,
+) -> bytes:
+    """Reopen the template-builder receipt before accepting final manifest IO."""
+
+    pending = json.loads(canonical_json_bytes(dict(manifest)))
+    pending["artifacts"]["cutover_approval_sha256"] = ZERO_SHA256
+    pending_payload = canonical_json_bytes(pending)
+    try:
+        receipt_path = runtime_targets.runtime_target_derivation_receipt_path(
+            manifest_path
+        )
+        receipt_raw = read_secure_bytes(
+            receipt_path,
+            label="runtime target derivation receipt",
+            owner_uid=owner_uid,
+            max_size=64 * 1024,
+        )
+        receipt = json.loads(
+            receipt_raw.decode("utf-8"),
+            object_pairs_hook=_strict_object,
+        )
+    except (
+        OSError,
+        SecureFileError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        runtime_targets.ConvergenceRuntimeTargetDescriptorError,
+    ) as exc:
+        raise CutoverContractError(
+            "runtime target derivation receipt is unavailable or unsafe"
+        ) from exc
+    if receipt_raw != canonical_json_bytes(receipt):
+        raise CutoverContractError(
+            "runtime target derivation receipt is not canonical JSON"
+        )
+    try:
+        runtime_targets.validate_runtime_target_derivation_receipt(
+            receipt,
+            campaign_id=manifest["campaign_id"],
+            operation_id=manifest["operation_id"],
+            release_sha=manifest["release_sha"],
+            template_sha256=hashlib.sha256(pending_payload).hexdigest(),
+            authorization_basis_sha256=authorization_basis_sha256(pending),
+            canonical_compose_sha256=manifest["artifacts"]["shadow_compose_sha256"],
+            convergence_runtime_targets=manifest["artifacts"][
+                "convergence_runtime_targets"
+            ],
+            label="runtime target derivation receipt",
+        )
+    except (
+        KeyError,
+        runtime_targets.ConvergenceRuntimeTargetDescriptorError,
+    ) as exc:
+        raise CutoverContractError(
+            "runtime target derivation receipt does not bind the final manifest"
+        ) from exc
+    return receipt_raw
 
 
 def _agent_args(
@@ -1317,6 +1512,8 @@ def _agent_args(
         agent.extend(["--payload-transport", "object-storage-private-versioned-age"])
     return [
         "/usr/bin/ssh",
+        "-F",
+        "/dev/null",
         "-o",
         "BatchMode=yes",
         "-o",
@@ -1330,7 +1527,7 @@ def _agent_args(
         "-p",
         str(topology["ssh_port"]),
         f"{topology['ssh_user']}@{topology['host']}",
-        *agent,
+        shlex.join(agent),
     ]
 
 
@@ -1819,6 +2016,809 @@ def _validate_phase_verification_result(
     )
 
 
+@dataclass(frozen=True)
+class ReleaseVerifierProcessIdentity:
+    pid: int
+    parent_pid: int
+    process_group: int
+    session_id: int
+    start_time: int
+    state: str
+
+    @property
+    def key(self) -> tuple[int, int]:
+        return self.pid, self.start_time
+
+
+def _release_verifier_process_identity(
+    pid: int,
+) -> ReleaseVerifierProcessIdentity | None:
+    try:
+        payload = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+        fields = payload[payload.rindex(") ") + 2 :].split()
+        if len(fields) < 20:
+            raise ValueError("short process stat")
+        return ReleaseVerifierProcessIdentity(
+            pid=pid,
+            parent_pid=int(fields[1], 10),
+            process_group=int(fields[2], 10),
+            session_id=int(fields[3], 10),
+            start_time=int(fields[19], 10),
+            state=fields[0],
+        )
+    except (FileNotFoundError, ProcessLookupError):
+        return None
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise CutoverContractError(
+            "release-bound phase verifier process identity is unavailable"
+        ) from exc
+
+
+def _read_release_verifier_process_identity(
+    pid: int,
+) -> ReleaseVerifierProcessIdentity:
+    identity = _release_verifier_process_identity(pid)
+    if identity is None:
+        raise CutoverContractError(
+            "release-bound phase verifier root identity is unavailable"
+        )
+    return identity
+
+
+def _release_verifier_process_snapshot(
+) -> dict[int, ReleaseVerifierProcessIdentity]:
+    observed: dict[int, ReleaseVerifierProcessIdentity] = {}
+    scanned = 0
+    try:
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdecimal():
+                continue
+            scanned += 1
+            if scanned > MAX_RELEASE_VERIFIER_PROCESS_SNAPSHOT_MEMBERS:
+                raise CutoverContractError(
+                    "release-bound phase verifier process inventory "
+                    "exceeds its member bound"
+                )
+            identity = _release_verifier_process_identity(
+                int(entry.name, 10)
+            )
+            if identity is not None:
+                observed[identity.pid] = identity
+    except CutoverContractError:
+        raise
+    except OSError as exc:
+        raise CutoverContractError(
+            "release-bound phase verifier process inventory is unavailable"
+        ) from exc
+    return observed
+
+
+def _enable_release_verifier_subreaper() -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise CutoverContractError(
+            "release-bound phase verifier child subreaper setup failed "
+            f"with errno {error}"
+        )
+
+
+def _release_verifier_child_baseline() -> frozenset[tuple[int, int]]:
+    owner = os.getpid()
+    return frozenset(
+        identity.key
+        for identity in _release_verifier_process_snapshot().values()
+        if identity.parent_pid == owner
+    )
+
+
+def _owned_release_verifier_processes(
+    root_identity: ReleaseVerifierProcessIdentity,
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+    tracked: dict[
+        tuple[int, int],
+        ReleaseVerifierProcessIdentity,
+    ],
+    include_zombies: bool = False,
+) -> tuple[ReleaseVerifierProcessIdentity, ...]:
+    snapshot = _release_verifier_process_snapshot()
+    owned_ids: set[int] = set()
+    observed_root = snapshot.get(root_identity.pid)
+    if (
+        observed_root is not None
+        and observed_root.start_time == root_identity.start_time
+    ):
+        owned_ids.add(root_identity.pid)
+    for identity in tracked.values():
+        current = snapshot.get(identity.pid)
+        if (
+            current is not None
+            and current.start_time == identity.start_time
+        ):
+            owned_ids.add(identity.pid)
+    owner = os.getpid()
+    for identity in snapshot.values():
+        if (
+            identity.pid != root_identity.pid
+            and identity.parent_pid == owner
+            and identity.key not in baseline_children
+        ):
+            owned_ids.add(identity.pid)
+    if len(owned_ids) > MAX_RELEASE_VERIFIER_PROCESS_TREE_MEMBERS:
+        raise CutoverContractError(
+            "release-bound phase verifier subprocess tree "
+            "exceeds its member bound"
+        )
+    children: dict[int, list[int]] = {}
+    for identity in snapshot.values():
+        children.setdefault(identity.parent_pid, []).append(identity.pid)
+    pending = list(owned_ids)
+    while pending:
+        parent = pending.pop()
+        for child in children.get(parent, ()):
+            if child in owned_ids:
+                continue
+            owned_ids.add(child)
+            if len(owned_ids) > MAX_RELEASE_VERIFIER_PROCESS_TREE_MEMBERS:
+                raise CutoverContractError(
+                    "release-bound phase verifier subprocess tree "
+                    "exceeds its member bound"
+                )
+            pending.append(child)
+    owned = tuple(
+        identity
+        for pid, identity in snapshot.items()
+        if pid in owned_ids
+    )
+    for identity in owned:
+        tracked[identity.key] = identity
+    if len(tracked) > MAX_RELEASE_VERIFIER_PROCESS_TREE_MEMBERS:
+        raise CutoverContractError(
+            "release-bound phase verifier tracked subprocess tree "
+            "exceeds its member bound"
+        )
+    return tuple(
+        identity
+        for identity in owned
+        if include_zombies or identity.state != "Z"
+    )
+
+
+def _release_verifier_identity_is_live(
+    identity: ReleaseVerifierProcessIdentity,
+) -> bool:
+    current = _release_verifier_process_identity(identity.pid)
+    return (
+        current is not None
+        and current.start_time == identity.start_time
+        and current.state != "Z"
+    )
+
+
+def _reap_release_verifier_zombies(
+    *,
+    root_identity: ReleaseVerifierProcessIdentity,
+    baseline_children: frozenset[tuple[int, int]],
+    tracked: dict[
+        tuple[int, int],
+        ReleaseVerifierProcessIdentity,
+    ],
+) -> None:
+    owner = os.getpid()
+    while True:
+        reaped = False
+        for identity in _owned_release_verifier_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+            include_zombies=True,
+        ):
+            if (
+                identity.key == root_identity.key
+                or identity.parent_pid != owner
+                or identity.state != "Z"
+            ):
+                continue
+            try:
+                waited, _status = os.waitpid(identity.pid, os.WNOHANG)
+            except (ChildProcessError, ProcessLookupError):
+                continue
+            except OSError as exc:
+                raise CutoverContractError(
+                    "release-bound phase verifier zombie could not be reaped"
+                ) from exc
+            if waited not in {0, identity.pid}:
+                raise CutoverContractError(
+                    "release-bound phase verifier reaped an unexpected PID"
+                )
+            reaped |= waited == identity.pid
+        if not reaped:
+            return
+
+
+def _raise_release_verifier_cleanup_error(
+    label: str,
+    error: BaseException,
+) -> None:
+    if isinstance(error, (KeyboardInterrupt, SystemExit)):
+        raise error
+    if isinstance(error, CutoverContractError):
+        raise error
+    raise CutoverContractError(
+        f"release-bound phase verifier {label} cleanup failed"
+    ) from error
+
+
+def _note_release_verifier_cleanup_error(
+    original_error: BaseException,
+    label: str,
+    error: BaseException,
+) -> None:
+    original_error.add_note(
+        "additional release-bound phase verifier cleanup failure "
+        f"during {label}: {type(error).__name__}"
+    )
+
+
+def _signal_release_verifier_handle(
+    descriptor: int,
+    signum: int,
+) -> None:
+    try:
+        signal.pidfd_send_signal(descriptor, signum)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise CutoverContractError(
+            "release-bound phase verifier identity signal failed"
+        ) from exc
+
+
+def _signal_release_verifier_identity(
+    identity: ReleaseVerifierProcessIdentity,
+    signum: int,
+) -> None:
+    current = _release_verifier_process_identity(identity.pid)
+    if current is None or current.start_time != identity.start_time:
+        return
+    try:
+        descriptor = os.pidfd_open(identity.pid, 0)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise CutoverContractError(
+            "release-bound phase verifier identity handle cannot be opened"
+        ) from exc
+    try:
+        refreshed = _release_verifier_process_identity(identity.pid)
+        if refreshed is None or refreshed.start_time != identity.start_time:
+            return
+        _signal_release_verifier_handle(descriptor, signum)
+    finally:
+        original_error = sys.exception()
+        try:
+            os.close(descriptor)
+        except BaseException as exc:
+            if original_error is not None:
+                _note_release_verifier_cleanup_error(
+                    original_error,
+                    "temporary identity handle",
+                    exc,
+                )
+            else:
+                _raise_release_verifier_cleanup_error(
+                    "temporary identity handle",
+                    exc,
+                )
+
+
+def _signal_owned_release_verifier_process(
+    identity: ReleaseVerifierProcessIdentity,
+    signum: int,
+    *,
+    root_identity: ReleaseVerifierProcessIdentity,
+    root_descriptor: int | None,
+) -> None:
+    if identity.key == root_identity.key and root_descriptor is not None:
+        _signal_release_verifier_handle(root_descriptor, signum)
+        return
+    _signal_release_verifier_identity(identity, signum)
+
+
+def _terminate_release_verifier_tree(
+    process: subprocess.Popen[bytes],
+    *,
+    root_identity: ReleaseVerifierProcessIdentity,
+    root_descriptor: int | None,
+    baseline_children: frozenset[tuple[int, int]],
+    tracked: dict[
+        tuple[int, int],
+        ReleaseVerifierProcessIdentity,
+    ],
+) -> bool:
+    descendant_observed = any(
+        key != root_identity.key for key in tracked
+    )
+
+    def refresh(
+        *,
+        include_zombies: bool = False,
+    ) -> tuple[ReleaseVerifierProcessIdentity, ...]:
+        nonlocal descendant_observed
+        current = _owned_release_verifier_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+            include_zombies=include_zombies,
+        )
+        descendant_observed = descendant_observed or any(
+            identity.key != root_identity.key for identity in current
+        )
+        return current
+
+    def signal_live(signum: int) -> None:
+        current = refresh()
+        for identity in sorted(
+            current,
+            key=lambda item: item.pid,
+            reverse=True,
+        ):
+            _signal_owned_release_verifier_process(
+                identity,
+                signum,
+                root_identity=root_identity,
+                root_descriptor=root_descriptor,
+            )
+        if (
+            root_descriptor is not None
+            and process.poll() is None
+            and not any(
+                identity.key == root_identity.key
+                for identity in current
+            )
+        ):
+            _signal_release_verifier_handle(root_descriptor, signum)
+
+    signal_live(signal.SIGTERM)
+    deadline = time.monotonic() + RELEASE_VERIFIER_TERM_SECONDS
+    while time.monotonic() < deadline:
+        process.poll()
+        _reap_release_verifier_zombies(
+            root_identity=root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+        current = refresh()
+        if process.poll() is not None and not any(
+            _release_verifier_identity_is_live(identity)
+            for identity in current
+        ):
+            break
+        signal_live(signal.SIGTERM)
+        time.sleep(
+            min(
+                RELEASE_VERIFIER_POLL_SECONDS,
+                max(0.0, deadline - time.monotonic()),
+            )
+        )
+    signal_live(signal.SIGKILL)
+    try:
+        process.wait(timeout=RELEASE_VERIFIER_TERM_SECONDS)
+    except subprocess.TimeoutExpired:
+        signal_live(signal.SIGKILL)
+        try:
+            process.wait(timeout=RELEASE_VERIFIER_TERM_SECONDS)
+        except subprocess.TimeoutExpired as exc:
+            raise CutoverContractError(
+                "release-bound phase verifier root survived cleanup"
+            ) from exc
+
+    absence_deadline = (
+        time.monotonic()
+        + RELEASE_VERIFIER_TERM_SECONDS
+        + RELEASE_VERIFIER_TREE_QUIESCENCE_SECONDS
+    )
+    stable_since: float | None = None
+    while time.monotonic() < absence_deadline:
+        _reap_release_verifier_zombies(
+            root_identity=root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+        residue = refresh(include_zombies=True)
+        if residue:
+            stable_since = None
+            for identity in sorted(
+                residue,
+                key=lambda item: item.pid,
+                reverse=True,
+            ):
+                if _release_verifier_identity_is_live(identity):
+                    _signal_owned_release_verifier_process(
+                        identity,
+                        signal.SIGKILL,
+                        root_identity=root_identity,
+                        root_descriptor=root_descriptor,
+                    )
+        elif stable_since is None:
+            stable_since = time.monotonic()
+        elif (
+            time.monotonic() - stable_since
+            >= RELEASE_VERIFIER_TREE_QUIESCENCE_SECONDS
+        ):
+            return descendant_observed
+        time.sleep(
+            min(
+                RELEASE_VERIFIER_POLL_SECONDS,
+                max(0.0, absence_deadline - time.monotonic()),
+            )
+        )
+    _reap_release_verifier_zombies(
+        root_identity=root_identity,
+        baseline_children=baseline_children,
+        tracked=tracked,
+    )
+    if refresh(include_zombies=True):
+        raise CutoverContractError(
+            "release-bound phase verifier subprocess tree survived cleanup"
+        )
+    return descendant_observed
+
+
+def _terminate_unidentified_release_verifier_root(
+    process: subprocess.Popen[bytes],
+    *,
+    root_descriptor: int | None,
+    baseline_children: frozenset[tuple[int, int]],
+    tracked: dict[
+        tuple[int, int],
+        ReleaseVerifierProcessIdentity,
+    ],
+) -> None:
+    descriptor = root_descriptor
+    close_descriptor = False
+    if descriptor is None:
+        try:
+            descriptor = os.pidfd_open(process.pid, 0)
+            close_descriptor = True
+        except ProcessLookupError:
+            descriptor = None
+        except OSError as exc:
+            raise CutoverContractError(
+                "release-bound phase verifier root handle cannot be "
+                "reacquired for cleanup"
+            ) from exc
+    try:
+        if descriptor is not None:
+            _signal_release_verifier_handle(descriptor, signal.SIGKILL)
+        try:
+            process.wait(timeout=RELEASE_VERIFIER_TERM_SECONDS)
+        except subprocess.TimeoutExpired:
+            if descriptor is not None:
+                _signal_release_verifier_handle(
+                    descriptor,
+                    signal.SIGKILL,
+                )
+            try:
+                process.wait(timeout=RELEASE_VERIFIER_TERM_SECONDS)
+            except subprocess.TimeoutExpired as second_exc:
+                raise CutoverContractError(
+                    "release-bound phase verifier unidentified root "
+                    "survived cleanup"
+                ) from second_exc
+        placeholder = ReleaseVerifierProcessIdentity(
+            pid=process.pid,
+            parent_pid=os.getpid(),
+            process_group=process.pid,
+            session_id=process.pid,
+            start_time=-1,
+            state="?",
+        )
+        _terminate_release_verifier_tree(
+            process,
+            root_identity=placeholder,
+            root_descriptor=descriptor,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+    finally:
+        if close_descriptor and descriptor is not None:
+            original_error = sys.exception()
+            try:
+                os.close(descriptor)
+            except BaseException as exc:
+                if original_error is not None:
+                    _note_release_verifier_cleanup_error(
+                        original_error,
+                        "reacquired root identity handle",
+                        exc,
+                    )
+                else:
+                    _raise_release_verifier_cleanup_error(
+                        "reacquired root identity handle",
+                        exc,
+                    )
+
+
+def _run_bounded_release_verifier_locked(
+    arguments: Sequence[str],
+    *,
+    timeout: float,
+    max_stream_bytes: int,
+) -> subprocess.CompletedProcess[bytes]:
+    _enable_release_verifier_subreaper()
+    baseline_children = _release_verifier_child_baseline()
+    process: subprocess.Popen[bytes] | None = None
+    root_identity: ReleaseVerifierProcessIdentity | None = None
+    root_descriptor: int | None = None
+    tracked: dict[
+        tuple[int, int],
+        ReleaseVerifierProcessIdentity,
+    ] = {}
+    selector: selectors.BaseSelector | None = None
+    streams: dict[str, Any] = {}
+    buffers = {"stdout": bytearray(), "stderr": bytearray()}
+    tree_cleaned = False
+    descendant_observed = False
+    try:
+        process = subprocess.Popen(  # noqa: S603
+            list(arguments),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={
+                "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
+                "HOME": "/nonexistent",
+                "LANG": "C.UTF-8",
+                "LC_ALL": "C.UTF-8",
+                "PYTHONDONTWRITEBYTECODE": "1",
+            },
+            close_fds=True,
+            shell=False,
+            start_new_session=True,
+        )
+        root_descriptor = os.pidfd_open(process.pid, 0)
+        root_identity = _read_release_verifier_process_identity(process.pid)
+        tracked[root_identity.key] = root_identity
+        if process.stdout is None or process.stderr is None:
+            raise CutoverContractError(
+                "release-bound phase verifier lacks bounded pipes"
+            )
+        streams = {
+            "stdout": process.stdout,
+            "stderr": process.stderr,
+        }
+        selector = selectors.DefaultSelector()
+        for label, stream in streams.items():
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, label)
+        deadline = time.monotonic() + timeout
+        while selector.get_map():
+            current = _owned_release_verifier_processes(
+                root_identity,
+                baseline_children=baseline_children,
+                tracked=tracked,
+            )
+            descendant_observed = descendant_observed or any(
+                identity.key != root_identity.key for identity in current
+            )
+            _reap_release_verifier_zombies(
+                root_identity=root_identity,
+                baseline_children=baseline_children,
+                tracked=tracked,
+            )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise CutoverContractError(
+                    "release-bound phase verifier timed out"
+                )
+            events = selector.select(
+                min(RELEASE_VERIFIER_POLL_SECONDS, remaining)
+            )
+            if not events:
+                if process.poll() is not None and not tree_cleaned:
+                    descendant_observed |= (
+                        _terminate_release_verifier_tree(
+                            process,
+                            root_identity=root_identity,
+                            root_descriptor=root_descriptor,
+                            baseline_children=baseline_children,
+                            tracked=tracked,
+                        )
+                    )
+                    tree_cleaned = True
+                continue
+            for key, _mask in events:
+                stream = key.fileobj
+                label = key.data
+                buffer = buffers[label]
+                try:
+                    chunk = os.read(
+                        stream.fileno(),
+                        min(
+                            65536,
+                            max_stream_bytes + 1 - len(buffer),
+                        ),
+                    )
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(stream)
+                    continue
+                buffer.extend(chunk)
+                if len(buffer) > max_stream_bytes:
+                    raise CutoverContractError(
+                        "release-bound phase verifier output is oversized"
+                    )
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise CutoverContractError(
+                "release-bound phase verifier timed out"
+            )
+        try:
+            returncode = process.wait(timeout=remaining)
+        except subprocess.TimeoutExpired as exc:
+            raise CutoverContractError(
+                "release-bound phase verifier timed out"
+            ) from exc
+        if not tree_cleaned:
+            descendant_observed |= _terminate_release_verifier_tree(
+                process,
+                root_identity=root_identity,
+                root_descriptor=root_descriptor,
+                baseline_children=baseline_children,
+                tracked=tracked,
+            )
+            tree_cleaned = True
+        if descendant_observed:
+            raise CutoverContractError(
+                "release-bound phase verifier left a descendant process"
+            )
+        return subprocess.CompletedProcess(
+            list(arguments),
+            returncode,
+            bytes(buffers["stdout"]),
+            bytes(buffers["stderr"]),
+        )
+    except CutoverContractError:
+        raise
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise CutoverContractError(
+            "release-bound phase verifier could not complete"
+        ) from exc
+    finally:
+        original_error = sys.exception()
+        cleanup_errors: list[tuple[str, BaseException]] = []
+        if process is not None and not tree_cleaned:
+            for attempt in range(2):
+                try:
+                    if root_identity is None:
+                        _terminate_unidentified_release_verifier_root(
+                            process,
+                            root_descriptor=root_descriptor,
+                            baseline_children=baseline_children,
+                            tracked=tracked,
+                        )
+                    else:
+                        _terminate_release_verifier_tree(
+                            process,
+                            root_identity=root_identity,
+                            root_descriptor=root_descriptor,
+                            baseline_children=baseline_children,
+                            tracked=tracked,
+                        )
+                    tree_cleaned = True
+                    break
+                except BaseException as exc:
+                    cleanup_errors.append(
+                        (f"subprocess tree attempt {attempt + 1}", exc)
+                    )
+        if selector is not None:
+            try:
+                selector.close()
+            except BaseException as exc:
+                cleanup_errors.append(("selector", exc))
+        cleanup_streams = dict(streams)
+        if process is not None:
+            for label in ("stdout", "stderr"):
+                stream = getattr(process, label, None)
+                if stream is not None:
+                    cleanup_streams.setdefault(label, stream)
+        for label, stream in cleanup_streams.items():
+            try:
+                stream.close()
+            except BaseException as exc:
+                cleanup_errors.append((f"{label} stream", exc))
+        if root_descriptor is not None:
+            try:
+                os.close(root_descriptor)
+            except BaseException as exc:
+                cleanup_errors.append(("root identity handle", exc))
+        if cleanup_errors:
+            if original_error is not None:
+                for label, error in cleanup_errors:
+                    _note_release_verifier_cleanup_error(
+                        original_error,
+                        label,
+                        error,
+                    )
+            else:
+                label, error = cleanup_errors[0]
+                _raise_release_verifier_cleanup_error(label, error)
+
+
+def _run_bounded_release_verifier(
+    arguments: Sequence[str],
+    *,
+    timeout: float = RELEASE_VERIFIER_TIMEOUT_SECONDS,
+    max_stream_bytes: int = MAX_RELEASE_VERIFIER_STREAM_BYTES,
+) -> subprocess.CompletedProcess[bytes]:
+    if (
+        not arguments
+        or any(
+            not isinstance(argument, str) or not argument
+            for argument in arguments
+        )
+        or type(timeout) not in {int, float}
+        or not math.isfinite(timeout)
+        or timeout <= 0
+        or type(max_stream_bytes) is not int
+        or max_stream_bytes < 1
+    ):
+        raise CutoverContractError(
+            "release-bound phase verifier limits are invalid"
+        )
+    with _RELEASE_VERIFIER_RUN_LOCK:
+        return _run_bounded_release_verifier_locked(
+            arguments,
+            timeout=float(timeout),
+            max_stream_bytes=max_stream_bytes,
+        )
+
+
+def _release_verifier_arguments(
+    *,
+    verifier_path: Path,
+    phase: str,
+    evidence_path: Path,
+    manifest_path: Path,
+    approval_path: Path,
+    approval_policy_path: Path,
+    role_validation: Sequence[str],
+    claim_source: Sequence[str],
+    prior_phase_evidence: Sequence[str],
+) -> list[str]:
+    argv = [
+        PYTHON,
+        "-I",
+        "-B",
+        str(verifier_path),
+        "--evidence",
+        str(evidence_path),
+        "--manifest",
+        str(manifest_path),
+        "--approval",
+        str(approval_path),
+        "--approval-policy",
+        str(approval_policy_path),
+        "--expected-phase",
+        phase,
+    ]
+    for flag, values, label in (
+        ("--role-validation", role_validation, "role validation"),
+        ("--claim-source", claim_source, "claim source"),
+        (
+            "--prior-phase-evidence",
+            prior_phase_evidence,
+            "prior phase evidence",
+        ),
+    ):
+        for value in _absolute_mapping_args(list(values), label=label):
+            argv.extend((flag, value))
+    return argv
+
+
 def _run_release_phase_verifier(
     *,
     phase: str,
@@ -1859,50 +2859,18 @@ def _run_release_phase_verifier(
         raise CutoverContractError(
             "release-bound phase verifier differs from the manifest"
         )
-    argv = [
-        sys.executable,
-        "-I",
-        str(verifier_path),
-        "--evidence",
-        str(evidence_path),
-        "--manifest",
-        str(manifest_path),
-        "--approval",
-        str(approval_path),
-        "--approval-policy",
-        str(approval_policy_path),
-        "--expected-phase",
-        phase,
-    ]
-    for flag, values, label in (
-        ("--role-validation", role_validation, "role validation"),
-        ("--claim-source", claim_source, "claim source"),
-        (
-            "--prior-phase-evidence",
-            prior_phase_evidence,
-            "prior phase evidence",
-        ),
-    ):
-        for value in _absolute_mapping_args(values, label=label):
-            argv.extend((flag, value))
-    try:
-        completed = subprocess.run(
-            argv,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-            timeout=120,
-            env={
-                "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
-                "LANG": "C.UTF-8",
-                "LC_ALL": "C.UTF-8",
-            },
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise CutoverContractError(
-            "release-bound phase verifier could not complete"
-        ) from exc
+    argv = _release_verifier_arguments(
+        verifier_path=verifier_path,
+        phase=phase,
+        evidence_path=evidence_path,
+        manifest_path=manifest_path,
+        approval_path=approval_path,
+        approval_policy_path=approval_policy_path,
+        role_validation=role_validation,
+        claim_source=claim_source,
+        prior_phase_evidence=prior_phase_evidence,
+    )
+    completed = _run_bounded_release_verifier(argv)
     if (
         completed.returncode != 0
         or completed.stderr

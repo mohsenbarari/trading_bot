@@ -12,25 +12,34 @@ from __future__ import annotations
 import argparse
 import ast
 import ctypes
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 import errno
 import fcntl
 import hashlib
 import ipaddress
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
+import select
 import selectors
 import shutil
+import signal
 import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import time
-from typing import Any, BinaryIO, Callable, Mapping
+from typing import Any, BinaryIO, Callable, Iterator, Mapping, Sequence
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from core.docker_image_identity import (
     DockerImageIdentityError,
@@ -81,11 +90,28 @@ IMAGE_ARTIFACT_KINDS = {
     "nginx": "nginx-image-archive",
 }
 DOCKER = "/usr/bin/docker"
+DOCKER_HOST_ARGUMENT = "--host=unix:///run/docker.sock"
+DOCKER_BASE = (DOCKER, DOCKER_HOST_ARGUMENT)
+DOCKER_API_VERSION = "1.52"
 MAX_MANIFEST_BYTES = 256 * 1024
 MAX_ARCHIVE_MEMBERS = 200_000
 MAX_COMMAND_OUTPUT_BYTES = 2 * 1024 * 1024
 MAX_BOOTSTRAP_BYTES = 4 * 1024 * 1024
 MAX_STATE_BYTES = 256 * 1024
+MAX_STREAM_OUTPUT_BYTES = MAX_PAYLOAD_BYTES
+PROCESS_TERM_GRACE_SECONDS = 2.0
+PROCESS_KILL_GRACE_SECONDS = 2.0
+PROCESS_TREE_QUIESCENCE_SECONDS = 0.10
+PROCESS_POLL_SECONDS = 0.05
+MAX_PROCESS_SNAPSHOT_MEMBERS = 65_536
+MAX_PROCESS_TREE_MEMBERS = 8_192
+PR_SET_CHILD_SUBREAPER = 36
+CONTROLLER_WATCHDOG_SIGNAL = signal.SIGUSR1
+LATE_IMAGE_RECONCILIATION_ATTEMPTS = 20
+LATE_IMAGE_RECONCILIATION_INTERVAL_SECONDS = 0.10
+LATE_IMAGE_RECONCILIATION_SECONDS = 30.0
+DOCKER_INVENTORY_SCAN_SECONDS = 300.0
+MAX_LOCAL_IMAGE_IDS = 4096
 BOOTSTRAP_RELATIVE_PATH = Path("bootstrap/wa-ir-production-agent.pyz")
 _MATERIALIZING_PREFIX = ".wa-ir-materialize-"
 DATABASE_FINGERPRINT_ALGORITHM = (
@@ -251,6 +277,7 @@ _SAFE_ENV = {
     "LANG": "C.UTF-8",
     "LC_ALL": "C.UTF-8",
     "DOCKER_CONFIG": "/nonexistent",
+    "DOCKER_API_VERSION": DOCKER_API_VERSION,
 }
 _SAFE_GIT_ENV = {
     **_SAFE_ENV,
@@ -259,12 +286,47 @@ _SAFE_GIT_ENV = {
     "GIT_CONFIG_SYSTEM": "/dev/null",
     "GIT_TERMINAL_PROMPT": "0",
     "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_NO_REPLACE_OBJECTS": "1",
 }
 GIT = "/usr/bin/git"
+GIT_CONFIG_ARGUMENTS = (
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.untrackedCache=false",
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "core.fileMode=true",
+)
+GIT_BASE = (
+    GIT,
+    "--no-replace-objects",
+    "--no-optional-locks",
+    *GIT_CONFIG_ARGUMENTS,
+)
 
 
 class ProductionOperationError(RuntimeError):
     """A redacted fail-closed production operation error."""
+
+
+class ProductionOperationCancellation(ProductionOperationError):
+    """Controller liveness or an operator signal cancelled mutation."""
+
+
+@dataclass(frozen=True)
+class ProcessIdentity:
+    pid: int
+    parent_pid: int
+    process_group: int
+    session_id: int
+    start_time: int
+    state: str
+
+    @property
+    def key(self) -> tuple[int, int]:
+        return self.pid, self.start_time
 
 
 @dataclass(frozen=True)
@@ -591,9 +653,21 @@ def _write_state(path: Path, state: Mapping[str, Any]) -> None:
     except OSError as exc:
         raise ProductionOperationError("operation state could not be persisted") from exc
     finally:
-        if descriptor >= 0:
-            os.close(descriptor)
-        _reconcile_state_temporaries(path)
+        active_error = sys.exc_info()[1]
+        cleanup_error: BaseException | None = None
+        try:
+            with _late_reconciliation_scope():
+                if descriptor >= 0:
+                    os.close(descriptor)
+                _reconcile_state_temporaries(path)
+        except BaseException as exc:
+            cleanup_error = exc
+        if cleanup_error is not None:
+            if active_error is None:
+                raise cleanup_error
+            active_error.add_note(
+                "operation-state reconciliation also failed closed"
+            )
 
 
 def _load_or_create_state(
@@ -1516,19 +1590,28 @@ def _write_or_verify_file(
         )
         if observed != (expected_sha256, expected_bytes):
             raise ProductionOperationError("published materialized file differs")
-    except Exception:
-        if descriptor >= 0:
-            os.close(descriptor)
-            descriptor = -1
-        _reconcile_materializing_file(
-            temporary,
-            destination,
-            required_uid=required_uid,
-        )
+    except BaseException as original:
+        try:
+            with _late_reconciliation_scope():
+                if descriptor >= 0:
+                    os.close(descriptor)
+                    descriptor = -1
+                _reconcile_materializing_file(
+                    temporary,
+                    destination,
+                    required_uid=required_uid,
+                )
+        except BaseException:
+            original.add_note(
+                "materializing-file reconciliation also failed closed"
+            )
         raise
     finally:
         if descriptor >= 0:
-            os.close(descriptor)
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
     return "created"
 
 
@@ -2476,6 +2559,860 @@ def materialize_stage(
     }
 
 
+class ControllerAuthority:
+    """Watch one anonymous EOF-only pipe owned by the live controller."""
+
+    def __init__(self, control_fd: int):
+        if (
+            type(control_fd) is not int
+            or control_fd < 0
+            or threading.current_thread() is not threading.main_thread()
+        ):
+            raise ProductionOperationError(
+                "mutating operation requires a main-thread controller pipe"
+            )
+        descriptor = -1
+        try:
+            descriptor = os.dup(control_fd)
+            metadata = os.fstat(descriptor)
+            flags = fcntl.fcntl(descriptor, fcntl.F_GETFL)
+            link = os.readlink(f"/proc/self/fd/{descriptor}")
+        except OSError as exc:
+            if descriptor >= 0:
+                os.close(descriptor)
+            raise ProductionOperationError(
+                "controller liveness pipe is unavailable"
+            ) from exc
+        if (
+            not stat.S_ISFIFO(metadata.st_mode)
+            or flags & os.O_ACCMODE != os.O_RDONLY
+            or link != f"pipe:[{metadata.st_ino}]"
+        ):
+            os.close(descriptor)
+            raise ProductionOperationError(
+                "controller liveness descriptor is not an anonymous "
+                "read-only pipe"
+            )
+        try:
+            process_descriptors = tuple(Path("/proc/self/fd").iterdir())
+        except OSError as exc:
+            os.close(descriptor)
+            raise ProductionOperationError(
+                "controller liveness descriptor closure is unavailable"
+            ) from exc
+        for entry in process_descriptors:
+            if (
+                not entry.name.isdecimal()
+                or int(entry.name, 10) in {control_fd, descriptor}
+            ):
+                continue
+            candidate = int(entry.name, 10)
+            try:
+                candidate_metadata = os.fstat(candidate)
+                candidate_flags = fcntl.fcntl(candidate, fcntl.F_GETFL)
+            except OSError:
+                continue
+            if (
+                (candidate_metadata.st_dev, candidate_metadata.st_ino)
+                == (metadata.st_dev, metadata.st_ino)
+                and candidate_flags & os.O_ACCMODE
+                in {os.O_WRONLY, os.O_RDWR}
+            ):
+                os.close(descriptor)
+                raise ProductionOperationError(
+                    "controller liveness writer is retained locally"
+                )
+        try:
+            os.set_inheritable(descriptor, False)
+            os.set_blocking(descriptor, False)
+        except OSError as exc:
+            os.close(descriptor)
+            raise ProductionOperationError(
+                "controller liveness pipe cannot be secured"
+            ) from exc
+        self.descriptor = descriptor
+        self.stop_event = threading.Event()
+        self.lost_event = threading.Event()
+        self.started = False
+        self.failure = "controller liveness was lost"
+        self.thread = threading.Thread(
+            target=self._watch,
+            name="wa-ir-controller-liveness",
+            daemon=True,
+        )
+
+    def latch(self, failure: str) -> None:
+        if not self.lost_event.is_set():
+            self.failure = failure
+            self.lost_event.set()
+
+    def _watch(self) -> None:
+        while not self.stop_event.is_set():
+            try:
+                readable, _, _ = select.select(
+                    [self.descriptor],
+                    [],
+                    [],
+                    PROCESS_POLL_SECONDS,
+                )
+                if not readable:
+                    continue
+                chunk = os.read(self.descriptor, 1)
+            except (OSError, ValueError):
+                if self.stop_event.is_set():
+                    return
+                chunk = b""
+            self.latch(
+                (
+                    "controller liveness stream carried forbidden data"
+                    if chunk
+                    else "controller liveness was lost"
+                )
+            )
+            try:
+                os.kill(os.getpid(), CONTROLLER_WATCHDOG_SIGNAL)
+            except ProcessLookupError:
+                pass
+            return
+
+    def start(self) -> None:
+        readable, _, _ = select.select([self.descriptor], [], [], 0)
+        if readable:
+            chunk = os.read(self.descriptor, 1)
+            self.latch(
+                (
+                    "controller liveness stream carried forbidden data"
+                    if chunk
+                    else "controller liveness was lost before mutation"
+                )
+            )
+            raise ProductionOperationCancellation(self.failure)
+        self.started = True
+        try:
+            self.thread.start()
+        except BaseException:
+            self.started = False
+            raise
+
+    def check(self) -> None:
+        if self.lost_event.is_set():
+            raise ProductionOperationCancellation(self.failure)
+
+    def stop(self) -> None:
+        self.stop_event.set()
+        try:
+            if self.started:
+                self.thread.join(timeout=1.0)
+        finally:
+            try:
+                os.close(self.descriptor)
+            except OSError:
+                pass
+        if self.started and self.thread.is_alive():
+            raise ProductionOperationError(
+                "controller liveness watcher did not stop"
+            )
+
+
+_ACTIVE_CONTROLLER_AUTHORITY: ControllerAuthority | None = None
+_LATE_RECONCILIATION_DEPTH = 0
+_BOUNDED_COMMAND_LOCK = threading.Lock()
+
+
+@contextmanager
+def _controller_authority_guard(control_fd: int) -> Iterator[ControllerAuthority]:
+    global _ACTIVE_CONTROLLER_AUTHORITY
+    if _ACTIVE_CONTROLLER_AUTHORITY is not None:
+        raise ProductionOperationError(
+            "controller liveness authority cannot be nested"
+        )
+    authority = ControllerAuthority(control_fd)
+    previous = {
+        signum: signal.getsignal(signum)
+        for signum in (
+            signal.SIGHUP,
+            signal.SIGINT,
+            signal.SIGTERM,
+            CONTROLLER_WATCHDOG_SIGNAL,
+        )
+    }
+    cancellation_started = False
+
+    def cancel(signum: int, _frame: Any) -> None:
+        nonlocal cancellation_started
+        if signum != CONTROLLER_WATCHDOG_SIGNAL:
+            authority.latch(
+                f"operation received {signal.Signals(signum).name}"
+            )
+        elif not authority.lost_event.is_set():
+            authority.latch("controller watchdog cancellation was requested")
+        if _LATE_RECONCILIATION_DEPTH:
+            return
+        if cancellation_started:
+            return
+        cancellation_started = True
+        raise ProductionOperationCancellation(authority.failure)
+
+    _ACTIVE_CONTROLLER_AUTHORITY = authority
+    try:
+        for signum in previous:
+            signal.signal(signum, cancel)
+        authority.start()
+        authority.check()
+        yield authority
+        authority.check()
+    finally:
+        try:
+            with _late_reconciliation_scope():
+                authority.stop()
+        finally:
+            _ACTIVE_CONTROLLER_AUTHORITY = None
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
+
+
+@contextmanager
+def _late_reconciliation_scope() -> Iterator[None]:
+    global _LATE_RECONCILIATION_DEPTH
+    entry_exception = sys.exc_info()[0]
+    body_failed = False
+    _LATE_RECONCILIATION_DEPTH += 1
+    try:
+        yield
+    except BaseException:
+        body_failed = True
+        raise
+    finally:
+        _LATE_RECONCILIATION_DEPTH -= 1
+        if (
+            _LATE_RECONCILIATION_DEPTH == 0
+            and entry_exception is None
+            and not body_failed
+        ):
+            _check_controller_authority()
+
+
+def _check_controller_authority() -> None:
+    if (
+        _ACTIVE_CONTROLLER_AUTHORITY is not None
+        and _LATE_RECONCILIATION_DEPTH == 0
+    ):
+        _ACTIVE_CONTROLLER_AUTHORITY.check()
+
+
+def _enable_child_subreaper() -> None:
+    if not hasattr(os, "pidfd_open") or not hasattr(
+        signal,
+        "pidfd_send_signal",
+    ):
+        raise ProductionOperationError(
+            "identity-bound pidfd process control is unavailable"
+        )
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise ProductionOperationError(
+            f"child subreaper setup failed with errno {error}"
+        )
+
+
+def _process_identity(pid: int) -> ProcessIdentity | None:
+    try:
+        payload = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+        fields = payload[payload.rindex(") ") + 2 :].split()
+        if len(fields) < 20:
+            return None
+        return ProcessIdentity(
+            pid=pid,
+            parent_pid=int(fields[1], 10),
+            process_group=int(fields[2], 10),
+            session_id=int(fields[3], 10),
+            start_time=int(fields[19], 10),
+            state=fields[0],
+        )
+    except (OSError, UnicodeError, ValueError):
+        return None
+
+
+def _read_process_identity(pid: int) -> ProcessIdentity:
+    identity = _process_identity(pid)
+    if identity is None:
+        raise ProductionOperationError(
+            "subprocess identity is unavailable"
+        )
+    return identity
+
+
+def _process_snapshot() -> dict[int, ProcessIdentity]:
+    result: dict[int, ProcessIdentity] = {}
+    scanned = 0
+    try:
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdecimal():
+                continue
+            scanned += 1
+            if scanned > MAX_PROCESS_SNAPSHOT_MEMBERS:
+                raise ProductionOperationError(
+                    "subprocess ownership inventory exceeded its bound"
+                )
+            identity = _process_identity(int(entry.name, 10))
+            if identity is not None:
+                result[identity.pid] = identity
+    except ProductionOperationError:
+        raise
+    except OSError as exc:
+        raise ProductionOperationError(
+            "subprocess ownership inventory is unavailable"
+        ) from exc
+    return result
+
+
+def _direct_child_baseline() -> frozenset[tuple[int, int]]:
+    owner = os.getpid()
+    return frozenset(
+        identity.key
+        for identity in _process_snapshot().values()
+        if identity.parent_pid == owner
+    )
+
+
+def _owned_processes(
+    root_identity: ProcessIdentity,
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+    tracked: set[ProcessIdentity] | None = None,
+    include_zombies: bool = False,
+) -> tuple[ProcessIdentity, ...]:
+    snapshot = _process_snapshot()
+    owned_pids: set[int] = set()
+    observed_root = snapshot.get(root_identity.pid)
+    if (
+        observed_root is not None
+        and observed_root.start_time == root_identity.start_time
+    ):
+        owned_pids.add(root_identity.pid)
+    if tracked is not None:
+        for identity in tracked:
+            observed = snapshot.get(identity.pid)
+            if (
+                observed is not None
+                and observed.start_time == identity.start_time
+            ):
+                owned_pids.add(identity.pid)
+    owner = os.getpid()
+    for identity in snapshot.values():
+        if (
+            identity.pid != root_identity.pid
+            and identity.parent_pid == owner
+            and identity.key not in baseline_children
+        ):
+            owned_pids.add(identity.pid)
+    changed = True
+    while changed:
+        changed = False
+        for identity in snapshot.values():
+            if (
+                identity.pid not in owned_pids
+                and identity.parent_pid in owned_pids
+            ):
+                owned_pids.add(identity.pid)
+                changed = True
+    owned = tuple(
+        identity
+        for pid, identity in snapshot.items()
+        if pid in owned_pids
+    )
+    if tracked is not None:
+        discovered = set(owned)
+        if len(tracked | discovered) > MAX_PROCESS_TREE_MEMBERS:
+            raise ProductionOperationError(
+                "subprocess process tree exceeded its bound"
+            )
+        tracked.update(discovered)
+    return tuple(
+        identity
+        for identity in owned
+        if include_zombies or identity.state != "Z"
+    )
+
+
+def _identity_is_live(identity: ProcessIdentity) -> bool:
+    observed = _process_identity(identity.pid)
+    return (
+        observed is not None
+        and observed.start_time == identity.start_time
+        and observed.state != "Z"
+    )
+
+
+def _signal_identity(identity: ProcessIdentity, signum: int) -> None:
+    observed = _process_identity(identity.pid)
+    if observed is None or observed.start_time != identity.start_time:
+        return
+    if not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
+        raise ProductionOperationError(
+            "identity-bound pidfd process control is unavailable"
+        )
+    try:
+        descriptor = os.pidfd_open(identity.pid, 0)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise ProductionOperationError(
+            "identity-bound subprocess handle cannot be opened"
+        ) from exc
+    try:
+        refreshed = _process_identity(identity.pid)
+        if (
+            refreshed is not None
+            and refreshed.start_time == identity.start_time
+        ):
+            signal.pidfd_send_signal(descriptor, signum)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise ProductionOperationError(
+            "identity-bound subprocess signal failed"
+        ) from exc
+    finally:
+        os.close(descriptor)
+
+
+def _signal_process_handle(descriptor: int, signum: int) -> None:
+    try:
+        signal.pidfd_send_signal(descriptor, signum)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise ProductionOperationError(
+            "identity-bound subprocess signal failed"
+        ) from exc
+
+
+def _signal_owned_process(
+    identity: ProcessIdentity,
+    signum: int,
+    *,
+    root_identity: ProcessIdentity,
+    root_descriptor: int | None,
+) -> None:
+    if identity.key == root_identity.key and root_descriptor is not None:
+        _signal_process_handle(root_descriptor, signum)
+        return
+    _signal_identity(identity, signum)
+
+
+def _reap_owned_zombies(
+    root_identity: ProcessIdentity,
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+    tracked: set[ProcessIdentity],
+) -> None:
+    owner = os.getpid()
+    while True:
+        reaped = False
+        for identity in _owned_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+            include_zombies=True,
+        ):
+            if (
+                identity.key == root_identity.key
+                or identity.parent_pid != owner
+                or identity.state != "Z"
+            ):
+                continue
+            try:
+                waited, _status = os.waitpid(identity.pid, os.WNOHANG)
+            except (ChildProcessError, ProcessLookupError):
+                continue
+            except OSError as exc:
+                raise ProductionOperationError(
+                    "adopted subprocess child could not be reaped"
+                ) from exc
+            reaped |= waited == identity.pid
+        if not reaped:
+            return
+
+
+def _terminate_process_tree(
+    process: subprocess.Popen[bytes],
+    *,
+    root_identity: ProcessIdentity,
+    root_descriptor: int | None,
+    baseline_children: frozenset[tuple[int, int]],
+    tracked: set[ProcessIdentity],
+) -> None:
+    for identity in reversed(
+        _owned_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+    ):
+        _signal_owned_process(
+            identity,
+            signal.SIGTERM,
+            root_identity=root_identity,
+            root_descriptor=root_descriptor,
+        )
+    deadline = time.monotonic() + PROCESS_TERM_GRACE_SECONDS
+    while time.monotonic() < deadline and _owned_processes(
+        root_identity,
+        baseline_children=baseline_children,
+        tracked=tracked,
+    ):
+        process.poll()
+        _reap_owned_zombies(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+        time.sleep(
+            min(PROCESS_POLL_SECONDS, max(0.0, deadline - time.monotonic()))
+        )
+    for identity in reversed(
+        _owned_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+    ):
+        _signal_owned_process(
+            identity,
+            signal.SIGKILL,
+            root_identity=root_identity,
+            root_descriptor=root_descriptor,
+        )
+    try:
+        process.wait(timeout=PROCESS_KILL_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        _signal_owned_process(
+            root_identity,
+            signal.SIGKILL,
+            root_identity=root_identity,
+            root_descriptor=root_descriptor,
+        )
+        try:
+            process.wait(timeout=PROCESS_KILL_GRACE_SECONDS)
+        except subprocess.TimeoutExpired as second_exc:
+            raise ProductionOperationError(
+                "subprocess root survived forced cleanup"
+            ) from second_exc
+    absence_deadline = (
+        time.monotonic()
+        + PROCESS_KILL_GRACE_SECONDS
+        + PROCESS_TREE_QUIESCENCE_SECONDS
+    )
+    stable_since: float | None = None
+    while time.monotonic() < absence_deadline:
+        _reap_owned_zombies(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+        owned = _owned_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+            include_zombies=True,
+        )
+        if owned:
+            stable_since = None
+            for identity in reversed(owned):
+                if identity.state != "Z":
+                    _signal_owned_process(
+                        identity,
+                        signal.SIGKILL,
+                        root_identity=root_identity,
+                        root_descriptor=root_descriptor,
+                    )
+        elif stable_since is None:
+            stable_since = time.monotonic()
+        elif (
+            time.monotonic() - stable_since
+            >= PROCESS_TREE_QUIESCENCE_SECONDS
+        ):
+            return
+        time.sleep(PROCESS_POLL_SECONDS)
+    _reap_owned_zombies(
+        root_identity,
+        baseline_children=baseline_children,
+        tracked=tracked,
+    )
+    if _owned_processes(
+        root_identity,
+        baseline_children=baseline_children,
+        tracked=tracked,
+        include_zombies=True,
+    ):
+        raise ProductionOperationError(
+            "subprocess process tree survived forced cleanup"
+        )
+
+
+def _validate_command(
+    arguments: Sequence[str],
+    *,
+    timeout: int,
+    env: Mapping[str, str],
+) -> None:
+    allowed_executables = {
+        DOCKER,
+        GIT,
+        "/usr/bin/python3",
+    }
+    if (
+        not isinstance(arguments, (list, tuple))
+        or not arguments
+        or any(not isinstance(value, str) or not value for value in arguments)
+        or arguments[0] not in allowed_executables
+        or type(timeout) is not int
+        or not 1 <= timeout <= 8 * 60 * 60
+        or (
+            dict(env) != dict(_SAFE_ENV)
+            and dict(env) != dict(_SAFE_GIT_ENV)
+        )
+    ):
+        raise ProductionOperationError("required command contract is invalid")
+
+
+def _execute_incremental_locked(
+    arguments: list[str],
+    *,
+    timeout: int,
+    stdin: BinaryIO | int | None,
+    env: Mapping[str, str],
+    digest_stdout: bool,
+) -> tuple[bytes, StreamDigest | None]:
+    _validate_command(arguments, timeout=timeout, env=env)
+    _check_controller_authority()
+    _enable_child_subreaper()
+    baseline = _direct_child_baseline()
+    process: subprocess.Popen[bytes] | None = None
+    root_identity: ProcessIdentity | None = None
+    root_descriptor: int | None = None
+    selector = selectors.DefaultSelector()
+    tracked: set[ProcessIdentity] = set()
+    stdout = bytearray()
+    stderr = bytearray()
+    digest = hashlib.sha256()
+    stdout_bytes = 0
+    records = 0
+    last_byte: int | None = None
+    completed_cleanly = False
+    try:
+        process = subprocess.Popen(
+            arguments,
+            stdin=stdin,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=dict(env),
+            close_fds=True,
+            start_new_session=True,
+        )
+        root_descriptor = os.pidfd_open(process.pid, 0)
+        root_identity = _read_process_identity(process.pid)
+        tracked.add(root_identity)
+        if process.stdout is None or process.stderr is None:
+            raise ProductionOperationError(
+                "required command pipes are unavailable"
+            )
+        for stream, label in (
+            (process.stdout, "stdout"),
+            (process.stderr, "stderr"),
+        ):
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, label)
+        open_streams = {"stdout", "stderr"}
+        deadline = time.monotonic() + timeout
+        while open_streams or process.poll() is None:
+            _check_controller_authority()
+            _owned_processes(
+                root_identity,
+                baseline_children=baseline,
+                tracked=tracked,
+            )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ProductionOperationError(
+                    f"required command timed out: {Path(arguments[0]).name}"
+                )
+            events = selector.select(
+                min(PROCESS_POLL_SECONDS, remaining)
+            )
+            for key, _mask in events:
+                try:
+                    chunk = os.read(key.fileobj.fileno(), 1024 * 1024)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    open_streams.discard(str(key.data))
+                    continue
+                if key.data == "stderr":
+                    if len(stderr) + len(chunk) > MAX_COMMAND_OUTPUT_BYTES:
+                        raise ProductionOperationError(
+                            "required command stderr exceeded its bound"
+                        )
+                    stderr.extend(chunk)
+                    continue
+                stdout_bytes += len(chunk)
+                if digest_stdout:
+                    if stdout_bytes > MAX_STREAM_OUTPUT_BYTES:
+                        raise ProductionOperationError(
+                            "streaming command stdout exceeded its bound"
+                        )
+                    digest.update(chunk)
+                    records += chunk.count(b"\n")
+                    last_byte = chunk[-1]
+                else:
+                    if stdout_bytes > MAX_COMMAND_OUTPUT_BYTES:
+                        raise ProductionOperationError(
+                            "required command stdout exceeded its bound"
+                        )
+                    stdout.extend(chunk)
+        return_code = process.wait(timeout=max(0.1, deadline - time.monotonic()))
+        if return_code != 0:
+            raise ProductionOperationError(
+                f"required command failed closed: {Path(arguments[0]).name}"
+            )
+        residual = {
+            identity
+            for identity in _owned_processes(
+                root_identity,
+                baseline_children=baseline,
+                tracked=tracked,
+            )
+            if identity.key != root_identity.key
+        }
+        with _late_reconciliation_scope():
+            _terminate_process_tree(
+                process,
+                root_identity=root_identity,
+                root_descriptor=root_descriptor,
+                baseline_children=baseline,
+                tracked=tracked,
+            )
+        if residual:
+            raise ProductionOperationError(
+                "required command retained a descendant"
+            )
+        completed_cleanly = True
+        stream_digest = (
+            StreamDigest(
+                sha256=digest.hexdigest(),
+                bytes=stdout_bytes,
+                records=records,
+            )
+            if digest_stdout
+            else None
+        )
+        if digest_stdout and stdout_bytes and last_byte != ord("\n"):
+            raise ProductionOperationError(
+                "streaming command returned a truncated record"
+            )
+        return bytes(stdout), stream_digest
+    except ProductionOperationError:
+        raise
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ProductionOperationError(
+            f"required command is unavailable: {Path(arguments[0]).name}"
+        ) from exc
+    finally:
+        active_error = sys.exception()
+        cleanup_errors: list[BaseException] = []
+        try:
+            with _late_reconciliation_scope():
+                if process is not None:
+                    try:
+                        if not completed_cleanly:
+                            if root_identity is None:
+                                if root_descriptor is None:
+                                    root_identity = _read_process_identity(
+                                        process.pid
+                                    )
+                                else:
+                                    _signal_process_handle(
+                                        root_descriptor,
+                                        signal.SIGKILL,
+                                    )
+                                    try:
+                                        process.wait(
+                                            timeout=PROCESS_KILL_GRACE_SECONDS
+                                        )
+                                    except subprocess.TimeoutExpired as exc:
+                                        raise ProductionOperationError(
+                                            "unidentified subprocess root "
+                                            "survived forced cleanup"
+                                        ) from exc
+                                    root_identity = ProcessIdentity(
+                                        pid=process.pid,
+                                        parent_pid=os.getpid(),
+                                        process_group=process.pid,
+                                        session_id=process.pid,
+                                        start_time=-1,
+                                        state="?",
+                                    )
+                            _terminate_process_tree(
+                                process,
+                                root_identity=root_identity,
+                                root_descriptor=root_descriptor,
+                                baseline_children=baseline,
+                                tracked=tracked,
+                            )
+                    except BaseException as exc:
+                        cleanup_errors.append(exc)
+                try:
+                    selector.close()
+                except BaseException as exc:
+                    cleanup_errors.append(exc)
+                if process is not None:
+                    for stream in (process.stdout, process.stderr):
+                        if stream is None:
+                            continue
+                        try:
+                            stream.close()
+                        except BaseException as exc:
+                            cleanup_errors.append(exc)
+                if root_descriptor is not None:
+                    try:
+                        os.close(root_descriptor)
+                    except BaseException as exc:
+                        cleanup_errors.append(exc)
+        except BaseException as exc:
+            cleanup_errors.append(exc)
+        if cleanup_errors:
+            cleanup_error = cleanup_errors[0]
+            if active_error is None:
+                raise cleanup_error
+            for error in cleanup_errors:
+                active_error.add_note(
+                    "subprocess containment cleanup also failed closed: "
+                    f"{type(error).__name__}"
+                )
+            raise active_error from cleanup_error
+
+
+def _execute_incremental(
+    arguments: list[str],
+    *,
+    timeout: int,
+    stdin: BinaryIO | int | None,
+    env: Mapping[str, str],
+    digest_stdout: bool,
+) -> tuple[bytes, StreamDigest | None]:
+    with _BOUNDED_COMMAND_LOCK:
+        return _execute_incremental_locked(
+            arguments,
+            timeout=timeout,
+            stdin=stdin,
+            env=env,
+            digest_stdout=digest_stdout,
+        )
+
+
 def _run(
     arguments: list[str],
     *,
@@ -2483,30 +3420,19 @@ def _run(
     stdin: BinaryIO | int | None = subprocess.DEVNULL,
     env: Mapping[str, str] = _SAFE_ENV,
 ) -> str:
+    stdout, _digest = _execute_incremental(
+        arguments,
+        timeout=timeout,
+        stdin=stdin,
+        env=env,
+        digest_stdout=False,
+    )
     try:
-        result = subprocess.run(
-            arguments,
-            stdin=stdin,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-            timeout=timeout,
-            env=dict(env),
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise ProductionOperationError(
-            f"required command is unavailable: {Path(arguments[0]).name}"
-        ) from exc
-    if len(result.stdout) > MAX_COMMAND_OUTPUT_BYTES or len(result.stderr) > MAX_COMMAND_OUTPUT_BYTES:
-        raise ProductionOperationError("required command output exceeded its bound")
-    if result.returncode != 0:
-        raise ProductionOperationError(
-            f"required command failed closed: {Path(arguments[0]).name}"
-        )
-    try:
-        return result.stdout.decode("utf-8").strip()
+        return stdout.decode("utf-8").strip()
     except UnicodeDecodeError as exc:
-        raise ProductionOperationError("required command returned non-UTF-8 output") from exc
+        raise ProductionOperationError(
+            "required command returned non-UTF-8 output"
+        ) from exc
 
 
 def _run_streaming_sha256(
@@ -2516,101 +3442,18 @@ def _run_streaming_sha256(
     stdin: BinaryIO | int | None = subprocess.DEVNULL,
     env: Mapping[str, str] = _SAFE_ENV,
 ) -> StreamDigest:
-    process: subprocess.Popen[bytes] | None = None
-    selector: selectors.BaseSelector | None = None
-    try:
-        process = subprocess.Popen(
-            arguments,
-            stdin=stdin,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=dict(env),
-        )
-        if process.stdout is None or process.stderr is None:
-            raise ProductionOperationError(
-                "streaming command pipes are unavailable"
-            )
-        selector = selectors.DefaultSelector()
-        for stream, label in (
-            (process.stdout, "stdout"),
-            (process.stderr, "stderr"),
-        ):
-            os.set_blocking(stream.fileno(), False)
-            selector.register(stream, selectors.EVENT_READ, label)
-        digest = hashlib.sha256()
-        stdout_bytes = 0
-        record_count = 0
-        last_byte: int | None = None
-        stderr_bytes = 0
-        stderr_oversized = False
-        deadline = time.monotonic() + timeout
-        while selector.get_map():
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise subprocess.TimeoutExpired(arguments, timeout)
-            events = selector.select(min(1.0, remaining))
-            if not events:
-                continue
-            for key, _mask in events:
-                try:
-                    chunk = os.read(key.fd, 1024 * 1024)
-                except BlockingIOError:
-                    continue
-                if not chunk:
-                    selector.unregister(key.fileobj)
-                    continue
-                if key.data == "stdout":
-                    stdout_bytes += len(chunk)
-                    digest.update(chunk)
-                    record_count += chunk.count(b"\n")
-                    last_byte = chunk[-1]
-                else:
-                    stderr_bytes += len(chunk)
-                    if stderr_bytes > MAX_COMMAND_OUTPUT_BYTES:
-                        stderr_oversized = True
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise subprocess.TimeoutExpired(arguments, timeout)
-        return_code = process.wait(timeout=remaining)
-        if stderr_oversized:
-            raise ProductionOperationError(
-                "streaming command stderr exceeded its bound"
-            )
-        if return_code != 0:
-            raise ProductionOperationError(
-                f"required streaming command failed closed: "
-                f"{Path(arguments[0]).name}"
-            )
-        if stdout_bytes and last_byte != ord("\n"):
-            raise ProductionOperationError(
-                "streaming command returned a truncated record"
-            )
-        return StreamDigest(
-            sha256=digest.hexdigest(),
-            bytes=stdout_bytes,
-            records=record_count,
-        )
-    except ProductionOperationError:
-        raise
-    except (OSError, subprocess.SubprocessError) as exc:
+    _stdout, digest = _execute_incremental(
+        arguments,
+        timeout=timeout,
+        stdin=stdin,
+        env=env,
+        digest_stdout=True,
+    )
+    if digest is None:
         raise ProductionOperationError(
-            f"required streaming command is unavailable: "
-            f"{Path(arguments[0]).name}"
-        ) from exc
-    finally:
-        if process is not None and process.poll() is None:
-            process.kill()
-            try:
-                process.wait(timeout=30)
-            except subprocess.SubprocessError:
-                pass
-        if selector is not None:
-            selector.close()
-        if process is not None:
-            if process.stdout is not None:
-                process.stdout.close()
-            if process.stderr is not None:
-                process.stderr.close()
+            "streaming command retained no digest"
+        )
+    return digest
 
 
 def _rename_directory_noreplace(source: Path, destination: Path) -> None:
@@ -2724,35 +3567,39 @@ def _verify_materialized_release(
         or not stat.S_ISDIR(git_metadata.st_mode)
     ):
         raise ProductionOperationError("staged release layout is unsafe")
+    git_work_tree = [
+        *GIT_BASE,
+        f"--git-dir={release_root / '.git'}",
+        f"--work-tree={release_root}",
+    ]
     head = _run(
-        [GIT, "-C", str(release_root), "rev-parse", "HEAD"],
+        [*git_work_tree, "rev-parse", "HEAD"],
         timeout=30,
         env=_SAFE_GIT_ENV,
     )
     tree = _run(
-        [GIT, "-C", str(release_root), "rev-parse", "HEAD^{tree}"],
+        [*git_work_tree, "rev-parse", "HEAD^{tree}"],
         timeout=30,
         env=_SAFE_GIT_ENV,
     )
     branch = _run(
-        [GIT, "-C", str(release_root), "rev-parse", "--abbrev-ref", "HEAD"],
+        [*git_work_tree, "rev-parse", "--abbrev-ref", "HEAD"],
         timeout=30,
         env=_SAFE_GIT_ENV,
     )
     status = _run(
         [
-            GIT,
-            "-C",
-            str(release_root),
+            *git_work_tree,
             "status",
             "--porcelain=v1",
             "--untracked-files=all",
+            "--ignore-submodules=none",
         ],
         timeout=30,
         env=_SAFE_GIT_ENV,
     )
     remotes = _run(
-        [GIT, "-C", str(release_root), "remote"],
+        [*git_work_tree, "remote"],
         timeout=30,
         env=_SAFE_GIT_ENV,
     )
@@ -2803,9 +3650,7 @@ def _materialize_release_bundle(
         _fsync_directory(temporary.parent)
         _run(
             [
-                GIT,
-                "-c",
-                "core.hooksPath=/dev/null",
+                *GIT_BASE,
                 "clone",
                 "--no-checkout",
                 "--no-hardlinks",
@@ -2815,36 +3660,24 @@ def _materialize_release_bundle(
             timeout=300,
             env=_SAFE_GIT_ENV,
         )
+        temporary_git = [
+            *GIT_BASE,
+            f"--git-dir={temporary / '.git'}",
+            f"--work-tree={temporary}",
+        ]
         _run(
-            [GIT, "-C", str(temporary), "remote", "remove", "origin"],
+            [*temporary_git, "remote", "remove", "origin"],
             timeout=30,
             env=_SAFE_GIT_ENV,
         )
         _run(
             [
-                GIT,
-                "-C",
-                str(temporary),
-                "-c",
-                "core.hooksPath=/dev/null",
+                *temporary_git,
                 "checkout",
                 "--detach",
                 manifest.release_sha,
             ],
             timeout=300,
-            env=_SAFE_GIT_ENV,
-        )
-        _run(
-            [
-                GIT,
-                "-C",
-                str(temporary),
-                "config",
-                "--local",
-                "core.hooksPath",
-                "/dev/null",
-            ],
-            timeout=30,
             env=_SAFE_GIT_ENV,
         )
         temporary.chmod(0o700)
@@ -2853,8 +3686,17 @@ def _materialize_release_bundle(
         _rename_directory_noreplace(temporary, release_root)
         _fsync_directory(release_root.parent)
         _verify_materialized_release(release_root, manifest=manifest)
-    except Exception:
-        _remove_release_temporary(temporary, required_uid=required_uid)
+    except BaseException as original:
+        try:
+            with _late_reconciliation_scope():
+                _remove_release_temporary(
+                    temporary,
+                    required_uid=required_uid,
+                )
+        except BaseException:
+            original.add_note(
+                "release temporary reconciliation also failed closed"
+            )
         raise
 
 
@@ -3059,7 +3901,7 @@ def _concurrent_index_names(
 def _compose_base(manifest: OperationManifest, *, operation_root: Path) -> list[str]:
     canonical = _canonical_operation_paths(manifest)
     return [
-        DOCKER,
+        *DOCKER_BASE,
         "compose",
         "--project-name",
         manifest.project_name,
@@ -3073,7 +3915,7 @@ def _compose_base(manifest: OperationManifest, *, operation_root: Path) -> list[
 def _project_container_ids(manifest: OperationManifest) -> list[str]:
     output = _run(
         [
-            DOCKER,
+            *DOCKER_BASE,
             "ps",
             "--all",
             "--quiet",
@@ -3101,7 +3943,7 @@ def _container_compose_labels(
     identifier: str,
     manifest: OperationManifest,
 ) -> Mapping[str, str]:
-    raw = _run([DOCKER, "inspect", identifier], timeout=30)
+    raw = _run([*DOCKER_BASE, "inspect", identifier], timeout=30)
     try:
         documents = json.loads(raw, object_pairs_hook=_strict_json_object)
     except (ValueError, json.JSONDecodeError) as exc:
@@ -3182,7 +4024,7 @@ def _validate_oneoff_for_cleanup(
     *,
     operation_root: Path,
 ) -> Mapping[str, Any]:
-    raw = _run([DOCKER, "inspect", identifier], timeout=30)
+    raw = _run([*DOCKER_BASE, "inspect", identifier], timeout=30)
     try:
         documents = json.loads(raw, object_pairs_hook=_strict_json_object)
     except (ValueError, json.JSONDecodeError) as exc:
@@ -3314,7 +4156,10 @@ def _cleanup_operation_oneoffs(
                 manifest,
                 operation_root=operation_root,
             )
-            _run([DOCKER, "rm", "--force", "--volumes", identifier], timeout=60)
+            _run(
+                [*DOCKER_BASE, "rm", "--force", "--volumes", identifier],
+                timeout=60,
+            )
             removed.append(evidence)
             if cleanup_evidence is not None and all(
                 existing.get("container_id") != evidence["container_id"]
@@ -3373,12 +4218,18 @@ def _compose_one_shot(
         arguments.extend(command)
     try:
         output = _run(arguments, timeout=timeout, stdin=stdin)
-    except ProductionOperationError:
-        _cleanup_operation_oneoffs(
-            manifest,
-            operation_root=operation_root,
-            cleanup_evidence=cleanup_evidence,
-        )
+    except BaseException as original:
+        try:
+            with _late_reconciliation_scope():
+                _cleanup_operation_oneoffs(
+                    manifest,
+                    operation_root=operation_root,
+                    cleanup_evidence=cleanup_evidence,
+                )
+        except BaseException:
+            original.add_note(
+                "one-shot container reconciliation also failed closed"
+            )
         raise
     _cleanup_operation_oneoffs(
         manifest,
@@ -3440,12 +4291,18 @@ def _compose_streaming_copy_sha256(
     ]
     try:
         result = _run_streaming_sha256(arguments, timeout=timeout)
-    except ProductionOperationError:
-        _cleanup_operation_oneoffs(
-            manifest,
-            operation_root=operation_root,
-            cleanup_evidence=cleanup_evidence,
-        )
+    except BaseException as original:
+        try:
+            with _late_reconciliation_scope():
+                _cleanup_operation_oneoffs(
+                    manifest,
+                    operation_root=operation_root,
+                    cleanup_evidence=cleanup_evidence,
+                )
+        except BaseException:
+            original.add_note(
+                "streaming one-shot reconciliation also failed closed"
+            )
         raise
     _cleanup_operation_oneoffs(
         manifest,
@@ -3455,10 +4312,32 @@ def _compose_streaming_copy_sha256(
     return result
 
 
-def _inspect_local_image(runtime_image_id: str) -> Mapping[str, Any]:
+def _docker_inventory_timeout(
+    deadline: float | None,
+    *,
+    default: int,
+) -> int:
+    if deadline is None:
+        return default
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ProductionOperationError(
+            "Docker image inventory exceeded its deadline"
+        )
+    return max(1, min(default, math.ceil(remaining)))
+
+
+def _inspect_local_image(
+    runtime_image_id: str,
+    *,
+    deadline: float | None = None,
+) -> Mapping[str, Any]:
     if not _IMAGE_ID_RE.fullmatch(runtime_image_id):
         raise ProductionOperationError("local Docker image ID is invalid")
-    output = _run([DOCKER, "image", "inspect", runtime_image_id], timeout=60)
+    output = _run(
+        [*DOCKER_BASE, "image", "inspect", runtime_image_id],
+        timeout=_docker_inventory_timeout(deadline, default=60),
+    )
     try:
         documents = json.loads(output, object_pairs_hook=_strict_json_object)
     except (ValueError, json.JSONDecodeError) as exc:
@@ -3502,17 +4381,27 @@ def _local_image_semantic_evidence(
 
 def _enumerate_local_images(
     manifest: OperationManifest,
+    *,
+    deadline: float | None = None,
 ) -> Mapping[str, tuple[Mapping[str, Any], ...]]:
+    scan_deadline = (
+        time.monotonic() + DOCKER_INVENTORY_SCAN_SECONDS
+        if deadline is None
+        else deadline
+    )
     output = _run(
-        [DOCKER, "image", "ls", "--all", "--quiet", "--no-trunc"],
-        timeout=120,
+        [*DOCKER_BASE, "image", "ls", "--all", "--quiet", "--no-trunc"],
+        timeout=_docker_inventory_timeout(scan_deadline, default=120),
     )
     observed_runtime_ids = [
         line.strip() for line in output.splitlines() if line.strip()
     ]
-    if any(
-        not _IMAGE_ID_RE.fullmatch(value)
-        for value in observed_runtime_ids
+    if (
+        len(observed_runtime_ids) > MAX_LOCAL_IMAGE_IDS
+        or any(
+            not _IMAGE_ID_RE.fullmatch(value)
+            for value in observed_runtime_ids
+        )
     ):
         raise ProductionOperationError(
             "local Docker image inventory is invalid or ambiguous"
@@ -3527,7 +4416,10 @@ def _enumerate_local_images(
         for content_identity in expected_by_content
     }
     for runtime_id in runtime_ids:
-        document = _inspect_local_image(runtime_id)
+        document = _inspect_local_image(
+            runtime_id,
+            deadline=scan_deadline,
+        )
         try:
             descriptor, content_identity = image_content_descriptor(
                 document
@@ -3612,17 +4504,72 @@ def load_images(
         raise ProductionOperationError(
             "a preexisting semantic image match is ambiguous"
         )
-    # Loading a tagless, already verified archive is intentionally idempotent.
-    # Shared hosts commonly retain identical upstream Redis/Nginx images from
-    # an earlier campaign, while the local engine ID may also differ across
-    # Docker storage backends.  The post-load semantic inventory, not absence
-    # before load, is the operation binding.
+
+    def reconcile_late_load(image: ImageArtifact) -> None:
+        last_error: ProductionOperationError | None = None
+        deadline = (
+            time.monotonic() + LATE_IMAGE_RECONCILIATION_SECONDS
+        )
+        with _late_reconciliation_scope():
+            for attempt in range(LATE_IMAGE_RECONCILIATION_ATTEMPTS):
+                try:
+                    observed = _enumerate_local_images(
+                        manifest,
+                        deadline=deadline,
+                    )
+                    matches = observed[image.content_identity]
+                    if len(matches) > 1:
+                        raise ProductionOperationError(
+                            "late Docker image load became ambiguous"
+                        )
+                    if len(matches) == 1:
+                        return
+                    last_error = None
+                except ProductionOperationError as exc:
+                    last_error = exc
+                remaining = deadline - time.monotonic()
+                if (
+                    attempt + 1 < LATE_IMAGE_RECONCILIATION_ATTEMPTS
+                    and remaining > 0
+                ):
+                    time.sleep(
+                        min(
+                            LATE_IMAGE_RECONCILIATION_INTERVAL_SECONDS,
+                            remaining,
+                        )
+                    )
+                else:
+                    break
+        if last_error is not None:
+            raise ProductionOperationError(
+                "late Docker image load outcome could not be reconciled"
+            ) from last_error
+
+    # Exact preexisting semantic matches are adopted.  If the Docker client
+    # fails after handing an archive to the daemon, bounded read-only
+    # reconciliation observes a possible late image before the original
+    # cancellation/error is re-raised.
     for role in IMAGE_ROLES:
         image = manifest.image_artifacts[role]
-        _run(
-            [DOCKER, "load", "--input", str(paths[image.artifact_kind])],
-            timeout=3600,
-        )
+        if before[image.content_identity]:
+            continue
+        try:
+            _run(
+                [
+                    *DOCKER_BASE,
+                    "image",
+                    "load",
+                    "--input",
+                    str(paths[image.artifact_kind]),
+                ],
+                timeout=3600,
+            )
+        except BaseException:
+            try:
+                reconcile_late_load(image)
+            except BaseException:
+                pass
+            raise
     after = _enumerate_local_images(manifest)
     runtime_image_ids: dict[str, str] = {}
     for role in IMAGE_ROLES:
@@ -4280,7 +5227,7 @@ def _operation_network_name(manifest: OperationManifest) -> str:
 
 def _operation_network_present(manifest: OperationManifest) -> bool:
     raw = _run(
-        [DOCKER, "network", "ls", "--format", "{{.Name}}"],
+        [*DOCKER_BASE, "network", "ls", "--format", "{{.Name}}"],
         timeout=30,
     )
     names = raw.splitlines() if raw else []
@@ -4314,7 +5261,10 @@ def _validate_operation_network(
                 "operation database network is absent"
             )
         return None
-    raw = _run([DOCKER, "network", "inspect", expected_name], timeout=30)
+    raw = _run(
+        [*DOCKER_BASE, "network", "inspect", expected_name],
+        timeout=30,
+    )
     try:
         documents = json.loads(raw, object_pairs_hook=_strict_json_object)
     except (ValueError, json.JSONDecodeError) as exc:
@@ -4494,7 +5444,7 @@ def _validate_database_container(
     manifest: OperationManifest,
 ) -> bool:
     canonical = _canonical_operation_paths(manifest)
-    raw = _run([DOCKER, "inspect", identifier], timeout=30)
+    raw = _run([*DOCKER_BASE, "inspect", identifier], timeout=30)
     try:
         documents = json.loads(raw, object_pairs_hook=_strict_json_object)
     except (ValueError, json.JSONDecodeError) as exc:
@@ -4892,7 +5842,7 @@ def prepare_database(
                 require_attached=running,
             )
         if not running:
-            _run([DOCKER, "start", existing_id], timeout=300)
+            _run([*DOCKER_BASE, "start", existing_id], timeout=300)
             started = False
             last_start_validation_error: ProductionOperationError | None = None
             for attempt in range(40):
@@ -4902,6 +5852,8 @@ def prepare_database(
                         manifest,
                     )
                     last_start_validation_error = None
+                except ProductionOperationCancellation:
+                    raise
                 except ProductionOperationError as exc:
                     last_start_validation_error = exc
                     started = False
@@ -4959,6 +5911,8 @@ def prepare_database(
             ):
                 ready = True
                 break
+        except ProductionOperationCancellation:
+            raise
         except ProductionOperationError:
             time.sleep(1)
     if not ready:
@@ -5271,7 +6225,12 @@ def plan(
         allow_final_prepare=allow_final_prepare,
     )
     bundle_heads = _run(
-        [GIT, "bundle", "list-heads", str(paths["release-bundle"])],
+        [
+            *GIT_BASE,
+            "bundle",
+            "list-heads",
+            str(paths["release-bundle"]),
+        ],
         timeout=60,
         env=_SAFE_GIT_ENV,
     )
@@ -5420,7 +6379,7 @@ def _stage_images_from_state(
     return images, stage, observed_sha256
 
 
-def execute_stage(
+def _execute_stage_authorized(
     manifest: OperationManifest,
     *,
     operation_root: Path,
@@ -5535,7 +6494,24 @@ def execute_stage(
     }
 
 
-def execute(
+def execute_stage(
+    manifest: OperationManifest,
+    *,
+    operation_root: Path,
+    required_uid: int,
+    confirm: str,
+    control_fd: int,
+) -> Mapping[str, Any]:
+    with _controller_authority_guard(control_fd):
+        return _execute_stage_authorized(
+            manifest,
+            operation_root=operation_root,
+            required_uid=required_uid,
+            confirm=confirm,
+        )
+
+
+def _execute_authorized(
     manifest: OperationManifest,
     *,
     operation_root: Path,
@@ -5678,6 +6654,23 @@ def execute(
     }
 
 
+def execute(
+    manifest: OperationManifest,
+    *,
+    operation_root: Path,
+    required_uid: int,
+    confirm: str,
+    control_fd: int,
+) -> Mapping[str, Any]:
+    with _controller_authority_guard(control_fd):
+        return _execute_authorized(
+            manifest,
+            operation_root=operation_root,
+            required_uid=required_uid,
+            confirm=confirm,
+        )
+
+
 def _operation_root(operation_id: str) -> Path:
     try:
         canonical = validate_operation_id(operation_id)
@@ -5735,49 +6728,70 @@ def main(argv: list[str] | None = None) -> int:
     action.add_argument("--stage-only", action="store_true")
     action.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")
+    parser.add_argument("--control-fd", type=int)
     args = parser.parse_args(argv)
     try:
         if os.geteuid() != 0:
             raise ProductionOperationError("production operation agent must run as root")
         root = _operation_root(args.operation_id)
-        with _operation_lock(root, required_uid=0):
-            manifest = load_manifest(
-                root / "incoming" / "operation-manifest.json",
-                required_uid=0,
+        mutating = args.stage_only or args.apply
+        if mutating and args.control_fd is None:
+            raise ProductionOperationError(
+                "mutating operation requires --control-fd"
             )
-            if manifest.operation_id != args.operation_id:
-                raise ProductionOperationError("operation manifest id differs from argv")
-            _verify_executing_bootstrap(
-                manifest,
-                operation_root=root,
-                required_uid=0,
+        if not mutating and (
+            args.confirm is not None or args.control_fd is not None
+        ):
+            raise ProductionOperationError(
+                "--confirm and --control-fd are valid only with "
+                "--stage-only or --apply"
             )
-            if args.stage_only:
-                result = execute_stage(
-                    manifest,
-                    operation_root=root,
+        authority = (
+            _controller_authority_guard(args.control_fd)
+            if mutating
+            else nullcontext()
+        )
+        with authority:
+            with _operation_lock(root, required_uid=0):
+                manifest = load_manifest(
+                    root / "incoming" / "operation-manifest.json",
                     required_uid=0,
-                    confirm=str(args.confirm or ""),
                 )
-            elif args.apply:
-                result = execute(
-                    manifest,
-                    operation_root=root,
-                    required_uid=0,
-                    confirm=str(args.confirm or ""),
-                )
-            else:
-                if args.confirm is not None:
+                if manifest.operation_id != args.operation_id:
                     raise ProductionOperationError(
-                        "--confirm is valid only with --stage-only or --apply"
+                        "operation manifest id differs from argv"
                     )
-                result = plan(manifest, operation_root=root, required_uid=0)
-            result = {
-                **result,
-                "bootstrap_agent_verified": True,
-                "bootstrap_agent_sha256": manifest.bootstrap_sha256,
-                "bootstrap_agent_bytes": manifest.bootstrap_bytes,
-            }
+                _verify_executing_bootstrap(
+                    manifest,
+                    operation_root=root,
+                    required_uid=0,
+                )
+                if args.stage_only:
+                    result = _execute_stage_authorized(
+                        manifest,
+                        operation_root=root,
+                        required_uid=0,
+                        confirm=str(args.confirm or ""),
+                    )
+                elif args.apply:
+                    result = _execute_authorized(
+                        manifest,
+                        operation_root=root,
+                        required_uid=0,
+                        confirm=str(args.confirm or ""),
+                    )
+                else:
+                    result = plan(
+                        manifest,
+                        operation_root=root,
+                        required_uid=0,
+                    )
+                result = {
+                    **result,
+                    "bootstrap_agent_verified": True,
+                    "bootstrap_agent_sha256": manifest.bootstrap_sha256,
+                    "bootstrap_agent_bytes": manifest.bootstrap_bytes,
+                }
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0
     except ProductionOperationError as exc:

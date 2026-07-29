@@ -49,7 +49,36 @@ class SourceFreezeError(RuntimeError):
     pass
 
 
+LEGACY_SOURCE_FREEZE_RETIREMENT_REASON = (
+    "legacy staging source-freeze apply is retired because no immutable "
+    "controller-bound authorization closure exists"
+)
+
+
+class LegacySourceFreezeRetiredError(SourceFreezeError):
+    """Raised before legacy source-freeze code can read caller authority."""
+
+
+def assert_legacy_source_freeze_retired(operation: str) -> None:
+    """Deny every mutable legacy source-freeze path unconditionally."""
+
+    raise LegacySourceFreezeRetiredError(
+        f"{LEGACY_SOURCE_FREEZE_RETIREMENT_REASON}: {operation}"
+    )
+
+
+def legacy_source_freeze_blocked_payload() -> dict[str, object]:
+    """Return the side-effect-free retirement result used by the CLI."""
+
+    return {
+        "status": "blocked_legacy_source_freeze_retired",
+        "reason": LEGACY_SOURCE_FREEZE_RETIREMENT_REASON,
+        "replacement": "production-shadow source snapshot and restore workflow",
+    }
+
+
 def _run(arguments: list[str], *, timeout: int = 30) -> str:
+    assert_legacy_source_freeze_retired("run source-freeze command")
     try:
         result = subprocess.run(
             arguments,
@@ -85,6 +114,7 @@ def _compose(args: argparse.Namespace) -> list[str]:
 
 def _secure_bundle_directory(path: Path) -> Path:
     """Create/verify the owner-only durable rollback artifact directory."""
+    assert_legacy_source_freeze_retired("create source-freeze rollback bundle directory")
     if path.exists() and path.is_symlink():
         raise SourceFreezeError("rollback bundle directory cannot be a symlink")
     resolved = path.resolve()
@@ -112,6 +142,7 @@ def _capture_legacy_restore_bundle(
     target_release_sha: str,
 ) -> dict[str, object]:
     """Pin resolved legacy Compose bytes and every running container image ID."""
+    assert_legacy_source_freeze_retired("capture source-freeze rollback bundle")
     bundle_dir = _secure_bundle_directory(args.rollback_bundle_dir)
     compose_bytes = (_run([*prefix, "config", "--format", "yaml"]) + "\n").encode()
     compose_hash = hashlib.sha256(compose_bytes).hexdigest()
@@ -175,6 +206,7 @@ def build_plan(
 
 
 def _validate_static(args: argparse.Namespace, inventory_result: dict[str, object]):
+    assert_legacy_source_freeze_retired("validate legacy source-freeze runtime")
     repo = args.repo.resolve()
     expected_compose = (repo / "deploy/staging/docker-compose.staging.yml").resolve()
     if args.compose.resolve() != expected_compose:
@@ -204,6 +236,7 @@ def execute(
     *,
     inventory_result: dict[str, object],
 ) -> dict[str, object]:
+    assert_legacy_source_freeze_retired("execute source freeze")
     repo, env, prefix, services, user, database = _validate_static(args, inventory_result)
     required_confirmation = confirmation_phrase(
         str(inventory_result["campaign_id"]), args.source_role, str(inventory_result["release_sha"])
@@ -334,36 +367,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--rollback-bundle-dir", type=Path, required=True)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")
-    args = parser.parse_args(argv)
+    parser.parse_args(argv)
     try:
-        args.source_role = list(dict.fromkeys(args.source_role))
-        args.expected_source_release_sha = _role_mapping(args.expected_source_release_sha)
-        if set(args.source_role) != set(args.expected_source_release_sha):
-            raise SourceFreezeError("every selected source role requires one expected release")
-        inventory = load_inventory(args.inventory)
-        inventory_result = verify_approved_inventory(
-            inventory,
-            approval=load_inventory(args.inventory_approval),
-            approval_policy=load_inventory(args.approval_policy),
-            host_destructive=None,
-        )
-        if inventory_result["inventory_stage"] != "provisioned":
-            raise SourceFreezeError("source freeze requires approved provisioned inventory")
-        _repo, _env, _prefix, services, _user, _database = _validate_static(
-            args, inventory_result
-        )
-        plan = build_plan(
-            campaign_id=str(inventory_result["campaign_id"]),
-            release_sha=str(inventory_result["release_sha"]),
-            roles=args.source_role,
-            services=services,
-        )
-        result = execute(args, inventory_result=inventory_result) if args.apply else plan
-    except Exception as exc:
-        print(json.dumps({"status": "blocked", "error": str(exc), "error_class": type(exc).__name__}, sort_keys=True))
-        return 1
-    print(json.dumps(result, sort_keys=True))
-    return 0
+        assert_legacy_source_freeze_retired("source-freeze CLI")
+    except LegacySourceFreezeRetiredError:
+        print(json.dumps(legacy_source_freeze_blocked_payload(), sort_keys=True))
+        return 2
+    raise AssertionError("retired source-freeze guard was unexpectedly bypassed")
 
 
 if __name__ == "__main__":

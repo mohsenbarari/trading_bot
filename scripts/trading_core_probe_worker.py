@@ -23,6 +23,7 @@ from collections import Counter
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
+from functools import wraps
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Awaitable, Callable, Mapping
@@ -122,6 +123,61 @@ PRODUCTION_CLEANUP_CONFIRM_VALUE = "hard-delete-test-data"
 PRODUCTION_CLEANUP_ALLOWED_PREFIXES = ("PFM_", "PRODTEST_", "FMX_", "P7 Mixed Load User")
 PRODUCTION_ROLE_WORKER_CONFIRM_ENV = "PRODUCTION_FULL_MATRIX_CONFIRM"
 PRODUCTION_ROLE_WORKER_CONFIRM_VALUE = "execute-production-full-matrix"
+LEGACY_TWO_SERVER_FULL_MATRIX_RETIREMENT_REASON = (
+    "legacy_two_server_full_matrix_worker_retired_use_three_site_sealed_campaign"
+)
+# These commands operate only on local JSON artifacts. Every command that can
+# contact an application dependency, create fixtures, clean data, or drive a
+# router stays denied until a separate three-site sealed campaign verifier owns
+# the operation. This is intentionally independent of ENVIRONMENT and every
+# legacy confirmation flag, because those are operator-controlled inputs.
+LEGACY_TWO_SERVER_WORKER_LOCAL_ONLY_COMMANDS = frozenset(
+    {
+        "load-runner-ready",
+        "write-dual-role-plan",
+        "run-dual-role-artifact-smoke",
+        "set-role-plan-barrier",
+        "set-prepare-barrier",
+        "merge-role-results",
+    }
+)
+
+
+def assert_legacy_two_server_worker_operation_retired(operation: str) -> None:
+    """Deny retained worker handlers before they can touch an application dependency.
+
+    The check is intentionally unconditional.  `ENVIRONMENT`, legacy
+    confirmation values, and process globals are all operator-controlled and
+    cannot turn a retired two-server fixture, cleanup, router, Redis, database,
+    sync, race, or benchmark operation back on.
+    """
+
+    raise TradingProbeError(
+        "Legacy two-site Full Matrix worker operation is retired and hard-disabled "
+        f"before dependency access: operation={operation}; "
+        "use a sealed three-site campaign verifier."
+    )
+
+
+def retire_legacy_two_server_worker_runtime_helper(operation: str):
+    """Wrap a retained helper so direct imports cannot reach runtime state.
+
+    This is a call-time guard, not a dispatch policy. It covers helpers that
+    historical runners imported directly and is independent of every
+    environment variable and confirmation token.
+    """
+
+    def decorate(function):
+        @wraps(function)
+        def guarded(*args: Any, **kwargs: Any):
+            assert_legacy_two_server_worker_operation_retired(operation)
+            return function(*args, **kwargs)
+
+        return guarded
+
+    return decorate
+
+
 SYNTHETIC_OFFER_SEED_METADATA_STALE_RETRY_ATTEMPTS = 5
 LOAD_FIXTURE_IDENTITY_RETRY_ATTEMPTS = 8
 LOAD_FIXTURE_MOBILE_PREFIX = "09"
@@ -172,7 +228,6 @@ BROAD_CLEANUP_PREFIXES = {
 CLEANUP_DB_RETRY_ATTEMPTS = 3
 CLEANUP_SQL_IN_BATCH_SIZE = 5000
 RETRYABLE_CLEANUP_SQLSTATES = {"40P01", "40001"}
-_PRODUCTION_CLEANUP_HARD_DELETE_ALLOWED = False
 
 
 LOAD_RUNNER_ROLES = {
@@ -379,6 +434,7 @@ async def timed_ms(fn: Callable[[], Awaitable[Any]]) -> tuple[Any, float]:
 
 async def warm_load_runner_dependencies(*, db_connections: int) -> dict[str, Any]:
     """Warm local dependency pools so timed attempts measure the trade path."""
+    assert_legacy_two_server_worker_operation_retired("load_runner_dependency_warmup")
     safe_connections = min(max(int(db_connections or 1), 1), 32)
 
     async def warm_db_connection() -> None:
@@ -1114,8 +1170,8 @@ def assert_load_runner_runtime_surface(
     configured_server_mode = normalize_server(getattr(settings, "server_mode", None), default="")
     reasons: list[str] = []
 
-    production_allowed = configured_environment == "production" and allow_production
-    if configured_environment != "staging" and not production_allowed:
+    production_requested = configured_environment == "production"
+    if configured_environment != "staging":
         reasons.append("ENVIRONMENT must be staging for load runner runtime")
     if configured_service != "load_runner":
         reasons.append("TRADING_BOT_SERVICE must be load_runner for load runner runtime")
@@ -1123,15 +1179,11 @@ def assert_load_runner_runtime_surface(
         reasons.append(f"SERVER_MODE must be {role_config['server_mode']} for {role} load runner")
     if getattr(settings, "bot_token", None):
         reasons.append("BOT_TOKEN must be empty for load runner runtime")
-    if production_allowed:
-        try:
-            validate_production_cleanup_prefix(prefix or "")
-        except TradingProbeError as exc:
-            reasons.append(str(exc))
-        if os.getenv(PRODUCTION_ROLE_WORKER_CONFIRM_ENV) != PRODUCTION_ROLE_WORKER_CONFIRM_VALUE:
-            reasons.append(
-                f"{PRODUCTION_ROLE_WORKER_CONFIRM_ENV}={PRODUCTION_ROLE_WORKER_CONFIRM_VALUE} is required"
-            )
+    if production_requested:
+        reasons.append(
+            "legacy two-site Full Matrix worker is retired and cannot run in production; "
+            "a sealed three-site campaign verifier is required"
+        )
 
     if reasons:
         raise TradingProbeError("; ".join(reasons))
@@ -1143,20 +1195,14 @@ def assert_load_runner_runtime_surface(
         "environment": configured_environment,
         "server_mode": configured_server_mode,
         "service": configured_service,
-        "production_execution_allowed": production_allowed,
+        "production_execution_allowed": False,
         "telegram_credential_configured": False,
     }
 
 
 def assert_production_full_matrix_allowed(prefix: str, *, allow_flag: bool) -> None:
-    if not is_production_runtime():
-        return
-    validate_production_cleanup_prefix(prefix)
-    if not allow_flag or os.getenv(PRODUCTION_ROLE_WORKER_CONFIRM_ENV) != PRODUCTION_ROLE_WORKER_CONFIRM_VALUE:
-        raise TradingProbeError(
-            "production full-matrix execution requires --allow-production-execution and "
-            f"{PRODUCTION_ROLE_WORKER_CONFIRM_ENV}={PRODUCTION_ROLE_WORKER_CONFIRM_VALUE}"
-        )
+    del prefix, allow_flag
+    assert_legacy_two_server_worker_operation_retired("production_full_matrix_execution")
 
 
 def assert_dual_role_prepare_runtime(offer_origin: str, *, allow_production: bool, prefix: str) -> dict[str, Any]:
@@ -1173,7 +1219,7 @@ def assert_dual_role_prepare_runtime(offer_origin: str, *, allow_production: boo
         "offer_origin": normalized_origin,
         "server_mode": configured_server_mode,
         "environment": str(getattr(settings, "environment", "") or "").strip().lower(),
-        "production_execution_allowed": is_production_runtime() and allow_production,
+        "production_execution_allowed": False,
     }
 
 
@@ -1208,18 +1254,26 @@ def validate_production_cleanup_prefix(prefix: str) -> str:
 
 
 def allow_production_cleanup_hard_delete(prefix: str, *, allow_flag: bool) -> None:
-    global _PRODUCTION_CLEANUP_HARD_DELETE_ALLOWED
-    if not is_production_runtime():
-        _PRODUCTION_CLEANUP_HARD_DELETE_ALLOWED = True
+    del prefix, allow_flag
+    assert_legacy_two_server_worker_operation_retired("production_full_matrix_cleanup")
+
+
+def assert_legacy_two_server_worker_command_is_local_only(args: argparse.Namespace) -> None:
+    """Deny every legacy worker command that can leave local artifact handling.
+
+    The check deliberately does not inspect settings or environment variables.
+    A caller must not be able to relabel a production endpoint as development
+    and regain fixture, cleanup, router, Redis, or database access.
+    """
+
+    command = str(getattr(args, "command", "") or "").strip()
+    if command in LEGACY_TWO_SERVER_WORKER_LOCAL_ONLY_COMMANDS:
         return
-    validate_production_cleanup_prefix(prefix)
-    confirm_value = os.getenv(PRODUCTION_CLEANUP_CONFIRM_ENV)
-    if not allow_flag or confirm_value != PRODUCTION_CLEANUP_CONFIRM_VALUE:
-        raise TradingProbeError(
-            "production cleanup hard-delete requires --allow-production-hard-delete and "
-            f"{PRODUCTION_CLEANUP_CONFIRM_ENV}={PRODUCTION_CLEANUP_CONFIRM_VALUE}"
-        )
-    _PRODUCTION_CLEANUP_HARD_DELETE_ALLOWED = True
+    raise TradingProbeError(
+        "Legacy two-site Full Matrix worker command is retired and hard-disabled "
+        f"before dependency access: command={command!r}; "
+        "use a sealed three-site campaign verifier."
+    )
 
 
 def escape_sql_like_literal(value: str) -> str:
@@ -1258,8 +1312,11 @@ def stable_unique(values: list[Any]) -> list[Any]:
 
 
 def cleanup_mutating_statement(statement: Any) -> Any:
-    if is_production_runtime() and not _PRODUCTION_CLEANUP_HARD_DELETE_ALLOWED:
-        raise TradingProbeError("synthetic cleanup is disabled in production runtime")
+    if is_production_runtime():
+        raise TradingProbeError(
+            "Legacy two-site synthetic cleanup is retired and hard-disabled in production runtime; "
+            "use a sealed three-site campaign verifier."
+        )
     return statement.execution_options(is_sync=True)
 
 
@@ -1662,6 +1719,7 @@ async def collect_cleanup_plan(prefix: str) -> CleanupPlan:
 
 
 async def cleanup_prefix(prefix: str, *, dry_run: bool = False) -> dict[str, Any]:
+    assert_legacy_two_server_worker_operation_retired("cleanup_prefix")
     plan = await collect_cleanup_plan(prefix)
     if dry_run:
         planned_redis_keys = await cleanup_redis_for_user_ids(plan.user_ids, dry_run=True)
@@ -1770,6 +1828,7 @@ async def push_prefix_change_logs_to_peer(
     max_attempts: int = 3,
     include_synced: bool = False,
 ) -> dict[str, Any]:
+    assert_legacy_two_server_worker_operation_retired("prefix_sync_push")
     from core.server_routing import default_peer_server_url
     from core.sync_worker import change_log_entry_to_sync_item
 
@@ -2027,6 +2086,7 @@ async def resolve_commodity() -> tuple[int, str]:
 
 
 async def create_fixture_users(prefix: str) -> FixtureUsers:
+    assert_legacy_two_server_worker_operation_retired("fixture_user_creation")
     setup_event_listeners()
     users = [
         User(
@@ -2147,6 +2207,7 @@ def build_load_fixture_users(prefix: str, *, user_count: int, salt: int = 0) -> 
 
 
 async def create_load_fixture_users(prefix: str, *, user_count: int) -> list[LoadUserRef]:
+    assert_legacy_two_server_worker_operation_retired("load_fixture_user_creation")
     if user_count < 3:
         raise TradingProbeError("mixed load requires at least 3 synthetic users")
 
@@ -4752,6 +4813,7 @@ async def run_negative_guard_case(
 
 
 async def inspect_hot_offer_persistence(offer_id: int) -> HotOfferPersistenceSnapshot:
+    assert_legacy_two_server_worker_operation_retired("hot_offer_persistence_inspection")
     async with AsyncSessionLocal() as db:
         offer = await db.get(Offer, offer_id)
         if offer is None:
@@ -4906,6 +4968,7 @@ async def wait_for_offer_visibility(
     timeout_seconds: float,
     poll_seconds: float,
 ) -> dict[str, Any]:
+    assert_legacy_two_server_worker_operation_retired("offer_visibility_wait")
     deadline = time.monotonic() + max(0.0, float(timeout_seconds))
     attempts = 0
     last_seen_id: int | None = None
@@ -5144,6 +5207,7 @@ def read_json_artifact(path: Path) -> Mapping[str, Any]:
 
 
 async def run_role_worker_plan(plan_payload: Mapping[str, Any]) -> dict[str, Any]:
+    assert_legacy_two_server_worker_operation_retired("role_worker_plan_execution")
     plan = validate_role_plan_artifact(plan_payload)
     role = str(plan["role"])
     surface = str(plan["surface"])
@@ -5367,6 +5431,7 @@ async def run_hot_offer_contention(
     expected_winner_count: int,
     check: bool = True,
 ) -> dict[str, Any]:
+    assert_legacy_two_server_worker_operation_retired("hot_offer_contention")
     if target_rps <= 0:
         raise TradingProbeError("target_rps must be positive")
 
@@ -5541,6 +5606,7 @@ async def run_hot_offer_scenario(
     commodity_name: str,
     index: int,
 ) -> dict[str, Any]:
+    assert_legacy_two_server_worker_operation_retired("hot_offer_scenario")
     if len(users) < 3:
         raise TradingProbeError("hot-offer scenarios require at least three synthetic users")
     owner = users[1] if scenario.origin == "bot" else users[0]
@@ -5790,6 +5856,7 @@ async def run_duplicate_replay_probe(
     price: int,
     offer_type: str,
 ) -> dict[str, Any]:
+    assert_legacy_two_server_worker_operation_retired("duplicate_replay_probe")
     if len(users) < 4:
         raise TradingProbeError("duplicate/replay probe requires at least four synthetic users")
 
@@ -5879,6 +5946,7 @@ async def run_duplicate_replay_probe(
 
 
 async def run_notification_fanout(*, user_ids: list[int], prefix: str, iterations: int) -> dict[str, Any]:
+    assert_legacy_two_server_worker_operation_retired("notification_fanout")
     samples: list[float] = []
     created = 0
     for index in range(iterations):
@@ -5910,6 +5978,7 @@ async def run_race_probe(
     commodity_id: int,
     concurrency: int,
 ) -> dict[str, Any]:
+    assert_legacy_two_server_worker_operation_retired("race_probe")
     offer_id = await create_offer_for_user(
         user_id=fixture.seller_id,
         commodity_id=commodity_id,
@@ -5983,6 +6052,7 @@ async def run_race_probe(
 
 
 async def run_benchmark(args: argparse.Namespace) -> int:
+    assert_legacy_two_server_worker_operation_retired("benchmark")
     setup_event_listeners()
     prefix = args.prefix
     await cleanup_prefix(prefix)
@@ -6121,6 +6191,7 @@ async def run_benchmark(args: argparse.Namespace) -> int:
 
 
 async def run_mixed_load_benchmark(args: argparse.Namespace) -> int:
+    assert_legacy_two_server_worker_operation_retired("mixed_load_benchmark")
     setup_event_listeners()
     prefix = args.prefix
     await cleanup_prefix(prefix)
@@ -6227,6 +6298,7 @@ async def run_mixed_load_benchmark(args: argparse.Namespace) -> int:
 
 
 async def run_hot_offer_scenarios_command(args: argparse.Namespace) -> int:
+    assert_legacy_two_server_worker_operation_retired("hot_offer_scenarios")
     setup_event_listeners()
     prefix = args.prefix
     await cleanup_prefix(prefix)
@@ -6320,6 +6392,7 @@ async def run_hot_offer_scenarios_command(args: argparse.Namespace) -> int:
 
 
 async def cleanup_command(args: argparse.Namespace) -> int:
+    assert_legacy_two_server_worker_operation_retired("cleanup")
     if not args.dry_run:
         allow_production_cleanup_hard_delete(
             args.prefix,
@@ -6338,6 +6411,7 @@ async def load_runner_ready_command(args: argparse.Namespace) -> int:
 
 
 async def run_negative_guard_case_command(args: argparse.Namespace) -> int:
+    assert_legacy_two_server_worker_operation_retired("negative_guard_case")
     payload = await run_negative_guard_case(
         prefix=args.prefix,
         case_id=args.case_id,
@@ -6352,6 +6426,7 @@ async def run_negative_guard_case_command(args: argparse.Namespace) -> int:
 
 
 async def run_unsupported_policy_case_command(args: argparse.Namespace) -> int:
+    assert_legacy_two_server_worker_operation_retired("unsupported_policy_case")
     payload = await run_unsupported_policy_case(
         prefix=args.prefix,
         actor_pair_id=args.actor_pair_id,
@@ -6378,6 +6453,7 @@ async def run_unsupported_policy_case_command(args: argparse.Namespace) -> int:
 
 
 async def seed_dual_role_users_command(args: argparse.Namespace) -> int:
+    assert_legacy_two_server_worker_operation_retired("seed_dual_role_users")
     setup_event_listeners()
     prefix = str(args.prefix)
     assert_load_runner_runtime_surface(
@@ -6408,6 +6484,7 @@ async def seed_dual_role_users_command(args: argparse.Namespace) -> int:
 
 
 async def verify_dual_role_users_command(args: argparse.Namespace) -> int:
+    assert_legacy_two_server_worker_operation_retired("verify_dual_role_users")
     prefix = str(args.prefix)
     assert_production_full_matrix_allowed(
         prefix,
@@ -6432,6 +6509,7 @@ async def verify_dual_role_users_command(args: argparse.Namespace) -> int:
 
 
 async def prepare_dual_role_run_command(args: argparse.Namespace) -> int:
+    assert_legacy_two_server_worker_operation_retired("prepare_dual_role_run")
     setup_event_listeners()
     prefix = args.prefix
     assert_dual_role_prepare_runtime(
@@ -6598,6 +6676,7 @@ def assert_race_barrier_lateness(*, label: str, scheduled_epoch: float, started_
 
 
 async def run_manual_expiry_race_command(args: argparse.Namespace) -> int:
+    assert_legacy_two_server_worker_operation_retired("manual_expiry_race")
     # This command is commonly launched as its own short-lived container
     # process. Register model listeners here so the terminal offer mutation
     # produces the same durable sync outbox rows as the long-running app.
@@ -6691,6 +6770,7 @@ async def run_manual_expiry_race_command(args: argparse.Namespace) -> int:
 
 
 async def run_time_expiry_race_command(args: argparse.Namespace) -> int:
+    assert_legacy_two_server_worker_operation_retired("time_expiry_race")
     # Keep standalone expiry probes on the production transaction path. Without
     # these listeners the DB commit succeeds but no change_log row is emitted.
     setup_event_listeners()
@@ -6766,6 +6846,7 @@ async def run_time_expiry_race_command(args: argparse.Namespace) -> int:
 
 
 async def run_read_during_write_command(args: argparse.Namespace) -> int:
+    assert_legacy_two_server_worker_operation_retired("read_during_write")
     prepare = read_json_artifact(Path(args.prepare))
     prefix = str(prepare.get("prefix") or "")
     read_surface = str(args.read_surface or "").strip().lower()
@@ -6915,6 +6996,7 @@ async def run_read_during_write_command(args: argparse.Namespace) -> int:
 
 
 async def finalize_dual_role_run_command(args: argparse.Namespace) -> int:
+    assert_legacy_two_server_worker_operation_retired("finalize_dual_role_run")
     prepare = read_json_artifact(Path(args.prepare))
     merged_result = read_json_artifact(Path(args.merged_result))
     offer = _require_mapping(prepare.get("offer"), "prepare offer")
@@ -6940,6 +7022,7 @@ async def finalize_dual_role_run_command(args: argparse.Namespace) -> int:
 
 
 async def observability_snapshot_command(args: argparse.Namespace) -> int:
+    assert_legacy_two_server_worker_operation_retired("observability_snapshot")
     started = time.perf_counter()
     redis_errors = 0
     redis_info: dict[str, Any] = {}
@@ -7303,6 +7386,7 @@ async def write_dual_role_plan_command(args: argparse.Namespace) -> int:
 
 
 async def sync_prefix_catchup_command(args: argparse.Namespace) -> int:
+    assert_legacy_two_server_worker_operation_retired("sync_prefix_catchup")
     prefix = args.prefix
     assert_production_full_matrix_allowed(prefix, allow_flag=bool(args.allow_production_execution))
     tables = tuple(args.table or TARGETED_SYNC_TABLES)
@@ -7379,6 +7463,7 @@ async def optional_role_worker_patches(*, patch_boundaries: bool, patch_external
 
 
 async def run_role_plan_command(args: argparse.Namespace) -> int:
+    assert_legacy_two_server_worker_operation_retired("run_role_plan")
     plan = read_json_artifact(Path(args.plan))
     validated = validate_role_plan_artifact(plan)
     assert_load_runner_runtime_surface(
@@ -7401,6 +7486,7 @@ async def run_role_plan_command(args: argparse.Namespace) -> int:
 
 
 async def wait_offer_visible_command(args: argparse.Namespace) -> int:
+    assert_legacy_two_server_worker_operation_retired("wait_offer_visible")
     offer_id = args.offer_id
     offer_public_id = args.offer_public_id
     if args.plan:
@@ -7421,6 +7507,7 @@ async def wait_offer_visible_command(args: argparse.Namespace) -> int:
 
 
 async def rebase_role_plan_command(args: argparse.Namespace) -> int:
+    assert_legacy_two_server_worker_operation_retired("rebase_role_plan")
     plan = dict(validate_role_plan_artifact(read_json_artifact(Path(args.plan))))
     offer_payload = dict(_require_mapping(plan["offer"], "role plan offer"))
     original_offer_id = int(offer_payload["id"])
@@ -7852,6 +7939,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 async def dispatch(args: argparse.Namespace) -> int:
+    assert_legacy_two_server_worker_command_is_local_only(args)
     if args.command == "cleanup":
         return await cleanup_command(args)
     if args.command == "load-runner-ready":
@@ -7910,6 +7998,104 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         print_json({"status": "error", "error_type": type(exc).__name__, "message": str(exc)})
         return 1
+
+
+_LEGACY_TWO_SERVER_RUNTIME_HELPER_NAMES = (
+    "warm_load_runner_dependencies",
+    "cleanup_redis_for_user_ids",
+    "collect_int_ids",
+    "collect_ids",
+    "collect_int_ids_by_batched_filters",
+    "collect_ids_by_batched_filters",
+    "collect_offer_cleanup_rows",
+    "collect_cleanup_plan",
+    "cleanup_prefix",
+    "collect_targeted_prefix_change_logs",
+    "push_prefix_change_logs_to_peer",
+    "lock_cleanup_users",
+    "delete_in_batches",
+    "delete_cleanup_plan",
+    "resolve_commodity",
+    "create_fixture_users",
+    "create_load_fixture_users",
+    "assert_seeded_load_users_visible",
+    "patched_trading_boundaries",
+    "patched_external_side_effects",
+    "load_user",
+    "load_user_ref",
+    "seed_offer_runtime_metadata_with_retry",
+    "create_offer_for_user",
+    "expire_offer_for_user",
+    "list_active_offers_for_user",
+    "list_market_history_for_user",
+    "load_public_offer_detail_for_user",
+    "age_offer_for_time_expiry",
+    "schedule_offer_for_time_expiry_race",
+    "update_synthetic_user_for_negative_guard",
+    "create_active_customer_relation_for_negative_guard",
+    "count_offers_for_user",
+    "set_offer_home_server_for_negative_guard",
+    "load_offer_public_id_for_negative_guard",
+    "mark_offer_completed_for_negative_guard",
+    "execute_internal_trade_for_negative_guard",
+    "execute_offer_creation_for_user",
+    "run_offer_expiry_cycle_for_server",
+    "expire_time_limit_offer_for_race",
+    "execute_trade_for_user",
+    "detach_probe_router",
+    "include_probe_router",
+    "run_bot_text_handler_probe",
+    "execute_bot_offer_creation_for_user",
+    "execute_webapp_trade_for_user",
+    "execute_accountant_context_trade_for_user",
+    "negative_guard_offer_evidence",
+    "prepare_unsupported_policy_actor_fixture",
+    "execute_unsupported_tier2_offer_creation_probe",
+    "execute_unsupported_tier2_telegram_request_probe",
+    "run_unsupported_policy_case",
+    "run_negative_guard_case",
+    "inspect_hot_offer_persistence",
+    "create_bot_offer_with_dispatcher",
+    "load_offer_snapshot",
+    "wait_for_offer_visibility",
+    "preconfirm_bot_trade_callbacks",
+    "preconfirm_parsed_bot_trade_callback",
+    "preconfirm_bot_trade_callback",
+    "execute_bot_trade_with_dispatcher",
+    "expire_bot_offer_with_dispatcher",
+    "execute_bot_market_view_with_dispatcher",
+    "run_role_worker_plan",
+    "run_hot_offer_contention",
+    "create_hot_offer_for_scenario",
+    "run_hot_offer_scenario",
+    "run_duplicate_replay_probe",
+    "run_notification_fanout",
+    "run_race_probe",
+    "run_benchmark",
+    "run_mixed_load_benchmark",
+    "run_hot_offer_scenarios_command",
+    "cleanup_command",
+    "run_negative_guard_case_command",
+    "run_unsupported_policy_case_command",
+    "seed_dual_role_users_command",
+    "verify_dual_role_users_command",
+    "prepare_dual_role_run_command",
+    "run_manual_expiry_race_command",
+    "run_time_expiry_race_command",
+    "run_read_during_write_command",
+    "finalize_dual_role_run_command",
+    "observability_snapshot_command",
+    "sync_prefix_catchup_command",
+    "run_role_plan_command",
+    "wait_offer_visible_command",
+    "rebase_role_plan_command",
+)
+
+
+for _legacy_runtime_helper_name in _LEGACY_TWO_SERVER_RUNTIME_HELPER_NAMES:
+    globals()[_legacy_runtime_helper_name] = retire_legacy_two_server_worker_runtime_helper(
+        _legacy_runtime_helper_name
+    )(globals()[_legacy_runtime_helper_name])
 
 
 if __name__ == "__main__":

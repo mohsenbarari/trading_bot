@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""Plan and preflight the Stage 8 sync-parity staging rollout.
+"""Serialize the retired Stage 8 sync-parity staging rollout plan.
 
-The script is fail-closed by default: it writes an auditable plan without
-touching staging data. Read-only preflight commands are allowed in `preflight`
-mode. Commands that create staging fixtures require `execute` mode plus an
-explicit confirmation environment variable.
+Only artifact-only plan construction remains available.  Every retained
+preflight or execution path is hard-disabled before it can contact staging.
 """
 
 from __future__ import annotations
@@ -14,7 +12,6 @@ import json
 import os
 import subprocess
 import sys
-import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,6 +31,9 @@ EXECUTION_CONFIRM_VALUE = "execute-stage8-staging-rollout"
 STAGING_PROJECT_NAME = "trading_bot_staging"
 STAGING_COMPOSE_FILE = REPO_ROOT / "deploy" / "staging" / "docker-compose.staging.yml"
 STAGING_ENV_FILE = REPO_ROOT / ".env.staging"
+LEGACY_STAGE8_STAGING_RETIREMENT_REASON = (
+    "legacy_two_server_stage8_staging_rollout_retired_use_three_site_sealed_campaign"
+)
 
 
 @dataclass(frozen=True)
@@ -47,6 +47,20 @@ class CommandSpec:
     timeout_seconds: int = 300
     stdout_path: Path | None = None
     stderr_path: Path | None = None
+
+
+class LegacyTwoServerStage8RuntimeRetiredError(RuntimeError):
+    """Raised before the retired Stage 8 runner can execute a command."""
+
+
+def assert_legacy_two_server_stage8_execution_retired(operation: str) -> None:
+    """Hard-deny all retained Stage 8 preflight and execution entrypoints."""
+
+    raise LegacyTwoServerStage8RuntimeRetiredError(
+        "Legacy two-server Stage 8 staging rollout is retired and hard-disabled "
+        f"before subprocess, container, HTTP, or data access: operation={operation}; "
+        "use a sealed three-site campaign verifier."
+    )
 
 
 def utc_prefix() -> str:
@@ -516,7 +530,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         },
         "execution_contract": {
             "production_deploy_allowed": False,
-            "staging_data_mutation_requires_mode": "execute",
+            "legacy_two_server_staging_execution_hard_disabled": True,
             "execution_confirm_env": EXECUTION_CONFIRM_ENV,
             "execution_confirm_value": EXECUTION_CONFIRM_VALUE,
             "test_data_scope": "exact synthetic prefix only",
@@ -556,7 +570,8 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             "commands": [command_payload(command) for command in preflight],
         },
         "execution_plan": {
-            "status": "blocked_until_explicit_confirm",
+            "status": "hard_disabled",
+            "reason": LEGACY_STAGE8_STAGING_RETIREMENT_REASON,
             "commands": [command_payload(command) for command in execution],
         },
         "post_execution_checks": {
@@ -581,87 +596,18 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def run_command(command: dict[str, Any]) -> dict[str, Any]:
-    stdout_path = Path(command["stdout_path"]) if command.get("stdout_path") else None
-    stderr_path = Path(command["stderr_path"]) if command.get("stderr_path") else None
-    if stdout_path:
-        stdout_path.parent.mkdir(parents=True, exist_ok=True)
-    if stderr_path:
-        stderr_path.parent.mkdir(parents=True, exist_ok=True)
-
-    started = time.perf_counter()
-    try:
-        result = subprocess.run(
-            list(command["args"]),
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            timeout=int(command["timeout_seconds"]),
-            check=False,
-        )
-        stdout = result.stdout or ""
-        stderr = result.stderr or ""
-        if stdout_path:
-            stdout_path.write_text(stdout, encoding="utf-8")
-        if stderr_path:
-            stderr_path.write_text(stderr, encoding="utf-8")
-        status = "passed" if result.returncode == 0 else "failed"
-        return {
-            "name": command["name"],
-            "status": status,
-            "returncode": result.returncode,
-            "elapsed_seconds": round(time.perf_counter() - started, 3),
-            "stdout_path": str(stdout_path) if stdout_path else None,
-            "stderr_path": str(stderr_path) if stderr_path else None,
-        }
-    except subprocess.TimeoutExpired as exc:
-        if stdout_path and exc.stdout:
-            stdout_path.write_text(str(exc.stdout), encoding="utf-8")
-        if stderr_path and exc.stderr:
-            stderr_path.write_text(str(exc.stderr), encoding="utf-8")
-        return {
-            "name": command["name"],
-            "status": "timeout",
-            "returncode": 124,
-            "elapsed_seconds": round(time.perf_counter() - started, 3),
-            "stdout_path": str(stdout_path) if stdout_path else None,
-            "stderr_path": str(stderr_path) if stderr_path else None,
-        }
+    assert_legacy_two_server_stage8_execution_retired("run_command")
 
 
 def execute_plan(plan: dict[str, Any], *, include_mutating: bool) -> tuple[dict[str, Any], int]:
-    if not plan["branch_gate"]["passed"]:
-        plan["status"] = "blocked_wrong_branch"
-        return plan, 2
-    if include_mutating and os.environ.get(EXECUTION_CONFIRM_ENV) != EXECUTION_CONFIRM_VALUE:
-        plan["status"] = "blocked_execution_confirmation_missing"
-        plan["execution_plan"]["status"] = "blocked_confirmation_missing"
-        return plan, 2
-
-    sections = ["preflight"]
-    if include_mutating:
-        sections.extend(["execution_plan", "post_execution_checks"])
-
-    failed_required: list[str] = []
-    for section_name in sections:
-        section = plan[section_name]
-        results = []
-        for command in section["commands"]:
-            if command["mutates_staging"] and not include_mutating:
-                continue
-            result = run_command(command)
-            results.append(result)
-            if command.get("required", True) and result["status"] != "passed":
-                failed_required.append(command["name"])
-                break
-        section["results"] = results
-        section["status"] = "passed" if not any(result["status"] != "passed" for result in results) else "failed"
-        if failed_required:
-            break
-
-    plan["status"] = "passed" if not failed_required else "failed"
-    if failed_required:
-        plan["failed_required_commands"] = failed_required
-    return plan, 0 if not failed_required else 1
+    del include_mutating
+    plan["status"] = "blocked_legacy_two_server_stage8_runtime_retired"
+    for section_name in ("preflight", "execution_plan", "post_execution_checks"):
+        section = plan.get(section_name)
+        if isinstance(section, dict):
+            section["status"] = "hard_disabled"
+            section["reason"] = LEGACY_STAGE8_STAGING_RETIREMENT_REASON
+    return plan, 2
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -691,6 +637,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.mode != "plan":
+        print(
+            json.dumps(
+                {
+                    "status": "blocked_legacy_two_server_stage8_runtime_retired",
+                    "reason": LEGACY_STAGE8_STAGING_RETIREMENT_REASON,
+                    "mode": args.mode,
+                    "required_replacement": "sealed_three_site_campaign_verifier",
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+        return 2
     args.artifact_dir.mkdir(parents=True, exist_ok=True)
     plan = build_plan(args)
 

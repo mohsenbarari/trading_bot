@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -20,7 +21,10 @@ import yaml
 from scripts import (
     install_production_shadow_frozen_final_restore_inputs as MODULE,
 )
-from tests.test_production_shadow_cutover_controller import manifest_payload
+from tests.test_production_shadow_cutover_controller import (
+    manifest_payload,
+    write_controller_manifest,
+)
 from tests.test_production_shadow_frozen_final_restore_worker import (
     restore_set_document,
 )
@@ -346,10 +350,12 @@ class Fixture:
             hashlib.sha256(canonical_payload).hexdigest()
         )
         self.controller_path = root / "inputs" / "controller.json"
-        self.controller_sha256 = secure_file(
-            self.controller_path,
-            canonical(self.controller),
-        )
+        self.controller_path.parent.mkdir(mode=0o700, parents=True)
+        self.controller_path.parent.chmod(0o700)
+        write_controller_manifest(self.controller_path, self.controller)
+        self.controller_sha256 = hashlib.sha256(
+            self.controller_path.read_bytes()
+        ).hexdigest()
 
         self.database_backup = (
             root / "inputs" / "artifacts" / "database.dump"
@@ -527,10 +533,10 @@ class Fixture:
         self._write_restore_set()
 
     def rewrite_controller(self) -> None:
-        self.controller_sha256 = secure_file(
-            self.controller_path,
-            canonical(self.controller),
-        )
+        write_controller_manifest(self.controller_path, self.controller)
+        self.controller_sha256 = hashlib.sha256(
+            self.controller_path.read_bytes()
+        ).hexdigest()
         self.restore_document["controller_manifest_sha256"] = (
             self.controller_sha256
         )
@@ -586,6 +592,25 @@ class FrozenFinalRestoreInputInstallerTests(unittest.TestCase):
                 self.assertNotIn(
                     "worker",
                     {spec.kind for spec in plan.outputs},
+                )
+                derivation_receipt = next(
+                    spec
+                    for spec in plan.outputs
+                    if spec.kind
+                    == "controller-runtime-target-derivation-receipt"
+                )
+                self.assertEqual(
+                    derivation_receipt.path,
+                    MODULE.runtime_targets.runtime_target_derivation_receipt_path(
+                        plan.paths.secret_generation_root
+                        / "controller-manifest.json"
+                    ),
+                )
+                self.assertEqual(
+                    derivation_receipt.payload,
+                    MODULE.runtime_targets.runtime_target_derivation_receipt_path(
+                        fixture.controller_path
+                    ).read_bytes(),
                 )
                 self.assertEqual(
                     plan.role_manifest["worker_path"],
@@ -1333,6 +1358,208 @@ class FrozenFinalRestoreInputInstallerTests(unittest.TestCase):
                 "--apply",
             ]
             self.assertEqual(MODULE.main(args), 2)
+
+    def test_release_probe_neutralizes_git_config_and_rejects_index_flags(
+        self,
+    ) -> None:
+        with mock.patch.object(
+            MODULE,
+            "_run_bounded_probe",
+            return_value=(0, b"HEAD\n", b""),
+        ) as bounded:
+            self.assertEqual(
+                MODULE._run_release_probe(
+                    (MODULE.GIT, "rev-parse", "HEAD"),
+                    cwd=Path("/release"),
+                    label="test Git",
+                ),
+                "HEAD",
+            )
+        command = bounded.call_args.args[0]
+        self.assertIn("core.fsmonitor=false", command)
+        self.assertIn("core.hooksPath=/dev/null", command)
+        self.assertIn("--git-dir=/release/.git", command)
+        self.assertIn("--work-tree=/release", command)
+        for row in (
+            "S scripts/hidden.py",
+            "h scripts/assumed.py",
+        ):
+            with self.subTest(row=row), self.assertRaisesRegex(
+                MODULE.FrozenFinalRestoreInputInstallError,
+                "hidden tracked state",
+            ):
+                MODULE._verify_git_index_rows([row])
+        with (
+            mock.patch.object(
+                MODULE,
+                "_run_bounded_probe",
+                return_value=(0, b"HEAD\n", b"unexpected warning\n"),
+            ),
+            self.assertRaisesRegex(
+                MODULE.FrozenFinalRestoreInputInstallError,
+                "failed closed",
+            ),
+        ):
+            MODULE._run_release_probe(
+                (MODULE.GIT, "rev-parse", "HEAD"),
+                cwd=Path("/release"),
+                label="test Git",
+            )
+
+    def test_release_probe_output_is_bounded_while_process_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(
+                MODULE.FrozenFinalRestoreInputInstallError,
+                "stdout is oversized",
+            ):
+                MODULE._run_bounded_probe(
+                    (
+                        MODULE.PYTHON,
+                        "-I",
+                        "-c",
+                        "import os; os.write(1, b'x' * 5242880)",
+                    ),
+                    cwd=Path(temporary),
+                    timeout=10,
+                )
+
+    def test_release_probe_rejects_invalid_timeout_before_start(self) -> None:
+        for timeout in (0, True, 31):
+            with self.subTest(timeout=timeout), self.assertRaisesRegex(
+                MODULE.FrozenFinalRestoreInputInstallError,
+                "timeout is outside",
+            ):
+                MODULE._run_bounded_probe(
+                    (MODULE.PYTHON, "-I", "-c", "pass"),
+                    cwd=Path("/tmp"),
+                    timeout=timeout,
+                )
+
+    def test_release_probe_root_pidfd_contains_identity_failure(self) -> None:
+        opened: list[tuple[int, int]] = []
+        real_pidfd_open = os.pidfd_open
+
+        def capture_pidfd(pid: int, flags: int = 0) -> int:
+            descriptor = real_pidfd_open(pid, flags)
+            opened.append((pid, descriptor))
+            return descriptor
+
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                mock.patch.object(
+                    MODULE,
+                    "_direct_child_baseline",
+                    return_value=frozenset(),
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "_process_identity",
+                    return_value=None,
+                ),
+                mock.patch.object(
+                    MODULE.os,
+                    "pidfd_open",
+                    side_effect=capture_pidfd,
+                ),
+                self.assertRaisesRegex(
+                    MODULE.FrozenFinalRestoreInputInstallError,
+                    "identity is unavailable",
+                ),
+            ):
+                MODULE._run_bounded_probe(
+                    (
+                        sys.executable,
+                        "-I",
+                        "-B",
+                        "-c",
+                        "import time;time.sleep(60)",
+                    ),
+                    cwd=Path(directory),
+                    timeout=5,
+                )
+        self.assertEqual(len(opened), 1)
+        pid, descriptor = opened[0]
+        self.assertFalse(Path(f"/proc/{pid}").exists())
+        with self.assertRaises(OSError):
+            os.fstat(descriptor)
+
+    def test_release_probe_cleanup_close_preserves_interrupt(self) -> None:
+        selector = mock.Mock()
+        selector.get_map.return_value = {"active": object()}
+        selector.select.side_effect = KeyboardInterrupt
+        selector.close.side_effect = RuntimeError(
+            "forced selector close failure"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                mock.patch.object(
+                    MODULE.selectors,
+                    "DefaultSelector",
+                    return_value=selector,
+                ),
+                self.assertRaises(KeyboardInterrupt),
+            ):
+                MODULE._run_bounded_probe(
+                    (
+                        sys.executable,
+                        "-I",
+                        "-B",
+                        "-c",
+                        "import time;time.sleep(60)",
+                    ),
+                    cwd=Path(directory),
+                    timeout=5,
+                )
+        selector.close.assert_called_once_with()
+
+    def test_release_probe_kills_forked_descendant_after_parent_exit(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            child_pid_path = Path(directory) / "probe-descendant-pid"
+            code = (
+                "import os,signal,time\n"
+                "if os.fork() == 0:\n"
+                " os.setsid()\n"
+                " if os.fork() == 0:\n"
+                "  signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                f"  partial={str(child_pid_path)!r}+'.partial'\n"
+                "  with open(partial,'w',encoding='ascii') as stream:\n"
+                "   stream.write(str(os.getpid())+'\\n')\n"
+                "   stream.flush()\n"
+                "   os.fsync(stream.fileno())\n"
+                f"  os.replace(partial,{str(child_pid_path)!r})\n"
+                "  os.close(1)\n"
+                "  os.close(2)\n"
+                "  time.sleep(30)\n"
+                "  os._exit(0)\n"
+                " os._exit(0)\n"
+                "deadline=time.monotonic()+10\n"
+                f"while not os.path.exists({str(child_pid_path)!r}):\n"
+                " if time.monotonic() >= deadline:\n"
+                "  raise RuntimeError('detached child did not start')\n"
+                " time.sleep(0.005)\n"
+                "print('ok',flush=True)\n"
+            )
+            returncode, stdout, stderr = MODULE._run_bounded_probe(
+                (MODULE.PYTHON, "-I", "-B", "-c", code),
+                cwd=Path(directory),
+                timeout=10,
+            )
+            self.assertEqual(returncode, 0)
+            self.assertEqual(stdout, b"ok\n")
+            self.assertEqual(stderr, b"")
+            child_pid = int(
+                child_pid_path.read_text(encoding="ascii").strip()
+            )
+            child_path = Path(f"/proc/{child_pid}")
+            deadline = time.monotonic() + 2
+            while child_path.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertFalse(
+                child_path.exists(),
+                "detached release probe or zombie remained in /proc",
+            )
 
     def test_real_worker_import_smoke_has_no_bytecode_residue(self) -> None:
         env = dict(os.environ)

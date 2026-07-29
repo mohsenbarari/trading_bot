@@ -4,8 +4,14 @@ from contextlib import redirect_stdout
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
+import signal
+import subprocess
+import sys
 import tempfile
+import threading
+import time
 from unittest import mock
 import unittest
 
@@ -37,6 +43,87 @@ from tests.test_production_shadow_cutover_controller import manifest_payload
 
 CONTRACT = host_agent_contract_document()
 AGENT_SHA256 = "c" * 64
+
+
+def external_liveness_pipe() -> tuple[int, subprocess.Popen[bytes]]:
+    read_fd, write_fd = os.pipe()
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            "import os,sys,time;os.fstat(int(sys.argv[1]));time.sleep(300)",
+            str(write_fd),
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+        pass_fds=(write_fd,),
+    )
+    os.close(write_fd)
+    return read_fd, holder
+
+
+def stop_liveness_holder(holder: subprocess.Popen[bytes]) -> None:
+    if holder.poll() is None:
+        holder.terminate()
+    try:
+        holder.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        holder.kill()
+        holder.wait(timeout=2)
+
+
+def read_pipe_line(descriptor: int) -> bytes:
+    payload = bytearray()
+    while not payload.endswith(b"\n"):
+        chunk = os.read(descriptor, 1)
+        if not chunk:
+            raise AssertionError("reported wrapper reached EOF")
+        payload.extend(chunk)
+    return bytes(payload)
+
+
+def start_reported_wrapper(
+    *,
+    mode: str,
+    purpose: str,
+    target: list[str],
+    nonce: str = "a" * 32,
+) -> tuple[subprocess.Popen[bytes], int, int, bytes]:
+    report_read, report_write = os.pipe()
+    ack_read, ack_write = os.pipe()
+    digest = HOST_MODULE._argv_sha256(target)
+    worker = Path(HOST_MODULE.__file__).with_name(
+        "production_shadow_precommit_worker.py"
+    )
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            str(worker),
+            "--bounded-exec-wrapper",
+            mode,
+            nonce,
+            purpose,
+            digest,
+            str(report_write),
+            str(ack_read),
+            "--",
+            *target,
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+        pass_fds=(report_write, ack_read),
+    )
+    os.close(report_write)
+    os.close(ack_read)
+    return process, report_read, ack_write, read_pipe_line(report_read)
 
 
 def rendered_phases() -> list[dict]:
@@ -71,6 +158,40 @@ def agent_argv(command: dict) -> list[str]:
 
 
 class ProductionShadowHostAgentTests(unittest.TestCase):
+    def test_signal_guard_enter_failure_restores_installed_handlers(self):
+        guard = HOST_MODULE.HostSignalGuard()
+        originals = {
+            signum: signal.getsignal(signum)
+            for signum in guard._HANDLED
+        }
+        real_signal = signal.signal
+
+        def install(signum, handler):
+            if (
+                signum == signal.SIGTERM
+                and handler == guard._handle
+            ):
+                raise OSError("synthetic install failure")
+            return real_signal(signum, handler)
+
+        with (
+            mock.patch.object(
+                HOST_MODULE.signal,
+                "signal",
+                side_effect=install,
+            ),
+            self.assertRaisesRegex(OSError, "synthetic install failure"),
+        ):
+            guard.__enter__()
+        self.assertEqual(
+            {
+                signum: signal.getsignal(signum)
+                for signum in guard._HANDLED
+            },
+            originals,
+        )
+        self.assertEqual(guard._old_handlers, {})
+
     def installed_precommit_manifest(
         self,
         root: Path,
@@ -302,7 +423,7 @@ class ProductionShadowHostAgentTests(unittest.TestCase):
                 return_value=manifest,
             ),
             mock.patch(
-                "scripts.production_shadow_host_agent.subprocess.run",
+                "scripts.production_shadow_host_agent._run_precommit_worker",
                 return_value=completed,
             ) as run,
         ):
@@ -323,6 +444,597 @@ class ProductionShadowHostAgentTests(unittest.TestCase):
             ),
             argv,
         )
+        self.assertIsNone(run.call_args.kwargs["control_fd"])
+
+    def test_mutating_precommit_requires_controller_liveness(self):
+        command = next(
+            command
+            for phase in rendered_preparation()
+            for command in phase["commands"]
+            if "--operation" in command["argv"]
+            and command["argv"][
+                command["argv"].index("--operation") + 1
+            ]
+            == "bootstrap-database"
+        )
+        request, _execute = parse_request_argv(
+            agent_argv(command),
+            contract=CONTRACT,
+            observed_agent_sha256=AGENT_SHA256,
+        )
+        manifest = {
+            "operation_id": request["operation_id"],
+            "role": request["role"],
+            "release_sha": request["release_sha"],
+        }
+        with (
+            mock.patch.object(
+                HOST_MODULE,
+                "_load_precommit_manifest",
+                return_value=manifest,
+            ),
+            mock.patch.object(
+                HOST_MODULE,
+                "_run_precommit_worker",
+            ) as runner,
+            self.assertRaisesRegex(
+                HostAgentError,
+                "requires controller liveness",
+            ),
+        ):
+            execute_precommit_request(request)
+        runner.assert_not_called()
+
+    def test_controller_eof_reaches_worker_and_kills_forked_grandchild(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sentinel = root / "grandchild-survived"
+            descendant_pid = root / "grandchild-pid"
+            ready = root / "reported-group-ready"
+            worker = root / "worker.py"
+            worker.write_text(
+                "import argparse,os,signal,time\n"
+                "parser=argparse.ArgumentParser()\n"
+                "parser.add_argument('--control-fd',type=int,required=True)\n"
+                "parser.add_argument('--process-group-report-fd',"
+                "type=int,required=True)\n"
+                "parser.add_argument('--process-group-ack-fd',"
+                "type=int,required=True)\n"
+                "parser.add_argument('--cleanup-process-report-fd',"
+                "type=int,required=True)\n"
+                "parser.add_argument('--cleanup-process-ack-fd',"
+                "type=int,required=True)\n"
+                "args=parser.parse_args()\n"
+                "if os.fork() == 0:\n"
+                " os.setsid()\n"
+                " if os.fork() == 0:\n"
+                f"  open({str(descendant_pid)!r},'w').write(str(os.getpid()))\n"
+                f"  open({str(ready)!r},'wb').write(b'ready')\n"
+                "  signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                "  time.sleep(0.7)\n"
+                f"  open({str(sentinel)!r},'wb').write(b'survived')\n"
+                "  os._exit(0)\n"
+                " signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                " time.sleep(60)\n"
+                " os._exit(0)\n"
+                "time.sleep(60)\n",
+                encoding="ascii",
+            )
+            read_fd, holder = external_liveness_pipe()
+
+            def disconnect_when_reported():
+                deadline = time.monotonic() + 2
+                while not ready.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                stop_liveness_holder(holder)
+
+            closer = threading.Thread(
+                target=disconnect_when_reported,
+                daemon=True,
+            )
+            closer.start()
+            try:
+                with (
+                    mock.patch.object(
+                        HOST_MODULE,
+                        "PRECOMMIT_LIVENESS_GRACE_SECONDS",
+                        0.2,
+                    ),
+                    mock.patch.object(
+                        HOST_MODULE,
+                        "PROCESS_GROUP_TERM_SECONDS",
+                        0.1,
+                    ),
+                    self.assertRaisesRegex(
+                        HostAgentError,
+                        "liveness pipe reached EOF",
+                    ),
+                ):
+                    HOST_MODULE._run_precommit_worker(
+                        [sys.executable, "-I", "-B", str(worker)],
+                        control_fd=read_fd,
+                        timeout=5,
+                    )
+                closer.join(timeout=1)
+                time.sleep(0.8)
+                self.assertFalse(sentinel.exists())
+                self.assertFalse(
+                    Path(
+                        f"/proc/{descendant_pid.read_text(encoding='ascii')}"
+                    ).exists()
+                )
+            finally:
+                try:
+                    os.close(read_fd)
+                except OSError:
+                    pass
+                stop_liveness_holder(holder)
+
+    def test_worker_receives_only_liveness_read_end(self):
+        with tempfile.TemporaryDirectory() as directory:
+            worker = Path(directory) / "read-only-pipe.py"
+            worker.write_text(
+                "import argparse,json,os\n"
+                "parser=argparse.ArgumentParser()\n"
+                "parser.add_argument('--control-fd',type=int,required=True)\n"
+                "parser.add_argument('--process-group-report-fd',type=int)\n"
+                "parser.add_argument('--process-group-ack-fd',type=int)\n"
+                "parser.add_argument('--cleanup-process-report-fd',type=int)\n"
+                "parser.add_argument('--cleanup-process-ack-fd',type=int)\n"
+                "args=parser.parse_args()\n"
+                "try:\n"
+                " os.write(args.control_fd,b'forge')\n"
+                " forged=True\n"
+                "except OSError:\n"
+                " forged=False\n"
+                "print(json.dumps({'forged':forged},"
+                "sort_keys=True,separators=(',',':')))\n",
+                encoding="ascii",
+            )
+            read_fd, holder = external_liveness_pipe()
+            try:
+                completed = HOST_MODULE._run_precommit_worker(
+                    [sys.executable, "-I", "-B", str(worker)],
+                    control_fd=read_fd,
+                    timeout=5,
+                )
+            finally:
+                os.close(read_fd)
+                stop_liveness_holder(holder)
+            self.assertEqual(completed.returncode, 0)
+            self.assertEqual(completed.stderr, b"")
+            self.assertEqual(completed.stdout, b'{"forged":false}\n')
+
+    def test_worker_output_is_bounded_incrementally(self):
+        with mock.patch.object(
+            HOST_MODULE,
+            "PRECOMMIT_MAX_STDOUT_BYTES",
+            1024,
+        ), self.assertRaisesRegex(
+            HostAgentError,
+            "stdout exceeded",
+        ):
+            HOST_MODULE._run_precommit_worker(
+                [
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    "-c",
+                    "import os;os.write(1,b'x'*4096)",
+                ],
+                control_fd=None,
+                timeout=5,
+            )
+
+    def test_live_process_group_cannot_be_acknowledged_as_clean(self):
+        process, report_read, ack_write, started = start_reported_wrapper(
+            mode=HOST_MODULE.COMMAND_MODE_NORMAL,
+            purpose="normal-command",
+            target=["/usr/bin/sleep", "60"],
+        )
+        tracked: dict[str, HOST_MODULE.TrackedCommand] = {}
+        seen: set[str] = set()
+        control_read, holder = external_liveness_pipe()
+        controller_identity = HOST_MODULE._validate_controller_liveness_fd(
+            control_read
+        )
+        try:
+            HOST_MODULE._consume_group_report(
+                started,
+                buffer=bytearray(),
+                bytes_seen=[0],
+                tracked=tracked,
+                seen_nonces=seen,
+                worker_pid=os.getpid(),
+                ack_write_fd=ack_write,
+                expected_mode=HOST_MODULE.COMMAND_MODE_NORMAL,
+                allow_start=True,
+                operation_id="00000000-0000-4000-8000-000000000000",
+                role="bot_fi",
+                controller_fd=control_read,
+                controller_identity=controller_identity,
+            )
+            fields = started.decode("ascii").strip().split(":")
+            completed = (
+                f"D:{fields[1]}:{fields[2]}:{fields[3]}\n"
+            ).encode("ascii")
+            with self.assertRaisesRegex(
+                HostAgentError,
+                "live process",
+            ):
+                HOST_MODULE._consume_group_report(
+                    completed,
+                    buffer=bytearray(),
+                    bytes_seen=[0],
+                    tracked=tracked,
+                    seen_nonces=seen,
+                    worker_pid=os.getpid(),
+                    ack_write_fd=ack_write,
+                    expected_mode=HOST_MODULE.COMMAND_MODE_NORMAL,
+                    allow_start=True,
+                    operation_id="00000000-0000-4000-8000-000000000000",
+                    role="bot_fi",
+                    controller_fd=control_read,
+                    controller_identity=controller_identity,
+                )
+            self.assertEqual(set(tracked), {"a" * 32})
+        finally:
+            for command in tracked.values():
+                os.close(command.pidfd)
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=2)
+            os.close(report_read)
+            os.close(ack_write)
+            os.close(control_read)
+            stop_liveness_holder(holder)
+
+    def test_cleanup_tracks_reparented_group_without_acknowledging_it(self):
+        operation_id = "00000000-0000-4000-8000-000000000000"
+        project = HOST_MODULE._expected_project_name(operation_id, "bot_fi")
+        process, report_read, ack_write, started = start_reported_wrapper(
+            mode=HOST_MODULE.COMMAND_MODE_CLEANUP,
+            purpose="cleanup-list-oneoffs",
+            target=[
+                "/usr/bin/docker",
+                "ps",
+                "--all",
+                "--quiet",
+                "--filter",
+                f"label=com.docker.compose.project={project}",
+                "--filter",
+                "label=com.docker.compose.oneoff=True",
+                "--filter",
+                f"label=trading-bot.production.operation-id={operation_id}",
+            ],
+        )
+        tracked: dict[str, HOST_MODULE.TrackedCommand] = {}
+        seen: set[str] = set()
+        try:
+            HOST_MODULE._consume_group_report(
+                started,
+                buffer=bytearray(),
+                bytes_seen=[0],
+                tracked=tracked,
+                seen_nonces=seen,
+                worker_pid=999999,
+                ack_write_fd=ack_write,
+                expected_mode=HOST_MODULE.COMMAND_MODE_CLEANUP,
+                allow_start=False,
+                operation_id=operation_id,
+                role="bot_fi",
+                controller_fd=None,
+                controller_identity=None,
+            )
+            self.assertEqual(set(tracked), {"a" * 32})
+            time.sleep(0.05)
+            self.assertIsNone(process.poll())
+        finally:
+            for command in tracked.values():
+                os.close(command.pidfd)
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=2)
+            os.close(report_read)
+            os.close(ack_write)
+
+    def test_process_report_binds_nonce_argv_and_full_process_identity(self):
+        process, report_read, ack_write, started = start_reported_wrapper(
+            mode=HOST_MODULE.COMMAND_MODE_NORMAL,
+            purpose="normal-command",
+            target=["/usr/bin/sleep", "60"],
+        )
+        fields = started.decode("ascii").strip().split(":")
+        mutations = {
+            "nonce": (2, "b" * 32),
+            "starttime": (4, str(int(fields[4], 10) + 1)),
+            "process-group": (5, str(int(fields[5], 10) + 1)),
+            "session": (6, str(int(fields[6], 10) + 1)),
+            "purpose": (7, "different-purpose"),
+            "argv-digest": (8, "f" * 64),
+        }
+        tracked: dict[str, HOST_MODULE.TrackedCommand] = {}
+        try:
+            for label, (index, value) in mutations.items():
+                with self.subTest(label=label):
+                    changed = list(fields)
+                    changed[index] = value
+                    with self.assertRaises(HostAgentError):
+                        HOST_MODULE._consume_group_report(
+                            (":".join(changed) + "\n").encode("ascii"),
+                            buffer=bytearray(),
+                            bytes_seen=[0],
+                            tracked={},
+                            seen_nonces=set(),
+                            worker_pid=os.getpid(),
+                            ack_write_fd=ack_write,
+                            expected_mode=HOST_MODULE.COMMAND_MODE_NORMAL,
+                            allow_start=False,
+                            operation_id=(
+                                "00000000-0000-4000-8000-000000000000"
+                            ),
+                            role="bot_fi",
+                            controller_fd=None,
+                            controller_identity=None,
+                        )
+
+            seen: set[str] = set()
+            HOST_MODULE._consume_group_report(
+                started,
+                buffer=bytearray(),
+                bytes_seen=[0],
+                tracked=tracked,
+                seen_nonces=seen,
+                worker_pid=os.getpid(),
+                ack_write_fd=ack_write,
+                expected_mode=HOST_MODULE.COMMAND_MODE_NORMAL,
+                allow_start=False,
+                operation_id="00000000-0000-4000-8000-000000000000",
+                role="bot_fi",
+                controller_fd=None,
+                controller_identity=None,
+            )
+            with self.assertRaisesRegex(
+                HostAgentError,
+                "authorization is invalid",
+            ):
+                HOST_MODULE._consume_group_report(
+                    started,
+                    buffer=bytearray(),
+                    bytes_seen=[0],
+                    tracked=tracked,
+                    seen_nonces=seen,
+                    worker_pid=os.getpid(),
+                    ack_write_fd=ack_write,
+                    expected_mode=HOST_MODULE.COMMAND_MODE_NORMAL,
+                    allow_start=False,
+                    operation_id="00000000-0000-4000-8000-000000000000",
+                    role="bot_fi",
+                    controller_fd=None,
+                    controller_identity=None,
+                )
+        finally:
+            for command in tracked.values():
+                os.close(command.pidfd)
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=2)
+            os.close(report_read)
+            os.close(ack_write)
+
+    def test_cleanup_kills_reported_group_after_worker_parent_exit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            child_pid_path = root / "reported-child-pid"
+            sentinel = root / "reparented-child-survived"
+            HOST_MODULE._enable_child_subreaper()
+            baseline = HOST_MODULE._direct_child_baseline()
+            program = (
+                "import os,signal,time\n"
+                "child=os.fork()\n"
+                "if child == 0:\n"
+                " os.setsid();pid=os.getpid()\n"
+                f" open({str(child_pid_path)!r},'w').write(str(pid))\n"
+                " signal.signal(signal.SIGTERM,signal.SIG_IGN)\n"
+                " time.sleep(0.5)\n"
+                f" open({str(sentinel)!r},'wb').write(b'survived')\n"
+                " time.sleep(60)\n"
+                "os._exit(0)\n"
+            )
+            process = subprocess.Popen(
+                [sys.executable, "-I", "-B", "-c", program],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env={"PATH": "/usr/bin:/bin"},
+                close_fds=True,
+                start_new_session=True,
+            )
+            child_pid: int | None = None
+            pidfd: int | None = None
+            try:
+                self.assertEqual(process.wait(timeout=2), 0)
+                deadline = time.monotonic() + 2
+                while (
+                    not child_pid_path.exists()
+                    and time.monotonic() < deadline
+                ):
+                        time.sleep(0.01)
+                child_pid = int(
+                    child_pid_path.read_text(encoding="ascii"),
+                    10,
+                )
+                identity = HOST_MODULE._read_process_identity(child_pid)
+                self.assertEqual(identity.parent_id, os.getpid())
+                pidfd = os.pidfd_open(child_pid, 0)
+                tracked = {
+                    "b" * 32: HOST_MODULE.TrackedCommand(
+                        mode=HOST_MODULE.COMMAND_MODE_NORMAL,
+                        nonce="b" * 32,
+                        purpose="normal-command",
+                        argv_sha256="c" * 64,
+                        identity=identity,
+                        pidfd=pidfd,
+                    )
+                }
+                with (
+                    mock.patch.object(
+                        HOST_MODULE,
+                        "PRECOMMIT_LIVENESS_GRACE_SECONDS",
+                        0.1,
+                    ),
+                    mock.patch.object(
+                        HOST_MODULE,
+                        "PROCESS_GROUP_TERM_SECONDS",
+                        0.1,
+                    ),
+                ):
+                    HOST_MODULE._terminate_precommit_group(
+                        process,
+                        liveness_write_fd=None,
+                        normal_channel=HOST_MODULE.ReportChannel(
+                            HOST_MODULE.COMMAND_MODE_NORMAL,
+                            None,
+                            None,
+                            bytearray(),
+                            [0],
+                        ),
+                        cleanup_channel=HOST_MODULE.ReportChannel(
+                            HOST_MODULE.COMMAND_MODE_CLEANUP,
+                            None,
+                            None,
+                            bytearray(),
+                            [0],
+                        ),
+                        tracked=tracked,
+                        seen_nonces={"b" * 32},
+                        operation_id=(
+                            "00000000-0000-4000-8000-000000000000"
+                        ),
+                        role="bot_fi",
+                        baseline_children=baseline,
+                        output_buffers={
+                            "stdout": bytearray(),
+                            "stderr": bytearray(),
+                        },
+                    )
+                pidfd = None
+                time.sleep(0.6)
+                self.assertFalse(sentinel.exists())
+                self.assertFalse(
+                    HOST_MODULE._process_group_has_live_members(child_pid)
+                )
+                self.assertFalse(Path(f"/proc/{child_pid}").exists())
+            finally:
+                if child_pid is not None:
+                    try:
+                        os.killpg(child_pid, signal.SIGKILL)
+                    except (ProcessLookupError, OSError):
+                        pass
+                if pidfd is not None:
+                    os.close(pidfd)
+
+    def test_disconnect_denies_late_process_group_ack(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ready = root / "worker-ready"
+            sentinel = root / "late-command-executed"
+            worker = root / "late-wrapper.py"
+            bounded_worker = Path(HOST_MODULE.__file__).with_name(
+                "production_shadow_precommit_worker.py"
+            )
+            target = [
+                sys.executable,
+                "-I",
+                "-B",
+                "-c",
+                f"open({str(sentinel)!r},'wb').write(b'executed')",
+            ]
+            digest = HOST_MODULE._argv_sha256(target)
+            wrapper_prefix = [
+                sys.executable,
+                "-I",
+                "-B",
+                str(bounded_worker),
+                "--bounded-exec-wrapper",
+                HOST_MODULE.COMMAND_MODE_NORMAL,
+                "d" * 32,
+                "late-normal-command",
+                digest,
+            ]
+            worker.write_text(
+                "import argparse,os,subprocess,sys,time\n"
+                "parser=argparse.ArgumentParser()\n"
+                "parser.add_argument('--control-fd',type=int,required=True)\n"
+                "parser.add_argument('--process-group-report-fd',"
+                "type=int,required=True)\n"
+                "parser.add_argument('--process-group-ack-fd',"
+                "type=int,required=True)\n"
+                "parser.add_argument('--cleanup-process-report-fd',"
+                "type=int,required=True)\n"
+                "parser.add_argument('--cleanup-process-ack-fd',"
+                "type=int,required=True)\n"
+                "args=parser.parse_args()\n"
+                f"open({str(ready)!r},'wb').write(b'ready')\n"
+                "os.read(args.control_fd,1)\n"
+                "subprocess.Popen(\n"
+                f" {wrapper_prefix!r}"
+                "+[str(args.process_group_report_fd),"
+                "str(args.process_group_ack_fd),'--']"
+                f"+{target!r},\n"
+                " stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,"
+                "stderr=subprocess.DEVNULL,close_fds=True,"
+                "pass_fds=(args.process_group_report_fd,"
+                "args.process_group_ack_fd))\n"
+                "time.sleep(60)\n",
+                encoding="ascii",
+            )
+            read_fd, holder = external_liveness_pipe()
+
+            def disconnect_when_ready():
+                deadline = time.monotonic() + 2
+                while not ready.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                stop_liveness_holder(holder)
+
+            closer = threading.Thread(
+                target=disconnect_when_ready,
+                daemon=True,
+            )
+            closer.start()
+            try:
+                with (
+                    mock.patch.object(
+                        HOST_MODULE,
+                        "PRECOMMIT_LIVENESS_GRACE_SECONDS",
+                        0.3,
+                    ),
+                    mock.patch.object(
+                        HOST_MODULE,
+                        "PROCESS_GROUP_TERM_SECONDS",
+                        0.1,
+                    ),
+                    self.assertRaisesRegex(
+                        HostAgentError,
+                        "liveness pipe reached EOF",
+                    ),
+                ):
+                    HOST_MODULE._run_precommit_worker(
+                        [sys.executable, "-I", "-B", str(worker)],
+                        control_fd=read_fd,
+                        timeout=5,
+                    )
+                closer.join(timeout=1)
+                time.sleep(0.3)
+                self.assertFalse(sentinel.exists())
+            finally:
+                try:
+                    os.close(read_fd)
+                except OSError:
+                    pass
+                stop_liveness_holder(holder)
 
     def test_fixed_precommit_manifest_and_release_worker_are_hash_bound(self):
         command = rendered_preparation()[0]["commands"][0]

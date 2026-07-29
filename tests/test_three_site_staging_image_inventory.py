@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import io
+import json
+from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 from scripts.verify_three_site_staging_image_inventory import (
     ImageInventoryError,
+    collect_image_document,
     _canonical_sha256,
     image_content_descriptor,
+    main,
     verify_image_document,
+)
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
 )
 
 
@@ -135,6 +144,29 @@ class ThreeSiteStagingImageInventoryTests(unittest.TestCase):
         containerd_descriptor, containerd_identity = image_content_descriptor(containerd)
         self.assertEqual(legacy_descriptor, containerd_descriptor)
         self.assertEqual(legacy_identity, containerd_identity)
+
+
+class ThreeSiteStagingImageInventoryRetirementTests(unittest.TestCase):
+    def test_collector_and_cli_stop_before_docker_or_caller_path_access(self):
+        with patch(
+            "scripts.verify_three_site_staging_image_inventory.subprocess.run"
+        ) as run:
+            with self.assertRaises(LegacyThreeSiteStagingRuntimeRetiredError):
+                collect_image_document(
+                    role="bot-fi",
+                    campaign_id="forged",
+                    release_sha="a" * 40,
+                    role_compose=Path("/forged/compose.yml"),
+                    env_file=Path("/forged/role.env"),
+                )
+            stdout = io.StringIO()
+            with patch("sys.stdout", stdout):
+                self.assertEqual(main(["--forged-argument"]), 2)
+        run.assert_not_called()
+        self.assertEqual(
+            json.loads(stdout.getvalue())["status"],
+            "blocked_legacy_three_site_staging_runtime_retired",
+        )
 
 
 if __name__ == "__main__":

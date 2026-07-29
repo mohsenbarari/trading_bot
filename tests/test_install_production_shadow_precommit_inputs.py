@@ -605,8 +605,27 @@ class InstallFixture:
             canonical(self.precommit_document) + b"\n",
         )
 
-    def release_run(self, arguments: list[str], **_kwargs) -> str:
-        if arguments[:3] == [WORKER.GIT, "bundle", "list-heads"]:
+    def release_run(self, arguments: list[str], **kwargs) -> str:
+        required = {
+            "--no-optional-locks",
+            "core.fsmonitor=false",
+            "core.untrackedCache=false",
+            "core.hooksPath=/dev/null",
+        }
+        if (
+            not required.issubset(arguments)
+            or kwargs["env"].get("GIT_NO_REPLACE_OBJECTS") != "1"
+        ):
+            raise AssertionError(
+                f"Git invocation is not isolated: {arguments}"
+            )
+        if (
+            "bundle" in arguments
+            and arguments[
+                arguments.index("bundle") : arguments.index("bundle") + 2
+            ]
+            == ["bundle", "list-heads"]
+        ):
             return f"{RELEASE_SHA} refs/heads/main"
         if arguments[0] != WORKER.GIT:
             raise AssertionError(f"unexpected non-Git command: {arguments}")

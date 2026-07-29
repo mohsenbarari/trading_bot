@@ -11,7 +11,6 @@ import json
 import os
 import re
 import stat
-import subprocess
 import sys
 import time
 import uuid
@@ -32,6 +31,11 @@ from core.three_site_topology import (
     WEBAPP_FI_HOST,
     WEBAPP_IR_HOST,
 )
+from scripts.production_shadow_global_docker_inventory_agent import (
+    BoundedCommandError,
+    BoundedCommandResult,
+    _bounded_command,
+)
 
 
 DEFAULT_COMPOSE = REPO_ROOT / "deploy/production/docker-compose.three-site-shadow.yml"
@@ -40,6 +44,10 @@ DATA_ROOT_PREFIX = "/srv/trading-bot-three-site-production-shadow-data"
 SECRET_ROOT_PREFIX = "/root/secure-envs/trading-bot/three-site-production-shadow"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+MAX_LOCAL_COMMAND_OUTPUT_BYTES = 16 * 1024 * 1024
+MAX_LOCAL_COMMAND_ERROR_BYTES = 2 * 1024 * 1024
+POSTGRES_IDENTIFIER_RE = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
+POSTGRES_URL_SAFE_PASSWORD_RE = re.compile(r"^[A-Za-z0-9._~-]{1,256}$")
 REQUIRED_INTERPOLATION_RE = re.compile(r"\$\{([A-Z][A-Z0-9_]*):\?[^}]*\}")
 IMAGE_INTERPOLATION_RE = re.compile(
     r"^\$\{PRODUCTION_SHADOW_(APP|POSTGRES|REDIS|NGINX)_IMAGE_ID:\?[^}]+\}$"
@@ -183,6 +191,26 @@ RUNTIME_PARSER_ENV = {
     "REDIS_URL": "redis://127.0.0.1:6379/0",
     "JWT_SECRET_KEY": "verify-only-not-a-runtime-jwt-secret",
 }
+DATABASE_POLICY_CA_MOUNT = (
+    "${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/"
+    "tls/ca.crt:/run/production-dr-ca/ca.crt:ro"
+)
+
+
+def _database_policy_environment(role: str) -> dict[str, str]:
+    prefix = role.upper()
+    return {
+        "ENVIRONMENT": "production",
+        "BACKGROUND_JOBS_ENABLED": "false",
+        "RELEASE_SHA": (
+            "${PRODUCTION_SHADOW_RELEASE_SHA:?exact release SHA is required}"
+        ),
+        "SYNC_DATABASE_URL": (
+            f"postgresql://${{{prefix}_POSTGRES_USER:?required}}:"
+            f"${{{prefix}_POSTGRES_PASSWORD:?required}}@{role}_db/"
+            f"${{{prefix}_POSTGRES_DB:?required}}"
+        ),
+    }
 
 
 def _role_profiles(role: str) -> dict[str, set[str]]:
@@ -283,6 +311,7 @@ def _bot_profiles() -> dict[str, set[str]]:
         "bot_fi_restore_tool": {"bot-fi-restore"},
         "bot_fi_migration": {"bot-fi-prepare"},
         "bot_fi_db_roles": {"bot-fi-prepare"},
+        "bot_fi_db_fencing": {"bot-fi-prepare"},
         "bot_fi_dr_receiver": private_profiles,
         "bot_fi_dr_delivery": private_profiles,
         "bot_fi_dr_projection": private_profiles,
@@ -418,6 +447,16 @@ def _dependency_names(service: Mapping[str, Any]) -> set[str]:
     if isinstance(depends_on, list):
         return {str(name) for name in depends_on}
     return set()
+
+
+def _has_exact_dependency(
+    service: Mapping[str, Any],
+    dependency: str,
+    condition: str,
+) -> bool:
+    return service.get("depends_on") == {
+        dependency: {"condition": condition}
+    }
 
 
 def _dependency_cycle(services: Mapping[str, Any]) -> list[str] | None:
@@ -580,6 +619,28 @@ def collect_source_failures(
             )
             if ca_mount not in _service_volumes(service):
                 failures.append(f"{name} must mount the operation CA read-only")
+        if kind == "postgres":
+            postgres_runtime = {
+                "memswap_limit": (
+                    "${PRODUCTION_SHADOW_POSTGRES_MEMORY_LIMIT:-2g}"
+                ),
+                "mem_swappiness": 0,
+                "cgroup": "private",
+                "runtime": "runc",
+                "shm_size": "64m",
+                "init": False,
+                "oom_kill_disable": False,
+                "oom_score_adj": 0,
+            }
+            for key, expected_value in postgres_runtime.items():
+                if service.get(key) != expected_value:
+                    failures.append(
+                        f"{name} must pin PostgreSQL {key}={expected_value!r}"
+                    )
+            if service.get("memswap_limit") != service.get("mem_limit"):
+                failures.append(
+                    f"{name} must disable swap by matching memswap_limit to mem_limit"
+                )
 
         if name.endswith("_api"):
             environment = service.get("environment", {})
@@ -846,25 +907,223 @@ def collect_source_failures(
             if service.get("restart") != "no":
                 failures.append(f"{name} must be one-shot")
 
+    bot_roles_command = [
+        "python",
+        "scripts/provision_bot_database_roles.py",
+        "--phase",
+        "roles-grants",
+        "--role-prefix",
+        "bot_fi",
+        "--apply",
+        "--confirm",
+        "APPLY-BOT-DATABASE-ROLE-GRANTS",
+    ]
+    bot_fence_command = [
+        "python",
+        "scripts/provision_bot_database_roles.py",
+        "--phase",
+        "fence",
+        "--role-prefix",
+        "bot_fi",
+        "--apply",
+        "--confirm",
+        "ENABLE-BOT-DATABASE-FENCING",
+    ]
+    bot_roles = services.get("bot_fi_db_roles", {})
+    bot_fence = services.get("bot_fi_db_fencing", {})
+    expected_bot_roles_environment = {
+        **_database_policy_environment("bot_fi"),
+        "BOT_APP_DB_PASSWORD": "${BOT_FI_APP_DB_PASSWORD:?required}",
+        "BOT_RECEIVER_DB_PASSWORD": "${BOT_FI_RECEIVER_DB_PASSWORD:?required}",
+        "BOT_DELIVERY_DB_PASSWORD": "${BOT_FI_DELIVERY_DB_PASSWORD:?required}",
+        "BOT_PROJECTION_DB_PASSWORD": (
+            "${BOT_FI_PROJECTION_DB_PASSWORD:?required}"
+        ),
+        "BOT_OBSERVER_DB_PASSWORD": "${BOT_FI_OBSERVER_DB_PASSWORD:?required}",
+    }
+    expected_bot_fence_environment = _database_policy_environment("bot_fi")
+    if (
+        bot_roles.get("command") != bot_roles_command
+        or not _has_exact_dependency(
+            bot_roles,
+            "bot_fi_migration",
+            "service_completed_successfully",
+        )
+        or bot_roles.get("environment") != expected_bot_roles_environment
+        or _service_volumes(bot_roles) != [DATABASE_POLICY_CA_MOUNT]
+        or bot_roles.get("networks") != ["bot_fi"]
+        or bot_roles.get("env_file")
+    ):
+        failures.append(
+            "bot_fi_db_roles must apply only the confirmed roles-grants phase "
+            "after migration with the exact minimal environment and CA mount"
+        )
+    if (
+        bot_fence.get("command") != bot_fence_command
+        or not _has_exact_dependency(
+            bot_fence,
+            "bot_fi_db_roles",
+            "service_completed_successfully",
+        )
+        or bot_fence.get("environment") != expected_bot_fence_environment
+        or _service_volumes(bot_fence) != [DATABASE_POLICY_CA_MOUNT]
+        or bot_fence.get("networks") != ["bot_fi"]
+        or bot_fence.get("env_file")
+    ):
+        failures.append(
+            "bot_fi_db_fencing must apply only the confirmed fence phase "
+            "after roles-grants with the exact minimal environment and CA mount"
+        )
+
     for role in ("webapp_fi", "webapp_ir"):
+        phase_arguments = [
+            "--site",
+            role,
+            "--application-role",
+            f"{role}_app",
+            "--projection-role",
+            f"{role}_projection",
+            "--receiver-role",
+            f"{role}_receiver",
+            "--delivery-role",
+            f"{role}_delivery",
+            "--blob-role",
+            f"{role}_blob",
+            "--effect-role",
+            f"{role}_effect",
+            "--control-role",
+            f"{role}_control",
+            "--observer-role",
+            f"{role}_observer",
+            "--operator",
+            "production-shadow-compose",
+            "--apply",
+            "--confirm",
+        ]
+        grants_service = services.get(f"{role}_db_roles_post_migration", {})
+        fence_service = services.get(f"{role}_db_fencing", {})
+        expected_grants_command = [
+            "python",
+            "scripts/activate_three_site_database_fencing.py",
+            "--phase",
+            "grants",
+            *phase_arguments,
+            "APPLY-THREE-SITE-DATABASE-GRANTS",
+        ]
+        expected_fence_command = [
+            "python",
+            "scripts/activate_three_site_database_fencing.py",
+            "--phase",
+            "fence",
+            *phase_arguments,
+            "ENABLE-THREE-SITE-DATABASE-FENCING",
+        ]
+        prefix = role.upper()
+        expected_role_environment = {
+            **_database_policy_environment(role),
+            "THREE_SITE_APP_DB_PASSWORD": (
+                f"${{{prefix}_APP_DB_PASSWORD:?required}}"
+            ),
+            "THREE_SITE_RECEIVER_DB_PASSWORD": (
+                f"${{{prefix}_RECEIVER_DB_PASSWORD:?required}}"
+            ),
+            "THREE_SITE_DELIVERY_DB_PASSWORD": (
+                f"${{{prefix}_DELIVERY_DB_PASSWORD:?required}}"
+            ),
+            "THREE_SITE_PROJECTION_DB_PASSWORD": (
+                f"${{{prefix}_PROJECTION_DB_PASSWORD:?required}}"
+            ),
+            "THREE_SITE_BLOB_DB_PASSWORD": (
+                f"${{{prefix}_BLOB_DB_PASSWORD:?required}}"
+            ),
+            "THREE_SITE_EFFECT_DB_PASSWORD": (
+                f"${{{prefix}_EFFECT_DB_PASSWORD:?required}}"
+            ),
+            "THREE_SITE_CONTROL_DB_PASSWORD": (
+                f"${{{prefix}_CONTROL_DB_PASSWORD:?required}}"
+            ),
+            "THREE_SITE_OBSERVER_DB_PASSWORD": (
+                f"${{{prefix}_OBSERVER_DB_PASSWORD:?required}}"
+            ),
+        }
+        expected_phase_environment = _database_policy_environment(role)
+        role_service = services.get(f"{role}_db_roles", {})
+        expected_role_command = [
+            "python",
+            "scripts/provision_three_site_database_roles.py",
+            "--role-prefix",
+            role,
+        ]
+        if (
+            role_service.get("command") != expected_role_command
+            or not _has_exact_dependency(
+                role_service,
+                f"{role}_db",
+                "service_healthy",
+            )
+            or role_service.get("environment") != expected_role_environment
+            or _service_volumes(role_service) != [DATABASE_POLICY_CA_MOUNT]
+            or role_service.get("networks") != [role]
+            or role_service.get("env_file")
+        ):
+            failures.append(
+                f"{role}_db_roles must create only the exact runtime roles "
+                "with the exact minimal environment and CA mount"
+            )
+        if (
+            grants_service.get("command") != expected_grants_command
+            or not _has_exact_dependency(
+                grants_service,
+                f"{role}_migration",
+                "service_completed_successfully",
+            )
+            or grants_service.get("environment") != expected_phase_environment
+            or _service_volumes(grants_service) != [DATABASE_POLICY_CA_MOUNT]
+            or grants_service.get("networks") != [role]
+            or grants_service.get("env_file")
+        ):
+            failures.append(
+                f"{role}_db_roles_post_migration must apply only the "
+                "confirmed grants phase with the exact minimal environment "
+                "and CA mount"
+            )
+        if (
+            fence_service.get("command") != expected_fence_command
+            or not _has_exact_dependency(
+                fence_service,
+                f"{role}_db_roles_post_migration",
+                "service_completed_successfully",
+            )
+            or fence_service.get("environment") != expected_phase_environment
+            or _service_volumes(fence_service) != [DATABASE_POLICY_CA_MOUNT]
+            or fence_service.get("networks") != [role]
+            or fence_service.get("env_file")
+        ):
+            failures.append(
+                f"{role}_db_fencing must apply only the confirmed fence "
+                "phase with the exact minimal environment and CA mount"
+            )
         prepare_chain = (
-            (f"{role}_migration", {f"{role}_db_roles"}),
+            (f"{role}_migration", f"{role}_db_roles"),
             (
                 f"{role}_db_roles_post_migration",
-                {f"{role}_migration"},
+                f"{role}_migration",
             ),
             (
                 f"{role}_db_fencing",
-                {f"{role}_db_roles_post_migration"},
+                f"{role}_db_roles_post_migration",
             ),
         )
-        for service_name, expected_dependencies in prepare_chain:
-            if _dependency_names(
-                services.get(service_name, {})
-            ) != expected_dependencies:
+        for service_name, expected_dependency in prepare_chain:
+            if not _has_exact_dependency(
+                services.get(service_name, {}),
+                expected_dependency,
+                "service_completed_successfully",
+            ):
                 failures.append(
                     f"{service_name} must preserve the exact "
-                    "roles-to-migration-to-roles-to-fencing sequence"
+                    "roles-to-migration-to-roles-to-fencing sequence with "
+                    "service_completed_successfully"
                 )
 
     for role in ("bot_fi", "webapp_fi", "webapp_ir"):
@@ -1226,20 +1485,46 @@ def _strict_json(raw: str) -> Any:
     return json.loads(raw, object_pairs_hook=reject_duplicates)
 
 
+def _run_bounded_local_command(
+    arguments: list[str],
+    *,
+    timeout: float,
+    environment: Mapping[str, str],
+    stdout_limit: int = MAX_LOCAL_COMMAND_OUTPUT_BYTES,
+    stderr_limit: int = MAX_LOCAL_COMMAND_ERROR_BYTES,
+) -> BoundedCommandResult:
+    try:
+        return _bounded_command(
+            arguments,
+            timeout=timeout,
+            env=environment,
+            stdout_limit=stdout_limit,
+            stderr_limit=stderr_limit,
+        )
+    except BoundedCommandError as exc:
+        raise ProductionShadowComposeError(
+            "bounded local verification command failed closed"
+        ) from exc
+
+
 @lru_cache(maxsize=32)
 def _runtime_peer_parser_accepts(raw: str, local_site: str) -> bool:
     environment = {
         **RUNTIME_PARSER_ENV,
         "DR_PEERS_JSON": raw,
         "LOCAL_SITE": local_site,
+        "PRODUCTION_SHADOW_VERIFIER_ROOT": str(REPO_ROOT),
     }
     try:
-        completed = subprocess.run(
+        completed = _run_bounded_local_command(
             [
                 "/usr/bin/python3",
+                "-I",
                 "-c",
                 (
-                    "import os;"
+                    "import os,sys;"
+                    "sys.path.insert(0,os.environ["
+                    "'PRODUCTION_SHADOW_VERIFIER_ROOT']);"
                     "from core.dr_delivery_worker import parse_peer_urls;"
                     "parse_peer_urls("
                     "os.environ['DR_PEERS_JSON'],"
@@ -1247,15 +1532,12 @@ def _runtime_peer_parser_accepts(raw: str, local_site: str) -> bool:
                     ")"
                 ),
             ],
-            cwd=REPO_ROOT,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
             timeout=15,
-            env=environment,
+            environment=environment,
+            stdout_limit=64 * 1024,
+            stderr_limit=64 * 1024,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except ProductionShadowComposeError:
         return False
     return completed.returncode == 0
 
@@ -1304,9 +1586,27 @@ def collect_environment_failures(
     source_text: str,
 ) -> list[str]:
     failures: list[str] = []
-    for key in sorted(_required_values(source_text)):
+    required_keys = _required_values(source_text)
+    for key in sorted(required_keys):
         if not values.get(key):
             failures.append(f"missing required environment value: {key}")
+    for role_prefix in ("BOT_FI", "WEBAPP_FI", "WEBAPP_IR"):
+        for suffix in ("POSTGRES_USER", "POSTGRES_DB"):
+            key = f"{role_prefix}_{suffix}"
+            if not POSTGRES_IDENTIFIER_RE.fullmatch(values.get(key, "")):
+                failures.append(
+                    f"{key} must be an exact lowercase PostgreSQL identifier"
+                )
+    for key in sorted(
+        key
+        for key in required_keys
+        if key.endswith("_POSTGRES_PASSWORD")
+        or key.endswith("_DB_PASSWORD")
+    ):
+        if not POSTGRES_URL_SAFE_PASSWORD_RE.fullmatch(values.get(key, "")):
+            failures.append(
+                f"{key} must contain only RFC3986 unreserved URL-safe characters"
+            )
 
     operation_raw = values.get("PRODUCTION_SHADOW_OPERATION_ID", "")
     try:
@@ -1687,18 +1987,16 @@ def run_compose_config(
     if not resolve_service_env_files:
         command.append("--no-env-resolution")
     command.append("--quiet")
-    completed = subprocess.run(
+    completed = _run_bounded_local_command(
         command,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
         timeout=30,
-        env=environment,
+        environment=environment,
     )
     if completed.returncode != 0:
-        detail = completed.stderr.strip().splitlines()
+        try:
+            detail = completed.stderr.decode("utf-8").strip().splitlines()
+        except UnicodeDecodeError:
+            detail = []
         raise ProductionShadowComposeError(
             "docker compose config rejected the manifest"
             + (f": {detail[-1]}" if detail else "")
@@ -1708,15 +2006,10 @@ def run_compose_config(
 def inspect_local_images(values: Mapping[str, str]) -> None:
     for key in IMAGE_KEYS:
         image_id = values[key]
-        completed = subprocess.run(
+        completed = _run_bounded_local_command(
             ["/usr/bin/docker", "image", "inspect", image_id],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False,
             timeout=15,
-            env={
+            environment={
                 "PATH": "/usr/bin:/bin",
                 "HOME": "/root",
                 "LANG": "C.UTF-8",
@@ -1725,7 +2018,7 @@ def inspect_local_images(values: Mapping[str, str]) -> None:
         )
         try:
             payload = json.loads(completed.stdout)
-        except json.JSONDecodeError:
+        except (UnicodeDecodeError, json.JSONDecodeError):
             payload = None
         if (
             completed.returncode != 0

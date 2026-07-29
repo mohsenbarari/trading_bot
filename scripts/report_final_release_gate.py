@@ -12,12 +12,15 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts.capture_production_baseline import DEFAULT_ARTIFACT_ROOT, display_path, run_command, utc_iso, utc_stamp
+from scripts.capture_production_baseline import DEFAULT_ARTIFACT_ROOT, display_path, utc_iso, utc_stamp
 from scripts.deploy_config import resolve_deploy_settings
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
+LEGACY_TWO_SERVER_LIVE_CHECKS_RETIREMENT_REASON = (
+    "legacy_two_server_live_release_checks_retired_use_three_site_production_shadow_campaign"
+)
 
 
 @dataclass(frozen=True)
@@ -57,12 +60,16 @@ REQUIRED_MANIFEST_KEYS = (
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the Stage P11 final release gate.")
+    parser = argparse.ArgumentParser(description="Report the retired Stage P11 two-site release gate.")
     parser.add_argument("--manifest", default=None)
     parser.add_argument("--timestamp", default=None)
     parser.add_argument("--artifact-root", default=str(DEFAULT_ARTIFACT_ROOT))
     parser.add_argument("--json", action="store_true")
-    parser.add_argument("--skip-live-checks", action="store_true")
+    parser.add_argument(
+        "--skip-live-checks",
+        action="store_true",
+        help="Retired compatibility option. It cannot restore legacy two-site live checks.",
+    )
     parser.add_argument("--report-out", default=None, help="Optional markdown report path to update.")
     return parser.parse_args(argv)
 
@@ -345,24 +352,19 @@ def parse_sync_health_from_command(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def run_live_checks(*, manifest: str, logs_dir: Path, skip: bool) -> dict[str, Any]:
-    if skip:
-        return {"status": "skipped", "commands": [], "sync_health": {}}
-    commands = [
-        ("production_check_local", ["bash", "./scripts/production_deploy_online.sh", "--manifest", manifest, "check-local"], 240),
-        ("production_online_health", ["make", "production-online-health"], 240),
-        ("sync_health_foreign", ["make", "sync-health"], 90),
-        ("sync_health_iran", ["make", "sync-health-iran"], 90),
-    ]
-    results = [run_command(name=name, args=args, logs_dir=logs_dir, timeout=timeout) for name, args, timeout in commands]
-    failures = [item["name"] for item in results if item["exit_code"] != 0]
-    sync_health = {
-        "foreign": parse_sync_health_from_command(next(item for item in results if item["name"] == "sync_health_foreign")),
-        "iran": parse_sync_health_from_command(next(item for item in results if item["name"] == "sync_health_iran")),
+    # Do not delegate through the old shell helper or its Make aliases. Even
+    # nominally read-only legacy checks load two-site deployment state and can
+    # reach retired hosts. A three-site campaign owns live readiness evidence.
+    return {
+        "status": "failed",
+        "reason": LEGACY_TWO_SERVER_LIVE_CHECKS_RETIREMENT_REASON,
+        "skip_requested": bool(skip),
+        "manifest": str(manifest),
+        "logs_dir": str(logs_dir),
+        "commands": [],
+        "sync_health": {},
+        "failures": [LEGACY_TWO_SERVER_LIVE_CHECKS_RETIREMENT_REASON],
     }
-    for role, item in sync_health.items():
-        if item["status"] != "passed":
-            failures.append(f"sync_health_{role}_dirty")
-    return {"status": "passed" if not failures else "failed", "commands": results, "sync_health": sync_health, "failures": failures}
 
 
 def build_score(stage_rows: list[dict[str, Any]], checks: dict[str, Any], warnings: list[dict[str, str]]) -> dict[str, Any]:

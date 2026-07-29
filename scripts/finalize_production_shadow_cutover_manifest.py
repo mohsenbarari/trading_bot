@@ -46,6 +46,7 @@ from scripts.production_shadow_cutover_controller import (  # noqa: E402
     CutoverContractError,
     validate_manifest,
 )
+from scripts import production_shadow_convergence_runtime_targets as runtime_targets  # noqa: E402
 
 
 MAX_DOCUMENT_BYTES = 16 * 1024 * 1024
@@ -138,6 +139,60 @@ def _validated_template(document: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _read_and_validate_runtime_target_derivation_receipt(
+    *,
+    template: dict[str, Any],
+    template_bytes: bytes,
+    template_path: Path,
+    receipt_path: Path,
+    required_uid: int,
+) -> tuple[dict[str, Any], bytes]:
+    """Reopen the builder-only sidecar before issuing or accepting approval."""
+
+    try:
+        expected_path = runtime_targets.runtime_target_derivation_receipt_path(
+            template_path
+        )
+    except runtime_targets.ConvergenceRuntimeTargetDescriptorError as exc:
+        raise CutoverManifestFinalizationError(
+            "runtime target derivation receipt template path is unsafe"
+        ) from exc
+    if receipt_path != expected_path:
+        raise CutoverManifestFinalizationError(
+            "runtime target derivation receipt must be the template sidecar"
+        )
+    receipt, receipt_bytes = _read_document(
+        receipt_path,
+        label="runtime target derivation receipt",
+        required_uid=required_uid,
+        require_canonical=True,
+    )
+    try:
+        runtime_targets.validate_runtime_target_derivation_receipt(
+            receipt,
+            campaign_id=template["campaign_id"],
+            operation_id=template["operation_id"],
+            release_sha=template["release_sha"],
+            template_sha256=hashlib.sha256(template_bytes).hexdigest(),
+            authorization_basis_sha256=authorization_basis_sha256(template),
+            canonical_compose_sha256=template["artifacts"][
+                "shadow_compose_sha256"
+            ],
+            convergence_runtime_targets=template["artifacts"][
+                "convergence_runtime_targets"
+            ],
+            label="runtime target derivation receipt",
+        )
+    except (
+        KeyError,
+        runtime_targets.ConvergenceRuntimeTargetDescriptorError,
+    ) as exc:
+        raise CutoverManifestFinalizationError(
+            "runtime target derivation receipt does not bind the exact template"
+        ) from exc
+    return receipt, receipt_bytes
+
+
 def _preflight_destination(
     path: Path,
     payload: bytes,
@@ -194,16 +249,24 @@ def _publish_exact(
 def build_subject(
     *,
     template_path: Path,
+    derivation_receipt_path: Path,
     output_path: Path,
     required_uid: int,
 ) -> dict[str, Any]:
-    template, _ = _read_document(
+    template, template_bytes = _read_document(
         template_path,
         label="production cutover manifest template",
         required_uid=required_uid,
         require_canonical=True,
     )
     template = _validated_template(template)
+    _read_and_validate_runtime_target_derivation_receipt(
+        template=template,
+        template_bytes=template_bytes,
+        template_path=template_path,
+        receipt_path=derivation_receipt_path,
+        required_uid=required_uid,
+    )
     subject = authorization_subject_from_manifest(template)
     subject_bytes = canonical_json_bytes(subject)
     publication = _publish_exact(
@@ -226,6 +289,7 @@ def build_subject(
 def finalize_manifest(
     *,
     template_path: Path,
+    derivation_receipt_path: Path,
     policy_path: Path,
     approval_path: Path,
     manifest_output: Path,
@@ -233,13 +297,20 @@ def finalize_manifest(
     approval_output: Path,
     required_uid: int,
 ) -> dict[str, Any]:
-    template, _ = _read_document(
+    template, template_bytes = _read_document(
         template_path,
         label="production cutover manifest template",
         required_uid=required_uid,
         require_canonical=True,
     )
     template = _validated_template(template)
+    _receipt, receipt_bytes = _read_and_validate_runtime_target_derivation_receipt(
+        template=template,
+        template_bytes=template_bytes,
+        template_path=template_path,
+        receipt_path=derivation_receipt_path,
+        required_uid=required_uid,
+    )
     policy, policy_bytes = _read_document(
         policy_path,
         label="human approval policy source",
@@ -294,6 +365,14 @@ def finalize_manifest(
             "final production cutover manifest verification failed"
         ) from exc
     manifest_bytes = canonical_json_bytes(final_manifest)
+    try:
+        final_receipt_path = runtime_targets.runtime_target_derivation_receipt_path(
+            manifest_output
+        )
+    except runtime_targets.ConvergenceRuntimeTargetDescriptorError as exc:
+        raise CutoverManifestFinalizationError(
+            "final manifest path cannot bind a runtime target derivation receipt"
+        ) from exc
 
     destinations = (
         (
@@ -310,6 +389,11 @@ def finalize_manifest(
             manifest_output,
             manifest_bytes,
             "final production cutover manifest",
+        ),
+        (
+            final_receipt_path,
+            receipt_bytes,
+            "final runtime target derivation receipt",
         ),
     )
     for destination, payload, label in destinations:
@@ -330,6 +414,12 @@ def finalize_manifest(
             approval_output,
             approval_bytes,
             label="canonical production approval",
+            required_uid=required_uid,
+        ),
+        "runtime_target_derivation_receipt": _publish_exact(
+            final_receipt_path,
+            receipt_bytes,
+            label="final runtime target derivation receipt",
             required_uid=required_uid,
         ),
         "manifest": _publish_exact(
@@ -355,6 +445,7 @@ def finalize_manifest(
         "manifest_output": str(manifest_output),
         "approval_output": str(approval_output),
         "policy_output": str(policy_output),
+        "runtime_target_derivation_receipt_output": str(final_receipt_path),
     }
 
 
@@ -364,10 +455,20 @@ def main(argv: list[str] | None = None) -> int:
 
     subject = subparsers.add_parser("subject")
     subject.add_argument("--manifest-template", type=Path, required=True)
+    subject.add_argument(
+        "--runtime-target-derivation-receipt",
+        type=Path,
+        required=True,
+    )
     subject.add_argument("--output", type=Path, required=True)
 
     finalize = subparsers.add_parser("finalize")
     finalize.add_argument("--manifest-template", type=Path, required=True)
+    finalize.add_argument(
+        "--runtime-target-derivation-receipt",
+        type=Path,
+        required=True,
+    )
     finalize.add_argument("--policy", type=Path, required=True)
     finalize.add_argument("--approval", type=Path, required=True)
     finalize.add_argument("--manifest-output", type=Path, required=True)
@@ -383,12 +484,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "subject":
             result = build_subject(
                 template_path=args.manifest_template,
+                derivation_receipt_path=args.runtime_target_derivation_receipt,
                 output_path=args.output,
                 required_uid=0,
             )
         else:
             result = finalize_manifest(
                 template_path=args.manifest_template,
+                derivation_receipt_path=args.runtime_target_derivation_receipt,
                 policy_path=args.policy,
                 approval_path=args.approval,
                 manifest_output=args.manifest_output,

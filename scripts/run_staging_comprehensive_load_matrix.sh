@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+case "${1:-}" in
+    -h|--help|help)
+        printf '%s\n' 'Legacy two-server staging comprehensive matrix is retired. Only artifact-only planning in the sealed three-site campaign is supported.'
+        exit 0
+        ;;
+    *)
+        printf '%s\n' 'Legacy two-server staging comprehensive matrix is retired and hard-disabled before Docker, HTTP, or data access. Use the sealed three-site campaign verifier.' >&2
+        exit 2
+        ;;
+esac
+
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="$PROJECT_DIR/deploy/staging/docker-compose.staging.yml"
 ENV_FILE="$PROJECT_DIR/.env.staging"

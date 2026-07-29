@@ -10,6 +10,7 @@ command metadata and hashes, never command output bodies.
 from __future__ import annotations
 
 import argparse
+import ctypes
 from dataclasses import dataclass
 import fcntl
 import hashlib
@@ -18,9 +19,13 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import secrets
+import selectors
+import signal
 import stat
 import subprocess
 import sys
+import threading
+import time
 from typing import Any, Callable, Mapping, Sequence
 from uuid import UUID
 
@@ -47,6 +52,12 @@ EVIDENCE_SCHEMA = "production-shadow-nginx-coordinator-command-evidence-v1"
 RESULT_SCHEMA = "production-shadow-nginx-coordinator-result-v1"
 STATE_RECEIPT_SCHEMA = (
     "production-shadow-nginx-coordinator-state-receipt-v1"
+)
+PRE_FREEZE_FRESH_READBACK_RECEIPT_SCHEMA = (
+    "production-shadow-nginx-coordinator-fresh-state-receipt-v1"
+)
+READBACK_CHALLENGE_SET_SCHEMA = (
+    "production-shadow-nginx-readback-challenge-set-v1"
 )
 LIVE_LEASE_CLAIM_SCHEMA = (
     "production-shadow-nginx-coordinator-live-lease-claim-v1"
@@ -78,6 +89,7 @@ DEFAULT_SSH_IDENTITY = Path("/root/.ssh/id_ed25519")
 HOST_CONTROL_PARENT = Path("/etc/trading-bot-production-shadow")
 HOST_OPERATION_BASE = GENERATION.DEFAULT_OPERATION_BASE
 PYTHON = "/usr/bin/python3"
+ENV = "/usr/bin/env"
 SSH = "/usr/bin/ssh"
 SCP = "/usr/bin/scp"
 CURL = "/usr/bin/curl"
@@ -148,6 +160,12 @@ VHOST_RECEIPT_LAYOUT = {
 }
 MAX_COMMAND_STDOUT_BYTES = 2 * 1024 * 1024
 MAX_COMMAND_STDERR_BYTES = 2 * 1024 * 1024
+MAX_COMMAND_TIMEOUT_SECONDS = 300
+COMMAND_TERM_GRACE_SECONDS = 2.0
+PROCESS_POLL_SECONDS = 0.05
+PROCESS_TREE_QUIESCENCE_SECONDS = 0.1
+PR_SET_CHILD_SUBREAPER = 36
+READBACK_MAX_CROSS_HOST_SKEW_SECONDS = 15
 MAX_KEY_BYTES = 1024 * 1024
 FILE_MODE = 0o600
 DIRECTORY_MODE = 0o700
@@ -159,12 +177,15 @@ LIVE_LEASE_OWNER_OUTCOMES = {
     "capture-frozen-final-snapshots": frozenset(
         {"handoff-shadow-readonly"}
     ),
+    "verify-current-frozen-writers": frozenset(
+        {"current-frozen-verified"}
+    ),
     "restore-legacy-writers": frozenset({"legacy-restored"}),
     "restore-shadow-frozen-final": frozenset(
         {"frozen-final-shadow-restored"}
     ),
 }
-LOCAL_EXECUTABLES = frozenset({PYTHON, SSH, SCP, CURL})
+LOCAL_EXECUTABLES = frozenset({ENV, PYTHON, SSH, SCP, CURL})
 REMOTE_EXECUTABLES = frozenset(
     {
         PYTHON,
@@ -188,7 +209,20 @@ class CommandResult:
     stderr: bytes = b""
 
 
-RunFn = Callable[[Sequence[str], int], CommandResult]
+RunFn = Callable[..., CommandResult]
+
+
+@dataclass(frozen=True)
+class ProcessIdentity:
+    pid: int
+    parent_pid: int
+    process_group: int
+    start_time: int
+    state: str
+
+    @property
+    def key(self) -> tuple[int, int]:
+        return self.pid, self.start_time
 
 
 @dataclass(frozen=True)
@@ -406,8 +440,34 @@ def load_state_receipt(
     release_sha: str,
     release_tree_sha: str,
     aggregate_sha256: str,
+    *,
+    allow_historical: bool = False,
+    observed_at_epoch: int | None = None,
+    _require_current_journal: bool = True,
 ) -> tuple[dict[str, Any], str]:
     """Load and fully verify a canonical two-host state receipt."""
+    if type(allow_historical) is not bool:
+        raise NginxCoordinatorError(
+            "historical receipt policy is invalid"
+        )
+    if type(_require_current_journal) is not bool:
+        raise NginxCoordinatorError(
+            "current journal receipt policy is invalid"
+        )
+    if allow_historical and not _require_current_journal:
+        raise NginxCoordinatorError(
+            "historical and transferred-fresh policies cannot be combined"
+        )
+    if (
+        observed_at_epoch is not None
+        and (
+            type(observed_at_epoch) is not int
+            or observed_at_epoch < 1
+        )
+    ):
+        raise NginxCoordinatorError(
+            "receipt observation time is invalid"
+        )
     if expected_state not in GENERATION.GENERATION_STATES:
         raise NginxCoordinatorError(
             "expected receipt state is not allowlisted"
@@ -426,7 +486,7 @@ def load_state_receipt(
         path,
         label="production Nginx coordinator state receipt",
     )
-    fields = {
+    base_fields = {
         "schema",
         "verification_status",
         "source_action",
@@ -452,6 +512,20 @@ def load_state_receipt(
         "volume_mutated",
         "data_mutated",
     }
+    freshness_fields = {
+        "readback_challenge_sha256",
+        "issued_at_epoch",
+        "expires_at_epoch",
+        "captured_at_epoch",
+    }
+    is_fresh = (
+        document.get("schema")
+        == PRE_FREEZE_FRESH_READBACK_RECEIPT_SCHEMA
+    )
+    is_historical = document.get("schema") == STATE_RECEIPT_SCHEMA
+    expected_fields = (
+        base_fields | freshness_fields if is_fresh else base_fields
+    )
     identity = {
         "operation_id": operation_id,
         "release_sha": release_sha,
@@ -459,8 +533,9 @@ def load_state_receipt(
         "aggregate_sha256": aggregate_sha256,
     }
     if (
-        set(document) != fields
-        or document["schema"] != STATE_RECEIPT_SCHEMA
+        set(document) != expected_fields
+        or not (is_fresh or is_historical)
+        or (is_historical and not allow_historical)
         or document["verification_status"] != "verified"
         or document["source_action"] not in STATE_RECEIPT_ACTIONS
         or not isinstance(document["coordinator_status"], str)
@@ -583,7 +658,7 @@ def load_state_receipt(
         raise NginxCoordinatorError(
             "state receipt host readback closure differs"
         )
-    readback_fields = {
+    historical_readback_fields = {
         "schema",
         "status",
         "operation_id",
@@ -601,6 +676,16 @@ def load_state_receipt(
         "service_reloaded",
         "journal_sha256",
     }
+    fresh_readback_fields = historical_readback_fields | {
+        "readback_challenge_nonce",
+        "readback_challenge_sha256",
+        "issued_at_epoch",
+        "expires_at_epoch",
+        "captured_at_epoch",
+    }
+    readback_fields = (
+        fresh_readback_fields if is_fresh else historical_readback_fields
+    )
     for role in ROLE_ORDER:
         readback = readbacks[role]
         binding = role_bindings[role]
@@ -611,7 +696,11 @@ def load_state_receipt(
             not isinstance(readback, dict)
             or set(readback) != readback_fields
             or readback["schema"]
-            != "production-shadow-nginx-host-readback-v1"
+            != (
+                GENERATION.HOST_FRESH_READBACK_SCHEMA
+                if is_fresh
+                else "production-shadow-nginx-host-readback-v1"
+            )
             or readback["status"] != "read-back"
             or readback["operation_id"] != operation_id
             or readback["role"] != role
@@ -645,13 +734,16 @@ def load_state_receipt(
             "state receipt global generation digest differs"
         )
     external = document["external_readback"]
-    external_fields = {
+    historical_external_fields = {
         "states",
         "states_by_role",
         "blocked_probes_performed",
         "write_method_probe_performed",
         "vhosts",
     }
+    external_fields = historical_external_fields | (
+        freshness_fields if is_fresh else set()
+    )
     blocked = expected_state in BLOCKED_STATES
     if (
         not isinstance(external, dict)
@@ -690,6 +782,91 @@ def load_state_receipt(
             raise NginxCoordinatorError(
                 "state receipt external probe result differs"
             )
+    if is_fresh:
+        freshness = _readback_freshness(
+            operation_id=operation_id,
+            release_sha=release_sha,
+            release_tree_sha=release_tree_sha,
+            aggregate_sha256=aggregate_sha256,
+            readbacks=readbacks,
+        )
+        if (
+            any(
+                document[field] != freshness[field]
+                for field in (
+                    "readback_challenge_sha256",
+                    "issued_at_epoch",
+                    "expires_at_epoch",
+                )
+            )
+            or any(
+                external[field] != document[field]
+                for field in freshness_fields
+            )
+            or type(document["captured_at_epoch"]) is not int
+            or document["captured_at_epoch"]
+            < freshness["captured_at_epoch"]
+            - GENERATION.READBACK_MAX_CLOCK_SKEW_SECONDS
+            or document["captured_at_epoch"]
+            > document["expires_at_epoch"]
+        ):
+            raise NginxCoordinatorError(
+                "state receipt fresh readback binding differs"
+            )
+        if not allow_historical:
+            now_epoch = (
+                int(time.time())
+                if observed_at_epoch is None
+                else observed_at_epoch
+            )
+            if (
+                now_epoch
+                < document["issued_at_epoch"]
+                - GENERATION.READBACK_MAX_CLOCK_SKEW_SECONDS
+                or now_epoch > document["expires_at_epoch"]
+                or document["captured_at_epoch"]
+                > now_epoch + GENERATION.READBACK_MAX_CLOCK_SKEW_SECONDS
+            ):
+                raise NginxCoordinatorError(
+                    "state receipt fresh readback window is not current"
+                )
+            if _require_current_journal:
+                digest = _sha256(payload)
+                expected_path = _canonical_receipt_path(
+                    operation_id=operation_id,
+                    state=expected_state,
+                    digest=digest,
+                )
+                if path != expected_path:
+                    raise NginxCoordinatorError(
+                        "fresh state receipt path is not controller-canonical"
+                    )
+                current_journal, _ = _load_canonical_json(
+                    path.parent.parent / "journal.json",
+                    label="current production Nginx coordinator journal",
+                )
+                if (
+                    current_journal.get("schema") != COORDINATOR_SCHEMA
+                    or current_journal.get("operation_id") != operation_id
+                    or current_journal.get("release_sha") != release_sha
+                    or current_journal.get("release_tree_sha")
+                    != release_tree_sha
+                    or current_journal.get("aggregate_sha256")
+                    != aggregate_sha256
+                    or current_journal.get("stable_state") != expected_state
+                    or current_journal.get("pending") is not None
+                    or current_journal.get("state_sha256")
+                    != _journal_hash(current_journal)
+                    or current_journal.get("state_sha256")
+                    != document["journal_sha256"]
+                    or current_journal.get("evidence_count")
+                    != document["evidence_count"]
+                    or current_journal.get("evidence_tail_sha256")
+                    != document["evidence_tail_sha256"]
+                ):
+                    raise NginxCoordinatorError(
+                        "fresh state receipt is not bound to the current journal"
+                    )
     return document, _sha256(payload)
 
 
@@ -1513,30 +1690,438 @@ class _CoordinatorLock:
         return False
 
 
-def _subprocess_runner(argv: Sequence[str], timeout: int) -> CommandResult:
+def _process_identity(pid: int) -> ProcessIdentity | None:
     try:
-        result = subprocess.run(
+        payload = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+        fields = payload[payload.rindex(") ") + 2 :].split()
+        if len(fields) < 20:
+            return None
+        return ProcessIdentity(
+            pid=pid,
+            parent_pid=int(fields[1], 10),
+            process_group=int(fields[2], 10),
+            start_time=int(fields[19], 10),
+            state=fields[0],
+        )
+    except (OSError, UnicodeError, ValueError):
+        return None
+
+
+def _process_snapshot() -> dict[int, ProcessIdentity]:
+    try:
+        entries = tuple(Path("/proc").iterdir())
+    except OSError as exc:
+        raise NginxCoordinatorError(
+            "subprocess ownership inventory is unavailable"
+        ) from exc
+    return {
+        identity.pid: identity
+        for entry in entries
+        if entry.name.isdecimal()
+        for identity in (_process_identity(int(entry.name, 10)),)
+        if identity is not None
+    }
+
+
+def _enable_child_subreaper() -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise NginxCoordinatorError(
+            f"child subreaper setup failed with errno {error}"
+        )
+
+
+def _direct_child_baseline() -> frozenset[tuple[int, int]]:
+    owner = os.getpid()
+    return frozenset(
+        identity.key
+        for identity in _process_snapshot().values()
+        if identity.parent_pid == owner
+    )
+
+
+def _owned_processes(
+    root: ProcessIdentity,
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+) -> set[ProcessIdentity]:
+    snapshot = _process_snapshot()
+    observed_root = snapshot.get(root.pid)
+    owned_ids: set[int] = set()
+    if (
+        observed_root is not None
+        and observed_root.start_time == root.start_time
+    ):
+        owned_ids.add(root.pid)
+    changed = True
+    while changed:
+        changed = False
+        for identity in snapshot.values():
+            if (
+                identity.pid not in owned_ids
+                and identity.parent_pid in owned_ids
+            ):
+                owned_ids.add(identity.pid)
+                changed = True
+    owner = os.getpid()
+    for identity in snapshot.values():
+        if (
+            identity.parent_pid == owner
+            and identity.key not in baseline_children
+        ):
+            owned_ids.add(identity.pid)
+    return {
+        identity
+        for pid, identity in snapshot.items()
+        if pid in owned_ids
+    }
+
+
+def _identity_is_live(identity: ProcessIdentity) -> bool:
+    current = _process_identity(identity.pid)
+    return (
+        current is not None
+        and current.start_time == identity.start_time
+        and current.state != "Z"
+    )
+
+
+def _identity_is_current(identity: ProcessIdentity) -> bool:
+    current = _process_identity(identity.pid)
+    return (
+        current is not None
+        and current.start_time == identity.start_time
+    )
+
+
+def _reap_adopted_zombies(
+    tracked: set[ProcessIdentity],
+    *,
+    root_pid: int,
+) -> None:
+    for identity in tuple(tracked):
+        if identity.pid == root_pid:
+            continue
+        current = _process_identity(identity.pid)
+        if (
+            current is None
+            or current.start_time != identity.start_time
+            or current.parent_pid != os.getpid()
+            or current.state != "Z"
+        ):
+            continue
+        try:
+            reaped, _status = os.waitpid(identity.pid, os.WNOHANG)
+        except ChildProcessError:
+            continue
+        except OSError as exc:
+            raise NginxCoordinatorError(
+                "identity-bound adopted subprocess could not be reaped"
+            ) from exc
+        if reaped not in {0, identity.pid}:
+            raise NginxCoordinatorError(
+                "identity-bound adopted subprocess reap differed"
+            )
+
+
+def _signal_process_identity(
+    identity: ProcessIdentity,
+    signum: int,
+) -> None:
+    current = _process_identity(identity.pid)
+    if current is None or current.start_time != identity.start_time:
+        return
+    try:
+        descriptor = os.pidfd_open(identity.pid, 0)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise NginxCoordinatorError(
+            "identity-bound subprocess handle cannot be opened"
+        ) from exc
+    try:
+        refreshed = _process_identity(identity.pid)
+        if refreshed is None or refreshed.start_time != identity.start_time:
+            return
+        signal.pidfd_send_signal(descriptor, signum)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise NginxCoordinatorError(
+            "identity-bound subprocess signal failed"
+        ) from exc
+    finally:
+        os.close(descriptor)
+
+
+def _terminate_process_tree(
+    process: subprocess.Popen[bytes],
+    root: ProcessIdentity,
+    tracked: set[ProcessIdentity],
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+) -> None:
+    def refresh() -> None:
+        tracked.update(
+            _owned_processes(
+                root,
+                baseline_children=baseline_children,
+            )
+        )
+        _reap_adopted_zombies(tracked, root_pid=root.pid)
+
+    def signal_live(*, force: bool) -> None:
+        refresh()
+        for identity in tuple(tracked):
+            if _identity_is_live(identity):
+                _signal_process_identity(
+                    identity,
+                    (
+                        signal.SIGKILL
+                        if force
+                        or identity.process_group != root.process_group
+                        else signal.SIGTERM
+                    ),
+                )
+
+    signal_live(force=False)
+    deadline = time.monotonic() + COMMAND_TERM_GRACE_SECONDS
+    while time.monotonic() < deadline:
+        process.poll()
+        signal_live(force=False)
+        if process.poll() is not None and not any(
+            _identity_is_live(identity) for identity in tracked
+        ):
+            break
+        time.sleep(
+            min(
+                PROCESS_POLL_SECONDS,
+                max(0.0, deadline - time.monotonic()),
+            )
+        )
+    signal_live(force=True)
+    try:
+        process.wait(timeout=COMMAND_TERM_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=COMMAND_TERM_GRACE_SECONDS)
+    absence_deadline = (
+        time.monotonic()
+        + COMMAND_TERM_GRACE_SECONDS
+        + PROCESS_TREE_QUIESCENCE_SECONDS
+    )
+    stable_since: float | None = None
+    while time.monotonic() < absence_deadline:
+        refresh()
+        live = {
+            identity for identity in tracked if _identity_is_live(identity)
+        }
+        if live:
+            stable_since = None
+            for identity in live:
+                _signal_process_identity(identity, signal.SIGKILL)
+        elif stable_since is None:
+            stable_since = time.monotonic()
+        elif (
+            time.monotonic() - stable_since
+            >= PROCESS_TREE_QUIESCENCE_SECONDS
+        ):
+            return
+        time.sleep(
+            min(
+                PROCESS_POLL_SECONDS,
+                max(0.0, absence_deadline - time.monotonic()),
+            )
+        )
+    refresh()
+    if any(
+        identity.pid != root.pid and _identity_is_current(identity)
+        for identity in tracked
+    ):
+        raise NginxCoordinatorError(
+            "subprocess process tree survived forced cleanup"
+        )
+
+
+def _subprocess_runner(
+    argv: Sequence[str],
+    timeout: int,
+    *,
+    stdin: int = subprocess.DEVNULL,
+    pass_fds: tuple[int, ...] = (),
+) -> CommandResult:
+    if (
+        type(timeout) is not int
+        or not 1 <= timeout <= MAX_COMMAND_TIMEOUT_SECONDS
+    ):
+        raise NginxCoordinatorError(
+            "coordinator command timeout is outside the bounded contract"
+        )
+    if (
+        stdin != subprocess.DEVNULL
+        and (type(stdin) is not int or stdin < 0)
+    ):
+        raise NginxCoordinatorError(
+            "coordinator command stdin is outside the bounded contract"
+        )
+    if (
+        not isinstance(pass_fds, tuple)
+        or pass_fds
+    ):
+        raise NginxCoordinatorError(
+            "coordinator inherited descriptors are outside the bounded contract"
+        )
+    if stdin != subprocess.DEVNULL:
+        try:
+            metadata = os.fstat(stdin)
+            flags = fcntl.fcntl(stdin, fcntl.F_GETFL)
+            target = os.readlink(f"/proc/self/fd/{stdin}")
+        except OSError as exc:
+            raise NginxCoordinatorError(
+                "coordinator command liveness pipe is unavailable"
+            ) from exc
+        if (
+            not stat.S_ISFIFO(metadata.st_mode)
+            or flags & os.O_ACCMODE != os.O_RDONLY
+            or target != f"pipe:[{metadata.st_ino}]"
+        ):
+            raise NginxCoordinatorError(
+                "coordinator command stdin is not an anonymous read pipe"
+            )
+    process: subprocess.Popen[bytes] | None = None
+    selector = selectors.DefaultSelector()
+    buffers = {"stdout": bytearray(), "stderr": bytearray()}
+    tracked: set[ProcessIdentity] = set()
+    root: ProcessIdentity | None = None
+    cleaned = False
+    deadline = time.monotonic() + timeout
+    _enable_child_subreaper()
+    baseline_children = _direct_child_baseline()
+    try:
+        process = subprocess.Popen(  # noqa: S603
             list(argv),
-            stdin=subprocess.DEVNULL,
+            stdin=stdin,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            timeout=timeout,
-            check=False,
             env={
                 "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
-                "HOME": "/root",
+                "HOME": "/nonexistent",
                 "LANG": "C.UTF-8",
                 "LC_ALL": "C.UTF-8",
             },
+            close_fds=True,
+            pass_fds=pass_fds,
+            start_new_session=True,
         )
+        root = _process_identity(process.pid)
+        if root is None:
+            process.poll()
+            root = ProcessIdentity(
+                pid=process.pid,
+                parent_pid=os.getpid(),
+                process_group=process.pid,
+                start_time=-1,
+                state="?",
+            )
+        if process.stdout is None or process.stderr is None:
+            raise NginxCoordinatorError(
+                "bounded coordinator pipes are unavailable"
+            )
+        for label, stream in (
+            ("stdout", process.stdout),
+            ("stderr", process.stderr),
+        ):
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, label)
+        while selector.get_map():
+            tracked.update(
+                _owned_processes(
+                    root,
+                    baseline_children=baseline_children,
+                )
+            )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise NginxCoordinatorError(
+                    "bounded coordinator command timed out"
+                )
+            events = selector.select(
+                min(PROCESS_POLL_SECONDS, remaining)
+            )
+            if not events:
+                if process.poll() is not None and not cleaned:
+                    _terminate_process_tree(
+                        process,
+                        root,
+                        tracked,
+                        baseline_children=baseline_children,
+                    )
+                    cleaned = True
+                continue
+            for key, _mask in events:
+                try:
+                    chunk = os.read(key.fileobj.fileno(), 64 * 1024)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                label = key.data
+                buffer = buffers[label]
+                limit = (
+                    MAX_COMMAND_STDOUT_BYTES
+                    if label == "stdout"
+                    else MAX_COMMAND_STDERR_BYTES
+                )
+                if len(buffer) + len(chunk) > limit:
+                    raise NginxCoordinatorError(
+                        f"bounded coordinator {label} is oversized"
+                    )
+                buffer.extend(chunk)
+            if process.poll() is not None and not cleaned:
+                _terminate_process_tree(
+                    process,
+                    root,
+                    tracked,
+                    baseline_children=baseline_children,
+                )
+                cleaned = True
+        returncode = process.poll()
+        if returncode is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise NginxCoordinatorError(
+                    "bounded coordinator command timed out"
+                )
+            returncode = process.wait(timeout=remaining)
+    except NginxCoordinatorError:
+        raise
     except (OSError, subprocess.SubprocessError) as exc:
         raise NginxCoordinatorError(
             "bounded coordinator command could not execute"
         ) from exc
+    finally:
+        selector.close()
+        if process is not None and root is not None:
+            try:
+                if not cleaned:
+                    _terminate_process_tree(
+                        process,
+                        root,
+                        tracked,
+                        baseline_children=baseline_children,
+                    )
+            finally:
+                if process.stdout is not None:
+                    process.stdout.close()
+                if process.stderr is not None:
+                    process.stderr.close()
     return CommandResult(
-        returncode=result.returncode,
-        stdout=bytes(result.stdout),
-        stderr=bytes(result.stderr),
+        returncode=returncode,
+        stdout=bytes(buffers["stdout"]),
+        stderr=bytes(buffers["stderr"]),
     )
 
 
@@ -1626,6 +2211,8 @@ def _run_audited(
     target_state: str | None,
     timeout: int,
     accepted_returncodes: frozenset[int] = frozenset({0}),
+    stdin: int = subprocess.DEVNULL,
+    pass_fds: tuple[int, ...] = (),
 ) -> CommandResult:
     if (
         not isinstance(argv, (tuple, list))
@@ -1634,7 +2221,12 @@ def _run_audited(
         or argv[0] not in LOCAL_EXECUTABLES
     ):
         raise NginxCoordinatorError("command argv is invalid")
-    result = runner(tuple(argv), timeout)
+    result = runner(
+        tuple(argv),
+        timeout,
+        stdin=stdin,
+        pass_fds=pass_fds,
+    )
     if (
         not isinstance(result, CommandResult)
         and not isinstance(result, GENERATION.CommandResult)
@@ -1675,6 +2267,8 @@ def _ssh_prefix(
 ) -> tuple[str, ...]:
     return (
         SSH,
+        "-F",
+        "/dev/null",
         "-T",
         "-i",
         os.fspath(ssh_identity),
@@ -1713,6 +2307,8 @@ def _scp_prefix(
 ) -> tuple[str, ...]:
     return (
         SCP,
+        "-F",
+        "/dev/null",
         "-q",
         "-B",
         "-p",
@@ -1754,6 +2350,7 @@ def _worker_arguments(
     action: str,
     generation: str | None,
     remote: bool,
+    readback_challenge: Mapping[str, Any] | None = None,
 ) -> tuple[str, ...]:
     material = inputs.roles[role]
     if remote:
@@ -1763,7 +2360,17 @@ def _worker_arguments(
         manifest_path = material.manifest_path
         archive_path = material.archive_path
     arguments = [
+        ENV,
+        "-i",
+        "PATH=/usr/bin:/bin",
+        "HOME=/root",
+        "LANG=C.UTF-8",
+        "LC_ALL=C.UTF-8",
+        "PYTHONDONTWRITEBYTECODE=1",
+        "GIT_NO_REPLACE_OBJECTS=1",
         PYTHON,
+        "-I",
+        "-B",
         os.fspath(inputs.worker_path),
         "host",
         "--manifest",
@@ -1788,13 +2395,42 @@ def _worker_arguments(
     if generation is not None:
         arguments.extend(("--generation", generation))
     arguments.append("--apply")
-    if action in {
+    if action == "readback":
+        if (
+            not isinstance(readback_challenge, Mapping)
+            or set(readback_challenge)
+            != {
+                "readback_challenge_nonce",
+                "readback_challenge_sha256",
+                "issued_at_epoch",
+                "expires_at_epoch",
+            }
+        ):
+            raise NginxCoordinatorError(
+                "fresh host readback challenge is required"
+            )
+        arguments.extend(
+            (
+                "--readback-challenge-nonce",
+                str(readback_challenge["readback_challenge_nonce"]),
+                "--readback-challenge-sha256",
+                str(readback_challenge["readback_challenge_sha256"]),
+                "--issued-at-epoch",
+                str(readback_challenge["issued_at_epoch"]),
+                "--expires-at-epoch",
+                str(readback_challenge["expires_at_epoch"]),
+                "--control-fd",
+                "0",
+            )
+        )
+    elif action in {
         "install",
         "test",
         "activate",
         "rollback-freeze",
         "restore",
     }:
+        arguments.extend(("--control-fd", "0"))
         effective = "legacy-normal" if action == "restore" else generation
         arguments.extend(
             (
@@ -1813,6 +2449,40 @@ def _worker_arguments(
             *_safe_remote_command(arguments),
         )
     return tuple(arguments)
+
+
+def _new_host_readback_challenge(
+    inputs: CoordinatorInputs,
+    *,
+    role: str,
+) -> dict[str, Any]:
+    material = inputs.roles[role]
+    issued_at_epoch = int(time.time())
+    expires_at_epoch = (
+        issued_at_epoch + GENERATION.READBACK_CHALLENGE_TTL_SECONDS
+    )
+    challenge = {
+        "schema": GENERATION.HOST_READBACK_CHALLENGE_SCHEMA,
+        "operation_id": inputs.operation_id,
+        "role": role,
+        "expected_host": material.expected_host,
+        "release_sha": inputs.release_sha,
+        "release_tree_sha": inputs.release_tree_sha,
+        "manifest_sha256": material.manifest_sha256,
+        "archive_sha256": material.manifest["archive"]["sha256"],
+        "readback_challenge_nonce": secrets.token_hex(32),
+        "issued_at_epoch": issued_at_epoch,
+        "expires_at_epoch": expires_at_epoch,
+    }
+    challenge_sha256 = _sha256(canonical_json_bytes(challenge))
+    return {
+        "readback_challenge_nonce": challenge[
+            "readback_challenge_nonce"
+        ],
+        "readback_challenge_sha256": challenge_sha256,
+        "issued_at_epoch": issued_at_epoch,
+        "expires_at_epoch": expires_at_epoch,
+    }
 
 
 def _parse_exact_json_stdout(
@@ -1873,6 +2543,34 @@ def _validate_command_evidence(value: Any) -> None:
         )
 
 
+def _validate_stability_evidence(
+    value: Any,
+    *,
+    expected_state: str,
+) -> None:
+    if (
+        not isinstance(value, list)
+        or not 2 <= len(value) <= 10
+    ):
+        raise NginxCoordinatorError(
+            "activation stability evidence is invalid"
+        )
+    for index, observation in enumerate(value, 1):
+        if (
+            not isinstance(observation, dict)
+            or set(observation)
+            != {"index", "service", "nginx_test", "state"}
+            or type(observation["index"]) is not int
+            or observation["index"] != index
+            or observation["state"] != expected_state
+        ):
+            raise NginxCoordinatorError(
+                "activation stability observation differs"
+            )
+        _validate_command_evidence(observation["service"])
+        _validate_command_evidence(observation["nginx_test"])
+
+
 def _validate_host_result(
     document: Mapping[str, Any],
     *,
@@ -1880,6 +2578,7 @@ def _validate_host_result(
     role: str,
     action: str,
     generation: str | None,
+    readback_challenge: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     material = inputs.roles[role]
     identity = {
@@ -1903,14 +2602,39 @@ def _validate_host_result(
             "active_configuration_mutated",
             "service_reloaded",
             "journal_sha256",
+            "readback_challenge_nonce",
+            "readback_challenge_sha256",
+            "issued_at_epoch",
+            "expires_at_epoch",
+            "captured_at_epoch",
         }
+        now_epoch = int(time.time())
         if (
             not isinstance(document, Mapping)
             or set(document) != fields
             or document["schema"]
-            != "production-shadow-nginx-host-readback-v1"
+            != GENERATION.HOST_FRESH_READBACK_SCHEMA
             or document["status"] != "read-back"
             or any(document.get(key) != value for key, value in identity.items())
+            or not isinstance(readback_challenge, Mapping)
+            or any(
+                document.get(field) != readback_challenge.get(field)
+                for field in (
+                    "readback_challenge_nonce",
+                    "readback_challenge_sha256",
+                    "issued_at_epoch",
+                    "expires_at_epoch",
+                )
+            )
+            or type(document["captured_at_epoch"]) is not int
+            or document["captured_at_epoch"] < 1
+            or document["captured_at_epoch"]
+            < document["issued_at_epoch"]
+            - GENERATION.READBACK_MAX_CLOCK_SKEW_SECONDS
+            or document["captured_at_epoch"] > document["expires_at_epoch"]
+            or document["captured_at_epoch"]
+            > now_epoch + GENERATION.READBACK_MAX_CLOCK_SKEW_SECONDS
+            or now_epoch > document["expires_at_epoch"]
             or document["state"] not in GENERATION.GENERATION_STATES
             or document["generation_sha256"]
             != material.manifest["generation_sha256"][document["state"]]
@@ -1928,6 +2652,11 @@ def _validate_host_result(
         ):
             _nonzero_sha256(document[field], label=f"{role} {field}")
         return json.loads(canonical_json_bytes(document).decode("utf-8"))
+
+    if readback_challenge is not None:
+        raise NginxCoordinatorError(
+            "non-readback host result received a readback challenge"
+        )
 
     base_fields = {
         "schema",
@@ -1997,13 +2726,18 @@ def _validate_host_result(
                 or document["service_reloaded"] is not True
                 or document["from_state"] not in GENERATION.GENERATION_STATES
                 or not isinstance(document["commands"], dict)
-                or set(document["commands"]) != {"test", "reload"}
+                or set(document["commands"])
+                != {"test", "reload", "stability"}
             ):
                 raise NginxCoordinatorError(
                     "activation mutation evidence differs"
                 )
             _validate_command_evidence(document["commands"]["test"])
             _validate_command_evidence(document["commands"]["reload"])
+            _validate_stability_evidence(
+                document["commands"]["stability"],
+                expected_state=str(effective),
+            )
         elif (
             document["active_configuration_mutated"] is not False
             or document["service_reloaded"] is not False
@@ -2023,24 +2757,49 @@ def _call_host_worker(
     generation: str | None,
     runner: RunFn,
 ) -> dict[str, Any]:
+    controlled = action in GENERATION.CONTROLLED_HOST_ACTIONS
+    readback_challenge = (
+        _new_host_readback_challenge(inputs, role=role)
+        if action == "readback"
+        else None
+    )
     argv = _worker_arguments(
         inputs,
         role=role,
         action=action,
         generation=generation,
         remote=role == "webapp_fi",
+        readback_challenge=readback_challenge,
     )
-    result = _run_audited(
-        inputs,
-        journal,
-        argv,
-        runner=runner,
-        kind="ssh-worker" if role == "webapp_fi" else "local-worker",
-        scope=role,
-        action=action,
-        target_state=generation,
-        timeout=90,
-    )
+    read_fd: int | None = None
+    write_fd: int | None = None
+    try:
+        if controlled:
+            read_fd, write_fd = os.pipe()
+            os.set_inheritable(read_fd, False)
+            os.set_inheritable(write_fd, False)
+        result = _run_audited(
+            inputs,
+            journal,
+            argv,
+            runner=runner,
+            kind="ssh-worker" if role == "webapp_fi" else "local-worker",
+            scope=role,
+            action=action,
+            target_state=generation,
+            timeout=90,
+            stdin=(
+                read_fd
+                if read_fd is not None
+                else subprocess.DEVNULL
+            ),
+            pass_fds=(),
+        )
+    finally:
+        if read_fd is not None:
+            os.close(read_fd)
+        if write_fd is not None:
+            os.close(write_fd)
     document = _parse_exact_json_stdout(
         result.stdout,
         label=f"{role} host worker",
@@ -2051,6 +2810,7 @@ def _call_host_worker(
         role=role,
         action=action,
         generation=generation,
+        readback_challenge=readback_challenge,
     )
 
 
@@ -2669,6 +3429,117 @@ def _readback_hosts(
     }
 
 
+def _readback_freshness(
+    *,
+    operation_id: str,
+    release_sha: str,
+    release_tree_sha: str,
+    aggregate_sha256: str,
+    readbacks: Mapping[str, Mapping[str, Any]],
+) -> dict[str, int | str]:
+    if (
+        not isinstance(readbacks, Mapping)
+        or set(readbacks) != set(ROLE_ORDER)
+    ):
+        raise NginxCoordinatorError(
+            "fresh readback role closure differs"
+        )
+    bindings: dict[str, dict[str, Any]] = {}
+    for role in ROLE_ORDER:
+        row = readbacks[role]
+        bindings[role] = {
+            field: row.get(field)
+            for field in (
+                "readback_challenge_nonce",
+                "readback_challenge_sha256",
+                "issued_at_epoch",
+                "expires_at_epoch",
+            )
+        }
+        if (
+            not isinstance(bindings[role]["readback_challenge_nonce"], str)
+            or SHA256_RE.fullmatch(
+                bindings[role]["readback_challenge_nonce"]
+            )
+            is None
+            or bindings[role]["readback_challenge_nonce"] == "0" * 64
+            or not isinstance(
+                bindings[role]["readback_challenge_sha256"], str
+            )
+            or SHA256_RE.fullmatch(
+                bindings[role]["readback_challenge_sha256"]
+            )
+            is None
+            or bindings[role]["readback_challenge_sha256"] == "0" * 64
+            or type(bindings[role]["issued_at_epoch"]) is not int
+            or type(bindings[role]["expires_at_epoch"]) is not int
+            or bindings[role]["expires_at_epoch"]
+            != bindings[role]["issued_at_epoch"]
+            + GENERATION.READBACK_CHALLENGE_TTL_SECONDS
+            or type(row.get("captured_at_epoch")) is not int
+            or row["captured_at_epoch"]
+            < bindings[role]["issued_at_epoch"]
+            - GENERATION.READBACK_MAX_CLOCK_SKEW_SECONDS
+            or row["captured_at_epoch"]
+            > bindings[role]["expires_at_epoch"]
+        ):
+            raise NginxCoordinatorError(
+                f"{role} fresh readback timing differs"
+            )
+        host_challenge = {
+            "schema": GENERATION.HOST_READBACK_CHALLENGE_SCHEMA,
+            "operation_id": operation_id,
+            "role": role,
+            "expected_host": row.get("expected_host"),
+            "release_sha": release_sha,
+            "release_tree_sha": release_tree_sha,
+            "manifest_sha256": row.get("manifest_sha256"),
+            "archive_sha256": row.get("archive_sha256"),
+            "readback_challenge_nonce": bindings[role][
+                "readback_challenge_nonce"
+            ],
+            "issued_at_epoch": bindings[role]["issued_at_epoch"],
+            "expires_at_epoch": bindings[role]["expires_at_epoch"],
+        }
+        if (
+            _sha256(canonical_json_bytes(host_challenge))
+            != bindings[role]["readback_challenge_sha256"]
+        ):
+            raise NginxCoordinatorError(
+                f"{role} fresh readback challenge binding differs"
+            )
+    issued = [bindings[role]["issued_at_epoch"] for role in ROLE_ORDER]
+    captured = [readbacks[role]["captured_at_epoch"] for role in ROLE_ORDER]
+    if (
+        issued != sorted(issued)
+        or captured[1]
+        < captured[0] - GENERATION.READBACK_MAX_CLOCK_SKEW_SECONDS
+        or max(captured) - min(captured)
+        > READBACK_MAX_CROSS_HOST_SKEW_SECONDS
+    ):
+        raise NginxCoordinatorError(
+            "fresh readback cross-host timing differs"
+        )
+    challenge_set = {
+        "schema": READBACK_CHALLENGE_SET_SCHEMA,
+        "operation_id": operation_id,
+        "release_sha": release_sha,
+        "release_tree_sha": release_tree_sha,
+        "aggregate_sha256": aggregate_sha256,
+        "role_challenges": bindings,
+    }
+    return {
+        "readback_challenge_sha256": _sha256(
+            canonical_json_bytes(challenge_set)
+        ),
+        "issued_at_epoch": min(issued),
+        "expires_at_epoch": min(
+            bindings[role]["expires_at_epoch"] for role in ROLE_ORDER
+        ),
+        "captured_at_epoch": max(captured),
+    }
+
+
 def _curl_arguments(
     *,
     vhost: str,
@@ -2677,6 +3548,7 @@ def _curl_arguments(
 ) -> tuple[str, ...]:
     base = [
         CURL,
+        "--disable",
         "--silent",
         "--show-error",
         "--output",
@@ -2731,6 +3603,7 @@ def _external_readback(
     runner: RunFn,
     action: str,
     target_state: str | None,
+    freshness: Mapping[str, int | str],
 ) -> dict[str, Any]:
     if (
         not isinstance(role_states, Mapping)
@@ -2793,12 +3666,37 @@ def _external_readback(
                     f"{vhost} {probe} was not rejected before upstream"
                 )
             results[vhost][probe] = status
+    captured_at_epoch = int(time.time())
+    if (
+        set(freshness)
+        != {
+            "readback_challenge_sha256",
+            "issued_at_epoch",
+            "expires_at_epoch",
+            "captured_at_epoch",
+        }
+        or type(freshness["expires_at_epoch"]) is not int
+        or type(freshness["captured_at_epoch"]) is not int
+        or captured_at_epoch
+        < freshness["captured_at_epoch"]
+        - GENERATION.READBACK_MAX_CLOCK_SKEW_SECONDS
+        or captured_at_epoch > freshness["expires_at_epoch"]
+    ):
+        raise NginxCoordinatorError(
+            "external readback exceeded the fresh challenge window"
+        )
     return {
         "states": sorted(states),
         "states_by_role": dict(role_states),
         "blocked_probes_performed": write_probe_performed,
         "write_method_probe_performed": write_probe_performed,
         "vhosts": results,
+        "readback_challenge_sha256": freshness[
+            "readback_challenge_sha256"
+        ],
+        "issued_at_epoch": freshness["issued_at_epoch"],
+        "expires_at_epoch": freshness["expires_at_epoch"],
+        "captured_at_epoch": captured_at_epoch,
     }
 
 
@@ -2817,6 +3715,13 @@ def _verified_readback(
     dict[str, Any],
 ]:
     readbacks = _readback_hosts(inputs, journal, runner=runner)
+    freshness = _readback_freshness(
+        operation_id=inputs.operation_id,
+        release_sha=inputs.release_sha,
+        release_tree_sha=inputs.release_tree_sha,
+        aggregate_sha256=inputs.aggregate_sha256,
+        readbacks=readbacks,
+    )
     state, global_digest = _global_digest_for_readbacks(inputs, readbacks)
     role_states = {
         role: readbacks[role]["state"] for role in ROLE_ORDER
@@ -2837,6 +3742,7 @@ def _verified_readback(
         runner=runner,
         action=action,
         target_state=target_state,
+        freshness=freshness,
     )
     return readbacks, state, global_digest, external
 
@@ -3239,20 +4145,24 @@ def _activate_action(
                 item for item in ROLE_ORDER if item in completed
             ]
             _write_journal(inputs.journal_path, journal, create=False)
-        except NginxCoordinatorError:
+        except BaseException as exc:
             if target_state == "legacy-frozen":
-                return _compensate_frozen_failure(
+                reconciled = _compensate_frozen_failure(
                     inputs,
                     journal,
                     runner=runner,
                 )
-            return _partial_result(
-                inputs,
-                journal,
-                target_state=target_state,
-                policy=policy,
-                runner=runner,
-            )
+            else:
+                reconciled = _partial_result(
+                    inputs,
+                    journal,
+                    target_state=target_state,
+                    policy=policy,
+                    runner=runner,
+                )
+            if isinstance(exc, NginxCoordinatorError):
+                return reconciled
+            raise
     final_readbacks, final_state, final_digest, final_external = (
         _verified_readback(
             inputs,
@@ -3759,6 +4669,11 @@ def _persist_state_receipt(
     if state not in GENERATION.GENERATION_STATES:
         return None
     if (
+        journal.get("stable_state") != state
+        or journal.get("pending") is not None
+    ):
+        return None
+    if (
         not isinstance(readbacks, Mapping)
         or set(readbacks) != set(ROLE_ORDER)
         or any(readbacks[role].get("state") != state for role in ROLE_ORDER)
@@ -3767,6 +4682,21 @@ def _persist_state_receipt(
     ):
         raise NginxCoordinatorError(
             "verified state cannot produce an exact coordinator receipt"
+        )
+    freshness_fields = {
+        "readback_challenge_sha256",
+        "issued_at_epoch",
+        "expires_at_epoch",
+        "captured_at_epoch",
+    }
+    if (
+        not freshness_fields <= set(external)
+        or external["captured_at_epoch"]
+        < max(readbacks[role]["captured_at_epoch"] for role in ROLE_ORDER)
+        - GENERATION.READBACK_MAX_CLOCK_SKEW_SECONDS
+    ):
+        raise NginxCoordinatorError(
+            "verified state lacks fresh readback completion"
         )
     vhost_rows: dict[str, dict[str, str]] = {}
     for role in ROLE_ORDER:
@@ -3791,7 +4721,7 @@ def _persist_state_receipt(
             "state receipt vhost closure differs"
         )
     receipt = {
-        "schema": STATE_RECEIPT_SCHEMA,
+        "schema": PRE_FREEZE_FRESH_READBACK_RECEIPT_SCHEMA,
         "verification_status": "verified",
         "source_action": action,
         "requested_target_state": target_state,
@@ -3815,6 +4745,12 @@ def _persist_state_receipt(
         "container_mutated": False,
         "volume_mutated": False,
         "data_mutated": False,
+        "readback_challenge_sha256": external[
+            "readback_challenge_sha256"
+        ],
+        "issued_at_epoch": external["issued_at_epoch"],
+        "expires_at_epoch": external["expires_at_epoch"],
+        "captured_at_epoch": external["captured_at_epoch"],
     }
     payload = canonical_json_bytes(receipt)
     digest = _sha256(payload)
@@ -3944,6 +4880,7 @@ def load_live_lease_claim_material(
         release_sha,
         release_tree_sha,
         aggregate_sha256,
+        allow_historical=True,
     )
     if receipt_sha256 != expected_state_receipt_sha256:
         raise NginxCoordinatorError(
@@ -4062,6 +4999,67 @@ def load_live_lease_claim_material(
     return document, observed_sha256
 
 
+def load_transferred_fresh_state_receipt(
+    state_receipt_path: Path,
+    expected_state: str,
+    operation_id: str,
+    release_sha: str,
+    release_tree_sha: str,
+    aggregate_sha256: str,
+    *,
+    live_lease_claim_path: Path,
+    expected_state_receipt_sha256: str,
+    expected_live_lease_claim_sha256: str,
+    expected_owner_action: str,
+    observed_at_epoch: int | None = None,
+) -> tuple[dict[str, Any], str, dict[str, Any], str]:
+    """Validate a fresh transferred receipt plus its immutable lease claim.
+
+    The caller must separately prove interactive controller-lock liveness.
+    Unlike ``load_state_receipt``, this does not require a copied controller
+    journal, and it never accepts an unchallenged or expired receipt.
+    """
+    if expected_owner_action not in LIVE_LEASE_OWNER_OUTCOMES:
+        raise NginxCoordinatorError(
+            "transferred fresh receipt owner action is invalid"
+        )
+    receipt, receipt_sha256 = load_state_receipt(
+        state_receipt_path,
+        expected_state,
+        operation_id,
+        release_sha,
+        release_tree_sha,
+        aggregate_sha256,
+        observed_at_epoch=observed_at_epoch,
+        _require_current_journal=False,
+    )
+    if receipt_sha256 != _nonzero_sha256(
+        expected_state_receipt_sha256,
+        label="transferred fresh receipt SHA-256",
+    ):
+        raise NginxCoordinatorError(
+            "transferred fresh receipt digest differs"
+        )
+    claim, claim_sha256 = load_live_lease_claim_material(
+        live_lease_claim_path,
+        state_receipt_path=state_receipt_path,
+        expected_claim_sha256=expected_live_lease_claim_sha256,
+        expected_state_receipt_sha256=receipt_sha256,
+        operation_id=operation_id,
+        release_sha=release_sha,
+        release_tree_sha=release_tree_sha,
+        aggregate_sha256=aggregate_sha256,
+    )
+    if (
+        expected_state != "legacy-frozen"
+        or claim["owner_action"] != expected_owner_action
+    ):
+        raise NginxCoordinatorError(
+            "transferred fresh receipt lease binding differs"
+        )
+    return receipt, receipt_sha256, claim, claim_sha256
+
+
 def _load_claim_from_controller(
     inputs: CoordinatorInputs,
     claim_path: Path,
@@ -4112,6 +5110,7 @@ def _load_claim_from_controller(
         inputs.release_sha,
         inputs.release_tree_sha,
         inputs.aggregate_sha256,
+        allow_historical=True,
     )
     return claim, receipt
 
@@ -4320,6 +5319,7 @@ def _load_consumption_audit(
             document["outcome"]
             in {
                 "handoff-shadow-readonly",
+                "current-frozen-verified",
                 "frozen-final-shadow-restored",
             }
             and (
@@ -4366,6 +5366,7 @@ def _load_consumption_audit(
         inputs.release_sha,
         inputs.release_tree_sha,
         inputs.aggregate_sha256,
+        allow_historical=True,
     )
     if (
         final_receipt_sha256
@@ -4380,6 +5381,7 @@ def _load_consumption_audit(
             document["outcome"]
             in {
                 "handoff-shadow-readonly",
+                "current-frozen-verified",
                 "frozen-final-shadow-restored",
             }
             and final_receipt_sha256
@@ -4618,6 +5620,7 @@ def _validate_current_receipt(
         inputs.release_sha,
         inputs.release_tree_sha,
         inputs.aggregate_sha256,
+        allow_historical=True,
     )
     if (
         observed != receipt_sha256
@@ -5308,6 +6311,7 @@ def _find_current_state_receipt(
             inputs.release_sha,
             inputs.release_tree_sha,
             inputs.aggregate_sha256,
+            allow_historical=True,
         )
         if digest != expected:
             raise NginxCoordinatorError(
@@ -5533,6 +6537,7 @@ class CoordinatorLiveLease:
         )
         if outcome in {
             "handoff-shadow-readonly",
+            "current-frozen-verified",
             "frozen-final-shadow-restored",
         }:
             if (
@@ -5786,6 +6791,7 @@ class _CoordinatorLiveLeaseContext:
             self._inputs.release_sha,
             self._inputs.release_tree_sha,
             self._inputs.aggregate_sha256,
+            allow_historical=True,
         )
         if observed != receipt_sha256:
             raise NginxCoordinatorError(
@@ -6167,6 +7173,14 @@ def execute_coordinator(
             inputs,
             action=action,
             target_state=target_state,
+        )
+    if os.geteuid() != 0:
+        raise NginxCoordinatorError(
+            "mutating Nginx coordination requires root ownership"
+        )
+    if threading.current_thread() is not threading.main_thread():
+        raise NginxCoordinatorError(
+            "mutating Nginx coordination must run in the main thread"
         )
     if confirm != required:
         raise NginxCoordinatorError(

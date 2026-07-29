@@ -12,6 +12,7 @@ import tempfile
 import unittest
 from unittest import mock
 
+from core.production_shadow_authorization import authorization_basis_sha256
 from scripts import build_production_shadow_precommit_manifests as MODULE
 from scripts import production_shadow_precommit_worker as WORKER
 from tests.test_production_shadow_cutover_controller import manifest_payload
@@ -278,6 +279,9 @@ class PrecommitBuildFixture:
 
         self.prepare = {
             "schema": MODULE.PREPARE_SET_SCHEMA,
+            "capabilities": list(
+                MODULE.runtime_targets.RUNTIME_TARGET_CAPABILITIES
+            ),
             "operation_id": self.operation_id,
             "release_sha": self.release_sha,
             "canonical_compose_sha256": self.controller["artifacts"][
@@ -292,12 +296,40 @@ class PrecommitBuildFixture:
                     "role_materials"
                 ],
                 "role_runtime_image_ids": self.runtime_ids,
+                "convergence_runtime_targets": self.controller["artifacts"][
+                    "convergence_runtime_targets"
+                ],
             },
             "activation_secrets_included": False,
             "precommit_manifest_bound": False,
         }
         secure_file(self.prepare_path, canonical(self.prepare))
         secure_file(self.controller_path, canonical(self.controller))
+        pending_controller = json.loads(canonical(self.controller))
+        pending_controller["artifacts"]["cutover_approval_sha256"] = "0" * 64
+        controller_receipt = MODULE.runtime_targets.build_runtime_target_derivation_receipt(
+            campaign_id=pending_controller["campaign_id"],
+            operation_id=pending_controller["operation_id"],
+            release_sha=pending_controller["release_sha"],
+            template_sha256=hashlib.sha256(
+                canonical(pending_controller)
+            ).hexdigest(),
+            authorization_basis_sha256=authorization_basis_sha256(
+                pending_controller
+            ),
+            canonical_compose_sha256=pending_controller["artifacts"][
+                "shadow_compose_sha256"
+            ],
+            convergence_runtime_targets=pending_controller["artifacts"][
+                "convergence_runtime_targets"
+            ],
+        )
+        secure_file(
+            MODULE.runtime_targets.runtime_target_derivation_receipt_path(
+                self.controller_path
+            ),
+            canonical(controller_receipt),
+        )
         self.controller_sha256 = hashlib.sha256(
             canonical(self.controller)
         ).hexdigest()
@@ -598,6 +630,28 @@ class ProductionShadowPrecommitManifestBuilderTests(unittest.TestCase):
                 / MODULE.OUTPUT_FILENAMES["webapp_fi"]
             ).exists()
         )
+
+    def test_prepare_runtime_target_descriptor_must_match_v3_manifest(self) -> None:
+        prepare = json.loads(self.fixture.prepare_path.read_bytes())
+        prepare["controller_bindings"]["convergence_runtime_targets"][
+            "sha256"
+        ] = "f" * 64
+        secure_file(self.fixture.prepare_path, canonical(prepare))
+        with self.assertRaisesRegex(
+            MODULE.PrecommitManifestBuildError,
+            "runtime target descriptor",
+        ):
+            self.fixture.build()
+
+        legacy = json.loads(self.fixture.prepare_path.read_bytes())
+        legacy["schema"] = MODULE.PREPARE.LEGACY_SET_SCHEMA
+        del legacy["capabilities"]
+        secure_file(self.fixture.prepare_path, canonical(legacy))
+        with self.assertRaisesRegex(
+            MODULE.PrecommitManifestBuildError,
+            "fresh v3 prepare material",
+        ):
+            self.fixture.build()
 
     def test_role_archive_and_migration_graph_are_closed(self) -> None:
         role_path = (

@@ -43,11 +43,13 @@ from scripts.produce_production_shadow_source_snapshot import (
 from scripts.produce_production_shadow_prepare_material import (
     FINAL_PREPARE_FIELDS,
 )
+from scripts import produce_production_shadow_prepare_material as PREPARE
+from scripts import production_shadow_convergence_runtime_targets as runtime_targets
 
 
 SET_SCHEMA = "production-shadow-precommit-manifest-set-v1"
 CLOSURE_SCHEMA = "production-shadow-release-artifact-closure-v2"
-PREPARE_SET_SCHEMA = "production-shadow-prepare-material-set-v1"
+PREPARE_SET_SCHEMA = PREPARE.SET_SCHEMA
 SOURCE_SNAPSHOT_SCHEMA = "production-shadow-source-snapshot-v1"
 FINAL_PREPARE_SCHEMA = "production-shadow-final-prepare-material-v1"
 ROLES = ("bot_fi", "webapp_fi")
@@ -472,8 +474,13 @@ def _validate_prepare_set(
         label="production prepare material set",
         require_canonical=True,
     )
+    if runtime_targets.is_legacy_prepare_material_schema(document):
+        raise PrecommitManifestBuildError(
+            runtime_targets.PREPARE_V2_MIGRATION_MESSAGE
+        )
     expected_fields = {
         "schema",
+        "capabilities",
         "operation_id",
         "release_sha",
         "canonical_compose_sha256",
@@ -485,9 +492,35 @@ def _validate_prepare_set(
         "activation_secrets_included",
         "precommit_manifest_bound",
     }
+    try:
+        metadata_runtime_targets = runtime_targets.validate_runtime_target_descriptor(
+            document.get("controller_bindings", {}).get(
+                "convergence_runtime_targets"
+            ),
+            label="prepare convergence runtime target descriptor",
+        )
+        manifest_runtime_targets = runtime_targets.validate_runtime_target_descriptor(
+            controller["artifacts"]["convergence_runtime_targets"],
+            label="controller convergence runtime target descriptor",
+        )
+    except (
+        AttributeError,
+        KeyError,
+        runtime_targets.ConvergenceRuntimeTargetDescriptorError,
+    ) as exc:
+        raise PrecommitManifestBuildError(
+            "prepare convergence runtime target descriptor is invalid"
+        ) from exc
+    if metadata_runtime_targets != manifest_runtime_targets:
+        raise PrecommitManifestBuildError(
+            "prepare convergence runtime target descriptor differs from the "
+            "controller manifest"
+        )
     if (
         set(document) != expected_fields
         or document.get("schema") != PREPARE_SET_SCHEMA
+        or document.get("capabilities")
+        != list(runtime_targets.RUNTIME_TARGET_CAPABILITIES)
         or document.get("operation_id") != controller["operation_id"]
         or document.get("release_sha") != controller["release_sha"]
         or document.get("canonical_compose_sha256")
@@ -500,6 +533,7 @@ def _validate_prepare_set(
             "role_runtime_image_ids": controller["artifacts"][
                 "role_runtime_image_ids"
             ],
+            "convergence_runtime_targets": manifest_runtime_targets,
         }
         or not isinstance(document.get("roles"), dict)
         or set(document["roles"]) != set(controller["topology"])

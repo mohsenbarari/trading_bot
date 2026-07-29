@@ -129,6 +129,23 @@ READ_VIEW_FAMILIES = {
 DEFAULT_READ_VIEW_MAX_CONCURRENCY = 96
 EXPIRY_BUSY_RETRY_ATTEMPTS = 8
 EXPIRY_RECONCILE_ROUNDS = 4
+LEGACY_TWO_SERVER_COMPREHENSIVE_MATRIX_RETIREMENT_REASON = (
+    "legacy_two_server_comprehensive_matrix_retired_use_three_site_sealed_campaign"
+)
+
+
+class LegacyTwoServerComprehensiveMatrixRuntimeRetiredError(RuntimeError):
+    """Raised before a retained comprehensive-matrix helper can reach runtime state."""
+
+
+def assert_legacy_two_server_comprehensive_matrix_execution_retired(operation: str) -> None:
+    """Hard-deny importable legacy helpers before dependency or router access."""
+
+    raise LegacyTwoServerComprehensiveMatrixRuntimeRetiredError(
+        "Legacy two-server comprehensive Full Matrix execution is retired and hard-disabled "
+        f"before fixture, cleanup, router, Redis, database, or scheduler access: operation={operation}; "
+        "use a sealed three-site campaign verifier."
+    )
 
 
 def scenario_key(value: str) -> str:
@@ -215,6 +232,24 @@ def filter_scenarios(
     return selected
 
 
+def listed_scenario_payload(args: argparse.Namespace) -> dict[str, Any]:
+    """Build the local, side-effect-free scenario catalog used by ``--list``."""
+
+    all_scenarios = build_comprehensive_scenarios()
+    selected = filter_scenarios(
+        all_scenarios,
+        families=set(args.family or []),
+        names=set(args.scenario or []),
+        max_scenarios=args.max_scenarios,
+    )
+    return {
+        "schema_version": MATRIX_SCHEMA_VERSION,
+        "scenario_count": len(all_scenarios),
+        "selected_count": len(selected),
+        "scenarios": [asdict(scenario) | {"name": scenario.name} for scenario in selected],
+    }
+
+
 def surface_for_index(index: int, telegram_ratio: float) -> str:
     slots = max(1, min(9, int(round(float(telegram_ratio) * 10))))
     return "telegram" if index % 10 < slots else "webapp"
@@ -246,6 +281,7 @@ def read_view_admission_max_concurrency_for_scenario(
 
 async def reset_scenario_user_runtime_state(users: list[worker.LoadUserRef]) -> int:
     """Clear synthetic-user Redis runtime keys so scenarios stay isolated."""
+    assert_legacy_two_server_comprehensive_matrix_execution_retired("reset_scenario_user_runtime_state")
     user_ids = sorted({int(user.user_id) for user in users})
     return await worker.cleanup_redis_for_user_ids(user_ids)
 
@@ -289,6 +325,7 @@ async def run_scheduled_attempts(
     attempt: Callable[[int], Awaitable[str]],
     max_concurrency: int | None = None,
 ) -> tuple[list[AttemptOutcome], float]:
+    assert_legacy_two_server_comprehensive_matrix_execution_retired("run_scheduled_attempts")
     started = time.perf_counter()
     concurrency_limit = int(max_concurrency or 0)
     semaphore = asyncio.Semaphore(concurrency_limit) if concurrency_limit > 0 else None
@@ -338,6 +375,7 @@ async def create_offer(
     fast_seed_bot_offer: bool = False,
     time_limit_buffer_minutes: int | None = None,
 ) -> int:
+    assert_legacy_two_server_comprehensive_matrix_execution_retired("create_offer")
     if origin == "webapp" or fast_seed_bot_offer:
         target_server = SERVER_IRAN if origin == "webapp" else SERVER_FOREIGN
         with override_current_server(target_server):
@@ -390,6 +428,7 @@ async def create_non_contention_offers(
     max_concurrency: int | None,
 ) -> tuple[list[OfferExecutionRef], list[worker.LoadUserRef], float]:
     """Seed independent offers before the measured non-contention attempt phase."""
+    assert_legacy_two_server_comprehensive_matrix_execution_retired("create_non_contention_offers")
     semaphore = asyncio.Semaphore(max_concurrency) if max_concurrency and max_concurrency > 0 else None
     started = time.perf_counter()
 
@@ -447,6 +486,7 @@ async def execute_trade_attempt(
     record_rejected_details: bool = False,
     offer_ref: OfferExecutionRef | None = None,
 ) -> str:
+    assert_legacy_two_server_comprehensive_matrix_execution_retired("execute_trade_attempt")
     offer = offer_ref or await worker.load_offer_snapshot(offer_id)
     if surface == "telegram":
         with override_current_server(SERVER_FOREIGN):
@@ -512,6 +552,7 @@ async def expire_attempt(
     index: int,
     error_details: list[str] | None = None,
 ) -> str:
+    assert_legacy_two_server_comprehensive_matrix_execution_retired("expire_attempt")
     busy_detail = worker.offers_router.OFFER_EXPIRY_LOCK_BUSY_DETAIL
     for attempt in range(EXPIRY_BUSY_RETRY_ATTEMPTS):
         details_before = len(error_details or [])
@@ -573,6 +614,7 @@ async def finalize_offer_for_terminal_state(
     offer_type: str,
     prefix: str,
 ) -> int:
+    assert_legacy_two_server_comprehensive_matrix_execution_retired("finalize_offer_for_terminal_state")
     harness = worker.AiogramDispatcherHarness()
     try:
         offer_id = await create_offer(
@@ -638,6 +680,7 @@ async def assert_offer_terminal(
     offer_id: int,
     expected_status: str,
 ) -> None:
+    assert_legacy_two_server_comprehensive_matrix_execution_retired("assert_offer_terminal")
     offer = await worker.load_offer_snapshot(offer_id)
     status = getattr(getattr(offer, "status", None), "value", None)
     if status != expected_status:
@@ -645,6 +688,7 @@ async def assert_offer_terminal(
 
 
 async def count_non_terminal_offers(offer_refs: list[OfferExecutionRef], expected_status: str) -> int:
+    assert_legacy_two_server_comprehensive_matrix_execution_retired("count_non_terminal_offers")
     non_terminal = 0
     for offer_ref in offer_refs:
         offer = await worker.load_offer_snapshot(offer_ref.id)
@@ -658,6 +702,7 @@ async def collect_non_terminal_offer_indexes(
     offer_refs: list[OfferExecutionRef],
     expected_status: str,
 ) -> list[int]:
+    assert_legacy_two_server_comprehensive_matrix_execution_retired("collect_non_terminal_offer_indexes")
     non_terminal_indexes: list[int] = []
     for index, offer_ref in enumerate(offer_refs):
         offer = await worker.load_offer_snapshot(offer_ref.id)
@@ -677,6 +722,9 @@ async def reconcile_manual_expiry_terminal_state(
     error_details: list[str],
 ) -> dict[str, Any]:
     """Retry only offers that stayed non-terminal after the measured batch."""
+    assert_legacy_two_server_comprehensive_matrix_execution_retired(
+        "reconcile_manual_expiry_terminal_state"
+    )
     remaining_indexes = await collect_non_terminal_offer_indexes(
         offer_refs,
         expected_status=OfferStatus.EXPIRED.value,
@@ -724,6 +772,7 @@ async def run_scenario(
     write_max_concurrency: int,
     read_view_max_concurrency: int,
 ) -> dict[str, Any]:
+    assert_legacy_two_server_comprehensive_matrix_execution_retired("run_scenario")
     shape = SHAPES[scenario.shape]
     scenario_prefix = f"{run_prefix}{scenario.scenario_id}_"
     scenario_write_max_concurrency = write_admission_max_concurrency_for_scenario(
@@ -1181,6 +1230,8 @@ async def run_matrix(args: argparse.Namespace) -> int:
         )
         return 0
 
+    assert_legacy_two_server_comprehensive_matrix_execution_retired("run_matrix")
+
     if not selected:
         raise worker.TradingProbeError("no scenarios selected")
 
@@ -1305,12 +1356,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--allow-production-execution",
         action="store_true",
-        help="Allow production market matrix fixture creation only with the production full-matrix confirmation env.",
+        help="Retired legacy option. It cannot enable comprehensive Full Matrix execution.",
     )
     parser.add_argument(
         "--allow-production-cleanup",
         action="store_true",
-        help="Allow production market matrix cleanup only with the cleanup confirmation env.",
+        help="Retired legacy option. It cannot enable comprehensive Full Matrix cleanup.",
     )
     return parser
 
@@ -1337,6 +1388,7 @@ def stdout_payload_for_matrix(payload: dict[str, Any], *, output_path: str | Non
 
 
 async def run_shutdown_step(label: str, awaitable: Awaitable[Any]) -> None:
+    assert_legacy_two_server_comprehensive_matrix_execution_retired("run_shutdown_step")
     task = asyncio.create_task(awaitable)
     done, _pending = await asyncio.wait({task}, timeout=SHUTDOWN_TIMEOUT_SECONDS)
     if not done:
@@ -1373,6 +1425,7 @@ async def run_shutdown_step(label: str, awaitable: Awaitable[Any]) -> None:
 
 
 async def run_matrix_with_shutdown(args: argparse.Namespace) -> int:
+    assert_legacy_two_server_comprehensive_matrix_execution_retired("run_matrix_with_shutdown")
     try:
         return await run_matrix(args)
     finally:
@@ -1381,6 +1434,7 @@ async def run_matrix_with_shutdown(args: argparse.Namespace) -> int:
 
 
 def run_async_entrypoint(args: argparse.Namespace) -> int:
+    assert_legacy_two_server_comprehensive_matrix_execution_retired("run_async_entrypoint")
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
@@ -1397,17 +1451,20 @@ def run_async_entrypoint(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    try:
-        return run_async_entrypoint(args)
-    except Exception as exc:
-        print(
-            json.dumps(
-                {"status": "error", "error_type": type(exc).__name__, "message": str(exc)},
-                ensure_ascii=False,
-                sort_keys=True,
-            )
+    if args.list:
+        print(json.dumps(listed_scenario_payload(args), ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+    print(
+        json.dumps(
+            {
+                "status": "blocked_legacy_two_server_full_matrix_retired",
+                "reason": LEGACY_TWO_SERVER_COMPREHENSIVE_MATRIX_RETIREMENT_REASON,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
         )
-        return 1
+    )
+    return 2
 
 
 if __name__ == "__main__":

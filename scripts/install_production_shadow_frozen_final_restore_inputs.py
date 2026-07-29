@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+import ctypes
 from dataclasses import dataclass
 import fcntl
 import hashlib
@@ -19,10 +20,14 @@ import io
 import json
 import os
 from pathlib import Path, PurePosixPath
+import selectors
+import signal
 import stat
 import subprocess
 import sys
 import tarfile
+import threading
+import time
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
 # The installer is executed from an immutable release.  Disable bytecode before
@@ -47,6 +52,7 @@ from scripts import (  # noqa: E402
 )
 from scripts import produce_production_shadow_prepare_material as PREPARE  # noqa: E402
 from scripts import production_shadow_cutover_controller as CONTROLLER  # noqa: E402
+from scripts import production_shadow_convergence_runtime_targets as runtime_targets  # noqa: E402
 from scripts import (  # noqa: E402
     production_shadow_frozen_final_restore_worker as WORKER,
 )
@@ -68,6 +74,37 @@ MAX_JSON_BYTES = 4 * 1024 * 1024
 MAX_ROLE_MATERIAL_BYTES = 64 * 1024 * 1024
 MAX_RELEASE_FILE_BYTES = 16 * 1024 * 1024
 MAX_ARTIFACT_BYTES = 64 * 1024 * 1024 * 1024
+MAX_RELEASE_PROBE_TIMEOUT_SECONDS = 30
+PROCESS_TERM_SECONDS = 2.0
+PROCESS_POLL_SECONDS = 0.01
+PROCESS_TREE_QUIESCENCE_SECONDS = 0.05
+MAX_PROCESS_SNAPSHOT_MEMBERS = 65536
+MAX_PROCESS_TREE_MEMBERS = 8192
+PR_SET_CHILD_SUBREAPER = 36
+_RELEASE_PROBE_LOCK = threading.Lock()
+GIT = "/usr/bin/git"
+PYTHON = "/usr/bin/python3"
+SAFE_PROBE_ENV = {
+    "PATH": "/usr/bin:/bin",
+    "HOME": "/nonexistent",
+    "LANG": "C.UTF-8",
+    "LC_ALL": "C.UTF-8",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_CONFIG_SYSTEM": "/dev/null",
+    "GIT_TERMINAL_PROMPT": "0",
+    "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_NO_REPLACE_OBJECTS": "1",
+}
+GIT_CONFIG_ARGUMENTS = (
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "core.fileMode=true",
+)
 ARTIFACT_FILENAMES = {
     "database-backup": "database.dump",
     "uploads-archive": "uploads.tar.gz",
@@ -1542,43 +1579,595 @@ def _assert_root_contract(
         )
 
 
+def _run_bounded_probe_locked(
+    arguments: Sequence[str],
+    *,
+    cwd: Path,
+    timeout: int,
+) -> tuple[int, bytes, bytes]:
+    if (
+        type(timeout) is not int
+        or not 1 <= timeout <= MAX_RELEASE_PROBE_TIMEOUT_SECONDS
+    ):
+        raise FrozenFinalRestoreInputInstallError(
+            "release probe timeout is outside the bounded contract"
+        )
+    _enable_child_subreaper()
+    baseline_children = _direct_child_baseline()
+    process: subprocess.Popen[bytes] | None = None
+    root_identity: ProcessIdentity | None = None
+    root_descriptor: int | None = None
+    selector = selectors.DefaultSelector()
+    buffers = {"stdout": bytearray(), "stderr": bytearray()}
+    tracked: set[ProcessIdentity] = set()
+    cleaned = False
+    try:
+        process = subprocess.Popen(  # noqa: S603
+            list(arguments),
+            cwd=cwd,
+            env=SAFE_PROBE_ENV,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            close_fds=True,
+            shell=False,
+            start_new_session=True,
+        )
+        root_descriptor = os.pidfd_open(process.pid, 0)
+        root_identity = _process_identity(process.pid)
+        if root_identity is None:
+            raise FrozenFinalRestoreInputInstallError(
+                "release probe identity is unavailable"
+            )
+        tracked.add(root_identity)
+        if process.stdout is None or process.stderr is None:
+            raise FrozenFinalRestoreInputInstallError(
+                "release probe pipes are unavailable"
+            )
+        for label, stream in (
+            ("stdout", process.stdout),
+            ("stderr", process.stderr),
+        ):
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, label)
+        deadline = time.monotonic() + timeout
+        while selector.get_map():
+            _reap_owned_zombies(
+                root_identity,
+                baseline_children=baseline_children,
+                tracked=tracked,
+            )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise FrozenFinalRestoreInputInstallError(
+                    "release probe timed out"
+                )
+            events = selector.select(
+                min(PROCESS_POLL_SECONDS, remaining)
+            )
+            if not events:
+                if process.poll() is not None and not cleaned:
+                    _terminate_process_tree(
+                        process,
+                        root_identity=root_identity,
+                        root_descriptor=root_descriptor,
+                        baseline_children=baseline_children,
+                        tracked=tracked,
+                    )
+                    cleaned = True
+                continue
+            for key, _ in events:
+                try:
+                    chunk = os.read(key.fileobj.fileno(), 64 * 1024)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                label = key.data
+                buffer = buffers[label]
+                if len(buffer) + len(chunk) > MAX_JSON_BYTES:
+                    raise FrozenFinalRestoreInputInstallError(
+                        f"release probe {label} is oversized"
+                    )
+                buffer.extend(chunk)
+        returncode = process.poll()
+        if returncode is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise FrozenFinalRestoreInputInstallError(
+                    "release probe timed out"
+                )
+            returncode = process.wait(timeout=remaining)
+        return (
+            returncode,
+            bytes(buffers["stdout"]),
+            bytes(buffers["stderr"]),
+        )
+    except FrozenFinalRestoreInputInstallError:
+        raise
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise FrozenFinalRestoreInputInstallError(
+            "release probe could not execute"
+        ) from exc
+    finally:
+        original_error = sys.exception()
+        cleanup_errors: list[BaseException] = []
+        if process is not None:
+            try:
+                if not cleaned:
+                    if root_identity is None:
+                        if root_descriptor is None:
+                            root_identity = _process_identity(process.pid)
+                            if root_identity is None:
+                                raise FrozenFinalRestoreInputInstallError(
+                                    "unidentified release probe cannot be "
+                                    "cleaned safely"
+                                )
+                        else:
+                            _signal_process_handle(
+                                root_descriptor,
+                                signal.SIGKILL,
+                            )
+                            try:
+                                process.wait(timeout=PROCESS_TERM_SECONDS)
+                            except subprocess.TimeoutExpired as exc:
+                                raise FrozenFinalRestoreInputInstallError(
+                                    "unidentified release probe root "
+                                    "survived forced cleanup"
+                                ) from exc
+                            root_identity = ProcessIdentity(
+                                pid=process.pid,
+                                parent_pid=os.getpid(),
+                                start_time=-1,
+                                state="?",
+                            )
+                    _terminate_process_tree(
+                        process,
+                        root_identity=root_identity,
+                        root_descriptor=root_descriptor,
+                        baseline_children=baseline_children,
+                        tracked=tracked,
+                    )
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+        try:
+            selector.close()
+        except BaseException as exc:
+            cleanup_errors.append(exc)
+        if process is not None:
+            for stream in (process.stdout, process.stderr):
+                if stream is None:
+                    continue
+                try:
+                    stream.close()
+                except BaseException as exc:
+                    cleanup_errors.append(exc)
+        if root_descriptor is not None:
+            try:
+                os.close(root_descriptor)
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+        if cleanup_errors:
+            cleanup_error = cleanup_errors[0]
+            if original_error is not None:
+                raise original_error from cleanup_error
+            raise cleanup_error
+
+
+def _run_bounded_probe(
+    arguments: Sequence[str],
+    *,
+    cwd: Path,
+    timeout: int,
+) -> tuple[int, bytes, bytes]:
+    with _RELEASE_PROBE_LOCK:
+        return _run_bounded_probe_locked(
+            arguments,
+            cwd=cwd,
+            timeout=timeout,
+        )
+
+
+@dataclass(frozen=True)
+class ProcessIdentity:
+    pid: int
+    parent_pid: int
+    start_time: int
+    state: str
+
+    @property
+    def key(self) -> tuple[int, int]:
+        return self.pid, self.start_time
+
+
+def _process_identity(pid: int) -> ProcessIdentity | None:
+    try:
+        payload = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+        fields = payload[payload.rindex(") ") + 2 :].split()
+        if len(fields) < 20:
+            return None
+        return ProcessIdentity(
+            pid=pid,
+            parent_pid=int(fields[1], 10),
+            start_time=int(fields[19], 10),
+            state=fields[0],
+        )
+    except (OSError, UnicodeError, ValueError):
+        return None
+
+
+def _process_snapshot() -> dict[int, ProcessIdentity]:
+    observed: dict[int, ProcessIdentity] = {}
+    scanned = 0
+    try:
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdecimal():
+                continue
+            scanned += 1
+            if scanned > MAX_PROCESS_SNAPSHOT_MEMBERS:
+                raise FrozenFinalRestoreInputInstallError(
+                    "release probe closure exceeds its process bound"
+                )
+            identity = _process_identity(int(entry.name, 10))
+            if identity is not None:
+                observed[identity.pid] = identity
+    except FrozenFinalRestoreInputInstallError:
+        raise
+    except OSError as exc:
+        raise FrozenFinalRestoreInputInstallError(
+            "release probe process inventory is unavailable"
+        ) from exc
+    return observed
+
+
+def _enable_child_subreaper() -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise FrozenFinalRestoreInputInstallError(
+            f"release probe child subreaper setup failed with errno {error}"
+        )
+
+
+def _direct_child_baseline() -> frozenset[tuple[int, int]]:
+    owner = os.getpid()
+    return frozenset(
+        identity.key
+        for identity in _process_snapshot().values()
+        if identity.parent_pid == owner
+    )
+
+
+def _owned_processes(
+    root_identity: ProcessIdentity,
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+    tracked: set[ProcessIdentity] | None = None,
+    include_zombies: bool = False,
+) -> tuple[ProcessIdentity, ...]:
+    snapshot = _process_snapshot()
+    observed_root = snapshot.get(root_identity.pid)
+    owned_ids: set[int] = set()
+    if (
+        observed_root is not None
+        and observed_root.start_time == root_identity.start_time
+    ):
+        owned_ids.add(root_identity.pid)
+    if tracked is not None:
+        for identity in tracked:
+            current = snapshot.get(identity.pid)
+            if (
+                current is not None
+                and current.start_time == identity.start_time
+            ):
+                owned_ids.add(identity.pid)
+    owner = os.getpid()
+    for identity in snapshot.values():
+        if (
+            identity.pid != root_identity.pid
+            and identity.parent_pid == owner
+            and identity.key not in baseline_children
+        ):
+            owned_ids.add(identity.pid)
+    changed = True
+    while changed:
+        changed = False
+        for identity in snapshot.values():
+            if (
+                identity.pid not in owned_ids
+                and identity.parent_pid in owned_ids
+            ):
+                owned_ids.add(identity.pid)
+                changed = True
+    owned = tuple(
+        identity
+        for pid, identity in snapshot.items()
+        if pid in owned_ids
+    )
+    if tracked is not None:
+        discovered = set(owned)
+        if len(tracked | discovered) > MAX_PROCESS_TREE_MEMBERS:
+            raise FrozenFinalRestoreInputInstallError(
+                "release probe tree exceeds its process bound"
+            )
+        tracked.update(discovered)
+    return tuple(
+        identity
+        for identity in owned
+        if include_zombies or identity.state != "Z"
+    )
+
+
+def _reap_owned_zombies(
+    root_identity: ProcessIdentity,
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+    tracked: set[ProcessIdentity],
+) -> None:
+    owner = os.getpid()
+    while True:
+        reaped = False
+        for identity in _owned_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+            include_zombies=True,
+        ):
+            if (
+                identity.key == root_identity.key
+                or identity.parent_pid != owner
+                or identity.state != "Z"
+            ):
+                continue
+            try:
+                waited, _status = os.waitpid(identity.pid, os.WNOHANG)
+            except (ChildProcessError, ProcessLookupError):
+                continue
+            except OSError as exc:
+                raise FrozenFinalRestoreInputInstallError(
+                    "release probe adopted zombie could not be reaped"
+                ) from exc
+            if waited not in {0, identity.pid}:
+                raise FrozenFinalRestoreInputInstallError(
+                    "release probe reaped an unexpected PID"
+                )
+            reaped |= waited == identity.pid
+        if not reaped:
+            return
+
+
+def _signal_process_identity(
+    identity: ProcessIdentity,
+    signum: int,
+) -> None:
+    current = _process_identity(identity.pid)
+    if current is None or current.start_time != identity.start_time:
+        return
+    try:
+        descriptor = os.pidfd_open(identity.pid, 0)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise FrozenFinalRestoreInputInstallError(
+            "release probe identity handle cannot be opened"
+        ) from exc
+    try:
+        refreshed = _process_identity(identity.pid)
+        if refreshed is None or refreshed.start_time != identity.start_time:
+            return
+        _signal_process_handle(descriptor, signum)
+    except ProcessLookupError:
+        return
+    finally:
+        original_error = sys.exception()
+        try:
+            os.close(descriptor)
+        except BaseException as close_error:
+            if original_error is not None:
+                raise original_error from close_error
+            raise
+
+
+def _signal_process_handle(descriptor: int, signum: int) -> None:
+    try:
+        signal.pidfd_send_signal(descriptor, signum)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise FrozenFinalRestoreInputInstallError(
+            "release probe identity signal failed"
+        ) from exc
+
+
+def _signal_owned_process(
+    identity: ProcessIdentity,
+    signum: int,
+    *,
+    root_identity: ProcessIdentity,
+    root_descriptor: int | None,
+) -> None:
+    if identity.key == root_identity.key and root_descriptor is not None:
+        _signal_process_handle(root_descriptor, signum)
+        return
+    _signal_process_identity(identity, signum)
+
+
+def _terminate_process_tree(
+    process: subprocess.Popen[bytes],
+    *,
+    root_identity: ProcessIdentity,
+    root_descriptor: int | None,
+    baseline_children: frozenset[tuple[int, int]],
+    tracked: set[ProcessIdentity],
+) -> None:
+    for identity in reversed(
+        _owned_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+    ):
+        _signal_owned_process(
+            identity,
+            signal.SIGTERM,
+            root_identity=root_identity,
+            root_descriptor=root_descriptor,
+        )
+    deadline = time.monotonic() + PROCESS_TERM_SECONDS
+    while time.monotonic() < deadline and _owned_processes(
+        root_identity,
+        baseline_children=baseline_children,
+        tracked=tracked,
+    ):
+        process.poll()
+        _reap_owned_zombies(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+        time.sleep(
+            min(
+                PROCESS_POLL_SECONDS,
+                max(0.0, deadline - time.monotonic()),
+            )
+        )
+    for identity in reversed(
+        _owned_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+    ):
+        _signal_owned_process(
+            identity,
+            signal.SIGKILL,
+            root_identity=root_identity,
+            root_descriptor=root_descriptor,
+        )
+    try:
+        process.wait(timeout=PROCESS_TERM_SECONDS)
+    except subprocess.TimeoutExpired:
+        _signal_owned_process(
+            root_identity,
+            signal.SIGKILL,
+            root_identity=root_identity,
+            root_descriptor=root_descriptor,
+        )
+        try:
+            process.wait(timeout=PROCESS_TERM_SECONDS)
+        except subprocess.TimeoutExpired as exc:
+            raise FrozenFinalRestoreInputInstallError(
+                "release probe root survived identity-bound cleanup"
+            ) from exc
+
+    absence_deadline = (
+        time.monotonic()
+        + PROCESS_TERM_SECONDS
+        + PROCESS_TREE_QUIESCENCE_SECONDS
+    )
+    stable_since: float | None = None
+    while time.monotonic() < absence_deadline:
+        _reap_owned_zombies(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+        owned = _owned_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+            include_zombies=True,
+        )
+        if owned:
+            stable_since = None
+            for identity in reversed(owned):
+                if identity.state != "Z":
+                    _signal_owned_process(
+                        identity,
+                        signal.SIGKILL,
+                        root_identity=root_identity,
+                        root_descriptor=root_descriptor,
+                    )
+        elif stable_since is None:
+            stable_since = time.monotonic()
+        elif (
+            time.monotonic() - stable_since
+            >= PROCESS_TREE_QUIESCENCE_SECONDS
+        ):
+            return
+        time.sleep(
+            min(
+                PROCESS_POLL_SECONDS,
+                max(0.0, absence_deadline - time.monotonic()),
+            )
+        )
+    _reap_owned_zombies(
+        root_identity,
+        baseline_children=baseline_children,
+        tracked=tracked,
+    )
+    if _owned_processes(
+        root_identity,
+        baseline_children=baseline_children,
+        tracked=tracked,
+        include_zombies=True,
+    ):
+        raise FrozenFinalRestoreInputInstallError(
+            "release probe subprocess tree survived forced cleanup"
+        )
+
+
 def _run_release_probe(
     arguments: Sequence[str],
     *,
     cwd: Path,
     label: str,
 ) -> str:
-    try:
-        result = subprocess.run(
-            list(arguments),
-            cwd=cwd,
-            env={
-                "PATH": "/usr/bin:/bin",
-                "HOME": "/root",
-                "LANG": "C.UTF-8",
-                "LC_ALL": "C.UTF-8",
-                "PYTHONDONTWRITEBYTECODE": "1",
-            },
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=30,
-            check=False,
+    if not arguments:
+        raise FrozenFinalRestoreInputInstallError(
+            f"{label} probe command is empty"
         )
-    except (OSError, subprocess.SubprocessError) as exc:
+    if arguments[0] == GIT:
+        work_tree = _canonical_path(cwd, label="release Git work tree")
+        if any(
+            argument == "-C"
+            or argument.startswith("--git-dir")
+            or argument.startswith("--work-tree")
+            for argument in arguments[1:]
+        ):
+            raise FrozenFinalRestoreInputInstallError(
+                f"{label} probe carries a caller-selected Git work tree"
+            )
+        command = [
+            GIT,
+            *GIT_CONFIG_ARGUMENTS,
+            f"--git-dir={work_tree / '.git'}",
+            f"--work-tree={work_tree}",
+            *arguments[1:],
+        ]
+    elif arguments[0] == PYTHON:
+        command = list(arguments)
+    else:
+        raise FrozenFinalRestoreInputInstallError(
+            f"{label} probe executable is not allowlisted"
+        )
+    try:
+        returncode, stdout, stderr = _run_bounded_probe(
+            command,
+            cwd=cwd,
+            timeout=30,
+        )
+    except FrozenFinalRestoreInputInstallError as exc:
         raise FrozenFinalRestoreInputInstallError(
             f"{label} probe is unavailable"
         ) from exc
-    if (
-        result.returncode != 0
-        or len(result.stdout) > MAX_JSON_BYTES
-        or len(result.stderr) > MAX_JSON_BYTES
-    ):
+    if returncode != 0 or stderr:
         raise FrozenFinalRestoreInputInstallError(
             f"{label} probe failed closed"
         )
     try:
-        return result.stdout.decode("utf-8").strip()
+        return stdout.decode("utf-8").strip()
     except UnicodeError as exc:
         raise FrozenFinalRestoreInputInstallError(
             f"{label} probe returned invalid output"
@@ -1592,35 +2181,35 @@ def _verify_immutable_release(
     canonical_compose: Path,
     worker: Path,
 ) -> None:
-    git = "/usr/bin/git"
     head = _run_release_probe(
-        (git, "rev-parse", "--verify", "HEAD"),
+        (GIT, "rev-parse", "--verify", "HEAD"),
         cwd=paths.release_root,
         label="release HEAD",
     )
     tree = _run_release_probe(
-        (git, "rev-parse", "--verify", "HEAD^{tree}"),
+        (GIT, "rev-parse", "--verify", "HEAD^{tree}"),
         cwd=paths.release_root,
         label="release tree",
     )
     status = _run_release_probe(
         (
-            git,
+            GIT,
             "status",
             "--porcelain=v1",
             "--untracked-files=all",
+            "--ignore-submodules=none",
         ),
         cwd=paths.release_root,
         label="release cleanliness",
     )
     branch = _run_release_probe(
-        (git, "branch", "--show-current"),
+        (GIT, "branch", "--show-current"),
         cwd=paths.release_root,
         label="release detached HEAD",
     )
     ignored = _run_release_probe(
         (
-            git,
+            GIT,
             "ls-files",
             "--others",
             "--ignored",
@@ -1629,11 +2218,17 @@ def _verify_immutable_release(
         cwd=paths.release_root,
         label="release ignored residue",
     )
+    index_rows = _run_release_probe(
+        (GIT, "ls-files", "-v", "--full-name"),
+        cwd=paths.release_root,
+        label="release index visibility",
+    ).splitlines()
+    _verify_git_index_rows(index_rows)
     relative_compose = canonical_compose.relative_to(paths.release_root)
     relative_worker = worker.relative_to(paths.release_root)
     tracked_rows = _run_release_probe(
         (
-            git,
+            GIT,
             "ls-files",
             "--stage",
             "--",
@@ -1673,7 +2268,7 @@ def _verify_immutable_release(
             "release HEAD, tree, cleanliness, or tracked files differ"
         )
     help_output = _run_release_probe(
-        (sys.executable, "-I", os.fspath(worker), "--help"),
+        (PYTHON, "-I", "-B", os.fspath(worker), "--help"),
         cwd=paths.release_root,
         label="release worker import",
     )
@@ -1683,11 +2278,19 @@ def _verify_immutable_release(
         )
 
 
+def _verify_git_index_rows(rows: Sequence[str]) -> None:
+    if not rows or any(not row.startswith("H ") for row in rows):
+        raise FrozenFinalRestoreInputInstallError(
+            "release index contains hidden tracked state"
+        )
+
+
 def _build_documents(
     *,
     controller: Mapping[str, Any],
     controller_sha256: str,
     controller_payload: bytes,
+    controller_derivation_receipt_payload: bytes,
     restore_set: Mapping[str, Any],
     restore_set_sha256: str,
     restore_set_payload: bytes,
@@ -1712,6 +2315,11 @@ def _build_documents(
 ]:
     controller_destination = (
         paths.secret_generation_root / "controller-manifest.json"
+    )
+    controller_derivation_receipt_destination = (
+        runtime_targets.runtime_target_derivation_receipt_path(
+            controller_destination
+        )
     )
     restore_set_destination = (
         paths.secret_generation_root / "frozen-final-restore-set.json"
@@ -1813,6 +2421,13 @@ def _build_documents(
         ),
         *artifact_specs,
     ]
+    controller_derivation_receipt_spec = OutputSpec(
+        kind="controller-runtime-target-derivation-receipt",
+        path=controller_derivation_receipt_destination,
+        sha256=_sha256(controller_derivation_receipt_payload),
+        bytes=len(controller_derivation_receipt_payload),
+        payload=controller_derivation_receipt_payload,
+    )
     installed_files = {
         spec.kind: {
             "path": os.fspath(spec.path),
@@ -1962,6 +2577,7 @@ def _build_documents(
     role_manifest_sha256 = _sha256(role_manifest_payload)
     outputs = (
         *ordinary_specs,
+        controller_derivation_receipt_spec,
         OutputSpec(
             kind="installer-receipt",
             path=receipt_destination,
@@ -2032,6 +2648,39 @@ def preflight_installation(
         controller_payload,
         controller_identity,
     ) = _load_controller(controller_manifest)
+    try:
+        controller_derivation_receipt_payload = (
+            CONTROLLER.read_runtime_target_derivation_receipt(
+                controller,
+                manifest_path=controller_manifest,
+                owner_uid=ROOT_UID,
+            )
+        )
+        controller_derivation_receipt_path = (
+            runtime_targets.runtime_target_derivation_receipt_path(
+                controller_manifest
+            )
+        )
+        (
+            observed_derivation_receipt_payload,
+            controller_derivation_receipt_identity,
+        ) = _read_secure_file(
+            controller_derivation_receipt_path,
+            label="controller runtime target derivation receipt",
+            maximum=MAX_JSON_BYTES,
+        )
+    except (
+        CONTROLLER.CutoverContractError,
+        FrozenFinalRestoreInputInstallError,
+        runtime_targets.ConvergenceRuntimeTargetDescriptorError,
+    ) as exc:
+        raise FrozenFinalRestoreInputInstallError(
+            "controller runtime target derivation receipt is invalid"
+        ) from exc
+    if observed_derivation_receipt_payload != controller_derivation_receipt_payload:
+        raise FrozenFinalRestoreInputInstallError(
+            "controller runtime target derivation receipt changed while being read"
+        )
     (
         restore_document,
         restore_payload,
@@ -2134,6 +2783,9 @@ def preflight_installation(
         controller=controller,
         controller_sha256=controller_identity.sha256,
         controller_payload=controller_payload,
+        controller_derivation_receipt_payload=(
+            controller_derivation_receipt_payload
+        ),
         restore_set=restore_document,
         restore_set_sha256=restore_identity.sha256,
         restore_set_payload=restore_payload,
@@ -2150,6 +2802,7 @@ def preflight_installation(
     )
     input_paths = [
         controller_manifest,
+        controller_derivation_receipt_path,
         restore_set,
         canonical_compose,
         role_material,
@@ -2183,6 +2836,7 @@ def preflight_installation(
     )
     core_identities = (
         controller_identity,
+        controller_derivation_receipt_identity,
         restore_identity,
         canonical_identity,
         role_material_identity,
@@ -2910,6 +3564,7 @@ def _load_authority(
             plan.controller["release_sha"],
             plan.controller["release_tree_sha"],
             plan.restore_set["nginx_freeze"]["aggregate_sha256"],
+            allow_historical=True,
         )
     except NGINX.NginxCoordinatorError as exc:
         raise FrozenFinalRestoreInputInstallError(

@@ -5,8 +5,13 @@ import json
 import os
 from pathlib import Path
 import shlex
+import signal
 import stat
+import subprocess
+import sys
 import tempfile
+import threading
+import time
 from unittest import mock
 import unittest
 
@@ -31,6 +36,48 @@ def canonical(value: object) -> bytes:
 def secure_file(path: Path, payload: bytes, mode: int) -> None:
     path.write_bytes(payload)
     path.chmod(mode)
+
+
+def external_liveness_pipe():
+    control_read, control_write = os.pipe()
+    stop_read, stop_write = os.pipe()
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-c",
+            "import os,sys;os.read(int(sys.argv[1]),1)",
+            str(stop_read),
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        pass_fds=(control_write, stop_read),
+        close_fds=True,
+    )
+    os.close(control_write)
+    os.close(stop_read)
+    return control_read, holder, stop_write
+
+
+def stop_liveness_holder(
+    holder: subprocess.Popen[bytes],
+    stop_write: int,
+) -> None:
+    try:
+        os.write(stop_write, b"x")
+    except OSError:
+        pass
+    try:
+        os.close(stop_write)
+    except OSError:
+        pass
+    try:
+        holder.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        holder.kill()
+        holder.wait(timeout=2)
 
 
 def descriptor(index: int) -> tuple[dict, str]:
@@ -611,6 +658,319 @@ class FinlandArtifactOrchestratorTests(unittest.TestCase):
                 validated["runtime_image_ids"][role],
                 manifest["image_artifacts"][role]["config_digest"],
             )
+
+    def test_stage_python_argv_is_isolated_and_ssh_keeps_stdin_live(self):
+        closure, _raw, _digest, _sources = self.fixture.closure_and_sources()
+        agent_sha = hashlib.sha256(self.fixture.agent.read_bytes()).hexdigest()
+        manifest = MODULE.build_stage_manifest(
+            operation_id=OPERATION_ID,
+            release_sha=RELEASE_SHA,
+            release_tree_sha=RELEASE_TREE_SHA,
+            role="webapp_fi",
+            closure=closure,
+            agent_sha256=agent_sha,
+        )
+        manifest_sha = hashlib.sha256(canonical(manifest)).hexdigest()
+        for arguments in (
+            MODULE._bootstrap_install_arguments(
+                operation_id=OPERATION_ID,
+                role="webapp_fi",
+                agent_sha256=agent_sha,
+            ),
+            MODULE._version_arguments(
+                operation_id=OPERATION_ID,
+                release_sha=RELEASE_SHA,
+                role="webapp_fi",
+                agent_sha256=agent_sha,
+            ),
+            MODULE._stage_arguments(
+                manifest,
+                manifest_sha256=manifest_sha,
+                agent_sha256=agent_sha,
+            ),
+        ):
+            self.assertEqual(arguments[:3], [MODULE.PYTHON, "-I", "-B"])
+            ssh = MODULE.ssh_arguments(
+                self.fixture.identity,
+                remote_arguments=arguments,
+            )
+            self.assertNotIn("-n", ssh)
+            self.assertEqual(shlex.split(ssh[-1]), arguments)
+            for forbidden in (
+                "ForwardAgent=yes",
+                "ForwardX11=yes",
+                "ProxyCommand",
+                "ProxyJump",
+                "ControlMaster=auto",
+            ):
+                self.assertNotIn(forbidden, ssh)
+
+    def test_signal_cancellation_is_catchable_reentrant_and_one_shot(self):
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            with self.subTest(signum=signum):
+                previous = signal.getsignal(signum)
+                authority = MODULE.ExecutionAuthority(None)
+                with authority:
+                    with self.assertRaisesRegex(
+                        MODULE.FinlandArtifactOrchestratorCancellation,
+                        f"received signal {signum}",
+                    ):
+                        authority._handle_signal(  # noqa: SLF001
+                            signum,
+                            None,
+                        )
+                    authority._handle_signal(signum, None)  # noqa: SLF001
+                    authority.check()
+                self.assertIs(signal.getsignal(signum), previous)
+
+    def test_liveness_rejects_a_writer_held_by_the_controller(self):
+        read_fd, write_fd = os.pipe()
+        try:
+            with self.assertRaisesRegex(
+                MODULE.FinlandArtifactOrchestratorError,
+                "writer end is held",
+            ):
+                MODULE.ExecutionAuthority(read_fd)
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+    def test_controller_eof_cancels_and_reaps_setsided_double_fork(self):
+        descendant_pid = self.root / "controller-descendant-pid"
+        sentinel = self.root / "controller-descendant-survived"
+        program = (
+            "import os,signal,time\n"
+            "if os.fork() == 0:\n"
+            " os.setsid()\n"
+            " if os.fork() != 0: time.sleep(60);os._exit(0)\n"
+            " signal.signal(signal.SIGTERM,signal.SIG_IGN)\n"
+            f" open({str(descendant_pid)!r},'w').write(str(os.getpid()))\n"
+            " time.sleep(0.7)\n"
+            f" open({str(sentinel)!r},'wb').write(b'survived')\n"
+            " os._exit(0)\n"
+            f"while not os.path.exists({str(descendant_pid)!r}):"
+            " time.sleep(0.005)\n"
+            "time.sleep(60)\n"
+        )
+        control_read, holder, stop_write = external_liveness_pipe()
+
+        def disconnect_when_ready() -> None:
+            deadline = time.monotonic() + 2
+            while (
+                not descendant_pid.exists()
+                and time.monotonic() < deadline
+            ):
+                time.sleep(0.01)
+            stop_liveness_holder(holder, stop_write)
+
+        closer = threading.Thread(
+            target=disconnect_when_ready,
+            daemon=True,
+        )
+        closer.start()
+        try:
+            with (
+                mock.patch.object(
+                    MODULE,
+                    "CONTROLLER_LIVENESS_GRACE_SECONDS",
+                    0.1,
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "PROCESS_GROUP_TERM_SECONDS",
+                    0.1,
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "PROCESS_TREE_QUIESCENCE_SECONDS",
+                    0.05,
+                ),
+                self.assertRaisesRegex(
+                    MODULE.FinlandArtifactOrchestratorCancellation,
+                    "liveness pipe reached EOF",
+                ),
+            ):
+                with MODULE._execution_authority(control_read):
+                    MODULE._default_runner(
+                        [sys.executable, "-I", "-B", "-c", program],
+                        input=None,
+                        capture_output=True,
+                        check=False,
+                        timeout=5,
+                        env={"PATH": "/usr/bin:/bin"},
+                    )
+            closer.join(timeout=2)
+            time.sleep(0.8)
+            self.assertFalse(sentinel.exists())
+            self.assertTrue(descendant_pid.is_file())
+            self.assertFalse(
+                Path(
+                    f"/proc/{descendant_pid.read_text(encoding='ascii')}"
+                ).exists()
+            )
+        finally:
+            try:
+                os.close(control_read)
+            except OSError:
+                pass
+            if closer.is_alive():
+                stop_liveness_holder(holder, stop_write)
+                closer.join(timeout=2)
+
+    def test_controller_runner_incrementally_bounds_streams_and_timeout(self):
+        for descriptor, label in ((1, "stdout"), (2, "stderr")):
+            with (
+                self.subTest(stream=label),
+                mock.patch.object(
+                    MODULE,
+                    "MAX_COMMAND_OUTPUT_BYTES",
+                    1024,
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "PROCESS_GROUP_TERM_SECONDS",
+                    0.1,
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "CONTROLLER_LIVENESS_GRACE_SECONDS",
+                    0.05,
+                ),
+                self.assertRaisesRegex(
+                    MODULE.BoundedControllerRunnerError,
+                    f"{label} is oversized",
+                ),
+            ):
+                MODULE._default_runner(
+                    [
+                        sys.executable,
+                        "-I",
+                        "-B",
+                        "-c",
+                        f"import os,time;os.write({descriptor},b'x'*4096);"
+                        "time.sleep(60)",
+                    ],
+                    input=None,
+                    capture_output=True,
+                    check=False,
+                    timeout=5,
+                    env={"PATH": "/usr/bin:/bin"},
+                )
+        with (
+            mock.patch.object(
+                MODULE,
+                "PROCESS_GROUP_TERM_SECONDS",
+                0.1,
+            ),
+            mock.patch.object(
+                MODULE,
+                "CONTROLLER_LIVENESS_GRACE_SECONDS",
+                0.05,
+            ),
+            self.assertRaisesRegex(
+                MODULE.BoundedControllerRunnerError,
+                "timed out",
+            ),
+        ):
+            MODULE._default_runner(
+                [sys.executable, "-I", "-B", "-c", "import time;time.sleep(60)"],
+                input=None,
+                capture_output=True,
+                check=False,
+                timeout=0.1,
+                env={"PATH": "/usr/bin:/bin"},
+            )
+
+    def test_controller_child_receives_only_anonymous_read_pipe(self):
+        program = (
+            "import fcntl,os,stat\n"
+            "m=os.fstat(0);f=fcntl.fcntl(0,fcntl.F_GETFL)\n"
+            "ok=stat.S_ISFIFO(m.st_mode) and "
+            "(f & os.O_ACCMODE)==os.O_RDONLY\n"
+            "print('anonymous-read-only' if ok else 'unsafe',flush=True)\n"
+        )
+        completed = MODULE._default_runner(
+            [sys.executable, "-I", "-B", "-c", program],
+            input=None,
+            capture_output=True,
+            check=False,
+            timeout=2,
+            env={"PATH": "/usr/bin:/bin"},
+        )
+        self.assertEqual(completed.returncode, 0)
+        self.assertEqual(completed.stdout, b"anonymous-read-only\n")
+        self.assertEqual(completed.stderr, b"")
+
+    def test_controller_eof_propagates_to_local_stage_worker_stdin(self):
+        worker = self.root / "stage-liveness-worker.py"
+        ready = self.root / "stage-worker-ready"
+        reconciled = self.root / "stage-worker-reconciled"
+        worker.write_text(
+            "import sys,time\n"
+            f"sys.path.insert(0,{str(MODULE.REPO_ROOT)!r})\n"
+            "from scripts import production_shadow_finland_stage as stage\n"
+            "try:\n"
+            " with stage._execution_authority(0):\n"
+            f"  open({str(ready)!r},'wb').write(b'ready')\n"
+            "  time.sleep(60)\n"
+            "except stage.FinlandStageCancellation:\n"
+            f" open({str(reconciled)!r},'wb').write(b'reconciled')\n",
+            encoding="ascii",
+        )
+        control_read, holder, stop_write = external_liveness_pipe()
+
+        def disconnect_when_ready() -> None:
+            deadline = time.monotonic() + 2
+            while not ready.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            stop_liveness_holder(holder, stop_write)
+
+        closer = threading.Thread(
+            target=disconnect_when_ready,
+            daemon=True,
+        )
+        closer.start()
+        try:
+            with (
+                mock.patch.object(
+                    MODULE,
+                    "CONTROLLER_LIVENESS_GRACE_SECONDS",
+                    1.0,
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "PROCESS_GROUP_TERM_SECONDS",
+                    0.1,
+                ),
+                self.assertRaisesRegex(
+                    MODULE.FinlandArtifactOrchestratorCancellation,
+                    "liveness pipe reached EOF",
+                ),
+            ):
+                with MODULE._execution_authority(control_read):
+                    MODULE._default_runner(
+                        [
+                            MODULE.PYTHON,
+                            "-I",
+                            "-B",
+                            str(worker),
+                        ],
+                        input=None,
+                        capture_output=True,
+                        check=False,
+                        timeout=5,
+                        env=MODULE.SAFE_ENV,
+                    )
+            closer.join(timeout=2)
+            self.assertTrue(reconciled.is_file())
+        finally:
+            try:
+                os.close(control_read)
+            except OSError:
+                pass
+            if closer.is_alive():
+                stop_liveness_holder(holder, stop_write)
+                closer.join(timeout=2)
 
 
 if __name__ == "__main__":

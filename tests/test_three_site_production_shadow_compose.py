@@ -5,8 +5,10 @@ import subprocess
 import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
+from scripts import verify_three_site_production_shadow_compose as MODULE
 from scripts.verify_three_site_production_shadow_compose import (
     DATA_ROOT_PREFIX,
     PROJECT_ROOT_PREFIX,
@@ -63,6 +65,12 @@ class ThreeSiteProductionShadowComposeTests(unittest.TestCase):
                 "PRODUCTION_SHADOW_POSTGRES_IMAGE_ID": f"sha256:{'2' * 64}",
                 "PRODUCTION_SHADOW_REDIS_IMAGE_ID": f"sha256:{'3' * 64}",
                 "PRODUCTION_SHADOW_NGINX_IMAGE_ID": f"sha256:{'4' * 64}",
+                "BOT_FI_POSTGRES_USER": "bot_fi_owner",
+                "BOT_FI_POSTGRES_DB": "bot_fi_shadow",
+                "WEBAPP_FI_POSTGRES_USER": "webapp_fi_owner",
+                "WEBAPP_FI_POSTGRES_DB": "webapp_fi_shadow",
+                "WEBAPP_IR_POSTGRES_USER": "webapp_ir_owner",
+                "WEBAPP_IR_POSTGRES_DB": "webapp_ir_shadow",
                 "BOT_FI_SHADOW_API_PORT": "9311",
                 "WEBAPP_FI_SHADOW_API_PORT": "9312",
                 "WEBAPP_IR_SHADOW_API_PORT": "9313",
@@ -312,7 +320,7 @@ class ThreeSiteProductionShadowComposeTests(unittest.TestCase):
         )
 
         self.assertEqual(summary["status"], "passed")
-        self.assertEqual(summary["service_count"], 49)
+        self.assertEqual(summary["service_count"], 50)
         self.assertEqual(summary["profile_count"], 24)
         self.assertTrue(summary["full_product_topology"])
         self.assertEqual(
@@ -476,6 +484,105 @@ class ThreeSiteProductionShadowComposeTests(unittest.TestCase):
         self.assert_source_failure(
             document,
             "webapp_ir_writer_fence must apply the exact epoch-1 local standby gate",
+        )
+
+    def test_rejects_coupled_or_implicit_database_policy_phases(self):
+        document = copy.deepcopy(self.document)
+        document["services"]["webapp_fi_db_roles_post_migration"]["command"][
+            3
+        ] = "fence"
+        self.assert_source_failure(
+            document,
+            "webapp_fi_db_roles_post_migration must apply only the confirmed "
+            "grants phase",
+        )
+
+        document = copy.deepcopy(self.document)
+        command = document["services"]["webapp_ir_db_fencing"]["command"]
+        del command[2:4]
+        self.assert_source_failure(
+            document,
+            "webapp_ir_db_fencing must apply only the confirmed fence phase",
+        )
+
+        document = copy.deepcopy(self.document)
+        document["services"]["bot_fi_db_roles"]["command"][-1] = (
+            "ENABLE-BOT-DATABASE-FENCING"
+        )
+        self.assert_source_failure(
+            document,
+            "bot_fi_db_roles must apply only the confirmed roles-grants phase",
+        )
+
+        document = copy.deepcopy(self.document)
+        document["services"]["bot_fi_db_fencing"]["depends_on"] = {
+            "bot_fi_migration": {"condition": "service_completed_successfully"}
+        }
+        self.assert_source_failure(
+            document,
+            "bot_fi_db_fencing must apply only the confirmed fence phase",
+        )
+
+    def test_rejects_database_policy_dependency_environment_or_mount_drift(self):
+        document = copy.deepcopy(self.document)
+        document["services"]["webapp_fi_db_fencing"]["depends_on"][
+            "webapp_fi_db_roles_post_migration"
+        ]["condition"] = "service_started"
+        self.assert_source_failure(
+            document,
+            "service_completed_successfully",
+        )
+
+        document = copy.deepcopy(self.document)
+        document["services"]["webapp_ir_db_roles_post_migration"][
+            "environment"
+        ]["DATABASE_URL"] = "forbidden"
+        self.assert_source_failure(
+            document,
+            "exact minimal environment and CA mount",
+        )
+
+        document = copy.deepcopy(self.document)
+        document["services"]["bot_fi_db_fencing"]["volumes"].append(
+            "/tmp/foreign-secret:/run/foreign-secret:ro"
+        )
+        self.assert_source_failure(
+            document,
+            "exact minimal environment and CA mount",
+        )
+
+        document = copy.deepcopy(self.document)
+        del document["services"]["webapp_ir_db_roles"]["environment"][
+            "THREE_SITE_OBSERVER_DB_PASSWORD"
+        ]
+        self.assert_source_failure(
+            document,
+            "webapp_ir_db_roles must create only the exact runtime roles",
+        )
+
+    def test_rejects_unpinned_postgres_runtime_or_swap(self):
+        for key, value in (
+            ("cgroup", "host"),
+            ("runtime", "unreviewed"),
+            ("shm_size", "32m"),
+            ("init", True),
+            ("oom_kill_disable", True),
+            ("oom_score_adj", 1),
+            ("mem_swappiness", 1),
+        ):
+            with self.subTest(key=key):
+                document = copy.deepcopy(self.document)
+                document["services"]["webapp_ir_db"][key] = value
+                self.assert_source_failure(
+                    document,
+                    f"webapp_ir_db must pin PostgreSQL {key}=",
+                )
+
+        document = copy.deepcopy(self.document)
+        document["services"]["bot_fi_db"]["memswap_limit"] = "3g"
+        self.assert_source_failure(
+            document,
+            "bot_fi_db must disable swap by matching memswap_limit to mem_limit",
         )
 
     def test_rejects_non_loopback_api_and_unscoped_dr_listener(self):
@@ -700,6 +807,29 @@ class ThreeSiteProductionShadowComposeTests(unittest.TestCase):
             failures,
         )
 
+    def test_rejects_unsafe_postgres_identifiers_and_unencoded_passwords(self):
+        cases = {
+            "BOT_FI_POSTGRES_USER": "quoted-owner",
+            "WEBAPP_FI_POSTGRES_DB": "MixedCase",
+            "WEBAPP_IR_POSTGRES_USER": "owner;drop",
+            "WEBAPP_IR_APP_DB_PASSWORD": "contains@dsn-delimiter",
+            "BOT_FI_POSTGRES_PASSWORD": "contains/slash",
+            "WEBAPP_FI_OBSERVER_DB_PASSWORD": "contains%escape",
+        }
+        for key, unsafe_value in cases.items():
+            with self.subTest(key=key):
+                values = self.valid_environment()
+                values[key] = unsafe_value
+                failures = collect_environment_failures(
+                    values,
+                    self.source_text,
+                )
+                self.assertTrue(
+                    any(key in failure for failure in failures),
+                    "\n".join(failures),
+                )
+                self.assertNotIn(unsafe_value, "\n".join(failures))
+
     def test_api_runtime_env_requires_shared_derived_key_without_bot_token(self):
         values = self.valid_environment()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -875,6 +1005,69 @@ class ThreeSiteProductionShadowComposeTests(unittest.TestCase):
                     legacy_mount,
                     f"{service_name} must bind only its exact restore input",
                 )
+
+    def test_local_runner_delegates_to_identity_bounded_execution(self):
+        arguments = ["/usr/bin/docker", "version"]
+        environment = {"PATH": "/usr/bin:/bin"}
+        bounded_result = MODULE.BoundedCommandResult(
+            returncode=0,
+            stdout=b"ok",
+            stderr=b"",
+        )
+        with mock.patch.object(
+            MODULE,
+            "_bounded_command",
+            return_value=bounded_result,
+        ) as bounded:
+            result = MODULE._run_bounded_local_command(
+                arguments,
+                timeout=7,
+                environment=environment,
+                stdout_limit=123,
+                stderr_limit=456,
+            )
+
+        self.assertIs(result, bounded_result)
+        bounded.assert_called_once_with(
+            arguments,
+            timeout=7,
+            env=environment,
+            stdout_limit=123,
+            stderr_limit=456,
+        )
+
+    def test_local_runner_maps_bounded_failure_but_not_baseexception(self):
+        arguments = ["/usr/bin/docker", "version"]
+        environment = {"PATH": "/usr/bin:/bin"}
+        with (
+            mock.patch.object(
+                MODULE,
+                "_bounded_command",
+                side_effect=MODULE.BoundedCommandError("timed out"),
+            ),
+            self.assertRaisesRegex(
+                ProductionShadowComposeError,
+                "failed closed",
+            ),
+        ):
+            MODULE._run_bounded_local_command(
+                arguments,
+                timeout=1,
+                environment=environment,
+            )
+        with (
+            mock.patch.object(
+                MODULE,
+                "_bounded_command",
+                side_effect=KeyboardInterrupt,
+            ),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            MODULE._run_bounded_local_command(
+                arguments,
+                timeout=1,
+                environment=environment,
+            )
 
 
 if __name__ == "__main__":

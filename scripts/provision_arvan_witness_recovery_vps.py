@@ -19,6 +19,16 @@ from typing import Any
 import urllib.error
 import urllib.request
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
+
 
 API_BASE = "https://napi.arvancloud.ir/ecc/v1"
 TOKEN_FILE = Path("tmp/secrets/arvan-cdn-token")
@@ -43,7 +53,11 @@ class ApiPermissionError(ProvisionError):
     pass
 
 
+RETIREMENT_COMPONENT = "provision_arvan_witness_recovery_vps"
+
+
 def read_private_text(path: Path) -> str:
+    assert_retired(component=RETIREMENT_COMPONENT, operation="private token read")
     if not path.is_file():
         raise ProvisionError(f"required private file is missing: {path}")
     mode = stat.S_IMODE(path.stat().st_mode)
@@ -63,6 +77,7 @@ def api_request(
     *,
     timeout: float = 30,
 ) -> dict[str, Any]:
+    assert_retired(component=RETIREMENT_COMPONENT, operation="Arvan API request")
     authorization = token if token.lower().startswith("apikey ") else f"Apikey {token}"
     body = None
     if payload is not None:
@@ -105,6 +120,7 @@ def response_data(response: dict[str, Any], operation: str) -> Any:
 
 
 def list_data(token: str, path: str, operation: str) -> list[dict[str, Any]]:
+    assert_retired(component=RETIREMENT_COMPONENT, operation="Arvan API list")
     data = response_data(api_request("GET", path, token), operation)
     if not isinstance(data, list):
         raise ProvisionError(f"Arvan API returned a non-list for {operation}")
@@ -119,6 +135,7 @@ def find_one(items: list[dict[str, Any]], key: str, value: str, operation: str) 
 
 
 def validate_public_key(path: Path) -> str:
+    assert_retired(component=RETIREMENT_COMPONENT, operation="SSH public-key validation")
     if not path.is_file():
         raise ProvisionError(f"SSH public key is missing: {path}")
     value = path.read_text(encoding="utf-8").strip()
@@ -186,6 +203,7 @@ touch /var/lib/writer-witness-recovery-bootstrap-complete
 
 
 def validate_init_script(public_key: str) -> None:
+    assert_retired(component=RETIREMENT_COMPONENT, operation="bootstrap script validation")
     check = subprocess.run(
         ["bash", "-n"],
         input=init_script(public_key),
@@ -243,6 +261,7 @@ def expected_rules() -> list[dict[str, Any]]:
 
 
 def find_security_group(token: str) -> dict[str, Any] | None:
+    assert_retired(component=RETIREMENT_COMPONENT, operation="security-group lookup")
     groups = list_data(
         token,
         f"/regions/{REGION}/securities",
@@ -255,6 +274,7 @@ def find_security_group(token: str) -> dict[str, Any] | None:
 
 
 def ensure_security_group(token: str, *, apply: bool) -> dict[str, Any] | None:
+    assert_retired(component=RETIREMENT_COMPONENT, operation="security-group provision")
     group = find_security_group(token)
     if group is None:
         if not apply:
@@ -311,6 +331,7 @@ def ensure_security_group(token: str, *, apply: bool) -> dict[str, Any] | None:
 
 
 def default_security_group(token: str) -> dict[str, Any]:
+    assert_retired(component=RETIREMENT_COMPONENT, operation="default security-group lookup")
     groups = list_data(
         token,
         f"/regions/{REGION}/securities",
@@ -343,6 +364,7 @@ def server_public_ipv4(server: dict[str, Any]) -> str | None:
 
 
 def validate_preflight(token: str) -> dict[str, Any]:
+    assert_retired(component=RETIREMENT_COMPONENT, operation="provider preflight")
     regions = list_data(token, "/regions", "regions")
     region = find_one(regions, "code", REGION, "approved region")
     if region.get("create") is not True or region.get("visible") is not True:
@@ -394,6 +416,7 @@ def validate_preflight(token: str) -> dict[str, Any]:
 
 
 def find_server(token: str) -> dict[str, Any] | None:
+    assert_retired(component=RETIREMENT_COMPONENT, operation="server lookup")
     servers = list_data(token, f"/regions/{REGION}/servers", "servers")
     matches = [server for server in servers if server.get("name") == SERVER_NAME]
     if len(matches) > 1:
@@ -418,6 +441,7 @@ def create_server(
     preflight: dict[str, Any],
     security_group: dict[str, Any],
 ) -> tuple[dict[str, Any], str]:
+    assert_retired(component=RETIREMENT_COMPONENT, operation="VPS creation")
     group_id = security_group.get("id")
     if not isinstance(group_id, str) or not group_id:
         raise ProvisionError("cannot create server without the isolated security group")
@@ -450,6 +474,7 @@ def create_server(
 
 
 def wait_for_server(token: str, server_id: str) -> dict[str, Any]:
+    assert_retired(component=RETIREMENT_COMPONENT, operation="VPS state polling")
     deadline = time.monotonic() + 600
     last_status = "unknown"
     while time.monotonic() < deadline:
@@ -474,6 +499,7 @@ def write_state(
     plan: dict[str, Any],
     security_group_mode: str,
 ) -> None:
+    assert_retired(component=RETIREMENT_COMPONENT, operation="recovery VPS state write")
     server_id = server.get("id")
     public_ip = server_public_ipv4(server)
     if not isinstance(server_id, str) or not server_id or not public_ip:
@@ -501,6 +527,7 @@ def write_state(
 
 
 def parse_args() -> argparse.Namespace:
+    assert_retired(component=RETIREMENT_COMPONENT, operation="CLI argument parsing")
     parser = argparse.ArgumentParser()
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--token-file", type=Path, default=TOKEN_FILE)
@@ -508,92 +535,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
-    args = parse_args()
-    token = read_private_text(args.token_file)
-    public_key = validate_public_key(PUBLIC_KEY_FILE)
-    validate_init_script(public_key)
-    preflight = validate_preflight(token)
-    existing = find_server(token)
-    if not args.apply:
-        print(
-            json.dumps(
-                {
-                    "status": "dry_run",
-                    "apply": False,
-                    "region": REGION,
-                    "name": SERVER_NAME,
-                    "plan": PLAN_ID,
-                    "image": "ubuntu-24.04",
-                    "disk_gb": DISK_SIZE_GB,
-                    "monthly_irr": preflight["plan"].get("price_per_month"),
-                    "hourly_irr": preflight["plan"].get("price_per_hour"),
-                    "existing_server": existing is not None,
-                    "security_group_exists": find_security_group(token) is not None,
-                    "security_group_fallback": "arDefault-plus-host-firewall",
-                    "ssh_key_delivery": "init-script-ed25519",
-                    "billable_resource_created": False,
-                },
-                sort_keys=True,
-            )
-        )
-        return 0
-
-    security_group_mode = "dedicated"
     try:
-        security_group = ensure_security_group(token, apply=True)
-        assert security_group is not None
-    except ApiPermissionError:
-        security_group = default_security_group(token)
-        security_group_mode = "arDefault-plus-host-firewall"
-    password = ""
-    server = existing
-    if server is None:
-        try:
-            created, password = create_server(token, public_key, preflight, security_group)
-            server_id = str(created["id"])
-        except ProvisionError:
-            recovered = find_server(token)
-            if recovered is None:
-                raise
-            server_id = str(recovered.get("id") or "")
-            if not server_id:
-                raise ProvisionError("created server recovery has no id")
-        server = wait_for_server(token, server_id)
-    else:
-        verify_server_contract(server)
-        server_id = str(server.get("id") or "")
-        if not server_id:
-            raise ProvisionError("existing server has no id")
-        server = wait_for_server(token, server_id)
-    verify_server_contract(server)
-    write_state(server, password, preflight["plan"], security_group_mode)
-    print(
-        json.dumps(
-            {
-                "status": "active",
-                "region": REGION,
-                "name": SERVER_NAME,
-                "server_id": server.get("id"),
-                "public_ip": server_public_ipv4(server),
-                "plan": PLAN_ID,
-                "image": "ubuntu-24.04",
-                "disk_gb": DISK_SIZE_GB,
-                "monthly_irr": preflight["plan"].get("price_per_month"),
-                "hourly_irr": preflight["plan"].get("price_per_hour"),
-                "security_group": (
-                    SECURITY_GROUP_NAME
-                    if security_group_mode == "dedicated"
-                    else "arDefault"
-                ),
-                "security_group_mode": security_group_mode,
-                "password_printed": False,
-                "state_file_mode": "0600",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            },
-            sort_keys=True,
-        )
-    )
-    return 0
+        assert_retired(component=RETIREMENT_COMPONENT, operation="CLI")
+    except LegacyThreeSiteStagingRuntimeRetiredError:
+        print(json.dumps(blocked_payload(component=RETIREMENT_COMPONENT), sort_keys=True))
+        return 2
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import hashlib
+import inspect
 import io
 import json
 import os
@@ -260,10 +261,14 @@ class PrepareFixture:
                 "PRODUCTION_SHADOW_POSTGRES_IMAGE_ID": "sha256:" + "f" * 64,
                 "PRODUCTION_SHADOW_REDIS_IMAGE_ID": "sha256:" + "0" * 64,
                 "PRODUCTION_SHADOW_NGINX_IMAGE_ID": "sha256:" + "1" * 64,
+                "BOT_FI_POSTGRES_DB": "bot_fi",
+                "WEBAPP_FI_POSTGRES_DB": "webapp_fi",
+                "WEBAPP_IR_POSTGRES_DB": "webapp_ir",
                 "BOT_TOKEN": "must-not-leak",
                 "ARVAN_S3_SECRET_ACCESS_KEY": "must-not-leak-either",
             }
         )
+        self.environment_values = dict(values)
         self.env_path = self.input / "canonical.env"
         secure_file(
             self.env_path,
@@ -317,6 +322,10 @@ class ProductionShadowPrepareMaterialTests(unittest.TestCase):
         result = self.fixture.produce()
 
         self.assertEqual(result["schema"], MODULE.SET_SCHEMA)
+        self.assertEqual(
+            result["capabilities"],
+            list(MODULE.runtime_targets.RUNTIME_TARGET_CAPABILITIES),
+        )
         self.assertEqual(result["operation_id"], OPERATION_ID)
         self.assertFalse(result["activation_secrets_included"])
         self.assertFalse(result["precommit_manifest_bound"])
@@ -489,6 +498,315 @@ class ProductionShadowPrepareMaterialTests(unittest.TestCase):
         self.assertNotIn(b"token", witness_archive.lower())
         digests.add(witness_metadata["sha256"])
         self.assertEqual(len(digests), len(MODULE.ALL_ROLES))
+
+    def test_convergence_runtime_target_set_is_redacted_and_complete(self) -> None:
+        result = self.fixture.produce()
+        descriptor = result["controller_bindings"][
+            "convergence_runtime_targets"
+        ]
+        self.assertEqual(
+            set(descriptor),
+            MODULE.CONVERGENCE_RUNTIME_TARGET_DESCRIPTOR_FIELDS,
+        )
+        self.assertEqual(descriptor["roles"], list(MODULE.DOCKER_ROLES))
+        self.assertNotIn("witness", descriptor["roles"])
+        payload = (
+            self.fixture.output / MODULE.CONVERGENCE_RUNTIME_TARGETS_FILENAME
+        ).read_bytes()
+        self.assertEqual(hashlib.sha256(payload).hexdigest(), descriptor["sha256"])
+        self.assertEqual(len(payload), descriptor["bytes"])
+        document = json.loads(payload)
+        self.assertEqual(set(document), MODULE.CONVERGENCE_RUNTIME_TARGET_SET_FIELDS)
+        self.assertEqual(set(document["roles"]), set(MODULE.DOCKER_ROLES))
+        self.assertNotIn("witness", document["roles"])
+        for role in MODULE.DOCKER_ROLES:
+            self.assertEqual(
+                set(document["roles"][role]),
+                MODULE.CONVERGENCE_RUNTIME_TARGET_ROLE_FIELDS,
+            )
+            self.assertTrue(
+                all(
+                    isinstance(value, str)
+                    and MODULE.SHA256_RE.fullmatch(value) is not None
+                    for value in document["roles"][role].values()
+                )
+            )
+        self.assertEqual(document["target_set_sha256"], descriptor["target_set_sha256"])
+        metadata_payload = (
+            self.fixture.output / "prepare-materials.json"
+        ).read_bytes()
+        descriptor_payload = canonical_json(descriptor)
+        for forbidden in (
+            b"postgresql",
+            b"DATABASE_URL",
+            b"POSTGRES_PASSWORD",
+            b"JWT_SECRET_KEY",
+            b"REDIS_URL",
+            b"FRONTEND_URL",
+            b"/root/secure-envs",
+            b"bot_fi_db",
+            b"bot_fi_observer",
+            self.fixture.environment_values[
+                "BOT_FI_OBSERVER_DB_PASSWORD"
+            ].encode("ascii"),
+            b"must-not-leak",
+            b"must-not-leak-either",
+        ):
+            self.assertNotIn(forbidden, payload)
+            self.assertNotIn(forbidden, metadata_payload)
+            self.assertNotIn(forbidden, descriptor_payload)
+
+    def test_convergence_runtime_target_password_changes_do_not_change_descriptor(self) -> None:
+        first = self.fixture.produce()
+        first_payload = (
+            self.fixture.output / MODULE.CONVERGENCE_RUNTIME_TARGETS_FILENAME
+        ).read_bytes()
+        changed = dict(self.fixture.environment_values)
+        for index, name in enumerate(
+            (
+                "BOT_FI_OBSERVER_DB_PASSWORD",
+                "WEBAPP_FI_OBSERVER_DB_PASSWORD",
+                "WEBAPP_IR_OBSERVER_DB_PASSWORD",
+            ),
+            1,
+        ):
+            changed[name] = f"observer-password-rotated-{index}"
+        secure_file(
+            self.fixture.env_path,
+            (
+                "\n".join(
+                    f"{name}={value}" for name, value in sorted(changed.items())
+                )
+                + "\n"
+            ).encode("ascii"),
+        )
+        second = self.fixture.produce(output=self.fixture.output_second)
+        second_payload = (
+            self.fixture.output_second
+            / MODULE.CONVERGENCE_RUNTIME_TARGETS_FILENAME
+        ).read_bytes()
+        self.assertEqual(first_payload, second_payload)
+        self.assertEqual(
+            first["controller_bindings"]["convergence_runtime_targets"],
+            second["controller_bindings"]["convergence_runtime_targets"],
+        )
+
+    def test_convergence_runtime_target_serialization_never_leaks_sensitive_inputs(self) -> None:
+        source_values = dict(self.fixture.environment_values)
+        passwords = {
+            "BOT_FI_OBSERVER_DB_PASSWORD": "sentinel-db-password-bot",
+            "WEBAPP_FI_OBSERVER_DB_PASSWORD": "sentinel-db-password-fi",
+            "WEBAPP_IR_OBSERVER_DB_PASSWORD": "sentinel-db-password-ir",
+        }
+        source_values.update(passwords)
+        candidate = yaml.safe_load(self.fixture.compose_bytes)
+        sentinels = [
+            *passwords.values(),
+            "sentinel-jwt-material",
+            "redis://sentinel-redis:6379/9",
+            "https://sentinel-frontend.invalid/private",
+            "/root/sentinel-keyring.json",
+            "/srv/sentinel-private-path",
+        ]
+        for role in MODULE.DOCKER_ROLES:
+            environment = candidate["services"][
+                f"{role}_sync_observer"
+            ]["environment"]
+            environment["JWT_SECRET_KEY"] = sentinels[3]
+            environment["REDIS_URL"] = sentinels[4]
+            environment["FRONTEND_URL"] = sentinels[5]
+            environment["DR_BLOB_KEYRING"] = sentinels[6]
+            environment["DR_BLOB_ROOT"] = sentinels[7]
+        role_source_values = {
+            role: {
+                name: source_values[name]
+                for name in MODULE._runtime_target_source_names(
+                    candidate,
+                    role=role,
+                )
+            }
+            for role in MODULE.DOCKER_ROLES
+        }
+        document = MODULE.build_convergence_runtime_target_set(
+            operation_id=OPERATION_ID,
+            release_sha=RELEASE_SHA,
+            canonical_compose_raw=yaml.safe_dump(
+                candidate,
+                allow_unicode=False,
+                sort_keys=True,
+            ).encode("utf-8"),
+            role_source_values=role_source_values,
+        )
+        payload = canonical_json(document)
+        raw_urls = [
+            (
+                "postgresql+asyncpg://"
+                f"{role}_observer:{passwords[role.upper() + '_OBSERVER_DB_PASSWORD']}"
+                f"@{role}_db/{source_values[role.upper() + '_POSTGRES_DB']}"
+            )
+            for role in MODULE.DOCKER_ROLES
+        ]
+        for value in (*sentinels, *raw_urls):
+            self.assertNotIn(value.encode("ascii"), payload)
+        for forbidden_name in (
+            b"DATABASE_URL",
+            b"SYNC_DATABASE_URL",
+            b"POSTGRES_PASSWORD",
+            b"JWT_SECRET_KEY",
+            b"REDIS_URL",
+            b"FRONTEND_URL",
+            b"DR_BLOB_KEYRING",
+            b"DR_BLOB_ROOT",
+        ):
+            self.assertNotIn(forbidden_name, payload)
+
+    def test_convergence_runtime_target_rejects_malformed_or_mismatched_urls(self) -> None:
+        source_values = parse_env_values(
+            self.fixture.env_path.read_text(encoding="ascii")
+        )
+        base = yaml.safe_load(self.fixture.compose_bytes)
+        password = source_values["BOT_FI_OBSERVER_DB_PASSWORD"]
+        database = source_values["BOT_FI_POSTGRES_DB"]
+        async_url = (
+            "postgresql+asyncpg://bot_fi_observer:"
+            f"{password}@bot_fi_db/{database}"
+        )
+        sync_url = (
+            "postgresql://bot_fi_observer:"
+            f"{password}@bot_fi_db/{database}"
+        )
+        cases = {
+            "query": ("DATABASE_URL", async_url + "?application_name=x"),
+            "fragment": ("DATABASE_URL", async_url + "#fragment"),
+            "ambiguous-userinfo": (
+                "DATABASE_URL",
+                (
+                    "postgresql+asyncpg://bot_fi_observer:"
+                    f"{password}@other@bot_fi_db/{database}"
+                ),
+            ),
+            "sync-target-mismatch": ("SYNC_DATABASE_URL", sync_url[:-1] + "x"),
+        }
+        for label, (field, value) in cases.items():
+            with self.subTest(case=label):
+                candidate = json.loads(json.dumps(base))
+                candidate["services"]["bot_fi_sync_observer"]["environment"][
+                    field
+                ] = value
+                with self.assertRaises(MODULE.PrepareMaterialError):
+                    MODULE.build_convergence_runtime_target_set(
+                        operation_id=OPERATION_ID,
+                        release_sha=RELEASE_SHA,
+                        canonical_compose_raw=yaml.safe_dump(
+                            candidate,
+                            allow_unicode=False,
+                            sort_keys=True,
+                        ).encode("utf-8"),
+                        role_source_values={
+                            role: {
+                                name: source_values[name]
+                                for name in MODULE._runtime_target_source_names(
+                                    candidate,
+                                    role=role,
+                                )
+                            }
+                            for role in MODULE.DOCKER_ROLES
+                        },
+                    )
+
+    def test_convergence_runtime_targets_reject_observer_compose_contract_drift(self) -> None:
+        source_values = parse_env_values(
+            self.fixture.env_path.read_text(encoding="ascii")
+        )
+        mutations = {
+            "profile": lambda service, _network: service.update(
+                {"profiles": ["bot-fi-private"]}
+            ),
+            "restart": lambda service, _network: service.update(
+                {"restart": "unless-stopped"}
+            ),
+            "command": lambda service, _network: service.update(
+                {"command": ["python", "-m", "unsafe"]}
+            ),
+            "dependency": lambda service, _network: service.update(
+                {"depends_on": {"bot_fi_db": {"condition": "service_started"}}}
+            ),
+            "network": lambda _service, network: network.update({"internal": False}),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(drift=label):
+                candidate = json.loads(json.dumps(yaml.safe_load(self.fixture.compose_bytes)))
+                mutate(
+                    candidate["services"]["bot_fi_sync_observer"],
+                    candidate["networks"]["bot_fi"],
+                )
+                with self.assertRaisesRegex(
+                    MODULE.PrepareMaterialError,
+                    "canonical Compose contract failed|observer service definition",
+                ):
+                    MODULE.build_convergence_runtime_target_set(
+                        operation_id=OPERATION_ID,
+                        release_sha=RELEASE_SHA,
+                        canonical_compose_raw=yaml.safe_dump(
+                            candidate,
+                            allow_unicode=False,
+                            sort_keys=True,
+                        ).encode("utf-8"),
+                        role_source_values={
+                            role: source_values for role in MODULE.DOCKER_ROLES
+                        },
+                    )
+
+    def test_convergence_runtime_target_set_rejects_tampering_and_has_no_cli_input(self) -> None:
+        result = self.fixture.produce()
+        payload = (
+            self.fixture.output / MODULE.CONVERGENCE_RUNTIME_TARGETS_FILENAME
+        ).read_bytes()
+        document = json.loads(payload)
+        document["roles"]["bot_fi"]["observer_service_sha256"] = "f" * 64
+        with self.assertRaises(MODULE.PrepareMaterialError):
+            MODULE.validate_convergence_runtime_target_set(
+                document,
+                operation_id=OPERATION_ID,
+                release_sha=RELEASE_SHA,
+                canonical_compose_raw=self.fixture.compose_bytes,
+            )
+        parser_destinations = {
+            action.dest for action in MODULE.build_parser()._actions
+        }
+        self.assertNotIn("convergence_runtime_targets", parser_destinations)
+        self.assertEqual(
+            result["publication_results"]["convergence_runtime_targets"],
+            "created",
+        )
+
+    def test_convergence_runtime_targets_bind_exact_raw_compose_internally(self) -> None:
+        self.fixture.produce()
+        document = json.loads(
+            (
+                self.fixture.output
+                / MODULE.CONVERGENCE_RUNTIME_TARGETS_FILENAME
+            ).read_bytes()
+        )
+
+        self.assertNotIn(
+            "canonical_compose_sha256",
+            inspect.signature(
+                MODULE.build_convergence_runtime_target_set
+            ).parameters,
+        )
+        with self.assertRaisesRegex(
+            MODULE.PrepareMaterialError,
+            "identity differs",
+        ):
+            MODULE.validate_convergence_runtime_target_set(
+                document,
+                operation_id=OPERATION_ID,
+                release_sha=RELEASE_SHA,
+                # This stays valid YAML with the same semantic Compose shape,
+                # but must not be accepted under a digest supplied elsewhere.
+                canonical_compose_raw=self.fixture.compose_bytes + b"\n",
+            )
 
     def test_output_is_reproducible_and_create_only_resume_is_idempotent(self) -> None:
         first = self.fixture.produce()

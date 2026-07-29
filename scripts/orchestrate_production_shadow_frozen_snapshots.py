@@ -13,16 +13,23 @@ from __future__ import annotations
 import argparse
 import base64
 from contextlib import contextmanager
+import ctypes
+from dataclasses import dataclass
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
 import secrets
+import selectors
+import signal
 import stat
 import subprocess
 import sys
+import threading
+import time
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
 
@@ -36,6 +43,7 @@ from scripts import (  # noqa: E402
 from scripts import (  # noqa: E402
     orchestrate_production_shadow_nginx_generations as NGINX,
 )
+from scripts import production_shadow_cutover_controller as CONTROLLER  # noqa: E402
 from scripts import produce_production_shadow_source_snapshot as SOURCE  # noqa: E402
 from scripts import production_shadow_finland_stage as FINLAND_STAGE  # noqa: E402
 from scripts import production_shadow_legacy_writer_freeze as FREEZE  # noqa: E402
@@ -43,13 +51,22 @@ from scripts import production_shadow_nginx_generation as NGINX_GENERATION  # no
 
 
 PLAN_SCHEMA = "production-shadow-frozen-snapshot-plan-v1"
-RESULT_SCHEMA = "production-shadow-frozen-snapshot-orchestrator-v1"
+RESULT_SCHEMA = "production-shadow-frozen-snapshot-orchestrator-v2"
 HOST_REQUEST_SCHEMA = "production-shadow-frozen-snapshot-host-request-v1"
 HOST_RESULT_SCHEMA = "production-shadow-frozen-snapshot-host-result-v1"
+HOST_CURRENT_VERIFY_SCHEMA = (
+    "production-shadow-current-frozen-host-verification-v1"
+)
 HOST_PREPARE_SCHEMA = "production-shadow-frozen-snapshot-host-prepare-v1"
 JOURNAL_SCHEMA = "production-shadow-frozen-snapshot-journal-v1"
 JOURNAL_EVENT_SCHEMA = "production-shadow-frozen-snapshot-journal-event-v1"
 OUTCOME_SCHEMA = "production-shadow-frozen-snapshot-outcome-v1"
+PUBLIC_PHASE_HANDOFF_SCHEMA = (
+    "production-shadow-frozen-snapshot-public-phase-handoff-v1"
+)
+PUBLIC_PHASE = "stop_legacy_writers"
+RESULTS_DIRECTORY = Path("results")
+RESULT_PREFIX = "frozen-snapshot-result"
 
 ROLES = ("bot_fi", "webapp_fi")
 ROLE_PATHS = {"bot_fi": "bot-fi", "webapp_fi": "webapp-fi"}
@@ -104,6 +121,7 @@ HOST_ACTIONS = (
     "install-material",
     "freeze",
     "verify",
+    "verify-current",
     "snapshot",
 )
 ROLE_PHASES = (
@@ -118,12 +136,20 @@ ROLE_PHASES = (
 MAX_JSON_BYTES = 2 * 1024 * 1024
 MAX_ARTIFACT_BYTES = SOURCE.MAX_ARTIFACT_BYTES
 MAX_COMMAND_OUTPUT_BYTES = 8 * 1024 * 1024
+MAX_COMMAND_ERROR_BYTES = 256 * 1024
 MAX_JOURNAL_BYTES = 8 * 1024 * 1024
+PROCESS_GROUP_TERM_SECONDS = 5.0
+PROCESS_POLL_SECONDS = 0.05
+PROCESS_TREE_QUIESCENCE_SECONDS = 0.1
+MAX_PROCESS_SNAPSHOT_MEMBERS = 131_072
+MAX_PROCESS_TREE_MEMBERS = 4_096
+PR_SET_CHILD_SUBREAPER = 36
 ZERO_SHA256 = "0" * 64
 SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 NONCE_RE = re.compile(r"^[0-9a-f]{64}$")
 REMOTE_TOKEN_RE = re.compile(r"^[A-Za-z0-9_./:=+%-]+$")
+_BOUNDED_COMMAND_LOCK = threading.Lock()
 
 SAFE_ENV = {
     "PATH": "/usr/bin:/bin",
@@ -202,6 +228,48 @@ HOST_RESULT_FIELDS = frozenset(
     }
 )
 FILE_RESULT_FIELDS = frozenset({"sha256", "bytes"})
+HOST_CURRENT_VERIFY_FIELDS = frozenset(
+    {
+        "schema",
+        "status",
+        "action",
+        "operation_id",
+        "release_sha",
+        "release_tree_sha",
+        "role",
+        "mode",
+        "binding_sha256",
+        "state_receipt_sha256",
+        "readback_challenge_sha256",
+        "issued_at_epoch",
+        "expires_at_epoch",
+        "captured_at_epoch",
+        "lease_claim_sha256",
+        "lease_claim_epoch",
+        "previous_live_lease_claim_sha256",
+        "freeze_evidence_live_lease_claim_sha256",
+        "freeze_evidence_sha256",
+        "role_freeze_generation_sha256",
+        "freeze_generation_sha256",
+        "source_container_ids",
+        "writer_container_ids",
+        "journal_sha256",
+        "legacy_writer_process_count",
+        "writer_database_client_count",
+        "file_mutator_process_count",
+        "database_container_running",
+        "redis_container_running",
+        "pull_policy",
+        "source_stopped_or_restarted",
+        "source_mutated",
+        "current_mutated",
+        "service_mutated",
+        "container_mutated",
+        "volume_mutated",
+        "data_mutated",
+        "production_mutated",
+    }
+)
 
 
 class FrozenSnapshotOrchestratorError(RuntimeError):
@@ -211,6 +279,801 @@ class FrozenSnapshotOrchestratorError(RuntimeError):
 Runner = Callable[..., subprocess.CompletedProcess[bytes]]
 Checkpoint = Callable[[str], None]
 LeaseVerify = Callable[[], Mapping[str, Any]]
+AuthorizationCheck = Callable[[], None]
+
+
+class FrozenSnapshotCancellation(FrozenSnapshotOrchestratorError):
+    """The controller connection or host process authority was lost."""
+
+
+@dataclass(frozen=True)
+class PublicCutoverContext:
+    """Verified root-only inputs for the first public cutover transition."""
+
+    manifest: Mapping[str, Any]
+    manifest_sha256: str
+    plan_sha256: str
+    approval_path: Path
+    approval_sha256: str
+    approval_policy_path: Path
+    approval_policy_sha256: str
+
+
+def _anonymous_read_pipe_identity(
+    descriptor: int,
+    *,
+    label: str,
+) -> tuple[int, int]:
+    if type(descriptor) is not int or descriptor < 0:
+        raise FrozenSnapshotOrchestratorError(
+            f"{label} descriptor is invalid"
+        )
+    try:
+        metadata = os.fstat(descriptor)
+        flags = fcntl.fcntl(descriptor, fcntl.F_GETFL)
+        target = os.readlink(f"/proc/self/fd/{descriptor}")
+    except OSError as exc:
+        raise FrozenSnapshotOrchestratorError(
+            f"{label} pipe is unavailable"
+        ) from exc
+    if (
+        not stat.S_ISFIFO(metadata.st_mode)
+        or flags & os.O_ACCMODE != os.O_RDONLY
+        or target != f"pipe:[{metadata.st_ino}]"
+    ):
+        raise FrozenSnapshotOrchestratorError(
+            f"{label} must be an anonymous read-only pipe"
+        )
+    try:
+        entries = tuple(Path("/proc/self/fd").iterdir())
+    except OSError as exc:
+        raise FrozenSnapshotOrchestratorError(
+            f"{label} descriptor closure cannot be inspected"
+        ) from exc
+    for entry in entries:
+        if not entry.name.isdecimal() or int(entry.name, 10) == descriptor:
+            continue
+        candidate = int(entry.name, 10)
+        try:
+            observed = os.fstat(candidate)
+            observed_flags = fcntl.fcntl(candidate, fcntl.F_GETFL)
+        except OSError:
+            continue
+        if (
+            (observed.st_dev, observed.st_ino)
+            == (metadata.st_dev, metadata.st_ino)
+            and observed_flags & os.O_ACCMODE
+            in {os.O_WRONLY, os.O_RDWR}
+        ):
+            raise FrozenSnapshotOrchestratorError(
+                f"{label} writer end is held by the host worker"
+            )
+    return metadata.st_dev, metadata.st_ino
+
+
+@dataclass(frozen=True)
+class BoundedCommandResult:
+    returncode: int
+    stdout: bytes
+    stderr: bytes
+
+
+@dataclass(frozen=True)
+class ProcessIdentity:
+    pid: int
+    parent_pid: int
+    process_group: int
+    start_time: int
+    state: str
+
+    @property
+    def key(self) -> tuple[int, int]:
+        return self.pid, self.start_time
+
+
+def _process_identity(pid: int) -> ProcessIdentity | None:
+    try:
+        payload = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+        fields = payload[payload.rindex(") ") + 2 :].split()
+        if len(fields) < 20:
+            return None
+        return ProcessIdentity(
+            pid=pid,
+            parent_pid=int(fields[1], 10),
+            process_group=int(fields[2], 10),
+            start_time=int(fields[19], 10),
+            state=fields[0],
+        )
+    except (OSError, UnicodeError, ValueError):
+        return None
+
+
+def _process_snapshot() -> dict[int, ProcessIdentity]:
+    observed: dict[int, ProcessIdentity] = {}
+    scanned = 0
+    try:
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdecimal():
+                continue
+            scanned += 1
+            if scanned > MAX_PROCESS_SNAPSHOT_MEMBERS:
+                raise FrozenSnapshotOrchestratorError(
+                    "subprocess inventory exceeds its process bound"
+                )
+            identity = _process_identity(int(entry.name, 10))
+            if identity is not None:
+                observed[identity.pid] = identity
+    except FrozenSnapshotOrchestratorError:
+        raise
+    except OSError as exc:
+        raise FrozenSnapshotOrchestratorError(
+            "subprocess ownership inventory is unavailable"
+        ) from exc
+    return observed
+
+
+def _enable_child_subreaper() -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise FrozenSnapshotOrchestratorError(
+            f"child subreaper setup failed with errno {error}"
+        )
+
+
+def _direct_child_baseline() -> frozenset[tuple[int, int]]:
+    owner = os.getpid()
+    return frozenset(
+        identity.key
+        for identity in _process_snapshot().values()
+        if identity.parent_pid == owner
+    )
+
+
+def _owned_processes(
+    root_identity: ProcessIdentity,
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+    tracked: set[ProcessIdentity] | None = None,
+) -> set[ProcessIdentity]:
+    snapshot = _process_snapshot()
+    owned_ids: set[int] = set()
+    observed_root = snapshot.get(root_identity.pid)
+    if (
+        observed_root is not None
+        and observed_root.start_time == root_identity.start_time
+    ):
+        owned_ids.add(root_identity.pid)
+    if tracked is not None:
+        for identity in tracked:
+            current = snapshot.get(identity.pid)
+            if (
+                current is not None
+                and current.start_time == identity.start_time
+            ):
+                owned_ids.add(identity.pid)
+    owner = os.getpid()
+    for identity in snapshot.values():
+        if (
+            identity.pid != root_identity.pid
+            and identity.parent_pid == owner
+            and identity.key not in baseline_children
+        ):
+            owned_ids.add(identity.pid)
+    changed = True
+    while changed:
+        changed = False
+        for identity in snapshot.values():
+            if (
+                identity.pid not in owned_ids
+                and identity.parent_pid in owned_ids
+            ):
+                owned_ids.add(identity.pid)
+                changed = True
+    owned = {
+        identity
+        for pid, identity in snapshot.items()
+        if pid in owned_ids
+    }
+    if tracked is not None:
+        if len(tracked | owned) > MAX_PROCESS_TREE_MEMBERS:
+            raise FrozenSnapshotOrchestratorError(
+                "subprocess tree exceeds its process bound"
+            )
+        tracked.update(owned)
+    return owned
+
+
+def _identity_exists(identity: ProcessIdentity) -> bool:
+    current = _process_identity(identity.pid)
+    return (
+        current is not None
+        and current.start_time == identity.start_time
+    )
+
+
+def _identity_is_live(identity: ProcessIdentity) -> bool:
+    current = _process_identity(identity.pid)
+    return (
+        current is not None
+        and current.start_time == identity.start_time
+        and current.state != "Z"
+    )
+
+
+def _reap_owned_zombies(
+    tracked: set[ProcessIdentity],
+    *,
+    root_pid: int,
+) -> None:
+    for identity in tuple(tracked):
+        if identity.pid == root_pid:
+            continue
+        current = _process_identity(identity.pid)
+        if (
+            current is None
+            or current.start_time != identity.start_time
+            or current.state != "Z"
+        ):
+            continue
+        try:
+            waited, _status = os.waitpid(identity.pid, os.WNOHANG)
+        except ChildProcessError:
+            continue
+        except OSError as exc:
+            raise FrozenSnapshotOrchestratorError(
+                "owned subprocess zombie could not be reaped"
+            ) from exc
+        if waited not in {0, identity.pid}:
+            raise FrozenSnapshotOrchestratorError(
+                "owned subprocess reap returned an unexpected PID"
+            )
+
+
+def _signal_process_identity(
+    identity: ProcessIdentity,
+    signum: int,
+) -> None:
+    current = _process_identity(identity.pid)
+    if current is None or current.start_time != identity.start_time:
+        return
+    try:
+        descriptor = os.pidfd_open(identity.pid, 0)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise FrozenSnapshotOrchestratorError(
+            "identity-bound subprocess handle cannot be opened"
+        ) from exc
+    try:
+        refreshed = _process_identity(identity.pid)
+        if refreshed is None or refreshed.start_time != identity.start_time:
+            return
+        _signal_process_handle(descriptor, signum)
+    except ProcessLookupError:
+        return
+    finally:
+        os.close(descriptor)
+
+
+def _signal_process_handle(descriptor: int, signum: int) -> None:
+    try:
+        signal.pidfd_send_signal(descriptor, signum)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise FrozenSnapshotOrchestratorError(
+            "identity-bound subprocess signal failed"
+        ) from exc
+
+
+def _signal_owned_process(
+    identity: ProcessIdentity,
+    signum: int,
+    *,
+    root_identity: ProcessIdentity,
+    root_descriptor: int | None,
+) -> None:
+    if identity.key == root_identity.key and root_descriptor is not None:
+        _signal_process_handle(root_descriptor, signum)
+        return
+    _signal_process_identity(identity, signum)
+
+
+def _terminate_process_tree(
+    process: subprocess.Popen[bytes],
+    tracked: set[ProcessIdentity],
+    *,
+    root_identity: ProcessIdentity,
+    root_descriptor: int | None,
+    baseline_children: frozenset[tuple[int, int]],
+) -> None:
+    _owned_processes(
+        root_identity,
+        baseline_children=baseline_children,
+        tracked=tracked,
+    )
+    root_group = root_identity.process_group
+
+    def request_shutdown() -> None:
+        _owned_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+        _reap_owned_zombies(tracked, root_pid=process.pid)
+        for identity in tracked:
+            _signal_owned_process(
+                identity,
+                (
+                    signal.SIGKILL
+                    if identity.process_group != root_group
+                    else signal.SIGTERM
+                ),
+                root_identity=root_identity,
+                root_descriptor=root_descriptor,
+            )
+
+    request_shutdown()
+    deadline = time.monotonic() + PROCESS_GROUP_TERM_SECONDS
+    while time.monotonic() < deadline:
+        process.poll()
+        request_shutdown()
+        if process.poll() is not None and not any(
+            _identity_is_live(identity) for identity in tracked
+        ):
+            break
+        time.sleep(
+            min(
+                PROCESS_POLL_SECONDS,
+                max(0.0, deadline - time.monotonic()),
+            )
+        )
+    _owned_processes(
+        root_identity,
+        baseline_children=baseline_children,
+        tracked=tracked,
+    )
+    for identity in tracked:
+        _signal_owned_process(
+            identity,
+            signal.SIGKILL,
+            root_identity=root_identity,
+            root_descriptor=root_descriptor,
+        )
+    try:
+        process.wait(timeout=PROCESS_GROUP_TERM_SECONDS)
+    except subprocess.TimeoutExpired:
+        _signal_owned_process(
+            root_identity,
+            signal.SIGKILL,
+            root_identity=root_identity,
+            root_descriptor=root_descriptor,
+        )
+        try:
+            process.wait(timeout=PROCESS_GROUP_TERM_SECONDS)
+        except subprocess.TimeoutExpired as exc:
+            raise FrozenSnapshotOrchestratorError(
+                "subprocess root survived identity-bound cleanup"
+            ) from exc
+    absence_deadline = (
+        time.monotonic()
+        + PROCESS_GROUP_TERM_SECONDS
+        + PROCESS_TREE_QUIESCENCE_SECONDS
+    )
+    stable_since: float | None = None
+    while time.monotonic() < absence_deadline:
+        _owned_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+        _reap_owned_zombies(tracked, root_pid=process.pid)
+        live = {
+            identity for identity in tracked if _identity_is_live(identity)
+        }
+        residue = {
+            identity for identity in tracked if _identity_exists(identity)
+        }
+        if live or residue:
+            stable_since = None
+            for identity in live:
+                _signal_owned_process(
+                    identity,
+                    signal.SIGKILL,
+                    root_identity=root_identity,
+                    root_descriptor=root_descriptor,
+                )
+        elif stable_since is None:
+            stable_since = time.monotonic()
+        elif (
+            time.monotonic() - stable_since
+            >= PROCESS_TREE_QUIESCENCE_SECONDS
+        ):
+            return
+        time.sleep(
+            min(
+                PROCESS_POLL_SECONDS,
+                max(0.0, absence_deadline - time.monotonic()),
+            )
+        )
+    _reap_owned_zombies(tracked, root_pid=process.pid)
+    if any(_identity_exists(identity) for identity in tracked):
+        raise FrozenSnapshotOrchestratorError(
+            "subprocess process tree survived forced cleanup"
+        )
+
+
+def _bounded_command_locked(
+    arguments: Sequence[str],
+    *,
+    timeout: float,
+    stdin: int | None = subprocess.DEVNULL,
+    pass_fds: Sequence[int] = (),
+) -> BoundedCommandResult:
+    if (
+        type(timeout) not in {int, float}
+        or not math.isfinite(timeout)
+        or timeout <= 0
+    ):
+        raise FrozenSnapshotOrchestratorError(
+            "controller command timeout is invalid"
+        )
+    process: subprocess.Popen[bytes] | None = None
+    root_identity: ProcessIdentity | None = None
+    root_descriptor: int | None = None
+    selector = selectors.DefaultSelector()
+    buffers = {"stdout": bytearray(), "stderr": bytearray()}
+    tracked: set[ProcessIdentity] = set()
+    deadline = time.monotonic() + timeout
+    cleaned = False
+    _enable_child_subreaper()
+    baseline_children = _direct_child_baseline()
+    try:
+        process = subprocess.Popen(  # noqa: S603
+            list(arguments),
+            stdin=stdin,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=SAFE_ENV,
+            close_fds=True,
+            pass_fds=tuple(pass_fds),
+            start_new_session=True,
+        )
+        root_descriptor = os.pidfd_open(process.pid, 0)
+        root_identity = _process_identity(process.pid)
+        if root_identity is None:
+            raise FrozenSnapshotOrchestratorError(
+                "controller command root identity is unavailable"
+            )
+        tracked.add(root_identity)
+        if process.stdout is None or process.stderr is None:
+            raise FrozenSnapshotOrchestratorError(
+                "controller command pipes are unavailable"
+            )
+        for label, stream in (
+            ("stdout", process.stdout),
+            ("stderr", process.stderr),
+        ):
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, label)
+        while selector.get_map():
+            _owned_processes(
+                root_identity,
+                baseline_children=baseline_children,
+                tracked=tracked,
+            )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise FrozenSnapshotOrchestratorError(
+                    "controller command timed out"
+                )
+            events = selector.select(
+                min(PROCESS_POLL_SECONDS, remaining)
+            )
+            if not events:
+                if process.poll() is not None and not cleaned:
+                    _terminate_process_tree(
+                        process,
+                        tracked,
+                        root_identity=root_identity,
+                        root_descriptor=root_descriptor,
+                        baseline_children=baseline_children,
+                    )
+                    cleaned = True
+                continue
+            for key, _mask in events:
+                try:
+                    chunk = os.read(key.fileobj.fileno(), 64 * 1024)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                label = str(key.data)
+                buffer = buffers[label]
+                limit = (
+                    MAX_COMMAND_OUTPUT_BYTES
+                    if label == "stdout"
+                    else MAX_COMMAND_ERROR_BYTES
+                )
+                if len(buffer) + len(chunk) > limit:
+                    raise FrozenSnapshotOrchestratorError(
+                        f"controller command {label} exceeded its byte limit"
+                    )
+                buffer.extend(chunk)
+            if process.poll() is not None and not cleaned:
+                _terminate_process_tree(
+                    process,
+                    tracked,
+                    root_identity=root_identity,
+                    root_descriptor=root_descriptor,
+                    baseline_children=baseline_children,
+                )
+                cleaned = True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise FrozenSnapshotOrchestratorError(
+                "controller command timed out"
+            )
+        returncode = process.wait(timeout=remaining)
+        return BoundedCommandResult(
+            returncode=returncode,
+            stdout=bytes(buffers["stdout"]),
+            stderr=bytes(buffers["stderr"]),
+        )
+    except FrozenSnapshotOrchestratorError:
+        raise
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise FrozenSnapshotOrchestratorError(
+            "controller command execution failed"
+        ) from exc
+    finally:
+        original_error = sys.exception()
+        cleanup_errors: list[BaseException] = []
+        if process is not None and not cleaned:
+            try:
+                if root_identity is None:
+                    if root_descriptor is None:
+                        root_identity = _process_identity(process.pid)
+                    else:
+                        _signal_process_handle(
+                            root_descriptor,
+                            signal.SIGKILL,
+                        )
+                        try:
+                            process.wait(
+                                timeout=PROCESS_GROUP_TERM_SECONDS
+                            )
+                        except subprocess.TimeoutExpired as exc:
+                            raise FrozenSnapshotOrchestratorError(
+                                "unidentified controller command survived "
+                                "forced cleanup"
+                            ) from exc
+                        root_identity = ProcessIdentity(
+                            pid=process.pid,
+                            parent_pid=os.getpid(),
+                            process_group=process.pid,
+                            start_time=-1,
+                            state="?",
+                        )
+                    if root_identity is None:
+                        raise FrozenSnapshotOrchestratorError(
+                            "controller command root could not be bound "
+                            "for cleanup"
+                        )
+                _terminate_process_tree(
+                    process,
+                    tracked,
+                    root_identity=root_identity,
+                    root_descriptor=root_descriptor,
+                    baseline_children=baseline_children,
+                )
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+        try:
+            selector.close()
+        except BaseException as exc:
+            cleanup_errors.append(exc)
+        if process is not None:
+            for stream in (process.stdout, process.stderr):
+                if stream is None:
+                    continue
+                try:
+                    stream.close()
+                except BaseException as exc:
+                    cleanup_errors.append(exc)
+        if root_descriptor is not None:
+            try:
+                os.close(root_descriptor)
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+        if cleanup_errors:
+            cleanup_error = cleanup_errors[0]
+            if original_error is not None:
+                raise original_error from cleanup_error
+            raise cleanup_error
+
+
+def _bounded_command(
+    arguments: Sequence[str],
+    *,
+    timeout: float,
+    stdin: int | None = subprocess.DEVNULL,
+    pass_fds: Sequence[int] = (),
+) -> BoundedCommandResult:
+    with _BOUNDED_COMMAND_LOCK:
+        return _bounded_command_locked(
+            arguments,
+            timeout=timeout,
+            stdin=stdin,
+            pass_fds=pass_fds,
+        )
+
+
+class ControllerLivenessGuard:
+    """Keep host mutations bound to the controller-owned pipe."""
+
+    _WAKE_SIGNAL = signal.SIGUSR1
+    _HANDLED_SIGNALS = (
+        signal.SIGHUP,
+        signal.SIGTERM,
+        signal.SIGINT,
+        _WAKE_SIGNAL,
+    )
+
+    def __init__(self, control_fd: int) -> None:
+        _anonymous_read_pipe_identity(
+            control_fd,
+            label="controller liveness",
+        )
+        if threading.current_thread() is not threading.main_thread():
+            raise FrozenSnapshotOrchestratorError(
+                "host action must run in the main thread"
+            )
+        try:
+            self._fd = os.dup(control_fd)
+            os.set_inheritable(self._fd, False)
+            os.set_blocking(self._fd, False)
+        except OSError as exc:
+            raise FrozenSnapshotOrchestratorError(
+                "controller liveness pipe cannot be secured"
+            ) from exc
+        self._cancelled = threading.Event()
+        self._stopping = threading.Event()
+        self._reason = "controller liveness was lost"
+        self._exception_delivered = False
+        self._closed = False
+        self._old_handlers: dict[int, Any] = {}
+        self._monitor: threading.Thread | None = None
+
+    @property
+    def control_fd(self) -> int:
+        return self._fd
+
+    def _cancel(self, reason: str, *, wake_main: bool) -> None:
+        if self._cancelled.is_set():
+            return
+        self._reason = reason
+        self._cancelled.set()
+        if wake_main:
+            main_ident = threading.main_thread().ident
+            if main_ident is not None:
+                try:
+                    signal.pthread_kill(main_ident, self._WAKE_SIGNAL)
+                except (OSError, RuntimeError):
+                    pass
+
+    def _sample(self) -> None:
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(self._fd, selectors.EVENT_READ)
+            if not selector.select(0):
+                return
+            try:
+                payload = os.read(self._fd, 1)
+            except BlockingIOError:
+                return
+        finally:
+            selector.close()
+        reason = (
+            "controller liveness pipe reached EOF"
+            if payload == b""
+            else "controller liveness pipe carried forbidden data"
+        )
+        self._cancel(reason, wake_main=False)
+        self.check()
+
+    def _handle_signal(self, signum: int, _frame: Any) -> None:
+        if self._exception_delivered:
+            return
+        self._exception_delivered = True
+        if signum == self._WAKE_SIGNAL:
+            reason = self._reason
+        else:
+            reason = f"frozen snapshot host received signal {signum}"
+            self._cancel(reason, wake_main=False)
+        raise FrozenSnapshotCancellation(reason)
+
+    def _monitor_control(self) -> None:
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(self._fd, selectors.EVENT_READ)
+            while not self._stopping.is_set():
+                if not selector.select(PROCESS_POLL_SECONDS):
+                    continue
+                try:
+                    payload = os.read(self._fd, 1)
+                except BlockingIOError:
+                    continue
+                except OSError:
+                    if self._stopping.is_set():
+                        return
+                    payload = b""
+                reason = (
+                    "controller liveness pipe reached EOF"
+                    if payload == b""
+                    else "controller liveness pipe carried forbidden data"
+                )
+                self._cancel(reason, wake_main=True)
+                return
+        finally:
+            selector.close()
+
+    def __enter__(self) -> ControllerLivenessGuard:
+        try:
+            for signum in self._HANDLED_SIGNALS:
+                self._old_handlers[signum] = signal.getsignal(signum)
+                signal.signal(signum, self._handle_signal)
+            self._sample()
+            self._monitor = threading.Thread(
+                target=self._monitor_control,
+                name="frozen-snapshot-controller-liveness",
+                daemon=True,
+            )
+            self._monitor.start()
+            self.check()
+            return self
+        except BaseException:
+            self._restore()
+            raise
+
+    def check(self) -> None:
+        if self._cancelled.is_set() and not self._exception_delivered:
+            self._exception_delivered = True
+            raise FrozenSnapshotCancellation(self._reason)
+
+    def _restore(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._exception_delivered = True
+        self._stopping.set()
+        if self._monitor is not None:
+            self._monitor.join(timeout=1)
+        try:
+            os.close(self._fd)
+        except OSError:
+            pass
+        for signum, handler in self._old_handlers.items():
+            signal.signal(signum, handler)
+        self._old_handlers.clear()
+
+    def __exit__(
+        self,
+        error_type: Any,
+        _value: Any,
+        _traceback: Any,
+    ) -> None:
+        deliver_after_restore = (
+            self._cancelled.is_set()
+            and error_type is None
+            and not self._exception_delivered
+        )
+        reason = self._reason
+        self._restore()
+        if deliver_after_restore:
+            raise FrozenSnapshotCancellation(reason)
 
 
 def canonical_json(value: Any) -> bytes:
@@ -393,6 +1256,7 @@ def canonical_paths(
         "operation_secret": operation_secret,
         "controller_root": controller_root,
         "collection_root": collection_root,
+        "results": controller_root / RESULTS_DIRECTORY,
         "journal": controller_root / JOURNAL_FILENAME,
         "lock": controller_root / LOCK_FILENAME,
         "outcome": controller_root / OUTCOME_FILENAME,
@@ -416,6 +1280,246 @@ def canonical_paths(
             nginx_secret / "live-leases" / "claims" / f"{claim}.json"
         )
     return result
+
+
+def _public_journal_bindings(context: PublicCutoverContext) -> dict[str, str]:
+    manifest = context.manifest
+    return {
+        "manifest_sha256": context.manifest_sha256,
+        "plan_sha256": context.plan_sha256,
+        "campaign_id": str(manifest["campaign_id"]),
+        "operation_id": str(manifest["operation_id"]),
+        "release_sha": str(manifest["release_sha"]),
+        "legacy_release_sha": str(manifest["legacy_release_sha"]),
+    }
+
+
+def _root_private_digest(path: Path, *, label: str) -> str:
+    return _hash_payload(
+        _read_file(
+            path,
+            label=label,
+            required_uid=0,
+            expected_mode=0o600,
+            maximum=16 * 1024 * 1024,
+        )
+    )
+
+
+def _load_public_cutover_context(
+    *,
+    manifest_path: Path | None,
+    approval_path: Path | None,
+    approval_policy_path: Path | None,
+    inputs: NGINX.CoordinatorInputs,
+    bindings: Mapping[str, SOURCE.SnapshotBinding],
+) -> PublicCutoverContext:
+    """Load the exact authorization closure before any live freeze action."""
+
+    if (
+        manifest_path is None
+        or approval_path is None
+        or approval_policy_path is None
+    ):
+        raise FrozenSnapshotOrchestratorError(
+            "apply requires the root-only manifest, approval, and approval policy"
+        )
+    for path, label in (
+        (manifest_path, "cutover manifest"),
+        (approval_path, "cutover approval"),
+        (approval_policy_path, "cutover approval policy"),
+    ):
+        if (
+            not isinstance(path, Path)
+            or not path.is_absolute()
+            or ".." in path.parts
+            or Path(os.path.abspath(path)) != path
+        ):
+            raise FrozenSnapshotOrchestratorError(
+                f"{label} path is not canonical absolute"
+            )
+    try:
+        manifest, manifest_sha256 = CONTROLLER.read_root_only_manifest(
+            manifest_path
+        )
+        plan = CONTROLLER.render_plan(
+            manifest,
+            manifest_sha256=manifest_sha256,
+            manifest_path=manifest_path,
+        )
+        CONTROLLER._verify_runtime_authorization(  # noqa: SLF001
+            manifest,
+            approval_path=approval_path,
+            approval_policy_path=approval_policy_path,
+        )
+    except CONTROLLER.CutoverContractError as exc:
+        raise FrozenSnapshotOrchestratorError(
+            "cutover manifest, plan, or authorization is invalid or expired"
+        ) from exc
+    approval_sha256 = _root_private_digest(
+        approval_path,
+        label="production cutover approval",
+    )
+    approval_policy_sha256 = _root_private_digest(
+        approval_policy_path,
+        label="production human approval policy",
+    )
+    expected_identity = {
+        "operation_id": inputs.operation_id,
+        "release_sha": inputs.release_sha,
+        "release_tree_sha": inputs.release_tree_sha,
+    }
+    if (
+        any(manifest.get(key) != value for key, value in expected_identity.items())
+        or manifest["artifacts"].get("cutover_approval_sha256")
+        != approval_sha256
+        or manifest["artifacts"].get("human_approval_policy_sha256")
+        != approval_policy_sha256
+        or manifest["artifacts"].get("nginx_freeze_generation_sha256")
+        != inputs.aggregate["generation_sha256"]["legacy-frozen"]
+        or any(
+            manifest["topology"][role]["host"] != ROLE_HOSTS[role]
+            or manifest["topology"][role]["role"] != role
+            for role in ROLES
+        )
+        or any(
+            bindings[role].legacy_release_sha
+            != manifest["legacy_release_sha"]
+            or bindings[role].controller_manifest_sha256 != manifest_sha256
+            or bindings[role].approval_sha256 != approval_sha256
+            for role in ROLES
+        )
+    ):
+        raise FrozenSnapshotOrchestratorError(
+            "frozen-final inputs differ from the public cutover closure"
+        )
+    plan_sha256 = _nonzero_sha256(
+        plan.get("plan_sha256"),
+        label="public cutover plan SHA-256",
+    )
+    return PublicCutoverContext(
+        manifest=manifest,
+        manifest_sha256=manifest_sha256,
+        plan_sha256=plan_sha256,
+        approval_path=approval_path,
+        approval_sha256=approval_sha256,
+        approval_policy_path=approval_policy_path,
+        approval_policy_sha256=approval_policy_sha256,
+    )
+
+
+def _verify_public_cutover_authorization(
+    context: PublicCutoverContext,
+) -> None:
+    try:
+        CONTROLLER._verify_runtime_authorization(  # noqa: SLF001
+            dict(context.manifest),
+            approval_path=context.approval_path,
+            approval_policy_path=context.approval_policy_path,
+        )
+    except CONTROLLER.CutoverContractError as exc:
+        raise FrozenSnapshotOrchestratorError(
+            "production approval is invalid or expired"
+        ) from exc
+
+
+def _public_phase_prefix() -> list[str]:
+    return list(CONTROLLER.PHASES[: CONTROLLER.PHASES.index(PUBLIC_PHASE)])
+
+
+def _validate_public_phase_state(
+    state: Mapping[str, Any],
+    *,
+    context: PublicCutoverContext,
+    status: str,
+) -> dict[str, Any]:
+    prefix = _public_phase_prefix()
+    expected_started = PUBLIC_PHASE if status == "phase_started" else None
+    if (
+        any(
+            state.get(key) != value
+            for key, value in _public_journal_bindings(context).items()
+        )
+        or state.get("status") != status
+        or state.get("completed_phases") != prefix
+        or state.get("started_phase") != expected_started
+        or state.get("rollback_eligible") is not True
+        or state.get("first_business_write_allowed") is not False
+        or not isinstance(state.get("events"), list)
+        or not state["events"]
+        or not isinstance(state.get("state_sha256"), str)
+        or CONTROLLER.SHA256_RE.fullmatch(state["state_sha256"]) is None
+        or state["state_sha256"] == ZERO_SHA256
+        or not isinstance(state.get("event_tail_sha256"), str)
+        or CONTROLLER.SHA256_RE.fullmatch(state["event_tail_sha256"]) is None
+        or state["event_tail_sha256"] == ZERO_SHA256
+    ):
+        raise FrozenSnapshotOrchestratorError(
+            "public cutover journal is outside the exact pre-freeze corridor"
+        )
+    if status == "phase_started":
+        last = state["events"][-1]
+        if (
+            not isinstance(last, dict)
+            or last.get("kind") != "phase_started"
+            or last.get("phase") != PUBLIC_PHASE
+            or last.get("event_hash") != state["event_tail_sha256"]
+        ):
+            raise FrozenSnapshotOrchestratorError(
+                "public cutover journal start transition differs"
+            )
+    return dict(state)
+
+
+def _public_phase_handoff(
+    *,
+    context: PublicCutoverContext,
+    inputs: NGINX.CoordinatorInputs,
+    state: Mapping[str, Any],
+    status: str,
+    prior_intent: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    state = _validate_public_phase_state(
+        state,
+        context=context,
+        status="active" if status == "intent" else "phase_started",
+    )
+    started = status == "started"
+    if started:
+        if prior_intent is None:
+            raise FrozenSnapshotOrchestratorError(
+                "public phase start lacks a durable prestart intent"
+            )
+        prestart_state_sha256 = prior_intent.get(
+            "prestart_journal_state_sha256"
+        )
+        prestart_event_tail_sha256 = prior_intent.get(
+            "prestart_journal_event_tail_sha256"
+        )
+        prestart_event_count = prior_intent.get("prestart_journal_event_count")
+    else:
+        prestart_state_sha256 = state["state_sha256"]
+        prestart_event_tail_sha256 = state["event_tail_sha256"]
+        prestart_event_count = len(state["events"])
+    return {
+        "schema": PUBLIC_PHASE_HANDOFF_SCHEMA,
+        "status": status,
+        "phase": PUBLIC_PHASE,
+        **_public_journal_bindings(context),
+        "nginx_aggregate_sha256": inputs.aggregate_sha256,
+        "approval_sha256": context.approval_sha256,
+        "approval_policy_sha256": context.approval_policy_sha256,
+        "prestart_journal_state_sha256": prestart_state_sha256,
+        "prestart_journal_event_tail_sha256": prestart_event_tail_sha256,
+        "prestart_journal_event_count": prestart_event_count,
+        "started_journal_state_sha256": (
+            state["state_sha256"] if started else None
+        ),
+        "started_journal_event_tail_sha256": (
+            state["event_tail_sha256"] if started else None
+        ),
+        "started_journal_event_count": len(state["events"]) if started else None,
+    }
 
 
 def _material_paths(
@@ -1051,9 +2155,11 @@ def scp_download_arguments(
 def _run_command(
     arguments: Sequence[str],
     *,
-    runner: Runner,
+    runner: Runner | None,
     timeout: int,
     allowed: frozenset[str],
+    stdin: int | None = subprocess.DEVNULL,
+    pass_fds: Sequence[int] = (),
 ) -> bytes:
     if (
         not arguments
@@ -1063,22 +2169,34 @@ def _run_command(
         raise FrozenSnapshotOrchestratorError(
             "controller command argv is outside its allowlist"
         )
-    try:
-        completed = runner(
-            list(arguments),
-            input=None,
-            capture_output=True,
-            check=False,
+    if runner is None:
+        completed = _bounded_command(
+            arguments,
             timeout=timeout,
-            env=SAFE_ENV,
+            stdin=stdin,
+            pass_fds=pass_fds,
         )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise FrozenSnapshotOrchestratorError(
-            f"command is unavailable: {Path(arguments[0]).name}"
-        ) from exc
+    else:
+        try:
+            completed = runner(
+                list(arguments),
+                stdin=stdin,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=timeout,
+                env=SAFE_ENV,
+                close_fds=True,
+                pass_fds=tuple(pass_fds),
+                start_new_session=True,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise FrozenSnapshotOrchestratorError(
+                f"command is unavailable: {Path(arguments[0]).name}"
+            ) from exc
     if (
         len(completed.stdout) > MAX_COMMAND_OUTPUT_BYTES
-        or len(completed.stderr) > MAX_COMMAND_OUTPUT_BYTES
+        or len(completed.stderr) > MAX_COMMAND_ERROR_BYTES
     ):
         raise FrozenSnapshotOrchestratorError(
             "command output exceeded its bound"
@@ -1127,7 +2245,7 @@ def _validate_exact_release(
     request: Mapping[str, Any],
     *,
     agent_path: Path,
-    runner: Runner,
+    runner: Runner | None,
     required_uid: int,
 ) -> None:
     release_root = canonical_paths(
@@ -1190,23 +2308,38 @@ def _validate_exact_release(
             raise FrozenSnapshotOrchestratorError(
                 "operation release is not exact, detached, and clean"
             )
-    try:
-        detached = runner(
-            [GIT, "-C", str(release_root), "symbolic-ref", "-q", "HEAD"],
-            input=None,
-            capture_output=True,
-            check=False,
-            timeout=60,
-            env=SAFE_ENV,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise FrozenSnapshotOrchestratorError(
-            "operation release detached-state check failed"
-        ) from exc
+    detached_arguments = [
+        GIT,
+        "-C",
+        str(release_root),
+        "symbolic-ref",
+        "-q",
+        "HEAD",
+    ]
+    if runner is None:
+        detached = _bounded_command(detached_arguments, timeout=60)
+    else:
+        try:
+            detached = runner(
+                detached_arguments,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=60,
+                env=SAFE_ENV,
+                close_fds=True,
+                pass_fds=(),
+                start_new_session=True,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise FrozenSnapshotOrchestratorError(
+                "operation release detached-state check failed"
+            ) from exc
     if (
         detached.returncode != 1
         or detached.stdout
-        or len(detached.stderr) > MAX_COMMAND_OUTPUT_BYTES
+        or len(detached.stderr) > MAX_COMMAND_ERROR_BYTES
     ):
         raise FrozenSnapshotOrchestratorError(
             "operation release is not detached"
@@ -1628,7 +2761,8 @@ def _call_freeze_worker(
     *,
     action: str,
     binding: SOURCE.SnapshotBinding,
-    runner: Runner,
+    control_fd: int,
+    runner: Runner | None,
     paths: Mapping[str, Any],
 ) -> dict[str, Any]:
     kwargs = _freeze_kwargs(request, action=action, binding=binding)
@@ -1659,6 +2793,8 @@ def _call_freeze_worker(
         "--action",
         action,
         "--apply",
+        "--control-fd",
+        str(control_fd),
     ]
     if kwargs["confirm"] is not None:
         arguments.extend(["--confirm", str(kwargs["confirm"])])
@@ -1668,16 +2804,23 @@ def _call_freeze_worker(
             runner=runner,
             timeout=2 * 60 * 60,
             allowed=frozenset({PYTHON}),
+            pass_fds=(control_fd,),
         ),
         label=f"legacy writer {action} worker",
     )
     expected_statuses = {
         "freeze": {"frozen", "already-frozen"},
         "verify": {"verified-frozen"},
+        "verify-current": {"verified-current-frozen"},
     }
+    expected_schema = (
+        FREEZE.CURRENT_VERIFY_RESULT_SCHEMA
+        if action == "verify-current"
+        else FREEZE.RESULT_SCHEMA
+    )
     if (
         not isinstance(result, dict)
-        or result.get("schema") != FREEZE.RESULT_SCHEMA
+        or result.get("schema") != expected_schema
         or result.get("action") != action
         or result.get("status") not in expected_statuses[action]
         or result.get("operation_id") != request["operation_id"]
@@ -1695,6 +2838,10 @@ def _call_freeze_worker(
         or result.get("legacy_writer_process_count") != 0
         or result.get("writer_database_client_count") != 0
         or result.get("file_mutator_process_count") != 0
+        or (
+            action == "verify-current"
+            and result.get("production_mutated") is not False
+        )
         or type(result.get("production_mutated")) is not bool
     ):
         raise FrozenSnapshotOrchestratorError(
@@ -1788,14 +2935,112 @@ def _host_action_result(
     }
 
 
+def _current_verify_host_result(
+    request: Mapping[str, Any],
+    worker_result: Mapping[str, Any],
+) -> dict[str, Any]:
+    result = {
+        "schema": HOST_CURRENT_VERIFY_SCHEMA,
+        "status": "verified-current-frozen",
+        "action": "verify-current",
+        "operation_id": request["operation_id"],
+        "release_sha": request["release_sha"],
+        "release_tree_sha": request["release_tree_sha"],
+        "role": request["role"],
+        "mode": "frozen-final",
+        "binding_sha256": request["binding_sha256"],
+        "state_receipt_sha256": request["state_receipt_sha256"],
+        "readback_challenge_sha256": worker_result[
+            "readback_challenge_sha256"
+        ],
+        "issued_at_epoch": worker_result["issued_at_epoch"],
+        "expires_at_epoch": worker_result["expires_at_epoch"],
+        "captured_at_epoch": worker_result["captured_at_epoch"],
+        "lease_claim_sha256": request["lease_claim_sha256"],
+        "lease_claim_epoch": worker_result["live_lease_claim_epoch"],
+        "previous_live_lease_claim_sha256": worker_result[
+            "previous_live_lease_claim_sha256"
+        ],
+        "freeze_evidence_live_lease_claim_sha256": worker_result[
+            "freeze_evidence_live_lease_claim_sha256"
+        ],
+        "freeze_evidence_sha256": worker_result[
+            "freeze_evidence_sha256"
+        ],
+        "role_freeze_generation_sha256": worker_result[
+            "role_freeze_generation_sha256"
+        ],
+        "freeze_generation_sha256": worker_result[
+            "freeze_generation_sha256"
+        ],
+        "source_container_ids": worker_result["source_container_ids"],
+        "writer_container_ids": worker_result["writer_container_ids"],
+        "journal_sha256": worker_result["journal_sha256"],
+        "legacy_writer_process_count": worker_result[
+            "legacy_writer_process_count"
+        ],
+        "writer_database_client_count": worker_result[
+            "writer_database_client_count"
+        ],
+        "file_mutator_process_count": worker_result[
+            "file_mutator_process_count"
+        ],
+        "database_container_running": worker_result[
+            "database_container_running"
+        ],
+        "redis_container_running": worker_result[
+            "redis_container_running"
+        ],
+        "pull_policy": "never",
+        "source_stopped_or_restarted": worker_result[
+            "source_stopped_or_restarted"
+        ],
+        "source_mutated": False,
+        "current_mutated": worker_result["current_mutated"],
+        "service_mutated": worker_result["service_mutated"],
+        "container_mutated": worker_result["container_mutated"],
+        "volume_mutated": worker_result["volume_mutated"],
+        "data_mutated": worker_result["data_mutated"],
+        "production_mutated": worker_result["production_mutated"],
+    }
+    return _validate_host_result(result, request=request)
+
+
 def host_agent(
     encoded_request: str,
     *,
-    runner: Runner = subprocess.run,
+    runner: Runner | None = None,
     required_uid: int = 0,
     agent_path: Path | None = None,
     observed_host_addresses: set[str] | None = None,
+    control_fd: int | None = None,
 ) -> dict[str, Any]:
+    if control_fd is None:
+        raise FrozenSnapshotOrchestratorError(
+            "host action requires controller liveness"
+        )
+    with ControllerLivenessGuard(control_fd) as liveness:
+        return _host_agent_under_liveness(
+            encoded_request,
+            runner=runner,
+            required_uid=required_uid,
+            agent_path=agent_path,
+            observed_host_addresses=observed_host_addresses,
+            controller_liveness=liveness,
+        )
+
+
+def _host_agent_under_liveness(
+    encoded_request: str,
+    *,
+    runner: Runner | None,
+    required_uid: int,
+    agent_path: Path | None,
+    observed_host_addresses: set[str] | None,
+    controller_liveness: ControllerLivenessGuard,
+) -> dict[str, Any]:
+    _controller_liveness = controller_liveness
+    _controller_liveness.check()
     request = decode_host_request(encoded_request)
     if os.geteuid() != required_uid or required_uid != 0:
         raise FrozenSnapshotOrchestratorError(
@@ -1825,20 +3070,24 @@ def host_agent(
     )
     action = str(request["action"])
     if action == "prepare-material":
-        return _prepare_host_material(request, required_uid=required_uid)
+        result = _prepare_host_material(request, required_uid=required_uid)
+        _controller_liveness.check()
+        return result
     _install_host_material(
         request,
         required_uid=required_uid,
     )
     if action == "install-material":
         claim = _load_live_lease_material(request)
-        return _host_action_result(
+        result = _host_action_result(
             request,
             action=action,
             freeze_sha256=ZERO_SHA256,
             production_mutated=False,
             lease_claim_epoch=claim["claim_epoch"],
         )
+        _controller_liveness.check()
+        return result
     binding = _binding(
         Path(str(request["binding_path"])),
         operation_id=str(request["operation_id"]),
@@ -1850,11 +3099,12 @@ def host_agent(
         required_uid=required_uid,
     )
     _load_live_lease_material(request)
-    if action in {"freeze", "verify"}:
+    if action in {"freeze", "verify", "verify-current"}:
         worker_result = _call_freeze_worker(
             request,
             action=action,
             binding=binding,
+            control_fd=_controller_liveness.control_fd,
             runner=runner,
             paths=paths,
         )
@@ -1863,7 +3113,14 @@ def host_agent(
             worker_result.get("freeze_evidence_sha256"),
             label="freeze evidence SHA-256",
         )
-        return _host_action_result(
+        if action == "verify-current":
+            result = _current_verify_host_result(
+                request,
+                worker_result,
+            )
+            _controller_liveness.check()
+            return result
+        result = _host_action_result(
             request,
             action=action,
             freeze_sha256=freeze_sha256,
@@ -1873,6 +3130,8 @@ def host_agent(
                 "live_lease_claim_epoch"
             ],
         )
+        _controller_liveness.check()
+        return result
     if action != "snapshot":
         raise FrozenSnapshotOrchestratorError(
             "host action is not allowlisted"
@@ -1911,6 +3170,8 @@ def host_agent(
         "--live-lease-claim-sha256",
         str(request["lease_claim_sha256"]),
         "--apply",
+        "--control-fd",
+        str(_controller_liveness.control_fd),
         "--confirm",
         SOURCE.confirmation_phrase(binding),
     ]
@@ -1919,6 +3180,7 @@ def host_agent(
         runner=runner,
         timeout=8 * 60 * 60,
         allowed=frozenset({PYTHON}),
+        pass_fds=(_controller_liveness.control_fd,),
     )
     producer_result = _parse_command_json(
         producer_raw,
@@ -1942,6 +3204,7 @@ def host_agent(
         request,
         action="verify",
         binding=binding,
+        control_fd=_controller_liveness.control_fd,
         runner=runner,
         paths=paths,
     )
@@ -1974,7 +3237,7 @@ def host_agent(
         freeze_sha256=freeze_sha256,
         required_uid=required_uid,
     )
-    return _host_action_result(
+    result = _host_action_result(
         request,
         action="snapshot",
         freeze_sha256=freeze_sha256,
@@ -1982,6 +3245,8 @@ def host_agent(
         production_mutated=False,
         lease_claim_epoch=post_freeze["live_lease_claim_epoch"],
     )
+    _controller_liveness.check()
+    return result
 
 
 def _validate_prepare_result(
@@ -2032,6 +3297,107 @@ def _validate_host_result(
     expected_claim_epoch: int | None = None,
 ) -> dict[str, Any]:
     action = str(request["action"])
+    if action == "verify-current":
+        identity = {
+            "operation_id": request["operation_id"],
+            "release_sha": request["release_sha"],
+            "release_tree_sha": request["release_tree_sha"],
+            "role": request["role"],
+            "binding_sha256": request["binding_sha256"],
+            "state_receipt_sha256": request["state_receipt_sha256"],
+            "lease_claim_sha256": request["lease_claim_sha256"],
+        }
+        source_keys = set(SOURCE.SOURCE_CONTAINERS)
+        writer_keys = {
+            kind
+            for kind, _name, _service in FREEZE.ROLE_WRITERS[
+                str(request["role"])
+            ]
+        }
+        if (
+            not isinstance(document, dict)
+            or set(document) != HOST_CURRENT_VERIFY_FIELDS
+            or document["schema"] != HOST_CURRENT_VERIFY_SCHEMA
+            or document["status"] != "verified-current-frozen"
+            or document["action"] != action
+            or document["mode"] != "frozen-final"
+            or any(
+                document.get(field) != value
+                for field, value in identity.items()
+            )
+            or document["pull_policy"] != "never"
+            or type(document["lease_claim_epoch"]) is not int
+            or document["lease_claim_epoch"] < 2
+            or (
+                expected_claim_epoch is not None
+                and document["lease_claim_epoch"]
+                != expected_claim_epoch
+            )
+            or type(document["issued_at_epoch"]) is not int
+            or type(document["expires_at_epoch"]) is not int
+            or type(document["captured_at_epoch"]) is not int
+            or not (
+                1
+                <= document["issued_at_epoch"]
+                <= document["captured_at_epoch"]
+                <= document["expires_at_epoch"]
+            )
+            or document["legacy_writer_process_count"] != 0
+            or document["writer_database_client_count"] != 0
+            or document["file_mutator_process_count"] != 0
+            or document["database_container_running"] is not True
+            or document["redis_container_running"] is not True
+            or document["source_stopped_or_restarted"] is not False
+            or any(
+                document[field] is not False
+                for field in (
+                    "source_mutated",
+                    "current_mutated",
+                    "service_mutated",
+                    "container_mutated",
+                    "volume_mutated",
+                    "data_mutated",
+                    "production_mutated",
+                )
+            )
+            or not isinstance(document["source_container_ids"], dict)
+            or set(document["source_container_ids"]) != source_keys
+            or not isinstance(document["writer_container_ids"], dict)
+            or set(document["writer_container_ids"]) != writer_keys
+        ):
+            raise FrozenSnapshotOrchestratorError(
+                "host verify-current result differs"
+            )
+        for field in (
+            "state_receipt_sha256",
+            "readback_challenge_sha256",
+            "lease_claim_sha256",
+            "previous_live_lease_claim_sha256",
+            "freeze_evidence_live_lease_claim_sha256",
+            "freeze_evidence_sha256",
+            "role_freeze_generation_sha256",
+            "freeze_generation_sha256",
+            "journal_sha256",
+        ):
+            _nonzero_sha256(
+                document[field],
+                label=f"verify-current {field}",
+            )
+        for group in (
+            document["source_container_ids"],
+            document["writer_container_ids"],
+        ):
+            if any(
+                not isinstance(value, str)
+                or FREEZE.CONTAINER_ID_RE.fullmatch(value) is None
+                or value == ZERO_SHA256
+                for value in group.values()
+            ):
+                raise FrozenSnapshotOrchestratorError(
+                    "host verify-current container identity differs"
+                )
+        return json.loads(canonical_json(document).decode("ascii"))
+
     expected_status = {
         "install-material": "material-installed",
         "freeze": "frozen",
@@ -2130,7 +3496,7 @@ def _invoke_host(
     paths: Mapping[str, Any],
     ssh_identity: Path,
     known_hosts: Path,
-    runner: Runner,
+    runner: Runner | None,
 ) -> dict[str, Any]:
     arguments = [
         PYTHON,
@@ -2138,6 +3504,8 @@ def _invoke_host(
         str(paths["agent"]),
         "--host-request-b64",
         encode_host_request(request),
+        "--control-fd",
+        "0",
     ]
     if role == "webapp_fi":
         arguments = ssh_arguments(
@@ -2148,12 +3516,30 @@ def _invoke_host(
         allowed = frozenset({SSH})
     else:
         allowed = frozenset({PYTHON})
-    raw = _run_command(
-        arguments,
-        runner=runner,
-        timeout=8 * 60 * 60,
-        allowed=allowed,
-    )
+    control_read_fd = -1
+    control_write_fd = -1
+    try:
+        control_read_fd, control_write_fd = os.pipe()
+        os.set_inheritable(control_read_fd, False)
+        os.set_inheritable(control_write_fd, False)
+        raw = _run_command(
+            arguments,
+            runner=runner,
+            timeout=8 * 60 * 60,
+            allowed=allowed,
+            stdin=control_read_fd,
+        )
+    except OSError as exc:
+        raise FrozenSnapshotOrchestratorError(
+            "controller liveness pipe could not be created"
+        ) from exc
+    finally:
+        for descriptor in (control_read_fd, control_write_fd):
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
     return _parse_command_json(raw, label=f"{role} frozen host agent")
 
 
@@ -2163,9 +3549,14 @@ def _leased_call(
     label: str,
     call: Callable[[], Any],
     checkpoint: Checkpoint,
+    authorization: AuthorizationCheck | None = None,
 ) -> Any:
+    if authorization is not None:
+        authorization()
     lease.verify()
     checkpoint(f"before-rpc:{label}")
+    if authorization is not None:
+        authorization()
     result = call()
     lease.verify()
     checkpoint(f"after-rpc:{label}")
@@ -2213,7 +3604,7 @@ def _transfer_material(
     source: Path,
     ssh_identity: Path,
     known_hosts: Path,
-    runner: Runner,
+    runner: Runner | None,
     required_uid: int,
 ) -> None:
     final, partial, digest = _material_paths(request)[key]
@@ -2305,7 +3696,7 @@ def _collect_file(
     paths: Mapping[str, Any],
     ssh_identity: Path,
     known_hosts: Path,
-    runner: Runner,
+    runner: Runner | None,
     required_uid: int,
 ) -> str:
     maximum = (
@@ -2515,6 +3906,7 @@ def _initial_journal(
         "bindings": {
             role: bindings[role].canonical_sha256 for role in ROLES
         },
+        "public_phase_handoff": None,
         "lease": None,
         "status": "prepared",
         "roles": {role: _role_state() for role in ROLES},
@@ -2526,6 +3918,102 @@ def _initial_journal(
     }
     document["state_sha256"] = _state_sha256(document)
     return document
+
+
+def _validate_public_phase_handoff(
+    value: Any,
+    *,
+    inputs: NGINX.CoordinatorInputs,
+) -> None:
+    if value is None:
+        return
+    fields = {
+        "schema",
+        "status",
+        "phase",
+        "manifest_sha256",
+        "plan_sha256",
+        "campaign_id",
+        "operation_id",
+        "release_sha",
+        "legacy_release_sha",
+        "nginx_aggregate_sha256",
+        "approval_sha256",
+        "approval_policy_sha256",
+        "prestart_journal_state_sha256",
+        "prestart_journal_event_tail_sha256",
+        "prestart_journal_event_count",
+        "started_journal_state_sha256",
+        "started_journal_event_tail_sha256",
+        "started_journal_event_count",
+    }
+    if (
+        not isinstance(value, dict)
+        or set(value) != fields
+        or value["schema"] != PUBLIC_PHASE_HANDOFF_SCHEMA
+        or value["status"] not in {"intent", "started"}
+        or value["phase"] != PUBLIC_PHASE
+        or value["operation_id"] != inputs.operation_id
+        or value["release_sha"] != inputs.release_sha
+        or value["nginx_aggregate_sha256"] != inputs.aggregate_sha256
+        or value["campaign_id"] == inputs.operation_id
+        or _canonical_uuid4(value["operation_id"]) != inputs.operation_id
+        or _release_sha(value["release_sha"]) != inputs.release_sha
+        or _release_sha(value["legacy_release_sha"], label="legacy release SHA")
+        == inputs.release_sha
+    ):
+        raise FrozenSnapshotOrchestratorError(
+            "frozen snapshot public phase handoff differs"
+        )
+    try:
+        CONTROLLER._canonical_campaign_id(value["campaign_id"])  # noqa: SLF001
+    except CONTROLLER.CutoverContractError as exc:
+        raise FrozenSnapshotOrchestratorError(
+            "frozen snapshot public phase handoff campaign differs"
+        ) from exc
+    for field in (
+        "manifest_sha256",
+        "plan_sha256",
+        "nginx_aggregate_sha256",
+        "approval_sha256",
+        "approval_policy_sha256",
+        "prestart_journal_state_sha256",
+        "prestart_journal_event_tail_sha256",
+    ):
+        _nonzero_sha256(value[field], label=f"public handoff {field}")
+    if (
+        type(value["prestart_journal_event_count"]) is not int
+        or value["prestart_journal_event_count"] < 1
+    ):
+        raise FrozenSnapshotOrchestratorError(
+            "public handoff prestart journal event count differs"
+        )
+    if value["status"] == "intent":
+        if any(
+            value[field] is not None
+            for field in (
+                "started_journal_state_sha256",
+                "started_journal_event_tail_sha256",
+                "started_journal_event_count",
+            )
+        ):
+            raise FrozenSnapshotOrchestratorError(
+                "public handoff intent contains a premature public start"
+            )
+        return
+    for field in (
+        "started_journal_state_sha256",
+        "started_journal_event_tail_sha256",
+    ):
+        _nonzero_sha256(value[field], label=f"public handoff {field}")
+    if (
+        type(value["started_journal_event_count"]) is not int
+        or value["started_journal_event_count"]
+        != value["prestart_journal_event_count"] + 1
+    ):
+        raise FrozenSnapshotOrchestratorError(
+            "public handoff started journal event count differs"
+        )
 
 
 def _validate_event_chain(events: Any, tail: Any) -> None:
@@ -2666,6 +4154,7 @@ def _validate_journal(
         "nginx_aggregate_sha256",
         "state_receipt_sha256",
         "bindings",
+        "public_phase_handoff",
         "lease",
         "status",
         "roles",
@@ -2705,6 +4194,10 @@ def _validate_journal(
         raise FrozenSnapshotOrchestratorError(
             "frozen snapshot journal identity or fields differ"
         )
+    _validate_public_phase_handoff(
+        document["public_phase_handoff"],
+        inputs=inputs,
+    )
     lease = document["lease"]
     if lease is not None:
         if (
@@ -2790,6 +4283,10 @@ def _validate_journal(
         _nonzero_sha256(
             document["consumption_sha256"],
             label="journal consumption SHA-256",
+        )
+    if document["lease"] is not None and document["public_phase_handoff"] is None:
+        raise FrozenSnapshotOrchestratorError(
+            "frozen snapshot journal lease lacks a public phase handoff"
         )
     if document["status"] in {"ready-to-consume", "complete"} and (
         document["lease"] is None
@@ -3054,6 +4551,12 @@ def _ensure_controller_directories(
         required_uid=required_uid,
         private=True,
     )
+    _ensure_private_child(
+        paths["results"],
+        parent=paths["controller_root"],
+        label="controller frozen-final results",
+        required_uid=required_uid,
+    )
     snapshot_root = paths["controller_root"] / "source-snapshots"
     _ensure_private_child(
         snapshot_root,
@@ -3147,6 +4650,13 @@ def _controller_result(
     paths: Mapping[str, Any],
     journal: Mapping[str, Any],
 ) -> dict[str, Any]:
+    handoff = journal.get("public_phase_handoff")
+    _validate_public_phase_handoff(handoff, inputs=inputs)
+    if not isinstance(handoff, dict) or handoff["status"] != "started":
+        raise FrozenSnapshotOrchestratorError(
+            "completed frozen snapshot journal lacks a public phase start"
+        )
+    handoff_sha256 = _hash_payload(canonical_json(handoff))
     return {
         "schema": RESULT_SCHEMA,
         "status": "complete",
@@ -3171,6 +4681,17 @@ def _controller_result(
         "outcome_path": str(paths["outcome"]),
         "journal_path": str(paths["journal"]),
         "journal_state_sha256": journal["state_sha256"],
+        "public_phase": PUBLIC_PHASE,
+        "public_phase_handoff_sha256": handoff_sha256,
+        "public_phase_start_journal_state_sha256": handoff[
+            "started_journal_state_sha256"
+        ],
+        "public_phase_start_journal_event_tail_sha256": handoff[
+            "started_journal_event_tail_sha256"
+        ],
+        "public_phase_start_journal_event_count": handoff[
+            "started_journal_event_count"
+        ],
         "live_lease_outcome": "handoff-shadow-readonly",
         "legacy_writers_frozen": True,
         "automatic_restore_performed": False,
@@ -3179,6 +4700,64 @@ def _controller_result(
         "object_storage_used": False,
         "wa_contacted": False,
     }
+
+
+def _persist_controller_result(
+    *,
+    paths: Mapping[str, Any],
+    result: Mapping[str, Any],
+    required_uid: int,
+) -> Path:
+    payload = canonical_json(result)
+    digest = _hash_payload(payload)
+    _nonzero_sha256(digest, label="frozen snapshot coordinator result SHA-256")
+    path = paths["results"] / f"{RESULT_PREFIX}.{digest}.json"
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        _write_private_atomic(
+            path,
+            result,
+            required_uid=required_uid,
+            create=True,
+        )
+    except OSError as exc:
+        raise FrozenSnapshotOrchestratorError(
+            "frozen snapshot coordinator result cannot be inspected"
+        ) from exc
+    _reconcile_create_link(path, required_uid=required_uid)
+    observed = _read_file(
+        path,
+        label="frozen snapshot coordinator result",
+        required_uid=required_uid,
+        expected_mode=0o600,
+        maximum=MAX_JOURNAL_BYTES,
+    )
+    if observed != payload or _hash_payload(observed) != digest:
+        raise FrozenSnapshotOrchestratorError(
+            "existing frozen snapshot coordinator result differs"
+        )
+    return path
+
+
+def _final_controller_result(
+    *,
+    inputs: NGINX.CoordinatorInputs,
+    paths: Mapping[str, Any],
+    journal: Mapping[str, Any],
+    required_uid: int,
+) -> dict[str, Any]:
+    result = _controller_result(
+        inputs=inputs,
+        paths=paths,
+        journal=journal,
+    )
+    _persist_controller_result(
+        paths=paths,
+        result=result,
+        required_uid=required_uid,
+    )
+    return result
 
 
 def render_plan(
@@ -3408,6 +4987,12 @@ def _recover_consumed_lease(
         )
     ):
         return False
+    handoff = journal.get("public_phase_handoff")
+    _validate_public_phase_handoff(handoff, inputs=inputs)
+    if not isinstance(handoff, dict) or handoff["status"] != "started":
+        raise FrozenSnapshotOrchestratorError(
+            "consumed lease recovery lacks a started public phase handoff"
+        )
     claim_path = Path(journal["lease"]["claim_path"])
     claim_sha256 = journal["lease"]["claim_sha256"]
     try:
@@ -3518,6 +5103,219 @@ def _journal_write_existing(
     )
 
 
+def _assert_handoff_context(
+    handoff: Mapping[str, Any],
+    *,
+    context: PublicCutoverContext,
+    inputs: NGINX.CoordinatorInputs,
+) -> None:
+    expected = {
+        **_public_journal_bindings(context),
+        "nginx_aggregate_sha256": inputs.aggregate_sha256,
+        "approval_sha256": context.approval_sha256,
+        "approval_policy_sha256": context.approval_policy_sha256,
+        "phase": PUBLIC_PHASE,
+    }
+    if any(handoff.get(key) != value for key, value in expected.items()):
+        raise FrozenSnapshotOrchestratorError(
+            "public phase handoff differs from the verified cutover closure"
+        )
+
+
+def _assert_handoff_matches_started_state(
+    handoff: Mapping[str, Any],
+    state: Mapping[str, Any],
+    *,
+    context: PublicCutoverContext,
+    inputs: NGINX.CoordinatorInputs,
+) -> None:
+    _assert_handoff_context(handoff, context=context, inputs=inputs)
+    state = _validate_public_phase_state(
+        state,
+        context=context,
+        status="phase_started",
+    )
+    last = state["events"][-1]
+    if (
+        handoff.get("status") != "started"
+        or handoff.get("started_journal_state_sha256")
+        != state["state_sha256"]
+        or handoff.get("started_journal_event_tail_sha256")
+        != state["event_tail_sha256"]
+        or handoff.get("started_journal_event_count") != len(state["events"])
+        or last.get("previous_hash")
+        != handoff.get("prestart_journal_event_tail_sha256")
+        or len(state["events"])
+        != handoff.get("prestart_journal_event_count", -1) + 1
+    ):
+        raise FrozenSnapshotOrchestratorError(
+            "public phase handoff does not match the durable journal start"
+        )
+
+
+def _ensure_public_phase_started(
+    *,
+    journal: dict[str, Any],
+    paths: Mapping[str, Any],
+    inputs: NGINX.CoordinatorInputs,
+    bindings: Mapping[str, SOURCE.SnapshotBinding],
+    state_receipt_sha256: str,
+    required_uid: int,
+    context: PublicCutoverContext,
+) -> None:
+    """Durably start the public phase before any legacy writer freeze RPC."""
+
+    public_journal = CONTROLLER.ProductionCutoverJournal(
+        Path(context.manifest["deployment"]["controller_journal_path"])
+    )
+    try:
+        state = public_journal.assert_bindings(
+            **_public_journal_bindings(context)
+        )
+    except CONTROLLER.CutoverContractError as exc:
+        raise FrozenSnapshotOrchestratorError(
+            "public cutover journal binding differs"
+        ) from exc
+    handoff = journal["public_phase_handoff"]
+    if handoff is not None:
+        _validate_public_phase_handoff(handoff, inputs=inputs)
+        assert isinstance(handoff, dict)
+        _assert_handoff_context(handoff, context=context, inputs=inputs)
+        if handoff["status"] == "started":
+            _assert_handoff_matches_started_state(
+                handoff,
+                state,
+                context=context,
+                inputs=inputs,
+            )
+            return
+        if handoff["status"] != "intent":
+            raise FrozenSnapshotOrchestratorError(
+                "public phase handoff status is invalid"
+            )
+        if state.get("status") == "phase_started":
+            started_handoff = _public_phase_handoff(
+                context=context,
+                inputs=inputs,
+                state=state,
+                status="started",
+                prior_intent=handoff,
+            )
+            _assert_handoff_matches_started_state(
+                started_handoff,
+                state,
+                context=context,
+                inputs=inputs,
+            )
+            journal["public_phase_handoff"] = started_handoff
+            _append_event(
+                journal,
+                kind="public-phase-started",
+                role=None,
+                details={
+                    "handoff_sha256": _hash_payload(
+                        canonical_json(started_handoff)
+                    )
+                },
+            )
+            _journal_write_existing(
+                paths=paths,
+                journal=journal,
+                inputs=inputs,
+                bindings=bindings,
+                state_receipt_sha256=state_receipt_sha256,
+                required_uid=required_uid,
+            )
+            return
+        state = _validate_public_phase_state(
+            state,
+            context=context,
+            status="active",
+        )
+        if (
+            state["state_sha256"]
+            != handoff["prestart_journal_state_sha256"]
+            or state["event_tail_sha256"]
+            != handoff["prestart_journal_event_tail_sha256"]
+            or len(state["events"])
+            != handoff["prestart_journal_event_count"]
+        ):
+            raise FrozenSnapshotOrchestratorError(
+                "public cutover journal changed after the durable handoff intent"
+            )
+    else:
+        if journal["lease"] is not None:
+            raise FrozenSnapshotOrchestratorError(
+                "live lease exists without a durable public phase handoff"
+            )
+        state = _validate_public_phase_state(
+            state,
+            context=context,
+            status="active",
+        )
+        handoff = _public_phase_handoff(
+            context=context,
+            inputs=inputs,
+            state=state,
+            status="intent",
+        )
+        journal["public_phase_handoff"] = handoff
+        _append_event(
+            journal,
+            kind="public-phase-intent",
+            role=None,
+            details={"handoff_sha256": _hash_payload(canonical_json(handoff))},
+        )
+        _journal_write_existing(
+            paths=paths,
+            journal=journal,
+            inputs=inputs,
+            bindings=bindings,
+            state_receipt_sha256=state_receipt_sha256,
+            required_uid=required_uid,
+        )
+    _verify_public_cutover_authorization(context)
+    try:
+        state = public_journal.begin_phase(PUBLIC_PHASE)
+        state = public_journal.assert_bindings(
+            **_public_journal_bindings(context)
+        )
+    except CONTROLLER.CutoverContractError as exc:
+        raise FrozenSnapshotOrchestratorError(
+            "public cutover phase cannot be durably started"
+        ) from exc
+    started_handoff = _public_phase_handoff(
+        context=context,
+        inputs=inputs,
+        state=state,
+        status="started",
+        prior_intent=handoff,
+    )
+    _assert_handoff_matches_started_state(
+        started_handoff,
+        state,
+        context=context,
+        inputs=inputs,
+    )
+    journal["public_phase_handoff"] = started_handoff
+    _append_event(
+        journal,
+        kind="public-phase-started",
+        role=None,
+        details={
+            "handoff_sha256": _hash_payload(canonical_json(started_handoff))
+        },
+    )
+    _journal_write_existing(
+        paths=paths,
+        journal=journal,
+        inputs=inputs,
+        bindings=bindings,
+        state_receipt_sha256=state_receipt_sha256,
+        required_uid=required_uid,
+    )
+
+
 def _request_for(
     *,
     action: str,
@@ -3552,9 +5350,10 @@ def _install_role_material(
     paths: Mapping[str, Any],
     ssh_identity: Path,
     known_hosts: Path,
-    runner: Runner,
+    runner: Runner | None,
     required_uid: int,
     checkpoint: Checkpoint,
+    authorization: AuthorizationCheck | None = None,
 ) -> None:
     request = _request_for(
         action="prepare-material",
@@ -3578,6 +5377,7 @@ def _install_role_material(
                 runner=runner,
             ),
             checkpoint=checkpoint,
+            authorization=authorization,
         ),
         request=request,
     )
@@ -3601,6 +5401,7 @@ def _install_role_material(
                 required_uid=required_uid,
             ),
             checkpoint=checkpoint,
+            authorization=authorization,
         )
     install = dict(request)
     install["action"] = "install-material"
@@ -3618,6 +5419,7 @@ def _install_role_material(
                 runner=runner,
             ),
             checkpoint=checkpoint,
+            authorization=authorization,
         ),
         request=install,
         expected_claim_epoch=lease.claim["claim_epoch"],
@@ -3636,8 +5438,9 @@ def _invoke_bound_action(
     paths: Mapping[str, Any],
     ssh_identity: Path,
     known_hosts: Path,
-    runner: Runner,
+    runner: Runner | None,
     checkpoint: Checkpoint,
+    authorization: AuthorizationCheck | None = None,
 ) -> dict[str, Any]:
     request = _request_for(
         action=action,
@@ -3661,6 +5464,7 @@ def _invoke_bound_action(
                 runner=runner,
             ),
             checkpoint=checkpoint,
+            authorization=authorization,
         ),
         request=request,
         expected_claim_epoch=lease.claim["claim_epoch"],
@@ -3712,9 +5516,12 @@ def orchestrate(
     resume_claim_path: Path | None = None,
     resume_claim_sha256: str | None = None,
     resume_claim_nonce: str | None = None,
+    manifest_path: Path | None = None,
+    approval_path: Path | None = None,
+    approval_policy_path: Path | None = None,
     apply: bool = False,
     confirm: str | None = None,
-    runner: Runner = subprocess.run,
+    runner: Runner | None = None,
     required_uid: int = 0,
     checkpoint: Checkpoint | None = None,
     observed_host_addresses: set[str] | None = None,
@@ -3870,10 +5677,11 @@ def orchestrate(
                 raise FrozenSnapshotOrchestratorError(
                     "completed outcome digest differs"
                 )
-            return _controller_result(
+            return _final_controller_result(
                 inputs=inputs,
                 paths=paths,
                 journal=journal,
+                required_uid=required_uid,
             )
         if _recover_consumed_lease(
             journal=journal,
@@ -3884,11 +5692,32 @@ def orchestrate(
             paths=paths,
             required_uid=required_uid,
         ):
-            return _controller_result(
+            return _final_controller_result(
                 inputs=inputs,
                 paths=paths,
                 journal=journal,
+                required_uid=required_uid,
             )
+        public_context = _load_public_cutover_context(
+            manifest_path=manifest_path,
+            approval_path=approval_path,
+            approval_policy_path=approval_policy_path,
+            inputs=inputs,
+            bindings=bindings,
+        )
+        _ensure_public_phase_started(
+            journal=journal,
+            paths=paths,
+            inputs=inputs,
+            bindings=bindings,
+            state_receipt_sha256=state_receipt_sha256,
+            required_uid=required_uid,
+            context=public_context,
+        )
+        _verify_public_cutover_authorization(public_context)
+        authorization_callback: AuthorizationCheck = (
+            lambda: _verify_public_cutover_authorization(public_context)
+        )
         if resume:
             if (
                 journal["lease"] is None
@@ -3926,6 +5755,9 @@ def orchestrate(
                 legacy_frozen_receipt_path=state_receipt_path,
                 legacy_frozen_receipt_sha256=state_receipt_sha256,
             )
+        # The lease context's entry is the first live mutation. Revalidate the
+        # approval as the final operation before either a new or resumed lease.
+        authorization_callback()
         with lease_context as lease:
             try:
                 lease.verify()
@@ -4016,6 +5848,7 @@ def orchestrate(
                         runner=runner,
                         required_uid=required_uid,
                         checkpoint=callback,
+                        authorization=authorization_callback,
                     )
                     if not _phase_at_least(
                         journal["roles"][role]["phase"],
@@ -4057,6 +5890,7 @@ def orchestrate(
                         known_hosts=known_hosts,
                         runner=runner,
                         checkpoint=callback,
+                        authorization=authorization_callback,
                     )
                     freeze_sha256 = result["freeze_evidence_sha256"]
                     journal["roles"][role][
@@ -4091,6 +5925,7 @@ def orchestrate(
                         known_hosts=known_hosts,
                         runner=runner,
                         checkpoint=callback,
+                        authorization=authorization_callback,
                     )
                     if (
                         result["freeze_evidence_sha256"]
@@ -4152,6 +5987,7 @@ def orchestrate(
                         known_hosts=known_hosts,
                         runner=runner,
                         checkpoint=callback,
+                        authorization=authorization_callback,
                     )
                     if (
                         result["freeze_evidence_sha256"]
@@ -4202,6 +6038,7 @@ def orchestrate(
                                 required_uid=required_uid,
                             ),
                             checkpoint=callback,
+                            authorization=authorization_callback,
                         )
                     collection = _verify_collected_role(
                         role=role,
@@ -4250,7 +6087,9 @@ def orchestrate(
                     required_uid=required_uid,
                 )
                 callback("before-lease-consume")
+                authorization_callback()
                 lease.verify()
+                authorization_callback()
                 _consumption_path, consumption_sha256 = lease.consume(
                     outcome="handoff-shadow-readonly",
                     outcome_sha256=outcome_sha256,
@@ -4312,10 +6151,11 @@ def orchestrate(
             raise FrozenSnapshotOrchestratorError(
                 "frozen-final controller did not complete"
             )
-        return _controller_result(
+        return _final_controller_result(
             inputs=inputs,
             paths=paths,
             journal=final_journal,
+            required_uid=required_uid,
         )
 
 
@@ -4330,6 +6170,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--webapp-fi-binding", type=Path)
     parser.add_argument("--state-receipt", type=Path)
     parser.add_argument("--state-receipt-sha256")
+    parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--approval", type=Path)
+    parser.add_argument("--approval-policy", type=Path)
     parser.add_argument("--known-hosts", type=Path, default=KNOWN_HOSTS)
     parser.add_argument(
         "--ssh-identity",
@@ -4343,6 +6186,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")
     parser.add_argument("--host-request-b64", help=argparse.SUPPRESS)
+    parser.add_argument("--control-fd", type=int, help=argparse.SUPPRESS)
     return parser
 
 
@@ -4364,17 +6208,32 @@ def main(argv: list[str] | None = None) -> int:
                 args.webapp_fi_binding,
                 args.state_receipt,
                 args.state_receipt_sha256,
+                args.manifest,
+                args.approval,
+                args.approval_policy,
                 args.resume_claim,
                 args.resume_claim_sha256,
                 args.resume_claim_nonce,
                 args.confirm,
             )
-            if any(value is not None for value in forbidden) or args.apply:
+            if (
+                any(value is not None for value in forbidden)
+                or args.apply
+                or args.control_fd is None
+            ):
                 raise FrozenSnapshotOrchestratorError(
-                    "host request cannot be combined with controller arguments"
+                    "host request requires liveness and cannot be combined "
+                    "with controller arguments"
                 )
-            result = host_agent(args.host_request_b64)
+            result = host_agent(
+                args.host_request_b64,
+                control_fd=args.control_fd,
+            )
         else:
+            if args.control_fd is not None:
+                raise FrozenSnapshotOrchestratorError(
+                    "--control-fd is valid only for a host request"
+                )
             required = (
                 args.aggregate,
                 args.bot_fi_nginx_manifest,
@@ -4406,6 +6265,9 @@ def main(argv: list[str] | None = None) -> int:
                 resume_claim_path=args.resume_claim,
                 resume_claim_sha256=args.resume_claim_sha256,
                 resume_claim_nonce=args.resume_claim_nonce,
+                manifest_path=args.manifest,
+                approval_path=args.approval,
+                approval_policy_path=args.approval_policy,
                 apply=args.apply,
                 confirm=args.confirm,
             )

@@ -15,6 +15,9 @@ from core.dr_failover_orchestrator import DrOrchestrationError
 from core.dr_operation_ledger import WitnessOperationLedger
 from core.writer_witness_auth import WitnessClientCredential
 from core.writer_witness_client import WriterWitnessClientConfig
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+)
 
 
 class _Response:
@@ -44,6 +47,15 @@ class _Client:
 
 
 class DrOperationLedgerTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self._retirement_patch = patch(
+            "core.dr_operation_ledger.assert_retired", return_value=None
+        )
+        self._retirement_patch.start()
+
+    async def asyncTearDown(self) -> None:
+        self._retirement_patch.stop()
+
     async def test_witness_signature_binds_global_reservation_receipt(self):
         private = Ed25519PrivateKey.generate()
         public = base64.b64encode(
@@ -101,6 +113,47 @@ class DrOperationLedgerTests(unittest.IsolatedAsyncioTestCase):
             )
             with self.assertRaisesRegex(DrOrchestrationError, "does not match"):
                 await ledger.reserve(plan)
+
+
+class DrOperationLedgerRetirementTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def _ledger() -> WitnessOperationLedger:
+        private = Ed25519PrivateKey.generate()
+        public = base64.b64encode(
+            private.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+        ).decode()
+        return WitnessOperationLedger(
+            WriterWitnessClientConfig(
+                base_url="https://witness.invalid",
+                credential=WitnessClientCredential(
+                    key_id="forged", site="webapp_fi", secret="s" * 32
+                ),
+            ),
+            witness_public_key=public,
+        )
+
+    @staticmethod
+    def _plan() -> SimpleNamespace:
+        return SimpleNamespace(
+            operation_id=str(uuid4()),
+            operation_nonce=str(uuid4()),
+            plan_hash="a" * 64,
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        )
+
+    async def test_direct_ledger_calls_stop_before_http_client_creation(self):
+        ledger = self._ledger()
+        plan = self._plan()
+        with patch("core.dr_operation_ledger.httpx.AsyncClient") as client:
+            with self.assertRaises(LegacyThreeSiteStagingRuntimeRetiredError):
+                await ledger.reserve(plan)
+            with self.assertRaises(LegacyThreeSiteStagingRuntimeRetiredError):
+                await ledger.finalize(
+                    plan, outcome="failed", evidence_hash="b" * 64
+                )
+            with self.assertRaises(LegacyThreeSiteStagingRuntimeRetiredError):
+                await ledger._send(plan, action="reserve")
+        client.assert_not_called()
 
 
 if __name__ == "__main__":

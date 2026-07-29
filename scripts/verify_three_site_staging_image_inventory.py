@@ -26,6 +26,11 @@ from core.docker_image_identity import (
     verify_content_descriptor as _canonical_verify_content_descriptor,
 )
 from scripts.render_three_site_staging_role_compose import _atomic_write
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
 from scripts.verify_three_site_staging_inventory import load_inventory
 from scripts.verify_three_site_staging_role_bundle import (
     _verify_bundle_source,
@@ -73,6 +78,7 @@ def _verify_content_descriptor(descriptor: Any) -> str:
 
 
 def _run(arguments: list[str], *, timeout: int = 60) -> str:
+    assert_retired(component="staging-image-inventory", operation="Docker image inspection")
     try:
         result = subprocess.run(
             arguments,
@@ -183,6 +189,7 @@ def collect_image_document(
     role_compose: Path,
     env_file: Path,
 ) -> dict[str, Any]:
+    assert_retired(component="staging-image-inventory", operation="image inventory collection")
     references = sorted(
         {
             value for value in _run(
@@ -228,6 +235,11 @@ def collect_image_document(
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        assert_retired(component="staging-image-inventory", operation="CLI")
+    except LegacyThreeSiteStagingRuntimeRetiredError:
+        print(json.dumps(blocked_payload(component="staging-image-inventory"), sort_keys=True))
+        return 2
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--role", choices=("bot-fi", "webapp-fi", "webapp-ir", "witness"), required=True)
     parser.add_argument("--canonical-compose", type=Path, required=True)

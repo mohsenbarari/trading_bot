@@ -11,6 +11,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest import mock
@@ -23,7 +24,10 @@ from tests.test_install_production_shadow_precommit_inputs import (
     canonical,
     secure_file,
 )
-from tests.test_production_shadow_cutover_controller import manifest_payload
+from tests.test_production_shadow_cutover_controller import (
+    manifest_payload,
+    write_controller_manifest,
+)
 
 
 def completed(
@@ -212,30 +216,27 @@ class ControllerInputClosureTests(unittest.TestCase):
             fixture.runtime_ids
         )
         validated = CUTOVER.validate_manifest(controller)
+        controller_path = root / "controller.json"
+        write_controller_manifest(controller_path, validated)
         controller_sha256 = hashlib.sha256(
-            MODULE._canonical_json(validated)  # noqa: SLF001
+            controller_path.read_bytes()
         ).hexdigest()
-        fixture.precommit_document[
-            "controller_manifest_sha256"
-        ] = controller_sha256
+        fixture.precommit_document["controller_manifest_sha256"] = (
+            controller_sha256
+        )
         fixture.precommit_document["approval_sha256"] = artifacts[
             "cutover_approval_sha256"
         ]
         fixture.write_precommit()
-        fixture.source_document[
-            "controller_manifest_sha256"
-        ] = controller_sha256
+        fixture.source_document["controller_manifest_sha256"] = (
+            controller_sha256
+        )
         fixture.source_document["approval_sha256"] = artifacts[
             "cutover_approval_sha256"
         ]
         secure_file(
             fixture.source_manifest_path,
             canonical(fixture.source_document),
-        )
-        controller_path = root / "controller.json"
-        secure_file(
-            controller_path,
-            MODULE._canonical_json(validated),  # noqa: SLF001
         )
         return fixture, validated, controller_sha256, controller_path
 
@@ -352,7 +353,7 @@ class ControllerInputClosureTests(unittest.TestCase):
                 )
                 with self.assertRaisesRegex(
                     MODULE.PrecommitInputOrchestrationError,
-                    "not canonical",
+                    "unavailable or invalid",
                 ):
                     MODULE._read_controller_manifest(  # noqa: SLF001
                         controller_path
@@ -371,6 +372,109 @@ class ControllerInputClosureTests(unittest.TestCase):
 
 
 class ControllerExecutionTests(unittest.TestCase):
+    def test_default_runner_keeps_controller_stdin_live(self):
+        code = (
+            "import json,select\n"
+            "readable=bool(select.select([0],[],[],0)[0])\n"
+            "print(json.dumps({'stdin_eof':readable},"
+            "sort_keys=True,separators=(',',':')))\n"
+        )
+        completed = MODULE._default_runner(
+            [sys.executable, "-I", "-B", "-c", code],
+            5,
+            {"PATH": "/usr/bin:/bin"},
+        )
+        self.assertEqual(completed.returncode, 0)
+        self.assertEqual(completed.stderr, b"")
+        self.assertEqual(completed.stdout, b'{"stdin_eof":false}\n')
+
+    def test_default_runner_preserves_subsecond_wait_budget(self):
+        process = mock.Mock()
+        process.pid = 42
+        process.stdin = mock.Mock()
+        process.stdout.fileno.return_value = 10
+        process.stderr.fileno.return_value = 11
+        process.wait.return_value = 0
+        selector = mock.Mock()
+        selector.get_map.return_value = {}
+        with (
+            mock.patch.object(
+                MODULE.subprocess,
+                "Popen",
+                return_value=process,
+            ),
+            mock.patch.object(
+                MODULE.selectors,
+                "DefaultSelector",
+                return_value=selector,
+            ),
+            mock.patch.object(MODULE.os, "set_blocking"),
+            mock.patch.object(MODULE.time, "monotonic", side_effect=(10, 10.75)),
+            mock.patch.object(MODULE, "_terminate_process_group"),
+        ):
+            completed = MODULE._default_runner(
+                ["/usr/bin/true"],
+                1,
+                {"PATH": "/usr/bin:/bin"},
+            )
+        self.assertEqual(completed.returncode, 0)
+        self.assertEqual(process.wait.call_args, mock.call(timeout=0.25))
+
+    def test_default_runner_kills_forked_descendant_after_parent_exit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            sentinel = Path(directory) / "controller-descendant-survived"
+            descendant_pid = Path(directory) / "controller-descendant-pid"
+            code = (
+                "import os,signal,time\n"
+                "if os.fork() == 0:\n"
+                " os.setsid()\n"
+                " if os.fork() != 0: time.sleep(60);os._exit(0)\n"
+                " os.close(1);os.close(2)\n"
+                " signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                f" open({str(descendant_pid)!r},'w').write(str(os.getpid()))\n"
+                " time.sleep(0.5)\n"
+                f" open({str(sentinel)!r},'wb').write(b'survived')\n"
+                " os._exit(0)\n"
+                f"while not os.path.exists({str(descendant_pid)!r}):"
+                " time.sleep(0.005)\n"
+                "print('{}',flush=True)\n"
+            )
+            with mock.patch.object(
+                MODULE,
+                "PROCESS_GROUP_TERM_SECONDS",
+                0.1,
+            ):
+                completed = MODULE._default_runner(
+                    [sys.executable, "-I", "-B", "-c", code],
+                    5,
+                    {"PATH": "/usr/bin:/bin"},
+                )
+            self.assertEqual(completed.stdout, b"{}\n")
+            time.sleep(0.6)
+            self.assertFalse(sentinel.exists())
+            self.assertFalse(
+                Path(
+                    f"/proc/{descendant_pid.read_text(encoding='ascii')}"
+                ).exists()
+            )
+
+    def test_default_runner_bounds_output_while_process_runs(self):
+        with (
+            mock.patch.object(MODULE, "MAX_JSON_BYTES", 1024),
+            self.assertRaises(MODULE.BoundedRunnerError),
+        ):
+            MODULE._default_runner(
+                [
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    "-c",
+                    "import os;os.write(1,b'x'*4096)",
+                ],
+                5,
+                {"PATH": "/usr/bin:/bin"},
+            )
+
     def test_default_plan_and_wrong_confirmation_are_zero_runner_zero_mutation(
         self,
     ) -> None:
@@ -1081,12 +1185,17 @@ class ReleaseAndInstallerTests(unittest.TestCase):
                 },
             }
 
+            git_calls: list[
+                tuple[list[str], dict[str, str]]
+            ] = []
+
             def runner(
                 argv: object,
                 _timeout: int,
-                _env: object,
+                _env: dict[str, str],
             ) -> subprocess.CompletedProcess[bytes]:
                 arguments = list(argv)
+                git_calls.append((arguments, _env))
                 if "ls-tree" in arguments:
                     relative = arguments[-1]
                     payload = (release_root / relative).read_bytes()
@@ -1117,6 +1226,23 @@ class ReleaseAndInstallerTests(unittest.TestCase):
                 current_script=orchestrator,
             )
             self.assertEqual(observed, release_root)
+            self.assertGreaterEqual(len(git_calls), 6)
+            for argv, environment in git_calls:
+                self.assertEqual(argv[0], MODULE.GIT)
+                self.assertIn("--no-optional-locks", argv)
+                self.assertIn("core.fsmonitor=false", argv)
+                self.assertIn("core.untrackedCache=false", argv)
+                self.assertIn("core.hooksPath=/dev/null", argv)
+                self.assertIn("core.fileMode=true", argv)
+                self.assertEqual(
+                    environment["GIT_CONFIG_GLOBAL"],
+                    "/dev/null",
+                )
+                self.assertEqual(
+                    environment["GIT_NO_REPLACE_OBJECTS"],
+                    "1",
+                )
+            git_calls.clear()
             request["controller_manifest"]["artifacts"][
                 "host_agent_sha256"
             ] = "f" * 64
@@ -1208,8 +1334,10 @@ class ReleaseAndInstallerTests(unittest.TestCase):
                 mock.patch.object(
                     MODULE.INSTALLER,
                     "_load_source_snapshot",
-                    return_value=({}, SimpleNamespace(), {}),
-                ),
+                    side_effect=AssertionError(
+                        "large source validation must stay in bounded installer"
+                    ),
+                ) as source_loader,
                 mock.patch.object(
                     MODULE,
                     "_validate_role_controller_binding",
@@ -1228,6 +1356,7 @@ class ReleaseAndInstallerTests(unittest.TestCase):
                 )
             self.assertIs(loaded, manifest)
             self.assertEqual(members, role_members)
+            source_loader.assert_not_called()
             self.assertEqual(
                 calls[0][:4],
                 [

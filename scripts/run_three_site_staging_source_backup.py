@@ -53,11 +53,40 @@ class StagingBackupError(RuntimeError):
     pass
 
 
+LEGACY_SOURCE_BACKUP_APPLY_RETIREMENT_REASON = (
+    "legacy staging source-backup apply is retired because no immutable "
+    "controller-bound authorization closure exists"
+)
+
+
+class LegacySourceBackupApplyRetiredError(StagingBackupError):
+    """Raised before a legacy source backup can read caller-selected authority."""
+
+
+def assert_legacy_source_backup_apply_retired(operation: str) -> None:
+    """Deny all mutable source-backup paths without an anchored campaign closure."""
+
+    raise LegacySourceBackupApplyRetiredError(
+        f"{LEGACY_SOURCE_BACKUP_APPLY_RETIREMENT_REASON}: {operation}"
+    )
+
+
+def legacy_source_backup_apply_blocked_payload() -> dict[str, object]:
+    """Return the side-effect-free result used for every retired apply request."""
+
+    return {
+        "status": "blocked_legacy_source_backup_apply_retired",
+        "reason": LEGACY_SOURCE_BACKUP_APPLY_RETIREMENT_REASON,
+        "replacement": "production-shadow source snapshot and restore workflow",
+    }
+
+
 def confirmation_phrase(campaign_id: str, source_role: str, target_release_sha: str) -> str:
     return f"backup-and-restore:{campaign_id}:{source_role}:{target_release_sha}"
 
 
 def _run(arguments: list[str], *, timeout: int = 30) -> str:
+    assert_legacy_source_backup_apply_retired("run source-backup command")
     try:
         result = subprocess.run(
             arguments,
@@ -105,6 +134,7 @@ def _secure_env(path: Path) -> dict[str, str]:
 
 
 def _prepare_output(path: Path, *, repo: Path) -> None:
+    assert_legacy_source_backup_apply_retired("prepare source-backup output")
     resolved = path.resolve()
     try:
         resolved.relative_to(repo.resolve())
@@ -123,6 +153,7 @@ def _prepare_output(path: Path, *, repo: Path) -> None:
 
 
 def _stream_to_file(arguments: list[str], target: Path, *, timeout: int) -> None:
+    assert_legacy_source_backup_apply_retired("stream source-backup artifact")
     descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         with os.fdopen(descriptor, "wb") as output:
@@ -399,6 +430,7 @@ def _psql(
     database: str,
     sql: str,
 ) -> str:
+    assert_legacy_source_backup_apply_retired("query legacy source database")
     return _run(
         [
             *docker_prefix, "exec", "-T", service,
@@ -410,6 +442,7 @@ def _psql(
 
 
 def _scratch_psql(container: str, sql: str) -> str:
+    assert_legacy_source_backup_apply_retired("query source-backup restore drill")
     return _run(
         [
             DOCKER, "exec", container, "psql", "-v", "ON_ERROR_STOP=1",
@@ -427,6 +460,7 @@ def _wait_for_scratch_database(container: str, *, attempts: int = 30) -> None:
     the first ``pg_restore``.  A successful query against the exact restore
     database is the readiness condition required by the restore drill.
     """
+    assert_legacy_source_backup_apply_retired("wait for source-backup restore drill")
     for _attempt in range(attempts):
         ready = subprocess.run(
             [DOCKER, "exec", container, "pg_isready", "-U", "restore", "-d", "restore"],
@@ -488,6 +522,7 @@ def _database_fingerprint(query) -> tuple[str, int, int]:  # noqa: ANN001
 
 
 def _restore_drill(dump_path: Path, *, container: str) -> dict[str, object]:
+    assert_legacy_source_backup_apply_retired("run source-backup restore drill")
     _run(
         [
             DOCKER, "run", "-d", "--name", container,
@@ -559,146 +594,37 @@ def build_plan(args: argparse.Namespace, inventory_result: dict[str, object]) ->
     }
 
 
-def execute(args: argparse.Namespace, inventory_result: dict[str, object]) -> dict[str, object]:
-    repo = args.repo.resolve()
-    expected_compose = (repo / "deploy/staging/docker-compose.staging.yml").resolve()
-    if args.compose.resolve() != expected_compose:
-        raise StagingBackupError("source backup is locked to the reviewed legacy staging Compose")
-    if _run([GIT, "-C", str(repo), "rev-parse", "HEAD"]) != args.target_release_sha:
-        raise StagingBackupError("backup controller repository is not the exact target release")
-    if _run([GIT, "-C", str(repo), "status", "--porcelain=v1", "--untracked-files=all"]):
-        raise StagingBackupError("backup controller repository must be clean")
-    env = _secure_env(args.env_file)
-    user = env.get("POSTGRES_USER", "")
-    database = env.get("POSTGRES_DB", "")
-    if not IDENT_RE.fullmatch(user) or not IDENT_RE.fullmatch(database):
-        raise StagingBackupError("legacy staging database identity is invalid")
-    _prepare_output(args.output_dir, repo=repo)
-    prefix = _compose_base(
-        args.compose, args.env_file, args.source_role, args.project_name
-    )
-    _run([*prefix, "config", "--quiet"], timeout=30)
-    freeze, freeze_hash = _load_freeze_evidence(
-        args.source_freeze_evidence,
-        campaign_id=str(inventory_result["campaign_id"]),
-        target_release_sha=str(inventory_result["release_sha"]),
-        source_role=args.source_role,
-        expected_source_release_sha=args.expected_source_release_sha,
-        project_name=args.project_name,
-    )
-    app_service = ROLE_APP_SERVICE[args.source_role]
-    if not _run([*prefix, "ps", "--status", "running", "-q", "db"]):
-        raise StagingBackupError("required legacy staging database is not running")
-    if _run([*prefix, "ps", "--status", "running", "-q", app_service]):
-        raise StagingBackupError("legacy source application resumed after freeze")
-    source_system_id = _psql(
-        prefix, "db", user, database,
-        "SELECT system_identifier FROM pg_control_system()",
-    )
-    source_revision = _psql(
-        prefix, "db", user, database, "SELECT version_num FROM alembic_version"
-    )
+def _verified_execution_inventory(args: argparse.Namespace) -> dict[str, object]:
+    """Re-verify the campaign binding before any source-host command.
+
+    ``execute`` is intentionally importable for the closed source-adoption
+    workflow.  It must not trust the caller-provided summary that the CLI
+    happened to construct first: an imported call must re-read the approved
+    inventory and enforce the same confirmation before it can reach Docker.
+    """
+
     if (
-        source_system_id != freeze["postgres"]["system_id"]
-        or source_revision != freeze["postgres"]["alembic_revision"]
+        args.source_role not in ROLE_APP_SERVICE
+        or SHA_RE.fullmatch(str(args.expected_source_release_sha)) is None
+        or SHA_RE.fullmatch(str(args.target_release_sha)) is None
     ):
-        raise StagingBackupError("legacy database identity changed after source freeze")
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    base = f"{args.source_role}-{inventory_result['campaign_id']}-{stamp}"
-    dump = args.output_dir / f"{base}.postgres.custom"
-    uploads = args.output_dir / f"{base}.uploads.tar.gz"
-    audit = args.output_dir / f"{base}.audit.tar.gz"
-    _stream_to_file(
-        [
-            *prefix, "exec", "-T", "db", "pg_dump", "-U", user, "-d", database,
-            "-Fc", "--no-owner", "--no-acl",
-        ],
-        dump,
-        timeout=900,
+        raise StagingBackupError("source and target releases must be exact 40-hex SHAs")
+    inventory_result = verify_approved_inventory(
+        load_inventory(args.inventory),
+        approval=load_inventory(args.inventory_approval),
+        approval_policy=load_inventory(args.approval_policy),
+        host_destructive=None,
     )
-    for target, directory in ((uploads, "/app/uploads"), (audit, "/app/audit_trail")):
-        _stream_to_file(
-            [
-                *prefix, "run", "--rm", "--no-deps", "-T",
-                "--entrypoint", "tar", app_service,
-                "-C", directory, "-czf", "-", ".",
-            ],
-            target,
-            timeout=900,
-        )
-    upload_members = verify_tar_artifact(uploads)
-    audit_members = verify_tar_artifact(audit)
-    scratch = f"tb3-restore-{args.source_role.replace('_', '-')}-{str(inventory_result['campaign_id'])[:8]}"
-    # Refuse to replace an unrelated or stale scratch resource.
-    existing = subprocess.run(
-        [DOCKER, "container", "inspect", scratch],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-        timeout=10,
-        env=SAFE_ENV,
-    )
-    if existing.returncode == 0:
-        raise StagingBackupError("restore-drill container name is already occupied")
-    restore = _restore_drill(dump, container=scratch)
-    if restore["restored_alembic_revision"] != source_revision:
-        raise StagingBackupError("restore drill schema revision differs from source backup")
-    if restore["scratch_postgres_system_id"] == source_system_id:
-        raise StagingBackupError("restore drill did not use an independent PostgreSQL cluster")
-    if restore["database_fingerprint_sha256"] != freeze["postgres"]["database_fingerprint_sha256"]:
-        raise StagingBackupError("restored backup fingerprint differs from frozen source")
-    running_after = {
-        value for value in _run(
-            [*prefix, "ps", "--status", "running", "--services"]
-        ).splitlines() if value
-    }
-    if running_after != {"db", "redis"}:
-        raise StagingBackupError("legacy staging changed its frozen service state during backup")
-    manifest = {
-        "schema": "three-site-staging-source-backup-v2",
-        "campaign_id": inventory_result["campaign_id"],
-        "source_role": args.source_role,
-        "source_release_sha": args.expected_source_release_sha,
-        "target_release_sha": inventory_result["release_sha"],
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "source_postgres_system_id": source_system_id,
-        "source_alembic_revision": source_revision,
-        "source_freeze_evidence_sha256": freeze_hash,
-        "redis_observation": freeze["redis_observation"],
-        "artifacts": {
-            "postgres": _sha_file(dump),
-            "uploads": {**_sha_file(uploads), "safe_member_count": upload_members},
-            "audit": {**_sha_file(audit), "safe_member_count": audit_members},
-        },
-        "restore_drill": restore,
-        "redis_restore": False,
-        "application_mutation": False,
-    }
-    manifest_path = args.output_dir / f"{base}.manifest.json"
-    _atomic_write(
-        manifest_path,
-        (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode(),
-        mode=0o600,
-    )
-    verify_backup_manifest(
-        manifest,
-        campaign_id=str(inventory_result["campaign_id"]),
-        source_role=args.source_role,
-        source_release_sha=args.expected_source_release_sha,
-        target_release_sha=str(inventory_result["release_sha"]),
-        verify_files=True,
-    )
-    return {
-        "status": "backup-and-restore-verified",
-        "campaign_id": inventory_result["campaign_id"],
-        "source_role": args.source_role,
-        "manifest": str(manifest_path),
-        "manifest_sha256": hashlib.sha256(
-            json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest(),
-        "database_fingerprint_sha256": restore["database_fingerprint_sha256"],
-        "redis_restore": False,
-    }
+    if inventory_result["inventory_stage"] != "provisioned":
+        raise StagingBackupError("final source backup requires approved provisioned inventory")
+    if inventory_result["release_sha"] != args.target_release_sha:
+        raise StagingBackupError("target SHA differs from approved planned inventory")
+    return inventory_result
+
+
+def execute(args: argparse.Namespace, inventory_result: dict[str, object]) -> dict[str, object]:
+    del args, inventory_result
+    assert_legacy_source_backup_apply_retired("execute source backup")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -717,39 +643,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--target-release-sha", required=True)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")
-    args = parser.parse_args(argv)
+    parser.parse_args(argv)
     try:
-        if not SHA_RE.fullmatch(args.expected_source_release_sha) or not SHA_RE.fullmatch(
-            args.target_release_sha
-        ):
-            raise StagingBackupError("source and target releases must be exact 40-hex SHAs")
-        inventory_result = verify_approved_inventory(
-            load_inventory(args.inventory),
-            approval=load_inventory(args.inventory_approval),
-            approval_policy=load_inventory(args.approval_policy),
-            host_destructive=None,
-        )
-        if inventory_result["inventory_stage"] != "provisioned":
-            raise StagingBackupError("final source backup requires approved provisioned inventory")
-        if inventory_result["release_sha"] != args.target_release_sha:
-            raise StagingBackupError("target SHA differs from approved planned inventory")
-        plan = build_plan(args, inventory_result)
-        if not args.apply:
-            result = plan
-        else:
-            if args.confirm != plan["required_confirmation"]:
-                raise StagingBackupError("backup confirmation phrase is missing or stale")
-            result = execute(args, inventory_result)
-    except Exception as exc:
-        print(
-            json.dumps(
-                {"status": "blocked", "error": str(exc), "error_class": type(exc).__name__},
-                sort_keys=True,
-            )
-        )
-        return 1
-    print(json.dumps(result, sort_keys=True))
-    return 0
+        assert_legacy_source_backup_apply_retired("source-backup CLI")
+    except LegacySourceBackupApplyRetiredError:
+        print(json.dumps(legacy_source_backup_apply_blocked_payload(), sort_keys=True))
+        return 2
+    raise AssertionError("retired source-backup guard was unexpectedly bypassed")
 
 
 if __name__ == "__main__":

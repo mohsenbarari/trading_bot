@@ -49,6 +49,9 @@ CLAUDE_LOG_ROOT = REPO_ROOT / "tmp" / "claude" / "full_matrix_logs"
 CHATGPT_LOG_ROOT = REPO_ROOT / "tmp" / "chatgpt" / "full_matrix_logs"
 EXECUTION_CONFIRM_ENV = "STAGING_TWO_SERVER_FULL_MATRIX_CONFIRM"
 EXECUTION_CONFIRM_VALUE = "execute-staging-two-server-full-matrix"
+LEGACY_TWO_SERVER_STAGING_MATRIX_RETIREMENT_REASON = (
+    "legacy_two_server_staging_matrix_retired_use_three_site_sealed_campaign"
+)
 DEFAULT_IRAN_SSH_HOST = "root@65.109.220.59"
 DEFAULT_IRAN_SSH_PORT = "37067"
 WA_IR_OBJECT_STORAGE_ONLY_IP = "95.38.164.29"
@@ -63,6 +66,25 @@ REMOTE_STAGING_COMPOSE_FILE = "deploy/staging/docker-compose.staging.yml"
 REMOTE_STAGING_ENV_FILE = ".env.staging"
 ROLE_START_BARRIER_DELAY_SECONDS = 30.0
 RACE_START_BARRIER_DELAY_SECONDS = 90.0
+
+
+class LegacyTwoServerStagingMatrixRetiredError(RuntimeError):
+    """Raised before the retired runner can access a two-server endpoint."""
+
+
+def assert_legacy_two_server_staging_matrix_execution_retired(operation: str) -> None:
+    """Hard-deny all legacy staging runner runtime entrypoints.
+
+    The retained module is allowed to serialize plans and validate artifacts,
+    but no environment confirmation or imported caller may re-enable its
+    historical HTTP, SSH, SCP, container, or scenario execution paths.
+    """
+
+    raise LegacyTwoServerStagingMatrixRetiredError(
+        "Legacy two-server staging Full Matrix execution is retired and hard-disabled "
+        f"before network or container access: operation={operation}; "
+        "use a sealed three-site campaign verifier."
+    )
 
 DRIVER_SCENARIOS = [
     {
@@ -272,11 +294,13 @@ def sanitize_payload(value: Any) -> Any:
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
+    assert_legacy_two_server_staging_matrix_execution_retired("write_json")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(sanitize_payload(payload), ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def append_jsonl(path: Path, payload: dict[str, Any]) -> None:
+    assert_legacy_two_server_staging_matrix_execution_retired("append_jsonl")
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(sanitize_payload(payload), ensure_ascii=False, sort_keys=True) + "\n")
@@ -300,6 +324,7 @@ def redact_command(command: list[str]) -> list[str]:
 
 
 def write_text(path: Path, content: str) -> None:
+    assert_legacy_two_server_staging_matrix_execution_retired("write_text")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(sanitize_text(content), encoding="utf-8")
 
@@ -330,6 +355,7 @@ def detect_forbidden_secret_like_values(root: Path) -> dict[str, Any]:
 
 
 def run_git_value(args: list[str]) -> str | None:
+    assert_legacy_two_server_staging_matrix_execution_retired("git_subprocess_execution")
     result = subprocess.run(
         ["git", "-C", str(REPO_ROOT), *args],
         capture_output=True,
@@ -368,6 +394,7 @@ def validate_staging_url(name: str, url: str, expected_host: str | None = None) 
 
 
 def fetch_json(url: str, *, basic_auth: tuple[str, str] | None, timeout_seconds: float = 10.0) -> tuple[int, dict[str, Any] | None, str]:
+    assert_legacy_two_server_staging_matrix_execution_retired("http_json_fetch")
     request = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "staging-two-server-full-matrix/1"})
     if basic_auth:
         raw = f"{basic_auth[0]}:{basic_auth[1]}".encode("utf-8")
@@ -395,6 +422,7 @@ def fetch_status(
     method: str = "HEAD",
     timeout_seconds: float = 10.0,
 ) -> tuple[int, dict[str, str], str]:
+    assert_legacy_two_server_staging_matrix_execution_retired("http_status_fetch")
     request = urllib.request.Request(
         url,
         headers={"Accept": "application/json", "User-Agent": "staging-two-server-full-matrix/1"},
@@ -423,6 +451,7 @@ def fetch_observability_json(
     payload: dict[str, Any] | None = None,
     timeout_seconds: float = 30.0,
 ) -> tuple[int, dict[str, Any] | None, str]:
+    assert_legacy_two_server_staging_matrix_execution_retired("observability_http_fetch")
     body: bytes | None = None
     headers = {
         "Accept": "application/json",
@@ -539,6 +568,7 @@ def check_internal_ingress_without_basic_auth(name: str, url: str) -> CheckResul
 
 
 def check_tls(name: str, base_url: str) -> CheckResult:
+    assert_legacy_two_server_staging_matrix_execution_retired("tls_check")
     started = time.perf_counter()
     hostname = host_of(base_url)
     if not hostname:
@@ -617,6 +647,7 @@ def normalized_url_host(value: Any) -> str:
 
 
 def run_json_command(command: list[str], *, timeout_seconds: float = 10.0) -> tuple[int, dict[str, Any] | None, str, str]:
+    assert_legacy_two_server_staging_matrix_execution_retired("json_subprocess_execution")
     try:
         result = subprocess.run(command, capture_output=True, text=True, timeout=timeout_seconds, check=False)
     except Exception as exc:  # noqa: BLE001
@@ -657,6 +688,7 @@ def run_logged_command(
     cwd: Path = REPO_ROOT,
     env: dict[str, str] | None = None,
 ) -> CommandResult:
+    assert_legacy_two_server_staging_matrix_execution_retired("logged_subprocess_execution")
     log_dir.mkdir(parents=True, exist_ok=True)
     slug = command_slug(name)
     stdout_path = log_dir / f"{slug}.stdout.log"
@@ -709,6 +741,7 @@ def run_logged_commands_parallel(
     cwd: Path = REPO_ROOT,
     env: dict[str, str] | None = None,
 ) -> list[CommandResult]:
+    assert_legacy_two_server_staging_matrix_execution_retired("parallel_subprocess_execution")
     log_dir.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
     processes: list[tuple[str, list[str], Path, Path, subprocess.Popen[str]]] = []
@@ -1063,6 +1096,7 @@ def build_manifest_summary_md(manifest: dict[str, Any]) -> str:
 
 
 def write_scenario_plan_jsonl(path: Path, manifest: dict[str, Any]) -> None:
+    assert_legacy_two_server_staging_matrix_execution_retired("write_scenario_plan_jsonl")
     if path.exists():
         path.unlink()
     for index, record in enumerate(manifest_records(manifest), start=1):
@@ -1136,6 +1170,11 @@ def build_run_metadata(args: argparse.Namespace, manifest: dict[str, Any], *, st
 
 
 def publish_agent_logs(artifact_dir: Path, args: argparse.Namespace, manifest: dict[str, Any], *, status: str) -> None:
+    # This helper removes and recreates caller-derived log paths. It cannot be
+    # retained as a directly importable operation after the two-server runner
+    # was retired.
+    assert_legacy_two_server_staging_matrix_execution_retired("publish_agent_logs")
+
     targets = [CLAUDE_LOG_ROOT / args.run_id, CHATGPT_LOG_ROOT / args.run_id]
     write_text(artifact_dir / "README.md", build_readme(args, manifest, status))
     write_json(artifact_dir / "run-metadata.json", build_run_metadata(args, manifest, status=status))
@@ -1161,6 +1200,11 @@ def publish_agent_logs(artifact_dir: Path, args: argparse.Namespace, manifest: d
 
 
 def build_plan(args: argparse.Namespace) -> dict[str, Any]:
+    # "plan" is not side-effect free in this historical runner: it creates
+    # artifacts and eventually replaces log directories derived from ``args``.
+    # Block direct import callers before they can inspect or use those values.
+    assert_legacy_two_server_staging_matrix_execution_retired("build_plan")
+
     manifest = build_manifest(args)
     validation_errors = manifest_builder.validate_manifest(manifest)
     artifact_dir = args.artifact_dir
@@ -1231,6 +1275,7 @@ def build_summary_md(summary: dict[str, Any]) -> str:
 
 
 def preflight_checks(args: argparse.Namespace, manifest: dict[str, Any]) -> list[CheckResult]:
+    assert_legacy_two_server_staging_matrix_execution_retired("preflight_checks")
     auth = basic_auth_from_args(args)
     checks: list[CheckResult] = []
     current_branch = run_git_value(["branch", "--show-current"])
@@ -1482,6 +1527,7 @@ def sync_health_gate_failures(
 
 
 def capture_sync_health(args: argparse.Namespace, *, label: str, require_fresh_parity: bool = False) -> dict[str, Any]:
+    assert_legacy_two_server_staging_matrix_execution_retired("capture_sync_health")
     auth = basic_auth_from_args(args)
     payload: dict[str, Any] = {
         "schema_version": "staging_two_server_sync_health_pair_v1",
@@ -1535,6 +1581,7 @@ def capture_sync_health(args: argparse.Namespace, *, label: str, require_fresh_p
 
 
 def capture_parity(args: argparse.Namespace, *, label: str) -> dict[str, Any]:
+    assert_legacy_two_server_staging_matrix_execution_retired("capture_parity")
     from core.sync_parity import compare_parity_snapshots
     from core.sync_parity_observability import infer_parity_comparison_mode, summarize_parity_comparison
 
@@ -1636,6 +1683,7 @@ def capture_parity(args: argparse.Namespace, *, label: str) -> dict[str, Any]:
 
 
 def run_preflight(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    assert_legacy_two_server_staging_matrix_execution_retired("run_preflight")
     plan = build_plan(args)
     manifest = plan["manifest"]
     checks = preflight_checks(args, manifest)
@@ -2373,6 +2421,7 @@ def race_role_command(
 
 
 def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], *, suite_dir: Path, remote_root: str) -> dict[str, Any]:
+    assert_legacy_two_server_staging_matrix_execution_retired("execute_driver_scenario")
     scenario_id = scenario["id"]
     local_dir = suite_dir / scenario_id
     log_dir = local_dir / "logs"
@@ -2680,6 +2729,7 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
 
 
 def run_driver_suite(args: argparse.Namespace, manifest: dict[str, Any]) -> dict[str, Any]:
+    assert_legacy_two_server_staging_matrix_execution_retired("run_driver_suite")
     suite_dir = args.artifact_dir / "driver-suite"
     suite_dir.mkdir(parents=True, exist_ok=True)
     remote_root = f"{args.iran_workdir}/tmp/full_matrix_logs/{args.run_id}"
@@ -2739,6 +2789,7 @@ def run_driver_suite(args: argparse.Namespace, manifest: dict[str, Any]) -> dict
 
 
 def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    assert_legacy_two_server_staging_matrix_execution_retired("run_execute")
     plan, preflight_exit = run_preflight(args)
     summary = dict(plan["summary"])
     if preflight_exit != 0:
@@ -2853,7 +2904,39 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # This historical CLI used to treat ``plan`` as harmless, but plan creation
+    # writes caller-derived artifact/log paths. Retire the command before
+    # argparse can materialize or normalize any caller-controlled value.
+    print(
+        json.dumps(
+            {
+                "status": "blocked_legacy_two_server_staging_matrix_retired",
+                "reason": LEGACY_TWO_SERVER_STAGING_MATRIX_RETIREMENT_REASON,
+                "required_replacement": "sealed_three_site_campaign_verifier",
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+    return 2
+
     args = parse_args(argv)
+    if args.mode in {"preflight", "execute"}:
+        # Reject before build_plan can resolve a manifest or create artifact
+        # paths for a retired command-capable runner.
+        print(
+            json.dumps(
+                {
+                    "status": "blocked_legacy_two_server_staging_matrix_retired",
+                    "reason": LEGACY_TWO_SERVER_STAGING_MATRIX_RETIREMENT_REASON,
+                    "mode": args.mode,
+                    "required_replacement": "sealed_three_site_campaign_verifier",
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+        return 2
     if args.mode == "plan":
         payload = build_plan(args)
         print(json.dumps(payload["summary"], ensure_ascii=False, sort_keys=True))

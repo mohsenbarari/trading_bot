@@ -56,6 +56,8 @@ from scripts import (  # noqa: E402
 from scripts import production_shadow_finland_stage as release_stage  # noqa: E402
 from scripts import production_shadow_host_agent as host_agent  # noqa: E402
 from scripts import production_shadow_nginx_generation as nginx_generation  # noqa: E402
+from scripts import production_shadow_convergence_runtime_targets as runtime_targets  # noqa: E402
+from scripts import production_shadow_remote_receiver_signing_policy as receiver_policy  # noqa: E402
 from scripts import (  # noqa: E402
     produce_production_shadow_prepare_material as prepare_material,
 )
@@ -72,6 +74,8 @@ from scripts.production_shadow_cutover_controller import (  # noqa: E402
     POLICY_FIELDS,
     POSTCOMMIT_JOURNAL_STATUS,
     POSTCOMMIT_SPECS,
+    REMOTE_RECEIVER_POLICY_CONTRACT_FIELDS,
+    REMOTE_RECEIVER_POLICY_ROLES,
     ZERO_SHA256,
     CutoverContractError,
     _secure_root,
@@ -119,10 +123,14 @@ CANONICAL_COMPOSE_RELATIVE_PATH = Path(
 )
 SHADOW_ROOT_BASE = Path("/srv/trading-bot-three-site-production-shadow")
 OUTPUT_FILENAME = "production-shadow-cutover-manifest-template.json"
+RUNTIME_TARGET_DERIVATION_RECEIPT_FILENAME = (
+    runtime_targets.CONVERGENCE_RUNTIME_TARGET_DERIVATION_RECEIPT_FILENAME
+)
 MAX_JSON_BYTES = 4 * 1024 * 1024
 MAX_ROLE_ARCHIVE_BYTES = 512 * 1024 * 1024
 MAX_ARTIFACT_BYTES = 64 * 1024 * 1024 * 1024
 MAX_RELEASE_CODE_BYTES = 16 * 1024 * 1024
+MAX_RUNTIME_TARGET_BYTES = runtime_targets.MAX_CONVERGENCE_RUNTIME_TARGET_BYTES
 SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -151,6 +159,7 @@ ROLLBACK_FIELDS = frozenset(
 PREPARE_SET_FIELDS = frozenset(
     {
         "schema",
+        "capabilities",
         "operation_id",
         "release_sha",
         "canonical_compose_sha256",
@@ -762,7 +771,7 @@ def _validate_prepare_internal_manifest(
     release_sha: str,
     metadata_row: Mapping[str, Any],
     runtime_image_ids: Mapping[str, str],
-) -> bytes:
+) -> tuple[bytes, dict[str, str] | None]:
     manifest_name = (
         prepare_material.WITNESS_MANIFEST_NAME
         if role == "witness"
@@ -844,6 +853,7 @@ def _validate_prepare_internal_manifest(
             label="Witness public prepare attestation",
         )
     else:
+        env_values: dict[str, str]
         keys = manifest["required_env_keys"]
         if (
             not isinstance(keys, list)
@@ -903,7 +913,7 @@ def _validate_prepare_internal_manifest(
             raise CutoverManifestTemplateError(
                 f"{role} prepare CA payload is invalid"
             )
-    return manifest_raw
+    return manifest_raw, (None if role == "witness" else env_values)
 
 
 def _verify_prepare_materials(
@@ -918,6 +928,7 @@ def _verify_prepare_materials(
     dict[str, dict[str, Any]],
     dict[str, dict[str, str]],
     str,
+    dict[str, Any],
 ]:
     _assert_private_directory(
         metadata_path.parent,
@@ -929,6 +940,10 @@ def _verify_prepare_materials(
         label="prepare material metadata",
         owner_uid=owner_uid,
     )
+    if runtime_targets.is_legacy_prepare_material_schema(metadata):
+        raise CutoverManifestTemplateError(
+            runtime_targets.PREPARE_V2_MIGRATION_MESSAGE
+        )
     release_sha = closure["release"]["commit_sha"]
     expected_compose_path = release_root / CANONICAL_COMPOSE_RELATIVE_PATH
     if canonical_compose != expected_compose_path:
@@ -955,6 +970,8 @@ def _verify_prepare_materials(
     if (
         set(metadata) != PREPARE_SET_FIELDS
         or metadata["schema"] != prepare_material.SET_SCHEMA
+        or metadata["capabilities"]
+        != list(runtime_targets.RUNTIME_TARGET_CAPABILITIES)
         or metadata["operation_id"] != operation_id
         or metadata["release_sha"] != release_sha
         or metadata["canonical_compose_sha256"] != compose_sha256
@@ -963,7 +980,11 @@ def _verify_prepare_materials(
         or set(metadata.get("roles", {}))
         != set(prepare_material.ALL_ROLES)
         or set(metadata.get("controller_bindings", {}))
-        != {"role_materials", "role_runtime_image_ids"}
+        != {
+            "role_materials",
+            "role_runtime_image_ids",
+            "convergence_runtime_targets",
+        }
     ):
         raise CutoverManifestTemplateError(
             "prepare material metadata identity differs"
@@ -996,6 +1017,95 @@ def _verify_prepare_materials(
         raise CutoverManifestTemplateError(
             "prepare runtime image inventory differs from verified archives"
         )
+    runtime_target_descriptor_input = metadata["controller_bindings"][
+        "convergence_runtime_targets"
+    ]
+    try:
+        runtime_target_descriptor_input = (
+            runtime_targets.validate_runtime_target_descriptor(
+                runtime_target_descriptor_input,
+                label="prepare convergence runtime target descriptor",
+            )
+        )
+    except runtime_targets.ConvergenceRuntimeTargetDescriptorError as exc:
+        raise CutoverManifestTemplateError(
+            "prepare convergence runtime target descriptor differs"
+        ) from exc
+    runtime_target_sha256 = _nonzero_sha256(
+        runtime_target_descriptor_input["sha256"],
+        label="prepare convergence runtime target file",
+    )
+    runtime_target_set_sha256 = _nonzero_sha256(
+        runtime_target_descriptor_input["target_set_sha256"],
+        label="prepare convergence runtime target set",
+    )
+    runtime_target_bytes = _bounded_size(
+        runtime_target_descriptor_input["bytes"],
+        label="prepare convergence runtime target file",
+        maximum=MAX_RUNTIME_TARGET_BYTES,
+    )
+    runtime_target_path = (
+        metadata_path.parent
+        / prepare_material.CONVERGENCE_RUNTIME_TARGETS_FILENAME
+    )
+    runtime_target_payload = _read_stable_file(
+        runtime_target_path,
+        label="prepare convergence runtime target set",
+        owner_uid=owner_uid,
+        allowed_modes=frozenset({0o600}),
+        maximum=MAX_RUNTIME_TARGET_BYTES,
+    )
+    if (
+        len(runtime_target_payload) != runtime_target_bytes
+        or hashlib.sha256(runtime_target_payload).hexdigest()
+        != runtime_target_sha256
+    ):
+        raise CutoverManifestTemplateError(
+            "prepare convergence runtime target file identity differs"
+        )
+    runtime_target_document = _parse_canonical_object_bytes(
+        runtime_target_payload,
+        label="prepare convergence runtime target set",
+    )
+    try:
+        prepare_material.validate_convergence_runtime_target_set(
+            runtime_target_document,
+            operation_id=operation_id,
+            release_sha=release_sha,
+            canonical_compose_raw=compose_raw,
+        )
+    except prepare_material.PrepareMaterialError as exc:
+        raise CutoverManifestTemplateError(
+            "prepare convergence runtime target set is invalid"
+        ) from exc
+    if (
+        runtime_target_document["target_set_sha256"]
+        != runtime_target_set_sha256
+    ):
+        raise CutoverManifestTemplateError(
+            "prepare convergence runtime target descriptor hash differs"
+        )
+    runtime_target_descriptor = {
+        "schema": prepare_material.CONVERGENCE_RUNTIME_TARGET_SET_SCHEMA,
+        "filename": prepare_material.CONVERGENCE_RUNTIME_TARGETS_FILENAME,
+        "sha256": runtime_target_sha256,
+        "bytes": runtime_target_bytes,
+        "target_set_sha256": runtime_target_set_sha256,
+        "roles": list(prepare_material.DOCKER_ROLES),
+    }
+    try:
+        runtime_target_descriptor = runtime_targets.validate_runtime_target_descriptor(
+            runtime_target_descriptor,
+            label="verified convergence runtime target descriptor",
+        )
+    except runtime_targets.ConvergenceRuntimeTargetDescriptorError as exc:
+        raise CutoverManifestTemplateError(
+            "prepare convergence runtime target descriptor differs"
+        ) from exc
+    if runtime_target_descriptor_input != runtime_target_descriptor:
+        raise CutoverManifestTemplateError(
+            "prepare convergence runtime target descriptor differs"
+        )
     controller_materials = metadata["controller_bindings"][
         "role_materials"
     ]
@@ -1007,6 +1117,7 @@ def _verify_prepare_materials(
             "prepare controller role material closure differs"
         )
     role_materials: dict[str, dict[str, Any]] = {}
+    verified_runtime_target_sources: dict[str, Mapping[str, str]] = {}
     for role in prepare_material.ALL_ROLES:
         row = metadata["roles"][role]
         expected_filename = prepare_material.ROLE_ARCHIVE_NAMES[role]
@@ -1048,7 +1159,7 @@ def _verify_prepare_materials(
             raise CutoverManifestTemplateError(
                 f"{role} prepare archive identity differs"
             )
-        internal_raw = _validate_prepare_internal_manifest(
+        internal_raw, runtime_target_source = _validate_prepare_internal_manifest(
             role=role,
             members=members,
             operation_id=operation_id,
@@ -1065,6 +1176,12 @@ def _verify_prepare_materials(
             raise CutoverManifestTemplateError(
                 f"{role} internal prepare manifest digest differs"
             )
+        if role in prepare_material.DOCKER_ROLES:
+            if runtime_target_source is None:
+                raise CutoverManifestTemplateError(
+                    f"{role} runtime target environment is unavailable"
+                )
+            verified_runtime_target_sources[role] = runtime_target_source
         controller_row = {
             "sha256": row["sha256"],
             "bytes": row["bytes"],
@@ -1076,13 +1193,52 @@ def _verify_prepare_materials(
                 f"{role} controller role material binding differs"
             )
         role_materials[role] = controller_row
+    if set(verified_runtime_target_sources) != set(prepare_material.DOCKER_ROLES):
+        raise CutoverManifestTemplateError(
+            "prepare runtime target environment source coverage differs"
+        )
+    try:
+        rederived_runtime_target_set = (
+            prepare_material.build_convergence_runtime_target_set(
+                operation_id=operation_id,
+                release_sha=release_sha,
+                canonical_compose_raw=compose_raw,
+                role_source_values=verified_runtime_target_sources,
+            )
+        )
+        rederived_runtime_target_payload = canonical_json_bytes(
+            rederived_runtime_target_set
+        )
+        rederived_runtime_target_descriptor = (
+            prepare_material.convergence_runtime_target_descriptor(
+                rederived_runtime_target_set,
+                canonical_compose_raw=compose_raw,
+            )
+        )
+    except prepare_material.PrepareMaterialError as exc:
+        raise CutoverManifestTemplateError(
+            "prepare convergence runtime target semantic derivation failed"
+        ) from exc
+    if (
+        runtime_target_payload != rederived_runtime_target_payload
+        or runtime_target_document != rederived_runtime_target_set
+        or runtime_target_descriptor != rederived_runtime_target_descriptor
+    ):
+        raise CutoverManifestTemplateError(
+            "prepare convergence runtime target semantic derivation differs"
+        )
     if len({row["sha256"] for row in role_materials.values()}) != len(
         role_materials
     ):
         raise CutoverManifestTemplateError(
             "prepare role material digests must be distinct"
         )
-    return role_materials, runtime_inventory, compose_sha256
+    return (
+        role_materials,
+        runtime_inventory,
+        compose_sha256,
+        runtime_target_descriptor,
+    )
 
 
 def _verify_rollback_attestation(
@@ -1457,6 +1613,70 @@ def _verify_human_policy(
     return digest
 
 
+def _verify_remote_receiver_signing_policies(
+    *,
+    paths: Mapping[str, Path],
+    campaign_id: str,
+    operation_id: str,
+    release_sha: str,
+    release_tree_sha: str,
+    owner_uid: int,
+) -> dict[str, dict[str, str]]:
+    """Read public, root-only remote signing policies into manifest anchors."""
+
+    if set(paths) != set(REMOTE_RECEIVER_POLICY_ROLES):
+        raise CutoverManifestTemplateError(
+            "remote receiver signing-policy roles are not exact"
+        )
+    anchors: dict[str, dict[str, str]] = {}
+    for role in REMOTE_RECEIVER_POLICY_ROLES:
+        raw = _read_stable_file(
+            paths[role],
+            label=f"{role} remote receiver signing policy",
+            owner_uid=owner_uid,
+            allowed_modes=frozenset({0o600}),
+            maximum=receiver_policy.MAX_POLICY_BYTES,
+        )
+        try:
+            policy = receiver_policy.parse_policy_payload(raw)
+        except receiver_policy.RemoteReceiverSigningPolicyError as exc:
+            raise CutoverManifestTemplateError(
+                f"{role} remote receiver signing policy is invalid"
+            ) from exc
+        expected = {
+            "campaign_id": campaign_id,
+            "operation_id": operation_id,
+            "release_sha": release_sha,
+            "release_tree_sha": release_tree_sha,
+            "role": role,
+        }
+        actual = {
+            "campaign_id": policy.campaign_id,
+            "operation_id": policy.operation_id,
+            "release_sha": policy.release_sha,
+            "release_tree_sha": policy.release_tree_sha,
+            "role": policy.role,
+        }
+        if actual != expected:
+            raise CutoverManifestTemplateError(
+                f"{role} remote receiver signing policy binding differs"
+            )
+        anchor = {
+            "policy_file_sha256": hashlib.sha256(raw).hexdigest(),
+            "policy_sha256": policy.policy_sha256,
+            "key_id": policy.key_id,
+            "public_key_sha256": hashlib.sha256(policy.public_key).hexdigest(),
+            "receiver_sha256": policy.receiver_sha256,
+            "worker_sha256": policy.worker_sha256,
+        }
+        if set(anchor) != REMOTE_RECEIVER_POLICY_CONTRACT_FIELDS:
+            raise CutoverManifestTemplateError(
+                f"{role} remote receiver signing-policy anchor differs"
+            )
+        anchors[role] = anchor
+    return anchors
+
+
 def _assert_only_pending_approval(manifest: Mapping[str, Any]) -> None:
     zero_paths: list[str] = []
 
@@ -1514,6 +1734,8 @@ def build_template(
     webapp_rollback_attestation: Path,
     nginx_aggregate: Path,
     human_approval_policy: Path,
+    webapp_ir_remote_receiver_signing_policy: Path,
+    witness_remote_receiver_signing_policy: Path,
     postcommit_executor_contract: Path,
     owner_uid: int = 0,
 ) -> dict[str, Any]:
@@ -1540,7 +1762,12 @@ def build_template(
         raise CutoverManifestTemplateError(
             "legacy and shadow release SHAs must differ"
         )
-    role_materials, runtime_inventory, compose_sha256 = (
+    (
+        role_materials,
+        runtime_inventory,
+        compose_sha256,
+        runtime_target_descriptor,
+    ) = (
         _verify_prepare_materials(
             metadata_path=prepare_metadata,
             canonical_compose=canonical_compose,
@@ -1578,6 +1805,19 @@ def build_template(
         human_approval_policy,
         owner_uid=owner_uid,
     )
+    remote_receiver_signing_policies = (
+        _verify_remote_receiver_signing_policies(
+            paths={
+                "webapp_ir": webapp_ir_remote_receiver_signing_policy,
+                "witness": witness_remote_receiver_signing_policy,
+            },
+            campaign_id=campaign_id,
+            operation_id=operation_id,
+            release_sha=release_sha,
+            release_tree_sha=release_tree_sha,
+            owner_uid=owner_uid,
+        )
+    )
     release_contracts = _verify_release_contracts(
         release_root=release_root,
         release_sha=release_sha,
@@ -1591,6 +1831,8 @@ def build_template(
         "role_materials": role_materials,
         "image_artifacts": closure["images"],
         "role_runtime_image_ids": runtime_inventory,
+        "convergence_runtime_targets": runtime_target_descriptor,
+        "remote_receiver_signing_policies": remote_receiver_signing_policies,
         "postgres_runtime_uid": 70,
         "postgres_runtime_gid": 70,
         "postgres_image_ref": (
@@ -1608,6 +1850,7 @@ def build_template(
     }
     manifest = {
         "schema": MANIFEST_SCHEMA,
+        "capabilities": list(runtime_targets.RUNTIME_TARGET_CAPABILITIES),
         "campaign_id": campaign_id,
         "operation_id": operation_id,
         "created_at": created_at,
@@ -1629,6 +1872,43 @@ def build_template(
     return _validate_template(manifest)
 
 
+def build_runtime_target_derivation_receipt(
+    template: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Emit the nonsecret sidecar that proves template-side rederivation.
+
+    This helper is invoked only after ``build_template`` has independently
+    recomputed the target set from release Compose and verified role archive
+    environments.  It deliberately binds the pending (zero approval) template
+    bytes, rather than a final manifest, so the approval remains the sole
+    allowed finalization delta.
+    """
+
+    normalized = _validate_template(dict(template))
+    template_payload = canonical_json_bytes(normalized)
+    try:
+        return runtime_targets.build_runtime_target_derivation_receipt(
+            campaign_id=normalized["campaign_id"],
+            operation_id=normalized["operation_id"],
+            release_sha=normalized["release_sha"],
+            template_sha256=hashlib.sha256(template_payload).hexdigest(),
+            authorization_basis_sha256=authorization_basis_sha256(normalized),
+            canonical_compose_sha256=normalized["artifacts"][
+                "shadow_compose_sha256"
+            ],
+            convergence_runtime_targets=normalized["artifacts"][
+                "convergence_runtime_targets"
+            ],
+        )
+    except (
+        KeyError,
+        runtime_targets.ConvergenceRuntimeTargetDescriptorError,
+    ) as exc:
+        raise CutoverManifestTemplateError(
+            "runtime target derivation receipt cannot bind the template"
+        ) from exc
+
+
 def confirmation_phrase(
     campaign_id: str,
     operation_id: str,
@@ -1646,6 +1926,7 @@ def _preflight_output(
     payload: bytes,
     *,
     owner_uid: int,
+    label: str,
 ) -> str | None:
     try:
         os.lstat(path)
@@ -1653,18 +1934,18 @@ def _preflight_output(
         return None
     except OSError as exc:
         raise CutoverManifestTemplateError(
-            "cannot inspect cutover manifest template output"
+            f"cannot inspect {label} output"
         ) from exc
     existing = _read_stable_file(
         path,
-        label="existing cutover manifest template",
+        label=f"existing {label}",
         owner_uid=owner_uid,
         allowed_modes=frozenset({0o600}),
         maximum=MAX_JSON_BYTES,
     )
     if existing != payload:
         raise CutoverManifestTemplateError(
-            "refusing to overwrite a different cutover manifest template"
+            f"refusing to overwrite a different {label}"
         )
     return "reused"
 
@@ -1674,11 +1955,13 @@ def _publish_output(
     payload: bytes,
     *,
     owner_uid: int,
+    label: str,
 ) -> str:
     existing = _preflight_output(
         path,
         payload,
         owner_uid=owner_uid,
+        label=label,
     )
     if existing is not None:
         return existing
@@ -1686,24 +1969,24 @@ def _publish_output(
         write_secure_new_bytes(
             path,
             payload,
-            label="production shadow cutover manifest template",
+            label=label,
             mode=0o600,
             max_size=MAX_JSON_BYTES,
         )
     except SecureFileError as exc:
         raise CutoverManifestTemplateError(
-            "cutover manifest template publication failed closed"
+            f"{label} publication failed closed"
         ) from exc
     observed = _read_stable_file(
         path,
-        label="published cutover manifest template",
+        label=f"published {label}",
         owner_uid=owner_uid,
         allowed_modes=frozenset({0o600}),
         maximum=MAX_JSON_BYTES,
     )
     if observed != payload:
         raise CutoverManifestTemplateError(
-            "published cutover manifest template differs"
+            f"published {label} differs"
         )
     return "created"
 
@@ -1731,6 +2014,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--nginx-aggregate", type=Path, required=True)
     parser.add_argument(
         "--human-approval-policy",
+        type=Path,
+        required=True,
+    )
+    parser.add_argument(
+        "--webapp-ir-remote-receiver-signing-policy",
+        type=Path,
+        required=True,
+    )
+    parser.add_argument(
+        "--witness-remote-receiver-signing-policy",
         type=Path,
         required=True,
     )
@@ -1772,6 +2065,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             webapp_rollback_attestation=args.webapp_rollback_attestation,
             nginx_aggregate=args.nginx_aggregate,
             human_approval_policy=args.human_approval_policy,
+            webapp_ir_remote_receiver_signing_policy=(
+                args.webapp_ir_remote_receiver_signing_policy
+            ),
+            witness_remote_receiver_signing_policy=(
+                args.witness_remote_receiver_signing_policy
+            ),
             postcommit_executor_contract=(
                 args.postcommit_executor_contract
             ),
@@ -1779,6 +2078,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         payload = canonical_json_bytes(manifest)
         template_sha256 = hashlib.sha256(payload).hexdigest()
+        runtime_target_derivation_receipt = (
+            build_runtime_target_derivation_receipt(manifest)
+        )
+        runtime_target_derivation_receipt_payload = canonical_json_bytes(
+            runtime_target_derivation_receipt
+        )
         required_confirmation = confirmation_phrase(
             manifest["campaign_id"],
             manifest["operation_id"],
@@ -1786,7 +2091,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             template_sha256,
         )
         output = args.output_directory / OUTPUT_FILENAME
-        _preflight_output(output, payload, owner_uid=0)
+        receipt_output = (
+            args.output_directory / RUNTIME_TARGET_DERIVATION_RECEIPT_FILENAME
+        )
+        _preflight_output(
+            output,
+            payload,
+            owner_uid=0,
+            label="production shadow cutover manifest template",
+        )
+        _preflight_output(
+            receipt_output,
+            runtime_target_derivation_receipt_payload,
+            owner_uid=0,
+            label="runtime target derivation receipt",
+        )
         result: dict[str, Any] = {
             "schema": MANIFEST_SCHEMA,
             "campaign_id": manifest["campaign_id"],
@@ -1795,11 +2114,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             "release_tree_sha": manifest["release_tree_sha"],
             "legacy_release_sha": manifest["legacy_release_sha"],
             "template_sha256": template_sha256,
+            "runtime_target_derivation_receipt_sha256": hashlib.sha256(
+                runtime_target_derivation_receipt_payload
+            ).hexdigest(),
             "authorization_basis_sha256": authorization_basis_sha256(
                 manifest
             ),
             "cutover_approval_sha256": ZERO_SHA256,
             "output": str(output),
+            "runtime_target_derivation_receipt_output": str(receipt_output),
             "required_confirmation": required_confirmation,
             "network_io": False,
             "docker_contacted": False,
@@ -1821,11 +2144,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                 output,
                 payload,
                 owner_uid=0,
+                label="production shadow cutover manifest template",
+            )
+            receipt_publication = _publish_output(
+                receipt_output,
+                runtime_target_derivation_receipt_payload,
+                owner_uid=0,
+                label="runtime target derivation receipt",
             )
             result.update(
                 status="published",
                 publication=publication,
-                output_mutated=publication == "created",
+                runtime_target_derivation_receipt_publication=receipt_publication,
+                output_mutated=(
+                    publication == "created" or receipt_publication == "created"
+                ),
             )
         print(
             json.dumps(

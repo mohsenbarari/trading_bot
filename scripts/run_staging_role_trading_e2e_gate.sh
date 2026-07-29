@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+case "${1:-}" in
+  -h|--help|help)
+    printf '%s\n' 'Legacy two-server staging role/trading E2E gate is retired. Only artifact-only planning in the sealed three-site campaign is supported.'
+    exit 0
+    ;;
+  *)
+    printf '%s\n' 'Legacy two-server staging role/trading E2E gate is retired and hard-disabled before Docker, HTTP, or data access. Use the sealed three-site campaign verifier.' >&2
+    exit 2
+    ;;
+esac
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 ARTIFACT_ROOT="${ROLE_TRADING_E2E_ARTIFACT_ROOT:-$ROOT_DIR/tmp/staging-role-trading-e2e/$(date -u +%Y%m%dT%H%M%SZ)}"

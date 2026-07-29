@@ -7,6 +7,30 @@ from scripts import report_final_release_gate as gate
 
 
 class FinalReleaseGateTests(unittest.TestCase):
+    def test_live_checks_are_retired_without_subprocess_or_make_delegation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = gate.run_live_checks(
+                manifest=str(Path(tmp) / "untrusted.env"),
+                logs_dir=Path(tmp) / "logs",
+                skip=False,
+            )
+
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["reason"], gate.LEGACY_TWO_SERVER_LIVE_CHECKS_RETIREMENT_REASON)
+        self.assertEqual(result["commands"], [])
+        self.assertEqual(result["sync_health"], {})
+
+    def test_skip_flag_cannot_restore_retired_live_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = gate.run_live_checks(
+                manifest=str(Path(tmp) / "untrusted.env"),
+                logs_dir=Path(tmp) / "logs",
+                skip=True,
+            )
+
+        self.assertEqual(result["status"], "failed")
+        self.assertTrue(result["skip_requested"])
+
     def test_messenger_summary_accepts_ready_surfaces_and_records_context_debt(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

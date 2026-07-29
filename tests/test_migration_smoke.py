@@ -39,7 +39,7 @@ class MigrationSmokeTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
         heads = [line for line in result.stdout.splitlines() if line.strip()]
-        self.assertEqual(heads, ['b986c7d8e0f1 (head)'])
+        self.assertEqual(heads, ['c097d8e9f1a2 (head)'])
 
     def test_executed_e653_revision_is_immutable_and_remediation_is_forward_only(self):
         versions = REPO_ROOT / 'migrations' / 'versions'
@@ -70,6 +70,26 @@ class MigrationSmokeTests(unittest.TestCase):
         self.assertIn('cursor.last_sequence>0', boundary_source)
         self.assertIn('NEW.source_xid IS NOT DISTINCT FROM OLD.source_xid', boundary_source)
         self.assertIn('forward-only DR safety migration', boundary_source)
+        policy_child = versions / 'c097d8e9f1a2_extend_dr_delivery_projection_allowlist.py'
+        policy_source = policy_child.read_text(encoding='utf-8')
+        self.assertIn('down_revision = "b986c7d8e0f1"', policy_source)
+        self.assertIn('IN SHARE ROW EXCLUSIVE MODE', policy_source)
+        self.assertIn("'dr_event_deliveries'", policy_source)
+        self.assertIn("'first_attempt_at'", policy_source)
+        self.assertIn('delivery_field_policy_count <> 0', policy_source)
+        self.assertEqual(
+            policy_source.count(
+                'INSERT INTO public.dr_projection_field_allowlist'
+            ),
+            1,
+        )
+        policy_upgrade = policy_source.split(
+            'EXTEND_PROJECTION_POLICY_SQL = r"""',
+            1,
+        )[1].split('"""', 1)[0].upper()
+        for forbidden in ('DELETE ', 'UPDATE ', 'ALTER TABLE', 'ON CONFLICT'):
+            self.assertNotIn(forbidden, policy_upgrade)
+        self.assertIn('forward-only projection policy migration', policy_source)
 
     def test_writer_trigger_uses_database_boottime_not_wall_clock(self):
         migration = (

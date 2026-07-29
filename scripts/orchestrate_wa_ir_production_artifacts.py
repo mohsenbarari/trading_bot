@@ -19,13 +19,22 @@ import json
 import os
 from pathlib import Path
 import re
+import selectors
 import shlex
+import signal
 import stat
 import subprocess
 import sys
 import tempfile
-from typing import Any, Callable, Mapping
+import threading
+import time
+from typing import Any, Callable, Iterator, Mapping
 import zipfile
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from core.secure_file_io import (
     SecureFileError,
@@ -62,10 +71,19 @@ from scripts.wa_ir_production_operation import (
     IMAGE_STAGE_ATTESTATION_SCHEMA,
     MAX_MANIFEST_BYTES,
     OperationManifest,
+    PROCESS_KILL_GRACE_SECONDS,
+    ProcessIdentity,
     ProductionOperationError,
+    _BOUNDED_COMMAND_LOCK,
+    _direct_child_baseline,
+    _enable_child_subreaper,
     _load_final_prepare_archive,
     _load_manifest_bytes,
     _materialize_release_bundle,
+    _owned_processes,
+    _read_process_identity,
+    _signal_process_handle,
+    _terminate_process_tree,
 )
 from scripts.wa_ir_production_transport_contract import (
     MAX_PAYLOAD_BYTES,
@@ -107,6 +125,7 @@ DEFAULT_PREFIX = "dark-standby/production-operation"
 MAX_CONTROL_BYTES = 256 * 1024
 MAX_ATTESTATION_BYTES = 256 * 1024
 MAX_BOOTSTRAP_BYTES = 4 * 1024 * 1024
+PROCESS_POLL_SECONDS = 0.05
 SSH = "/usr/bin/ssh"
 PYTHON = "/usr/bin/python3"
 _SAFE_ENV = {
@@ -406,7 +425,12 @@ _BOOTSTRAP_SOURCE_FILES = (
 )
 _BOOTSTRAP_DISPATCH = b"""\
 from __future__ import annotations
+from pathlib import Path
 import sys
+
+REPO_ROOT = Path(sys.argv[0]).resolve()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 def main() -> int:
     if len(sys.argv) < 2:
@@ -559,6 +583,94 @@ printf '%s\n%s\n%s\n%s\n%s\n%s\n' \
 
 class ProductionOrchestratorError(RuntimeError):
     """A redacted fail-closed controller/orchestration error."""
+
+
+class ProductionOrchestratorCancellation(ProductionOrchestratorError):
+    """A catchable controller signal or SSH-liveness cancellation."""
+
+
+_SIGNAL_GUARD_DEPTH = 0
+_SIGNAL_CANCELLATION_STARTED = False
+_SIGNAL_RECONCILIATION_DEPTH = 0
+_SIGNAL_DEFERRED_REASON: str | None = None
+_SSH_PROCESS_LOCK = _BOUNDED_COMMAND_LOCK
+
+
+@contextmanager
+def _signal_reconciliation_scope() -> Iterator[None]:
+    global _SIGNAL_RECONCILIATION_DEPTH, _SIGNAL_DEFERRED_REASON
+    entry_exception = sys.exc_info()[0]
+    body_failed = False
+    _SIGNAL_RECONCILIATION_DEPTH += 1
+    try:
+        yield
+    except BaseException:
+        body_failed = True
+        raise
+    finally:
+        _SIGNAL_RECONCILIATION_DEPTH -= 1
+        if (
+            _SIGNAL_RECONCILIATION_DEPTH == 0
+            and _SIGNAL_DEFERRED_REASON is not None
+            and entry_exception is None
+            and not body_failed
+        ):
+            reason = _SIGNAL_DEFERRED_REASON
+            _SIGNAL_DEFERRED_REASON = None
+            raise ProductionOrchestratorCancellation(reason)
+
+
+@contextmanager
+def _signal_cancellation_guard() -> Iterator[None]:
+    global _SIGNAL_GUARD_DEPTH, _SIGNAL_CANCELLATION_STARTED
+    global _SIGNAL_DEFERRED_REASON
+    if threading.current_thread() is not threading.main_thread():
+        raise ProductionOrchestratorError(
+            "SSH control must run in the main thread"
+        )
+    if _SIGNAL_GUARD_DEPTH:
+        _SIGNAL_GUARD_DEPTH += 1
+        try:
+            yield
+        finally:
+            _SIGNAL_GUARD_DEPTH -= 1
+        return
+    previous = {
+        signum: signal.getsignal(signum)
+        for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM)
+    }
+
+    def cancel(signum: int, _frame: Any) -> None:
+        global _SIGNAL_CANCELLATION_STARTED, _SIGNAL_DEFERRED_REASON
+        reason = f"controller received {signal.Signals(signum).name}"
+        if _SIGNAL_DEFERRED_REASON is None:
+            _SIGNAL_DEFERRED_REASON = reason
+        if _SIGNAL_RECONCILIATION_DEPTH:
+            return
+        if _SIGNAL_CANCELLATION_STARTED:
+            return
+        _SIGNAL_CANCELLATION_STARTED = True
+        raise ProductionOrchestratorCancellation(reason)
+
+    _SIGNAL_GUARD_DEPTH = 1
+    _SIGNAL_CANCELLATION_STARTED = False
+    _SIGNAL_DEFERRED_REASON = None
+    try:
+        for signum in previous:
+            signal.signal(signum, cancel)
+        yield
+        if _SIGNAL_DEFERRED_REASON is not None:
+            raise ProductionOrchestratorCancellation(
+                _SIGNAL_DEFERRED_REASON
+            )
+    finally:
+        try:
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
+        finally:
+            _SIGNAL_GUARD_DEPTH = 0
+            _SIGNAL_CANCELLATION_STARTED = False
+            _SIGNAL_DEFERRED_REASON = None
 
 
 @dataclass(frozen=True)
@@ -1177,6 +1289,10 @@ def _ssh_arguments(
         "-o",
         "StrictHostKeyChecking=yes",
         "-o",
+        "ServerAliveInterval=15",
+        "-o",
+        "ServerAliveCountMax=2",
+        "-o",
         "LogLevel=ERROR",
         f"{WA_IR_USER}@{WA_IR_HOST}",
         remote_command,
@@ -1196,38 +1312,338 @@ def _remote_agent_path(operation_id: str) -> Path:
     )
 
 
+def _run_ssh_authorized_locked(
+    arguments: list[str],
+    control: bytes,
+    *,
+    timeout: int,
+    runner: Callable[..., subprocess.CompletedProcess[bytes]] | None = None,
+    liveness_only: bool = False,
+) -> bytes:
+    if (
+        not arguments
+        or arguments[0] != SSH
+        or type(timeout) is not int
+        or not 1 <= timeout <= 8 * 60 * 60
+        or (
+            liveness_only
+            and control != b""
+        )
+        or (
+            not liveness_only
+            and (
+                not 1 <= len(control) <= MAX_CONTROL_BYTES
+                or any(
+                    control.startswith(prefix)
+                    for prefix in (b"\x1f\x8b", b"PK\x03\x04")
+                )
+            )
+        )
+    ):
+        raise ProductionOrchestratorError("SSH control input is invalid or payload-like")
+    if runner is not None:
+        try:
+            result = runner(
+                arguments,
+                input=b"" if liveness_only else control,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=timeout,
+                env=_SAFE_ENV,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ProductionOrchestratorError(
+                "WA-IR SSH control channel failed"
+            ) from exc
+        if (
+            not isinstance(result, subprocess.CompletedProcess)
+            or len(result.stdout) > MAX_ATTESTATION_BYTES
+            or len(result.stderr) > MAX_ATTESTATION_BYTES
+        ):
+            raise ProductionOrchestratorError(
+                "WA-IR control output exceeded its bound"
+            )
+        if result.returncode != 0 or result.stderr:
+            raise ProductionOrchestratorError(
+                "WA-IR control command failed closed"
+            )
+        return bytes(result.stdout)
+
+    _enable_child_subreaper()
+    baseline = _direct_child_baseline()
+    process: subprocess.Popen[bytes] | None = None
+    root_identity: ProcessIdentity | None = None
+    root_descriptor: int | None = None
+    selector = selectors.DefaultSelector()
+    tracked: set[ProcessIdentity] = set()
+    stdout = bytearray()
+    stderr = bytearray()
+    stdin_offset = 0
+    liveness_read = -1
+    liveness_write = -1
+    completed_cleanly = False
+    try:
+        if liveness_only:
+            liveness_read, liveness_write = os.pipe()
+            os.set_inheritable(liveness_read, False)
+            os.set_inheritable(liveness_write, False)
+            child_stdin: int | None = liveness_read
+        else:
+            child_stdin = subprocess.PIPE
+        process = subprocess.Popen(
+            arguments,
+            stdin=child_stdin,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=dict(_SAFE_ENV),
+            close_fds=True,
+            start_new_session=True,
+        )
+        root_descriptor = os.pidfd_open(process.pid, 0)
+        root_identity = _read_process_identity(process.pid)
+        tracked.add(root_identity)
+        if liveness_read >= 0:
+            os.close(liveness_read)
+            liveness_read = -1
+        if process.stdout is None or process.stderr is None:
+            raise ProductionOrchestratorError(
+                "WA-IR SSH control pipes are unavailable"
+            )
+        for stream, label in (
+            (process.stdout, "stdout"),
+            (process.stderr, "stderr"),
+        ):
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, label)
+        if not liveness_only:
+            if process.stdin is None:
+                raise ProductionOrchestratorError(
+                    "WA-IR SSH stdin pipe is unavailable"
+                )
+            os.set_blocking(process.stdin.fileno(), False)
+            selector.register(process.stdin, selectors.EVENT_WRITE, "stdin")
+        open_outputs = {"stdout", "stderr"}
+        deadline = time.monotonic() + timeout
+        with _signal_cancellation_guard():
+            while open_outputs or process.poll() is None:
+                _owned_processes(
+                    root_identity,
+                    baseline_children=baseline,
+                    tracked=tracked,
+                )
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ProductionOrchestratorError(
+                        "WA-IR SSH control channel timed out"
+                    )
+                events = selector.select(
+                    min(PROCESS_POLL_SECONDS, remaining)
+                )
+                for key, mask in events:
+                    label = str(key.data)
+                    stream = key.fileobj
+                    if label == "stdin" and mask & selectors.EVENT_WRITE:
+                        try:
+                            sent = os.write(
+                                stream.fileno(),
+                                control[stdin_offset : stdin_offset + 65536],
+                            )
+                        except BlockingIOError:
+                            continue
+                        except BrokenPipeError:
+                            sent = 0
+                        stdin_offset += sent
+                        if sent == 0 or stdin_offset == len(control):
+                            selector.unregister(stream)
+                            stream.close()
+                            if stdin_offset != len(control):
+                                raise ProductionOrchestratorError(
+                                    "WA-IR SSH control input was truncated"
+                                )
+                        continue
+                    if not mask & selectors.EVENT_READ:
+                        continue
+                    try:
+                        chunk = os.read(stream.fileno(), 65536)
+                    except BlockingIOError:
+                        continue
+                    if not chunk:
+                        selector.unregister(stream)
+                        open_outputs.discard(label)
+                        continue
+                    target = stdout if label == "stdout" else stderr
+                    if len(target) + len(chunk) > MAX_ATTESTATION_BYTES:
+                        raise ProductionOrchestratorError(
+                            "WA-IR control output exceeded its bound"
+                        )
+                    target.extend(chunk)
+            return_code = process.wait(
+                timeout=max(0.1, deadline - time.monotonic())
+            )
+        if (
+            return_code != 0
+            or stderr
+            or (not liveness_only and stdin_offset != len(control))
+        ):
+            raise ProductionOrchestratorError(
+                "WA-IR control command failed closed"
+            )
+        residual = {
+            identity
+            for identity in _owned_processes(
+                root_identity,
+                baseline_children=baseline,
+                tracked=tracked,
+            )
+            if identity.key != root_identity.key
+        }
+        _terminate_process_tree(
+            process,
+            root_identity=root_identity,
+            root_descriptor=root_descriptor,
+            baseline_children=baseline,
+            tracked=tracked,
+        )
+        if residual:
+            raise ProductionOrchestratorError(
+                "WA-IR SSH control retained a descendant"
+            )
+        completed_cleanly = True
+        return bytes(stdout)
+    except ProductionOrchestratorError:
+        raise
+    except ProductionOperationError as exc:
+        raise ProductionOrchestratorError(
+            "WA-IR SSH process containment failed"
+        ) from exc
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ProductionOrchestratorError(
+            "WA-IR SSH control channel failed"
+        ) from exc
+    finally:
+        active_error = sys.exception()
+        cleanup_errors: list[BaseException] = []
+        try:
+            with _signal_reconciliation_scope():
+                if liveness_write >= 0:
+                    try:
+                        os.close(liveness_write)
+                    except BaseException as exc:
+                        cleanup_errors.append(exc)
+                if liveness_read >= 0:
+                    try:
+                        os.close(liveness_read)
+                    except BaseException as exc:
+                        cleanup_errors.append(exc)
+                if process is not None:
+                    try:
+                        if not completed_cleanly:
+                            if root_identity is None:
+                                if root_descriptor is None:
+                                    root_identity = _read_process_identity(
+                                        process.pid
+                                    )
+                                else:
+                                    _signal_process_handle(
+                                        root_descriptor,
+                                        signal.SIGKILL,
+                                    )
+                                    try:
+                                        process.wait(
+                                            timeout=PROCESS_KILL_GRACE_SECONDS
+                                        )
+                                    except subprocess.TimeoutExpired as exc:
+                                        raise ProductionOrchestratorError(
+                                            "unidentified WA-IR SSH root "
+                                            "survived forced cleanup"
+                                        ) from exc
+                                    root_identity = ProcessIdentity(
+                                        pid=process.pid,
+                                        parent_pid=os.getpid(),
+                                        process_group=process.pid,
+                                        session_id=process.pid,
+                                        start_time=-1,
+                                        state="?",
+                                    )
+                            _terminate_process_tree(
+                                process,
+                                root_identity=root_identity,
+                                root_descriptor=root_descriptor,
+                                baseline_children=baseline,
+                                tracked=tracked,
+                            )
+                    except BaseException as exc:
+                        cleanup_errors.append(exc)
+                try:
+                    selector.close()
+                except BaseException as exc:
+                    cleanup_errors.append(exc)
+                if process is not None:
+                    for stream in (
+                        process.stdin,
+                        process.stdout,
+                        process.stderr,
+                    ):
+                        if stream is None:
+                            continue
+                        try:
+                            stream.close()
+                        except BaseException as exc:
+                            cleanup_errors.append(exc)
+                if root_descriptor is not None:
+                    try:
+                        os.close(root_descriptor)
+                    except BaseException as exc:
+                        cleanup_errors.append(exc)
+        except BaseException as exc:
+            cleanup_errors.append(exc)
+        if cleanup_errors:
+            cleanup_error = cleanup_errors[0]
+            if active_error is None:
+                raise cleanup_error
+            for error in cleanup_errors:
+                active_error.add_note(
+                    "SSH containment cleanup also failed closed: "
+                    f"{type(error).__name__}"
+                )
+            raise active_error from cleanup_error
+
+
+def _run_ssh_authorized(
+    arguments: list[str],
+    control: bytes,
+    *,
+    timeout: int,
+    runner: Callable[..., subprocess.CompletedProcess[bytes]] | None = None,
+    liveness_only: bool = False,
+) -> bytes:
+    with _SSH_PROCESS_LOCK:
+        return _run_ssh_authorized_locked(
+            arguments,
+            control,
+            timeout=timeout,
+            runner=runner,
+            liveness_only=liveness_only,
+        )
+
+
 def _run_ssh(
     arguments: list[str],
     control: bytes,
     *,
     timeout: int,
-    runner: Callable[..., subprocess.CompletedProcess[bytes]] = subprocess.run,
+    runner: Callable[..., subprocess.CompletedProcess[bytes]] | None = None,
+    liveness_only: bool = False,
 ) -> bytes:
-    if (
-        not 1 <= len(control) <= MAX_CONTROL_BYTES
-        or any(control.startswith(prefix) for prefix in (b"\x1f\x8b", b"PK\x03\x04"))
-    ):
-        raise ProductionOrchestratorError("SSH control input is invalid or payload-like")
-    try:
-        result = runner(
+    with _signal_cancellation_guard():
+        return _run_ssh_authorized(
             arguments,
-            input=control,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
+            control,
             timeout=timeout,
-            env=_SAFE_ENV,
+            runner=runner,
+            liveness_only=liveness_only,
         )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise ProductionOrchestratorError("WA-IR SSH control channel failed") from exc
-    if (
-        len(result.stdout) > MAX_ATTESTATION_BYTES
-        or len(result.stderr) > MAX_ATTESTATION_BYTES
-    ):
-        raise ProductionOrchestratorError("WA-IR control output exceeded its bound")
-    if result.returncode != 0:
-        raise ProductionOrchestratorError("WA-IR control command failed closed")
-    return bytes(result.stdout)
 
 
 def _parse_receive_attestation(
@@ -1289,11 +1705,14 @@ def deliver_received_artifact(
     descriptor_payload: bytes,
     *,
     ssh_identity: Path,
-    runner: Callable[..., subprocess.CompletedProcess[bytes]] = subprocess.run,
+    runner: Callable[..., subprocess.CompletedProcess[bytes]] | None = None,
 ) -> RemoteAttestation:
     # Parse before opening SSH; this also rejects incomplete or malformed SigV4.
     descriptor = parse_descriptor(descriptor_payload)
-    command = f"{PYTHON} {_remote_agent_path(descriptor.operation_id)} receive"
+    command = (
+        f"{PYTHON} -I -B "
+        f"{_remote_agent_path(descriptor.operation_id)} receive"
+    )
     output = _run_ssh(
         _ssh_arguments(ssh_identity, remote_command=command),
         descriptor_payload,
@@ -1359,7 +1778,7 @@ def bootstrap_remote_agent(
     published: PublishedObject,
     presigned: EphemeralPresignedGet,
     ssh_identity: Path,
-    runner: Callable[..., subprocess.CompletedProcess[bytes]] = subprocess.run,
+    runner: Callable[..., subprocess.CompletedProcess[bytes]] | None = None,
 ) -> Mapping[str, Any]:
     control = _bootstrap_control(
         operation_id=operation_id,
@@ -1806,7 +2225,7 @@ def transfer_operation(
     ssh_identity: Path,
     prefix: str = DEFAULT_PREFIX,
     ttl_seconds: int = 300,
-    runner: Callable[..., subprocess.CompletedProcess[bytes]] = subprocess.run,
+    runner: Callable[..., subprocess.CompletedProcess[bytes]] | None = None,
 ) -> Mapping[str, Any]:
     with _orchestrator_lock(journal_directory):
         return _transfer_operation_locked(
@@ -1834,7 +2253,7 @@ def _transfer_operation_locked(
     ssh_identity: Path,
     prefix: str = DEFAULT_PREFIX,
     ttl_seconds: int = 300,
-    runner: Callable[..., subprocess.CompletedProcess[bytes]] = subprocess.run,
+    runner: Callable[..., subprocess.CompletedProcess[bytes]] | None = None,
 ) -> Mapping[str, Any]:
     """Publish, bootstrap, and receive every artifact in one exact operation."""
 
@@ -2147,7 +2566,7 @@ def transfer_final_prepare_material(
     ssh_identity: Path,
     prefix: str = DEFAULT_PREFIX,
     ttl_seconds: int = 300,
-    runner: Callable[..., subprocess.CompletedProcess[bytes]] = subprocess.run,
+    runner: Callable[..., subprocess.CompletedProcess[bytes]] | None = None,
 ) -> Mapping[str, Any]:
     """Publish and receive exactly one post-stage prepare archive."""
 
@@ -2729,7 +3148,7 @@ def run_remote_operation(
     apply: bool,
     stage: bool = False,
     confirm: str | None = None,
-    runner: Callable[..., subprocess.CompletedProcess[bytes]] = subprocess.run,
+    runner: Callable[..., subprocess.CompletedProcess[bytes]] | None = None,
 ) -> Mapping[str, Any]:
     if apply and stage:
         raise ProductionOrchestratorError(
@@ -2741,7 +3160,7 @@ def run_remote_operation(
     except ProductionTransportError as exc:
         raise ProductionOrchestratorError("operation id is invalid") from exc
     command = (
-        f"{PYTHON} {_remote_agent_path(canonical)} "
+        f"{PYTHON} -I -B {_remote_agent_path(canonical)} "
         f"operation --operation-id {canonical}"
     )
     if stage:
@@ -2750,21 +3169,24 @@ def run_remote_operation(
             raise ProductionOrchestratorError(
                 "remote image stage confirmation is invalid"
             )
-        command += f" --stage-only --confirm {confirm}"
+        command += (
+            f" --stage-only --confirm {confirm} --control-fd 0"
+        )
     elif apply:
         required = f"prepare-wa-ir:{canonical}:{manifest.release_sha}"
         if confirm != required:
             raise ProductionOrchestratorError("remote operation confirmation is invalid")
-        command += f" --apply --confirm {confirm}"
+        command += f" --apply --confirm {confirm} --control-fd 0"
     elif confirm is not None:
         raise ProductionOrchestratorError(
             "confirmation is valid only with stage or apply"
         )
     output = _run_ssh(
         _ssh_arguments(ssh_identity, remote_command=command),
-        b"{}\n",
+        b"" if (stage or apply) else b"{}\n",
         timeout=7200 if (stage or apply) else 900,
         runner=runner,
+        liveness_only=stage or apply,
     )
     if _attestation_contains_sensitive_transport(output):
         raise ProductionOrchestratorError(

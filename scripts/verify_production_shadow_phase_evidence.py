@@ -14,13 +14,14 @@ import argparse
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
 import re
 import stat
 import sys
-from typing import Any
+from typing import Any, Mapping
 from uuid import UUID
 
 
@@ -53,6 +54,8 @@ from scripts.production_shadow_cutover_controller import (  # noqa: E402
     read_root_only_manifest,
     render_plan,
 )
+from scripts import production_shadow_convergence_observer_worker as CONVERGENCE_WORKER  # noqa: E402
+from scripts import production_shadow_convergence_runtime_targets as runtime_targets  # noqa: E402
 
 
 EVIDENCE_SCHEMA = "production-shadow-phase-evidence-v1"
@@ -176,6 +179,64 @@ HOST_AGENT_VALIDATION_FIELDS = frozenset(
         "production_contacted",
     }
 )
+CONVERGENCE_ROLE_VALIDATION_SCHEMA = (
+    "production-shadow-convergence-role-validation-v1"
+)
+CONVERGENCE_ROLE_VALIDATION_FIELDS = frozenset(
+    set(HOST_AGENT_VALIDATION_FIELDS)
+    | {
+        "worker_request",
+        "worker_attestation",
+        "transport_receipt",
+        "host_identity_proof_sha256",
+        "compose_execution",
+        "provenance_closure_sha256",
+    }
+)
+CONVERGENCE_REFERENCE_FIELDS = frozenset({"path", "sha256"})
+CONVERGENCE_TRANSPORT_RECEIPT_SCHEMA = (
+    "production-shadow-convergence-observation-transport-receipt-v1"
+)
+CONVERGENCE_TRANSPORT_RECEIPT_FIELDS = frozenset(
+    {
+        "schema",
+        "status",
+        "campaign_id",
+        "operation_id",
+        "release_sha",
+        "release_tree_sha",
+        "manifest_sha256",
+        "plan_sha256",
+        "approval_sha256",
+        "phase",
+        "operation",
+        "role",
+        "expected_host",
+        "phase_started_at",
+        "request_sha256",
+        "attestation_sha256",
+        "attestation_file_sha256",
+        "transport",
+        "payload_class",
+        "transport_detail",
+        "remote_receiver_attestation",
+        "received_at",
+        "direct_fi_to_ir_transfer",
+        "transport_receipt_sha256",
+    }
+)
+CONVERGENCE_RECEIPT_TRANSPORT_BY_ROLE = {
+    "bot_fi": "controller-local-root-only",
+    "webapp_fi": "trusted-ssh-redacted-attestation",
+    "webapp_ir": "object-storage-private-versioned-age",
+    "witness": "object-storage-private-versioned-age",
+}
+CONVERGENCE_VALIDATION_TRANSPORT_BY_ROLE = {
+    "bot_fi": "local-controller",
+    "webapp_fi": "ssh-control",
+    "webapp_ir": "ssh-control-object-storage-payload-only",
+    "witness": "ssh-control-object-storage-payload-only",
+}
 CLAIM_SOURCE_FIELDS = frozenset(
     {
         "schema",
@@ -311,6 +372,7 @@ PHASE_CLAIM_RULES: dict[str, dict[str, ClaimRule]] = {
         "reviewed_file_restore_verified": exact(True),
         "legacy_redis_restore_byte_count": exact(0),
         "non_operation_resource_delta_count": exact(0),
+        "inventory_closure_sha256": HASH,
         "restored_postgres_snapshot_set_sha256": HASH,
         "restored_reviewed_file_snapshot_set_sha256": HASH,
         "restore_result_set_sha256": HASH,
@@ -855,6 +917,15 @@ def _validate_manifest_artifacts(
             raise PhaseEvidenceError(
                 f"manifest runtime image inventory for {role} is invalid"
             )
+    try:
+        runtime_targets.validate_runtime_target_descriptor(
+            value["convergence_runtime_targets"],
+            label="manifest convergence runtime target descriptor",
+        )
+    except runtime_targets.ConvergenceRuntimeTargetDescriptorError as exc:
+        raise PhaseEvidenceError(
+            "manifest convergence runtime target descriptor is invalid"
+        ) from exc
     if (
         value["postgres_runtime_uid"] != 70
         or value["postgres_runtime_gid"] != 70
@@ -1292,20 +1363,60 @@ def verify_phase_evidence(
             or set(attestation) != ROLE_ATTESTATION_FIELDS
         ):
             raise PhaseEvidenceError("role attestation fields are not exact")
-        topology = EXPECTED_TOPOLOGY[expected_role]
-        expected_role_values = {
-            "role": expected_role,
-            "expected_host": topology["host"],
-            "operation": spec.operation,
-            "app_release_sha": expected_release_sha,
-            "agent_artifact_sha256": manifest_artifacts[
-                "host_agent_sha256"
-            ],
-            "host_identity_observed": True,
-            "observed_at": expected_role_observed_at[expected_role],
-            "status": "verified",
-            "transport": topology["transport"],
-        }
+        if spec.phase == "convergence_gate":
+            # The phase's source-set reader already reopened the worker
+            # attestation and host proof.  Do not overwrite that observed
+            # address with controller topology here; evidence is bound to the
+            # re-opened proof closure through request/source artifact hashes.
+            host = attestation.get("expected_host")
+            if not isinstance(host, str):
+                raise PhaseEvidenceError(
+                    f"{expected_role} convergence observed host is invalid"
+                )
+            try:
+                parsed_host = ipaddress.ip_address(host)
+            except (TypeError, ValueError) as exc:
+                raise PhaseEvidenceError(
+                    f"{expected_role} convergence observed host is invalid"
+                ) from exc
+            if (
+                parsed_host.version != 4
+                or str(parsed_host) != host
+                or parsed_host.is_unspecified
+                or parsed_host.is_multicast
+                or attestation.get("transport")
+                != CONVERGENCE_VALIDATION_TRANSPORT_BY_ROLE[expected_role]
+            ):
+                raise PhaseEvidenceError(
+                    f"{expected_role} convergence proof-derived host or transport is invalid"
+                )
+            expected_role_values = {
+                "role": expected_role,
+                "operation": spec.operation,
+                "app_release_sha": expected_release_sha,
+                "agent_artifact_sha256": manifest_artifacts[
+                    "host_agent_sha256"
+                ],
+                "host_identity_observed": True,
+                "observed_at": expected_role_observed_at[expected_role],
+                "status": "verified",
+                "transport": CONVERGENCE_VALIDATION_TRANSPORT_BY_ROLE[expected_role],
+            }
+        else:
+            topology = EXPECTED_TOPOLOGY[expected_role]
+            expected_role_values = {
+                "role": expected_role,
+                "expected_host": topology["host"],
+                "operation": spec.operation,
+                "app_release_sha": expected_release_sha,
+                "agent_artifact_sha256": manifest_artifacts[
+                    "host_agent_sha256"
+                ],
+                "host_identity_observed": True,
+                "observed_at": expected_role_observed_at[expected_role],
+                "status": "verified",
+                "transport": topology["transport"],
+            }
         for field, expected in expected_role_values.items():
             if not _typed_exact(attestation[field], expected):
                 raise PhaseEvidenceError(
@@ -1547,12 +1658,313 @@ def _read_secure_json_record(
     return document, hashlib.sha256(payload).hexdigest()
 
 
+def _convergence_reference(value: Any, *, label: str) -> tuple[Path, str]:
+    if not isinstance(value, Mapping) or set(value) != CONVERGENCE_REFERENCE_FIELDS:
+        raise PhaseEvidenceError(f"{label} reference fields are not exact")
+    raw_path = value.get("path")
+    if not isinstance(raw_path, str):
+        raise PhaseEvidenceError(f"{label} reference path is invalid")
+    path = Path(raw_path)
+    if not path.is_absolute() or ".." in path.parts:
+        raise PhaseEvidenceError(f"{label} reference path is unsafe")
+    return path, _nonzero_sha256(value.get("sha256"), label=f"{label} reference")
+
+
+def _convergence_provenance_closure(document: Mapping[str, Any]) -> str:
+    """Return the digest that phase evidence uses as the role request binding."""
+
+    return hashlib.sha256(
+        _canonical_json(
+            {
+                "schema": CONVERGENCE_ROLE_VALIDATION_SCHEMA,
+                "campaign_id": document["campaign_id"],
+                "operation_id": document["operation_id"],
+                "app_release_sha": document["app_release_sha"],
+                "manifest_sha256": document["manifest_sha256"],
+                "approval_sha256": document["approval_sha256"],
+                "phase": "convergence_gate",
+                "operation": document["operation"],
+                "role": document["role"],
+                "expected_host": document["expected_host"],
+                "observed_host": document["observed_host"],
+                "observed_at": document["observed_at"],
+                "transport": document["transport"],
+                "worker_request": document["worker_request"],
+                "worker_attestation": document["worker_attestation"],
+                "transport_receipt": document["transport_receipt"],
+                "host_identity_proof_sha256": document["host_identity_proof_sha256"],
+                "compose_execution": document["compose_execution"],
+            }
+        )
+    ).hexdigest()
+
+
+def _convergence_input_paths(
+    validation_path: Path,
+    *,
+    role: str,
+    validation_sha256: str,
+) -> dict[str, Path]:
+    """Derive the only raw artifacts a convergence validation may reference."""
+
+    if (
+        not validation_path.is_absolute()
+        or ".." in validation_path.parts
+        or validation_path.parent.name != "role-validations"
+        or validation_path.parent.parent.name != "observation-inputs"
+        or validation_path.name != f"{role}.{validation_sha256}.json"
+    ):
+        raise PhaseEvidenceError("convergence role validation path is not canonical")
+    incoming = validation_path.parent.parent / "incoming"
+    return {
+        "worker_request": incoming / "requests",
+        "worker_attestation": incoming / "attestations",
+        "transport_receipt": incoming / "transport-receipts",
+    }
+
+
+def _read_convergence_input(
+    document: Mapping[str, Any],
+    *,
+    field: str,
+    root: Path,
+    role: str,
+) -> tuple[dict[str, Any], str, Path]:
+    path, digest = _convergence_reference(document.get(field), label=field)
+    expected = root / f"{role}.{digest}.json"
+    if path != expected:
+        raise PhaseEvidenceError(f"{field} reference path is not canonical")
+    observed, observed_sha256 = _read_secure_json_record(
+        expected,
+        label=f"{role} {field}",
+        max_size=CONVERGENCE_WORKER.MAX_JSON_BYTES,
+    )
+    if observed_sha256 != digest:
+        raise PhaseEvidenceError(f"{field} reference digest differs on readback")
+    return observed, observed_sha256, expected
+
+
+def _convergence_receipt_digest(document: Mapping[str, Any]) -> str:
+    return hashlib.sha256(
+        _canonical_json(
+            {
+                key: value
+                for key, value in document.items()
+                if key != "transport_receipt_sha256"
+            }
+        )
+    ).hexdigest()
+
+
+def _validate_convergence_receipt(
+    receipt: Mapping[str, Any],
+    *,
+    role: str,
+    request: Mapping[str, Any],
+    attestation: Mapping[str, Any],
+    attestation_file_sha256: str,
+    proof: Mapping[str, Any],
+    now: datetime,
+) -> dict[str, Any]:
+    """Validate the receipt as an input artifact, never as remote proof alone."""
+
+    if (
+        not isinstance(receipt, Mapping)
+        or set(receipt) != CONVERGENCE_TRANSPORT_RECEIPT_FIELDS
+        or receipt.get("schema") != CONVERGENCE_TRANSPORT_RECEIPT_SCHEMA
+        or receipt.get("status") != "received"
+        or receipt.get("payload_class") != "redacted-attestation-json"
+        or receipt.get("direct_fi_to_ir_transfer") is not False
+        or receipt.get("transport") != CONVERGENCE_RECEIPT_TRANSPORT_BY_ROLE[role]
+    ):
+        raise PhaseEvidenceError(f"{role} convergence transport receipt fields differ")
+    expected = {
+        "campaign_id": request["campaign_id"],
+        "operation_id": request["operation_id"],
+        "release_sha": request["release_sha"],
+        "release_tree_sha": request["release_tree_sha"],
+        "manifest_sha256": request["manifest_sha256"],
+        "plan_sha256": request["plan_sha256"],
+        "approval_sha256": request["approval_sha256"],
+        "phase": request["phase"],
+        "operation": request["operation"],
+        "role": role,
+        "expected_host": proof["expected_host"],
+        "phase_started_at": request["phase_started_at"],
+        "request_sha256": request["request_sha256"],
+        "attestation_sha256": attestation["attestation_sha256"],
+        "attestation_file_sha256": attestation_file_sha256,
+    }
+    if any(receipt.get(key) != value for key, value in expected.items()):
+        raise PhaseEvidenceError(f"{role} convergence transport receipt binding differs")
+    if receipt.get("transport_receipt_sha256") != _convergence_receipt_digest(receipt):
+        raise PhaseEvidenceError(f"{role} convergence transport receipt digest differs")
+    received_at = _timestamp(receipt.get("received_at"), label=f"{role} transport receipt")
+    phase_started_at = _timestamp(request["phase_started_at"], label=f"{role} phase start")
+    if received_at < phase_started_at:
+        raise PhaseEvidenceError(f"{role} convergence transport receipt predates phase start")
+    if received_at > now + CONVERGENCE_WORKER.MAX_OBSERVATION_FUTURE_SKEW:
+        raise PhaseEvidenceError(f"{role} convergence transport receipt is future dated")
+    if now - received_at > CONVERGENCE_WORKER.MAX_OBSERVATION_AGE:
+        raise PhaseEvidenceError(f"{role} convergence transport receipt is stale")
+
+    detail = receipt.get("transport_detail")
+    if not isinstance(detail, Mapping):
+        raise PhaseEvidenceError(f"{role} convergence transport detail is invalid")
+    if role == "bot_fi":
+        if detail != {
+            "source_host": proof["expected_host"],
+            "controller_role": "bot_fi",
+        }:
+            raise PhaseEvidenceError("Bot-FI convergence transport detail differs")
+    elif role == "webapp_fi":
+        if (
+            set(detail) != {"host", "port", "user", "known_hosts_sha256"}
+            or detail.get("host") != proof["expected_host"]
+            or type(detail.get("port")) is not int
+            or not 1 <= detail["port"] <= 65535
+            or not isinstance(detail.get("user"), str)
+            or not detail["user"]
+        ):
+            raise PhaseEvidenceError("WebApp-FI convergence transport detail differs")
+        _nonzero_sha256(detail.get("known_hosts_sha256"), label="WebApp-FI known_hosts")
+    else:
+        # A controller-authored receipt can describe an Object Storage VersionId
+        # but cannot prove that WA-IR or Witness produced the observation.  The
+        # dedicated signed receiver policy remains a mandatory future input.
+        raise PhaseEvidenceError(
+            f"{role} Object Storage receiver signer provenance is unavailable"
+        )
+    if receipt.get("remote_receiver_attestation") is not None:
+        raise PhaseEvidenceError(f"{role} non-Object-Storage receipt carries remote attestation")
+    return dict(receipt)
+
+
+def _validate_convergence_role_provenance(
+    document: Mapping[str, Any],
+    *,
+    validation_path: Path,
+    validation_sha256: str,
+    role: str,
+    manifest: Mapping[str, Any],
+    manifest_sha256: str,
+    now: datetime,
+) -> tuple[str, str]:
+    """Reopen and bind the raw proof closure behind one role validation.
+
+    The returned tuple is the closure digest (used as the evidence request
+    binding) and the proof's observed time.  It deliberately derives neither
+    value from controller topology.
+    """
+
+    if (
+        not isinstance(document, Mapping)
+        or set(document) != CONVERGENCE_ROLE_VALIDATION_FIELDS
+        or document.get("schema") != CONVERGENCE_ROLE_VALIDATION_SCHEMA
+    ):
+        raise PhaseEvidenceError(f"{role} convergence role validation fields are not exact")
+    paths = _convergence_input_paths(
+        validation_path,
+        role=role,
+        validation_sha256=validation_sha256,
+    )
+    request, _request_file_sha256, _request_path = _read_convergence_input(
+        document,
+        field="worker_request",
+        root=paths["worker_request"],
+        role=role,
+    )
+    attestation, attestation_file_sha256, _attestation_path = _read_convergence_input(
+        document,
+        field="worker_attestation",
+        root=paths["worker_attestation"],
+        role=role,
+    )
+    receipt, _receipt_file_sha256, _receipt_path = _read_convergence_input(
+        document,
+        field="transport_receipt",
+        root=paths["transport_receipt"],
+        role=role,
+    )
+    try:
+        request = CONVERGENCE_WORKER.validate_request(request, now=now)
+        attestation = CONVERGENCE_WORKER.validate_attestation(
+            attestation,
+            request=request,
+            now=now,
+        )
+        proof = CONVERGENCE_WORKER.validate_host_identity_proof(
+            attestation.get("host_identity_proof"),
+            request=request,
+            now=now,
+        )
+    except CONVERGENCE_WORKER.ConvergenceRoleObserverError as exc:
+        raise PhaseEvidenceError(f"{role} convergence worker proof closure is invalid") from exc
+    compose_execution = attestation.get("compose_execution")
+    if role in CONVERGENCE_WORKER.RUNTIME_SNAPSHOT_ROLES:
+        try:
+            compose_execution = CONVERGENCE_WORKER._validate_compose_execution_proof(  # noqa: SLF001
+                compose_execution,
+                request=request,
+            )
+        except CONVERGENCE_WORKER.ConvergenceRoleObserverError as exc:
+            raise PhaseEvidenceError(
+                f"{role} convergence Compose execution proof is invalid"
+            ) from exc
+    elif compose_execution is not None:
+        raise PhaseEvidenceError("Witness convergence attestation carries Compose execution proof")
+    if document.get("compose_execution") != compose_execution:
+        raise PhaseEvidenceError(f"{role} convergence Compose execution proof closure differs")
+    _validate_convergence_receipt(
+        receipt,
+        role=role,
+        request=request,
+        attestation=attestation,
+        attestation_file_sha256=attestation_file_sha256,
+        proof=proof,
+        now=now,
+    )
+    expected = {
+        "status": "validated-request",
+        "operation": PHASE_SPEC_BY_NAME["convergence_gate"].operation,
+        "role": role,
+        "campaign_id": manifest["campaign_id"],
+        "operation_id": manifest["operation_id"],
+        "app_release_sha": manifest["release_sha"],
+        "manifest_sha256": manifest_sha256,
+        "approval_sha256": manifest["artifacts"]["cutover_approval_sha256"],
+        "expected_host": proof["expected_host"],
+        "observed_host": proof["observed_host"],
+        "required_journal_status": PRECOMMIT_JOURNAL_STATUS,
+        "business_write_policy": "forbid",
+        "agent_artifact_sha256": manifest["artifacts"]["host_agent_sha256"],
+        "host_agent_contract_sha256": manifest["artifacts"]["host_agent_contract_sha256"],
+        "transport": CONVERGENCE_VALIDATION_TRANSPORT_BY_ROLE[role],
+        "observed_at": proof["observed_at"],
+        "host_identity_observed": True,
+        "execution_supported": False,
+        "production_contacted": False,
+        "host_identity_proof_sha256": proof["host_identity_proof_sha256"],
+        "compose_execution": compose_execution,
+    }
+    if any(document.get(key) != value for key, value in expected.items()):
+        raise PhaseEvidenceError(f"{role} convergence role validation binding differs")
+    closure = _convergence_provenance_closure(document)
+    if (
+        document.get("provenance_closure_sha256") != closure
+        or document.get("request_sha256") != closure
+    ):
+        raise PhaseEvidenceError(f"{role} convergence role provenance closure differs")
+    return closure, str(proof["observed_at"])
+
+
 def _read_role_validation_records(
     values: list[str],
     *,
     phase: str,
     manifest: dict[str, Any],
     manifest_sha256: str,
+    now: datetime | None = None,
 ) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
     spec = PHASE_SPEC_BY_NAME[phase]
     paths = _parse_string_mapping(values, label="role validation file")
@@ -1561,11 +1973,27 @@ def _read_role_validation_records(
     request_hashes: dict[str, str] = {}
     source_hashes: dict[str, str] = {}
     observed_at: dict[str, str] = {}
+    observed_now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     for role in spec.roles:
+        validation_path = Path(paths[role])
         document, source_sha256 = _read_secure_json_record(
-            Path(paths[role]),
+            validation_path,
             label=f"{role} host-agent validation",
         )
+        if phase == "convergence_gate":
+            closure, proof_observed_at = _validate_convergence_role_provenance(
+                document,
+                validation_path=validation_path,
+                validation_sha256=source_sha256,
+                role=role,
+                manifest=manifest,
+                manifest_sha256=manifest_sha256,
+                now=observed_now,
+            )
+            request_hashes[role] = closure
+            observed_at[role] = proof_observed_at
+            source_hashes[role] = source_sha256
+            continue
         if set(document) != HOST_AGENT_VALIDATION_FIELDS:
             raise PhaseEvidenceError(
                 f"{role} host-agent validation fields are not exact"
@@ -1744,6 +2172,7 @@ def main(argv: list[str] | None = None) -> int:
             raise PhaseEvidenceError(
                 "journal is not durably started at the exact evidence phase"
             )
+        observed_now = datetime.now(timezone.utc)
         (
             role_request_sha256,
             role_source_artifact_sha256,
@@ -1753,8 +2182,8 @@ def main(argv: list[str] | None = None) -> int:
             phase=args.expected_phase,
             manifest=manifest,
             manifest_sha256=manifest_sha256,
+            now=observed_now,
         )
-        observed_now = datetime.now(timezone.utc)
         (
             dynamic_claim_values,
             claim_source_sha256,

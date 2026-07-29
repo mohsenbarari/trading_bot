@@ -5,8 +5,11 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import Mock, patch
 from urllib.parse import urlencode
@@ -14,6 +17,7 @@ import zipfile
 
 from scripts import orchestrate_wa_ir_production_artifacts as MODULE
 from scripts import produce_wa_ir_source_database_attestation as SOURCE
+from scripts import wa_ir_production_operation as WA_OPERATION
 from scripts.wa_ir_production_object_storage_transport import (
     EphemeralPresignedGet,
     PublishedObject,
@@ -659,9 +663,13 @@ class ProductionArtifactOrchestratorTests(unittest.TestCase):
             fixture = OperationFixture(Path(raw))
             identity = fixture.root / "ssh"
             secure_file(identity, b"fixture-private-key")
+            invocations: list[tuple[list[str], bytes]] = []
 
             def runner_for(document):  # noqa: ANN001
-                def runner(arguments, **_kwargs):  # noqa: ANN001
+                def runner(arguments, **kwargs):  # noqa: ANN001
+                    invocations.append(
+                        (list(arguments), bytes(kwargs["input"]))
+                    )
                     return subprocess.CompletedProcess(
                         arguments,
                         0,
@@ -708,6 +716,15 @@ class ProductionArtifactOrchestratorTests(unittest.TestCase):
                 runner=runner_for(operation_apply(fixture)),
             )
             self.assertTrue(applied["database_container_started"])
+            self.assertEqual(invocations[0][1], b"{}\n")
+            self.assertEqual(invocations[1][1], b"")
+            self.assertEqual(invocations[2][1], b"")
+            for arguments, _control in invocations[:3]:
+                remote = arguments[-1]
+                self.assertIn("/usr/bin/python3 -I -B ", remote)
+            self.assertNotIn("--control-fd", invocations[0][0][-1])
+            self.assertIn("--control-fd 0", invocations[1][0][-1])
+            self.assertIn("--control-fd 0", invocations[2][0][-1])
 
             legacy_materialized = operation_apply(fixture)
             legacy_root = (
@@ -748,6 +765,503 @@ class ProductionArtifactOrchestratorTests(unittest.TestCase):
                     apply=False,
                     runner=runner_for(leaked),
                 )
+
+    def test_streaming_ssh_holds_eof_only_pipe_until_remote_exit(self) -> None:
+        code = (
+            "import os,select,stat;"
+            "assert stat.S_ISFIFO(os.fstat(0).st_mode);"
+            "assert not select.select([0],[],[],0)[0];"
+            "print('ok')"
+        )
+        with patch.object(MODULE, "SSH", "/usr/bin/python3"):
+            output = MODULE._run_ssh(
+                ["/usr/bin/python3", "-I", "-B", "-c", code],
+                b"",
+                timeout=5,
+                liveness_only=True,
+            )
+        self.assertEqual(output, b"ok\n")
+
+    def test_streaming_ssh_rejects_loss_flood_and_timeout(self) -> None:
+        with (
+            patch.object(MODULE, "SSH", "/usr/bin/python3"),
+            self.assertRaisesRegex(
+                MODULE.ProductionOrchestratorError,
+                "failed closed",
+            ),
+        ):
+            MODULE._run_ssh(
+                [
+                    "/usr/bin/python3",
+                    "-I",
+                    "-B",
+                    "-c",
+                    "raise SystemExit(7)",
+                ],
+                b"{}\n",
+                timeout=5,
+            )
+        with (
+            patch.object(MODULE, "SSH", "/usr/bin/python3"),
+            patch.object(MODULE, "MAX_ATTESTATION_BYTES", 64),
+            self.assertRaisesRegex(
+                MODULE.ProductionOrchestratorError,
+                "exceeded",
+            ),
+        ):
+            MODULE._run_ssh(
+                [
+                    "/usr/bin/python3",
+                    "-I",
+                    "-B",
+                    "-c",
+                    "print('x' * 10000)",
+                ],
+                b"{}\n",
+                timeout=5,
+            )
+        with (
+            patch.object(MODULE, "SSH", "/usr/bin/python3"),
+            self.assertRaisesRegex(
+                MODULE.ProductionOrchestratorError,
+                "timed out",
+            ),
+        ):
+            MODULE._run_ssh(
+                [
+                    "/usr/bin/python3",
+                    "-I",
+                    "-B",
+                    "-c",
+                    "import time;time.sleep(5)",
+                ],
+                b"{}\n",
+                timeout=1,
+            )
+
+    def test_streaming_ssh_kills_detached_setsid_child(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            pid_path = Path(raw) / "pid"
+            code = (
+                "import subprocess;"
+                "from pathlib import Path;"
+                "p=subprocess.Popen("
+                "['/usr/bin/python3','-I','-B','-c',"
+                "'import time;time.sleep(60)'],"
+                "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,"
+                "stderr=subprocess.DEVNULL,start_new_session=True);"
+                f"Path({str(pid_path)!r}).write_text(str(p.pid));"
+                "print('done')"
+            )
+            with (
+                patch.object(MODULE, "SSH", "/usr/bin/python3"),
+                self.assertRaisesRegex(
+                    MODULE.ProductionOrchestratorError,
+                    "retained a descendant",
+                ),
+            ):
+                MODULE._run_ssh(
+                    ["/usr/bin/python3", "-I", "-B", "-c", code],
+                    b"{}\n",
+                    timeout=5,
+                )
+            pid = int(pid_path.read_text(encoding="ascii"))
+            deadline = time.monotonic() + 2
+            while Path(f"/proc/{pid}").exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertFalse(Path(f"/proc/{pid}").exists())
+
+    def test_streaming_ssh_reaps_double_fork_adopted_zombies(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            child_path = Path(raw) / "child"
+            grandchild_path = Path(raw) / "grandchild"
+            before = MODULE._direct_child_baseline()
+            code = (
+                "import os,time;"
+                "from pathlib import Path;"
+                "pid=os.fork();"
+                "\nif pid==0:"
+                "\n os.setsid(); grand=os.fork();"
+                f"\n if grand==0: Path({str(grandchild_path)!r}).write_text("
+                "str(os.getpid())); os._exit(0)"
+                f"\n Path({str(child_path)!r}).write_text(str(os.getpid()));"
+                " os._exit(0)"
+                "\ntime.sleep(.3);print('ok')"
+            )
+            with patch.object(MODULE, "SSH", "/usr/bin/python3"):
+                output = MODULE._run_ssh(
+                    ["/usr/bin/python3", "-I", "-B", "-c", code],
+                    b"{}\n",
+                    timeout=5,
+                )
+            self.assertEqual(output, b"ok\n")
+            pids = {
+                int(child_path.read_text(encoding="ascii")),
+                int(grandchild_path.read_text(encoding="ascii")),
+            }
+            self.assertTrue(
+                all(not Path(f"/proc/{pid}").exists() for pid in pids)
+            )
+            self.assertEqual(MODULE._direct_child_baseline(), before)
+
+    def test_streaming_ssh_timeout_kills_setsided_double_fork(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            pid_path = Path(raw) / "grandchild-pid"
+            temporary_pid_path = Path(raw) / "grandchild-pid.partial"
+            sentinel = Path(raw) / "grandchild-survived"
+            code = (
+                "import os,signal,time\n"
+                "if os.fork()==0:\n"
+                " os.setsid()\n"
+                " if os.fork()!=0: time.sleep(60);os._exit(0)\n"
+                " signal.signal(signal.SIGTERM,signal.SIG_IGN)\n"
+                f" with open({str(temporary_pid_path)!r},'w') as f:"
+                " f.write(str(os.getpid()));f.flush();os.fsync(f.fileno())\n"
+                f" os.replace({str(temporary_pid_path)!r},"
+                f"{str(pid_path)!r})\n"
+                " time.sleep(1.3)\n"
+                f" open({str(sentinel)!r},'wb').write(b'survived')\n"
+                " os._exit(0)\n"
+                f"while not os.path.exists({str(pid_path)!r}):"
+                " time.sleep(0.005)\n"
+                "time.sleep(60)\n"
+            )
+            with (
+                patch.object(MODULE, "SSH", "/usr/bin/python3"),
+                patch.object(WA_OPERATION, "PROCESS_TERM_GRACE_SECONDS", 0.1),
+                patch.object(WA_OPERATION, "PROCESS_KILL_GRACE_SECONDS", 0.1),
+                patch.object(
+                    WA_OPERATION,
+                    "PROCESS_TREE_QUIESCENCE_SECONDS",
+                    0.05,
+                ),
+                self.assertRaisesRegex(
+                    MODULE.ProductionOrchestratorError,
+                    "timed out",
+                ),
+            ):
+                MODULE._run_ssh(
+                    ["/usr/bin/python3", "-I", "-B", "-c", code],
+                    b"{}\n",
+                    timeout=1,
+                )
+            time.sleep(0.5)
+            self.assertTrue(pid_path.is_file())
+            self.assertFalse(sentinel.exists())
+            self.assertFalse(
+                Path(
+                    f"/proc/{pid_path.read_text(encoding='ascii')}"
+                ).exists()
+            )
+
+    def test_streaming_ssh_root_pidfd_contains_identity_failure(self) -> None:
+        opened: list[tuple[int, int]] = []
+        real_pidfd_open = os.pidfd_open
+
+        def capture_pidfd(pid: int, flags: int = 0) -> int:
+            descriptor = real_pidfd_open(pid, flags)
+            opened.append((pid, descriptor))
+            return descriptor
+
+        with (
+            patch.object(MODULE, "SSH", "/usr/bin/python3"),
+            patch.object(
+                MODULE,
+                "_direct_child_baseline",
+                return_value=frozenset(),
+            ),
+            patch.object(
+                MODULE,
+                "_read_process_identity",
+                side_effect=MODULE.ProductionOperationError(
+                    "forced SSH root identity failure"
+                ),
+            ),
+            patch.object(
+                MODULE.os,
+                "pidfd_open",
+                side_effect=capture_pidfd,
+            ),
+            self.assertRaisesRegex(
+                MODULE.ProductionOrchestratorError,
+                "process containment failed",
+            ),
+        ):
+            MODULE._run_ssh(
+                [
+                    "/usr/bin/python3",
+                    "-I",
+                    "-B",
+                    "-c",
+                    "import time;time.sleep(60)",
+                ],
+                b"{}\n",
+                timeout=5,
+            )
+        self.assertEqual(len(opened), 1)
+        pid, descriptor = opened[0]
+        self.assertFalse(Path(f"/proc/{pid}").exists())
+        with self.assertRaises(OSError):
+            os.fstat(descriptor)
+
+    def test_streaming_ssh_cleanup_closes_all_after_baseexception(
+        self,
+    ) -> None:
+        class FatalSsh(BaseException):
+            pass
+
+        class FatalSelectorClose(BaseException):
+            pass
+
+        with tempfile.TemporaryDirectory() as raw:
+            pid_path = Path(raw) / "ssh-pid"
+            original = FatalSsh("original SSH interruption")
+            selector = MODULE.selectors.DefaultSelector()
+            selector_close_calls: list[bool] = []
+            spawned: list[subprocess.Popen[bytes]] = []
+            opened: list[int] = []
+            real_popen = subprocess.Popen
+            real_pidfd_open = os.pidfd_open
+
+            class HostileSelector:
+                def register(self, *args, **kwargs):  # noqa: ANN002, ANN003
+                    return selector.register(*args, **kwargs)
+
+                def unregister(self, *args, **kwargs):  # noqa: ANN002, ANN003
+                    return selector.unregister(*args, **kwargs)
+
+                def select(self, *_args, **_kwargs):  # noqa: ANN002, ANN003
+                    deadline = time.monotonic() + 2
+                    while (
+                        not pid_path.exists()
+                        and time.monotonic() < deadline
+                    ):
+                        time.sleep(0.01)
+                    raise original
+
+                def close(self) -> None:
+                    selector.close()
+                    selector_close_calls.append(True)
+                    raise FatalSelectorClose("forced selector close failure")
+
+            def capture_spawn(*args, **kwargs):  # noqa: ANN002, ANN003
+                process = real_popen(*args, **kwargs)
+                spawned.append(process)
+                return process
+
+            def capture_pidfd(pid: int, flags: int = 0) -> int:
+                descriptor = real_pidfd_open(pid, flags)
+                opened.append(descriptor)
+                return descriptor
+
+            with (
+                patch.object(MODULE, "SSH", "/usr/bin/python3"),
+                patch.object(
+                    MODULE.selectors,
+                    "DefaultSelector",
+                    return_value=HostileSelector(),
+                ),
+                patch.object(
+                    MODULE.subprocess,
+                    "Popen",
+                    side_effect=capture_spawn,
+                ),
+                patch.object(
+                    MODULE.os,
+                    "pidfd_open",
+                    side_effect=capture_pidfd,
+                ),
+                self.assertRaises(FatalSsh) as raised,
+            ):
+                MODULE._run_ssh(
+                    [
+                        "/usr/bin/python3",
+                        "-I",
+                        "-B",
+                        "-c",
+                        (
+                            "from pathlib import Path;"
+                            f"Path({str(pid_path)!r}).write_text("
+                            "__import__('os').getpid().__str__());"
+                            "__import__('time').sleep(60)"
+                        ),
+                    ],
+                    b"{}\n",
+                    timeout=5,
+                )
+            self.assertIs(raised.exception, original)
+            self.assertEqual(selector_close_calls, [True])
+            self.assertEqual(len(spawned), 1)
+            self.assertTrue(spawned[0].stdin.closed)
+            self.assertTrue(spawned[0].stdout.closed)
+            self.assertTrue(spawned[0].stderr.closed)
+            self.assertEqual(len(opened), 1)
+            with self.assertRaises(OSError):
+                os.fstat(opened[0])
+            self.assertFalse(Path(f"/proc/{spawned[0].pid}").exists())
+            self.assertIn(
+                "FatalSelectorClose",
+                "\n".join(getattr(raised.exception, "__notes__", ())),
+            )
+
+    def test_streaming_ssh_preserves_baseexception_after_cleanup_error(
+        self,
+    ) -> None:
+        class FatalSsh(BaseException):
+            pass
+
+        with tempfile.TemporaryDirectory() as raw:
+            pid_path = Path(raw) / "ssh-pid"
+            original = FatalSsh("original SSH interruption")
+            terminate = MODULE._terminate_process_tree
+
+            def abort_select(*_args, **_kwargs):  # noqa: ANN002, ANN003
+                deadline = time.monotonic() + 2
+                while not pid_path.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                raise original
+
+            def terminate_then_fail(*args, **kwargs):  # noqa: ANN002, ANN003
+                terminate(*args, **kwargs)
+                raise MODULE.ProductionOperationError(
+                    "simulated SSH containment report failure"
+                )
+
+            with (
+                patch.object(MODULE, "SSH", "/usr/bin/python3"),
+                patch.object(
+                    MODULE.selectors.DefaultSelector,
+                    "select",
+                    side_effect=abort_select,
+                ),
+                patch.object(
+                    MODULE,
+                    "_terminate_process_tree",
+                    side_effect=terminate_then_fail,
+                ),
+                self.assertRaises(FatalSsh) as raised,
+            ):
+                MODULE._run_ssh(
+                    [
+                        "/usr/bin/python3",
+                        "-I",
+                        "-B",
+                        "-c",
+                        (
+                            "from pathlib import Path;"
+                            f"Path({str(pid_path)!r}).write_text("
+                            "__import__('os').getpid().__str__());"
+                            "__import__('time').sleep(60)"
+                        ),
+                    ],
+                    b"{}\n",
+                    timeout=5,
+                )
+            self.assertIs(raised.exception, original)
+            pid = int(pid_path.read_text(encoding="ascii"))
+            self.assertFalse(Path(f"/proc/{pid}").exists())
+            self.assertIn(
+                "containment cleanup also failed closed",
+                "\n".join(getattr(raised.exception, "__notes__", ())),
+            )
+
+    def test_controller_signal_guard_is_reentrant_and_restored(self) -> None:
+        before = {
+            signum: signal.getsignal(signum)
+            for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM)
+        }
+        with self.assertRaises(
+            MODULE.ProductionOrchestratorCancellation
+        ):
+            with MODULE._signal_cancellation_guard():
+                first = signal.getsignal(signal.SIGINT)
+                self.assertTrue(callable(first))
+                try:
+                    first(signal.SIGINT, None)
+                except MODULE.ProductionOrchestratorCancellation:
+                    second = signal.getsignal(signal.SIGTERM)
+                    self.assertTrue(callable(second))
+                    second(signal.SIGTERM, None)
+                    raise
+        self.assertEqual(
+            {
+                signum: signal.getsignal(signum)
+                for signum in before
+            },
+            before,
+        )
+
+    def test_controller_signal_is_deferred_through_reconciliation(self) -> None:
+        cleanup_finished = False
+        with self.assertRaisesRegex(
+            MODULE.ProductionOrchestratorCancellation,
+            "SIGTERM",
+        ):
+            with MODULE._signal_cancellation_guard():
+                with MODULE._signal_reconciliation_scope():
+                    handler = signal.getsignal(signal.SIGTERM)
+                    self.assertTrue(callable(handler))
+                    handler(signal.SIGTERM, None)
+                    cleanup_finished = True
+        self.assertTrue(cleanup_finished)
+
+    def test_reconciliation_signal_preserves_active_baseexception(self) -> None:
+        class FatalControl(BaseException):
+            pass
+
+        original = FatalControl("original control failure")
+        cleanup_finished = False
+        with self.assertRaises(FatalControl) as raised:
+            with MODULE._signal_cancellation_guard():
+                try:
+                    raise original
+                finally:
+                    with MODULE._signal_reconciliation_scope():
+                        handler = signal.getsignal(signal.SIGINT)
+                        self.assertTrue(callable(handler))
+                        handler(signal.SIGINT, None)
+                        cleanup_finished = True
+        self.assertIs(raised.exception, original)
+        self.assertTrue(cleanup_finished)
+
+    def test_controller_signal_cancels_and_reaps_ssh_process(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            pid_path = Path(raw) / "ssh-pid"
+            code = (
+                "from pathlib import Path;"
+                f"Path({str(pid_path)!r}).write_text("
+                "__import__('os').getpid().__str__());"
+                "__import__('time').sleep(60)"
+            )
+
+            def interrupt() -> None:
+                deadline = time.monotonic() + 2
+                while time.monotonic() < deadline:
+                    try:
+                        if pid_path.read_text(encoding="ascii").isdigit():
+                            break
+                    except OSError:
+                        pass
+                    time.sleep(0.01)
+                os.kill(os.getpid(), signal.SIGTERM)
+
+            sender = threading.Thread(target=interrupt)
+            sender.start()
+            with (
+                patch.object(MODULE, "SSH", "/usr/bin/python3"),
+                self.assertRaises(
+                    MODULE.ProductionOrchestratorCancellation
+                ),
+            ):
+                MODULE._run_ssh(
+                    ["/usr/bin/python3", "-I", "-B", "-c", code],
+                    b"{}\n",
+                    timeout=5,
+                )
+            sender.join(timeout=2)
+            self.assertFalse(sender.is_alive())
+            pid = int(pid_path.read_text(encoding="ascii"))
+            self.assertFalse(Path(f"/proc/{pid}").exists())
 
     def test_stage_outputs_are_canonical_bound_and_exact_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

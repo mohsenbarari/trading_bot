@@ -43,6 +43,11 @@ from scripts.wa_ir_production_transport_contract import (  # noqa: E402
     ProductionTransportError,
     validate_operation_id,
 )
+from scripts.production_shadow_global_docker_inventory_agent import (  # noqa: E402
+    BoundedCommandError,
+    BoundedCommandResult,
+    _bounded_command,
+)
 
 
 ARTIFACT_ROOT = Path(
@@ -336,19 +341,23 @@ def _execute_command(
     env: Mapping[str, str],
 ) -> subprocess.CompletedProcess[bytes]:
     try:
-        return subprocess.run(
+        result = _bounded_command(
             arguments,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
             timeout=timeout,
             env=dict(env),
+            stdout_limit=MAX_COMMAND_OUTPUT_BYTES,
+            stderr_limit=MAX_COMMAND_OUTPUT_BYTES,
         )
-    except (OSError, subprocess.SubprocessError) as exc:
+    except BoundedCommandError as exc:
         raise ReleaseArtifactError(
             f"required local command is unavailable: {Path(arguments[0]).name}"
         ) from exc
+    return subprocess.CompletedProcess(
+        arguments,
+        result.returncode,
+        result.stdout,
+        result.stderr,
+    )
 
 
 def _run(

@@ -17,6 +17,7 @@ from scripts.production_shadow_cutover_controller import (
     PHASE_SPECS,
     PRECOMMIT_JOURNAL_STATUS,
 )
+from scripts import verify_production_shadow_phase_evidence as VERIFY_MODULE
 from scripts.verify_production_shadow_phase_evidence import (
     EVIDENCE_SCHEMA,
     PHASE_CLAIM_RULES,
@@ -43,6 +44,7 @@ LEGACY_RELEASE_SHA = "b" * 40
 MANIFEST_SHA256 = "c" * 64
 PLAN_SHA256 = "d" * 64
 APPROVAL_SHA256 = "e" * 64
+NOW = datetime(2026, 7, 28, 12, 0, tzinfo=timezone.utc)
 MANIFEST_ARTIFACTS = dict(manifest_payload()["artifacts"])
 MANIFEST_ARTIFACTS["cutover_approval_sha256"] = APPROVAL_SHA256
 MANIFEST_ARTIFACTS[
@@ -414,6 +416,12 @@ class ProductionShadowPhaseEvidenceTests(unittest.TestCase):
             ],
             ["shadow-readonly", "shadow-writable"],
         )
+        self.assertEqual(
+            PHASE_CLAIM_RULES["shadow_restore"][
+                "inventory_closure_sha256"
+            ].kind,
+            "nonzero-sha256",
+        )
 
     def test_every_precommit_phase_exact_evidence_verifies(self):
         now = datetime.now(timezone.utc)
@@ -740,6 +748,257 @@ class ProductionShadowPhaseEvidenceTests(unittest.TestCase):
             )
             self.assertEqual(dynamic, expected_dynamic)
             self.assertEqual(set(claim_hashes), set(PHASE_CLAIM_RULES[phase]))
+
+    def test_convergence_validation_reopens_bound_host_proof_and_receipt(self):
+        """A true controller boolean cannot replace the raw worker proof."""
+
+        role = "bot_fi"
+        manifest = manifest_payload()
+        manifest["artifacts"] = dict(MANIFEST_ARTIFACTS)
+        phase_started_at = (NOW - timedelta(minutes=1)).isoformat()
+        observed_at = NOW.isoformat()
+        request = {
+            "campaign_id": CAMPAIGN_ID,
+            "operation_id": OPERATION_ID,
+            "release_sha": RELEASE_SHA,
+            "release_tree_sha": "a" * 40,
+            "manifest_sha256": MANIFEST_SHA256,
+            "plan_sha256": PLAN_SHA256,
+            "approval_sha256": APPROVAL_SHA256,
+            "phase": "convergence_gate",
+            "operation": "verify-shadow-three-site-convergence",
+            "role": role,
+            "expected_host": "127.0.0.1",
+            "phase_started_at": phase_started_at,
+            "request_sha256": "6" * 64,
+        }
+        proof = {
+            "expected_host": "127.0.0.1",
+            "observed_host": "127.0.0.1",
+            "observed_at": observed_at,
+            "host_identity_proof_sha256": "7" * 64,
+        }
+        attestation = {
+            "attestation_sha256": "8" * 64,
+            "host_identity_proof": proof,
+            "compose_execution": {
+                "execution_plan_sha256": "1" * 64,
+                "receipt_sha256": "2" * 64,
+                "container_id_sha256": "3" * 64,
+                "network_id_sha256": "4" * 64,
+                "cleanup_verified": True,
+            },
+        }
+
+        def write_record(path: Path, document: dict[str, object]) -> tuple[Path, str]:
+            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            path.parent.chmod(0o700)
+            payload = json.dumps(
+                document,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("ascii") + b"\n"
+            digest = hashlib.sha256(payload).hexdigest()
+            target = path.parent / f"{role}.{digest}.json"
+            target.write_bytes(payload)
+            target.chmod(0o600)
+            return target, digest
+
+        with tempfile.TemporaryDirectory() as directory:
+            evidence_root = Path(directory)
+            evidence_root.chmod(0o700)
+            source_input = evidence_root / "convergence-gate" / "observation-inputs"
+            request_path, request_digest = write_record(
+                source_input / "incoming" / "requests" / "placeholder.json",
+                {"kind": "request"},
+            )
+            attestation_path, attestation_digest = write_record(
+                source_input / "incoming" / "attestations" / "placeholder.json",
+                {"kind": "attestation"},
+            )
+            receipt = {
+                "schema": VERIFY_MODULE.CONVERGENCE_TRANSPORT_RECEIPT_SCHEMA,
+                "status": "received",
+                "campaign_id": CAMPAIGN_ID,
+                "operation_id": OPERATION_ID,
+                "release_sha": RELEASE_SHA,
+                "release_tree_sha": "a" * 40,
+                "manifest_sha256": MANIFEST_SHA256,
+                "plan_sha256": PLAN_SHA256,
+                "approval_sha256": APPROVAL_SHA256,
+                "phase": "convergence_gate",
+                "operation": "verify-shadow-three-site-convergence",
+                "role": role,
+                "expected_host": proof["expected_host"],
+                "phase_started_at": phase_started_at,
+                "request_sha256": request["request_sha256"],
+                "attestation_sha256": attestation["attestation_sha256"],
+                "attestation_file_sha256": attestation_digest,
+                "transport": "controller-local-root-only",
+                "payload_class": "redacted-attestation-json",
+                "transport_detail": {
+                    "source_host": proof["expected_host"],
+                    "controller_role": "bot_fi",
+                },
+                "remote_receiver_attestation": None,
+                "received_at": observed_at,
+                "direct_fi_to_ir_transfer": False,
+                "transport_receipt_sha256": "0" * 64,
+            }
+            receipt["transport_receipt_sha256"] = VERIFY_MODULE._convergence_receipt_digest(receipt)
+            receipt_path, receipt_digest = write_record(
+                source_input / "incoming" / "transport-receipts" / "placeholder.json",
+                receipt,
+            )
+            validation = {
+                "schema": VERIFY_MODULE.CONVERGENCE_ROLE_VALIDATION_SCHEMA,
+                "status": "validated-request",
+                "request_sha256": "0" * 64,
+                "operation": request["operation"],
+                "role": role,
+                "campaign_id": CAMPAIGN_ID,
+                "operation_id": OPERATION_ID,
+                "app_release_sha": RELEASE_SHA,
+                "manifest_sha256": MANIFEST_SHA256,
+                "approval_sha256": APPROVAL_SHA256,
+                "expected_host": proof["expected_host"],
+                "observed_host": proof["observed_host"],
+                "required_journal_status": PRECOMMIT_JOURNAL_STATUS,
+                "business_write_policy": "forbid",
+                "agent_artifact_sha256": MANIFEST_ARTIFACTS["host_agent_sha256"],
+                "host_agent_contract_sha256": MANIFEST_ARTIFACTS["host_agent_contract_sha256"],
+                "transport": "local-controller",
+                "observed_at": observed_at,
+                "host_identity_observed": True,
+                "execution_supported": False,
+                "production_contacted": False,
+                "worker_request": {"path": str(request_path), "sha256": request_digest},
+                "worker_attestation": {"path": str(attestation_path), "sha256": attestation_digest},
+                "transport_receipt": {"path": str(receipt_path), "sha256": receipt_digest},
+                "host_identity_proof_sha256": proof["host_identity_proof_sha256"],
+                "compose_execution": attestation["compose_execution"],
+                "provenance_closure_sha256": "0" * 64,
+            }
+            closure = VERIFY_MODULE._convergence_provenance_closure(validation)
+            validation["request_sha256"] = closure
+            validation["provenance_closure_sha256"] = closure
+            payload = json.dumps(
+                validation,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("ascii") + b"\n"
+            validation_digest = hashlib.sha256(payload).hexdigest()
+            validation_path = (
+                source_input
+                / "role-validations"
+                / f"{role}.{validation_digest}.json"
+            )
+            validation_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            validation_path.parent.chmod(0o700)
+            validation_path.write_bytes(payload)
+            validation_path.chmod(0o600)
+
+            with (
+                mock.patch.object(
+                    VERIFY_MODULE.CONVERGENCE_WORKER,
+                    "validate_request",
+                    return_value=request,
+                ) as validate_request,
+                mock.patch.object(
+                    VERIFY_MODULE.CONVERGENCE_WORKER,
+                    "validate_attestation",
+                    return_value=attestation,
+                ) as validate_attestation,
+                mock.patch.object(
+                    VERIFY_MODULE.CONVERGENCE_WORKER,
+                    "validate_host_identity_proof",
+                    return_value=proof,
+                ) as validate_proof,
+            ):
+                observed_closure, proof_time = VERIFY_MODULE._validate_convergence_role_provenance(
+                    validation,
+                    validation_path=validation_path,
+                    validation_sha256=validation_digest,
+                    role=role,
+                    manifest=manifest,
+                    manifest_sha256=MANIFEST_SHA256,
+                    now=NOW,
+                )
+            self.assertEqual(observed_closure, closure)
+            self.assertEqual(proof_time, observed_at)
+            self.assertEqual(validate_request.call_args.args[0], {"kind": "request"})
+            self.assertEqual(validate_attestation.call_args.args[0], {"kind": "attestation"})
+            self.assertEqual(validate_proof.call_count, 1)
+
+            # Reopening the same raw attestation is not enough: the normalized
+            # role validation must also retain the Compose receipt closure.
+            missing_compose = dict(validation)
+            missing_compose["compose_execution"] = None
+            missing_closure = VERIFY_MODULE._convergence_provenance_closure(missing_compose)
+            missing_compose["request_sha256"] = missing_closure
+            missing_compose["provenance_closure_sha256"] = missing_closure
+            with (
+                mock.patch.object(
+                    VERIFY_MODULE.CONVERGENCE_WORKER,
+                    "validate_request",
+                    return_value=request,
+                ),
+                mock.patch.object(
+                    VERIFY_MODULE.CONVERGENCE_WORKER,
+                    "validate_attestation",
+                    return_value=attestation,
+                ),
+                mock.patch.object(
+                    VERIFY_MODULE.CONVERGENCE_WORKER,
+                    "validate_host_identity_proof",
+                    return_value=proof,
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    PhaseEvidenceError,
+                    "Compose execution proof closure differs",
+                ):
+                    VERIFY_MODULE._validate_convergence_role_provenance(
+                        missing_compose,
+                        validation_path=validation_path,
+                        validation_sha256=validation_digest,
+                        role=role,
+                        manifest=manifest,
+                        manifest_sha256=MANIFEST_SHA256,
+                        now=NOW,
+                    )
+
+            # A controller can write the boolean, but a failed worker proof
+            # prevents the same validation record from becoming evidence.
+            with (
+                mock.patch.object(
+                    VERIFY_MODULE.CONVERGENCE_WORKER,
+                    "validate_request",
+                    return_value=request,
+                ),
+                mock.patch.object(
+                    VERIFY_MODULE.CONVERGENCE_WORKER,
+                    "validate_attestation",
+                    return_value=attestation,
+                ),
+                mock.patch.object(
+                    VERIFY_MODULE.CONVERGENCE_WORKER,
+                    "validate_host_identity_proof",
+                    side_effect=VERIFY_MODULE.CONVERGENCE_WORKER.ConvergenceRoleObserverError(
+                        "host proof rejected"
+                    ),
+                ),
+            ):
+                with self.assertRaisesRegex(PhaseEvidenceError, "worker proof closure"):
+                    VERIFY_MODULE._validate_convergence_role_provenance(
+                        validation,
+                        validation_path=validation_path,
+                        validation_sha256=validation_digest,
+                        role=role,
+                        manifest=manifest,
+                        manifest_sha256=MANIFEST_SHA256,
+                        now=NOW,
+                    )
 
     def test_phase_specific_freshness_and_cross_role_skew_fail_closed(self):
         now = datetime.now(timezone.utc)

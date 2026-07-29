@@ -11,6 +11,7 @@ the production cutover journal directly.
 from __future__ import annotations
 
 import argparse
+import ctypes
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -23,6 +24,7 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
@@ -59,13 +61,13 @@ PHASE = "shadow_restore"
 OPERATION = "restore-shadow-postgres-and-files-without-redis"
 PLAN_SCHEMA = "production-shadow-restore-phase-coordinator-plan-v1"
 BASELINE_SCHEMA = (
-    "production-shadow-global-docker-inventory-three-role-baseline-v1"
+    "production-shadow-global-docker-inventory-three-role-baseline-v2"
 )
 INVENTORY_CLOSURE_SCHEMA = (
-    "production-shadow-global-docker-inventory-zero-delta-closure-v1"
+    "production-shadow-global-docker-inventory-zero-delta-closure-v2"
 )
 INVENTORY_CLOSURE_REFERENCE_SCHEMA = (
-    "production-shadow-global-docker-inventory-zero-delta-reference-v1"
+    "production-shadow-global-docker-inventory-zero-delta-reference-v2"
 )
 DERIVATION_SCHEMA = (
     "production-shadow-frozen-final-restore-claim-derivation-v1"
@@ -96,9 +98,21 @@ INVENTORY_CLOSURE_REFERENCE_FIELDS = frozenset(
         "completion_sha256",
         "closure_path",
         "closure_sha256",
+        "operation_host_config_sha256_by_role",
         "captured_before_lease_consumption",
     }
 )
+INVENTORY_ROLE_FIELDS = frozenset(
+    {
+        "before",
+        "after",
+        "comparison",
+        "expected_operation_container_id",
+        "expected_operation_host_config_sha256",
+        "observed_operation_host_config_sha256",
+    }
+)
+INVENTORY_OBSERVATION_FIELDS = frozenset({"request", "response"})
 DERIVATION_FIELDS = frozenset(
     {
         "schema",
@@ -133,6 +147,12 @@ MAX_VALIDATION_BYTES = 256 * 1024
 MAX_CONTROL_STDERR_BYTES = 64 * 1024
 CONTROL_TIMEOUT_SECONDS = 120.0
 PROCESS_GROUP_TERM_GRACE_SECONDS = 2.0
+PROCESS_POLL_SECONDS = 0.01
+PROCESS_TREE_QUIESCENCE_SECONDS = 0.05
+MAX_PROCESS_SNAPSHOT_MEMBERS = 65536
+MAX_PROCESS_TREE_MEMBERS = 8192
+PR_SET_CHILD_SUBREAPER = 36
+_BOUNDED_PROCESS_LOCK = threading.Lock()
 ZERO_SHA256 = "0" * 64
 
 
@@ -1114,6 +1134,28 @@ def _database_container_ids(
     return identifiers
 
 
+def _database_host_config_sha256s(
+    completion: Mapping[str, Any],
+) -> dict[str, str]:
+    digests: dict[str, str] = {}
+    for role in ROLES:
+        try:
+            value = completion["roles"][role]["host_result"][
+                "action_evidence"
+            ]["verify-final"]["document"]["semantic"][
+                "database_host_config_sha256"
+            ]
+        except (KeyError, TypeError) as exc:
+            raise RestorePhaseCoordinatorError(
+                f"{role} completion lacks its verified database HostConfig"
+            ) from exc
+        digests[role] = _nonzero_sha256(
+            value,
+            label=f"{role} database HostConfig",
+        )
+    return digests
+
+
 def _installed_role_manifests(
     completion: Mapping[str, Any],
 ) -> dict[str, tuple[Path, str]]:
@@ -1147,6 +1189,7 @@ def _inventory_request(
     action: str,
     inventory_agent_sha256: str,
     expected_operation_container_id: str | None,
+    expected_operation_host_config_sha256: str | None,
     role_manifest_path: Path | None,
     role_manifest_sha256: str | None,
 ) -> dict[str, Any]:
@@ -1165,6 +1208,9 @@ def _inventory_request(
             worker_sha256=context.requests[role]["worker_sha256"],
             expected_operation_container_id=(
                 expected_operation_container_id
+            ),
+            expected_operation_host_config_sha256=(
+                expected_operation_host_config_sha256
             ),
             role_manifest_path=role_manifest_path,
             role_manifest_sha256=role_manifest_sha256,
@@ -1374,6 +1420,11 @@ def _capture_inventory_set(
         if completion is not None
         else {role: None for role in ROLES}
     )
+    host_config_sha256s = (
+        _database_host_config_sha256s(completion)
+        if completion is not None
+        else {role: None for role in ROLES}
+    )
     role_manifests = (
         _installed_role_manifests(completion)
         if completion is not None
@@ -1388,6 +1439,9 @@ def _capture_inventory_set(
             action=action,
             inventory_agent_sha256=inventory_agent_sha256,
             expected_operation_container_id=container_ids[role],
+            expected_operation_host_config_sha256=(
+                host_config_sha256s[role]
+            ),
             role_manifest_path=role_manifest_path,
             role_manifest_sha256=role_manifest_sha256,
         )
@@ -1480,6 +1534,7 @@ def _baseline_document(
             action="capture-before",
             inventory_agent_sha256=inventory_agent_sha256,
             expected_operation_container_id=None,
+            expected_operation_host_config_sha256=None,
             role_manifest_path=None,
             role_manifest_sha256=None,
         )
@@ -1526,6 +1581,9 @@ def _baseline_document(
         "role_order": list(ROLES),
         "complete_before_restore": True,
         "operation_resource_count": 0,
+        "operation_host_config_sha256_by_role": {
+            role: None for role in ROLES
+        },
     }
 
 
@@ -1701,6 +1759,7 @@ def _inventory_closure(
             )
         comparisons[role] = dict(comparison)
     container_ids = _database_container_ids(completion)
+    host_config_sha256s = _database_host_config_sha256s(completion)
     document = {
         "schema": INVENTORY_CLOSURE_SCHEMA,
         "status": "zero-non-operation-resource-delta",
@@ -1725,10 +1784,17 @@ def _inventory_closure(
                 "after": dict(after[role]),
                 "comparison": comparisons[role],
                 "expected_operation_container_id": container_ids[role],
+                "expected_operation_host_config_sha256": (
+                    host_config_sha256s[role]
+                ),
+                "observed_operation_host_config_sha256": after[role][
+                    "response"
+                ]["observed_operation_host_config_sha256"],
             }
             for role in ROLES
         },
         "non_operation_resource_delta_count": 0,
+        "operation_host_config_sha256_by_role": host_config_sha256s,
         "captured_before_lease_consumption": True,
     }
     path, digest, _publication = _persist_document(
@@ -1738,6 +1804,7 @@ def _inventory_closure(
     )
     _persist_inventory_closure_reference(
         context,
+        completion=completion,
         completion_path=completion_path,
         completion_sha256=completion_sha256,
         closure_path=path,
@@ -1749,6 +1816,7 @@ def _inventory_closure(
 def _inventory_closure_reference_document(
     context: CoordinatorContext,
     *,
+    completion: Mapping[str, Any],
     completion_path: Path,
     completion_sha256: str,
     closure_path: Path,
@@ -1781,6 +1849,9 @@ def _inventory_closure_reference_document(
             closure_sha256,
             label="inventory closure",
         ),
+        "operation_host_config_sha256_by_role": (
+            _database_host_config_sha256s(completion)
+        ),
         "captured_before_lease_consumption": True,
     }
 
@@ -1788,6 +1859,7 @@ def _inventory_closure_reference_document(
 def _persist_inventory_closure_reference(
     context: CoordinatorContext,
     *,
+    completion: Mapping[str, Any],
     completion_path: Path,
     completion_sha256: str,
     closure_path: Path,
@@ -1795,6 +1867,7 @@ def _persist_inventory_closure_reference(
 ) -> Path:
     document = _inventory_closure_reference_document(
         context,
+        completion=completion,
         completion_path=completion_path,
         completion_sha256=completion_sha256,
         closure_path=closure_path,
@@ -1873,6 +1946,7 @@ def _load_inventory_closure_reference(
     )
     expected_reference = _inventory_closure_reference_document(
         context,
+        completion=completion,
         completion_path=completion_path,
         completion_sha256=completion_sha256,
         closure_path=closure_path,
@@ -1908,6 +1982,9 @@ def _load_inventory_closure_reference(
         "completion_sha256": completion_sha256,
         "role_order": list(ROLES),
         "non_operation_resource_delta_count": 0,
+        "operation_host_config_sha256_by_role": (
+            _database_host_config_sha256s(completion)
+        ),
         "captured_before_lease_consumption": True,
     }
     if (
@@ -1924,6 +2001,75 @@ def _load_inventory_closure_reference(
         raise RestorePhaseCoordinatorError(
             "referenced pre-consume inventory closure differs"
         )
+    expected_container_ids = _database_container_ids(completion)
+    expected_host_config_sha256s = _database_host_config_sha256s(completion)
+    for role in ROLES:
+        row = closure["roles"][role]
+        if not isinstance(row, Mapping) or set(row) != INVENTORY_ROLE_FIELDS:
+            raise RestorePhaseCoordinatorError(
+                f"{role} pre-consume inventory role closure differs"
+            )
+        observations: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
+        for name in ("before", "after"):
+            observation = row[name]
+            if (
+                not isinstance(observation, Mapping)
+                or set(observation) != INVENTORY_OBSERVATION_FIELDS
+            ):
+                raise RestorePhaseCoordinatorError(
+                    f"{role} pre-consume inventory observation differs"
+                )
+            try:
+                request = INVENTORY.validate_request(
+                    observation["request"]
+                )
+                response = INVENTORY.validate_response(
+                    observation["response"],
+                    request=request,
+                )
+            except INVENTORY.GlobalDockerInventoryError as exc:
+                raise RestorePhaseCoordinatorError(
+                    f"{role} pre-consume inventory observation is invalid"
+                ) from exc
+            observations[name] = (request, response)
+        before_request, before_response = observations["before"]
+        after_request, after_response = observations["after"]
+        try:
+            comparison = INVENTORY.compare_non_operation_inventories(
+                before_response,
+                after_response,
+                before_request=before_request,
+                after_request=after_request,
+            )
+        except INVENTORY.GlobalDockerInventoryError as exc:
+            raise RestorePhaseCoordinatorError(
+                f"{role} pre-consume inventory comparison is invalid"
+            ) from exc
+        expected_digest = expected_host_config_sha256s[role]
+        if (
+            row["comparison"] != comparison
+            or row["expected_operation_container_id"]
+            != expected_container_ids[role]
+            or row["expected_operation_host_config_sha256"]
+            != expected_digest
+            or row["observed_operation_host_config_sha256"]
+            != expected_digest
+            or after_request["expected_operation_container_id"]
+            != expected_container_ids[role]
+            or after_request["expected_operation_host_config_sha256"]
+            != expected_digest
+            or after_response["expected_operation_host_config_sha256"]
+            != expected_digest
+            or after_response["observed_operation_host_config_sha256"]
+            != expected_digest
+            or before_request["expected_operation_host_config_sha256"]
+            is not None
+            or before_response["observed_operation_host_config_sha256"]
+            is not None
+        ):
+            raise RestorePhaseCoordinatorError(
+                f"{role} pre-consume HostConfig closure differs"
+            )
     return closure, closure_path, closure_sha256
 
 
@@ -2043,6 +2189,18 @@ def _post_consumption_receipt(
 ProcessControl = InventoryControl | ValidationControl
 
 
+@dataclass(frozen=True)
+class ProcessIdentity:
+    pid: int
+    parent_pid: int
+    start_time: int
+    state: str
+
+    @property
+    def key(self) -> tuple[int, int]:
+        return self.pid, self.start_time
+
+
 def _validate_process_control(control: ProcessControl) -> None:
     if not isinstance(control, (InventoryControl, ValidationControl)):
         raise RestorePhaseCoordinatorError(
@@ -2119,51 +2277,355 @@ def _process_control_sha256(control: ProcessControl) -> str:
     return _sha256(_canonical_json(document))
 
 
-def _process_group_exists(process_group_id: int) -> bool:
+def _process_identity(pid: int) -> ProcessIdentity | None:
     try:
-        os.killpg(process_group_id, 0)
+        payload = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+        fields = payload[payload.rindex(") ") + 2 :].split()
+        if len(fields) < 20:
+            return None
+        return ProcessIdentity(
+            pid=pid,
+            parent_pid=int(fields[1], 10),
+            start_time=int(fields[19], 10),
+            state=fields[0],
+        )
+    except (OSError, UnicodeError, ValueError):
+        return None
+
+
+def _process_snapshot() -> dict[int, ProcessIdentity]:
+    observed: dict[int, ProcessIdentity] = {}
+    scanned = 0
+    try:
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdecimal():
+                continue
+            scanned += 1
+            if scanned > MAX_PROCESS_SNAPSHOT_MEMBERS:
+                raise RestorePhaseCoordinatorError(
+                    "subprocess closure exceeds its process bound"
+                )
+            identity = _process_identity(int(entry.name, 10))
+            if identity is not None:
+                observed[identity.pid] = identity
+    except RestorePhaseCoordinatorError:
+        raise
+    except OSError as exc:
+        raise RestorePhaseCoordinatorError(
+            "subprocess ownership inventory is unavailable"
+        ) from exc
+    return observed
+
+
+def _enable_child_subreaper() -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise RestorePhaseCoordinatorError(
+            f"child subreaper setup failed with errno {error}"
+        )
+
+
+def _direct_child_baseline() -> frozenset[tuple[int, int]]:
+    owner = os.getpid()
+    return frozenset(
+        identity.key
+        for identity in _process_snapshot().values()
+        if identity.parent_pid == owner
+    )
+
+
+def _owned_processes(
+    root_identity: ProcessIdentity,
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+    tracked: set[ProcessIdentity] | None = None,
+    include_zombies: bool = False,
+) -> tuple[ProcessIdentity, ...]:
+    snapshot = _process_snapshot()
+    observed_root = snapshot.get(root_identity.pid)
+    owned_ids: set[int] = set()
+    if (
+        observed_root is not None
+        and observed_root.start_time == root_identity.start_time
+    ):
+        owned_ids.add(root_identity.pid)
+    if tracked is not None:
+        for identity in tracked:
+            current = snapshot.get(identity.pid)
+            if (
+                current is not None
+                and current.start_time == identity.start_time
+            ):
+                owned_ids.add(identity.pid)
+    owner = os.getpid()
+    for identity in snapshot.values():
+        if (
+            identity.pid != root_identity.pid
+            and identity.parent_pid == owner
+            and identity.key not in baseline_children
+        ):
+            owned_ids.add(identity.pid)
+    changed = True
+    while changed:
+        changed = False
+        for identity in snapshot.values():
+            if (
+                identity.pid not in owned_ids
+                and identity.parent_pid in owned_ids
+            ):
+                owned_ids.add(identity.pid)
+                changed = True
+    owned = tuple(
+        identity
+        for pid, identity in snapshot.items()
+        if pid in owned_ids
+    )
+    if tracked is not None:
+        discovered = set(owned)
+        if len(tracked | discovered) > MAX_PROCESS_TREE_MEMBERS:
+            raise RestorePhaseCoordinatorError(
+                "subprocess tree exceeds its process bound"
+            )
+        tracked.update(discovered)
+    return tuple(
+        identity
+        for identity in owned
+        if include_zombies or identity.state != "Z"
+    )
+
+
+def _reap_owned_zombies(
+    root_identity: ProcessIdentity,
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+    tracked: set[ProcessIdentity],
+) -> None:
+    owner = os.getpid()
+    while True:
+        reaped = False
+        for identity in _owned_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+            include_zombies=True,
+        ):
+            if (
+                identity.key == root_identity.key
+                or identity.parent_pid != owner
+                or identity.state != "Z"
+            ):
+                continue
+            try:
+                waited, _status = os.waitpid(identity.pid, os.WNOHANG)
+            except (ChildProcessError, ProcessLookupError):
+                continue
+            except OSError as exc:
+                raise RestorePhaseCoordinatorError(
+                    "owned subprocess zombie could not be reaped"
+                ) from exc
+            if waited not in {0, identity.pid}:
+                raise RestorePhaseCoordinatorError(
+                    "owned subprocess reap returned an unexpected PID"
+                )
+            reaped |= waited == identity.pid
+        if not reaped:
+            return
+
+
+def _signal_process_identity(
+    identity: ProcessIdentity,
+    signum: int,
+) -> bool:
+    current = _process_identity(identity.pid)
+    if current is None or current.start_time != identity.start_time:
+        return False
+    try:
+        descriptor = os.pidfd_open(identity.pid, 0)
     except ProcessLookupError:
         return False
-    except PermissionError:
+    except OSError as exc:
+        raise RestorePhaseCoordinatorError(
+            "identity-bound subprocess handle cannot be opened"
+        ) from exc
+    try:
+        refreshed = _process_identity(identity.pid)
+        if refreshed is None or refreshed.start_time != identity.start_time:
+            return False
+        return _signal_process_handle(descriptor, signum)
+    except ProcessLookupError:
+        return False
+    finally:
+        original_error = sys.exception()
+        try:
+            os.close(descriptor)
+        except BaseException as close_error:
+            if original_error is not None:
+                raise original_error from close_error
+            raise
+
+
+def _signal_process_handle(descriptor: int, signum: int) -> bool:
+    try:
+        signal.pidfd_send_signal(descriptor, signum)
         return True
-    return True
+    except ProcessLookupError:
+        return False
+    except OSError as exc:
+        raise RestorePhaseCoordinatorError(
+            "identity-bound subprocess signal failed"
+        ) from exc
 
 
-def _terminate_process_group(
+def _signal_owned_process(
+    identity: ProcessIdentity,
+    signum: int,
+    *,
+    root_identity: ProcessIdentity,
+    root_descriptor: int | None,
+) -> bool:
+    if identity.key == root_identity.key and root_descriptor is not None:
+        return _signal_process_handle(root_descriptor, signum)
+    return _signal_process_identity(identity, signum)
+
+
+def _terminate_process_tree(
     process: subprocess.Popen[bytes],
     *,
+    root_identity: ProcessIdentity,
+    root_descriptor: int | None,
+    baseline_children: frozenset[tuple[int, int]],
+    tracked: set[ProcessIdentity],
     grace_seconds: float,
 ) -> bool:
     signalled = False
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-        signalled = True
-    except ProcessLookupError:
-        pass
-    except OSError:
-        if process.poll() is None:
-            process.terminate()
-            signalled = True
+    for identity in reversed(
+        _owned_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+    ):
+        signalled = (
+            _signal_owned_process(
+                identity,
+                signal.SIGTERM,
+                root_identity=root_identity,
+                root_descriptor=root_descriptor,
+            )
+            or signalled
+        )
     deadline = time.monotonic() + grace_seconds
-    while _process_group_exists(process.pid) and time.monotonic() < deadline:
+    while time.monotonic() < deadline and _owned_processes(
+        root_identity,
+        baseline_children=baseline_children,
+        tracked=tracked,
+    ):
         process.poll()
-        time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
-    if _process_group_exists(process.pid):
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-            signalled = True
-        except ProcessLookupError:
-            pass
-        except OSError:
-            if process.poll() is None:
-                process.kill()
-                signalled = True
+        _reap_owned_zombies(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+        time.sleep(
+            min(
+                PROCESS_POLL_SECONDS,
+                max(0.0, deadline - time.monotonic()),
+            )
+        )
+    for identity in reversed(
+        _owned_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+    ):
+        signalled = (
+            _signal_owned_process(
+                identity,
+                signal.SIGKILL,
+                root_identity=root_identity,
+                root_descriptor=root_descriptor,
+            )
+            or signalled
+        )
     try:
         process.wait(timeout=max(0.1, grace_seconds))
     except subprocess.TimeoutExpired:
-        if process.poll() is None:
-            process.kill()
+        signalled = (
+            _signal_owned_process(
+                root_identity,
+                signal.SIGKILL,
+                root_identity=root_identity,
+                root_descriptor=root_descriptor,
+            )
+            or signalled
+        )
+        try:
             process.wait(timeout=max(0.1, grace_seconds))
+        except subprocess.TimeoutExpired as final_exc:
+            raise RestorePhaseCoordinatorError(
+                "bounded subprocess root survived identity-bound cleanup"
+            ) from final_exc
+
+    absence_deadline = (
+        time.monotonic()
+        + grace_seconds
+        + PROCESS_TREE_QUIESCENCE_SECONDS
+    )
+    stable_since: float | None = None
+    while time.monotonic() < absence_deadline:
+        _reap_owned_zombies(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+        owned = _owned_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+            include_zombies=True,
+        )
+        if owned:
+            stable_since = None
+            for identity in reversed(owned):
+                if identity.state != "Z":
+                    signalled = (
+                        _signal_owned_process(
+                            identity,
+                            signal.SIGKILL,
+                            root_identity=root_identity,
+                            root_descriptor=root_descriptor,
+                        )
+                        or signalled
+                    )
+        elif stable_since is None:
+            stable_since = time.monotonic()
+        elif (
+            time.monotonic() - stable_since
+            >= PROCESS_TREE_QUIESCENCE_SECONDS
+        ):
+            return signalled
+        time.sleep(
+            min(
+                PROCESS_POLL_SECONDS,
+                max(0.0, absence_deadline - time.monotonic()),
+            )
+        )
+    _reap_owned_zombies(
+        root_identity,
+        baseline_children=baseline_children,
+        tracked=tracked,
+    )
+    if _owned_processes(
+        root_identity,
+        baseline_children=baseline_children,
+        tracked=tracked,
+        include_zombies=True,
+    ):
+        raise RestorePhaseCoordinatorError(
+            "bounded subprocess tree survived forced cleanup"
+        )
     return signalled
 
 
@@ -2178,12 +2640,15 @@ def _close_selector_stream(
     stream.close()
 
 
-def run_bounded_process(control: ProcessControl) -> BoundedProcessResult:
+def _run_bounded_process_locked(
+    control: ProcessControl,
+) -> BoundedProcessResult:
     """Execute one exact argv with bounded pipes and whole-group cleanup."""
 
     _validate_process_control(control)
     process: subprocess.Popen[bytes] | None = None
-    selector = selectors.DefaultSelector()
+    root_identity: ProcessIdentity | None = None
+    root_descriptor: int | None = None
     buffers = {"stdout": bytearray(), "stderr": bytearray()}
     stdin_bytes_sent = 0
     timed_out = False
@@ -2191,6 +2656,10 @@ def run_bounded_process(control: ProcessControl) -> BoundedProcessResult:
     stderr_limit_exceeded = False
     cleanup_performed = False
     process_group_terminated = False
+    tracked: set[ProcessIdentity] = set()
+    _enable_child_subreaper()
+    baseline_children = _direct_child_baseline()
+    selector = selectors.DefaultSelector()
     try:
         process = subprocess.Popen(  # noqa: S603
             list(control.argv),
@@ -2199,9 +2668,17 @@ def run_bounded_process(control: ProcessControl) -> BoundedProcessResult:
             stderr=subprocess.PIPE,
             env={},
             close_fds=True,
+            shell=False,
             start_new_session=control.start_new_session,
             bufsize=0,
         )
+        root_descriptor = os.pidfd_open(process.pid, 0)
+        root_identity = _process_identity(process.pid)
+        if root_identity is None:
+            raise RestorePhaseCoordinatorError(
+                "bounded subprocess identity is unavailable"
+            )
+        tracked.add(root_identity)
         if (
             process.stdin is None
             or process.stdout is None
@@ -2228,6 +2705,11 @@ def run_bounded_process(control: ProcessControl) -> BoundedProcessResult:
         deadline = time.monotonic() + control.timeout_seconds
         drain_deadline: float | None = None
         while True:
+            _reap_owned_zombies(
+                root_identity,
+                baseline_children=baseline_children,
+                tracked=tracked,
+            )
             now = time.monotonic()
             if (
                 not cleanup_performed
@@ -2243,8 +2725,12 @@ def run_bounded_process(control: ProcessControl) -> BoundedProcessResult:
                 or process.poll() is not None
             )
             if cancellation_required and not cleanup_performed:
-                process_group_terminated = _terminate_process_group(
+                process_group_terminated = _terminate_process_tree(
                     process,
+                    root_identity=root_identity,
+                    root_descriptor=root_descriptor,
+                    baseline_children=baseline_children,
+                    tracked=tracked,
                     grace_seconds=control.kill_process_group_after_seconds,
                 )
                 cleanup_performed = True
@@ -2323,8 +2809,12 @@ def run_bounded_process(control: ProcessControl) -> BoundedProcessResult:
             ):
                 continue
         if not cleanup_performed:
-            process_group_terminated = _terminate_process_group(
+            process_group_terminated = _terminate_process_tree(
                 process,
+                root_identity=root_identity,
+                root_descriptor=root_descriptor,
+                baseline_children=baseline_children,
+                tracked=tracked,
                 grace_seconds=control.kill_process_group_after_seconds,
             )
             cleanup_performed = True
@@ -2355,20 +2845,87 @@ def run_bounded_process(control: ProcessControl) -> BoundedProcessResult:
             "bounded process execution failed"
         ) from exc
     finally:
-        selector.close()
+        original_error = sys.exception()
+        cleanup_errors: list[BaseException] = []
         if process is not None:
-            if not cleanup_performed:
-                _terminate_process_group(
-                    process,
-                    grace_seconds=control.kill_process_group_after_seconds,
-                )
+            try:
+                if not cleanup_performed:
+                    if root_identity is None:
+                        if root_descriptor is None:
+                            root_identity = _process_identity(process.pid)
+                            if root_identity is None:
+                                raise RestorePhaseCoordinatorError(
+                                    "unidentified bounded subprocess cannot "
+                                    "be cleaned safely"
+                                )
+                        else:
+                            _signal_process_handle(
+                                root_descriptor,
+                                signal.SIGKILL,
+                            )
+                            try:
+                                process.wait(
+                                    timeout=max(
+                                        0.1,
+                                        control.kill_process_group_after_seconds,
+                                    )
+                                )
+                            except subprocess.TimeoutExpired as exc:
+                                raise RestorePhaseCoordinatorError(
+                                    "unidentified bounded subprocess root "
+                                    "survived forced cleanup"
+                                ) from exc
+                            root_identity = ProcessIdentity(
+                                pid=process.pid,
+                                parent_pid=os.getpid(),
+                                start_time=-1,
+                                state="?",
+                            )
+                    _terminate_process_tree(
+                        process,
+                        root_identity=root_identity,
+                        root_descriptor=root_descriptor,
+                        baseline_children=baseline_children,
+                        tracked=tracked,
+                        grace_seconds=(
+                            control.kill_process_group_after_seconds
+                        ),
+                    )
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+        try:
+            selector.close()
+        except BaseException as exc:
+            cleanup_errors.append(exc)
+        if process is not None:
             for stream in (
                 process.stdin,
                 process.stdout,
                 process.stderr,
             ):
-                if stream is not None and not stream.closed:
+                if stream is None or stream.closed:
+                    continue
+                try:
                     stream.close()
+                except BaseException as exc:
+                    cleanup_errors.append(exc)
+        if root_descriptor is not None:
+            try:
+                os.close(root_descriptor)
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+        if cleanup_errors:
+            cleanup_error = cleanup_errors[0]
+            if original_error is not None:
+                raise original_error from cleanup_error
+            raise cleanup_error
+
+
+def run_bounded_process(control: ProcessControl) -> BoundedProcessResult:
+    """Execute one exact argv with bounded pipes and whole-tree cleanup."""
+
+    with _BOUNDED_PROCESS_LOCK:
+        return _run_bounded_process_locked(control)
 
 
 def _validated_bounded_result(
@@ -2579,6 +3136,7 @@ def _derive_claim_values(
     completion: Mapping[str, Any],
     completion_sha256: str,
     inventory_closure: Mapping[str, Any],
+    inventory_closure_sha256: str,
 ) -> dict[str, Any]:
     postgres_snapshot = context.restore_set[
         "postgres_snapshot_set_sha256"
@@ -2598,6 +3156,10 @@ def _derive_claim_values(
         raise RestorePhaseCoordinatorError(
             "restore set differs from final snapshot evidence"
         )
+    inventory_closure_sha256 = _nonzero_sha256(
+        inventory_closure_sha256,
+        label="inventory closure",
+    )
     if (
         completion.get("schema") != RESTORE.COMPLETION_SCHEMA
         or completion.get("redis_restored") is not False
@@ -2609,6 +3171,8 @@ def _derive_claim_values(
             "non_operation_resource_delta_count"
         )
         != 0
+        or _sha256(_canonical_json(inventory_closure) + b"\n")
+        != inventory_closure_sha256
     ):
         raise RestorePhaseCoordinatorError(
             "restore completion or inventory closure differs"
@@ -2649,6 +3213,7 @@ def _derive_claim_values(
         "reviewed_file_restore_verified": True,
         "legacy_redis_restore_byte_count": 0,
         "non_operation_resource_delta_count": 0,
+        "inventory_closure_sha256": inventory_closure_sha256,
         "restored_postgres_snapshot_set_sha256": postgres_snapshot,
         "restored_reviewed_file_snapshot_set_sha256": file_snapshot,
         "restore_result_set_sha256": completion_sha256,
@@ -3434,37 +3999,21 @@ def apply_restore_phase(
                 _prepared,
                 _store,
             ) = _load_validated_restore_closure(context)
-            reference_path = (
-                context.coordinator_output_directory
-                / "inventory"
-                / "zero-delta-reference.json"
+            # An unconsumed resume must observe Docker again. The immutable
+            # reference may only prove consumed recovery; it cannot authorize
+            # a later lease consumption after the host state has changed.
+            inventory_result = _inventory_closure(
+                context,
+                baseline=baseline,
+                baseline_path=baseline_path,
+                baseline_sha256=baseline_sha256,
+                completion=completion_at_boundary,
+                completion_path=completion_path_at_boundary,
+                completion_sha256=completion_sha256_at_boundary,
+                inventory_invoke=inventory_invoke,
+                inventory_agent_sha256=inventory_agent_sha256,
+                ssh_trust=ssh_trust,
             )
-            try:
-                os.lstat(reference_path)
-            except FileNotFoundError:
-                inventory_result = _inventory_closure(
-                    context,
-                    baseline=baseline,
-                    baseline_path=baseline_path,
-                    baseline_sha256=baseline_sha256,
-                    completion=completion_at_boundary,
-                    completion_path=completion_path_at_boundary,
-                    completion_sha256=completion_sha256_at_boundary,
-                    inventory_invoke=inventory_invoke,
-                    inventory_agent_sha256=inventory_agent_sha256,
-                    ssh_trust=ssh_trust,
-                )
-            except OSError as exc:
-                raise RestorePhaseCoordinatorError(
-                    "pre-consume inventory closure state is unavailable"
-                ) from exc
-            else:
-                inventory_result = _load_inventory_closure_reference(
-                    context,
-                    completion=completion_at_boundary,
-                    completion_path=completion_path_at_boundary,
-                    completion_sha256=completion_sha256_at_boundary,
-                )
             if (
                 inventory_result[0][
                     "non_operation_resource_delta_count"
@@ -3599,6 +4148,7 @@ def apply_restore_phase(
         completion=completion,
         completion_sha256=completion_sha256,
         inventory_closure=inventory_closure,
+        inventory_closure_sha256=inventory_sha256,
     )
     observed_now = now or datetime.now(timezone.utc)
     claim_paths, derivation_path, derivation_sha256 = (

@@ -20,13 +20,19 @@ from scripts.produce_production_shadow_source_snapshot import (
     load_binding,
 )
 from scripts.production_shadow_cutover_controller import (
+    CONVERGENCE_RUNTIME_TARGETS_FILENAME,
+    CONVERGENCE_RUNTIME_TARGET_SET_SCHEMA,
     EXPECTED_TOPOLOGY,
     HOST_AGENT_CONTRACT_SHA256,
+    MANIFEST_CAPABILITIES,
     MANIFEST_SCHEMA,
     POLICY_FIELDS,
     _secure_root,
     _shadow_project,
     _shadow_root,
+)
+from tests.test_production_shadow_cutover_controller import (
+    write_controller_manifest,
 )
 
 
@@ -63,6 +69,7 @@ def controller_manifest() -> dict:
     secure_root = _secure_root(CAMPAIGN_ID)
     return {
         "schema": MANIFEST_SCHEMA,
+        "capabilities": list(MANIFEST_CAPABILITIES),
         "campaign_id": CAMPAIGN_ID,
         "operation_id": OPERATION_ID,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -125,6 +132,14 @@ def controller_manifest() -> dict:
                     "webapp_ir": ("9", "a", "b", "c"),
                 }.items()
             },
+            "convergence_runtime_targets": {
+                "schema": CONVERGENCE_RUNTIME_TARGET_SET_SCHEMA,
+                "filename": CONVERGENCE_RUNTIME_TARGETS_FILENAME,
+                "sha256": "e" * 64,
+                "bytes": 1024,
+                "target_set_sha256": "f" * 64,
+                "roles": ["bot_fi", "webapp_fi", "webapp_ir"],
+            },
             "postgres_runtime_uid": 70,
             "postgres_runtime_gid": 70,
             "postgres_image_ref": (
@@ -158,8 +173,7 @@ class SourceSnapshotBindingBuilderTests(unittest.TestCase):
         self.root.chmod(0o700)
         self.controller = self.root / "controller.json"
         self.document = controller_manifest()
-        self.controller.write_bytes(canonical_bytes(self.document))
-        self.controller.chmod(0o600)
+        write_controller_manifest(self.controller, self.document)
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -245,9 +259,9 @@ class SourceSnapshotBindingBuilderTests(unittest.TestCase):
         self.controller.write_bytes(canonical_bytes(self.document) + b"\n")
         status, result = self.run_main(self.base_arguments())
         self.assertEqual(status, 1)
-        self.assertIn("not canonical", result["error"])
+        self.assertIn("invalid", result["error"])
 
-        self.controller.write_bytes(canonical_bytes(self.document))
+        write_controller_manifest(self.controller, self.document)
         output = self.root / MODULE.OUTPUT_NAMES[("bot_fi", "live-baseline")]
         output.write_bytes(b"{}")
         output.chmod(0o600)
@@ -271,8 +285,7 @@ class SourceSnapshotBindingBuilderTests(unittest.TestCase):
         self.assertIn("invalid", result["error"])
 
         self.controller.unlink()
-        self.controller.write_bytes(canonical_bytes(self.document))
-        self.controller.chmod(0o600)
+        write_controller_manifest(self.controller, self.document)
         self.root.chmod(0o755)
         status, result = self.run_main(self.base_arguments())
         self.assertEqual(status, 1)

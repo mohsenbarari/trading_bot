@@ -32,6 +32,11 @@ if str(REPO_ROOT) not in sys.path:
 import boto3
 
 from core.secure_file_io import read_secure_text, sha256_secure_file, write_secure_atomic_bytes
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
 from scripts.wa_ir_object_storage_preflight_agent import (
     ARVAN_OBJECT_STORAGE_HOST,
     FILE_TRANSFER_IDENTITY,
@@ -75,6 +80,7 @@ class PublicationError(RuntimeError):
 
 
 def require_private_versioned_bucket(client, *, bucket: str) -> None:  # noqa: ANN001
+    assert_retired(component="wa-ir-object-storage-preflight-publication", operation="inspect Object Storage bucket")
     if client.get_bucket_versioning(Bucket=bucket).get("Status") != "Enabled":
         raise PublicationError("WA-IR delivery requires a versioned bucket")
     acl = client.get_bucket_acl(Bucket=bucket)
@@ -86,6 +92,7 @@ def require_private_versioned_bucket(client, *, bucket: str) -> None:  # noqa: A
 
 
 def _credentials(path: Path) -> tuple[str, str, str, str]:
+    assert_retired(component="wa-ir-object-storage-preflight-publication", operation="read Object Storage credentials")
     values: dict[str, str] = {}
     try:
         text = read_secure_text(path, label="WA-IR Object Storage credentials", max_size=16_384)
@@ -124,6 +131,7 @@ def _credentials(path: Path) -> tuple[str, str, str, str]:
 
 
 def _client(credentials: tuple[str, str, str, str]):  # noqa: ANN001
+    assert_retired(component="wa-ir-object-storage-preflight-publication", operation="create Object Storage client")
     access_key, secret_key, endpoint, region = credentials
     return boto3.client(
         "s3",
@@ -135,6 +143,7 @@ def _client(credentials: tuple[str, str, str, str]):  # noqa: ANN001
 
 
 def _read_material(path: Path, *, label: str, expected_mode: int) -> bytes:
+    assert_retired(component="wa-ir-object-storage-preflight-publication", operation="read role material")
     try:
         descriptor = os.open(
             path,
@@ -174,6 +183,7 @@ def _read_material(path: Path, *, label: str, expected_mode: int) -> bytes:
 
 
 def build_role_materials(source: Path, output: Path) -> tuple[str, int]:
+    assert_retired(component="wa-ir-object-storage-preflight-publication", operation="build role-material archive")
     output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     with output.open("xb") as raw:
         with tarfile.open(fileobj=raw, mode="w") as archive:
@@ -199,6 +209,7 @@ def build_role_materials(source: Path, output: Path) -> tuple[str, int]:
 
 
 def create_release_bundle(repo: Path, release_sha: str, output: Path) -> tuple[str, int]:
+    assert_retired(component="wa-ir-object-storage-preflight-publication", operation="create release bundle")
     if not RELEASE_RE.fullmatch(release_sha):
         raise PublicationError("release SHA must be exactly 40 lowercase hexadecimal characters")
     head = subprocess.run(
@@ -235,6 +246,7 @@ def create_release_bundle(repo: Path, release_sha: str, output: Path) -> tuple[s
 
 
 def encrypt(source: Path, output: Path, recipient: str) -> tuple[str, int]:
+    assert_retired(component="wa-ir-object-storage-preflight-publication", operation="encrypt artifact")
     if not AGE_RECIPIENT_RE.fullmatch(recipient):
         raise PublicationError("WA-IR age recipient is malformed")
     if not Path(AGE).is_file():
@@ -298,6 +310,7 @@ def _hash_regular(path: Path, *, label: str, max_size: int) -> tuple[str, int]:
 def _upload_and_readback(
     client, *, bucket: str, key: str, source: Path, metadata: dict[str, str]
 ) -> dict[str, Any]:  # noqa: ANN001
+    assert_retired(component="wa-ir-object-storage-preflight-publication", operation="upload and read back Object Storage artifact")
     digest, size = _hash_regular(source, label="WA-IR upload source", max_size=MAX_RELEASE_BYTES)
     with source.open("rb") as body:
         response = client.put_object(
@@ -343,6 +356,7 @@ def _upload_and_readback(
 
 
 def _presigned_get(client, *, bucket: str, obj: dict[str, Any], ttl: int) -> str:  # noqa: ANN001
+    assert_retired(component="wa-ir-object-storage-preflight-publication", operation="create Object Storage URL")
     url = client.generate_presigned_url(
         "get_object",
         Params={"Bucket": bucket, "Key": obj["object_key"], "VersionId": obj["version_id"]},
@@ -353,6 +367,7 @@ def _presigned_get(client, *, bucket: str, obj: dict[str, Any], ttl: int) -> str
 
 
 def _json_file(path: Path, payload: dict[str, Any], *, label: str) -> tuple[str, int]:
+    assert_retired(component="wa-ir-object-storage-preflight-publication", operation="write publication artifact")
     encoded = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode()
     write_secure_atomic_bytes(path, encoded, label=label, max_size=1024 * 1024)
     return hashlib.sha256(encoded).hexdigest(), len(encoded)
@@ -363,6 +378,7 @@ def confirmation_phrase(release_sha: str, bucket: str, prefix: str) -> str:
 
 
 def execute(args: argparse.Namespace, *, client=None) -> dict[str, Any]:  # noqa: ANN001
+    assert_retired(component="wa-ir-object-storage-preflight-publication", operation="execute publication")
     release_sha = str(args.release_sha)
     prefix = str(args.prefix).strip("/") + "/"
     if not RELEASE_RE.fullmatch(release_sha):
@@ -574,6 +590,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        assert_retired(component="wa-ir-object-storage-preflight-publication", operation="CLI")
+    except LegacyThreeSiteStagingRuntimeRetiredError:
+        print(
+            json.dumps(
+                blocked_payload(component="wa-ir-object-storage-preflight-publication"),
+                sort_keys=True,
+            )
+        )
+        return 2
     args = parse_args(argv)
     try:
         result = execute(args)

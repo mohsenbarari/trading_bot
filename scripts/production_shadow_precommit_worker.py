@@ -5,23 +5,33 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+import ctypes
 from dataclasses import dataclass
 import fcntl
 import hashlib
 import ipaddress
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
+import selectors
+import secrets
+import signal
 import stat
 import subprocess
 import sys
 import tarfile
+import threading
 import time
 from typing import Any, BinaryIO, Callable, Mapping
 from uuid import UUID
 
 import yaml
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from core.docker_image_identity import (
     DockerImageIdentityError,
@@ -47,7 +57,6 @@ from scripts.wa_ir_production_operation import (
     _fingerprint_from_streams,
     _load_migration_graph,
     _migration_corridor,
-    _run_streaming_sha256,
     _docker_archive_identity,
 )
 
@@ -67,6 +76,21 @@ GIT = "/usr/bin/git"
 MAX_FILE_BYTES = 64 * 1024 * 1024 * 1024
 MAX_JSON_BYTES = 2 * 1024 * 1024
 MAX_TAR_MEMBERS = 250_000
+MAX_COMMAND_STDOUT_BYTES = 16 * 1024 * 1024
+MAX_COMMAND_STDERR_BYTES = 2 * 1024 * 1024
+PROCESS_GROUP_TERM_SECONDS = 1.0
+PYTHON3 = "/usr/bin/python3"
+BOUNDED_EXEC_WRAPPER = "--bounded-exec-wrapper"
+GROUP_REPORT_START = "S"
+GROUP_REPORT_DONE = "D"
+COMMAND_MODE_NORMAL = "N"
+COMMAND_MODE_CLEANUP = "C"
+NONCE_RE = re.compile(r"^[0-9a-f]{32}$")
+PURPOSE_RE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
+PR_SET_CHILD_SUBREAPER = 36
+PROCESS_TREE_QUIESCENCE_SECONDS = 0.25
+ONEOFF_QUIESCENCE_SECONDS = 1.0
+ONEOFF_CLEANUP_TIMEOUT_SECONDS = 30.0
 POSTGRES_RUNTIME_UID = 70
 POSTGRES_RUNTIME_GID = 70
 SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -193,11 +217,559 @@ _SAFE_GIT_ENV = {
     "GIT_CONFIG_SYSTEM": "/dev/null",
     "GIT_TERMINAL_PROMPT": "0",
     "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_NO_REPLACE_OBJECTS": "1",
 }
+_GIT_CONFIG_ARGUMENTS = (
+    "--no-optional-locks",
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.untrackedCache=false",
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "core.fileMode=true",
+)
 
 
 class PrecommitWorkerError(RuntimeError):
     """A redacted fail-closed preparation error."""
+
+
+class PrecommitWorkerCancellation(PrecommitWorkerError):
+    """The controller connection or worker process authority was lost."""
+
+
+class BoundedCommandError(RuntimeError):
+    """A subprocess exceeded the local bounded execution contract."""
+
+
+def _anonymous_pipe_identity(
+    descriptor: int,
+    *,
+    access_mode: int,
+    reject_opposite_end: bool,
+    label: str,
+) -> tuple[int, int]:
+    if type(descriptor) is not int or descriptor < 0:
+        raise PrecommitWorkerError(f"{label} descriptor is invalid")
+    try:
+        metadata = os.fstat(descriptor)
+        flags = fcntl.fcntl(descriptor, fcntl.F_GETFL)
+        target = os.readlink(f"/proc/self/fd/{descriptor}")
+    except OSError as exc:
+        raise PrecommitWorkerError(f"{label} descriptor is unavailable") from exc
+    if (
+        not stat.S_ISFIFO(metadata.st_mode)
+        or flags & os.O_ACCMODE != access_mode
+        or target != f"pipe:[{metadata.st_ino}]"
+    ):
+        raise PrecommitWorkerError(
+            f"{label} must be an anonymous pipe with exact direction"
+        )
+    if reject_opposite_end:
+        opposite_modes = (
+            {os.O_WRONLY, os.O_RDWR}
+            if access_mode == os.O_RDONLY
+            else {os.O_RDONLY, os.O_RDWR}
+        )
+        try:
+            entries = tuple(Path("/proc/self/fd").iterdir())
+        except OSError as exc:
+            raise PrecommitWorkerError(
+                f"{label} descriptor closure cannot be inspected"
+            ) from exc
+        for entry in entries:
+            if not entry.name.isdecimal() or int(entry.name, 10) == descriptor:
+                continue
+            candidate = int(entry.name, 10)
+            try:
+                observed = os.fstat(candidate)
+                observed_flags = fcntl.fcntl(candidate, fcntl.F_GETFL)
+            except OSError:
+                continue
+            if (
+                (observed.st_dev, observed.st_ino)
+                == (metadata.st_dev, metadata.st_ino)
+                and observed_flags & os.O_ACCMODE in opposite_modes
+            ):
+                raise PrecommitWorkerError(
+                    f"{label} writer end is held by the worker"
+                )
+    return metadata.st_dev, metadata.st_ino
+
+
+def _enable_child_subreaper() -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise PrecommitWorkerError(
+            f"child subreaper setup failed with errno {error}"
+        )
+
+
+def _argv_sha256(arguments: list[str]) -> str:
+    if (
+        not arguments
+        or not Path(arguments[0]).is_absolute()
+        or any(
+            not isinstance(value, str)
+            or not value
+            or "\x00" in value
+            for value in arguments
+        )
+    ):
+        raise BoundedCommandError("reported subprocess arguments are invalid")
+    digest = hashlib.sha256()
+    for value in arguments:
+        encoded = os.fsencode(value)
+        digest.update(len(encoded).to_bytes(8, "big"))
+        digest.update(encoded)
+    return digest.hexdigest()
+
+
+def _proc_identity(process_id: int) -> tuple[int, int, int, int, str]:
+    try:
+        payload = Path(f"/proc/{process_id}/stat").read_text(encoding="ascii")
+        fields = payload[payload.rindex(") ") + 2 :].split()
+        if len(fields) < 20:
+            raise ValueError("short process stat")
+        return (
+            int(fields[1], 10),
+            int(fields[2], 10),
+            int(fields[3], 10),
+            int(fields[19], 10),
+            fields[0],
+        )
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise BoundedCommandError(
+            "subprocess identity cannot be read"
+        ) from exc
+
+
+class ControllerLivenessGuard:
+    """Bind mutating execution to one controller-owned pipe read end."""
+
+    _WAKE_SIGNAL = signal.SIGUSR1
+    _HANDLED_SIGNALS = (
+        signal.SIGHUP,
+        signal.SIGTERM,
+        signal.SIGINT,
+        _WAKE_SIGNAL,
+    )
+
+    def __init__(self, control_fd: int) -> None:
+        _anonymous_pipe_identity(
+            control_fd,
+            access_mode=os.O_RDONLY,
+            reject_opposite_end=True,
+            label="controller liveness",
+        )
+        if threading.current_thread() is not threading.main_thread():
+            raise PrecommitWorkerError(
+                "mutating precommit action must run in the main thread"
+            )
+        try:
+            self._fd = os.dup(control_fd)
+            os.set_inheritable(self._fd, False)
+            os.set_blocking(self._fd, False)
+        except OSError as exc:
+            raise PrecommitWorkerError(
+                "controller liveness pipe cannot be secured"
+            ) from exc
+        self._cancelled = threading.Event()
+        self._exception_delivered = threading.Event()
+        self._stopping = threading.Event()
+        self._reason = "controller liveness was lost"
+        self._old_handlers: dict[int, Any] = {}
+        self._monitor: threading.Thread | None = None
+
+    def _sample(self) -> None:
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(self._fd, selectors.EVENT_READ)
+            if not selector.select(0):
+                return
+            try:
+                payload = os.read(self._fd, 1)
+            except BlockingIOError:
+                return
+        finally:
+            selector.close()
+        reason = (
+            "controller liveness pipe reached EOF"
+            if payload == b""
+            else "controller liveness pipe carried forbidden data"
+        )
+        self._cancel(reason, wake_main=False)
+        self.check()
+
+    def _cancel(self, reason: str, *, wake_main: bool) -> None:
+        if self._cancelled.is_set():
+            return
+        self._reason = reason
+        self._cancelled.set()
+        if wake_main:
+            main_ident = threading.main_thread().ident
+            if main_ident is not None:
+                try:
+                    signal.pthread_kill(main_ident, self._WAKE_SIGNAL)
+                except (OSError, RuntimeError):
+                    pass
+
+    def _handle_signal(self, signum: int, _frame: Any) -> None:
+        if signum == self._WAKE_SIGNAL:
+            reason = self._reason
+        else:
+            reason = f"precommit worker received signal {signum}"
+            self._cancel(reason, wake_main=False)
+        if self._exception_delivered.is_set():
+            return
+        self._exception_delivered.set()
+        raise PrecommitWorkerCancellation(reason)
+
+    def _monitor_control(self) -> None:
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(self._fd, selectors.EVENT_READ)
+            while not self._stopping.is_set():
+                if not selector.select(0.05):
+                    continue
+                try:
+                    payload = os.read(self._fd, 1)
+                except BlockingIOError:
+                    continue
+                except OSError:
+                    if self._stopping.is_set():
+                        return
+                    payload = b""
+                reason = (
+                    "controller liveness pipe reached EOF"
+                    if payload == b""
+                    else "controller liveness pipe carried forbidden data"
+                )
+                self._cancel(reason, wake_main=True)
+                return
+        finally:
+            selector.close()
+
+    def __enter__(self) -> ControllerLivenessGuard:
+        try:
+            for signum in self._HANDLED_SIGNALS:
+                self._old_handlers[signum] = signal.getsignal(signum)
+                signal.signal(signum, self._handle_signal)
+            self._sample()
+            self._monitor = threading.Thread(
+                target=self._monitor_control,
+                name="precommit-controller-liveness",
+                daemon=True,
+            )
+            self._monitor.start()
+            self.check()
+            return self
+        except BaseException:
+            self._restore()
+            raise
+
+    def check(self) -> None:
+        if (
+            self._cancelled.is_set()
+            and not self._exception_delivered.is_set()
+        ):
+            self._exception_delivered.set()
+            raise PrecommitWorkerCancellation(self._reason)
+
+    def _restore(self) -> None:
+        self._stopping.set()
+        if self._monitor is not None:
+            self._monitor.join(timeout=1)
+        try:
+            os.close(self._fd)
+        except OSError:
+            pass
+        for signum, handler in self._old_handlers.items():
+            signal.signal(signum, handler)
+        self._old_handlers.clear()
+
+    def __exit__(self, error_type: Any, _value: Any, _traceback: Any) -> None:
+        cancelled = self._cancelled.is_set()
+        reason = self._reason
+        deliver_after_restore = (
+            cancelled
+            and error_type is None
+            and not self._exception_delivered.is_set()
+        )
+        self._exception_delivered.set()
+        self._restore()
+        if deliver_after_restore:
+            raise PrecommitWorkerCancellation(reason)
+
+
+@dataclass(frozen=True)
+class CommandAuthorization:
+    mode: str
+    nonce: str
+    purpose: str
+    argv_sha256: str
+    process_id: int | None = None
+
+
+class ProcessGroupReporter:
+    """Bind normal and cleanup commands to separate host ACK channels."""
+
+    def __init__(
+        self,
+        normal_report_fd: int,
+        normal_ack_fd: int,
+        cleanup_report_fd: int,
+        cleanup_ack_fd: int,
+    ) -> None:
+        descriptors = (
+            (normal_report_fd, os.O_WRONLY, "normal report"),
+            (normal_ack_fd, os.O_RDONLY, "normal ACK"),
+            (cleanup_report_fd, os.O_WRONLY, "cleanup report"),
+            (cleanup_ack_fd, os.O_RDONLY, "cleanup ACK"),
+        )
+        identities = [
+            _anonymous_pipe_identity(
+                descriptor,
+                access_mode=access,
+                reject_opposite_end=True,
+                label=label,
+            )
+            for descriptor, access, label in descriptors
+        ]
+        if len(set(identities)) != len(identities):
+            raise PrecommitWorkerError(
+                "process authorization channels must be distinct"
+            )
+        try:
+            self.normal_report_fd = os.dup(normal_report_fd)
+            self.normal_ack_fd = os.dup(normal_ack_fd)
+            self.cleanup_report_fd = os.dup(cleanup_report_fd)
+            self.cleanup_ack_fd = os.dup(cleanup_ack_fd)
+            for descriptor in self.descriptors:
+                os.set_inheritable(descriptor, False)
+        except OSError as exc:
+            for descriptor in getattr(self, "descriptors", ()):
+                if descriptor is not None:
+                    try:
+                        os.close(descriptor)
+                    except OSError:
+                        pass
+            raise PrecommitWorkerError(
+                "process-group reporting pipes cannot be secured"
+            ) from exc
+
+    @property
+    def descriptors(self) -> tuple[int, int, int, int]:
+        return (
+            self.normal_report_fd,
+            self.normal_ack_fd,
+            self.cleanup_report_fd,
+            self.cleanup_ack_fd,
+        )
+
+    def authorize(
+        self,
+        arguments: list[str],
+        *,
+        purpose: str,
+        cleanup_only: bool,
+    ) -> tuple[CommandAuthorization, list[str], tuple[int, int]]:
+        if PURPOSE_RE.fullmatch(purpose) is None:
+            raise BoundedCommandError("subprocess purpose is invalid")
+        authorization = CommandAuthorization(
+            mode=(
+                COMMAND_MODE_CLEANUP
+                if cleanup_only
+                else COMMAND_MODE_NORMAL
+            ),
+            nonce=secrets.token_hex(16),
+            purpose=purpose,
+            argv_sha256=_argv_sha256(arguments),
+        )
+        report_fd, ack_fd = (
+            (self.cleanup_report_fd, self.cleanup_ack_fd)
+            if cleanup_only
+            else (self.normal_report_fd, self.normal_ack_fd)
+        )
+        return (
+            authorization,
+            [
+                PYTHON3,
+                "-I",
+                "-B",
+                str(Path(__file__).resolve()),
+                BOUNDED_EXEC_WRAPPER,
+                authorization.mode,
+                authorization.nonce,
+                authorization.purpose,
+                authorization.argv_sha256,
+                str(report_fd),
+                str(ack_fd),
+                "--",
+                *arguments,
+            ],
+            (report_fd, ack_fd),
+        )
+
+    def complete(
+        self,
+        authorization: CommandAuthorization,
+        process_id: int,
+    ) -> None:
+        report_fd = (
+            self.cleanup_report_fd
+            if authorization.mode == COMMAND_MODE_CLEANUP
+            else self.normal_report_fd
+        )
+        payload = (
+            f"{GROUP_REPORT_DONE}:{authorization.mode}:"
+            f"{authorization.nonce}:{process_id}\n"
+        ).encode("ascii")
+        try:
+            written = os.write(report_fd, payload)
+        except OSError as exc:
+            raise BoundedCommandError(
+                "process-group completion could not be reported"
+            ) from exc
+        if written != len(payload):
+            raise BoundedCommandError(
+                "process-group completion report was truncated"
+            )
+
+    def __enter__(self) -> ProcessGroupReporter:
+        global _ACTIVE_GROUP_REPORTER
+        if _ACTIVE_GROUP_REPORTER is not None:
+            raise PrecommitWorkerError(
+                "process-group reporter is already active"
+            )
+        _enable_child_subreaper()
+        _ACTIVE_GROUP_REPORTER = self
+        return self
+
+    def __exit__(self, _type: Any, _value: Any, _traceback: Any) -> None:
+        global _ACTIVE_GROUP_REPORTER
+        _ACTIVE_GROUP_REPORTER = None
+        for descriptor in self.descriptors:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
+_ACTIVE_GROUP_REPORTER: ProcessGroupReporter | None = None
+_ACTIVE_LIVENESS_GUARD: ControllerLivenessGuard | None = None
+
+
+@contextmanager
+def _execution_authority(
+    *,
+    control_fd: int,
+    normal_report_fd: int,
+    normal_ack_fd: int,
+    cleanup_report_fd: int,
+    cleanup_ack_fd: int,
+):  # noqa: ANN202
+    global _ACTIVE_LIVENESS_GUARD
+    with (
+        ControllerLivenessGuard(control_fd) as liveness,
+        ProcessGroupReporter(
+            normal_report_fd,
+            normal_ack_fd,
+            cleanup_report_fd,
+            cleanup_ack_fd,
+        ),
+    ):
+        if _ACTIVE_LIVENESS_GUARD is not None:
+            raise PrecommitWorkerError(
+                "controller liveness guard is already active"
+            )
+        _ACTIVE_LIVENESS_GUARD = liveness
+        try:
+            liveness.check()
+            yield
+        finally:
+            _ACTIVE_LIVENESS_GUARD = None
+
+
+def _bounded_exec_wrapper(argv: list[str]) -> int:
+    if (
+        len(argv) < 9
+        or argv[0] != BOUNDED_EXEC_WRAPPER
+        or argv[7] != "--"
+    ):
+        return 125
+    try:
+        mode = argv[1]
+        nonce = argv[2]
+        purpose = argv[3]
+        argv_sha256 = argv[4]
+        report_fd = int(argv[5], 10)
+        ack_fd = int(argv[6], 10)
+        arguments = argv[8:]
+        if (
+            mode not in {COMMAND_MODE_NORMAL, COMMAND_MODE_CLEANUP}
+            or NONCE_RE.fullmatch(nonce) is None
+            or PURPOSE_RE.fullmatch(purpose) is None
+            or SHA256_RE.fullmatch(argv_sha256) is None
+            or _argv_sha256(arguments) != argv_sha256
+            or report_fd < 0
+            or ack_fd < 0
+            or report_fd == ack_fd
+        ):
+            return 125
+        _anonymous_pipe_identity(
+            report_fd,
+            access_mode=os.O_WRONLY,
+            reject_opposite_end=True,
+            label="wrapper report",
+        )
+        _anonymous_pipe_identity(
+            ack_fd,
+            access_mode=os.O_RDONLY,
+            reject_opposite_end=True,
+            label="wrapper ACK",
+        )
+        os.setsid()
+        process_id = os.getpid()
+        _parent, process_group, session, starttime, _state = _proc_identity(
+            process_id
+        )
+        start = (
+            f"{GROUP_REPORT_START}:{mode}:{nonce}:{process_id}:"
+            f"{starttime}:{process_group}:{session}:{purpose}:"
+            f"{argv_sha256}\n"
+        ).encode("ascii")
+        if (
+            process_group != process_id
+            or session != process_id
+            or os.write(report_fd, start) != len(start)
+        ):
+            return 125
+        expected_ack = (
+            b"A" + start[1:]
+        )
+        ack = bytearray()
+        while len(ack) < len(expected_ack):
+            chunk = os.read(ack_fd, len(expected_ack) - len(ack))
+            if not chunk:
+                return 125
+            ack.extend(chunk)
+        if bytes(ack) != expected_ack:
+            return 125
+        os.close(report_fd)
+        os.close(ack_fd)
+        os.execve(arguments[0], arguments, dict(os.environ))
+    except (
+        OSError,
+        ValueError,
+        PrecommitWorkerError,
+        BoundedCommandError,
+    ):
+        return 125
+    return 125
 
 
 @dataclass(frozen=True)
@@ -266,7 +838,7 @@ ROLE_SERVICES = {
         "migration": "bot_fi_migration",
         "roles": "bot_fi_db_roles",
         "roles_post": None,
-        "fencing": None,
+        "fencing": "bot_fi_db_fencing",
         "observer": "bot_fi_sync_observer",
         "database_env": "BOT_FI_POSTGRES_DB",
         "network": "bot_fi",
@@ -866,32 +1438,425 @@ def confirmation_phrase(manifest: PrecommitManifest, action: str) -> str:
     )
 
 
-def _run(
+@dataclass(frozen=True)
+class BoundedCommandResult:
+    returncode: int
+    stdout: bytes
+    stderr: bytes
+
+
+@dataclass(frozen=True)
+class ProcessIdentity:
+    process_id: int
+    parent_id: int
+    process_group: int
+    session_id: int
+    starttime: int
+    state: str
+
+    @property
+    def key(self) -> tuple[int, int]:
+        return self.process_id, self.starttime
+
+
+def _process_snapshot() -> dict[int, ProcessIdentity]:
+    try:
+        entries = tuple(Path("/proc").iterdir())
+    except OSError as exc:
+        raise BoundedCommandError(
+            "process closure cannot be enumerated"
+        ) from exc
+    observed: dict[int, ProcessIdentity] = {}
+    for entry in entries:
+        if not entry.name.isdecimal():
+            continue
+        process_id = int(entry.name, 10)
+        try:
+            parent, group, session, starttime, state = _proc_identity(
+                process_id
+            )
+        except BoundedCommandError:
+            continue
+        observed[process_id] = ProcessIdentity(
+            process_id=process_id,
+            parent_id=parent,
+            process_group=group,
+            session_id=session,
+            starttime=starttime,
+            state=state,
+        )
+    return observed
+
+
+def _direct_child_baseline() -> frozenset[tuple[int, int]]:
+    owner = os.getpid()
+    return frozenset(
+        identity.key
+        for identity in _process_snapshot().values()
+        if identity.parent_id == owner
+    )
+
+
+def _owned_processes(
+    root_process_id: int,
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+    include_zombies: bool = False,
+) -> tuple[ProcessIdentity, ...]:
+    snapshot = _process_snapshot()
+    owned_ids = {root_process_id}
+    changed = True
+    while changed:
+        changed = False
+        for identity in snapshot.values():
+            if (
+                identity.process_id not in owned_ids
+                and identity.parent_id in owned_ids
+            ):
+                owned_ids.add(identity.process_id)
+                changed = True
+    owner = os.getpid()
+    for identity in snapshot.values():
+        if (
+            identity.parent_id == owner
+            and identity.key not in baseline_children
+        ):
+            owned_ids.add(identity.process_id)
+    return tuple(
+        identity
+        for process_id, identity in snapshot.items()
+        if process_id in owned_ids
+        and (include_zombies or identity.state != "Z")
+    )
+
+
+def _signal_process_identity(
+    identity: ProcessIdentity,
+    signum: int,
+) -> None:
+    try:
+        current = _proc_identity(identity.process_id)
+    except BoundedCommandError:
+        return
+    if current[3] != identity.starttime:
+        return
+    try:
+        descriptor = os.pidfd_open(identity.process_id, 0)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise BoundedCommandError(
+            "identity-bound process handle cannot be opened"
+        ) from exc
+    try:
+        refreshed = _proc_identity(identity.process_id)
+        if refreshed[3] != identity.starttime:
+            return
+        signal.pidfd_send_signal(descriptor, signum)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise BoundedCommandError(
+            "identity-bound process signal failed"
+        ) from exc
+    finally:
+        os.close(descriptor)
+
+
+def _reap_owned_zombies(
+    root_process_id: int,
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+) -> None:
+    owner = os.getpid()
+    while True:
+        reaped = False
+        for identity in _owned_processes(
+            root_process_id,
+            baseline_children=baseline_children,
+            include_zombies=True,
+        ):
+            if (
+                identity.process_id == root_process_id
+                or identity.parent_id != owner
+                or identity.state != "Z"
+            ):
+                continue
+            try:
+                waited, _status = os.waitpid(identity.process_id, os.WNOHANG)
+            except (ChildProcessError, ProcessLookupError):
+                continue
+            except OSError as exc:
+                raise BoundedCommandError(
+                    "adopted subprocess child could not be reaped"
+                ) from exc
+            reaped |= waited == identity.process_id
+        if not reaped:
+            return
+
+
+def _terminate_process_group(
+    process: subprocess.Popen[bytes],
+    *,
+    baseline_children: frozenset[tuple[int, int]] = frozenset(),
+) -> None:
+    for identity in reversed(
+        _owned_processes(
+            process.pid,
+            baseline_children=baseline_children,
+        )
+    ):
+        _signal_process_identity(identity, signal.SIGTERM)
+    deadline = time.monotonic() + PROCESS_GROUP_TERM_SECONDS
+    while (
+        _owned_processes(
+            process.pid,
+            baseline_children=baseline_children,
+        )
+        and time.monotonic() < deadline
+    ):
+        process.poll()
+        _reap_owned_zombies(
+            process.pid,
+            baseline_children=baseline_children,
+        )
+        time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
+    for identity in reversed(
+        _owned_processes(
+            process.pid,
+            baseline_children=baseline_children,
+        )
+    ):
+        _signal_process_identity(identity, signal.SIGKILL)
+    try:
+        process.wait(timeout=PROCESS_GROUP_TERM_SECONDS)
+    except subprocess.TimeoutExpired:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=PROCESS_GROUP_TERM_SECONDS)
+    absence_deadline = (
+        time.monotonic()
+        + PROCESS_GROUP_TERM_SECONDS
+        + PROCESS_TREE_QUIESCENCE_SECONDS
+    )
+    stable_since: float | None = None
+    while time.monotonic() < absence_deadline:
+        _reap_owned_zombies(
+            process.pid,
+            baseline_children=baseline_children,
+        )
+        owned = _owned_processes(
+            process.pid,
+            baseline_children=baseline_children,
+            include_zombies=True,
+        )
+        if owned:
+            stable_since = None
+            for identity in reversed(owned):
+                if identity.state != "Z":
+                    _signal_process_identity(identity, signal.SIGKILL)
+        else:
+            if stable_since is None:
+                stable_since = time.monotonic()
+            elif (
+                time.monotonic() - stable_since
+                >= PROCESS_TREE_QUIESCENCE_SECONDS
+            ):
+                return
+        time.sleep(0.01)
+    _reap_owned_zombies(
+        process.pid,
+        baseline_children=baseline_children,
+    )
+    if _owned_processes(
+        process.pid,
+        baseline_children=baseline_children,
+        include_zombies=True,
+    ):
+        raise BoundedCommandError(
+            "subprocess descendant closure survived forced cleanup"
+        )
+
+
+def _validate_command_limits(
+    *,
+    timeout: float,
+    stdout_limit: int,
+    stderr_limit: int,
+) -> None:
+    if (
+        type(timeout) not in {int, float}
+        or not math.isfinite(timeout)
+        or timeout <= 0
+        or type(stdout_limit) is not int
+        or stdout_limit < 1
+        or type(stderr_limit) is not int
+        or stderr_limit < 1
+    ):
+        raise BoundedCommandError("subprocess limits are invalid")
+
+
+def _bounded_command(
     arguments: list[str],
     *,
-    timeout: int,
-    env: Mapping[str, str] = _SAFE_ENV,
-    stdin: BinaryIO | int | None = subprocess.DEVNULL,
-) -> str:
-    try:
-        result = subprocess.run(
+    timeout: float,
+    env: Mapping[str, str],
+    stdin: BinaryIO | int | None,
+    stdout_limit: int,
+    stderr_limit: int,
+    purpose: str = "normal-command",
+    cleanup_only: bool = False,
+) -> BoundedCommandResult:
+    _validate_command_limits(
+        timeout=timeout,
+        stdout_limit=stdout_limit,
+        stderr_limit=stderr_limit,
+    )
+    process: subprocess.Popen[bytes] | None = None
+    selector = selectors.DefaultSelector()
+    buffers = {"stdout": bytearray(), "stderr": bytearray()}
+    deadline = time.monotonic() + timeout
+    group_cleaned = False
+    reporter = _ACTIVE_GROUP_REPORTER
+    authorization: CommandAuthorization | None = None
+    pass_fds: tuple[int, ...] = ()
+    _enable_child_subreaper()
+    baseline_children = _direct_child_baseline()
+    if (
+        reporter is not None
+        and not cleanup_only
+        and _ACTIVE_LIVENESS_GUARD is not None
+    ):
+        _ACTIVE_LIVENESS_GUARD.check()
+    if reporter is not None:
+        authorization, popen_arguments, report_fds = reporter.authorize(
             arguments,
+            purpose=purpose,
+            cleanup_only=cleanup_only,
+        )
+        pass_fds = report_fds
+    else:
+        popen_arguments = arguments
+    try:
+        process = subprocess.Popen(  # noqa: S603
+            popen_arguments,
             stdin=stdin,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=dict(env),
+            close_fds=True,
+            pass_fds=pass_fds,
+            start_new_session=reporter is None,
+        )
+        if process.stdout is None or process.stderr is None:
+            raise BoundedCommandError("subprocess pipes are unavailable")
+        for label, stream in (
+            ("stdout", process.stdout),
+            ("stderr", process.stderr),
+        ):
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, label)
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BoundedCommandError("subprocess timed out")
+            events = selector.select(min(0.1, remaining))
+            if not events:
+                if process.poll() is not None and not group_cleaned:
+                    _terminate_process_group(
+                        process,
+                        baseline_children=baseline_children,
+                    )
+                    group_cleaned = True
+                continue
+            for key, _mask in events:
+                try:
+                    chunk = os.read(key.fileobj.fileno(), 64 * 1024)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                label = key.data
+                buffer = buffers[label]
+                limit = (
+                    stdout_limit if label == "stdout" else stderr_limit
+                )
+                if len(buffer) + len(chunk) > limit:
+                    raise BoundedCommandError(
+                        f"subprocess {label} exceeded its byte limit"
+                    )
+                buffer.extend(chunk)
+            if process.poll() is not None and not group_cleaned:
+                _terminate_process_group(
+                    process,
+                    baseline_children=baseline_children,
+                )
+                group_cleaned = True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise BoundedCommandError("subprocess timed out")
+        returncode = process.wait(timeout=remaining)
+        return BoundedCommandResult(
+            returncode=returncode,
+            stdout=bytes(buffers["stdout"]),
+            stderr=bytes(buffers["stderr"]),
+        )
+    except BoundedCommandError:
+        raise
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise BoundedCommandError("subprocess execution failed") from exc
+    finally:
+        selector.close()
+        if process is not None:
+            cleanup_complete = False
+            try:
+                if not group_cleaned:
+                    _terminate_process_group(
+                        process,
+                        baseline_children=baseline_children,
+                    )
+                cleanup_complete = True
+            finally:
+                try:
+                    if (
+                        cleanup_complete
+                        and reporter is not None
+                        and authorization is not None
+                    ):
+                        reporter.complete(authorization, process.pid)
+                finally:
+                    if process.stdout is not None:
+                        process.stdout.close()
+                    if process.stderr is not None:
+                        process.stderr.close()
+
+
+def _run(
+    arguments: list[str],
+    *,
+    timeout: float,
+    env: Mapping[str, str] = _SAFE_ENV,
+    stdin: BinaryIO | int | None = subprocess.DEVNULL,
+    purpose: str = "normal-command",
+    cleanup_only: bool = False,
+) -> str:
+    try:
+        result = _bounded_command(
+            arguments,
+            stdin=stdin,
             timeout=timeout,
             env=dict(env),
-            check=False,
+            stdout_limit=MAX_COMMAND_STDOUT_BYTES,
+            stderr_limit=MAX_COMMAND_STDERR_BYTES,
+            purpose=purpose,
+            cleanup_only=cleanup_only,
         )
-    except (OSError, subprocess.SubprocessError) as exc:
+    except BoundedCommandError as exc:
         raise PrecommitWorkerError(
             f"required command is unavailable: {Path(arguments[0]).name}"
         ) from exc
-    if (
-        result.returncode != 0
-        or len(result.stdout) > 16 * 1024 * 1024
-        or len(result.stderr) > 2 * 1024 * 1024
-    ):
+    if result.returncode != 0:
         raise PrecommitWorkerError(
             f"required command failed closed: {Path(arguments[0]).name}"
         )
@@ -900,6 +1865,187 @@ def _run(
     except UnicodeDecodeError as exc:
         raise PrecommitWorkerError(
             "required command returned non-UTF-8 output"
+        ) from exc
+
+
+def _bounded_streaming_sha256(
+    arguments: list[str],
+    *,
+    timeout: float,
+    stdin: BinaryIO | int | None,
+    env: Mapping[str, str],
+    purpose: str = "normal-stream",
+    cleanup_only: bool = False,
+) -> StreamDigest:
+    _validate_command_limits(
+        timeout=timeout,
+        stdout_limit=MAX_FILE_BYTES,
+        stderr_limit=MAX_COMMAND_STDERR_BYTES,
+    )
+    process: subprocess.Popen[bytes] | None = None
+    selector = selectors.DefaultSelector()
+    digest = hashlib.sha256()
+    stdout_bytes = 0
+    stderr_bytes = 0
+    records = 0
+    last_byte: int | None = None
+    deadline = time.monotonic() + timeout
+    group_cleaned = False
+    reporter = _ACTIVE_GROUP_REPORTER
+    authorization: CommandAuthorization | None = None
+    pass_fds: tuple[int, ...] = ()
+    _enable_child_subreaper()
+    baseline_children = _direct_child_baseline()
+    if (
+        reporter is not None
+        and not cleanup_only
+        and _ACTIVE_LIVENESS_GUARD is not None
+    ):
+        _ACTIVE_LIVENESS_GUARD.check()
+    if reporter is not None:
+        authorization, popen_arguments, report_fds = reporter.authorize(
+            arguments,
+            purpose=purpose,
+            cleanup_only=cleanup_only,
+        )
+        pass_fds = report_fds
+    else:
+        popen_arguments = arguments
+    try:
+        process = subprocess.Popen(  # noqa: S603
+            popen_arguments,
+            stdin=stdin,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=dict(env),
+            close_fds=True,
+            pass_fds=pass_fds,
+            start_new_session=reporter is None,
+        )
+        if process.stdout is None or process.stderr is None:
+            raise BoundedCommandError(
+                "streaming subprocess pipes are unavailable"
+            )
+        for label, stream in (
+            ("stdout", process.stdout),
+            ("stderr", process.stderr),
+        ):
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, label)
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BoundedCommandError(
+                    "streaming subprocess timed out"
+                )
+            events = selector.select(min(0.1, remaining))
+            if not events:
+                if process.poll() is not None and not group_cleaned:
+                    _terminate_process_group(
+                        process,
+                        baseline_children=baseline_children,
+                    )
+                    group_cleaned = True
+                continue
+            for key, _mask in events:
+                try:
+                    chunk = os.read(key.fileobj.fileno(), 1024 * 1024)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                if key.data == "stdout":
+                    stdout_bytes += len(chunk)
+                    if stdout_bytes > MAX_FILE_BYTES:
+                        raise BoundedCommandError(
+                            "streaming stdout exceeded its byte limit"
+                        )
+                    digest.update(chunk)
+                    records += chunk.count(b"\n")
+                    last_byte = chunk[-1]
+                else:
+                    stderr_bytes += len(chunk)
+                    if stderr_bytes > MAX_COMMAND_STDERR_BYTES:
+                        raise BoundedCommandError(
+                            "streaming stderr exceeded its byte limit"
+                        )
+            if process.poll() is not None and not group_cleaned:
+                _terminate_process_group(
+                    process,
+                    baseline_children=baseline_children,
+                )
+                group_cleaned = True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise BoundedCommandError("streaming subprocess timed out")
+        returncode = process.wait(timeout=remaining)
+        if returncode != 0:
+            raise BoundedCommandError(
+                "streaming subprocess failed closed"
+            )
+        if stdout_bytes and last_byte != ord("\n"):
+            raise BoundedCommandError(
+                "streaming subprocess returned a truncated record"
+            )
+        return StreamDigest(
+            sha256=digest.hexdigest(),
+            bytes=stdout_bytes,
+            records=records,
+        )
+    except BoundedCommandError:
+        raise
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise BoundedCommandError(
+            "streaming subprocess execution failed"
+        ) from exc
+    finally:
+        selector.close()
+        if process is not None:
+            cleanup_complete = False
+            try:
+                if not group_cleaned:
+                    _terminate_process_group(
+                        process,
+                        baseline_children=baseline_children,
+                    )
+                cleanup_complete = True
+            finally:
+                try:
+                    if (
+                        cleanup_complete
+                        and reporter is not None
+                        and authorization is not None
+                    ):
+                        reporter.complete(authorization, process.pid)
+                finally:
+                    if process.stdout is not None:
+                        process.stdout.close()
+                    if process.stderr is not None:
+                        process.stderr.close()
+
+
+def _run_streaming_sha256(
+    arguments: list[str],
+    *,
+    timeout: float,
+    stdin: BinaryIO | int | None = subprocess.DEVNULL,
+    env: Mapping[str, str] = _SAFE_ENV,
+    purpose: str = "normal-stream",
+    cleanup_only: bool = False,
+) -> StreamDigest:
+    try:
+        return _bounded_streaming_sha256(
+            arguments,
+            timeout=timeout,
+            stdin=stdin,
+            env=env,
+            purpose=purpose,
+            cleanup_only=cleanup_only,
+        )
+    except BoundedCommandError as exc:
+        raise ProductionOperationError(
+            "required streaming command failed closed"
         ) from exc
 
 
@@ -926,12 +2072,20 @@ def _load_json_output(raw: str, *, label: str) -> Any:
         raise PrecommitWorkerError(f"{label} returned invalid JSON") from exc
 
 
+def _git_argv(*arguments: str) -> list[str]:
+    return [GIT, *_GIT_CONFIG_ARGUMENTS, *arguments]
+
+
 def _verify_release(
     manifest: PrecommitManifest,
     paths: OperationPaths,
 ) -> None:
     heads = _run(
-        [GIT, "bundle", "list-heads", str(paths.artifacts["release-bundle"])],
+        _git_argv(
+            "bundle",
+            "list-heads",
+            str(paths.artifacts["release-bundle"]),
+        ),
         timeout=60,
         env=_SAFE_GIT_ENV,
     )
@@ -940,46 +2094,54 @@ def _verify_release(
     }:
         raise PrecommitWorkerError("release bundle lacks the exact release")
     head = _run(
-        [GIT, "-C", str(paths.release_root), "rev-parse", "HEAD"],
+        _git_argv("-C", str(paths.release_root), "rev-parse", "HEAD"),
         timeout=30,
         env=_SAFE_GIT_ENV,
     )
     tree = _run(
-        [GIT, "-C", str(paths.release_root), "rev-parse", "HEAD^{tree}"],
+        _git_argv(
+            "-C",
+            str(paths.release_root),
+            "rev-parse",
+            "HEAD^{tree}",
+        ),
         timeout=30,
         env=_SAFE_GIT_ENV,
     )
     status = _run(
-        [
-            GIT,
+        _git_argv(
             "-C",
             str(paths.release_root),
             "status",
             "--porcelain=v1",
             "--untracked-files=all",
-        ],
+        ),
         timeout=30,
         env=_SAFE_GIT_ENV,
     )
     branch = _run(
-        [
-            GIT,
+        _git_argv(
             "-C",
             str(paths.release_root),
             "rev-parse",
             "--abbrev-ref",
             "HEAD",
-        ],
+        ),
         timeout=30,
         env=_SAFE_GIT_ENV,
     )
     remotes = _run(
-        [GIT, "-C", str(paths.release_root), "remote"],
+        _git_argv("-C", str(paths.release_root), "remote"),
         timeout=30,
         env=_SAFE_GIT_ENV,
     )
     top = _run(
-        [GIT, "-C", str(paths.release_root), "rev-parse", "--show-toplevel"],
+        _git_argv(
+            "-C",
+            str(paths.release_root),
+            "rev-parse",
+            "--show-toplevel",
+        ),
         timeout=30,
         env=_SAFE_GIT_ENV,
     )
@@ -1050,20 +2212,19 @@ def _verify_release(
                     "release-owned executable source changed while read"
                 )
             tree_entry = _run(
-                [
-                    GIT,
+                _git_argv(
                     "-C",
                     str(paths.release_root),
                     "ls-tree",
                     "HEAD",
                     "--",
                     relative,
-                ],
+                ),
                 timeout=30,
                 env=_SAFE_GIT_ENV,
             )
             blob = _run(
-                [GIT, "hash-object", str(source)],
+                _git_argv("hash-object", "--no-filters", str(source)),
                 timeout=30,
                 env=_SAFE_GIT_ENV,
             )
@@ -1861,6 +3022,8 @@ def _verify_compose(
 def _oneoff_ids(
     manifest: PrecommitManifest,
     paths: OperationPaths,
+    *,
+    cleanup_only: bool = False,
 ) -> list[str]:
     output = _run(
         [
@@ -1870,25 +3033,48 @@ def _oneoff_ids(
             "--quiet",
             "--filter",
             f"label=com.docker.compose.project={paths.project_name}",
+            "--filter",
+            "label=com.docker.compose.oneoff=True",
+            "--filter",
+            (
+                "label=trading-bot.production.operation-id="
+                f"{manifest.operation_id}"
+            ),
         ],
         timeout=30,
+        purpose=(
+            "cleanup-list-oneoffs"
+            if cleanup_only
+            else "inventory-oneoffs"
+        ),
+        cleanup_only=cleanup_only,
     )
     values = [value for value in output.splitlines() if value]
     if len(values) != len(set(values)) or any(
         not CONTAINER_ID_RE.fullmatch(value) for value in values
     ):
         raise PrecommitWorkerError("operation one-off inventory is invalid")
-    database = _database_container(manifest, paths)
-    return sorted(value for value in values if value != database)
+    return sorted(values)
 
 
 def _validate_oneoff(
     identifier: str,
     manifest: PrecommitManifest,
     paths: OperationPaths,
+    *,
+    cleanup_only: bool = False,
 ) -> dict[str, Any]:
     payload = _load_json_output(
-        _run([DOCKER, "inspect", identifier], timeout=30),
+        _run(
+            [DOCKER, "inspect", identifier],
+            timeout=30,
+            purpose=(
+                "cleanup-inspect-oneoff"
+                if cleanup_only
+                else "inspect-oneoff"
+            ),
+            cleanup_only=cleanup_only,
+        ),
         label="operation one-off inspection",
     )
     if (
@@ -2058,24 +3244,43 @@ def _cleanup_oneoffs(
     paths: OperationPaths,
 ) -> list[dict[str, Any]]:
     removed: list[dict[str, Any]] = []
-    stable_empty = 0
-    for _attempt in range(40):
-        identifiers = _oneoff_ids(manifest, paths)
+    removed_ids: set[str] = set()
+    deadline = time.monotonic() + ONEOFF_CLEANUP_TIMEOUT_SECONDS
+    stable_since: float | None = None
+    while time.monotonic() < deadline:
+        identifiers = _oneoff_ids(
+            manifest,
+            paths,
+            cleanup_only=True,
+        )
         if not identifiers:
-            stable_empty += 1
-            if stable_empty >= 2:
+            if stable_since is None:
+                stable_since = time.monotonic()
+            elif (
+                time.monotonic() - stable_since
+                >= ONEOFF_QUIESCENCE_SECONDS
+            ):
                 return removed
-            time.sleep(0.1)
+            time.sleep(0.05)
             continue
-        stable_empty = 0
+        stable_since = None
         for identifier in identifiers:
-            evidence = _validate_oneoff(identifier, manifest, paths)
+            evidence = _validate_oneoff(
+                identifier,
+                manifest,
+                paths,
+                cleanup_only=True,
+            )
             _run(
                 [DOCKER, "rm", "--force", "--volumes", identifier],
                 timeout=60,
+                purpose="cleanup-remove-oneoff",
+                cleanup_only=True,
             )
-            removed.append(evidence)
-        time.sleep(0.1)
+            if identifier not in removed_ids:
+                removed.append(evidence)
+                removed_ids.add(identifier)
+        time.sleep(0.05)
     raise PrecommitWorkerError(
         "operation one-off residue did not reach stable empty"
     )
@@ -3592,6 +4797,11 @@ def execute_action(
     action: str,
     apply: bool,
     confirm: str | None,
+    control_fd: int | None = None,
+    process_group_report_fd: int | None = None,
+    process_group_ack_fd: int | None = None,
+    cleanup_process_report_fd: int | None = None,
+    cleanup_process_ack_fd: int | None = None,
 ) -> Mapping[str, Any]:
     manifest = load_manifest(manifest_path)
     paths = operation_paths(
@@ -3625,6 +4835,34 @@ def execute_action(
         raise PrecommitWorkerError(
             f"precommit execution requires --confirm {required}"
         )
+    if action in MUTATING_ACTIONS:
+        if (
+            control_fd is None
+            or process_group_report_fd is None
+            or process_group_ack_fd is None
+            or cleanup_process_report_fd is None
+            or cleanup_process_ack_fd is None
+        ):
+            raise PrecommitWorkerError(
+                "mutating precommit action requires controller liveness "
+                "and separate normal/cleanup process authorization"
+            )
+        with _execution_authority(
+            control_fd=control_fd,
+            normal_report_fd=process_group_report_fd,
+            normal_ack_fd=process_group_ack_fd,
+            cleanup_report_fd=cleanup_process_report_fd,
+            cleanup_ack_fd=cleanup_process_ack_fd,
+        ):
+            return _execute_action_apply(manifest, paths, action)
+    return _execute_action_apply(manifest, paths, action)
+
+
+def _execute_action_apply(
+    manifest: PrecommitManifest,
+    paths: OperationPaths,
+    action: str,
+) -> Mapping[str, Any]:
     _prepare_journal_directories(paths)
     with _journal_lock(paths):
         state = _load_state(paths, manifest)
@@ -3752,18 +4990,31 @@ def execute_action(
 
 
 def main(argv: list[str] | None = None) -> int:
+    incoming = sys.argv[1:] if argv is None else argv
+    if incoming and incoming[0] == BOUNDED_EXEC_WRAPPER:
+        return _bounded_exec_wrapper(incoming)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--action", choices=ACTIONS, required=True)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")
-    args = parser.parse_args(argv)
+    parser.add_argument("--control-fd", type=int)
+    parser.add_argument("--process-group-report-fd", type=int)
+    parser.add_argument("--process-group-ack-fd", type=int)
+    parser.add_argument("--cleanup-process-report-fd", type=int)
+    parser.add_argument("--cleanup-process-ack-fd", type=int)
+    args = parser.parse_args(incoming)
     try:
         result = execute_action(
             args.manifest,
             action=args.action,
             apply=args.apply,
             confirm=args.confirm,
+            control_fd=args.control_fd,
+            process_group_report_fd=args.process_group_report_fd,
+            process_group_ack_fd=args.process_group_ack_fd,
+            cleanup_process_report_fd=args.cleanup_process_report_fd,
+            cleanup_process_ack_fd=args.cleanup_process_ack_fd,
         )
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0

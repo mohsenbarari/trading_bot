@@ -15,6 +15,7 @@ import unittest
 from unittest import mock
 
 from core.canonical_json import canonical_json_bytes
+from core.production_shadow_authorization import authorization_basis_sha256
 from core.docker_image_identity import (
     image_content_descriptor_from_archive_config,
 )
@@ -22,6 +23,8 @@ from scripts import (
     build_production_shadow_cutover_manifest_template as MODULE,
 )
 from scripts import production_shadow_nginx_generation as NGINX
+from scripts import production_shadow_convergence_runtime_targets as TARGETS
+from scripts import production_shadow_remote_receiver_signing_policy as RECEIVER_POLICY
 from scripts import produce_production_shadow_prepare_material as PREPARE
 from scripts import render_three_site_production_shadow_role_compose as ROLE
 from scripts.production_shadow_cutover_controller import (
@@ -411,6 +414,38 @@ class CutoverFixture:
             ],
         }
         secure_file(self.policy, canonical_json_bytes(policy))
+        self.remote_receiver_policies: dict[str, Path] = {}
+        for index, role in enumerate(("webapp_ir", "witness"), 1):
+            policy_document: dict[str, object] = {
+                "schema": RECEIVER_POLICY.POLICY_SCHEMA,
+                "algorithm": RECEIVER_POLICY.ALGORITHM,
+                "key_id": f"{role}-convergence-0{index}",
+                "public_key_base64": base64.b64encode(
+                    bytes([0x50 + index]) * 32
+                ).decode("ascii"),
+                "public_key_sha256": hashlib.sha256(
+                    bytes([0x50 + index]) * 32
+                ).hexdigest(),
+                "campaign_id": CAMPAIGN_ID,
+                "operation_id": OPERATION_ID,
+                "release_sha": self.release_sha,
+                "release_tree_sha": self.release_tree_sha,
+                "role": role,
+                "not_before": "2026-07-28T00:00:00Z",
+                "expires_at": "2026-08-28T00:00:00Z",
+                "receiver_sha256": str(index) * 64,
+                "worker_sha256": str(index + 2) * 64,
+                "policy_sha256": "0" * 64,
+            }
+            policy_document["policy_sha256"] = hashlib.sha256(
+                RECEIVER_POLICY.policy_payload(policy_document)
+            ).hexdigest()
+            path = self.control / f"{role}-remote-receiver-policy.json"
+            secure_file(
+                path,
+                RECEIVER_POLICY.canonical_json_bytes(policy_document) + b"\n",
+            )
+            self.remote_receiver_policies[role] = path
         self.postcommit_contract = (
             self.control / "postcommit-executor-contract.json"
         )
@@ -452,6 +487,18 @@ class CutoverFixture:
     def _prepare_materials(self) -> Path:
         roles: dict[str, dict] = {}
         controller_materials: dict[str, dict] = {}
+        canonical_compose_raw = self.compose.read_bytes()
+        canonical_compose = PREPARE.yaml.safe_load(canonical_compose_raw)
+        runtime_target_sources: dict[str, dict[str, str]] = {}
+        target_source_values = {
+            "PRODUCTION_SHADOW_RELEASE_SHA": self.release_sha,
+            "BOT_FI_OBSERVER_DB_PASSWORD": "fixture-observer-bot",
+            "BOT_FI_POSTGRES_DB": "bot_fi",
+            "WEBAPP_FI_OBSERVER_DB_PASSWORD": "fixture-observer-fi",
+            "WEBAPP_FI_POSTGRES_DB": "webapp_fi",
+            "WEBAPP_IR_OBSERVER_DB_PASSWORD": "fixture-observer-ir",
+            "WEBAPP_IR_POSTGRES_DB": "webapp_ir",
+        }
         for index, role in enumerate(PREPARE.ALL_ROLES, 1):
             operation_manifest = f"{index:x}" * 64
             stage_attestation = f"{index + 4:x}" * 64
@@ -503,6 +550,22 @@ class CutoverFixture:
                         kind
                     ]
                     for kind in PREPARE.IMAGE_KINDS
+                }
+                required_runtime_target_names = (
+                    PREPARE._runtime_target_source_names(
+                        canonical_compose,
+                        role=role,
+                    )
+                )
+                values.update(
+                    {
+                        name: target_source_values[name]
+                        for name in required_runtime_target_names
+                    }
+                )
+                runtime_target_sources[role] = {
+                    name: values[name]
+                    for name in required_runtime_target_names
                 }
                 env_raw = ROLE.canonical_role_env_bytes(
                     values,
@@ -563,8 +626,28 @@ class CutoverFixture:
                 "format": row["format"],
                 "transport": row["transport"],
             }
+        runtime_target_document = PREPARE.build_convergence_runtime_target_set(
+            operation_id=OPERATION_ID,
+            release_sha=self.release_sha,
+            canonical_compose_raw=canonical_compose_raw,
+            role_source_values=runtime_target_sources,
+        )
+        runtime_target_raw = canonical_json_bytes(runtime_target_document)
+        self.runtime_targets = (
+            self.prepare / PREPARE.CONVERGENCE_RUNTIME_TARGETS_FILENAME
+        )
+        secure_file(self.runtime_targets, runtime_target_raw)
+        runtime_target_descriptor = (
+            PREPARE.convergence_runtime_target_descriptor(
+                runtime_target_document,
+                canonical_compose_raw=canonical_compose_raw,
+            )
+        )
         metadata = {
             "schema": PREPARE.SET_SCHEMA,
+            "capabilities": list(
+                PREPARE.runtime_targets.RUNTIME_TARGET_CAPABILITIES
+            ),
             "operation_id": OPERATION_ID,
             "release_sha": self.release_sha,
             "canonical_compose_sha256": hashlib.sha256(
@@ -580,6 +663,7 @@ class CutoverFixture:
                     role: self.runtime_ids
                     for role in PREPARE.DOCKER_ROLES
                 },
+                "convergence_runtime_targets": runtime_target_descriptor,
             },
             "activation_secrets_included": False,
             "precommit_manifest_bound": False,
@@ -679,6 +763,10 @@ class CutoverFixture:
             str(self.nginx_aggregate),
             "--human-approval-policy",
             str(self.policy),
+            "--webapp-ir-remote-receiver-signing-policy",
+            str(self.remote_receiver_policies["webapp_ir"]),
+            "--witness-remote-receiver-signing-policy",
+            str(self.remote_receiver_policies["witness"]),
             "--postcommit-executor-contract",
             str(self.postcommit_contract),
             "--output-directory",
@@ -760,6 +848,39 @@ class CutoverManifestTemplateBuilderTests(unittest.TestCase):
         self.assertEqual(output.stat().st_mode & 0o777, 0o600)
         manifest = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual(output.read_bytes(), canonical_json_bytes(manifest))
+        receipt_path = TARGETS.runtime_target_derivation_receipt_path(output)
+        self.assertEqual(
+            receipt_path,
+            Path(result["runtime_target_derivation_receipt_output"]),
+        )
+        self.assertEqual(receipt_path.stat().st_mode & 0o777, 0o600)
+        receipt_payload = receipt_path.read_bytes()
+        receipt = json.loads(receipt_payload)
+        self.assertEqual(receipt_payload, canonical_json_bytes(receipt))
+        TARGETS.validate_runtime_target_derivation_receipt(
+            receipt,
+            campaign_id=manifest["campaign_id"],
+            operation_id=manifest["operation_id"],
+            release_sha=manifest["release_sha"],
+            template_sha256=hashlib.sha256(output.read_bytes()).hexdigest(),
+            authorization_basis_sha256=authorization_basis_sha256(manifest),
+            canonical_compose_sha256=manifest["artifacts"][
+                "shadow_compose_sha256"
+            ],
+            convergence_runtime_targets=manifest["artifacts"][
+                "convergence_runtime_targets"
+            ],
+            label="fixture runtime target derivation receipt",
+        )
+        for forbidden in (
+            b"fixture-observer-bot",
+            b"fixture-observer-fi",
+            b"fixture-observer-ir",
+            b"DATABASE_URL",
+            b"POSTGRES_PASSWORD",
+        ):
+            self.assertNotIn(forbidden, output.read_bytes())
+            self.assertNotIn(forbidden, receipt_payload)
         self.assertEqual(
             manifest["artifacts"]["cutover_approval_sha256"],
             "0" * 64,
@@ -784,6 +905,37 @@ class CutoverManifestTemplateBuilderTests(unittest.TestCase):
                 self.fixture.postcommit_contract.read_bytes()
             ).hexdigest(),
         )
+        runtime_targets = manifest["artifacts"][
+            "convergence_runtime_targets"
+        ]
+        self.assertEqual(
+            runtime_targets["schema"],
+            PREPARE.CONVERGENCE_RUNTIME_TARGET_SET_SCHEMA,
+        )
+        self.assertEqual(
+            runtime_targets["filename"],
+            PREPARE.CONVERGENCE_RUNTIME_TARGETS_FILENAME,
+        )
+        self.assertEqual(runtime_targets["roles"], list(PREPARE.DOCKER_ROLES))
+        self.assertNotIn("witness", runtime_targets["roles"])
+        anchors = manifest["artifacts"]["remote_receiver_signing_policies"]
+        self.assertEqual(set(anchors), {"webapp_ir", "witness"})
+        for role, path in self.fixture.remote_receiver_policies.items():
+            raw = path.read_bytes()
+            parsed = RECEIVER_POLICY.parse_policy_payload(raw)
+            self.assertEqual(
+                anchors[role],
+                {
+                    "policy_file_sha256": hashlib.sha256(raw).hexdigest(),
+                    "policy_sha256": parsed.policy_sha256,
+                    "key_id": parsed.key_id,
+                    "public_key_sha256": hashlib.sha256(
+                        parsed.public_key
+                    ).hexdigest(),
+                    "receiver_sha256": parsed.receiver_sha256,
+                    "worker_sha256": parsed.worker_sha256,
+                },
+            )
 
         retry_status, retry = self.run_main(apply_args)
         self.assertEqual(retry_status, 0)
@@ -870,6 +1022,143 @@ class CutoverManifestTemplateBuilderTests(unittest.TestCase):
         status, result = self.run_main(self.fixture.args())
         self.assertEqual(status, 1)
         self.assertIn("POSTCOMMIT_SPECS", result["error"])
+
+    def test_remote_receiver_policy_binding_and_reuse_drift_fail_closed(self) -> None:
+        policy_path = self.fixture.remote_receiver_policies["webapp_ir"]
+        original = policy_path.read_bytes()
+        document = json.loads(policy_path.read_bytes()[:-1])
+        document["release_tree_sha"] = "f" * 40
+        document["policy_sha256"] = hashlib.sha256(
+            RECEIVER_POLICY.policy_payload(document)
+        ).hexdigest()
+        secure_file(
+            policy_path,
+            RECEIVER_POLICY.canonical_json_bytes(document) + b"\n",
+        )
+        status, result = self.run_main(self.fixture.args())
+        self.assertEqual(status, 1)
+        self.assertIn("signing policy binding differs", result["error"])
+
+        secure_file(policy_path, original)
+        status, plan = self.run_main(self.fixture.args())
+        self.assertEqual(status, 0, plan)
+        apply_args = self.fixture.args() + [
+            "--apply",
+            "--confirm",
+            plan["required_confirmation"],
+        ]
+        status, result = self.run_main(apply_args)
+        self.assertEqual(status, 0, result)
+
+        policy_path = self.fixture.remote_receiver_policies["webapp_ir"]
+        for field, replacement in (
+            ("key_id", "webapp-ir-convergence-99"),
+            ("receiver_sha256", "d" * 64),
+            ("worker_sha256", "e" * 64),
+        ):
+            document = json.loads(original[:-1])
+            document[field] = replacement
+            document["policy_sha256"] = hashlib.sha256(
+                RECEIVER_POLICY.policy_payload(document)
+            ).hexdigest()
+            secure_file(
+                policy_path,
+                RECEIVER_POLICY.canonical_json_bytes(document) + b"\n",
+            )
+            status, result = self.run_main(self.fixture.args())
+            self.assertEqual(status, 1)
+            self.assertIn("refusing to overwrite a different", result["error"])
+        secure_file(policy_path, original)
+
+    def test_convergence_runtime_target_artifact_tampering_fails_closed(self) -> None:
+        target_document = json.loads(
+            self.fixture.runtime_targets.read_text(encoding="utf-8")
+        )
+        target_document["roles"]["bot_fi"][
+            "observer_service_sha256"
+        ] = "f" * 64
+        tampered = canonical_json_bytes(target_document)
+        secure_file(self.fixture.runtime_targets, tampered)
+        metadata = json.loads(
+            self.fixture.prepare_metadata.read_text(encoding="utf-8")
+        )
+        descriptor = metadata["controller_bindings"][
+            "convergence_runtime_targets"
+        ]
+        descriptor["sha256"] = hashlib.sha256(tampered).hexdigest()
+        descriptor["bytes"] = len(tampered)
+        secure_file(
+            self.fixture.prepare_metadata,
+            canonical_json_bytes(metadata),
+        )
+
+        status, result = self.run_main(self.fixture.args())
+        self.assertEqual(status, 1)
+        self.assertIn("convergence runtime target set is invalid", result["error"])
+
+    def test_self_consistent_runtime_target_replacement_fails_semantic_rederivation(
+        self,
+    ) -> None:
+        target_document = json.loads(
+            self.fixture.runtime_targets.read_text(encoding="utf-8")
+        )
+        row = target_document["roles"]["bot_fi"]
+        row["observer_service_sha256"] = "f" * 64
+        row["runtime_target_descriptor_sha256"] = (
+            PREPARE._domain_separated_sha256(
+                "runtime-target-descriptor",
+                {
+                    "role": "bot_fi",
+                    **{
+                        field: row[field]
+                        for field in PREPARE.CONVERGENCE_RUNTIME_TARGET_ROLE_FIELDS
+                        if field != "runtime_target_descriptor_sha256"
+                    },
+                },
+            )
+        )
+        target_document["target_set_sha256"] = PREPARE._runtime_target_set_digest(
+            target_document
+        )
+        fabricated_payload = canonical_json_bytes(target_document)
+        secure_file(self.fixture.runtime_targets, fabricated_payload)
+
+        metadata = json.loads(
+            self.fixture.prepare_metadata.read_text(encoding="utf-8")
+        )
+        descriptor = metadata["controller_bindings"][
+            "convergence_runtime_targets"
+        ]
+        descriptor.update(
+            sha256=hashlib.sha256(fabricated_payload).hexdigest(),
+            bytes=len(fabricated_payload),
+            target_set_sha256=target_document["target_set_sha256"],
+        )
+        secure_file(
+            self.fixture.prepare_metadata,
+            canonical_json_bytes(metadata),
+        )
+
+        status, result = self.run_main(self.fixture.args())
+        self.assertEqual(status, 1)
+        self.assertIn(
+            "convergence runtime target semantic derivation differs",
+            result["error"],
+        )
+
+    def test_legacy_prepare_metadata_requires_fresh_v3_template_and_approval(self) -> None:
+        metadata = json.loads(
+            self.fixture.prepare_metadata.read_text(encoding="utf-8")
+        )
+        metadata["schema"] = PREPARE.LEGACY_SET_SCHEMA
+        del metadata["capabilities"]
+        secure_file(
+            self.fixture.prepare_metadata,
+            canonical_json_bytes(metadata),
+        )
+        status, result = self.run_main(self.fixture.args())
+        self.assertEqual(status, 1)
+        self.assertIn("fresh v3 prepare material", result["error"])
 
     def test_symlink_hardlink_mode_and_read_drift_are_rejected(self) -> None:
         target = self.fixture.control / "policy-target.json"

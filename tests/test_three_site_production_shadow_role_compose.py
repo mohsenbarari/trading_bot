@@ -174,6 +174,7 @@ class ThreeSiteProductionShadowRoleComposeTests(unittest.TestCase):
                 "bot_fi_db",
                 "bot_fi_restore_tool",
                 "bot_fi_db_roles",
+                "bot_fi_db_fencing",
                 "bot_fi_migration",
                 "bot_fi_sync_observer",
             },

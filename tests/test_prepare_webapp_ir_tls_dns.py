@@ -1197,6 +1197,8 @@ class ActivationDocumentTests(unittest.TestCase):
                 "role_materials",
                 "image_artifacts",
                 "role_runtime_image_ids",
+                "convergence_runtime_targets",
+                "remote_receiver_signing_policies",
                 "postgres_runtime_uid",
                 "postgres_runtime_gid",
                 "postgres_image_ref",
@@ -1255,6 +1257,32 @@ class ActivationDocumentTests(unittest.TestCase):
                 },
                 "image_artifacts": image_artifacts,
                 "role_runtime_image_ids": runtime_inventory,
+                "convergence_runtime_targets": {
+                    "schema": worker.CONVERGENCE_RUNTIME_TARGET_SET_SCHEMA,
+                    "filename": worker.CONVERGENCE_RUNTIME_TARGETS_FILENAME,
+                    "sha256": "e" * 64,
+                    "bytes": 1024,
+                    "target_set_sha256": "f" * 64,
+                    "roles": list(worker.DOCKER_RUNTIME_ROLES),
+                },
+                "remote_receiver_signing_policies": {
+                    "webapp_ir": {
+                        "policy_file_sha256": "1" * 64,
+                        "policy_sha256": "2" * 64,
+                        "key_id": "webapp-ir-convergence-01",
+                        "public_key_sha256": "3" * 64,
+                        "receiver_sha256": "4" * 64,
+                        "worker_sha256": "5" * 64,
+                    },
+                    "witness": {
+                        "policy_file_sha256": "6" * 64,
+                        "policy_sha256": "7" * 64,
+                        "key_id": "witness-convergence-01",
+                        "public_key_sha256": "8" * 64,
+                        "receiver_sha256": "9" * 64,
+                        "worker_sha256": "a" * 64,
+                    },
+                },
                 "postgres_runtime_uid": 70,
                 "postgres_runtime_gid": 70,
                 "postgres_image_ref": (
@@ -1264,6 +1292,7 @@ class ActivationDocumentTests(unittest.TestCase):
         )
         cutover = {
             "schema": worker.CUTOVER_MANIFEST_SCHEMA,
+            "capabilities": list(worker.runtime_targets.RUNTIME_TARGET_CAPABILITIES),
             "campaign_id": CAMPAIGN_ID,
             "operation_id": OPERATION_ID,
             "created_at": "2026-07-27T00:00:00+00:00",
@@ -1391,6 +1420,87 @@ class ActivationDocumentTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 worker.WebAppIrTlsError,
                 "runtime image inventory",
+            ):
+                worker._validate_cutover_manifest_source(
+                    cutover,
+                    campaign_id=CAMPAIGN_ID,
+                    operation_id=OPERATION_ID,
+                    release_sha=RELEASE_SHA,
+                )
+
+    def test_cutover_manifest_requires_a_valid_convergence_runtime_target_descriptor(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = private_dir(Path(tmp) / "documents")
+            documents = self._documents(root)
+            cutover = json.loads(
+                documents["cutover"].read_text(encoding="utf-8")
+            )
+            cutover["artifacts"].pop("convergence_runtime_targets")
+            with self.assertRaisesRegex(
+                worker.WebAppIrTlsError,
+                "cutover artifacts fields differ",
+            ):
+                worker._validate_cutover_manifest_source(
+                    cutover,
+                    campaign_id=CAMPAIGN_ID,
+                    operation_id=OPERATION_ID,
+                    release_sha=RELEASE_SHA,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = private_dir(Path(tmp) / "documents")
+            documents = self._documents(root)
+            cutover = json.loads(
+                documents["cutover"].read_text(encoding="utf-8")
+            )
+            cutover["artifacts"]["convergence_runtime_targets"][
+                "roles"
+            ].append("witness")
+            with self.assertRaisesRegex(
+                worker.WebAppIrTlsError,
+                "convergence runtime target descriptor is invalid",
+            ):
+                worker._validate_cutover_manifest_source(
+                    cutover,
+                    campaign_id=CAMPAIGN_ID,
+                    operation_id=OPERATION_ID,
+                    release_sha=RELEASE_SHA,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = private_dir(Path(tmp) / "documents")
+            documents = self._documents(root)
+            legacy = json.loads(
+                documents["cutover"].read_text(encoding="utf-8")
+            )
+            legacy["schema"] = worker.LEGACY_CUTOVER_MANIFEST_SCHEMA
+            del legacy["capabilities"]
+            with self.assertRaisesRegex(
+                worker.WebAppIrTlsError,
+                "fresh v4 template.*fresh approval",
+            ):
+                worker._validate_cutover_manifest_source(
+                    legacy,
+                    campaign_id=CAMPAIGN_ID,
+                    operation_id=OPERATION_ID,
+                    release_sha=RELEASE_SHA,
+                )
+
+    def test_cutover_manifest_requires_exact_remote_receiver_policy_anchors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = private_dir(Path(tmp) / "documents")
+            documents = self._documents(root)
+            cutover = json.loads(
+                documents["cutover"].read_text(encoding="utf-8")
+            )
+            cutover["artifacts"]["remote_receiver_signing_policies"][
+                "webapp_ir"
+            ]["key_id"] = "invalid key id"
+            with self.assertRaisesRegex(
+                worker.WebAppIrTlsError,
+                "key id is invalid",
             ):
                 worker._validate_cutover_manifest_source(
                     cutover,

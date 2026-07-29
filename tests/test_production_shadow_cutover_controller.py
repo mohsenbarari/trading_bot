@@ -9,11 +9,19 @@ import json
 import os
 from pathlib import Path
 import shlex
+import signal
+import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
 from core.docker_image_identity import verify_content_descriptor
+from core.canonical_json import canonical_json_bytes
+from core.production_shadow_authorization import authorization_basis_sha256
+from scripts import production_shadow_cutover_controller as MODULE
+from scripts import production_shadow_convergence_runtime_targets as TARGETS
 from scripts.production_shadow_cutover_controller import (
     APPLY_CONFIRMATION,
     ARTIFACT_FIELDS,
@@ -35,6 +43,8 @@ from scripts.production_shadow_cutover_controller import (
     ProductionCutoverJournal,
     VerifiedPhaseCompletion,
     _persist_phase_verification_receipt,
+    _release_verifier_arguments,
+    _run_bounded_release_verifier,
     _validate_phase_verification_result,
     _secure_root,
     _operation_release_root,
@@ -112,6 +122,7 @@ def manifest_payload() -> dict:
     secure_root = _secure_root(CAMPAIGN_ID)
     return {
         "schema": MANIFEST_SCHEMA,
+        "capabilities": list(MODULE.MANIFEST_CAPABILITIES),
         "campaign_id": CAMPAIGN_ID,
         "operation_id": OPERATION_ID,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -179,6 +190,32 @@ def manifest_payload() -> dict:
                     "webapp_ir": ("9", "a", "b", "c"),
                 }.items()
             },
+            "convergence_runtime_targets": {
+                "schema": MODULE.CONVERGENCE_RUNTIME_TARGET_SET_SCHEMA,
+                "filename": MODULE.CONVERGENCE_RUNTIME_TARGETS_FILENAME,
+                "sha256": "e" * 64,
+                "bytes": 1024,
+                "target_set_sha256": "f" * 64,
+                "roles": ["bot_fi", "webapp_fi", "webapp_ir"],
+            },
+            "remote_receiver_signing_policies": {
+                "webapp_ir": {
+                    "policy_file_sha256": "1" * 64,
+                    "policy_sha256": "2" * 64,
+                    "key_id": "webapp-ir-convergence-01",
+                    "public_key_sha256": "3" * 64,
+                    "receiver_sha256": "4" * 64,
+                    "worker_sha256": "5" * 64,
+                },
+                "witness": {
+                    "policy_file_sha256": "6" * 64,
+                    "policy_sha256": "7" * 64,
+                    "key_id": "witness-convergence-01",
+                    "public_key_sha256": "8" * 64,
+                    "receiver_sha256": "9" * 64,
+                    "worker_sha256": "a" * 64,
+                },
+            },
             "postgres_runtime_uid": 70,
             "postgres_runtime_gid": 70,
             "postgres_image_ref": f"trading_bot_postgres_boottime:15-{RELEASE_SHA}",
@@ -203,7 +240,636 @@ def manifest_payload() -> dict:
     }
 
 
+def write_controller_manifest(path: Path, payload: dict | None = None) -> dict:
+    """Write a canonical final-manifest fixture with its required sidecar."""
+
+    manifest = manifest_payload() if payload is None else payload
+    path.write_bytes(canonical_json_bytes(manifest))
+    path.chmod(0o600)
+    pending = json.loads(canonical_json_bytes(manifest))
+    pending["artifacts"]["cutover_approval_sha256"] = "0" * 64
+    receipt = TARGETS.build_runtime_target_derivation_receipt(
+        campaign_id=pending["campaign_id"],
+        operation_id=pending["operation_id"],
+        release_sha=pending["release_sha"],
+        template_sha256=hashlib.sha256(
+            canonical_json_bytes(pending)
+        ).hexdigest(),
+        authorization_basis_sha256=authorization_basis_sha256(pending),
+        canonical_compose_sha256=pending["artifacts"]["shadow_compose_sha256"],
+        convergence_runtime_targets=pending["artifacts"][
+            "convergence_runtime_targets"
+        ],
+    )
+    receipt_path = TARGETS.runtime_target_derivation_receipt_path(path)
+    receipt_path.write_bytes(canonical_json_bytes(receipt))
+    receipt_path.chmod(0o600)
+    return manifest
+
+
 class ProductionShadowManifestTests(unittest.TestCase):
+    def test_release_verifier_argv_pins_system_python_isolation(self):
+        argv = _release_verifier_arguments(
+            verifier_path=Path("/release/scripts/verifier.py"),
+            phase=PHASES[0],
+            evidence_path=Path("/root/evidence.json"),
+            manifest_path=Path("/root/manifest.json"),
+            approval_path=Path("/root/approval.json"),
+            approval_policy_path=Path("/root/policy.json"),
+            role_validation=("bot_fi=/root/bot.json",),
+            claim_source=("claim=/root/claim.json",),
+            prior_phase_evidence=("prior=/root/prior.json",),
+        )
+        self.assertEqual(
+            argv[:4],
+            [
+                "/usr/bin/python3",
+                "-I",
+                "-B",
+                "/release/scripts/verifier.py",
+            ],
+        )
+        self.assertEqual(argv.count("--role-validation"), 1)
+        self.assertEqual(argv.count("--claim-source"), 1)
+        self.assertEqual(argv.count("--prior-phase-evidence"), 1)
+
+    def test_release_verifier_process_is_isolated_and_bytecode_free(self):
+        real_popen = subprocess.Popen
+        code = (
+            "import os,sys;"
+            "print(f'{int(sys.dont_write_bytecode)}|"
+            "{os.environ.get(\"HOME\")}|"
+            "{os.environ.get(\"PYTHONDONTWRITEBYTECODE\")}')"
+        )
+        with mock.patch.object(
+            MODULE.subprocess,
+            "Popen",
+            wraps=real_popen,
+        ) as popen:
+            completed = _run_bounded_release_verifier(
+                [sys.executable, "-I", "-B", "-c", code],
+                timeout=5,
+            )
+        self.assertEqual(completed.stdout, b"1|/nonexistent|1\n")
+        self.assertEqual(completed.stderr, b"")
+        self.assertTrue(popen.call_args.kwargs["start_new_session"])
+        self.assertEqual(
+            popen.call_args.kwargs["env"]["PYTHONDONTWRITEBYTECODE"],
+            "1",
+        )
+
+    def test_release_verifier_output_is_bounded(self):
+        with self.assertRaisesRegex(CutoverContractError, "oversized"):
+            _run_bounded_release_verifier(
+                [
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    "-c",
+                    "import os;os.write(1,b'x'*4097)",
+                ],
+                timeout=5,
+                max_stream_bytes=4096,
+            )
+
+    def test_release_verifier_rejects_non_finite_or_untyped_limits(self):
+        for timeout in (float("nan"), float("inf"), True):
+            with self.subTest(timeout=timeout), self.assertRaisesRegex(
+                CutoverContractError,
+                "limits are invalid",
+            ):
+                _run_bounded_release_verifier(
+                    [sys.executable, "-I", "-B", "-c", "pass"],
+                    timeout=timeout,
+                )
+        with self.assertRaisesRegex(
+            CutoverContractError,
+            "limits are invalid",
+        ):
+            _run_bounded_release_verifier(
+                [sys.executable, "-I", "-B", "-c", "pass"],
+                max_stream_bytes=True,
+            )
+
+    def test_release_verifier_timeout_escalates_to_process_tree_kill(self):
+        with tempfile.TemporaryDirectory() as directory:
+            child_pid_path = Path(directory) / "timed-out-child-pid"
+            code = (
+                "import os,signal,time\n"
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                "if os.fork() == 0:\n"
+                " os.setsid()\n"
+                " if os.fork() == 0:\n"
+                "  signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                f"  partial={str(child_pid_path)!r}+'.partial'\n"
+                "  with open(partial,'w',encoding='ascii') as stream:\n"
+                "   stream.write(str(os.getpid())+'\\n')\n"
+                "   stream.flush()\n"
+                "   os.fsync(stream.fileno())\n"
+                f"  os.replace(partial,{str(child_pid_path)!r})\n"
+                "  time.sleep(60)\n"
+                "  os._exit(0)\n"
+                " os._exit(0)\n"
+                "deadline=time.monotonic()+10\n"
+                f"while not os.path.exists({str(child_pid_path)!r}):\n"
+                " if time.monotonic() >= deadline:\n"
+                "  raise RuntimeError('detached child did not start')\n"
+                " time.sleep(0.005)\n"
+                "time.sleep(60)\n"
+            )
+            with self.assertRaisesRegex(CutoverContractError, "timed out"):
+                _run_bounded_release_verifier(
+                    [sys.executable, "-I", "-B", "-c", code],
+                    timeout=1.0,
+                )
+            child_pid = int(
+                child_pid_path.read_text(encoding="ascii").strip()
+            )
+            self.assertFalse(
+                Path(f"/proc/{child_pid}").exists(),
+                "timed-out detached verifier child remained in /proc",
+            )
+
+    def test_release_verifier_rejects_and_kills_forked_descendant(self):
+        with tempfile.TemporaryDirectory() as directory:
+            child_pid_path = Path(directory) / "descendant-pid"
+            code = (
+                "import os,signal,time\n"
+                "if os.fork() == 0:\n"
+                " os.setsid()\n"
+                " if os.fork() == 0:\n"
+                "  signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                f"  partial={str(child_pid_path)!r}+'.partial'\n"
+                "  with open(partial,'w',encoding='ascii') as stream:\n"
+                "   stream.write(str(os.getpid())+'\\n')\n"
+                "   stream.flush()\n"
+                "   os.fsync(stream.fileno())\n"
+                f"  os.replace(partial,{str(child_pid_path)!r})\n"
+                "  os.close(1)\n"
+                "  os.close(2)\n"
+                "  time.sleep(60)\n"
+                "  os._exit(0)\n"
+                " os._exit(0)\n"
+                "deadline=time.monotonic()+10\n"
+                f"while not os.path.exists({str(child_pid_path)!r}):\n"
+                " if time.monotonic() >= deadline:\n"
+                "  raise RuntimeError('detached child did not start')\n"
+                " time.sleep(0.005)\n"
+                "print('{}',flush=True)\n"
+            )
+            with self.assertRaisesRegex(
+                CutoverContractError,
+                "descendant",
+            ):
+                _run_bounded_release_verifier(
+                    [sys.executable, "-I", "-B", "-c", code],
+                    timeout=5,
+                )
+            child_pid = int(
+                child_pid_path.read_text(encoding="ascii").strip()
+            )
+            self.assertFalse(
+                Path(f"/proc/{child_pid}").exists(),
+                "detached verifier child or zombie remained in /proc",
+            )
+
+    def test_release_verifier_root_identity_failure_uses_held_pidfd(self):
+        opened: list[tuple[int, int]] = []
+        processes = []
+        real_pidfd_open = os.pidfd_open
+        real_popen = subprocess.Popen
+
+        def capture_pidfd(process_id: int, flags: int = 0) -> int:
+            descriptor = real_pidfd_open(process_id, flags)
+            opened.append((process_id, descriptor))
+            return descriptor
+
+        def capture_popen(*args, **kwargs):
+            process = real_popen(*args, **kwargs)
+            processes.append(process)
+            return process
+
+        with (
+            mock.patch.object(
+                MODULE.subprocess,
+                "Popen",
+                side_effect=capture_popen,
+            ),
+            mock.patch.object(
+                MODULE,
+                "_read_release_verifier_process_identity",
+                side_effect=CutoverContractError(
+                    "forced root identity acquisition failure"
+                ),
+            ),
+            mock.patch.object(
+                MODULE.os,
+                "pidfd_open",
+                side_effect=capture_pidfd,
+            ),
+            mock.patch.object(
+                MODULE,
+                "RELEASE_VERIFIER_TERM_SECONDS",
+                0.1,
+            ),
+            mock.patch.object(
+                MODULE,
+                "RELEASE_VERIFIER_TREE_QUIESCENCE_SECONDS",
+                0.02,
+            ),
+            self.assertRaisesRegex(
+                CutoverContractError,
+                "forced root identity acquisition failure",
+            ),
+        ):
+            _run_bounded_release_verifier(
+                [
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    "-c",
+                    "import time;time.sleep(60)",
+                ],
+                timeout=5,
+            )
+        self.assertEqual(len(opened), 1)
+        self.assertEqual(len(processes), 1)
+        process_id, descriptor = opened[0]
+        self.assertFalse(Path(f"/proc/{process_id}").exists())
+        self.assertTrue(processes[0].stdout.closed)
+        self.assertTrue(processes[0].stderr.closed)
+        with self.assertRaises(OSError):
+            os.fstat(descriptor)
+
+    def test_release_verifier_root_signals_use_persistent_pidfd(self):
+        opened: list[tuple[int, int]] = []
+        signaled: list[int] = []
+        real_pidfd_open = os.pidfd_open
+        real_pidfd_send_signal = signal.pidfd_send_signal
+
+        def capture_pidfd(process_id: int, flags: int = 0) -> int:
+            descriptor = real_pidfd_open(process_id, flags)
+            opened.append((process_id, descriptor))
+            return descriptor
+
+        def capture_signal(
+            descriptor: int,
+            signum: int,
+            siginfo=None,
+            flags: int = 0,
+        ) -> None:
+            signaled.append(descriptor)
+            real_pidfd_send_signal(descriptor, signum, siginfo, flags)
+
+        with (
+            mock.patch.object(
+                MODULE.os,
+                "pidfd_open",
+                side_effect=capture_pidfd,
+            ),
+            mock.patch.object(
+                MODULE.signal,
+                "pidfd_send_signal",
+                side_effect=capture_signal,
+            ),
+            mock.patch.object(
+                MODULE,
+                "RELEASE_VERIFIER_TERM_SECONDS",
+                0.1,
+            ),
+            mock.patch.object(
+                MODULE,
+                "RELEASE_VERIFIER_TREE_QUIESCENCE_SECONDS",
+                0.02,
+            ),
+            self.assertRaisesRegex(CutoverContractError, "timed out"),
+        ):
+            _run_bounded_release_verifier(
+                [
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    "-c",
+                    "import time;time.sleep(60)",
+                ],
+                timeout=0.05,
+            )
+        self.assertEqual(len(opened), 1)
+        self.assertTrue(signaled)
+        self.assertEqual(set(signaled), {opened[0][1]})
+
+    def test_release_verifier_refuses_reused_root_identity(self):
+        root_identity = MODULE.ReleaseVerifierProcessIdentity(
+            pid=4242,
+            parent_pid=os.getpid(),
+            process_group=4242,
+            session_id=4242,
+            start_time=100,
+            state="S",
+        )
+        reused_root = MODULE.ReleaseVerifierProcessIdentity(
+            pid=4242,
+            parent_pid=os.getpid(),
+            process_group=4242,
+            session_id=4242,
+            start_time=101,
+            state="S",
+        )
+        unrelated_child = MODULE.ReleaseVerifierProcessIdentity(
+            pid=4243,
+            parent_pid=4242,
+            process_group=4242,
+            session_id=4242,
+            start_time=200,
+            state="S",
+        )
+        tracked = {root_identity.key: root_identity}
+        with mock.patch.object(
+            MODULE,
+            "_release_verifier_process_snapshot",
+            return_value={
+                reused_root.pid: reused_root,
+                unrelated_child.pid: unrelated_child,
+            },
+        ):
+            self.assertEqual(
+                MODULE._owned_release_verifier_processes(
+                    root_identity,
+                    baseline_children=frozenset(),
+                    tracked=tracked,
+                ),
+                (),
+            )
+
+    def test_release_verifier_tree_member_bound_fails_closed(self):
+        root_identity = MODULE.ReleaseVerifierProcessIdentity(
+            pid=4242,
+            parent_pid=os.getpid(),
+            process_group=4242,
+            session_id=4242,
+            start_time=100,
+            state="S",
+        )
+        child = MODULE.ReleaseVerifierProcessIdentity(
+            pid=4243,
+            parent_pid=4242,
+            process_group=4242,
+            session_id=4242,
+            start_time=200,
+            state="S",
+        )
+        with (
+            mock.patch.object(
+                MODULE,
+                "_release_verifier_process_snapshot",
+                return_value={
+                    root_identity.pid: root_identity,
+                    child.pid: child,
+                },
+            ),
+            mock.patch.object(
+                MODULE,
+                "MAX_RELEASE_VERIFIER_PROCESS_TREE_MEMBERS",
+                1,
+            ),
+            self.assertRaisesRegex(
+                CutoverContractError,
+                "exceeds its member bound",
+            ),
+        ):
+            MODULE._owned_release_verifier_processes(
+                root_identity,
+                baseline_children=frozenset(),
+                tracked={root_identity.key: root_identity},
+            )
+
+    def test_release_verifier_snapshot_member_bound_fails_closed(self):
+        with (
+            mock.patch.object(
+                MODULE,
+                "MAX_RELEASE_VERIFIER_PROCESS_SNAPSHOT_MEMBERS",
+                0,
+            ),
+            self.assertRaisesRegex(
+                CutoverContractError,
+                "process inventory exceeds its member bound",
+            ),
+        ):
+            MODULE._release_verifier_process_snapshot()
+
+    def test_release_verifier_selector_close_failure_fails_closed(self):
+        real_selector_factory = MODULE.selectors.DefaultSelector
+        opened: list[int] = []
+        real_pidfd_open = os.pidfd_open
+
+        class FailingCloseSelector:
+            def __init__(self):
+                self.delegate = real_selector_factory()
+
+            def __getattr__(self, name):
+                return getattr(self.delegate, name)
+
+            def close(self):
+                self.delegate.close()
+                raise RuntimeError("forced selector close failure")
+
+        def capture_pidfd(process_id: int, flags: int = 0) -> int:
+            descriptor = real_pidfd_open(process_id, flags)
+            opened.append(descriptor)
+            return descriptor
+
+        with (
+            mock.patch.object(
+                MODULE.selectors,
+                "DefaultSelector",
+                FailingCloseSelector,
+            ),
+            mock.patch.object(
+                MODULE.os,
+                "pidfd_open",
+                side_effect=capture_pidfd,
+            ),
+            self.assertRaisesRegex(
+                CutoverContractError,
+                "selector cleanup failed",
+            ),
+        ):
+            _run_bounded_release_verifier(
+                [sys.executable, "-I", "-B", "-c", "print('{}')"],
+                timeout=5,
+            )
+        self.assertEqual(len(opened), 1)
+        with self.assertRaises(OSError):
+            os.fstat(opened[0])
+
+    def test_release_verifier_stream_and_pidfd_close_all_attempted(self):
+        events: list[str] = []
+        processes = []
+        root_descriptors: list[int] = []
+        real_popen = subprocess.Popen
+        real_pidfd_open = os.pidfd_open
+        real_close = os.close
+
+        class FailingCloseStream:
+            def __init__(self, delegate, label: str):
+                self.delegate = delegate
+                self.label = label
+                self.failed = False
+
+            def __getattr__(self, name):
+                return getattr(self.delegate, name)
+
+            def close(self):
+                self.delegate.close()
+                if not self.failed:
+                    self.failed = True
+                    events.append(self.label)
+                    raise RuntimeError(f"forced {self.label} close failure")
+
+        def capture_popen(*args, **kwargs):
+            process = real_popen(*args, **kwargs)
+            process.stdout = FailingCloseStream(
+                process.stdout,
+                "stdout",
+            )
+            process.stderr = FailingCloseStream(
+                process.stderr,
+                "stderr",
+            )
+            processes.append(process)
+            return process
+
+        def capture_pidfd(process_id: int, flags: int = 0) -> int:
+            descriptor = real_pidfd_open(process_id, flags)
+            root_descriptors.append(descriptor)
+            return descriptor
+
+        def fail_root_close(descriptor: int) -> None:
+            if descriptor in root_descriptors:
+                events.append("pidfd")
+                real_close(descriptor)
+                raise RuntimeError("forced pidfd close failure")
+            real_close(descriptor)
+
+        with (
+            mock.patch.object(
+                MODULE.subprocess,
+                "Popen",
+                side_effect=capture_popen,
+            ),
+            mock.patch.object(
+                MODULE.os,
+                "pidfd_open",
+                side_effect=capture_pidfd,
+            ),
+            mock.patch.object(
+                MODULE.os,
+                "close",
+                side_effect=fail_root_close,
+            ),
+            self.assertRaisesRegex(
+                CutoverContractError,
+                "stdout stream cleanup failed",
+            ),
+        ):
+            _run_bounded_release_verifier(
+                [sys.executable, "-I", "-B", "-c", "print('{}')"],
+                timeout=5,
+            )
+        self.assertEqual(events, ["stdout", "stderr", "pidfd"])
+        self.assertEqual(len(processes), 1)
+        self.assertTrue(processes[0].stdout.closed)
+        self.assertTrue(processes[0].stderr.closed)
+        self.assertEqual(len(root_descriptors), 1)
+        with self.assertRaises(OSError):
+            os.fstat(root_descriptors[0])
+
+    def test_release_verifier_cleanup_failures_do_not_mask_primary(self):
+        real_selector_factory = MODULE.selectors.DefaultSelector
+
+        class FailingCloseSelector:
+            def __init__(self):
+                self.delegate = real_selector_factory()
+
+            def __getattr__(self, name):
+                return getattr(self.delegate, name)
+
+            def close(self):
+                self.delegate.close()
+                raise RuntimeError("forced selector close failure")
+
+        with (
+            mock.patch.object(
+                MODULE.selectors,
+                "DefaultSelector",
+                FailingCloseSelector,
+            ),
+            self.assertRaisesRegex(
+                CutoverContractError,
+                "oversized",
+            ) as raised,
+        ):
+            _run_bounded_release_verifier(
+                [
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    "-c",
+                    "import os;os.write(1,b'x'*4097)",
+                ],
+                timeout=5,
+                max_stream_bytes=4096,
+            )
+        self.assertTrue(
+            any(
+                "selector" in note
+                for note in getattr(raised.exception, "__notes__", ())
+            )
+        )
+
+    def test_release_verifier_tree_cleanup_is_baseexception_safe(self):
+        class ForcedCleanupInterrupt(BaseException):
+            pass
+
+        real_terminate = MODULE._terminate_release_verifier_tree
+        attempts = 0
+        opened: list[int] = []
+        real_pidfd_open = os.pidfd_open
+
+        def interrupt_once(*args, **kwargs):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise ForcedCleanupInterrupt("forced cleanup interruption")
+            return real_terminate(*args, **kwargs)
+
+        def capture_pidfd(process_id: int, flags: int = 0) -> int:
+            descriptor = real_pidfd_open(process_id, flags)
+            opened.append(descriptor)
+            return descriptor
+
+        with (
+            mock.patch.object(
+                MODULE,
+                "_terminate_release_verifier_tree",
+                side_effect=interrupt_once,
+            ),
+            mock.patch.object(
+                MODULE.os,
+                "pidfd_open",
+                side_effect=capture_pidfd,
+            ),
+            self.assertRaises(ForcedCleanupInterrupt),
+        ):
+            _run_bounded_release_verifier(
+                [sys.executable, "-I", "-B", "-c", "print('{}')"],
+                timeout=5,
+            )
+        self.assertGreaterEqual(attempts, 2)
+        self.assertEqual(len(opened), 1)
+        with self.assertRaises(OSError):
+            os.fstat(opened[0])
+
     def test_exact_manifest_and_plan_preserve_audited_order(self):
         manifest = validate_manifest(manifest_payload())
         plan = render_plan(manifest, manifest_sha256="4" * 64)
@@ -256,6 +922,7 @@ class ProductionShadowManifestTests(unittest.TestCase):
             postcommit[0]["prerequisite_phase"],
             FORWARD_ONLY_COMMIT_GATE,
         )
+
         self.assertTrue(
             all(
                 command["business_write_allowed"]
@@ -347,6 +1014,52 @@ class ProductionShadowManifestTests(unittest.TestCase):
             manifest["artifacts"]["nginx_shadow_writable_generation_sha256"],
         )
 
+    def test_v3_manifest_requires_fresh_v4_template_and_approval(self):
+        legacy = manifest_payload()
+        legacy["schema"] = TARGETS.PREVIOUS_V3_CUTOVER_MANIFEST_SCHEMA
+        with self.assertRaisesRegex(
+            CutoverContractError,
+            "fresh v4 template.*fresh approval",
+        ):
+            validate_manifest(legacy)
+
+    def test_remote_receiver_policy_anchors_are_exact_and_non_aliased(self):
+        missing_role = manifest_payload()
+        missing_role["artifacts"]["remote_receiver_signing_policies"].pop(
+            "witness"
+        )
+        with self.assertRaisesRegex(
+            CutoverContractError,
+            "signing-policy roles are not exact",
+        ):
+            validate_manifest(missing_role)
+
+        extra_field = manifest_payload()
+        extra_field["artifacts"]["remote_receiver_signing_policies"][
+            "webapp_ir"
+        ]["unexpected"] = "x"
+        with self.assertRaisesRegex(CutoverContractError, "fields are not exact"):
+            validate_manifest(extra_field)
+
+        key_drift = manifest_payload()
+        key_drift["artifacts"]["remote_receiver_signing_policies"][
+            "webapp_ir"
+        ]["key_id"] = "invalid key id"
+        with self.assertRaisesRegex(CutoverContractError, "key id is invalid"):
+            validate_manifest(key_drift)
+
+        source_alias = manifest_payload()
+        source_alias["artifacts"]["remote_receiver_signing_policies"][
+            "witness"
+        ]["worker_sha256"] = source_alias["artifacts"][
+            "remote_receiver_signing_policies"
+        ]["witness"]["receiver_sha256"]
+        with self.assertRaisesRegex(
+            CutoverContractError,
+            "source digests must differ",
+        ):
+            validate_manifest(source_alias)
+
     def test_unknown_root_and_nested_fields_fail_closed(self):
         root_extra = manifest_payload()
         root_extra["unexpected"] = True
@@ -413,6 +1126,23 @@ class ProductionShadowManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(CutoverContractError, "three Docker roles"):
             validate_manifest(witness_runtime)
 
+        missing_runtime_targets = manifest_payload()
+        missing_runtime_targets["artifacts"].pop(
+            "convergence_runtime_targets"
+        )
+        with self.assertRaisesRegex(CutoverContractError, "fields are not exact"):
+            validate_manifest(missing_runtime_targets)
+
+        witness_runtime_target = manifest_payload()
+        witness_runtime_target["artifacts"][
+            "convergence_runtime_targets"
+        ]["roles"].append("witness")
+        with self.assertRaisesRegex(
+            CutoverContractError,
+            "convergence runtime target descriptor is invalid",
+        ):
+            validate_manifest(witness_runtime_target)
+
     def test_topology_policy_and_paths_are_pinned(self):
         wrong_host = manifest_payload()
         wrong_host["topology"]["webapp_ir"]["host"] = "127.0.0.1"
@@ -453,8 +1183,22 @@ class ProductionShadowManifestTests(unittest.TestCase):
         )
         self.assertTrue(all(isinstance(command["argv"], list) for command in all_commands))
         self.assertTrue(all(command["render_only"] for command in all_commands))
-        for command in all_commands:
+
+        def agent_argv(command: dict) -> list[str]:
             argv = command["argv"]
+            if argv[0] != "/usr/bin/ssh":
+                return argv
+            self.assertEqual(
+                argv[argv.index("-F") : argv.index("-F") + 2],
+                ["-F", "/dev/null"],
+            )
+            self.assertEqual(len(argv), argv.index("-p") + 4)
+            remote = shlex.split(argv[-1])
+            self.assertEqual(shlex.join(remote), argv[-1])
+            return remote
+
+        for command in all_commands:
+            argv = agent_argv(command)
             remote_agent_path = str(
                 _remote_agent_path(OPERATION_ID, RELEASE_SHA)
             )
@@ -463,12 +1207,6 @@ class ProductionShadowManifestTests(unittest.TestCase):
                 argv[agent_index - 2 : agent_index],
                 ["/usr/bin/python3", "-I"],
             )
-            if argv[0] == "/usr/bin/ssh":
-                remote = argv[agent_index - 2 :]
-                self.assertEqual(
-                    shlex.split(" ".join(remote)),
-                    remote,
-                )
             role = argv[argv.index("--role") + 1]
             runtime_ids = json.loads(
                 base64.urlsafe_b64decode(
@@ -537,12 +1275,13 @@ class ProductionShadowManifestTests(unittest.TestCase):
         self.assertIn("sealed-rollback-evidence-only", rendered)
         self.assertIn("pristine-empty-no-restore", rendered)
         for command in all_commands:
+            argv = agent_argv(command)
             if command["role"] in {"webapp_ir", "witness"}:
                 self.assertEqual(
                     command["payload_transfer"],
                     "object-storage-private-versioned-age",
                 )
-                self.assertIn("object-storage-private-versioned-age", command["argv"])
+                self.assertIn("object-storage-private-versioned-age", argv)
 
         preparation = [
             command
@@ -551,7 +1290,7 @@ class ProductionShadowManifestTests(unittest.TestCase):
         ]
         self.assertEqual(
             {
-                command["argv"][command["argv"].index("--operation") + 1]
+                agent_argv(command)[agent_argv(command).index("--operation") + 1]
                 for command in preparation
             },
             {
@@ -562,7 +1301,7 @@ class ProductionShadowManifestTests(unittest.TestCase):
                 "readonly-acceptance",
             },
         )
-        self.assertTrue(all("--execute" in command["argv"] for command in preparation))
+        self.assertTrue(all("--execute" in agent_argv(command) for command in preparation))
         self.assertTrue(all(command["executor_available"] for command in preparation))
         self.assertTrue(all(not command["business_write_allowed"] for command in preparation))
 
@@ -717,8 +1456,7 @@ class ProductionShadowManifestTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             path = root / "manifest.json"
-            path.write_text(json.dumps(manifest_payload()), encoding="utf-8")
-            path.chmod(0o600)
+            write_controller_manifest(path)
             loaded, digest = read_root_only_manifest(path, owner_uid=os.geteuid())
             self.assertEqual(loaded["campaign_id"], CAMPAIGN_ID)
             self.assertEqual(len(digest), 64)
@@ -742,12 +1480,36 @@ class ProductionShadowManifestTests(unittest.TestCase):
             with self.assertRaisesRegex(CutoverContractError, "duplicate manifest field"):
                 read_root_only_manifest(duplicate, owner_uid=os.geteuid())
 
+    def test_root_only_manifest_reader_requires_exact_derivation_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "manifest.json"
+            write_controller_manifest(path)
+            receipt_path = TARGETS.runtime_target_derivation_receipt_path(path)
+
+            receipt_path.unlink()
+            with self.assertRaisesRegex(
+                CutoverContractError,
+                "derivation receipt is unavailable or unsafe",
+            ):
+                read_root_only_manifest(path, owner_uid=os.geteuid())
+
+            write_controller_manifest(path)
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            receipt["template_sha256"] = "f" * 64
+            receipt_path.write_bytes(canonical_json_bytes(receipt))
+            receipt_path.chmod(0o600)
+            with self.assertRaisesRegex(
+                CutoverContractError,
+                "does not bind the final manifest",
+            ):
+                read_root_only_manifest(path, owner_uid=os.geteuid())
+
     @unittest.skipUnless(os.geteuid() == 0, "production CLI is intentionally root-only")
     def test_cli_defaults_to_plan_and_non_apply_transition_never_writes_journal(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "manifest.json"
-            path.write_text(json.dumps(manifest_payload()), encoding="utf-8")
-            path.chmod(0o600)
+            write_controller_manifest(path)
             output = io.StringIO()
             with (
                 mock.patch.object(
@@ -824,8 +1586,7 @@ class ProductionShadowManifestTests(unittest.TestCase):
     def test_cli_complete_phase_runs_release_verifier_and_rejects_raw_digest(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "manifest.json"
-            path.write_text(json.dumps(manifest_payload()), encoding="utf-8")
-            path.chmod(0o600)
+            write_controller_manifest(path)
             token = verified_completion(PHASES[0], "7" * 64)
             receipt = b'{"status":"verified"}\n'
             journal = mock.Mock(unsafe=True)
@@ -918,8 +1679,7 @@ class ProductionShadowManifestTests(unittest.TestCase):
     def test_applied_journal_creation_verifies_authorization_before_mutation(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "manifest.json"
-            path.write_text(json.dumps(manifest_payload()), encoding="utf-8")
-            path.chmod(0o600)
+            write_controller_manifest(path)
             journal = mock.Mock(unsafe=True)
             journal.create.return_value = {
                 "status": "active",

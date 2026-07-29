@@ -10,21 +10,28 @@ controller still owns its lock.
 from __future__ import annotations
 
 import argparse
+import ctypes
 from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+import errno
 import fcntl
 import hashlib
+import importlib.machinery
 import ipaddress
 import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import selectors
+import signal
 import stat
 import subprocess
 import sys
 import tarfile
+import threading
 import time
+import types
 from typing import Any, BinaryIO, Callable, Mapping, Protocol, Sequence
 from uuid import UUID
 
@@ -35,6 +42,33 @@ sys.dont_write_bytecode = True
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+# Bind the namespace before release imports so a preloaded package cannot win.
+_SCRIPTS_ROOT = (REPO_ROOT / "scripts").resolve()
+_scripts_package = sys.modules.get("scripts")
+if _scripts_package is None:
+    _scripts_package = types.ModuleType("scripts")
+    _scripts_package.__file__ = None
+    _scripts_package.__package__ = "scripts"
+    _scripts_package.__path__ = [str(_SCRIPTS_ROOT)]
+    _scripts_package.__spec__ = importlib.machinery.ModuleSpec(
+        "scripts",
+        loader=None,
+        is_package=True,
+    )
+    _scripts_package.__spec__.submodule_search_locations = [
+        str(_SCRIPTS_ROOT)
+    ]
+    sys.modules["scripts"] = _scripts_package
+else:
+    try:
+        _loaded_script_paths = {
+            Path(item).resolve(strict=True)
+            for item in getattr(_scripts_package, "__path__", ())
+        }
+    except (OSError, TypeError) as exc:
+        raise RuntimeError("loaded scripts package identity is invalid") from exc
+    if _loaded_script_paths != {_SCRIPTS_ROOT}:
+        raise RuntimeError("loaded scripts package is not release-owned")
 
 from scripts import (  # noqa: E402
     build_production_shadow_frozen_final_restore_set as RESTORE_SET,
@@ -60,7 +94,6 @@ from scripts.wa_ir_production_operation import (  # noqa: E402
     _fingerprint_from_streams,
     _load_migration_graph,
     _migration_ancestors,
-    _run_streaming_sha256,
 )
 
 
@@ -91,11 +124,23 @@ SECRET_ROOT_PREFIX = Path(
 )
 RUNNING_WORKER_PATH = Path(__file__).resolve()
 DOCKER = "/usr/bin/docker"
+DOCKER_SOCKET_PATH = Path("/run/docker.sock")
+DOCKER_HOST_ARGUMENT = "--host=unix:///run/docker.sock"
+DOCKER_BASE = (DOCKER, DOCKER_HOST_ARGUMENT)
+DOCKER_API_VERSION = "1.52"
 GIT = "/usr/bin/git"
 MAX_JSON_BYTES = 4 * 1024 * 1024
 MAX_ARTIFACT_BYTES = 64 * 1024 * 1024 * 1024
 MAX_TAR_MEMBERS = 250_000
 MAX_OUTPUT_BYTES = 16 * 1024 * 1024
+MAX_ERROR_BYTES = 2 * 1024 * 1024
+PROCESS_TERM_SECONDS = 2.0
+PROCESS_POLL_SECONDS = 0.01
+PROCESS_TREE_QUIESCENCE_SECONDS = 0.05
+MAX_PROCESS_SNAPSHOT_MEMBERS = 65536
+MAX_PROCESS_TREE_MEMBERS = 8192
+PR_SET_CHILD_SUBREAPER = 36
+_BOUNDED_PROCESS_LOCK = threading.Lock()
 POSTGRES_RUNTIME_UID = 70
 POSTGRES_RUNTIME_GID = 70
 ZERO_SHA256 = "0" * 64
@@ -138,10 +183,11 @@ MUTATING_ACTIONS = frozenset(
 )
 SAFE_ENV = {
     "PATH": "/usr/bin:/bin",
-    "HOME": "/root",
+    "HOME": "/nonexistent",
     "LANG": "C.UTF-8",
     "LC_ALL": "C.UTF-8",
-    "DOCKER_CONFIG": "/root/.docker",
+    "DOCKER_CONFIG": "/nonexistent",
+    "DOCKER_API_VERSION": DOCKER_API_VERSION,
 }
 SAFE_GIT_ENV = {
     "PATH": "/usr/bin:/bin",
@@ -153,7 +199,155 @@ SAFE_GIT_ENV = {
     "GIT_CONFIG_SYSTEM": "/dev/null",
     "GIT_TERMINAL_PROMPT": "0",
     "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_NO_REPLACE_OBJECTS": "1",
 }
+GIT_CONFIG_ARGUMENTS = (
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "core.fileMode=true",
+)
+RESERVED_MATERIAL_ENVIRONMENT = frozenset(
+    {
+        "DOCKER_HOST",
+        "DOCKER_CONTEXT",
+        "DOCKER_CONFIG",
+        "DOCKER_API_VERSION",
+    }
+)
+
+HOST_CONFIG_FIELDS = frozenset(
+    {
+        "CpuShares",
+        "Memory",
+        "CgroupParent",
+        "BlkioWeight",
+        "BlkioWeightDevice",
+        "BlkioDeviceReadBps",
+        "BlkioDeviceWriteBps",
+        "BlkioDeviceReadIOps",
+        "BlkioDeviceWriteIOps",
+        "CpuPeriod",
+        "CpuQuota",
+        "CpuRealtimePeriod",
+        "CpuRealtimeRuntime",
+        "CpusetCpus",
+        "CpusetMems",
+        "Devices",
+        "DeviceCgroupRules",
+        "DeviceRequests",
+        "MemoryReservation",
+        "MemorySwap",
+        "MemorySwappiness",
+        "NanoCpus",
+        "OomKillDisable",
+        "Init",
+        "PidsLimit",
+        "Ulimits",
+        "CpuCount",
+        "CpuPercent",
+        "IOMaximumIOps",
+        "IOMaximumBandwidth",
+        "Binds",
+        "ContainerIDFile",
+        "LogConfig",
+        "NetworkMode",
+        "PortBindings",
+        "RestartPolicy",
+        "AutoRemove",
+        "VolumeDriver",
+        "VolumesFrom",
+        "Mounts",
+        "ConsoleSize",
+        "Annotations",
+        "CapAdd",
+        "CapDrop",
+        "CgroupnsMode",
+        "Dns",
+        "DnsOptions",
+        "DnsSearch",
+        "ExtraHosts",
+        "GroupAdd",
+        "IpcMode",
+        "Cgroup",
+        "Links",
+        "OomScoreAdj",
+        "PidMode",
+        "Privileged",
+        "PublishAllPorts",
+        "ReadonlyRootfs",
+        "SecurityOpt",
+        "StorageOpt",
+        "Tmpfs",
+        "UTSMode",
+        "UsernsMode",
+        "ShmSize",
+        "Sysctls",
+        "Runtime",
+        "Isolation",
+        "MaskedPaths",
+        "ReadonlyPaths",
+    }
+)
+OPTIONAL_HOST_CONFIG_FIELDS = frozenset(
+    {"Annotations", "Mounts", "StorageOpt", "Sysctls", "Tmpfs", "Init"}
+)
+CONTAINER_CONFIG_FIELDS = frozenset(
+    {
+        "Hostname",
+        "Domainname",
+        "User",
+        "AttachStdin",
+        "AttachStdout",
+        "AttachStderr",
+        "ExposedPorts",
+        "Tty",
+        "OpenStdin",
+        "StdinOnce",
+        "Env",
+        "Cmd",
+        "Healthcheck",
+        "ArgsEscaped",
+        "Image",
+        "Volumes",
+        "WorkingDir",
+        "Entrypoint",
+        "NetworkDisabled",
+        "OnBuild",
+        "Labels",
+        "StopSignal",
+        "StopTimeout",
+        "Shell",
+    }
+)
+BASE_MASKED_PATHS = (
+    "/proc/asound",
+    "/proc/acpi",
+    "/proc/interrupts",
+    "/proc/kcore",
+    "/proc/keys",
+    "/proc/latency_stats",
+    "/proc/timer_list",
+    "/proc/timer_stats",
+    "/proc/sched_debug",
+    "/proc/scsi",
+    "/sys/firmware",
+    "/sys/devices/virtual/powercap",
+)
+READONLY_PATHS = (
+    "/proc/bus",
+    "/proc/fs",
+    "/proc/irq",
+    "/proc/sys",
+    "/proc/sysrq-trigger",
+)
+THERMAL_THROTTLE_ROOT = Path("/sys/devices/system/cpu")
+THERMAL_THROTTLE_RE = re.compile(
+    r"^/sys/devices/system/cpu/cpu(0|[1-9][0-9]*)/thermal_throttle$"
+)
+MAX_SYSFS_CPU_ENTRIES = 16_384
 
 ROLE_MANIFEST_FIELDS = frozenset(
     {
@@ -482,15 +676,23 @@ class DatabaseState:
 class DatabaseRuntimeContract:
     service: str
     container_name: str
+    image_id: str
     config_hash: str
     command: tuple[str, ...] | None
     entrypoint: tuple[str, ...] | None
     user: str
     working_dir: str
     stop_signal: str
+    stop_timeout: int
     environment: Mapping[str, str]
     healthcheck: Mapping[str, Any] | None
     labels: Mapping[str, str]
+    exposed_ports: Mapping[str, Mapping[str, Any]]
+    volumes: Mapping[str, Mapping[str, Any]]
+    on_build: tuple[str, ...] | None
+    shell: tuple[str, ...] | None
+    compose_version: str
+    compose_dependencies: str
     cgroup_parent: str
     restart_policy: str
     nano_cpus: int
@@ -534,8 +736,796 @@ LiveAuthorityVerifier = Callable[
 ]
 
 
+@dataclass(frozen=True)
+class DockerSocketIdentity:
+    device: int
+    inode: int
+    uid: int
+    gid: int
+    mode: int
+
+
+@dataclass(frozen=True)
+class BoundedCommandResult:
+    returncode: int
+    stdout: bytes
+    stderr: bytes
+
+
+class BoundedCommandError(RuntimeError):
+    """Raised when a subprocess exceeds its bounded execution contract."""
+
+
+@dataclass(frozen=True)
+class ProcessIdentity:
+    pid: int
+    parent_pid: int
+    start_time: int
+    state: str
+
+    @property
+    def key(self) -> tuple[int, int]:
+        return self.pid, self.start_time
+
+
+def _process_identity(pid: int) -> ProcessIdentity | None:
+    try:
+        payload = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+        fields = payload[payload.rindex(") ") + 2 :].split()
+        if len(fields) < 20:
+            return None
+        return ProcessIdentity(
+            pid=pid,
+            parent_pid=int(fields[1], 10),
+            start_time=int(fields[19], 10),
+            state=fields[0],
+        )
+    except (OSError, UnicodeError, ValueError):
+        return None
+
+
+def _process_snapshot() -> dict[int, ProcessIdentity]:
+    observed: dict[int, ProcessIdentity] = {}
+    scanned = 0
+    try:
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdecimal():
+                continue
+            scanned += 1
+            if scanned > MAX_PROCESS_SNAPSHOT_MEMBERS:
+                raise BoundedCommandError(
+                    "subprocess closure exceeds its process bound"
+                )
+            identity = _process_identity(int(entry.name, 10))
+            if identity is not None:
+                observed[identity.pid] = identity
+    except BoundedCommandError:
+        raise
+    except OSError as exc:
+        raise BoundedCommandError(
+            "subprocess ownership inventory is unavailable"
+        ) from exc
+    return observed
+
+
+def _enable_child_subreaper() -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise BoundedCommandError(
+            f"child subreaper setup failed with errno {error}"
+        )
+
+
+def _direct_child_baseline() -> frozenset[tuple[int, int]]:
+    owner = os.getpid()
+    return frozenset(
+        identity.key
+        for identity in _process_snapshot().values()
+        if identity.parent_pid == owner
+    )
+
+
+def _owned_processes(
+    root_identity: ProcessIdentity,
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+    tracked: set[ProcessIdentity] | None = None,
+    include_zombies: bool = False,
+) -> tuple[ProcessIdentity, ...]:
+    snapshot = _process_snapshot()
+    observed_root = snapshot.get(root_identity.pid)
+    owned_ids: set[int] = set()
+    if (
+        observed_root is not None
+        and observed_root.start_time == root_identity.start_time
+    ):
+        owned_ids.add(root_identity.pid)
+    if tracked is not None:
+        for identity in tracked:
+            current = snapshot.get(identity.pid)
+            if (
+                current is not None
+                and current.start_time == identity.start_time
+            ):
+                owned_ids.add(identity.pid)
+    owner = os.getpid()
+    for identity in snapshot.values():
+        if (
+            identity.pid != root_identity.pid
+            and identity.parent_pid == owner
+            and identity.key not in baseline_children
+        ):
+            owned_ids.add(identity.pid)
+    changed = True
+    while changed:
+        changed = False
+        for identity in snapshot.values():
+            if (
+                identity.pid not in owned_ids
+                and identity.parent_pid in owned_ids
+            ):
+                owned_ids.add(identity.pid)
+                changed = True
+    owned = tuple(
+        identity
+        for pid, identity in snapshot.items()
+        if pid in owned_ids
+    )
+    if tracked is not None:
+        discovered = set(owned)
+        if len(tracked | discovered) > MAX_PROCESS_TREE_MEMBERS:
+            raise BoundedCommandError(
+                "subprocess tree exceeds its process bound"
+            )
+        tracked.update(discovered)
+    return tuple(
+        identity
+        for identity in owned
+        if include_zombies or identity.state != "Z"
+    )
+
+
+def _reap_owned_zombies(
+    root_identity: ProcessIdentity,
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+    tracked: set[ProcessIdentity],
+) -> None:
+    owner = os.getpid()
+    while True:
+        reaped = False
+        for identity in _owned_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+            include_zombies=True,
+        ):
+            if (
+                identity.key == root_identity.key
+                or identity.parent_pid != owner
+                or identity.state != "Z"
+            ):
+                continue
+            try:
+                waited, _status = os.waitpid(identity.pid, os.WNOHANG)
+            except (ChildProcessError, ProcessLookupError):
+                continue
+            except OSError as exc:
+                raise BoundedCommandError(
+                    "owned subprocess zombie could not be reaped"
+                ) from exc
+            if waited not in {0, identity.pid}:
+                raise BoundedCommandError(
+                    "owned subprocess reap returned an unexpected PID"
+                )
+            reaped |= waited == identity.pid
+        if not reaped:
+            return
+
+
+def _signal_process_identity(
+    identity: ProcessIdentity,
+    signum: int,
+) -> None:
+    current = _process_identity(identity.pid)
+    if current is None or current.start_time != identity.start_time:
+        return
+    try:
+        descriptor = os.pidfd_open(identity.pid, 0)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise BoundedCommandError(
+            "identity-bound subprocess handle cannot be opened"
+        ) from exc
+    try:
+        refreshed = _process_identity(identity.pid)
+        if refreshed is None or refreshed.start_time != identity.start_time:
+            return
+        _signal_process_handle(descriptor, signum)
+    except ProcessLookupError:
+        return
+    finally:
+        original_error = sys.exception()
+        try:
+            os.close(descriptor)
+        except BaseException as close_error:
+            if original_error is not None:
+                raise original_error from close_error
+            raise
+
+
+def _signal_process_handle(descriptor: int, signum: int) -> None:
+    try:
+        signal.pidfd_send_signal(descriptor, signum)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise BoundedCommandError(
+            "identity-bound subprocess signal failed"
+        ) from exc
+
+
+def _signal_owned_process(
+    identity: ProcessIdentity,
+    signum: int,
+    *,
+    root_identity: ProcessIdentity,
+    root_descriptor: int | None,
+) -> None:
+    if identity.key == root_identity.key and root_descriptor is not None:
+        _signal_process_handle(root_descriptor, signum)
+        return
+    _signal_process_identity(identity, signum)
+
+
+def _terminate_process_tree(
+    process: subprocess.Popen[bytes],
+    *,
+    root_identity: ProcessIdentity,
+    root_descriptor: int | None,
+    baseline_children: frozenset[tuple[int, int]],
+    tracked: set[ProcessIdentity],
+) -> None:
+    for identity in reversed(
+        _owned_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+    ):
+        _signal_owned_process(
+            identity,
+            signal.SIGTERM,
+            root_identity=root_identity,
+            root_descriptor=root_descriptor,
+        )
+    deadline = time.monotonic() + PROCESS_TERM_SECONDS
+    while time.monotonic() < deadline and _owned_processes(
+        root_identity,
+        baseline_children=baseline_children,
+        tracked=tracked,
+    ):
+        process.poll()
+        _reap_owned_zombies(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+        time.sleep(
+            min(
+                PROCESS_POLL_SECONDS,
+                max(0.0, deadline - time.monotonic()),
+            )
+        )
+    for identity in reversed(
+        _owned_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+    ):
+        _signal_owned_process(
+            identity,
+            signal.SIGKILL,
+            root_identity=root_identity,
+            root_descriptor=root_descriptor,
+        )
+    try:
+        process.wait(timeout=PROCESS_TERM_SECONDS)
+    except subprocess.TimeoutExpired:
+        _signal_owned_process(
+            root_identity,
+            signal.SIGKILL,
+            root_identity=root_identity,
+            root_descriptor=root_descriptor,
+        )
+        try:
+            process.wait(timeout=PROCESS_TERM_SECONDS)
+        except subprocess.TimeoutExpired as exc:
+            raise BoundedCommandError(
+                "subprocess root survived identity-bound cleanup"
+            ) from exc
+
+    absence_deadline = (
+        time.monotonic()
+        + PROCESS_TERM_SECONDS
+        + PROCESS_TREE_QUIESCENCE_SECONDS
+    )
+    stable_since: float | None = None
+    while time.monotonic() < absence_deadline:
+        _reap_owned_zombies(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+        owned = _owned_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+            include_zombies=True,
+        )
+        if owned:
+            stable_since = None
+            for identity in reversed(owned):
+                if identity.state != "Z":
+                    _signal_owned_process(
+                        identity,
+                        signal.SIGKILL,
+                        root_identity=root_identity,
+                        root_descriptor=root_descriptor,
+                    )
+        elif stable_since is None:
+            stable_since = time.monotonic()
+        elif (
+            time.monotonic() - stable_since
+            >= PROCESS_TREE_QUIESCENCE_SECONDS
+        ):
+            return
+        time.sleep(
+            min(
+                PROCESS_POLL_SECONDS,
+                max(0.0, absence_deadline - time.monotonic()),
+            )
+        )
+    _reap_owned_zombies(
+        root_identity,
+        baseline_children=baseline_children,
+        tracked=tracked,
+    )
+    if _owned_processes(
+        root_identity,
+        baseline_children=baseline_children,
+        tracked=tracked,
+        include_zombies=True,
+    ):
+        raise BoundedCommandError(
+            "subprocess tree survived forced cleanup"
+        )
+
+
+def _docker_socket_identity() -> DockerSocketIdentity:
+    try:
+        metadata = os.lstat(DOCKER_SOCKET_PATH)
+    except OSError as exc:
+        raise FrozenFinalRestoreWorkerError(
+            "local Docker socket is unavailable"
+        ) from exc
+    if (
+        not stat.S_ISSOCK(metadata.st_mode)
+        or metadata.st_uid != 0
+        or stat.S_IMODE(metadata.st_mode) & 0o002
+    ):
+        raise FrozenFinalRestoreWorkerError(
+            "local Docker socket identity is unsafe"
+        )
+    return DockerSocketIdentity(
+        device=metadata.st_dev,
+        inode=metadata.st_ino,
+        uid=metadata.st_uid,
+        gid=metadata.st_gid,
+        mode=metadata.st_mode,
+    )
+
+
+def _assert_docker_socket_identity(expected: DockerSocketIdentity) -> None:
+    if _docker_socket_identity() != expected:
+        raise FrozenFinalRestoreWorkerError(
+            "local Docker socket identity changed"
+        )
+
+
+def _bounded_command_locked(
+    arguments: Sequence[str],
+    *,
+    timeout: int,
+    env: Mapping[str, str],
+    stdin: BinaryIO | int | None,
+    stdout_limit: int,
+    stderr_limit: int,
+) -> BoundedCommandResult:
+    process: subprocess.Popen[bytes] | None = None
+    root_identity: ProcessIdentity | None = None
+    root_descriptor: int | None = None
+    buffers = {"stdout": bytearray(), "stderr": bytearray()}
+    tracked: set[ProcessIdentity] = set()
+    cleaned = False
+    _enable_child_subreaper()
+    baseline_children = _direct_child_baseline()
+    selector = selectors.DefaultSelector()
+    try:
+        process = subprocess.Popen(  # noqa: S603
+            list(arguments),
+            stdin=stdin,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=dict(env),
+            close_fds=True,
+            shell=False,
+            start_new_session=True,
+        )
+        root_descriptor = os.pidfd_open(process.pid, 0)
+        root_identity = _process_identity(process.pid)
+        if root_identity is None:
+            raise BoundedCommandError(
+                "subprocess identity is unavailable"
+            )
+        tracked.add(root_identity)
+        if process.stdout is None or process.stderr is None:
+            raise BoundedCommandError("subprocess pipes are unavailable")
+        for label, stream in (
+            ("stdout", process.stdout),
+            ("stderr", process.stderr),
+        ):
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, label)
+        deadline = time.monotonic() + timeout
+        while selector.get_map():
+            _reap_owned_zombies(
+                root_identity,
+                baseline_children=baseline_children,
+                tracked=tracked,
+            )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BoundedCommandError("subprocess timed out")
+            events = selector.select(
+                min(PROCESS_POLL_SECONDS, remaining)
+            )
+            if not events:
+                if process.poll() is not None and not cleaned:
+                    _terminate_process_tree(
+                        process,
+                        root_identity=root_identity,
+                        root_descriptor=root_descriptor,
+                        baseline_children=baseline_children,
+                        tracked=tracked,
+                    )
+                    cleaned = True
+                continue
+            for key, _ in events:
+                try:
+                    chunk = os.read(key.fileobj.fileno(), 64 * 1024)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                label = key.data
+                buffer = buffers[label]
+                limit = stdout_limit if label == "stdout" else stderr_limit
+                if len(buffer) + len(chunk) > limit:
+                    raise BoundedCommandError(
+                        f"subprocess {label} exceeded its byte limit"
+                    )
+                buffer.extend(chunk)
+        wait_timeout = deadline - time.monotonic()
+        if wait_timeout <= 0:
+            raise BoundedCommandError("subprocess timed out")
+        returncode = process.wait(timeout=wait_timeout)
+        return BoundedCommandResult(
+            returncode=returncode,
+            stdout=bytes(buffers["stdout"]),
+            stderr=bytes(buffers["stderr"]),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise BoundedCommandError("subprocess execution failed") from exc
+    finally:
+        original_error = sys.exception()
+        cleanup_errors: list[BaseException] = []
+        if process is not None:
+            try:
+                if not cleaned:
+                    if root_identity is None:
+                        if root_descriptor is None:
+                            root_identity = _process_identity(process.pid)
+                            if root_identity is None:
+                                raise BoundedCommandError(
+                                    "unidentified subprocess cannot be "
+                                    "cleaned safely"
+                                )
+                        else:
+                            _signal_process_handle(
+                                root_descriptor,
+                                signal.SIGKILL,
+                            )
+                            try:
+                                process.wait(timeout=PROCESS_TERM_SECONDS)
+                            except subprocess.TimeoutExpired as exc:
+                                raise BoundedCommandError(
+                                    "unidentified subprocess root survived "
+                                    "forced cleanup"
+                                ) from exc
+                            root_identity = ProcessIdentity(
+                                pid=process.pid,
+                                parent_pid=os.getpid(),
+                                start_time=-1,
+                                state="?",
+                            )
+                    _terminate_process_tree(
+                        process,
+                        root_identity=root_identity,
+                        root_descriptor=root_descriptor,
+                        baseline_children=baseline_children,
+                        tracked=tracked,
+                    )
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+        try:
+            selector.close()
+        except BaseException as exc:
+            cleanup_errors.append(exc)
+        if process is not None:
+            for stream in (process.stdout, process.stderr):
+                if stream is None:
+                    continue
+                try:
+                    stream.close()
+                except BaseException as exc:
+                    cleanup_errors.append(exc)
+        if root_descriptor is not None:
+            try:
+                os.close(root_descriptor)
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+        if cleanup_errors:
+            cleanup_error = cleanup_errors[0]
+            if original_error is not None:
+                raise original_error from cleanup_error
+            raise cleanup_error
+
+
+def _bounded_command(
+    arguments: Sequence[str],
+    *,
+    timeout: int,
+    env: Mapping[str, str],
+    stdin: BinaryIO | int | None,
+    stdout_limit: int,
+    stderr_limit: int,
+) -> BoundedCommandResult:
+    with _BOUNDED_PROCESS_LOCK:
+        return _bounded_command_locked(
+            arguments,
+            timeout=timeout,
+            env=env,
+            stdin=stdin,
+            stdout_limit=stdout_limit,
+            stderr_limit=stderr_limit,
+        )
+
+
+def _bounded_streaming_sha256_locked(
+    arguments: Sequence[str],
+    *,
+    timeout: int,
+    env: Mapping[str, str],
+) -> StreamDigest:
+    process: subprocess.Popen[bytes] | None = None
+    root_identity: ProcessIdentity | None = None
+    root_descriptor: int | None = None
+    digest = hashlib.sha256()
+    stdout_bytes = 0
+    stderr_bytes = 0
+    record_count = 0
+    last_byte: int | None = None
+    tracked: set[ProcessIdentity] = set()
+    cleaned = False
+    _enable_child_subreaper()
+    baseline_children = _direct_child_baseline()
+    selector = selectors.DefaultSelector()
+    try:
+        process = subprocess.Popen(  # noqa: S603
+            list(arguments),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=dict(env),
+            close_fds=True,
+            shell=False,
+            start_new_session=True,
+        )
+        root_descriptor = os.pidfd_open(process.pid, 0)
+        root_identity = _process_identity(process.pid)
+        if root_identity is None:
+            raise BoundedCommandError(
+                "streaming subprocess identity is unavailable"
+            )
+        tracked.add(root_identity)
+        if process.stdout is None or process.stderr is None:
+            raise BoundedCommandError("streaming subprocess pipes unavailable")
+        for label, stream in (
+            ("stdout", process.stdout),
+            ("stderr", process.stderr),
+        ):
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, label)
+        deadline = time.monotonic() + timeout
+        while selector.get_map():
+            _reap_owned_zombies(
+                root_identity,
+                baseline_children=baseline_children,
+                tracked=tracked,
+            )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BoundedCommandError("streaming subprocess timed out")
+            events = selector.select(
+                min(PROCESS_POLL_SECONDS, remaining)
+            )
+            if not events:
+                if process.poll() is not None and not cleaned:
+                    _terminate_process_tree(
+                        process,
+                        root_identity=root_identity,
+                        root_descriptor=root_descriptor,
+                        baseline_children=baseline_children,
+                        tracked=tracked,
+                    )
+                    cleaned = True
+                continue
+            for key, _ in events:
+                try:
+                    chunk = os.read(key.fileobj.fileno(), 1024 * 1024)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                if key.data == "stdout":
+                    stdout_bytes += len(chunk)
+                    digest.update(chunk)
+                    record_count += chunk.count(b"\n")
+                    last_byte = chunk[-1]
+                else:
+                    stderr_bytes += len(chunk)
+                    if stderr_bytes > MAX_ERROR_BYTES:
+                        raise BoundedCommandError(
+                            "streaming subprocess stderr exceeded its "
+                            "byte limit"
+                        )
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise BoundedCommandError("streaming subprocess timed out")
+        if process.wait(timeout=remaining) != 0:
+            raise BoundedCommandError("streaming subprocess failed closed")
+        if stdout_bytes and last_byte != ord("\n"):
+            raise BoundedCommandError(
+                "streaming subprocess returned a truncated record"
+            )
+        return StreamDigest(
+            sha256=digest.hexdigest(),
+            bytes=stdout_bytes,
+            records=record_count,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise BoundedCommandError(
+            "streaming subprocess execution failed"
+        ) from exc
+    finally:
+        original_error = sys.exception()
+        cleanup_errors: list[BaseException] = []
+        if process is not None:
+            try:
+                if not cleaned:
+                    if root_identity is None:
+                        if root_descriptor is None:
+                            root_identity = _process_identity(process.pid)
+                            if root_identity is None:
+                                raise BoundedCommandError(
+                                    "unidentified streaming subprocess "
+                                    "cannot be cleaned safely"
+                                )
+                        else:
+                            _signal_process_handle(
+                                root_descriptor,
+                                signal.SIGKILL,
+                            )
+                            try:
+                                process.wait(timeout=PROCESS_TERM_SECONDS)
+                            except subprocess.TimeoutExpired as exc:
+                                raise BoundedCommandError(
+                                    "unidentified streaming subprocess root "
+                                    "survived forced cleanup"
+                                ) from exc
+                            root_identity = ProcessIdentity(
+                                pid=process.pid,
+                                parent_pid=os.getpid(),
+                                start_time=-1,
+                                state="?",
+                            )
+                    _terminate_process_tree(
+                        process,
+                        root_identity=root_identity,
+                        root_descriptor=root_descriptor,
+                        baseline_children=baseline_children,
+                        tracked=tracked,
+                    )
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+        try:
+            selector.close()
+        except BaseException as exc:
+            cleanup_errors.append(exc)
+        if process is not None:
+            for stream in (process.stdout, process.stderr):
+                if stream is None:
+                    continue
+                try:
+                    stream.close()
+                except BaseException as exc:
+                    cleanup_errors.append(exc)
+        if root_descriptor is not None:
+            try:
+                os.close(root_descriptor)
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+        if cleanup_errors:
+            cleanup_error = cleanup_errors[0]
+            if original_error is not None:
+                raise original_error from cleanup_error
+            raise cleanup_error
+
+
+def _bounded_streaming_sha256(
+    arguments: Sequence[str],
+    *,
+    timeout: int,
+    env: Mapping[str, str],
+) -> StreamDigest:
+    with _BOUNDED_PROCESS_LOCK:
+        return _bounded_streaming_sha256_locked(
+            arguments,
+            timeout=timeout,
+            env=env,
+        )
+
+
+def _validate_docker_execution(
+    arguments: Sequence[str],
+    env: Mapping[str, str],
+) -> None:
+    if tuple(arguments[: len(DOCKER_BASE)]) != DOCKER_BASE:
+        raise FrozenFinalRestoreWorkerError(
+            "Docker command is not bound to the local socket"
+        )
+    if (
+        env.get("DOCKER_CONFIG") != SAFE_ENV["DOCKER_CONFIG"]
+        or "DOCKER_HOST" in env
+        or "DOCKER_CONTEXT" in env
+        or any(key.startswith("COMPOSE_") for key in env)
+    ):
+        raise FrozenFinalRestoreWorkerError(
+            "Docker command environment contains reserved controls"
+        )
+
+
 class SubprocessDockerRunner:
     """Production command runner; tests inject a deterministic replacement."""
+
+    def __init__(self) -> None:
+        self._socket_identity = _docker_socket_identity()
 
     def run(
         self,
@@ -545,25 +1535,24 @@ class SubprocessDockerRunner:
         env: Mapping[str, str],
         stdin: BinaryIO | int | None = subprocess.DEVNULL,
     ) -> str:
+        _validate_docker_execution(arguments, env)
+        _assert_docker_socket_identity(self._socket_identity)
         try:
-            result = subprocess.run(
-                list(arguments),
-                stdin=stdin,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+            result = _bounded_command(
+                arguments,
                 timeout=timeout,
-                env=dict(env),
-                check=False,
+                env=env,
+                stdin=stdin,
+                stdout_limit=MAX_OUTPUT_BYTES,
+                stderr_limit=MAX_ERROR_BYTES,
             )
-        except (OSError, subprocess.SubprocessError) as exc:
+        except BoundedCommandError as exc:
             raise FrozenFinalRestoreWorkerError(
                 "required Docker command is unavailable"
             ) from exc
-        if (
-            result.returncode != 0
-            or len(result.stdout) > MAX_OUTPUT_BYTES
-            or len(result.stderr) > 2 * 1024 * 1024
-        ):
+        finally:
+            _assert_docker_socket_identity(self._socket_identity)
+        if result.returncode != 0:
             raise FrozenFinalRestoreWorkerError(
                 "required Docker command failed closed"
             )
@@ -581,16 +1570,20 @@ class SubprocessDockerRunner:
         timeout: int,
         env: Mapping[str, str],
     ) -> StreamDigest:
+        _validate_docker_execution(arguments, env)
+        _assert_docker_socket_identity(self._socket_identity)
         try:
-            return _run_streaming_sha256(
-                list(arguments),
+            return _bounded_streaming_sha256(
+                arguments,
                 timeout=timeout,
                 env=env,
             )
-        except ProductionOperationError as exc:
+        except BoundedCommandError as exc:
             raise FrozenFinalRestoreWorkerError(
                 "database fingerprint stream failed closed"
             ) from exc
+        finally:
+            _assert_docker_socket_identity(self._socket_identity)
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -1188,25 +2181,51 @@ def _verify_release_file(
 
 
 def _run_readonly(arguments: Sequence[str], *, timeout: int = 30) -> str:
+    if (
+        len(arguments) < 4
+        or arguments[0] != GIT
+        or arguments[1] != "-C"
+    ):
+        raise FrozenFinalRestoreWorkerError(
+            "immutable release verification command lacks an exact work tree"
+        )
+    work_tree = Path(arguments[2])
+    tail = list(arguments[3:])
+    if (
+        not work_tree.is_absolute()
+        or work_tree != Path(os.path.abspath(work_tree))
+        or ".." in work_tree.parts
+        or any(
+            argument == "-C"
+            or argument.startswith("--git-dir")
+            or argument.startswith("--work-tree")
+            for argument in tail
+        )
+    ):
+        raise FrozenFinalRestoreWorkerError(
+            "immutable release Git work tree is not canonical"
+        )
+    command = [
+        GIT,
+        *GIT_CONFIG_ARGUMENTS,
+        f"--git-dir={work_tree / '.git'}",
+        f"--work-tree={work_tree}",
+        *tail,
+    ]
     try:
-        result = subprocess.run(
-            list(arguments),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+        result = _bounded_command(
+            command,
             timeout=timeout,
             env=SAFE_GIT_ENV,
-            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout_limit=MAX_OUTPUT_BYTES,
+            stderr_limit=1024 * 1024,
         )
-    except (OSError, subprocess.SubprocessError) as exc:
+    except BoundedCommandError as exc:
         raise FrozenFinalRestoreWorkerError(
             "immutable release verification command is unavailable"
         ) from exc
-    if (
-        result.returncode != 0
-        or len(result.stdout) > MAX_OUTPUT_BYTES
-        or len(result.stderr) > 1024 * 1024
-    ):
+    if result.returncode != 0:
         raise FrozenFinalRestoreWorkerError(
             "immutable release verification failed closed"
         )
@@ -1263,6 +2282,7 @@ def _verify_immutable_release(
                 "status",
                 "--porcelain=v1",
                 "--untracked-files=all",
+                "--ignore-submodules=none",
             ]
         )
         != ""
@@ -1293,6 +2313,7 @@ def _verify_immutable_release(
         raise FrozenFinalRestoreWorkerError(
             "immutable release is not detached, exact, and clean"
         )
+    _verify_git_index_visibility(release_root)
     tracked = _run_readonly(
         [
             GIT,
@@ -1318,6 +2339,23 @@ def _verify_immutable_release(
         worker_path,
         expected_sha256=worker_sha256,
     )
+
+
+def _verify_git_index_visibility(release_root: Path) -> None:
+    rows = _run_readonly(
+        [
+            GIT,
+            "-C",
+            str(release_root),
+            "ls-files",
+            "-v",
+            "--full-name",
+        ]
+    ).splitlines()
+    if not rows or any(not row.startswith("H ") for row in rows):
+        raise FrozenFinalRestoreWorkerError(
+            "immutable release index contains hidden tracked state"
+        )
 
 
 def _project_identity(
@@ -2400,6 +3438,15 @@ def _compose_environment(
         raise FrozenFinalRestoreWorkerError(
             "frozen-final role environment is invalid"
         ) from exc
+    reserved = sorted(
+        key
+        for key in original
+        if key in RESERVED_MATERIAL_ENVIRONMENT or key.startswith("COMPOSE_")
+    )
+    if reserved:
+        raise FrozenFinalRestoreWorkerError(
+            "frozen-final role environment contains reserved controls"
+        )
     role_prefix = ROLE_PREFIXES[manifest.role]
     required_role = {
         f"{role_prefix}_POSTGRES_USER",
@@ -2443,13 +3490,15 @@ def _compose_environment(
             manifest.postgres_image_id
         ),
     }
-    command_env = {**SAFE_ENV, **original, **overrides}
+    # Role material is an env-file for Compose interpolation and containers.
+    # It must never become the host environment of the root Docker client.
+    command_env = {**SAFE_ENV, **overrides}
     return command_env, overrides
 
 
 def _compose_base(manifest: RoleManifest) -> list[str]:
     return [
-        DOCKER,
+        *DOCKER_BASE,
         "compose",
         "--project-name",
         manifest.paths.project_name,
@@ -2588,20 +3637,21 @@ def _verify_role_compose(
                 f"rendered {service_name} escaped the final generation"
             )
     rendered_text = json.dumps(rendered, sort_keys=True)
+    material_environment = parse_env_values(
+        _read_root_file(
+            manifest.environment_path,
+            label="frozen-final role environment",
+            maximum=MAX_JSON_BYTES,
+            expected_sha256=manifest.document["environment_sha256"],
+        ).decode("ascii")
+    )
     for name in (
         "PRODUCTION_SHADOW_PROJECT",
         "PRODUCTION_SHADOW_DATA_ROOT",
         "PRODUCTION_SHADOW_SECRET_ROOT",
         "PRODUCTION_SHADOW_CGROUP_PARENT",
     ):
-        prior = parse_env_values(
-            _read_root_file(
-                manifest.environment_path,
-                label="frozen-final role environment",
-                maximum=MAX_JSON_BYTES,
-                expected_sha256=manifest.document["environment_sha256"],
-            ).decode("ascii")
-        ).get(name)
+        prior = material_environment.get(name)
         if (
             prior
             and prior != overrides[name]
@@ -2611,7 +3661,9 @@ def _verify_role_compose(
                 f"rendered Compose retained rehearsal {name}"
             )
     required_names = referenced_environment_names(expected)
-    if not required_names.issubset(command_env):
+    if not required_names.issubset(
+        set(command_env) | set(material_environment)
+    ):
         raise FrozenFinalRestoreWorkerError(
             "rendered Compose environment closure is incomplete"
         )
@@ -2739,7 +3791,7 @@ def _verify_image(
     ):
         observed = runner.run(
             [
-                DOCKER,
+                *DOCKER_BASE,
                 "image",
                 "inspect",
                 "--format",
@@ -2976,6 +4028,429 @@ def _inspect_healthcheck(value: Any) -> Mapping[str, Any] | None:
     return values
 
 
+def _empty_object_map(value: Any, *, label: str) -> dict[str, dict]:
+    if value is None:
+        return {}
+    if (
+        not isinstance(value, dict)
+        or any(
+            not isinstance(key, str)
+            or not key
+            or not isinstance(item, dict)
+            or item
+            for key, item in value.items()
+        )
+    ):
+        raise FrozenFinalRestoreWorkerError(f"{label} is invalid")
+    return dict(sorted(value.items()))
+
+
+def _duration_seconds(value: Any, *, label: str) -> int:
+    nanoseconds = _duration_nanoseconds(value, label=label)
+    if nanoseconds % 1_000_000_000 != 0:
+        raise FrozenFinalRestoreWorkerError(f"{label} is not whole seconds")
+    seconds = nanoseconds // 1_000_000_000
+    if not 0 <= seconds <= 2**31 - 1:
+        raise FrozenFinalRestoreWorkerError(f"{label} is invalid")
+    return seconds
+
+
+def _compose_dependencies_label(value: Any) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, dict):
+        raise FrozenFinalRestoreWorkerError(
+            "rendered database dependencies are invalid"
+        )
+    encoded: list[str] = []
+    for name, dependency in sorted(value.items()):
+        if (
+            not isinstance(name, str)
+            or not name
+            or not isinstance(dependency, dict)
+        ):
+            raise FrozenFinalRestoreWorkerError(
+                "rendered database dependencies are invalid"
+            )
+        condition = dependency.get("condition", "service_started")
+        restart = dependency.get("restart", False)
+        if (
+            condition
+            not in {
+                "service_started",
+                "service_healthy",
+                "service_completed_successfully",
+            }
+            or not isinstance(restart, bool)
+        ):
+            raise FrozenFinalRestoreWorkerError(
+                "rendered database dependencies are invalid"
+            )
+        encoded.append(f"{name}:{condition}:{str(restart).lower()}")
+    return ",".join(encoded)
+
+
+def _expected_compose_container_labels(
+    manifest: RoleManifest,
+    contract: DatabaseRuntimeContract,
+    *,
+    oneoff: bool,
+    slug: str | None,
+    config_hash: str | None = None,
+) -> dict[str, str]:
+    labels = {
+        "com.docker.compose.config-hash": (
+            contract.config_hash if config_hash is None else config_hash
+        ),
+        "com.docker.compose.depends_on": contract.compose_dependencies,
+        "com.docker.compose.image": contract.image_id,
+        "com.docker.compose.oneoff": str(oneoff),
+        "com.docker.compose.project": manifest.paths.project_name,
+        "com.docker.compose.project.config_files": str(
+            manifest.role_compose_path
+        ),
+        "com.docker.compose.project.environment_file": str(
+            manifest.environment_path
+        ),
+        "com.docker.compose.project.working_dir": str(
+            manifest.role_compose_path.parent
+        ),
+        "com.docker.compose.service": contract.service,
+        "com.docker.compose.version": contract.compose_version,
+    }
+    if oneoff:
+        if (
+            not isinstance(slug, str)
+            or re.fullmatch(r"[0-9a-f]{64}", slug) is None
+        ):
+            raise FrozenFinalRestoreWorkerError(
+                "restore one-off Compose slug is invalid"
+            )
+        labels["com.docker.compose.slug"] = slug
+    elif slug is not None:
+        raise FrozenFinalRestoreWorkerError(
+            "persistent database unexpectedly carries a Compose slug"
+        )
+    else:
+        labels["com.docker.compose.container-number"] = "1"
+    return labels
+
+
+def _trusted_sysfs_directory(metadata: os.stat_result) -> bool:
+    return (
+        stat.S_ISDIR(metadata.st_mode)
+        and metadata.st_uid == 0
+        and metadata.st_gid == 0
+        and stat.S_IMODE(metadata.st_mode) & 0o022 == 0
+    )
+
+
+def _expected_masked_paths() -> list[str]:
+    root_fd = -1
+    cpu_fd = -1
+    thermal_fd = -1
+    try:
+        root_fd = os.open(
+            THERMAL_THROTTLE_ROOT,
+            _directory_flags(),
+        )
+        root_before = os.fstat(root_fd)
+        if not _trusted_sysfs_directory(root_before):
+            raise FrozenFinalRestoreWorkerError(
+                "CPU sysfs capability root is unsafe"
+            )
+        entries = os.listdir(root_fd)
+        if len(entries) > MAX_SYSFS_CPU_ENTRIES:
+            raise FrozenFinalRestoreWorkerError(
+                "CPU sysfs capability inventory exceeds its bound"
+            )
+        cpu_names: list[tuple[int, str]] = []
+        for name in entries:
+            match = re.fullmatch(r"cpu(0|[1-9][0-9]*)", name)
+            if match is not None:
+                cpu_names.append((int(match.group(1)), name))
+        if len(cpu_names) != len({number for number, _name in cpu_names}):
+            raise FrozenFinalRestoreWorkerError(
+                "CPU sysfs capability identities collide"
+            )
+        thermal_paths: list[str] = []
+        for number, name in sorted(cpu_names):
+            cpu_fd = os.open(
+                name,
+                _directory_flags(),
+                dir_fd=root_fd,
+            )
+            cpu_metadata = os.fstat(cpu_fd)
+            if not _trusted_sysfs_directory(cpu_metadata):
+                raise FrozenFinalRestoreWorkerError(
+                    "CPU sysfs capability directory is unsafe"
+                )
+            try:
+                thermal_fd = os.open(
+                    "thermal_throttle",
+                    _directory_flags(),
+                    dir_fd=cpu_fd,
+                )
+            except OSError as exc:
+                if exc.errno != errno.ENOENT:
+                    raise
+            else:
+                if not _trusted_sysfs_directory(os.fstat(thermal_fd)):
+                    raise FrozenFinalRestoreWorkerError(
+                        "CPU thermal capability directory is unsafe"
+                    )
+                thermal_paths.append(
+                    "/sys/devices/system/cpu/"
+                    f"cpu{number}/thermal_throttle"
+                )
+                os.close(thermal_fd)
+                thermal_fd = -1
+            os.close(cpu_fd)
+            cpu_fd = -1
+        root_after = os.fstat(root_fd)
+        if (
+            any(
+                getattr(root_before, field) != getattr(root_after, field)
+                for field in (
+                    "st_dev",
+                    "st_ino",
+                    "st_mode",
+                    "st_uid",
+                    "st_gid",
+                    "st_mtime_ns",
+                    "st_ctime_ns",
+                )
+            )
+            or sorted(os.listdir(root_fd)) != sorted(entries)
+        ):
+            raise FrozenFinalRestoreWorkerError(
+                "CPU sysfs capability inventory changed"
+            )
+        return [*BASE_MASKED_PATHS, *thermal_paths]
+    except FrozenFinalRestoreWorkerError:
+        raise
+    except OSError as exc:
+        raise FrozenFinalRestoreWorkerError(
+            "CPU sysfs capability inventory is unavailable"
+        ) from exc
+    finally:
+        if thermal_fd >= 0:
+            os.close(thermal_fd)
+        if cpu_fd >= 0:
+            os.close(cpu_fd)
+        if root_fd >= 0:
+            os.close(root_fd)
+
+
+def _validate_exact_host_config(
+    host: Any,
+    *,
+    binds: Sequence[str],
+    network_mode: str,
+    cgroup_parent: str,
+    nano_cpus: int,
+    memory: int,
+    pids_limit: int,
+    auto_remove: bool,
+    restart_policy: str,
+    log_config: Mapping[str, Any],
+) -> str:
+    if not isinstance(host, dict):
+        raise FrozenFinalRestoreWorkerError(
+            "container HostConfig is invalid"
+        )
+    observed_fields = set(host)
+    if (
+        observed_fields - HOST_CONFIG_FIELDS
+        or (HOST_CONFIG_FIELDS - OPTIONAL_HOST_CONFIG_FIELDS)
+        - observed_fields
+    ):
+        raise FrozenFinalRestoreWorkerError(
+            "container HostConfig fields are not exact"
+        )
+    normalized = {
+        "Annotations": {},
+        "Mounts": None,
+        "StorageOpt": {},
+        "Sysctls": {},
+        "Tmpfs": {},
+        "Init": False,
+        **host,
+    }
+    empty_sequences = (
+        "BlkioDeviceReadBps",
+        "BlkioDeviceReadIOps",
+        "BlkioDeviceWriteBps",
+        "BlkioDeviceWriteIOps",
+        "BlkioWeightDevice",
+        "CapAdd",
+        "CapDrop",
+        "DeviceCgroupRules",
+        "DeviceRequests",
+        "Devices",
+        "Dns",
+        "DnsOptions",
+        "DnsSearch",
+        "ExtraHosts",
+        "GroupAdd",
+        "Links",
+        "Mounts",
+        "SecurityOpt",
+        "Ulimits",
+        "VolumesFrom",
+    )
+    empty_maps = (
+        "Annotations",
+        "PortBindings",
+        "StorageOpt",
+        "Sysctls",
+        "Tmpfs",
+    )
+    zero_values = (
+        "BlkioWeight",
+        "CpuCount",
+        "CpuPercent",
+        "CpuPeriod",
+        "CpuQuota",
+        "CpuRealtimePeriod",
+        "CpuRealtimeRuntime",
+        "CpuShares",
+        "IOMaximumBandwidth",
+        "IOMaximumIOps",
+        "MemoryReservation",
+        "OomScoreAdj",
+    )
+    empty_strings = (
+        "Cgroup",
+        "ContainerIDFile",
+        "CpusetCpus",
+        "CpusetMems",
+        "Isolation",
+        "PidMode",
+        "UTSMode",
+        "UsernsMode",
+        "VolumeDriver",
+    )
+    restart = normalized["RestartPolicy"]
+    memory_swappiness = normalized["MemorySwappiness"]
+    if (
+        any(normalized[field] not in (None, []) for field in empty_sequences)
+        or any(normalized[field] != {} for field in empty_maps)
+        or any(normalized[field] != 0 for field in zero_values)
+        or any(normalized[field] != "" for field in empty_strings)
+        or normalized["Binds"] != list(binds)
+        or normalized["NetworkMode"] != network_mode
+        or normalized["CgroupParent"] != cgroup_parent
+        or normalized["NanoCpus"] != nano_cpus
+        or normalized["Memory"] != memory
+        or normalized["MemorySwap"] != memory
+        or (
+            memory_swappiness is not None
+            and (
+                type(memory_swappiness) is not int
+                or memory_swappiness != 0
+            )
+        )
+        or normalized["PidsLimit"] != pids_limit
+        or normalized["AutoRemove"] is not auto_remove
+        or normalized["OomKillDisable"] is not False
+        or normalized["Init"] is not False
+        or normalized["Privileged"] is not False
+        or normalized["PublishAllPorts"] is not False
+        or normalized["ReadonlyRootfs"] is not False
+        or normalized["CgroupnsMode"] != "private"
+        or normalized["IpcMode"] != "private"
+        or normalized["Runtime"] != "runc"
+        or normalized["ShmSize"] != 64 * 1024 * 1024
+        or normalized["ConsoleSize"] != [0, 0]
+        or normalized["LogConfig"] != log_config
+        or not isinstance(restart, dict)
+        or set(restart) != {"Name", "MaximumRetryCount"}
+        or restart["Name"] != restart_policy
+        or restart["MaximumRetryCount"] != 0
+        or normalized["MaskedPaths"] != _expected_masked_paths()
+        or normalized["ReadonlyPaths"] != list(READONLY_PATHS)
+    ):
+        raise FrozenFinalRestoreWorkerError(
+            "container immutable runtime config differs: HostConfig"
+        )
+    return _sha256(_canonical_json(host))
+
+
+def _validate_exact_container_config(
+    config: Any,
+    *,
+    container_id: str,
+    contract: DatabaseRuntimeContract,
+    command: tuple[str, ...] | None,
+    environment: Mapping[str, str],
+) -> None:
+    if (
+        not isinstance(config, dict)
+        or set(config) != CONTAINER_CONFIG_FIELDS
+        or config["Hostname"] != container_id[:12]
+        or config["Domainname"] != ""
+        or config["User"] != contract.user
+        or config["AttachStdin"] is not False
+        or config["AttachStdout"] is not True
+        or config["AttachStderr"] is not True
+        or _empty_object_map(
+            config["ExposedPorts"],
+            label="container exposed ports",
+        )
+        != contract.exposed_ports
+        or config["Tty"] is not False
+        or config["OpenStdin"] is not False
+        or config["StdinOnce"] is not False
+        or _environment_map(
+            config["Env"],
+            label="container environment",
+        )
+        != environment
+        or _string_vector(
+            config["Cmd"],
+            label="container command",
+        )
+        != command
+        or _inspect_healthcheck(config["Healthcheck"])
+        != contract.healthcheck
+        or config["ArgsEscaped"] is not False
+        or config["Image"] != contract.image_id
+        or _empty_object_map(
+            config["Volumes"],
+            label="container volumes",
+        )
+        != contract.volumes
+        or config["WorkingDir"] != contract.working_dir
+        or _string_vector(
+            config["Entrypoint"],
+            label="container entrypoint",
+        )
+        != contract.entrypoint
+        or config["NetworkDisabled"] is not False
+        or _string_vector(
+            config["OnBuild"],
+            label="container OnBuild",
+        )
+        != contract.on_build
+        or not isinstance(config["Labels"], dict)
+        or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in config["Labels"].items()
+        )
+        or config["StopSignal"] != contract.stop_signal
+        or config["StopTimeout"] != contract.stop_timeout
+        or _string_vector(
+            config["Shell"],
+            label="container shell",
+        )
+        != contract.shell
+    ):
+        raise FrozenFinalRestoreWorkerError(
+            "container immutable runtime config differs: Config"
+        )
+
+
 def _service_runtime_contract(
     manifest: RoleManifest,
     runner: DockerCommandRunner,
@@ -3019,7 +4494,12 @@ def _service_runtime_contract(
         )
     image_rows = _load_json_output(
         runner.run(
-            [DOCKER, "image", "inspect", manifest.postgres_image_id],
+            [
+                *DOCKER_BASE,
+                "image",
+                "inspect",
+                manifest.postgres_image_id,
+            ],
             timeout=30,
             env=command_env,
         ),
@@ -3128,18 +4608,55 @@ def _service_runtime_contract(
         raise FrozenFinalRestoreWorkerError(
             "rendered database config hash or logging differs"
         )
+    compose_version = runner.run(
+        [*DOCKER_BASE, "compose", "version", "--short"],
+        timeout=30,
+        env=command_env,
+    ).strip()
+    if re.fullmatch(
+        r"[0-9]+(?:\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.-]+)?",
+        compose_version,
+    ) is None:
+        raise FrozenFinalRestoreWorkerError(
+            "Docker Compose version identity is invalid"
+        )
     return DatabaseRuntimeContract(
         service=service_name,
         container_name=f"{manifest.paths.project_name}-{service_name}-1",
+        image_id=manifest.postgres_image_id,
         config_hash=match.group(1),
         command=command,
         entrypoint=entrypoint,
         user=user,
         working_dir=working_dir,
         stop_signal=stop_signal,
+        stop_timeout=_duration_seconds(
+            service.get("stop_grace_period", "10s"),
+            label="rendered database stop grace period",
+        ),
         environment=dict(sorted(environment.items())),
         healthcheck=_compose_healthcheck(service.get("healthcheck")),
         labels=dict(sorted(expected_labels.items())),
+        exposed_ports=_empty_object_map(
+            image_config.get("ExposedPorts"),
+            label="PostgreSQL image exposed ports",
+        ),
+        volumes=_empty_object_map(
+            image_config.get("Volumes"),
+            label="PostgreSQL image volumes",
+        ),
+        on_build=_string_vector(
+            image_config.get("OnBuild"),
+            label="PostgreSQL image OnBuild",
+        ),
+        shell=_string_vector(
+            image_config.get("Shell"),
+            label="PostgreSQL image shell",
+        ),
+        compose_version=compose_version,
+        compose_dependencies=_compose_dependencies_label(
+            service.get("depends_on")
+        ),
         cgroup_parent=service["cgroup_parent"],
         restart_policy=service["restart"],
         nano_cpus=_nano_cpus(
@@ -3178,17 +4695,46 @@ def _validate_database_runtime(
     config = row.get("Config")
     host = row.get("HostConfig")
     labels = config.get("Labels") if isinstance(config, dict) else None
-    restart = host.get("RestartPolicy") if isinstance(host, dict) else None
-    non_compose_labels = (
-        {
-            key: value
-            for key, value in labels.items()
-            if not key.startswith("com.docker.compose.")
-        }
-        if isinstance(labels, dict)
-        else None
-    )
+    expected_labels = {
+        **contract.labels,
+        **_expected_compose_container_labels(
+            manifest,
+            contract,
+            oneoff=False,
+            slug=None,
+        ),
+    }
     expected_network = f"{manifest.paths.project_name}_{manifest.role}"
+    container_id = row.get("Id")
+    if (
+        not isinstance(container_id, str)
+        or CONTAINER_ID_RE.fullmatch(container_id) is None
+    ):
+        raise FrozenFinalRestoreWorkerError(
+            "database container identity is invalid"
+        )
+    _validate_exact_container_config(
+        config,
+        container_id=container_id,
+        contract=contract,
+        command=contract.command,
+        environment=contract.environment,
+    )
+    _validate_exact_host_config(
+        host,
+        binds=[
+            f"{manifest.paths.postgres}:"
+            "/var/lib/postgresql/data:rw"
+        ],
+        network_mode=expected_network,
+        cgroup_parent=contract.cgroup_parent,
+        nano_cpus=contract.nano_cpus,
+        memory=contract.memory,
+        pids_limit=contract.pids_limit,
+        auto_remove=False,
+        restart_policy=contract.restart_policy,
+        log_config=contract.log_config,
+    )
     if (
         row.get("Name") != f"/{contract.container_name}"
         or not isinstance(config, dict)
@@ -3213,63 +4759,7 @@ def _validate_database_runtime(
         != contract.environment
         or _inspect_healthcheck(config.get("Healthcheck"))
         != contract.healthcheck
-        or not isinstance(labels, dict)
-        or any(
-            not isinstance(key, str) or not isinstance(value, str)
-            for key, value in labels.items()
-        )
-        or non_compose_labels != contract.labels
-        or labels.get("com.docker.compose.project")
-        != manifest.paths.project_name
-        or labels.get("com.docker.compose.service") != contract.service
-        or labels.get("com.docker.compose.oneoff") != "False"
-        or labels.get("com.docker.compose.container-number") != "1"
-        or labels.get("com.docker.compose.config-hash")
-        != contract.config_hash
-        or not isinstance(host, dict)
-        or host.get("NetworkMode") != expected_network
-        or host.get("CgroupParent") != contract.cgroup_parent
-        or host.get("NanoCpus") != contract.nano_cpus
-        or host.get("Memory") != contract.memory
-        or host.get("MemoryReservation", 0) != 0
-        or host.get("MemorySwap", 0) != 0
-        or host.get("PidsLimit") != contract.pids_limit
-        or host.get("CpuShares", 0) != 0
-        or host.get("CpuPeriod", 0) != 0
-        or host.get("CpuQuota", 0) != 0
-        or host.get("CpusetCpus", "") != ""
-        or host.get("CpusetMems", "") != ""
-        or host.get("AutoRemove") is not False
-        or host.get("Privileged") is not False
-        or host.get("ReadonlyRootfs") is not False
-        or host.get("PublishAllPorts") is not False
-        or host.get("PortBindings") not in (None, {})
-        or host.get("CapAdd") not in (None, [])
-        or host.get("CapDrop") not in (None, [])
-        or host.get("SecurityOpt") not in (None, [])
-        or host.get("Devices") not in (None, [])
-        or host.get("DeviceRequests") not in (None, [])
-        or host.get("PidMode", "") != ""
-        or host.get("IpcMode", "private") != "private"
-        or host.get("UTSMode", "") != ""
-        or host.get("UsernsMode", "") != ""
-        or host.get("Links") not in (None, [])
-        or host.get("ExtraHosts") not in (None, [])
-        or host.get("Dns") not in (None, [])
-        or host.get("DnsOptions") not in (None, [])
-        or host.get("DnsSearch") not in (None, [])
-        or host.get("GroupAdd") not in (None, [])
-        or host.get("Sysctls") not in (None, {})
-        or host.get("Tmpfs") not in (None, {})
-        or host.get("Binds")
-        != [
-            f"{manifest.paths.postgres}:"
-            "/var/lib/postgresql/data:rw"
-        ]
-        or host.get("LogConfig") != contract.log_config
-        or not isinstance(restart, dict)
-        or restart.get("Name") != contract.restart_policy
-        or restart.get("MaximumRetryCount", 0) != 0
+        or labels != expected_labels
     ):
         raise FrozenFinalRestoreWorkerError(
             "database container immutable runtime config differs"
@@ -3315,7 +4805,6 @@ def _validate_restore_oneoff_runtime(
     config = row.get("Config")
     host = row.get("HostConfig")
     labels = config.get("Labels") if isinstance(config, dict) else None
-    restart = host.get("RestartPolicy") if isinstance(host, dict) else None
     command = (
         _string_vector(
             config.get("Cmd"),
@@ -3338,15 +4827,6 @@ def _validate_restore_oneoff_runtime(
         "PGCLIENTENCODING": DATABASE_FINGERPRINT_CLIENT_ENCODING,
     }
     environment_items = tuple(sorted(environment.items()))
-    non_compose_labels = (
-        {
-            key: value
-            for key, value in labels.items()
-            if not key.startswith("com.docker.compose.")
-        }
-        if isinstance(labels, dict)
-        else None
-    )
     expected_non_compose = {
         **contract.labels,
         "trading-bot.production.restore-generation": (
@@ -3359,6 +4839,82 @@ def _validate_restore_oneoff_runtime(
         f"{manifest.paths.audit}:/run/restore-target/audit:rw",
     }
     binds = host.get("Binds") if isinstance(host, dict) else None
+    container_id = row.get("Id")
+    if (
+        not isinstance(container_id, str)
+        or CONTAINER_ID_RE.fullmatch(container_id) is None
+    ):
+        raise FrozenFinalRestoreWorkerError(
+            "restore one-off container identity is invalid"
+        )
+    name = row.get("Name")
+    name_match = (
+        re.fullmatch(
+            rf"/{re.escape(manifest.paths.project_name)}-"
+            rf"{re.escape(contract.service)}-run-([0-9a-f]{{12}})",
+            name,
+        )
+        if isinstance(name, str)
+        else None
+    )
+    if name_match is None:
+        raise FrozenFinalRestoreWorkerError(
+            "restore one-off container name is invalid"
+        )
+    compose_slug = (
+        labels.get("com.docker.compose.slug")
+        if isinstance(labels, dict)
+        else None
+    )
+    oneoff_config_hash = (
+        labels.get("com.docker.compose.config-hash")
+        if isinstance(labels, dict)
+        else None
+    )
+    if (
+        not isinstance(compose_slug, str)
+        or re.fullmatch(r"[0-9a-f]{64}", compose_slug) is None
+        or name_match.group(1) != compose_slug[:12]
+        or not isinstance(oneoff_config_hash, str)
+        or SHA256_RE.fullmatch(oneoff_config_hash) is None
+        or oneoff_config_hash == ZERO_SHA256
+    ):
+        raise FrozenFinalRestoreWorkerError(
+            "restore one-off Compose identity binding is invalid"
+        )
+    expected_labels = {
+        **expected_non_compose,
+        **_expected_compose_container_labels(
+            manifest,
+            contract,
+            oneoff=True,
+            slug=compose_slug,
+            config_hash=oneoff_config_hash,
+        ),
+    }
+    _validate_exact_container_config(
+        config,
+        container_id=container_id,
+        contract=contract,
+        command=command,
+        environment=environment,
+    )
+    _validate_exact_host_config(
+        host,
+        binds=[
+            f"{manifest.paths.restore_input_root}:/run/restore-input:ro",
+            f"{manifest.paths.uploads}:/run/restore-target/uploads:rw",
+            f"{manifest.paths.audit}:/run/restore-target/audit:rw",
+        ],
+        network_mode=f"{manifest.paths.project_name}_{manifest.role}",
+        cgroup_parent=contract.cgroup_parent,
+        nano_cpus=contract.nano_cpus,
+        memory=contract.memory,
+        pids_limit=contract.pids_limit,
+        auto_remove=True,
+        restart_policy="no",
+        log_config=contract.log_config,
+    )
     if (
         not isinstance(config, dict)
         or config.get("Image") != manifest.postgres_image_id
@@ -3377,64 +4933,10 @@ def _validate_restore_oneoff_runtime(
         }
         or _inspect_healthcheck(config.get("Healthcheck"))
         != contract.healthcheck
-        or not isinstance(labels, dict)
-        or non_compose_labels != expected_non_compose
-        or labels.get("com.docker.compose.project")
-        != manifest.paths.project_name
-        or labels.get("com.docker.compose.service") != contract.service
-        or labels.get("com.docker.compose.oneoff") != "True"
-        or labels.get("com.docker.compose.config-hash")
-        != contract.config_hash
-        or not isinstance(row.get("Name"), str)
-        or re.fullmatch(
-            rf"/{re.escape(manifest.paths.project_name)}-"
-            rf"{re.escape(contract.service)}-run-[a-z0-9]+",
-            str(row["Name"]),
-        )
-        is None
-        or not isinstance(host, dict)
-        or host.get("NetworkMode")
-        != f"{manifest.paths.project_name}_{manifest.role}"
-        or host.get("CgroupParent") != contract.cgroup_parent
-        or host.get("NanoCpus") != contract.nano_cpus
-        or host.get("Memory") != contract.memory
-        or host.get("MemoryReservation", 0) != 0
-        or host.get("MemorySwap", 0) != 0
-        or host.get("PidsLimit") != contract.pids_limit
-        or host.get("CpuShares", 0) != 0
-        or host.get("CpuPeriod", 0) != 0
-        or host.get("CpuQuota", 0) != 0
-        or host.get("CpusetCpus", "") != ""
-        or host.get("CpusetMems", "") != ""
-        or host.get("AutoRemove") is not True
-        or host.get("Privileged") is not False
-        or host.get("ReadonlyRootfs") is not False
-        or host.get("PublishAllPorts") is not False
-        or host.get("PortBindings") not in (None, {})
-        or host.get("CapAdd") not in (None, [])
-        or host.get("CapDrop") not in (None, [])
-        or host.get("SecurityOpt") not in (None, [])
-        or host.get("Devices") not in (None, [])
-        or host.get("DeviceRequests") not in (None, [])
-        or host.get("PidMode", "") != ""
-        or host.get("IpcMode", "private") != "private"
-        or host.get("UTSMode", "") != ""
-        or host.get("UsernsMode", "") != ""
-        or host.get("Links") not in (None, [])
-        or host.get("ExtraHosts") not in (None, [])
-        or host.get("Dns") not in (None, [])
-        or host.get("DnsOptions") not in (None, [])
-        or host.get("DnsSearch") not in (None, [])
-        or host.get("GroupAdd") not in (None, [])
-        or host.get("Sysctls") not in (None, {})
-        or host.get("Tmpfs") not in (None, {})
+        or labels != expected_labels
         or not isinstance(binds, list)
         or len(binds) != len(expected_binds)
         or set(binds) != expected_binds
-        or host.get("LogConfig") != contract.log_config
-        or not isinstance(restart, dict)
-        or restart.get("Name") != "no"
-        or restart.get("MaximumRetryCount", 0) != 0
     ):
         raise FrozenFinalRestoreWorkerError(
             "restore one-off immutable runtime config differs"
@@ -3488,7 +4990,7 @@ def _network_runtime_contract(
             "rendered network runtime contract is invalid"
         )
     version = runner.run(
-        [DOCKER, "compose", "version", "--short"],
+        [*DOCKER_BASE, "compose", "version", "--short"],
         timeout=30,
         env=command_env,
     )
@@ -4326,7 +5828,7 @@ def _project_container_ids(
     command_env, _ = _compose_environment(manifest)
     raw = runner.run(
         [
-            DOCKER,
+            *DOCKER_BASE,
             "ps",
             "--all",
             "--quiet",
@@ -4357,7 +5859,7 @@ def _inspect_container(
     command_env, _ = _compose_environment(manifest)
     document = _load_json_output(
         runner.run(
-            [DOCKER, "inspect", identifier],
+            [*DOCKER_BASE, "inspect", identifier],
             timeout=30,
             env=command_env,
         ),
@@ -4523,7 +6025,7 @@ def _preflight_generation_resources(
         value
         for value in runner.run(
             [
-                DOCKER,
+                *DOCKER_BASE,
                 "network",
                 "ls",
                 "--quiet",
@@ -4549,7 +6051,12 @@ def _preflight_generation_resources(
     if network_ids:
         rows = _load_json_output(
             runner.run(
-                [DOCKER, "network", "inspect", network_ids[0]],
+                [
+                    *DOCKER_BASE,
+                    "network",
+                    "inspect",
+                    network_ids[0],
+                ],
                 timeout=30,
                 env=command_env,
             ),
@@ -4590,7 +6097,7 @@ def _preflight_generation_resources(
         value
         for value in runner.run(
             [
-                DOCKER,
+                *DOCKER_BASE,
                 "volume",
                 "ls",
                 "--quiet",
@@ -4715,7 +6222,7 @@ def _cleanup_oneoffs(
             )
             runner.run(
                 [
-                    DOCKER,
+                    *DOCKER_BASE,
                     "rm",
                     "--force",
                     "--volumes",
@@ -5789,6 +7296,18 @@ def _verify_final_state(
         raise FrozenFinalRestoreWorkerError(
             "final generation container closure differs"
         )
+    final_container = _database_container(manifest, runner)
+    if (
+        final_container is None
+        or final_container.get("Id") != database_container
+        or not isinstance(final_container.get("HostConfig"), dict)
+    ):
+        raise FrozenFinalRestoreWorkerError(
+            "final database HostConfig is unavailable"
+        )
+    database_host_config_sha256 = _sha256(
+        _canonical_json(final_container["HostConfig"])
+    )
     return {
         "database": {
             "alembic_revision": database.alembic_revision,
@@ -5800,6 +7319,7 @@ def _verify_final_state(
         },
         "file_trees": file_trees,
         "database_container_id": database_container,
+        "database_host_config_sha256": database_host_config_sha256,
         "project_container_count": 1,
         "oneoff_cleanup": removed,
         "redis_restore_bytes": 0,

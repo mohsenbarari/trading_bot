@@ -1,17 +1,21 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 import io
 import json
 import os
 from pathlib import Path
+import signal
 import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
+import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from scripts import orchestrate_wa_ir_production_artifacts as ORCHESTRATOR
 from scripts import wa_ir_production_operation as MODULE
@@ -20,7 +24,7 @@ from scripts import wa_ir_production_operation as MODULE
 OPERATION_ID = "12345678-1234-4234-8234-123456789abc"
 SOURCE_REVISION = "f2c7d8e9a0b1"
 INTERMEDIATE_REVISION = "a875b6c7d9e0"
-TARGET_REVISION = "b986c7d8e0f1"
+TARGET_REVISION = "c097d8e9f1a2"
 CONCURRENT_INDEX = "ix_fixture_resume"
 TABLE_STREAM = b'{"id":1}\n{"id":2}\n'
 TABLE_DIGEST = hashlib.sha256(TABLE_STREAM).hexdigest()
@@ -50,6 +54,43 @@ FINGERPRINT = hashlib.sha256(
 def secure_file(path: Path, payload: bytes) -> None:
     path.write_bytes(payload)
     path.chmod(0o600)
+
+
+@contextmanager
+def disconnectable_control_pipe():  # noqa: ANN202
+    read_fd, write_fd = os.pipe()
+    holder = subprocess.Popen(
+        [
+            "/usr/bin/python3",
+            "-I",
+            "-B",
+            "-c",
+            "import time; time.sleep(60)",
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        pass_fds=(write_fd,),
+        close_fds=True,
+    )
+    os.close(write_fd)
+    try:
+        yield read_fd, holder
+    finally:
+        os.close(read_fd)
+        if holder.poll() is None:
+            holder.terminate()
+        try:
+            holder.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            holder.kill()
+            holder.wait(timeout=2)
+
+
+@contextmanager
+def live_control_pipe():  # noqa: ANN202
+    with disconnectable_control_pipe() as (read_fd, _holder):
+        yield read_fd
 
 
 def tar_bytes(files: dict[str, bytes], *, gzip: bool = False) -> bytes:
@@ -1797,9 +1838,10 @@ class ProductionOperationTests(unittest.TestCase):
             )
 
             def network_run(arguments, *, timeout, stdin=-3):  # noqa: ANN001, ARG001
-                if arguments[1:3] == ["network", "ls"]:
+                docker = arguments[len(MODULE.DOCKER_BASE) :]
+                if docker[:2] == ["network", "ls"]:
                     return expected_name
-                if arguments[1:3] == ["network", "inspect"]:
+                if docker[:2] == ["network", "inspect"]:
                     return json.dumps(exact)
                 self.fail(f"unexpected Docker network command: {arguments}")
 
@@ -1858,7 +1900,8 @@ class ProductionOperationTests(unittest.TestCase):
                         timeout,
                         stdin=-3,
                     ):
-                        if arguments[1:3] == ["network", "ls"]:
+                        docker = arguments[len(MODULE.DOCKER_BASE) :]
+                        if docker[:2] == ["network", "ls"]:
                             return expected_name
                         return json.dumps(mutation)
 
@@ -1976,9 +2019,10 @@ class ProductionOperationTests(unittest.TestCase):
 
             def fake_run(arguments, *, timeout, stdin=-3):  # noqa: ANN001, ARG001
                 calls.append(list(arguments))
-                if arguments[1] == "inspect":
+                docker = arguments[len(MODULE.DOCKER_BASE) :]
+                if docker[0] == "inspect":
                     return json.dumps(inspection)
-                if arguments[1] == "rm":
+                if docker[0] == "rm":
                     return identifier
                 raise AssertionError(arguments)
 
@@ -1997,7 +2041,7 @@ class ProductionOperationTests(unittest.TestCase):
                 )
             self.assertIn(
                 [
-                    MODULE.DOCKER,
+                    *MODULE.DOCKER_BASE,
                     "rm",
                     "--force",
                     "--volumes",
@@ -2269,7 +2313,8 @@ class ProductionOperationTests(unittest.TestCase):
 
             def fake_run(arguments, *, timeout, stdin=-3):  # noqa: ANN001, ARG001
                 nonlocal inventory_calls
-                if arguments[1:3] == ["image", "ls"]:
+                docker = arguments[len(MODULE.DOCKER_BASE) :]
+                if docker[:2] == ["image", "ls"]:
                     inventory_calls += 1
                     if inventory_calls == 1:
                         return "\n".join(
@@ -2284,9 +2329,9 @@ class ProductionOperationTests(unittest.TestCase):
                             fixture.runtime_image_ids["app"],
                         ]
                     )
-                if arguments[1:3] == ["image", "inspect"]:
-                    return json.dumps([inspections[arguments[3]]])
-                if arguments[1] == "load":
+                if docker[:2] == ["image", "inspect"]:
+                    return json.dumps([inspections[docker[2]]])
+                if docker[:2] == ["image", "load"]:
                     load_calls.append(list(arguments))
                     return "loaded"
                 raise AssertionError(arguments)
@@ -2312,7 +2357,7 @@ class ProductionOperationTests(unittest.TestCase):
                     for role in MODULE.IMAGE_ROLES
                 )
             )
-            self.assertEqual(len(load_calls), len(MODULE.IMAGE_ROLES))
+            self.assertEqual(len(load_calls), 2)
 
             exact = {
                 image.content_identity: ()
@@ -2379,7 +2424,7 @@ class ProductionOperationTests(unittest.TestCase):
                 for image in fixture.manifest.image_artifacts.values()
             }
             partial = dict(empty)
-            for role in ("app", "postgres"):
+            for role in ("app", "postgres", "redis"):
                 partial[
                     fixture.manifest.image_artifacts[role].content_identity
                 ] = (
@@ -2404,7 +2449,16 @@ class ProductionOperationTests(unittest.TestCase):
 
             def load(arguments, *, timeout):  # noqa: ANN001, ARG001
                 nonlocal fail_once
-                self.assertEqual(arguments[0:2], [MODULE.DOCKER, "load"])
+                self.assertEqual(
+                    arguments[: len(MODULE.DOCKER_BASE)],
+                    list(MODULE.DOCKER_BASE),
+                )
+                self.assertEqual(
+                    arguments[
+                        len(MODULE.DOCKER_BASE) : len(MODULE.DOCKER_BASE) + 2
+                    ],
+                    ["image", "load"],
+                )
                 load_attempts.append(Path(arguments[-1]).name)
                 if (
                     fail_once
@@ -2421,7 +2475,7 @@ class ProductionOperationTests(unittest.TestCase):
                 patch.object(
                     MODULE,
                     "_enumerate_local_images",
-                    side_effect=[empty, partial, complete],
+                    side_effect=[empty, partial, partial, complete],
                 ),
                 patch.object(MODULE, "_run", side_effect=load),
                 patch.object(
@@ -2437,9 +2491,9 @@ class ProductionOperationTests(unittest.TestCase):
                     MODULE.load_images(fixture.manifest, paths)
                 evidence = MODULE.load_images(fixture.manifest, paths)
             self.assertEqual(evidence, [{"status": "validated"}])
-            self.assertEqual(len(load_attempts), 7)
+            self.assertEqual(len(load_attempts), 4)
             self.assertEqual(
-                load_attempts[-4:],
+                load_attempts,
                 [
                     "app-image.tar",
                     "postgres-image.tar",
@@ -2606,7 +2660,8 @@ class ProductionOperationTests(unittest.TestCase):
                 calls.append(list(arguments))
                 joined = " ".join(arguments)
                 sql = arguments[-1] if "-Atqc" in arguments else ""
-                if arguments[:2] == [MODULE.DOCKER, "ps"]:
+                docker = arguments[len(MODULE.DOCKER_BASE) :]
+                if docker[:1] == ["ps"]:
                     return ""
                 if " compose " in f" {joined} " and " ps " in f" {joined} ":
                     return "a" * 64 if database_created else ""
@@ -2614,7 +2669,7 @@ class ProductionOperationTests(unittest.TestCase):
                     lifecycle_events.append("compose-create")
                     database_created = True
                     return ""
-                if arguments[:2] == [MODULE.DOCKER, "start"]:
+                if docker[:1] == ["start"]:
                     lifecycle_events.append("docker-start")
                     database_running = True
                     return arguments[-1]
@@ -2854,7 +2909,8 @@ class ProductionOperationTests(unittest.TestCase):
                     calls.append(list(arguments))
                     joined = " ".join(arguments)
                     sql = arguments[-1] if "-Atqc" in arguments else ""
-                    if arguments[:2] == [MODULE.DOCKER, "ps"]:
+                    docker = arguments[len(MODULE.DOCKER_BASE) :]
+                    if docker[:1] == ["ps"]:
                         return ""
                     if " compose " in f" {joined} " and " ps " in f" {joined} ":
                         return "c" * 64
@@ -2992,6 +3048,671 @@ class ProductionOperationTests(unittest.TestCase):
                 (TARGET_REVISION,),
             )
 
+    def test_runtime_command_contract_is_isolated(self) -> None:
+        self.assertEqual(
+            MODULE.DOCKER_BASE,
+            (
+                "/usr/bin/docker",
+                "--host=unix:///run/docker.sock",
+            ),
+        )
+        self.assertEqual(MODULE._SAFE_ENV["DOCKER_CONFIG"], "/nonexistent")
+        self.assertEqual(MODULE._SAFE_GIT_ENV["GIT_NO_REPLACE_OBJECTS"], "1")
+        self.assertIn("--no-replace-objects", MODULE.GIT_BASE)
+        self.assertIn("--no-optional-locks", MODULE.GIT_BASE)
+        self.assertIn("core.fsmonitor=false", MODULE.GIT_BASE)
+        self.assertIn("core.untrackedCache=false", MODULE.GIT_BASE)
+        self.assertIn("core.hooksPath=/dev/null", MODULE.GIT_BASE)
+        self.assertEqual(MODULE.REPO_ROOT, Path(MODULE.__file__).resolve().parents[1])
+
+    def test_controller_eof_before_mutation_is_rejected(self) -> None:
+        read_fd, write_fd = os.pipe()
+        os.close(write_fd)
+        try:
+            with self.assertRaisesRegex(
+                MODULE.ProductionOperationCancellation,
+                "before mutation",
+            ):
+                with MODULE._controller_authority_guard(read_fd):
+                    self.fail("closed authority entered mutation")
+        finally:
+            os.close(read_fd)
+
+    def test_controller_pipe_rejects_a_locally_retained_writer(self) -> None:
+        read_fd, write_fd = os.pipe()
+        try:
+            with self.assertRaisesRegex(
+                MODULE.ProductionOperationError,
+                "writer is retained locally",
+            ):
+                with MODULE._controller_authority_guard(read_fd):
+                    self.fail("unsafe controller pipe entered mutation")
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+    def test_controller_eof_during_command_kills_exact_process(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            pid_path = Path(raw) / "pid"
+            with disconnectable_control_pipe() as (
+                read_fd,
+                holder,
+            ):
+                def disconnect() -> None:
+                    time.sleep(0.15)
+                    holder.terminate()
+                    holder.wait(timeout=2)
+
+                closer = threading.Thread(target=disconnect)
+                closer.start()
+                with self.assertRaises(
+                    MODULE.ProductionOperationCancellation
+                ):
+                    with MODULE._controller_authority_guard(read_fd):
+                        MODULE._run(
+                            [
+                                "/usr/bin/python3",
+                                "-I",
+                                "-B",
+                                "-c",
+                                (
+                                    "from pathlib import Path;"
+                                    f"Path({str(pid_path)!r}).write_text("
+                                    "__import__('os').getpid().__str__());"
+                                    "__import__('time').sleep(60)"
+                                ),
+                            ],
+                            timeout=5,
+                        )
+                closer.join(timeout=2)
+            self.assertFalse(closer.is_alive())
+            pid = int(pid_path.read_text(encoding="ascii"))
+            deadline = time.monotonic() + 2
+            while Path(f"/proc/{pid}").exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertFalse(Path(f"/proc/{pid}").exists())
+
+    def test_controller_signal_guard_is_reentrant_and_restored(self) -> None:
+        before = {
+            signum: signal.getsignal(signum)
+            for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM)
+        }
+        with live_control_pipe() as control_fd:
+            with self.assertRaises(
+                MODULE.ProductionOperationCancellation
+            ):
+                with MODULE._controller_authority_guard(control_fd):
+                    first = signal.getsignal(signal.SIGINT)
+                    self.assertTrue(callable(first))
+                    try:
+                        first(signal.SIGINT, None)
+                    except MODULE.ProductionOperationCancellation:
+                        second = signal.getsignal(signal.SIGTERM)
+                        self.assertTrue(callable(second))
+                        second(signal.SIGTERM, None)
+                        raise
+        self.assertEqual(
+            {
+                signum: signal.getsignal(signum)
+                for signum in before
+            },
+            before,
+        )
+
+    def test_operator_signal_remains_latched_after_retry_catches_it(self) -> None:
+        with (
+            live_control_pipe() as control_fd,
+            patch.object(MODULE.subprocess, "Popen") as spawn,
+            self.assertRaisesRegex(
+                MODULE.ProductionOperationCancellation,
+                "SIGTERM",
+            ),
+        ):
+            with MODULE._controller_authority_guard(control_fd):
+                handler = signal.getsignal(signal.SIGTERM)
+                self.assertTrue(callable(handler))
+                try:
+                    handler(signal.SIGTERM, None)
+                except MODULE.ProductionOperationError:
+                    pass
+                MODULE._run(
+                    [
+                        "/usr/bin/python3",
+                        "-I",
+                        "-B",
+                        "-c",
+                        "raise SystemExit(0)",
+                    ],
+                    timeout=5,
+                )
+        spawn.assert_not_called()
+
+    def test_controller_eof_is_deferred_until_reconciliation_finishes(
+        self,
+    ) -> None:
+        completed_cleanup = False
+        with disconnectable_control_pipe() as (read_fd, holder):
+            with self.assertRaisesRegex(
+                MODULE.ProductionOperationCancellation,
+                "liveness was lost",
+            ):
+                with MODULE._controller_authority_guard(read_fd) as authority:
+                    with MODULE._late_reconciliation_scope():
+                        holder.terminate()
+                        holder.wait(timeout=2)
+                        self.assertTrue(authority.lost_event.wait(timeout=2))
+                        time.sleep(0.1)
+                        completed_cleanup = True
+        self.assertTrue(completed_cleanup)
+
+    def test_incremental_runner_rejects_flood_and_timeout(self) -> None:
+        with (
+            patch.object(MODULE, "MAX_COMMAND_OUTPUT_BYTES", 64),
+            self.assertRaisesRegex(
+                MODULE.ProductionOperationError,
+                "stdout exceeded",
+            ),
+        ):
+            MODULE._run(
+                [
+                    "/usr/bin/python3",
+                    "-I",
+                    "-B",
+                    "-c",
+                    "print('x' * 10000)",
+                ],
+                timeout=5,
+            )
+        with self.assertRaisesRegex(
+            MODULE.ProductionOperationError,
+            "timed out",
+        ):
+            MODULE._run(
+                [
+                    "/usr/bin/python3",
+                    "-I",
+                    "-B",
+                    "-c",
+                    "import time; time.sleep(5)",
+                ],
+                timeout=1,
+            )
+
+    def test_incremental_runner_kills_detached_setsid_child(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            pid_path = Path(raw) / "detached-pid"
+            code = (
+                "import subprocess;"
+                "from pathlib import Path;"
+                "p=subprocess.Popen("
+                "['/usr/bin/python3','-I','-B','-c',"
+                "'import time;time.sleep(60)'],"
+                "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,"
+                "stderr=subprocess.DEVNULL,start_new_session=True);"
+                f"Path({str(pid_path)!r}).write_text(str(p.pid))"
+            )
+            with self.assertRaisesRegex(
+                MODULE.ProductionOperationError,
+                "retained a descendant",
+            ):
+                MODULE._run(
+                    ["/usr/bin/python3", "-I", "-B", "-c", code],
+                    timeout=5,
+                )
+            pid = int(pid_path.read_text(encoding="ascii"))
+            deadline = time.monotonic() + 2
+            while Path(f"/proc/{pid}").exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertFalse(Path(f"/proc/{pid}").exists())
+
+    def test_incremental_runner_reaps_rapid_double_fork_zombies(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            child_path = Path(raw) / "child"
+            grandchild_path = Path(raw) / "grandchild"
+            before = MODULE._direct_child_baseline()
+            code = (
+                "import os,time;"
+                "from pathlib import Path;"
+                "pid=os.fork();"
+                "\nif pid==0:"
+                "\n os.setsid(); grand=os.fork();"
+                f"\n if grand==0: Path({str(grandchild_path)!r}).write_text("
+                "str(os.getpid())); os._exit(0)"
+                f"\n Path({str(child_path)!r}).write_text(str(os.getpid()));"
+                " os._exit(0)"
+                "\ntime.sleep(.3);print('ok')"
+            )
+            self.assertEqual(
+                MODULE._run(
+                    ["/usr/bin/python3", "-I", "-B", "-c", code],
+                    timeout=5,
+                ),
+                "ok",
+            )
+            pids = {
+                int(child_path.read_text(encoding="ascii")),
+                int(grandchild_path.read_text(encoding="ascii")),
+            }
+            deadline = time.monotonic() + 2
+            while (
+                any(Path(f"/proc/{pid}").exists() for pid in pids)
+                and time.monotonic() < deadline
+            ):
+                time.sleep(0.02)
+            self.assertTrue(
+                all(not Path(f"/proc/{pid}").exists() for pid in pids)
+            )
+            self.assertEqual(MODULE._direct_child_baseline(), before)
+
+    def test_incremental_timeout_kills_setsided_double_fork(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            pid_path = Path(raw) / "grandchild-pid"
+            temporary_pid_path = Path(raw) / "grandchild-pid.partial"
+            sentinel = Path(raw) / "grandchild-survived"
+            code = (
+                "import os,signal,time\n"
+                "if os.fork()==0:\n"
+                " os.setsid()\n"
+                " if os.fork()!=0: time.sleep(60);os._exit(0)\n"
+                " signal.signal(signal.SIGTERM,signal.SIG_IGN)\n"
+                f" with open({str(temporary_pid_path)!r},'w') as f:"
+                " f.write(str(os.getpid()));f.flush();os.fsync(f.fileno())\n"
+                f" os.replace({str(temporary_pid_path)!r},"
+                f"{str(pid_path)!r})\n"
+                " time.sleep(1.3)\n"
+                f" open({str(sentinel)!r},'wb').write(b'survived')\n"
+                " os._exit(0)\n"
+                f"while not os.path.exists({str(pid_path)!r}):"
+                " time.sleep(0.005)\n"
+                "time.sleep(60)\n"
+            )
+            with (
+                patch.object(MODULE, "PROCESS_TERM_GRACE_SECONDS", 0.1),
+                patch.object(MODULE, "PROCESS_KILL_GRACE_SECONDS", 0.1),
+                patch.object(
+                    MODULE,
+                    "PROCESS_TREE_QUIESCENCE_SECONDS",
+                    0.05,
+                ),
+                self.assertRaisesRegex(
+                    MODULE.ProductionOperationError,
+                    "timed out",
+                ),
+            ):
+                MODULE._run(
+                    ["/usr/bin/python3", "-I", "-B", "-c", code],
+                    timeout=1,
+                )
+            time.sleep(0.5)
+            self.assertTrue(pid_path.is_file())
+            self.assertFalse(sentinel.exists())
+            self.assertFalse(
+                Path(
+                    f"/proc/{pid_path.read_text(encoding='ascii')}"
+                ).exists()
+            )
+
+    def test_identity_bound_signal_refuses_reused_pid(self) -> None:
+        identity = MODULE.ProcessIdentity(
+            pid=4242,
+            parent_pid=os.getpid(),
+            process_group=4242,
+            session_id=4242,
+            start_time=100,
+            state="S",
+        )
+        reused = MODULE.ProcessIdentity(
+            pid=4242,
+            parent_pid=os.getpid(),
+            process_group=4242,
+            session_id=4242,
+            start_time=101,
+            state="S",
+        )
+        with (
+            patch.object(MODULE, "_process_identity", return_value=reused),
+            patch.object(MODULE.os, "pidfd_open") as pidfd_open,
+        ):
+            MODULE._signal_identity(identity, signal.SIGKILL)
+        pidfd_open.assert_not_called()
+
+    def test_owned_processes_refuses_reused_root_pid(self) -> None:
+        root_identity = MODULE.ProcessIdentity(
+            pid=4242,
+            parent_pid=os.getpid(),
+            process_group=4242,
+            session_id=4242,
+            start_time=100,
+            state="S",
+        )
+        reused = MODULE.ProcessIdentity(
+            pid=4242,
+            parent_pid=os.getpid(),
+            process_group=4242,
+            session_id=4242,
+            start_time=101,
+            state="S",
+        )
+        with patch.object(
+            MODULE,
+            "_process_snapshot",
+            return_value={reused.pid: reused},
+        ):
+            self.assertEqual(
+                MODULE._owned_processes(
+                    root_identity,
+                    baseline_children=frozenset(),
+                ),
+                (),
+            )
+
+    def test_root_pidfd_contains_when_proc_identity_is_unavailable(
+        self,
+    ) -> None:
+        opened: list[tuple[int, int]] = []
+        real_pidfd_open = os.pidfd_open
+
+        def capture_pidfd(pid: int, flags: int = 0) -> int:
+            descriptor = real_pidfd_open(pid, flags)
+            opened.append((pid, descriptor))
+            return descriptor
+
+        with (
+            patch.object(
+                MODULE,
+                "_direct_child_baseline",
+                return_value=frozenset(),
+            ),
+            patch.object(
+                MODULE,
+                "_read_process_identity",
+                side_effect=MODULE.ProductionOperationError(
+                    "forced subprocess identity failure"
+                ),
+            ),
+            patch.object(
+                MODULE.os,
+                "pidfd_open",
+                side_effect=capture_pidfd,
+            ),
+            self.assertRaisesRegex(
+                MODULE.ProductionOperationError,
+                "forced subprocess identity failure",
+            ),
+        ):
+            MODULE._run(
+                [
+                    "/usr/bin/python3",
+                    "-I",
+                    "-B",
+                    "-c",
+                    "import time;time.sleep(60)",
+                ],
+                timeout=5,
+            )
+        self.assertEqual(len(opened), 1)
+        pid, descriptor = opened[0]
+        self.assertFalse(Path(f"/proc/{pid}").exists())
+        with self.assertRaises(OSError):
+            os.fstat(descriptor)
+
+    def test_runner_cleanup_closes_streams_and_pidfd_after_baseexception(
+        self,
+    ) -> None:
+        class FatalRunner(BaseException):
+            pass
+
+        class FatalSelectorClose(BaseException):
+            pass
+
+        with tempfile.TemporaryDirectory() as raw:
+            pid_path = Path(raw) / "pid"
+            original = FatalRunner("original runner interruption")
+            selector = MODULE.selectors.DefaultSelector()
+            selector_close_calls: list[bool] = []
+            spawned: list[subprocess.Popen[bytes]] = []
+            opened: list[int] = []
+            real_popen = subprocess.Popen
+            real_pidfd_open = os.pidfd_open
+
+            class HostileSelector:
+                def register(self, *args, **kwargs):  # noqa: ANN002, ANN003
+                    return selector.register(*args, **kwargs)
+
+                def unregister(self, *args, **kwargs):  # noqa: ANN002, ANN003
+                    return selector.unregister(*args, **kwargs)
+
+                def select(self, *_args, **_kwargs):  # noqa: ANN002, ANN003
+                    deadline = time.monotonic() + 2
+                    while (
+                        not pid_path.exists()
+                        and time.monotonic() < deadline
+                    ):
+                        time.sleep(0.01)
+                    raise original
+
+                def close(self) -> None:
+                    selector.close()
+                    selector_close_calls.append(True)
+                    raise FatalSelectorClose("forced selector close failure")
+
+            def capture_spawn(*args, **kwargs):  # noqa: ANN002, ANN003
+                process = real_popen(*args, **kwargs)
+                spawned.append(process)
+                return process
+
+            def capture_pidfd(pid: int, flags: int = 0) -> int:
+                descriptor = real_pidfd_open(pid, flags)
+                opened.append(descriptor)
+                return descriptor
+
+            with (
+                patch.object(
+                    MODULE.selectors,
+                    "DefaultSelector",
+                    return_value=HostileSelector(),
+                ),
+                patch.object(
+                    MODULE.subprocess,
+                    "Popen",
+                    side_effect=capture_spawn,
+                ),
+                patch.object(
+                    MODULE.os,
+                    "pidfd_open",
+                    side_effect=capture_pidfd,
+                ),
+                self.assertRaises(FatalRunner) as raised,
+            ):
+                MODULE._run(
+                    [
+                        "/usr/bin/python3",
+                        "-I",
+                        "-B",
+                        "-c",
+                        (
+                            "from pathlib import Path;"
+                            f"Path({str(pid_path)!r}).write_text("
+                            "__import__('os').getpid().__str__());"
+                            "__import__('time').sleep(60)"
+                        ),
+                    ],
+                    timeout=5,
+                )
+            self.assertIs(raised.exception, original)
+            self.assertEqual(selector_close_calls, [True])
+            self.assertEqual(len(spawned), 1)
+            self.assertTrue(spawned[0].stdout.closed)
+            self.assertTrue(spawned[0].stderr.closed)
+            self.assertEqual(len(opened), 1)
+            with self.assertRaises(OSError):
+                os.fstat(opened[0])
+            self.assertFalse(Path(f"/proc/{spawned[0].pid}").exists())
+            self.assertIn(
+                "FatalSelectorClose",
+                "\n".join(getattr(raised.exception, "__notes__", ())),
+            )
+
+    def test_incremental_runner_preserves_baseexception_after_cleanup_error(
+        self,
+    ) -> None:
+        class FatalRunner(BaseException):
+            pass
+
+        with tempfile.TemporaryDirectory() as raw:
+            pid_path = Path(raw) / "pid"
+            original = FatalRunner("original runner interruption")
+            terminate = MODULE._terminate_process_tree
+
+            def abort_select(*_args, **_kwargs):  # noqa: ANN002, ANN003
+                deadline = time.monotonic() + 2
+                while not pid_path.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                raise original
+
+            def terminate_then_fail(*args, **kwargs):  # noqa: ANN002, ANN003
+                terminate(*args, **kwargs)
+                raise MODULE.ProductionOperationError(
+                    "simulated containment report failure"
+                )
+
+            with (
+                patch.object(
+                    MODULE.selectors.DefaultSelector,
+                    "select",
+                    side_effect=abort_select,
+                ),
+                patch.object(
+                    MODULE,
+                    "_terminate_process_tree",
+                    side_effect=terminate_then_fail,
+                ),
+                self.assertRaises(FatalRunner) as raised,
+            ):
+                MODULE._run(
+                    [
+                        "/usr/bin/python3",
+                        "-I",
+                        "-B",
+                        "-c",
+                        (
+                            "from pathlib import Path;"
+                            f"Path({str(pid_path)!r}).write_text("
+                            "__import__('os').getpid().__str__());"
+                            "__import__('time').sleep(60)"
+                        ),
+                    ],
+                    timeout=5,
+                )
+            self.assertIs(raised.exception, original)
+            pid = int(pid_path.read_text(encoding="ascii"))
+            self.assertFalse(Path(f"/proc/{pid}").exists())
+            self.assertIn(
+                "containment cleanup also failed closed",
+                "\n".join(getattr(raised.exception, "__notes__", ())),
+            )
+
+    def test_one_shot_cleanup_runs_for_baseexception_reconciliation(self) -> None:
+        class FatalAudit(BaseException):
+            pass
+
+        prefix = [
+            *MODULE.DOCKER_BASE,
+            "compose",
+            "--env-file",
+            "/tmp/runtime.env",
+            "--file",
+            "/tmp/compose.yml",
+        ]
+        manifest = Mock()
+        manifest.operation_id = OPERATION_ID
+        manifest.services = {"database": "database"}
+        canonical = Mock()
+        canonical.project_root = Path("/tmp/project")
+        canonical.compose = Path("/tmp/compose.yml")
+        canonical.runtime_env = Path("/tmp/runtime.env")
+        cleanup_depths: list[int] = []
+
+        def cleanup(*_args, **_kwargs):  # noqa: ANN002, ANN003
+            cleanup_depths.append(MODULE._LATE_RECONCILIATION_DEPTH)
+            raise MODULE.ProductionOperationError(
+                "simulated reconciliation failure"
+            )
+
+        with (
+            patch.object(
+                MODULE,
+                "_canonical_operation_paths",
+                return_value=canonical,
+            ),
+            patch.object(MODULE, "_oneoff_ids", return_value=[]),
+            patch.object(MODULE, "_run", side_effect=FatalAudit("stop")),
+            patch.object(
+                MODULE,
+                "_cleanup_operation_oneoffs",
+                side_effect=cleanup,
+            ) as reconciler,
+            self.assertRaises(FatalAudit) as raised,
+        ):
+            MODULE._compose_one_shot(
+                prefix,
+                manifest,
+                profile="prepare",
+                service="oneoff",
+                timeout=30,
+            )
+        reconciler.assert_called_once()
+        self.assertEqual(cleanup_depths, [1])
+        self.assertIn(
+            "reconciliation also failed closed",
+            "\n".join(getattr(raised.exception, "__notes__", ())),
+        )
+
+    def test_late_image_reconciliation_preserves_original_baseexception(
+        self,
+    ) -> None:
+        class FatalLoad(BaseException):
+            pass
+
+        manifest = Mock()
+        manifest.release_sha = "a" * 40
+        manifest.postgres_runtime_uid = 999
+        manifest.postgres_runtime_gid = 999
+        manifest.image_artifacts = {
+            role: Mock(
+                artifact_kind=f"{role}-image",
+                content_identity=f"identity-{role}",
+            )
+            for role in MODULE.IMAGE_ROLES
+        }
+        paths = {
+            f"{role}-image": Path(f"/tmp/{role}-image.tar")
+            for role in MODULE.IMAGE_ROLES
+        }
+        empty = {
+            f"identity-{role}": ()
+            for role in MODULE.IMAGE_ROLES
+        }
+        original = FatalLoad("original image-load interruption")
+        with (
+            patch.object(MODULE, "_docker_archive_identity"),
+            patch.object(
+                MODULE,
+                "_enumerate_local_images",
+                side_effect=[
+                    empty,
+                    MODULE.ProductionOperationError(
+                        "late reconciliation failed"
+                    ),
+                ],
+            ),
+            patch.object(MODULE, "_run", side_effect=original),
+            patch.object(MODULE, "LATE_IMAGE_RECONCILIATION_ATTEMPTS", 1),
+            self.assertRaises(FatalLoad) as raised,
+        ):
+            MODULE.load_images(manifest, paths)
+        self.assertIs(raised.exception, original)
+
     def test_execute_resumes_from_durable_phase_without_reloading_images(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             fixture = OperationFixture(Path(raw))
@@ -3008,6 +3729,7 @@ class ProductionOperationTests(unittest.TestCase):
                     "_validate_runtime_image_set",
                     return_value=staged_images,
                 ),
+                live_control_pipe() as control_fd,
             ):
                 MODULE.execute_stage(
                     fixture.manifest,
@@ -3016,6 +3738,7 @@ class ProductionOperationTests(unittest.TestCase):
                     confirm=MODULE.stage_confirmation_phrase(
                         fixture.manifest
                     ),
+                    control_fd=control_fd,
                 )
             secure_file(
                 fixture.incoming
@@ -3023,12 +3746,15 @@ class ProductionOperationTests(unittest.TestCase):
                 fixture.runtime_archive,
             )
 
+            class FatalAudit(BaseException):
+                pass
+
             def crash_after_database_start(*args, **kwargs):  # noqa: ANN002, ANN003
                 kwargs["phase_done"](
                     "database-started",
                     {"container_id": "a" * 64},
                 )
-                raise MODULE.ProductionOperationError("injected crash")
+                raise FatalAudit("injected crash")
 
             with (
                 patch.object(
@@ -3041,13 +3767,15 @@ class ProductionOperationTests(unittest.TestCase):
                     "prepare_database",
                     side_effect=crash_after_database_start,
                 ),
-                self.assertRaises(MODULE.ProductionOperationError),
+                live_control_pipe() as control_fd,
+                self.assertRaises(FatalAudit),
             ):
                 MODULE.execute(
                     fixture.manifest,
                     operation_root=fixture.operation_root,
                     required_uid=os.geteuid(),
                     confirm=MODULE.confirmation_phrase(fixture.manifest),
+                    control_fd=control_fd,
                 )
 
             state = MODULE._load_or_create_state(
@@ -3133,12 +3861,14 @@ class ProductionOperationTests(unittest.TestCase):
                     "prepare_database",
                     side_effect=complete_resume,
                 ),
+                live_control_pipe() as control_fd,
             ):
                 result = MODULE.execute(
                     fixture.manifest,
                     operation_root=fixture.operation_root,
                     required_uid=os.geteuid(),
                     confirm=MODULE.confirmation_phrase(fixture.manifest),
+                    control_fd=control_fd,
                 )
             rematerialize.assert_not_called()
             reload_images.assert_not_called()

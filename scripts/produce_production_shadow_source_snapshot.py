@@ -18,16 +18,25 @@ import fcntl
 import gzip
 import hashlib
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
 import selectors
+import signal
 import stat
 import subprocess
+import sys
 import tarfile
+import threading
 import time
 from typing import Any, Callable, Iterator, Mapping, Sequence
 from uuid import UUID
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.production_shadow_cutover_controller import PRODUCTION_VHOSTS
 from scripts.wa_ir_production_operation import (
@@ -37,7 +46,6 @@ from scripts.wa_ir_production_operation import (
     ProductionOperationError,
     StreamDigest,
     _fingerprint_from_streams,
-    _run_streaming_sha256,
 )
 
 
@@ -51,6 +59,22 @@ MAX_JSON_BYTES = 2 * 1024 * 1024
 MAX_ARTIFACT_BYTES = 64 * 1024 * 1024 * 1024
 MAX_COMMAND_OUTPUT_BYTES = 8 * 1024 * 1024
 MAX_COMMAND_ERROR_BYTES = 2 * 1024 * 1024
+PROCESS_GROUP_TERM_SECONDS = 1.0
+PROCESS_POLL_SECONDS = 0.05
+PROCESS_TREE_QUIESCENCE_SECONDS = 0.1
+MAX_PROCESS_SNAPSHOT_MEMBERS = 131_072
+MAX_PROCESS_TREE_MEMBERS = 4_096
+PR_SET_CHILD_SUBREAPER = 36
+SCRATCH_CLEANUP_TIMEOUT_SECONDS = 3.0
+SCRATCH_CLEANUP_STABLE_OBSERVATIONS = 3
+SCRATCH_CLEANUP_QUIESCENCE_SECONDS = 0.5
+_BOUNDED_PROCESS_LOCK = threading.Lock()
+SCRATCH_RECONCILIATION_ROOT = Path(
+    "/root/secure-envs/trading-bot/three-site-production-shadow"
+)
+SCRATCH_RECONCILIATION_SCHEMA = (
+    "production-shadow-source-scratch-reconciliation-v1"
+)
 MAX_TREE_MEMBERS = 250_000
 MAX_PATH_BYTES = 4096
 MAX_SNAPSHOT_ATTEMPTS = 3
@@ -276,8 +300,808 @@ class SourceSnapshotError(RuntimeError):
     """A redacted fail-closed source snapshot error."""
 
 
+class SourceSnapshotCancellation(SourceSnapshotError):
+    """The controller connection or source process authority was lost."""
+
+
 class UnstableTreeError(SourceSnapshotError):
     """A retryable source tree stability failure."""
+
+
+def _anonymous_read_pipe_identity(
+    descriptor: int,
+    *,
+    label: str,
+) -> tuple[int, int]:
+    if type(descriptor) is not int or descriptor < 0:
+        raise SourceSnapshotError(f"{label} descriptor is invalid")
+    try:
+        metadata = os.fstat(descriptor)
+        flags = fcntl.fcntl(descriptor, fcntl.F_GETFL)
+        target = os.readlink(f"/proc/self/fd/{descriptor}")
+    except OSError as exc:
+        raise SourceSnapshotError(f"{label} pipe is unavailable") from exc
+    if (
+        not stat.S_ISFIFO(metadata.st_mode)
+        or flags & os.O_ACCMODE != os.O_RDONLY
+        or target != f"pipe:[{metadata.st_ino}]"
+    ):
+        raise SourceSnapshotError(
+            f"{label} must be an anonymous read-only pipe"
+        )
+    try:
+        entries = tuple(Path("/proc/self/fd").iterdir())
+    except OSError as exc:
+        raise SourceSnapshotError(
+            f"{label} descriptor closure cannot be inspected"
+        ) from exc
+    for entry in entries:
+        if not entry.name.isdecimal() or int(entry.name, 10) == descriptor:
+            continue
+        candidate = int(entry.name, 10)
+        try:
+            observed = os.fstat(candidate)
+            observed_flags = fcntl.fcntl(candidate, fcntl.F_GETFL)
+        except OSError:
+            continue
+        if (
+            (observed.st_dev, observed.st_ino)
+            == (metadata.st_dev, metadata.st_ino)
+            and observed_flags & os.O_ACCMODE
+            in {os.O_WRONLY, os.O_RDWR}
+        ):
+            raise SourceSnapshotError(
+                f"{label} writer end is held by the worker"
+            )
+    return metadata.st_dev, metadata.st_ino
+
+
+@dataclass(frozen=True)
+class BoundedCommandResult:
+    returncode: int
+    stdout: bytes
+    stderr: bytes
+    stdout_bytes: int
+    stdout_records: int
+
+
+@dataclass(frozen=True)
+class ProcessIdentity:
+    pid: int
+    parent_pid: int
+    process_group: int
+    start_time: int
+    state: str
+
+    @property
+    def key(self) -> tuple[int, int]:
+        return self.pid, self.start_time
+
+
+def _process_identity(pid: int) -> ProcessIdentity | None:
+    try:
+        payload = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+        fields = payload[payload.rindex(") ") + 2 :].split()
+        if len(fields) < 20:
+            return None
+        return ProcessIdentity(
+            pid=pid,
+            parent_pid=int(fields[1], 10),
+            process_group=int(fields[2], 10),
+            start_time=int(fields[19], 10),
+            state=fields[0],
+        )
+    except (OSError, UnicodeError, ValueError):
+        return None
+
+
+def _process_snapshot() -> dict[int, ProcessIdentity]:
+    observed: dict[int, ProcessIdentity] = {}
+    scanned = 0
+    try:
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdecimal():
+                continue
+            scanned += 1
+            if scanned > MAX_PROCESS_SNAPSHOT_MEMBERS:
+                raise SourceSnapshotError(
+                    "subprocess inventory exceeds its process bound"
+                )
+            identity = _process_identity(int(entry.name, 10))
+            if identity is not None:
+                observed[identity.pid] = identity
+    except SourceSnapshotError:
+        raise
+    except OSError as exc:
+        raise SourceSnapshotError(
+            "subprocess ownership inventory is unavailable"
+        ) from exc
+    return observed
+
+
+def _enable_child_subreaper() -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise SourceSnapshotError(
+            f"child subreaper setup failed with errno {error}"
+        )
+
+
+def _direct_child_baseline() -> frozenset[tuple[int, int]]:
+    owner = os.getpid()
+    return frozenset(
+        identity.key
+        for identity in _process_snapshot().values()
+        if identity.parent_pid == owner
+    )
+
+
+def _owned_processes(
+    root_identity: ProcessIdentity,
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+    tracked: set[ProcessIdentity] | None = None,
+) -> set[ProcessIdentity]:
+    snapshot = _process_snapshot()
+    owned_ids: set[int] = set()
+    observed_root = snapshot.get(root_identity.pid)
+    if (
+        observed_root is not None
+        and observed_root.start_time == root_identity.start_time
+    ):
+        owned_ids.add(root_identity.pid)
+    if tracked is not None:
+        for identity in tracked:
+            current = snapshot.get(identity.pid)
+            if (
+                current is not None
+                and current.start_time == identity.start_time
+            ):
+                owned_ids.add(identity.pid)
+    owner = os.getpid()
+    for identity in snapshot.values():
+        if (
+            identity.pid != root_identity.pid
+            and identity.parent_pid == owner
+            and identity.key not in baseline_children
+        ):
+            owned_ids.add(identity.pid)
+    changed = True
+    while changed:
+        changed = False
+        for identity in snapshot.values():
+            if (
+                identity.pid not in owned_ids
+                and identity.parent_pid in owned_ids
+            ):
+                owned_ids.add(identity.pid)
+                changed = True
+    owned = {
+        identity
+        for pid, identity in snapshot.items()
+        if pid in owned_ids
+    }
+    if tracked is not None:
+        if len(tracked | owned) > MAX_PROCESS_TREE_MEMBERS:
+            raise SourceSnapshotError(
+                "subprocess tree exceeds its process bound"
+            )
+        tracked.update(owned)
+    return owned
+
+
+def _identity_exists(identity: ProcessIdentity) -> bool:
+    current = _process_identity(identity.pid)
+    return (
+        current is not None
+        and current.start_time == identity.start_time
+    )
+
+
+def _identity_is_live(identity: ProcessIdentity) -> bool:
+    current = _process_identity(identity.pid)
+    return (
+        current is not None
+        and current.start_time == identity.start_time
+        and current.state != "Z"
+    )
+
+
+def _reap_owned_zombies(
+    tracked: set[ProcessIdentity],
+    *,
+    root_pid: int,
+) -> None:
+    for identity in tuple(tracked):
+        if identity.pid == root_pid:
+            continue
+        current = _process_identity(identity.pid)
+        if (
+            current is None
+            or current.start_time != identity.start_time
+            or current.state != "Z"
+        ):
+            continue
+        try:
+            waited, _status = os.waitpid(identity.pid, os.WNOHANG)
+        except ChildProcessError:
+            continue
+        except OSError as exc:
+            raise SourceSnapshotError(
+                "owned subprocess zombie could not be reaped"
+            ) from exc
+        if waited not in {0, identity.pid}:
+            raise SourceSnapshotError(
+                "owned subprocess reap returned an unexpected PID"
+            )
+
+
+def _signal_process_identity(
+    identity: ProcessIdentity,
+    signum: int,
+) -> None:
+    current = _process_identity(identity.pid)
+    if current is None or current.start_time != identity.start_time:
+        return
+    try:
+        descriptor = os.pidfd_open(identity.pid, 0)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise SourceSnapshotError(
+            "identity-bound subprocess handle cannot be opened"
+        ) from exc
+    try:
+        refreshed = _process_identity(identity.pid)
+        if refreshed is None or refreshed.start_time != identity.start_time:
+            return
+        _signal_process_handle(descriptor, signum)
+    except ProcessLookupError:
+        return
+    finally:
+        os.close(descriptor)
+
+
+def _signal_process_handle(descriptor: int, signum: int) -> None:
+    try:
+        signal.pidfd_send_signal(descriptor, signum)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise SourceSnapshotError(
+            "identity-bound subprocess signal failed"
+        ) from exc
+
+
+def _signal_owned_process(
+    identity: ProcessIdentity,
+    signum: int,
+    *,
+    root_identity: ProcessIdentity,
+    root_descriptor: int | None,
+) -> None:
+    if identity.key == root_identity.key and root_descriptor is not None:
+        _signal_process_handle(root_descriptor, signum)
+        return
+    _signal_process_identity(identity, signum)
+
+
+def _terminate_process_tree(
+    process: subprocess.Popen[bytes],
+    tracked: set[ProcessIdentity],
+    *,
+    root_identity: ProcessIdentity,
+    root_descriptor: int | None,
+    baseline_children: frozenset[tuple[int, int]],
+) -> None:
+    _owned_processes(
+        root_identity,
+        baseline_children=baseline_children,
+        tracked=tracked,
+    )
+    root_group = root_identity.process_group
+
+    def request_shutdown() -> None:
+        _owned_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+        _reap_owned_zombies(tracked, root_pid=process.pid)
+        for identity in tracked:
+            _signal_owned_process(
+                identity,
+                (
+                    signal.SIGKILL
+                    if identity.process_group != root_group
+                    else signal.SIGTERM
+                ),
+                root_identity=root_identity,
+                root_descriptor=root_descriptor,
+            )
+
+    request_shutdown()
+    deadline = time.monotonic() + PROCESS_GROUP_TERM_SECONDS
+    while time.monotonic() < deadline:
+        process.poll()
+        request_shutdown()
+        if process.poll() is not None and not any(
+            _identity_is_live(identity) for identity in tracked
+        ):
+            break
+        time.sleep(
+            min(
+                PROCESS_POLL_SECONDS,
+                max(0.0, deadline - time.monotonic()),
+            )
+        )
+    _owned_processes(
+        root_identity,
+        baseline_children=baseline_children,
+        tracked=tracked,
+    )
+    for identity in tracked:
+        _signal_owned_process(
+            identity,
+            signal.SIGKILL,
+            root_identity=root_identity,
+            root_descriptor=root_descriptor,
+        )
+    try:
+        process.wait(timeout=PROCESS_GROUP_TERM_SECONDS)
+    except subprocess.TimeoutExpired:
+        _signal_owned_process(
+            root_identity,
+            signal.SIGKILL,
+            root_identity=root_identity,
+            root_descriptor=root_descriptor,
+        )
+        try:
+            process.wait(timeout=PROCESS_GROUP_TERM_SECONDS)
+        except subprocess.TimeoutExpired as exc:
+            raise SourceSnapshotError(
+                "subprocess root survived identity-bound cleanup"
+            ) from exc
+    absence_deadline = (
+        time.monotonic()
+        + PROCESS_GROUP_TERM_SECONDS
+        + PROCESS_TREE_QUIESCENCE_SECONDS
+    )
+    stable_since: float | None = None
+    while time.monotonic() < absence_deadline:
+        _owned_processes(
+            root_identity,
+            baseline_children=baseline_children,
+            tracked=tracked,
+        )
+        _reap_owned_zombies(tracked, root_pid=process.pid)
+        live = {
+            identity for identity in tracked if _identity_is_live(identity)
+        }
+        residue = {
+            identity for identity in tracked if _identity_exists(identity)
+        }
+        if live or residue:
+            stable_since = None
+            for identity in live:
+                _signal_owned_process(
+                    identity,
+                    signal.SIGKILL,
+                    root_identity=root_identity,
+                    root_descriptor=root_descriptor,
+                )
+        elif stable_since is None:
+            stable_since = time.monotonic()
+        elif (
+            time.monotonic() - stable_since
+            >= PROCESS_TREE_QUIESCENCE_SECONDS
+        ):
+            return
+        time.sleep(
+            min(
+                PROCESS_POLL_SECONDS,
+                max(0.0, absence_deadline - time.monotonic()),
+            )
+        )
+    _reap_owned_zombies(tracked, root_pid=process.pid)
+    if any(_identity_exists(identity) for identity in tracked):
+        raise SourceSnapshotError(
+            "subprocess process tree survived forced cleanup"
+        )
+
+
+def _bounded_process_locked(
+    arguments: Sequence[str],
+    *,
+    timeout: float,
+    stdin: int | None = subprocess.DEVNULL,
+    pass_fds: Sequence[int] = (),
+    stdout_limit: int = MAX_COMMAND_OUTPUT_BYTES,
+    stderr_limit: int = MAX_COMMAND_ERROR_BYTES,
+    stdout_consumer: Callable[[bytes], None] | None = None,
+) -> BoundedCommandResult:
+    if (
+        not arguments
+        or type(timeout) not in {int, float}
+        or not math.isfinite(timeout)
+        or timeout <= 0
+        or type(stdout_limit) is not int
+        or stdout_limit < 0
+        or type(stderr_limit) is not int
+        or stderr_limit < 0
+    ):
+        raise SourceSnapshotError("subprocess execution bounds are invalid")
+    process: subprocess.Popen[bytes] | None = None
+    root_identity: ProcessIdentity | None = None
+    root_descriptor: int | None = None
+    selector = selectors.DefaultSelector()
+    stdout = bytearray()
+    stderr = bytearray()
+    stdout_bytes = 0
+    stdout_records = 0
+    tracked: set[ProcessIdentity] = set()
+    deadline = time.monotonic() + timeout
+    cleaned = False
+    _enable_child_subreaper()
+    baseline_children = _direct_child_baseline()
+    try:
+        process = subprocess.Popen(  # noqa: S603
+            list(arguments),
+            stdin=stdin,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=SAFE_ENV,
+            close_fds=True,
+            pass_fds=tuple(pass_fds),
+            start_new_session=True,
+        )
+        root_descriptor = os.pidfd_open(process.pid, 0)
+        root_identity = _process_identity(process.pid)
+        if root_identity is None:
+            raise SourceSnapshotError(
+                "subprocess root identity is unavailable"
+            )
+        tracked.add(root_identity)
+        if process.stdout is None or process.stderr is None:
+            raise SourceSnapshotError("subprocess pipes are unavailable")
+        for label, stream in (
+            ("stdout", process.stdout),
+            ("stderr", process.stderr),
+        ):
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, label)
+        while selector.get_map():
+            _owned_processes(
+                root_identity,
+                baseline_children=baseline_children,
+                tracked=tracked,
+            )
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise SourceSnapshotError(
+                    f"required command timed out: "
+                    f"{Path(arguments[0]).name}"
+                )
+            events = selector.select(
+                min(PROCESS_POLL_SECONDS, remaining)
+            )
+            if not events:
+                if process.poll() is not None and not cleaned:
+                    _terminate_process_tree(
+                        process,
+                        tracked,
+                        root_identity=root_identity,
+                        root_descriptor=root_descriptor,
+                        baseline_children=baseline_children,
+                    )
+                    cleaned = True
+                continue
+            for key, _mask in events:
+                try:
+                    chunk = os.read(key.fileobj.fileno(), 1024 * 1024)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                if key.data == "stdout":
+                    stdout_bytes += len(chunk)
+                    stdout_records += chunk.count(b"\n")
+                    if stdout_bytes > stdout_limit:
+                        raise SourceSnapshotError(
+                            "required command output exceeds its bound"
+                        )
+                    if stdout_consumer is None:
+                        stdout.extend(chunk)
+                    else:
+                        stdout_consumer(chunk)
+                else:
+                    if len(stderr) + len(chunk) > stderr_limit:
+                        raise SourceSnapshotError(
+                            "required command error output exceeds its bound"
+                        )
+                    stderr.extend(chunk)
+            if process.poll() is not None and not cleaned:
+                _terminate_process_tree(
+                    process,
+                    tracked,
+                    root_identity=root_identity,
+                    root_descriptor=root_descriptor,
+                    baseline_children=baseline_children,
+                )
+                cleaned = True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise SourceSnapshotError(
+                f"required command timed out: {Path(arguments[0]).name}"
+            )
+        returncode = process.wait(timeout=remaining)
+        return BoundedCommandResult(
+            returncode=returncode,
+            stdout=bytes(stdout),
+            stderr=bytes(stderr),
+            stdout_bytes=stdout_bytes,
+            stdout_records=stdout_records,
+        )
+    except SourceSnapshotError:
+        raise
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise SourceSnapshotError(
+            f"required command is unavailable: {Path(arguments[0]).name}"
+        ) from exc
+    finally:
+        original_error = sys.exception()
+        cleanup_errors: list[BaseException] = []
+        if process is not None and not cleaned:
+            try:
+                if root_identity is None:
+                    if root_descriptor is None:
+                        root_identity = _process_identity(process.pid)
+                    else:
+                        _signal_process_handle(
+                            root_descriptor,
+                            signal.SIGKILL,
+                        )
+                        try:
+                            process.wait(
+                                timeout=PROCESS_GROUP_TERM_SECONDS
+                            )
+                        except subprocess.TimeoutExpired as exc:
+                            raise SourceSnapshotError(
+                                "unidentified subprocess survived forced "
+                                "cleanup"
+                            ) from exc
+                        root_identity = ProcessIdentity(
+                            pid=process.pid,
+                            parent_pid=os.getpid(),
+                            process_group=process.pid,
+                            start_time=-1,
+                            state="?",
+                        )
+                    if root_identity is None:
+                        raise SourceSnapshotError(
+                            "subprocess root could not be bound for cleanup"
+                        )
+                _terminate_process_tree(
+                    process,
+                    tracked,
+                    root_identity=root_identity,
+                    root_descriptor=root_descriptor,
+                    baseline_children=baseline_children,
+                )
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+        try:
+            selector.close()
+        except BaseException as exc:
+            cleanup_errors.append(exc)
+        if process is not None:
+            for stream in (process.stdout, process.stderr):
+                if stream is None:
+                    continue
+                try:
+                    stream.close()
+                except BaseException as exc:
+                    cleanup_errors.append(exc)
+        if root_descriptor is not None:
+            try:
+                os.close(root_descriptor)
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+        if cleanup_errors:
+            cleanup_error = cleanup_errors[0]
+            if original_error is not None:
+                raise original_error from cleanup_error
+            raise cleanup_error
+
+
+def _bounded_process(
+    arguments: Sequence[str],
+    *,
+    timeout: float,
+    stdin: int | None = subprocess.DEVNULL,
+    pass_fds: Sequence[int] = (),
+    stdout_limit: int = MAX_COMMAND_OUTPUT_BYTES,
+    stderr_limit: int = MAX_COMMAND_ERROR_BYTES,
+    stdout_consumer: Callable[[bytes], None] | None = None,
+) -> BoundedCommandResult:
+    with _BOUNDED_PROCESS_LOCK:
+        return _bounded_process_locked(
+            arguments,
+            timeout=timeout,
+            stdin=stdin,
+            pass_fds=pass_fds,
+            stdout_limit=stdout_limit,
+            stderr_limit=stderr_limit,
+            stdout_consumer=stdout_consumer,
+        )
+
+
+class ControllerLivenessGuard:
+    """Bind source snapshot apply to the controller-owned pipe."""
+
+    _WAKE_SIGNAL = signal.SIGUSR1
+    _HANDLED_SIGNALS = (
+        signal.SIGHUP,
+        signal.SIGTERM,
+        signal.SIGINT,
+        _WAKE_SIGNAL,
+    )
+
+    def __init__(self, control_fd: int) -> None:
+        _anonymous_read_pipe_identity(
+            control_fd,
+            label="controller liveness",
+        )
+        if threading.current_thread() is not threading.main_thread():
+            raise SourceSnapshotError(
+                "source snapshot apply must run in the main thread"
+            )
+        try:
+            self._fd = os.dup(control_fd)
+            os.set_inheritable(self._fd, False)
+            os.set_blocking(self._fd, False)
+        except OSError as exc:
+            raise SourceSnapshotError(
+                "controller liveness pipe cannot be secured"
+            ) from exc
+        self._cancelled = threading.Event()
+        self._stopping = threading.Event()
+        self._reason = "controller liveness was lost"
+        self._exception_delivered = False
+        self._closed = False
+        self._old_handlers: dict[int, Any] = {}
+        self._monitor: threading.Thread | None = None
+
+    def _cancel(self, reason: str, *, wake_main: bool) -> None:
+        if self._cancelled.is_set():
+            return
+        self._reason = reason
+        self._cancelled.set()
+        if wake_main:
+            main_ident = threading.main_thread().ident
+            if main_ident is not None:
+                try:
+                    signal.pthread_kill(main_ident, self._WAKE_SIGNAL)
+                except (OSError, RuntimeError):
+                    pass
+
+    def _sample(self) -> None:
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(self._fd, selectors.EVENT_READ)
+            if not selector.select(0):
+                return
+            try:
+                payload = os.read(self._fd, 1)
+            except BlockingIOError:
+                return
+        finally:
+            selector.close()
+        reason = (
+            "controller liveness pipe reached EOF"
+            if payload == b""
+            else "controller liveness pipe carried forbidden data"
+        )
+        self._cancel(reason, wake_main=False)
+        self.check()
+
+    def _handle_signal(self, signum: int, _frame: Any) -> None:
+        if self._exception_delivered:
+            return
+        self._exception_delivered = True
+        if signum == self._WAKE_SIGNAL:
+            reason = self._reason
+        else:
+            reason = f"source snapshot received signal {signum}"
+            self._cancel(reason, wake_main=False)
+        raise SourceSnapshotCancellation(reason)
+
+    def _monitor_control(self) -> None:
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(self._fd, selectors.EVENT_READ)
+            while not self._stopping.is_set():
+                if not selector.select(PROCESS_POLL_SECONDS):
+                    continue
+                try:
+                    payload = os.read(self._fd, 1)
+                except BlockingIOError:
+                    continue
+                except OSError:
+                    if self._stopping.is_set():
+                        return
+                    payload = b""
+                reason = (
+                    "controller liveness pipe reached EOF"
+                    if payload == b""
+                    else "controller liveness pipe carried forbidden data"
+                )
+                self._cancel(reason, wake_main=True)
+                return
+        finally:
+            selector.close()
+
+    def __enter__(self) -> ControllerLivenessGuard:
+        try:
+            for signum in self._HANDLED_SIGNALS:
+                self._old_handlers[signum] = signal.getsignal(signum)
+                signal.signal(signum, self._handle_signal)
+            self._sample()
+            self._monitor = threading.Thread(
+                target=self._monitor_control,
+                name="source-snapshot-controller-liveness",
+                daemon=True,
+            )
+            self._monitor.start()
+            self.check()
+            return self
+        except BaseException:
+            self._restore()
+            raise
+
+    def check(self) -> None:
+        if self._cancelled.is_set() and not self._exception_delivered:
+            self._exception_delivered = True
+            raise SourceSnapshotCancellation(self._reason)
+
+    @property
+    def control_fd(self) -> int:
+        self.check()
+        return self._fd
+
+    def _restore(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._exception_delivered = True
+        self._stopping.set()
+        if self._monitor is not None:
+            self._monitor.join(timeout=1)
+        try:
+            os.close(self._fd)
+        except OSError:
+            pass
+        for signum, handler in self._old_handlers.items():
+            signal.signal(signum, handler)
+        self._old_handlers.clear()
+
+    def __exit__(
+        self,
+        error_type: Any,
+        _value: Any,
+        _traceback: Any,
+    ) -> None:
+        deliver_after_restore = (
+            self._cancelled.is_set()
+            and error_type is None
+            and not self._exception_delivered
+        )
+        reason = self._reason
+        self._restore()
+        if deliver_after_restore:
+            raise SourceSnapshotCancellation(reason)
 
 
 @dataclass(frozen=True)
@@ -739,28 +1563,15 @@ def _load_json_output(payload: bytes, *, label: str) -> Any:
 def _run(
     arguments: Sequence[str],
     *,
-    timeout: int = 60,
+    timeout: float = 60,
     maximum: int = MAX_COMMAND_OUTPUT_BYTES,
 ) -> str:
-    try:
-        result = subprocess.run(
-            list(arguments),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout,
-            env=SAFE_ENV,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise SourceSnapshotError(
-            f"required command is unavailable: {Path(arguments[0]).name}"
-        ) from exc
-    if (
-        result.returncode != 0
-        or len(result.stdout) > maximum
-        or len(result.stderr) > MAX_COMMAND_ERROR_BYTES
-    ):
+    result = _bounded_process(
+        arguments,
+        timeout=timeout,
+        stdout_limit=maximum,
+    )
+    if result.returncode != 0:
         raise SourceSnapshotError(
             f"required command failed closed: {Path(arguments[0]).name}"
         )
@@ -772,21 +1583,18 @@ def _run(
         ) from exc
 
 
-def _inspect_optional(kind: str, name: str) -> Mapping[str, Any] | None:
+def _inspect_optional(
+    kind: str,
+    name: str,
+    *,
+    timeout: float = 30,
+) -> Mapping[str, Any] | None:
     if kind not in {"container", "image", "volume"}:
         raise SourceSnapshotError("Docker inspection kind is invalid")
-    try:
-        result = subprocess.run(
-            [DOCKER, kind, "inspect", name],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=30,
-            env=SAFE_ENV,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise SourceSnapshotError("Docker inspection is unavailable") from exc
+    result = _bounded_process(
+        [DOCKER, kind, "inspect", name],
+        timeout=timeout,
+    )
     if result.returncode != 0:
         try:
             error = result.stderr.decode("utf-8").strip()
@@ -1145,7 +1953,7 @@ def _open_absolute_directory(path: Path) -> int:
             os.close(descriptor)
             descriptor = next_descriptor
         return descriptor
-    except Exception:
+    except BaseException:
         os.close(descriptor)
         raise
 
@@ -1489,7 +2297,7 @@ def _open_relative_file(root_descriptor: int, relative: str) -> tuple[int, int]:
             dir_fd=directory,
         )
         return directory, descriptor
-    except Exception:
+    except BaseException:
         os.close(directory)
         raise
 
@@ -1527,7 +2335,7 @@ def _write_staging_manifest(path: Path, payload: bytes) -> None:
         os.fsync(descriptor)
         os.close(descriptor)
         descriptor = -1
-    except Exception:
+    except BaseException:
         if descriptor >= 0:
             os.close(descriptor)
         try:
@@ -1625,7 +2433,7 @@ def _create_archive(
             raw.flush()
             os.fsync(raw.fileno())
         os.chmod(destination, 0o600, follow_symlinks=False)
-    except Exception:
+    except BaseException:
         if output_descriptor >= 0:
             os.close(output_descriptor)
         try:
@@ -1774,80 +2582,18 @@ def _stream_process(
     timeout: int,
     pass_fds: Sequence[int] = (),
 ) -> tuple[int, int]:
-    process: subprocess.Popen[bytes] | None = None
-    selector = selectors.DefaultSelector()
-    stdout_bytes = 0
-    stdout_records = 0
-    stderr_bytes = 0
-    deadline = time.monotonic() + timeout
-    try:
-        process = subprocess.Popen(
-            list(arguments),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=SAFE_ENV,
-            pass_fds=tuple(pass_fds),
-        )
-        if process.stdout is None or process.stderr is None:
-            raise SourceSnapshotError("required streaming command is unavailable")
-        os.set_blocking(process.stdout.fileno(), False)
-        os.set_blocking(process.stderr.fileno(), False)
-        selector.register(process.stdout, selectors.EVENT_READ, "stdout")
-        selector.register(process.stderr, selectors.EVENT_READ, "stderr")
-        while selector.get_map():
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise SourceSnapshotError(
-                    f"required command timed out: {Path(arguments[0]).name}"
-                )
-            events = selector.select(min(remaining, 1.0))
-            if not events and process.poll() is not None:
-                events = [
-                    (key, selectors.EVENT_READ)
-                    for key in list(selector.get_map().values())
-                ]
-            for key, _mask in events:
-                chunk = os.read(key.fileobj.fileno(), 1024 * 1024)
-                if not chunk:
-                    selector.unregister(key.fileobj)
-                    continue
-                if key.data == "stdout":
-                    stdout_bytes += len(chunk)
-                    stdout_records += chunk.count(b"\n")
-                    if stdout_bytes > stdout_maximum:
-                        raise SourceSnapshotError(
-                            "required command output exceeds its bound"
-                        )
-                    stdout_consumer(chunk)
-                else:
-                    stderr_bytes += len(chunk)
-                    if stderr_bytes > MAX_COMMAND_ERROR_BYTES:
-                        raise SourceSnapshotError(
-                            "required command error output exceeds its bound"
-                        )
-        return_code = process.wait(
-            timeout=max(0.1, deadline - time.monotonic())
-        )
-        if return_code != 0:
-            raise SourceSnapshotError(
-                f"required command failed closed: {Path(arguments[0]).name}"
-            )
-        return stdout_bytes, stdout_records
-    except (OSError, subprocess.SubprocessError) as exc:
+    result = _bounded_process(
+        arguments,
+        timeout=timeout,
+        pass_fds=pass_fds,
+        stdout_limit=stdout_maximum,
+        stdout_consumer=stdout_consumer,
+    )
+    if result.returncode != 0:
         raise SourceSnapshotError(
-            f"required streaming command failed: {Path(arguments[0]).name}"
-        ) from exc
-    finally:
-        selector.close()
-        if process is not None and process.poll() is None:
-            process.kill()
-            process.wait()
-        if process is not None:
-            if process.stdout is not None:
-                process.stdout.close()
-            if process.stderr is not None:
-                process.stderr.close()
+            f"required command failed closed: {Path(arguments[0]).name}"
+        )
+    return result.stdout_bytes, result.stdout_records
 
 
 def _hash_secure_artifact(path: Path) -> tuple[str, int]:
@@ -2107,7 +2853,7 @@ def create_database_dump(
                 "database dump hash differs after publication"
             )
         return observed
-    except Exception:
+    except BaseException:
         if descriptor >= 0:
             os.close(descriptor)
         try:
@@ -2209,6 +2955,208 @@ def _validate_scratch_container(
     return identifier
 
 
+def _open_or_create_root_only_child(
+    parent_descriptor: int,
+    name: str,
+) -> int:
+    if (
+        not name
+        or name in {".", ".."}
+        or "/" in name
+        or "\x00" in name
+    ):
+        raise SourceSnapshotError(
+            "scratch reconciliation directory name is invalid"
+        )
+    try:
+        created = False
+        try:
+            os.mkdir(name, mode=0o700, dir_fd=parent_descriptor)
+            created = True
+        except FileExistsError:
+            pass
+        if created:
+            os.fsync(parent_descriptor)
+        descriptor = os.open(
+            name,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=parent_descriptor,
+        )
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != 0
+            or stat.S_IMODE(metadata.st_mode) != 0o700
+        ):
+            os.close(descriptor)
+            raise SourceSnapshotError(
+                "scratch reconciliation directory is unsafe"
+            )
+        return descriptor
+    except SourceSnapshotError:
+        raise
+    except OSError as exc:
+        raise SourceSnapshotError(
+            "scratch reconciliation directory is unavailable"
+        ) from exc
+
+
+def _open_scratch_reconciliation_directory(
+    binding: SnapshotBinding,
+) -> int:
+    root = SCRATCH_RECONCILIATION_ROOT
+    if not root.is_absolute() or root.name in {"", ".", ".."}:
+        raise SourceSnapshotError(
+            "scratch reconciliation root is invalid"
+        )
+    parent_descriptor = -1
+    root_descriptor = -1
+    operation_descriptor = -1
+    try:
+        parent_descriptor = _open_absolute_directory(root.parent)
+        parent_metadata = os.fstat(parent_descriptor)
+        if (
+            parent_metadata.st_uid != 0
+            or stat.S_IMODE(parent_metadata.st_mode) & 0o022
+        ):
+            raise SourceSnapshotError(
+                "scratch reconciliation parent is unsafe"
+            )
+        root_descriptor = _open_or_create_root_only_child(
+            parent_descriptor,
+            root.name,
+        )
+        operation_descriptor = _open_or_create_root_only_child(
+            root_descriptor,
+            binding.operation_id,
+        )
+        return _open_or_create_root_only_child(
+            operation_descriptor,
+            "source-snapshot-reconciliation",
+        )
+    finally:
+        for descriptor in (
+            operation_descriptor,
+            root_descriptor,
+            parent_descriptor,
+        ):
+            if descriptor >= 0:
+                os.close(descriptor)
+
+
+def _persist_scratch_reconciliation(
+    binding: SnapshotBinding,
+    *,
+    zero_residue: bool,
+    error: BaseException | None,
+) -> None:
+    if type(zero_residue) is not bool or (zero_residue == (error is not None)):
+        raise SourceSnapshotError(
+            "scratch reconciliation state is invalid"
+        )
+    container, volume = _scratch_names(binding)
+    document = {
+        "schema": SCRATCH_RECONCILIATION_SCHEMA,
+        "operation_id": binding.operation_id,
+        "release_sha": binding.release_sha,
+        "role": binding.role,
+        "mode": binding.mode,
+        "binding_sha256": binding.canonical_sha256,
+        "scratch_container": container,
+        "scratch_volume": volume,
+        "zero_residue": zero_residue,
+        "cleanup_error_sha256": (
+            None
+            if error is None
+            else hashlib.sha256(
+                (
+                    f"{type(error).__module__}."
+                    f"{type(error).__qualname__}:{error}"
+                ).encode("utf-8", "replace")
+            ).hexdigest()
+        ),
+    }
+    payload = _canonical_json(document)
+    if not 1 <= len(payload) <= MAX_JSON_BYTES:
+        raise SourceSnapshotError(
+            "scratch reconciliation record is oversized"
+        )
+    directory_descriptor = _open_scratch_reconciliation_directory(
+        binding
+    )
+    filename = f"{binding.role}-{binding.mode}.json"
+    temporary = f".{filename}.materializing"
+    descriptor = -1
+    try:
+        for candidate in (filename, temporary):
+            try:
+                metadata = os.stat(
+                    candidate,
+                    dir_fd=directory_descriptor,
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError:
+                continue
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != 0
+                or metadata.st_nlink != 1
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+                or metadata.st_size > MAX_JSON_BYTES
+            ):
+                raise SourceSnapshotError(
+                    "scratch reconciliation record is unsafe"
+                )
+            if candidate == temporary:
+                os.unlink(candidate, dir_fd=directory_descriptor)
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+            dir_fd=directory_descriptor,
+        )
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise OSError("short scratch reconciliation write")
+            view = view[written:]
+        os.fchmod(descriptor, 0o600)
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+        os.replace(
+            temporary,
+            filename,
+            src_dir_fd=directory_descriptor,
+            dst_dir_fd=directory_descriptor,
+        )
+        os.fsync(directory_descriptor)
+    except SourceSnapshotError:
+        raise
+    except OSError as exc:
+        raise SourceSnapshotError(
+            "scratch reconciliation record could not be persisted"
+        ) from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            os.unlink(temporary, dir_fd=directory_descriptor)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
+        os.close(directory_descriptor)
+
+
 def cleanup_exact_scratch(
     binding: SnapshotBinding,
     *,
@@ -2216,34 +3164,110 @@ def cleanup_exact_scratch(
 ) -> bool:
     container, volume = _scratch_names(binding)
     removed = False
-    container_document = _inspect_optional("container", container)
-    if container_document is not None:
-        _validate_scratch_container(
-            container_document,
-            binding=binding,
-            name=container,
-            volume=volume,
-            expected_image=expected_image,
+    stable_observations = 0
+    stable_since: float | None = None
+    deadline = time.monotonic() + SCRATCH_CLEANUP_TIMEOUT_SECONDS
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise SourceSnapshotError(
+                    "scratch restore drill did not quiesce at zero residue"
+                )
+            container_document = _inspect_optional(
+                "container",
+                container,
+                timeout=min(30.0, remaining),
+            )
+            if container_document is not None:
+                _validate_scratch_container(
+                    container_document,
+                    binding=binding,
+                    name=container,
+                    volume=volume,
+                    expected_image=expected_image,
+                )
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise SourceSnapshotError(
+                        "scratch restore drill cleanup timed out"
+                    )
+                _run(
+                    [DOCKER, "container", "rm", "--force", container],
+                    timeout=min(120.0, remaining),
+                )
+                removed = True
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise SourceSnapshotError(
+                    "scratch restore drill cleanup timed out"
+                )
+            volume_document = _inspect_optional(
+                "volume",
+                volume,
+                timeout=min(30.0, remaining),
+            )
+            if volume_document is not None:
+                _validate_scratch_volume(
+                    volume_document,
+                    binding=binding,
+                    name=volume,
+                )
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise SourceSnapshotError(
+                        "scratch restore drill cleanup timed out"
+                    )
+                _run(
+                    [DOCKER, "volume", "rm", volume],
+                    timeout=min(120.0, remaining),
+                )
+                removed = True
+            if (
+                container_document is None
+                and volume_document is None
+            ):
+                stable_observations += 1
+                if stable_since is None:
+                    stable_since = time.monotonic()
+            else:
+                stable_observations = 0
+                stable_since = None
+            now = time.monotonic()
+            if (
+                stable_since is not None
+                and stable_observations
+                >= SCRATCH_CLEANUP_STABLE_OBSERVATIONS
+                and now - stable_since
+                >= SCRATCH_CLEANUP_QUIESCENCE_SECONDS
+            ):
+                break
+            remaining = deadline - now
+            if remaining <= 0:
+                raise SourceSnapshotError(
+                    "scratch restore drill did not quiesce "
+                    "at zero residue"
+                )
+            time.sleep(min(PROCESS_POLL_SECONDS, remaining))
+        _persist_scratch_reconciliation(
+            binding,
+            zero_residue=True,
+            error=None,
         )
-        _run([DOCKER, "container", "rm", "--force", container], timeout=120)
-        removed = True
-    volume_document = _inspect_optional("volume", volume)
-    if volume_document is not None:
-        _validate_scratch_volume(
-            volume_document,
-            binding=binding,
-            name=volume,
-        )
-        _run([DOCKER, "volume", "rm", volume], timeout=120)
-        removed = True
-    if (
-        _inspect_optional("container", container) is not None
-        or _inspect_optional("volume", volume) is not None
-    ):
-        raise SourceSnapshotError(
-            "scratch restore drill did not reach exact zero residue"
-        )
-    return removed
+        return removed
+    except BaseException as exc:
+        try:
+            _persist_scratch_reconciliation(
+                binding,
+                zero_residue=False,
+                error=exc,
+            )
+        except BaseException as reconciliation_error:
+            raise SourceSnapshotError(
+                "scratch cleanup failed and durable reconciliation "
+                "could not be persisted"
+            ) from reconciliation_error
+        raise
 
 
 def _scratch_psql_arguments(
@@ -2284,16 +3308,33 @@ def _scratch_query(container: str, sql: str) -> str:
 
 
 def _scratch_stream(container: str, sql: str) -> StreamDigest:
-    try:
-        return _run_streaming_sha256(
-            _scratch_psql_arguments(container, sql, streaming=True),
-            timeout=1800,
-            env=SAFE_ENV,
-        )
-    except ProductionOperationError as exc:
+    digest = hashlib.sha256()
+    last_byte: int | None = None
+
+    def consume(chunk: bytes) -> None:
+        nonlocal last_byte
+        digest.update(chunk)
+        last_byte = chunk[-1]
+
+    result = _bounded_process(
+        _scratch_psql_arguments(container, sql, streaming=True),
+        timeout=1800,
+        stdout_limit=MAX_ARTIFACT_BYTES,
+        stdout_consumer=consume,
+    )
+    if result.returncode != 0:
         raise SourceSnapshotError(
             "scratch streaming fingerprint failed closed"
-        ) from exc
+        )
+    if result.stdout_bytes and last_byte != ord("\n"):
+        raise SourceSnapshotError(
+            "scratch streaming fingerprint returned a truncated record"
+        )
+    return StreamDigest(
+        sha256=digest.hexdigest(),
+        bytes=result.stdout_bytes,
+        records=result.stdout_records,
+    )
 
 
 def build_source_database(
@@ -2400,65 +3441,19 @@ def _run_with_input_descriptor(
     *,
     timeout: int,
 ) -> None:
-    process: subprocess.Popen[bytes] | None = None
-    selector = selectors.DefaultSelector()
-    deadline = time.monotonic() + timeout
-    stderr_bytes = 0
-    try:
-        process = subprocess.Popen(
-            list(arguments),
-            stdin=descriptor,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            env=SAFE_ENV,
-        )
-        if process.stderr is None:
-            raise SourceSnapshotError(
-                "required input-stream command is unavailable"
-            )
-        os.set_blocking(process.stderr.fileno(), False)
-        selector.register(process.stderr, selectors.EVENT_READ)
-        while selector.get_map():
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise SourceSnapshotError(
-                    f"required command timed out: {Path(arguments[0]).name}"
-                )
-            events = selector.select(min(remaining, 1.0))
-            if not events and process.poll() is not None:
-                events = [
-                    (key, selectors.EVENT_READ)
-                    for key in list(selector.get_map().values())
-                ]
-            for key, _mask in events:
-                chunk = os.read(key.fileobj.fileno(), 65536)
-                if not chunk:
-                    selector.unregister(key.fileobj)
-                    continue
-                stderr_bytes += len(chunk)
-                if stderr_bytes > MAX_COMMAND_ERROR_BYTES:
-                    raise SourceSnapshotError(
-                        "required command error output exceeds its bound"
-                    )
-        return_code = process.wait(
-            timeout=max(0.1, deadline - time.monotonic())
-        )
-        if return_code != 0:
-            raise SourceSnapshotError(
-                f"required command failed closed: {Path(arguments[0]).name}"
-            )
-    except (OSError, subprocess.SubprocessError) as exc:
+    if type(descriptor) is not int or descriptor < 0:
         raise SourceSnapshotError(
-            f"required input-stream command failed: "
-            f"{Path(arguments[0]).name}"
-        ) from exc
-    finally:
-        selector.close()
-        if process is not None and process.poll() is None:
-            process.kill()
-            process.wait()
-        if process is not None and process.stderr is not None:
-            process.stderr.close()
+            "required input-stream descriptor is invalid"
+        )
+    result = _bounded_process(
+        arguments,
+        stdin=descriptor,
+        timeout=timeout,
+    )
+    if result.returncode != 0:
+        raise SourceSnapshotError(
+            f"required command failed closed: {Path(arguments[0]).name}"
+        )
 
 
 def restore_and_fingerprint(
@@ -2470,7 +3465,7 @@ def restore_and_fingerprint(
     container, volume = _scratch_names(binding)
     recovered = cleanup_exact_scratch(binding)
     result: dict[str, Any] | None = None
-    failure: Exception | None = None
+    failure: BaseException | None = None
     try:
         observed_volume = _run(
             [
@@ -2547,7 +3542,7 @@ def restore_and_fingerprint(
             )
         ready = False
         for _attempt in range(120):
-            probe = subprocess.run(
+            probe = _bounded_process(
                 [
                     DOCKER,
                     "exec",
@@ -2558,12 +3553,7 @@ def restore_and_fingerprint(
                     "-d",
                     "restore",
                 ],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
                 timeout=5,
-                env=SAFE_ENV,
-                check=False,
             )
             if probe.returncode == 0:
                 try:
@@ -2602,15 +3592,15 @@ def restore_and_fingerprint(
             "pull_policy": "never",
             "source_or_current_mounted": False,
         }
-    except Exception as exc:
+    except BaseException as exc:
         failure = exc
-    cleanup_error: Exception | None = None
+    cleanup_error: BaseException | None = None
     try:
         cleanup_exact_scratch(
             binding,
             expected_image=postgres_image,
         )
-    except Exception as exc:
+    except BaseException as exc:
         cleanup_error = exc
     if cleanup_error is not None:
         raise SourceSnapshotError(
@@ -3475,10 +4465,10 @@ def execute(
             "source_mutated": False,
             "redis_restored": False,
         }
-    except Exception:
+    except BaseException:
         try:
             cleanup_exact_scratch(binding)
-        except Exception as cleanup_error:
+        except BaseException as cleanup_error:
             raise SourceSnapshotError(
                 "source snapshot failed and scratch cleanup failed closed"
             ) from cleanup_error
@@ -3496,6 +4486,107 @@ def _error_payload(message: str) -> dict[str, str]:
     }
 
 
+def _dispatch_request(
+    args: argparse.Namespace,
+    *,
+    controller: ControllerLivenessGuard | None,
+) -> dict[str, Any]:
+    if controller is not None:
+        controller.check()
+    binding = load_binding(args.binding)
+    freeze_sha256: str | None = None
+    live_lease_claim_sha256: str | None = None
+    if binding.mode == "frozen-final":
+        if (
+            args.freeze_evidence is None
+            or args.live_lease_claim is None
+            or args.live_lease_claim_sha256 is None
+        ):
+            raise SourceSnapshotError(
+                "frozen-final mode requires freeze evidence and "
+                "live lease claim material"
+            )
+        freeze, freeze_sha256 = load_freeze_evidence(
+            args.freeze_evidence,
+            binding,
+            live_lease_claim_sha256=args.live_lease_claim_sha256,
+        )
+        live_lease_claim_sha256 = freeze[
+            "live_lease_claim_sha256"
+        ]
+    elif (
+        args.freeze_evidence is not None
+        or args.live_lease_claim is not None
+        or args.live_lease_claim_sha256 is not None
+    ):
+        raise SourceSnapshotError(
+            "freeze and live lease evidence are valid only for "
+            "frozen-final mode"
+        )
+    if not args.apply:
+        if args.confirm is not None:
+            raise SourceSnapshotError(
+                "--confirm is valid only with --apply"
+            )
+        return build_plan(
+            binding,
+            output_root=args.output_root,
+            freeze_evidence_sha256=freeze_sha256,
+        )
+
+    if controller is None:
+        raise SourceSnapshotError(
+            "source snapshot apply requires a controller liveness pipe"
+        )
+    required = confirmation_phrase(binding)
+    if args.confirm != required:
+        raise SourceSnapshotError(
+            f"source snapshot requires --confirm {required}"
+        )
+    if os.geteuid() != 0:
+        raise SourceSnapshotError(
+            "source snapshot apply must run as root"
+        )
+    controller.check()
+    with operation_lock(binding):
+        controller.check()
+        if binding.mode == "frozen-final":
+            from scripts import (  # noqa: PLC0415
+                production_shadow_legacy_writer_freeze as FREEZE,
+            )
+
+            try:
+                with FREEZE.hold_verified_freeze(
+                    binding,
+                    freeze_path=args.freeze_evidence,
+                    live_lease_claim=args.live_lease_claim,
+                    live_lease_claim_sha256=(
+                        live_lease_claim_sha256
+                    ),
+                    control_fd=controller.control_fd,
+                ) as freeze_verify:
+                    result = execute(
+                        binding,
+                        output_root=args.output_root,
+                        freeze_path=args.freeze_evidence,
+                        freeze_sha256=freeze_sha256,
+                        freeze_verify=freeze_verify,
+                    )
+            except FREEZE.LegacyWriterFreezeError as exc:
+                raise SourceSnapshotError(
+                    "live frozen-final authorization failed"
+                ) from exc
+        else:
+            result = execute(
+                binding,
+                output_root=args.output_root,
+                freeze_path=args.freeze_evidence,
+                freeze_sha256=freeze_sha256,
+            )
+        controller.check()
+        return result
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binding", type=Path, required=True)
@@ -3505,91 +4596,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--live-lease-claim-sha256")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")
+    parser.add_argument("--control-fd", type=int, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     try:
-        binding = load_binding(args.binding)
-        freeze_sha256: str | None = None
-        live_lease_claim_sha256: str | None = None
-        if binding.mode == "frozen-final":
-            if (
-                args.freeze_evidence is None
-                or args.live_lease_claim is None
-                or args.live_lease_claim_sha256 is None
-            ):
-                raise SourceSnapshotError(
-                    "frozen-final mode requires freeze evidence and "
-                    "live lease claim material"
-                )
-            freeze, freeze_sha256 = load_freeze_evidence(
-                args.freeze_evidence,
-                binding,
-                live_lease_claim_sha256=args.live_lease_claim_sha256,
-            )
-            live_lease_claim_sha256 = freeze[
-                "live_lease_claim_sha256"
-            ]
-        elif (
-            args.freeze_evidence is not None
-            or args.live_lease_claim is not None
-            or args.live_lease_claim_sha256 is not None
-        ):
+        if args.apply and args.control_fd is None:
             raise SourceSnapshotError(
-                "freeze and live lease evidence are valid only for "
-                "frozen-final mode"
+                "source snapshot apply requires --control-fd"
             )
-        if not args.apply:
-            if args.confirm is not None:
-                raise SourceSnapshotError(
-                    "--confirm is valid only with --apply"
+        if not args.apply and args.control_fd is not None:
+            raise SourceSnapshotError(
+                "--control-fd is valid only with --apply"
+            )
+        if args.apply:
+            with ControllerLivenessGuard(args.control_fd) as controller:
+                result = _dispatch_request(
+                    args,
+                    controller=controller,
                 )
-            result = build_plan(
-                binding,
-                output_root=args.output_root,
-                freeze_evidence_sha256=freeze_sha256,
-            )
+                controller.check()
         else:
-            required = confirmation_phrase(binding)
-            if args.confirm != required:
-                raise SourceSnapshotError(
-                    f"source snapshot requires --confirm {required}"
-                )
-            if os.geteuid() != 0:
-                raise SourceSnapshotError(
-                    "source snapshot apply must run as root"
-                )
-            with operation_lock(binding):
-                if binding.mode == "frozen-final":
-                    from scripts import (  # noqa: PLC0415
-                        production_shadow_legacy_writer_freeze as FREEZE,
-                    )
-
-                    try:
-                        with FREEZE.hold_verified_freeze(
-                            binding,
-                            freeze_path=args.freeze_evidence,
-                            live_lease_claim=args.live_lease_claim,
-                            live_lease_claim_sha256=(
-                                live_lease_claim_sha256
-                            ),
-                        ) as freeze_verify:
-                            result = execute(
-                                binding,
-                                output_root=args.output_root,
-                                freeze_path=args.freeze_evidence,
-                                freeze_sha256=freeze_sha256,
-                                freeze_verify=freeze_verify,
-                            )
-                    except FREEZE.LegacyWriterFreezeError as exc:
-                        raise SourceSnapshotError(
-                            "live frozen-final authorization failed"
-                        ) from exc
-                else:
-                    result = execute(
-                        binding,
-                        output_root=args.output_root,
-                        freeze_path=args.freeze_evidence,
-                        freeze_sha256=freeze_sha256,
-                    )
+            result = _dispatch_request(args, controller=None)
         print(json.dumps(result, sort_keys=True, separators=(",", ":")))
         return 0
     except SourceSnapshotError as exc:

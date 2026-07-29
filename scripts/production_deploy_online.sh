@@ -39,28 +39,13 @@ Usage:
 
 Commands:
   help                 Show this help.
-  release              Run the full production flow. This is the default.
-  check-local          Validate local tooling and manifest.
-  deploy-foreign       Build and deploy the foreign server locally.
-  bootstrap-iran       Install Docker/Nginx/Certbot prerequisites on the Iran host.
-  configure-nginx      Render and install the Iran Nginx config.
-  issue-cert           Request/renew the SSL certificate on the Iran host.
-  build-release        Build frontend locally, prepare wheel cache, and build/loadable Docker artifacts.
-  sync-project         Rsync the production payload and runtime env to the Iran host.
-  ship-images          Upload the prepared Docker image bundle to the Iran host.
-  load-images          Load the uploaded Docker image bundle on the Iran host.
-  deploy-iran          Start Docker services on the Iran host without remote build/pull.
-  inspect-shared-data  Inspect Iran shared-table state and print the fresh/existing classification.
-  seed-shared-data     Apply guarded shared-table seed/reset handling for the Iran host.
-  healthcheck          Validate local and public health endpoints.
+  <all other commands> Retired legacy two-site flow; always blocked.
 
 Notes:
-  - The script first deploys the foreign server locally.
-  - It then asks whether Iran currently has working internet.
-  - If the answer is "yes", it runs the Iran-online flow using shipped images/artifacts.
-  - If the answer is "no", it stops after foreign deploy because the Iran-offline flow is not implemented yet.
-  - For SSH, prefer key-based auth. Password auth is supported only when sshpass is installed.
-  - Release healthcheck runs a read-only production data hygiene guard on both hosts.
+  - This script now accepts only help. Every legacy two-site command, including
+    local checks, builds, remote inspection, and health checks, is hard-disabled
+    before any manifest is read. Use the dedicated three-site production-shadow
+    campaign path for live work.
 EOF
 }
 
@@ -488,6 +473,10 @@ parse_args() {
     done
 
     [[ -n "$COMMAND" ]] || COMMAND="release"
+}
+
+block_legacy_two_site_command() {
+    die "Legacy two-site production flow is retired and hard-disabled. This script permits only help and does not read deployment manifests for retired commands. Use the dedicated three-site production-shadow campaign path."
 }
 
 load_manifest() {
@@ -2486,25 +2475,10 @@ main() {
         usage
         exit 0
     fi
-    ensure_manifest_file
-    load_manifest
-    case "$COMMAND" in
-        check-local) check_local ;;
-        release) run_release ;;
-        deploy-foreign) check_local; install_sync_sampler_local; build_release; deploy_foreign; verify_sync_sampler_local ;;
-        bootstrap-iran) check_local; bootstrap_iran ;;
-        configure-nginx) check_local; configure_nginx ;;
-        issue-cert) check_local; issue_cert ;;
-        build-release) check_local; build_release ;;
-        sync-project) check_local; sync_project ;;
-        ship-images) check_local; ship_images ;;
-        load-images) check_local; load_images ;;
-        deploy-iran) check_local; install_sync_sampler_remote; deploy_iran; verify_sync_sampler_remote ;;
-        inspect-shared-data) check_local; inspect_iran_shared_data ;;
-        seed-shared-data) check_local; handle_iran_shared_data ;;
-        healthcheck) check_local; healthcheck ;;
-        *) die "Unknown command: $COMMAND" ;;
-    esac
+    # This must stay ahead of every manifest helper. A manifest is executable
+    # shell input, so even legacy commands that appeared read-only are denied
+    # before they can source operator-supplied configuration.
+    block_legacy_two_site_command
 }
 
 main "$@"

@@ -17,8 +17,10 @@ from __future__ import annotations
 
 import argparse
 import base64
+import ctypes
 import fcntl
 import hashlib
+import importlib.machinery
 import io
 import json
 import os
@@ -26,11 +28,13 @@ import re
 import secrets
 import select
 import shlex
+import signal
 import stat
 import subprocess
 import sys
-import tempfile
+import threading
 import time
+import types
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,6 +46,33 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+# Bind the namespace before release imports so a preloaded package cannot win.
+_SCRIPTS_ROOT = (REPO_ROOT / "scripts").resolve()
+_scripts_package = sys.modules.get("scripts")
+if _scripts_package is None:
+    _scripts_package = types.ModuleType("scripts")
+    _scripts_package.__file__ = None
+    _scripts_package.__package__ = "scripts"
+    _scripts_package.__path__ = [str(_SCRIPTS_ROOT)]
+    _scripts_package.__spec__ = importlib.machinery.ModuleSpec(
+        "scripts",
+        loader=None,
+        is_package=True,
+    )
+    _scripts_package.__spec__.submodule_search_locations = [
+        str(_SCRIPTS_ROOT)
+    ]
+    sys.modules["scripts"] = _scripts_package
+else:
+    try:
+        _loaded_script_paths = {
+            Path(item).resolve(strict=True)
+            for item in getattr(_scripts_package, "__path__", ())
+        }
+    except (OSError, TypeError) as exc:
+        raise RuntimeError("loaded scripts package identity is invalid") from exc
+    if _loaded_script_paths != {_SCRIPTS_ROOT}:
+        raise RuntimeError("loaded scripts package is not release-owned")
 
 from scripts import (  # noqa: E402
     install_production_shadow_frozen_final_restore_inputs as INSTALLER,
@@ -115,12 +146,40 @@ MAX_COMPLETION_BYTES = (
 )
 MAX_TRANSCRIPT_ENTRIES = 20_000
 MAX_POST_RESULT_EXIT_SECONDS = 15.0
+MAX_SESSION_GROUP_TERM_SECONDS = 2.0
+PROCESS_POLL_SECONDS = 0.05
+PROCESS_TREE_QUIESCENCE_SECONDS = 0.1
+PR_SET_CHILD_SUBREAPER = 36
+MAX_HOST_SESSION_SECONDS = 36 * 60 * 60.0
+MAX_BASE_FRAME_TIMEOUT_SECONDS = 120.0
 ZERO_SHA256 = "0" * 64
 SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 VERSION_ID_RE = re.compile(r"^[^\s\x00-\x1f\x7f]{1,1024}$")
+BUCKET_RE = re.compile(
+    r"^[a-z0-9](?:[a-z0-9.-]{1,61}[a-z0-9])$"
+)
+AGE_RECIPIENT_RE = re.compile(
+    r"^age1[023456789acdefghjklmnpqrstuvwxyz]{20,100}$"
+)
+OBJECT_KEY_SEGMENT_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._=+-]{0,254}$"
+)
 BOUNDARY_RE = re.compile(r"^[a-z0-9][a-z0-9:._-]{0,255}$")
 SAFE_REMOTE_TOKEN_RE = re.compile(r"^[A-Za-z0-9_./:=+-]{1,4096}$")
+
+# The host protocol is deliberately quiet while one exact action runs.  These
+# bounds cover the worker's own command deadlines plus local verification and
+# cleanup; the overall session deadline remains the final cap.
+ACTION_FRAME_TIMEOUT_SECONDS = {
+    "verify-inputs": 15 * 60.0,
+    "initialize-generation": 15 * 60.0,
+    "restore-postgres": 2 * 60 * 60.0,
+    "restore-files": 6 * 60 * 60.0,
+    "verify-final": 2 * 60 * 60.0,
+    "completed-readback": 2 * 60 * 60.0,
+}
+INSTALLER_COPY_FRAME_TIMEOUT_SECONDS = 7 * 60 * 60.0
 
 AGENT_RELATIVE = Path(
     "scripts/orchestrate_production_shadow_frozen_final_restore.py"
@@ -166,6 +225,8 @@ WA_VERSION_FIELDS = frozenset(
         "private",
         "versioned",
         "encryption",
+        "bucket",
+        "recipient",
         "object_key",
         "version_id",
         "ciphertext_sha256",
@@ -443,6 +504,30 @@ class FrozenFinalRestoreOrchestratorError(RuntimeError):
 
 class ConsumptionAuditAbsent(FrozenFinalRestoreOrchestratorError):
     """The exact live claim has not yet been consumed."""
+
+
+class FrozenFinalRestoreCancellation(FrozenFinalRestoreOrchestratorError):
+    """A catchable controller or host cancellation was requested."""
+
+
+@dataclass(frozen=True)
+class ProcessIdentity:
+    pid: int
+    parent_pid: int
+    process_group: int
+    start_time: int
+    state: str
+
+    @property
+    def key(self) -> tuple[int, int]:
+        return self.pid, self.start_time
+
+
+@dataclass
+class InteractiveProcessOwnership:
+    root: ProcessIdentity
+    baseline_children: frozenset[tuple[int, int]]
+    tracked: set[ProcessIdentity]
 
 
 class InteractiveProcess(Protocol):
@@ -863,6 +948,33 @@ def _expected_release_paths(
     }
 
 
+def _validated_wa_object_key(value: Any) -> str:
+    if not isinstance(value, str):
+        raise FrozenFinalRestoreOrchestratorError(
+            "WebApp-IR object key is not a safe ASCII path"
+        )
+    try:
+        encoded = value.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise FrozenFinalRestoreOrchestratorError(
+            "WebApp-IR object key is not a safe ASCII path"
+        ) from exc
+    segments = value.split("/")
+    if (
+        not 1 <= len(encoded) <= 1024
+        or not value.endswith(".age")
+        or any(
+            segment in {"", ".", ".."}
+            or OBJECT_KEY_SEGMENT_RE.fullmatch(segment) is None
+            for segment in segments
+        )
+    ):
+        raise FrozenFinalRestoreOrchestratorError(
+            "WebApp-IR object key is not a safe ASCII path"
+        )
+    return value
+
+
 def validate_wa_exact_version(value: Any) -> dict[str, Any]:
     if (
         not isinstance(value, dict)
@@ -871,10 +983,13 @@ def validate_wa_exact_version(value: Any) -> dict[str, Any]:
         or value["private"] is not True
         or value["versioned"] is not True
         or value["encryption"] != "age"
-        or not isinstance(value["object_key"], str)
-        or not 1 <= len(value["object_key"]) <= 1024
-        or value["object_key"].startswith("/")
-        or ".." in Path(value["object_key"]).parts
+        or not isinstance(value["bucket"], str)
+        or BUCKET_RE.fullmatch(value["bucket"]) is None
+        or ".." in value["bucket"]
+        or ".-" in value["bucket"]
+        or "-." in value["bucket"]
+        or not isinstance(value["recipient"], str)
+        or AGE_RECIPIENT_RE.fullmatch(value["recipient"]) is None
         or not isinstance(value["version_id"], str)
         or VERSION_ID_RE.fullmatch(value["version_id"]) is None
         or value["exact_version_readback_verified"] is not True
@@ -884,6 +999,7 @@ def validate_wa_exact_version(value: Any) -> dict[str, Any]:
         raise FrozenFinalRestoreOrchestratorError(
             "WebApp-IR exact-VersionId transport binding differs"
         )
+    _validated_wa_object_key(value["object_key"])
     _nonzero_sha256(
         value["ciphertext_sha256"],
         label="WebApp-IR ciphertext SHA-256",
@@ -1031,7 +1147,16 @@ def validate_host_request(value: Mapping[str, Any]) -> dict[str, Any]:
                 "host request authority path or epoch differs"
             )
     if role == "webapp_ir":
-        validate_wa_exact_version(document["wa_exact_version"])
+        wa_exact_version = validate_wa_exact_version(
+            document["wa_exact_version"]
+        )
+        object_namespace = (
+            f"production-shadow/{campaign_id}/{operation_id}/"
+        )
+        if not wa_exact_version["object_key"].startswith(object_namespace):
+            raise FrozenFinalRestoreOrchestratorError(
+                "WebApp-IR object key is outside the operation namespace"
+            )
         if any(
             inputs[field] is None
             for field in (
@@ -1043,10 +1168,15 @@ def validate_host_request(value: Mapping[str, Any]) -> dict[str, Any]:
                 "WebApp-IR transport evidence paths are incomplete"
             )
         if document["action"] == "apply":
-            validate_wa_fresh_control_version(
+            fresh_control = validate_wa_fresh_control_version(
                 document["wa_fresh_control_exact_version"],
                 request=document,
             )
+            if not fresh_control["object_key"].startswith(object_namespace):
+                raise FrozenFinalRestoreOrchestratorError(
+                    "WebApp-IR fresh-control key is outside the operation "
+                    "namespace"
+                )
             if inputs["webapp_ir_control_transfer_receipt"] is None:
                 raise FrozenFinalRestoreOrchestratorError(
                     "WebApp-IR fresh-control receipt path is absent"
@@ -1432,6 +1562,10 @@ class ControllerAuthoritySession:
         self.transcript: list[dict[str, Any]] = []
 
     def respond(self, challenge: Mapping[str, Any]) -> dict[str, Any]:
+        if len(self.transcript) >= MAX_TRANSCRIPT_ENTRIES:
+            raise FrozenFinalRestoreOrchestratorError(
+                "controller authority transcript entry limit exceeded"
+            )
         candidate_nonce = challenge.get("challenge_nonce")
         if (
             not isinstance(candidate_nonce, str)
@@ -1644,6 +1778,8 @@ def _wa_control_receipt(request: Mapping[str, Any]) -> DocumentReadback | None:
             "private",
             "versioned",
             "encryption",
+            "bucket",
+            "recipient",
             "object_key",
             "version_id",
             "ciphertext_sha256",
@@ -1671,6 +1807,8 @@ def _wa_control_receipt(request: Mapping[str, Any]) -> DocumentReadback | None:
                 "private",
                 "versioned",
                 "encryption",
+                "bucket",
+                "recipient",
                 "object_key",
                 "version_id",
                 "ciphertext_sha256",
@@ -3034,6 +3172,8 @@ def validate_host_result(
             result["transport"].get(field) != expected[field]
             for field in (
                 "provider",
+                "bucket",
+                "recipient",
                 "object_key",
                 "version_id",
                 "ciphertext_sha256",
@@ -4608,8 +4748,14 @@ def session_arguments(
     agent = request["agent_path"]
     host_arguments = [
         ENV,
+        "-i",
+        "PATH=/usr/bin:/bin",
+        "HOME=/root",
+        "LANG=C.UTF-8",
+        "LC_ALL=C.UTF-8",
         "PYTHONDONTWRITEBYTECODE=1",
         PYTHON,
+        "-I",
         "-B",
         agent,
         "--host-stdio",
@@ -4626,6 +4772,8 @@ def session_arguments(
             )
     return [
         SSH,
+        "-F",
+        "/dev/null",
         "-T",
         "-p",
         str(request["expected_port"]),
@@ -4660,15 +4808,178 @@ def session_arguments(
     ]
 
 
+def _process_identity(pid: int) -> ProcessIdentity | None:
+    try:
+        payload = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+        fields = payload[payload.rindex(") ") + 2 :].split()
+        if len(fields) < 20:
+            return None
+        return ProcessIdentity(
+            pid=pid,
+            parent_pid=int(fields[1], 10),
+            process_group=int(fields[2], 10),
+            start_time=int(fields[19], 10),
+            state=fields[0],
+        )
+    except (OSError, UnicodeError, ValueError):
+        return None
+
+
+def _process_snapshot() -> dict[int, ProcessIdentity]:
+    try:
+        entries = tuple(Path("/proc").iterdir())
+    except OSError as exc:
+        raise FrozenFinalRestoreOrchestratorError(
+            "interactive process ownership inventory is unavailable"
+        ) from exc
+    return {
+        identity.pid: identity
+        for entry in entries
+        if entry.name.isdecimal()
+        for identity in (_process_identity(int(entry.name, 10)),)
+        if identity is not None
+    }
+
+
+def _enable_child_subreaper() -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise FrozenFinalRestoreOrchestratorError(
+            f"interactive child subreaper setup failed with errno {error}"
+        )
+
+
+def _direct_child_baseline() -> frozenset[tuple[int, int]]:
+    owner = os.getpid()
+    return frozenset(
+        identity.key
+        for identity in _process_snapshot().values()
+        if identity.parent_pid == owner
+    )
+
+
+def _owned_processes(
+    ownership: InteractiveProcessOwnership,
+) -> set[ProcessIdentity]:
+    snapshot = _process_snapshot()
+    root = ownership.root
+    observed_root = snapshot.get(root.pid)
+    owned_ids: set[int] = set()
+    if (
+        observed_root is not None
+        and observed_root.start_time == root.start_time
+    ):
+        owned_ids.add(root.pid)
+    changed = True
+    while changed:
+        changed = False
+        for identity in snapshot.values():
+            if (
+                identity.pid not in owned_ids
+                and identity.parent_pid in owned_ids
+            ):
+                owned_ids.add(identity.pid)
+                changed = True
+    owner = os.getpid()
+    for identity in snapshot.values():
+        if (
+            identity.parent_pid == owner
+            and identity.key not in ownership.baseline_children
+        ):
+            owned_ids.add(identity.pid)
+    return {
+        identity
+        for pid, identity in snapshot.items()
+        if pid in owned_ids
+    }
+
+
+def _identity_is_live(identity: ProcessIdentity) -> bool:
+    current = _process_identity(identity.pid)
+    return (
+        current is not None
+        and current.start_time == identity.start_time
+        and current.state != "Z"
+    )
+
+
+def _identity_is_current(identity: ProcessIdentity) -> bool:
+    current = _process_identity(identity.pid)
+    return (
+        current is not None
+        and current.start_time == identity.start_time
+    )
+
+
+def _reap_adopted_zombies(
+    ownership: InteractiveProcessOwnership,
+) -> None:
+    for identity in tuple(ownership.tracked):
+        if identity.pid == ownership.root.pid:
+            continue
+        current = _process_identity(identity.pid)
+        if (
+            current is None
+            or current.start_time != identity.start_time
+            or current.parent_pid != os.getpid()
+            or current.state != "Z"
+        ):
+            continue
+        try:
+            reaped, _status = os.waitpid(identity.pid, os.WNOHANG)
+        except ChildProcessError:
+            continue
+        except OSError as exc:
+            raise FrozenFinalRestoreOrchestratorError(
+                "identity-bound adopted interactive child could not be reaped"
+            ) from exc
+        if reaped not in {0, identity.pid}:
+            raise FrozenFinalRestoreOrchestratorError(
+                "identity-bound adopted interactive child reap differed"
+            )
+
+
+def _signal_process_identity(
+    identity: ProcessIdentity,
+    signum: int,
+) -> None:
+    current = _process_identity(identity.pid)
+    if current is None or current.start_time != identity.start_time:
+        return
+    try:
+        descriptor = os.pidfd_open(identity.pid, 0)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise FrozenFinalRestoreOrchestratorError(
+            "interactive child pidfd could not be opened"
+        ) from exc
+    try:
+        refreshed = _process_identity(identity.pid)
+        if refreshed is None or refreshed.start_time != identity.start_time:
+            return
+        signal.pidfd_send_signal(descriptor, signum)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise FrozenFinalRestoreOrchestratorError(
+            "interactive child pidfd signal failed"
+        ) from exc
+    finally:
+        os.close(descriptor)
+
+
 def _default_session_factory(arguments: Sequence[str]) -> InteractiveProcess:
-    # A temporary file prevents an untrusted remote stderr stream from
-    # deadlocking the authority channel.  Its contents are never persisted.
-    stderr = tempfile.TemporaryFile()
+    # Remote stderr is outside the framed protocol.  DEVNULL is a kernel sink,
+    # so it cannot fill an unread pipe or grow controller storage.
+    _enable_child_subreaper()
+    baseline_children = _direct_child_baseline()
     process = subprocess.Popen(  # noqa: S603
         list(arguments),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
-        stderr=stderr,
+        stderr=subprocess.DEVNULL,
         env={
             "PATH": "/usr/bin:/bin",
             "HOME": "/root",
@@ -4676,13 +4987,156 @@ def _default_session_factory(arguments: Sequence[str]) -> InteractiveProcess:
             "LC_ALL": "C.UTF-8",
             "PYTHONDONTWRITEBYTECODE": "1",
         },
+        close_fds=True,
+        pass_fds=(),
+        start_new_session=True,
     )
+    root = _process_identity(process.pid)
+    if root is None:
+        root = ProcessIdentity(
+            pid=process.pid,
+            parent_pid=os.getpid(),
+            process_group=process.pid,
+            start_time=-1,
+            state="?",
+        )
+    ownership = InteractiveProcessOwnership(
+        root=root,
+        baseline_children=baseline_children,
+        tracked={root} if root.start_time >= 0 else set(),
+    )
+    setattr(process, "_production_shadow_process_ownership", ownership)
     if process.stdin is None or process.stdout is None:
-        process.kill()
+        _terminate_interactive_process(process, kill_direct=True)
         raise FrozenFinalRestoreOrchestratorError(
             "interactive host process lacks bounded stdio"
         )
     return process
+
+
+def _frame_timeout_after_boundary(
+    boundary: str,
+    *,
+    base_timeout: float,
+) -> float:
+    if boundary.startswith("before:"):
+        parts = boundary.split(":")
+        if len(parts) == 3 and parts[1] in ROLES:
+            return max(
+                base_timeout,
+                ACTION_FRAME_TIMEOUT_SECONDS.get(parts[2], base_timeout),
+            )
+    if boundary.startswith(
+        ("before-copy-source:", "before-write-payload:")
+    ):
+        return max(base_timeout, INSTALLER_COPY_FRAME_TIMEOUT_SECONDS)
+    return base_timeout
+
+
+def _terminate_interactive_process(
+    process: InteractiveProcess,
+    *,
+    kill_direct: bool,
+) -> None:
+    ownership = getattr(
+        process,
+        "_production_shadow_process_ownership",
+        None,
+    )
+    if not isinstance(ownership, InteractiveProcessOwnership):
+        if kill_direct:
+            process.kill()
+        try:
+            process.wait(timeout=MAX_POST_RESULT_EXIT_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=MAX_POST_RESULT_EXIT_SECONDS)
+        return
+
+    def refresh() -> None:
+        ownership.tracked.update(_owned_processes(ownership))
+        _reap_adopted_zombies(ownership)
+
+    def signal_live(*, force: bool) -> None:
+        refresh()
+        for identity in tuple(ownership.tracked):
+            if _identity_is_live(identity):
+                _signal_process_identity(
+                    identity,
+                    (
+                        signal.SIGKILL
+                        if force
+                        or identity.process_group
+                        != ownership.root.process_group
+                        else signal.SIGTERM
+                    ),
+                )
+
+    signal_live(force=False)
+    deadline = time.monotonic() + MAX_SESSION_GROUP_TERM_SECONDS
+    while time.monotonic() < deadline:
+        poll = getattr(process, "poll", None)
+        returncode = poll() if callable(poll) else None
+        signal_live(force=False)
+        if returncode is not None and not any(
+            _identity_is_live(identity)
+            for identity in ownership.tracked
+        ):
+            break
+        time.sleep(
+            min(
+                PROCESS_POLL_SECONDS,
+                max(0.0, deadline - time.monotonic()),
+            )
+        )
+    signal_live(force=True)
+    try:
+        process.wait(timeout=MAX_POST_RESULT_EXIT_SECONDS)
+    except subprocess.TimeoutExpired:
+        poll = getattr(process, "poll", None)
+        if not callable(poll) or poll() is None:
+            process.kill()
+        process.wait(timeout=MAX_POST_RESULT_EXIT_SECONDS)
+
+    absence_deadline = (
+        time.monotonic()
+        + MAX_SESSION_GROUP_TERM_SECONDS
+        + PROCESS_TREE_QUIESCENCE_SECONDS
+    )
+    stable_since: float | None = None
+    while time.monotonic() < absence_deadline:
+        refresh()
+        live = {
+            identity
+            for identity in ownership.tracked
+            if _identity_is_live(identity)
+        }
+        if live:
+            stable_since = None
+            for identity in live:
+                _signal_process_identity(identity, signal.SIGKILL)
+        elif stable_since is None:
+            stable_since = time.monotonic()
+        elif (
+            time.monotonic() - stable_since
+            >= PROCESS_TREE_QUIESCENCE_SECONDS
+        ):
+            return
+        time.sleep(
+            min(
+                PROCESS_POLL_SECONDS,
+                max(0.0, absence_deadline - time.monotonic()),
+            )
+        )
+    refresh()
+    if any(
+        identity.pid != ownership.root.pid
+        and _identity_is_current(identity)
+        for identity in ownership.tracked
+    ):
+        raise FrozenFinalRestoreOrchestratorError(
+            "interactive process tree survived forced cleanup"
+        )
 
 
 def run_interactive_host_with_authority(
@@ -4694,13 +5148,22 @@ def run_interactive_host_with_authority(
     ssh_identity: Path,
     known_hosts: Path,
     session_factory: SessionFactory = _default_session_factory,
-    timeout: float = 8 * 60 * 60,
-    line_timeout: float = 120.0,
+    timeout: float = MAX_HOST_SESSION_SECONDS,
+    line_timeout: float = MAX_BASE_FRAME_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     request = validate_host_request(request_value)
     if request["action"] != "apply":
         raise FrozenFinalRestoreOrchestratorError(
             "interactive host session requires apply"
+        )
+    if (
+        type(timeout) not in {int, float}
+        or not 0 < timeout <= MAX_HOST_SESSION_SECONDS
+        or type(line_timeout) not in {int, float}
+        or not 0 < line_timeout <= MAX_BASE_FRAME_TIMEOUT_SECONDS
+    ):
+        raise FrozenFinalRestoreOrchestratorError(
+            "interactive host deadlines are outside the bounded contract"
         )
     process = session_factory(
         session_arguments(
@@ -4714,12 +5177,14 @@ def run_interactive_host_with_authority(
     controller_transcript: list[dict[str, Any]] = []
     overall_deadline = time.monotonic() + timeout
     reader = DeadlineLineReader(process.stdout)
+    next_frame_timeout = line_timeout
+    completed_successfully = False
     try:
         process.stdin.write(canonical_json(request) + b"\n")
         process.stdin.flush()
         while True:
             remaining = min(
-                line_timeout,
+                next_frame_timeout,
                 overall_deadline - time.monotonic(),
             )
             if remaining <= 0:
@@ -4792,6 +5257,10 @@ def run_interactive_host_with_authority(
                 controller_transcript.append(entry)
                 process.stdin.write(canonical_json(response) + b"\n")
                 process.stdin.flush()
+                next_frame_timeout = _frame_timeout_after_boundary(
+                    document["boundary"],
+                    base_timeout=line_timeout,
+                )
                 continue
             if document.get("schema") != HOST_RESULT_SCHEMA:
                 raise FrozenFinalRestoreOrchestratorError(
@@ -4835,23 +5304,20 @@ def run_interactive_host_with_authority(
                 raise FrozenFinalRestoreOrchestratorError(
                     "host transcript differs from the controller exchange"
                 )
+            completed_successfully = True
             return result
-    except BaseException:
-        try:
-            process.kill()
-        except BaseException:
-            pass
-        try:
-            process.wait(timeout=MAX_POST_RESULT_EXIT_SECONDS)
-        except BaseException:
-            pass
-        raise
     finally:
-        for stream in (process.stdin, process.stdout):
-            try:
-                stream.close()
-            except BaseException:
-                pass
+        try:
+            _terminate_interactive_process(
+                process,
+                kill_direct=not completed_successfully,
+            )
+        finally:
+            for stream in (process.stdin, process.stdout):
+                try:
+                    stream.close()
+                except BaseException:
+                    pass
 
 
 def run_interactive_host(
@@ -4861,8 +5327,8 @@ def run_interactive_host(
     ssh_identity: Path,
     known_hosts: Path,
     session_factory: SessionFactory = _default_session_factory,
-    timeout: float = 8 * 60 * 60,
-    line_timeout: float = 120.0,
+    timeout: float = MAX_HOST_SESSION_SECONDS,
+    line_timeout: float = MAX_BASE_FRAME_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     request = validate_host_request(request_value)
     authority_session = ControllerAuthoritySession(
@@ -5128,6 +5594,8 @@ def _prepared_apply_request(
         if (
             fresh_version["version_id"] == restore_version["version_id"]
             or fresh_version["object_key"] == restore_version["object_key"]
+            or fresh_version["bucket"] != restore_version["bucket"]
+            or fresh_version["recipient"] != restore_version["recipient"]
             or prepared["inputs"][
                 "webapp_ir_control_transfer_receipt"
             ]
@@ -5206,7 +5674,69 @@ def _load_or_prepare_request(
     return prepared
 
 
-def run_three_roles_under_lease(
+class _OneShotSignalGuard:
+    def __init__(self, *, scope: str) -> None:
+        self._scope = scope
+        self._signals = (
+            signal.SIGHUP,
+            signal.SIGTERM,
+            signal.SIGINT,
+        )
+        self._previous: dict[int, Any] = {}
+        self._delivered = False
+
+    def _handle(self, signum: int, _frame: Any) -> None:
+        if self._delivered:
+            return
+        self._delivered = True
+        raise FrozenFinalRestoreCancellation(
+            f"{self._scope} was cancelled "
+            f"({signal.Signals(signum).name})"
+        )
+
+    def _restore(self) -> None:
+        failures: list[BaseException] = []
+        for signum, handler in reversed(tuple(self._previous.items())):
+            try:
+                signal.signal(signum, handler)
+            except BaseException as exc:
+                failures.append(exc)
+        self._previous.clear()
+        if failures:
+            raise FrozenFinalRestoreOrchestratorError(
+                f"{self._scope} signal handlers could not be restored"
+            ) from failures[0]
+
+    def __enter__(self) -> _OneShotSignalGuard:
+        if threading.current_thread() is not threading.main_thread():
+            raise FrozenFinalRestoreOrchestratorError(
+                f"{self._scope} requires the main thread"
+            )
+        try:
+            for signum in self._signals:
+                previous = signal.getsignal(signum)
+                self._previous[signum] = previous
+                signal.signal(signum, self._handle)
+            return self
+        except BaseException as exc:
+            self._delivered = True
+            self._restore()
+            raise FrozenFinalRestoreOrchestratorError(
+                f"{self._scope} signal handlers could not be installed"
+            ) from exc
+
+    def __exit__(
+        self,
+        _error_type: Any,
+        _error: Any,
+        _traceback: Any,
+    ) -> bool:
+        self._delivered = True
+        self._restore()
+        return False
+
+
+def _run_three_roles_under_lease(
     *,
     lease: Any,
     requests: Mapping[str, Mapping[str, Any]],
@@ -5321,33 +5851,96 @@ def run_three_roles_under_lease(
         )
 
 
+def run_three_roles_under_lease(
+    *,
+    lease: Any,
+    requests: Mapping[str, Mapping[str, Any]],
+    prepare_request: RoleRequestPreparer,
+    invoke: HostInvoker,
+    output_directory: Path,
+    consumption_readback: ConsumptionReadback,
+    checkpoint: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    with _OneShotSignalGuard(scope="frozen-final controller operation"):
+        return _run_three_roles_under_lease(
+            lease=lease,
+            requests=requests,
+            prepare_request=prepare_request,
+            invoke=invoke,
+            output_directory=output_directory,
+            consumption_readback=consumption_readback,
+            checkpoint=checkpoint,
+        )
+
+
 def _host_stdio() -> dict[str, Any]:
-    reader = DeadlineLineReader(sys.stdin.buffer)
-    raw = reader.read_line(
-        maximum=MAX_CONTROL_BYTES,
-        timeout=120.0,
-    )
-    if (
-        not raw
-        or len(raw) > MAX_CONTROL_BYTES
-        or not raw.endswith(b"\n")
-    ):
+    with _host_control_disconnect_guard(sys.stdin.buffer):
+        reader = DeadlineLineReader(sys.stdin.buffer)
+        raw = reader.read_line(
+            maximum=MAX_CONTROL_BYTES,
+            timeout=120.0,
+        )
+        if (
+            not raw
+            or len(raw) > MAX_CONTROL_BYTES
+            or not raw.endswith(b"\n")
+        ):
+            raise FrozenFinalRestoreOrchestratorError(
+                "host control request is missing or oversized"
+            )
+        request = validate_host_request(
+            strict_json(raw[:-1], label="host control request")
+        )
+        exchange = (
+            StdioAuthorityExchange(
+                sys.stdin.buffer,
+                sys.stdout.buffer,
+                line_reader=reader,
+            )
+            if request["action"] == "apply"
+            else None
+        )
+        return execute_host_request(request, exchange=exchange)
+
+
+@contextmanager
+def _host_control_disconnect_guard(
+    input_stream: BinaryIO,
+) -> Iterator[None]:
+    try:
+        descriptor = input_stream.fileno()
+    except (AttributeError, OSError, ValueError) as exc:
         raise FrozenFinalRestoreOrchestratorError(
-            "host control request is missing or oversized"
+            "host control input lacks a pollable descriptor"
+        ) from exc
+    with _OneShotSignalGuard(scope="host control connection") as guard:
+        poller = select.poll()
+        poller.register(
+            descriptor,
+            select.POLLHUP | select.POLLERR | select.POLLNVAL,
         )
-    request = validate_host_request(
-        strict_json(raw[:-1], label="host control request")
-    )
-    exchange = (
-        StdioAuthorityExchange(
-            sys.stdin.buffer,
-            sys.stdout.buffer,
-            line_reader=reader,
+        if poller.poll(0):
+            guard._handle(signal.SIGHUP, None)  # noqa: SLF001
+        stopped = threading.Event()
+
+        def monitor_disconnect() -> None:
+            while not stopped.is_set():
+                events = poller.poll(100)
+                if events and not stopped.is_set():
+                    os.kill(os.getpid(), signal.SIGHUP)
+                    return
+
+        monitor = threading.Thread(
+            target=monitor_disconnect,
+            name="frozen-final-control-disconnect",
+            daemon=True,
         )
-        if request["action"] == "apply"
-        else None
-    )
-    return execute_host_request(request, exchange=exchange)
+        monitor.start()
+        try:
+            yield
+        finally:
+            stopped.set()
+            monitor.join(timeout=1.0)
 
 
 def _load_request(path: Path) -> dict[str, Any]:

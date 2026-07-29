@@ -1,7 +1,10 @@
+import io
 import json
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
+from scripts import plan_production_full_matrix as legacy_planner
 from scripts.plan_production_full_matrix import (
     PlanError,
     build_plan,
@@ -11,6 +14,19 @@ from scripts.plan_production_full_matrix import (
 
 
 class ProductionFullMatrixPlanTests(unittest.TestCase):
+    def test_cli_is_retired_before_legacy_command_plan_is_built(self):
+        with patch.object(
+            legacy_planner,
+            "build_plan",
+            side_effect=AssertionError("retired planner must not emit legacy commands"),
+        ), patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            exit_code = legacy_planner.main(["--prefix", "PFM_20260728_legacy_fence_"])
+
+        self.assertEqual(exit_code, 2)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["status"], "blocked_legacy_two_server_full_matrix_retired")
+        self.assertEqual(payload["reason"], legacy_planner.LEGACY_TWO_SERVER_PLAN_RETIREMENT_REASON)
+
     def make_args(self, **overrides):
         values = {
             "prefix": "PFM_20260624_180000_",

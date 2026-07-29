@@ -12,16 +12,24 @@ from __future__ import annotations
 
 import argparse
 import base64
+from contextlib import contextmanager
+import ctypes
 from dataclasses import dataclass
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
+import select
+import selectors
+import signal
 import stat
 import subprocess
 import sys
+import threading
+import time
 from typing import Any, Callable, Mapping, Sequence
 
 
@@ -50,6 +58,9 @@ FILE_MODE = 0o600
 DIRECTORY_MODE = 0o700
 MAX_JSON_BYTES = 2 * 1024 * 1024
 MAX_ARTIFACT_BYTES = 64 * 1024 * 1024 * 1024
+PROCESS_GROUP_TERM_SECONDS = 1.0
+PROCESS_TREE_QUIESCENCE_SECONDS = 0.25
+PR_SET_CHILD_SUBREAPER = 36
 PYTHON3 = "/usr/bin/python3"
 SSH = "/usr/bin/ssh"
 SCP = "/usr/bin/scp"
@@ -101,7 +112,19 @@ SAFE_GIT_ENV = {
     "GIT_CONFIG_SYSTEM": "/dev/null",
     "GIT_TERMINAL_PROMPT": "0",
     "GIT_OPTIONAL_LOCKS": "0",
+    "GIT_NO_REPLACE_OBJECTS": "1",
 }
+GIT_CONFIG_ARGUMENTS = (
+    "--no-optional-locks",
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.untrackedCache=false",
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "core.fileMode=true",
+)
 INPUT_ROW_FIELDS = frozenset({"filename", "sha256", "bytes"})
 HOST_REQUEST_FIELDS = frozenset(
     {
@@ -120,6 +143,25 @@ HOST_REQUEST_FIELDS = frozenset(
 
 class PrecommitInputOrchestrationError(RuntimeError):
     """Raised when controller or host orchestration fails closed."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        production_contacted: bool = False,
+        mutation_possible: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.production_contacted = production_contacted
+        self.mutation_possible = mutation_possible
+
+
+class PrecommitInputCancellation(PrecommitInputOrchestrationError):
+    """The controller connection or process authority was lost."""
+
+
+class BoundedRunnerError(subprocess.SubprocessError):
+    """The controller subprocess exceeded its execution contract."""
 
 
 @dataclass(frozen=True)
@@ -604,21 +646,676 @@ def _plan(closure: ControllerClosure) -> dict[str, Any]:
     }
 
 
+def _anonymous_read_pipe_identity(
+    descriptor: int,
+    *,
+    label: str,
+) -> tuple[int, int]:
+    if type(descriptor) is not int or descriptor < 0:
+        raise PrecommitInputOrchestrationError(
+            f"{label} descriptor is invalid"
+        )
+    try:
+        metadata = os.fstat(descriptor)
+        flags = fcntl.fcntl(descriptor, fcntl.F_GETFL)
+        target = os.readlink(f"/proc/self/fd/{descriptor}")
+    except OSError as exc:
+        raise PrecommitInputOrchestrationError(
+            f"{label} descriptor is unavailable"
+        ) from exc
+    if (
+        not stat.S_ISFIFO(metadata.st_mode)
+        or flags & os.O_ACCMODE != os.O_RDONLY
+        or target != f"pipe:[{metadata.st_ino}]"
+    ):
+        raise PrecommitInputOrchestrationError(
+            f"{label} must be an anonymous read-only pipe"
+        )
+    try:
+        entries = tuple(Path("/proc/self/fd").iterdir())
+    except OSError as exc:
+        raise PrecommitInputOrchestrationError(
+            f"{label} descriptor closure cannot be inspected"
+        ) from exc
+    for entry in entries:
+        if not entry.name.isdecimal() or int(entry.name, 10) == descriptor:
+            continue
+        candidate = int(entry.name, 10)
+        try:
+            observed = os.fstat(candidate)
+            observed_flags = fcntl.fcntl(candidate, fcntl.F_GETFL)
+        except OSError:
+            continue
+        if (
+            (observed.st_dev, observed.st_ino)
+            == (metadata.st_dev, metadata.st_ino)
+            and observed_flags & os.O_ACCMODE in {os.O_WRONLY, os.O_RDWR}
+        ):
+            raise PrecommitInputOrchestrationError(
+                f"{label} writer end is held by the host subprocess"
+            )
+    return metadata.st_dev, metadata.st_ino
+
+
+class ExecutionAuthority:
+    """Deliver one cancellation and bind host work to controller stdin."""
+
+    _WAKE_SIGNAL = signal.SIGUSR1
+    _HANDLED_SIGNALS = (
+        signal.SIGHUP,
+        signal.SIGTERM,
+        signal.SIGINT,
+        _WAKE_SIGNAL,
+    )
+
+    def __init__(self, control_fd: int | None) -> None:
+        if threading.current_thread() is not threading.main_thread():
+            raise PrecommitInputOrchestrationError(
+                "precommit input orchestration must run in the main thread"
+            )
+        self._fd: int | None = None
+        if control_fd is not None:
+            _anonymous_read_pipe_identity(
+                control_fd,
+                label="controller stdin liveness",
+            )
+            try:
+                self._fd = os.dup(control_fd)
+                os.set_inheritable(self._fd, False)
+                os.set_blocking(self._fd, False)
+            except OSError as exc:
+                raise PrecommitInputOrchestrationError(
+                    "controller stdin liveness cannot be secured"
+                ) from exc
+        self._cancelled = threading.Event()
+        self._exception_delivered = threading.Event()
+        self._stopping = threading.Event()
+        self._reason = "precommit input execution authority was lost"
+        self._old_handlers: dict[int, Any] = {}
+        self._monitor: threading.Thread | None = None
+        self.production_contacted = False
+        self.mutation_possible = False
+
+    def mark_risk(
+        self,
+        *,
+        production_contacted: bool,
+        mutation_possible: bool,
+    ) -> None:
+        self.production_contacted |= production_contacted
+        self.mutation_possible |= mutation_possible
+
+    def _cancel(self, reason: str, *, wake_main: bool) -> None:
+        if self._cancelled.is_set():
+            return
+        self._reason = reason
+        self._cancelled.set()
+        if wake_main:
+            main_ident = threading.main_thread().ident
+            if main_ident is not None:
+                try:
+                    signal.pthread_kill(main_ident, self._WAKE_SIGNAL)
+                except (OSError, RuntimeError):
+                    pass
+
+    def _raise_once(self) -> None:
+        if self._exception_delivered.is_set():
+            return
+        self._exception_delivered.set()
+        raise PrecommitInputCancellation(
+            self._reason,
+            production_contacted=self.production_contacted,
+            mutation_possible=self.mutation_possible,
+        )
+
+    def _sample(self) -> None:
+        if self._fd is None:
+            return
+        ready, _write, _error = select.select([self._fd], [], [], 0)
+        if not ready:
+            return
+        try:
+            payload = os.read(self._fd, 1)
+        except BlockingIOError:
+            return
+        self._cancel(
+            (
+                "controller stdin liveness reached EOF"
+                if payload == b""
+                else "controller stdin liveness carried forbidden data"
+            ),
+            wake_main=False,
+        )
+        self._raise_once()
+
+    def _handle_signal(self, signum: int, _frame: Any) -> None:
+        if signum == self._WAKE_SIGNAL and self._cancelled.is_set():
+            pass
+        else:
+            self._cancel(
+                f"precommit input orchestrator received signal {signum}",
+                wake_main=False,
+            )
+        self._raise_once()
+
+    def _monitor_control(self) -> None:
+        assert self._fd is not None
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(self._fd, selectors.EVENT_READ)
+            while not self._stopping.is_set():
+                if not selector.select(0.05):
+                    continue
+                try:
+                    payload = os.read(self._fd, 1)
+                except BlockingIOError:
+                    continue
+                except OSError:
+                    if self._stopping.is_set():
+                        return
+                    payload = b""
+                self._cancel(
+                    (
+                        "controller stdin liveness reached EOF"
+                        if payload == b""
+                        else "controller stdin liveness carried forbidden data"
+                    ),
+                    wake_main=True,
+                )
+                return
+        finally:
+            selector.close()
+
+    def __enter__(self) -> ExecutionAuthority:
+        try:
+            for signum in self._HANDLED_SIGNALS:
+                self._old_handlers[signum] = signal.getsignal(signum)
+                signal.signal(signum, self._handle_signal)
+            self._sample()
+            if self._fd is not None:
+                self._monitor = threading.Thread(
+                    target=self._monitor_control,
+                    name="precommit-input-controller-liveness",
+                    daemon=True,
+                )
+                self._monitor.start()
+            self.check()
+            return self
+        except BaseException:
+            self._restore()
+            raise
+
+    def check(self) -> None:
+        if (
+            self._cancelled.is_set()
+            and not self._exception_delivered.is_set()
+        ):
+            self._raise_once()
+
+    def _restore(self) -> None:
+        self._stopping.set()
+        if self._monitor is not None:
+            self._monitor.join(timeout=1)
+        if self._fd is not None:
+            try:
+                os.close(self._fd)
+            except OSError:
+                pass
+            self._fd = None
+        for signum, handler in self._old_handlers.items():
+            signal.signal(signum, handler)
+        self._old_handlers.clear()
+
+    def __exit__(self, error_type: Any, _value: Any, _traceback: Any) -> None:
+        deliver_after_restore = (
+            self._cancelled.is_set()
+            and error_type is None
+            and not self._exception_delivered.is_set()
+        )
+        reason = self._reason
+        self._exception_delivered.set()
+        self._restore()
+        if deliver_after_restore:
+            raise PrecommitInputCancellation(
+                reason,
+                production_contacted=self.production_contacted,
+                mutation_possible=self.mutation_possible,
+            )
+
+
+_ACTIVE_EXECUTION_AUTHORITY: ExecutionAuthority | None = None
+
+
+@contextmanager
+def _execution_authority(
+    control_fd: int | None = None,
+):  # noqa: ANN202
+    global _ACTIVE_EXECUTION_AUTHORITY
+    if _ACTIVE_EXECUTION_AUTHORITY is not None:
+        if control_fd is not None:
+            raise PrecommitInputOrchestrationError(
+                "controller liveness authority is already active"
+            )
+        yield _ACTIVE_EXECUTION_AUTHORITY
+        return
+    authority = ExecutionAuthority(control_fd)
+    try:
+        with authority:
+            _ACTIVE_EXECUTION_AUTHORITY = authority
+            try:
+                yield authority
+            finally:
+                _ACTIVE_EXECUTION_AUTHORITY = None
+    except PrecommitInputOrchestrationError as exc:
+        exc.production_contacted |= authority.production_contacted
+        exc.mutation_possible |= authority.mutation_possible
+        raise
+
+
+def _mark_execution_risk(
+    *,
+    production_contacted: bool,
+    mutation_possible: bool,
+) -> None:
+    if _ACTIVE_EXECUTION_AUTHORITY is not None:
+        _ACTIVE_EXECUTION_AUTHORITY.mark_risk(
+            production_contacted=production_contacted,
+            mutation_possible=mutation_possible,
+        )
+
+
+def _enable_child_subreaper() -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise BoundedRunnerError(
+            f"controller child subreaper setup failed with errno {error}"
+        )
+
+
+@dataclass(frozen=True)
+class ProcessIdentity:
+    process_id: int
+    parent_id: int
+    process_group: int
+    session_id: int
+    starttime: int
+    state: str
+
+    @property
+    def key(self) -> tuple[int, int]:
+        return self.process_id, self.starttime
+
+
+def _proc_identity(process_id: int) -> tuple[int, int, int, int, str]:
+    try:
+        payload = Path(f"/proc/{process_id}/stat").read_text(
+            encoding="ascii"
+        )
+        fields = payload[payload.rindex(") ") + 2 :].split()
+        if len(fields) < 20:
+            raise ValueError("short process stat")
+        state = fields[0]
+        parent = int(fields[1], 10)
+        group = int(fields[2], 10)
+        session = int(fields[3], 10)
+        starttime = int(fields[19], 10)
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise BoundedRunnerError(
+            "controller subprocess identity is unavailable"
+        ) from exc
+    return parent, group, session, starttime, state
+
+
+def _process_snapshot() -> dict[int, ProcessIdentity]:
+    try:
+        entries = tuple(Path("/proc").iterdir())
+    except OSError as exc:
+        raise BoundedRunnerError(
+            "controller process closure cannot be enumerated"
+        ) from exc
+    observed: dict[int, ProcessIdentity] = {}
+    for entry in entries:
+        if not entry.name.isdecimal():
+            continue
+        process_id = int(entry.name, 10)
+        try:
+            parent, group, session, starttime, state = _proc_identity(
+                process_id
+            )
+        except BoundedRunnerError:
+            continue
+        observed[process_id] = ProcessIdentity(
+            process_id=process_id,
+            parent_id=parent,
+            process_group=group,
+            session_id=session,
+            starttime=starttime,
+            state=state,
+        )
+    return observed
+
+
+def _direct_child_baseline() -> frozenset[tuple[int, int]]:
+    owner = os.getpid()
+    return frozenset(
+        identity.key
+        for identity in _process_snapshot().values()
+        if identity.parent_id == owner
+    )
+
+
+def _owned_processes(
+    root_process_id: int,
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+    include_zombies: bool = False,
+) -> tuple[ProcessIdentity, ...]:
+    snapshot = _process_snapshot()
+    owned_ids = {root_process_id}
+    changed = True
+    while changed:
+        changed = False
+        for identity in snapshot.values():
+            if (
+                identity.process_id not in owned_ids
+                and identity.parent_id in owned_ids
+            ):
+                owned_ids.add(identity.process_id)
+                changed = True
+    owner = os.getpid()
+    for identity in snapshot.values():
+        if (
+            identity.parent_id == owner
+            and identity.key not in baseline_children
+        ):
+            owned_ids.add(identity.process_id)
+    return tuple(
+        identity
+        for process_id, identity in snapshot.items()
+        if process_id in owned_ids
+        and (include_zombies or identity.state != "Z")
+    )
+
+
+def _signal_process_identity(
+    identity: ProcessIdentity,
+    signum: int,
+) -> None:
+    try:
+        current = _proc_identity(identity.process_id)
+    except BoundedRunnerError:
+        return
+    if current[3] != identity.starttime:
+        return
+    try:
+        descriptor = os.pidfd_open(identity.process_id, 0)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise BoundedRunnerError(
+            "controller identity-bound process handle cannot be opened"
+        ) from exc
+    try:
+        refreshed = _proc_identity(identity.process_id)
+        if refreshed[3] != identity.starttime:
+            return
+        signal.pidfd_send_signal(descriptor, signum)
+    except ProcessLookupError:
+        return
+    except OSError as exc:
+        raise BoundedRunnerError(
+            "controller identity-bound process signal failed"
+        ) from exc
+    finally:
+        os.close(descriptor)
+
+
+def _reap_owned_zombies(
+    root_process_id: int,
+    *,
+    baseline_children: frozenset[tuple[int, int]],
+) -> None:
+    owner = os.getpid()
+    while True:
+        reaped = False
+        for identity in _owned_processes(
+            root_process_id,
+            baseline_children=baseline_children,
+            include_zombies=True,
+        ):
+            if (
+                identity.process_id == root_process_id
+                or identity.parent_id != owner
+                or identity.state != "Z"
+            ):
+                continue
+            try:
+                waited, _status = os.waitpid(identity.process_id, os.WNOHANG)
+            except (ChildProcessError, ProcessLookupError):
+                continue
+            except OSError as exc:
+                raise BoundedRunnerError(
+                    "controller adopted child could not be reaped"
+                ) from exc
+            reaped |= waited == identity.process_id
+        if not reaped:
+            return
+
+
+def _terminate_process_group(
+    process: subprocess.Popen[bytes],
+    *,
+    baseline_children: frozenset[tuple[int, int]] = frozenset(),
+) -> None:
+    if process.stdin is not None:
+        try:
+            process.stdin.close()
+        except OSError:
+            pass
+    for identity in reversed(
+        _owned_processes(
+            process.pid,
+            baseline_children=baseline_children,
+        )
+    ):
+        _signal_process_identity(identity, signal.SIGTERM)
+    deadline = time.monotonic() + PROCESS_GROUP_TERM_SECONDS
+    while (
+        _owned_processes(
+            process.pid,
+            baseline_children=baseline_children,
+        )
+        and time.monotonic() < deadline
+    ):
+        process.poll()
+        _reap_owned_zombies(
+            process.pid,
+            baseline_children=baseline_children,
+        )
+        time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
+    for identity in reversed(
+        _owned_processes(
+            process.pid,
+            baseline_children=baseline_children,
+        )
+    ):
+        _signal_process_identity(identity, signal.SIGKILL)
+    try:
+        process.wait(timeout=PROCESS_GROUP_TERM_SECONDS)
+    except subprocess.TimeoutExpired:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=PROCESS_GROUP_TERM_SECONDS)
+    absence_deadline = (
+        time.monotonic()
+        + PROCESS_GROUP_TERM_SECONDS
+        + PROCESS_TREE_QUIESCENCE_SECONDS
+    )
+    stable_since: float | None = None
+    while time.monotonic() < absence_deadline:
+        _reap_owned_zombies(
+            process.pid,
+            baseline_children=baseline_children,
+        )
+        owned = _owned_processes(
+            process.pid,
+            baseline_children=baseline_children,
+            include_zombies=True,
+        )
+        if owned:
+            stable_since = None
+            for identity in reversed(owned):
+                if identity.state != "Z":
+                    _signal_process_identity(identity, signal.SIGKILL)
+        else:
+            if stable_since is None:
+                stable_since = time.monotonic()
+            elif (
+                time.monotonic() - stable_since
+                >= PROCESS_TREE_QUIESCENCE_SECONDS
+            ):
+                return
+        time.sleep(0.01)
+    _reap_owned_zombies(
+        process.pid,
+        baseline_children=baseline_children,
+    )
+    if _owned_processes(
+        process.pid,
+        baseline_children=baseline_children,
+        include_zombies=True,
+    ):
+        raise BoundedRunnerError(
+            "controller subprocess descendants survived forced cleanup"
+        )
+
+
 def _default_runner(
     argv: Sequence[str],
     timeout: int,
     env: Mapping[str, str],
 ) -> subprocess.CompletedProcess[bytes]:
-    return subprocess.run(
-        list(argv),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=timeout,
-        env=dict(env),
-        check=False,
-        shell=False,
-    )
+    if (
+        type(timeout) not in {int, float}
+        or not math.isfinite(timeout)
+        or timeout <= 0
+    ):
+        raise BoundedRunnerError("controller subprocess timeout is invalid")
+    if _ACTIVE_EXECUTION_AUTHORITY is None:
+        with _execution_authority():
+            return _default_runner(argv, timeout, env)
+    _ACTIVE_EXECUTION_AUTHORITY.check()
+    _enable_child_subreaper()
+    baseline_children = _direct_child_baseline()
+    process: subprocess.Popen[bytes] | None = None
+    selector = selectors.DefaultSelector()
+    buffers = {"stdout": bytearray(), "stderr": bytearray()}
+    deadline = time.monotonic() + timeout
+    group_cleaned = False
+    try:
+        _mark_execution_risk(
+            production_contacted=True,
+            mutation_possible=True,
+        )
+        _ACTIVE_EXECUTION_AUTHORITY.check()
+        process = subprocess.Popen(  # noqa: S603
+            list(argv),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=dict(env),
+            close_fds=True,
+            shell=False,
+            start_new_session=True,
+        )
+        if (
+            process.stdin is None
+            or process.stdout is None
+            or process.stderr is None
+        ):
+            raise BoundedRunnerError(
+                "controller subprocess pipes are unavailable"
+            )
+        for label, stream in (
+            ("stdout", process.stdout),
+            ("stderr", process.stderr),
+        ):
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, label)
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BoundedRunnerError(
+                    "controller subprocess timed out"
+                )
+            events = selector.select(min(0.1, remaining))
+            if not events:
+                if process.poll() is not None and not group_cleaned:
+                    _terminate_process_group(
+                        process,
+                        baseline_children=baseline_children,
+                    )
+                    group_cleaned = True
+                continue
+            for key, _mask in events:
+                try:
+                    chunk = os.read(key.fileobj.fileno(), 64 * 1024)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                buffer = buffers[key.data]
+                if len(buffer) + len(chunk) > MAX_JSON_BYTES:
+                    raise BoundedRunnerError(
+                        f"controller subprocess {key.data} is oversized"
+                    )
+                buffer.extend(chunk)
+            if process.poll() is not None and not group_cleaned:
+                _terminate_process_group(
+                    process,
+                    baseline_children=baseline_children,
+                )
+                group_cleaned = True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise BoundedRunnerError("controller subprocess timed out")
+        returncode = process.wait(timeout=remaining)
+        return subprocess.CompletedProcess(
+            args=list(argv),
+            returncode=returncode,
+            stdout=bytes(buffers["stdout"]),
+            stderr=bytes(buffers["stderr"]),
+        )
+    except BoundedRunnerError:
+        raise
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise BoundedRunnerError(
+            "controller subprocess execution failed"
+        ) from exc
+    finally:
+        original_error = sys.exception()
+        selector.close()
+        cleanup_error: BaseException | None = None
+        if process is not None:
+            try:
+                if not group_cleaned:
+                    _terminate_process_group(
+                        process,
+                        baseline_children=baseline_children,
+                    )
+            except BaseException as exc:
+                cleanup_error = exc
+            finally:
+                if process.stdout is not None:
+                    process.stdout.close()
+                if process.stderr is not None:
+                    process.stderr.close()
+        if cleanup_error is not None:
+            if isinstance(original_error, PrecommitInputCancellation):
+                raise original_error from cleanup_error
+            raise cleanup_error
 
 
 def _run_json(
@@ -1841,12 +2538,18 @@ def orchestrate(
         known_hosts=known_hosts,
         identity_file=identity_file,
     )
-    return _apply(
-        closure,
-        runner=_default_runner if runner is None else runner,
-        known_hosts=known_hosts,
-        identity_file=identity_file,
-    )
+    with _execution_authority() as authority:
+        authority.mark_risk(
+            production_contacted=True,
+            mutation_possible=True,
+        )
+        authority.check()
+        return _apply(
+            closure,
+            runner=_default_runner if runner is None else runner,
+            known_hosts=known_hosts,
+            identity_file=identity_file,
+        )
 
 
 def _validate_host_request(document: Any) -> dict[str, Any]:
@@ -1962,6 +2665,16 @@ def _git_output(
         ) from exc
 
 
+def _git_argv(root: Path, *arguments: str) -> list[str]:
+    return [
+        GIT,
+        *GIT_CONFIG_ARGUMENTS,
+        "-C",
+        str(root),
+        *arguments,
+    ]
+
+
 def _verify_release(
     request: Mapping[str, Any],
     *,
@@ -1980,38 +2693,30 @@ def _verify_release(
             "host subcommand is not the release-bound orchestrator"
         )
     commands = {
-        "head": [GIT, "-C", str(release_root), "rev-parse", "HEAD"],
-        "tree": [
-            GIT,
-            "-C",
-            str(release_root),
+        "head": _git_argv(release_root, "rev-parse", "HEAD"),
+        "tree": _git_argv(
+            release_root,
             "rev-parse",
             "HEAD^{tree}",
-        ],
-        "status": [
-            GIT,
-            "-C",
-            str(release_root),
+        ),
+        "status": _git_argv(
+            release_root,
             "status",
             "--porcelain=v1",
             "--untracked-files=all",
-        ],
-        "branch": [
-            GIT,
-            "-C",
-            str(release_root),
+        ),
+        "branch": _git_argv(
+            release_root,
             "rev-parse",
             "--abbrev-ref",
             "HEAD",
-        ],
-        "remotes": [GIT, "-C", str(release_root), "remote"],
-        "top": [
-            GIT,
-            "-C",
-            str(release_root),
+        ),
+        "remotes": _git_argv(release_root, "remote"),
+        "top": _git_argv(
+            release_root,
             "rev-parse",
             "--show-toplevel",
-        ],
+        ),
     }
     observed = {
         key: _git_output(
@@ -2041,15 +2746,13 @@ def _verify_release(
         source = release_root / relative
         tree_row = _git_output(
             runner,
-            [
-                GIT,
-                "-C",
-                str(release_root),
+            _git_argv(
+                release_root,
                 "ls-tree",
                 "HEAD",
                 "--",
                 relative.as_posix(),
-            ],
+            ),
             label=f"release source tree entry {relative}",
         )
         pieces = tree_row.split(None, 3)
@@ -2065,14 +2768,12 @@ def _verify_release(
             )
         observed_blob = _git_output(
             runner,
-            [
-                GIT,
-                "-C",
-                str(release_root),
+            _git_argv(
+                release_root,
                 "hash-object",
                 "--no-filters",
                 str(source),
-            ],
+            ),
             label=f"release source blob {relative}",
         )
         if observed_blob != pieces[2]:
@@ -2484,10 +3185,6 @@ def _run_installer(
             manifest=manifest,
             paths=paths,
         )
-        INSTALLER._load_source_snapshot(  # noqa: SLF001
-            inputs["source_snapshot_manifest"],
-            manifest=manifest,
-        )
     except (
         INSTALLER.PrecommitInputInstallError,
         WORKER.PrecommitWorkerError,
@@ -2708,6 +3405,14 @@ def host_execute(
     current_script: Path | None = None,
     observed_addresses: set[str] | None = None,
 ) -> dict[str, Any]:
+    if _ACTIVE_EXECUTION_AUTHORITY is None:
+        with _execution_authority():
+            return host_execute(
+                encoded_request,
+                runner=runner,
+                current_script=current_script,
+                observed_addresses=observed_addresses,
+            )
     if os.geteuid() != ROOT_UID or os.getegid() != ROOT_GID:
         raise PrecommitInputOrchestrationError(
             "host precommit input subcommand must run as root:root"
@@ -2742,6 +3447,11 @@ def host_execute(
         raise PrecommitInputOrchestrationError(
             "host identity differs from the controller topology"
         )
+    _ACTIVE_EXECUTION_AUTHORITY.mark_risk(
+        production_contacted=True,
+        mutation_possible=True,
+    )
+    _ACTIVE_EXECUTION_AUTHORITY.check()
     contract_path, contract_publication = _publish_contract(
         request["operation_id"]
     )
@@ -2856,7 +3566,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         if args.host_request_b64 is not None:
-            result = host_execute(args.host_request_b64)
+            with _execution_authority(control_fd=0):
+                result = host_execute(args.host_request_b64)
         else:
             result = orchestrate(
                 controller_manifest=args.controller_manifest,
@@ -2875,7 +3586,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         print(_canonical_json(result).decode("ascii"))
         return 0
-    except PrecommitInputOrchestrationError:
+    except PrecommitInputOrchestrationError as exc:
         print(
             _canonical_json(
                 {
@@ -2885,6 +3596,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "failed closed"
                     ),
                     "error_class": "PrecommitInputOrchestrationError",
+                    "production_contacted": exc.production_contacted,
+                    "mutation_possible": exc.mutation_possible,
                     "docker_invoked": False,
                     "service_mutated": False,
                     "current_mutated": False,
@@ -2895,6 +3608,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 2
     except Exception:
+        risk_possible = bool(
+            args.host_request_b64 is not None or args.apply
+        )
         print(
             _canonical_json(
                 {
@@ -2904,6 +3620,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         "failed closed"
                     ),
                     "error_class": "PrecommitInputOrchestrationError",
+                    "production_contacted": risk_possible,
+                    "mutation_possible": risk_possible,
                     "docker_invoked": False,
                     "service_mutated": False,
                     "current_mutated": False,

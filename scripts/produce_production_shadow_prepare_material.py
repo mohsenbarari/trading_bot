@@ -55,9 +55,11 @@ from scripts.render_three_site_production_shadow_role_compose import (
 from scripts.verify_three_site_production_shadow_compose import (
     collect_source_failures,
 )
+from scripts import production_shadow_convergence_runtime_targets as runtime_targets
 
 
-SET_SCHEMA = "production-shadow-prepare-material-set-v1"
+SET_SCHEMA = runtime_targets.PREPARE_MATERIAL_SET_SCHEMA
+LEGACY_SET_SCHEMA = runtime_targets.LEGACY_PREPARE_MATERIAL_SET_SCHEMA
 STAGE_BINDINGS_SCHEMA = "production-shadow-image-stage-bindings-v1"
 FI_FINAL_PREPARE_SCHEMA = "production-shadow-final-prepare-material-v1"
 WA_IR_FINAL_PREPARE_SCHEMA = "wa-ir-production-final-prepare-material-v1"
@@ -66,8 +68,14 @@ WITNESS_PUBLIC_INPUT_SCHEMA = (
 )
 WITNESS_PREPARE_SCHEMA = "production-shadow-witness-prepare-material-v1"
 DR_CA_ATTESTATION_SCHEMA = "production-shadow-dr-ca-attestation-v1"
+CONVERGENCE_RUNTIME_TARGET_SET_SCHEMA = (
+    runtime_targets.CONVERGENCE_RUNTIME_TARGET_SET_SCHEMA
+)
+CONVERGENCE_RUNTIME_TARGETS_FILENAME = (
+    runtime_targets.CONVERGENCE_RUNTIME_TARGETS_FILENAME
+)
 
-DOCKER_ROLES = ("bot_fi", "webapp_fi", "webapp_ir")
+DOCKER_ROLES = runtime_targets.CONVERGENCE_RUNTIME_TARGET_ROLES
 ALL_ROLES = (*DOCKER_ROLES, "witness")
 IMAGE_KINDS = ("app", "postgres", "redis", "nginx")
 ROLE_RENDER_NAMES = {
@@ -95,6 +103,37 @@ ROLE_ARCHIVE_NAMES = {
 FINAL_PREPARE_MANIFEST_NAME = "final-prepare-manifest.json"
 WITNESS_MANIFEST_NAME = "witness-prepare-manifest.json"
 WITNESS_ATTESTATION_NAME = "witness-public-attestation.json"
+CONVERGENCE_RUNTIME_TARGET_SET_FIELDS = (
+    runtime_targets.CONVERGENCE_RUNTIME_TARGET_SET_FIELDS
+)
+CONVERGENCE_RUNTIME_TARGET_ROLE_FIELDS = (
+    runtime_targets.CONVERGENCE_RUNTIME_TARGET_ROLE_FIELDS
+)
+CONVERGENCE_RUNTIME_TARGET_DESCRIPTOR_FIELDS = (
+    runtime_targets.CONVERGENCE_RUNTIME_TARGET_DESCRIPTOR_FIELDS
+)
+CONVERGENCE_RUNTIME_OBSERVER_SERVICES = {
+    role: f"{role}_sync_observer" for role in DOCKER_ROLES
+}
+CONVERGENCE_RUNTIME_IDENTITY_ENV_FIELDS = (
+    "TZ",
+    "ENVIRONMENT",
+    "TOPOLOGY_SCHEMA_VERSION",
+    "THREE_SITE_DR_ENABLED",
+    "DR_EVENT_PROTOCOL_ENABLED",
+    "DR_EVENT_PROTOCOL_STRICT",
+    "RELEASE_SHA",
+    "SERVER_MODE",
+    "LOGICAL_AUTHORITY",
+    "PHYSICAL_SITE",
+)
+CONVERGENCE_RUNTIME_DATABASE_ENV_FIELDS = (
+    "DATABASE_URL",
+    "SYNC_DATABASE_URL",
+    "POSTGRES_USER",
+    "POSTGRES_PASSWORD",
+    "POSTGRES_DB",
+)
 IMAGE_ENV_NAMES = frozenset(
     {
         "PRODUCTION_SHADOW_APP_IMAGE_ID",
@@ -178,6 +217,9 @@ DR_CA_ATTESTATION_FIELDS = frozenset(
 SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+REQUIRED_INTERPOLATION_RE = re.compile(
+    r"\$\{([A-Z][A-Z0-9_]*):\?[^{}]*\}"
+)
 MAX_INPUT_BYTES = 16 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_ARCHIVE_MEMBER_BYTES = 16 * 1024 * 1024
@@ -801,11 +843,12 @@ def _build_docker_role(
             "canonical environment DR TLS attestation epoch differs"
         )
 
-    required = required_environment_names(rendered)
-    optional = (
-        referenced_environment_names(rendered)
-        - required
-    ) | IMAGE_ENV_NAMES
+    runtime_target_source_names = _runtime_target_source_names(
+        canonical_payload,
+        role=role,
+    )
+    required = required_environment_names(rendered) | runtime_target_source_names
+    optional = (referenced_environment_names(rendered) - required) | IMAGE_ENV_NAMES
     try:
         environment = canonical_role_env_bytes(
             values,
@@ -1199,6 +1242,363 @@ def _validate_canonical_compose(
     return payload
 
 
+def _domain_separated_sha256(label: str, value: Mapping[str, Any]) -> str:
+    """Hash only a typed, nonsecret descriptor under a fixed domain label."""
+
+    try:
+        return runtime_targets.domain_separated_sha256(label, value)
+    except runtime_targets.ConvergenceRuntimeTargetBindingError as exc:
+        raise PrepareMaterialError("runtime target digest domain is invalid") from exc
+
+
+def _resolve_required_interpolations(
+    value: Any,
+    *,
+    source_values: Mapping[str, str],
+    label: str,
+) -> str:
+    """Resolve the narrow Compose interpolation grammar used by target fields."""
+
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or any(ord(character) < 0x20 for character in value)
+    ):
+        raise PrepareMaterialError(f"{label} is invalid")
+
+    def replacement(match: re.Match[str]) -> str:
+        name = match.group(1)
+        resolved = source_values.get(name)
+        if (
+            not isinstance(resolved, str)
+            or not resolved
+            or resolved != resolved.strip()
+            or "\x00" in resolved
+            or any(ord(character) < 0x20 for character in resolved)
+        ):
+            raise PrepareMaterialError(
+                f"{label} interpolation source is invalid"
+            )
+        return resolved
+
+    resolved = REQUIRED_INTERPOLATION_RE.sub(replacement, value)
+    if "$" in resolved or "${" in resolved:
+        raise PrepareMaterialError(
+            f"{label} contains an unsupported interpolation"
+        )
+    return resolved
+
+
+def _observer_service_environment(
+    canonical_payload: Mapping[str, Any],
+    *,
+    role: str,
+) -> Mapping[str, Any]:
+    """Validate the fixed, one-shot Compose observer service for one role."""
+
+    if role not in DOCKER_ROLES:
+        raise PrepareMaterialError("runtime target role is invalid")
+    services = canonical_payload.get("services")
+    service_name = CONVERGENCE_RUNTIME_OBSERVER_SERVICES[role]
+    if not isinstance(services, Mapping):
+        raise PrepareMaterialError("canonical Compose observer services are invalid")
+    service = services.get(service_name)
+    if not isinstance(service, Mapping):
+        raise PrepareMaterialError(
+            f"canonical Compose observer service for {role} is unavailable"
+        )
+    try:
+        runtime_targets.validate_canonical_observer_service(
+            canonical_payload,
+            role=role,
+            label=f"canonical Compose observer {role}",
+        )
+    except runtime_targets.ConvergenceRuntimeTargetBindingError as exc:
+        raise PrepareMaterialError(
+            f"canonical Compose observer service definition for {role} differs"
+        ) from exc
+    environment = service.get("environment")
+    if not isinstance(environment, Mapping):
+        raise PrepareMaterialError(
+            f"canonical Compose observer environment for {role} is invalid"
+        )
+    return environment
+
+
+def _runtime_target_source_names(
+    canonical_payload: Mapping[str, Any],
+    *,
+    role: str,
+) -> frozenset[str]:
+    """Return only the env names needed to rederive one redacted target row.
+
+    The role archive remains root-only and encrypted in transit.  These values
+    are deliberately retained there so the template builder can recompute the
+    target set from verified role material; they are never copied into the
+    target set, its descriptor, metadata, receipt, or manifest.
+    """
+
+    environment = _observer_service_environment(canonical_payload, role=role)
+    names: set[str] = set()
+    for field in (
+        *CONVERGENCE_RUNTIME_DATABASE_ENV_FIELDS,
+        *CONVERGENCE_RUNTIME_IDENTITY_ENV_FIELDS,
+    ):
+        value = environment.get(field)
+        if not isinstance(value, str) or not value:
+            raise PrepareMaterialError(
+                f"canonical Compose observer {field} for {role} is invalid"
+            )
+        names.update(REQUIRED_INTERPOLATION_RE.findall(value))
+        if "$" in REQUIRED_INTERPOLATION_RE.sub("", value):
+            raise PrepareMaterialError(
+                f"canonical Compose observer {field} for {role} has unsupported interpolation"
+            )
+    return frozenset(names)
+
+
+def _parse_observer_database_target(
+    value: str,
+    *,
+    role: str,
+    expected_scheme: str,
+    label: str,
+) -> tuple[dict[str, Any], str]:
+    """Parse one canonical PostgreSQL URL without retaining its password."""
+
+    try:
+        return runtime_targets.parse_observer_database_target(
+            value,
+            role=role,
+            expected_scheme=expected_scheme,
+            label=label,
+        )
+    except runtime_targets.ConvergenceRuntimeTargetBindingError as exc:
+        raise PrepareMaterialError(f"{label} is not a canonical database URL") from exc
+
+
+def _runtime_identity_for_observer(
+    environment: Mapping[str, Any],
+    *,
+    source_values: Mapping[str, str],
+    role: str,
+    release_sha: str,
+) -> dict[str, str]:
+    values = {
+        name: _resolve_required_interpolations(
+            environment.get(name),
+            source_values=source_values,
+            label=f"{role} observer {name}",
+        )
+        for name in CONVERGENCE_RUNTIME_IDENTITY_ENV_FIELDS
+    }
+    try:
+        return runtime_targets.derive_runtime_identity(
+            values,
+            role=role,
+            release_sha=release_sha,
+        )
+    except runtime_targets.ConvergenceRuntimeTargetBindingError as exc:
+        raise PrepareMaterialError(
+            f"canonical Compose runtime identity for {role} differs"
+        ) from exc
+
+
+def _observer_target_row(
+    canonical_payload: Mapping[str, Any],
+    *,
+    source_values: Mapping[str, str],
+    role: str,
+    release_sha: str,
+) -> dict[str, str]:
+    environment = _observer_service_environment(canonical_payload, role=role)
+    resolved = {
+        name: _resolve_required_interpolations(
+            environment.get(name),
+            source_values=source_values,
+            label=f"{role} observer {name}",
+        )
+        for name in CONVERGENCE_RUNTIME_DATABASE_ENV_FIELDS
+    }
+    identity = _runtime_identity_for_observer(
+        environment,
+        source_values=source_values,
+        role=role,
+        release_sha=release_sha,
+    )
+    try:
+        binding = runtime_targets.derive_runtime_target_binding(
+            {**resolved, **identity},
+            role=role,
+            release_sha=release_sha,
+            observer_service=runtime_targets.validate_canonical_observer_service(
+                canonical_payload,
+                role=role,
+                label=f"canonical Compose observer {role}",
+            ),
+        )
+    except runtime_targets.ConvergenceRuntimeTargetBindingError as exc:
+        raise PrepareMaterialError(
+            f"canonical Compose observer database targets for {role} differ"
+        ) from exc
+    row = binding["runtime_target_row"]
+    if not isinstance(row, dict):
+        raise PrepareMaterialError("runtime target binding row is invalid")
+    return row
+
+
+def _runtime_target_set_digest(document: Mapping[str, Any]) -> str:
+    try:
+        return runtime_targets.runtime_target_set_digest(document)
+    except runtime_targets.ConvergenceRuntimeTargetBindingError as exc:
+        raise PrepareMaterialError("runtime target set digest is invalid") from exc
+
+
+def _verified_runtime_target_compose(
+    canonical_compose_raw: bytes,
+) -> tuple[dict[str, Any], str]:
+    """Parse and hash the exact raw release Compose used for target derivation."""
+
+    if (
+        not isinstance(canonical_compose_raw, bytes)
+        or not 1 <= len(canonical_compose_raw) <= MAX_INPUT_BYTES
+    ):
+        raise PrepareMaterialError(
+            "canonical Compose runtime target source is invalid"
+        )
+    canonical_compose_sha256 = hashlib.sha256(canonical_compose_raw).hexdigest()
+    return (
+        _validate_canonical_compose(
+            canonical_compose_raw,
+            expected_sha256=canonical_compose_sha256,
+        ),
+        canonical_compose_sha256,
+    )
+
+
+def _validated_runtime_target_source_values(
+    role_source_values: Mapping[str, Mapping[str, str]],
+) -> dict[str, Mapping[str, str]]:
+    if not isinstance(role_source_values, Mapping) or set(role_source_values) != set(
+        DOCKER_ROLES
+    ):
+        raise PrepareMaterialError(
+            "runtime target role environment source coverage is invalid"
+        )
+    normalized: dict[str, Mapping[str, str]] = {}
+    for role in DOCKER_ROLES:
+        source_values = role_source_values[role]
+        if not isinstance(source_values, Mapping) or any(
+            not isinstance(name, str) or not isinstance(value, str)
+            for name, value in source_values.items()
+        ):
+            raise PrepareMaterialError(
+                f"runtime target environment source for {role} is invalid"
+            )
+        normalized[role] = source_values
+    return normalized
+
+
+def validate_convergence_runtime_target_set(
+    document: Mapping[str, Any],
+    *,
+    operation_id: str,
+    release_sha: str,
+    canonical_compose_raw: bytes,
+) -> dict[str, Any]:
+    """Validate the redacted target set before binding it to a manifest."""
+
+    operation_id = _canonical_uuid(operation_id, label="operation_id")
+    if not isinstance(release_sha, str) or SHA40_RE.fullmatch(release_sha) is None:
+        raise PrepareMaterialError("release_sha must be a full lowercase Git SHA")
+    _, canonical_compose_sha256 = _verified_runtime_target_compose(
+        canonical_compose_raw
+    )
+    try:
+        return runtime_targets.validate_runtime_target_set(
+            document,
+            operation_id=operation_id,
+            release_sha=release_sha,
+            canonical_compose_sha256=canonical_compose_sha256,
+            label="convergence runtime target set",
+        )
+    except runtime_targets.ConvergenceRuntimeTargetBindingError as exc:
+        raise PrepareMaterialError(str(exc)) from exc
+
+
+def build_convergence_runtime_target_set(
+    *,
+    operation_id: str,
+    release_sha: str,
+    canonical_compose_raw: bytes,
+    role_source_values: Mapping[str, Mapping[str, str]],
+) -> dict[str, Any]:
+    """Derive a redacted, controller-only observer target descriptor set.
+
+    Passwords are checked only for async/sync consistency.  They, raw URLs,
+    and every unrelated service value are intentionally omitted from the
+    result and therefore cannot become an evidence or manifest payload.
+    """
+
+    operation_id = _canonical_uuid(operation_id, label="operation_id")
+    if not isinstance(release_sha, str) or SHA40_RE.fullmatch(release_sha) is None:
+        raise PrepareMaterialError("release_sha must be a full lowercase Git SHA")
+    canonical_payload, canonical_compose_sha256 = _verified_runtime_target_compose(
+        canonical_compose_raw
+    )
+    normalized_role_sources = _validated_runtime_target_source_values(
+        role_source_values
+    )
+    document: dict[str, Any] = {
+        "schema": CONVERGENCE_RUNTIME_TARGET_SET_SCHEMA,
+        "operation_id": operation_id,
+        "release_sha": release_sha,
+        "canonical_compose_sha256": canonical_compose_sha256,
+        "roles": {
+            role: _observer_target_row(
+                canonical_payload,
+                source_values=normalized_role_sources[role],
+                role=role,
+                release_sha=release_sha,
+            )
+            for role in DOCKER_ROLES
+        },
+        "target_set_sha256": "0" * 64,
+    }
+    document["target_set_sha256"] = _runtime_target_set_digest(document)
+    return validate_convergence_runtime_target_set(
+        document,
+        operation_id=operation_id,
+        release_sha=release_sha,
+        canonical_compose_raw=canonical_compose_raw,
+    )
+
+
+def convergence_runtime_target_descriptor(
+    document: Mapping[str, Any],
+    *,
+    canonical_compose_raw: bytes,
+) -> dict[str, Any]:
+    """Return the manifest-safe descriptor for a validated target-set file."""
+
+    normalized = validate_convergence_runtime_target_set(
+        document,
+        operation_id=str(document.get("operation_id", "")),
+        release_sha=str(document.get("release_sha", "")),
+        canonical_compose_raw=canonical_compose_raw,
+    )
+    try:
+        return runtime_targets.runtime_target_set_descriptor(normalized)
+    except (
+        runtime_targets.ConvergenceRuntimeTargetDescriptorError,
+        runtime_targets.ConvergenceRuntimeTargetBindingError,
+    ) as exc:
+        raise PrepareMaterialError(
+            "producer convergence runtime target descriptor is invalid"
+        ) from exc
+
+
 def produce_prepare_materials(
     *,
     operation_id: str,
@@ -1281,11 +1681,11 @@ def produce_prepare_materials(
         label="Witness public prepare input",
         required_uid=required_uid,
     )
-
     artifacts: dict[str, RoleArtifact] = {}
     runtime_inventory: dict[str, dict[str, str]] = {}
+    runtime_target_role_sources: dict[str, Mapping[str, str]] = {}
     for role in DOCKER_ROLES:
-        archive, internal_manifest, _ = _build_docker_role(
+        archive, internal_manifest, files = _build_docker_role(
             role=role,
             operation_id=operation_id,
             release_sha=release_sha,
@@ -1324,6 +1724,36 @@ def produce_prepare_materials(
         runtime_inventory[role] = dict(
             bindings[role]["runtime_image_ids"]
         )
+        try:
+            runtime_target_role_sources[role] = parse_env_values(
+                files["runtime.env.role"].decode("ascii")
+            )
+        except (KeyError, UnicodeError, ProductionShadowRoleError) as exc:
+            raise PrepareMaterialError(
+                f"{role} runtime target role environment is invalid"
+            ) from exc
+
+    runtime_target_set = build_convergence_runtime_target_set(
+        operation_id=operation_id,
+        release_sha=release_sha,
+        canonical_compose_raw=compose_raw,
+        role_source_values=runtime_target_role_sources,
+    )
+    if runtime_target_set["canonical_compose_sha256"] != expected_compose_sha256:
+        raise PrepareMaterialError(
+            "runtime target canonical Compose binding differs"
+        )
+    runtime_target_payload = _canonical_json(runtime_target_set)
+    runtime_target_publication = _publish_create_only(
+        output_directory / CONVERGENCE_RUNTIME_TARGETS_FILENAME,
+        runtime_target_payload,
+        required_uid=required_uid,
+        maximum=MAX_INPUT_BYTES,
+    )
+    runtime_target_descriptor = convergence_runtime_target_descriptor(
+        runtime_target_set,
+        canonical_compose_raw=compose_raw,
+    )
 
     witness_archive, witness_manifest, _ = _build_witness_role(
         operation_id=operation_id,
@@ -1373,6 +1803,7 @@ def produce_prepare_materials(
     }
     result: dict[str, Any] = {
         "schema": SET_SCHEMA,
+        "capabilities": list(runtime_targets.RUNTIME_TARGET_CAPABILITIES),
         "operation_id": operation_id,
         "release_sha": release_sha,
         "canonical_compose_sha256": expected_compose_sha256,
@@ -1401,11 +1832,13 @@ def produce_prepare_materials(
         "controller_bindings": {
             "role_materials": controller_role_materials,
             "role_runtime_image_ids": runtime_inventory,
+            "convergence_runtime_targets": runtime_target_descriptor,
         },
         "activation_secrets_included": False,
         "precommit_manifest_bound": False,
         "publication_results": {
-            role: artifacts[role].publication for role in ALL_ROLES
+            **{role: artifacts[role].publication for role in ALL_ROLES},
+            "convergence_runtime_targets": runtime_target_publication,
         },
     }
     if metadata_output is not None:
