@@ -5,10 +5,14 @@ import copy
 import ast
 import json
 from pathlib import Path
+import subprocess
+import tempfile
 import unittest
 
 from scripts import production_shadow_queue_state_collector_contract as MODULE
 from scripts import production_shadow_queue_state_observation as QUEUE
+from scripts import produce_production_shadow_convergence_compose_inputs as COMPOSE_INPUTS
+from scripts import production_shadow_convergence_compose_execution as COMPOSE
 
 
 CAMPAIGN_ID = "11111111-1111-4111-8111-111111111111"
@@ -134,6 +138,50 @@ class QueueStateCollectorContractTests(unittest.TestCase):
         self.assertFalse(
             imports & {"subprocess", "socket", "requests", "docker", "redis", "sqlalchemy", "os"}
         )
+
+    def test_current_exact_release_compose_closure_excludes_unimplemented_queue_collector(self) -> None:
+        """Keep the future queue collector out of the runnable observer closure.
+
+        The queue contract is deliberately only a contract today: no release
+        entrypoint or sealed Compose source closure exists for it yet.  This
+        regression test prevents a caller from treating the generic observer
+        closure as authorization to collect database/Redis queue state.
+        """
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative in (
+                "core/__init__.py",
+                "models/__init__.py",
+                COMPOSE.CONTAINER_COLLECTOR_RELATIVE,
+                COMPOSE.CONTAINER_COLLECTOR_DELEGATE_RELATIVE,
+                MODULE.COLLECTOR_ENTRYPOINT,
+            ):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("# fixture\n", encoding="ascii")
+            for arguments in (
+                ["git", "init", "--quiet"],
+                ["git", "add", "."],
+                ["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "fixture"],
+            ):
+                subprocess.run(arguments, cwd=root, check=True, stdin=subprocess.DEVNULL)
+            tree = subprocess.run(
+                ["git", "rev-parse", "HEAD^{tree}"],
+                cwd=root,
+                check=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+            ).stdout.decode("ascii").strip()
+
+            sealed = COMPOSE_INPUTS._sealed_collector_python_paths(  # noqa: SLF001
+                release_root=root,
+                release_tree_sha=tree,
+            )
+
+        self.assertIn(COMPOSE.CONTAINER_COLLECTOR_RELATIVE, sealed)
+        self.assertIn(COMPOSE.CONTAINER_COLLECTOR_DELEGATE_RELATIVE, sealed)
+        self.assertNotIn(MODULE.COLLECTOR_ENTRYPOINT, sealed)
 
 
 if __name__ == "__main__":
