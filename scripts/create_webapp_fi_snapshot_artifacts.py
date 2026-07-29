@@ -410,6 +410,9 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     )
     manifest_path = artifact_dir / "snapshot-artifacts.json"
     write_manifest(manifest_path, payload)
+    # The caller must distinguish a completed local artifact set from a
+    # merely started capture before handing it to the immutable publisher.
+    payload["status"] = "ready"
     payload["manifest_path"] = str(manifest_path)
     return payload
 

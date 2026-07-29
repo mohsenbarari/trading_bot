@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import importlib.util
+import io
+import os
 import sys
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -126,6 +130,54 @@ class CreateWebappFiSnapshotArtifactsTests(unittest.TestCase):
     def test_client_lifetime_uses_ceil_and_never_underreports(self) -> None:
         self.assertEqual(MODULE.conservative_client_lifetime_seconds(300.0001), 301)
         self.assertEqual(MODULE.conservative_client_lifetime_seconds(0.001), 1)
+
+    def test_applied_capture_reports_ready_only_after_manifest_is_written(self) -> None:
+        def fake_capture(_arguments, *, stdout_path=None, **_kwargs):
+            assert stdout_path is not None
+            if stdout_path.name == "database.dump":
+                stdout_path.write_bytes(b"PGDMPfixture")
+                return ""
+            root_name = "audit_trail" if stdout_path.name == "audit.tar.gz" else "uploads"
+            with tarfile.open(stdout_path, "w:gz") as archive:
+                directory = tarfile.TarInfo(root_name + "/")
+                directory.type = tarfile.DIRTYPE
+                directory.mode = 0o700
+                archive.addfile(directory)
+                entry = tarfile.TarInfo(root_name + "/sample.txt")
+                entry.size = 1
+                entry.mode = 0o600
+                archive.addfile(entry, io.BytesIO(b"x"))
+            return ""
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            os.chmod(root, 0o700)
+            capture_env = root / "capture.env"
+            capture_env.write_text(
+                "CAPTURE_DB_USER=snapshot_reader\nCAPTURE_DB_PASSWORD=not-printed\n",
+                encoding="utf-8",
+            )
+            os.chmod(capture_env, 0o600)
+            arguments = MODULE.build_parser().parse_args(
+                [
+                    "--output-root", str(root),
+                    "--release-sha", "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5",
+                    "--alembic-revision", "f2c7d8e9a0b1",
+                    "--generation", "snapshot-20260729-0002",
+                    "--db-capture-env", str(capture_env),
+                    "--include-audit",
+                    "--apply",
+                ]
+            )
+            with (
+                mock.patch.object(MODULE, "assert_source_role_read_only"),
+                mock.patch.object(MODULE, "source_alembic_revision", return_value="f2c7d8e9a0b1"),
+                mock.patch.object(MODULE, "run_capture", side_effect=fake_capture),
+            ):
+                payload = MODULE.execute(arguments)
+
+            self.assertEqual(payload["status"], "ready")
+            self.assertTrue(Path(payload["manifest_path"]).is_file())
 
 
 if __name__ == "__main__":
