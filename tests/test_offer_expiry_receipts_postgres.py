@@ -21,6 +21,7 @@ from core.services.offer_publication_state_service import (
 )
 from core.services.telegram_offer_channel_service import OfferChannelStateApplyResult
 from models.commodity import Commodity
+from models.change_log import ChangeLog
 from models.offer import Offer, OfferStatus, OfferType
 from models.offer_expiry_command_receipt import OfferExpiryCommandReceipt
 from models.offer_publication_state import (
@@ -223,15 +224,14 @@ class OfferExpiryReceiptsPostgresTests(unittest.IsolatedAsyncioTestCase):
             ).scalar_one()
             receipt_count = await session.scalar(select(func.count(OfferExpiryCommandReceipt.id)))
             offer_update_count = await session.scalar(
-                text(
-                    "SELECT count(*) FROM change_log "
-                    "WHERE table_name = 'offers' AND operation = 'UPDATE'"
+                select(func.count(ChangeLog.id)).where(
+                    ChangeLog.table_name == "offers",
+                    ChangeLog.operation == "UPDATE",
                 )
             )
             receipt_outbox_count = await session.scalar(
-                text(
-                    "SELECT count(*) FROM change_log "
-                    "WHERE table_name = 'offer_expiry_command_receipts'"
+                select(func.count(ChangeLog.id)).where(
+                    ChangeLog.table_name == "offer_expiry_command_receipts",
                 )
             )
         self.assertEqual(offer.status, OfferStatus.EXPIRED)
