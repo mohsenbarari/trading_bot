@@ -1,0 +1,20 @@
+[Unit]
+Description=Capture and publish the fenced WebApp-FI 2c08 standby snapshot
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+Environment=TZ=UTC
+ExecStart=__TOOL_PYTHON__ __TOOL_ROOT__/scripts/publish_webapp_fi_snapshot_standby.py --source-env __SOURCE_ENV__ --capture-script __TOOL_ROOT__/scripts/create_webapp_fi_snapshot_artifacts.py --transport-script __TOOL_ROOT__/scripts/manage_webapp_ir_snapshot.py --capture-python __TOOL_PYTHON__ --transport-python __TOOL_PYTHON__ --timer-interval-seconds 15 --apply --json
+TimeoutStartSec=20min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=__SOURCE_DATA_ROOT__
+
+# This unit only reads local Docker data and invokes the immutable Object
+# Storage publisher.  It has no FI-to-IR peer transport, remote command, or
+# application/container lifecycle action.
