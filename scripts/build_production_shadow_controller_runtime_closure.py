@@ -41,11 +41,15 @@ from typing import Any, Mapping, Sequence
 import zipfile
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+DIRECT_SCRIPT_BLOCKED_MESSAGE = (
+    "blocked: controller runtime builder requires a trusted scripts package context"
+)
+if __package__ != "scripts":
+    print(DIRECT_SCRIPT_BLOCKED_MESSAGE, file=sys.stderr)
+    raise SystemExit(69)
 
-from scripts import verify_production_shadow_controller_runtime_closure as VERIFY  # noqa: E402
+
+from scripts import verify_production_shadow_controller_runtime_closure as VERIFY
 
 
 POLICY_SCHEMA = "production-shadow-controller-runtime-closure-policy-v1"
@@ -399,13 +403,15 @@ def _collect_plan_bound_project_sources(
     held_plan: VERIFY.HeldRuntimePlan,
     expected_uid: int | None,
 ) -> dict[str, bytes]:
+    if set(held_plan.required_blobs) != VERIFY.HELD_RUNTIME_STATIC_BLOBS:
+        raise RuntimeClosureBuildError("controller runtime held plan pre-runtime blob map differs")
     result: dict[str, bytes] = {}
     expected = {
         relative: digest
         for relative, digest in held_plan.required_blobs.items()
-        if relative.startswith(("core/", "scripts/"))
+        if relative.startswith("scripts/")
     }
-    if not expected or not VERIFY.CONTROL_SOURCE_PATHS <= set(expected):
+    if set(expected) != VERIFY.CONTROL_SOURCE_PATHS:
         raise RuntimeClosureBuildError("controller runtime held plan project source set differs")
     for relative, digest in sorted(expected.items()):
         raw = _read_release_file(
@@ -921,16 +927,16 @@ def _assert_materialization_lease(
     ):
         raise RuntimeClosureBuildError("controller runtime prepared closure differs from held-FD plan")
     required_blobs = getattr(lease, "required_blobs", None)
+    if not isinstance(required_blobs, Mapping) or set(required_blobs) != VERIFY.HELD_RUNTIME_STATIC_BLOBS:
+        raise RuntimeClosureBuildError("controller runtime held-FD pre-runtime blob map differs")
     expected_sources = (
         {
             path: digest
             for path, digest in required_blobs.items()
-            if isinstance(path, str) and path.startswith(("core/", "scripts/"))
+            if isinstance(path, str) and path.startswith("scripts/")
         }
-        if isinstance(required_blobs, Mapping)
-        else None
     )
-    if expected_sources != dict(prepared.project_sources):
+    if set(expected_sources) != VERIFY.CONTROL_SOURCE_PATHS or expected_sources != dict(prepared.project_sources):
         raise RuntimeClosureBuildError("controller runtime project sources differ from held-FD plan")
 
 
@@ -1065,6 +1071,7 @@ def _materialize(
         manifest: dict[str, Any] = {
             "schema": VERIFY.RUNTIME_CLOSURE_SCHEMA,
             "namespace": VERIFY.RUNTIME_NAMESPACE,
+            "closure_scope": VERIFY.PRE_RUNTIME_CLOSURE_SCOPE,
             "campaign_id": prepared.campaign_id,
             "release": {"commit_sha": prepared.release_sha, "tree_sha": prepared.release_tree_sha},
             "python": {

@@ -163,6 +163,7 @@ class RuntimeClosureFixture(unittest.TestCase):
         document: dict[str, object] = {
             "schema": MODULE.RUNTIME_CLOSURE_SCHEMA,
             "namespace": MODULE.RUNTIME_NAMESPACE,
+            "closure_scope": MODULE.PRE_RUNTIME_CLOSURE_SCOPE,
             "campaign_id": CAMPAIGN_ID,
             "release": {"commit_sha": RELEASE_SHA, "tree_sha": TREE_SHA},
             "python": {
@@ -249,6 +250,7 @@ class RuntimeClosureFixture(unittest.TestCase):
             "source_policy_sha256": self.digest(self.policy),
             "controller_wheelhouse_sha256": self.digest(self.wheelhouse_manifest),
             "wheel_input_receipt_sha256": self.digest(self.wheel_input_receipt),
+            "closure_scope": MODULE.PRE_RUNTIME_CLOSURE_SCOPE,
             "bootstrap_path": MODULE.HELD_RUNTIME_BOOTSTRAP_SOURCE,
             "required_blobs": required_blobs,
         }
@@ -327,9 +329,9 @@ class SuccessfulRuntimeClosureTests(RuntimeClosureFixture):
         self.assertEqual(plan.release_tree_sha, TREE_SHA)
         self.assertEqual(plan.sha256, self.held_plan_sha256)
 
-    def test_v1_held_plan_is_rejected(self) -> None:
+    def test_v2_held_plan_is_rejected(self) -> None:
         document = self.held_plan()
-        document["schema"] = "production-shadow-controller-runtime-held-plan-v1"
+        document["schema"] = "production-shadow-controller-runtime-held-plan-v2"
         self.write_held_plan(document)
         with self.assertRaisesRegex(MODULE.RuntimeClosureError, "held plan fields differ"):
             MODULE.read_held_runtime_plan(
@@ -337,6 +339,53 @@ class SuccessfulRuntimeClosureTests(RuntimeClosureFixture):
                 expected_uid=self.uid,
                 plan_root=self.plan_root,
             )
+
+    def test_pre_runtime_plan_rejects_post_runtime_source_binding(self) -> None:
+        document = self.held_plan()
+        blobs = dict(document["required_blobs"])
+        blobs["scripts/produce_production_shadow_convergence_source_set.py"] = "a" * 64
+        document["required_blobs"] = blobs
+        self.write_held_plan(document)
+        with self.assertRaisesRegex(MODULE.RuntimeClosureError, "unavailable post-runtime source"):
+            MODULE.read_held_runtime_plan(
+                CAMPAIGN_ID,
+                expected_uid=self.uid,
+                plan_root=self.plan_root,
+            )
+
+    def test_pre_runtime_plan_rejects_any_non_pre_runtime_source_binding(self) -> None:
+        document = self.held_plan()
+        blobs = dict(document["required_blobs"])
+        blobs["scripts/unreachable.py"] = "a" * 64
+        document["required_blobs"] = blobs
+        self.write_held_plan(document)
+        with self.assertRaisesRegex(MODULE.RuntimeClosureError, "pre-runtime blob map differs"):
+            MODULE.read_held_runtime_plan(
+                CAMPAIGN_ID,
+                expected_uid=self.uid,
+                plan_root=self.plan_root,
+            )
+
+    def test_held_plan_rejects_missing_or_wrong_closure_scope(self) -> None:
+        missing = self.held_plan()
+        missing.pop("closure_scope")
+        wrong = self.held_plan()
+        wrong["closure_scope"] = "post-runtime-controller-closure"
+        for document, message in (
+            (missing, "held plan fields differ"),
+            (wrong, "held plan closure scope differs"),
+        ):
+            with self.subTest(message=message):
+                self.write_held_plan(document)
+                with self.assertRaisesRegex(MODULE.RuntimeClosureError, message):
+                    MODULE.read_held_runtime_plan(
+                        CAMPAIGN_ID,
+                        expected_uid=self.uid,
+                        plan_root=self.plan_root,
+                    )
+
+    def test_runtime_manifest_binds_only_pre_runtime_control_sources(self) -> None:
+        self.assertFalse(MODULE.CONTROL_SOURCE_PATHS & MODULE.POST_RUNTIME_UNAVAILABLE_SOURCES)
 
     def test_clean_preimport_state_accepts_real_isolated_python_startup(self) -> None:
         completed = subprocess.run(
@@ -471,6 +520,33 @@ class SuccessfulRuntimeClosureTests(RuntimeClosureFixture):
 
 
 class RejectionRuntimeClosureTests(RuntimeClosureFixture):
+    def test_v2_runtime_manifest_is_rejected(self) -> None:
+        document = self.manifest()
+        document["schema"] = "production-shadow-controller-runtime-closure-v2"
+        document["runtime_binding_sha256"] = MODULE._sha256(
+            {key: value for key, value in document.items() if key != "runtime_binding_sha256"}
+        )
+        self.write_receipt()
+        self.write_manifest(document)
+        self.assert_rejected("manifest schema or namespace differs")
+
+    def test_runtime_manifest_rejects_missing_or_wrong_closure_scope(self) -> None:
+        missing = self.manifest()
+        missing.pop("closure_scope")
+        wrong = self.manifest()
+        wrong["closure_scope"] = "post-runtime-controller-closure"
+        for document, message in (
+            (missing, "manifest fields differ"),
+            (wrong, "manifest closure scope differs"),
+        ):
+            with self.subTest(message=message):
+                document["runtime_binding_sha256"] = MODULE._sha256(
+                    {key: value for key, value in document.items() if key != "runtime_binding_sha256"}
+                )
+                self.write_receipt()
+                self.write_manifest(document)
+                self.assert_rejected(message)
+
     def test_verifier_cli_requires_root_and_has_no_uid_override(self) -> None:
         with mock.patch.object(MODULE, "_require_isolated_startup"), mock.patch.object(
             MODULE,
@@ -657,6 +733,18 @@ class RejectionRuntimeClosureTests(RuntimeClosureFixture):
         self.write_receipt()
         self.write_manifest(document)
         self.assert_rejected("import origins differ")
+
+    def test_manifest_rejects_non_pre_runtime_project_source(self) -> None:
+        document = self.manifest()
+        project_sources = dict(document["project_sources"])
+        project_sources["core/unreachable.py"] = "a" * 64
+        document["project_sources"] = project_sources
+        document["runtime_binding_sha256"] = MODULE._sha256(
+            {key: value for key, value in document.items() if key != "runtime_binding_sha256"}
+        )
+        self.write_receipt()
+        self.write_manifest(document)
+        self.assert_rejected("project source set differs")
 
     def test_symlinked_runtime_file_is_rejected(self) -> None:
         self.write_receipt()

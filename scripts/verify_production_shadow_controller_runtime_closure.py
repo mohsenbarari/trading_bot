@@ -13,9 +13,11 @@ different interpreter is a fail-closed condition, not a compatibility mode.
 
 The committed policy is a release input.  A future offline builder derives the
 installed ``runtime-closure-manifest.json`` from that policy, one exact Git
-release, and an independently trusted wheel input.  This module verifies the
-derived manifest and the materialized files; it never downloads, installs, or
-contacts a host.
+release, and an independently trusted wheel input.  The v3 plan and v3
+manifest bind only the small pre-runtime controller closure.  The producer and
+convergence gate require a distinct reviewed post-runtime FD-pinned loader/map
+and are deliberately unavailable here.  This module never downloads,
+installs, or contacts a host.
 """
 
 from __future__ import annotations
@@ -37,8 +39,9 @@ from typing import Any, Mapping, Sequence
 from uuid import UUID
 
 
-RUNTIME_CLOSURE_SCHEMA = "production-shadow-controller-runtime-closure-v1"
+RUNTIME_CLOSURE_SCHEMA = "production-shadow-controller-runtime-closure-v3"
 RUNTIME_NAMESPACE = "production-shadow-controller-only"
+PRE_RUNTIME_CLOSURE_SCOPE = "pre-runtime-controller-closure"
 RUNTIME_MANIFEST_FILENAME = "runtime-closure-manifest.json"
 WHEEL_RECEIPT_FILENAME = "controller-wheel-installation-receipt.json"
 WHEEL_RECEIPT_SCHEMA = "production-shadow-controller-wheel-installation-receipt-v1"
@@ -58,7 +61,7 @@ WHEELHOUSE_MANIFEST_RELATIVE = (
 )
 HELD_RUNTIME_PLAN_ROOT = Path("/etc/trading-bot-three-site/campaigns")
 HELD_RUNTIME_PLAN_FILENAME = "controller-runtime-closure-plan.json"
-HELD_RUNTIME_PLAN_SCHEMA = "production-shadow-controller-runtime-held-plan-v2"
+HELD_RUNTIME_PLAN_SCHEMA = "production-shadow-controller-runtime-held-plan-v3"
 MAX_MANIFEST_BYTES = 4 * 1024 * 1024
 MAX_RUNTIME_FILE_BYTES = 64 * 1024 * 1024
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
@@ -96,9 +99,8 @@ REQUIRED_IMPORT_ORIGINS = {
 }
 CONTROL_SOURCE_PATHS = frozenset(
     {
+        "scripts/__init__.py",
         "scripts/build_production_shadow_controller_runtime_closure.py",
-        "scripts/produce_production_shadow_convergence_source_set.py",
-        "scripts/production_shadow_convergence_source_set_launcher",
         "scripts/production_shadow_convergence_source_set_runtime_bootstrap.py",
         "scripts/verify_production_shadow_controller_runtime_closure.py",
     }
@@ -107,6 +109,7 @@ MANIFEST_FIELDS = frozenset(
     {
         "schema",
         "namespace",
+        "closure_scope",
         "campaign_id",
         "release",
         "python",
@@ -160,18 +163,26 @@ HELD_RUNTIME_PLAN_FIELDS = frozenset(
         "source_policy_sha256",
         "controller_wheelhouse_sha256",
         "wheel_input_receipt_sha256",
+        "closure_scope",
         "bootstrap_path",
         "required_blobs",
     }
 )
 HELD_RUNTIME_BOOTSTRAP_SOURCE = "scripts/production_shadow_convergence_source_set_runtime_bootstrap.py"
+POST_RUNTIME_UNAVAILABLE_SOURCES = frozenset(
+    {
+        "scripts/produce_production_shadow_convergence_source_set.py",
+        "scripts/orchestrate_production_shadow_convergence_gate.py",
+        "scripts/production_shadow_cutover_controller.py",
+        "scripts/verify_production_shadow_phase_evidence.py",
+    }
+)
 HELD_RUNTIME_STATIC_BLOBS = frozenset(
     {
+        "scripts/__init__.py",
         HELD_RUNTIME_BOOTSTRAP_SOURCE,
         "scripts/verify_production_shadow_controller_runtime_closure.py",
         "scripts/build_production_shadow_controller_runtime_closure.py",
-        "scripts/produce_production_shadow_convergence_source_set.py",
-        "scripts/production_shadow_convergence_source_set_launcher",
         SOURCE_POLICY_RELATIVE,
         "deploy/production-shadow-controller-runtime/requirements.lock",
         WHEELHOUSE_MANIFEST_RELATIVE,
@@ -208,6 +219,7 @@ class HeldRuntimePlan:
     source_policy_sha256: str
     wheelhouse_manifest_sha256: str
     wheel_input_receipt_sha256: str
+    closure_scope: str
     bootstrap_path: str
     required_blobs: Mapping[str, str]
     sha256: str
@@ -580,6 +592,8 @@ def read_held_runtime_plan(
     document = _strict_json(raw, label="controller runtime held plan")
     if set(document) != HELD_RUNTIME_PLAN_FIELDS or document.get("schema") != HELD_RUNTIME_PLAN_SCHEMA:
         raise RuntimeClosureError("controller runtime held plan fields differ")
+    if document.get("closure_scope") != PRE_RUNTIME_CLOSURE_SCOPE:
+        raise RuntimeClosureError("controller runtime held plan closure scope differs")
     if document.get("campaign_id") != campaign:
         raise RuntimeClosureError("controller runtime held plan campaign differs")
     release = document.get("release")
@@ -602,8 +616,10 @@ def read_held_runtime_plan(
             digest,
             label="controller runtime held plan blob",
         )
-    if not HELD_RUNTIME_STATIC_BLOBS <= set(normalized_blobs):
-        raise RuntimeClosureError("controller runtime held plan omits static bootstrap blob")
+    if set(normalized_blobs) & POST_RUNTIME_UNAVAILABLE_SOURCES:
+        raise RuntimeClosureError("controller runtime held plan binds unavailable post-runtime source")
+    if set(normalized_blobs) != HELD_RUNTIME_STATIC_BLOBS:
+        raise RuntimeClosureError("controller runtime held plan pre-runtime blob map differs")
     return HeldRuntimePlan(
         campaign_id=campaign,
         release_sha=_require_sha40(release.get("commit_sha"), label="controller runtime held plan release commit"),
@@ -620,6 +636,7 @@ def read_held_runtime_plan(
             document.get("wheel_input_receipt_sha256"),
             label="controller runtime held plan wheel input receipt",
         ),
+        closure_scope=PRE_RUNTIME_CLOSURE_SCOPE,
         bootstrap_path=bootstrap_path,
         required_blobs=MappingProxyType(
             {path: normalized_blobs[path] for path in sorted(normalized_blobs)}
@@ -651,6 +668,8 @@ def _validate_manifest(document: Mapping[str, Any]) -> dict[str, Any]:
         raise RuntimeClosureError("runtime closure manifest fields differ")
     if document.get("schema") != RUNTIME_CLOSURE_SCHEMA or document.get("namespace") != RUNTIME_NAMESPACE:
         raise RuntimeClosureError("runtime closure manifest schema or namespace differs")
+    if document.get("closure_scope") != PRE_RUNTIME_CLOSURE_SCOPE:
+        raise RuntimeClosureError("runtime closure manifest closure scope differs")
     campaign_id = _require_campaign_id(
         document.get("campaign_id"),
         label="runtime closure campaign",
@@ -721,8 +740,8 @@ def _validate_manifest(document: Mapping[str, Any]) -> dict[str, Any]:
     control_sources = _validate_source_mapping(document.get("control_sources"), label="runtime closure control sources")
     if set(control_sources) != CONTROL_SOURCE_PATHS:
         raise RuntimeClosureError("runtime closure control source set differs")
-    if not CONTROL_SOURCE_PATHS <= set(project_sources):
-        raise RuntimeClosureError("runtime closure project source set omits control source")
+    if set(project_sources) != CONTROL_SOURCE_PATHS:
+        raise RuntimeClosureError("runtime closure project source set differs")
     if any(project_sources[path] != control_sources[path] for path in CONTROL_SOURCE_PATHS):
         raise RuntimeClosureError("runtime closure control source digest differs")
 

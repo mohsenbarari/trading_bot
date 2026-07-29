@@ -3,11 +3,15 @@
 
 This module deliberately imports only the Python standard library.  It holds
 future parsing and descriptor-attestation primitives for a separately
-root-installed bootstrap.  The copy in a release is *not* an executable trust
-anchor: this checkpoint deliberately keeps its CLI unavailable, because a
-launcher cannot execute release-controlled bootstrap bytes before proving
-them.  It does not import the producer, alter ``sys.path``, materialize a
-runtime, or contact any host.
+root-installed bootstrap.  The v3 held plan binds only the small pre-runtime
+closure needed to prove and materialize the controller runtime.  The producer
+and convergence gate are explicitly post-runtime sources and remain
+unavailable until a separately reviewed FD-pinned loader/map binds them.
+
+The copy in a release is *not* an executable trust anchor: this checkpoint
+deliberately keeps its CLI unavailable, because a launcher cannot execute
+release-controlled bootstrap bytes before proving them.  It does not import
+the producer, alter ``sys.path``, materialize a runtime, or contact any host.
 """
 
 from __future__ import annotations
@@ -29,7 +33,8 @@ from typing import Any, Mapping, Sequence
 from uuid import UUID
 
 
-HELD_PLAN_SCHEMA = "production-shadow-controller-runtime-held-plan-v2"
+HELD_PLAN_SCHEMA = "production-shadow-controller-runtime-held-plan-v3"
+PRE_RUNTIME_CLOSURE_SCOPE = "pre-runtime-controller-closure"
 MAX_PLAN_BYTES = 4 * 1024 * 1024
 MAX_SOURCE_BYTES = 16 * 1024 * 1024
 MAX_SOURCE_FILES = 4096
@@ -44,6 +49,7 @@ PLAN_FIELDS = frozenset(
         "source_policy_sha256",
         "controller_wheelhouse_sha256",
         "wheel_input_receipt_sha256",
+        "closure_scope",
         "bootstrap_path",
         "required_blobs",
     }
@@ -54,16 +60,30 @@ VERIFIER_SOURCE = "scripts/verify_production_shadow_controller_runtime_closure.p
 BUILDER_SOURCE = "scripts/build_production_shadow_controller_runtime_closure.py"
 PRODUCER_SOURCE = "scripts/produce_production_shadow_convergence_source_set.py"
 LAUNCHER_SOURCE = "scripts/production_shadow_convergence_source_set_launcher"
+GATE_SOURCE = "scripts/orchestrate_production_shadow_convergence_gate.py"
+CUTOVER_CONTROLLER_SOURCE = "scripts/production_shadow_cutover_controller.py"
+PHASE_VERIFIER_SOURCE = "scripts/verify_production_shadow_phase_evidence.py"
+SCRIPTS_INIT_SOURCE = "scripts/__init__.py"
 POLICY_SOURCE = "deploy/production-shadow-controller-runtime/runtime-closure-policy.json"
 REQUIREMENTS_SOURCE = "deploy/production-shadow-controller-runtime/requirements.lock"
 WHEELHOUSE_SOURCE = "deploy/production-shadow-controller-runtime/controller-wheelhouse.sha256"
+# These files deliberately have no v3 blob binding.  They can become
+# executable only under a separately reviewed post-runtime FD-pinned loader
+# with its own exact map; this bootstrap never imports or dispatches them.
+POST_RUNTIME_UNAVAILABLE_SOURCES = frozenset(
+    {
+        PRODUCER_SOURCE,
+        GATE_SOURCE,
+        CUTOVER_CONTROLLER_SOURCE,
+        PHASE_VERIFIER_SOURCE,
+    }
+)
 STATIC_REQUIRED_BLOBS = frozenset(
     {
         BOOTSTRAP_SOURCE,
         VERIFIER_SOURCE,
         BUILDER_SOURCE,
-        PRODUCER_SOURCE,
-        LAUNCHER_SOURCE,
+        SCRIPTS_INIT_SOURCE,
         POLICY_SOURCE,
         REQUIREMENTS_SOURCE,
         WHEELHOUSE_SOURCE,
@@ -202,6 +222,7 @@ class HeldRuntimePlan:
     source_policy_sha256: str
     wheelhouse_manifest_sha256: str
     wheel_input_receipt_sha256: str
+    closure_scope: str
     bootstrap_path: str
     required_blobs: Mapping[str, str]
     sha256: str
@@ -351,6 +372,8 @@ def parse_held_runtime_plan(raw: bytes) -> HeldRuntimePlan:
     document = _strict_json(raw)
     if set(document) != PLAN_FIELDS or document.get("schema") != HELD_PLAN_SCHEMA:
         raise SourceSetRuntimeBootstrapError("held runtime plan schema or fields differ")
+    if document.get("closure_scope") != PRE_RUNTIME_CLOSURE_SCOPE:
+        raise SourceSetRuntimeBootstrapError("held runtime plan closure scope differs")
     release = document.get("release")
     if not isinstance(release, dict) or set(release) != RELEASE_FIELDS:
         raise SourceSetRuntimeBootstrapError("held runtime plan release differs")
@@ -363,14 +386,20 @@ def parse_held_runtime_plan(raw: bytes) -> HeldRuntimePlan:
         if normalized in normalized_blobs:
             raise SourceSetRuntimeBootstrapError("held runtime plan blob path is duplicated")
         normalized_blobs[normalized] = _require_sha256(digest, label="held runtime plan blob")
+    if set(normalized_blobs) & POST_RUNTIME_UNAVAILABLE_SOURCES:
+        raise SourceSetRuntimeBootstrapError(
+            "held runtime plan binds an unavailable post-runtime source"
+        )
     bootstrap_path = _safe_relative_path(
         document.get("bootstrap_path"),
         label="held runtime plan bootstrap",
     )
     if bootstrap_path != BOOTSTRAP_SOURCE or bootstrap_path not in normalized_blobs:
         raise SourceSetRuntimeBootstrapError("held runtime plan bootstrap binding differs")
-    if not STATIC_REQUIRED_BLOBS <= set(normalized_blobs):
-        raise SourceSetRuntimeBootstrapError("held runtime plan omits required controller blobs")
+    if set(normalized_blobs) != STATIC_REQUIRED_BLOBS:
+        raise SourceSetRuntimeBootstrapError(
+            "held runtime plan pre-runtime blob map differs"
+        )
     return HeldRuntimePlan(
         campaign_id=_require_campaign_id(document.get("campaign_id")),
         release_sha=_require_sha40(release.get("commit_sha"), label="held runtime plan release commit"),
@@ -387,6 +416,7 @@ def parse_held_runtime_plan(raw: bytes) -> HeldRuntimePlan:
             document.get("wheel_input_receipt_sha256"),
             label="held runtime plan wheel input receipt",
         ),
+        closure_scope=PRE_RUNTIME_CLOSURE_SCOPE,
         bootstrap_path=bootstrap_path,
         required_blobs=MappingProxyType(
             {path: normalized_blobs[path] for path in sorted(normalized_blobs)}

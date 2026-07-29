@@ -20,7 +20,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = ROOT / "scripts/build_production_shadow_controller_runtime_closure.py"
 SPEC = importlib.util.spec_from_file_location(
-    "build_production_shadow_controller_runtime_closure",
+    "scripts.build_production_shadow_controller_runtime_closure",
     MODULE_PATH,
 )
 assert SPEC is not None and SPEC.loader is not None
@@ -289,6 +289,7 @@ class BuilderFixture(unittest.TestCase):
                 "source_policy_sha256": self.policy_sha,
                 "controller_wheelhouse_sha256": self.wheelhouse_sha,
                 "wheel_input_receipt_sha256": receipt_sha256,
+                "closure_scope": VERIFY.PRE_RUNTIME_CLOSURE_SCOPE,
                 "bootstrap_path": BOOTSTRAP.BOOTSTRAP_SOURCE,
                 "required_blobs": blobs,
             }
@@ -379,6 +380,23 @@ class BuilderFixture(unittest.TestCase):
 
 
 class RuntimeClosureBuilderTests(BuilderFixture):
+    def test_direct_absolute_path_cli_fails_closed_without_package_context(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="controller-runtime-builder-direct-") as temporary:
+            completed = subprocess.run(
+                [sys.executable, str(MODULE_PATH)],
+                cwd=temporary,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(completed.returncode, 69)
+        self.assertEqual(completed.stdout, "")
+        self.assertEqual(
+            completed.stderr,
+            "blocked: controller runtime builder requires a trusted scripts package context\n",
+        )
+        self.assertNotIn("ModuleNotFoundError", completed.stderr)
+
     def test_build_cli_requires_root_and_has_no_uid_override(self) -> None:
         with mock.patch.object(MODULE.os, "geteuid", return_value=1000), mock.patch.object(
             MODULE.os,
@@ -441,6 +459,8 @@ class RuntimeClosureBuilderTests(BuilderFixture):
         manifest = json.loads((self.output / VERIFY.RUNTIME_MANIFEST_FILENAME).read_text())
         receipt = json.loads((self.output / VERIFY.WHEEL_RECEIPT_FILENAME).read_text())
         self.assertEqual(manifest["wheel_input_receipt_sha256"], prepared.wheel_input_receipt_sha256)
+        self.assertEqual(manifest["closure_scope"], VERIFY.PRE_RUNTIME_CLOSURE_SCOPE)
+        self.assertFalse(set(manifest["control_sources"]) & VERIFY.POST_RUNTIME_UNAVAILABLE_SOURCES)
         self.assertEqual(receipt["wheel_input_receipt_sha256"], prepared.wheel_input_receipt_sha256)
         self.assertTrue(all(row["source_member"] == row["path"] for row in receipt["installed_files"]))
 
@@ -669,10 +689,10 @@ class CommittedControllerRuntimePolicyTests(unittest.TestCase):
         MODULE._parse_requirements((ROOT / MODULE.REQUIREMENTS_RELATIVE).read_bytes())
         MODULE._parse_wheelhouse_manifest((ROOT / MODULE.WHEELHOUSE_RELATIVE).read_bytes())
 
-    def test_runtime_uses_the_v2_bootstrap_boundary_without_a_boolean_bypass(self) -> None:
+    def test_runtime_uses_the_v3_pre_runtime_boundary_without_a_boolean_bypass(self) -> None:
         self.assertFalse(hasattr(VERIFY, "HELD_FD_BOOTSTRAP_IMPLEMENTED"))
         self.assertTrue((ROOT / "scripts/production_shadow_convergence_source_set_runtime_bootstrap.py").is_file())
-        self.assertEqual(VERIFY.HELD_RUNTIME_PLAN_SCHEMA, "production-shadow-controller-runtime-held-plan-v2")
+        self.assertEqual(VERIFY.HELD_RUNTIME_PLAN_SCHEMA, "production-shadow-controller-runtime-held-plan-v3")
 
 
 if __name__ == "__main__":

@@ -52,6 +52,7 @@ class HeldPlanFixture(unittest.TestCase):
             "source_policy_sha256": "c" * 64,
             "controller_wheelhouse_sha256": "d" * 64,
             "wheel_input_receipt_sha256": "e" * 64,
+            "closure_scope": MODULE.PRE_RUNTIME_CLOSURE_SCOPE,
             "bootstrap_path": MODULE.BOOTSTRAP_SOURCE,
             "required_blobs": required,
         }
@@ -70,7 +71,7 @@ class HeldPlanFixture(unittest.TestCase):
 
 
 class HeldPlanParsingTests(HeldPlanFixture):
-    def test_reads_exact_v2_plan_from_held_root_only_descriptor(self) -> None:
+    def test_reads_exact_v3_pre_runtime_plan_from_held_root_only_descriptor(self) -> None:
         self.write_plan()
         descriptor = self.open_plan()
         self.addCleanup(os.close, descriptor)
@@ -79,9 +80,9 @@ class HeldPlanParsingTests(HeldPlanFixture):
         self.assertEqual(plan.bootstrap_path, MODULE.BOOTSTRAP_SOURCE)
         self.assertEqual(set(plan.required_blobs), MODULE.STATIC_REQUIRED_BLOBS)
 
-    def test_v1_or_missing_required_blob_plan_is_rejected(self) -> None:
+    def test_v2_or_non_exact_pre_runtime_blob_plan_is_rejected(self) -> None:
         for document, message in (
-            (self.plan(schema="production-shadow-controller-runtime-held-plan-v1"), "schema or fields differ"),
+            (self.plan(schema="production-shadow-controller-runtime-held-plan-v2"), "schema or fields differ"),
             (
                 self.plan(
                     blobs={
@@ -90,8 +91,54 @@ class HeldPlanParsingTests(HeldPlanFixture):
                         if path != MODULE.BUILDER_SOURCE
                     }
                 ),
-                "omits required controller blobs",
+                "pre-runtime blob map differs",
             ),
+            (
+                self.plan(
+                    blobs={
+                        **{
+                            path: "a" * 64
+                            for path in MODULE.STATIC_REQUIRED_BLOBS
+                        },
+                        "scripts/unreachable.py": "b" * 64,
+                    }
+                ),
+                "pre-runtime blob map differs",
+            ),
+        ):
+            with self.subTest(message=message):
+                self.write_plan(document)
+                descriptor = self.open_plan()
+                try:
+                    with self.assertRaisesRegex(MODULE.SourceSetRuntimeBootstrapError, message):
+                        MODULE.read_held_runtime_plan_fd(descriptor, expected_uid=self.uid)
+                finally:
+                    os.close(descriptor)
+
+    def test_post_runtime_sources_cannot_enter_the_pre_runtime_plan(self) -> None:
+        document = self.plan(
+            blobs={
+                **{
+                    path: "a" * 64
+                    for path in MODULE.STATIC_REQUIRED_BLOBS
+                },
+                MODULE.PRODUCER_SOURCE: "b" * 64,
+            }
+        )
+        self.write_plan(document)
+        descriptor = self.open_plan()
+        self.addCleanup(os.close, descriptor)
+        with self.assertRaisesRegex(MODULE.SourceSetRuntimeBootstrapError, "unavailable post-runtime"):
+            MODULE.read_held_runtime_plan_fd(descriptor, expected_uid=self.uid)
+
+    def test_missing_or_wrong_closure_scope_plan_is_rejected(self) -> None:
+        missing = self.plan()
+        missing.pop("closure_scope")
+        wrong = self.plan()
+        wrong["closure_scope"] = "post-runtime-controller-closure"
+        for document, message in (
+            (missing, "schema or fields differ"),
+            (wrong, "closure scope differs"),
         ):
             with self.subTest(message=message):
                 self.write_plan(document)
@@ -173,19 +220,25 @@ class ExactGitBootstrapFixture(unittest.TestCase):
 
     def _write_release(self) -> None:
         source = {
-            MODULE.BOOTSTRAP_SOURCE: b"from core import alpha\n",
-            MODULE.VERIFIER_SOURCE: b"import core.alpha\n",
-            MODULE.BUILDER_SOURCE: b"from scripts import helper\n",
-            MODULE.PRODUCER_SOURCE: b"from core import alpha\nfrom scripts import helper\n",
+            MODULE.BOOTSTRAP_SOURCE: b"import argparse\n",
+            MODULE.VERIFIER_SOURCE: b"import hashlib\n",
+            MODULE.BUILDER_SOURCE: (
+                b"from scripts import verify_production_shadow_controller_runtime_closure as VERIFY\n"
+            ),
+            # Deliberately unsafe post-runtime sources are Git-tracked but not
+            # part of the v3 pre-runtime map or graph.
+            MODULE.PRODUCER_SOURCE: b"import sys\nsys.path.insert(0, '/unsafe')\n",
+            MODULE.GATE_SOURCE: (
+                b"def deferred():\n"
+                b"    from scripts import orchestrate_production_shadow_prepared_clone_inventory\n"
+            ),
+            MODULE.CUTOVER_CONTROLLER_SOURCE: b"import sys\nsys.path.insert(0, '/unsafe')\n",
+            MODULE.PHASE_VERIFIER_SOURCE: b"import sys\nsys.path.insert(0, '/unsafe')\n",
             MODULE.LAUNCHER_SOURCE: b"#!/bin/sh\nexit 0\n",
             MODULE.POLICY_SOURCE: b"{}\n",
             MODULE.REQUIREMENTS_SOURCE: b"cffi==2.1.0\n",
             MODULE.WHEELHOUSE_SOURCE: b"a" * 64 + b"  synthetic.whl\n",
             "scripts/__init__.py": b"# explicit package\n",
-            "scripts/helper.py": b"from core import beta\n",
-            "core/__init__.py": b"",
-            "core/alpha.py": b"from . import beta\n",
-            "core/beta.py": b"VALUE = 1\n",
         }
         for relative, payload in source.items():
             self.write(relative, payload, mode=0o755 if relative == MODULE.LAUNCHER_SOURCE else 0o600)
@@ -226,6 +279,7 @@ class ExactGitBootstrapFixture(unittest.TestCase):
             "source_policy_sha256": self.digest(policy),
             "controller_wheelhouse_sha256": self.digest(wheelhouse),
             "wheel_input_receipt_sha256": "f" * 64,
+            "closure_scope": MODULE.PRE_RUNTIME_CLOSURE_SCOPE,
             "bootstrap_path": MODULE.BOOTSTRAP_SOURCE,
             "required_blobs": blobs,
         }
@@ -292,11 +346,12 @@ class ExactGitBootstrapFixture(unittest.TestCase):
 
 
 class ExactGitBootstrapTests(ExactGitBootstrapFixture):
-    def test_proves_exact_graph_including_empty_package_initializer(self) -> None:
+    def test_proves_exact_pre_runtime_graph_and_excludes_post_runtime_sources(self) -> None:
         inputs = self.verified_inputs()
-        self.assertIn("core/__init__.py", inputs.reachable_blobs)
         self.assertIn("scripts/__init__.py", inputs.reachable_blobs)
         self.assertEqual(inputs.reachable_blobs, self.graph.paths)
+        self.assertEqual(set(inputs.reachable_blobs), MODULE.STATIC_REQUIRED_BLOBS)
+        self.assertFalse(set(inputs.reachable_blobs) & MODULE.POST_RUNTIME_UNAVAILABLE_SOURCES)
         self.assertEqual(len(inputs.source_graph_sha256), 64)
 
     def test_plan_rejects_missing_extra_or_wrong_graph_blob(self) -> None:
@@ -305,34 +360,35 @@ class ExactGitBootstrapTests(ExactGitBootstrapFixture):
             for relative in self.graph.paths
         }
         cases = {
-            "missing": {key: value for key, value in exact.items() if key != "core/beta.py"},
-            "extra": {**exact, "core/unreachable.py": "a" * 64},
-            "wrong": {**exact, "core/beta.py": "b" * 64},
+            "missing": {key: value for key, value in exact.items() if key != MODULE.BUILDER_SOURCE},
+            "extra": {**exact, "scripts/unreachable.py": "a" * 64},
+            "wrong": {**exact, MODULE.BUILDER_SOURCE: "b" * 64},
         }
         for label, blobs in cases.items():
             with self.subTest(label=label):
                 self._write_plan(blobs)
-                with self.assertRaisesRegex(MODULE.SourceSetRuntimeBootstrapError, "blob map|blob digest"):
+                with self.assertRaisesRegex(
+                    MODULE.SourceSetRuntimeBootstrapError,
+                    "omits required|blob map|blob digest",
+                ):
                     self.verified_inputs()
         self._write_exact_plan()
 
     def test_git_worktree_drift_is_rejected_before_blob_use(self) -> None:
-        alpha = self.release / "core/alpha.py"
-        alpha.write_bytes(b"from . import beta\nVALUE = 2\n")
-        alpha.chmod(0o600)
+        builder = self.release / MODULE.BUILDER_SOURCE
+        builder.write_bytes(b"VALUE = 2\n")
+        builder.chmod(0o600)
         with self.assertRaisesRegex(MODULE.SourceSetRuntimeBootstrapError, "exact detached clean"):
             self.verified_inputs()
 
-    def test_deferred_local_import_and_path_mutation_are_rejected(self) -> None:
-        producer = self.release / MODULE.PRODUCER_SOURCE
-        producer.write_bytes(
+    def test_pre_runtime_path_mutation_is_rejected(self) -> None:
+        builder = self.release / MODULE.BUILDER_SOURCE
+        builder.write_bytes(
             b"import sys\n"
-            b"def deferred():\n"
-            b"    from core import alpha\n"
-            b"    sys.path.insert(0, '/unsafe')\n"
+            b"sys.path.insert(0, '/unsafe')\n"
         )
-        producer.chmod(0o600)
-        self.git("add", MODULE.PRODUCER_SOURCE)
+        builder.chmod(0o600)
+        self.git("add", MODULE.BUILDER_SOURCE)
         self.git("commit", "--quiet", "-m", "bad graph")
         self.release_sha = self.git("rev-parse", "HEAD")
         self.release_tree_sha = self.git("rev-parse", "HEAD^{tree}")
