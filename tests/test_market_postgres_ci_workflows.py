@@ -33,6 +33,8 @@ class MarketPostgresCiWorkflowTests(unittest.TestCase):
             self.assertIn("install -m 600 .env .env.migration", workflow, path.name)
             self.assertIn("trading-bot-ci-browser-postgres-boottime", workflow, path.name)
             self.assertIn('echo "POSTGRES_IMAGE=$image" >> "$GITHUB_ENV"', workflow, path.name)
+            self.assertIn("E2E_TARGET_ENV: local", workflow, path.name)
+            self.assertIn("E2E_ALLOW_LOCAL_MUTATION: local-dev-only", workflow, path.name)
             self.assertNotIn("image: postgres:15-alpine", workflow, path.name)
 
     def test_market_postgres_gate_cleans_up_its_disposable_container(self) -> None:

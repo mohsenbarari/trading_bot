@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.sql.elements import TextClause
 
 from api.deps import EffectiveOwnerActor
 from api.routers.trades import (
@@ -71,7 +72,8 @@ class TradeAtomicityHardeningTests(unittest.IsolatedAsyncioTestCase):
         db.execute.assert_not_awaited()
         db.scalar.assert_awaited_once()
         statement = db.scalar.await_args.args[0]
-        self.assertIn(f"nextval('{TRADE_NUMBER_SEQUENCE_NAME}')", str(statement))
+        self.assertNotIsInstance(statement, TextClause)
+        self.assertIn("nextval", str(statement))
 
     async def test_allocate_next_trade_number_skips_advisory_lock_outside_postgresql(self):
         db = FakeDB(dialect_name="sqlite", scalar_result=None)

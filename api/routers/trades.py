@@ -379,7 +379,7 @@ async def _try_lock_trade_offer_execution(db: AsyncSession, offer_id: int, *, wa
 
 async def _allocate_next_trade_number(db: AsyncSession) -> int:
     if _db_dialect_name(db) == "postgresql":
-        next_value = await db.scalar(text(f"SELECT nextval('{TRADE_NUMBER_SEQUENCE_NAME}')"))
+        next_value = await db.scalar(select(func.nextval(TRADE_NUMBER_SEQUENCE_NAME)))
         return int(next_value)
 
     max_trade_number = await db.scalar(select(func.max(Trade.trade_number)))

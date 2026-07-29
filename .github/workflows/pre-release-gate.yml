@@ -302,6 +302,8 @@ jobs:
         env:
           CI: 'true'
           PLAYWRIGHT_HTML_OPEN: never
+          E2E_TARGET_ENV: local
+          E2E_ALLOW_LOCAL_MUTATION: local-dev-only
         shell: bash
         run: |
           case "${{ matrix.browser }}" in
