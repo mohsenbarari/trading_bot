@@ -275,3 +275,28 @@ receipt.  A successful receipt is root-only and records the exact release and
 rendered-config hash; the external routing controller must require that fresh
 receipt before it changes a public origin.  The helper never copies a TLS key
 from another host and never makes a route change itself.
+
+## One-Shot Promotion Coordinator
+
+The long-running promotion watch must not be followed by a route command in an
+`ExecStartPost`: it does not exit while waiting.  Use the local one-shot
+coordinator when the systemd integration has selected an actual promotion
+event.  It runs only this serial sequence: `promote-watch --once`, the local
+listener gate, then the route bridge with the newly written listener receipt.
+
+Create a root-only (`0600`) JSON copy of
+`deploy/production/webapp-ir-promotion-coordinator.json.example` outside Git.
+All referenced configs, receipts, proof directories, token files, and audit
+parents must already be root-only.  The coordinator has no configurable script
+paths, SSH, or Object Storage operation.  It uses only the three fixed scripts
+from the exact release directory.
+
+```bash
+python3 scripts/run_webapp_ir_promotion_coordinator.py \
+  --config /etc/trading-bot-three-site/webapp-ir-promotion-coordinator.json \
+  --apply --json
+```
+
+Any failed stage stops the sequence without starting a later stage.  The route
+bridge is invoked only after the listener helper has returned `reloaded` and a
+fresh root-only listener receipt exists at the configured path.

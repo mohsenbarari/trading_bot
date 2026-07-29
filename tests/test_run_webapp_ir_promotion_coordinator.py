@@ -1,0 +1,249 @@
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest import mock
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "scripts/run_webapp_ir_promotion_coordinator.py"
+SPEC = importlib.util.spec_from_file_location("run_webapp_ir_promotion_coordinator", SCRIPT)
+assert SPEC and SPEC.loader
+MODULE = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = MODULE
+SPEC.loader.exec_module(MODULE)
+
+
+def write_file(path: Path, value: str, mode: int = 0o600) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(value, encoding="utf-8")
+    path.chmod(mode)
+
+
+class PromotionRunner:
+    def __init__(self, *, receipt: Path, listener_status: str = "reloaded") -> None:
+        self.receipt = receipt
+        self.listener_status = listener_status
+        self.calls: list[tuple[str, ...]] = []
+
+    def __call__(self, command: list[str] | tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+        normalized = tuple(command)
+        self.calls.append(normalized)
+        script = Path(normalized[1]).name
+        if script == "production_writer_lease_agent.py":
+            payload = {"status": "activated", "site": "webapp_ir", "action": "promote_ir"}
+        elif script == "activate_webapp_ir_promoted_listener.py":
+            if self.listener_status == "reloaded":
+                write_file(self.receipt, '{"status":"reloaded"}\n')
+            payload = {
+                "status": self.listener_status,
+                "external_route_changed": False,
+                "receipt_path": str(self.receipt),
+            }
+        elif script == "route_webapp_ir_from_promotion_proof.py":
+            payload = {"status": "switched", "applied": True}
+        else:
+            raise AssertionError(f"unexpected command {normalized}")
+        return subprocess.CompletedProcess(normalized, 0, json.dumps(payload) + "\n", "")
+
+
+class WebappIrPromotionCoordinatorTests(unittest.TestCase):
+    def make_fixture(self) -> dict[str, Path]:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        root.chmod(0o700)
+
+        release = root / "releases" / MODULE.RELEASE_SHA
+        scripts = release / "scripts"
+        scripts.mkdir(parents=True)
+        release.chmod(0o755)
+        scripts.chmod(0o755)
+        for name in (
+            "production_writer_lease_agent.py",
+            "activate_webapp_ir_promoted_listener.py",
+            "route_webapp_ir_from_promotion_proof.py",
+        ):
+            write_file(scripts / name, "# fixture\n", 0o700)
+
+        secure = root / "secure"
+        state = root / "state"
+        audit = root / "audit"
+        for directory in (secure, state, audit):
+            directory.mkdir()
+            directory.chmod(0o700)
+        proof_directory = state / "proofs"
+        proof_directory.mkdir()
+        proof_directory.chmod(0o700)
+
+        writer_config = secure / "writer.json"
+        restore_receipt = state / "restore.json"
+        listener_config = secure / "listener.env"
+        token = secure / "route-token"
+        for path in (writer_config, restore_receipt, listener_config, token):
+            write_file(path, "fixture\n")
+        listener_receipt = state / "listener.json"
+        route_audit = audit / "route.jsonl"
+        config = secure / "coordinator.json"
+        payload = {
+            "schema": MODULE.SCHEMA,
+            "writer_agent_config": str(writer_config),
+            "restore_receipt": str(restore_receipt),
+            "proof_directory": str(proof_directory),
+            "listener_config": str(listener_config),
+            "listener_receipt": str(listener_receipt),
+            "route_token_file": str(token),
+            "route_audit_log": str(route_audit),
+            "poll_seconds": 2,
+        }
+        write_file(config, json.dumps(payload) + "\n")
+        return {
+            "root": root,
+            "release": release,
+            "scripts": scripts,
+            "writer_config": writer_config,
+            "restore_receipt": restore_receipt,
+            "proof_directory": proof_directory,
+            "listener_config": listener_config,
+            "listener_receipt": listener_receipt,
+            "token": token,
+            "route_audit": route_audit,
+            "config": config,
+        }
+
+    def execute_coordinator(self, fixture: dict[str, Path], *, apply: bool, runner: PromotionRunner) -> dict:
+        with mock.patch.object(MODULE, "RELEASE_ROOT", fixture["release"]):
+            return MODULE.run_coordinator(fixture["config"], apply=apply, command_runner=runner)
+
+    def test_apply_runs_only_the_three_fixed_stages_in_order(self) -> None:
+        fixture = self.make_fixture()
+        runner = PromotionRunner(receipt=fixture["listener_receipt"])
+
+        result = self.execute_coordinator(fixture, apply=True, runner=runner)
+
+        python = "/usr/bin/python3"
+        writer = str(fixture["scripts"] / "production_writer_lease_agent.py")
+        listener = str(fixture["scripts"] / "activate_webapp_ir_promoted_listener.py")
+        route = str(fixture["scripts"] / "route_webapp_ir_from_promotion_proof.py")
+        self.assertEqual(
+            runner.calls,
+            [
+                (
+                    python,
+                    writer,
+                    "--config",
+                    str(fixture["writer_config"]),
+                    "promote-watch",
+                    "--restore-receipt",
+                    str(fixture["restore_receipt"]),
+                    "--proof-directory",
+                    str(fixture["proof_directory"]),
+                    "--poll-seconds",
+                    "2",
+                    "--once",
+                ),
+                (python, listener, "--config", str(fixture["listener_config"]), "--apply", "--json"),
+                (
+                    python,
+                    route,
+                    "--proof-directory",
+                    str(fixture["proof_directory"]),
+                    "--token-file",
+                    str(fixture["token"]),
+                    "--audit-log",
+                    str(fixture["route_audit"]),
+                    "--listener-receipt",
+                    str(fixture["listener_receipt"]),
+                    "--apply",
+                ),
+            ],
+        )
+        self.assertEqual(result["status"], "completed")
+        self.assertTrue(result["external_route_changed"])
+        self.assertEqual(set(result["stages"]), {"promote_watch", "listener_activation", "route"})
+
+    def test_plan_runs_no_stage(self) -> None:
+        fixture = self.make_fixture()
+        runner = PromotionRunner(receipt=fixture["listener_receipt"])
+
+        result = self.execute_coordinator(fixture, apply=False, runner=runner)
+
+        self.assertEqual(result["status"], "planned")
+        self.assertFalse(result["external_route_changed"])
+        self.assertEqual(runner.calls, [])
+
+    def test_failed_promotion_stops_before_listener_and_route(self) -> None:
+        fixture = self.make_fixture()
+
+        class FailingPromotion(PromotionRunner):
+            def __call__(self, command: list[str] | tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+                normalized = tuple(command)
+                self.calls.append(normalized)
+                return subprocess.CompletedProcess(normalized, 1, '{"status":"blocked"}\n', "failed")
+
+        runner = FailingPromotion(receipt=fixture["listener_receipt"])
+        with self.assertRaisesRegex(MODULE.PromotionCoordinatorError, "promote-watch exited"):
+            self.execute_coordinator(fixture, apply=True, runner=runner)
+        self.assertEqual(len(runner.calls), 1)
+        self.assertFalse(fixture["listener_receipt"].exists())
+
+    def test_listener_failure_or_missing_receipt_stops_before_route(self) -> None:
+        fixture = self.make_fixture()
+        failed_listener = PromotionRunner(receipt=fixture["listener_receipt"], listener_status="planned")
+        with self.assertRaisesRegex(MODULE.PromotionCoordinatorError, "listener activation did not"):
+            self.execute_coordinator(fixture, apply=True, runner=failed_listener)
+        self.assertEqual(len(failed_listener.calls), 2)
+
+        fixture = self.make_fixture()
+
+        class MissingReceipt(PromotionRunner):
+            def __call__(self, command: list[str] | tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+                normalized = tuple(command)
+                self.calls.append(normalized)
+                script = Path(normalized[1]).name
+                if script == "production_writer_lease_agent.py":
+                    payload = {"status": "activated", "site": "webapp_ir"}
+                elif script == "activate_webapp_ir_promoted_listener.py":
+                    payload = {
+                        "status": "reloaded",
+                        "external_route_changed": False,
+                        "receipt_path": str(self.receipt),
+                    }
+                else:
+                    raise AssertionError("route must not run")
+                return subprocess.CompletedProcess(normalized, 0, json.dumps(payload) + "\n", "")
+
+        missing_receipt = MissingReceipt(receipt=fixture["listener_receipt"])
+        with self.assertRaisesRegex(MODULE.PromotionCoordinatorError, "listener receipt does not exist"):
+            self.execute_coordinator(fixture, apply=True, runner=missing_receipt)
+        self.assertEqual(len(missing_receipt.calls), 2)
+
+    def test_closed_config_rejects_arbitrary_command_or_nonprivate_token(self) -> None:
+        fixture = self.make_fixture()
+        payload = json.loads(fixture["config"].read_text(encoding="utf-8"))
+        payload["ssh_command"] = "ssh root@example.invalid"
+        write_file(fixture["config"], json.dumps(payload) + "\n")
+        with self.assertRaisesRegex(MODULE.PromotionCoordinatorError, "unexpected ssh_command"):
+            MODULE.load_config(fixture["config"])
+
+        payload.pop("ssh_command")
+        write_file(fixture["config"], json.dumps(payload) + "\n")
+        fixture["token"].chmod(0o640)
+        with self.assertRaisesRegex(MODULE.PromotionCoordinatorError, "route token file must be"):
+            MODULE.load_config(fixture["config"])
+
+    def test_implementation_does_not_expose_remote_or_arbitrary_command_knobs(self) -> None:
+        source = SCRIPT.read_text(encoding="utf-8")
+        for forbidden in ("boto3", "paramiko", "subprocess.shell", "shell=True", "scp ", "ssh "):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, source)
+
+
+if __name__ == "__main__":
+    unittest.main()
