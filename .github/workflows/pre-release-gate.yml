@@ -262,6 +262,17 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+      - name: Build browser boottime PostgreSQL
+        shell: bash
+        run: |
+          image="trading-bot-ci-browser-postgres-boottime:$(git rev-parse --short=12 HEAD)"
+          docker build \
+            --build-arg RELEASE_SHA="$(git rev-parse HEAD)" \
+            --file deploy/postgres-boottime/Dockerfile \
+            --tag "$image" \
+            .
+          echo "POSTGRES_IMAGE=$image" >> "$GITHUB_ENV"
+
       - name: Bootstrap backend stack
         run: bash ./scripts/bootstrap_ci_backend.sh
 

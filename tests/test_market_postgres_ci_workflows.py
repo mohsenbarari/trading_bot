@@ -31,12 +31,18 @@ class MarketPostgresCiWorkflowTests(unittest.TestCase):
             self.assertIn("REDIS_URL: redis://127.0.0.1:6379/14", workflow, path.name)
             self.assertIn("install -m 600 .env .env.api", workflow, path.name)
             self.assertIn("install -m 600 .env .env.migration", workflow, path.name)
+            self.assertIn("trading-bot-ci-browser-postgres-boottime", workflow, path.name)
+            self.assertIn('echo "POSTGRES_IMAGE=$image" >> "$GITHUB_ENV"', workflow, path.name)
             self.assertNotIn("image: postgres:15-alpine", workflow, path.name)
 
     def test_market_postgres_gate_cleans_up_its_disposable_container(self) -> None:
         for path in WORKFLOWS:
             workflow = path.read_text(encoding="utf-8")
             self.assertIn("docker rm --force market-postgres || true", workflow, path.name)
+
+    def test_compose_keeps_stock_postgres_as_the_default_image(self) -> None:
+        compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+        self.assertIn("image: ${POSTGRES_IMAGE:-postgres:15-alpine}", compose)
 
 
 if __name__ == "__main__":

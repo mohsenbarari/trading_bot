@@ -140,7 +140,7 @@ services:
       - trading_net
 
   db:
-    image: postgres:15-alpine
+    image: ${POSTGRES_IMAGE:-postgres:15-alpine}
     logging: *default_logging
     container_name: trading_bot_db
     restart: always
