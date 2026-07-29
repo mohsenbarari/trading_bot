@@ -204,12 +204,8 @@ export function useOffers() {
 
             const page = await readOfferPage(response);
             if (requestRevision === filterRevision) {
-                if (silent && offers.value.length > 0) {
+                if (silent && offers.value.length > 0 && loadedAdditionalPages) {
                     offers.value = dedupeOffers([...page.items, ...offers.value]);
-                    if (!loadedAdditionalPages) {
-                        nextCursor.value = page.nextCursor;
-                        hasMore.value = page.hasMore;
-                    }
                 } else {
                     offers.value = dedupeOffers(page.items);
                     nextCursor.value = page.nextCursor;

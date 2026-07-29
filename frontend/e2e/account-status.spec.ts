@@ -347,7 +347,7 @@ test.describe('Account status browser regression', () => {
       expect(lockResult.blocked).toBeGreaterThanOrEqual(1)
 
       await userPage.reload({ waitUntil: 'domcontentloaded' })
-      await userPage.waitForURL(/\/login$/)
+      await expect.poll(() => new URL(userPage.url()).pathname).toBe('/login')
       await expect(userPage.getByRole('heading', { name: 'ورود به بازار' })).toBeVisible()
 
       await toggleAccountStatusFromAdminProfile(adminPage)

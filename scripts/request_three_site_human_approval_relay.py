@@ -43,6 +43,11 @@ from core.writer_witness_auth import (  # noqa: E402
     WitnessClientCredential,
     sign_witness_request,
 )
+from scripts.legacy_three_site_staging_runtime_fence import (  # noqa: E402
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
 
 
 class RelayRequestError(RuntimeError):
@@ -118,6 +123,7 @@ def _credential_values(path: Path) -> dict[str, str]:
 
 
 def request_receipt(args: argparse.Namespace) -> dict[str, Any]:
+    assert_retired(component="staging-human-approval-relay", operation="request receipt")
     subject = _strict_json(args.subject, label="human approval relay subject")
     policy = _strict_json(args.policy, label="human approval relay policy")
     credentials = _credential_values(args.credentials)
@@ -191,6 +197,16 @@ def request_receipt(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        assert_retired(component="staging-human-approval-relay", operation="CLI")
+    except LegacyThreeSiteStagingRuntimeRetiredError:
+        print(
+            json.dumps(
+                blocked_payload(component="staging-human-approval-relay"),
+                sort_keys=True,
+            )
+        )
+        return 2
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--action", required=True)
     parser.add_argument("--subject", type=Path, required=True)

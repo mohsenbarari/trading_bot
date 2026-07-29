@@ -34,6 +34,11 @@ from scripts.render_three_site_staging_role_compose import parse_env_values
 from scripts.verify_three_site_staging_image_inventory import verify_image_document
 from scripts.verify_three_site_staging_inventory import _strict_object
 from scripts.verify_three_site_staging_role_bundle import _verify_bundle_source
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
 
 
 SAFE_ENV = {
@@ -319,6 +324,7 @@ def validate_convergence_artifact(
 def _run(
     arguments: list[str], *, timeout: int = 120, include_stderr: bool = False
 ) -> str:
+    assert_retired(component="staging-migration-observation", operation="Docker command observation")
     result = subprocess.run(
         arguments,
         text=True,
@@ -369,6 +375,7 @@ def _artifact(
 
 
 def collect_routing(args: argparse.Namespace) -> dict[str, Any]:
+    assert_retired(component="staging-migration-observation", operation="Arvan routing observation")
     provider = inspect_or_switch(
         domain="gold-trading.ir",
         record_name="app",
@@ -424,6 +431,7 @@ def _service_observation(
     expected_image_reference: str,
     expected_image_id: str,
 ) -> dict[str, Any]:
+    assert_retired(component="staging-migration-observation", operation="service observation")
     container = _run([*_compose(args), "ps", "-q", service])
     if not container:
         raise ObservationError(f"required service has no container: {service}")
@@ -505,6 +513,7 @@ def _direct_origin_http_observation(
     path: str,
 ) -> tuple[int, bytes, str]:
     """Probe the role origin without weakening runtime surface guards."""
+    assert_retired(component="staging-migration-observation", operation="origin HTTP observation")
 
     service = ROLE_API_SERVICE.get(args.role)
     if service:
@@ -536,6 +545,7 @@ def _direct_origin_http_observation(
 
 
 def _tls_observation(*, role: str, env: dict[str, str]) -> dict[str, Any]:
+    assert_retired(component="staging-migration-observation", operation="private TLS observation")
     bind_key, port, server_name = ROLE_TLS[role]
     bind_address = env.get(bind_key, "").strip()
     ca_path = env.get("STAGING_DR_CA_CERT", "").strip()
@@ -573,6 +583,7 @@ def _tls_observation(*, role: str, env: dict[str, str]) -> dict[str, Any]:
 
 
 def collect_role(args: argparse.Namespace) -> dict[str, Any]:
+    assert_retired(component="staging-migration-observation", operation="role observation")
     env_bytes = read_secure_bytes(args.env_file, label="role env", max_size=1024 * 1024)
     env = parse_env_values(env_bytes.decode())
     compose_bytes = _verify_bundle_source(args.role_compose, expected_mode=0o640)
@@ -735,6 +746,11 @@ def collect_role(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        assert_retired(component="staging-migration-observation", operation="CLI")
+    except LegacyThreeSiteStagingRuntimeRetiredError:
+        print(json.dumps(blocked_payload(component="staging-migration-observation"), sort_keys=True))
+        return 2
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="action", required=True)
     for action in ("routing", "role"):
@@ -755,7 +771,7 @@ def main(argv: list[str] | None = None) -> int:
     role.add_argument("--env-file", type=Path, required=True)
     role.add_argument("--routing-observation", type=Path, required=True)
     role.add_argument("--image-inventory", type=Path, required=True)
-    role.add_argument("--expected-head", default="b986c7d8e0f1")
+    role.add_argument("--expected-head", default="c097d8e9f1a2")
     args = parser.parse_args(argv)
     try:
         document = collect_routing(args) if args.action == "routing" else collect_role(args)

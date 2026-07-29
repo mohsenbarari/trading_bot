@@ -6,7 +6,7 @@ from enum import Enum
 import hashlib
 from uuid import UUID
 
-from sqlalchemy import delete, or_, select, text
+from sqlalchemy import bindparam, delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.offer_expiry_command_receipt import OfferExpiryCommandReceipt
@@ -57,7 +57,11 @@ async def acquire_offer_expiry_command_locks(
         idempotency_key=idempotency_key,
     ):
         await db.execute(
-            text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+            select(
+                func.pg_advisory_xact_lock(
+                    func.hashtextextended(bindparam("lock_key"), 0)
+                )
+            ),
             {"lock_key": lock_key},
         )
 

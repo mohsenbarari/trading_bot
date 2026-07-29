@@ -68,11 +68,11 @@ class BotWebAppCandidateFullMatrixTests(unittest.TestCase):
 
         targeted_join = summary["trade_delivery_targeted_join_matrix"]
         targeted_join_command = targeted_join["run"]["command"]
-        self.assertEqual(targeted_join["run"]["status"], "passed")
-        self.assertEqual(targeted_join["status"], "planned")
-        self.assertEqual(targeted_join["scenario_count"], 204)
-        self.assertEqual(targeted_join["executable_count"], 108)
-        self.assertEqual(targeted_join["policy_unsupported_count"], 96)
+        self.assertEqual(targeted_join["run"]["status"], "planned")
+        self.assertIsNone(targeted_join["status"])
+        self.assertIsNone(targeted_join["scenario_count"])
+        self.assertIsNone(targeted_join["executable_count"])
+        self.assertIsNone(targeted_join["policy_unsupported_count"])
         self.assertIn(str(REPO_ROOT / "scripts" / "run_trade_delivery_targeted_join_matrix.py"), targeted_join_command)
         self.assertIn("--dry-run", targeted_join_command)
         self.assertIn("--check", targeted_join_command)
@@ -80,6 +80,33 @@ class BotWebAppCandidateFullMatrixTests(unittest.TestCase):
         stage11_command = summary["trade_delivery_stage11_matrix"]["run"]["command"]
         self.assertIn(str(REPO_ROOT / "scripts" / "report_trade_delivery_staging_validation.py"), stage11_command)
         self.assertIn("matrix", stage11_command)
+
+    def test_non_dry_run_is_blocked_before_artifact_or_subprocess_access(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            artifact_dir = Path(tmp_dir) / "would-be-runtime-artifact"
+            with patch.object(candidate_matrix.subprocess, "run") as run, patch(
+                "sys.stdout", new_callable=io.StringIO
+            ) as stdout:
+                exit_code = candidate_matrix.main(["--artifact-dir", str(artifact_dir)])
+            self.assertFalse(artifact_dir.exists())
+
+        self.assertEqual(exit_code, 2)
+        self.assertFalse(run.called)
+        self.assertIn("blocked_legacy_two_server_candidate_matrix_retired", stdout.getvalue())
+
+    def test_direct_command_helpers_cannot_be_reenabled_by_importers(self):
+        with patch.object(candidate_matrix.subprocess, "run") as run:
+            with self.assertRaises(candidate_matrix.LegacyCandidateMatrixRuntimeRetiredError):
+                candidate_matrix.run_streamed(["unsafe-command"], env={}, dry_run=False)
+            with self.assertRaises(candidate_matrix.LegacyCandidateMatrixRuntimeRetiredError):
+                candidate_matrix.run_captured(
+                    ["unsafe-command"],
+                    stdout_path=Path("/tmp/unsafe.stdout"),
+                    stderr_path=Path("/tmp/unsafe.stderr"),
+                    dry_run=False,
+                )
+
+        self.assertFalse(run.called)
 
 
 if __name__ == "__main__":

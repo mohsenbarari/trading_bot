@@ -18,6 +18,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.secure_file_io import read_secure_text
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
 from scripts.wa_ir_object_storage_preflight_agent import _validate_object_storage_url
 
 
@@ -124,6 +129,7 @@ def remote_command(payload: dict[str, Any]) -> str:
 
 
 def execute(args: argparse.Namespace) -> dict[str, Any]:
+    assert_retired(component="wa-ir-object-storage-preflight-bootstrap", operation="execute SSH bootstrap")
     if args.host != WA_IR_HOST or args.port != 22 or args.user != WA_IR_USER:
         raise BootstrapError("WA-IR SSH target differs from the pinned replacement host")
     try:
@@ -191,6 +197,16 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        assert_retired(component="wa-ir-object-storage-preflight-bootstrap", operation="CLI")
+    except LegacyThreeSiteStagingRuntimeRetiredError:
+        print(
+            json.dumps(
+                blocked_payload(component="wa-ir-object-storage-preflight-bootstrap"),
+                sort_keys=True,
+            )
+        )
+        return 2
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--descriptor", type=Path, required=True)
     parser.add_argument("--identity", type=Path, required=True)

@@ -9,6 +9,7 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+from scripts import run_three_site_staging_source_backup as source_backup
 from scripts.run_three_site_staging_source_backup import (
     StagingBackupError,
     _compose_base,
@@ -123,6 +124,45 @@ class ThreeSiteStagingSourceBackupTests(unittest.TestCase):
             result["required_confirmation"],
             confirmation_phrase(inventory["campaign_id"], "webapp_fi", "a" * 40),
         )
+
+    def test_direct_execute_reverifies_inventory_and_confirmation_before_docker(self):
+        verified = {
+            "campaign_id": "11111111-1111-4111-8111-111111111111",
+            "release_sha": "a" * 40,
+            "inventory_stage": "provisioned",
+        }
+        args = SimpleNamespace(
+            source_role="webapp_fi",
+            expected_source_release_sha="b" * 40,
+            target_release_sha="a" * 40,
+            inventory=Path("/secure/inventory.json"),
+            inventory_approval=Path("/secure/inventory-approval.json"),
+            approval_policy=Path("/secure/approval-policy.json"),
+            confirm=confirmation_phrase(verified["campaign_id"], "webapp_fi", "a" * 40),
+        )
+        with (
+            patch.object(source_backup, "load_inventory", return_value={}) as load,
+            patch.object(source_backup, "verify_approved_inventory", return_value=verified) as verify,
+            patch.object(source_backup, "_run") as run,
+        ):
+            with self.assertRaisesRegex(StagingBackupError, "caller inventory summary"):
+                source_backup.execute(
+                    args,
+                    {**verified, "campaign_id": "22222222-2222-4222-8222-222222222222"},
+                )
+        self.assertEqual(load.call_count, 3)
+        verify.assert_called_once()
+        run.assert_not_called()
+
+        with (
+            patch.object(source_backup, "load_inventory", return_value={}),
+            patch.object(source_backup, "verify_approved_inventory", return_value=verified),
+            patch.object(source_backup, "_run") as run,
+        ):
+            args.confirm = "spoofed-confirmation"
+            with self.assertRaisesRegex(StagingBackupError, "confirmation phrase"):
+                source_backup.execute(args, verified)
+        run.assert_not_called()
 
     def test_archive_verifier_rejects_links_and_parent_traversal(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Build a side-effect-free production full-matrix command plan."""
+"""Legacy two-site Full Matrix planning helpers.
+
+The importable helpers remain available for local documentation/unit tests. The
+CLI is retired because its emitted command plan can drive the old two-site
+production executor.
+"""
 
 from __future__ import annotations
 
@@ -18,6 +23,9 @@ IRAN_HOST = "root@65.109.220.59"
 IRAN_SSH_PORT = os.getenv("IRAN_SSH_PORT", "37067")
 IRAN_PROJECT_DIR = "/srv/trading-bot/current"
 PRODUCTION_CLEANUP_CONFIRM = "hard-delete-test-data"
+LEGACY_TWO_SERVER_PLAN_RETIREMENT_REASON = (
+    "legacy_two_server_full_matrix_plan_retired_use_three_site_sealed_campaign"
+)
 SCENARIO_CATALOG_PATH = Path("docs/PRODUCTION_FULL_MATRIX_SCENARIO_CATALOG.md")
 SCENARIO_MANIFEST_DOC_PATH = Path("docs/PRODUCTION_FULL_MATRIX_MANIFEST.md")
 
@@ -349,14 +357,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-    try:
-        plan = build_plan(args)
-    except PlanError as exc:
-        print(json.dumps({"status": "error", "message": str(exc)}, sort_keys=True))
-        return 2
-    print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))
-    return 0
+    parse_args(argv)
+    print(
+        json.dumps(
+            {
+                "status": "blocked_legacy_two_server_full_matrix_retired",
+                "reason": LEGACY_TWO_SERVER_PLAN_RETIREMENT_REASON,
+                "required_replacement": "sealed_three_site_campaign_verifier",
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+    return 2
 
 
 if __name__ == "__main__":

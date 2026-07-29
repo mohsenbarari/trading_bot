@@ -1,4 +1,6 @@
 import os
+import hashlib
+import hmac
 import tempfile
 import unittest
 from pathlib import Path
@@ -183,6 +185,19 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         )
         self.assertEqual(foreign["RELEASE_SHA"], "abc123release")
         self.assertEqual(iran["RELEASE_SHA"], "abc123release")
+        expected_webapp_key = hmac.new(
+            b"WebAppData",
+            b"bot-token",
+            hashlib.sha256,
+        ).hexdigest()
+        self.assertEqual(
+            foreign["TELEGRAM_WEBAPP_VALIDATION_KEY"],
+            expected_webapp_key,
+        )
+        self.assertEqual(
+            iran["TELEGRAM_WEBAPP_VALIDATION_KEY"],
+            expected_webapp_key,
+        )
         self.assertEqual(foreign["FRONTEND_URL"], "https://coin.362514.ir")
         self.assertEqual(iran["FRONTEND_URL"], "https://coin.gold-trade.ir")
         self.assertEqual(foreign["PUBLIC_WEBAPP_URL"], "https://app.gold-trade.ir")
@@ -240,9 +255,14 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         )
         self.assertEqual(foreign_api["TELEGRAM_DELIVERY_PRODUCER_MODE"], "queue-v1")
         self.assertNotIn("BOT_TOKEN", foreign_api)
+        self.assertEqual(
+            foreign_api["TELEGRAM_WEBAPP_VALIDATION_KEY"],
+            expected_webapp_key,
+        )
         self.assertNotIn("TELEGRAM_DELIVERY_EXECUTION_OWNER", foreign_api)
         self.assertNotIn("TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN", foreign_api)
         self.assertEqual(foreign_bot["BOT_TOKEN"], "bot-token")
+        self.assertNotIn("TELEGRAM_WEBAPP_VALIDATION_KEY", foreign_bot)
         self.assertEqual(
             foreign_bot["TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN"],
             "editor-secret",
@@ -257,6 +277,10 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
         self.assertNotIn("TELEGRAM_DELIVERY_EXECUTION_OWNER", legacy_api)
         self.assertNotIn(
             "BOT_TOKEN",
+            build_service_runtime_env(legacy_foreign, service="sync", role="foreign"),
+        )
+        self.assertNotIn(
+            "TELEGRAM_WEBAPP_VALIDATION_KEY",
             build_service_runtime_env(legacy_foreign, service="sync", role="foreign"),
         )
         legacy_iran = iran.copy()
@@ -339,6 +363,23 @@ class RenderRuntimeEnvsTests(unittest.TestCase):
             self.assertNotIn("BOT_TOKEN=bot-token", iran_lines)
             self.assertNotIn("BOT_TOKEN=bot-token", iran_api_lines)
             self.assertNotIn("BOT_TOKEN=bot-token", foreign_api_lines)
+            expected_webapp_key = hmac.new(
+                b"WebAppData",
+                b"bot-token",
+                hashlib.sha256,
+            ).hexdigest()
+            self.assertIn(
+                f"TELEGRAM_WEBAPP_VALIDATION_KEY={expected_webapp_key}",
+                iran_api_lines,
+            )
+            self.assertIn(
+                f"TELEGRAM_WEBAPP_VALIDATION_KEY={expected_webapp_key}",
+                foreign_api_lines,
+            )
+            self.assertNotIn(
+                "TELEGRAM_WEBAPP_VALIDATION_KEY=",
+                "\n".join(foreign_bot_lines),
+            )
             self.assertNotIn(
                 "TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN=editor-secret",
                 foreign_api_lines,

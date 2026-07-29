@@ -6,13 +6,7 @@
 # Iran:              API + Nginx + Frontend
 # ==========================================
 
-IRAN_HOST ?= $(shell python3 scripts/deploy_config.py --key IRAN_SSH_TARGET 2>/dev/null)
-IRAN_DIR ?= $(shell python3 scripts/deploy_config.py --key IRAN_PROJECT_DIR 2>/dev/null)
-IRAN_HOST_DISPLAY ?= $(shell python3 scripts/deploy_config.py --key IRAN_HOST 2>/dev/null)
-IRAN_SSH_PORT ?= $(shell python3 scripts/deploy_config.py --key IRAN_SSH_PORT 2>/dev/null)
-SSH_IRAN_OPTS = -o StrictHostKeyChecking=accept-new -p $(IRAN_SSH_PORT)
 LOCAL_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then printf '%s' 'docker compose'; elif command -v docker-compose >/dev/null 2>&1; then printf '%s' 'docker-compose'; else printf '%s' 'docker compose'; fi)
-IRAN_REMOTE_COMPOSE = if docker compose version >/dev/null 2>&1; then compose_cmd="docker compose"; elif command -v docker-compose >/dev/null 2>&1; then compose_cmd="docker-compose"; else echo "No Docker Compose command is available on the Iran host." >&2; exit 1; fi
 
 .PHONY: help up deploy frontend iran foreign sync-recover sync-health sync-health-iran sync-health-sample sync-health-monitor-install audit-anchor-export audit-anchor-monitor-install audit-anchor-ship audit-anchor-ship-install metrics-targets deployment-surface-guard restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs observability-overhead observability-readiness observability-gate audit-log-export test-report test-gate test-diff-gate stage9-infrastructure-gate stage9-runtime-evidence stage9-evidence-gate stage9-mutation-gate stage9-test-matrix frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans production-read-path-query-plans production-read-path-attribution messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all production-alerts production-alerts-monitor-install production-backup-foreign production-backup-iran production-backup-all production-recoverability-report production-recoverability-drill production-deployment-restart production-release-gate production-data-hygiene production-data-hygiene-iran production-benchmark-baseline production-benchmark-quick production-benchmark-targeted production-benchmark-full production-load-runner-bootstrap production-load-fixtures production-load-realistic production-load-sampler production-load-pool-matrix production-full-matrix-manifest production-full-matrix-run production-full-matrix-plan writer-witness-real-host-matrix-plan writer-witness-real-host-matrix-preflight writer-witness-real-host-scenario-plan writer-witness-real-host-scenario-approve writer-witness-real-host-scenario-run writer-witness-real-host-scenario-recover webapp-ir-dark-standby-check three-site-topology-contract-check production-release production-online-help production-online-check production-online-bootstrap production-online-nginx production-online-cert production-online-build production-online-sync production-online-ship-images production-online-load-images production-online-deploy production-online-inspect-shared production-online-seed-shared production-online-health
 
@@ -20,11 +14,8 @@ help:
 	@echo ""
 	@echo "🚀 Available commands:"
 	@echo ""
-	@echo "  make up         - Full deploy: build frontend + deploy both servers + auto sync recovery"
-	@echo "  make frontend   - Build frontend + deploy to Iran only"
-	@echo "  make iran       - Build frontend + full Iran deploy"
-	@echo "  make foreign    - Rebuild Docker on foreign server only"
-	@echo "  make sync-recover - Manual fallback to catch up both servers after Iran reconnects"
+	@echo "  make up/deploy/frontend/iran/foreign - Retired legacy two-site deployment routes"
+	@echo "  make sync-recover - Retired legacy two-site sync mutation route"
 	@echo "  make sync-health - Show local/foreign sync backlog and lag"
 	@echo "  make sync-health-iran - Show Iran sync backlog and lag through SSH"
 	@echo "  make sync-health-sample - Sample local and Iran sync health from the foreign host"
@@ -50,7 +41,7 @@ help:
 	@echo "  make reset-sessions    - Interactive session reset"
 	@echo "  make unlock-login      - Interactive login throttle unlock"
 	@echo ""
-	@echo "  make down        - Stop foreign containers"
+	@echo "  make down        - Retired legacy two-site container mutation route"
 	@echo "  make logs        - Foreign server logs"
 	@echo "  make logs-api    - Follow API container logs"
 	@echo "  make logs-bot    - Follow bot container logs"
@@ -58,8 +49,8 @@ help:
 	@echo "  make logs-follow - Follow all local runtime logs with a bounded tail"
 	@echo "  make metrics     - Print Prometheus metrics from the local API"
 	@echo "  make logs-iran   - Iran server logs"
-	@echo "  make restart     - Restart foreign containers"
-	@echo "  make restart-iran - Restart Iran containers"
+	@echo "  make restart     - Retired legacy two-site container mutation route"
+	@echo "  make restart-iran - Retired legacy two-site container mutation route"
 	@echo "  make status      - Show status of both servers"
 	@echo "  make observability-up   - Start local Loki/Promtail/Grafana stack"
 	@echo "  make observability-down - Stop local observability stack"
@@ -108,61 +99,46 @@ help:
 	@echo "  make production-alerts-monitor-install - Install the 5-minute production alert sampler"
 	@echo "  make production-recoverability-report - Run live recoverability health/sync checks"
 	@echo "  make production-recoverability-drill  - Create Iran backup and smoke-restore DB in a temporary container"
-	@echo "  make production-release       - Run the full foreign-controlled production release flow"
-	@echo "  make production-deployment-restart - Run the Stage P10 deploy/restart/backup benchmark"
-	@echo "  make production-release-gate  - Run the Stage P11 final release gate"
+	@echo "  make production-release       - Retired legacy live route; use the three-site production-shadow campaign path"
+	@echo "  make production-deployment-restart - Retired legacy two-site mutation route"
+	@echo "  make production-release-gate  - Retired legacy two-site release gate"
 	@echo "  make production-data-hygiene  - Run read-only dev/test artifact guard on the foreign DB"
 	@echo "  make production-data-hygiene-iran - Run read-only dev/test artifact guard on the Iran DB"
 	@echo "  make production-online-help   - Show the production release helper usage"
-	@echo "  make production-online-check  - Validate the production deploy manifest and SSH access"
-	@echo "  make production-online-bootstrap - Install Iran host prerequisites over SSH"
-	@echo "  make production-online-nginx  - Render and install the Iran Nginx config"
-	@echo "  make production-online-cert   - Request/renew SSL on the Iran host"
-	@echo "  make production-online-build  - Build local artifacts for the release"
-	@echo "  make production-online-sync   - Rsync the production payload to the Iran host"
-	@echo "  make production-online-ship-images - Upload the prepared Docker image bundle"
-	@echo "  make production-online-load-images - Load the uploaded Docker image bundle on Iran"
-	@echo "  make production-online-deploy - Start the Iran Docker stack without remote build"
-	@echo "  make production-online-inspect-shared - Inspect Iran shared-table fresh/existing state"
-	@echo "  make production-online-seed-shared - Run guarded Iran shared-table seed/reset handling"
-	@echo "  make production-online-health - Run post-deploy health checks"
+	@echo "  make production-online-<command> - Retired; all legacy two-site commands are blocked"
 	@echo ""
 
 # --- Deploy Commands ---
 
-up: deploy
+up:
+	@printf '%s\n' 'Legacy two-site deployment command is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
+
 deploy:
-	@chmod +x ./deploy.sh
-	@./deploy.sh all
+	@printf '%s\n' 'Legacy two-site deployment command is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 frontend:
-	@chmod +x ./deploy.sh
-	@./deploy.sh frontend
+	@printf '%s\n' 'Legacy two-site deployment command is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 iran:
-	@chmod +x ./deploy.sh
-	@./deploy.sh iran
+	@printf '%s\n' 'Legacy two-site deployment command is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 foreign:
-	@chmod +x ./deploy.sh
-	@./deploy.sh foreign
+	@printf '%s\n' 'Legacy two-site deployment command is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 sync-recover:
-	@chmod +x ./scripts/recover_cross_server_sync.sh
-	@./scripts/recover_cross_server_sync.sh
+	@printf '%s\n' 'Legacy two-site sync recovery is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 sync-health:
-	@docker compose exec -T app python -c "import os, urllib.request; req = urllib.request.Request('http://127.0.0.1:8000/api/sync/health', headers={'X-Observability-Api-Key': os.environ.get('OBSERVABILITY_API_KEY', '')}); print(urllib.request.urlopen(req, timeout=15).read().decode())"
+	@printf '%s\n' 'Legacy two-site sync health contact is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 sync-health-iran:
-	@ssh $(SSH_IRAN_OPTS) $(IRAN_HOST) 'cd $(IRAN_DIR) && $(IRAN_REMOTE_COMPOSE); $$compose_cmd -f docker-compose.iran.yml exec -T app python -c "import os, urllib.request; req = urllib.request.Request(\"http://127.0.0.1:8000/api/sync/health\", headers={\"X-Observability-Api-Key\": os.environ.get(\"OBSERVABILITY_API_KEY\", \"\")}); print(urllib.request.urlopen(req, timeout=15).read().decode())"'
+	@printf '%s\n' 'Legacy two-site sync health contact is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 sync-health-sample:
-	@python3 scripts/sample_sync_health.py $${ARGS}
+	@printf '%s\n' 'Legacy two-site sync health contact is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 sync-health-monitor-install:
-	@chmod +x ./scripts/install_sync_health_monitor.sh
-	@./scripts/install_sync_health_monitor.sh
+	@printf '%s\n' 'Legacy two-site sync health contact is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 audit-anchor-export:
 	@python3 scripts/export_audit_anchor.py $${ARGS}
@@ -229,42 +205,37 @@ unlock-login:
 # --- Management Commands ---
 
 down:
-	@docker compose down
+	@printf '%s\n' 'Legacy two-site container mutation is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 logs:
-	@docker compose logs -f
+	@printf '%s\n' 'Legacy two-site runtime contact is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 logs-api:
-	@docker compose logs -f --tail=150 app
+	@printf '%s\n' 'Legacy two-site runtime contact is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 logs-bot:
-	@docker compose logs -f --tail=150 bot
+	@printf '%s\n' 'Legacy two-site runtime contact is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 logs-jobs:
-	@docker compose logs -f --tail=200 app bot
+	@printf '%s\n' 'Legacy two-site runtime contact is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 logs-follow:
-	@docker compose logs -f --tail=100 app bot redis db
+	@printf '%s\n' 'Legacy two-site runtime contact is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 metrics:
-	@curl -fsS http://127.0.0.1:8000/metrics
+	@printf '%s\n' 'Legacy two-site runtime contact is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 logs-iran:
-	@ssh $(SSH_IRAN_OPTS) $(IRAN_HOST) 'cd $(IRAN_DIR) && $(IRAN_REMOTE_COMPOSE); $$compose_cmd -f docker-compose.iran.yml logs -f --tail=50'
+	@printf '%s\n' 'Legacy two-site runtime contact is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 restart:
-	@docker compose restart
+	@printf '%s\n' 'Legacy two-site container mutation is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 restart-iran:
-	@ssh $(SSH_IRAN_OPTS) $(IRAN_HOST) 'cd $(IRAN_DIR) && $(IRAN_REMOTE_COMPOSE); $$compose_cmd -f docker-compose.iran.yml restart'
+	@printf '%s\n' 'Legacy two-site container mutation is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 status:
-	@echo ""
-	@echo "🌍 Foreign Server (local):"
-	@docker compose ps
-	@echo ""
-	@echo "🇮🇷 Iran Server ($(IRAN_HOST_DISPLAY)):"
-	@ssh $(SSH_IRAN_OPTS) $(IRAN_HOST) 'cd $(IRAN_DIR) && $(IRAN_REMOTE_COMPOSE); $$compose_cmd -f docker-compose.iran.yml ps'
+	@printf '%s\n' 'Legacy two-site runtime contact is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 observability-up:
 	@docker compose -f docker-compose.observability.yml up -d
@@ -330,89 +301,88 @@ messenger-surface-report:
 	@python3 ./scripts/build_messenger_surface_report.py
 
 production-release:
-	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env}
+	@printf '%s\n' 'Legacy two-site production release is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-deployment-restart:
-	@python3 scripts/report_deployment_restart_benchmark.py --manifest $${MANIFEST:-./deploy/production/online.env} $${ARGS}
+	@printf '%s\n' 'Legacy two-site deployment/restart benchmark is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-release-gate:
-	@python3 scripts/report_final_release_gate.py --manifest $${MANIFEST:-./deploy/production/online.env} $${ARGS}
+	@printf '%s\n' 'Legacy two-site final release gate is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-data-hygiene:
-	@$(LOCAL_COMPOSE) exec -T app python scripts/check_production_data_hygiene.py --role foreign --json $${ARGS}
+	@printf '%s\n' 'Legacy two-site production data contact is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-data-hygiene-iran:
-	@ssh $(SSH_IRAN_OPTS) $(IRAN_HOST) 'cd $(IRAN_DIR) && $(IRAN_REMOTE_COMPOSE); $$compose_cmd -f docker-compose.iran.yml exec -T app python scripts/check_production_data_hygiene.py --role iran --json' $${ARGS}
+	@printf '%s\n' 'Legacy two-site production data contact is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-backup-foreign:
-	@python3 scripts/run_production_backup.py --manifest $${MANIFEST:-./deploy/production/online.env} --role foreign --json $${ARGS}
+	@printf '%s\n' 'Legacy two-site production backup is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-backup-iran:
-	@python3 scripts/run_production_backup.py --manifest $${MANIFEST:-./deploy/production/online.env} --role iran --json $${ARGS}
+	@printf '%s\n' 'Legacy two-site production backup is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-backup-all:
-	@python3 scripts/run_production_backup.py --manifest $${MANIFEST:-./deploy/production/online.env} --role both --json $${ARGS}
+	@printf '%s\n' 'Legacy two-site production backup is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-alerts:
-	@python3 scripts/report_production_alerts.py --manifest $${MANIFEST:-./deploy/production/online.env} --json $${ARGS}
+	@printf '%s\n' 'Legacy two-site production alert contact is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-alerts-monitor-install:
-	@chmod +x ./scripts/install_production_alert_monitor.sh
-	@./scripts/install_production_alert_monitor.sh
+	@printf '%s\n' 'Legacy two-site production alert contact is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-recoverability-report:
-	@python3 scripts/report_production_recoverability.py --manifest $${MANIFEST:-./deploy/production/online.env} --json $${ARGS}
+	@printf '%s\n' 'Legacy two-site production recoverability contact is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-recoverability-drill:
-	@python3 scripts/report_production_recoverability.py --manifest $${MANIFEST:-./deploy/production/online.env} --run-backup --backup-role iran --backup-restore-smoke --json $${ARGS}
+	@printf '%s\n' 'Legacy two-site production recoverability contact is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-online-help:
-	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env} help
+	@printf '%s\n' 'Legacy two-site production helper is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-online-check:
-	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env} check-local
+	@printf '%s\n' 'Legacy two-site production command is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-online-bootstrap:
-	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env} bootstrap-iran
+	@printf '%s\n' 'Legacy two-site production command is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-online-nginx:
-	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env} configure-nginx
+	@printf '%s\n' 'Legacy two-site production command is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-online-cert:
-	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env} issue-cert
+	@printf '%s\n' 'Legacy two-site production command is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-online-build:
-	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env} build-release
+	@printf '%s\n' 'Legacy two-site production command is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-online-sync:
-	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env} sync-project
+	@printf '%s\n' 'Legacy two-site production command is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-online-ship-images:
-	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env} ship-images
+	@printf '%s\n' 'Legacy two-site production command is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-online-load-images:
-	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env} load-images
+	@printf '%s\n' 'Legacy two-site production command is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-online-deploy:
-	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env} deploy-iran
+	@printf '%s\n' 'Legacy two-site production command is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-online-inspect-shared:
-	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env} inspect-shared-data
+	@printf '%s\n' 'Legacy two-site production command is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-online-seed-shared:
-	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env} seed-shared-data
+	@printf '%s\n' 'Legacy two-site production command is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-online-health:
-	@bash ./scripts/production_deploy_online.sh --manifest $${MANIFEST:-./deploy/production/online.env} healthcheck
+	@printf '%s\n' 'Legacy two-site production command is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 messenger-query-plans:
 	@python3 ./scripts/report_messenger_query_plans.py
 
 production-read-path-query-plans:
-	@python3 ./scripts/report_production_read_path_query_plans.py $${ARGS}
+	@printf '%s\n' 'Legacy two-site production read-path contact is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-read-path-attribution:
-	@python3 ./scripts/report_read_path_endpoint_attribution.py $${ARGS}
+	@printf '%s\n' 'Legacy two-site production read-path contact is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 messenger-benchmark-prepare:
 	@python3 ./scripts/prepare_messenger_benchmark_versions.py
@@ -426,40 +396,40 @@ messenger-benchmark-report:
 messenger-benchmark-all: messenger-surface-report messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report
 
 production-benchmark-baseline:
-	@python3 ./scripts/capture_production_baseline.py --manifest $${MANIFEST:-./deploy/production/online.env}
+	@printf '%s\n' 'Legacy two-site production benchmark is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-benchmark-quick:
-	@python3 ./scripts/run_production_benchmark.py --mode quick --manifest $${MANIFEST:-./deploy/production/online.env} $${ARGS}
+	@printf '%s\n' 'Legacy two-site production benchmark is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-benchmark-targeted:
-	@python3 ./scripts/run_production_benchmark.py --mode targeted --profile $${PROFILE:-sync} --manifest $${MANIFEST:-./deploy/production/online.env} $${ARGS}
+	@printf '%s\n' 'Legacy two-site production benchmark is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-benchmark-full:
-	@python3 ./scripts/run_production_benchmark.py --mode full --manifest $${MANIFEST:-./deploy/production/online.env} $${ARGS}
+	@printf '%s\n' 'Legacy two-site production benchmark is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-load-runner-bootstrap:
-	@bash ./scripts/bootstrap_load_runner.sh --manifest $${MANIFEST:-./deploy/production/online.env} $${ARGS}
+	@printf '%s\n' 'Legacy two-site production load route is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-load-fixtures:
-	@python3 ./scripts/report_production_load_fixtures.py --manifest $${MANIFEST:-./deploy/production/online.env} $${ARGS}
+	@printf '%s\n' 'Legacy two-site production load route is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-load-realistic:
-	@python3 ./scripts/report_production_realistic_load.py --manifest $${MANIFEST:-./deploy/production/online.env} $${ARGS}
+	@printf '%s\n' 'Legacy two-site production load route is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-load-sampler:
-	@python3 ./scripts/report_production_load_sampler.py --manifest $${MANIFEST:-./deploy/production/online.env} $${ARGS}
+	@printf '%s\n' 'Legacy two-site production load route is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-load-pool-matrix:
-	@python3 ./scripts/run_stage_l_pool_matrix.py --manifest $${MANIFEST:-./deploy/production/online.env} $${ARGS}
+	@printf '%s\n' 'Legacy two-site production load route is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-full-matrix-manifest:
 	@python3 ./scripts/build_production_full_matrix_manifest.py $${ARGS}
 
 production-full-matrix-run:
-	@python3 ./scripts/run_production_full_matrix.py $${ARGS}
+	@printf '%s\n' 'Legacy two-site Full Matrix runner is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 production-full-matrix-plan:
-	@python3 ./scripts/plan_production_full_matrix.py $${ARGS}
+	@printf '%s\n' 'Legacy two-site Full Matrix planner is retired and hard-disabled. Use the dedicated three-site production-shadow campaign path.' >&2; exit 2
 
 writer-witness-real-host-matrix-plan:
 	@./scripts/run_writer_witness_matrix_controller.sh preflight --mode plan $${ARGS}

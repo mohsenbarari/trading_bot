@@ -13,6 +13,19 @@ from scripts import trading_core_probe_worker as worker
 
 
 class TradingCoreMixedLoadHelperTests(unittest.TestCase):
+    def setUp(self):
+        # These retained behavior tests use fake dependencies only. Runtime
+        # entrypoints are covered separately with the real hard fence.
+        self._runtime_guard = patch.object(
+            worker,
+            "assert_legacy_two_server_worker_operation_retired",
+            return_value=None,
+        )
+        self._runtime_guard.start()
+
+    def tearDown(self):
+        self._runtime_guard.stop()
+
     def test_dual_role_users_artifact_round_trip_is_iran_authoritative(self):
         users = [
             worker.LoadUserRef(user_id=10, telegram_id=9010),
@@ -139,7 +152,8 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
                 )
             )
 
-    def test_seed_and_verify_commands_enforce_cleanup_and_emit_artifacts(self):
+    @patch.object(worker, "assert_legacy_two_server_worker_operation_retired", return_value=None)
+    def test_seed_and_verify_commands_enforce_cleanup_and_emit_artifacts(self, _retirement_guard):
         users = [
             worker.LoadUserRef(user_id=10, telegram_id=9010),
             worker.LoadUserRef(user_id=12, telegram_id=9012),
@@ -199,7 +213,8 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         visible.assert_awaited_once_with(users)
         self.assertEqual(write_result.call_args.args[1]["user_count"], 3)
 
-    def test_seed_cleanup_branches_and_verify_without_output(self):
+    @patch.object(worker, "assert_legacy_two_server_worker_operation_retired", return_value=None)
+    def test_seed_cleanup_branches_and_verify_without_output(self, _retirement_guard):
         users = [
             worker.LoadUserRef(user_id=10, telegram_id=9010),
             worker.LoadUserRef(user_id=12, telegram_id=9012),
@@ -258,7 +273,8 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertEqual(result, 0)
         write.assert_not_called()
 
-    def test_prepare_reused_users_requires_cleanup_skip_and_uses_converged_artifact(self):
+    @patch.object(worker, "assert_legacy_two_server_worker_operation_retired", return_value=None)
+    def test_prepare_reused_users_requires_cleanup_skip_and_uses_converged_artifact(self, _retirement_guard):
         parser = worker.build_parser()
         with tempfile.TemporaryDirectory() as directory:
             args = parser.parse_args(
@@ -338,7 +354,8 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         visible.assert_awaited_once_with(users)
         self.assertEqual(write.call_args.args[1], prepare_payload)
 
-    def test_prepare_without_users_artifact_creates_local_fixture_users(self):
+    @patch.object(worker, "assert_legacy_two_server_worker_operation_retired", return_value=None)
+    def test_prepare_without_users_artifact_creates_local_fixture_users(self, _retirement_guard):
         parser = worker.build_parser()
         with tempfile.TemporaryDirectory() as directory:
             args = parser.parse_args(
@@ -397,7 +414,7 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertEqual(result, 0)
         create_users.assert_awaited_once_with("FMX_STAGE_UNIT_", user_count=3)
 
-    def test_dispatch_routes_seed_and_verify_commands(self):
+    def test_dispatch_blocks_legacy_seed_verify_and_prepare_commands_before_handlers(self):
         async def run():
             with patch.object(
                 worker, "seed_dual_role_users_command", new=AsyncMock(return_value=3)
@@ -406,18 +423,22 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
             ) as verify, patch.object(
                 worker, "prepare_dual_role_run_command", new=AsyncMock(return_value=5)
             ) as prepare:
-                seed_result = await worker.dispatch(SimpleNamespace(command="seed-dual-role-users"))
-                verify_result = await worker.dispatch(SimpleNamespace(command="verify-dual-role-users"))
-                prepare_result = await worker.dispatch(SimpleNamespace(command="prepare-dual-role-run"))
-            return seed_result, verify_result, prepare_result, seed, verify, prepare
+                for command in (
+                    "seed-dual-role-users",
+                    "verify-dual-role-users",
+                    "prepare-dual-role-run",
+                ):
+                    with self.assertRaises(worker.TradingProbeError):
+                        await worker.dispatch(SimpleNamespace(command=command))
+            return seed, verify, prepare
 
-        seed_result, verify_result, prepare_result, seed, verify, prepare = asyncio.run(run())
-        self.assertEqual((seed_result, verify_result, prepare_result), (3, 4, 5))
-        seed.assert_awaited_once()
-        verify.assert_awaited_once()
-        prepare.assert_awaited_once()
+        seed, verify, prepare = asyncio.run(run())
+        seed.assert_not_awaited()
+        verify.assert_not_awaited()
+        prepare.assert_not_awaited()
 
-    def test_read_during_write_webapp_detail_uses_owner_visibility(self):
+    @patch.object(worker, "assert_legacy_two_server_worker_operation_retired", return_value=None)
+    def test_read_during_write_webapp_detail_uses_owner_visibility(self, _retirement_guard):
         class NoopAsyncContext:
             async def __aenter__(self):
                 return self
@@ -508,7 +529,8 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertEqual(calls[1], ("public_detail", 7, "ofr_public"))
         self.assertEqual(calls[2], ("market_history", 11))
 
-    def test_read_during_write_telegram_skips_unsynced_reader(self):
+    @patch.object(worker, "assert_legacy_two_server_worker_operation_retired", return_value=None)
+    def test_read_during_write_telegram_skips_unsynced_reader(self, _retirement_guard):
         class NoopAsyncContext:
             async def __aenter__(self):
                 return self
@@ -599,7 +621,8 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertEqual(calls, [12, 12])
         self.assertEqual(payload["summary"]["skipped_telegram_reader_user_ids"], [11])
 
-    def test_warm_load_runner_dependencies_initializes_redis_singleton(self):
+    @patch.object(worker, "assert_legacy_two_server_worker_operation_retired", return_value=None)
+    def test_warm_load_runner_dependencies_initializes_redis_singleton(self, _retirement_guard):
         class FakeSession:
             async def __aenter__(self):
                 return self
@@ -785,7 +808,8 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertIsNotNone(fake_db.offer.created_at)
         self.assertIsNotNone(fake_db.offer.updated_at)
 
-    def test_hot_offer_contention_runs_surfaces_with_architecture_server_roles(self):
+    @patch.object(worker, "assert_legacy_two_server_worker_operation_retired", return_value=None)
+    def test_hot_offer_contention_runs_surfaces_with_architecture_server_roles(self, _retirement_guard):
         users = [
             worker.LoadUserRef(user_id=1, telegram_id=9001),
             worker.LoadUserRef(user_id=2, telegram_id=9002),
@@ -1552,7 +1576,7 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertIn("SERVER_MODE must be foreign", message)
         self.assertIn("BOT_TOKEN must be empty", message)
 
-    def test_load_runner_runtime_surface_guard_allows_confirmed_production_runner(self):
+    def test_load_runner_runtime_surface_guard_rejects_confirmed_legacy_production_runner(self):
         with patch.dict(
             "os.environ",
             {worker.PRODUCTION_ROLE_WORKER_CONFIRM_ENV: worker.PRODUCTION_ROLE_WORKER_CONFIRM_VALUE},
@@ -1560,28 +1584,26 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         ), patch.object(worker.settings, "environment", "production"), patch.object(
             worker.settings, "trading_bot_service", "load_runner"
         ), patch.object(worker.settings, "server_mode", "foreign"), patch.object(worker.settings, "bot_token", ""):
-            payload = worker.assert_load_runner_runtime_surface(
-                "telegram_foreign",
-                allow_production=True,
-                prefix="PFM_20260624_180000_",
-            )
+            with self.assertRaises(worker.TradingProbeError) as exc_info:
+                worker.assert_load_runner_runtime_surface(
+                    "telegram_foreign",
+                    allow_production=True,
+                    prefix="PFM_20260624_180000_",
+                )
 
-        self.assertEqual(payload["status"], "ok")
-        self.assertEqual(payload["environment"], "production")
-        self.assertTrue(payload["production_execution_allowed"])
+        self.assertIn("retired", str(exc_info.exception))
 
-    def test_dual_role_prepare_runtime_requires_offer_home_server(self):
+    def test_dual_role_prepare_runtime_is_retired_even_on_the_former_staging_server(self):
+        self._runtime_guard.stop()
         with patch.object(worker.settings, "environment", "staging"), patch.object(
             worker.settings, "server_mode", "foreign"
         ):
-            payload = worker.assert_dual_role_prepare_runtime(
-                "bot",
-                allow_production=False,
-                prefix="PFM_20260624_180000_",
-            )
-
-        self.assertEqual(payload["status"], "ok")
-        self.assertEqual(payload["server_mode"], "foreign")
+            with self.assertRaisesRegex(worker.TradingProbeError, "retired and hard-disabled"):
+                worker.assert_dual_role_prepare_runtime(
+                    "bot",
+                    allow_production=False,
+                    prefix="PFM_20260624_180000_",
+                )
 
         with patch.object(worker.settings, "environment", "staging"), patch.object(
             worker.settings, "server_mode", "foreign"

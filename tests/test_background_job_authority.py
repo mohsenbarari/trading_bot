@@ -235,6 +235,22 @@ class BackgroundJobAuthorityTests(unittest.TestCase):
         self.assertTrue(local_session.ok)
         self.assertTrue(local_sync.ok)
 
+    def test_webapp_standby_rejection_preserves_fence_context(self):
+        decision = check_background_job_authority(
+            JOB_USER_ACCOUNT_STATUS,
+            server_mode="iran",
+            physical_site="webapp_ir",
+            runtime_role="standby",
+        )
+
+        self.assertFalse(decision.ok)
+        self.assertEqual(decision.job_name, JOB_USER_ACCOUNT_STATUS)
+        self.assertEqual(decision.current_server, "iran")
+        self.assertEqual(decision.allowed_servers, ("iran",))
+        self.assertEqual(decision.reason, "webapp_writer_not_active")
+        self.assertEqual(decision.physical_site, "webapp_ir")
+        self.assertEqual(decision.runtime_role, "standby")
+
     def test_webapp_active_site_keeps_authoritative_jobs(self):
         decision = check_background_job_authority(
             JOB_USER_ACCOUNT_STATUS,

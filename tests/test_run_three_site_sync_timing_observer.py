@@ -22,6 +22,19 @@ from tests.test_three_site_staging_signed_inventory import _inventory
 
 
 class ThreeSiteSyncTimingObserverTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # The historical algorithm tests exercise only local fixture data. The
+        # production module itself is permanently retired before SSH/Docker.
+        self._runtime_guard = patch(
+            "scripts.run_three_site_sync_timing_observer."
+            "assert_legacy_three_site_sync_timing_observer_retired",
+            return_value=None,
+        )
+        self._runtime_guard.start()
+
+    def tearDown(self) -> None:
+        self._runtime_guard.stop()
+
     def _config(self, root: Path):  # noqa: ANN202
         artifacts = root / "artifacts"
         artifacts.mkdir(mode=0o700)

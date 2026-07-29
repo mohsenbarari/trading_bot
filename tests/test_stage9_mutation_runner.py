@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import ast
 import json
 import os
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -143,6 +145,28 @@ class Stage9MutationRunnerTests(unittest.TestCase):
         self.assertEqual(env["SERVER_MODE"], "foreign")
         self.assertEqual(env["REDIS_URL"], "redis://127.0.0.1:6379/15")
         self.assertTrue(env["PYTHONPATH"].endswith(os.pathsep + "existing"))
+
+    def test_mutmut_pytest_selection_references_existing_test_nodes(self):
+        with (ROOT / "pyproject.toml").open("rb") as handle:
+            selection = tomllib.load(handle)["tool"]["mutmut"][
+                "pytest_add_cli_args_test_selection"
+            ]
+
+        for item in selection:
+            path_text, *node_names = item.split("::")
+            path = ROOT / path_text
+            with self.subTest(item=item):
+                self.assertTrue(path.is_file())
+                nodes = ast.parse(path.read_text(encoding="utf-8")).body
+                for name in node_names:
+                    nodes = [
+                        node
+                        for node in nodes
+                        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+                        and node.name == name
+                    ]
+                    self.assertEqual(len(nodes), 1)
+                    nodes = nodes[0].body
 
     def test_main_writes_evidence_and_fails_for_run_or_survivor(self):
         target = self.manifest["targets"][0]

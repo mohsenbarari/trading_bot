@@ -10,6 +10,31 @@ import re
 
 from sqlalchemy import create_engine, text
 
+if __package__:
+    from scripts.activate_three_site_database_fencing import (
+        PUBLIC_TRUSTED_LANGUAGE_REVOKE,
+        _assert_exact_database_authorization_closure,
+        _assert_exact_public_type_usage,
+        _assert_exact_role_closure,
+        _assert_exact_runtime_database_scope,
+        _cluster_database_rows,
+        _database_scope_statements,
+        _direct_grant_inventory,
+        _unsafe_public_privilege_count,
+    )
+else:
+    from activate_three_site_database_fencing import (  # type: ignore[no-redef]
+        PUBLIC_TRUSTED_LANGUAGE_REVOKE,
+        _assert_exact_database_authorization_closure,
+        _assert_exact_public_type_usage,
+        _assert_exact_role_closure,
+        _assert_exact_runtime_database_scope,
+        _cluster_database_rows,
+        _database_scope_statements,
+        _direct_grant_inventory,
+        _unsafe_public_privilege_count,
+    )
+
 
 ROLE_RE = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 
@@ -52,12 +77,21 @@ def main() -> int:
                 statement = connection.scalar(
                     text(
                         "SELECT format(" +
-                        ("'ALTER ROLE %I LOGIN PASSWORD %L NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS'" if exists else "'CREATE ROLE %I LOGIN PASSWORD %L NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS'") +
+                        ("'ALTER ROLE %I LOGIN PASSWORD %L NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS CONNECTION LIMIT -1 VALID UNTIL ''infinity'''" if exists else "'CREATE ROLE %I LOGIN PASSWORD %L NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS CONNECTION LIMIT -1 VALID UNTIL ''infinity'''") +
                         ", :role, :password)"
                     ),
                     {"role": role, "password": password},
                 )
                 connection.exec_driver_sql(str(statement))
+                connection.exec_driver_sql(f"ALTER ROLE {role} RESET ALL")
+                _current_database, database_rows = _cluster_database_rows(
+                    connection
+                )
+                for database_name, _allow_connections in database_rows:
+                    connection.exec_driver_sql(
+                        f"ALTER ROLE {role} IN DATABASE "
+                        f"{database_name} RESET ALL"
+                    )
                 # PostgreSQL NOINHERIT prevents automatic privilege inheritance,
                 # but membership still authorizes SET ROLE.  Runtime identities
                 # therefore have no role memberships in either direction.
@@ -80,6 +114,44 @@ def main() -> int:
                         },
                     )
                     connection.exec_driver_sql(str(revoke))
+            for statement in _database_scope_statements(
+                connection,
+                roles,
+                grant_current=False,
+            ):
+                connection.exec_driver_sql(statement)
+            role_list = ", ".join(sorted(roles))
+            for statement in (
+                "REVOKE ALL ON SCHEMA public FROM PUBLIC",
+                PUBLIC_TRUSTED_LANGUAGE_REVOKE,
+                "REVOKE ALL ON ALL TABLES IN SCHEMA public FROM PUBLIC",
+                "REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC",
+                "REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC",
+                f"REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {role_list}",
+                f"REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM {role_list}",
+                f"REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM {role_list}",
+            ):
+                connection.exec_driver_sql(statement)
+
+            _assert_exact_role_closure(connection, roles)
+            _assert_exact_runtime_database_scope(
+                connection,
+                roles,
+                grant_current=False,
+            )
+            if _direct_grant_inventory(connection, roles):
+                raise RuntimeError(
+                    "pre-migration runtime roles retain direct grants"
+                )
+            if _unsafe_public_privilege_count(connection):
+                raise RuntimeError(
+                    "pre-migration database retains unsafe PUBLIC privileges"
+                )
+            _assert_exact_public_type_usage(connection)
+            _assert_exact_database_authorization_closure(
+                connection,
+                roles,
+            )
     except Exception as exc:
         print(json.dumps({"status": "error", "error_class": type(exc).__name__}, sort_keys=True))
         return 1

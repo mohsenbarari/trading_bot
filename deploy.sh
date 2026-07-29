@@ -76,6 +76,24 @@ IRAN_USER="${IRAN_USER:-}"
 IRAN_SSH_PORT="${IRAN_SSH_PORT:-}"
 IRAN_PROJECT_DIR="${IRAN_PROJECT_DIR:-}"
 
+# This executable used to be the generic two-site deployment entrypoint. Keep
+# its help available, but reject every operation before deploy_config can load
+# or evaluate operator-supplied deployment state.
+case "${1:-all}" in
+    -h|--help|help)
+        printf '%s\n' \
+            'Legacy two-site deploy.sh is retired and hard-disabled.' \
+            'Use the dedicated three-site production-shadow campaign path.'
+        exit 0
+        ;;
+    *)
+        printf '%s\n' \
+            'Legacy two-site deploy.sh is retired and hard-disabled before deployment configuration is read.' \
+            'Use the dedicated three-site production-shadow campaign path.' >&2
+        exit 2
+        ;;
+esac
+
 load_shared_deploy_surface() {
     if [[ -f "$DEPLOY_CONFIG_SCRIPT" ]]; then
         local explicit_iran_user="${IRAN_USER:-}"

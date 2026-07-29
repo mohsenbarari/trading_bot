@@ -79,6 +79,28 @@ class AgentError(RuntimeError):
     pass
 
 
+RETIREMENT_REASON = (
+    "legacy three-site staging runtime is retired; it cannot consume "
+    "caller-controlled approval, policy, inventory, artifact, or URL inputs "
+    "for host, Docker, network, or storage operations"
+)
+
+
+def _assert_retired(operation: str) -> None:
+    """Block this standalone legacy agent before any effectful operation."""
+
+    raise AgentError(f"{RETIREMENT_REASON}: wa-ir-object-storage-preflight-agent ({operation})")
+
+
+def _blocked_payload() -> dict[str, str]:
+    return {
+        "status": "blocked_legacy_three_site_staging_runtime_retired",
+        "component": "wa-ir-object-storage-preflight-agent",
+        "error": RETIREMENT_REASON,
+        "error_class": AgentError.__name__,
+    }
+
+
 def _strict_object(pairs):  # noqa: ANN001
     result = {}
     for key, value in pairs:
@@ -204,6 +226,7 @@ def _validate_object_storage_url(url: str, *, label: str) -> None:
 
 
 def download(artifact: dict[str, Any], *, label: str, output: Path) -> Path:
+    _assert_retired("download Object Storage artifact")
     output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     temporary = output.with_name(f".{output.name}.download")
     temporary.unlink(missing_ok=True)
@@ -246,6 +269,7 @@ def download(artifact: dict[str, Any], *, label: str, output: Path) -> Path:
 
 
 def decrypt_if_needed(source: Path, artifact: dict[str, Any], *, identity: Path | None) -> Path:
+    _assert_retired("decrypt artifact")
     if not artifact.get("encrypted"):
         return source
     if identity is None:
@@ -288,6 +312,7 @@ def decrypt_if_needed(source: Path, artifact: dict[str, Any], *, identity: Path 
 
 
 def install_release(bundle: Path, *, release_sha: str) -> Path:
+    _assert_retired("install release")
     release_dir = RELEASE_ROOT / release_sha
     if release_dir.exists():
         if not (release_dir / ".git").is_dir():
@@ -329,6 +354,7 @@ def _safe_tar_members(archive: tarfile.TarFile) -> list[tarfile.TarInfo]:
 
 
 def install_role_materials(archive_path: Path, *, secure_dir: Path) -> None:
+    _assert_retired("install role materials")
     secure_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     secure_metadata = secure_dir.lstat()
     if (
@@ -433,6 +459,7 @@ def _writer_witness_public_key(env_file: Path) -> str:
 
 
 def run_preflight(*, release_dir: Path, secure_dir: Path, output: Path) -> dict[str, Any]:
+    _assert_retired("run preflight")
     witness_public_key = _writer_witness_public_key(
         secure_dir / "roles" / "webapp-ir.env"
     )
@@ -477,6 +504,7 @@ def run_preflight(*, release_dir: Path, secure_dir: Path, output: Path) -> dict[
 
 
 def upload_evidence(upload: Any, source: Path) -> dict[str, Any] | None:
+    _assert_retired("upload evidence")
     if upload is None:
         return None
     if not isinstance(upload, dict):
@@ -533,6 +561,7 @@ def upload_evidence(upload: Any, source: Path) -> dict[str, Any] | None:
 
 
 def _run(arguments: list[str], *, timeout: int = 60) -> str:
+    _assert_retired("run command")
     result = subprocess.run(
         arguments,
         text=True,
@@ -548,6 +577,7 @@ def _run(arguments: list[str], *, timeout: int = 60) -> str:
 
 
 def execute(manifest: dict[str, Any]) -> dict[str, Any]:
+    _assert_retired("execute preflight")
     release_sha = str(manifest["release_sha"])
     secure_dir = Path(str(manifest["secure_materials_dir"]))
     output = Path(str(manifest["preflight_output"]))
@@ -619,6 +649,7 @@ def load_file_transfer_manifest(encoded: str) -> dict[str, Any]:
 
 
 def receive_file_transfer(payload: dict[str, Any]) -> dict[str, Any]:
+    _assert_retired("receive file transfer")
     destination = Path(str(payload["destination"]))
     if not destination.parent.is_dir() or destination.parent.is_symlink():
         raise AgentError("file-transfer campaign directory is unavailable or unsafe")
@@ -661,6 +692,11 @@ def receive_file_transfer(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        _assert_retired("CLI")
+    except AgentError:
+        print(json.dumps(_blocked_payload(), sort_keys=True))
+        return 2
     parser = argparse.ArgumentParser(description=__doc__)
     selection = parser.add_mutually_exclusive_group(required=True)
     selection.add_argument("--manifest", type=Path)

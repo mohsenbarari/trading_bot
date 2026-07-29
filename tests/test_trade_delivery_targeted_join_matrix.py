@@ -1,11 +1,12 @@
 import importlib.util
+import asyncio
 import io
 import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +20,69 @@ spec.loader.exec_module(targeted_matrix)
 
 
 class TradeDeliveryTargetedJoinMatrixTests(unittest.TestCase):
+    def test_cli_execution_is_retired_before_catalog_fixture_or_output_creation(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = Path(tmp_dir) / "must-not-exist.json"
+            with patch.dict(
+                targeted_matrix.os.environ,
+                {
+                    "ENVIRONMENT": "development",
+                    targeted_matrix.worker.PRODUCTION_ROLE_WORKER_CONFIRM_ENV: (
+                        targeted_matrix.worker.PRODUCTION_ROLE_WORKER_CONFIRM_VALUE
+                    ),
+                },
+                clear=False,
+            ), patch.object(
+                targeted_matrix,
+                "execute_matrix",
+                side_effect=AssertionError("retired matrix must not create fixtures"),
+            ), patch("sys.stdout", new_callable=io.StringIO) as stdout:
+                exit_code = targeted_matrix.main(
+                    [
+                        "--prefix",
+                        "PFM_20260728_legacy_fence_",
+                        "--output",
+                        str(output),
+                        "--allow-production-execution",
+                        "--allow-production-cleanup",
+                    ]
+                )
+
+            self.assertFalse(output.exists())
+
+        self.assertEqual(exit_code, 2)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["status"], "blocked_legacy_two_server_full_matrix_retired")
+
+    def test_imported_runtime_helpers_stay_retired_despite_environment_spoofing(self):
+        db = AsyncMock()
+
+        async def run_probe():
+            with self.assertRaises(targeted_matrix.LegacyTwoServerTargetedJoinRuntimeRetiredError):
+                await targeted_matrix.available_fixture_identity(
+                    db,
+                    prefix="P7_STAGE_TARGETED_",
+                    scenario_index=1,
+                    offset=1,
+                    telegram_linked=True,
+                )
+            with self.assertRaises(targeted_matrix.LegacyTwoServerTargetedJoinRuntimeRetiredError):
+                await targeted_matrix.execute_matrix(object(), [])
+
+        with patch.dict(
+            targeted_matrix.os.environ,
+            {
+                "ENVIRONMENT": "development",
+                targeted_matrix.worker.PRODUCTION_ROLE_WORKER_CONFIRM_ENV: (
+                    targeted_matrix.worker.PRODUCTION_ROLE_WORKER_CONFIRM_VALUE
+                ),
+            },
+            clear=False,
+        ):
+            asyncio.run(run_probe())
+
+        self.assertFalse(db.scalar.called)
+
     def test_catalog_covers_delivery_matrix_and_marks_policy_unsupported_paths(self):
         scenarios = targeted_matrix.build_targeted_join_scenarios()
 

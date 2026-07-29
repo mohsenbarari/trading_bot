@@ -24,8 +24,11 @@ from core.registration_sync_policy import (
 )
 from core.background_job_authority import (
     BackgroundJobAuthorityDecision,
+    JOB_CONNECTIVITY_MONITOR,
+    JOB_OFFER_EXPIRY,
     JOB_OTP_SMS_FALLBACK,
     JOB_TELEGRAM_REGISTRATION_RECONCILIATION,
+    JOB_USER_ACCOUNT_STATUS,
     check_background_job_authority,
 )
 from core.invitation_sms_policy import invitation_sms_enabled
@@ -896,6 +899,42 @@ class Stage9MutationContractTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(invalid_server.current_server, SERVER_IRAN)
         self.assertIs(invalid_server.ok, False)
+
+        # A standby WebApp runtime cannot run shared mutations, while a
+        # explicitly local-runtime probe remains permitted at that site.
+        standby_mutator = check_background_job_authority(
+            JOB_USER_ACCOUNT_STATUS,
+            server_mode=SERVER_IRAN,
+            physical_site="webapp_ir",
+            runtime_role="standby",
+        )
+        self.assertEqual(standby_mutator.reason, "webapp_writer_not_active")
+        self.assertIs(standby_mutator.ok, False)
+        standby_local_runtime = check_background_job_authority(
+            JOB_CONNECTIVITY_MONITOR,
+            server_mode=SERVER_IRAN,
+            physical_site="webapp_ir",
+            runtime_role="standby",
+        )
+        self.assertIs(standby_local_runtime.ok, True)
+        self.assertIsNone(standby_local_runtime.reason)
+        foreign_webapp_standby = check_background_job_authority(
+            JOB_OFFER_EXPIRY,
+            server_mode=SERVER_FOREIGN,
+            physical_site=" webapp_fi ",
+            runtime_role=" STANDBY ",
+        )
+        self.assertIs(foreign_webapp_standby.ok, True)
+        self.assertEqual(foreign_webapp_standby.physical_site, "webapp_fi")
+        self.assertEqual(foreign_webapp_standby.runtime_role, "standby")
+        bot_fi_standby = check_background_job_authority(
+            JOB_USER_ACCOUNT_STATUS,
+            server_mode=SERVER_IRAN,
+            physical_site=SITE_BOT_FI,
+            runtime_role="standby",
+        )
+        self.assertIs(bot_fi_standby.ok, True)
+        self.assertIsNone(bot_fi_standby.reason)
 
     def test_invitation_sms_category_policy_is_independent(self):
         cases = (

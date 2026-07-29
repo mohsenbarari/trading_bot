@@ -776,7 +776,7 @@ test.describe('Market offer creation regressions', () => {
     await expect(page.getByRole('button', { name: /ثبت خرید/ })).toHaveCount(0)
     await expect(page.getByRole('button', { name: /ثبت فروش/ })).toHaveCount(0)
 
-    await openOfferPreview(page, `خرید ${actor.commodityName} 10 عدد ${price}`)
+    await openOfferPreview(page, `خرید نقد ${actor.commodityName} 10 عدد ${price}`)
     await expect(page.getByRole('heading', { name: 'پیش‌نمایش لفظ' })).toBeVisible()
     await confirmOfferPreview(page)
 
@@ -800,7 +800,7 @@ test.describe('Market offer creation regressions', () => {
     await setSeededSession(page, actor)
     await page.goto('/market')
 
-    await openOfferPreview(page, `فروش ${actor.commodityName} 12 عدد ${price}`)
+    await openOfferPreview(page, `فروش نقد ${actor.commodityName} 12 عدد ${price}`)
     await expect(page.getByRole('heading', { name: 'پیش‌نمایش لفظ' })).toBeVisible()
     await confirmOfferPreview(page)
 
@@ -854,7 +854,7 @@ test.describe('Market offer creation regressions', () => {
     await setSeededSession(page, fixture.tier1Customer)
     await page.goto('/market')
 
-    await openOfferPreview(page, `فروش ${fixture.commodityName} 7 عدد ${sellPrice}: ${uniqueNote}`)
+    await openOfferPreview(page, `فروش نقد ${fixture.commodityName} 7 عدد ${sellPrice}: ${uniqueNote}`)
     await expect(page.getByRole('heading', { name: 'پیش‌نمایش لفظ' })).toBeVisible()
     await confirmOfferPreview(page)
     await expect(page.locator('[data-test="offer-preview-card"]')).toHaveCount(0)
@@ -970,7 +970,7 @@ test.describe('Market offer creation regressions', () => {
     await setSeededSession(page, actor)
     await page.goto('/market')
 
-    await openOfferPreview(page, `فروش ${commodity.name} 10 عدد 99900: ${uniqueNote}`)
+    await openOfferPreview(page, `فروش نقد ${commodity.name} 10 عدد 99900: ${uniqueNote}`)
     await expect(page.getByRole('heading', { name: 'پیش‌نمایش لفظ' })).toBeVisible()
     await confirmOfferPreview(page)
 
@@ -1003,7 +1003,7 @@ test.describe('Market offer creation regressions', () => {
     await setSeededSession(page, actor)
     await page.goto('/market')
 
-    await openOfferPreview(page, `خرید ${commodity.name} 10 عدد ${warningPrice}: ${uniqueNote}`)
+    await openOfferPreview(page, `خرید نقد ${commodity.name} 10 عدد ${warningPrice}: ${uniqueNote}`)
     await expect(page.getByRole('heading', { name: 'پیش‌نمایش لفظ' })).toBeVisible()
     await confirmOfferPreview(page)
 

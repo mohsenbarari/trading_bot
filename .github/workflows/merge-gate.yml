@@ -43,19 +43,6 @@ jobs:
     needs: repository-governance
     timeout-minutes: 35
     services:
-      postgres:
-        image: postgres:15-alpine
-        env:
-          POSTGRES_USER: market_ci
-          POSTGRES_PASSWORD: market_ci
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U market_ci -d postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
       redis:
         image: redis:7-alpine
         ports:
@@ -69,6 +56,34 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Build and start disposable boottime PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="trading-bot-ci-postgres-boottime:$(git rev-parse --short=12 HEAD)"
+          docker build \
+            --build-arg RELEASE_SHA="$(git rev-parse HEAD)" \
+            --file deploy/postgres-boottime/Dockerfile \
+            --tag "$image" \
+            .
+          docker run -d --name market-postgres \
+            --publish 127.0.0.1:5432:5432 \
+            --env POSTGRES_USER=market_ci \
+            --env POSTGRES_PASSWORD=market_ci \
+            --env POSTGRES_DB=postgres \
+            "$image"
+          for _ in $(seq 1 30); do
+            if docker exec market-postgres pg_isready -h 127.0.0.1 -U market_ci -d postgres; then
+              docker exec market-postgres psql -h 127.0.0.1 -U market_ci -d postgres -Atqc \
+                "SELECT default_version FROM pg_available_extensions WHERE name = 'trading_bot_boottime'" \
+                | grep -Fx '1.0'
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs market-postgres
+          exit 1
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -99,6 +114,10 @@ jobs:
           MARKET_STAGE14_TEST_REDIS_URL: redis://127.0.0.1:6379/14
           DATABASE_URL: postgresql+asyncpg://market_ci:market_ci@127.0.0.1:5432/postgres
           SYNC_DATABASE_URL: postgresql+psycopg2://market_ci:market_ci@127.0.0.1:5432/postgres
+          POSTGRES_DB: postgres
+          POSTGRES_USER: market_ci
+          POSTGRES_PASSWORD: market_ci
+          REDIS_URL: redis://127.0.0.1:6379/14
           FRONTEND_URL: http://127.0.0.1:4173
           JWT_SECRET_KEY: ci_market_postgres_gate_secret
         run: |
@@ -115,6 +134,10 @@ jobs:
             tmp/market-postgres-gate.log
             tmp/market-realtime-redis-gate.log
           if-no-files-found: error
+
+      - name: Remove disposable boottime PostgreSQL
+        if: always()
+        run: docker rm --force market-postgres || true
 
   observability-gate:
     name: observability-gate
@@ -238,9 +261,13 @@ jobs:
           SYNC_DATABASE_URL=postgresql+psycopg2://admin:strongpassword@db:5432/trading_bot_db
           REDIS_URL=redis://redis:6379/0
           FRONTEND_URL=http://127.0.0.1:4173
+          IRAN_SERVER_DOMAIN=127.0.0.1
+          PUBLIC_WEBAPP_URL=https://127.0.0.1:4173
           DEV_API_KEY=REDACTED_DEV_API_KEY
           JWT_SECRET_KEY=ci_jwt_secret_key_please_override_in_real_envs
           EOF
+          install -m 600 .env .env.api
+          install -m 600 .env .env.migration
           cat > frontend/.env.local <<'EOF'
           VITE_API_BASE_URL=http://127.0.0.1:8000
           VITE_STAGING_DEV_LOGIN=true
@@ -260,6 +287,17 @@ jobs:
       - name: Build frontend
         working-directory: frontend
         run: npm run build
+
+      - name: Build browser boottime PostgreSQL
+        shell: bash
+        run: |
+          image="trading-bot-ci-browser-postgres-boottime:$(git rev-parse --short=12 HEAD)"
+          docker build \
+            --build-arg RELEASE_SHA="$(git rev-parse HEAD)" \
+            --file deploy/postgres-boottime/Dockerfile \
+            --tag "$image" \
+            .
+          echo "POSTGRES_IMAGE=$image" >> "$GITHUB_ENV"
 
       - name: Bootstrap backend stack
         run: bash ./scripts/bootstrap_ci_backend.sh
@@ -290,6 +328,8 @@ jobs:
         env:
           CI: 'true'
           PLAYWRIGHT_HTML_OPEN: never
+          E2E_TARGET_ENV: local
+          E2E_ALLOW_LOCAL_MUTATION: local-dev-only
         shell: bash
         run: |
           case "${{ matrix.browser }}" in

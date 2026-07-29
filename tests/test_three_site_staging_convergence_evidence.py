@@ -12,11 +12,10 @@ from scripts.collect_three_site_staging_migration_observation import (
     ObservationError,
     validate_convergence_artifact,
 )
-from scripts.export_three_site_staging_convergence_snapshot import (
-    ConvergenceExportError,
-    _descriptor,
+from scripts.run_three_site_staging_convergence_observer import (
+    LegacyThreeSiteConvergenceObserverRetiredError,
+    _put_descriptor,
 )
-from scripts.run_three_site_staging_convergence_observer import _put_descriptor
 
 
 CAMPAIGN_ID = "11111111-1111-4111-8111-111111111111"
@@ -179,40 +178,15 @@ class ThreeSiteConvergenceEvidenceTests(unittest.TestCase):
                 plan_sha256=PLAN_SHA,
             )
 
-    def test_iran_export_descriptor_is_short_lived_and_campaign_bound(self):
-        class Client:
-            def generate_presigned_url(self, operation, *, Params, ExpiresIn, HttpMethod):
-                self.operation = operation
-                self.params = Params
-                self.ttl = ExpiresIn
-                self.method = HttpMethod
-                return "https://s3.ir-thr-at1.arvanstorage.ir/private/snapshot?signature=temporary"
-
-        client = Client()
+    def test_legacy_iran_export_descriptor_is_hard_disabled(self):
         config = {
             "campaign_id": CAMPAIGN_ID,
             "release_sha": RELEASE_SHA,
             "plan_sha256": PLAN_SHA,
             "limits": {"url_ttl_seconds": 300},
         }
-        encoded = _put_descriptor(config, client=client, bucket="staging-private", key="x/y.json")
-        upload = _descriptor(
-            encoded,
-            campaign_id=CAMPAIGN_ID,
-            release_sha=RELEASE_SHA,
-            plan_sha256=PLAN_SHA,
-        )
-        self.assertEqual(client.operation, "put_object")
-        self.assertEqual(client.method, "PUT")
-        self.assertEqual(client.ttl, 300)
-        self.assertEqual(upload["method"], "PUT")
-        with self.assertRaises(ConvergenceExportError):
-            _descriptor(
-                encoded,
-                campaign_id="22222222-2222-4222-8222-222222222222",
-                release_sha=RELEASE_SHA,
-                plan_sha256=PLAN_SHA,
-            )
+        with self.assertRaises(LegacyThreeSiteConvergenceObserverRetiredError):
+            _put_descriptor(config, client=object(), bucket="staging-private", key="x/y.json")
 
 
 if __name__ == "__main__":

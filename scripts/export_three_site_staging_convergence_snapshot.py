@@ -1,45 +1,27 @@
 #!/usr/bin/env python3
-"""Export one redacted WebApp-IR convergence snapshot through Object Storage.
+"""Retired direct convergence exporter.
 
-This is intentionally separate from the non-egress ``*_sync_observer``
-service.  It has the same read-only database role and read-only local CAS
-mount, but receives only a short-lived presigned PUT descriptor at execution
-time.  It has no Object Storage credential, does not retain the descriptor,
-and returns only immutable transfer metadata over SSH.
+The historical exporter imported the collector into an ambient interpreter and
+then performed Object Storage egress.  That bypassed the held-FD, Git-bound
+observer boundary, so it is deliberately unavailable.  Descriptor parsing is
+retained only for legacy plan validation tests; no runtime snapshot, credential
+import, Object Storage action, or evidence publication can occur here.
 """
 
 from __future__ import annotations
 
 import argparse
-import asyncio
 import base64
 import binascii
-import hashlib
 import json
-import os
-from pathlib import Path
+import re
 import sys
-import tempfile
 from typing import Any
 from uuid import UUID
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from core.runtime_identity import resolve_runtime_identity
-from scripts.collect_three_site_staging_convergence_snapshot import (
-    SHA256,
-    SHA40,
-    ConvergenceSnapshotError,
-    _canonical,
-    collect,
-)
-from scripts.wa_ir_object_storage_preflight_agent import AgentError, upload_evidence
-
-
 SCHEMA = "three-site-staging-convergence-snapshot-export-v1"
-MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
+SHA40 = re.compile(r"^[0-9a-f]{40}$")
 
 
 class ConvergenceExportError(RuntimeError):
@@ -82,8 +64,8 @@ def _descriptor(
     upload = value["upload"]
     if not isinstance(upload, dict):
         raise ConvergenceExportError("export upload descriptor is invalid")
-    # ``upload_evidence`` performs the endpoint, HTTP method/header and
-    # expected-status allowlist checks before making any network request.
+    # This parser is retained for old plan tests only.  The returned structure
+    # is not actionable in this module because ``export`` always fails closed.
     return upload
 
 
@@ -95,8 +77,7 @@ def _identity(campaign_id: str, release_sha: str, plan_sha256: str) -> None:
             raise ValueError
     except (ValueError, TypeError) as exc:
         raise ConvergenceExportError("convergence export identity is invalid") from exc
-    if resolve_runtime_identity().physical_site != "webapp_ir":
-        raise ConvergenceExportError("convergence exporter is pinned to WebApp-IR")
+    return
 
 
 async def export(
@@ -107,45 +88,12 @@ async def export(
     max_rows_per_table: int,
     upload: dict[str, Any],
 ) -> dict[str, Any]:
-    _identity(campaign_id, release_sha, plan_sha256)
-    snapshot = await collect(
-        campaign_id=campaign_id,
-        release_sha=release_sha,
-        plan_sha256=plan_sha256,
-        max_rows_per_table=max_rows_per_table,
+    """Fail closed: only the launcher-bound observer may produce evidence."""
+
+    del campaign_id, release_sha, plan_sha256, max_rows_per_table, upload
+    raise ConvergenceExportError(
+        "legacy direct convergence exporter is disabled; no unbound egress is permitted"
     )
-    payload = (_canonical(snapshot) + "\n").encode("utf-8")
-    if not payload or len(payload) > MAX_SNAPSHOT_BYTES:
-        raise ConvergenceExportError("redacted convergence snapshot exceeds its approved bound")
-    with tempfile.TemporaryDirectory(prefix="three-site-convergence-") as raw:
-        path = Path(raw) / "webapp-ir-redacted-snapshot.json"
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        try:
-            offset = 0
-            while offset < len(payload):
-                written = os.write(descriptor, payload[offset:])
-                if written <= 0:
-                    raise ConvergenceExportError("cannot write redacted convergence snapshot")
-                offset += written
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-        try:
-            result = upload_evidence(upload, path)
-        except AgentError as exc:
-            raise ConvergenceExportError("redacted convergence snapshot upload failed") from exc
-    if result is None or result.get("sha256") != hashlib.sha256(payload).hexdigest() or result.get("bytes") != len(payload):
-        raise ConvergenceExportError("redacted convergence snapshot upload receipt differs")
-    return {
-        "status": "uploaded",
-        "site": "webapp_ir",
-        "campaign_id": campaign_id,
-        "release_sha": release_sha,
-        "plan_sha256": plan_sha256,
-        "snapshot_sha256": str(result["sha256"]),
-        "snapshot_bytes": int(result["bytes"]),
-        "upload_http_status": int(result["http_status"]),
-    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -164,15 +112,10 @@ def main(argv: list[str] | None = None) -> int:
             release_sha=args.release_sha,
             plan_sha256=args.plan_sha256,
         )
-        print(json.dumps(asyncio.run(export(
-            campaign_id=args.campaign_id,
-            release_sha=args.release_sha,
-            plan_sha256=args.plan_sha256,
-            max_rows_per_table=args.max_rows_per_table,
-            upload=upload,
-        )), sort_keys=True))
-        return 0
-    except (ConvergenceSnapshotError, ConvergenceExportError, ValueError) as exc:
+        raise ConvergenceExportError(
+            "legacy direct convergence exporter is disabled; no unbound egress is permitted"
+        )
+    except (ConvergenceExportError, ValueError) as exc:
         print(json.dumps({"status": "blocked", "error": str(exc), "error_class": type(exc).__name__}, sort_keys=True), file=sys.stderr)
         return 1
 

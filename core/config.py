@@ -15,6 +15,9 @@ __all__ = ["Settings", "settings"]
 class Settings(BaseSettings):
     bot_token: str | None = None
     bot_username: str | None = None
+    # HMAC(WebAppData, bot token), encoded as lowercase hex. This secret can
+    # authenticate WebApp init data but cannot call the Telegram Bot API.
+    telegram_webapp_validation_key: SecretStr | None = None
     
     # Server Mode (iran vs foreign)
     server_mode: str = "foreign"

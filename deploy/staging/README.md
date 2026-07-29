@@ -358,7 +358,7 @@ an exact Object Storage version id is rejected.
 Each host begins with `run_three_site_staging_role_migration.py begin`. Run
 `restore-seed`, `configure-database`, and `start-private` on all four roles in
 their journal order. `configure-database` upgrades every supported predecessor
-to `b986c7d8e0f1`; on WebApp-IR it also converts the restored FI clone into a
+to `c097d8e9f1a2`; on WebApp-IR it also converts the restored FI clone into a
 locally fenced epoch-1 standby.
 
 Before Alembic starts, `configure-database` fails closed unless every
@@ -614,9 +614,10 @@ or any production mutation. It requires one fresh `approve_gate_d` token bound
 to both exact component report hashes.
 
 Synchronization timing is not inferred from scenario wall-clock duration.
-Migration head `b986c7d8e0f1` retains the first delivery attempt, rejects any
-cursor whose retained DR history is not exactly contiguous, and takes a
-write-excluding stream-table lock before its final history validation. Each role
+Migration head `c097d8e9f1a2` retains the first delivery attempt, binds that
+field into the exact projection policy, rejects any cursor whose retained DR
+history is not exactly contiguous, and takes a write-excluding stream-table
+lock before its final history validation. Each role
 bundle now contains a dedicated `*_sync_observer` database identity. That
 identity has one closed SELECT-only convergence surface: the migration/runtime
 and DR ledgers plus the synchronized product tables required to calculate a

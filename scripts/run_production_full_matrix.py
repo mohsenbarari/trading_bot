@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Consume the production full-matrix manifest and build an execution plan.
+"""Consume the legacy production full-matrix manifest and build a plan.
 
-This runner is fail-closed by default. It can build a manifest-driven command
-plan without production writes, execute live non-mutating preflight checks, and
-execute the guarded command plan only when the explicit production confirmation
-environment variable is present.
+This runner is fail-closed. It can build a manifest-driven two-server command
+plan for documentation, but every legacy live path is hard-disabled. Three-site
+Full Matrix work must use the dedicated production-shadow campaign path.
 """
 
 from __future__ import annotations
@@ -37,6 +36,9 @@ PREFLIGHT_CONFIRM_ENV = "PRODUCTION_FULL_MATRIX_PREFLIGHT_CONFIRM"
 PREFLIGHT_CONFIRM_VALUE = "run-production-preflight"
 CLEANUP_CONFIRM_ENV = "PRODUCTION_TEST_CLEANUP_CONFIRM"
 CLEANUP_CONFIRM_VALUE = "hard-delete-test-data"
+LEGACY_EXECUTION_RETIREMENT_REASON = (
+    "legacy_two_server_execution_retired_use_three_site_production_shadow_campaign"
+)
 IRAN_HOST = "root@65.109.220.59"
 IRAN_SSH_PORT = os.getenv("IRAN_SSH_PORT", "37067")
 IRAN_PROJECT_DIR = "/srv/trading-bot/current"
@@ -216,6 +218,21 @@ DRIVER_GAP_REASON_TO_BUCKET = {
 
 class RunnerError(ValueError):
     pass
+
+
+def assert_legacy_two_server_live_execution_retired(operation: str) -> None:
+    """Unconditionally deny retained two-server command execution helpers.
+
+    These functions remain importable only because plan serialization and older
+    evidence parsers share their data shapes.  No environment variable, module
+    flag, or caller-provided plan may re-enable a subprocess path here.
+    """
+
+    raise RunnerError(
+        "Legacy two-site Full Matrix live execution is retired and hard-disabled "
+        f"before subprocess or host access: operation={operation}; "
+        "use a sealed three-site campaign verifier."
+    )
 
 
 @dataclass(frozen=True)
@@ -2129,6 +2146,7 @@ def build_execution_plan(
 
 
 def run_preflight_commands(commands: list[CommandSpec], *, cwd: Path) -> list[dict[str, Any]]:
+    assert_legacy_two_server_live_execution_retired("preflight_command_execution")
     results: list[dict[str, Any]] = []
     for command in commands:
         try:
@@ -2169,6 +2187,7 @@ def run_execution_preflight_commands(
     cwd: Path,
     resume_skip_campaign_cleanup: bool,
 ) -> list[dict[str, Any]]:
+    assert_legacy_two_server_live_execution_retired("execution_preflight_command_execution")
     if not resume_skip_campaign_cleanup:
         return run_preflight_commands(commands, cwd=cwd)
 
@@ -2206,6 +2225,7 @@ def command_spec_from_payload(payload: dict[str, Any]) -> CommandSpec:
 
 
 def command_result(command: CommandSpec, *, cwd: Path) -> dict[str, Any]:
+    assert_legacy_two_server_live_execution_retired("scenario_command_execution")
     started = time.perf_counter()
     try:
         completed = subprocess.run(
@@ -2237,6 +2257,7 @@ def command_result(command: CommandSpec, *, cwd: Path) -> dict[str, Any]:
 
 
 def concurrent_command_results(commands: list[CommandSpec], *, cwd: Path) -> list[dict[str, Any]]:
+    assert_legacy_two_server_live_execution_retired("concurrent_scenario_command_execution")
     started_by_name: dict[str, float] = {}
     processes: list[tuple[CommandSpec, subprocess.Popen[str]]] = []
     for command in commands:
@@ -2409,6 +2430,20 @@ def execute_scenario_plan(
     cwd: Path,
 ) -> dict[str, Any]:
     manifest_id = str(scenario_plan.get("manifest_id") or f"scenario_{index}")
+    return {
+        "manifest_id": manifest_id,
+        "driver": scenario_plan.get("driver"),
+        "index": index,
+        "total": total,
+        "status": "blocked",
+        "reason": LEGACY_EXECUTION_RETIREMENT_REASON,
+        "elapsed_seconds": 0.0,
+        "groups": [],
+    }
+
+    # Retained below solely as a reference for a future replacement runner.
+    # The unconditional return above deliberately leaves no mutable enablement
+    # switch in this legacy module.
     started = time.perf_counter()
     group_results: list[dict[str, Any]] = []
     failed = False
@@ -2459,6 +2494,17 @@ def execute_command_plan(
     retry_mode: str = "transient",
 ) -> tuple[dict[str, Any], int]:
     execution_plan = plan.get("execution_plan") or {}
+    execution_plan["execution"] = {
+        "status": "blocked",
+        "reason": LEGACY_EXECUTION_RETIREMENT_REASON,
+        "replacement": "three-site production-shadow campaign path",
+    }
+    plan["status"] = "blocked_legacy_two_server_execution_retired"
+    return plan, 2
+
+    # This implementation remains retained for a future replacement runner,
+    # but the unconditional return above keeps it unavailable through every
+    # current entrypoint and direct import.
     artifact_dir = Path((plan.get("preflight") or {}).get("artifact_dir") or "/tmp/trading-bot-production-full-matrix")
     results_path = artifact_dir / "execution-results.jsonl"
     ledger_path = artifact_dir / "campaign-ledger.json"
@@ -2869,7 +2915,11 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     if args.mode == "preflight":
         status = "preflight_execution_requested" if args.execute else "preflight_planned"
     elif args.mode == "execution-plan":
-        status = "execution_requested" if args.execute else "execution_plan_built"
+        status = (
+            "blocked_legacy_two_server_execution_retired"
+            if args.execute
+            else "execution_plan_built"
+        )
     elif args.execute:
         status = "blocked_not_implemented"
     execution_plan = None
@@ -2934,13 +2984,14 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             "production_drivers_implemented": True,
             "execution_command_plan_implemented": True,
             "execution_driver_implemented": True,
+            "legacy_two_server_live_execution_hard_disabled": True,
             "preflight_driver_implemented": True,
             "full_driver_coverage_gate_available": True,
             "full_driver_coverage_required": bool(args.require_full_driver_coverage),
             "reason": (
-                "This runner can execute live non-mutating preflight and can build guarded production "
-                "execution command plans. In execution-plan mode, --execute runs the command plan only "
-                "when the explicit production confirmation environment variable is present."
+                "This runner can build legacy two-server command plans for documentation. "
+                "Every --execute path, including non-mutating preflight, is hard-disabled; "
+                "use the three-site production-shadow campaign path for live work."
             ),
         },
         "preflight": {
@@ -3032,8 +3083,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--execute",
         action="store_true",
         help=(
-            "Execute the selected mode. Preflight is non-mutating. Execution-plan mode mutates production "
-            "only with the explicit production confirmation env."
+            "Retired legacy live-execution request. Every selected mode is hard-disabled."
         ),
     )
     parser.add_argument(
@@ -3070,6 +3120,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.execute:
+        # Keep the planner importable for local documentation and unit tests,
+        # but do not let the retired CLI reach manifest parsing, artifact
+        # creation, subprocesses, or a live host through an environment flag.
+        print(
+            json.dumps(
+                {
+                    "status": "blocked_legacy_two_server_execution_retired",
+                    "reason": LEGACY_EXECUTION_RETIREMENT_REASON,
+                    "mode": args.mode,
+                    "execute_requested": True,
+                    "required_replacement": "sealed_three_site_campaign_verifier",
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+        return 2
     try:
         plan = build_plan(args)
     except RunnerError as exc:
@@ -3077,39 +3145,6 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     exit_code = 0
-    if args.execute and args.mode == "preflight":
-        if os.environ.get(PREFLIGHT_CONFIRM_ENV) != PREFLIGHT_CONFIRM_VALUE:
-            plan["status"] = "blocked_preflight_confirmation_missing"
-            plan["preflight"]["status"] = "blocked_confirmation_missing"
-            exit_code = 2
-        else:
-            commands = [
-                CommandSpec(
-                    name=item["name"],
-                    args=list(item["args"]),
-                    timeout_seconds=int(item["timeout_seconds"]),
-                    mutates_production=bool(item["mutates_production"]),
-                )
-                for item in plan["preflight"]["commands"]
-            ]
-            results = run_preflight_commands(commands, cwd=REPO_ROOT)
-            failed = [item for item in results if item.get("status") != "passed"]
-            plan["status"] = "preflight_failed" if failed else "preflight_passed"
-            plan["preflight"]["status"] = plan["status"]
-            plan["preflight"]["results"] = results
-            exit_code = 1 if failed else 0
-    elif args.execute and args.mode == "execution-plan":
-        plan, exit_code = execute_command_plan(
-            plan,
-            cwd=REPO_ROOT,
-            resume=args.resume,
-            continue_on_failure=args.continue_on_failure,
-            scenario_retries=args.scenario_retries,
-            retry_backoff_seconds=args.retry_backoff_seconds,
-            retry_mode=args.retry_mode,
-        )
-    elif args.execute:
-        exit_code = 2
     if args.mode == "execution-plan" and args.require_full_driver_coverage and plan["status"] == "blocked_driver_gaps":
         exit_code = 2
 

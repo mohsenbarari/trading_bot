@@ -17,6 +17,7 @@ from core.dr_event_protocol import canonical_json_bytes
 from core.dr_failover_orchestrator import DrOrchestrationError, FailoverPlan
 from core.writer_witness_auth import WITNESS_OPERATION_PATH, sign_witness_request
 from core.writer_witness_client import WriterWitnessClientConfig
+from scripts.legacy_three_site_staging_runtime_fence import assert_retired
 
 
 class WitnessOperationLedger:
@@ -38,6 +39,7 @@ class WitnessOperationLedger:
         outcome: str | None = None,
         evidence_hash: str | None = None,
     ) -> dict[str, Any]:
+        assert_retired(component="staging-witness-operation-ledger", operation="Witness ledger POST")
         payload: dict[str, Any] = {
             "contract_version": 1,
             "action": action,
@@ -120,6 +122,7 @@ class WitnessOperationLedger:
         }
 
     async def reserve(self, plan: FailoverPlan) -> dict[str, Any]:
+        assert_retired(component="staging-witness-operation-ledger", operation="reserve")
         return await self._send(plan, action="reserve")
 
     async def finalize(
@@ -129,6 +132,7 @@ class WitnessOperationLedger:
         outcome: str,
         evidence_hash: str,
     ) -> dict[str, Any]:
+        assert_retired(component="staging-witness-operation-ledger", operation="finalize")
         return await self._send(
             plan,
             action="finalize",

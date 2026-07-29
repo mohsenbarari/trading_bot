@@ -27,6 +27,11 @@ from scripts.verify_three_site_staging_inventory import (
     verify_approved_inventory,
 )
 from scripts.verify_three_site_staging_role_bundle import _verify_bundle_source
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
 
 
 class SourceRestoreError(RuntimeError):
@@ -202,6 +207,7 @@ def _legacy_prefix(
 
 
 def _verify_local_images(service_images: dict[str, str]) -> None:
+    assert_retired(component="source-restore", operation="local image verification")
     for service, expected_image_id in sorted(service_images.items()):
         observed = _run(
             [DOCKER, "image", "inspect", "--format", "{{.Id}}", expected_image_id]
@@ -211,6 +217,7 @@ def _verify_local_images(service_images: dict[str, str]) -> None:
 
 
 def _observe_service_images(prefix: list[str], services: set[str]) -> dict[str, str]:
+    assert_retired(component="source-restore", operation="service image observation")
     result: dict[str, str] = {}
     for service in sorted(services):
         container_id = _run([*prefix, "ps", "-q", service])
@@ -228,6 +235,7 @@ def execute(
     inventory_result: dict[str, object],
     evidence: dict,
 ) -> dict[str, object]:
+    assert_retired(component="source-restore", operation="execute")
     verified = verify_restore_input(
         evidence,
         campaign_id=str(inventory_result["campaign_id"]),
@@ -300,6 +308,11 @@ def execute(
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        assert_retired(component="source-restore", operation="CLI")
+    except LegacyThreeSiteStagingRuntimeRetiredError:
+        print(json.dumps(blocked_payload(component="source-restore"), sort_keys=True))
+        return 2
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-name", default="trading_bot_staging")
     parser.add_argument("--inventory", type=Path, required=True)

@@ -31,6 +31,7 @@
     {"id": "MUT-REG-COMMIT-BOUNDARY", "invariant_class": "transaction_boundary", "module": "core.services.authoritative_registration_service", "function": "_commit_result", "matcher": "core.services.authoritative_registration_service.x__commit_result*"}
   ],
   "equivalent_mutants": [
+    {"name": "core.background_job_authority.x_check_background_job_authority__mutmut_21", "reason": "The runtime-role fallback is normalized with lower() before any authorization decision, so changing only the fallback spelling from active to ACTIVE cannot change the result."},
     {"name": "core.services.registration_command_receipt_service.x_registration_command_lock_keys__mutmut_5", "reason": "Python treats UTF-8 and utf-8 as the same codec, so only the case of the encoding label changes."},
     {"name": "core.registration_sync_policy.x_allowed_user_fields_for_source__mutmut_5", "reason": "For every falsy source, both the empty-string and sentinel fallback normalize to an unknown source and return the same empty frozenset."},
     {"name": "core.services.canonical_invitation_creation_service.x__is_exact_base_retry__mutmut_12", "reason": "Invitation always defines created_by_id; changing getattr's missing-attribute default cannot affect a model instance."},

@@ -71,8 +71,9 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(plan["status"], "planned")
         self.assertEqual(plan["selected_summary"]["selected_count"], 5555)
         self.assertTrue(plan["execution_contract"]["production_drivers_implemented"])
+        self.assertTrue(plan["execution_contract"]["legacy_two_server_live_execution_hard_disabled"])
 
-    def test_execute_scenario_plan_runs_sequential_and_concurrent_groups(self):
+    def test_execute_scenario_plan_is_hard_disabled_outside_the_campaign_path(self):
         scenario_plan = {
             "manifest_id": "LOCAL-001",
             "driver": "local_test_driver",
@@ -113,20 +114,74 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
             ],
         }
 
-        result = runner.execute_scenario_plan(scenario_plan, index=1, total=1, cwd=REPO_ROOT)
+        with patch.object(
+            runner,
+            "command_result",
+            side_effect=AssertionError("retired scenario execution must not run commands"),
+        ):
+            result = runner.execute_scenario_plan(scenario_plan, index=1, total=1, cwd=REPO_ROOT)
 
-        self.assertEqual(result["status"], "passed")
-        self.assertEqual([group["status"] for group in result["groups"]], ["passed", "passed"])
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["reason"], runner.LEGACY_EXECUTION_RETIREMENT_REASON)
+        self.assertEqual(result["groups"], [])
+
+    def test_direct_execution_helpers_deny_environment_spoofing_before_subprocess_access(self):
+        command = runner.CommandSpec(
+            name="must_not_run",
+            args=[sys.executable, "-c", "raise SystemExit(99)"],
+            timeout_seconds=5,
+        )
+        invocations = {
+            "preflight": lambda: runner.run_preflight_commands([command], cwd=REPO_ROOT),
+            "execution_preflight": lambda: runner.run_execution_preflight_commands(
+                [command], cwd=REPO_ROOT, resume_skip_campaign_cleanup=False
+            ),
+            "command": lambda: runner.command_result(command, cwd=REPO_ROOT),
+            "concurrent": lambda: runner.concurrent_command_results([command], cwd=REPO_ROOT),
+        }
+
+        with patch.dict(
+            os.environ,
+            {
+                runner.PREFLIGHT_CONFIRM_ENV: runner.PREFLIGHT_CONFIRM_VALUE,
+                runner.EXECUTION_CONFIRM_ENV: runner.EXECUTION_CONFIRM_VALUE,
+                "ENVIRONMENT": "development",
+            },
+            clear=True,
+        ), patch.object(
+            runner.subprocess,
+            "run",
+            side_effect=AssertionError("retired helper reached subprocess.run"),
+        ), patch.object(
+            runner.subprocess,
+            "Popen",
+            side_effect=AssertionError("retired helper reached subprocess.Popen"),
+        ):
+            for name, invocation in invocations.items():
+                with self.subTest(name=name), self.assertRaisesRegex(runner.RunnerError, "hard-disabled"):
+                    invocation()
 
     def test_truncate_text_accepts_timeout_bytes_output(self):
         output = runner.truncate_text("خطا ".encode("utf-8"))
 
         self.assertEqual(output, "خطا ")
 
-    def test_execute_mode_requires_explicit_production_confirmation(self):
+    def test_execute_mode_is_hard_disabled_without_a_legacy_confirmation_bypass(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             output = Path(tmp_dir) / "blocked.json"
-            with patch.dict(os.environ, {}, clear=True), patch("sys.stdout", new_callable=io.StringIO):
+            with patch.dict(
+                os.environ,
+                {
+                    runner.EXECUTION_CONFIRM_ENV: runner.EXECUTION_CONFIRM_VALUE,
+                    runner.PREFLIGHT_CONFIRM_ENV: runner.PREFLIGHT_CONFIRM_VALUE,
+                    "ENVIRONMENT": "development",
+                },
+                clear=True,
+            ), patch.object(
+                runner,
+                "build_plan",
+                side_effect=AssertionError("retired execution must not parse a manifest or build a plan"),
+            ), patch("sys.stdout", new_callable=io.StringIO) as stdout:
                 exit_code = runner.main(
                     [
                         "--prefix",
@@ -143,13 +198,15 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                         str(output),
                     ]
                 )
-            payload = json.loads(output.read_text(encoding="utf-8"))
+            payload = json.loads(stdout.getvalue())
 
         self.assertEqual(exit_code, 2)
-        self.assertEqual(payload["status"], "blocked_execution_confirmation_missing")
-        self.assertEqual(payload["execution_plan"]["execution"]["reason"], "confirmation_missing")
+        self.assertEqual(payload["status"], "blocked_legacy_two_server_execution_retired")
+        self.assertEqual(payload["reason"], runner.LEGACY_EXECUTION_RETIREMENT_REASON)
+        self.assertEqual(payload["required_replacement"], "sealed_three_site_campaign_verifier")
+        self.assertFalse(output.exists())
 
-    def test_resume_execution_skips_campaign_wide_cleanup_preflight_when_results_exist(self):
+    def test_execution_plan_is_hard_disabled_even_with_confirmation_and_resume(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             artifact_dir = Path(tmp_dir)
             plan = self.build_execution_test_plan(artifact_dir, [])
@@ -182,25 +239,20 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                 os.environ,
                 {runner.EXECUTION_CONFIRM_ENV: runner.EXECUTION_CONFIRM_VALUE},
                 clear=True,
+            ), patch.object(
+                runner,
+                "run_execution_preflight_commands",
+                side_effect=AssertionError("legacy execution must not reach preflight"),
             ):
                 executed_plan, exit_code = runner.execute_command_plan(plan, cwd=REPO_ROOT, resume=True)
 
-        self.assertEqual(exit_code, 0)
-        results = executed_plan["preflight"]["results"]
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(executed_plan["status"], "blocked_legacy_two_server_execution_retired")
         self.assertEqual(
-            [item["name"] for item in results],
-            ["quick_preflight", "foreign_cleanup_dry_run", "iran_cleanup_dry_run"],
+            executed_plan["execution_plan"]["execution"]["reason"],
+            runner.LEGACY_EXECUTION_RETIREMENT_REASON,
         )
-        self.assertEqual(results[0]["status"], "passed")
-        self.assertFalse(results[0].get("skipped", False))
-        for result in results[1:]:
-            self.assertEqual(result["status"], "passed")
-            self.assertTrue(result["skipped"])
-            self.assertEqual(result["returncode"], 0)
-            self.assertEqual(
-                result["skip_reason"],
-                "resume_skips_campaign_wide_cleanup_dry_run_after_exact_scenario_cleanup",
-            )
+        self.assertNotIn("results", executed_plan["preflight"])
 
     def test_filters_supported_base_trade_shape_scenarios(self):
         plan = runner.build_plan(
@@ -501,7 +553,8 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
 
         payload = json.loads(stdout.getvalue())
         self.assertEqual(exit_code, 2)
-        self.assertEqual(payload["status"], "blocked_not_implemented")
+        self.assertEqual(payload["status"], "blocked_legacy_two_server_execution_retired")
+        self.assertEqual(payload["reason"], runner.LEGACY_EXECUTION_RETIREMENT_REASON)
         self.assertTrue(payload["execute_requested"])
 
     def test_preflight_mode_builds_non_mutating_command_plan(self):
@@ -1131,8 +1184,24 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(scenario_plan["driver"], "negative_guard_webapp_iran_probe")
         self.assertEqual(scenario_plan["case_id"], "watch_role_market_action")
 
-    def test_preflight_execute_requires_separate_confirmation(self):
-        with patch.dict(os.environ, {}, clear=True), patch("sys.stdout", new_callable=io.StringIO) as stdout:
+    def test_preflight_execute_is_retired_even_with_confirmation_and_environment_spoofing(self):
+        with patch.dict(
+            os.environ,
+            {
+                runner.PREFLIGHT_CONFIRM_ENV: runner.PREFLIGHT_CONFIRM_VALUE,
+                runner.EXECUTION_CONFIRM_ENV: runner.EXECUTION_CONFIRM_VALUE,
+                "ENVIRONMENT": "development",
+            },
+            clear=True,
+        ), patch.object(
+            runner,
+            "build_plan",
+            side_effect=AssertionError("retired preflight must not build a plan"),
+        ), patch.object(
+            runner.subprocess,
+            "run",
+            side_effect=AssertionError("retired preflight must not run commands"),
+        ), patch("sys.stdout", new_callable=io.StringIO) as stdout:
             exit_code = runner.main(
                 [
                     "--prefix",
@@ -1145,22 +1214,21 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
 
         payload = json.loads(stdout.getvalue())
         self.assertEqual(exit_code, 2)
-        self.assertEqual(payload["status"], "blocked_preflight_confirmation_missing")
-        self.assertEqual(payload["preflight"]["status"], "blocked_confirmation_missing")
+        self.assertEqual(payload["status"], "blocked_legacy_two_server_execution_retired")
+        self.assertEqual(payload["reason"], runner.LEGACY_EXECUTION_RETIREMENT_REASON)
 
-    def test_preflight_execute_runs_non_mutating_commands_when_confirmed(self):
-        def fake_run(args, **_kwargs):
-            return subprocess.CompletedProcess(args=args, returncode=0, stdout="ok", stderr="")
-
+    def test_preflight_execute_does_not_write_requested_output(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             output = Path(tmp_dir) / "preflight.json"
             with patch.dict(
                 os.environ,
                 {runner.PREFLIGHT_CONFIRM_ENV: runner.PREFLIGHT_CONFIRM_VALUE},
                 clear=True,
-            ), patch.object(runner.subprocess, "run", side_effect=fake_run) as run_mock, patch(
-                "sys.stdout", new_callable=io.StringIO
-            ) as stdout:
+            ), patch.object(
+                runner,
+                "run_preflight_commands",
+                side_effect=AssertionError("retired preflight must not reach command execution"),
+            ), patch("sys.stdout", new_callable=io.StringIO) as stdout:
                 exit_code = runner.main(
                     [
                         "--prefix",
@@ -1173,16 +1241,13 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                     ]
                 )
 
-            full_payload = json.loads(output.read_text(encoding="utf-8"))
             stdout_payload = json.loads(stdout.getvalue())
 
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(stdout_payload["status"], "preflight_passed")
-        self.assertEqual(full_payload["preflight"]["status"], "preflight_passed")
-        self.assertEqual(run_mock.call_count, len(full_payload["preflight"]["commands"]))
-        self.assertTrue(all(item["status"] == "passed" for item in full_payload["preflight"]["results"]))
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(stdout_payload["status"], "blocked_legacy_two_server_execution_retired")
+        self.assertFalse(output.exists())
 
-    def test_execution_resume_skips_previously_passed_scenarios(self):
+    def test_execution_resume_cannot_bypass_the_retirement_fence(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             artifact_dir = Path(tmp_dir)
             results_path = artifact_dir / "execution-results.jsonl"
@@ -1224,25 +1289,14 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                     resume=True,
                 )
 
-            events = [
-                json.loads(line)
-                for line in results_path.read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            ]
-            ledger = json.loads((artifact_dir / "campaign-ledger.json").read_text(encoding="utf-8"))
-
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(command_mock.call_count, 1)
-        self.assertEqual(result_plan["status"], "execution_passed")
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(command_mock.call_count, 0)
+        self.assertEqual(result_plan["status"], "blocked_legacy_two_server_execution_retired")
         execution = result_plan["execution_plan"]["execution"]
-        self.assertEqual(execution["scenario_passed"], 2)
-        self.assertEqual(execution["scenario_skipped_passed"], 1)
-        self.assertEqual(execution["scenario_failed"], 0)
-        self.assertIn("execution_resumed", [event["event"] for event in events])
-        self.assertIn("scenario_skipped", [event["event"] for event in events])
-        self.assertEqual(ledger["counts"], {"passed": 2})
+        self.assertEqual(execution["reason"], runner.LEGACY_EXECUTION_RETIREMENT_REASON)
+        self.assertFalse((artifact_dir / "campaign-ledger.json").exists())
 
-    def test_execution_retries_transient_scenario_failure(self):
+    def test_execution_retry_flags_cannot_bypass_the_retirement_fence(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             artifact_dir = Path(tmp_dir)
             results_path = artifact_dir / "execution-results.jsonl"
@@ -1274,7 +1328,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                 os.environ,
                 {runner.EXECUTION_CONFIRM_ENV: runner.EXECUTION_CONFIRM_VALUE},
                 clear=True,
-            ), patch.object(runner, "command_result", side_effect=fake_command_result):
+            ), patch.object(runner, "command_result", side_effect=fake_command_result) as command_mock:
                 result_plan, exit_code = runner.execute_command_plan(
                     plan,
                     cwd=REPO_ROOT,
@@ -1282,21 +1336,16 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                     retry_backoff_seconds=0,
                 )
 
-            events = [
-                json.loads(line)
-                for line in results_path.read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            ]
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(command_mock.call_count, 0)
+        self.assertEqual(result_plan["status"], "blocked_legacy_two_server_execution_retired")
+        self.assertEqual(
+            result_plan["execution_plan"]["execution"]["reason"],
+            runner.LEGACY_EXECUTION_RETIREMENT_REASON,
+        )
+        self.assertFalse(results_path.exists())
 
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(fake_command_result.call_count, 2)
-        self.assertEqual(result_plan["status"], "execution_passed")
-        self.assertIn("scenario_retry_scheduled", [event["event"] for event in events])
-        scenario_results = [event for event in events if event["event"] == "scenario_result"]
-        self.assertEqual([event["status"] for event in scenario_results], ["failed", "passed"])
-        self.assertTrue(scenario_results[0]["retryable"])
-
-    def test_execution_continue_on_failure_records_all_final_failures(self):
+    def test_execution_continue_on_failure_cannot_bypass_the_retirement_fence(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             artifact_dir = Path(tmp_dir)
             plan = self.build_execution_test_plan(
@@ -1334,12 +1383,10 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                     continue_on_failure=True,
                 )
 
-        self.assertEqual(exit_code, 1)
-        self.assertEqual(command_mock.call_count, 2)
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(command_mock.call_count, 0)
         execution = result_plan["execution_plan"]["execution"]
-        self.assertEqual(execution["scenario_passed"], 1)
-        self.assertEqual(execution["scenario_failed"], 1)
-        self.assertEqual(execution["failed_manifest_ids"], ["UNIT-FAIL"])
+        self.assertEqual(execution["reason"], runner.LEGACY_EXECUTION_RETIREMENT_REASON)
 
     def test_cli_writes_output_and_prints_compact_summary(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

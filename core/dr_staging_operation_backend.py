@@ -33,6 +33,7 @@ from scripts.arvan_origin_switch import (
 )
 from scripts.update_dr_connectivity_state import load_rounds
 from scripts.verify_three_site_staging_inventory import verify_approved_inventory
+from scripts.legacy_three_site_staging_runtime_fence import assert_retired
 
 
 PATH_RE = re.compile(r"^/[A-Za-z0-9._/-]+$")
@@ -89,6 +90,7 @@ def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def _secure_json(path: Path) -> dict[str, Any]:
+    assert_retired(component="staging-operation-backend", operation="backend config read")
     try:
         value = json.loads(
             read_secure_text(path, label="staging failover backend config", max_size=512 * 1024),
@@ -115,6 +117,7 @@ def load_staging_backend_config(
     inventory_approval: dict[str, Any],
     inventory_approval_policy: dict[str, Any],
 ) -> StagingBackendConfig:
+    assert_retired(component="staging-operation-backend", operation="backend config load")
     payload = _secure_json(path)
     fields = {
         "schema", "campaign_id", "release_sha", "domain", "record",
@@ -275,6 +278,7 @@ def _result_hash(payload: dict[str, Any]) -> str:
 
 class StagingTypedOperationBackend:
     def __init__(self, config: StagingBackendConfig) -> None:
+        assert_retired(component="staging-operation-backend", operation="constructor")
         self.config = config
 
     def _ssh_raw(
@@ -284,6 +288,7 @@ class StagingTypedOperationBackend:
         *,
         timeout: int = 300,
     ) -> subprocess.CompletedProcess[str]:
+        assert_retired(component="staging-operation-backend", operation="SSH command")
         remote = shlex.join(command)
         result = subprocess.run(
             [
@@ -318,6 +323,7 @@ class StagingTypedOperationBackend:
             )
 
     def preflight(self, plan: FailoverPlan) -> None:
+        assert_retired(component="staging-operation-backend", operation="preflight")
         self.validate_plan_scope(plan)
         policy = load_connectivity_policy(self.config.connectivity_policy)
         classification = classify_connectivity(
@@ -343,6 +349,7 @@ class StagingTypedOperationBackend:
             raise StagingOperationBackendError("origin readiness key is too short")
 
     def _ssh(self, host: StagingHost, command: list[str], *, timeout: int = 300) -> dict[str, Any]:
+        assert_retired(component="staging-operation-backend", operation="SSH site-agent request")
         result = self._ssh_raw(host, command, timeout=timeout)
         lines = [line for line in result.stdout.splitlines() if line.strip()]
         if len(lines) != 1:
@@ -371,6 +378,7 @@ class StagingTypedOperationBackend:
         source_tail: dict[str, Any] | None = None,
         previous_proof_hash: str | None = None,
     ) -> dict[str, Any]:
+        assert_retired(component="staging-operation-backend", operation="site-agent operation")
         host = self.config.hosts[role]
         output = self._site_evidence_path(host, plan, action)
         command = [
@@ -399,6 +407,7 @@ class StagingTypedOperationBackend:
         return self._ssh(host, command)
 
     def _compose_run(self, host: StagingHost, service: str, command: list[str], *, volume: tuple[str, str] | None = None) -> dict[str, Any]:
+        assert_retired(component="staging-operation-backend", operation="remote Compose run")
         args = [
             "/usr/bin/docker", "compose", "-f", host.role_compose,
             "--env-file", host.env_file, "run", "--rm", "--no-deps", "-T",
@@ -409,6 +418,7 @@ class StagingTypedOperationBackend:
         return self._ssh(host, args, timeout=420)
 
     def _compose_service(self, host: StagingHost, verb: str, services: list[str]) -> None:
+        assert_retired(component="staging-operation-backend", operation="remote Compose service operation")
         command = [
             "/usr/bin/docker", "compose", "-f", host.role_compose,
             "--env-file", host.env_file, verb,
@@ -421,6 +431,7 @@ class StagingTypedOperationBackend:
         self._ssh_raw(host, command, timeout=300)
 
     async def classification_verified(self, plan: FailoverPlan) -> dict[str, Any]:
+        assert_retired(component="staging-operation-backend", operation="classification verification")
         self.validate_plan_scope(plan)
         policy = load_connectivity_policy(self.config.connectivity_policy)
         classification = classify_connectivity(
@@ -436,6 +447,7 @@ class StagingTypedOperationBackend:
         }
 
     async def source_fenced(self, plan: FailoverPlan) -> dict[str, Any]:
+        assert_retired(component="staging-operation-backend", operation="source fencing")
         self.validate_plan_scope(plan)
         # Stop renewals and durably put the Witness lease into draining before
         # the site agent closes the local database Writer term.  Once the
@@ -460,6 +472,7 @@ class StagingTypedOperationBackend:
         return {**payload, "evidence_hash": _result_hash(payload)}
 
     async def source_connections_drained(self, plan: FailoverPlan) -> dict[str, Any]:
+        assert_retired(component="staging-operation-backend", operation="source connection drain")
         self.validate_plan_scope(plan)
         return await asyncio.to_thread(
             self._site_agent,
@@ -474,6 +487,7 @@ class StagingTypedOperationBackend:
         *,
         source_tail_boundary: dict[str, Any],
     ) -> dict[str, Any]:
+        assert_retired(component="staging-operation-backend", operation="target readiness")
         self.validate_plan_scope(plan)
         result = await asyncio.to_thread(
             self._site_agent,
@@ -488,6 +502,7 @@ class StagingTypedOperationBackend:
         return str(uuid5(NAMESPACE_URL, f"{plan.operation_id}:{label}"))
 
     def _drain_source_lease(self, plan: FailoverPlan) -> dict[str, Any]:
+        assert_retired(component="staging-operation-backend", operation="source Witness lease drain")
         host = self.config.hosts[plan.source_site]
         service = ROLE_SERVICE[plan.source_site]
         self._compose_service(host, "stop", [service])
@@ -505,6 +520,7 @@ class StagingTypedOperationBackend:
         )
 
     def _inspect_witness(self, plan: FailoverPlan, *, role: str) -> dict[str, Any]:
+        assert_retired(component="staging-operation-backend", operation="Witness inspection")
         host = self.config.hosts[role]
         request_id = str(uuid4())
         return self._compose_run(
@@ -518,6 +534,7 @@ class StagingTypedOperationBackend:
         )
 
     async def target_term_acquired(self, plan: FailoverPlan) -> dict[str, Any]:
+        assert_retired(component="staging-operation-backend", operation="target term acquisition")
         self.validate_plan_scope(plan)
         deadline = asyncio.get_running_loop().time() + min(
             self.config.rollback_wait_seconds, 300
@@ -580,6 +597,7 @@ class StagingTypedOperationBackend:
         return {**payload, "evidence_hash": _result_hash(payload)}
 
     async def route_switched(self, plan: FailoverPlan) -> dict[str, Any]:
+        assert_retired(component="staging-operation-backend", operation="Arvan route switch")
         self.validate_plan_scope(plan)
         token = load_token(self.config.arvan_token_file)
         result = await asyncio.to_thread(
@@ -611,6 +629,7 @@ class StagingTypedOperationBackend:
         return {**payload, "evidence_hash": _result_hash(payload)}
 
     async def public_route_verified(self, plan: FailoverPlan) -> dict[str, Any]:
+        assert_retired(component="staging-operation-backend", operation="public route verification")
         self.validate_plan_scope(plan)
         key = read_secure_text(
             self.config.origin_readiness_key_file,
@@ -657,6 +676,7 @@ class StagingTypedOperationBackend:
         failed_step: str,
         completed_steps: tuple[str, ...],
     ) -> dict[str, Any]:
+        assert_retired(component="staging-operation-backend", operation="rollback")
         self.validate_plan_scope(plan)
         # Availability is secondary here: both WebApp sites and all public
         # mutators are stopped/fenced, and any live lease is allowed to expire.

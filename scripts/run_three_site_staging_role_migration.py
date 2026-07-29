@@ -39,6 +39,11 @@ from scripts.verify_three_site_staging_role_bundle import (
     _verify_bundle_source,
     verify_role_bundle,
 )
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
 
 
 SAFE_ENV = {
@@ -47,7 +52,7 @@ SAFE_ENV = {
     "LANG": "C.UTF-8",
     "LC_ALL": "C.UTF-8",
 }
-EXPECTED_HEAD = "b986c7d8e0f1"
+EXPECTED_HEAD = "c097d8e9f1a2"
 ROLE_DB = {
     "bot_fi": ("bot_fi_db", "BOT_FI_POSTGRES_USER", "BOT_FI_POSTGRES_DB"),
     "webapp_fi": ("webapp_fi_db", "WEBAPP_FI_POSTGRES_USER", "WEBAPP_FI_POSTGRES_DB"),
@@ -91,6 +96,7 @@ def _reject_duplicate_json_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]
 
 
 def _run(arguments: list[str], *, timeout: int = 120) -> str:
+    assert_retired(component="role-migration", operation="command execution")
     try:
         result = subprocess.run(
             arguments,
@@ -270,6 +276,7 @@ class LocalRoleBackend:
         )
 
     def _wait_db(self) -> None:
+        assert_retired(component="role-migration", operation="database readiness probe")
         for _attempt in range(30):
             result = subprocess.run(
                 [
@@ -490,6 +497,7 @@ class LocalRoleBackend:
                     time.sleep(2)
 
     def restore_seed(self) -> None:
+        assert_retired(component="role-migration", operation="seed restore")
         _run([*self.prefix, "up", "-d", "--no-deps", self.db_service], timeout=180)
         self._wait_db()
         system_id = self._psql("SELECT system_identifier FROM pg_control_system()")
@@ -780,6 +788,7 @@ def apply_action(
     context: dict[str, Any],
     evidence_path: Path | None,
 ) -> dict[str, Any]:
+    assert_retired(component="role-migration", operation="apply action")
     role = backend.role
     phase = _phase_for_action(role, action)
     if phase not in ROLE_PHASES[role]:
@@ -928,6 +937,11 @@ def _verify_global_commit(path: Path, *, role: str, state: dict[str, Any]) -> di
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        assert_retired(component="role-migration", operation="CLI")
+    except LegacyThreeSiteStagingRuntimeRetiredError:
+        print(json.dumps(blocked_payload(component="role-migration"), sort_keys=True))
+        return 2
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=(
         "plan", "begin", "status", "restore-seed", "configure-database",

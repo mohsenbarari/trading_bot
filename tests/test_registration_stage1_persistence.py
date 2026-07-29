@@ -3,6 +3,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+from sqlalchemy.sql.elements import TextClause
+
 import models  # noqa: F401 - register all metadata
 
 from core.config import settings
@@ -13,7 +15,9 @@ from core.registration_identity import (
 )
 from core.services.invitation_identity_reservation_service import (
     InvitationIdentityReservationConflict,
+    acquire_invitation_creation_locks,
     acquire_invitation_identity_locks,
+    acquire_invitation_transition_locks,
     find_identity_reservation,
     invitation_identity_lock_keys,
     normalize_invitation_identity,
@@ -285,6 +289,37 @@ class RegistrationStage1PersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reservation.invitation_id, 77)
         self.assertEqual(db.added, [reservation])
         self.assertEqual(db.flush_count, 1)
+        for statement, _params in db.execute_calls[:2]:
+            self.assertNotIsInstance(statement, TextClause)
+            self.assertIn("pg_advisory_xact_lock", str(statement))
+            self.assertIn("hashtextextended", str(statement))
+
+    async def test_all_invitation_lock_paths_use_guard_safe_typed_statements(self):
+        identity = normalize_invitation_identity(
+            mobile_number="09120000000",
+            account_name="sample_user",
+        )
+        db = _FakeDB(results=[_Result()] * 7)
+
+        await acquire_invitation_transition_locks(
+            db,
+            invitation_token="ACCT-token",
+            identity=identity,
+            telegram_id=42,
+        )
+        await acquire_invitation_identity_locks(db, identity)
+        await acquire_invitation_creation_locks(
+            db,
+            creator_user_id=7,
+            identity=identity,
+        )
+
+        self.assertEqual(len(db.execute_calls), 9)
+        for statement, params in db.execute_calls:
+            self.assertNotIsInstance(statement, TextClause)
+            self.assertIn("pg_advisory_xact_lock", str(statement))
+            self.assertIn("hashtextextended", str(statement))
+            self.assertIn("lock_key", params)
 
     async def test_split_identity_reservation_fails_closed(self):
         identity = normalize_invitation_identity(

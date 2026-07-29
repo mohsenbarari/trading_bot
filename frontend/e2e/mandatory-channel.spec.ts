@@ -257,7 +257,9 @@ test.describe('Mandatory channel smoke', () => {
 
     await expect(page).toHaveURL(new RegExp(`/register\\?token=${invitation.token}$`))
     await expect(page.getByText(invitation.accountName)).toBeVisible()
-    await expect(page.getByText(invitation.mobileNumber)).toBeVisible()
+    const maskedMobileNumber = `${invitation.mobileNumber.slice(0, 4)}****${invitation.mobileNumber.slice(-3)}`
+    await expect(page.getByText(maskedMobileNumber)).toBeVisible()
+    await expect(page.getByText(invitation.mobileNumber)).toHaveCount(0)
 
     const otpResponse = page.waitForResponse((response) =>
       response.url().includes('/api/auth/register-otp-request') && response.status() === 200,

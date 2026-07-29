@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 
-from sqlalchemy import or_, select, text
+from sqlalchemy import bindparam, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.services.invitation_lifecycle_service import derive_invitation_state
@@ -96,7 +96,11 @@ async def acquire_invitation_transition_locks(
         telegram_id=telegram_id,
     ):
         await db.execute(
-            text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+            select(
+                func.pg_advisory_xact_lock(
+                    func.hashtextextended(bindparam("lock_key"), 0)
+                )
+            ),
             {"lock_key": lock_key},
         )
 
@@ -107,7 +111,11 @@ async def acquire_invitation_identity_locks(
 ) -> None:
     for lock_key in invitation_identity_lock_keys(identity):
         await db.execute(
-            text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+            select(
+                func.pg_advisory_xact_lock(
+                    func.hashtextextended(bindparam("lock_key"), 0)
+                )
+            ),
             {"lock_key": lock_key},
         )
 
@@ -126,7 +134,11 @@ async def acquire_invitation_creation_locks(
     )
     for lock_key in lock_keys:
         await db.execute(
-            text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+            select(
+                func.pg_advisory_xact_lock(
+                    func.hashtextextended(bindparam("lock_key"), 0)
+                )
+            ),
             {"lock_key": lock_key},
         )
 

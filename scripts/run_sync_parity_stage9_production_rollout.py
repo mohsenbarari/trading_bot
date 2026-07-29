@@ -38,6 +38,10 @@ BACKUP_CONFIRM_ENV = "SYNC_PARITY_STAGE9_PRODUCTION_BACKUP_CONFIRM"
 BACKUP_CONFIRM_VALUE = "create-production-backups"
 RELEASE_CONFIRM_ENV = "SYNC_PARITY_STAGE9_PRODUCTION_RELEASE_CONFIRM"
 RELEASE_CONFIRM_VALUE = "execute-production-rollout"
+LEGACY_RELEASE_RETIREMENT_REASON = (
+    "legacy_two_site_release_retired_use_three_site_production_shadow_campaign"
+)
+LEGACY_LIVE_STAGE9_MODES = frozenset({"preflight", "backup", "execute", "postdeploy"})
 STRICT_ALERT_CONFIRM_ENV = "SYNC_PARITY_STAGE9_STRICT_ALERT_CONFIRM"
 STRICT_ALERT_CONFIRM_VALUE = "enable-strict-parity-alerts"
 SSH_STRICT_HOST_KEY_CHECKING = "accept-new"
@@ -52,6 +56,11 @@ LOCAL_GATE_ENV = (
     "REDIS_URL=redis://127.0.0.1:1/0",
     "JWT_SECRET_KEY=matrix-gate-placeholder-jwt-secret-32-bytes",
 )
+LOCAL_STAGE9_GATE_COMMANDS = {
+    "local_sync_guarantee_matrix": "tests.test_sync_guarantee_matrix",
+    "local_stage8_rollout_contract": "tests.test_sync_parity_stage8_staging_rollout",
+    "local_stage9_rollout_contract": "tests.test_sync_parity_stage9_production_rollout",
+}
 
 
 @dataclass(frozen=True)
@@ -66,6 +75,36 @@ class CommandSpec:
     timeout_seconds: int = 300
     stdout_path: Path | None = None
     stderr_path: Path | None = None
+
+
+class LegacyTwoSiteStage9RuntimeRetiredError(RuntimeError):
+    """Raised before a retained Stage 9 command can contact a legacy surface."""
+
+
+def assert_stage9_command_is_local_gate_only(command: dict[str, Any]) -> None:
+    """Allow only the fixed local regression gates through the command helper.
+
+    The generic command helper is retained for those local tests.  It must not
+    become a direct-import bypass for preflight, backup, release, or
+    post-deploy command payloads.
+    """
+
+    name = str(command.get("name") or "")
+    expected_test = LOCAL_STAGE9_GATE_COMMANDS.get(name)
+    args = command.get("args")
+    expected_prefix = ["env", *LOCAL_GATE_ENV, sys.executable, "-m", "unittest"]
+    if (
+        command.get("phase") != "local_release_gate"
+        or command.get("reads_production")
+        or command.get("mutates_production")
+        or not isinstance(args, list)
+        or args[: len(expected_prefix)] != expected_prefix
+        or args[len(expected_prefix) :] != [expected_test]
+    ):
+        raise LegacyTwoSiteStage9RuntimeRetiredError(
+            "Legacy two-site Stage 9 command is retired and hard-disabled before subprocess access: "
+            f"name={name!r}; use a sealed three-site campaign verifier."
+        )
 
 
 def utc_stamp() -> str:
@@ -397,9 +436,19 @@ def build_release_commands(args: argparse.Namespace) -> list[CommandSpec]:
     return [
         CommandSpec(
             name="production_release",
-            args=["make", "production-release"],
+            args=[
+                "bash",
+                "./scripts/production_deploy_online.sh",
+                "--manifest",
+                str(args.manifest),
+                "release",
+            ],
             phase="production_release",
-            description="Run the full foreign-controlled production release flow after merge to main and fresh backups.",
+            description=(
+                "Invoke the selected legacy release manifest directly after merge to "
+                "main and fresh backups. The legacy executor is hard-disabled; a "
+                "three-site campaign must use its dedicated cutover path instead."
+            ),
             reads_production=True,
             mutates_production=True,
             timeout_seconds=3600,
@@ -619,6 +668,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             "backup_confirm_value": BACKUP_CONFIRM_VALUE,
             "release_confirm_env": RELEASE_CONFIRM_ENV,
             "release_confirm_value": RELEASE_CONFIRM_VALUE,
+            "legacy_two_site_release_hard_disabled": True,
             "release_requires_branch": RELEASE_BRANCH,
             "ssh_strict_host_key_checking": SSH_STRICT_HOST_KEY_CHECKING,
             "repair_policy": "production repair remains manual and dry-run-first; this rollout does not auto-repair drift",
@@ -627,7 +677,11 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         "local_release_gates": {"status": "planned", "commands": [command_payload(command) for command in local_gates]},
         "read_only_preflight": {"status": "blocked_until_explicit_confirm", "commands": [command_payload(command) for command in preflight]},
         "backup_confirmation": {"status": "blocked_until_explicit_confirm", "commands": [command_payload(command) for command in backups]},
-        "release_plan": {"status": "blocked_until_main_and_explicit_confirm", "commands": [command_payload(command) for command in release]},
+        "release_plan": {
+            "status": "hard_disabled",
+            "reason": LEGACY_RELEASE_RETIREMENT_REASON,
+            "commands": [command_payload(command) for command in release],
+        },
         "post_deploy_checks": {"status": "planned_after_release", "commands": [command_payload(command) for command in post_deploy]},
         "warning_only_alert_window": {
             "status": "required_after_release",
@@ -653,6 +707,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def run_command(command: dict[str, Any]) -> dict[str, Any]:
+    assert_stage9_command_is_local_gate_only(command)
     stdout_path = Path(command["stdout_path"]) if command.get("stdout_path") else None
     stderr_path = Path(command["stderr_path"]) if command.get("stderr_path") else None
     if stdout_path:
@@ -712,6 +767,21 @@ def execute_section(plan: dict[str, Any], section_name: str) -> tuple[dict[str, 
 
 
 def execute_plan(plan: dict[str, Any], args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    if args.mode in LEGACY_LIVE_STAGE9_MODES:
+        # No confirmation value, environment variable, or prebuilt plan is a
+        # capability to revive the retired two-site production contact path.
+        plan["status"] = "blocked_legacy_two_site_live_mode_retired"
+        for section_name in (
+            "read_only_preflight",
+            "backup_confirmation",
+            "release_plan",
+            "post_deploy_checks",
+        ):
+            section = plan.get(section_name)
+            if isinstance(section, dict):
+                section["status"] = "hard_disabled"
+                section["reason"] = LEGACY_RELEASE_RETIREMENT_REASON
+        return plan, 2
     if not plan["branch_gate"]["planning_passed"]:
         plan["status"] = "blocked_wrong_branch"
         return plan, 2
@@ -800,6 +870,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.mode in LEGACY_LIVE_STAGE9_MODES:
+        # Block before manifest resolution, artifact directory creation, or a
+        # subprocess/SSH-capable command can be assembled.
+        print(
+            json.dumps(
+                {
+                    "status": "blocked_legacy_two_site_live_mode_retired",
+                    "reason": LEGACY_RELEASE_RETIREMENT_REASON,
+                    "mode": args.mode,
+                    "required_replacement": "sealed_three_site_campaign_verifier",
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+        return 2
     args.artifact_dir.mkdir(parents=True, exist_ok=True)
     plan = build_plan(args)
     exit_code = 0

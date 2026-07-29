@@ -27,6 +27,11 @@ from scripts.collect_three_site_staging_migration_observation import (
 )
 from scripts.run_three_site_staging_role_migration import _secure_json
 from scripts.three_site_staging_migration_journal import MigrationJournal, ROLE_PHASES
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
 
 
 ROLES = tuple(ROLE_PHASES)
@@ -76,6 +81,10 @@ def _mapping(values: list[str], *, label: str) -> dict[str, Path]:
 
 
 def _load_journals(values: list[str]) -> dict[str, dict[str, Any]]:
+    # MigrationJournal.load creates a lock file. Do not leave that mutable
+    # legacy operation available to direct import callers.
+    assert_retired(component="staging-migration-coordinator", operation="journal load")
+
     paths = _mapping(values, label="--journal")
     result = {role: MigrationJournal(path).load() for role, path in paths.items()}
     identities = {
@@ -245,7 +254,7 @@ def _acceptance_observations(
         observations = {
             name: check["observation"] for name, check in value["checks"].items()
         }
-        expected_revision = "003" if role == "witness" else "b986c7d8e0f1"
+        expected_revision = "003" if role == "witness" else "c097d8e9f1a2"
         services = observations["service_health"].get("services")
         service_names = [row.get("service") for row in services] if isinstance(services, list) else []
         tls = observations["private_tls"]
@@ -397,7 +406,37 @@ def confirmation_phrase(action: str, identity: dict[str, str]) -> str:
     return f"migration-barrier:{identity['campaign_id']}:{action}:{identity['plan_sha256']}"
 
 
+def write_barrier_documents(
+    *, action: str, documents: dict[str, dict[str, Any]], output_dir: Path
+) -> dict[str, str]:
+    """Retired writer boundary kept only so direct imports fail closed."""
+
+    assert_retired(
+        component="staging-migration-coordinator",
+        operation="barrier evidence write",
+    )
+    paths = {}
+    for role, document in documents.items():
+        path = output_dir / f"{action}-{role}.json"
+        write_secure_atomic_bytes(
+            path,
+            (json.dumps(document, sort_keys=True, indent=2) + "\n").encode(),
+            label="migration coordination evidence",
+            mode=0o600,
+        )
+        paths[role] = str(path)
+    return paths
+
+
 def main(argv: list[str] | None = None) -> int:
+    # The historical "plan" action opens journals and can create lock files;
+    # reject every CLI action before argparse handles caller-controlled paths.
+    try:
+        assert_retired(component="staging-migration-coordinator", operation="CLI")
+    except LegacyThreeSiteStagingRuntimeRetiredError:
+        print(json.dumps(blocked_payload(component="staging-migration-coordinator"), sort_keys=True))
+        return 2
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "action", choices=("private-barrier", "routing-hold", "role-acceptance", "global-commit")
@@ -409,6 +448,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")
     args = parser.parse_args(argv)
+    if args.apply:
+        try:
+            assert_retired(component="staging-migration-coordinator", operation="CLI apply")
+        except LegacyThreeSiteStagingRuntimeRetiredError:
+            print(json.dumps(blocked_payload(component="staging-migration-coordinator"), sort_keys=True))
+            return 2
     try:
         journals = _load_journals(args.journal)
         documents = build_documents(
@@ -426,16 +471,11 @@ def main(argv: list[str] | None = None) -> int:
         else:
             if args.confirm != required:
                 raise MigrationCoordinationError("migration barrier confirmation mismatch")
-            paths = {}
-            for role, document in documents.items():
-                path = args.output_dir / f"{args.action}-{role}.json"
-                write_secure_atomic_bytes(
-                    path,
-                    (json.dumps(document, sort_keys=True, indent=2) + "\n").encode(),
-                    label="migration coordination evidence",
-                    mode=0o600,
-                )
-                paths[role] = str(path)
+            paths = write_barrier_documents(
+                action=args.action,
+                documents=documents,
+                output_dir=args.output_dir,
+            )
             result = {"status": "written", "action": args.action, "paths": paths}
         print(json.dumps(result, sort_keys=True))
         return 0

@@ -32,6 +32,11 @@ from core.dr_failover_orchestrator import (
     verify_human_failover_approval,
 )
 from core.secure_file_io import read_secure_text, write_secure_atomic_bytes
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
 from scripts.render_three_site_staging_role_compose import parse_env_values
 from scripts.run_three_site_staging_source_backup import DOCKER, SAFE_ENV
 from scripts.verify_three_site_staging_role_bundle import _verify_bundle_source
@@ -79,6 +84,7 @@ def _strict_json(path: Path, *, label: str) -> dict[str, Any]:
 
 
 def _run(arguments: list[str], *, timeout: int = 120) -> str:
+    assert_retired(component="staging-failover-site-agent", operation="command execution")
     result = subprocess.run(
         arguments,
         text=True,
@@ -100,6 +106,7 @@ def _compose(args: argparse.Namespace) -> list[str]:
 
 
 def _psql(args: argparse.Namespace, env: dict[str, str], sql: str) -> str:
+    assert_retired(component="staging-failover-site-agent", operation="database query")
     db_service, user_key, database_key, _app_user = ROLE_DB[args.role]
     return _run(
         [
@@ -164,6 +171,7 @@ def _with_evidence_hash(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def source_fenced(args: argparse.Namespace, plan, env: dict[str, str]) -> dict[str, Any]:  # noqa: ANN001
+    assert_retired(component="staging-failover-site-agent", operation="source fencing")
     state = _writer_state(args, env)
     if (
         state.get("active_site") != plan.source_site
@@ -289,6 +297,7 @@ def source_fenced(args: argparse.Namespace, plan, env: dict[str, str]) -> dict[s
 
 
 def source_connections_drained(args: argparse.Namespace, plan, env: dict[str, str]) -> dict[str, Any]:  # noqa: ANN001
+    assert_retired(component="staging-failover-site-agent", operation="source connection drain")
     for service in ROLE_PUBLIC[args.role]:
         if _run([*_compose(args), "ps", "--status", "running", "-q", service]):
             raise StagingSiteOperationError("source mutation service resumed before drain proof")
@@ -342,6 +351,7 @@ def _readiness_url(plan, boundary: dict[str, Any], recovery: dict[str, Any] | No
 
 
 def target_ready(args: argparse.Namespace, plan, env: dict[str, str]) -> dict[str, Any]:  # noqa: ANN001
+    assert_retired(component="staging-failover-site-agent", operation="target readiness request")
     if args.source_tail is None and args.source_tail_json is None:
         raise StagingSiteOperationError("target readiness requires source-tail evidence")
     if args.source_tail is not None and args.source_tail_json is not None:
@@ -416,6 +426,7 @@ def target_term_attested(
     plan,
     env: dict[str, str],
 ) -> dict[str, Any]:  # noqa: ANN001
+    assert_retired(component="staging-failover-site-agent", operation="target term attestation")
     previous = str(args.previous_proof_hash or "")
     if re.fullmatch(r"[0-9a-f]{64}", previous) is None:
         raise StagingSiteOperationError("target attestation requires the acquired proof hash")
@@ -460,6 +471,7 @@ def target_term_attested(
 
 
 def safe_fence(args: argparse.Namespace, plan, env: dict[str, str]) -> dict[str, Any]:  # noqa: ANN001
+    assert_retired(component="staging-failover-site-agent", operation="safe fence")
     writer_control = f"{args.role}_writer_control"
     _run(
         [
@@ -512,6 +524,11 @@ def confirmation_phrase(plan, role: str, action: str) -> str:  # noqa: ANN001
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        assert_retired(component="staging-failover-site-agent", operation="CLI")
+    except LegacyThreeSiteStagingRuntimeRetiredError:
+        print(json.dumps(blocked_payload(component="staging-failover-site-agent"), sort_keys=True))
+        return 2
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "action", choices=(

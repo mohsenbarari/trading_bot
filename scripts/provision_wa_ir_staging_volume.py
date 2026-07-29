@@ -21,6 +21,11 @@ from scripts.provision_arvan_witness_recovery_vps import (
     response_data,
     server_public_ipv4,
 )
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
 
 
 REGION = "ir-thr-fr1"
@@ -35,6 +40,9 @@ class VolumeError(RuntimeError):
     pass
 
 
+RETIREMENT_COMPONENT = "provision_wa_ir_staging_volume"
+
+
 def _volume_id(volume: dict[str, Any]) -> str:
     value = str(volume.get("id") or "")
     if not value:
@@ -43,6 +51,7 @@ def _volume_id(volume: dict[str, Any]) -> str:
 
 
 def _server(token: str) -> dict[str, Any]:
+    assert_retired(component=RETIREMENT_COMPONENT, operation="server lookup")
     data = response_data(
         api_request("GET", f"/regions/{REGION}/servers/{SERVER_ID}", token),
         "WA-IR server",
@@ -58,6 +67,7 @@ def _server(token: str) -> dict[str, Any]:
 
 
 def _find(token: str) -> dict[str, Any] | None:
+    assert_retired(component=RETIREMENT_COMPONENT, operation="volume lookup")
     matches = [
         volume
         for volume in list_data(token, f"/regions/{REGION}/volumes", "WA-IR volumes")
@@ -80,6 +90,7 @@ def _attached_to(volume: dict[str, Any], server_id: str) -> bool:
 
 
 def _wait(token: str, volume_id: str, *, attached: bool) -> dict[str, Any]:
+    assert_retired(component=RETIREMENT_COMPONENT, operation="volume state polling")
     deadline = time.monotonic() + 300
     while time.monotonic() < deadline:
         volumes = list_data(token, f"/regions/{REGION}/volumes", "WA-IR volumes")
@@ -102,6 +113,7 @@ def confirmation_phrase() -> str:
 
 
 def execute(*, token: str, apply: bool, confirm: str | None) -> dict[str, Any]:
+    assert_retired(component=RETIREMENT_COMPONENT, operation="volume provision or attach")
     _server(token)
     existing = _find(token)
     if not apply:
@@ -163,22 +175,11 @@ def execute(*, token: str, apply: bool, confirm: str | None) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--token-file", type=Path, default=TOKEN_FILE)
-    parser.add_argument("--apply", action="store_true")
-    parser.add_argument("--confirm")
-    args = parser.parse_args(argv)
     try:
-        result = execute(
-            token=read_private_text(args.token_file),
-            apply=args.apply,
-            confirm=args.confirm,
-        )
-    except Exception as exc:
-        print(json.dumps({"status": "blocked", "error": str(exc), "error_class": type(exc).__name__}, sort_keys=True))
-        return 1
-    print(json.dumps(result, sort_keys=True))
-    return 0
+        assert_retired(component=RETIREMENT_COMPONENT, operation="CLI")
+    except LegacyThreeSiteStagingRuntimeRetiredError:
+        print(json.dumps(blocked_payload(component=RETIREMENT_COMPONENT), sort_keys=True))
+        return 2
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ import unicodedata
 
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import case, func, or_, select, text
+from sqlalchemy import bindparam, case, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, joinedload
 
@@ -628,7 +628,7 @@ async def ensure_mandatory_channel(db: AsyncSession) -> Chat:
         return channels[0]
 
     lock_result = await db.execute(
-        text("SELECT pg_try_advisory_xact_lock(:lock_key)"),
+        select(func.pg_try_advisory_xact_lock(bindparam("lock_key"))),
         {"lock_key": MANDATORY_CHANNEL_LOCK_KEY},
     )
     if not bool(lock_result.scalar_one()):
@@ -639,7 +639,10 @@ async def ensure_mandatory_channel(db: AsyncSession) -> Chat:
         channels = await _list_mandatory_channels(db)
         if channels:
             return channels[0]
-        await db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": MANDATORY_CHANNEL_LOCK_KEY})
+        await db.execute(
+            select(func.pg_advisory_xact_lock(bindparam("lock_key"))),
+            {"lock_key": MANDATORY_CHANNEL_LOCK_KEY},
+        )
 
     channels = await _list_mandatory_channels(db)
     if channels:

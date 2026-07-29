@@ -5,7 +5,11 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import BackgroundTasks, HTTPException
 
-from api.routers.trades import TradeCreate, _execute_trade_authoritatively
+from api.routers.trades import (
+    TradeCreate,
+    _execute_trade_authoritatively,
+    _repair_trade_completion_delivery_background,
+)
 from core.enums import NotificationCategory, NotificationLevel, SettlementType, UserRole
 from core.services.offer_expiry_service import OfferExpiryReason
 from models.customer_relation import CustomerTier
@@ -451,6 +455,10 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.publish_user_event_mock.assert_not_awaited()
         response_mock.assert_called_once_with(existing_trade, identity_map={}, customer_relation_map={})
         self.assertEqual(len(background_tasks.tasks), 1)
+        repair_task = background_tasks.tasks[0]
+        self.assertIs(repair_task.func, _repair_trade_completion_delivery_background)
+        self.assertEqual(repair_task.args[0], existing_trade.trade_number)
+        self.assertEqual(repair_task.args[2], 7)
 
     async def test_early_completed_replay_rejects_mismatched_ledger_identity_and_payload(self):
         owner_user = make_user()
@@ -1095,6 +1103,9 @@ class TradesRouterAuthoritativeSuccessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(customer_leg.offer_user_id, mediator_owner.id)
         self.assertEqual(customer_leg.responder_user_id, customer_user.id)
         self.assertIsNone(customer_leg.offer_id)
+        self.assertIsNone(customer_leg.offer)
+        self.assertIsNone(customer_leg.offer_notes)
+        self.assertEqual(customer_leg.offer_home_server, offer.home_server)
         self.assertEqual(customer_leg.price, 100700)
         self.assertEqual(result, {"id": 94, "trade_number": 10007, "offer_id": None, "price": 100700})
 

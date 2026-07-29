@@ -22,6 +22,11 @@ from core.writer_witness_client import (
     initialize_local_writer_lease_once,
     writer_witness_client_from_settings,
 )
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
 
 
 def confirmation_phrase(campaign_id: str, request_id: str, release_sha: str) -> str:
@@ -29,6 +34,7 @@ def confirmation_phrase(campaign_id: str, request_id: str, release_sha: str) -> 
 
 
 async def run(args: argparse.Namespace) -> dict:
+    assert_retired(component="staging-writer-lease-bootstrap", operation="run")
     try:
         campaign_id = str(UUID(args.campaign_id))
         request_id = str(UUID(args.request_id))
@@ -86,6 +92,16 @@ async def run(args: argparse.Namespace) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        assert_retired(component="staging-writer-lease-bootstrap", operation="CLI")
+    except LegacyThreeSiteStagingRuntimeRetiredError:
+        print(
+            json.dumps(
+                blocked_payload(component="staging-writer-lease-bootstrap"),
+                sort_keys=True,
+            )
+        )
+        return 2
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--campaign-id", required=True)
     parser.add_argument("--request-id", required=True)

@@ -161,9 +161,8 @@ class ObservabilityConfigTests(unittest.TestCase):
             "remote_docker_service_guard",
             "systemctl reset-failed docker.service docker.socket",
             "systemctl enable --now docker.socket",
-            "check_local; install_sync_sampler_local; build_release; deploy_foreign; verify_sync_sampler_local",
-            "bootstrap-iran) check_local; bootstrap_iran",
-            "check_local; install_sync_sampler_remote; deploy_iran; verify_sync_sampler_remote",
+            "block_legacy_two_site_command",
+            "This script now accepts only help.",
             "ensure_runtime_env_file",
             "validate_observability_release_inputs",
             "handle_iran_shared_data",
@@ -229,20 +228,26 @@ class ObservabilityConfigTests(unittest.TestCase):
         ):
             self.assertIn(expected, script)
 
-    def test_iran_operator_commands_support_docker_compose_v1_fallback(self):
+    def test_legacy_iran_operator_commands_are_hard_disabled(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
         recover_script = (ROOT / "scripts/recover_cross_server_sync.sh").read_text(encoding="utf-8")
 
-        self.assertIn("IRAN_REMOTE_COMPOSE", makefile)
-        self.assertIn('command -v docker-compose', makefile)
-        for target in ("sync-health-iran:", "logs-iran:", "restart-iran:", "status:"):
+        self.assertNotIn("IRAN_REMOTE_COMPOSE", makefile)
+        for target in ("sync-health-iran:", "logs-iran:", "status:"):
             target_match = re.search(rf"(?m)^{re.escape(target)}$", makefile)
             self.assertIsNotNone(target_match)
             target_index = target_match.start()
             next_target_index = makefile.find("\n\n", target_index)
             target_body = makefile[target_index : next_target_index if next_target_index != -1 else None]
-            self.assertIn("IRAN_REMOTE_COMPOSE", target_body)
-            self.assertIn("$$compose_cmd -f docker-compose.iran.yml", target_body)
+            self.assertIn("retired and hard-disabled", target_body)
+            self.assertNotIn("ssh ", target_body)
+            self.assertNotIn("docker compose", target_body)
+
+        restart_target = re.search(r"(?m)^restart-iran:$", makefile)
+        self.assertIsNotNone(restart_target)
+        restart_body = makefile[restart_target.start() : makefile.find("\n\n", restart_target.start())]
+        self.assertIn("retired and hard-disabled", restart_body)
+        self.assertNotIn("IRAN_REMOTE_COMPOSE", restart_body)
 
         self.assertIn("local_compose_cmd()", recover_script)
         self.assertIn("command -v docker-compose", recover_script)

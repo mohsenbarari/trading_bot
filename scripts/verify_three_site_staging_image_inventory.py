@@ -19,7 +19,18 @@ if str(REPO_ROOT) not in sys.path:
 
 import yaml
 
+from core.docker_image_identity import (
+    DockerImageIdentityError,
+    canonical_sha256 as _canonical_sha256,
+    image_content_descriptor as _canonical_image_content_descriptor,
+    verify_content_descriptor as _canonical_verify_content_descriptor,
+)
 from scripts.render_three_site_staging_role_compose import _atomic_write
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
 from scripts.verify_three_site_staging_inventory import load_inventory
 from scripts.verify_three_site_staging_role_bundle import (
     _verify_bundle_source,
@@ -35,7 +46,6 @@ SAFE_ENV = {
     "LC_ALL": "C.UTF-8",
 }
 IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
-CONTENT_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 LOCAL_RELEASE_IMAGE_PREFIXES = (
     "trading_bot_three_site_staging:",
     "trading_bot_postgres_boottime:",
@@ -46,12 +56,6 @@ class ImageInventoryError(RuntimeError):
     pass
 
 
-def _canonical_sha256(value: Any) -> str:
-    return "sha256:" + hashlib.sha256(
-        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-
-
 def image_content_descriptor(raw: dict[str, Any]) -> tuple[dict[str, Any], str]:
     """Return a storage-driver-independent identity for one inspected image.
 
@@ -60,45 +64,21 @@ def image_content_descriptor(raw: dict[str, Any]) -> tuple[dict[str, Any], str]:
     configuration and ordered rootfs diff IDs remain identical after an exact
     save/load, so bind the inventory to those canonical values instead.
     """
-    config = raw.get("Config")
-    rootfs = raw.get("RootFS")
-    if not isinstance(config, dict) or not isinstance(rootfs, dict):
-        raise ImageInventoryError("Docker image lacks canonical config/rootfs metadata")
-    layers = rootfs.get("Layers")
-    descriptor = {
-        "architecture": str(raw.get("Architecture") or ""),
-        "os": str(raw.get("Os") or ""),
-        "created": str(raw.get("Created") or ""),
-        "config_sha256": _canonical_sha256(config),
-        "rootfs_type": str(rootfs.get("Type") or ""),
-        "rootfs_layers": list(layers) if isinstance(layers, list) else layers,
-    }
-    return descriptor, _verify_content_descriptor(descriptor)
+    try:
+        return _canonical_image_content_descriptor(raw)
+    except DockerImageIdentityError as exc:
+        raise ImageInventoryError(str(exc)) from exc
 
 
 def _verify_content_descriptor(descriptor: Any) -> str:
-    fields = {
-        "architecture", "os", "created", "config_sha256", "rootfs_type",
-        "rootfs_layers",
-    }
-    if not isinstance(descriptor, dict) or set(descriptor) != fields:
-        raise ImageInventoryError("image content descriptor fields are invalid")
-    layers = descriptor["rootfs_layers"]
-    if (
-        not descriptor["architecture"]
-        or not descriptor["os"]
-        or not descriptor["created"]
-        or not CONTENT_HASH_RE.fullmatch(str(descriptor["config_sha256"]))
-        or descriptor["rootfs_type"] != "layers"
-        or not isinstance(layers, list)
-        or not layers
-        or any(not CONTENT_HASH_RE.fullmatch(str(layer)) for layer in layers)
-    ):
-        raise ImageInventoryError("image content descriptor is malformed")
-    return _canonical_sha256(descriptor)
+    try:
+        return _canonical_verify_content_descriptor(descriptor)
+    except DockerImageIdentityError as exc:
+        raise ImageInventoryError(str(exc)) from exc
 
 
 def _run(arguments: list[str], *, timeout: int = 60) -> str:
+    assert_retired(component="staging-image-inventory", operation="Docker image inspection")
     try:
         result = subprocess.run(
             arguments,
@@ -209,6 +189,7 @@ def collect_image_document(
     role_compose: Path,
     env_file: Path,
 ) -> dict[str, Any]:
+    assert_retired(component="staging-image-inventory", operation="image inventory collection")
     references = sorted(
         {
             value for value in _run(
@@ -254,6 +235,11 @@ def collect_image_document(
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        assert_retired(component="staging-image-inventory", operation="CLI")
+    except LegacyThreeSiteStagingRuntimeRetiredError:
+        print(json.dumps(blocked_payload(component="staging-image-inventory"), sort_keys=True))
+        return 2
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--role", choices=("bot-fi", "webapp-fi", "webapp-ir", "witness"), required=True)
     parser.add_argument("--canonical-compose", type=Path, required=True)

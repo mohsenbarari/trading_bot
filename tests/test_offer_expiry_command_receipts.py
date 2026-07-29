@@ -15,6 +15,7 @@ from core.services.offer_expiry_command_receipt_service import (
     OfferExpiryCommandReceiptIncomplete,
     OfferExpiryCommandReplayConflict,
     OfferExpiryReceiptOutcome,
+    acquire_offer_expiry_command_locks,
     finalize_offer_expiry_command_receipt,
     offer_expiry_side_effect_dedupe_key,
     prepare_offer_expiry_command_receipt,
@@ -118,6 +119,23 @@ class FakeReceiptDB:
 
 
 class OfferExpiryCommandReceiptServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_advisory_locks_use_typed_read_statements(self):
+        command_id = uuid4()
+        db = SimpleNamespace(execute=AsyncMock())
+
+        await acquire_offer_expiry_command_locks(
+            db,
+            command_id=command_id,
+            idempotency_key="stage11-lock-contract",
+        )
+
+        self.assertEqual(db.execute.await_count, 2)
+        for call in db.execute.await_args_list:
+            statement, params = call.args
+            self.assertIn("pg_advisory_xact_lock", str(statement))
+            self.assertIn("hashtextextended", str(statement))
+            self.assertIn("lock_key", params)
+
     async def test_prepare_creates_pending_receipt_and_finalize_is_atomic_shape(self):
         identity = build_offer_expiry_command_identity(**command_kwargs())
         db = FakeReceiptDB()

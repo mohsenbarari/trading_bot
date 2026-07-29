@@ -1,6 +1,24 @@
 #!/bin/bash
 set -euo pipefail
 
+# This was the direct implementation behind the retired two-site sync-recover
+# alias. Keep only local help so no caller can bypass the Makefile fence and
+# reach deploy-config parsing, curl, SSH, or a sync mutation.
+case "${1:-run}" in
+  -h|--help|help)
+    printf '%s\n' \
+      'Legacy two-site sync recovery is retired and hard-disabled.' \
+      'Use the dedicated three-site production-shadow campaign path.'
+    exit 0
+    ;;
+  *)
+    printf '%s\n' \
+      'Legacy two-site sync recovery is retired and hard-disabled before deployment configuration is read.' \
+      'Use the dedicated three-site production-shadow campaign path.' >&2
+    exit 2
+    ;;
+esac
+
 PROJECT_DIR="/root/trading-bot/trading_bot"
 DEPLOY_CONFIG_SCRIPT="$PROJECT_DIR/scripts/deploy_config.py"
 LOCAL_API_URL="${LOCAL_API_URL:-http://127.0.0.1:8000}"

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import hashlib
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -12,7 +13,12 @@ from unittest.mock import patch
 from scripts.collect_three_site_staging_migration_observation import (
     ObservationError,
     ROLE_SERVICES,
+    collect_routing,
     collect_role,
+    main,
+)
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
 )
 from scripts.verify_three_site_staging_image_inventory import _canonical_sha256
 
@@ -51,6 +57,14 @@ class _Response:
 
 
 class MigrationObservationCollectorTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._retirement_patch = patch(
+            "scripts.collect_three_site_staging_migration_observation.assert_retired",
+            return_value=None,
+        )
+        self._retirement_patch.start()
+        self.addCleanup(self._retirement_patch.stop)
+
     def _fixture(self):  # noqa: ANN202
         stack = tempfile.TemporaryDirectory()
         root = Path(stack.name)
@@ -136,7 +150,7 @@ class MigrationObservationCollectorTests(unittest.TestCase):
             env_file=env_file,
             image_inventory=image_inventory,
             routing_observation=routing,
-            expected_head="b986c7d8e0f1",
+            expected_head="c097d8e9f1a2",
         )
         return stack, args
 
@@ -144,9 +158,27 @@ class MigrationObservationCollectorTests(unittest.TestCase):
     def _runner(*, wrong_release: bool = False):
         def run(arguments, **_kwargs):
             joined = " ".join(arguments)
+            if "config" in arguments and "--format" in arguments:
+                return json.dumps(
+                    {
+                        "services": {
+                            service: {
+                                "image": (
+                                    "nginx:1.27-alpine"
+                                    if service.endswith("_tls")
+                                    else (
+                                        "trading_bot_three_site_staging:"
+                                        f"{RELEASE_SHA}"
+                                    )
+                                )
+                            }
+                            for service in ROLE_SERVICES["bot_fi"]
+                        }
+                    }
+                )
             if "psql" in arguments:
                 return json.dumps(
-                    {"database": "bot", "user": "bot", "revision": "b986c7d8e0f1"}
+                    {"database": "bot", "user": "bot", "revision": "c097d8e9f1a2"}
                 )
             if " ps -q " in f" {joined} ":
                 return "container-id"
@@ -158,6 +190,8 @@ class MigrationObservationCollectorTests(unittest.TestCase):
                 return "0"
             if "logs" in arguments:
                 return ""
+            if "urllib.request" in joined:
+                return '200\n{"bot_username":"staging_bot"}'
             if "settings.release_sha" in joined:
                 return "d" * 40 if wrong_release else RELEASE_SHA
             raise AssertionError(arguments)
@@ -191,7 +225,7 @@ class MigrationObservationCollectorTests(unittest.TestCase):
             all(
                 item["release_sha"] == RELEASE_SHA
                 for item in services
-                if not item["service"].endswith("_tls")
+                if not item["service"].endswith(("_tls", "_redis"))
             )
         )
 
@@ -216,6 +250,35 @@ class MigrationObservationCollectorTests(unittest.TestCase):
             ):
             with self.assertRaisesRegex(ObservationError, "wrong release"):
                 collect_role(args)
+
+
+class MigrationObservationCollectorRetirementTests(unittest.TestCase):
+    def test_collectors_and_cli_stop_before_docker_provider_or_path_access(self):
+        with (
+            patch(
+                "scripts.collect_three_site_staging_migration_observation.subprocess.run"
+            ) as run,
+            patch(
+                "scripts.collect_three_site_staging_migration_observation.inspect_or_switch"
+            ) as provider,
+            patch(
+                "scripts.collect_three_site_staging_migration_observation.urllib.request.urlopen"
+            ) as request,
+        ):
+            with self.assertRaises(LegacyThreeSiteStagingRuntimeRetiredError):
+                collect_role(argparse.Namespace())
+            with self.assertRaises(LegacyThreeSiteStagingRuntimeRetiredError):
+                collect_routing(argparse.Namespace())
+            stdout = io.StringIO()
+            with patch("sys.stdout", stdout):
+                self.assertEqual(main(["--forged-argument"]), 2)
+        run.assert_not_called()
+        provider.assert_not_called()
+        request.assert_not_called()
+        self.assertEqual(
+            json.loads(stdout.getvalue())["status"],
+            "blocked_legacy_three_site_staging_runtime_retired",
+        )
 
 
 if __name__ == "__main__":
