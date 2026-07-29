@@ -32,6 +32,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.secure_file_io import SecureFileError, read_secure_bytes  # noqa: E402
+from scripts.production_shadow_prepared_clone_errors import (  # noqa: E402
+    PreparedCloneInventoryError,
+)
 from scripts import orchestrate_production_shadow_finland_artifacts as FINLAND  # noqa: E402
 from scripts import orchestrate_production_shadow_restore_phase as RUNNER  # noqa: E402
 from scripts import produce_production_shadow_prepare_material as PREPARE  # noqa: E402
@@ -174,10 +177,6 @@ RELEASE_ARTIFACT_RELATIVE_PATHS = {
         "wa-ir-operation"
     ],
 }
-
-
-class PreparedCloneInventoryError(RuntimeError):
-    """A redacted, fail-closed collection error."""
 
 
 class PreparedCloneInventoryCancellation(BaseException):

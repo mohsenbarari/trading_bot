@@ -9,6 +9,7 @@ import unittest
 from unittest import mock
 
 from scripts import orchestrate_production_shadow_convergence_gate as MODULE
+from scripts.production_shadow_prepared_clone_errors import PreparedCloneInventoryError
 
 
 NOW = datetime(2026, 7, 28, 12, 0, tzinfo=timezone.utc)
@@ -252,6 +253,103 @@ class ConvergenceGateTests(unittest.TestCase):
                     journal_factory=lambda _path: journal,
                 )
         journal.begin_phase.assert_not_called()
+
+    def test_apply_with_injected_dependencies_does_not_import_prepared_runtime(self) -> None:
+        started = context(self.root / "started", started=True)
+        request = mock.Mock(path=self.root / "request.json", sha256="a" * 64)
+        source = mock.Mock(path=self.root / "source.json", sha256="b" * 64)
+        source.document = {"source_binding_sha256": "c" * 64}
+        source_set = mock.Mock()
+
+        class Journal:
+            def assert_bindings(self, **_kwargs):
+                return started.journal
+
+        original_import = __import__
+
+        def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if (
+                name == "scripts.orchestrate_production_shadow_prepared_clone_inventory"
+                or (
+                    name == "scripts"
+                    and "orchestrate_production_shadow_prepared_clone_inventory" in fromlist
+                )
+            ):
+                raise AssertionError("prepared runtime must remain lazy")
+            return original_import(name, globals, locals, fromlist, level)
+
+        with (
+            mock.patch.object(MODULE, "load_request", return_value=(started, request, source, source_set)),
+            mock.patch.object(MODULE, "_validate_context", return_value=({}, {})),
+            mock.patch.object(MODULE, "build_plan", return_value={"required_confirmation": "exact"}),
+            mock.patch("builtins.__import__", side_effect=guarded_import),
+        ):
+            with self.assertRaisesRegex(MODULE.ConvergenceGateError, "dependency is unavailable"):
+                MODULE.apply_phase(
+                    self.root / "request.json",
+                    confirm="exact",
+                    control_fd=0,
+                    liveness_factory=None,
+                    signal_authority_factory=lambda: None,
+                    journal_factory=lambda _path: Journal(),
+                )
+
+    def test_apply_normalizes_injected_prepared_clone_error_without_import(self) -> None:
+        started = context(self.root / "started", started=True)
+        request = mock.Mock(path=self.root / "request.json", sha256="a" * 64)
+        source = mock.Mock(path=self.root / "source.json", sha256="b" * 64)
+        source.document = {"source_binding_sha256": "c" * 64}
+        source_set = mock.Mock()
+
+        class Journal:
+            def assert_bindings(self, **_kwargs):
+                return started.journal
+
+        class SignalAuthority:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, _type, _value, _traceback):
+                return False
+
+        class BrokenLiveness:
+            def __enter__(self):
+                raise PreparedCloneInventoryError("boom")
+
+            def __exit__(self, _type, _value, _traceback):
+                return False
+
+        original_import = __import__
+
+        def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if (
+                name == "scripts.orchestrate_production_shadow_prepared_clone_inventory"
+                or (
+                    name == "scripts"
+                    and "orchestrate_production_shadow_prepared_clone_inventory" in fromlist
+                )
+            ):
+                raise AssertionError("prepared runtime must remain lazy")
+            return original_import(name, globals, locals, fromlist, level)
+
+        with (
+            mock.patch.object(MODULE, "load_request", return_value=(started, request, source, source_set)),
+            mock.patch.object(MODULE, "_validate_context", return_value=({}, {})),
+            mock.patch.object(MODULE, "build_plan", return_value={"required_confirmation": "exact"}),
+            mock.patch("builtins.__import__", side_effect=guarded_import),
+        ):
+            with self.assertRaisesRegex(
+                MODULE.ConvergenceGateError,
+                "convergence phase apply failed closed",
+            ):
+                MODULE.apply_phase(
+                    self.root / "request.json",
+                    confirm="exact",
+                    control_fd=0,
+                    liveness_factory=lambda _fd: BrokenLiveness(),
+                    signal_authority_factory=lambda: SignalAuthority(),
+                    journal_factory=lambda _path: Journal(),
+                )
 
     def test_missing_producer_source_set_fails_closed_without_live_tools(self) -> None:
         unavailable = MODULE.Reference(

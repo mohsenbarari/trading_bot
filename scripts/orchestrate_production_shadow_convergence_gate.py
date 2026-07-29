@@ -50,7 +50,9 @@ from core.writer_witness_contract import (  # noqa: E402
     validate_witness_lease_proof,
     witness_public_key_is_valid,
 )
-from scripts import orchestrate_production_shadow_prepared_clone_inventory as PREPARED  # noqa: E402
+from scripts.production_shadow_prepared_clone_errors import (  # noqa: E402
+    PreparedCloneInventoryError,
+)
 from scripts import production_shadow_cutover_controller as CONTROLLER  # noqa: E402
 from scripts import verify_production_shadow_phase_evidence as VERIFY  # noqa: E402
 
@@ -67,6 +69,8 @@ SOURCE_RECORD_SCHEMA = "production-shadow-convergence-gate-source-record-v1"
 REQUEST_SCHEMA = "production-shadow-convergence-gate-phase-request-v1"
 PUBLICATION_SCHEMA = "production-shadow-convergence-gate-publication-v1"
 RESULT_SCHEMA = "production-shadow-convergence-gate-result-v1"
+
+_DEFAULT_APPLY_DEPENDENCY = object()
 
 DATABASE_OBSERVATION_SCHEMA = "production-shadow-convergence-database-observation-v1"
 DR_OBSERVATION_SCHEMA = "production-shadow-convergence-dr-observation-v1"
@@ -2358,8 +2362,8 @@ def apply_phase(
     confirm: str,
     control_fd: int | None,
     now: datetime | None = None,
-    liveness_factory: Any = PREPARED.ControllerLiveness,
-    signal_authority_factory: Any = PREPARED._signal_authority,  # noqa: SLF001
+    liveness_factory: Any = _DEFAULT_APPLY_DEPENDENCY,
+    signal_authority_factory: Any = _DEFAULT_APPLY_DEPENDENCY,
     authorization_verifier: Any = _verify_runtime_authorization,
     journal_factory: Any = CONTROLLER.ProductionCutoverJournal,
     release_verifier: Any = CONTROLLER._run_release_phase_verifier,  # noqa: SLF001
@@ -2388,6 +2392,7 @@ def apply_phase(
             source_record=source_record,
             source_set=source_set,
         )
+
     _validate_context(live_context, required_position="started")
     plan = build_plan(
         context=live_context,
@@ -2400,6 +2405,21 @@ def apply_phase(
         raise ConvergenceGateError("convergence apply requires exact digest-bound confirmation")
     if type(control_fd) is not int or control_fd < 0:
         raise ConvergenceGateError("convergence apply requires controller liveness")
+
+    if (
+        liveness_factory is _DEFAULT_APPLY_DEPENDENCY
+        or signal_authority_factory is _DEFAULT_APPLY_DEPENDENCY
+    ):
+        # Source-set inspection and fully injected application paths must not
+        # load the prepared-clone runtime.  Resolve it only for a missing
+        # implementation default.
+        from scripts import orchestrate_production_shadow_prepared_clone_inventory as prepared
+
+        if liveness_factory is _DEFAULT_APPLY_DEPENDENCY:
+            liveness_factory = prepared.ControllerLiveness
+        if signal_authority_factory is _DEFAULT_APPLY_DEPENDENCY:
+            signal_authority_factory = prepared._signal_authority  # noqa: SLF001
+
     if not all(callable(item) for item in (
         liveness_factory,
         signal_authority_factory,
@@ -2499,7 +2519,7 @@ def apply_phase(
             liveness.check()
     except (
         CONTROLLER.CutoverContractError,
-        PREPARED.PreparedCloneInventoryError,
+        PreparedCloneInventoryError,
         VERIFY.PhaseEvidenceError,
         SecureFileError,
     ) as exc:
