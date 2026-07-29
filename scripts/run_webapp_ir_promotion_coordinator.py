@@ -31,6 +31,7 @@ CONFIG_KEYS = frozenset(
         "schema",
         "writer_agent_config",
         "restore_receipt",
+        "active_snapshot",
         "proof_directory",
         "listener_config",
         "listener_receipt",
@@ -52,6 +53,7 @@ CommandRunner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
 class CoordinatorConfig:
     writer_agent_config: Path
     restore_receipt: Path
+    active_snapshot: Path
     proof_directory: Path
     listener_config: Path
     listener_receipt: Path
@@ -206,6 +208,7 @@ def load_config(path: Path) -> CoordinatorConfig:
     config = CoordinatorConfig(
         writer_agent_config=_safe_path(payload["writer_agent_config"], label="writer_agent_config"),
         restore_receipt=_safe_path(payload["restore_receipt"], label="restore_receipt"),
+        active_snapshot=_safe_path(payload["active_snapshot"], label="active_snapshot"),
         proof_directory=_safe_path(payload["proof_directory"], label="proof_directory"),
         listener_config=_safe_path(payload["listener_config"], label="listener_config"),
         listener_receipt=_safe_path(payload["listener_receipt"], label="listener_receipt"),
@@ -216,6 +219,7 @@ def load_config(path: Path) -> CoordinatorConfig:
     for file_path, label in (
         (config.writer_agent_config, "writer agent config"),
         (config.restore_receipt, "snapshot restore receipt"),
+        (config.active_snapshot, "active snapshot pointer"),
         (config.listener_config, "listener config"),
         (config.route_token_file, "route token file"),
     ):
@@ -254,20 +258,51 @@ def _python() -> Path:
     return PYTHON
 
 
-def _run(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
+def _run_fixed(
+    command: Sequence[str],
+    *,
+    timeout_seconds: float | None,
+    capture_stderr: bool,
+) -> subprocess.CompletedProcess[str]:
     try:
+        options: dict[str, Any] = {
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.PIPE,
+            "text": True,
+            "check": False,
+            "env": {
+                "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "LANG": "C",
+                "TZ": "UTC",
+            },
+        }
+        if timeout_seconds is not None:
+            options["timeout"] = timeout_seconds
+        if capture_stderr:
+            options["stderr"] = subprocess.PIPE
         return subprocess.run(
             list(command),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=300,
-            check=False,
-            env={"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "TZ": "UTC"},
+            **options,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise PromotionCoordinatorError("cannot start fixed local promotion stage") from exc
+
+
+def _run(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
+    """Run a bounded local activation or route stage."""
+
+    return _run_fixed(command, timeout_seconds=300, capture_stderr=True)
+
+
+def _run_watch(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
+    """Wait for a safe promotion without killing its persistent watcher.
+
+    The writer agent emits wait diagnostics to stderr, which is deliberately
+    inherited by systemd here instead of accumulating in a pipe.  Its single
+    stdout JSON result is retained for the coordinator once promotion ends.
+    """
+
+    return _run_fixed(command, timeout_seconds=None, capture_stderr=False)
 
 
 def _last_json(result: subprocess.CompletedProcess[str], *, stage: str) -> dict[str, Any]:
@@ -300,11 +335,14 @@ def run_coordinator(
     config_path: Path,
     *,
     apply: bool,
-    command_runner: CommandRunner = _run,
+    command_runner: CommandRunner | None = None,
+    watch_command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     config = load_config(config_path)
     writer_agent, listener, router = _release_scripts()
     python = _python()
+    stage_runner = command_runner or _run
+    watch_runner = watch_command_runner or (_run_watch if command_runner is None else stage_runner)
     status: dict[str, Any] = {
         "schema": SCHEMA,
         "status": "planned",
@@ -315,7 +353,7 @@ def run_coordinator(
         return status
 
     promotion = _run_stage(
-        command_runner,
+        watch_runner,
         (
             str(python),
             str(writer_agent),
@@ -324,11 +362,12 @@ def run_coordinator(
             "promote-watch",
             "--restore-receipt",
             str(config.restore_receipt),
+            "--active-snapshot",
+            str(config.active_snapshot),
             "--proof-directory",
             str(config.proof_directory),
             "--poll-seconds",
             str(config.poll_seconds),
-            "--once",
         ),
         stage="promote-watch",
     )
@@ -337,7 +376,7 @@ def run_coordinator(
     status["stages"]["promote_watch"] = promotion
 
     listener_result = _run_stage(
-        command_runner,
+        stage_runner,
         (str(python), str(listener), "--config", str(config.listener_config), "--apply", "--json"),
         stage="listener activation",
     )
@@ -351,7 +390,7 @@ def run_coordinator(
     status["stages"]["listener_activation"] = listener_result
 
     route_result = _run_stage(
-        command_runner,
+        stage_runner,
         (
             str(python),
             str(router),

@@ -5,12 +5,13 @@
 # `promoted` profile, no service exposes a public port, and direct legacy sync
 # is disabled.  Stop `snapshot_db` from the snapshot manifest before starting
 # this manifest because both bind the selected candidate DB volume.
+# Do not add a Docker restart policy: only the fenced lease agent may start
+# this runtime after it has a live Writer Witness term.
 services:
   db:
     image: ${WA_IR_POSTGRES_IMAGE:?exact preloaded PostgreSQL image is required}
     pull_policy: never
     profiles: ["promoted"]
-    restart: unless-stopped
     environment:
       TZ: UTC
       PGTZ: UTC
@@ -44,7 +45,6 @@ services:
     image: ${WA_IR_REDIS_IMAGE:?exact preloaded Redis image is required}
     pull_policy: never
     profiles: ["promoted"]
-    restart: unless-stopped
     command:
       - redis-server
       - --appendonly
@@ -64,7 +64,6 @@ services:
     image: ${WA_IR_APP_IMAGE:?exact preloaded 2c08 app image is required}
     pull_policy: never
     profiles: ["promoted"]
-    restart: unless-stopped
     command: >-
       sh -ec 'exec uvicorn main:app --host 0.0.0.0 --port 8000
       --workers ${API_WORKERS:-4}'

@@ -63,6 +63,7 @@ def proof_for(now: datetime, *, age_seconds: int = 2) -> dict:
         "source_capture_completed_at": capture_at.isoformat(),
         "snapshot_published_at": capture_at.isoformat(),
         "snapshot_ready_at": now.isoformat(),
+        "snapshot_restore_verified_at": now.isoformat(),
         "snapshot_restore_receipt_sha256": "a" * 64,
         "snapshot_stage_receipt_sha256": "b" * 64,
         "lease_id": "lease-1",

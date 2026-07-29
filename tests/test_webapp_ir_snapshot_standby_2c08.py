@@ -43,6 +43,8 @@ class WebappIrSnapshotStandby2c08Tests(unittest.TestCase):
         self.assertEqual(text.count("pull_policy: never"), 3)
         self.assertIn("start_period: 5s", text)
         self.assertIn("interval: 3s", text)
+        self.assertIn("only the fenced lease agent may start", text)
+        self.assertNotIn("restart:", text)
 
     def test_release_and_schema_are_pinned_to_actual_production(self) -> None:
         text = ENV_EXAMPLE.read_text(encoding="utf-8")

@@ -1731,7 +1731,7 @@ def _activate_from_snapshot_locked(
         "site": config.site,
         "writer_epoch": proof["writer_epoch"],
         "lease_expires_at": proof["expires_at"],
-        "snapshot_age_seconds": snapshot.snapshot_age_seconds,
+        "snapshot_age_seconds": promotion_proof["snapshot_age_seconds"],
         "proof_sha256": promotion_proof["proof_sha256"],
     }
 

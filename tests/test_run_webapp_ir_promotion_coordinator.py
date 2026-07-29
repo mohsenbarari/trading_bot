@@ -13,6 +13,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/run_webapp_ir_promotion_coordinator.py"
+SYSTEMD_UNIT = ROOT / "deploy/systemd/trading-bot-production-writer-ir-promotion-watch.service"
 SPEC = importlib.util.spec_from_file_location("run_webapp_ir_promotion_coordinator", SCRIPT)
 assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
@@ -84,9 +85,10 @@ class WebappIrPromotionCoordinatorTests(unittest.TestCase):
 
         writer_config = secure / "writer.json"
         restore_receipt = state / "restore.json"
+        active_snapshot = state / "active-snapshot.json"
         listener_config = secure / "listener.env"
         token = secure / "route-token"
-        for path in (writer_config, restore_receipt, listener_config, token):
+        for path in (writer_config, restore_receipt, active_snapshot, listener_config, token):
             write_file(path, "fixture\n")
         listener_receipt = state / "listener.json"
         route_audit = audit / "route.jsonl"
@@ -95,6 +97,7 @@ class WebappIrPromotionCoordinatorTests(unittest.TestCase):
             "schema": MODULE.SCHEMA,
             "writer_agent_config": str(writer_config),
             "restore_receipt": str(restore_receipt),
+            "active_snapshot": str(active_snapshot),
             "proof_directory": str(proof_directory),
             "listener_config": str(listener_config),
             "listener_receipt": str(listener_receipt),
@@ -109,6 +112,7 @@ class WebappIrPromotionCoordinatorTests(unittest.TestCase):
             "scripts": scripts,
             "writer_config": writer_config,
             "restore_receipt": restore_receipt,
+            "active_snapshot": active_snapshot,
             "proof_directory": proof_directory,
             "listener_config": listener_config,
             "listener_receipt": listener_receipt,
@@ -142,11 +146,12 @@ class WebappIrPromotionCoordinatorTests(unittest.TestCase):
                     "promote-watch",
                     "--restore-receipt",
                     str(fixture["restore_receipt"]),
+                    "--active-snapshot",
+                    str(fixture["active_snapshot"]),
                     "--proof-directory",
                     str(fixture["proof_directory"]),
                     "--poll-seconds",
                     "2",
-                    "--once",
                 ),
                 (python, listener, "--config", str(fixture["listener_config"]), "--apply", "--json"),
                 (
@@ -167,6 +172,44 @@ class WebappIrPromotionCoordinatorTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertTrue(result["external_route_changed"])
         self.assertEqual(set(result["stages"]), {"promote_watch", "listener_activation", "route"})
+
+    def test_watch_stage_can_use_the_persistent_runner_without_affecting_followups(self) -> None:
+        fixture = self.make_fixture()
+        watch_runner = PromotionRunner(receipt=fixture["listener_receipt"])
+        stage_runner = PromotionRunner(receipt=fixture["listener_receipt"])
+
+        with mock.patch.object(MODULE, "RELEASE_ROOT", fixture["release"]):
+            result = MODULE.run_coordinator(
+                fixture["config"],
+                apply=True,
+                command_runner=stage_runner,
+                watch_command_runner=watch_runner,
+            )
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(len(watch_runner.calls), 1)
+        self.assertIn("production_writer_lease_agent.py", watch_runner.calls[0][1])
+        self.assertEqual(len(stage_runner.calls), 2)
+        self.assertIn("activate_webapp_ir_promoted_listener.py", stage_runner.calls[0][1])
+        self.assertIn("route_webapp_ir_from_promotion_proof.py", stage_runner.calls[1][1])
+
+    def test_persistent_watch_runner_has_no_local_timeout_or_stderr_pipe(self) -> None:
+        completed = subprocess.CompletedProcess(("fixed",), 0, "{}\n", None)
+        with mock.patch.object(MODULE.subprocess, "run", return_value=completed) as run:
+            MODULE._run_watch(("fixed",))
+
+        kwargs = run.call_args.kwargs
+        self.assertNotIn("timeout", kwargs)
+        self.assertNotIn("stderr", kwargs)
+
+    def test_systemd_uses_only_the_complete_coordinator_sequence(self) -> None:
+        unit = SYSTEMD_UNIT.read_text(encoding="utf-8")
+        self.assertIn("run_webapp_ir_promotion_coordinator.py", unit)
+        self.assertIn("--apply --json", unit)
+        self.assertIn("Requires=trading-bot-production-writer-lease-guard.service", unit)
+        self.assertNotIn("ExecStartPost=", unit)
+        self.assertNotIn("production_writer_lease_agent.py --config", unit)
+        self.assertNotIn("route_webapp_ir_from_promotion_proof.py", unit)
 
     def test_plan_runs_no_stage(self) -> None:
         fixture = self.make_fixture()

@@ -57,6 +57,7 @@ PROMOTION_PROOF_FIELDS = frozenset(
         "source_capture_completed_at",
         "snapshot_published_at",
         "snapshot_ready_at",
+        "snapshot_restore_verified_at",
         "snapshot_restore_receipt_sha256",
         "snapshot_stage_receipt_sha256",
         "lease_id",
@@ -287,10 +288,13 @@ def parse_restore_receipt(
         )
     ):
         raise SnapshotPromotionError("snapshot restore receipt is in the future")
-    staged_age = max(0, math.ceil((ready_at - source_db_snapshot_started_at).total_seconds()))
+    staged_age = max(
+        0,
+        math.ceil((restore_verified_at - source_db_snapshot_started_at).total_seconds()),
+    )
     if staged_age > MAX_STAGED_SNAPSHOT_AGE_SECONDS:
         raise SnapshotPromotionError(
-            "snapshot restore receipt was not staged within the 30 second standby bound"
+            "snapshot restore receipt was not fully restored and verified within the 30 second standby bound"
         )
     actual_age = max(0, math.ceil((current - source_db_snapshot_started_at).total_seconds()))
     if actual_age > MAX_PROMOTION_SNAPSHOT_AGE_SECONDS:
@@ -342,6 +346,24 @@ def build_promotion_proof(
     lease_expires_at = _timestamp(witness_proof.get("expires_at"), label="Witness proof expires_at")
     if lease_expires_at <= issued_at:
         raise SnapshotPromotionError("Witness proof lifetime is invalid")
+    if issued_at < snapshot.restore_verified_at:
+        raise SnapshotPromotionError("Witness proof predates verified snapshot restore")
+    staged_age = max(
+        0,
+        math.ceil((snapshot.restore_verified_at - snapshot.source_db_snapshot_started_at).total_seconds()),
+    )
+    if staged_age > MAX_STAGED_SNAPSHOT_AGE_SECONDS:
+        raise SnapshotPromotionError(
+            "verified snapshot restore exceeds the 30 second standby bound"
+        )
+    snapshot_age_at_issuance = max(
+        0,
+        math.ceil((issued_at - snapshot.source_db_snapshot_started_at).total_seconds()),
+    )
+    if snapshot_age_at_issuance > MAX_PROMOTION_SNAPSHOT_AGE_SECONDS:
+        raise SnapshotPromotionError(
+            "Witness proof exceeds the 150 second DB snapshot recovery window"
+        )
     proof = {
         "schema": PROMOTION_PROOF_SCHEMA,
         "action": action,
@@ -352,11 +374,12 @@ def build_promotion_proof(
         "source_generation": snapshot.source_generation,
         "release_sha": snapshot.release_sha,
         "alembic_revision": snapshot.alembic_revision,
-        "snapshot_age_seconds": snapshot.snapshot_age_seconds,
+        "snapshot_age_seconds": snapshot_age_at_issuance,
         "source_db_snapshot_started_at": snapshot.source_db_snapshot_started_at.isoformat(),
         "source_capture_completed_at": snapshot.source_capture_completed_at.isoformat(),
         "snapshot_published_at": snapshot.published_at.isoformat(),
         "snapshot_ready_at": snapshot.ready_at.isoformat(),
+        "snapshot_restore_verified_at": snapshot.restore_verified_at.isoformat(),
         "snapshot_restore_receipt_sha256": snapshot.receipt_sha256,
         "snapshot_stage_receipt_sha256": snapshot.stage_receipt_sha256,
         "lease_id": lease_id,
@@ -422,6 +445,10 @@ def validate_promotion_proof(
     snapshot_ready_at = _timestamp(
         payload.get("snapshot_ready_at"), label="promotion proof snapshot_ready_at"
     )
+    snapshot_restore_verified_at = _timestamp(
+        payload.get("snapshot_restore_verified_at"),
+        label="promotion proof snapshot_restore_verified_at",
+    )
     issued_at = _timestamp(payload.get("issued_at"), label="promotion proof issued_at")
     lease_expires_at = _timestamp(
         payload.get("lease_expires_at"), label="promotion proof lease_expires_at"
@@ -432,6 +459,8 @@ def validate_promotion_proof(
             <= source_capture_completed_at
             <= snapshot_published_at
             <= snapshot_ready_at
+            <= snapshot_restore_verified_at
+            <= issued_at
         )
         or lease_expires_at <= issued_at
     ):
@@ -451,11 +480,20 @@ def validate_promotion_proof(
     unsigned = {key: value for key, value in payload.items() if key != "proof_sha256"}
     if hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest() != payload["proof_sha256"]:
         raise SnapshotPromotionError("promotion proof hash is invalid")
-    staged_age = max(0, math.ceil((snapshot_ready_at - source_db_snapshot_started_at).total_seconds()))
+    staged_age = max(
+        0,
+        math.ceil((snapshot_restore_verified_at - source_db_snapshot_started_at).total_seconds()),
+    )
     if staged_age > MAX_STAGED_SNAPSHOT_AGE_SECONDS:
         raise SnapshotPromotionError(
-            "promotion proof was not staged within the 30 second standby bound"
+            "promotion proof was not fully restored and verified within the 30 second standby bound"
         )
+    snapshot_age_at_issuance = max(
+        0,
+        math.ceil((issued_at - source_db_snapshot_started_at).total_seconds()),
+    )
+    if payload["snapshot_age_seconds"] != snapshot_age_at_issuance:
+        raise SnapshotPromotionError("promotion proof snapshot age does not match issuance")
     if now is not None:
         current = now.astimezone(timezone.utc)
         if (
@@ -466,6 +504,7 @@ def validate_promotion_proof(
                     source_capture_completed_at,
                     snapshot_published_at,
                     snapshot_ready_at,
+                    snapshot_restore_verified_at,
                     issued_at,
                 )
             )

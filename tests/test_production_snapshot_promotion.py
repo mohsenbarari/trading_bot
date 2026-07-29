@@ -105,9 +105,9 @@ class SnapshotPromotionTests(unittest.TestCase):
             NOW - timedelta(seconds=MAX_PROMOTION_SNAPSHOT_AGE_SECONDS + 1)
         ).isoformat()
         payload["source_capture_completed_at"] = (NOW - timedelta(seconds=150)).isoformat()
-        payload["ready_at"] = (NOW - timedelta(seconds=121)).isoformat()
-        payload["restored_at"] = (NOW - timedelta(seconds=120)).isoformat()
-        payload["restore_verified_at"] = (NOW - timedelta(seconds=119)).isoformat()
+        payload["ready_at"] = (NOW - timedelta(seconds=123)).isoformat()
+        payload["restored_at"] = (NOW - timedelta(seconds=122)).isoformat()
+        payload["restore_verified_at"] = (NOW - timedelta(seconds=121)).isoformat()
         unsigned = {key: value for key, value in payload.items() if key != "receipt_sha256"}
         payload["receipt_sha256"] = hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
 
@@ -115,12 +115,12 @@ class SnapshotPromotionTests(unittest.TestCase):
             parse_restore_receipt(payload, action="promote_ir", now=NOW)
 
     def test_promotion_accepts_a_recently_staged_candidate_after_lease_handoff(self):
-        payload = restore_receipt(published_at=NOW - timedelta(seconds=60))
+        payload = restore_receipt(published_at=NOW - timedelta(seconds=63))
         payload["source_db_snapshot_started_at"] = (NOW - timedelta(seconds=90)).isoformat()
         payload["source_capture_completed_at"] = (NOW - timedelta(seconds=89)).isoformat()
-        payload["ready_at"] = (NOW - timedelta(seconds=60)).isoformat()
-        payload["restored_at"] = (NOW - timedelta(seconds=59)).isoformat()
-        payload["restore_verified_at"] = (NOW - timedelta(seconds=58)).isoformat()
+        payload["ready_at"] = (NOW - timedelta(seconds=62)).isoformat()
+        payload["restored_at"] = (NOW - timedelta(seconds=61)).isoformat()
+        payload["restore_verified_at"] = (NOW - timedelta(seconds=60)).isoformat()
         unsigned = {key: value for key, value in payload.items() if key != "receipt_sha256"}
         payload["receipt_sha256"] = hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
 
@@ -140,6 +140,19 @@ class SnapshotPromotionTests(unittest.TestCase):
             SnapshotPromotionError,
             f"{MAX_STAGED_SNAPSHOT_AGE_SECONDS} second standby bound",
         ):
+            parse_restore_receipt(payload, action="promote_ir", now=NOW)
+
+    def test_promotion_rejects_a_candidate_not_fully_restored_within_stage_bound(self):
+        payload = restore_receipt(published_at=NOW - timedelta(seconds=29))
+        payload["source_db_snapshot_started_at"] = (NOW - timedelta(seconds=31)).isoformat()
+        payload["source_capture_completed_at"] = (NOW - timedelta(seconds=30)).isoformat()
+        payload["ready_at"] = (NOW - timedelta(seconds=29)).isoformat()
+        payload["restored_at"] = (NOW - timedelta(seconds=1)).isoformat()
+        payload["restore_verified_at"] = NOW.isoformat()
+        unsigned = {key: value for key, value in payload.items() if key != "receipt_sha256"}
+        payload["receipt_sha256"] = hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
+
+        with self.assertRaisesRegex(SnapshotPromotionError, "fully restored and verified"):
             parse_restore_receipt(payload, action="promote_ir", now=NOW)
 
     def test_failback_requires_exact_final_ir_generation(self):
@@ -181,8 +194,8 @@ class SnapshotPromotionTests(unittest.TestCase):
             "holder_site": "webapp_ir",
             "writer_epoch": 8,
             "lease_id": "lease-8",
-            "issued_at": NOW.isoformat(),
-            "expires_at": (NOW + timedelta(seconds=180)).isoformat(),
+            "issued_at": (NOW + timedelta(seconds=2)).isoformat(),
+            "expires_at": (NOW + timedelta(seconds=182)).isoformat(),
         }
         proof = build_promotion_proof(
             action="promote_ir",
@@ -194,10 +207,11 @@ class SnapshotPromotionTests(unittest.TestCase):
         self.assertEqual(proof["schema"], PROMOTION_PROOF_SCHEMA)
         self.assertEqual(proof["target_site"], "webapp_ir")
         self.assertEqual(proof["epoch"], 8)
+        self.assertEqual(proof["snapshot_age_seconds"], 17)
         unsigned = {key: value for key, value in proof.items() if key != "proof_sha256"}
         self.assertEqual(proof["proof_sha256"], hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest())
         self.assertEqual(
-            validate_promotion_proof(proof, now=NOW)["lease_id"],
+            validate_promotion_proof(proof, now=NOW + timedelta(seconds=2))["lease_id"],
             "lease-8",
         )
 

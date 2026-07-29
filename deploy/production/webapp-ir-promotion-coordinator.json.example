@@ -2,6 +2,7 @@
   "schema": "gold-trade-wa-ir-promotion-coordinator-v1",
   "writer_agent_config": "/etc/trading-bot-three-site/production-writer-lease-agent.json",
   "restore_receipt": "/var/lib/trading-bot-three-site/snapshots/latest-restore-receipt.json",
+  "active_snapshot": "/srv/trading-bot-standby-data/state/active-snapshot.json",
   "proof_directory": "/var/lib/trading-bot-three-site/promotion-proofs",
   "listener_config": "/etc/trading-bot-three-site/webapp-ir-promoted-listener.env",
   "listener_receipt": "/var/lib/trading-bot-three-site/listener-receipts/webapp-ir-promoted.json",

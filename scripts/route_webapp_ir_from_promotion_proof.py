@@ -62,6 +62,8 @@ class PromotionRouteError(RuntimeError):
 
 
 RequestFn = Callable[[str, str, str, Mapping[str, Any] | None], dict[str, Any]]
+WallClock = Callable[[], datetime]
+MonotonicClock = Callable[[], float]
 
 
 def _require_root() -> None:
@@ -214,6 +216,8 @@ def route_from_latest_proof(
     apply: bool,
     request_fn: RequestFn = None,  # type: ignore[assignment]
     now: datetime | None = None,
+    wall_clock: WallClock | None = None,
+    monotonic_clock: MonotonicClock | None = None,
 ) -> dict[str, Any]:
     selected = select_latest_fresh_promotion_proof(proof_directory, now=now)
     if selected is None:
@@ -236,7 +240,9 @@ def route_from_latest_proof(
             apply=apply,
             bootstrap_proxy=False,
             proof=proof,
-            now=reference,
+            now=now,
+            wall_clock=wall_clock,
+            monotonic_clock=monotonic_clock,
             **kwargs,
         )
     except ThreeSiteRoutingError as exc:

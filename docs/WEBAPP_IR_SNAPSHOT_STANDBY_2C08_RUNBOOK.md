@@ -276,20 +276,22 @@ rendered-config hash; the external routing controller must require that fresh
 receipt before it changes a public origin.  The helper never copies a TLS key
 from another host and never makes a route change itself.
 
-## One-Shot Promotion Coordinator
+## Promotion Coordinator
 
 The long-running promotion watch must not be followed by a route command in an
-`ExecStartPost`: it does not exit while waiting.  Use the local one-shot
-coordinator when the systemd integration has selected an actual promotion
-event.  It runs only this serial sequence: `promote-watch --once`, the local
-listener gate, then the route bridge with the newly written listener receipt.
+`ExecStartPost`: it does not exit while waiting.  The single systemd promotion
+unit runs the local coordinator, which waits inside `promote-watch` until a
+safe promotion is possible, then runs only this serial sequence: the local
+listener gate and the route bridge with the newly written listener receipt.
 
 Create a root-only (`0600`) JSON copy of
 `deploy/production/webapp-ir-promotion-coordinator.json.example` outside Git.
 All referenced configs, receipts, proof directories, token files, and audit
-parents must already be root-only.  The coordinator has no configurable script
-paths, SSH, or Object Storage operation.  It uses only the three fixed scripts
-from the exact release directory.
+parents must already be root-only.  The config includes the canonical active
+snapshot pointer; the coordinator passes it to the writer watch so the selected
+candidate is bound again immediately before promotion.  It has no configurable
+script paths, SSH, or Object Storage operation, and uses only the three fixed
+scripts from the exact release directory.
 
 ```bash
 python3 scripts/run_webapp_ir_promotion_coordinator.py \

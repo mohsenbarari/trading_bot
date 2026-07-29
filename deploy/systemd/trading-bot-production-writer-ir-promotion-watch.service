@@ -1,5 +1,6 @@
 [Unit]
-Description=GoldTrade WebApp-IR automatic Writer Witness promotion watcher
+Description=GoldTrade WebApp-IR fenced promotion coordinator
+Requires=trading-bot-production-writer-lease-guard.service
 After=network-online.target docker.service trading-bot-production-writer-lease-guard.service
 Wants=network-online.target
 
@@ -7,9 +8,7 @@ Wants=network-online.target
 Type=simple
 User=root
 WorkingDirectory=/srv/trading-bot-three-site/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5
-ExecStart=/usr/bin/python3 /srv/trading-bot-three-site/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5/scripts/production_writer_lease_agent.py --config /etc/trading-bot-three-site/production-writer-lease-agent.json promote-watch --restore-receipt /var/lib/trading-bot-three-site/snapshots/latest-restore-receipt.json --active-snapshot /srv/trading-bot-standby-data/state/active-snapshot.json --proof-directory /var/lib/trading-bot-three-site/promotion-proofs --poll-seconds 2
-# Routing is intentionally absent here.  The promotion coordinator activates
-# and verifies the local listener receipt before it can invoke the route bridge.
+ExecStart=/usr/bin/python3 /srv/trading-bot-three-site/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5/scripts/run_webapp_ir_promotion_coordinator.py --config /etc/trading-bot-three-site/webapp-ir-promotion-coordinator.json --apply --json
 Restart=on-failure
 RestartSec=2s
 TimeoutStopSec=10s

@@ -23,6 +23,7 @@ import re
 import socket
 import stat
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -46,7 +47,18 @@ MAX_PROOF_AGE_SECONDS = 120
 # writer's Witness lease expiry and the local promoted-runtime health check.
 MAX_STAGED_SNAPSHOT_AGE_SECONDS = 30
 MAX_SNAPSHOT_AGE_SECONDS = 150
-MIN_ROUTE_LEASE_REMAINING_SECONDS = 5
+# WA-IR's local lease guard fences its runtime 15 seconds before expiry.  The
+# route bridge must reserve enough time for a bounded PUT and its mandatory
+# read-back before that fence can take effect.
+ROUTE_WITNESS_SAFETY_MARGIN_SECONDS = 15
+ROUTE_API_REQUEST_TIMEOUT_SECONDS = 3.0
+ROUTE_POST_MUTATION_READBACKS = 1
+ROUTE_DISPATCH_SKEW_SECONDS = 4
+MIN_ROUTE_LEASE_REMAINING_SECONDS = int(
+    ROUTE_WITNESS_SAFETY_MARGIN_SECONDS
+    + math.ceil(ROUTE_API_REQUEST_TIMEOUT_SECONDS) * (1 + ROUTE_POST_MUTATION_READBACKS)
+    + ROUTE_DISPATCH_SKEW_SECONDS
+)
 MAX_CLOCK_SKEW_SECONDS = 15
 MAX_SECRET_BYTES = 16 * 1024
 MAX_PROOF_BYTES = 64 * 1024
@@ -74,6 +86,7 @@ _BASE_PROOF_FIELDS = {
     "source_capture_completed_at",
     "snapshot_published_at",
     "snapshot_ready_at",
+    "snapshot_restore_verified_at",
     "snapshot_restore_receipt_sha256",
     "snapshot_stage_receipt_sha256",
     "witness_proof_sha256",
@@ -295,6 +308,9 @@ def verify_promotion_proof(
     )
     published_at = _parse_timestamp(proof.get("snapshot_published_at"), field="snapshot_published_at")
     ready_at = _parse_timestamp(proof.get("snapshot_ready_at"), field="snapshot_ready_at")
+    restore_verified_at = _parse_timestamp(
+        proof.get("snapshot_restore_verified_at"), field="snapshot_restore_verified_at"
+    )
     if issued_at > reference + timedelta(seconds=MAX_CLOCK_SKEW_SECONDS):
         raise ThreeSiteRoutingError("Witness promotion proof is issued in the future")
     if (reference - issued_at).total_seconds() > max_proof_age_seconds:
@@ -310,13 +326,14 @@ def verify_promotion_proof(
         <= source_capture_completed_at
         <= published_at
         <= ready_at
+        <= restore_verified_at
         <= issued_at
     ):
         raise ThreeSiteRoutingError("Witness promotion proof snapshot timing is inconsistent")
-    staged_snapshot_age = math.ceil((ready_at - source_db_snapshot_started_at).total_seconds())
+    staged_snapshot_age = math.ceil((restore_verified_at - source_db_snapshot_started_at).total_seconds())
     if staged_snapshot_age < 0 or staged_snapshot_age > MAX_STAGED_SNAPSHOT_AGE_SECONDS:
         raise ThreeSiteRoutingError(
-            "database snapshot was not staged within the allowed standby bound"
+            "database snapshot was not fully restored and verified within the allowed standby bound"
         )
     snapshot_age_at_issuance = math.ceil((issued_at - source_db_snapshot_started_at).total_seconds())
     if snapshot_age_at_issuance < 0 or snapshot_age_at_issuance != snapshot_age:
@@ -366,7 +383,7 @@ def api_request(
     token: str,
     payload: Mapping[str, Any] | None = None,
     *,
-    timeout: float = 20.0,
+    timeout: float = ROUTE_API_REQUEST_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     validate_api_url(url)
     headers = {
@@ -471,6 +488,29 @@ def build_update_payload(record: Mapping[str, Any], *, target_ip: str) -> dict[s
 
 
 RequestFn = Callable[[str, str, str, Mapping[str, Any] | None], dict[str, Any]]
+WallClock = Callable[[], datetime]
+MonotonicClock = Callable[[], float]
+
+
+def _utc_clock_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _live_lease_reference(
+    *,
+    initial_wall: datetime,
+    initial_monotonic: float,
+    wall_clock: WallClock,
+    monotonic_clock: MonotonicClock,
+) -> datetime:
+    """Return time that cannot move backward during a route decision."""
+
+    observed = wall_clock()
+    if observed.tzinfo is None:
+        raise ThreeSiteRoutingError("route clock lacks a timezone")
+    elapsed = max(0.0, monotonic_clock() - initial_monotonic)
+    monotonic_floor = initial_wall + timedelta(seconds=elapsed)
+    return max(observed.astimezone(timezone.utc), monotonic_floor)
 
 
 def _records_url() -> str:
@@ -487,17 +527,40 @@ def inspect_or_route(
     proof: Mapping[str, Any] | None,
     request_fn: RequestFn = api_request,
     now: datetime | None = None,
+    wall_clock: WallClock | None = None,
+    monotonic_clock: MonotonicClock | None = None,
 ) -> dict[str, Any]:
     """Inspect or change the single production origin after strict fencing."""
     if target_site not in SITE_ORIGINS:
         raise ThreeSiteRoutingError("target site is not allowed")
     if bootstrap_proxy and target_site != "webapp_fi":
         raise ThreeSiteRoutingError("proxy bootstrap may only retain WA-FI as origin")
+    if now is not None and now.tzinfo is None:
+        raise ThreeSiteRoutingError("route reference time lacks a timezone")
+    initial_wall = (now or _utc_clock_now()).astimezone(timezone.utc)
+    use_live_clock = now is None or wall_clock is not None or monotonic_clock is not None
+    effective_wall_clock = wall_clock or _utc_clock_now
+    effective_monotonic_clock = monotonic_clock or time.monotonic
+    initial_monotonic = effective_monotonic_clock()
+
+    def lease_reference() -> datetime:
+        if not use_live_clock:
+            # ``now`` remains a deterministic, frozen reference for existing
+            # offline validation callers.  Production omits it and always
+            # takes the live monotonic-protected path below.
+            return initial_wall
+        return _live_lease_reference(
+            initial_wall=initial_wall,
+            initial_monotonic=initial_monotonic,
+            wall_clock=effective_wall_clock,
+            monotonic_clock=effective_monotonic_clock,
+        )
+
     proof_summary: dict[str, Any] | None = None
     if apply and not bootstrap_proxy:
         if proof is None:
             raise ThreeSiteRoutingError("a Witness promotion proof is mandatory for a route switch")
-        proof_summary = verify_promotion_proof(proof, target_site=target_site, now=now)
+        proof_summary = verify_promotion_proof(proof, target_site=target_site, now=lease_reference())
     if apply and not expected_current_ip:
         raise ThreeSiteRoutingError("--expected-current-ip is mandatory with --apply")
 
@@ -537,6 +600,16 @@ def inspect_or_route(
     if not isinstance(record_id, str) or not record_id:
         raise ThreeSiteRoutingError("production record has no immutable id")
     update_url = f"{records_url}/{urllib.parse.quote(record_id, safe='')}"
+    if proof is not None and not bootstrap_proxy:
+        # The read-before-write request may have consumed most of the term.
+        # Recheck immediately adjacent to the only route mutation, using a
+        # monotonic floor so wall-clock rollback cannot extend authority.
+        proof_summary = verify_promotion_proof(
+            proof,
+            target_site=target_site,
+            now=lease_reference(),
+        )
+        result["proof"] = proof_summary
     request_fn("PUT", update_url, token, build_update_payload(current, target_ip=target_ip))
     verified = find_production_record(request_fn("GET", records_url, token, None))
     if record_origin_ip(verified) != target_ip or verified.get("cloud") is not True:

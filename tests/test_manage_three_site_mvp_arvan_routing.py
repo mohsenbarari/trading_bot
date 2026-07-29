@@ -56,6 +56,7 @@ def proof_for(
     target_site: str = "webapp_ir",
     now: datetime | None = None,
     snapshot_age_seconds: int = 2,
+    lease_seconds: int = 120,
 ) -> dict:
     reference = now or datetime.now(timezone.utc)
     source_site = "webapp_fi" if target_site == "webapp_ir" else "webapp_ir"
@@ -76,16 +77,33 @@ def proof_for(
         "source_db_snapshot_started_at": (reference - timedelta(seconds=snapshot_age_seconds)).isoformat(),
         "source_capture_completed_at": capture_time.isoformat(),
         "snapshot_ready_at": reference.isoformat(),
+        "snapshot_restore_verified_at": reference.isoformat(),
         "snapshot_restore_receipt_sha256": "a" * 64,
         "snapshot_stage_receipt_sha256": "b" * 64,
         "lease_id": "lease-1",
         "epoch": 1,
         "issued_at": reference.isoformat(),
-        "lease_expires_at": (reference + timedelta(seconds=120)).isoformat(),
+        "lease_expires_at": (reference + timedelta(seconds=lease_seconds)).isoformat(),
         "witness_proof_sha256": "c" * 64,
     }
     proof["proof_sha256"] = _sha256(_canonical_json_bytes(proof))
     return proof
+
+
+class MutableClock:
+    def __init__(self, initial: datetime) -> None:
+        self.current = initial
+        self.monotonic_seconds = 0.0
+
+    def wall(self) -> datetime:
+        return self.current
+
+    def monotonic(self) -> float:
+        return self.monotonic_seconds
+
+    def advance(self, seconds: float, *, wall_seconds: float | None = None) -> None:
+        self.monotonic_seconds += seconds
+        self.current += timedelta(seconds=seconds if wall_seconds is None else wall_seconds)
 
 
 class ThreeSiteMvpArvanRoutingTests(unittest.TestCase):
@@ -142,7 +160,19 @@ class ThreeSiteMvpArvanRoutingTests(unittest.TestCase):
         unsigned.pop("proof_sha256")
         proof["proof_sha256"] = _sha256(_canonical_json_bytes(unsigned))
 
-        with self.assertRaisesRegex(ThreeSiteRoutingError, "staged within"):
+        with self.assertRaisesRegex(ThreeSiteRoutingError, "fully restored and verified"):
+            verify_promotion_proof(proof, target_site="webapp_ir", now=now)
+
+    def test_verify_proof_rejects_a_candidate_not_fully_restored_within_stage_bound(self) -> None:
+        now = datetime(2026, 7, 29, tzinfo=timezone.utc)
+        proof = proof_for(now=now, snapshot_age_seconds=31)
+        proof["snapshot_ready_at"] = (now - timedelta(seconds=30)).isoformat()
+        proof["snapshot_restore_verified_at"] = now.isoformat()
+        unsigned = dict(proof)
+        unsigned.pop("proof_sha256")
+        proof["proof_sha256"] = _sha256(_canonical_json_bytes(unsigned))
+
+        with self.assertRaisesRegex(ThreeSiteRoutingError, "fully restored and verified"):
             verify_promotion_proof(proof, target_site="webapp_ir", now=now)
 
     def test_verify_proof_rejects_a_term_that_cannot_survive_the_route_change(self) -> None:
@@ -192,6 +222,61 @@ class ThreeSiteMvpArvanRoutingTests(unittest.TestCase):
         self.assertEqual([method for method, _, _ in fake.calls], ["GET", "PUT", "GET"])
         self.assertEqual(fake.current["value"][0]["ip"], SITE_ORIGINS["webapp_ir"])
         self.assertTrue(fake.current["cloud"])
+
+    def test_route_rechecks_live_lease_after_get_before_put(self) -> None:
+        now = datetime(2026, 7, 29, tzinfo=timezone.utc)
+        clock = MutableClock(now)
+        fake = FakeApi(current_ip=SITE_ORIGINS["webapp_fi"])
+
+        def delayed_get(method: str, url: str, token: str, payload: dict | None) -> dict:
+            response = fake(method, url, token, payload)
+            if method == "GET" and len(fake.calls) == 1:
+                clock.advance(1)
+            return response
+
+        with self.assertRaisesRegex(ThreeSiteRoutingError, "too close to expiry"):
+            inspect_or_route(
+                target_site="webapp_ir",
+                token="secret",
+                expected_current_ip=SITE_ORIGINS["webapp_fi"],
+                apply=True,
+                bootstrap_proxy=False,
+                proof=proof_for(now=now, lease_seconds=26),
+                request_fn=delayed_get,
+                now=now,
+                wall_clock=clock.wall,
+                monotonic_clock=clock.monotonic,
+            )
+
+        self.assertEqual([method for method, _, _ in fake.calls], ["GET"])
+        self.assertEqual(fake.current["value"][0]["ip"], SITE_ORIGINS["webapp_fi"])
+
+    def test_route_uses_monotonic_elapsed_time_when_wall_clock_moves_backward(self) -> None:
+        now = datetime(2026, 7, 29, tzinfo=timezone.utc)
+        clock = MutableClock(now)
+        fake = FakeApi(current_ip=SITE_ORIGINS["webapp_fi"])
+
+        def delayed_get(method: str, url: str, token: str, payload: dict | None) -> dict:
+            response = fake(method, url, token, payload)
+            if method == "GET" and len(fake.calls) == 1:
+                clock.advance(2, wall_seconds=-60)
+            return response
+
+        with self.assertRaisesRegex(ThreeSiteRoutingError, "too close to expiry"):
+            inspect_or_route(
+                target_site="webapp_ir",
+                token="secret",
+                expected_current_ip=SITE_ORIGINS["webapp_fi"],
+                apply=True,
+                bootstrap_proxy=False,
+                proof=proof_for(now=now, lease_seconds=26),
+                request_fn=delayed_get,
+                now=now,
+                wall_clock=clock.wall,
+                monotonic_clock=clock.monotonic,
+            )
+
+        self.assertEqual([method for method, _, _ in fake.calls], ["GET"])
 
     def test_proxy_bootstrap_can_only_keep_existing_fi_origin(self) -> None:
         fake = FakeApi(current_ip=SITE_ORIGINS["webapp_fi"], cloud=False)
