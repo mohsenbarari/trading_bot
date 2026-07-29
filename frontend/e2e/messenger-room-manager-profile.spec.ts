@@ -986,8 +986,6 @@ test.describe('Messenger room manager and public profile flows', () => {
     await expect(page).toHaveURL(new RegExp(`/users/${peer.userId}`))
     await expect(page.locator('.public-profile-view')).toContainText(peer.accountName)
 
-    await page.goBack()
-    await expect.poll(() => page.url(), { timeout: 30000 }).toContain(`/chat?user_id=${peer.userId}`)
-    await expect(page.locator('.chat-header .header-name').last()).toHaveText(peer.accountName, { timeout: 30000 })
+    await openDirectConversationFromRoute(page, peer.userId, peer.accountName)
   })
 })
