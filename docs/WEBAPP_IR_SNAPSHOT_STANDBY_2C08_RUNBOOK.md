@@ -227,3 +227,37 @@ Only the independent promotion controller may replace this fenced listener
 with the loopback-only `18000` promotion runtime after source fencing. For a
 rollback, return this 503 listener first, preserve the candidate volumes, and
 make no `current` or Object Storage deletion.
+
+## Promoted Listener Activation Gate
+
+The local promoted listener is a separate host-side gate.  It must complete
+after the promoted application has passed its local health check and before
+any public route change is attempted.  It has no Arvan, DNS, Object Storage,
+SSH, or cross-host capability.
+
+Create a root-only copy of
+`deploy/production/webapp-ir-promoted-listener-2c08.env.example` outside Git.
+The local TLS directory, certificate, and key must be owned by `root`, private
+(`0700` for the directory and `0600` for both files), and generated locally on
+WA-IR.  The immutable release root must end in the exact `2c08` release SHA,
+and the configured Nginx enabled symlink must already target the dark-listener
+site that will be replaced.  The receipt directory must already exist as
+root-only `0700`.
+
+Run the gate locally on WA-IR as root:
+
+```bash
+python3 scripts/activate_webapp_ir_promoted_listener.py \
+  --config /etc/trading-bot-three-site/webapp-ir-promoted-listener.env \
+  --apply --json
+```
+
+The helper renders only
+`nginx-webapp-ir-promoted-2c08-https.conf.template`, verifies the fixed
+`127.0.0.1:18000` API backend and direct-sync fence, atomically replaces only
+the existing enabled site, runs `nginx -t`, and then runs `nginx -s reload`.
+Any validation or reload failure restores the previous site bytes and emits no
+receipt.  A successful receipt is root-only and records the exact release and
+rendered-config hash; the external routing controller must require that fresh
+receipt before it changes a public origin.  The helper never copies a TLS key
+from another host and never makes a route change itself.
