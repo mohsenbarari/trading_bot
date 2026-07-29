@@ -169,7 +169,6 @@ jobs:
           SYNC_DATABASE_URL=postgresql+psycopg2://admin:strongpassword@db:5432/trading_bot_db
           REDIS_URL=redis://redis:6379/0
           FRONTEND_URL=http://127.0.0.1:4173
-          PUBLIC_WEBAPP_URL=http://127.0.0.1:4173
           DEV_API_KEY=REDACTED_DEV_API_KEY
           JWT_SECRET_KEY=ci_jwt_secret_key_please_override_in_real_envs
           EOF
@@ -262,6 +261,8 @@ jobs:
           SYNC_DATABASE_URL=postgresql+psycopg2://admin:strongpassword@db:5432/trading_bot_db
           REDIS_URL=redis://redis:6379/0
           FRONTEND_URL=http://127.0.0.1:4173
+          IRAN_SERVER_DOMAIN=127.0.0.1
+          PUBLIC_WEBAPP_URL=https://127.0.0.1:4173
           DEV_API_KEY=REDACTED_DEV_API_KEY
           JWT_SECRET_KEY=ci_jwt_secret_key_please_override_in_real_envs
           EOF

@@ -35,7 +35,13 @@ class MarketPostgresCiWorkflowTests(unittest.TestCase):
             self.assertIn('echo "POSTGRES_IMAGE=$image" >> "$GITHUB_ENV"', workflow, path.name)
             self.assertIn("E2E_TARGET_ENV: local", workflow, path.name)
             self.assertIn("E2E_ALLOW_LOCAL_MUTATION: local-dev-only", workflow, path.name)
-            self.assertIn("PUBLIC_WEBAPP_URL=http://127.0.0.1:4173", workflow, path.name)
+            self.assertIn("IRAN_SERVER_DOMAIN=127.0.0.1", workflow, path.name)
+            self.assertIn("PUBLIC_WEBAPP_URL=https://127.0.0.1:4173", workflow, path.name)
+            self.assertEqual(
+                workflow.count("PUBLIC_WEBAPP_URL=https://127.0.0.1:4173"),
+                1,
+                path.name,
+            )
             self.assertNotIn("image: postgres:15-alpine", workflow, path.name)
 
     def test_market_postgres_gate_cleans_up_its_disposable_container(self) -> None:
