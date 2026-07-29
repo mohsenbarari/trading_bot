@@ -270,6 +270,14 @@ class SourceSet:
 
 
 @dataclass(frozen=True)
+class ValidatedSourceMembers:
+    role_validation: Mapping[str, SecureRecord]
+    observations: Mapping[str, SecureRecord]
+    observed_at: Mapping[str, datetime]
+    captured_at: datetime
+
+
+@dataclass(frozen=True)
 class PreparedSourceRecord:
     context: EvidenceContext
     source_set: SourceSet
@@ -1270,14 +1278,11 @@ def _validate_source_times(
     return max(values)
 
 
-def _validate_source_set(
+def _validate_source_member_layout(
     context: EvidenceContext,
-    reference: Reference,
     *,
-    now: datetime,
     require_fresh: bool,
-    expected_phase_started_at: str | None = None,
-) -> SourceSet:
+) -> None:
     _validate_context(context, required_position="started" if require_fresh else "any")
     _required_source_directory(_phase_root(context.manifest), label="convergence gate root")
     _required_source_directory(_source_input_root(context.manifest), label="convergence observation-input root")
@@ -1293,6 +1298,138 @@ def _validate_source_set(
             incoming_root / label,
             label=f"convergence incoming {label} root",
         )
+
+
+def _validate_source_members(
+    context: EvidenceContext,
+    *,
+    role_validation: Mapping[str, Reference],
+    observations: Mapping[str, Reference],
+    phase_started_at: datetime,
+    now: datetime,
+    require_fresh: bool,
+    _layout_checked: bool = False,
+) -> ValidatedSourceMembers:
+    """Validate the immutable role and observation closure shared by publisher and gate."""
+    if not _layout_checked:
+        _validate_source_member_layout(context, require_fresh=require_fresh)
+    if set(role_validation) != set(ROLES) or set(observations) != set(SOURCE_LABELS):
+        raise ConvergenceGateError("convergence source-set members differ")
+
+    role_records: dict[str, SecureRecord] = {}
+    observation_records: dict[str, SecureRecord] = {}
+    all_records: dict[str, SecureRecord] = {}
+    for role in ROLES:
+        reference_role = role_validation[role]
+        if reference_role.path != _canonical_role_validation_path(
+            context.manifest,
+            role=role,
+            digest=reference_role.sha256,
+        ):
+            raise ConvergenceGateError(f"source-set role {role} path is not canonical")
+        role_record = _read_secure_record(reference_role, label=f"source-set role {role}")
+        role_records[role] = role_record
+        all_records[f"role:{role}"] = role_record
+    for label in SOURCE_LABELS:
+        reference_observation = observations[label]
+        if reference_observation.path != _canonical_observation_path(
+            context.manifest,
+            label=label,
+            digest=reference_observation.sha256,
+        ):
+            raise ConvergenceGateError(f"source-set {label} path is not canonical")
+        observation_record = _read_secure_record(
+            reference_observation,
+            label=f"source-set {label}",
+        )
+        observation_records[label] = observation_record
+        all_records[f"observation:{label}"] = observation_record
+    identities = {(item.identity.device, item.identity.inode) for item in all_records.values()}
+    if len(identities) != len(all_records):
+        raise ConvergenceGateError("convergence source artifacts share a file identity")
+    # Use the release verifier's role-validation contract rather than a local
+    # duplicate. These records remain input evidence; this bridge never
+    # manufactures a host validation statement.
+    try:
+        role_requests, role_sources, role_times = VERIFY._read_role_validation_records(
+            [f"{role}={role_validation[role].path}" for role in ROLES],
+            phase=PHASE,
+            manifest=context.manifest,
+            manifest_sha256=context.manifest_sha256,
+            now=now,
+        )
+    except VERIFY.PhaseEvidenceError as exc:
+        raise ConvergenceGateError("production convergence role validations are invalid") from exc
+    if (
+        set(role_requests) != set(ROLES)
+        or set(role_times) != set(ROLES)
+        or role_sources
+        != {role: role_validation[role].sha256 for role in ROLES}
+    ):
+        raise ConvergenceGateError("production convergence role validation closure differs")
+    observation_times = {
+        "database_parity": _validate_database_observation(
+            observation_records["database_parity"].document,
+            context=context,
+        ),
+        "dr_convergence": _validate_dr_observation(
+            observation_records["dr_convergence"].document,
+            context=context,
+        ),
+        "blob_roundtrip": _validate_blob_observation(
+            observation_records["blob_roundtrip"].document,
+            context=context,
+        ),
+        "queue_state": _validate_queue_observation(
+            observation_records["queue_state"].document,
+            context=context,
+        ),
+        "dr_tls": _validate_tls_observation(
+            observation_records["dr_tls"].document,
+            context=context,
+        ),
+        "destination_firewall": _validate_firewall_observation(
+            observation_records["destination_firewall"].document,
+            context=context,
+        ),
+        "witness_live": _validate_witness_observation(
+            observation_records["witness_live"].document,
+            context=context,
+            now=now,
+            require_fresh=require_fresh,
+        ),
+    }
+    observed = {
+        **{
+            f"role:{role}": _timestamp(role_times[role], label=f"role {role} observation")
+            for role in ROLES
+        },
+        **{f"observation:{label}": value for label, value in observation_times.items()},
+    }
+    captured_at = _validate_source_times(
+        observed,
+        phase_started_at=phase_started_at,
+        now=now,
+        require_fresh=require_fresh,
+    )
+    _assert_records_unchanged(all_records)
+    return ValidatedSourceMembers(
+        role_validation=role_records,
+        observations=observation_records,
+        observed_at=observed,
+        captured_at=captured_at,
+    )
+
+
+def _validate_source_set(
+    context: EvidenceContext,
+    reference: Reference,
+    *,
+    now: datetime,
+    require_fresh: bool,
+    expected_phase_started_at: str | None = None,
+) -> SourceSet:
+    _validate_source_member_layout(context, require_fresh=require_fresh)
     expected_path = _canonical_source_set_path(context.manifest, reference.sha256)
     if reference.path != expected_path:
         raise ConvergenceGateError("convergence source-set path is not canonical")
@@ -1336,81 +1473,33 @@ def _validate_source_set(
         observations=observations,
     ):
         raise ConvergenceGateError("production convergence source-set closure differs")
-    role_records: dict[str, SecureRecord] = {}
-    observation_records: dict[str, SecureRecord] = {}
-    all_records: dict[str, SecureRecord] = {"source-set": record}
-    for role in ROLES:
-        reference_role = roles[role]
-        if reference_role.path != _canonical_role_validation_path(
-            context.manifest,
-            role=role,
-            digest=reference_role.sha256,
-        ):
-            raise ConvergenceGateError(f"source-set role {role} path is not canonical")
-        role_record = _read_secure_record(reference_role, label=f"source-set role {role}")
-        role_records[role] = role_record
-        all_records[f"role:{role}"] = role_record
-    for label in SOURCE_LABELS:
-        ref = observations[label]
-        if ref.path != _canonical_observation_path(
-            context.manifest,
-            label=label,
-            digest=ref.sha256,
-        ):
-            raise ConvergenceGateError(f"source-set {label} path is not canonical")
-        observation_record = _read_secure_record(ref, label=f"source-set {label}")
-        observation_records[label] = observation_record
-        all_records[f"observation:{label}"] = observation_record
-    identities = {(item.identity.device, item.identity.inode) for item in all_records.values()}
-    if len(identities) != len(all_records):
-        raise ConvergenceGateError("convergence source artifacts share a file identity")
-    # Use the release verifier's role-validation contract rather than a local
-    # duplicate.  These records remain input evidence; this bridge never
-    # manufactures a host validation statement.
-    try:
-        role_requests, _role_sources, role_times = VERIFY._read_role_validation_records(  # noqa: SLF001
-            [f"{role}={roles[role].path}" for role in ROLES],
-            phase=PHASE,
-            manifest=context.manifest,
-            manifest_sha256=context.manifest_sha256,
-            now=now,
-        )
-    except VERIFY.PhaseEvidenceError as exc:
-        raise ConvergenceGateError("production convergence role validations are invalid") from exc
-    if set(role_requests) != set(ROLES) or set(role_times) != set(ROLES):
-        raise ConvergenceGateError("production convergence role validation closure differs")
-    observation_times = {
-        "database_parity": _validate_database_observation(observation_records["database_parity"].document, context=context),
-        "dr_convergence": _validate_dr_observation(observation_records["dr_convergence"].document, context=context),
-        "blob_roundtrip": _validate_blob_observation(observation_records["blob_roundtrip"].document, context=context),
-        "queue_state": _validate_queue_observation(observation_records["queue_state"].document, context=context),
-        "dr_tls": _validate_tls_observation(observation_records["dr_tls"].document, context=context),
-        "destination_firewall": _validate_firewall_observation(observation_records["destination_firewall"].document, context=context),
-        "witness_live": _validate_witness_observation(
-            observation_records["witness_live"].document,
-            context=context,
-            now=now,
-            require_fresh=require_fresh,
-        ),
-    }
-    observed = {
-        **{f"role:{role}": _timestamp(role_times[role], label=f"role {role} observation") for role in ROLES},
-        **{f"observation:{label}": value for label, value in observation_times.items()},
-    }
-    captured_at = _validate_source_times(
-        observed,
+    members = _validate_source_members(
+        context,
+        role_validation=roles,
+        observations=observations,
         phase_started_at=phase_started_at,
         now=now,
         require_fresh=require_fresh,
+        _layout_checked=True,
     )
-    _assert_records_unchanged(all_records)
+    member_records = {
+        **{f"role:{role}": members.role_validation[role] for role in ROLES},
+        **{
+            f"observation:{label}": members.observations[label]
+            for label in SOURCE_LABELS
+        },
+    }
+    identities = {(item.identity.device, item.identity.inode) for item in member_records.values()}
+    if (record.identity.device, record.identity.inode) in identities:
+        raise ConvergenceGateError("convergence source artifacts share a file identity")
+    _assert_records_unchanged({"source-set": record, **member_records})
     return SourceSet(
         reference=reference,
         record=record,
-        role_validation=role_records,
-        observations=observation_records,
-        observed_at=observed,
-        captured_at=captured_at,
+        role_validation=members.role_validation,
+        observations=members.observations,
+        observed_at=members.observed_at,
+        captured_at=members.captured_at,
     )
 
 

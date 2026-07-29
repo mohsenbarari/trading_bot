@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import base64
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import hashlib
+import io
 import json
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 import unittest
 from unittest import mock
@@ -74,6 +77,13 @@ def remote_policy_material(role: str) -> tuple[bytes, dict[str, str]]:
 
 def context() -> SimpleNamespace:
     return SimpleNamespace(
+        manifest_path=Path("/tmp/convergence-manifest.json"),
+        approval_path=Path("/tmp/convergence-approval.json"),
+        approval_policy_path=Path("/tmp/convergence-approval-policy.json"),
+        prior_paths={
+            phase: Path(f"/tmp/{phase}-evidence.json")
+            for phase in MODULE.BRIDGE.PRIOR_PHASES
+        },
         manifest={
             "campaign_id": CAMPAIGN_ID,
             "operation_id": OPERATION_ID,
@@ -402,6 +412,75 @@ def ingress_with_host_identity_proof(role: str) -> MODULE.Ingress:
 
 
 class ProductionShadowConvergenceSourceSetProducerTests(unittest.TestCase):
+    def controller_context_arguments(self) -> list[str]:
+        arguments = [
+            "--manifest",
+            "/tmp/convergence-manifest.json",
+            "--approval",
+            "/tmp/convergence-approval.json",
+            "--approval-policy",
+            "/tmp/convergence-approval-policy.json",
+        ]
+        for phase in MODULE.BRIDGE.PRIOR_PHASES:
+            arguments.extend(
+                ["--prior-evidence", f"{phase}=/tmp/{phase}-evidence.json"]
+            )
+        return arguments
+
+    def ready_source_set_cli_mappings(self) -> list[str]:
+        role_digests, observation_digests = self.ready_source_set_inputs()
+        arguments: list[str] = []
+        for role in MODULE.ROLES:
+            arguments.extend(["--role-validation", f"{role}={role_digests[role]}"])
+        for label in MODULE.BRIDGE.SOURCE_LABELS:
+            arguments.extend(["--observation", f"{label}={observation_digests[label]}"])
+        return arguments
+
+    def invoke_main(self, arguments: list[str]) -> tuple[int, str, str]:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            status = MODULE.main(arguments)
+        return status, stdout.getvalue(), stderr.getvalue()
+
+    def ready_source_set_inputs(self) -> tuple[dict[str, str], dict[str, str]]:
+        return (
+            {role: "a" * 64 for role in MODULE.ROLES},
+            {label: "b" * 64 for label in MODULE.BRIDGE.SOURCE_LABELS},
+        )
+
+    def prepared_ready_source_set(self) -> MODULE.PreparedReadySourceSet:
+        role_digests, observation_digests = self.ready_source_set_inputs()
+        ctx = context()
+        role_validation = MODULE._ready_role_validation_references(
+            ctx,
+            digests=role_digests,
+        )
+        observations = MODULE._ready_observation_references(
+            ctx,
+            digests=observation_digests,
+        )
+        document = MODULE._ready_source_set_document(
+            ctx,
+            role_validation=role_validation,
+            observations=observations,
+        )
+        payload = MODULE._canonical_json(document) + b"\n"
+        digest = MODULE._sha256(payload)
+        return MODULE.PreparedReadySourceSet(
+            context=ctx,
+            role_validation=role_validation,
+            observations=observations,
+            document=document,
+            payload=payload,
+            sha256=digest,
+            output=MODULE.BRIDGE._canonical_source_set_path(ctx.manifest, digest),
+            required_confirmation=(
+                f"publish-{MODULE.PHASE}-ready-source-set:"
+                f"{ctx.manifest['operation_id']}:{ctx.manifest['release_sha']}:{digest}"
+            ),
+        )
+
     def validate_receipt(self, document: dict[str, object], *, role: str) -> None:
         MODULE._validate_receipt(
             document,
@@ -480,6 +559,172 @@ class ProductionShadowConvergenceSourceSetProducerTests(unittest.TestCase):
             plan["object_storage_private_versioned_age_roles"],
             ["webapp_ir", "witness"],
         )
+
+    def test_plan_cli_rejects_every_ready_source_set_publication_flag(self) -> None:
+        forbidden_arguments = (
+            ["--role-validation", "bot_fi=" + "a" * 64],
+            ["--observation", "database_parity=" + "a" * 64],
+            ["--apply"],
+            ["--confirm", "caller-selected-confirmation"],
+        )
+
+        for arguments in forbidden_arguments:
+            with self.subTest(arguments=arguments):
+                with mock.patch.object(MODULE, "build_plan") as build_plan:
+                    status, stdout, stderr = self.invoke_main(["plan", *arguments])
+
+                self.assertEqual(status, 1)
+                self.assertEqual(stdout, "")
+                blocked = json.loads(stderr)
+                self.assertEqual(blocked["status"], "blocked")
+                self.assertIn(
+                    "plan does not accept ready source-set publication arguments",
+                    blocked["error"],
+                )
+                build_plan.assert_not_called()
+
+    def test_ready_source_set_cli_rejects_confirmation_apply_misuse_before_prepare(self) -> None:
+        modes = (
+            (["--confirm", "caller-selected-confirmation"], "confirmation requires --apply"),
+            (["--apply"], "--apply requires --confirm"),
+        )
+        for action_arguments, expected_error in modes:
+            with self.subTest(action_arguments=action_arguments):
+                with (
+                    mock.patch.object(
+                        MODULE.BRIDGE,
+                        "load_evidence_context",
+                        return_value=context(),
+                    ),
+                    mock.patch.object(MODULE, "prepare_ready_source_set") as prepare,
+                    mock.patch.object(MODULE, "publish_ready_source_set") as publish,
+                ):
+                    status, stdout, stderr = self.invoke_main(
+                        [
+                            "ready-source-set",
+                            *self.controller_context_arguments(),
+                            *action_arguments,
+                        ]
+                    )
+
+                self.assertEqual(status, 1)
+                self.assertEqual(stdout, "")
+                blocked = json.loads(stderr)
+                self.assertEqual(blocked["status"], "blocked")
+                self.assertIn(expected_error, blocked["error"])
+                prepare.assert_not_called()
+                publish.assert_not_called()
+
+    def test_ready_source_set_cli_rejects_incomplete_member_mappings_before_prepare(self) -> None:
+        role_digests, observation_digests = self.ready_source_set_inputs()
+        incomplete_cases = (
+            (
+                ["--role-validation", "bot_fi=" + role_digests["bot_fi"]],
+                "role validation mapping must cover exactly four roles",
+            ),
+            (
+                [
+                    *[
+                        item
+                        for role in MODULE.ROLES
+                        for item in (
+                            "--role-validation",
+                            f"{role}={role_digests[role]}",
+                        )
+                    ],
+                    "--observation",
+                    "database_parity=" + observation_digests["database_parity"],
+                ],
+                "observation mapping must cover exactly seven observations",
+            ),
+        )
+        for mapping_arguments, expected_error in incomplete_cases:
+            with self.subTest(expected_error=expected_error):
+                with (
+                    mock.patch.object(
+                        MODULE.BRIDGE,
+                        "load_evidence_context",
+                        return_value=context(),
+                    ),
+                    mock.patch.object(MODULE, "prepare_ready_source_set") as prepare,
+                ):
+                    status, stdout, stderr = self.invoke_main(
+                        [
+                            "ready-source-set",
+                            *self.controller_context_arguments(),
+                            *mapping_arguments,
+                        ]
+                    )
+
+                self.assertEqual(status, 1)
+                self.assertEqual(stdout, "")
+                blocked = json.loads(stderr)
+                self.assertEqual(blocked["status"], "blocked")
+                self.assertIn(expected_error, blocked["error"])
+                prepare.assert_not_called()
+
+    def test_ready_source_set_cli_prepares_without_publishing_until_apply(self) -> None:
+        prepared = self.prepared_ready_source_set()
+        with (
+            mock.patch.object(
+                MODULE.BRIDGE,
+                "load_evidence_context",
+                return_value=prepared.context,
+            ),
+            mock.patch.object(
+                MODULE,
+                "prepare_ready_source_set",
+                return_value=prepared,
+            ) as prepare,
+            mock.patch.object(MODULE, "publish_ready_source_set") as publish,
+        ):
+            status, stdout, stderr = self.invoke_main(
+                [
+                    "ready-source-set",
+                    *self.controller_context_arguments(),
+                    *self.ready_source_set_cli_mappings(),
+                ]
+            )
+
+        self.assertEqual(status, 0)
+        self.assertEqual(stderr, "")
+        result = json.loads(stdout)
+        self.assertEqual(result["status"], "prepared")
+        self.assertFalse(result["output_mutated"])
+        self.assertFalse(result["journal_mutated"])
+        self.assertFalse(result["production_contacted"])
+        self.assertEqual(result["required_confirmation"], prepared.required_confirmation)
+        prepare.assert_called_once_with(
+            prepared.context,
+            role_validation_digests={
+                role: prepared.role_validation[role].sha256 for role in MODULE.ROLES
+            },
+            observation_digests={
+                label: prepared.observations[label].sha256
+                for label in MODULE.BRIDGE.SOURCE_LABELS
+            },
+        )
+        publish.assert_not_called()
+
+    def test_launcher_rejects_nonpublication_action_before_opening_release_root(self) -> None:
+        launcher = Path(MODULE.__file__).with_name(
+            "production_shadow_convergence_source_set_launcher"
+        )
+        result = subprocess.run(
+            [
+                str(launcher),
+                "--release-root",
+                "/definitely-not-an-openable-release-root",
+                "plan",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 64)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("produce|ready-source-set", result.stderr)
 
     def test_canonical_incoming_path_does_not_accept_caller_selected_paths(self) -> None:
         path = MODULE.canonical_incoming_path(
@@ -767,6 +1012,257 @@ class ProductionShadowConvergenceSourceSetProducerTests(unittest.TestCase):
                 receipt_digests=digests,
                 now=NOW,
             )
+
+    def test_ready_source_set_exact_release_blocks_before_member_validation(self) -> None:
+        role_digests, observation_digests = self.ready_source_set_inputs()
+
+        with (
+            mock.patch.object(MODULE, "_validate_context"),
+            mock.patch.object(MODULE.BRIDGE, "_validate_source_members") as validate_members,
+        ):
+            with self.assertRaisesRegex(
+                MODULE.ControllerProducerExactReleaseUnavailable,
+                MODULE.CONTROLLER_PRODUCER_EXACT_RELEASE_REQUIREMENT,
+            ):
+                MODULE.prepare_ready_source_set(
+                    context(),
+                    role_validation_digests=role_digests,
+                    observation_digests=observation_digests,
+                )
+
+        validate_members.assert_not_called()
+
+    def test_prepare_ready_source_set_derives_only_canonical_member_paths(self) -> None:
+        role_digests, observation_digests = self.ready_source_set_inputs()
+        ctx = context()
+
+        with (
+            mock.patch.object(MODULE, "_validate_context"),
+            mock.patch.object(MODULE, "_require_controller_producer_exact_release"),
+            mock.patch.object(MODULE.BRIDGE, "_validate_source_members") as validate_members,
+            mock.patch.object(MODULE, "_utcnow", return_value=NOW),
+        ):
+            prepared = MODULE.prepare_ready_source_set(
+                ctx,
+                role_validation_digests=role_digests,
+                observation_digests=observation_digests,
+            )
+
+        kwargs = validate_members.call_args.kwargs
+        self.assertEqual(
+            kwargs["role_validation"],
+            {
+                role: MODULE.BRIDGE.Reference(
+                    MODULE.BRIDGE._canonical_role_validation_path(
+                        ctx.manifest,
+                        role=role,
+                        digest=role_digests[role],
+                    ),
+                    role_digests[role],
+                )
+                for role in MODULE.ROLES
+            },
+        )
+        self.assertEqual(
+            kwargs["observations"],
+            {
+                label: MODULE.BRIDGE.Reference(
+                    MODULE.BRIDGE._canonical_observation_path(
+                        ctx.manifest,
+                        label=label,
+                        digest=observation_digests[label],
+                    ),
+                    observation_digests[label],
+                )
+                for label in MODULE.BRIDGE.SOURCE_LABELS
+            },
+        )
+        self.assertEqual(prepared.document["status"], "ready")
+        self.assertEqual(prepared.document["schema"], MODULE.BRIDGE.SOURCE_SET_SCHEMA)
+        self.assertEqual(
+            prepared.document["source_set_closure_sha256"],
+            MODULE.BRIDGE._source_set_closure(
+                phase_started_at=ctx.journal["started_at"],
+                role_validation=kwargs["role_validation"],
+                observations=kwargs["observations"],
+            ),
+        )
+        self.assertEqual(
+            prepared.output,
+            MODULE.BRIDGE._canonical_source_set_path(ctx.manifest, prepared.sha256),
+        )
+
+    def test_ready_source_set_requires_exact_role_and_observation_closures(self) -> None:
+        role_digests, observation_digests = self.ready_source_set_inputs()
+        role_digests.pop("witness")
+        with self.assertRaisesRegex(
+            MODULE.ConvergenceSourceSetProducerError,
+            "exactly four roles",
+        ):
+            MODULE._ready_role_validation_references(context(), digests=role_digests)
+
+        observation_digests.pop("witness_live")
+        with self.assertRaisesRegex(
+            MODULE.ConvergenceSourceSetProducerError,
+            "exactly seven observations",
+        ):
+            MODULE._ready_observation_references(context(), digests=observation_digests)
+
+    def test_publish_ready_source_set_requires_digest_confirmation(self) -> None:
+        prepared = self.prepared_ready_source_set()
+        with mock.patch.object(MODULE, "prepare_ready_source_set") as refresh:
+            with self.assertRaisesRegex(
+                MODULE.ConvergenceSourceSetProducerError,
+                "exact digest-bound confirmation",
+            ):
+                MODULE.publish_ready_source_set(prepared, confirm="wrong")
+        refresh.assert_not_called()
+
+    def test_publish_ready_source_set_refreshes_before_create_only_write(self) -> None:
+        prepared = self.prepared_ready_source_set()
+        with (
+            mock.patch.object(
+                MODULE.BRIDGE,
+                "load_evidence_context",
+                return_value=prepared.context,
+            ) as reload_context,
+            mock.patch.object(MODULE, "prepare_ready_source_set", return_value=prepared) as refresh,
+            mock.patch.object(MODULE, "_require_controller_producer_exact_release") as exact_release,
+            mock.patch.object(MODULE, "_write_new_or_same", return_value="created") as write,
+            mock.patch.object(MODULE.BRIDGE, "_validate_source_set") as validate_source_set,
+            mock.patch.object(MODULE, "_utcnow", return_value=NOW),
+        ):
+            result = MODULE.publish_ready_source_set(
+                prepared,
+                confirm=prepared.required_confirmation,
+            )
+
+        reload_context.assert_called_once_with(
+            manifest_path=prepared.context.manifest_path,
+            approval_path=prepared.context.approval_path,
+            approval_policy_path=prepared.context.approval_policy_path,
+            prior_evidence_paths=prepared.context.prior_paths,
+        )
+        refresh.assert_called_once_with(
+            prepared.context,
+            role_validation_digests={
+                role: prepared.role_validation[role].sha256
+                for role in MODULE.ROLES
+            },
+            observation_digests={
+                label: prepared.observations[label].sha256
+                for label in MODULE.BRIDGE.SOURCE_LABELS
+            },
+        )
+        exact_release.assert_called_once_with(prepared.context)
+        write.assert_called_once_with(
+            prepared.output,
+            prepared.payload,
+            label="ready convergence source-set",
+        )
+        validate_source_set.assert_called_once_with(
+            prepared.context,
+            MODULE.BRIDGE.Reference(prepared.output, prepared.sha256),
+            now=NOW,
+            require_fresh=True,
+        )
+        self.assertEqual(result["status"], "published")
+        self.assertTrue(result["output_mutated"])
+        self.assertFalse(result["journal_mutated"])
+        self.assertFalse(result["production_contacted"])
+
+    def test_publish_ready_source_set_refuses_reloaded_context_drift_before_write(self) -> None:
+        prepared = self.prepared_ready_source_set()
+        changed_context = context()
+        changed_context.journal = {
+            "started_at": (NOW - timedelta(minutes=9)).isoformat().replace("+00:00", "Z")
+        }
+        changed = replace(
+            prepared,
+            context=changed_context,
+            payload=prepared.payload + b" ",
+        )
+
+        with (
+            mock.patch.object(
+                MODULE.BRIDGE,
+                "load_evidence_context",
+                return_value=changed_context,
+            ) as reload_context,
+            mock.patch.object(MODULE, "prepare_ready_source_set", return_value=changed) as refresh,
+            mock.patch.object(MODULE, "_write_new_or_same") as write,
+        ):
+            with self.assertRaisesRegex(
+                MODULE.ConvergenceSourceSetProducerError,
+                "members changed before publication",
+            ):
+                MODULE.publish_ready_source_set(
+                    prepared,
+                    confirm=prepared.required_confirmation,
+                )
+
+        reload_context.assert_called_once_with(
+            manifest_path=prepared.context.manifest_path,
+            approval_path=prepared.context.approval_path,
+            approval_policy_path=prepared.context.approval_policy_path,
+            prior_evidence_paths=prepared.context.prior_paths,
+        )
+        refresh.assert_called_once_with(
+            changed_context,
+            role_validation_digests={
+                role: prepared.role_validation[role].sha256
+                for role in MODULE.ROLES
+            },
+            observation_digests={
+                label: prepared.observations[label].sha256
+                for label in MODULE.BRIDGE.SOURCE_LABELS
+            },
+        )
+        write.assert_not_called()
+
+    def test_publish_ready_source_set_refuses_changed_members_before_write(self) -> None:
+        prepared = self.prepared_ready_source_set()
+        changed = replace(prepared, payload=prepared.payload + b" ")
+        with (
+            mock.patch.object(
+                MODULE.BRIDGE,
+                "load_evidence_context",
+                return_value=prepared.context,
+            ),
+            mock.patch.object(MODULE, "prepare_ready_source_set", return_value=changed),
+            mock.patch.object(MODULE, "_write_new_or_same") as write,
+        ):
+            with self.assertRaisesRegex(
+                MODULE.ConvergenceSourceSetProducerError,
+                "members changed before publication",
+            ):
+                MODULE.publish_ready_source_set(
+                    prepared,
+                    confirm=prepared.required_confirmation,
+                )
+        write.assert_not_called()
+
+    def test_publish_ready_source_set_recomputes_confirmation_after_refresh(self) -> None:
+        prepared = self.prepared_ready_source_set()
+        tampered = replace(prepared, required_confirmation="caller-selected-confirmation")
+        with (
+            mock.patch.object(
+                MODULE.BRIDGE,
+                "load_evidence_context",
+                return_value=prepared.context,
+            ),
+            mock.patch.object(MODULE, "prepare_ready_source_set", return_value=prepared),
+            mock.patch.object(MODULE, "_write_new_or_same") as write,
+        ):
+            with self.assertRaisesRegex(
+                MODULE.ConvergenceSourceSetProducerError,
+                "members changed before publication",
+            ):
+                MODULE.publish_ready_source_set(
+                    tampered,
+                    confirm="caller-selected-confirmation",
+                )
+        write.assert_not_called()
 
     def test_signed_receiver_version_must_match_transport_receipt(self) -> None:
         document = receipt(role="webapp_ir")

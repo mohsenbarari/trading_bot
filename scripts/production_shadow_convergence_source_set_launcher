@@ -6,8 +6,9 @@
 
 set -eu
 
-if [ "$#" -lt 3 ] || [ "$1" != "--release-root" ] || [ -z "$2" ] || [ "$3" != "produce" ]; then
-    printf '%s\n' 'blocked: launcher requires --release-root ROOT produce ...' >&2
+if [ "$#" -lt 3 ] || [ "$1" != "--release-root" ] || [ -z "$2" ] \
+    || { [ "$3" != "produce" ] && [ "$3" != "ready-source-set" ]; }; then
+    printf '%s\n' 'blocked: launcher requires --release-root ROOT produce|ready-source-set ...' >&2
     exit 64
 fi
 

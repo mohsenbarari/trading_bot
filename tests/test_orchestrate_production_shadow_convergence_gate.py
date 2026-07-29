@@ -519,18 +519,35 @@ class ConvergenceGateTests(unittest.TestCase):
         class Verified:
             canonical_payload = proof
 
-        with (
-            mock.patch.object(MODULE, "_validate_context", return_value=({}, {})),
-            mock.patch.object(MODULE.VERIFY, "_read_role_validation_records", return_value=(role_requests, role_sources, role_times)),
-            mock.patch.object(MODULE, "witness_public_key_is_valid", return_value=True),
-            mock.patch.object(MODULE, "validate_witness_lease_proof", return_value=Verified()),
-        ):
-            validated = MODULE._validate_source_set(
-                self.context, source_set, now=NOW + timedelta(seconds=2), require_fresh=True
-            )
+        def validate_with_role_sources(source_hashes: dict[str, str]) -> MODULE.SourceSet:
+            with (
+                mock.patch.object(MODULE, "_validate_context", return_value=({}, {})),
+                mock.patch.object(
+                    MODULE.VERIFY,
+                    "_read_role_validation_records",
+                    return_value=(role_requests, source_hashes, role_times),
+                ),
+                mock.patch.object(MODULE, "witness_public_key_is_valid", return_value=True),
+                mock.patch.object(MODULE, "validate_witness_lease_proof", return_value=Verified()),
+            ):
+                return MODULE._validate_source_set(
+                    self.context,
+                    source_set,
+                    now=NOW + timedelta(seconds=2),
+                    require_fresh=True,
+                )
+
+        validated = validate_with_role_sources(role_sources)
         self.assertEqual(validated.captured_at, NOW + timedelta(seconds=1))
         self.assertEqual(set(validated.observations), set(MODULE.SOURCE_LABELS))
         self.assertFalse(hasattr(validated, "claims"))
+        substituted_sources = dict(role_sources)
+        substituted_sources["bot_fi"] = "f" * 64
+        with self.assertRaisesRegex(
+            MODULE.ConvergenceGateError,
+            "role validation closure differs",
+        ):
+            validate_with_role_sources(substituted_sources)
 
 
 if __name__ == "__main__":
