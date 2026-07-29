@@ -1,0 +1,161 @@
+# WA-IR promotion listener for the legacy production release 2c08.
+#
+# Render this only from a root-owned WA-IR configuration after the independent
+# writer controller has fenced the former writer.  The certificate and key are
+# generated and retained locally on WA-IR.  This listener has no cross-site
+# upstream and does not expose the legacy direct-sync receiver.
+server {
+    listen 80;
+    server_name __SERVER_NAME__;
+    client_max_body_size 50M;
+    access_log off;
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name __SERVER_NAME__;
+    client_max_body_size 50M;
+
+    # These are root-only paths on WA-IR, never copied from another host.
+    ssl_certificate __WA_IR_CERTIFICATE_PATH__;
+    ssl_certificate_key __WA_IR_CERTIFICATE_KEY_PATH__;
+
+    # This is the immutable 2c08 release directory delivered through the
+    # verified Object Storage release path, never a mutable `current` tree.
+    root __WA_IR_RELEASE_ROOT__/mini_app_dist;
+    index index.html;
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    location = /metrics {
+        deny all;
+        return 404;
+    }
+
+    # The promoted runtime has direct sync disabled.  Keep this legacy
+    # receiver unreachably fenced even though the generic API route follows.
+    location = /api/sync/receive {
+        access_log off;
+        return 404;
+    }
+
+    location ~ ^/api/invitations/(lookup|validate)/ {
+        access_log off;
+        proxy_pass http://127.0.0.1:18000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        add_header Cache-Control "no-store, max-age=0" always;
+        add_header Pragma "no-cache" always;
+        add_header Referrer-Policy "no-referrer" always;
+    }
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:18000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+    }
+
+    location /api/realtime/ws {
+        proxy_pass http://127.0.0.1:18000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_connect_timeout 7d;
+        proxy_send_timeout 7d;
+        proxy_read_timeout 7d;
+        proxy_buffering off;
+    }
+
+    location ~ ^/assets/.*\.js$ {
+        try_files $uri @stale_js_chunk;
+        access_log off;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
+    location /assets/ {
+        try_files $uri =404;
+        access_log off;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
+    location = /manifest.webmanifest {
+        try_files $uri =404;
+        default_type application/manifest+json;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
+    location = /sw.js {
+        try_files $uri =404;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        add_header Service-Worker-Allowed "/" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
+    location = /share-target-sw.js {
+        try_files $uri =404;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        add_header Service-Worker-Allowed "/" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
+    location ~ ^/workbox-[A-Za-z0-9_-]+\.js$ {
+        try_files $uri =404;
+        access_log off;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
+    location /uploads/ {
+        access_log off;
+        return 404;
+    }
+
+    location @stale_js_chunk {
+        internal;
+        default_type application/javascript;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header X-Static-Delivery "nginx" always;
+        return 200 "console.warn('Stale PWA chunk requested. Forcing hard reload...'); window.location.reload(true);";
+    }
+
+    location ~ ^/register(?:/|$) {
+        access_log off;
+        try_files /index.html =404;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
+    location ^~ /i/ {
+        access_log off;
+        try_files /index.html =404;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header X-Static-Delivery "nginx" always;
+    }
+}
