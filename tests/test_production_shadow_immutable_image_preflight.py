@@ -109,7 +109,11 @@ def image_inspection() -> dict[str, object]:
         "Architecture": "amd64",
         "Os": "linux",
         "Created": "2026-07-29T00:00:00Z",
-        "Config": {"Env": ["PATH=/usr/local/bin:/usr/bin:/bin"], "Entrypoint": None},
+        "Config": {
+            "Env": ["PATH=/usr/local/bin:/usr/bin:/bin"],
+            "Entrypoint": None,
+            "Labels": {"org.opencontainers.image.revision": RELEASE_SHA},
+        },
         "RootFS": {"Type": "layers", "Layers": ["sha256:" + "5" * 64]},
     }
 
@@ -244,6 +248,12 @@ class ImmutableImagePreflightTests(unittest.TestCase):
             MODULE.inspect_image(altered, plan=plan())
         altered = image_inspection()
         altered["Config"]["Entrypoint"] = ["sh"]  # type: ignore[index]
+        with self.assertRaises(MODULE.ImmutableImagePreflightContractError):
+            MODULE.inspect_image(altered, plan=plan())
+        altered = image_inspection()
+        altered["Config"]["Labels"] = {  # type: ignore[index]
+            "org.opencontainers.image.revision": "f" * 40
+        }
         with self.assertRaises(MODULE.ImmutableImagePreflightContractError):
             MODULE.inspect_image(altered, plan=plan())
 

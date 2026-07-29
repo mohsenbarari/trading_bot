@@ -880,8 +880,16 @@ def inspect_image(image: Any, *, plan: Mapping[str, Any]) -> dict[str, str]:
     if not isinstance(image, Mapping) or image.get("Id") != checked["app_image_id"]:
         raise ImmutableImagePreflightContractError("image inspection ID differs from the plan")
     config = image.get("Config")
-    if not isinstance(config, Mapping) or config.get("Entrypoint") not in (None, []):
-        raise ImmutableImagePreflightContractError("image inspection entrypoint differs")
+    labels = config.get("Labels") if isinstance(config, Mapping) else None
+    if (
+        not isinstance(config, Mapping)
+        or config.get("Entrypoint") not in (None, [])
+        or not isinstance(labels, Mapping)
+        or labels.get("org.opencontainers.image.revision") != checked["release_sha"]
+    ):
+        raise ImmutableImagePreflightContractError(
+            "image inspection differs from the exact planned release"
+        )
     try:
         _descriptor, identity = image_content_descriptor(dict(image))
     except DockerImageIdentityError as exc:
