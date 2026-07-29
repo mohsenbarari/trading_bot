@@ -625,21 +625,45 @@ class FrozenPrepareWorkerTests(unittest.TestCase):
             },
         )
         self.assertEqual(WORKER.PHASE_EXECUTION_BLOCKERS, {})
-        expected_services = {
-            "bot_fi_db_roles",
-            "bot_fi_db_fencing",
-            "webapp_fi_db_roles_post_migration",
-            "webapp_fi_db_fencing",
-            "webapp_ir_db_roles_post_migration",
-            "webapp_ir_db_fencing",
-            "webapp_ir_writer_fence",
-        }
-        self.assertTrue(
-            expected_services.issubset(WORKER.PREPARE_SERVICE_COMMANDS)
-        )
-        self.assertEqual(
-            WORKER.PREPARE_SERVICE_COMMANDS["bot_fi_db_roles"],
-            (
+        def webapp_phase_command(
+            site: str,
+            *,
+            phase: str,
+            confirmation: str,
+        ) -> tuple[str, ...]:
+            return (
+                "python",
+                "scripts/activate_three_site_database_fencing.py",
+                "--phase",
+                phase,
+                "--site",
+                site,
+                "--application-role",
+                f"{site}_app",
+                "--projection-role",
+                f"{site}_projection",
+                "--receiver-role",
+                f"{site}_receiver",
+                "--delivery-role",
+                f"{site}_delivery",
+                "--blob-role",
+                f"{site}_blob",
+                "--effect-role",
+                f"{site}_effect",
+                "--control-role",
+                f"{site}_control",
+                "--observer-role",
+                f"{site}_observer",
+                "--operator",
+                "production-shadow-compose",
+                "--apply",
+                "--confirm",
+                confirmation,
+            )
+
+        expected_commands = {
+            "bot_fi_migration": ("python", "manage.py"),
+            "bot_fi_db_roles": (
                 "python",
                 "scripts/provision_bot_database_roles.py",
                 "--phase",
@@ -650,10 +674,7 @@ class FrozenPrepareWorkerTests(unittest.TestCase):
                 "--confirm",
                 "APPLY-BOT-DATABASE-ROLE-GRANTS",
             ),
-        )
-        self.assertEqual(
-            WORKER.PREPARE_SERVICE_COMMANDS["bot_fi_db_fencing"],
-            (
+            "bot_fi_db_fencing": (
                 "python",
                 "scripts/provision_bot_database_roles.py",
                 "--phase",
@@ -664,61 +685,73 @@ class FrozenPrepareWorkerTests(unittest.TestCase):
                 "--confirm",
                 "ENABLE-BOT-DATABASE-FENCING",
             ),
-        )
-        for site in ("webapp_fi", "webapp_ir"):
-            for phase, service_suffix, confirmation in (
-                (
-                    "grants",
-                    "db_roles_post_migration",
-                    "APPLY-THREE-SITE-DATABASE-GRANTS",
-                ),
-                (
-                    "fence",
-                    "db_fencing",
-                    "ENABLE-THREE-SITE-DATABASE-FENCING",
-                ),
-            ):
-                self.assertEqual(
-                    WORKER.PREPARE_SERVICE_COMMANDS[
-                        f"{site}_{service_suffix}"
-                    ],
-                    (
-                        "python",
-                        "scripts/activate_three_site_database_fencing.py",
-                        "--phase",
-                        phase,
-                        "--site",
-                        site,
-                        "--application-role",
-                        f"{site}_app",
-                        "--projection-role",
-                        f"{site}_projection",
-                        "--receiver-role",
-                        f"{site}_receiver",
-                        "--delivery-role",
-                        f"{site}_delivery",
-                        "--blob-role",
-                        f"{site}_blob",
-                        "--effect-role",
-                        f"{site}_effect",
-                        "--control-role",
-                        f"{site}_control",
-                        "--observer-role",
-                        f"{site}_observer",
-                        "--operator",
-                        "production-shadow-compose",
-                        "--apply",
-                        "--confirm",
-                        confirmation,
-                    ),
+            "webapp_fi_db_roles": (
+                "python",
+                "scripts/provision_three_site_database_roles.py",
+                "--role-prefix",
+                "webapp_fi",
+            ),
+            "webapp_fi_migration": ("python", "manage.py"),
+            "webapp_fi_db_roles_post_migration": webapp_phase_command(
+                "webapp_fi",
+                phase="grants",
+                confirmation="APPLY-THREE-SITE-DATABASE-GRANTS",
+            ),
+            "webapp_fi_db_fencing": webapp_phase_command(
+                "webapp_fi",
+                phase="fence",
+                confirmation="ENABLE-THREE-SITE-DATABASE-FENCING",
+            ),
+            "webapp_ir_db_roles": (
+                "python",
+                "scripts/provision_three_site_database_roles.py",
+                "--role-prefix",
+                "webapp_ir",
+            ),
+            "webapp_ir_migration": ("python", "manage.py"),
+            "webapp_ir_db_roles_post_migration": webapp_phase_command(
+                "webapp_ir",
+                phase="grants",
+                confirmation="APPLY-THREE-SITE-DATABASE-GRANTS",
+            ),
+            "webapp_ir_db_fencing": webapp_phase_command(
+                "webapp_ir",
+                phase="fence",
+                confirmation="ENABLE-THREE-SITE-DATABASE-FENCING",
+            ),
+            "webapp_ir_writer_fence": (
+                "python",
+                "scripts/manage_webapp_writer.py",
+                "fence",
+                "--expected-epoch",
+                "1",
+                "--expected-active-site",
+                "webapp_fi",
+                "--operator",
+                "__OPERATION_BOUND_OPERATOR__",
+                "--reason",
+                "initialize WebApp-IR as an operation-bound locally fenced standby",
+                "--apply",
+                "--confirm",
+                "writer:fence:webapp_ir:1:1",
+            ),
+        }
+        self.assertEqual(WORKER.PREPARE_SERVICE_COMMANDS, expected_commands)
+        for service, expected in expected_commands.items():
+            with self.subTest(service=service):
+                resolved = tuple(
+                    f"production-shadow:{OPERATION_ID}"
+                    if token == "__OPERATION_BOUND_OPERATOR__"
+                    else token
+                    for token in expected
                 )
-        self.assertEqual(
-            WORKER._prepare_service_command(
-                "webapp_ir_writer_fence",
-                operation_id=OPERATION_ID,
-            )[8],
-            f"production-shadow:{OPERATION_ID}",
-        )
+                self.assertEqual(
+                    WORKER._prepare_service_command(
+                        service,
+                        operation_id=OPERATION_ID,
+                    ),
+                    resolved,
+                )
 
     def test_load_request_binds_digest_namespace_and_all_closures(self) -> None:
         request_path, document, manifest = self.request_fixture()
