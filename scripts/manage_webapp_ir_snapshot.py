@@ -22,6 +22,8 @@ receipt after its own restore verification.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import contextlib
 import dataclasses
 import datetime as dt
@@ -42,6 +44,16 @@ from urllib.parse import urlparse
 
 import fcntl
 
+try:  # This repository already pins python-jose[cryptography].
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+except ImportError:  # pragma: no cover - deployment requirements include cryptography.
+    InvalidSignature = None  # type: ignore[assignment,misc]
+    serialization = None  # type: ignore[assignment]
+    Ed25519PrivateKey = None  # type: ignore[assignment,misc]
+    Ed25519PublicKey = None  # type: ignore[assignment,misc]
+
 try:  # Imported lazily enough for focused unit tests to replace the client.
     import boto3
 except ImportError:  # pragma: no cover - production images already ship boto3.
@@ -50,6 +62,8 @@ except ImportError:  # pragma: no cover - production images already ship boto3.
 
 TRANSPORT_SCHEMA = "gold-trade-snapshot-transport-v1"
 MANIFEST_SCHEMA = "gold-trade-snapshot-manifest-v1"
+MANIFEST_SIGNATURE_DOMAIN = b"gold-trade-snapshot-manifest-signature-v1\x00"
+MANIFEST_SIGNATURE_ALGORITHM = "ed25519"
 READY_RECEIPT_SCHEMA = "gold-trade-snapshot-ready-v1"
 OBJECT_ENCRYPTION = "age-v1"
 OBJECT_LAYOUT_VERSION = "v1"
@@ -59,6 +73,10 @@ DEFAULT_MAXIMUM_DATABASE_BYTES = 2 * 1024 * 1024 * 1024
 DEFAULT_MAXIMUM_UPLOADS_BYTES = 4 * 1024 * 1024 * 1024
 DEFAULT_MAXIMUM_AUDIT_BYTES = 2 * 1024 * 1024 * 1024
 MAXIMUM_SOURCE_DB_CLIENT_LIFETIME_SECONDS = 300
+DEFAULT_MAXIMUM_RETAINED_CANDIDATES = 2
+RESTORE_RECEIPT_SCHEMA = "gold-trade-snapshot-restore-receipt-v1"
+READY_RECEIPT_FILENAME = "snapshot-ready.json"
+RESTORE_RECEIPT_FILENAME = "snapshot-restore.json"
 
 SITE_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 GENERATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -88,6 +106,10 @@ class TransportConfig:
     maximum_uploads_bytes: int
     maximum_audit_bytes: int
     maximum_snapshot_age_seconds: int
+    maximum_retained_candidates: int
+    signing_source_site: str | None
+    source_signing_private_key_file: Path | None
+    source_signing_public_key: bytes | None
 
 
 def canonical_json_bytes(value: Mapping[str, Any]) -> bytes:
@@ -112,13 +134,13 @@ def sha256_file(path: Path) -> tuple[str, int]:
 
 
 def utc_now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+    return dt.datetime.now(dt.timezone.utc)
 
 
 def utc_iso(value: dt.datetime) -> str:
     if value.tzinfo is None:
         raise SnapshotTransportError("timestamp must be timezone-aware")
-    return value.astimezone(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return value.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def parse_utc_iso(value: object, *, field: str) -> dt.datetime:
@@ -131,6 +153,35 @@ def parse_utc_iso(value: object, *, field: str) -> dt.datetime:
     if parsed.tzinfo is None:
         raise SnapshotTransportError(f"{field} must include a timezone")
     return parsed.astimezone(dt.timezone.utc)
+
+
+def elapsed_seconds_ceil(later: dt.datetime, earlier: dt.datetime, *, field: str) -> int:
+    """Return a nonnegative elapsed interval rounded up at microsecond precision."""
+
+    if later.tzinfo is None or earlier.tzinfo is None:
+        raise SnapshotTransportError(f"{field} timestamps must be timezone-aware")
+    delta = later.astimezone(dt.timezone.utc) - earlier.astimezone(dt.timezone.utc)
+    if delta < dt.timedelta(0):
+        raise SnapshotTransportError(f"{field} is negative")
+    microseconds = ((delta.days * 86_400) + delta.seconds) * 1_000_000 + delta.microseconds
+    return (microseconds + 999_999) // 1_000_000
+
+
+def assert_snapshot_freshness(
+    *,
+    checked_at: dt.datetime,
+    source_db_snapshot_started_at: dt.datetime,
+    maximum_snapshot_age_seconds: int,
+    error_message: str,
+) -> int:
+    snapshot_age_seconds = elapsed_seconds_ceil(
+        checked_at,
+        source_db_snapshot_started_at,
+        field="source database snapshot age",
+    )
+    if snapshot_age_seconds > maximum_snapshot_age_seconds:
+        raise SnapshotTransportError(error_message)
+    return snapshot_age_seconds
 
 
 def require_string(value: object, field: str) -> str:
@@ -205,8 +256,12 @@ def ensure_root_only_directory(path: Path, *, field: str) -> Path:
             raise SnapshotTransportError(f"{field} contains a non-directory or symlink component")
         if state.st_uid != 0:
             raise SnapshotTransportError(f"{field} must be owned by root")
-        if stat.S_IMODE(state.st_mode) & 0o077:
-            raise SnapshotTransportError(f"{field} must not be accessible by group/other")
+        mode = stat.S_IMODE(state.st_mode)
+        if current == path:
+            if mode & 0o077:
+                raise SnapshotTransportError(f"{field} must not be accessible by group/other")
+        elif mode & 0o022:
+            raise SnapshotTransportError(f"{field} ancestors must not be writable by group/other")
     return path
 
 
@@ -241,6 +296,39 @@ def validate_prefix(value: object) -> str:
     return prefix
 
 
+def decode_exact_base64(value: object, *, field: str, expected_bytes: int) -> bytes:
+    encoded = require_string(value, field)
+    try:
+        decoded = base64.b64decode(encoded.encode("ascii"), validate=True)
+    except (UnicodeEncodeError, binascii.Error) as exc:
+        raise SnapshotTransportError(f"{field} must be strict base64") from exc
+    if len(decoded) != expected_bytes:
+        raise SnapshotTransportError(f"{field} must decode to exactly {expected_bytes} bytes")
+    return decoded
+
+
+def load_optional_signing_configuration(raw: Mapping[str, Any]) -> tuple[str | None, Path | None, bytes | None]:
+    source_site_value = raw.get("signing_source_site")
+    private_key_value = raw.get("source_signing_private_key_file")
+    public_key_value = raw.get("source_signing_public_key_base64")
+    if source_site_value is None and private_key_value is None and public_key_value is None:
+        return None, None, None
+    if source_site_value is None or (private_key_value is None and public_key_value is None):
+        raise SnapshotTransportError(
+            "signing_source_site and exactly one source signing or verification key must be configured together"
+        )
+    if private_key_value is not None and public_key_value is not None:
+        raise SnapshotTransportError("transport config must not contain both a source private key and destination public key")
+    source_site = require_id(source_site_value, "signing_source_site", SITE_RE)
+    if private_key_value is not None:
+        return source_site, Path(require_string(private_key_value, "source_signing_private_key_file")), None
+    return source_site, None, decode_exact_base64(
+        public_key_value,
+        field="source_signing_public_key_base64",
+        expected_bytes=32,
+    )
+
+
 def load_transport_config(path: Path, *, workspace_override: str | None = None) -> TransportConfig:
     raw = load_root_only_json(path, field="config")
     if raw.get("schema") != TRANSPORT_SCHEMA:
@@ -260,6 +348,7 @@ def load_transport_config(path: Path, *, workspace_override: str | None = None) 
     age_identity_file = None
     if age_identity_value is not None:
         age_identity_file = Path(require_string(age_identity_value, "age_identity_file"))
+    signing_source_site, source_signing_private_key_file, source_signing_public_key = load_optional_signing_configuration(raw)
     workspace_value = workspace_override or raw.get("workspace") or DEFAULT_WORKSPACE
     workspace = Path(require_string(workspace_value, "workspace"))
     maximum_database_bytes = require_nonnegative_int(
@@ -282,6 +371,11 @@ def load_transport_config(path: Path, *, workspace_override: str | None = None) 
         "maximum_snapshot_age_seconds",
         minimum=1,
     )
+    maximum_retained_candidates = require_nonnegative_int(
+        raw.get("maximum_retained_candidates", DEFAULT_MAXIMUM_RETAINED_CANDIDATES),
+        "maximum_retained_candidates",
+        minimum=1,
+    )
     return TransportConfig(
         endpoint=endpoint,
         region=region,
@@ -296,6 +390,10 @@ def load_transport_config(path: Path, *, workspace_override: str | None = None) 
         maximum_uploads_bytes=maximum_uploads_bytes,
         maximum_audit_bytes=maximum_audit_bytes,
         maximum_snapshot_age_seconds=maximum_snapshot_age_seconds,
+        maximum_retained_candidates=maximum_retained_candidates,
+        signing_source_site=signing_source_site,
+        source_signing_private_key_file=source_signing_private_key_file,
+        source_signing_public_key=source_signing_public_key,
     )
 
 
@@ -334,6 +432,10 @@ def assert_private_versioned_bucket(client: Any, bucket: str) -> None:
         acl = client.get_bucket_acl(Bucket=bucket)
     except Exception as exc:
         raise SnapshotTransportError("cannot verify bucket privacy") from exc
+    owner = acl.get("Owner") if isinstance(acl, Mapping) else None
+    owner_id = owner.get("ID") if isinstance(owner, Mapping) else None
+    if not isinstance(owner_id, str) or not owner_id:
+        raise SnapshotTransportError("bucket ACL response is missing its canonical owner")
     grants = acl.get("Grants") if isinstance(acl, Mapping) else None
     if not isinstance(grants, list):
         raise SnapshotTransportError("bucket ACL response is malformed")
@@ -343,12 +445,10 @@ def assert_private_versioned_bucket(client: Any, bucket: str) -> None:
         grantee = grant.get("Grantee")
         if not isinstance(grantee, Mapping):
             raise SnapshotTransportError("bucket ACL response is malformed")
-        uri = grantee.get("URI")
-        if uri in {
-            "http://acs.amazonaws.com/groups/global/AllUsers",
-            "http://acs.amazonaws.com/groups/global/AuthenticatedUsers",
-        }:
-            raise SnapshotTransportError("bucket must not grant public or authenticated-users access")
+        if grantee.get("Type") != "CanonicalUser" or grantee.get("ID") != owner_id:
+            raise SnapshotTransportError("bucket ACL must not grant access outside its canonical owner")
+        if grant.get("Permission") != "FULL_CONTROL":
+            raise SnapshotTransportError("bucket ACL must grant only owner full control")
 
 
 def generated_snapshot_id(now: dt.datetime | None = None) -> str:
@@ -481,25 +581,167 @@ def run_age_decrypt(age_binary: str, identity_file: Path, input_path: Path, outp
     require_root_only_file(output_path, field="decrypted candidate artifact")
 
 
-def _not_found_error(exc: Exception) -> bool:
-    if isinstance(exc, (FileNotFoundError, KeyError)):
-        return True
-    response = getattr(exc, "response", None)
-    if isinstance(response, Mapping):
-        error = response.get("Error")
-        if isinstance(error, Mapping) and str(error.get("Code")) in {"404", "NoSuchKey", "NotFound", "NoSuchVersion"}:
-            return True
-    return False
+def require_ed25519_backend() -> None:
+    if Ed25519PrivateKey is None or Ed25519PublicKey is None or serialization is None or InvalidSignature is None:
+        raise SnapshotTransportError("cryptography Ed25519 support is unavailable")
+
+
+def unsigned_manifest_payload(manifest: Mapping[str, Any]) -> bytes:
+    """Return the domain-separated canonical plaintext manifest payload.
+
+    Every manifest field except the detached ``source_signature`` envelope is
+    covered.  This includes each artifact's exact VersionId and both plaintext
+    and ciphertext descriptors.
+    """
+
+    return MANIFEST_SIGNATURE_DOMAIN + canonical_json_bytes(
+        {key: value for key, value in manifest.items() if key != "source_signature"}
+    )
+
+
+def _configured_source_private_key(config: TransportConfig, *, source_site: str) -> Any:
+    if config.signing_source_site != source_site or config.source_signing_private_key_file is None:
+        raise SnapshotTransportError("a source-bound Ed25519 private signing key is required to publish")
+    if config.source_signing_public_key is not None:
+        raise SnapshotTransportError("publisher transport config must not carry a destination pinned public key")
+    key_path = require_secure_input_file(
+        config.source_signing_private_key_file,
+        field="source_signing_private_key_file",
+        maximum_bytes=256,
+    )
+    raw_key = key_path.read_bytes()
+    if len(raw_key) != 32:
+        raise SnapshotTransportError("source_signing_private_key_file must contain exactly 32 raw Ed25519 bytes")
+    require_ed25519_backend()
+    try:
+        return Ed25519PrivateKey.from_private_bytes(raw_key)
+    except ValueError as exc:  # pragma: no cover - exact-length raw Ed25519 keys are accepted by cryptography.
+        raise SnapshotTransportError("source_signing_private_key_file is not a valid Ed25519 key") from exc
+
+
+def _configured_source_public_key(config: TransportConfig, *, source_site: str) -> Any:
+    if config.signing_source_site != source_site or config.source_signing_public_key is None:
+        raise SnapshotTransportError("a pinned source Ed25519 public key is required to consume")
+    if config.source_signing_private_key_file is not None:
+        raise SnapshotTransportError("consumer transport config must not carry a source private signing key")
+    if not isinstance(config.source_signing_public_key, bytes) or len(config.source_signing_public_key) != 32:
+        raise SnapshotTransportError("pinned source Ed25519 public key has an invalid length")
+    require_ed25519_backend()
+    try:
+        return Ed25519PublicKey.from_public_bytes(config.source_signing_public_key)
+    except ValueError as exc:  # pragma: no cover - exact-length raw Ed25519 keys are accepted by cryptography.
+        raise SnapshotTransportError("pinned source Ed25519 public key is invalid") from exc
+
+
+def sign_manifest(manifest: Mapping[str, Any], *, config: TransportConfig, source_site: str) -> dict[str, str]:
+    private_key = _configured_source_private_key(config, source_site=source_site)
+    payload = unsigned_manifest_payload(manifest)
+    signature = private_key.sign(payload)
+    require_ed25519_backend()
+    public_key = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    return {
+        "algorithm": MANIFEST_SIGNATURE_ALGORITHM,
+        "key_id": sha256_bytes(public_key),
+        "signature": base64.b64encode(signature).decode("ascii"),
+    }
+
+
+def verify_manifest_source_signature(
+    manifest: Mapping[str, Any], *, config: TransportConfig, expected_source_site: str
+) -> None:
+    signature_value = manifest.get("source_signature")
+    if not isinstance(signature_value, Mapping):
+        raise SnapshotTransportError("manifest source_signature is required")
+    signature = dict(signature_value)
+    if set(signature) != {"algorithm", "key_id", "signature"}:
+        raise SnapshotTransportError("manifest source_signature fields are unsupported")
+    if signature.get("algorithm") != MANIFEST_SIGNATURE_ALGORITHM:
+        raise SnapshotTransportError("manifest source_signature algorithm is unsupported")
+    public_key = _configured_source_public_key(config, source_site=expected_source_site)
+    expected_key_id = sha256_bytes(config.source_signing_public_key or b"")
+    if require_id(signature.get("key_id"), "manifest source_signature.key_id", re.compile(r"^[a-f0-9]{64}$")) != expected_key_id:
+        raise SnapshotTransportError("manifest source_signature key_id does not match the pinned source key")
+    raw_signature = decode_exact_base64(
+        signature.get("signature"),
+        field="manifest source_signature.signature",
+        expected_bytes=64,
+    )
+    try:
+        public_key.verify(raw_signature, unsigned_manifest_payload(manifest))
+    except InvalidSignature as exc:
+        raise SnapshotTransportError("manifest source_signature verification failed") from exc
+
+
+def exact_object_version_history(client: Any, *, bucket: str, key: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """List every exact-key version and delete marker, failing closed on ambiguity."""
+
+    key_marker: str | None = None
+    version_id_marker: str | None = None
+    versions: list[dict[str, Any]] = []
+    delete_markers: list[dict[str, Any]] = []
+    while True:
+        request: dict[str, Any] = {"Bucket": bucket, "Prefix": key}
+        if key_marker is not None:
+            request["KeyMarker"] = key_marker
+        if version_id_marker is not None:
+            request["VersionIdMarker"] = version_id_marker
+        try:
+            response = client.list_object_versions(**request)
+        except Exception as exc:
+            raise SnapshotTransportError("cannot inspect immutable object version history") from exc
+        if not isinstance(response, Mapping):
+            raise SnapshotTransportError("immutable object version listing is malformed")
+        for collection_name, target in (("Versions", versions), ("DeleteMarkers", delete_markers)):
+            collection = response.get(collection_name, [])
+            if not isinstance(collection, list):
+                raise SnapshotTransportError("immutable object version listing is malformed")
+            for entry in collection:
+                if not isinstance(entry, Mapping):
+                    raise SnapshotTransportError("immutable object version listing is malformed")
+                if entry.get("Key") == key:
+                    target.append(dict(entry))
+        if not response.get("IsTruncated"):
+            return versions, delete_markers
+        key_marker = response.get("NextKeyMarker")
+        version_id_marker = response.get("NextVersionIdMarker")
+        if not isinstance(key_marker, str) or not key_marker:
+            raise SnapshotTransportError("immutable object version listing pagination marker is missing")
+        if not isinstance(version_id_marker, str) or not version_id_marker:
+            raise SnapshotTransportError("immutable object version listing pagination marker is missing")
 
 
 def assert_object_absent(client: Any, *, bucket: str, key: str) -> None:
-    try:
-        client.head_object(Bucket=bucket, Key=key)
-    except Exception as exc:
-        if _not_found_error(exc):
-            return
-        raise SnapshotTransportError("cannot confirm that an immutable object key is unused") from exc
-    raise SnapshotTransportError("refusing to overwrite an existing immutable object key")
+    """Reject every prior version and delete marker for an immutable key."""
+
+    versions, delete_markers = exact_object_version_history(client, bucket=bucket, key=key)
+    if versions or delete_markers:
+        raise SnapshotTransportError("refusing to reuse an immutable object key with prior versions or a delete marker")
+
+
+def require_singleton_immutable_object_version(
+    client: Any,
+    *,
+    bucket: str,
+    key: str,
+    expected_version_id: str | None = None,
+) -> str:
+    """Return an exact, sole, current version; reject a mutable key or tombstone."""
+
+    versions, delete_markers = exact_object_version_history(client, bucket=bucket, key=key)
+    if delete_markers or len(versions) != 1:
+        raise SnapshotTransportError("immutable object key must have exactly one version and no delete marker")
+    version = versions[0]
+    version_id = version.get("VersionId")
+    if not isinstance(version_id, str) or not version_id or version_id == "null":
+        raise SnapshotTransportError("immutable object version history is missing a valid VersionId")
+    if version.get("IsLatest") is not True:
+        raise SnapshotTransportError("immutable object version is not an unambiguous current version")
+    if expected_version_id is not None and version_id != expected_version_id:
+        raise SnapshotTransportError("immutable object version history does not match the conditional-create result")
+    return version_id
 
 
 def metadata_for_ciphertext(ciphertext_sha256: str) -> dict[str, str]:
@@ -523,8 +765,17 @@ def write_response_body(response: Mapping[str, Any], output_path: Path) -> tuple
         raise SnapshotTransportError("object response has no readable body")
     digest = hashlib.sha256()
     total = 0
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
     try:
-        with output_path.open("xb") as handle:
+        descriptor = os.open(str(output_path), flags, 0o600)
+    except FileExistsError as exc:
+        raise SnapshotTransportError("refusing to overwrite a local artifact") from exc
+    except OSError as exc:
+        raise SnapshotTransportError("cannot safely create a local artifact") from exc
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
             while True:
                 chunk = body.read(1024 * 1024)
                 if not chunk:
@@ -536,8 +787,9 @@ def write_response_body(response: Mapping[str, Any], output_path: Path) -> tuple
                 total += len(chunk)
             handle.flush()
             os.fsync(handle.fileno())
-    except FileExistsError as exc:
-        raise SnapshotTransportError("refusing to overwrite a local artifact") from exc
+    except Exception:
+        output_path.unlink(missing_ok=True)
+        raise
     return digest.hexdigest(), total
 
 
@@ -621,14 +873,21 @@ def upload_immutable_object_in_workspace(
                 Body=handle,
                 ContentType="application/octet-stream",
                 Metadata=metadata_for_ciphertext(ciphertext_sha256),
+                IfNoneMatch="*",
             )
         except Exception as exc:
-            raise SnapshotTransportError("immutable object upload failed") from exc
+            raise SnapshotTransportError("conditional immutable object upload failed") from exc
     if not isinstance(response, Mapping):
         raise SnapshotTransportError("object upload returned a malformed response")
     version_id = response.get("VersionId")
     if not isinstance(version_id, str) or not version_id or version_id == "null":
         raise SnapshotTransportError("versioned object upload did not return a VersionId")
+    require_singleton_immutable_object_version(
+        client,
+        bucket=bucket,
+        key=key,
+        expected_version_id=version_id,
+    )
     verify_remote_ciphertext_in_workspace(
         client,
         bucket=bucket,
@@ -759,6 +1018,11 @@ def validate_manifest(
     destination_site = require_id(manifest.get("destination_site"), "manifest destination_site", SITE_RE)
     if source_site != expected_source_site or destination_site != expected_destination_site:
         raise SnapshotTransportError("manifest site binding does not match this consumer")
+    verify_manifest_source_signature(
+        manifest,
+        config=config,
+        expected_source_site=source_site,
+    )
     generation = require_id(manifest.get("source_generation"), "manifest source_generation", GENERATION_RE)
     snapshot_id = require_id(manifest.get("snapshot_id"), "manifest snapshot_id", SNAPSHOT_ID_RE)
     release_sha = require_id(manifest.get("release_sha"), "manifest release_sha", RELEASE_SHA_RE)
@@ -918,6 +1182,8 @@ def publish_snapshot(
     source_volume_capture = validate_source_volume_capture(source_volume_capture_mode)
     snapshot_id = require_id(snapshot_id or generated_snapshot_id(now), "snapshot_id", SNAPSHOT_ID_RE)
     recipient = require_id(age_recipient or config.age_recipient, "age_recipient", AGE_RECIPIENT_RE)
+    # Fail before creating any remote artifact when this host lacks its bound source key.
+    _configured_source_private_key(config, source_site=source_site)
     database_sha256, database_bytes = validate_database_dump(database_dump, config.maximum_database_bytes)
     uploads_sha256, uploads_bytes = validate_uploads_archive(uploads_archive, config.maximum_uploads_bytes)
     audit_sha256: str | None = None
@@ -925,11 +1191,15 @@ def publish_snapshot(
     if audit_archive is not None:
         audit_sha256, audit_bytes = validate_audit_archive(audit_archive, config.maximum_audit_bytes)
     assert_private_versioned_bucket(client, config.bucket)
-    publish_time = now or utc_now()
-    published_at = utc_iso(publish_time)
-    snapshot_age_seconds = int((publish_time.astimezone(dt.timezone.utc) - source_db_snapshot_time).total_seconds())
-    if snapshot_age_seconds < 0 or snapshot_age_seconds > config.maximum_snapshot_age_seconds:
-        raise SnapshotTransportError("source snapshot is outside the configured freshness bound before publication")
+    preflight_time = now or utc_now()
+    if source_capture_time > preflight_time:
+        raise SnapshotTransportError("source_capture_completed_at is after the current publication time")
+    assert_snapshot_freshness(
+        checked_at=preflight_time,
+        source_db_snapshot_started_at=source_db_snapshot_time,
+        maximum_snapshot_age_seconds=config.maximum_snapshot_age_seconds,
+        error_message="source snapshot is outside the configured freshness bound before publication",
+    )
     base = snapshot_base_key(config, source_site, generation, snapshot_id)
 
     with locked_workspace_context(config, lock_name=f"publish-{source_site}-{destination_site}") as temporary_name:
@@ -990,6 +1260,17 @@ def publish_snapshot(
             if audit_remote is not None and audit_sha256 is not None and audit_bytes is not None
             else None
         )
+        # This is the last freshness check before building and committing the signed manifest.
+        commit_time = now or utc_now()
+        if source_capture_time > commit_time:
+            raise SnapshotTransportError("source_capture_completed_at is after the manifest commit time")
+        assert_snapshot_freshness(
+            checked_at=commit_time,
+            source_db_snapshot_started_at=source_db_snapshot_time,
+            maximum_snapshot_age_seconds=config.maximum_snapshot_age_seconds,
+            error_message="source snapshot is outside the configured freshness bound at manifest commit",
+        )
+        published_at = utc_iso(commit_time)
         manifest = build_manifest(
             source_site=source_site,
             destination_site=destination_site,
@@ -1006,11 +1287,20 @@ def publish_snapshot(
             uploads=uploads,
             audit=audit,
         )
+        manifest["source_signature"] = sign_manifest(manifest, config=config, source_site=source_site)
         manifest_plaintext = temporary / "manifest.json"
         atomic_write_json(manifest_plaintext, manifest)
         manifest_ciphertext = temporary / "manifest.json.age"
         encryptor(config.age_binary, recipient, manifest_plaintext, manifest_ciphertext)
         require_root_only_file(manifest_ciphertext, field="manifest ciphertext")
+        # Encryption is normally tiny, but a delayed process must never commit a stale manifest.
+        final_commit_check_time = now or utc_now()
+        assert_snapshot_freshness(
+            checked_at=final_commit_check_time,
+            source_db_snapshot_started_at=source_db_snapshot_time,
+            maximum_snapshot_age_seconds=config.maximum_snapshot_age_seconds,
+            error_message="source snapshot is outside the configured freshness bound at manifest upload",
+        )
         manifest_remote = upload_immutable_object_in_workspace(
             client,
             bucket=config.bucket,
@@ -1112,11 +1402,16 @@ def discover_latest_manifest(
         encrypted_manifest = workspace / f"manifest-{index}.json.age"
         plaintext_manifest = workspace / f"manifest-{index}.json"
         try:
+            manifest_version_id = require_singleton_immutable_object_version(
+                client,
+                bucket=config.bucket,
+                key=key,
+            )
             ciphertext_sha256, ciphertext_bytes, version_id = get_exact_object_to_file(
                 client,
                 bucket=config.bucket,
                 key=key,
-                version_id=None,
+                version_id=manifest_version_id,
                 output_path=encrypted_manifest,
             )
             manifest = decrypt_manifest_to_value(
@@ -1160,11 +1455,261 @@ def _safe_candidate_directory(candidate_root: Path, manifest: Mapping[str, Any])
     return candidate_root / source_site / generation / snapshot_id
 
 
-def _prepare_candidate_parent(candidate: Path) -> None:
-    parent = candidate.parent
-    ensure_root_only_directory(parent, field="candidate_root")
-    if candidate.exists() or candidate.is_symlink():
-        raise SnapshotTransportError("refusing to overwrite an existing candidate snapshot")
+def require_root_only_directory(path: Path, *, field: str) -> Path:
+    if not path.is_absolute():
+        raise SnapshotTransportError(f"{field} must be an absolute path")
+    state = _lstat(path)
+    if stat.S_ISLNK(state.st_mode) or not stat.S_ISDIR(state.st_mode):
+        raise SnapshotTransportError(f"{field} must be a non-symlink directory")
+    if state.st_uid != 0 or stat.S_IMODE(state.st_mode) & 0o077:
+        raise SnapshotTransportError(f"{field} must be root-only")
+    return path
+
+
+def verify_receipt_hash(receipt: Mapping[str, Any], *, field: str) -> None:
+    recorded = require_id(receipt.get("receipt_sha256"), f"{field}.receipt_sha256", re.compile(r"^[a-f0-9]{64}$"))
+    canonical = {key: value for key, value in receipt.items() if key != "receipt_sha256"}
+    if recorded != sha256_bytes(canonical_json_bytes(canonical)):
+        raise SnapshotTransportError(f"{field} receipt hash is invalid")
+
+
+def _require_manifest_remote(value: object, *, field: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise SnapshotTransportError(f"{field} must be an object")
+    remote = dict(value)
+    remote["object_key"] = require_string(remote.get("object_key"), f"{field}.object_key")
+    remote["version_id"] = require_string(remote.get("version_id"), f"{field}.version_id")
+    remote["ciphertext_sha256"] = require_id(
+        remote.get("ciphertext_sha256"), f"{field}.ciphertext_sha256", re.compile(r"^[a-f0-9]{64}$")
+    )
+    remote["ciphertext_bytes"] = require_nonnegative_int(remote.get("ciphertext_bytes"), f"{field}.ciphertext_bytes", minimum=1)
+    return remote
+
+
+def load_candidate_ready_receipt(candidate: Path) -> dict[str, Any]:
+    require_root_only_directory(candidate, field="candidate")
+    receipt = load_root_only_json(candidate / READY_RECEIPT_FILENAME, field="candidate ready receipt")
+    if receipt.get("schema") != READY_RECEIPT_SCHEMA or receipt.get("status") != "ready":
+        raise SnapshotTransportError("candidate ready receipt schema or status is unsupported")
+    verify_receipt_hash(receipt, field="candidate ready receipt")
+    normalized: dict[str, Any] = {
+        "schema": READY_RECEIPT_SCHEMA,
+        "status": "ready",
+    }
+    for field, pattern in (
+        ("source_site", SITE_RE),
+        ("destination_site", SITE_RE),
+        ("source_generation", GENERATION_RE),
+        ("snapshot_id", SNAPSHOT_ID_RE),
+        ("release_sha", RELEASE_SHA_RE),
+        ("alembic_revision", ALEMBIC_REVISION_RE),
+    ):
+        normalized[field] = require_id(receipt.get(field), f"candidate ready receipt.{field}", pattern)
+    for field in ("source_db_snapshot_started_at", "source_capture_completed_at", "published_at", "ready_at"):
+        normalized[field] = require_string(receipt.get(field), f"candidate ready receipt.{field}")
+        parse_utc_iso(normalized[field], field=f"candidate ready receipt.{field}")
+    if not (
+        parse_utc_iso(normalized["source_db_snapshot_started_at"], field="candidate ready receipt.source_db_snapshot_started_at")
+        <= parse_utc_iso(normalized["source_capture_completed_at"], field="candidate ready receipt.source_capture_completed_at")
+        <= parse_utc_iso(normalized["published_at"], field="candidate ready receipt.published_at")
+        <= parse_utc_iso(normalized["ready_at"], field="candidate ready receipt.ready_at")
+    ):
+        raise SnapshotTransportError("candidate ready receipt timestamps are inconsistent")
+    normalized["source_database_capture"] = dict(
+        validate_source_database_capture(
+            (receipt.get("source_database_capture") or {}).get("client_mode")
+            if isinstance(receipt.get("source_database_capture"), Mapping)
+            else None,
+            (receipt.get("source_database_capture") or {}).get("client_lifetime_seconds")
+            if isinstance(receipt.get("source_database_capture"), Mapping)
+            else None,
+        )
+    )
+    normalized["source_volume_capture"] = dict(
+        validate_source_volume_capture(
+            (receipt.get("source_volume_capture") or {}).get("mode")
+            if isinstance(receipt.get("source_volume_capture"), Mapping)
+            else None
+        )
+    )
+    for field in (
+        "snapshot_age_seconds",
+        "source_db_snapshot_age_seconds",
+        "source_capture_age_seconds",
+        "source_capture_duration_seconds",
+        "publish_lag_seconds",
+    ):
+        normalized[field] = require_nonnegative_int(receipt.get(field), f"candidate ready receipt.{field}")
+    if receipt.get("candidate_directory") != str(candidate):
+        raise SnapshotTransportError("candidate ready receipt directory binding is invalid")
+    expected_paths = {
+        "database_dump_path": candidate / "database.dump",
+        "uploads_archive_path": candidate / "uploads.tar.gz",
+    }
+    for field, expected_path in expected_paths.items():
+        if receipt.get(field) != str(expected_path):
+            raise SnapshotTransportError(f"candidate ready receipt {field} binding is invalid")
+        normalized[field] = str(expected_path)
+    normalized["candidate_directory"] = str(candidate)
+    normalized["database"] = _require_artifact_descriptor(
+        receipt.get("database"), field="candidate ready database", expected_format="pg_dump_custom"
+    )
+    normalized["uploads"] = _require_artifact_descriptor(
+        receipt.get("uploads"), field="candidate ready uploads", expected_format="tar_gz_uploads_root"
+    )
+    normalized["manifest"] = _require_manifest_remote(receipt.get("manifest"), field="candidate ready manifest")
+    if "audit" in receipt or "audit_archive_path" in receipt:
+        if receipt.get("audit_archive_path") != str(candidate / "audit.tar.gz"):
+            raise SnapshotTransportError("candidate ready receipt audit path binding is invalid")
+        normalized["audit_archive_path"] = str(candidate / "audit.tar.gz")
+        normalized["audit"] = _require_artifact_descriptor(
+            receipt.get("audit"), field="candidate ready audit", expected_format="tar_gz_audit_trail_root"
+        )
+    normalized["receipt_sha256"] = receipt["receipt_sha256"]
+    return normalized
+
+
+def verify_candidate_artifacts(candidate: Path, ready: Mapping[str, Any], config: TransportConfig) -> None:
+    database_sha256, database_bytes = validate_database_dump(candidate / "database.dump", config.maximum_database_bytes)
+    if database_sha256 != ready["database"]["sha256"] or database_bytes != ready["database"]["bytes"]:
+        raise SnapshotTransportError("candidate database artifact does not match its readiness receipt")
+    uploads_sha256, uploads_bytes = validate_uploads_archive(candidate / "uploads.tar.gz", config.maximum_uploads_bytes)
+    if uploads_sha256 != ready["uploads"]["sha256"] or uploads_bytes != ready["uploads"]["bytes"]:
+        raise SnapshotTransportError("candidate uploads artifact does not match its readiness receipt")
+    if "audit" in ready:
+        audit_sha256, audit_bytes = validate_audit_archive(candidate / "audit.tar.gz", config.maximum_audit_bytes)
+        if audit_sha256 != ready["audit"]["sha256"] or audit_bytes != ready["audit"]["bytes"]:
+            raise SnapshotTransportError("candidate audit artifact does not match its readiness receipt")
+
+
+def verify_existing_candidate(
+    candidate: Path,
+    *,
+    manifest: Mapping[str, Any],
+    manifest_remote: Mapping[str, Any],
+    config: TransportConfig,
+) -> dict[str, Any]:
+    ready = load_candidate_ready_receipt(candidate)
+    for field in (
+        "source_site",
+        "destination_site",
+        "source_generation",
+        "snapshot_id",
+        "release_sha",
+        "alembic_revision",
+        "source_db_snapshot_started_at",
+        "source_capture_completed_at",
+        "published_at",
+        "source_database_capture",
+        "source_volume_capture",
+    ):
+        if ready.get(field) != manifest.get(field):
+            raise SnapshotTransportError(f"existing candidate {field} does not match the latest committed snapshot")
+    for artifact in ("database", "uploads"):
+        if ready.get(artifact) != manifest.get(artifact):
+            raise SnapshotTransportError(f"existing candidate {artifact} descriptor does not match the latest committed snapshot")
+    if ready.get("manifest") != dict(manifest_remote):
+        raise SnapshotTransportError("existing candidate manifest version does not match the latest committed snapshot")
+    if ("audit" in ready) != ("audit" in manifest) or ready.get("audit") != manifest.get("audit"):
+        raise SnapshotTransportError("existing candidate audit descriptor does not match the latest committed snapshot")
+    verify_candidate_artifacts(candidate, ready, config)
+    return ready
+
+
+def load_verified_restore_receipt(candidate: Path, ready: Mapping[str, Any]) -> dict[str, Any] | None:
+    restore_path = candidate / RESTORE_RECEIPT_FILENAME
+    if not restore_path.exists():
+        return None
+    receipt = load_root_only_json(restore_path, field="candidate restore receipt")
+    if receipt.get("schema") != RESTORE_RECEIPT_SCHEMA or receipt.get("status") != "restored_verified":
+        raise SnapshotTransportError("candidate restore receipt schema or status is unsupported")
+    verify_receipt_hash(receipt, field="candidate restore receipt")
+    for field in (
+        "source_site",
+        "destination_site",
+        "source_generation",
+        "snapshot_id",
+        "release_sha",
+        "alembic_revision",
+        "source_db_snapshot_started_at",
+        "source_capture_completed_at",
+        "published_at",
+        "ready_at",
+    ):
+        if receipt.get(field) != ready.get(field):
+            raise SnapshotTransportError(f"candidate restore receipt {field} does not bind to its ready receipt")
+    if receipt.get("ready_receipt_sha256") != ready.get("receipt_sha256"):
+        raise SnapshotTransportError("candidate restore receipt does not bind to its ready receipt hash")
+    active_pointer_state = receipt.get("active_pointer_state")
+    if active_pointer_state not in {"active", "inactive"}:
+        raise SnapshotTransportError("candidate restore receipt active_pointer_state is unsupported")
+    return dict(receipt)
+
+
+def _candidate_has_staged_artifacts(candidate: Path) -> bool:
+    return any((candidate / name).exists() for name in ("database.dump", "uploads.tar.gz", "audit.tar.gz"))
+
+
+def scan_candidate_records(candidate_parent: Path) -> list[dict[str, Any]]:
+    require_root_only_directory(candidate_parent, field="candidate_root")
+    records: list[dict[str, Any]] = []
+    for path in candidate_parent.iterdir():
+        if not SNAPSHOT_ID_RE.fullmatch(path.name):
+            continue
+        ready = load_candidate_ready_receipt(path)
+        restore = load_verified_restore_receipt(path, ready)
+        records.append(
+            {
+                "path": path,
+                "ready": ready,
+                "restore": restore,
+                "has_artifacts": _candidate_has_staged_artifacts(path),
+            }
+        )
+    return sorted(
+        records,
+        key=lambda record: (parse_utc_iso(record["ready"]["ready_at"], field="candidate ready receipt.ready_at"), record["path"].name),
+        reverse=True,
+    )
+
+
+def reject_pending_candidate_records(records: Sequence[Mapping[str, Any]]) -> None:
+    for record in records:
+        if record["has_artifacts"] and record["restore"] is None:
+            raise SnapshotTransportError("an earlier candidate still awaits verified restore; refusing to stage another")
+
+
+def prune_candidate_artifacts(candidate: Path, ready: Mapping[str, Any]) -> None:
+    names = ["database.dump", "uploads.tar.gz"]
+    if "audit" in ready:
+        names.append("audit.tar.gz")
+    for name in names:
+        artifact = candidate / name
+        if not artifact.exists():
+            continue
+        if artifact.is_symlink():
+            raise SnapshotTransportError("refusing to remove a symlinked candidate artifact")
+        require_root_only_file(artifact, field="candidate artifact")
+        artifact.unlink()
+
+
+def cleanup_restored_candidate_artifacts(
+    candidate_parent: Path,
+    *,
+    keep_candidate: Path,
+    maximum_retained_candidates: int,
+) -> None:
+    records = scan_candidate_records(candidate_parent)
+    artifact_records = [record for record in records if record["has_artifacts"]]
+    keep_paths = {record["path"] for record in artifact_records[:maximum_retained_candidates]}
+    keep_paths.add(keep_candidate)
+    for record in artifact_records:
+        if record["path"] in keep_paths:
+            continue
+        restore = record["restore"]
+        if restore is None or restore.get("active_pointer_state") != "inactive":
+            continue
+        prune_candidate_artifacts(record["path"], record["ready"])
 
 
 def _consume_artifact(
@@ -1252,13 +1797,16 @@ def consume_snapshot(
     now: dt.datetime | None = None,
     decryptor: Callable[[str, Path, Path, Path], None] = run_age_decrypt,
 ) -> dict[str, Any]:
+    source_site = require_id(source_site, "source_site", SITE_RE)
+    destination_site = require_id(destination_site, "destination_site", SITE_RE)
     selected_identity = identity_file or config.age_identity_file
     if selected_identity is None:
         raise SnapshotTransportError("age_identity_file is required for a snapshot consumer")
     selected_identity = require_root_only_file(selected_identity, field="age_identity_file")
+    # Fail before reading bucket state if this host does not pin the requested source key.
+    _configured_source_public_key(config, source_site=source_site)
     assert_private_versioned_bucket(client, config.bucket)
     ensure_root_only_directory(config.workspace, field="workspace")
-    now_value = now or utc_now()
     with locked_workspace_context(config, lock_name=f"consume-{source_site}-{destination_site}") as temporary_name:
         temporary = Path(temporary_name)
         manifest, manifest_remote = discover_latest_manifest(
@@ -1277,19 +1825,39 @@ def consume_snapshot(
             manifest["source_capture_completed_at"], field="manifest source_capture_completed_at"
         )
         published_at = parse_utc_iso(manifest["published_at"], field="manifest published_at")
-        snapshot_age_seconds = int((now_value.astimezone(dt.timezone.utc) - source_db_snapshot_time).total_seconds())
-        if snapshot_age_seconds < 0 or snapshot_age_seconds > config.maximum_snapshot_age_seconds:
-            raise SnapshotTransportError("newest committed snapshot is outside the configured freshness bound")
-        source_capture_age_seconds = int((now_value.astimezone(dt.timezone.utc) - source_capture_time).total_seconds())
-        source_capture_duration_seconds = int((source_capture_time - source_db_snapshot_time).total_seconds())
-        if source_capture_age_seconds < 0 or source_capture_duration_seconds < 0:
-            raise SnapshotTransportError("manifest source capture timestamps are inconsistent")
-        publish_lag_seconds = int((published_at - source_capture_time).total_seconds())
-        if publish_lag_seconds < 0:
-            raise SnapshotTransportError("manifest publication precedes source capture completion")
+        initial_check_time = now or utc_now()
+        assert_snapshot_freshness(
+            checked_at=initial_check_time,
+            source_db_snapshot_started_at=source_db_snapshot_time,
+            maximum_snapshot_age_seconds=config.maximum_snapshot_age_seconds,
+            error_message="newest committed snapshot is outside the configured freshness bound",
+        )
+        elapsed_seconds_ceil(initial_check_time, source_capture_time, field="source capture age")
+        elapsed_seconds_ceil(source_capture_time, source_db_snapshot_time, field="source capture duration")
+        elapsed_seconds_ceil(published_at, source_capture_time, field="manifest publication lag")
         candidate = _safe_candidate_directory(candidate_root, manifest)
-        _prepare_candidate_parent(candidate)
         candidate_parent = candidate.parent
+        ensure_root_only_directory(candidate_parent, field="candidate_root")
+        if candidate.exists() or candidate.is_symlink():
+            receipt = verify_existing_candidate(
+                candidate,
+                manifest=manifest,
+                manifest_remote=manifest_remote,
+                config=config,
+            )
+            cleanup_restored_candidate_artifacts(
+                candidate_parent,
+                keep_candidate=candidate,
+                maximum_retained_candidates=config.maximum_retained_candidates,
+            )
+            return receipt
+        records = scan_candidate_records(candidate_parent)
+        reject_pending_candidate_records(records)
+        cleanup_restored_candidate_artifacts(
+            candidate_parent,
+            keep_candidate=candidate,
+            maximum_retained_candidates=config.maximum_retained_candidates,
+        )
         incoming = candidate_parent / (".incoming-" + manifest["snapshot_id"] + "-" + secrets.token_hex(8))
         try:
             incoming.mkdir(mode=0o700)
@@ -1324,7 +1892,30 @@ def consume_snapshot(
                     decryptor=decryptor,
                     validator=validate_audit_archive,
                 )
-            ready_at = utc_iso(now_value)
+            # Recheck from the database capture start immediately before committing readiness.
+            ready_time = now or utc_now()
+            snapshot_age_seconds = assert_snapshot_freshness(
+                checked_at=ready_time,
+                source_db_snapshot_started_at=source_db_snapshot_time,
+                maximum_snapshot_age_seconds=config.maximum_snapshot_age_seconds,
+                error_message="snapshot became stale before readiness commit",
+            )
+            source_capture_age_seconds = elapsed_seconds_ceil(
+                ready_time,
+                source_capture_time,
+                field="source capture age",
+            )
+            source_capture_duration_seconds = elapsed_seconds_ceil(
+                source_capture_time,
+                source_db_snapshot_time,
+                field="source capture duration",
+            )
+            publish_lag_seconds = elapsed_seconds_ceil(
+                published_at,
+                source_capture_time,
+                field="manifest publication lag",
+            )
+            ready_at = utc_iso(ready_time)
             receipt = build_ready_receipt(
                 manifest=manifest,
                 manifest_remote=manifest_remote,
@@ -1335,10 +1926,15 @@ def consume_snapshot(
                 source_capture_duration_seconds=source_capture_duration_seconds,
                 publish_lag_seconds=publish_lag_seconds,
             )
-            atomic_write_json(incoming / "snapshot-ready.json", receipt)
+            atomic_write_json(incoming / READY_RECEIPT_FILENAME, receipt)
             if candidate.exists() or candidate.is_symlink():
                 raise SnapshotTransportError("refusing to overwrite an existing candidate snapshot")
             os.replace(incoming, candidate)
+            cleanup_restored_candidate_artifacts(
+                candidate_parent,
+                keep_candidate=candidate,
+                maximum_retained_candidates=config.maximum_retained_candidates,
+            )
             return receipt
         except Exception:
             shutil.rmtree(incoming, ignore_errors=True)
