@@ -45,19 +45,6 @@ jobs:
     needs: repository-governance
     timeout-minutes: 35
     services:
-      postgres:
-        image: postgres:15-alpine
-        env:
-          POSTGRES_USER: market_ci
-          POSTGRES_PASSWORD: market_ci
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U market_ci -d postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
       redis:
         image: redis:7-alpine
         ports:
@@ -73,6 +60,34 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.git_ref || github.sha }}
+
+      - name: Build and start disposable boottime PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="trading-bot-ci-postgres-boottime:$(git rev-parse --short=12 HEAD)"
+          docker build \
+            --build-arg RELEASE_SHA="$(git rev-parse HEAD)" \
+            --file deploy/postgres-boottime/Dockerfile \
+            --tag "$image" \
+            .
+          docker run -d --name market-postgres \
+            --publish 127.0.0.1:5432:5432 \
+            --env POSTGRES_USER=market_ci \
+            --env POSTGRES_PASSWORD=market_ci \
+            --env POSTGRES_DB=postgres \
+            "$image"
+          for _ in $(seq 1 30); do
+            if docker exec market-postgres pg_isready -U market_ci -d postgres; then
+              docker exec market-postgres psql -U market_ci -d postgres -Atqc \
+                "SELECT default_version FROM pg_available_extensions WHERE name = 'trading_bot_boottime'" \
+                | grep -Fx '1.0'
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs market-postgres
+          exit 1
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -119,6 +134,10 @@ jobs:
             tmp/market-postgres-gate.log
             tmp/market-realtime-redis-gate.log
           if-no-files-found: error
+
+      - name: Remove disposable boottime PostgreSQL
+        if: always()
+        run: docker rm --force market-postgres || true
 
   observability-gate:
     name: observability-gate
