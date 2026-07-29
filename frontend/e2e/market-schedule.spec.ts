@@ -450,7 +450,7 @@ test.describe('Market schedule browser regressions', () => {
 
     await expect(activePage.locator('.market-runtime-notice')).toHaveText('شروع فعالیت بازار')
 
-    await openOfferPreview(activePage, `خرید ${actor.commodityName} 10 عدد 121111`)
+    await openOfferPreview(activePage, `خرید نقد ${actor.commodityName} 10 عدد 121111`)
     configureMarketRuntime({
       mode: 'open',
       noticeVisible: true,
@@ -467,7 +467,7 @@ test.describe('Market schedule browser regressions', () => {
     const { freshContext: afterFirstOfferContext, freshPage: afterFirstOfferPage } = await openFreshMarketContext(browser, actor, afterFirstOfferState)
     await expect(afterFirstOfferPage.locator('.market-runtime-notice')).toHaveText('شروع فعالیت بازار')
 
-    await openOfferPreview(activePage, `فروش ${actor.commodityName} 12 عدد 121222`)
+    await openOfferPreview(activePage, `فروش نقد ${actor.commodityName} 12 عدد 121222`)
     configureMarketRuntime({
       mode: 'open',
       noticeVisible: true,
