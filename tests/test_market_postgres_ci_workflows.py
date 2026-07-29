@@ -29,6 +29,8 @@ class MarketPostgresCiWorkflowTests(unittest.TestCase):
             self.assertIn("POSTGRES_USER: market_ci", workflow, path.name)
             self.assertIn("POSTGRES_PASSWORD: market_ci", workflow, path.name)
             self.assertIn("REDIS_URL: redis://127.0.0.1:6379/14", workflow, path.name)
+            self.assertIn("install -m 600 .env .env.api", workflow, path.name)
+            self.assertIn("install -m 600 .env .env.migration", workflow, path.name)
             self.assertNotIn("image: postgres:15-alpine", workflow, path.name)
 
     def test_market_postgres_gate_cleans_up_its_disposable_container(self) -> None:

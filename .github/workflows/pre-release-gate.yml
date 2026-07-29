@@ -240,6 +240,8 @@ jobs:
           DEV_API_KEY=REDACTED_DEV_API_KEY
           JWT_SECRET_KEY=ci_jwt_secret_key_please_override_in_real_envs
           EOF
+          install -m 600 .env .env.api
+          install -m 600 .env .env.migration
           cat > frontend/.env.local <<'EOF'
           VITE_API_BASE_URL=http://127.0.0.1:8000
           VITE_STAGING_DEV_LOGIN=true
