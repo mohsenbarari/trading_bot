@@ -9,6 +9,10 @@ The manifest is the commit marker and is uploaded last.  A consumer downloads
 only the exact object versions recorded by a verified manifest, decrypts them
 into a new candidate directory, and writes a root-only readiness receipt.
 
+The source wrapper must report the database consistent-snapshot start and the
+completion time for all source artifacts.  Freshness is always measured from
+that database snapshot start, never from object upload time.
+
 The script never starts containers, restores a database, changes ``current``,
 or deletes/overwrites an S3 object.  The host-specific deployment wrapper owns
 the explicitly named standby volumes and turns a ready receipt into a restore
@@ -650,6 +654,8 @@ def build_manifest(
     snapshot_id: str,
     release_sha: str,
     alembic_revision: str,
+    source_db_snapshot_started_at: str,
+    source_capture_completed_at: str,
     published_at: str,
     source_database_capture: Mapping[str, Any],
     source_volume_capture: Mapping[str, Any],
@@ -666,6 +672,8 @@ def build_manifest(
         "snapshot_id": snapshot_id,
         "release_sha": release_sha,
         "alembic_revision": alembic_revision,
+        "source_db_snapshot_started_at": source_db_snapshot_started_at,
+        "source_capture_completed_at": source_capture_completed_at,
         "published_at": published_at,
         "source_database_capture": dict(source_database_capture),
         "source_volume_capture": dict(source_volume_capture),
@@ -755,8 +763,24 @@ def validate_manifest(
     snapshot_id = require_id(manifest.get("snapshot_id"), "manifest snapshot_id", SNAPSHOT_ID_RE)
     release_sha = require_id(manifest.get("release_sha"), "manifest release_sha", RELEASE_SHA_RE)
     alembic_revision = require_id(manifest.get("alembic_revision"), "manifest alembic_revision", ALEMBIC_REVISION_RE)
+    source_db_snapshot_started_at = require_string(
+        manifest.get("source_db_snapshot_started_at"), "manifest source_db_snapshot_started_at"
+    )
+    source_db_snapshot_time = parse_utc_iso(
+        source_db_snapshot_started_at, field="manifest source_db_snapshot_started_at"
+    )
+    source_capture_completed_at = require_string(
+        manifest.get("source_capture_completed_at"), "manifest source_capture_completed_at"
+    )
+    source_capture_time = parse_utc_iso(
+        source_capture_completed_at, field="manifest source_capture_completed_at"
+    )
+    if source_capture_time < source_db_snapshot_time:
+        raise SnapshotTransportError("manifest source_capture_completed_at precedes source_db_snapshot_started_at")
     published_at = require_string(manifest.get("published_at"), "manifest published_at")
-    parse_utc_iso(published_at, field="manifest published_at")
+    published_time = parse_utc_iso(published_at, field="manifest published_at")
+    if published_time < source_capture_time:
+        raise SnapshotTransportError("manifest published_at precedes source_capture_completed_at")
     source_database_capture = validate_source_database_capture(
         (manifest.get("source_database_capture") or {}).get("client_mode")
         if isinstance(manifest.get("source_database_capture"), Mapping)
@@ -793,6 +817,8 @@ def validate_manifest(
         "snapshot_id": snapshot_id,
         "release_sha": release_sha,
         "alembic_revision": alembic_revision,
+        "source_db_snapshot_started_at": source_db_snapshot_started_at,
+        "source_capture_completed_at": source_capture_completed_at,
         "published_at": published_at,
         "source_database_capture": source_database_capture,
         "source_volume_capture": source_volume_capture,
@@ -857,6 +883,8 @@ def publish_snapshot(
     generation: str,
     release_sha: str,
     alembic_revision: str,
+    source_db_snapshot_started_at: str,
+    source_capture_completed_at: str,
     source_db_client_mode: str,
     source_db_client_lifetime_seconds: int,
     source_volume_capture_mode: str,
@@ -872,6 +900,18 @@ def publish_snapshot(
     generation = require_id(generation, "generation", GENERATION_RE)
     release_sha = require_id(release_sha, "release_sha", RELEASE_SHA_RE)
     alembic_revision = require_id(alembic_revision, "alembic_revision", ALEMBIC_REVISION_RE)
+    source_db_snapshot_started_at = require_string(
+        source_db_snapshot_started_at, "source_db_snapshot_started_at"
+    )
+    source_db_snapshot_time = parse_utc_iso(
+        source_db_snapshot_started_at, field="source_db_snapshot_started_at"
+    )
+    source_capture_completed_at = require_string(source_capture_completed_at, "source_capture_completed_at")
+    source_capture_time = parse_utc_iso(
+        source_capture_completed_at, field="source_capture_completed_at"
+    )
+    if source_capture_time < source_db_snapshot_time:
+        raise SnapshotTransportError("source_capture_completed_at precedes source_db_snapshot_started_at")
     source_database_capture = validate_source_database_capture(
         source_db_client_mode, source_db_client_lifetime_seconds
     )
@@ -885,7 +925,11 @@ def publish_snapshot(
     if audit_archive is not None:
         audit_sha256, audit_bytes = validate_audit_archive(audit_archive, config.maximum_audit_bytes)
     assert_private_versioned_bucket(client, config.bucket)
-    published_at = utc_iso(now or utc_now())
+    publish_time = now or utc_now()
+    published_at = utc_iso(publish_time)
+    snapshot_age_seconds = int((publish_time.astimezone(dt.timezone.utc) - source_db_snapshot_time).total_seconds())
+    if snapshot_age_seconds < 0 or snapshot_age_seconds > config.maximum_snapshot_age_seconds:
+        raise SnapshotTransportError("source snapshot is outside the configured freshness bound before publication")
     base = snapshot_base_key(config, source_site, generation, snapshot_id)
 
     with locked_workspace_context(config, lock_name=f"publish-{source_site}-{destination_site}") as temporary_name:
@@ -953,6 +997,8 @@ def publish_snapshot(
             snapshot_id=snapshot_id,
             release_sha=release_sha,
             alembic_revision=alembic_revision,
+            source_db_snapshot_started_at=source_db_snapshot_started_at,
+            source_capture_completed_at=source_capture_completed_at,
             published_at=published_at,
             source_database_capture=source_database_capture,
             source_volume_capture=source_volume_capture,
@@ -981,6 +1027,8 @@ def publish_snapshot(
         "snapshot_id": snapshot_id,
         "release_sha": release_sha,
         "alembic_revision": alembic_revision,
+        "source_db_snapshot_started_at": source_db_snapshot_started_at,
+        "source_capture_completed_at": source_capture_completed_at,
         "published_at": published_at,
         "source_database_capture": source_database_capture,
         "source_volume_capture": source_volume_capture,
@@ -1152,7 +1200,10 @@ def build_ready_receipt(
     manifest_remote: Mapping[str, Any],
     candidate: Path,
     ready_at: str,
-    snapshot_age_seconds: int,
+    source_db_snapshot_age_seconds: int,
+    source_capture_age_seconds: int,
+    source_capture_duration_seconds: int,
+    publish_lag_seconds: int,
 ) -> dict[str, Any]:
     database = dict(manifest["database"])
     uploads = dict(manifest["uploads"])
@@ -1165,11 +1216,17 @@ def build_ready_receipt(
         "snapshot_id": manifest["snapshot_id"],
         "release_sha": manifest["release_sha"],
         "alembic_revision": manifest["alembic_revision"],
+        "source_db_snapshot_started_at": manifest["source_db_snapshot_started_at"],
+        "source_capture_completed_at": manifest["source_capture_completed_at"],
         "published_at": manifest["published_at"],
         "source_database_capture": dict(manifest["source_database_capture"]),
         "source_volume_capture": dict(manifest["source_volume_capture"]),
         "ready_at": ready_at,
-        "snapshot_age_seconds": snapshot_age_seconds,
+        "snapshot_age_seconds": source_db_snapshot_age_seconds,
+        "source_db_snapshot_age_seconds": source_db_snapshot_age_seconds,
+        "source_capture_age_seconds": source_capture_age_seconds,
+        "source_capture_duration_seconds": source_capture_duration_seconds,
+        "publish_lag_seconds": publish_lag_seconds,
         "database_dump_path": str(candidate / "database.dump"),
         "uploads_archive_path": str(candidate / "uploads.tar.gz"),
         "candidate_directory": str(candidate),
@@ -1213,10 +1270,23 @@ def consume_snapshot(
             workspace=temporary,
             decryptor=decryptor,
         )
+        source_db_snapshot_time = parse_utc_iso(
+            manifest["source_db_snapshot_started_at"], field="manifest source_db_snapshot_started_at"
+        )
+        source_capture_time = parse_utc_iso(
+            manifest["source_capture_completed_at"], field="manifest source_capture_completed_at"
+        )
         published_at = parse_utc_iso(manifest["published_at"], field="manifest published_at")
-        age_seconds = int((now_value.astimezone(dt.timezone.utc) - published_at).total_seconds())
-        if age_seconds < 0 or age_seconds > config.maximum_snapshot_age_seconds:
+        snapshot_age_seconds = int((now_value.astimezone(dt.timezone.utc) - source_db_snapshot_time).total_seconds())
+        if snapshot_age_seconds < 0 or snapshot_age_seconds > config.maximum_snapshot_age_seconds:
             raise SnapshotTransportError("newest committed snapshot is outside the configured freshness bound")
+        source_capture_age_seconds = int((now_value.astimezone(dt.timezone.utc) - source_capture_time).total_seconds())
+        source_capture_duration_seconds = int((source_capture_time - source_db_snapshot_time).total_seconds())
+        if source_capture_age_seconds < 0 or source_capture_duration_seconds < 0:
+            raise SnapshotTransportError("manifest source capture timestamps are inconsistent")
+        publish_lag_seconds = int((published_at - source_capture_time).total_seconds())
+        if publish_lag_seconds < 0:
+            raise SnapshotTransportError("manifest publication precedes source capture completion")
         candidate = _safe_candidate_directory(candidate_root, manifest)
         _prepare_candidate_parent(candidate)
         candidate_parent = candidate.parent
@@ -1260,7 +1330,10 @@ def consume_snapshot(
                 manifest_remote=manifest_remote,
                 candidate=candidate,
                 ready_at=ready_at,
-                snapshot_age_seconds=age_seconds,
+                source_db_snapshot_age_seconds=snapshot_age_seconds,
+                source_capture_age_seconds=source_capture_age_seconds,
+                source_capture_duration_seconds=source_capture_duration_seconds,
+                publish_lag_seconds=publish_lag_seconds,
             )
             atomic_write_json(incoming / "snapshot-ready.json", receipt)
             if candidate.exists() or candidate.is_symlink():
@@ -1287,6 +1360,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     publish.add_argument("--generation", required=True)
     publish.add_argument("--release-sha", required=True)
     publish.add_argument("--alembic-revision", required=True)
+    publish.add_argument("--source-db-snapshot-started-at", required=True)
+    publish.add_argument("--source-capture-completed-at", required=True)
     publish.add_argument("--source-db-client-mode", required=True, choices=("short_lived_read_only",))
     publish.add_argument("--source-db-client-lifetime-seconds", required=True, type=int)
     publish.add_argument("--source-volume-capture-mode", required=True, choices=("read_only_no_mutation",))
@@ -1320,6 +1395,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 generation=args.generation,
                 release_sha=args.release_sha,
                 alembic_revision=args.alembic_revision,
+                source_db_snapshot_started_at=args.source_db_snapshot_started_at,
+                source_capture_completed_at=args.source_capture_completed_at,
                 source_db_client_mode=args.source_db_client_mode,
                 source_db_client_lifetime_seconds=args.source_db_client_lifetime_seconds,
                 source_volume_capture_mode=args.source_volume_capture_mode,

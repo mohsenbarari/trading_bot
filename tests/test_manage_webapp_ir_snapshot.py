@@ -169,7 +169,13 @@ class SnapshotTransportTests(unittest.TestCase):
             member.mode = 0o600
             archive.addfile(member, io.BytesIO(content))
 
-    def publish(self) -> dict[str, Any]:
+    def publish(
+        self,
+        *,
+        source_db_snapshot_started_at: dt.datetime = NOW,
+        source_capture_completed_at: dt.datetime = NOW,
+        now: dt.datetime = NOW,
+    ) -> dict[str, Any]:
         return snapshot.publish_snapshot(
             self.client,
             config=self.config,
@@ -181,11 +187,13 @@ class SnapshotTransportTests(unittest.TestCase):
             generation="fi-generation-1",
             release_sha=RELEASE_SHA,
             alembic_revision="f2c7d8e9a0b1",
+            source_db_snapshot_started_at=snapshot.utc_iso(source_db_snapshot_started_at),
+            source_capture_completed_at=snapshot.utc_iso(source_capture_completed_at),
             source_db_client_mode="short_lived_read_only",
             source_db_client_lifetime_seconds=30,
             source_volume_capture_mode="read_only_no_mutation",
             snapshot_id=SNAPSHOT_ID,
-            now=NOW,
+            now=now,
             encryptor=fake_encrypt,
         )
 
@@ -235,12 +243,18 @@ class SnapshotTransportTests(unittest.TestCase):
         self.assertEqual("fi-generation-1", receipt["source_generation"])
         self.assertEqual(RELEASE_SHA, receipt["release_sha"])
         self.assertEqual("f2c7d8e9a0b1", receipt["alembic_revision"])
+        self.assertEqual(snapshot.utc_iso(NOW), receipt["source_db_snapshot_started_at"])
+        self.assertEqual(snapshot.utc_iso(NOW), receipt["source_capture_completed_at"])
         self.assertEqual(
             {"client_mode": "short_lived_read_only", "client_lifetime_seconds": 30},
             receipt["source_database_capture"],
         )
         self.assertEqual({"mode": "read_only_no_mutation"}, receipt["source_volume_capture"])
         self.assertEqual(10, receipt["snapshot_age_seconds"])
+        self.assertEqual(10, receipt["source_db_snapshot_age_seconds"])
+        self.assertEqual(10, receipt["source_capture_age_seconds"])
+        self.assertEqual(0, receipt["source_capture_duration_seconds"])
+        self.assertEqual(0, receipt["publish_lag_seconds"])
         self.assertEqual(published["database"], receipt["database"])
         self.assertEqual(published["uploads"], receipt["uploads"])
         self.assertEqual(published["manifest"], receipt["manifest"])
@@ -277,6 +291,29 @@ class SnapshotTransportTests(unittest.TestCase):
             self.consume(now=NOW + dt.timedelta(seconds=31))
         self.assertFalse(self.candidate_root.exists())
 
+    def test_freshness_is_measured_from_db_snapshot_start_not_capture_completion(self) -> None:
+        self.publish(
+            source_db_snapshot_started_at=NOW - dt.timedelta(seconds=20),
+            source_capture_completed_at=NOW,
+        )
+
+        with self.assertRaisesRegex(snapshot.SnapshotTransportError, "freshness"):
+            self.consume(now=NOW + dt.timedelta(seconds=15))
+
+    def test_publisher_rejects_source_snapshot_that_is_already_outside_rpo_bound(self) -> None:
+        with self.assertRaisesRegex(snapshot.SnapshotTransportError, "source snapshot"):
+            self.publish(
+                source_db_snapshot_started_at=NOW - dt.timedelta(seconds=31),
+                source_capture_completed_at=NOW,
+            )
+
+    def test_publisher_rejects_capture_completion_before_db_snapshot_start(self) -> None:
+        with self.assertRaisesRegex(snapshot.SnapshotTransportError, "precedes"):
+            self.publish(
+                source_db_snapshot_started_at=NOW,
+                source_capture_completed_at=NOW - dt.timedelta(seconds=1),
+            )
+
     def test_consume_refuses_to_overwrite_existing_candidate(self) -> None:
         self.publish()
         self.consume()
@@ -299,6 +336,8 @@ class SnapshotTransportTests(unittest.TestCase):
             generation="fi-generation-1",
             release_sha=RELEASE_SHA,
             alembic_revision="f2c7d8e9a0b1",
+            source_db_snapshot_started_at=snapshot.utc_iso(NOW),
+            source_capture_completed_at=snapshot.utc_iso(NOW),
             source_db_client_mode="short_lived_read_only",
             source_db_client_lifetime_seconds=30,
             source_volume_capture_mode="read_only_no_mutation",
@@ -328,6 +367,8 @@ class SnapshotTransportTests(unittest.TestCase):
             generation="ir-final-generation-1",
             release_sha=RELEASE_SHA,
             alembic_revision="f2c7d8e9a0b1",
+            source_db_snapshot_started_at=snapshot.utc_iso(NOW),
+            source_capture_completed_at=snapshot.utc_iso(NOW),
             source_db_client_mode="short_lived_read_only",
             source_db_client_lifetime_seconds=30,
             source_volume_capture_mode="read_only_no_mutation",
