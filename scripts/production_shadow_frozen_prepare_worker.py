@@ -331,6 +331,12 @@ PREPARE_SERVICE_COMMANDS = {
     ),
 }
 
+PREPARE_SERVICE_DEFAULT_COMMAND = (
+    "sh",
+    "-ec",
+    "echo 'invoke only through production_shadow_frozen_prepare_worker' >&2; exit 64",
+)
+
 
 def _prepare_service_command(
     service: str,
@@ -6190,7 +6196,7 @@ class LocalDockerPrepareBackend:
                 not isinstance(service, dict)
                 or service.get("image") != self.manifest.app_image_id
                 or service.get("command")
-                != list(expected_command)
+                != list(PREPARE_SERVICE_DEFAULT_COMMAND)
                 or service.get("restart", "no") not in {"no", ""}
                 or not isinstance(service.get("cgroup_parent"), str)
                 or not isinstance(service.get("pids_limit"), int)
@@ -6909,6 +6915,14 @@ class LocalDockerPrepareBackend:
         service: str,
         timeout: int,
     ) -> tuple[str, int]:
+        expected_command = _prepare_service_command(
+            service,
+            operation_id=str(self.context.document["operation_id"]),
+        )
+        if expected_command is None:
+            raise FrozenPrepareWorkerError(
+                "prepare one-off command contract is unavailable"
+            )
         command_env, _overrides = RESTORE._compose_environment(self.manifest)
         boundary = RESTORE._capture_runtime_path_identities(
             self.manifest,
@@ -6949,6 +6963,7 @@ class LocalDockerPrepareBackend:
             ),
             "-T",
             service,
+            *expected_command,
         ]
         try:
             output = self.runner.run(

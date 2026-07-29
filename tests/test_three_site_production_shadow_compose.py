@@ -483,35 +483,38 @@ class ThreeSiteProductionShadowComposeTests(unittest.TestCase):
         )
         self.assert_source_failure(
             document,
-            "webapp_ir_writer_fence must apply the exact epoch-1 local standby gate",
+            "webapp_ir_writer_fence must retain the exact epoch-1 local standby gate",
         )
 
-    def test_rejects_coupled_or_implicit_database_policy_phases(self):
+    def test_rejects_direct_prepare_mutation_commands(self):
         document = copy.deepcopy(self.document)
-        document["services"]["webapp_fi_db_roles_post_migration"]["command"][
-            3
-        ] = "fence"
+        document["services"]["webapp_fi_db_roles_post_migration"]["command"] = [
+            "python",
+            "scripts/activate_three_site_database_fencing.py",
+        ]
         self.assert_source_failure(
             document,
-            "webapp_fi_db_roles_post_migration must apply only the confirmed "
-            "grants phase",
-        )
-
-        document = copy.deepcopy(self.document)
-        command = document["services"]["webapp_ir_db_fencing"]["command"]
-        del command[2:4]
-        self.assert_source_failure(
-            document,
-            "webapp_ir_db_fencing must apply only the confirmed fence phase",
+            "webapp_fi_db_roles_post_migration must default fail closed",
         )
 
         document = copy.deepcopy(self.document)
-        document["services"]["bot_fi_db_roles"]["command"][-1] = (
-            "ENABLE-BOT-DATABASE-FENCING"
-        )
+        document["services"]["webapp_ir_db_fencing"]["command"] = [
+            "python",
+            "scripts/activate_three_site_database_fencing.py",
+        ]
         self.assert_source_failure(
             document,
-            "bot_fi_db_roles must apply only the confirmed roles-grants phase",
+            "webapp_ir_db_fencing must default fail closed",
+        )
+
+        document = copy.deepcopy(self.document)
+        document["services"]["bot_fi_db_roles"]["command"] = [
+            "python",
+            "scripts/provision_bot_database_roles.py",
+        ]
+        self.assert_source_failure(
+            document,
+            "bot_fi_db_roles must default fail closed",
         )
 
         document = copy.deepcopy(self.document)
