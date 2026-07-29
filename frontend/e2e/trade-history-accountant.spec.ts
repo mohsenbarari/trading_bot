@@ -1002,7 +1002,7 @@ test.describe('Trade history accountant context', () => {
     const customResponsePromise = page.waitForResponse((response) => {
       if (!response.ok()) return false
       const url = new URL(response.url())
-      return url.pathname === '/api/trades/my' && url.searchParams.get('from_date') === fixture.wideFromDate && url.searchParams.get('to_date') === fixture.wideToDate
+      return url.pathname === '/api/trades/my/page' && url.searchParams.get('from_date') === fixture.wideFromDate && url.searchParams.get('to_date') === fixture.wideToDate
     })
     await page.getByRole('button', { name: 'اعمال فیلتر' }).click()
     await customResponsePromise
