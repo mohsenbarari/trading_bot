@@ -1,7 +1,9 @@
 import unittest
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
+from scripts import check_deployment_surface_guard
 from scripts.check_deployment_surface_guard import check_runtime_code, check_runtime_env_identity, run_guard
 
 
@@ -122,6 +124,25 @@ class DeploymentSurfaceGuardTests(unittest.TestCase):
             [(finding.path, finding.detail) for finding in findings],
             [("core/runtime_leak.py", f"contains deployment identity {identity!r}")],
         )
+
+    def test_runtime_file_paths_exempt_canonical_topology_only(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_root = Path(tmpdir)
+            core_dir = repo_root / "core"
+            core_dir.mkdir()
+            canonical = core_dir / "three_site_topology.py"
+            canonical.write_text("CANONICAL = True\n", encoding="utf-8")
+            runtime_file = repo_root / "main.py"
+            runtime_file.write_text("RUNTIME = True\n", encoding="utf-8")
+
+            with patch.object(
+                check_deployment_surface_guard,
+                "RUNTIME_PATHS",
+                ("core/three_site_topology.py", "main.py"),
+            ):
+                scanned = list(check_deployment_surface_guard.iter_runtime_files(repo_root))
+
+        self.assertEqual(scanned, [runtime_file])
 
     def test_runtime_identity_guard_accepts_valid_foreign_and_iran_envs(self):
         manifest = self.production_manifest()

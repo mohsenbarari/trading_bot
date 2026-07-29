@@ -115,7 +115,7 @@ class OfferCancelAllPostgresTests(unittest.IsolatedAsyncioTestCase):
                 text(
                     "TRUNCATE TABLE change_log, offers, commodities, users "
                     "RESTART IDENTITY CASCADE"
-                )
+                ).execution_options(is_sync=True)
             )
             await session.commit()
         setup_event_listeners()
