@@ -932,7 +932,7 @@ test.describe('Trade history accountant context', () => {
     const filteredResponsePromise = page.waitForResponse((response) => {
       if (!response.ok()) return false
       const url = new URL(response.url())
-      return url.pathname === `/api/trades/with/${fixture.targetUserId}` && url.searchParams.get('commodity_query') === fixture.goldCommodityName
+      return url.pathname === `/api/trades/with/${fixture.targetUserId}/page` && url.searchParams.get('commodity_query') === fixture.goldCommodityName
     })
     await page.getByRole('button', { name: 'اعمال فیلتر' }).click()
     const filteredResponse = await filteredResponsePromise
@@ -977,7 +977,7 @@ test.describe('Trade history accountant context', () => {
     const presetResponsePromise = page.waitForResponse((response) => {
       if (!response.ok()) return false
       const url = new URL(response.url())
-      return url.pathname === '/api/trades/my' && Boolean(url.searchParams.get('from_date')) && Boolean(url.searchParams.get('to_date'))
+      return url.pathname === '/api/trades/my/page' && Boolean(url.searchParams.get('from_date')) && Boolean(url.searchParams.get('to_date'))
     })
     await page.getByRole('tab', { name: '۳ ماه' }).click()
     const presetResponse = await presetResponsePromise
