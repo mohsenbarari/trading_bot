@@ -99,6 +99,7 @@ def command_body(
     lease_id: str | None,
     request_id: str,
     reason: str,
+    lease_duration_seconds: int = 180,
 ) -> bytes:
     return json.dumps(
         {
@@ -108,7 +109,7 @@ def command_body(
             "expected_lease_id": lease_id,
             "request_id": request_id,
             "reason": reason,
-            "lease_duration_seconds": 180,
+            "lease_duration_seconds": lease_duration_seconds,
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -386,12 +387,20 @@ class WriterWitnessAuthenticationTests(unittest.TestCase):
                 "writer_witness_app.async_sessionmaker", return_value=fake_sessions
             ):
                 runtime, engine = _build_runtime_from_settings(
-                    WriterWitnessServiceSettings(**common)
+                    WriterWitnessServiceSettings(
+                        **{
+                            **common,
+                            "writer_witness_lease_duration_seconds": 60,
+                            "writer_witness_enforce_configured_lease_duration": True,
+                        }
+                    )
                 )
 
             self.assertIs(engine, fake_engine)
             self.assertIs(runtime.session_factory, fake_sessions)
             self.assertEqual(runtime.credentials[FI_CREDENTIAL.key_id].site, "webapp_fi")
+            self.assertEqual(runtime.lease_duration_seconds, 60)
+            self.assertTrue(runtime.enforce_configured_lease_duration)
 
             with self.assertRaisesRegex(WitnessServiceConfigurationError, "PHYSICAL_SITE=witness"):
                 _build_runtime_from_settings(
@@ -537,6 +546,128 @@ class WriterWitnessServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(replay["replayed"])
         self.assertEqual(replay["proof"], first["proof"])
         self.assertEqual(self.state.holder_site, "webapp_fi")
+
+    async def test_configured_duration_enforcement_is_opt_in_and_pins_acquire_and_renew(self):
+        pinned_runtime = WriterWitnessServiceRuntime(
+            session_factory=self.sessions,
+            private_key_base64=self.private_key,
+            credentials={
+                FI_CREDENTIAL.key_id: FI_CREDENTIAL,
+                FI_PREVIOUS_CREDENTIAL.key_id: FI_PREVIOUS_CREDENTIAL,
+                IR_CREDENTIAL.key_id: IR_CREDENTIAL,
+            },
+            lease_duration_seconds=60,
+            enforce_configured_lease_duration=True,
+            clock=self.clock,
+        )
+        app = create_writer_witness_app(pinned_runtime)
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://witness.test",
+        ) as client:
+            mismatched_acquire = command_body(
+                action="acquire",
+                epoch=0,
+                lease_id=None,
+                request_id="pinned-acquire-mismatch",
+                reason="prove configured duration is server enforced",
+                lease_duration_seconds=180,
+            )
+            response = await self._post_to(
+                client,
+                FI_CREDENTIAL,
+                mismatched_acquire,
+                timestamp=NOW,
+            )
+            self.assertEqual(response.status_code, 422)
+            self.assertEqual(
+                response.json()["code"], "writer_witness_lease_duration_mismatch"
+            )
+            self.assertEqual(self.state.writer_epoch, 0)
+            self.assertEqual(self.sessions.receipts, {})
+
+            accepted_acquire = command_body(
+                action="acquire",
+                epoch=0,
+                lease_id=None,
+                request_id="pinned-acquire-accepted",
+                reason="start configured duration term",
+                lease_duration_seconds=60,
+            )
+            accepted = await self._post_to(
+                client,
+                FI_CREDENTIAL,
+                accepted_acquire,
+                timestamp=NOW,
+            )
+            self.assertEqual(accepted.status_code, 200)
+            lease_id = accepted.json()["state"]["lease_id"]
+
+            mismatched_renew = command_body(
+                action="renew",
+                epoch=1,
+                lease_id=lease_id,
+                request_id="pinned-renew-mismatch",
+                reason="prove renewal duration is server enforced",
+                lease_duration_seconds=180,
+            )
+            self.clock.value = NOW + timedelta(seconds=10)
+            response = await self._post_to(
+                client,
+                FI_CREDENTIAL,
+                mismatched_renew,
+                timestamp=self.clock.value,
+            )
+            self.assertEqual(response.status_code, 422)
+            self.assertEqual(
+                response.json()["code"], "writer_witness_lease_duration_mismatch"
+            )
+            self.assertEqual(self.state.writer_epoch, 1)
+            self.assertEqual(len(self.sessions.receipts), 1)
+
+            drain = command_body(
+                action="drain",
+                epoch=1,
+                lease_id=lease_id,
+                request_id="pinned-drain-unchanged",
+                reason="duration pin applies only to lease-bearing transitions",
+                lease_duration_seconds=180,
+            )
+            response = await self._post_to(
+                client,
+                FI_CREDENTIAL,
+                drain,
+                timestamp=self.clock.value,
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(self.state.lease_status, "draining")
+
+    async def test_without_enforcement_server_accepts_a_valid_client_duration_override(self):
+        body = command_body(
+            action="acquire",
+            epoch=0,
+            lease_id=None,
+            request_id="unconstrained-acquire-duration",
+            reason="preserve existing client-selected duration behavior",
+            lease_duration_seconds=60,
+        )
+        response = await self._post(FI_CREDENTIAL, body, timestamp=NOW)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.state.writer_epoch, 1)
+
+    async def _post_to(self, client, credential, body: bytes, *, timestamp: datetime):
+        payload = json.loads(body)
+        headers = sign_witness_request(
+            credential=credential,
+            method="POST",
+            path=WITNESS_TRANSITION_PATH,
+            body=body,
+            request_id=payload["request_id"],
+            timestamp=int(timestamp.timestamp()),
+        )
+        return await client.post(WITNESS_TRANSITION_PATH, content=body, headers=headers)
 
     async def test_rejected_acquisition_cannot_be_replayed_after_old_lease_expires(self):
         fi_body = command_body(

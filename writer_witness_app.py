@@ -46,6 +46,8 @@ from core.writer_witness_auth import (
 )
 from core.writer_witness_contract import witness_timing_configuration_is_safe
 from core.writer_witness_control import (
+    ACTION_ACQUIRE,
+    ACTION_RENEW,
     WITNESS_ACTIONS,
     WITNESS_COMMAND_VERSION,
     WriterWitnessError,
@@ -94,6 +96,7 @@ class WriterWitnessServiceRuntime:
     private_key_base64: str
     credentials: dict[str, WitnessClientCredential]
     lease_duration_seconds: int = 180
+    enforce_configured_lease_duration: bool = False
     auth_max_age_seconds: int = 15
     auth_max_future_skew_seconds: int = 5
     clock: Callable[[AsyncSession], Awaitable[datetime]] = database_clock
@@ -211,6 +214,7 @@ class WriterWitnessServiceSettings(BaseSettings):
     human_approval_relay_orchestrator_key_id: str | None = None
     human_approval_relay_orchestrator_secret: str | None = None
     writer_witness_lease_duration_seconds: int = 180
+    writer_witness_enforce_configured_lease_duration: bool = False
     writer_witness_renew_interval_seconds: int = 30
     writer_witness_safety_margin_seconds: int = 15
     writer_witness_max_clock_skew_seconds: int = 5
@@ -241,7 +245,12 @@ def _state_payload(snapshot) -> dict[str, Any]:
     }
 
 
-def _parse_command(raw_body: bytes, *, default_duration: int) -> WitnessCommand:
+def _parse_command(
+    raw_body: bytes,
+    *,
+    default_duration: int,
+    enforce_configured_lease_duration: bool = False,
+) -> WitnessCommand:
     try:
         payload = json.loads(raw_body)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -283,6 +292,15 @@ def _parse_command(raw_body: bytes, *, default_duration: int) -> WitnessCommand:
     duration = payload.get("lease_duration_seconds", default_duration)
     if type(duration) is not int or duration < 30 or duration > 3600:
         raise WriterWitnessError("lease_duration_seconds is invalid")
+    if (
+        enforce_configured_lease_duration
+        and action in {ACTION_ACQUIRE, ACTION_RENEW}
+        and duration != default_duration
+    ):
+        raise WriterWitnessError(
+            "lease_duration_seconds must match the configured witness duration",
+            code="writer_witness_lease_duration_mismatch",
+        )
     return WitnessCommand(
         action=action,
         expected_epoch=payload["expected_epoch"],
@@ -627,6 +645,9 @@ def _build_runtime_from_settings(
         private_key_base64=private_key,
         credentials=credentials,
         lease_duration_seconds=configured.writer_witness_lease_duration_seconds,
+        enforce_configured_lease_duration=(
+            configured.writer_witness_enforce_configured_lease_duration
+        ),
         auth_max_age_seconds=configured.writer_witness_auth_max_age_seconds,
         auth_max_future_skew_seconds=configured.writer_witness_max_clock_skew_seconds,
         database_user=str(parsed_database_url.username),
@@ -1028,6 +1049,9 @@ def create_writer_witness_app(
                 command = _parse_command(
                     raw_body,
                     default_duration=service_runtime.lease_duration_seconds,
+                    enforce_configured_lease_duration=(
+                        service_runtime.enforce_configured_lease_duration
+                    ),
                 )
                 if command.request_id != caller.request_id:
                     raise WitnessAuthenticationError(
