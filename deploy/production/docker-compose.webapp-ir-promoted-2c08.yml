@@ -1,0 +1,120 @@
+# WA-IR promotion-only runtime for the legacy production release 2c08.
+#
+# It must be used only after the independent fencing/routing controller has
+# selected WA-IR as the single writer.  All services are behind the explicit
+# `promoted` profile, no service exposes a public port, and direct legacy sync
+# is disabled.  Stop `snapshot_db` from the snapshot manifest before starting
+# this manifest because both bind the selected candidate DB volume.
+services:
+  db:
+    image: ${WA_IR_POSTGRES_IMAGE:?exact preloaded PostgreSQL image is required}
+    pull_policy: never
+    profiles: ["promoted"]
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+      PGTZ: UTC
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+    command:
+      - postgres
+      - -c
+      - max_connections=${POSTGRES_MAX_CONNECTIONS:-150}
+      - -c
+      - timezone=UTC
+      - -c
+      - log_timezone=UTC
+    volumes:
+      - candidate_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 10s
+    networks: ["runtime"]
+    logging: &default_logging
+      driver: json-file
+      options:
+        max-size: ${DOCKER_LOG_MAX_SIZE:-20m}
+        max-file: ${DOCKER_LOG_MAX_FILE:-5}
+
+  redis:
+    image: ${WA_IR_REDIS_IMAGE:?exact preloaded Redis image is required}
+    pull_policy: never
+    profiles: ["promoted"]
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - ${REDIS_APPENDONLY:-yes}
+      - --appendfsync
+      - ${REDIS_APPENDFSYNC:-everysec}
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-0}
+      - --maxmemory-policy
+      - ${REDIS_MAXMEMORY_POLICY:-noeviction}
+    volumes:
+      - redis_data:/data
+    networks: ["runtime"]
+    logging: *default_logging
+
+  app:
+    image: ${WA_IR_APP_IMAGE:?exact preloaded 2c08 app image is required}
+    pull_policy: never
+    profiles: ["promoted"]
+    restart: unless-stopped
+    command: >-
+      sh -ec 'exec uvicorn main:app --host 0.0.0.0 --port 8000
+      --workers ${API_WORKERS:-4}'
+    env_file:
+      - ${WA_IR_PROMOTION_RUNTIME_ENV_FILE:?root-only promotion env is required}
+    environment:
+      TZ: UTC
+      SERVER_MODE: iran
+      RELEASE_SHA: ${RELEASE_SHA:?exact release SHA is required}
+      TRADING_BOT_SERVICE: api
+      BACKGROUND_JOBS_ENABLED: "false"
+      TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"
+      AUDIT_TRAIL_PATH: /app/audit_trail/audit.jsonl
+    ports:
+      - "127.0.0.1:${WA_IR_APP_LOCAL_PORT:-18000}:8000"
+    volumes:
+      - candidate_uploads_data:/app/uploads
+      - audit_data:/app/audit_trail
+      - ${WA_IR_RELEASE_ROOT:?immutable S3-delivered release root is required}/trading_settings.json:/app/trading_settings.json:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import sys, urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/config', timeout=5).read(); sys.exit(0)\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks: ["runtime"]
+    logging: *default_logging
+
+networks:
+  runtime:
+    name: ${WA_IR_RUNTIME_NETWORK_NAME:-trading_bot_wa_ir_runtime}
+    driver: bridge
+
+volumes:
+  candidate_db_data:
+    external: true
+    name: ${WA_IR_CANDIDATE_DB_VOLUME:?candidate database volume is required}
+  candidate_uploads_data:
+    external: true
+    name: ${WA_IR_CANDIDATE_UPLOADS_VOLUME:?candidate uploads volume is required}
+  redis_data:
+    name: ${WA_IR_REDIS_VOLUME_NAME:-trading_bot_wa_ir_redis}
+  audit_data:
+    name: ${WA_IR_AUDIT_VOLUME_NAME:-trading_bot_wa_ir_audit}

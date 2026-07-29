@@ -1,0 +1,48 @@
+# WA-IR data-ready snapshot target for the legacy production release 2c08.
+#
+# This file intentionally has no application, Redis, migration, sync-worker,
+# Nginx, host port, or Docker network.  It only keeps a verified PostgreSQL
+# candidate volume warm while WA-IR is fenced.  The restore wrapper creates the
+# two external candidate volumes before invoking this manifest.
+services:
+  snapshot_db:
+    image: ${WA_IR_POSTGRES_IMAGE:?exact preloaded PostgreSQL image is required}
+    pull_policy: never
+    container_name: ${WA_IR_SNAPSHOT_DB_CONTAINER:?candidate container name is required}
+    restart: unless-stopped
+    network_mode: none
+    environment:
+      TZ: UTC
+      PGTZ: UTC
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+    command:
+      - postgres
+      - -c
+      - max_connections=${POSTGRES_MAX_CONNECTIONS:-150}
+      - -c
+      - timezone=UTC
+      - -c
+      - log_timezone=UTC
+    volumes:
+      - candidate_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 10s
+    labels:
+      com.goldtrade.webapp-ir.snapshot: "true"
+      com.goldtrade.webapp-ir.release: ${RELEASE_SHA:?exact release SHA is required}
+    logging:
+      driver: json-file
+      options:
+        max-size: ${DOCKER_LOG_MAX_SIZE:-20m}
+        max-file: ${DOCKER_LOG_MAX_FILE:-5}
+
+volumes:
+  candidate_db_data:
+    external: true
+    name: ${WA_IR_CANDIDATE_DB_VOLUME:?candidate database volume is required}

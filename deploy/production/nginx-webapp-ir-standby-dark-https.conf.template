@@ -1,0 +1,41 @@
+# WA-IR fenced standby listener for the legacy 2c08 runtime.
+#
+# Render this only with a certificate and private key generated locally on
+# WA-IR.  It deliberately has no upstream or cross-site receive exception.
+# DNS-01 obtains the local certificate without opening any HTTP challenge path.
+server {
+    listen 80;
+    server_name __SERVER_NAME__;
+    access_log off;
+
+    location / {
+        add_header Retry-After "300" always;
+        return 503;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name __SERVER_NAME__;
+    client_max_body_size 50M;
+
+    # Both paths are local WA-IR paths.  Never copy a WebApp-FI key here.
+    ssl_certificate __WA_IR_CERTIFICATE_PATH__;
+    ssl_certificate_key __WA_IR_CERTIFICATE_KEY_PATH__;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer" always;
+
+    location = /__standby/health {
+        allow 127.0.0.1;
+        allow ::1;
+        deny all;
+        access_log off;
+        return 204;
+    }
+
+    location / {
+        add_header Retry-After "300" always;
+        return 503;
+    }
+}

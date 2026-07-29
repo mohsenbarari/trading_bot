@@ -1,0 +1,13 @@
+[Unit]
+Description=Run the WA-IR fenced snapshot refresh every 15 seconds
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=15s
+AccuracySec=1s
+RandomizedDelaySec=0
+Persistent=true
+Unit=webapp-ir-snapshot-refresh.service
+
+[Install]
+WantedBy=timers.target

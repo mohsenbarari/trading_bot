@@ -1,0 +1,15 @@
+{
+  "schema": "gold-trade-snapshot-transport-v1",
+  "endpoint": "https://s3.ir-thr-at1.arvanstorage.ir",
+  "region": "ir-thr-at1",
+  "bucket": "replace-private-versioned-bucket",
+  "prefix": "webapp-ir-snapshot-2c08",
+  "credentials_file": "/root/secure-envs/trading-bot/webapp-fi-snapshot-s3-credentials.json",
+  "age_binary": "/usr/bin/age",
+  "age_recipient": "REPLACE_WITH_WA_IR_AGE_RECIPIENT",
+  "workspace": "/srv/trading-bot-standby-data/fi-transport-work",
+  "maximum_database_bytes": 2147483648,
+  "maximum_uploads_bytes": 4294967296,
+  "maximum_audit_bytes": 2147483648,
+  "maximum_snapshot_age_seconds": 30
+}
