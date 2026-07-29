@@ -778,7 +778,7 @@ class ProductionShadowConvergenceSourceSetProducerTests(unittest.TestCase):
         )
         publish.assert_not_called()
 
-    def test_launcher_rejects_nonpublication_action_before_opening_release_root(self) -> None:
+    def test_launcher_is_unavailable_before_opening_release_root(self) -> None:
         launcher = Path(MODULE.__file__).with_name(
             "production_shadow_convergence_source_set_launcher"
         )
@@ -794,9 +794,9 @@ class ProductionShadowConvergenceSourceSetProducerTests(unittest.TestCase):
             text=True,
         )
 
-        self.assertEqual(result.returncode, 64)
+        self.assertEqual(result.returncode, 69)
         self.assertEqual(result.stdout, "")
-        self.assertIn("produce|ready-source-set", result.stderr)
+        self.assertIn("unavailable pending a separately installed immutable bootstrap", result.stderr)
 
     def test_canonical_incoming_path_does_not_accept_caller_selected_paths(self) -> None:
         path = MODULE.canonical_incoming_path(
