@@ -106,7 +106,7 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
             "schema": agent.AGENT_SCHEMA,
             "mode": mode,
             "site": site,
-            "lease_file": str(directory / "writer-lease.json"),
+            "lease_file": str(directory / "writer-lease.json") if mode == "writer" else None,
             "runtime": {
                 "compose_file": str(directory / "isolated-compose.yml"),
                 "env_file": None,
@@ -265,7 +265,6 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             config = self._config(Path(raw), site="webapp_fi", mode="observer")
             proof = _proof(site="webapp_fi", epoch=3)
-            agent._write_lease(config.lease_file, proof=proof)
             status = {
                 "state": {
                     "holder_site": "webapp_fi",
@@ -285,15 +284,16 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                 result = agent.guard(config, once=True)
 
             self.assertEqual(result["status"], "observed")
+            self.assertEqual(result["writer_epoch"], 3)
             renew.assert_not_called()
             compose.assert_not_called()
             self.assertEqual(config.runtime.services, ("bot", "sync_worker"))
+            self.assertIsNone(config.lease_file)
 
     def test_bot_fi_observer_stops_when_witness_is_not_active_fi(self):
         with tempfile.TemporaryDirectory() as raw:
             config = self._config(Path(raw), site="webapp_fi", mode="observer")
             proof = _proof(site="webapp_fi", epoch=3)
-            agent._write_lease(config.lease_file, proof=proof)
             status = {
                 "state": {
                     "holder_site": "webapp_ir",
@@ -313,6 +313,62 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                     agent.guard(config, once=True)
 
             compose.assert_called_once_with(config, action="stop")
+
+    def test_bot_fi_observer_stops_immediately_when_witness_is_unavailable(self):
+        with tempfile.TemporaryDirectory() as raw:
+            config = self._config(Path(raw), site="webapp_fi", mode="observer")
+            with (
+                mock.patch.object(
+                    agent,
+                    "_status",
+                    side_effect=agent.WriterWitnessUnavailable("Witness unavailable"),
+                ),
+                mock.patch.object(agent, "_compose") as compose,
+            ):
+                with self.assertRaisesRegex(agent.WriterWitnessUnavailable, "unavailable"):
+                    agent.guard(config, once=True)
+
+            compose.assert_called_once_with(config, action="stop")
+
+    def test_observer_rejects_a_local_lease_or_ir_site(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            secret = directory / "witness.secret"
+            public_key = directory / "witness.pub"
+            _write_private(secret, "s" * 32)
+            _write_private(public_key, base64.b64encode(b"p" * 32).decode("ascii"))
+            payload = {
+                "schema": agent.AGENT_SCHEMA,
+                "mode": "observer",
+                "site": "webapp_fi",
+                "lease_file": str(directory / "writer-lease.json"),
+                "runtime": {
+                    "compose_file": str(directory / "isolated-compose.yml"),
+                    "env_file": None,
+                    "services": ["bot", "sync_worker"],
+                },
+                "witness": {
+                    "url": "https://witness.example.test",
+                    "key_id": "host-key-1",
+                    "secret_file": str(secret),
+                    "public_key_file": str(public_key),
+                    "ca_bundle": None,
+                    "timeout_seconds": 2,
+                    "lease_duration_seconds": 180,
+                    "safety_margin_seconds": 15,
+                    "renew_interval_seconds": 30,
+                },
+            }
+            config_path = directory / "agent.json"
+            _write_private(config_path, json.dumps(payload))
+            with self.assertRaisesRegex(agent.ProductionWriterLeaseAgentError, "must not configure"):
+                agent._load_config(config_path)
+
+            payload["lease_file"] = None
+            payload["site"] = "webapp_ir"
+            _write_private(config_path, json.dumps(payload))
+            with self.assertRaisesRegex(agent.ProductionWriterLeaseAgentError, "only for Bot-FI"):
+                agent._load_config(config_path)
 
     def test_bot_fi_observer_compose_scope_never_includes_database(self):
         with tempfile.TemporaryDirectory() as raw:

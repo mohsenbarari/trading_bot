@@ -89,7 +89,7 @@ class WitnessConfig:
 class AgentConfig:
     mode: str
     site: str
-    lease_file: Path
+    lease_file: Path | None
     runtime: RuntimeConfig
     witness: WitnessConfig
 
@@ -216,7 +216,19 @@ def _load_config(path: Path) -> AgentConfig:
     site = str(raw.get("site") or "").strip().lower()
     if site not in WEBAPP_SITES:
         raise ProductionWriterLeaseAgentError("writer lease agent site is invalid")
-    lease_file = _absolute(raw.get("lease_file"), label="lease file")
+    lease_value = raw.get("lease_file")
+    if mode == "writer":
+        lease_file: Path | None = _absolute(lease_value, label="lease file")
+    else:
+        # Bot-FI is a passive observer.  It must never receive a copied lease
+        # through a second transport path: a current authenticated Witness
+        # status is the sole authority, and any unavailable/mismatched status
+        # fences only the configured bot/sync services.
+        if lease_value is not None:
+            raise ProductionWriterLeaseAgentError("observer mode must not configure a local lease file")
+        if site != "webapp_fi":
+            raise ProductionWriterLeaseAgentError("observer mode is allowed only for Bot-FI")
+        lease_file = None
 
     runtime_raw = raw.get("runtime")
     runtime_fields = {"compose_file", "env_file", "services"}
@@ -750,6 +762,8 @@ def _best_effort_stop(config: AgentConfig) -> None:
 
 
 def _local_lease_safety(config: AgentConfig) -> tuple[Any, float]:
+    if config.lease_file is None:
+        raise ProductionWriterLeaseAgentError("this operation requires a local writer lease")
     lease = load_production_writer_lease(config.lease_file)
     if lease.holder_site != config.site:
         raise ProductionWriterLeaseAgentError("local lease holder does not match configured site")
@@ -764,13 +778,20 @@ def _require_writer_mode(config: AgentConfig) -> None:
         raise ProductionWriterLeaseAgentError("this command requires writer mode")
 
 
-def _observe_active_writer_term(config: AgentConfig, *, lease: Any) -> None:
-    """Confirm a follower's local term is still the active WebApp term.
+def _writer_lease_file(config: AgentConfig) -> Path:
+    _require_writer_mode(config)
+    if config.lease_file is None:
+        raise ProductionWriterLeaseAgentError("writer mode requires a local lease file")
+    return config.lease_file
 
-    Observer mode has read-only status access only in this helper: it never
-    invokes a Writer Witness transition.  A status mismatch is an immediate
-    fence; a transport outage is handled separately against the bounded local
-    signed term.
+
+def _observe_active_writer_term(config: AgentConfig) -> tuple[int, datetime]:
+    """Confirm that the sole Writer Witness term is currently WebApp-FI.
+
+    Bot-FI has no local writer authority and never receives a copied lease.
+    It can only remain active after a fresh authenticated status check.  This
+    avoids introducing an additional Object Storage replication path for a
+    lease while fencing bot/sync immediately if Witness is unavailable.
     """
 
     status = _status(config.witness, request_id=str(uuid4()))
@@ -778,12 +799,12 @@ def _observe_active_writer_term(config: AgentConfig, *, lease: Any) -> None:
     if (
         status["state"].get("lease_status") != "leased"
         or holder != config.site
-        or epoch != lease.writer_epoch
-        or lease_id != lease.lease_id
+        or lease_id is None
         or expires_at is None
         or expires_at <= datetime.now(timezone.utc) + timedelta(seconds=config.witness.safety_margin_seconds)
     ):
         raise ProductionWriterLeaseAgentError("Writer Witness term is not active for this follower")
+    return epoch, expires_at
 
 
 def _acquire_proof(
@@ -794,7 +815,7 @@ def _acquire_proof(
     require_initial_vacant: bool = False,
     allow_live_local_recovery: bool = False,
 ) -> dict[str, Any]:
-    _require_writer_mode(config)
+    lease_file = _writer_lease_file(config)
     operation = _operation_uuid(operation_id)
     status = _status(config.witness, request_id=_request_id(operation, "status"))
     holder, epoch, lease_id, expires_at = _state(status)
@@ -823,7 +844,7 @@ def _acquire_proof(
             )
             if proof.get("lease_id") != lease_id:
                 raise ProductionWriterLeaseAgentError("recovery renewal changed the lease identity")
-            _write_lease(config.lease_file, proof=proof)
+            _write_lease(lease_file, proof=proof)
             return proof
         raise ProductionWriterLeaseAgentError("predecessor Writer Witness lease is still live")
     transition = _transition(
@@ -839,7 +860,7 @@ def _acquire_proof(
         config=config.witness,
         expected_epoch=epoch + 1,
     )
-    _write_lease(config.lease_file, proof=proof)
+    _write_lease(lease_file, proof=proof)
     return proof
 
 
@@ -1087,8 +1108,8 @@ def promote_watch(
 
 
 def renew_once(config: AgentConfig, *, request_id: str | None = None) -> dict[str, Any]:
-    _require_writer_mode(config)
-    lease = load_production_writer_lease(config.lease_file)
+    lease_file = _writer_lease_file(config)
+    lease = load_production_writer_lease(lease_file)
     if lease.holder_site != config.site:
         raise ProductionWriterLeaseAgentError("local lease holder does not match configured site")
     transition = _transition(
@@ -1104,7 +1125,7 @@ def renew_once(config: AgentConfig, *, request_id: str | None = None) -> dict[st
     )
     if proof.get("lease_id") != lease.lease_id:
         raise ProductionWriterLeaseAgentError("Witness renewal changed the lease identity")
-    _write_lease(config.lease_file, proof=proof)
+    _write_lease(lease_file, proof=proof)
     return {
         "status": "renewed",
         "site": config.site,
@@ -1114,9 +1135,9 @@ def renew_once(config: AgentConfig, *, request_id: str | None = None) -> dict[st
 
 
 def drain_and_stop(config: AgentConfig, *, operation_id: str) -> dict[str, Any]:
-    _require_writer_mode(config)
+    lease_file = _writer_lease_file(config)
     operation = _operation_uuid(operation_id)
-    lease = load_production_writer_lease(config.lease_file)
+    lease = load_production_writer_lease(lease_file)
     if lease.holder_site != config.site:
         raise ProductionWriterLeaseAgentError("local lease holder does not match configured site")
     _transition(
@@ -1133,45 +1154,30 @@ def drain_and_stop(config: AgentConfig, *, operation_id: str) -> dict[str, Any]:
 
 def guard(config: AgentConfig, *, once: bool) -> dict[str, Any]:
     while True:
-        try:
-            lease, remaining = _local_lease_safety(config)
-        except ProductionWriterLeaseAgentError:
-            _best_effort_stop(config)
-            raise
         if config.mode == "observer":
             try:
-                _observe_active_writer_term(config, lease=lease)
+                epoch, expires_at = _observe_active_writer_term(config)
                 result = {
                     "status": "observed",
                     "site": config.site,
-                    "writer_epoch": lease.writer_epoch,
-                    "lease_expires_at": lease.expires_at.isoformat(),
+                    "writer_epoch": epoch,
+                    "lease_expires_at": expires_at.isoformat(),
                 }
-            except WriterWitnessUnavailable:
-                # A passive Bot-FI follower has no authority to renew.  It
-                # may continue only while its locally verified FI term still
-                # remains outside the safety margin.
-                try:
-                    lease, remaining = _local_lease_safety(config)
-                except ProductionWriterLeaseAgentError:
-                    _best_effort_stop(config)
-                    raise
-                result = {
-                    "status": "observation_degraded",
-                    "site": config.site,
-                    "writer_epoch": lease.writer_epoch,
-                    "lease_expires_at": lease.expires_at.isoformat(),
-                    "seconds_remaining": max(0, int(remaining)),
-                }
-                if not once:
-                    _emit_event("observation_degraded", **result)
-            except ProductionWriterLeaseAgentError:
+            except (WriterWitnessUnavailable, ProductionWriterLeaseAgentError):
+                # Bot-FI is deliberately stricter than the WebApp writers:
+                # without a fresh Witness observation it must not keep a
+                # legacy direct sync path alive after FI loses authority.
                 _best_effort_stop(config)
                 raise
             if once:
                 return result
             time.sleep(config.witness.renew_interval_seconds)
             continue
+        try:
+            lease, remaining = _local_lease_safety(config)
+        except ProductionWriterLeaseAgentError:
+            _best_effort_stop(config)
+            raise
         try:
             result = renew_once(config)
         except WriterWitnessUnavailable as renewal_error:
@@ -1201,7 +1207,18 @@ def guard(config: AgentConfig, *, once: bool) -> dict[str, Any]:
 
 
 def _public_status(config: AgentConfig) -> dict[str, Any]:
-    lease = load_production_writer_lease(config.lease_file)
+    if config.mode == "observer":
+        status = _status(config.witness, request_id=str(uuid4()))
+        holder, epoch, _lease_id, expires_at = _state(status)
+        return {
+            "status": "ok",
+            "mode": config.mode,
+            "site": config.site,
+            "holder_site": holder,
+            "writer_epoch": epoch,
+            "lease_expires_at": expires_at.isoformat() if expires_at is not None else None,
+        }
+    lease = load_production_writer_lease(_writer_lease_file(config))
     return {
         "status": "ok",
         "mode": config.mode,
