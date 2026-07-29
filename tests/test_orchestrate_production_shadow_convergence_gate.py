@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -97,6 +98,57 @@ class ConvergenceGateTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def _member_references(self) -> tuple[dict[str, MODULE.Reference], dict[str, MODULE.Reference]]:
+        roles = {
+            role: MODULE.Reference(
+                MODULE._canonical_role_validation_path(
+                    self.context.manifest,
+                    role=role,
+                    digest=(str(index + 1) * 64),
+                ),
+                str(index + 1) * 64,
+            )
+            for index, role in enumerate(MODULE.ROLES)
+        }
+        observations = {
+            label: MODULE.Reference(
+                MODULE._canonical_observation_path(
+                    self.context.manifest,
+                    label=label,
+                    digest=("abcdef1"[index] * 64),
+                ),
+                "abcdef1"[index] * 64,
+            )
+            for index, label in enumerate(MODULE.SOURCE_LABELS)
+        }
+        return roles, observations
+
+    def _source_set_document(
+        self,
+        roles: dict[str, MODULE.Reference],
+        observations: dict[str, MODULE.Reference],
+    ) -> dict[str, object]:
+        return {
+            "schema": MODULE.SOURCE_SET_SCHEMA,
+            "status": "ready",
+            **identity(self.context),
+            "phase": MODULE.PHASE,
+            "phase_started_at": self.context.journal["started_at"],
+            "role_validation": {
+                role: MODULE._reference_document(reference)
+                for role, reference in roles.items()
+            },
+            "observations": {
+                label: MODULE._reference_document(reference)
+                for label, reference in observations.items()
+            },
+            "source_set_closure_sha256": MODULE._source_set_closure(
+                phase_started_at=self.context.journal["started_at"],
+                role_validation=roles,
+                observations=observations,
+            ),
+        }
 
     def test_three_site_tls_pairs_exclude_witness(self) -> None:
         self.assertEqual(
@@ -349,6 +401,281 @@ class ConvergenceGateTests(unittest.TestCase):
                     liveness_factory=lambda _fd: BrokenLiveness(),
                     signal_authority_factory=lambda: SignalAuthority(),
                     journal_factory=lambda _path: Journal(),
+                )
+
+    def test_apply_resolves_each_default_dependency_only_when_needed(self) -> None:
+        started = context(self.root / "started", started=True)
+        request = mock.Mock(path=self.root / "request.json", sha256="a" * 64)
+        source = mock.Mock(path=self.root / "source.json", sha256="b" * 64)
+        source.document = {"source_binding_sha256": "c" * 64}
+        source_set = mock.Mock()
+
+        class Journal:
+            def assert_bindings(self, **_kwargs):
+                return started.journal
+
+        class Scope:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, _type, _value, _traceback):
+                return False
+
+        class Liveness(Scope):
+            def check(self):
+                return None
+
+        def stop_after_default_resolution(_context):
+            raise MODULE.ConvergenceGateError("stop after default resolution")
+
+        fake_prepared = SimpleNamespace(
+            ControllerLiveness=lambda _fd: Liveness(),
+            _signal_authority=lambda: Scope(),
+        )
+        original_import = __import__
+
+        def import_fake_prepared(name, globals=None, locals=None, fromlist=(), level=0):
+            if (
+                name == "scripts"
+                and "orchestrate_production_shadow_prepared_clone_inventory" in fromlist
+            ):
+                return SimpleNamespace(
+                    orchestrate_production_shadow_prepared_clone_inventory=fake_prepared
+                )
+            return original_import(name, globals, locals, fromlist, level)
+
+        def apply_with(**dependencies):
+            with (
+                mock.patch.object(
+                    MODULE,
+                    "load_request",
+                    return_value=(started, request, source, source_set),
+                ),
+                mock.patch.object(MODULE, "_validate_context", return_value=({}, {})),
+                mock.patch.object(
+                    MODULE,
+                    "build_plan",
+                    return_value={"required_confirmation": "exact"},
+                ),
+                mock.patch("builtins.__import__", side_effect=import_fake_prepared),
+            ):
+                with self.assertRaisesRegex(
+                    MODULE.ConvergenceGateError,
+                    "stop after default resolution",
+                ):
+                    MODULE.apply_phase(
+                        self.root / "request.json",
+                        confirm="exact",
+                        control_fd=0,
+                        authorization_verifier=stop_after_default_resolution,
+                        journal_factory=lambda _path: Journal(),
+                        **dependencies,
+                    )
+
+        apply_with(signal_authority_factory=lambda: Scope())
+        apply_with(liveness_factory=lambda _fd: Liveness())
+
+    def test_source_set_validation_rejects_noncanonical_or_malformed_members(self) -> None:
+        roles, observations = self._member_references()
+        with mock.patch.object(MODULE, "_validate_source_member_layout") as layout:
+            with self.assertRaisesRegex(
+                MODULE.ConvergenceGateError,
+                "members differ",
+            ):
+                MODULE._validate_source_members(
+                    self.context,
+                    role_validation={},
+                    observations={},
+                    phase_started_at=NOW,
+                    now=NOW,
+                    require_fresh=True,
+                )
+        layout.assert_called_once_with(self.context, require_fresh=True)
+
+        invalid_observations = dict(observations)
+        invalid_observations[MODULE.SOURCE_LABELS[0]] = MODULE.Reference(
+            self.root / "caller-selected.json",
+            observations[MODULE.SOURCE_LABELS[0]].sha256,
+        )
+        with (
+            mock.patch.object(MODULE, "_validate_source_member_layout"),
+            mock.patch.object(MODULE, "_read_secure_record", return_value=mock.Mock()),
+        ):
+            with self.assertRaisesRegex(
+                MODULE.ConvergenceGateError,
+                "path is not canonical",
+            ):
+                MODULE._validate_source_members(
+                    self.context,
+                    role_validation=roles,
+                    observations=invalid_observations,
+                    phase_started_at=NOW,
+                    now=NOW,
+                    require_fresh=True,
+                )
+
+    def test_source_set_validation_rejects_each_outer_closure_mismatch(self) -> None:
+        roles, observations = self._member_references()
+        digest = "f" * 64
+        reference = MODULE.Reference(
+            MODULE._canonical_source_set_path(self.context.manifest, digest),
+            digest,
+        )
+        identity_record = MODULE.FileIdentity(1, 2, 0o600, 0, 0, 1, 2)
+
+        with mock.patch.object(MODULE, "_validate_source_member_layout"):
+            with self.assertRaisesRegex(
+                MODULE.ConvergenceGateError,
+                "path is not canonical",
+            ):
+                MODULE._validate_source_set(
+                    self.context,
+                    MODULE.Reference(self.root / "caller-selected.json", digest),
+                    now=NOW,
+                    require_fresh=True,
+                )
+
+        malformed_record = MODULE.SecureRecord(
+            reference.path,
+            digest,
+            b"{}",
+            {},
+            identity_record,
+        )
+        with (
+            mock.patch.object(MODULE, "_validate_source_member_layout"),
+            mock.patch.object(MODULE, "_read_secure_record", return_value=malformed_record),
+        ):
+            with self.assertRaisesRegex(
+                MODULE.ConvergenceGateError,
+                "fields differ",
+            ):
+                MODULE._validate_source_set(
+                    self.context,
+                    reference,
+                    now=NOW,
+                    require_fresh=True,
+                )
+
+        binding_mismatch = self._source_set_document(roles, observations)
+        binding_mismatch["release_sha"] = "different"
+        binding_record = MODULE.SecureRecord(
+            reference.path,
+            digest,
+            b"{}",
+            binding_mismatch,
+            identity_record,
+        )
+        with (
+            mock.patch.object(MODULE, "_validate_source_member_layout"),
+            mock.patch.object(MODULE, "_read_secure_record", return_value=binding_record),
+        ):
+            with self.assertRaisesRegex(
+                MODULE.ConvergenceGateError,
+                "binding differs",
+            ):
+                MODULE._validate_source_set(
+                    self.context,
+                    reference,
+                    now=NOW,
+                    require_fresh=True,
+                )
+
+        member_mismatch = self._source_set_document(roles, observations)
+        member_mismatch["role_validation"] = {}
+        member_record = MODULE.SecureRecord(
+            reference.path,
+            digest,
+            b"{}",
+            member_mismatch,
+            identity_record,
+        )
+        with (
+            mock.patch.object(MODULE, "_validate_source_member_layout"),
+            mock.patch.object(MODULE, "_read_secure_record", return_value=member_record),
+        ):
+            with self.assertRaisesRegex(
+                MODULE.ConvergenceGateError,
+                "members differ",
+            ):
+                MODULE._validate_source_set(
+                    self.context,
+                    reference,
+                    now=NOW,
+                    require_fresh=True,
+                )
+
+        closure_mismatch = self._source_set_document(roles, observations)
+        closure_mismatch["source_set_closure_sha256"] = "0" * 64
+        closure_record = MODULE.SecureRecord(
+            reference.path,
+            digest,
+            b"{}",
+            closure_mismatch,
+            identity_record,
+        )
+        with (
+            mock.patch.object(MODULE, "_validate_source_member_layout"),
+            mock.patch.object(MODULE, "_read_secure_record", return_value=closure_record),
+        ):
+            with self.assertRaisesRegex(
+                MODULE.ConvergenceGateError,
+                "closure differs",
+            ):
+                MODULE._validate_source_set(
+                    self.context,
+                    reference,
+                    now=NOW,
+                    require_fresh=True,
+                )
+
+        document = self._source_set_document(roles, observations)
+        shared_identity = MODULE.FileIdentity(1, 2, 0o600, 0, 0, 1, 2)
+        source_record = MODULE.SecureRecord(
+            reference.path,
+            digest,
+            b"{}",
+            document,
+            shared_identity,
+        )
+        members = MODULE.ValidatedSourceMembers(
+            role_validation={
+                role: MODULE.SecureRecord(
+                    roles[role].path,
+                    roles[role].sha256,
+                    b"{}",
+                    {},
+                    shared_identity if role == MODULE.ROLES[0] else MODULE.FileIdentity(1, 10 + index, 0o600, 0, 0, 1, 2),
+                )
+                for index, role in enumerate(MODULE.ROLES)
+            },
+            observations={
+                label: MODULE.SecureRecord(
+                    observations[label].path,
+                    observations[label].sha256,
+                    b"{}",
+                    {},
+                    MODULE.FileIdentity(1, 100 + index, 0o600, 0, 0, 1, 2),
+                )
+                for index, label in enumerate(MODULE.SOURCE_LABELS)
+            },
+            observed_at={},
+            captured_at=NOW,
+        )
+        with (
+            mock.patch.object(MODULE, "_validate_source_member_layout"),
+            mock.patch.object(MODULE, "_read_secure_record", return_value=source_record),
+            mock.patch.object(MODULE, "_validate_source_members", return_value=members),
+        ):
+            with self.assertRaisesRegex(
+                MODULE.ConvergenceGateError,
+                "share a file identity",
+            ):
+                MODULE._validate_source_set(
+                    self.context,
+                    reference,
+                    now=NOW,
+                    require_fresh=True,
                 )
 
     def test_missing_producer_source_set_fails_closed_without_live_tools(self) -> None:

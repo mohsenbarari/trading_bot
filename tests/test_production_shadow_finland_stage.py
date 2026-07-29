@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 import hashlib
 import io
 import json
@@ -747,6 +747,154 @@ class ProductionShadowFinlandStageTests(unittest.TestCase):
             )
 
         fchmod.assert_not_called()
+
+    def test_release_child_metadata_normalizes_os_errors(self):
+        unavailable = self.fixture.root / "unavailable"
+
+        with mock.patch.object(Path, "stat", side_effect=OSError("denied")):
+            with self.assertRaisesRegex(
+                MODULE.FinlandStageError,
+                "unavailable is unavailable",
+            ):
+                MODULE._release_child_metadata(unavailable, label="unavailable")
+
+    def test_source_set_pair_without_members_is_legacy_but_partial_or_unsafe_is_not(self):
+        legacy_root = self.fixture.root / "empty-scripts-release"
+        scripts = legacy_root / "scripts"
+        scripts.mkdir(mode=0o755, parents=True)
+        self.assertIsNone(
+            MODULE._convergence_source_set_feature_paths(
+                legacy_root,
+                required_uid=0,
+            )
+        )
+
+        unsafe_root = self.fixture.root / "unsafe-producer-release"
+        unsafe_root.mkdir(mode=0o700)
+        self.fixture.materialize_release_tree(unsafe_root)
+        producer = unsafe_root / MODULE.CONVERGENCE_SOURCE_SET_PRODUCER_RELATIVE
+        producer.unlink()
+        os.mkfifo(producer, 0o600)
+        with self.assertRaisesRegex(
+            MODULE.FinlandStageError,
+            "producer is unsafe",
+        ):
+            MODULE._convergence_source_set_feature_paths(
+                unsafe_root,
+                required_uid=0,
+            )
+
+    def test_launcher_install_rejects_post_change_metadata_and_open_errors(self):
+        release_root = self.fixture.root / "post-change-release"
+        release_root.mkdir(mode=0o700)
+        self.fixture.materialize_release_tree(release_root)
+        launcher = release_root / MODULE.CONVERGENCE_SOURCE_SET_LAUNCHER_RELATIVE
+        before = launcher.stat(follow_symlinks=False)
+        after = os.stat_result(
+            (
+                before.st_mode,
+                before.st_ino,
+                before.st_dev,
+                before.st_nlink,
+                before.st_uid,
+                1,
+                before.st_size,
+                before.st_atime,
+                before.st_mtime,
+                before.st_ctime,
+            )
+        )
+        with mock.patch.object(MODULE.os, "fstat", side_effect=[before, after]):
+            with self.assertRaisesRegex(
+                MODULE.FinlandStageError,
+                "launcher is unsafe",
+            ):
+                MODULE._install_convergence_source_set_launcher(
+                    release_root,
+                    required_uid=0,
+                )
+
+        with mock.patch.object(MODULE.os, "open", side_effect=OSError("denied")):
+            with self.assertRaisesRegex(
+                MODULE.FinlandStageError,
+                "mode could not be fixed",
+            ):
+                MODULE._install_convergence_source_set_launcher(
+                    release_root,
+                    required_uid=0,
+                )
+
+        self.assertTrue(
+            MODULE._install_convergence_source_set_launcher(
+                release_root,
+                required_uid=0,
+            )
+        )
+
+        simulated_after = os.stat_result(
+            (
+                stat.S_IFREG | 0o700,
+                before.st_ino,
+                before.st_dev,
+                before.st_nlink,
+                before.st_uid,
+                before.st_gid,
+                before.st_size,
+                before.st_atime,
+                before.st_mtime,
+                before.st_ctime,
+            )
+        )
+        # Exercise the cleanup guard's no-descriptor path without a real FD.
+        with (
+            mock.patch.object(MODULE.os, "open", return_value=-1),
+            mock.patch.object(MODULE.os, "fstat", side_effect=[before, simulated_after]),
+            mock.patch.object(MODULE.os, "fchmod"),
+            mock.patch.object(MODULE.os, "fsync"),
+            mock.patch.object(MODULE, "_fsync_directory"),
+        ):
+            self.assertTrue(
+                MODULE._install_convergence_source_set_launcher(
+                    release_root,
+                    required_uid=0,
+                )
+            )
+
+    def test_launcher_verification_rejects_changed_group(self):
+        release_root = self.fixture.root / "wrong-group-release"
+        release_root.mkdir(mode=0o700)
+        self.fixture.materialize_release_tree(release_root)
+        launcher = release_root / MODULE.CONVERGENCE_SOURCE_SET_LAUNCHER_RELATIVE
+        metadata = launcher.stat(follow_symlinks=False)
+        wrong_group = os.stat_result(
+            (
+                metadata.st_mode,
+                metadata.st_ino,
+                metadata.st_dev,
+                metadata.st_nlink,
+                metadata.st_uid,
+                1,
+                metadata.st_size,
+                metadata.st_atime,
+                metadata.st_mtime,
+                metadata.st_ctime,
+            )
+        )
+
+        @contextmanager
+        def held_file(*_args, **_kwargs):
+            with launcher.open("rb") as stream:
+                yield stream, wrong_group
+
+        with mock.patch.object(MODULE, "_held_file", held_file):
+            with self.assertRaisesRegex(
+                MODULE.FinlandStageError,
+                "launcher is unsafe",
+            ):
+                MODULE._verify_convergence_source_set_launcher(
+                    release_root,
+                    required_uid=0,
+                )
 
     def test_all_archive_validation_precedes_first_docker_load(self):
         archive, binding, inspect = image_archive("nginx", attack="link")

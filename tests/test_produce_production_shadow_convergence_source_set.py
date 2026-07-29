@@ -583,6 +583,78 @@ class ProductionShadowConvergenceSourceSetProducerTests(unittest.TestCase):
                 )
                 build_plan.assert_not_called()
 
+        with mock.patch.object(MODULE, "build_plan", return_value={"status": "planned"}):
+            status, stdout, stderr = self.invoke_main(["plan"])
+        self.assertEqual(status, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(json.loads(stdout), {"status": "planned"})
+
+    def test_nonplan_cli_requires_context_and_enforces_action_specific_inputs(self) -> None:
+        status, stdout, stderr = self.invoke_main(["produce"])
+        self.assertEqual(status, 1)
+        self.assertEqual(stdout, "")
+        self.assertIn("produce requires controller context inputs", stderr)
+
+        with (
+            mock.patch.object(
+                MODULE.BRIDGE,
+                "load_evidence_context",
+                return_value=context(),
+            ),
+            mock.patch.object(MODULE, "produce") as produce,
+        ):
+            status, stdout, stderr = self.invoke_main(
+                [
+                    "produce",
+                    *self.controller_context_arguments(),
+                    "--role-validation",
+                    "bot_fi=" + "a" * 64,
+                ]
+            )
+        self.assertEqual(status, 1)
+        self.assertEqual(stdout, "")
+        self.assertIn("produce does not accept ready source-set publication arguments", stderr)
+        produce.assert_not_called()
+
+        with (
+            mock.patch.object(
+                MODULE.BRIDGE,
+                "load_evidence_context",
+                return_value=context(),
+            ),
+            mock.patch.object(MODULE, "_parse_digest_mapping", return_value={"role": "a" * 64}),
+            mock.patch.object(MODULE, "_parse_pure_observation_mapping", return_value={"pure": "b" * 64}),
+            mock.patch.object(MODULE, "produce", return_value={"status": "produced"}) as produce,
+        ):
+            status, stdout, stderr = self.invoke_main(
+                ["produce", *self.controller_context_arguments()]
+            )
+        self.assertEqual(status, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(json.loads(stdout), {"status": "produced"})
+        produce.assert_called_once()
+
+        with (
+            mock.patch.object(
+                MODULE.BRIDGE,
+                "load_evidence_context",
+                return_value=context(),
+            ),
+            mock.patch.object(MODULE, "prepare_ready_source_set") as prepare,
+        ):
+            status, stdout, stderr = self.invoke_main(
+                [
+                    "ready-source-set",
+                    *self.controller_context_arguments(),
+                    "--role-request",
+                    "bot_fi=" + "a" * 64,
+                ]
+            )
+        self.assertEqual(status, 1)
+        self.assertEqual(stdout, "")
+        self.assertIn("accepts only published member digest mappings", stderr)
+        prepare.assert_not_called()
+
     def test_ready_source_set_cli_rejects_confirmation_apply_misuse_before_prepare(self) -> None:
         modes = (
             (["--confirm", "caller-selected-confirmation"], "confirmation requires --apply"),
@@ -1032,6 +1104,57 @@ class ProductionShadowConvergenceSourceSetProducerTests(unittest.TestCase):
 
         validate_members.assert_not_called()
 
+    def test_ready_source_set_document_and_member_validation_fail_closed(self) -> None:
+        role_digests, observation_digests = self.ready_source_set_inputs()
+        ctx = context()
+        roles = MODULE._ready_role_validation_references(ctx, digests=role_digests)
+        observations = MODULE._ready_observation_references(
+            ctx,
+            digests=observation_digests,
+        )
+
+        with mock.patch.object(MODULE.BRIDGE, "SOURCE_SET_FIELDS", frozenset()):
+            with self.assertRaisesRegex(
+                MODULE.ConvergenceSourceSetProducerError,
+                "fields differ",
+            ):
+                MODULE._ready_source_set_document(
+                    ctx,
+                    role_validation=roles,
+                    observations=observations,
+                )
+
+        with (
+            mock.patch.object(MODULE, "_validate_context"),
+            mock.patch.object(MODULE, "_require_controller_producer_exact_release"),
+            mock.patch.object(
+                MODULE.BRIDGE,
+                "_validate_source_members",
+                side_effect=MODULE.BRIDGE.ConvergenceGateError("unsafe"),
+            ),
+        ):
+            with self.assertRaisesRegex(
+                MODULE.ConvergenceSourceSetUnavailable,
+                "members are unavailable or unsafe",
+            ):
+                MODULE.prepare_ready_source_set(
+                    ctx,
+                    role_validation_digests=role_digests,
+                    observation_digests=observation_digests,
+                )
+
+    def test_ready_source_set_mapping_parsers_reject_invalid_members(self) -> None:
+        with self.assertRaisesRegex(
+            MODULE.ConvergenceSourceSetProducerError,
+            "role validation mapping is invalid",
+        ):
+            MODULE._parse_ready_role_validation_mapping(["unknown=" + "a" * 64])
+        with self.assertRaisesRegex(
+            MODULE.ConvergenceSourceSetProducerError,
+            "observation mapping is invalid",
+        ):
+            MODULE._parse_ready_observation_mapping(["unknown=" + "a" * 64])
+
     def test_prepare_ready_source_set_derives_only_canonical_member_paths(self) -> None:
         role_digests, observation_digests = self.ready_source_set_inputs()
         ctx = context()
@@ -1117,6 +1240,85 @@ class ProductionShadowConvergenceSourceSetProducerTests(unittest.TestCase):
             ):
                 MODULE.publish_ready_source_set(prepared, confirm="wrong")
         refresh.assert_not_called()
+
+    def test_publish_ready_source_set_normalizes_context_and_gate_failures(self) -> None:
+        prepared = self.prepared_ready_source_set()
+        with mock.patch.object(
+            MODULE.BRIDGE,
+            "load_evidence_context",
+            side_effect=MODULE.BRIDGE.ConvergenceGateError("context changed"),
+        ):
+            with self.assertRaisesRegex(
+                MODULE.ConvergenceSourceSetProducerError,
+                "context changed or is unavailable",
+            ):
+                MODULE.publish_ready_source_set(
+                    prepared,
+                    confirm=prepared.required_confirmation,
+                )
+
+        with (
+            mock.patch.object(
+                MODULE.BRIDGE,
+                "load_evidence_context",
+                return_value=prepared.context,
+            ),
+            mock.patch.object(MODULE, "prepare_ready_source_set", return_value=prepared),
+            mock.patch.object(MODULE, "_require_controller_producer_exact_release"),
+            mock.patch.object(MODULE, "_write_new_or_same", return_value="created"),
+            mock.patch.object(
+                MODULE.BRIDGE,
+                "_validate_source_set",
+                side_effect=MODULE.BRIDGE.ConvergenceGateError("invalid source"),
+            ),
+        ):
+            with self.assertRaisesRegex(
+                MODULE.ConvergenceSourceSetProducerError,
+                "does not satisfy convergence gate",
+            ):
+                MODULE.publish_ready_source_set(
+                    prepared,
+                    confirm=prepared.required_confirmation,
+                )
+
+    def test_publish_ready_source_set_rechecks_mutable_confirmation_boundary(self) -> None:
+        prepared = self.prepared_ready_source_set()
+        refreshed = replace(
+            prepared,
+            required_confirmation="freshly-recomputed-confirmation",
+        )
+
+        def refresh_with_changed_confirmation(*_args, **_kwargs):
+            object.__setattr__(
+                prepared,
+                "required_confirmation",
+                refreshed.required_confirmation,
+            )
+            return refreshed
+
+        with (
+            mock.patch.object(
+                MODULE.BRIDGE,
+                "load_evidence_context",
+                return_value=prepared.context,
+            ),
+            mock.patch.object(
+                MODULE,
+                "prepare_ready_source_set",
+                side_effect=refresh_with_changed_confirmation,
+            ),
+            mock.patch.object(MODULE, "_write_new_or_same") as write,
+        ):
+            with self.assertRaisesRegex(
+                MODULE.ConvergenceSourceSetProducerError,
+                "exact digest-bound confirmation",
+            ):
+                MODULE.publish_ready_source_set(
+                    prepared,
+                    confirm=prepared.required_confirmation,
+                )
+
+        write.assert_not_called()
 
     def test_publish_ready_source_set_refreshes_before_create_only_write(self) -> None:
         prepared = self.prepared_ready_source_set()
