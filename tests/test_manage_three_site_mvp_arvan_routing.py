@@ -60,6 +60,7 @@ def proof_for(
     reference = now or datetime.now(timezone.utc)
     source_site = "webapp_fi" if target_site == "webapp_ir" else "webapp_ir"
     action = "promote_ir" if target_site == "webapp_ir" else "failback_fi"
+    capture_time = reference - timedelta(seconds=max(snapshot_age_seconds - 1, 0))
     proof = {
         "schema": "gold-trade-writer-promotion-proof-v1",
         "action": action,
@@ -71,8 +72,10 @@ def proof_for(
         "release_sha": "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5",
         "alembic_revision": "f2c7d8e9a0b1",
         "snapshot_age_seconds": snapshot_age_seconds,
-        "snapshot_published_at": (reference - timedelta(seconds=snapshot_age_seconds)).isoformat(),
-        "snapshot_ready_at": (reference - timedelta(seconds=1)).isoformat(),
+        "snapshot_published_at": capture_time.isoformat(),
+        "source_db_snapshot_started_at": (reference - timedelta(seconds=snapshot_age_seconds)).isoformat(),
+        "source_capture_completed_at": capture_time.isoformat(),
+        "snapshot_ready_at": reference.isoformat(),
         "snapshot_restore_receipt_sha256": "a" * 64,
         "snapshot_stage_receipt_sha256": "b" * 64,
         "lease_id": "lease-1",
@@ -117,6 +120,16 @@ class ThreeSiteMvpArvanRoutingTests(unittest.TestCase):
         proof["proof_sha256"] = _sha256(_canonical_json_bytes(unsigned))
 
         with self.assertRaisesRegex(ThreeSiteRoutingError, "does not match the deployed MVP release"):
+            verify_promotion_proof(proof, target_site="webapp_ir", now=now)
+
+    def test_verify_proof_rejects_stale_database_snapshot_even_if_proof_is_new(self) -> None:
+        now = datetime(2026, 7, 29, tzinfo=timezone.utc)
+        proof = proof_for(now=now, snapshot_age_seconds=31)
+        unsigned = dict(proof)
+        unsigned.pop("proof_sha256")
+        proof["proof_sha256"] = _sha256(_canonical_json_bytes(unsigned))
+
+        with self.assertRaisesRegex(ThreeSiteRoutingError, "older than the allowed recovery point"):
             verify_promotion_proof(proof, target_site="webapp_ir", now=now)
 
     def test_normal_route_requires_witness_proof_before_api_access(self) -> None:

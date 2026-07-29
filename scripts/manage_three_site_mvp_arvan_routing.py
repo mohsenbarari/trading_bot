@@ -16,6 +16,7 @@ import fcntl
 import hashlib
 import ipaddress
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -64,6 +65,8 @@ _BASE_PROOF_FIELDS = {
     "release_sha",
     "alembic_revision",
     "snapshot_age_seconds",
+    "source_db_snapshot_started_at",
+    "source_capture_completed_at",
     "snapshot_published_at",
     "snapshot_ready_at",
     "snapshot_restore_receipt_sha256",
@@ -279,6 +282,12 @@ def verify_promotion_proof(
     reference = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     issued_at = _parse_timestamp(proof.get("issued_at"), field="issued_at")
     lease_expires_at = _parse_timestamp(proof.get("lease_expires_at"), field="lease_expires_at")
+    source_db_snapshot_started_at = _parse_timestamp(
+        proof.get("source_db_snapshot_started_at"), field="source_db_snapshot_started_at"
+    )
+    source_capture_completed_at = _parse_timestamp(
+        proof.get("source_capture_completed_at"), field="source_capture_completed_at"
+    )
     published_at = _parse_timestamp(proof.get("snapshot_published_at"), field="snapshot_published_at")
     ready_at = _parse_timestamp(proof.get("snapshot_ready_at"), field="snapshot_ready_at")
     if issued_at > reference + timedelta(seconds=MAX_CLOCK_SKEW_SECONDS):
@@ -289,13 +298,22 @@ def verify_promotion_proof(
         raise ThreeSiteRoutingError("Witness promotion proof lease has expired")
     if lease_expires_at <= issued_at:
         raise ThreeSiteRoutingError("Witness promotion proof lease does not outlive issuance")
-    if published_at > reference + timedelta(seconds=MAX_CLOCK_SKEW_SECONDS):
-        raise ThreeSiteRoutingError("snapshot publication time is in the future")
-    if ready_at < published_at or ready_at > issued_at:
+    if source_db_snapshot_started_at > reference + timedelta(seconds=MAX_CLOCK_SKEW_SECONDS):
+        raise ThreeSiteRoutingError("database snapshot start time is in the future")
+    if not (
+        source_db_snapshot_started_at
+        <= source_capture_completed_at
+        <= published_at
+        <= ready_at
+        <= issued_at
+    ):
         raise ThreeSiteRoutingError("Witness promotion proof snapshot timing is inconsistent")
-    actual_snapshot_age = (reference - published_at).total_seconds()
-    if actual_snapshot_age > max_snapshot_age_seconds + MAX_CLOCK_SKEW_SECONDS:
-        raise ThreeSiteRoutingError("snapshot publication is older than the allowed recovery point")
+    snapshot_age_at_issuance = math.ceil((issued_at - source_db_snapshot_started_at).total_seconds())
+    if snapshot_age_at_issuance < 0 or snapshot_age_at_issuance != snapshot_age:
+        raise ThreeSiteRoutingError("Witness promotion proof snapshot age does not match its database snapshot start")
+    actual_snapshot_age = math.ceil((reference - source_db_snapshot_started_at).total_seconds())
+    if actual_snapshot_age < 0 or actual_snapshot_age > max_snapshot_age_seconds:
+        raise ThreeSiteRoutingError("database snapshot is older than the allowed recovery point")
     return {
         "action": action,
         "operation_id": proof["operation_id"],
