@@ -17,10 +17,20 @@ import os
 import stat
 import subprocess
 import sys
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Sequence
 
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from core.production_writer_lease import (
+    ProductionWriterLeaseError,
+    load_production_writer_lease,
+)
 from restore_webapp_ir_snapshot import (
     DEFAULT_COMPOSE_FILE,
     RestoreError,
@@ -32,7 +42,6 @@ from restore_webapp_ir_snapshot import (
 )
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TRANSPORT_SCRIPT = REPO_ROOT / "scripts/manage_webapp_ir_snapshot.py"
 DEFAULT_RESTORE_SCRIPT = REPO_ROOT / "scripts/restore_webapp_ir_snapshot.py"
 SCHEMA_VERSION = "webapp_ir_snapshot_refresh_v1"
@@ -125,6 +134,25 @@ def require_transport_maximum_snapshot_age(path: Path) -> int:
     return maximum_age
 
 
+def require_snapshot_refresh_fenced_by_writer_lease(path: Path) -> None:
+    """Refuse candidate mutation while this host holds a live Writer term."""
+
+    if not path.is_absolute():
+        raise RestoreError("WA_IR_SNAPSHOT_WRITER_LEASE_FILE must be absolute")
+    try:
+        lease = load_production_writer_lease(path)
+    except ProductionWriterLeaseError as exc:
+        raise RestoreError(
+            "local WA-IR Writer lease is unsafe; snapshot refresh remains self-fenced"
+        ) from exc
+    if lease.holder_site != "webapp_ir":
+        raise RestoreError(
+            "local Writer lease holder is not webapp_ir; snapshot refresh remains self-fenced"
+        )
+    if lease.expires_at > datetime.now(timezone.utc):
+        raise RestoreError("live local webapp_ir Writer lease exists; snapshot refresh self-fenced")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--standby-env", required=True)
@@ -159,6 +187,9 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         raise RestoreError("transport and restore snapshot freshness bounds must match")
     if args.timer_interval_seconds > maximum_snapshot_age_seconds:
         raise RestoreError("timer-interval-seconds may not exceed the snapshot freshness bound")
+    writer_lease_file = None
+    if args.apply:
+        writer_lease_file = Path(require_config(values, "WA_IR_SNAPSHOT_WRITER_LEASE_FILE"))
     transport_script = require_tool_file(Path(args.transport_script), label="transport-script")
     restore_script = require_tool_file(Path(args.restore_script), label="restore-script")
     for executable, label in ((args.transport_python, "transport-python"), (args.restore_python, "restore-python")):
@@ -181,6 +212,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     if not args.apply:
         return plan
     with refresh_lock(state_root):
+        require_snapshot_refresh_fenced_by_writer_lease(writer_lease_file)
         transport = run_json_command(
             [
                 args.transport_python,
@@ -221,6 +253,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         ]
         if args.keep_previous_running:
             restore_arguments.append("--keep-previous-running")
+        require_snapshot_refresh_fenced_by_writer_lease(writer_lease_file)
         restore = run_json_command(restore_arguments, label="snapshot candidate restore")
     if restore.get("status") != "ready":
         raise RestoreError("snapshot restore did not reach ready state")
