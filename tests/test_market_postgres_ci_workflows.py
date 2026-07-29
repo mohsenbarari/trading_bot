@@ -21,6 +21,8 @@ class MarketPostgresCiWorkflowTests(unittest.TestCase):
             self.assertIn("deploy/postgres-boottime/Dockerfile", workflow, path.name)
             self.assertIn("trading-bot-ci-postgres-boottime", workflow, path.name)
             self.assertIn("docker run -d --name market-postgres", workflow, path.name)
+            self.assertIn("pg_isready -h 127.0.0.1 -U market_ci -d postgres", workflow, path.name)
+            self.assertIn("psql -h 127.0.0.1 -U market_ci -d postgres", workflow, path.name)
             self.assertIn("trading_bot_boottime", workflow, path.name)
             self.assertIn("pg_available_extensions", workflow, path.name)
             self.assertNotIn("image: postgres:15-alpine", workflow, path.name)

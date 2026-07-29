@@ -74,8 +74,8 @@ jobs:
             --env POSTGRES_DB=postgres \
             "$image"
           for _ in $(seq 1 30); do
-            if docker exec market-postgres pg_isready -U market_ci -d postgres; then
-              docker exec market-postgres psql -U market_ci -d postgres -Atqc \
+            if docker exec market-postgres pg_isready -h 127.0.0.1 -U market_ci -d postgres; then
+              docker exec market-postgres psql -h 127.0.0.1 -U market_ci -d postgres -Atqc \
                 "SELECT default_version FROM pg_available_extensions WHERE name = 'trading_bot_boottime'" \
                 | grep -Fx '1.0'
               exit 0

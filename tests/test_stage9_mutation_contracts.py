@@ -25,6 +25,7 @@ from core.registration_sync_policy import (
 from core.background_job_authority import (
     BackgroundJobAuthorityDecision,
     JOB_CONNECTIVITY_MONITOR,
+    JOB_OFFER_EXPIRY,
     JOB_OTP_SMS_FALLBACK,
     JOB_TELEGRAM_REGISTRATION_RECONCILIATION,
     JOB_USER_ACCOUNT_STATUS,
@@ -917,6 +918,23 @@ class Stage9MutationContractTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIs(standby_local_runtime.ok, True)
         self.assertIsNone(standby_local_runtime.reason)
+        foreign_webapp_standby = check_background_job_authority(
+            JOB_OFFER_EXPIRY,
+            server_mode=SERVER_FOREIGN,
+            physical_site=" webapp_fi ",
+            runtime_role=" STANDBY ",
+        )
+        self.assertIs(foreign_webapp_standby.ok, True)
+        self.assertEqual(foreign_webapp_standby.physical_site, "webapp_fi")
+        self.assertEqual(foreign_webapp_standby.runtime_role, "standby")
+        bot_fi_standby = check_background_job_authority(
+            JOB_USER_ACCOUNT_STATUS,
+            server_mode=SERVER_IRAN,
+            physical_site=SITE_BOT_FI,
+            runtime_role="standby",
+        )
+        self.assertIs(bot_fi_standby.ok, True)
+        self.assertIsNone(bot_fi_standby.reason)
 
     def test_invitation_sms_category_policy_is_independent(self):
         cases = (
