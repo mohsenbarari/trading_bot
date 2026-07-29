@@ -24,6 +24,11 @@ MODULE = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 
+try:
+    from core.production_snapshot_promotion import parse_restore_receipt
+except ModuleNotFoundError:  # The Writer Witness change is merged independently.
+    parse_restore_receipt = None
+
 
 def secure_write(path: Path, data: bytes) -> None:
     path.write_bytes(data)
@@ -145,6 +150,89 @@ class RestoreWebappIrSnapshotTests(unittest.TestCase):
             ).encode("utf-8"),
         )
         return standby_env, receipt_path, uploads
+
+    def add_witness_transport_bindings(self, receipt_path: Path) -> None:
+        """Add the remote descriptors a real generic S3 ready receipt carries."""
+
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        audit = receipt_path.parent / "audit.tar.gz"
+        write_audit_archive(audit)
+        receipt["audit_archive_path"] = str(audit)
+        receipt["audit"] = {
+            "sha256": sha256(audit),
+            "bytes": audit.stat().st_size,
+            "format": "tar_gz_audit_trail_root",
+            "object_key": "snapshot-fi-ir/audit.age",
+            "version_id": "audit-version-1",
+            "ciphertext_sha256": "a" * 64,
+            "ciphertext_bytes": 100,
+        }
+        receipt["database"].update(
+            {
+                "object_key": "snapshot-fi-ir/database.age",
+                "version_id": "database-version-1",
+                "ciphertext_sha256": "b" * 64,
+                "ciphertext_bytes": 101,
+            }
+        )
+        receipt["uploads"].update(
+            {
+                "object_key": "snapshot-fi-ir/uploads.age",
+                "version_id": "uploads-version-1",
+                "ciphertext_sha256": "c" * 64,
+                "ciphertext_bytes": 102,
+            }
+        )
+        receipt["manifest"] = {
+            "object_key": "snapshot-fi-ir/manifest.json.age",
+            "version_id": "manifest-version-1",
+            "ciphertext_sha256": "d" * 64,
+            "ciphertext_bytes": 103,
+        }
+        receipt["receipt_sha256"] = hashlib.sha256(
+            json.dumps(
+                {key: value for key, value in receipt.items() if key != "receipt_sha256"},
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        secure_write(receipt_path, json.dumps(receipt).encode("utf-8"))
+
+    def make_witness_receipt_fixture(self, root: Path) -> tuple[object, object, dict, dict]:
+        standby_env, receipt_path, _ = self.make_inputs(root)
+        self.add_witness_transport_bindings(receipt_path)
+        values = MODULE.parse_env_file(standby_env, label="standby env")
+        receipt = MODULE.load_receipt(
+            receipt_path,
+            workspace_root=Path(values["WA_IR_SNAPSHOT_WORK_ROOT"]),
+        )
+        candidate = MODULE.build_candidate(
+            Path(values["WA_IR_STANDBY_DATA_ROOT"]), receipt.snapshot_id
+        )
+        restored_at = (receipt.ready_at_value + timedelta(milliseconds=1)).isoformat().replace(
+            "+00:00", "Z"
+        )
+        verified_at = (receipt.ready_at_value + timedelta(milliseconds=2)).isoformat().replace(
+            "+00:00", "Z"
+        )
+        witness = MODULE.build_witness_restore_receipt(
+            receipt=receipt,
+            restored_at=restored_at,
+            restore_verified_at=verified_at,
+        )
+        active = MODULE.candidate_payload(
+            receipt=receipt,
+            candidate=candidate,
+            table_count=1,
+            upload_members=1,
+            upload_bytes=1,
+            audit_members=1,
+            audit_bytes=1,
+            maximum_snapshot_age_seconds=30,
+            source_db_snapshot_age_seconds=1,
+        )
+        return receipt, candidate, witness, active
 
     def test_validation_plan_never_invokes_docker_or_starts_an_app(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -318,6 +406,213 @@ class RestoreWebappIrSnapshotTests(unittest.TestCase):
             )
         self.assertEqual(payload["audit"]["status"], "planned")
         self.assertEqual(payload["candidate"]["audit_volume"], "trading_bot_wa_ir_audit_snapshot-20260729-0001")
+
+    def test_witness_receipt_is_strict_hash_bound_and_strips_transport_format(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            standby_env, receipt_path, _ = self.make_inputs(root)
+            self.add_witness_transport_bindings(receipt_path)
+            values = MODULE.parse_env_file(standby_env, label="standby env")
+            receipt = MODULE.load_receipt(
+                receipt_path,
+                workspace_root=Path(values["WA_IR_SNAPSHOT_WORK_ROOT"]),
+            )
+            candidate = MODULE.build_candidate(
+                Path(values["WA_IR_STANDBY_DATA_ROOT"]), receipt.snapshot_id
+            )
+            restored_at = (receipt.ready_at_value + timedelta(milliseconds=1)).isoformat().replace(
+                "+00:00", "Z"
+            )
+            verified_at = (receipt.ready_at_value + timedelta(milliseconds=2)).isoformat().replace(
+                "+00:00", "Z"
+            )
+            witness = MODULE.build_witness_restore_receipt(
+                receipt=receipt,
+                restored_at=restored_at,
+                restore_verified_at=verified_at,
+            )
+            active = MODULE.candidate_payload(
+                receipt=receipt,
+                candidate=candidate,
+                table_count=1,
+                upload_members=1,
+                upload_bytes=1,
+                audit_members=1,
+                audit_bytes=1,
+                maximum_snapshot_age_seconds=30,
+                source_db_snapshot_age_seconds=1,
+            )
+            witness_root = root / "witness"
+            witness_root.mkdir()
+            os.chmod(witness_root, 0o700)
+            target = witness_root / "latest-restore-receipt.json"
+            binding = MODULE.bind_witness_receipt_to_active_snapshot(
+                active_snapshot=active,
+                candidate=candidate,
+                witness_path=target,
+                witness_receipt=witness,
+            )
+            prepared = MODULE.prepare_root_only_atomic_json(target, witness)
+            self.assertFalse(target.exists())
+            MODULE.commit_prepared_atomic_json(prepared)
+            persisted = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(set(witness), MODULE.WITNESS_RECEIPT_FIELDS)
+        self.assertEqual(witness["stage_receipt_sha256"], receipt.raw["receipt_sha256"])
+        self.assertEqual(witness["restored_database_sha256"], receipt.database.sha256)
+        self.assertEqual(witness["restored_uploads_sha256"], receipt.uploads.sha256)
+        self.assertEqual(set(witness["database"]), MODULE.WITNESS_PLAINTEXT_ARTIFACT_FIELDS)
+        self.assertNotIn("format", witness["database"])
+        self.assertEqual(witness["manifest"], receipt.raw["manifest"])
+        self.assertEqual(witness["receipt_sha256"], MODULE.canonical_witness_receipt_sha256(witness))
+        self.assertEqual(persisted, witness)
+        self.assertEqual(
+            binding,
+            {
+                "path": str(target),
+                "receipt_sha256": witness["receipt_sha256"],
+                "stage_receipt_sha256": receipt.raw["receipt_sha256"],
+                "source_generation": receipt.source_generation,
+                "snapshot_id": receipt.snapshot_id,
+            },
+        )
+
+    @unittest.skipIf(parse_restore_receipt is None, "Writer Witness core is merged independently")
+    def test_witness_receipt_is_accepted_by_the_exact_writer_core_parser(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            _receipt, _candidate, witness, _active = self.make_witness_receipt_fixture(Path(temporary))
+            parsed = parse_restore_receipt(
+                witness,
+                action="promote_ir",
+                now=datetime.now(timezone.utc),
+            )
+        self.assertEqual(parsed.receipt_sha256, witness["receipt_sha256"])
+        self.assertEqual(parsed.stage_receipt_sha256, witness["stage_receipt_sha256"])
+
+    def test_witness_receipt_requires_verified_audit_and_matching_candidate_volume(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            standby_env, receipt_path, _ = self.make_inputs(root)
+            values = MODULE.parse_env_file(standby_env, label="standby env")
+            receipt = MODULE.load_receipt(
+                receipt_path,
+                workspace_root=Path(values["WA_IR_SNAPSHOT_WORK_ROOT"]),
+            )
+            candidate = MODULE.build_candidate(
+                Path(values["WA_IR_STANDBY_DATA_ROOT"]), receipt.snapshot_id
+            )
+            with self.assertRaisesRegex(MODULE.RestoreError, "verified audit artifact"):
+                MODULE.build_witness_restore_receipt(
+                    receipt=receipt,
+                    restored_at=receipt.ready_at,
+                    restore_verified_at=receipt.ready_at,
+                )
+
+            self.add_witness_transport_bindings(receipt_path)
+            receipt = MODULE.load_receipt(
+                receipt_path,
+                workspace_root=Path(values["WA_IR_SNAPSHOT_WORK_ROOT"]),
+            )
+            witness = MODULE.build_witness_restore_receipt(
+                receipt=receipt,
+                restored_at=receipt.ready_at,
+                restore_verified_at=receipt.ready_at,
+            )
+            active = MODULE.candidate_payload(
+                receipt=receipt,
+                candidate=candidate,
+                table_count=1,
+                upload_members=1,
+                upload_bytes=1,
+                audit_members=1,
+                audit_bytes=1,
+                maximum_snapshot_age_seconds=30,
+                source_db_snapshot_age_seconds=1,
+            )
+            active["audit"]["status"] = "planned"
+            witness_root = root / "witness"
+            witness_root.mkdir()
+            os.chmod(witness_root, 0o700)
+            with self.assertRaisesRegex(MODULE.RestoreError, "audit.status=verified"):
+                MODULE.bind_witness_receipt_to_active_snapshot(
+                    active_snapshot=active,
+                    candidate=candidate,
+                    witness_path=witness_root / "latest-restore-receipt.json",
+                    witness_receipt=witness,
+                )
+
+            active["audit"]["status"] = "verified"
+            active["candidate"]["audit_volume"] = "wrong-candidate-audit-volume"
+            with self.assertRaisesRegex(MODULE.RestoreError, "active candidate audit volume"):
+                MODULE.bind_witness_receipt_to_active_snapshot(
+                    active_snapshot=active,
+                    candidate=candidate,
+                    witness_path=witness_root / "latest-restore-receipt.json",
+                    witness_receipt=witness,
+                )
+
+    def test_witness_receipt_replaces_only_the_canonical_latest_file_atomically(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "latest-restore-receipt.json"
+            secure_write(target, b'{"old":true}\n')
+            payload = {"new": True}
+            prepared = MODULE.prepare_root_only_atomic_json(target, payload)
+            self.assertEqual(target.read_bytes(), b'{"old":true}\n')
+            MODULE.commit_prepared_atomic_json(prepared)
+            self.assertEqual(json.loads(target.read_text(encoding="utf-8")), payload)
+            self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+
+    def test_witness_publication_never_exposes_an_unbound_new_latest_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            receipt, candidate, witness, active = self.make_witness_receipt_fixture(root)
+            witness_root = root / "witness"
+            witness_root.mkdir()
+            os.chmod(witness_root, 0o700)
+            target = witness_root / "latest-restore-receipt.json"
+            old = dict(witness)
+            old["snapshot_id"] = "snapshot-20260729-old"
+            old["receipt_sha256"] = MODULE.canonical_witness_receipt_sha256(old)
+            secure_write(target, json.dumps(old).encode("utf-8"))
+            binding = MODULE.bind_witness_receipt_to_active_snapshot(
+                active_snapshot=active,
+                candidate=candidate,
+                witness_path=target,
+                witness_receipt=witness,
+            )
+            prepared = MODULE.prepare_root_only_atomic_json(target, witness)
+
+            # This is the only permitted crash window: the pointer may bind the
+            # new hash while the old canonical path remains visible.  A Writer
+            # controller that checks the binding rejects the old receipt.
+            active["witness_restore_receipt"] = binding
+            visible_before_commit = json.loads(target.read_text(encoding="utf-8"))
+            self.assertNotEqual(visible_before_commit["receipt_sha256"], binding["receipt_sha256"])
+            self.assertTrue(prepared.temporary.exists())
+
+            MODULE.commit_prepared_atomic_json(prepared)
+            visible_after_commit = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(visible_after_commit["receipt_sha256"], binding["receipt_sha256"])
+        self.assertEqual(active["candidate"]["audit_volume"], candidate.audit_volume)
+        self.assertEqual(receipt.raw["receipt_sha256"], binding["stage_receipt_sha256"])
+
+    def test_witness_receipt_path_must_be_root_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            insecure = root / "insecure"
+            insecure.mkdir()
+            os.chmod(insecure, 0o755)
+            with self.assertRaisesRegex(MODULE.RestoreError, "root-only"):
+                MODULE.require_witness_receipt_path(insecure / "latest-restore-receipt.json")
+
+            secure = root / "secure"
+            secure.mkdir()
+            os.chmod(secure, 0o700)
+            target = secure / "latest-restore-receipt.json"
+            secure_write(target, b"{}")
+            os.chmod(target, 0o644)
+            with self.assertRaisesRegex(MODULE.RestoreError, "existing Witness restore receipt"):
+                MODULE.require_witness_receipt_path(target)
 
 
 if __name__ == "__main__":

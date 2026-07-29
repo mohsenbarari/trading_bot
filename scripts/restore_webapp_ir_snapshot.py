@@ -46,6 +46,38 @@ VOLUME_LABEL = "com.goldtrade.webapp-ir.snapshot"
 VOLUME_PREFIX = "trading_bot_wa_ir_"
 DEFAULT_MAX_UPLOAD_BYTES = 20 * 1024 * 1024 * 1024
 DEFAULT_MAX_AUDIT_BYTES = 2 * 1024 * 1024 * 1024
+WITNESS_RECEIPT_FILENAME = "latest-restore-receipt.json"
+WITNESS_RECEIPT_FIELDS = frozenset(
+    {
+        "schema",
+        "status",
+        "source_site",
+        "destination_site",
+        "source_generation",
+        "snapshot_id",
+        "release_sha",
+        "alembic_revision",
+        "source_db_snapshot_started_at",
+        "source_capture_completed_at",
+        "published_at",
+        "ready_at",
+        "restored_at",
+        "restore_verified_at",
+        "stage_receipt_sha256",
+        "restored_database_sha256",
+        "restored_uploads_sha256",
+        "database",
+        "uploads",
+        "manifest",
+        "receipt_sha256",
+    }
+)
+WITNESS_PLAINTEXT_ARTIFACT_FIELDS = frozenset(
+    {"sha256", "bytes", "object_key", "version_id", "ciphertext_sha256", "ciphertext_bytes"}
+)
+WITNESS_REMOTE_ARTIFACT_FIELDS = frozenset(
+    {"object_key", "version_id", "ciphertext_sha256", "ciphertext_bytes"}
+)
 
 
 class RestoreError(RuntimeError):
@@ -96,6 +128,14 @@ class Candidate:
     db_path: Path
     uploads_path: Path
     audit_path: Path
+
+
+@dataclass(frozen=True)
+class PreparedAtomicJson:
+    """A root-only JSON payload ready for one atomic replacement."""
+
+    target: Path
+    temporary: Path
 
 
 def utc_now() -> str:
@@ -687,6 +727,274 @@ def canonical_payload_sha256(payload: Mapping[str, Any], *, omit: str) -> str:
     ).hexdigest()
 
 
+def canonical_witness_receipt_sha256(payload: Mapping[str, Any]) -> str:
+    """Hash a strict Witness receipt with the Writer Witness canonical form.
+
+    The Witness core deliberately uses ``ensure_ascii=False``.  Keep this
+    separate from the generic snapshot transport's canonical receipt hash so a
+    future non-ASCII field cannot silently produce an incompatible digest.
+    """
+
+    unsigned = dict(payload)
+    unsigned.pop("receipt_sha256", None)
+    try:
+        encoded = json.dumps(
+            unsigned,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise RestoreError("Witness restore receipt is not canonical JSON") from exc
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def require_witness_receipt_path(path_value: str | Path) -> Path:
+    """Accept only the dedicated root-only Writer Witness receipt location."""
+
+    path = Path(path_value)
+    if not path.is_absolute():
+        raise RestoreError("Witness restore receipt path must be absolute")
+    if path.name != WITNESS_RECEIPT_FILENAME:
+        raise RestoreError(f"Witness restore receipt must be named {WITNESS_RECEIPT_FILENAME}")
+    parent = require_absolute_directory(
+        str(path.parent), label="Witness restore receipt parent directory"
+    )
+    target = parent / path.name
+    if target.exists() or target.is_symlink():
+        require_secure_regular_file(target, label="existing Witness restore receipt")
+    return target
+
+
+def prepare_root_only_atomic_json(path: Path, payload: Mapping[str, Any]) -> PreparedAtomicJson:
+    """Durably stage an atomic root-only replacement without exposing it yet."""
+
+    target = require_witness_receipt_path(path)
+    encoded = (json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            os.fchmod(handle.fileno(), 0o600)
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, 0o600)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+    return PreparedAtomicJson(target=target, temporary=temporary)
+
+
+def discard_prepared_atomic_json(prepared: PreparedAtomicJson) -> None:
+    prepared.temporary.unlink(missing_ok=True)
+
+
+def commit_prepared_atomic_json(prepared: PreparedAtomicJson) -> None:
+    """Make a previously staged receipt visible in one replace operation."""
+
+    target = require_witness_receipt_path(prepared.target)
+    if target != prepared.target:
+        raise RestoreError("Witness restore receipt target changed during staging")
+    if prepared.temporary.parent != target.parent:
+        raise RestoreError("Witness restore receipt staged file escaped its target directory")
+    if not prepared.temporary.is_file() or prepared.temporary.is_symlink():
+        raise RestoreError("Witness restore receipt staged file disappeared")
+    temporary_metadata = prepared.temporary.stat()
+    if temporary_metadata.st_uid != 0 or temporary_metadata.st_mode & 0o077:
+        raise RestoreError("Witness restore receipt staged file is not root-only")
+    os.replace(prepared.temporary, target)
+    directory_descriptor = os.open(str(target.parent), os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory_descriptor)
+    finally:
+        os.close(directory_descriptor)
+
+
+def _witness_plaintext_artifact(
+    raw: object,
+    *,
+    artifact: Artifact,
+    expected_format: str,
+    label: str,
+) -> dict[str, Any]:
+    """Project a transport artifact into the exact Writer Witness schema."""
+
+    if not isinstance(raw, Mapping):
+        raise RestoreError(f"snapshot-ready receipt {label} descriptor is malformed")
+    if raw.get("format") != expected_format or artifact.format != expected_format:
+        raise RestoreError(f"snapshot-ready receipt {label} format is incompatible with Witness receipt")
+    if raw.get("sha256") != artifact.sha256 or raw.get("bytes") != artifact.byte_count:
+        raise RestoreError(f"snapshot-ready receipt {label} descriptor does not bind restored artifact")
+    projected: dict[str, Any] = {"sha256": artifact.sha256, "bytes": artifact.byte_count}
+    for field in ("object_key", "version_id", "ciphertext_sha256", "ciphertext_bytes"):
+        value = raw.get(field)
+        if field.endswith("sha256"):
+            if not isinstance(value, str) or not SHA256_RE.fullmatch(value.lower()):
+                raise RestoreError(f"snapshot-ready receipt {label} {field} is invalid")
+            projected[field] = value.lower()
+        elif field.endswith("bytes"):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise RestoreError(f"snapshot-ready receipt {label} {field} is invalid")
+            projected[field] = value
+        elif not isinstance(value, str) or not value:
+            raise RestoreError(f"snapshot-ready receipt {label} {field} is invalid")
+        else:
+            projected[field] = value
+    if set(projected) != WITNESS_PLAINTEXT_ARTIFACT_FIELDS:
+        raise RestoreError(f"snapshot-ready receipt {label} descriptor cannot be projected for Witness")
+    return projected
+
+
+def _witness_manifest_artifact(raw: object) -> dict[str, Any]:
+    """Validate the immutable remote-manifest descriptor without changing it."""
+
+    if not isinstance(raw, Mapping) or set(raw) != WITNESS_REMOTE_ARTIFACT_FIELDS:
+        raise RestoreError("snapshot-ready receipt manifest descriptor is incompatible with Witness receipt")
+    projected = dict(raw)
+    for field in ("object_key", "version_id"):
+        if not isinstance(projected.get(field), str) or not projected[field]:
+            raise RestoreError(f"snapshot-ready receipt manifest {field} is invalid")
+    for field in ("ciphertext_sha256",):
+        value = projected.get(field)
+        if not isinstance(value, str) or not SHA256_RE.fullmatch(value.lower()):
+            raise RestoreError(f"snapshot-ready receipt manifest {field} is invalid")
+        projected[field] = value.lower()
+    value = projected.get("ciphertext_bytes")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise RestoreError("snapshot-ready receipt manifest ciphertext_bytes is invalid")
+    return projected
+
+
+def build_witness_restore_receipt(
+    *,
+    receipt: SnapshotReceipt,
+    restored_at: str,
+    restore_verified_at: str,
+) -> dict[str, Any]:
+    """Build the exact fail-closed receipt consumed by the Writer Witness.
+
+    This intentionally carries only the source-ready receipt and immutable
+    Object Storage bindings.  It does not contain a volume path, secret, or
+    activation instruction.  Audit evidence remains in the locally protected
+    active pointer and is a mandatory precondition for publishing this receipt.
+    """
+
+    if receipt.audit is None:
+        raise RestoreError("a Witness restore receipt requires a verified audit artifact")
+    restored_at_value = parse_utc_timestamp(restored_at, label="Witness restored_at")
+    restore_verified_at_value = parse_utc_timestamp(
+        restore_verified_at, label="Witness restore_verified_at"
+    )
+    if not (
+        receipt.ready_at_value
+        <= restored_at_value
+        <= restore_verified_at_value
+    ):
+        raise RestoreError("Witness restore receipt timestamps are inconsistent")
+    database = _witness_plaintext_artifact(
+        receipt.raw.get("database"),
+        artifact=receipt.database,
+        expected_format="pg_dump_custom",
+        label="database",
+    )
+    uploads = _witness_plaintext_artifact(
+        receipt.raw.get("uploads"),
+        artifact=receipt.uploads,
+        expected_format="tar_gz_uploads_root",
+        label="uploads",
+    )
+    manifest = _witness_manifest_artifact(receipt.raw.get("manifest"))
+    stage_receipt_sha256 = require_text(
+        receipt.raw, "receipt_sha256", label="snapshot-ready receipt"
+    ).lower()
+    if not SHA256_RE.fullmatch(stage_receipt_sha256):
+        raise RestoreError("snapshot-ready receipt receipt_sha256 is invalid for Witness")
+    witness: dict[str, Any] = {
+        "schema": SCHEMA_VERSION,
+        "status": "restored_verified",
+        "source_site": receipt.source_site,
+        "destination_site": receipt.destination_site,
+        "source_generation": receipt.source_generation,
+        "snapshot_id": receipt.snapshot_id,
+        "release_sha": receipt.release_sha,
+        "alembic_revision": receipt.alembic_revision,
+        "source_db_snapshot_started_at": receipt.source_db_snapshot_started_at,
+        "source_capture_completed_at": receipt.source_capture_completed_at,
+        "published_at": receipt.published_at,
+        "ready_at": receipt.ready_at,
+        "restored_at": restored_at,
+        "restore_verified_at": restore_verified_at,
+        "stage_receipt_sha256": stage_receipt_sha256,
+        "restored_database_sha256": database["sha256"],
+        "restored_uploads_sha256": uploads["sha256"],
+        "database": database,
+        "uploads": uploads,
+        "manifest": manifest,
+    }
+    if set(witness) != WITNESS_RECEIPT_FIELDS - {"receipt_sha256"}:
+        raise RestoreError("Witness restore receipt fields are incomplete")
+    witness["receipt_sha256"] = canonical_witness_receipt_sha256(witness)
+    return witness
+
+
+def bind_witness_receipt_to_active_snapshot(
+    *,
+    active_snapshot: Mapping[str, Any],
+    candidate: Candidate,
+    witness_path: Path,
+    witness_receipt: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return the minimal active-pointer binding required before publication."""
+
+    audit = active_snapshot.get("audit")
+    active_candidate = active_snapshot.get("candidate")
+    if active_snapshot.get("status") != "ready":
+        raise RestoreError("Witness restore receipt requires an active ready candidate")
+    if not isinstance(audit, Mapping) or audit.get("status") != "verified":
+        raise RestoreError("Witness restore receipt requires audit.status=verified")
+    if (
+        not isinstance(active_candidate, Mapping)
+        or not candidate.audit_volume
+        or active_candidate.get("audit_volume") != candidate.audit_volume
+    ):
+        raise RestoreError("Witness restore receipt requires the active candidate audit volume")
+    for field, expected in {
+        "generation": candidate.generation,
+        "db_volume": candidate.db_volume,
+        "uploads_volume": candidate.uploads_volume,
+        "audit_volume": candidate.audit_volume,
+        "db_container": candidate.db_container,
+        "compose_project": candidate.compose_project,
+    }.items():
+        if active_candidate.get(field) != expected:
+            raise RestoreError(f"active snapshot candidate {field} does not match Witness receipt")
+    for field in ("source_generation", "snapshot_id", "release_sha", "alembic_revision"):
+        if active_snapshot.get(field) != witness_receipt.get(field):
+            raise RestoreError(f"active snapshot does not bind Witness receipt {field}")
+    target = require_witness_receipt_path(witness_path)
+    receipt_sha256 = witness_receipt.get("receipt_sha256")
+    stage_receipt_sha256 = witness_receipt.get("stage_receipt_sha256")
+    if not isinstance(receipt_sha256, str) or not SHA256_RE.fullmatch(receipt_sha256):
+        raise RestoreError("Witness restore receipt hash is invalid")
+    if not isinstance(stage_receipt_sha256, str) or not SHA256_RE.fullmatch(stage_receipt_sha256):
+        raise RestoreError("Witness stage receipt hash is invalid")
+    if set(witness_receipt) != WITNESS_RECEIPT_FIELDS:
+        raise RestoreError("Witness restore receipt fields are incompatible with the active pointer")
+    if canonical_witness_receipt_sha256(witness_receipt) != receipt_sha256:
+        raise RestoreError("Witness restore receipt canonical hash is invalid")
+    if active_snapshot.get("ready_receipt_sha256") != stage_receipt_sha256:
+        raise RestoreError("active snapshot does not bind the Witness stage receipt")
+    return {
+        "path": str(target),
+        "receipt_sha256": receipt_sha256,
+        "stage_receipt_sha256": stage_receipt_sha256,
+        "source_generation": witness_receipt["source_generation"],
+        "snapshot_id": witness_receipt["snapshot_id"],
+    }
+
+
 def write_new_json(path: Path, payload: Mapping[str, Any]) -> None:
     """Write a new root-only marker without replacing a prior marker."""
 
@@ -975,6 +1283,12 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             raise RestoreError(f"{label} must be below WA_IR_STANDBY_DATA_ROOT") from exc
     if args.max_upload_bytes < 1 or args.max_audit_bytes < 1:
         raise RestoreError("max-upload-bytes and max-audit-bytes must be positive")
+    configured_witness_receipt = values.get("WA_IR_WITNESS_RESTORE_RECEIPT_PATH", "").strip()
+    witness_receipt_path = (
+        require_witness_receipt_path(configured_witness_receipt)
+        if configured_witness_receipt
+        else None
+    )
     receipt = load_receipt(Path(args.receipt), workspace_root=workspace_root)
     if receipt.release_sha != release_sha:
         raise RestoreError("receipt release_sha does not match the pinned standby release")
@@ -1059,6 +1373,14 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         "migration_started": False,
         "public_routing_changed": False,
     }
+    if witness_receipt_path is None:
+        plan["witness_restore_receipt"] = {"status": "not_requested"}
+    else:
+        plan["witness_restore_receipt"] = {
+            "status": "planned",
+            "path": str(witness_receipt_path),
+            "requires_verified_audit": True,
+        }
     if not args.apply:
         return plan
 
@@ -1146,6 +1468,31 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     evidence["freshness"]["source_db_snapshot_age_seconds"] = round(active_snapshot_age_seconds, 3)
     evidence["completed_at"] = utc_now()
     write_atomic_json(state_root / "active-snapshot.json", evidence)
+    if witness_receipt_path is not None:
+        # Stage the target first.  The active pointer is then updated with the
+        # exact hash before the watched canonical path becomes visible.  A
+        # crash produces either no new receipt or a pointer whose hash has no
+        # matching file, which the separate promotion controller must reject.
+        require_receipt_freshness(receipt, maximum_age_seconds=maximum_snapshot_age_seconds)
+        witness_receipt = build_witness_restore_receipt(
+            receipt=receipt,
+            restored_at=require_text(evidence, "completed_at", label="restore evidence"),
+            restore_verified_at=utc_now(),
+        )
+        binding = bind_witness_receipt_to_active_snapshot(
+            active_snapshot=evidence,
+            candidate=candidate,
+            witness_path=witness_receipt_path,
+            witness_receipt=witness_receipt,
+        )
+        prepared = prepare_root_only_atomic_json(witness_receipt_path, witness_receipt)
+        try:
+            evidence["witness_restore_receipt"] = binding
+            write_atomic_json(state_root / "active-snapshot.json", evidence)
+            commit_prepared_atomic_json(prepared)
+        except Exception:
+            discard_prepared_atomic_json(prepared)
+            raise
     marker = build_restore_marker(receipt=receipt, candidate=candidate)
     marker_path = receipt.staged_candidate_directory / "snapshot-restore.json"
     try:

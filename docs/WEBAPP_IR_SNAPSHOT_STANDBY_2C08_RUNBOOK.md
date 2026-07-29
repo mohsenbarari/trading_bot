@@ -187,6 +187,31 @@ docker inspect --format '{{.State.Health.Status}}' trading_bot_wa_ir_snapshot_db
 Expected result: `ready`, revision `f2c7d8e9a0b1`, and `healthy`. The target
 DB has no Docker network and no host port, so this check cannot serve users.
 
+## Writer Witness Receipt Bridge
+
+The normal refresh does not publish a Writer Witness receipt. Only after the
+separate Writer Witness controller is installed with active-pointer binding
+checks may the root-only standby env set:
+
+```text
+WA_IR_WITNESS_RESTORE_RECEIPT_PATH=/var/lib/trading-bot-three-site/snapshots/latest-restore-receipt.json
+```
+
+With that explicit setting, a successful restore first records the active
+candidate (including exact DB/uploads/audit volume names), then requires
+`audit.status: verified` and the matching nonempty candidate audit volume. It
+builds a strict `gold-trade-snapshot-restore-receipt-v1` from the verified
+transport receipt, strips the generic transport-only artifact `format` field,
+and keeps the immutable manifest descriptor and exact Object Storage
+`VersionId`s. The active pointer is atomically bound to the strict receipt's
+canonical hash before the canonical latest receipt path is atomically replaced.
+
+The bridge creates no runtime, routing, Witness lease, failover, or migration
+action. A crash leaves either the prior receipt or a hash-bound pointer with no
+matching new receipt; the independent promotion controller must reject the
+latter. Do not enable this path until that controller enforces the pointer
+binding and source-fencing policy.
+
 ## TLS And Fenced Listener
 
 Use the constrained DNS-01-only
