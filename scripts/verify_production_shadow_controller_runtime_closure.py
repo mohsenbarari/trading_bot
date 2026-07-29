@@ -32,6 +32,7 @@ import platform
 import re
 import stat
 import sys
+from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 from uuid import UUID
 
@@ -57,11 +58,7 @@ WHEELHOUSE_MANIFEST_RELATIVE = (
 )
 HELD_RUNTIME_PLAN_ROOT = Path("/etc/trading-bot-three-site/campaigns")
 HELD_RUNTIME_PLAN_FILENAME = "controller-runtime-closure-plan.json"
-HELD_RUNTIME_PLAN_SCHEMA = "production-shadow-controller-runtime-held-plan-v1"
-# The release-FD bootstrap is intentionally a separate checkpoint.  Until it
-# proves the exact detached Git release/tree/blob before imports, this CLI is
-# unavailable rather than accepting a path and self-claimed release values.
-HELD_FD_BOOTSTRAP_IMPLEMENTED = False
+HELD_RUNTIME_PLAN_SCHEMA = "production-shadow-controller-runtime-held-plan-v2"
 MAX_MANIFEST_BYTES = 4 * 1024 * 1024
 MAX_RUNTIME_FILE_BYTES = 64 * 1024 * 1024
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
@@ -99,6 +96,7 @@ REQUIRED_IMPORT_ORIGINS = {
 }
 CONTROL_SOURCE_PATHS = frozenset(
     {
+        "scripts/build_production_shadow_controller_runtime_closure.py",
         "scripts/produce_production_shadow_convergence_source_set.py",
         "scripts/production_shadow_convergence_source_set_launcher",
         "scripts/production_shadow_convergence_source_set_runtime_bootstrap.py",
@@ -162,8 +160,38 @@ HELD_RUNTIME_PLAN_FIELDS = frozenset(
         "source_policy_sha256",
         "controller_wheelhouse_sha256",
         "wheel_input_receipt_sha256",
+        "bootstrap_path",
+        "required_blobs",
     }
 )
+HELD_RUNTIME_BOOTSTRAP_SOURCE = "scripts/production_shadow_convergence_source_set_runtime_bootstrap.py"
+HELD_RUNTIME_STATIC_BLOBS = frozenset(
+    {
+        HELD_RUNTIME_BOOTSTRAP_SOURCE,
+        "scripts/verify_production_shadow_controller_runtime_closure.py",
+        "scripts/build_production_shadow_controller_runtime_closure.py",
+        "scripts/produce_production_shadow_convergence_source_set.py",
+        "scripts/production_shadow_convergence_source_set_launcher",
+        SOURCE_POLICY_RELATIVE,
+        "deploy/production-shadow-controller-runtime/requirements.lock",
+        WHEELHOUSE_MANIFEST_RELATIVE,
+    }
+)
+
+# These exact class identities are installed only by a bootstrap that has
+# already proved its held descriptors.  This is deliberately *not* a bearer
+# credential or a security boundary against arbitrary Python code already
+# executing in this interpreter: such code can alter module state.  It is an
+# in-process integration contract for a separately root-installed bootstrap;
+# the process/launcher boundary must establish trust before registration.
+#
+# A verifier must not import a release-sourced bootstrap merely to discover
+# its types.  The trusted bootstrap instead registers the concrete classes
+# from its own module instance after proof.  Exact identity, rather than a
+# structural/duck check, rejects ordinary look-alike objects at the operational
+# API boundary.
+_REGISTERED_HELD_BOOTSTRAP_CAPABILITY_TYPE: type[object] | None = None
+_REGISTERED_HELD_BOOTSTRAP_LEASE_TYPE: type[object] | None = None
 
 
 class RuntimeClosureError(RuntimeError):
@@ -180,6 +208,8 @@ class HeldRuntimePlan:
     source_policy_sha256: str
     wheelhouse_manifest_sha256: str
     wheel_input_receipt_sha256: str
+    bootstrap_path: str
+    required_blobs: Mapping[str, str]
     sha256: str
 
 
@@ -555,6 +585,25 @@ def read_held_runtime_plan(
     release = document.get("release")
     if not isinstance(release, dict) or set(release) != RELEASE_FIELDS:
         raise RuntimeClosureError("controller runtime held plan release differs")
+    bootstrap_path = document.get("bootstrap_path")
+    if bootstrap_path != HELD_RUNTIME_BOOTSTRAP_SOURCE:
+        raise RuntimeClosureError("controller runtime held plan bootstrap differs")
+    blobs = document.get("required_blobs")
+    if not isinstance(blobs, dict) or not blobs:
+        raise RuntimeClosureError("controller runtime held plan blob map differs")
+    normalized_blobs: dict[str, str] = {}
+    for path, digest in blobs.items():
+        if not isinstance(path, str):
+            raise RuntimeClosureError("controller runtime held plan blob path differs")
+        parts = _safe_relative(path, label="controller runtime held plan blob")
+        if parts[0] not in {"core", "scripts", "deploy"} or path in normalized_blobs:
+            raise RuntimeClosureError("controller runtime held plan blob path differs")
+        normalized_blobs[path] = _require_sha256(
+            digest,
+            label="controller runtime held plan blob",
+        )
+    if not HELD_RUNTIME_STATIC_BLOBS <= set(normalized_blobs):
+        raise RuntimeClosureError("controller runtime held plan omits static bootstrap blob")
     return HeldRuntimePlan(
         campaign_id=campaign,
         release_sha=_require_sha40(release.get("commit_sha"), label="controller runtime held plan release commit"),
@@ -570,6 +619,10 @@ def read_held_runtime_plan(
         wheel_input_receipt_sha256=_require_sha256(
             document.get("wheel_input_receipt_sha256"),
             label="controller runtime held plan wheel input receipt",
+        ),
+        bootstrap_path=bootstrap_path,
+        required_blobs=MappingProxyType(
+            {path: normalized_blobs[path] for path in sorted(normalized_blobs)}
         ),
         sha256=_sha256(raw),
     )
@@ -962,6 +1015,136 @@ def _verify_release_bound_input(
         os.close(descriptor)
 
 
+def _register_held_bootstrap_types(
+    *,
+    capability_type: type[object],
+    lease_type: type[object],
+) -> None:
+    """Bind this verifier process to one proved bootstrap's concrete types.
+
+    The caller must be the separately trusted bootstrap, after its held-FD
+    proof and before any operational verifier/builder call.  Registration is
+    idempotent only for the exact same two class objects; replacement fails
+    closed so a later module load cannot swap the protocol implementation.
+
+    This narrows the Python-level protocol to exact class identity but does
+    not claim to defend against code that was already able to execute in this
+    interpreter before the trusted bootstrap.  That stronger threat requires
+    the launcher/process trust boundary, not a Python object check.
+    """
+
+    global _REGISTERED_HELD_BOOTSTRAP_CAPABILITY_TYPE
+    global _REGISTERED_HELD_BOOTSTRAP_LEASE_TYPE
+    if (
+        type(capability_type) is not type
+        or type(lease_type) is not type
+        or capability_type is lease_type
+        or not callable(getattr(capability_type, "consume_for", None))
+        or not callable(getattr(lease_type, "assert_for", None))
+        or not callable(getattr(lease_type, "assert_held_by", None))
+    ):
+        raise RuntimeClosureError("runtime closure held-FD bootstrap type registration is invalid")
+    current_capability = _REGISTERED_HELD_BOOTSTRAP_CAPABILITY_TYPE
+    current_lease = _REGISTERED_HELD_BOOTSTRAP_LEASE_TYPE
+    if current_capability is None and current_lease is None:
+        _REGISTERED_HELD_BOOTSTRAP_CAPABILITY_TYPE = capability_type
+        _REGISTERED_HELD_BOOTSTRAP_LEASE_TYPE = lease_type
+        return
+    if current_capability is capability_type and current_lease is lease_type:
+        return
+    raise RuntimeClosureError("runtime closure held-FD bootstrap types are already registered")
+
+
+def _assert_registered_held_bootstrap_pair(capability: object, lease: object) -> None:
+    """Require exact registered types and a lease bound to its capability.
+
+    This helper is intentionally private.  It lets the builder validate an
+    already-consumed lease without making a second claim, while preserving the
+    same concrete-type gate used by the verifier.
+    """
+
+    capability_type = _REGISTERED_HELD_BOOTSTRAP_CAPABILITY_TYPE
+    lease_type = _REGISTERED_HELD_BOOTSTRAP_LEASE_TYPE
+    if capability_type is None or lease_type is None:
+        raise RuntimeClosureError("runtime closure held-FD bootstrap types are not registered")
+    if type(capability) is not capability_type:
+        raise RuntimeClosureError("runtime closure held-FD bootstrap capability type differs")
+    if type(lease) is not lease_type:
+        raise RuntimeClosureError("runtime closure held-FD bootstrap lease type differs")
+    assert_held_by = getattr(lease, "assert_held_by", None)
+    if not callable(assert_held_by):
+        raise RuntimeClosureError("runtime closure held-FD bootstrap lease is invalid")
+    try:
+        assert_held_by(capability)
+    except Exception as exc:
+        raise RuntimeClosureError("runtime closure held-FD bootstrap lease was rejected") from exc
+
+
+def _claim_held_bootstrap_capability(
+    capability: Any,
+    *,
+    operation: str,
+    campaign_id: str,
+    release_sha: str,
+    release_tree_sha: str,
+    held_plan_sha256: str,
+    release_root_descriptor: int | None,
+) -> Any:
+    """Require one registered held-FD bootstrap lease for an operational API.
+
+    This is an in-process protocol only.  The concrete types must already be
+    registered by the separately trusted bootstrap; a normal CLI cannot pass
+    a serialized capability or make registration happen.  The stdlib-only
+    bootstrap owns the concrete capability and re-proves its duplicated
+    descriptors on each claim.  The verifier intentionally avoids importing a
+    release-sourced bootstrap (or any producer) to discover those types.
+    """
+
+    if capability is None:
+        raise RuntimeClosureError("runtime closure operation requires a held-FD bootstrap capability")
+    capability_type = _REGISTERED_HELD_BOOTSTRAP_CAPABILITY_TYPE
+    if capability_type is None:
+        raise RuntimeClosureError("runtime closure held-FD bootstrap types are not registered")
+    if type(capability) is not capability_type:
+        raise RuntimeClosureError("runtime closure held-FD bootstrap capability type differs")
+    consume = getattr(capability, "consume_for", None)
+    if not callable(consume):
+        raise RuntimeClosureError("runtime closure operation requires a held-FD bootstrap capability")
+    try:
+        binding = consume(
+            operation=operation,
+            campaign_id=campaign_id,
+            release_sha=release_sha,
+            release_tree_sha=release_tree_sha,
+            held_plan_sha256=held_plan_sha256,
+            release_descriptor=release_root_descriptor,
+        )
+    except Exception as exc:
+        raise RuntimeClosureError("runtime closure held-FD bootstrap capability was rejected") from exc
+    _assert_registered_held_bootstrap_pair(capability, binding)
+    if (
+        getattr(binding, "campaign_id", None) != campaign_id
+        or getattr(binding, "release_sha", None) != release_sha
+        or getattr(binding, "release_tree_sha", None) != release_tree_sha
+        or getattr(binding, "held_plan_sha256", None) != held_plan_sha256
+    ):
+        raise RuntimeClosureError("runtime closure held-FD bootstrap capability binding differs")
+    assert_for = getattr(binding, "assert_for", None)
+    if not callable(assert_for):
+        raise RuntimeClosureError("runtime closure held-FD bootstrap lease is invalid")
+    try:
+        assert_for(
+            operation=operation,
+            campaign_id=campaign_id,
+            release_sha=release_sha,
+            release_tree_sha=release_tree_sha,
+            held_plan_sha256=held_plan_sha256,
+        )
+    except Exception as exc:
+        raise RuntimeClosureError("runtime closure held-FD bootstrap lease was rejected") from exc
+    return binding
+
+
 def attest_held_runtime_closure(
     *,
     runtime_root_descriptor: int,
@@ -971,8 +1154,14 @@ def attest_held_runtime_closure(
     expected_release_sha: str,
     expected_release_tree_sha: str,
     expected_held_plan_sha256: str,
+    held_bootstrap_capability: object | None = None,
 ) -> RuntimeClosureAttestation:
-    """Attest a closure via already-held no-follow directory descriptors."""
+    """Attest a closure via descriptors and a registered in-process lease.
+
+    ``held_bootstrap_capability`` is not a serializable authority token.  It
+    must be supplied by the separately root-installed bootstrap in the same
+    already-trusted interpreter after exact type registration.
+    """
 
     if type(runtime_root_descriptor) is not int or runtime_root_descriptor < 3:
         raise RuntimeClosureError("runtime closure root descriptor is invalid")
@@ -990,6 +1179,15 @@ def attest_held_runtime_closure(
     held_plan_sha256 = _require_sha256(
         expected_held_plan_sha256,
         label="expected controller runtime held plan",
+    )
+    _claim_held_bootstrap_capability(
+        held_bootstrap_capability,
+        operation="attest-runtime-closure",
+        campaign_id=campaign_id,
+        release_sha=release_sha,
+        release_tree_sha=release_tree_sha,
+        held_plan_sha256=held_plan_sha256,
+        release_root_descriptor=release_root_descriptor,
     )
     document, raw = _read_manifest_from_root(
         runtime_root_descriptor,
@@ -1196,6 +1394,7 @@ def attest_runtime_closure(
     expected_release_sha: str,
     expected_release_tree_sha: str,
     expected_held_plan_sha256: str,
+    held_bootstrap_capability: object | None = None,
 ) -> RuntimeClosureAttestation:
     runtime_descriptor = _open_root(
         runtime_root,
@@ -1216,6 +1415,7 @@ def attest_runtime_closure(
             expected_release_sha=expected_release_sha,
             expected_release_tree_sha=expected_release_tree_sha,
             expected_held_plan_sha256=expected_held_plan_sha256,
+            held_bootstrap_capability=held_bootstrap_capability,
         )
     finally:
         os.close(release_descriptor)
@@ -1259,45 +1459,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         _require_isolated_startup()
         require_clean_preimport_state()
         _require_root_cli()
-        args = _parser().parse_args(argv)
-        held_plan = read_held_runtime_plan(
-            args.campaign_id,
-            expected_uid=0,
+        _parser().parse_args(argv)
+        raise RuntimeClosureError(
+            "controller runtime verifier CLI is unavailable without an in-process held-FD bootstrap capability"
         )
-        if not HELD_FD_BOOTSTRAP_IMPLEMENTED:
-            raise RuntimeClosureError(
-                "controller runtime verifier CLI is unavailable pending held-FD exact-release bootstrap"
-            )
-        attestation = attest_runtime_closure(
-            args.runtime_root,
-            args.release_root,
-            expected_uid=0,
-            expected_campaign_id=held_plan.campaign_id,
-            expected_release_sha=held_plan.release_sha,
-            expected_release_tree_sha=held_plan.release_tree_sha,
-            expected_held_plan_sha256=held_plan.sha256,
-        )
-        if args.verify_import_origins:
-            base_path = list(sys.path)
-            sys.path[:] = [attestation.site_packages_root, *base_path]
-            verify_import_origins(attestation)
-        attestation.close()
-        print(
-            json.dumps(
-                {
-                    "runtime_closure_attested": "yes",
-                    "manifest_sha256": attestation.manifest_sha256,
-                    "release_sha": attestation.release_sha,
-                    "release_tree_sha": attestation.release_tree_sha,
-                    "site_file_count": attestation.site_file_count,
-                    "project_source_count": attestation.project_source_count,
-                },
-                ensure_ascii=True,
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-        )
-        return 0
     except (RuntimeClosureError, OSError, ValueError) as exc:
         print(f"blocked: {exc}", file=sys.stderr)
         return 1

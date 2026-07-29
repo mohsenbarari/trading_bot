@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import csv
+from dataclasses import replace
 import hashlib
 import importlib.util
 import io
@@ -27,6 +28,15 @@ MODULE = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 VERIFY = MODULE.VERIFY
+BOOTSTRAP_PATH = ROOT / "scripts/production_shadow_convergence_source_set_runtime_bootstrap.py"
+BOOTSTRAP_SPEC = importlib.util.spec_from_file_location(
+    "production_shadow_convergence_source_set_runtime_bootstrap_for_builder_tests",
+    BOOTSTRAP_PATH,
+)
+assert BOOTSTRAP_SPEC is not None and BOOTSTRAP_SPEC.loader is not None
+BOOTSTRAP = importlib.util.module_from_spec(BOOTSTRAP_SPEC)
+sys.modules[BOOTSTRAP_SPEC.name] = BOOTSTRAP
+BOOTSTRAP_SPEC.loader.exec_module(BOOTSTRAP)
 
 
 def sha256(value: bytes) -> str:
@@ -211,6 +221,7 @@ class BuilderFixture(unittest.TestCase):
         for relative in VERIFY.CONTROL_SOURCE_PATHS:
             source = b"# synthetic control source\n" if relative.endswith(".py") else b"#!/bin/sh\nexit 0\n"
             self._write(self.release, relative, source)
+        self._write(self.release, "scripts/__init__.py", b"# explicit source-graph package\n")
         self.policy_sha = sha256(policy)
         self.wheelhouse_sha = sha256(wheel_manifest)
 
@@ -268,18 +279,83 @@ class BuilderFixture(unittest.TestCase):
         directory = self.plan_root / self.campaign_id
         directory.mkdir(mode=0o700, exist_ok=True)
         directory.chmod(0o700)
-        document = {
-            "schema": VERIFY.HELD_RUNTIME_PLAN_SCHEMA,
-            "campaign_id": self.campaign_id,
-            "release": {"commit_sha": self.release_sha, "tree_sha": self.release_tree_sha},
-            "source_policy_sha256": self.policy_sha,
-            "controller_wheelhouse_sha256": self.wheelhouse_sha,
-            "wheel_input_receipt_sha256": receipt_sha256,
-        }
         path = directory / VERIFY.HELD_RUNTIME_PLAN_FILENAME
-        path.write_bytes(VERIFY.canonical_json_bytes(document))
-        path.chmod(0o600)
+
+        def write_document(blobs: dict[str, str]) -> None:
+            document = {
+                "schema": VERIFY.HELD_RUNTIME_PLAN_SCHEMA,
+                "campaign_id": self.campaign_id,
+                "release": {"commit_sha": self.release_sha, "tree_sha": self.release_tree_sha},
+                "source_policy_sha256": self.policy_sha,
+                "controller_wheelhouse_sha256": self.wheelhouse_sha,
+                "wheel_input_receipt_sha256": receipt_sha256,
+                "bootstrap_path": BOOTSTRAP.BOOTSTRAP_SOURCE,
+                "required_blobs": blobs,
+            }
+            path.write_bytes(VERIFY.canonical_json_bytes(document))
+            path.chmod(0o600)
+
+        write_document(
+            {
+                relative: sha256((self.release / relative).read_bytes())
+                for relative in BOOTSTRAP.STATIC_REQUIRED_BLOBS
+            }
+        )
+        release_descriptor = os.open(
+            self.release,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0),
+        )
+        plan_descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
+        try:
+            release_identity = BOOTSTRAP.capture_held_directory(
+                release_descriptor,
+                label="synthetic builder release",
+                expected_uid=self.uid,
+            )
+            plan = BOOTSTRAP.read_held_runtime_plan_fd(plan_descriptor, expected_uid=self.uid)
+            tracked = BOOTSTRAP._verify_exact_git_state(release_identity, plan)  # noqa: SLF001
+            graph = BOOTSTRAP.discover_reachable_controller_sources(
+                release_identity,
+                tracked_blobs=tracked,
+                expected_uid=self.uid,
+            )
+        finally:
+            os.close(plan_descriptor)
+            os.close(release_descriptor)
+        write_document(
+            {
+                relative: sha256((self.release / relative).read_bytes())
+                for relative in graph.paths
+            }
+        )
         return path
+
+    def held_capability(self):
+        path = self.plan_root / self.campaign_id / VERIFY.HELD_RUNTIME_PLAN_FILENAME
+        release_descriptor = os.open(
+            self.release,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0),
+        )
+        plan_descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
+        bootstrap_descriptor = os.open(
+            self.release / BOOTSTRAP.BOOTSTRAP_SOURCE,
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0),
+        )
+        try:
+            inputs = BOOTSTRAP.verify_held_bootstrap_inputs(
+                release_descriptor=release_descriptor,
+                plan_descriptor=plan_descriptor,
+                bootstrap_descriptor=bootstrap_descriptor,
+                expected_uid=self.uid,
+            )
+            capability = BOOTSTRAP.activate_verified_held_bootstrap(inputs, expected_uid=self.uid)
+            BOOTSTRAP.register_held_bootstrap_types(VERIFY)
+        finally:
+            os.close(bootstrap_descriptor)
+            os.close(plan_descriptor)
+            os.close(release_descriptor)
+        self.addCleanup(capability.close)
+        return capability
 
     def patch_contract(self):
         return mock.patch.multiple(
@@ -287,9 +363,6 @@ class BuilderFixture(unittest.TestCase):
             REQUIRED_PACKAGES=self.contract,
             REQUIRED_IMPORT_ORIGINS=self.origins,
         )
-
-    def synthetic_bootstrap(self):
-        return mock.patch.object(VERIFY, "HELD_FD_BOOTSTRAP_IMPLEMENTED", True)
 
     def prepare(self):
         receipt, digest = self.input_receipt()
@@ -347,12 +420,14 @@ class RuntimeClosureBuilderTests(BuilderFixture):
 
     def test_builds_exact_closure_from_independently_digest_bound_input(self) -> None:
         prepared = self.prepare()
-        with self.patch_contract(), self.synthetic_bootstrap():
+        capability = self.held_capability()
+        with self.patch_contract():
             result = MODULE.build_runtime_closure(
                 prepared,
                 destination=self.output,
                 confirm=prepared.required_confirmation,
                 expected_uid=self.uid,
+                held_bootstrap_capability=capability,
             )
         self.assertEqual(result["site_file_count"], 11)
         self.assertEqual(
@@ -373,13 +448,74 @@ class RuntimeClosureBuilderTests(BuilderFixture):
         prepared = self.prepare()
         with self.assertRaisesRegex(
             MODULE.RuntimeClosureBuildError,
-            "build API is unavailable pending held-FD exact-release bootstrap",
+            "requires a held-FD bootstrap capability",
         ):
             MODULE.build_runtime_closure(
                 prepared,
                 destination=self.output,
                 confirm=prepared.required_confirmation,
                 expected_uid=self.uid,
+            )
+        self.assertFalse(self.output.exists())
+
+    def test_builder_rejects_unregistered_duck_capability_before_output(self) -> None:
+        prepared = self.prepare()
+        registered = self.held_capability()
+        registered.close()
+
+        class DuckCapability:
+            def consume_for(self, **_expected: object) -> object:
+                raise AssertionError("unregistered capability must not be consumed")
+
+        with self.assertRaisesRegex(
+            MODULE.RuntimeClosureBuildError,
+            "capability type differs",
+        ):
+            MODULE.build_runtime_closure(
+                prepared,
+                destination=self.output,
+                confirm=prepared.required_confirmation,
+                expected_uid=self.uid,
+                held_bootstrap_capability=DuckCapability(),
+            )
+        self.assertFalse(self.output.exists())
+
+    def test_private_materializer_and_prepared_binding_fail_closed_before_output(self) -> None:
+        prepared = self.prepare()
+        with self.assertRaisesRegex(
+            MODULE.RuntimeClosureBuildError,
+            "requires a held-FD bootstrap capability",
+        ):
+            MODULE._materialize(  # noqa: SLF001
+                prepared,
+                destination=self.output,
+                expected_uid=self.uid,
+            )
+        capability = self.held_capability()
+        tampered = replace(prepared, source_policy_sha256="f" * 64)
+        with self.assertRaisesRegex(
+            MODULE.RuntimeClosureBuildError,
+            "prepared closure differs from held-FD plan",
+        ):
+            MODULE.build_runtime_closure(
+                tampered,
+                destination=self.output,
+                confirm=tampered.required_confirmation,
+                expected_uid=self.uid,
+                held_bootstrap_capability=capability,
+            )
+        source_capability = self.held_capability()
+        source_tampered = replace(prepared, project_sources={})
+        with self.assertRaisesRegex(
+            MODULE.RuntimeClosureBuildError,
+            "project sources differ from held-FD plan",
+        ):
+            MODULE.build_runtime_closure(
+                source_tampered,
+                destination=self.output,
+                confirm=source_tampered.required_confirmation,
+                expected_uid=self.uid,
+                held_bootstrap_capability=source_capability,
             )
         self.assertFalse(self.output.exists())
 
@@ -429,6 +565,20 @@ class RuntimeClosureBuilderTests(BuilderFixture):
         policy["packages"] = []
         policy_path.write_bytes(VERIFY.canonical_json_bytes(policy))
         policy_path.chmod(0o600)
+        for arguments in (("add", MODULE.POLICY_RELATIVE), ("commit", "--quiet", "-m", "invalid policy"), ("checkout", "--quiet", "--detach")):
+            completed = subprocess.run(
+                ["/usr/bin/git", "-C", str(self.release), *arguments],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.release_sha = subprocess.check_output(
+            ["/usr/bin/git", "-C", str(self.release), "rev-parse", "HEAD"], text=True
+        ).strip()
+        self.release_tree_sha = subprocess.check_output(
+            ["/usr/bin/git", "-C", str(self.release), "rev-parse", "HEAD^{tree}"], text=True
+        ).strip()
         with self.patch_contract(), self.assertRaisesRegex(MODULE.RuntimeClosureBuildError, "policy package closure differs"):
             self.prepare()
 
@@ -458,6 +608,7 @@ class RuntimeClosureBuilderTests(BuilderFixture):
 
     def test_no_replace_publish_preserves_destination_created_during_race(self) -> None:
         prepared = self.prepare()
+        capability = self.held_capability()
         original_publish = MODULE._rename_no_replace
         sentinel = b"racing destination remains untouched"
 
@@ -470,7 +621,7 @@ class RuntimeClosureBuilderTests(BuilderFixture):
             marker.chmod(0o600)
             return original_publish(*args)
 
-        with self.patch_contract(), self.synthetic_bootstrap(), mock.patch.object(
+        with self.patch_contract(), mock.patch.object(
             MODULE,
             "_rename_no_replace",
             side_effect=collide_then_publish,
@@ -480,6 +631,7 @@ class RuntimeClosureBuilderTests(BuilderFixture):
                 destination=self.output,
                 confirm=prepared.required_confirmation,
                 expected_uid=self.uid,
+                held_bootstrap_capability=capability,
             )
         self.assertEqual((self.output / "sentinel").read_bytes(), sentinel)
         self.assertFalse(any(path.name.startswith(".controller-runtime-") for path in self.root.iterdir()))
@@ -517,11 +669,10 @@ class CommittedControllerRuntimePolicyTests(unittest.TestCase):
         MODULE._parse_requirements((ROOT / MODULE.REQUIREMENTS_RELATIVE).read_bytes())
         MODULE._parse_wheelhouse_manifest((ROOT / MODULE.WHEELHOUSE_RELATIVE).read_bytes())
 
-    def test_runtime_remains_unavailable_until_the_separate_bootstrap_checkpoint(self) -> None:
-        self.assertFalse(VERIFY.HELD_FD_BOOTSTRAP_IMPLEMENTED)
-        self.assertFalse(
-            (ROOT / "scripts/production_shadow_convergence_source_set_runtime_bootstrap.py").exists()
-        )
+    def test_runtime_uses_the_v2_bootstrap_boundary_without_a_boolean_bypass(self) -> None:
+        self.assertFalse(hasattr(VERIFY, "HELD_FD_BOOTSTRAP_IMPLEMENTED"))
+        self.assertTrue((ROOT / "scripts/production_shadow_convergence_source_set_runtime_bootstrap.py").is_file())
+        self.assertEqual(VERIFY.HELD_RUNTIME_PLAN_SCHEMA, "production-shadow-controller-runtime-held-plan-v2")
 
 
 if __name__ == "__main__":

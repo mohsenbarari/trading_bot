@@ -30,6 +30,74 @@ TREE_SHA = "2" * 40
 CAMPAIGN_ID = "7fb08095-7a9e-4a92-9fa9-3f9a301b2944"
 
 
+class RegisteredTestHeldBootstrapLease:
+    """Explicit test-only implementation of the registered in-process API."""
+
+    def __init__(
+        self,
+        *,
+        capability: "RegisteredTestHeldBootstrapCapability",
+        operation: str,
+        campaign_id: str,
+        release_sha: str,
+        release_tree_sha: str,
+        held_plan_sha256: str,
+    ) -> None:
+        self._capability = capability
+        self.operation = operation
+        self.campaign_id = campaign_id
+        self.release_sha = release_sha
+        self.release_tree_sha = release_tree_sha
+        self.held_plan_sha256 = held_plan_sha256
+
+    def assert_for(self, **expected: str) -> None:
+        if (
+            expected["operation"] != self.operation
+            or expected["campaign_id"] != self.campaign_id
+            or expected["release_sha"] != self.release_sha
+            or expected["release_tree_sha"] != self.release_tree_sha
+            or expected["held_plan_sha256"] != self.held_plan_sha256
+        ):
+            raise RuntimeError("registered test held bootstrap lease differs")
+
+    def assert_held_by(self, capability: object) -> None:
+        if capability is not self._capability:
+            raise RuntimeError("registered test held bootstrap lease capability differs")
+
+
+class RegisteredTestHeldBootstrapCapability:
+    """Test-only registered type; FD/Git proof has separate integration tests."""
+
+    def __init__(self, *, campaign_id: str, release_sha: str, release_tree_sha: str, held_plan_sha256: str) -> None:
+        self.campaign_id = campaign_id
+        self.release_sha = release_sha
+        self.release_tree_sha = release_tree_sha
+        self.held_plan_sha256 = held_plan_sha256
+
+    def consume_for(self, **expected: object) -> RegisteredTestHeldBootstrapLease:
+        if (
+            expected["campaign_id"] != self.campaign_id
+            or expected["release_sha"] != self.release_sha
+            or expected["release_tree_sha"] != self.release_tree_sha
+            or expected["held_plan_sha256"] != self.held_plan_sha256
+        ):
+            raise RuntimeError("registered test held bootstrap capability differs")
+        return RegisteredTestHeldBootstrapLease(
+            capability=self,
+            operation=str(expected["operation"]),
+            campaign_id=self.campaign_id,
+            release_sha=self.release_sha,
+            release_tree_sha=self.release_tree_sha,
+            held_plan_sha256=self.held_plan_sha256,
+        )
+
+
+MODULE._register_held_bootstrap_types(  # noqa: SLF001
+    capability_type=RegisteredTestHeldBootstrapCapability,
+    lease_type=RegisteredTestHeldBootstrapLease,
+)
+
+
 class RuntimeClosureFixture(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="controller-runtime-closure-")
@@ -46,9 +114,11 @@ class RuntimeClosureFixture(unittest.TestCase):
         self.uid = os.getuid()
         self.policy = b'{"synthetic":"controller-policy"}'
         self.wheelhouse_manifest = b"synthetic wheel manifest\n"
+        self.requirements_lock = b"cffi==2.1.0\n"
         self.wheel_input_receipt = b"synthetic independently trusted wheel receipt\n"
         self.write_release(MODULE.SOURCE_POLICY_RELATIVE, self.policy)
         self.write_release(MODULE.WHEELHOUSE_MANIFEST_RELATIVE, self.wheelhouse_manifest)
+        self.write_release("deploy/production-shadow-controller-runtime/requirements.lock", self.requirements_lock)
         self.sources: dict[str, bytes] = {}
         for relative in sorted(MODULE.CONTROL_SOURCE_PATHS):
             self.sources[relative] = f"source:{relative}".encode("ascii")
@@ -166,6 +236,12 @@ class RuntimeClosureFixture(unittest.TestCase):
         return document
 
     def held_plan(self) -> dict[str, object]:
+        required_blobs = {
+            **{path: self.digest(payload) for path, payload in self.sources.items()},
+            MODULE.SOURCE_POLICY_RELATIVE: self.digest(self.policy),
+            MODULE.WHEELHOUSE_MANIFEST_RELATIVE: self.digest(self.wheelhouse_manifest),
+            "deploy/production-shadow-controller-runtime/requirements.lock": self.digest(self.requirements_lock),
+        }
         return {
             "schema": MODULE.HELD_RUNTIME_PLAN_SCHEMA,
             "campaign_id": CAMPAIGN_ID,
@@ -173,6 +249,8 @@ class RuntimeClosureFixture(unittest.TestCase):
             "source_policy_sha256": self.digest(self.policy),
             "controller_wheelhouse_sha256": self.digest(self.wheelhouse_manifest),
             "wheel_input_receipt_sha256": self.digest(self.wheel_input_receipt),
+            "bootstrap_path": MODULE.HELD_RUNTIME_BOOTSTRAP_SOURCE,
+            "required_blobs": required_blobs,
         }
 
     def write_held_plan(self, document: dict[str, object] | None = None) -> Path:
@@ -223,9 +301,18 @@ class RuntimeClosureFixture(unittest.TestCase):
             expected_release_sha=RELEASE_SHA,
             expected_release_tree_sha=TREE_SHA,
             expected_held_plan_sha256=self.held_plan_sha256,
+            held_bootstrap_capability=self.held_capability(),
         )
         self.addCleanup(attestation.close)
         return attestation
+
+    def held_capability(self) -> RegisteredTestHeldBootstrapCapability:
+        return RegisteredTestHeldBootstrapCapability(
+            campaign_id=CAMPAIGN_ID,
+            release_sha=RELEASE_SHA,
+            release_tree_sha=TREE_SHA,
+            held_plan_sha256=self.held_plan_sha256,
+        )
 
 
 class SuccessfulRuntimeClosureTests(RuntimeClosureFixture):
@@ -239,6 +326,17 @@ class SuccessfulRuntimeClosureTests(RuntimeClosureFixture):
         self.assertEqual(plan.release_sha, RELEASE_SHA)
         self.assertEqual(plan.release_tree_sha, TREE_SHA)
         self.assertEqual(plan.sha256, self.held_plan_sha256)
+
+    def test_v1_held_plan_is_rejected(self) -> None:
+        document = self.held_plan()
+        document["schema"] = "production-shadow-controller-runtime-held-plan-v1"
+        self.write_held_plan(document)
+        with self.assertRaisesRegex(MODULE.RuntimeClosureError, "held plan fields differ"):
+            MODULE.read_held_runtime_plan(
+                CAMPAIGN_ID,
+                expected_uid=self.uid,
+                plan_root=self.plan_root,
+            )
 
     def test_clean_preimport_state_accepts_real_isolated_python_startup(self) -> None:
         completed = subprocess.run(
@@ -291,6 +389,7 @@ class SuccessfulRuntimeClosureTests(RuntimeClosureFixture):
                 expected_release_sha=RELEASE_SHA,
                 expected_release_tree_sha=TREE_SHA,
                 expected_held_plan_sha256=self.held_plan_sha256,
+                held_bootstrap_capability=self.held_capability(),
             )
 
     def test_site_capability_close_is_idempotent(self) -> None:
@@ -301,6 +400,74 @@ class SuccessfulRuntimeClosureTests(RuntimeClosureFixture):
         attestation.close()
         with self.assertRaises(OSError):
             os.fstat(descriptor)
+
+    def test_attestation_api_requires_a_held_fd_capability(self) -> None:
+        self.write_receipt()
+        self.write_manifest()
+        with self.assertRaisesRegex(MODULE.RuntimeClosureError, "requires a held-FD bootstrap capability"):
+            MODULE.attest_runtime_closure(
+                self.runtime,
+                self.release,
+                expected_uid=self.uid,
+                expected_campaign_id=CAMPAIGN_ID,
+                expected_release_sha=RELEASE_SHA,
+                expected_release_tree_sha=TREE_SHA,
+                expected_held_plan_sha256=self.held_plan_sha256,
+            )
+
+    def test_unregistered_duck_capability_is_rejected_before_consume(self) -> None:
+        class DuckCapability:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def consume_for(self, **_expected: object) -> object:
+                self.calls += 1
+                return object()
+
+        capability = DuckCapability()
+        with self.assertRaisesRegex(MODULE.RuntimeClosureError, "capability type differs"):
+            MODULE._claim_held_bootstrap_capability(  # noqa: SLF001
+                capability,
+                operation="attest-runtime-closure",
+                campaign_id=CAMPAIGN_ID,
+                release_sha=RELEASE_SHA,
+                release_tree_sha=TREE_SHA,
+                held_plan_sha256=self.held_plan_sha256,
+                release_root_descriptor=None,
+            )
+        self.assertEqual(capability.calls, 0)
+
+    def test_registered_capability_rejects_wrong_lease_type(self) -> None:
+        capability = self.held_capability()
+        capability.consume_for = lambda **_expected: object()  # type: ignore[method-assign]
+        with self.assertRaisesRegex(MODULE.RuntimeClosureError, "lease type differs"):
+            MODULE._claim_held_bootstrap_capability(  # noqa: SLF001
+                capability,
+                operation="attest-runtime-closure",
+                campaign_id=CAMPAIGN_ID,
+                release_sha=RELEASE_SHA,
+                release_tree_sha=TREE_SHA,
+                held_plan_sha256=self.held_plan_sha256,
+                release_root_descriptor=None,
+            )
+
+    def test_type_registration_rejects_replacement(self) -> None:
+        class OtherLease:
+            def assert_for(self, **_expected: str) -> None:
+                pass
+
+            def assert_held_by(self, _capability: object) -> None:
+                pass
+
+        class OtherCapability:
+            def consume_for(self, **_expected: object) -> OtherLease:
+                return OtherLease()
+
+        with self.assertRaisesRegex(MODULE.RuntimeClosureError, "types are already registered"):
+            MODULE._register_held_bootstrap_types(  # noqa: SLF001
+                capability_type=OtherCapability,
+                lease_type=OtherLease,
+            )
 
 
 class RejectionRuntimeClosureTests(RuntimeClosureFixture):
@@ -389,6 +556,7 @@ class RejectionRuntimeClosureTests(RuntimeClosureFixture):
                 expected_release_sha=RELEASE_SHA,
                 expected_release_tree_sha=TREE_SHA,
                 expected_held_plan_sha256=self.held_plan_sha256,
+                held_bootstrap_capability=self.held_capability(),
             )
 
     def test_uninventoried_runtime_file_is_rejected(self) -> None:
@@ -460,6 +628,12 @@ class RejectionRuntimeClosureTests(RuntimeClosureFixture):
                 expected_release_sha="9" * 40,
                 expected_release_tree_sha=TREE_SHA,
                 expected_held_plan_sha256=self.held_plan_sha256,
+                held_bootstrap_capability=RegisteredTestHeldBootstrapCapability(
+                    campaign_id=CAMPAIGN_ID,
+                    release_sha="9" * 40,
+                    release_tree_sha=TREE_SHA,
+                    held_plan_sha256=self.held_plan_sha256,
+                ),
             )
 
     def test_unexpected_runtime_root_entry_is_rejected(self) -> None:

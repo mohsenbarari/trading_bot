@@ -19,7 +19,6 @@ identical.
 from __future__ import annotations
 
 import argparse
-import ast
 import base64
 import csv
 import ctypes
@@ -394,31 +393,21 @@ def _verify_exact_release(
             raise RuntimeClosureBuildError("release source differs from the exact Git blob")
 
 
-def _module_path(release_root: Path, module: str) -> str | None:
-    parts = module.split(".")
-    if not parts or parts[0] not in {"core", "scripts"}:
-        return None
-    file_path = "/".join(parts) + ".py"
-    package_path = "/".join(parts) + "/__init__.py"
-    if (release_root / file_path).is_file():
-        return file_path
-    if (release_root / package_path).is_file():
-        return package_path
-    return None
-
-
-def _collect_project_sources(
-    release_root: Path,
+def _collect_plan_bound_project_sources(
     release_descriptor: int,
     *,
+    held_plan: VERIFY.HeldRuntimePlan,
     expected_uid: int | None,
 ) -> dict[str, bytes]:
-    pending = list(VERIFY.CONTROL_SOURCE_PATHS)
     result: dict[str, bytes] = {}
-    while pending:
-        relative = pending.pop()
-        if relative in result:
-            continue
+    expected = {
+        relative: digest
+        for relative, digest in held_plan.required_blobs.items()
+        if relative.startswith(("core/", "scripts/"))
+    }
+    if not expected or not VERIFY.CONTROL_SOURCE_PATHS <= set(expected):
+        raise RuntimeClosureBuildError("controller runtime held plan project source set differs")
+    for relative, digest in sorted(expected.items()):
         raw = _read_release_file(
             release_descriptor,
             relative,
@@ -426,26 +415,9 @@ def _collect_project_sources(
             maximum=MAX_POLICY_BYTES,
             label="controller runtime project source",
         )
+        if _sha256(raw) != digest:
+            raise RuntimeClosureBuildError("controller runtime held plan project source digest differs")
         result[relative] = raw
-        if not relative.endswith(".py"):
-            continue
-        try:
-            tree = ast.parse(raw.decode("utf-8"), filename=relative)
-        except (UnicodeDecodeError, SyntaxError) as exc:
-            raise RuntimeClosureBuildError("controller runtime project source is not valid Python") from exc
-        modules: list[str] = []
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                modules.extend(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.level == 0:
-                if node.module:
-                    modules.append(node.module)
-                if node.module in {"core", "scripts"}:
-                    modules.extend(f"{node.module}.{alias.name}" for alias in node.names if alias.name != "*")
-        for module in modules:
-            candidate = _module_path(release_root, module)
-            if candidate is not None and candidate not in result:
-                pending.append(candidate)
     return result
 
 
@@ -747,9 +719,9 @@ def prepare_runtime_closure(
         _parse_policy(policy_raw)
         _parse_requirements(requirements_raw)
         _parse_wheelhouse_manifest(wheelhouse_raw)
-        source_bytes = _collect_project_sources(
-            canonical_release,
+        source_bytes = _collect_plan_bound_project_sources(
             release_descriptor,
+            held_plan=held_plan,
             expected_uid=expected_uid,
         )
     finally:
@@ -915,16 +887,86 @@ def _rename_no_replace(
     raise RuntimeClosureBuildError("controller runtime destination could not be published")
 
 
+def _assert_materialization_lease(
+    lease: object,
+    prepared: PreparedRuntimeClosure,
+    held_bootstrap_capability: object | None,
+) -> None:
+    """Bind a pre-consumed held-FD lease to exactly one prepared closure."""
+
+    try:
+        VERIFY._assert_registered_held_bootstrap_pair(  # noqa: SLF001
+            held_bootstrap_capability,
+            lease,
+        )
+    except VERIFY.RuntimeClosureError as exc:
+        raise RuntimeClosureBuildError(str(exc)) from exc
+    assert_for = getattr(lease, "assert_for", None)
+    if not callable(assert_for):
+        raise RuntimeClosureBuildError("controller runtime materialization requires a held-FD bootstrap lease")
+    try:
+        assert_for(
+            operation="materialize-runtime-closure",
+            campaign_id=prepared.campaign_id,
+            release_sha=prepared.release_sha,
+            release_tree_sha=prepared.release_tree_sha,
+            held_plan_sha256=prepared.held_plan_sha256,
+        )
+    except Exception as exc:
+        raise RuntimeClosureBuildError("controller runtime materialization held-FD lease was rejected") from exc
+    if (
+        getattr(lease, "source_policy_sha256", None) != prepared.source_policy_sha256
+        or getattr(lease, "wheelhouse_manifest_sha256", None) != prepared.wheelhouse_manifest_sha256
+        or getattr(lease, "wheel_input_receipt_sha256", None) != prepared.wheel_input_receipt_sha256
+    ):
+        raise RuntimeClosureBuildError("controller runtime prepared closure differs from held-FD plan")
+    required_blobs = getattr(lease, "required_blobs", None)
+    expected_sources = (
+        {
+            path: digest
+            for path, digest in required_blobs.items()
+            if isinstance(path, str) and path.startswith(("core/", "scripts/"))
+        }
+        if isinstance(required_blobs, Mapping)
+        else None
+    )
+    if expected_sources != dict(prepared.project_sources):
+        raise RuntimeClosureBuildError("controller runtime project sources differ from held-FD plan")
+
+
+def _claim_materialization_lease(
+    held_bootstrap_capability: object | None,
+    prepared: PreparedRuntimeClosure,
+) -> object:
+    try:
+        lease = VERIFY._claim_held_bootstrap_capability(  # noqa: SLF001
+            held_bootstrap_capability,
+            operation="materialize-runtime-closure",
+            campaign_id=prepared.campaign_id,
+            release_sha=prepared.release_sha,
+            release_tree_sha=prepared.release_tree_sha,
+            held_plan_sha256=prepared.held_plan_sha256,
+            release_root_descriptor=None,
+        )
+    except VERIFY.RuntimeClosureError as exc:
+        raise RuntimeClosureBuildError(str(exc)) from exc
+    _assert_materialization_lease(lease, prepared, held_bootstrap_capability)
+    return lease
+
+
 def _materialize(
     prepared: PreparedRuntimeClosure,
     *,
     destination: Path,
     expected_uid: int | None,
+    held_bootstrap_capability: object | None = None,
+    _held_bootstrap_materialization_lease: object | None = None,
 ) -> dict[str, Any]:
-    if not VERIFY.HELD_FD_BOOTSTRAP_IMPLEMENTED:
-        raise RuntimeClosureBuildError(
-            "controller runtime materialization is unavailable pending held-FD exact-release bootstrap"
-        )
+    lease = _held_bootstrap_materialization_lease
+    if lease is None:
+        lease = _claim_materialization_lease(held_bootstrap_capability, prepared)
+    else:
+        _assert_materialization_lease(lease, prepared, held_bootstrap_capability)
     if (
         not destination.is_absolute()
         or destination == Path("/")
@@ -1063,6 +1105,7 @@ def _materialize(
             expected_release_sha=prepared.release_sha,
             expected_release_tree_sha=prepared.release_tree_sha,
             expected_held_plan_sha256=prepared.held_plan_sha256,
+            held_bootstrap_capability=held_bootstrap_capability,
         )
         attestation.close()
         # The verifier's path API needs a real release root, not stdin.  Its
@@ -1112,14 +1155,18 @@ def build_runtime_closure(
     destination: Path,
     confirm: str,
     expected_uid: int | None = 0,
+    held_bootstrap_capability: object | None = None,
 ) -> dict[str, Any]:
-    if not VERIFY.HELD_FD_BOOTSTRAP_IMPLEMENTED:
-        raise RuntimeClosureBuildError(
-            "controller runtime build API is unavailable pending held-FD exact-release bootstrap"
-        )
     if confirm != prepared.required_confirmation:
         raise RuntimeClosureBuildError("controller runtime build requires exact digest-bound confirmation")
-    return _materialize(prepared, destination=destination, expected_uid=expected_uid)
+    lease = _claim_materialization_lease(held_bootstrap_capability, prepared)
+    return _materialize(
+        prepared,
+        destination=destination,
+        expected_uid=expected_uid,
+        held_bootstrap_capability=held_bootstrap_capability,
+        _held_bootstrap_materialization_lease=lease,
+    )
 
 
 def _require_root_cli() -> None:

@@ -1,69 +1,15 @@
 #!/bin/sh
-# Fixed launcher for the controller-local convergence source-set producer.
-# It opens the release root, producer, and itself before Python starts. The
-# producer accepts those held inodes only after matching them to exact Git
-# blobs in the manifest-bound detached release.
+# Fail-closed launcher for the controller convergence source set.
+#
+# The only bootstrap currently present lives inside the release being proved.
+# Executing it, even from a held descriptor, would execute release-controlled
+# bytes before its Git/blob proof.  This launcher must therefore stay
+# deliberately unavailable until a separately installed, root-controlled,
+# immutable bootstrap is supplied.  In particular, do not open a release
+# path, a held plan, or a release-sourced bootstrap from this checkpoint.
 
 set -eu
 
-if [ "$#" -lt 3 ] || [ "$1" != "--release-root" ] || [ -z "$2" ] || [ "$3" != "produce" ]; then
-    printf '%s\n' 'blocked: launcher requires --release-root ROOT produce ...' >&2
-    exit 64
-fi
-
-release_root=$2
-shift 2
-producer_relative=scripts/produce_production_shadow_convergence_source_set.py
-
-exec 3<"$0"
-exec 4<"$release_root"
-exec 5<"$release_root/$producer_relative"
-
-bootstrap='import os, runpy, sys
-allowed = {0, 1, 2, 3, 4, 5}
-for entry in os.listdir("/proc/self/fd"):
-    if not entry.isdecimal():
-        raise SystemExit("blocked: producer bootstrap descriptor table is invalid")
-    descriptor = int(entry)
-    if descriptor in allowed:
-        continue
-    try:
-        os.close(descriptor)
-    except OSError as exc:
-        if exc.errno != 9:
-            raise SystemExit("blocked: producer bootstrap descriptor cleanup failed")
-remaining = set()
-for entry in os.listdir("/proc/self/fd"):
-    if not entry.isdecimal():
-        continue
-    descriptor = int(entry)
-    try:
-        os.fstat(descriptor)
-    except OSError as exc:
-        if exc.errno == 9:
-            continue
-        raise SystemExit("blocked: producer bootstrap descriptor inspection failed")
-    remaining.add(descriptor)
-if remaining - allowed:
-    raise SystemExit("blocked: producer bootstrap retained inherited descriptors")
-sys.argv = ["/proc/self/fd/5", *sys.argv[1:]]
-runpy.run_path("/proc/self/fd/5", run_name="__main__")'
-
-exec /usr/bin/env -i \
-    PATH=/usr/bin:/bin \
-    HOME=/nonexistent \
-    LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8 \
-    GIT_CONFIG_NOSYSTEM=1 \
-    GIT_CONFIG_GLOBAL=/dev/null \
-    GIT_CONFIG_SYSTEM=/dev/null \
-    GIT_TERMINAL_PROMPT=0 \
-    GIT_OPTIONAL_LOCKS=0 \
-    GIT_NO_REPLACE_OBJECTS=1 \
-    GIT_PAGER=cat \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONNOUSERSITE=1 \
-    PRODUCTION_SHADOW_HELD_CONVERGENCE_PRODUCER_RELEASE_ROOT_FD=4 \
-    PRODUCTION_SHADOW_HELD_CONVERGENCE_PRODUCER_FD=5 \
-    PRODUCTION_SHADOW_HELD_CONVERGENCE_PRODUCER_LAUNCHER_FD=3 \
-    /usr/bin/python3 -I -S -c "$bootstrap" "$@"
+printf '%s\n' \
+    'blocked: controller source-set launcher is unavailable pending a separately installed immutable bootstrap' >&2
+exit 69
