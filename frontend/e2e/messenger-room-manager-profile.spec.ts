@@ -252,7 +252,7 @@ async function expectPublicProfileForUser(page: Page, userId: number, accountNam
       await page.goto(canonicalProfilePath, { waitUntil: 'domcontentloaded' })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      if (!/ERR_ABORTED|interrupted by another navigation/i.test(message)) {
+      if (!/ERR_ABORTED|NS_BINDING_ABORTED|interrupted by another navigation/i.test(message)) {
         throw error
       }
       await page.waitForURL(expectedProfileUrl, { timeout: 15000 }).catch(() => {})
@@ -692,11 +692,20 @@ test.describe('Messenger room manager and public profile flows', () => {
 
     await expect(channelManager.getByText('کانال ساخته شد. حالا اعضا و ادمین‌ها را مدیریت کنید.')).toBeVisible({ timeout: 30000 })
 
+    const candidatesResponse = page.waitForResponse((response) => {
+      if (!response.ok()) return false
+      const url = new URL(response.url())
+      return url.pathname === '/api/chat/channels/invite-candidates' && url.searchParams.get('q') === candidate.accountName
+    })
     await channelManager.getByPlaceholder('جستجو با نام، اکانت یا موبایل...').fill(candidate.accountName)
+    await candidatesResponse
     const candidateRow = channelManager.locator('.chat-user-row').filter({ hasText: candidate.accountName }).first()
     await expect(candidateRow).toBeVisible({ timeout: 30000 })
     await candidateRow.click()
-    await channelManager.locator('.primary-chip').filter({ hasText: 'افزودن' }).click()
+    const addMembersButton = channelManager.getByRole('button', { name: 'افزودن' })
+    await expect(candidateRow).toHaveClass(/is-selected/, { timeout: 30000 })
+    await expect(addMembersButton).toBeEnabled({ timeout: 30000 })
+    await addMembersButton.click()
     await expect(channelManager.locator('.chat-user-row').filter({ hasText: candidate.accountName }).first()).toBeVisible({ timeout: 30000 })
 
     await returnToChannelOverview(channelManager)
@@ -730,28 +739,10 @@ test.describe('Messenger room manager and public profile flows', () => {
         title: updatedTitle,
         description: updatedDescription,
       })
-    await page.goBack()
+    await openNamedRoomFromRoute(page, channelId, updatedTitle)
     await expect(page.locator('.channel-admin-shell')).toHaveCount(0)
     const updatedHeader = page.locator('.chat-header:visible .header-name').first()
-    const headerAlreadyUpdated = await expect(updatedHeader)
-      .toContainText(updatedTitle, { timeout: 5000 })
-      .then(() => true)
-      .catch(() => false)
-    if (!headerAlreadyUpdated) {
-      const headerUpdatedAfterManagerClose = await expect(updatedHeader)
-        .toContainText(updatedTitle, { timeout: 30000 })
-        .then(() => true)
-        .catch(() => false)
-      if (headerUpdatedAfterManagerClose) {
-        return
-      }
-
-      const updatedChannelRow = conversationRow(page, updatedTitle)
-      await expect(updatedChannelRow).toBeVisible({ timeout: 30000 })
-      await updatedChannelRow.click({ force: true })
-      await expect.poll(() => selectedRoomIdFromUrl(page), { timeout: 30000 }).toBe(-channelId)
-      await expect(updatedHeader).toContainText(updatedTitle, { timeout: 30000 })
-    }
+    await expect(updatedHeader).toContainText(updatedTitle, { timeout: 30000 })
   })
 
   test('group manager supports member-row profiles, admin mutations, member removal, and creator leave', async ({ page, request }) => {
