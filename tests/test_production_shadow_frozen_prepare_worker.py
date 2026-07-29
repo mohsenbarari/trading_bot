@@ -1656,6 +1656,16 @@ class FrozenPrepareWorkerTests(unittest.TestCase):
             f"{SHA_A}",
             arguments,
         )
+        self.assertEqual(
+            arguments[-5:],
+            [
+                "webapp_fi_db_roles",
+                "python",
+                "scripts/provision_three_site_database_roles.py",
+                "--role-prefix",
+                "webapp_fi",
+            ],
+        )
         self.assertNotIn("/usr/bin/ssh", arguments)
         self.assertNotIn("scp", arguments)
         self.assertEqual(environment["DOCKER_CONFIG"], "/nonexistent")

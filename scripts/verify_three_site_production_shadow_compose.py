@@ -72,6 +72,25 @@ FORBIDDEN_KEY_NAMES = {
     "pid",
     "ipc",
 }
+PREPARE_SERVICE_DEFAULT_COMMAND = [
+    "sh",
+    "-ec",
+    "echo 'invoke only through production_shadow_frozen_prepare_worker' >&2; exit 64",
+]
+PREPARE_MUTATION_SERVICES = {
+    "bot_fi_migration",
+    "bot_fi_db_roles",
+    "bot_fi_db_fencing",
+    "webapp_fi_db_roles",
+    "webapp_fi_migration",
+    "webapp_fi_db_roles_post_migration",
+    "webapp_fi_db_fencing",
+    "webapp_ir_db_roles",
+    "webapp_ir_migration",
+    "webapp_ir_db_roles_post_migration",
+    "webapp_ir_db_fencing",
+    "webapp_ir_writer_fence",
+}
 BANNED_HOST_PORTS = {
     80,
     443,
@@ -869,22 +888,18 @@ def collect_source_failures(
         ):
             if service.get("restart") != "no":
                 failures.append(f"{name} must be one-shot")
+        if (
+            name in PREPARE_MUTATION_SERVICES
+            and service.get("command") != PREPARE_SERVICE_DEFAULT_COMMAND
+        ):
+            failures.append(
+                f"{name} must default fail closed outside the frozen prepare worker"
+            )
         if name == "webapp_ir_writer_fence":
             command = service.get("command")
             environment = service.get("environment", {})
-            required_arguments = {
-                "scripts/manage_webapp_writer.py",
-                "fence",
-                "--expected-epoch",
-                "--expected-active-site",
-                "webapp_fi",
-                "--apply",
-                "--confirm",
-                "writer:fence:webapp_ir:1:1",
-            }
             if (
-                not isinstance(command, list)
-                or not required_arguments.issubset(set(map(str, command)))
+                command != PREPARE_SERVICE_DEFAULT_COMMAND
                 or _dependency_names(service) != {"webapp_ir_db_fencing"}
                 or set(service.get("networks", [])) != {"webapp_ir"}
                 or environment.get("WRITER_WITNESS_REQUIRED") != "false"
@@ -901,34 +916,12 @@ def collect_source_failures(
                 )
             ):
                 failures.append(
-                    "webapp_ir_writer_fence must apply the exact epoch-1 local standby gate"
+                    "webapp_ir_writer_fence must retain the exact epoch-1 local standby gate"
                 )
         if name == "webapp_ir_convergence_exporter":
             if service.get("restart") != "no":
                 failures.append(f"{name} must be one-shot")
 
-    bot_roles_command = [
-        "python",
-        "scripts/provision_bot_database_roles.py",
-        "--phase",
-        "roles-grants",
-        "--role-prefix",
-        "bot_fi",
-        "--apply",
-        "--confirm",
-        "APPLY-BOT-DATABASE-ROLE-GRANTS",
-    ]
-    bot_fence_command = [
-        "python",
-        "scripts/provision_bot_database_roles.py",
-        "--phase",
-        "fence",
-        "--role-prefix",
-        "bot_fi",
-        "--apply",
-        "--confirm",
-        "ENABLE-BOT-DATABASE-FENCING",
-    ]
     bot_roles = services.get("bot_fi_db_roles", {})
     bot_fence = services.get("bot_fi_db_fencing", {})
     expected_bot_roles_environment = {
@@ -943,8 +936,7 @@ def collect_source_failures(
     }
     expected_bot_fence_environment = _database_policy_environment("bot_fi")
     if (
-        bot_roles.get("command") != bot_roles_command
-        or not _has_exact_dependency(
+        not _has_exact_dependency(
             bot_roles,
             "bot_fi_migration",
             "service_completed_successfully",
@@ -959,8 +951,7 @@ def collect_source_failures(
             "after migration with the exact minimal environment and CA mount"
         )
     if (
-        bot_fence.get("command") != bot_fence_command
-        or not _has_exact_dependency(
+        not _has_exact_dependency(
             bot_fence,
             "bot_fi_db_roles",
             "service_completed_successfully",
@@ -976,48 +967,8 @@ def collect_source_failures(
         )
 
     for role in ("webapp_fi", "webapp_ir"):
-        phase_arguments = [
-            "--site",
-            role,
-            "--application-role",
-            f"{role}_app",
-            "--projection-role",
-            f"{role}_projection",
-            "--receiver-role",
-            f"{role}_receiver",
-            "--delivery-role",
-            f"{role}_delivery",
-            "--blob-role",
-            f"{role}_blob",
-            "--effect-role",
-            f"{role}_effect",
-            "--control-role",
-            f"{role}_control",
-            "--observer-role",
-            f"{role}_observer",
-            "--operator",
-            "production-shadow-compose",
-            "--apply",
-            "--confirm",
-        ]
         grants_service = services.get(f"{role}_db_roles_post_migration", {})
         fence_service = services.get(f"{role}_db_fencing", {})
-        expected_grants_command = [
-            "python",
-            "scripts/activate_three_site_database_fencing.py",
-            "--phase",
-            "grants",
-            *phase_arguments,
-            "APPLY-THREE-SITE-DATABASE-GRANTS",
-        ]
-        expected_fence_command = [
-            "python",
-            "scripts/activate_three_site_database_fencing.py",
-            "--phase",
-            "fence",
-            *phase_arguments,
-            "ENABLE-THREE-SITE-DATABASE-FENCING",
-        ]
         prefix = role.upper()
         expected_role_environment = {
             **_database_policy_environment(role),
@@ -1048,15 +999,8 @@ def collect_source_failures(
         }
         expected_phase_environment = _database_policy_environment(role)
         role_service = services.get(f"{role}_db_roles", {})
-        expected_role_command = [
-            "python",
-            "scripts/provision_three_site_database_roles.py",
-            "--role-prefix",
-            role,
-        ]
         if (
-            role_service.get("command") != expected_role_command
-            or not _has_exact_dependency(
+            not _has_exact_dependency(
                 role_service,
                 f"{role}_db",
                 "service_healthy",
@@ -1071,8 +1015,7 @@ def collect_source_failures(
                 "with the exact minimal environment and CA mount"
             )
         if (
-            grants_service.get("command") != expected_grants_command
-            or not _has_exact_dependency(
+            not _has_exact_dependency(
                 grants_service,
                 f"{role}_migration",
                 "service_completed_successfully",
@@ -1088,8 +1031,7 @@ def collect_source_failures(
                 "and CA mount"
             )
         if (
-            fence_service.get("command") != expected_fence_command
-            or not _has_exact_dependency(
+            not _has_exact_dependency(
                 fence_service,
                 f"{role}_db_roles_post_migration",
                 "service_completed_successfully",

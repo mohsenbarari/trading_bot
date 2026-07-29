@@ -49,6 +49,9 @@ x-app: &app
     trading-bot.production.operation-id: ${PRODUCTION_SHADOW_OPERATION_ID:?operation UUID is required}
   logging: *logging
 
+x-prepare-fail-closed-command: &prepare_fail_closed_command
+  [sh, -ec, "echo 'invoke only through production_shadow_frozen_prepare_worker' >&2; exit 64"]
+
 x-postgres: &postgres
   image: ${PRODUCTION_SHADOW_POSTGRES_IMAGE_ID:?immutable local PostgreSQL image ID is required}
   pull_policy: never
@@ -316,7 +319,7 @@ services:
     profiles: [bot-fi-prepare]
     <<: *app
     restart: "no"
-    command: [python, manage.py]
+    command: *prepare_fail_closed_command
     environment: *bot_fi_owner_env
     volumes:
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/tls/ca.crt:/run/production-dr-ca/ca.crt:ro
@@ -327,16 +330,7 @@ services:
     profiles: [bot-fi-prepare]
     <<: *app
     restart: "no"
-    command:
-      - python
-      - scripts/provision_bot_database_roles.py
-      - --phase
-      - roles-grants
-      - --role-prefix
-      - bot_fi
-      - --apply
-      - --confirm
-      - APPLY-BOT-DATABASE-ROLE-GRANTS
+    command: *prepare_fail_closed_command
     environment:
       <<: *bot_fi_database_policy_env
       BOT_APP_DB_PASSWORD: ${BOT_FI_APP_DB_PASSWORD:?required}
@@ -353,16 +347,7 @@ services:
     profiles: [bot-fi-prepare]
     <<: *app
     restart: "no"
-    command:
-      - python
-      - scripts/provision_bot_database_roles.py
-      - --phase
-      - fence
-      - --role-prefix
-      - bot_fi
-      - --apply
-      - --confirm
-      - ENABLE-BOT-DATABASE-FENCING
+    command: *prepare_fail_closed_command
     environment: *bot_fi_database_policy_env
     volumes:
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/tls/ca.crt:/run/production-dr-ca/ca.crt:ro
@@ -615,7 +600,7 @@ services:
     profiles: [webapp-fi-prepare]
     <<: *app
     restart: "no"
-    command: [python, scripts/provision_three_site_database_roles.py, --role-prefix, webapp_fi]
+    command: *prepare_fail_closed_command
     environment:
       <<: *webapp_fi_database_policy_env
       THREE_SITE_APP_DB_PASSWORD: ${WEBAPP_FI_APP_DB_PASSWORD:?required}
@@ -635,7 +620,7 @@ services:
     profiles: [webapp-fi-prepare]
     <<: *app
     restart: "no"
-    command: [python, manage.py]
+    command: *prepare_fail_closed_command
     environment: *webapp_fi_owner_env
     volumes:
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/tls/ca.crt:/run/production-dr-ca/ca.crt:ro
@@ -646,34 +631,7 @@ services:
     profiles: [webapp-fi-prepare]
     <<: *app
     restart: "no"
-    command:
-      - python
-      - scripts/activate_three_site_database_fencing.py
-      - --phase
-      - grants
-      - --site
-      - webapp_fi
-      - --application-role
-      - webapp_fi_app
-      - --projection-role
-      - webapp_fi_projection
-      - --receiver-role
-      - webapp_fi_receiver
-      - --delivery-role
-      - webapp_fi_delivery
-      - --blob-role
-      - webapp_fi_blob
-      - --effect-role
-      - webapp_fi_effect
-      - --control-role
-      - webapp_fi_control
-      - --observer-role
-      - webapp_fi_observer
-      - --operator
-      - production-shadow-compose
-      - --apply
-      - --confirm
-      - APPLY-THREE-SITE-DATABASE-GRANTS
+    command: *prepare_fail_closed_command
     environment: *webapp_fi_database_policy_env
     volumes:
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/tls/ca.crt:/run/production-dr-ca/ca.crt:ro
@@ -684,34 +642,7 @@ services:
     profiles: [webapp-fi-prepare]
     <<: *app
     restart: "no"
-    command:
-      - python
-      - scripts/activate_three_site_database_fencing.py
-      - --phase
-      - fence
-      - --site
-      - webapp_fi
-      - --application-role
-      - webapp_fi_app
-      - --projection-role
-      - webapp_fi_projection
-      - --receiver-role
-      - webapp_fi_receiver
-      - --delivery-role
-      - webapp_fi_delivery
-      - --blob-role
-      - webapp_fi_blob
-      - --effect-role
-      - webapp_fi_effect
-      - --control-role
-      - webapp_fi_control
-      - --observer-role
-      - webapp_fi_observer
-      - --operator
-      - production-shadow-compose
-      - --apply
-      - --confirm
-      - ENABLE-THREE-SITE-DATABASE-FENCING
+    command: *prepare_fail_closed_command
     environment: *webapp_fi_database_policy_env
     volumes:
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/tls/ca.crt:/run/production-dr-ca/ca.crt:ro
@@ -1033,7 +964,7 @@ services:
     profiles: [webapp-ir-prepare]
     <<: *app
     restart: "no"
-    command: [python, scripts/provision_three_site_database_roles.py, --role-prefix, webapp_ir]
+    command: *prepare_fail_closed_command
     environment:
       <<: *webapp_ir_database_policy_env
       THREE_SITE_APP_DB_PASSWORD: ${WEBAPP_IR_APP_DB_PASSWORD:?required}
@@ -1053,7 +984,7 @@ services:
     profiles: [webapp-ir-prepare]
     <<: *app
     restart: "no"
-    command: [python, manage.py]
+    command: *prepare_fail_closed_command
     environment: *webapp_ir_owner_env
     volumes:
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/tls/ca.crt:/run/production-dr-ca/ca.crt:ro
@@ -1064,34 +995,7 @@ services:
     profiles: [webapp-ir-prepare]
     <<: *app
     restart: "no"
-    command:
-      - python
-      - scripts/activate_three_site_database_fencing.py
-      - --phase
-      - grants
-      - --site
-      - webapp_ir
-      - --application-role
-      - webapp_ir_app
-      - --projection-role
-      - webapp_ir_projection
-      - --receiver-role
-      - webapp_ir_receiver
-      - --delivery-role
-      - webapp_ir_delivery
-      - --blob-role
-      - webapp_ir_blob
-      - --effect-role
-      - webapp_ir_effect
-      - --control-role
-      - webapp_ir_control
-      - --observer-role
-      - webapp_ir_observer
-      - --operator
-      - production-shadow-compose
-      - --apply
-      - --confirm
-      - APPLY-THREE-SITE-DATABASE-GRANTS
+    command: *prepare_fail_closed_command
     environment: *webapp_ir_database_policy_env
     volumes:
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/tls/ca.crt:/run/production-dr-ca/ca.crt:ro
@@ -1102,34 +1006,7 @@ services:
     profiles: [webapp-ir-prepare]
     <<: *app
     restart: "no"
-    command:
-      - python
-      - scripts/activate_three_site_database_fencing.py
-      - --phase
-      - fence
-      - --site
-      - webapp_ir
-      - --application-role
-      - webapp_ir_app
-      - --projection-role
-      - webapp_ir_projection
-      - --receiver-role
-      - webapp_ir_receiver
-      - --delivery-role
-      - webapp_ir_delivery
-      - --blob-role
-      - webapp_ir_blob
-      - --effect-role
-      - webapp_ir_effect
-      - --control-role
-      - webapp_ir_control
-      - --observer-role
-      - webapp_ir_observer
-      - --operator
-      - production-shadow-compose
-      - --apply
-      - --confirm
-      - ENABLE-THREE-SITE-DATABASE-FENCING
+    command: *prepare_fail_closed_command
     environment: *webapp_ir_database_policy_env
     volumes:
       - ${PRODUCTION_SHADOW_SECRET_ROOT:?operation-bound secret root is required}/tls/ca.crt:/run/production-dr-ca/ca.crt:ro
@@ -1140,21 +1017,7 @@ services:
     profiles: [webapp-ir-prepare]
     <<: *app
     restart: "no"
-    command:
-      - python
-      - scripts/manage_webapp_writer.py
-      - fence
-      - --expected-epoch
-      - "1"
-      - --expected-active-site
-      - webapp_fi
-      - --operator
-      - production-shadow:${PRODUCTION_SHADOW_OPERATION_ID:?operation UUID is required}
-      - --reason
-      - initialize WebApp-IR as an operation-bound locally fenced standby
-      - --apply
-      - --confirm
-      - writer:fence:webapp_ir:1:1
+    command: *prepare_fail_closed_command
     environment:
       <<: *webapp_ir_owner_env
       TRADING_BOT_SERVICE: writer_control_cli
