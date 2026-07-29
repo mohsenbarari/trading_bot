@@ -15,6 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from core import offer_publication_worker as worker
 from core.services import offer_publication_reconciliation_service as reconciliation
 from core.services.telegram_offer_channel_service import OfferChannelStateApplyResult
+from core.services.offer_publication_state_service import (
+    TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY,
+)
 from core.utils import utc_now
 from models.commodity import Commodity
 from models.offer import Offer, OfferStatus, OfferType
@@ -27,6 +30,7 @@ from models.user import User, UserRole
 
 
 DATABASE_NAME_PATTERN = re.compile(r"^market_stage9_[a-z0-9_]+_test$")
+TEST_TELEGRAM_CHANNEL_ID = -1001234567890
 
 
 def _stage9_database_urls() -> tuple[str, str] | None:
@@ -152,8 +156,11 @@ class OfferPublicationRepairPostgresTests(unittest.IsolatedAsyncioTestCase):
                         offer_home_server="foreign",
                         surface=OfferPublicationSurface.TELEGRAM_CHANNEL,
                         publication_owner_server="foreign",
+                        publisher_bot_identity=TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY,
                         status=OfferPublicationStatus.SENT,
                         dedupe_key=f"offer-publication:telegram_channel:{public_id}",
+                        surface_resource_id=str(offer.channel_message_id),
+                        telegram_chat_id=TEST_TELEGRAM_CHANNEL_ID,
                         telegram_message_id=offer.channel_message_id,
                         offer_version_id=0,
                         last_known_offer_status=OfferStatus.ACTIVE.value,
@@ -212,6 +219,7 @@ class OfferPublicationRepairPostgresTests(unittest.IsolatedAsyncioTestCase):
                         offer_home_server="foreign",
                         surface=OfferPublicationSurface.TELEGRAM_CHANNEL,
                         publication_owner_server="foreign",
+                        publisher_bot_identity=TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY,
                         status=OfferPublicationStatus.FAILED,
                         dedupe_key=f"offer-publication:telegram_channel:{public_id}",
                         offer_version_id=offer.version_id,
