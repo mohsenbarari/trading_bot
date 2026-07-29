@@ -487,35 +487,37 @@ class ThreeSiteProductionShadowComposeTests(unittest.TestCase):
         )
 
     def test_rejects_direct_prepare_mutation_commands(self):
-        document = copy.deepcopy(self.document)
-        document["services"]["webapp_fi_db_roles_post_migration"]["command"] = [
-            "python",
-            "scripts/activate_three_site_database_fencing.py",
-        ]
-        self.assert_source_failure(
-            document,
-            "webapp_fi_db_roles_post_migration must default fail closed",
+        self.assertEqual(
+            {
+                name
+                for name, service in self.document["services"].items()
+                if any(
+                    profile.endswith("-prepare")
+                    for profile in service.get("profiles", [])
+                )
+                and name.endswith(
+                    (
+                        "_migration",
+                        "_db_roles",
+                        "_db_roles_post_migration",
+                        "_db_fencing",
+                        "_writer_fence",
+                    )
+                )
+            },
+            MODULE.PREPARE_MUTATION_SERVICES,
         )
-
-        document = copy.deepcopy(self.document)
-        document["services"]["webapp_ir_db_fencing"]["command"] = [
-            "python",
-            "scripts/activate_three_site_database_fencing.py",
-        ]
-        self.assert_source_failure(
-            document,
-            "webapp_ir_db_fencing must default fail closed",
-        )
-
-        document = copy.deepcopy(self.document)
-        document["services"]["bot_fi_db_roles"]["command"] = [
-            "python",
-            "scripts/provision_bot_database_roles.py",
-        ]
-        self.assert_source_failure(
-            document,
-            "bot_fi_db_roles must default fail closed",
-        )
+        for service_name in sorted(MODULE.PREPARE_MUTATION_SERVICES):
+            with self.subTest(service=service_name):
+                document = copy.deepcopy(self.document)
+                document["services"][service_name]["command"] = [
+                    "python",
+                    "direct-mutation.py",
+                ]
+                self.assert_source_failure(
+                    document,
+                    f"{service_name} must default fail closed",
+                )
 
         document = copy.deepcopy(self.document)
         document["services"]["bot_fi_db_fencing"]["depends_on"] = {
