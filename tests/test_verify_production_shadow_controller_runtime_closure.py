@@ -387,6 +387,38 @@ class SuccessfulRuntimeClosureTests(RuntimeClosureFixture):
     def test_runtime_manifest_binds_only_pre_runtime_control_sources(self) -> None:
         self.assertFalse(MODULE.CONTROL_SOURCE_PATHS & MODULE.POST_RUNTIME_UNAVAILABLE_SOURCES)
 
+    def test_descriptor_native_preparation_binding_is_exact_and_path_free(self) -> None:
+        plan = self.held_plan()
+        sources = MODULE._validate_descriptor_native_preparation(  # noqa: SLF001
+            campaign_id=CAMPAIGN_ID,
+            release_sha=RELEASE_SHA,
+            release_tree_sha=TREE_SHA,
+            held_plan_sha256=self.held_plan_sha256,
+            source_policy_sha256=plan["source_policy_sha256"],
+            wheelhouse_manifest_sha256=plan["controller_wheelhouse_sha256"],
+            wheel_input_receipt_sha256=plan["wheel_input_receipt_sha256"],
+            source_graph_sha256="a" * 64,
+            required_blobs=plan["required_blobs"],
+            reachable_blobs=tuple(sorted(plan["required_blobs"])),
+        )
+
+        self.assertEqual(set(sources), MODULE.CONTROL_SOURCE_PATHS)
+        wrong = dict(plan["required_blobs"])
+        wrong.pop(next(iter(MODULE.CONTROL_SOURCE_PATHS)))
+        with self.assertRaisesRegex(MODULE.RuntimeClosureError, "pre-runtime blob map differs"):
+            MODULE._validate_descriptor_native_preparation(  # noqa: SLF001
+                campaign_id=CAMPAIGN_ID,
+                release_sha=RELEASE_SHA,
+                release_tree_sha=TREE_SHA,
+                held_plan_sha256=self.held_plan_sha256,
+                source_policy_sha256=plan["source_policy_sha256"],
+                wheelhouse_manifest_sha256=plan["controller_wheelhouse_sha256"],
+                wheel_input_receipt_sha256=plan["wheel_input_receipt_sha256"],
+                source_graph_sha256="a" * 64,
+                required_blobs=wrong,
+                reachable_blobs=tuple(sorted(wrong)),
+            )
+
     def test_clean_preimport_state_accepts_real_isolated_python_startup(self) -> None:
         completed = subprocess.run(
             [
