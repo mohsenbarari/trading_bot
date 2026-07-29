@@ -58,6 +58,12 @@ MANIFEST_FILENAME = "image-stage-manifest.json"
 ATTESTATION_FILENAME = "image-stage-attestation.json"
 JOURNAL_FILENAME = "image-stage-journal.json"
 LOCK_FILENAME = "image-stage.lock"
+CONVERGENCE_SOURCE_SET_PRODUCER_RELATIVE = Path(
+    "scripts/produce_production_shadow_convergence_source_set.py"
+)
+CONVERGENCE_SOURCE_SET_LAUNCHER_RELATIVE = Path(
+    "scripts/production_shadow_convergence_source_set_launcher"
+)
 
 GIT = "/usr/bin/git"
 DOCKER = "/usr/bin/docker"
@@ -231,6 +237,7 @@ MAX_MANIFEST_BYTES = 1024 * 1024
 MAX_JOURNAL_BYTES = 2 * 1024 * 1024
 MAX_ATTESTATION_BYTES = 2 * 1024 * 1024
 MAX_AGENT_BYTES = 8 * 1024 * 1024
+MAX_CONVERGENCE_SOURCE_SET_LAUNCHER_BYTES = 1024 * 1024
 MAX_ARTIFACT_BYTES = 64 * 1024 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 250_000
 MAX_ARCHIVE_CONFIG_BYTES = 16 * 1024 * 1024
@@ -821,6 +828,7 @@ def _held_file(
     expected_mode: int,
     maximum: int,
     allow_two_links: bool = False,
+    nonblocking: bool = False,
 ) -> Iterator[tuple[BinaryIO, os.stat_result]]:
     descriptor = -1
     stream: BinaryIO | None = None
@@ -829,6 +837,7 @@ def _held_file(
             path,
             os.O_RDONLY
             | getattr(os, "O_CLOEXEC", 0)
+            | (getattr(os, "O_NONBLOCK", 0) if nonblocking else 0)
             | getattr(os, "O_NOFOLLOW", 0),
         )
         before = os.fstat(descriptor)
@@ -2254,6 +2263,149 @@ def _verify_release_bundle(
         raise FinlandStageError("Git bundle does not contain only the exact release")
 
 
+def _release_child_metadata(path: Path, *, label: str) -> os.stat_result | None:
+    try:
+        return path.stat(follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise FinlandStageError(f"{label} is unavailable") from exc
+
+
+def _convergence_source_set_feature_paths(
+    release_root: Path,
+    *,
+    required_uid: int,
+) -> tuple[Path, Path] | None:
+    """Return the current source-set pair, or permit a truly legacy release.
+
+    The controller source-set producer requires its fixed shell launcher. A
+    release predating that feature contains neither file, which remains valid
+    for historical staging. A partial pair is not a legacy release and must
+    fail before Git verification can present it as usable.
+    """
+
+    scripts_directory = release_root / "scripts"
+    scripts_metadata = _release_child_metadata(
+        scripts_directory,
+        label="materialized release scripts directory",
+    )
+    if scripts_metadata is None:
+        return None
+    _assert_directory(
+        scripts_directory,
+        required_uid=required_uid,
+        private=False,
+    )
+
+    producer = release_root / CONVERGENCE_SOURCE_SET_PRODUCER_RELATIVE
+    launcher = release_root / CONVERGENCE_SOURCE_SET_LAUNCHER_RELATIVE
+    producer_metadata = _release_child_metadata(
+        producer,
+        label="convergence source-set producer",
+    )
+    launcher_metadata = _release_child_metadata(
+        launcher,
+        label="convergence source-set launcher",
+    )
+    if producer_metadata is None and launcher_metadata is None:
+        return None
+    if producer_metadata is None or launcher_metadata is None:
+        raise FinlandStageError(
+            "materialized release has an incomplete convergence source-set feature"
+        )
+    if not stat.S_ISREG(producer_metadata.st_mode):
+        raise FinlandStageError("convergence source-set producer is unsafe")
+    if not stat.S_ISREG(launcher_metadata.st_mode):
+        raise FinlandStageError("convergence source-set launcher is unsafe")
+    return producer, launcher
+
+
+def _install_convergence_source_set_launcher(
+    release_root: Path,
+    *,
+    required_uid: int,
+) -> bool:
+    """Set mode only after validating the checkout's root-owned launcher."""
+
+    paths = _convergence_source_set_feature_paths(
+        release_root,
+        required_uid=required_uid,
+    )
+    if paths is None:
+        return False
+    _producer, launcher = paths
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            launcher,
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != required_uid
+            or before.st_gid != required_uid
+            or before.st_nlink != 1
+            or not 1 <= before.st_size <= MAX_CONVERGENCE_SOURCE_SET_LAUNCHER_BYTES
+        ):
+            raise FinlandStageError("convergence source-set launcher is unsafe")
+        os.fchmod(descriptor, 0o700)
+        os.fsync(descriptor)
+        after = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(after.st_mode)
+            or after.st_uid != required_uid
+            or after.st_gid != required_uid
+            or stat.S_IMODE(after.st_mode) != 0o700
+            or after.st_nlink != 1
+            or not 1 <= after.st_size <= MAX_CONVERGENCE_SOURCE_SET_LAUNCHER_BYTES
+        ):
+            raise FinlandStageError("convergence source-set launcher is unsafe")
+    except FinlandStageError:
+        raise
+    except OSError as exc:
+        raise FinlandStageError(
+            "convergence source-set launcher mode could not be fixed"
+        ) from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    _fsync_directory(launcher.parent)
+    return True
+
+
+def _verify_convergence_source_set_launcher(
+    release_root: Path,
+    *,
+    required_uid: int,
+) -> bool:
+    """Verify the installed launcher before treating its release as exact."""
+
+    paths = _convergence_source_set_feature_paths(
+        release_root,
+        required_uid=required_uid,
+    )
+    if paths is None:
+        return False
+    _producer, launcher = paths
+    with _held_file(
+        launcher,
+        required_uid=required_uid,
+        expected_mode=0o700,
+        maximum=MAX_CONVERGENCE_SOURCE_SET_LAUNCHER_BYTES,
+        nonblocking=True,
+    ) as (stream, metadata):
+        if metadata.st_gid != required_uid:
+            raise FinlandStageError("convergence source-set launcher is unsafe")
+        while stream.read(1024 * 1024):
+            pass
+    return True
+
+
 def _verify_materialized_release(
     release_root: Path,
     *,
@@ -2395,6 +2547,14 @@ def _materialize_release(
         timeout=300,
         env=SAFE_GIT_ENV,
         runner=runner,
+    )
+    _install_convergence_source_set_launcher(
+        release_root,
+        required_uid=required_uid,
+    )
+    _verify_convergence_source_set_launcher(
+        release_root,
+        required_uid=required_uid,
     )
     _run(
         [
@@ -3411,6 +3571,16 @@ def stage_operation(
             required_uid=required_uid,
             runner=runner,
         )
+        if "release-materialized" in journal["completed_phases"]:
+            _assert_directory(
+                paths["release_root"],  # type: ignore[arg-type]
+                required_uid=required_uid,
+                private=True,
+            )
+            _install_convergence_source_set_launcher(
+                paths["release_root"],  # type: ignore[arg-type]
+                required_uid=required_uid,
+            )
         verified_archives = {}
         for image_role in IMAGE_ROLES:
             archive = (
@@ -3513,6 +3683,10 @@ def stage_operation(
                 required_uid=required_uid,
             )
 
+        _verify_convergence_source_set_launcher(
+            paths["release_root"],  # type: ignore[arg-type]
+            required_uid=required_uid,
+        )
         _verify_materialized_release(
             paths["release_root"],  # type: ignore[arg-type]
             bundle=release_bundle,
