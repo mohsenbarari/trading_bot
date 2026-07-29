@@ -13,6 +13,7 @@ class Stage9CIContractTests(unittest.TestCase):
         cls.path = REPO_ROOT / ".github" / "workflows" / "coverage-report.yml"
         cls.source = cls.path.read_text(encoding="utf-8")
         cls.workflow = yaml.safe_load(cls.source)
+        cls.triggers = yaml.load(cls.source, Loader=yaml.BaseLoader)["on"]
 
     def test_coverage_job_has_isolated_postgres_and_redis_services(self):
         job = self.workflow["jobs"]["repository-coverage"]
@@ -37,6 +38,56 @@ class Stage9CIContractTests(unittest.TestCase):
     def test_opt_in_logs_are_uploaded(self):
         self.assertIn("tmp/backend-postgres-opt-in.log", self.source)
         self.assertIn("tmp/backend-redis-opt-in.log", self.source)
+
+    def test_pull_requests_target_main_and_candidate_production_shadow(self):
+        self.assertEqual(
+            self.triggers["pull_request"]["branches"],
+            ["main", "candidate/production-three-site-shadow"],
+        )
+
+    def test_non_pr_coverage_base_is_explicit_and_fail_closed(self):
+        dispatch_inputs = self.triggers["workflow_dispatch"]["inputs"]
+        self.assertEqual(dispatch_inputs["compare_ref"]["required"], "true")
+
+        steps = self.workflow["jobs"]["repository-coverage"]["steps"]
+        base_step = next(step for step in steps if step.get("id") == "coverage_base")
+        self.assertEqual(
+            base_step["env"]["PR_BASE_SHA"],
+            "${{ github.event.pull_request.base.sha }}",
+        )
+        self.assertEqual(base_step["env"]["PUSH_BEFORE_SHA"], "${{ github.event.before }}")
+        self.assertEqual(base_step["env"]["MANUAL_COMPARE_REF"], "${{ inputs.compare_ref }}")
+        run = base_step["run"]
+        self.assertNotIn("HEAD~1", run)
+        self.assertIn('case "$EVENT_NAME" in', run)
+        self.assertIn('pull_request)\n    base="$PR_BASE_SHA"', run)
+        self.assertIn('push)\n    base="$PUSH_BEFORE_SHA"', run)
+        self.assertIn("workflow_dispatch)", run)
+        self.assertIn('git rev-parse --verify --end-of-options "${base}^{commit}"', run)
+        self.assertIn('git merge-base --is-ancestor "$base_sha" "$head_sha"', run)
+        self.assertIn('[[ "$base_sha" == "$head_sha" ]]', run)
+        self.assertIn("coverage base must differ from HEAD", run)
+
+    def test_backend_coverage_requires_every_shard_artifact_before_combine(self):
+        steps = self.workflow["jobs"]["repository-coverage"]["steps"]
+        combine_step = next(
+            step
+            for step in steps
+            if step.get("name") == "Combine verified backend coverage shards"
+        )
+        run = combine_step["run"]
+        self.assertIn("for shard in 0 1 2 3; do", run)
+        self.assertIn(
+            'coverage_files=(tmp/backend-coverage-inputs/.coverage.backend-shard-"${shard}".*)',
+            run,
+        )
+        self.assertIn("if (( ${#coverage_files[@]} == 0 )); then", run)
+        self.assertIn("missing backend coverage artifact for shard", run)
+        self.assertIn('if [[ "$missing_coverage_artifacts" -ne 0 ]]; then', run)
+        self.assertLess(
+            run.index('if [[ "$missing_coverage_artifacts" -ne 0 ]]; then'),
+            run.index("coverage combine --append"),
+        )
 
     def test_backend_coverage_is_partitioned_and_recombined_exactly(self):
         backend = self.workflow["jobs"]["backend-coverage"]

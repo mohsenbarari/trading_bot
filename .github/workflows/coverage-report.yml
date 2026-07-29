@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - candidate/production-three-site-shadow
   push:
     branches:
       - main
@@ -12,6 +13,10 @@ on:
       git_ref:
         description: Optional git ref to run the coverage report for
         required: false
+        type: string
+      compare_ref:
+        description: Required locally resolvable ancestor commit or ref for diff coverage
+        required: true
         type: string
 
 permissions:
@@ -273,14 +278,45 @@ jobs:
         id: coverage_base
         shell: bash
         env:
+          EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          MANUAL_COMPARE_REF: ${{ inputs.compare_ref }}
         run: |
-          if [[ -n "$PR_BASE_SHA" ]]; then
-            base="$PR_BASE_SHA"
-          else
-            base="$(git rev-parse HEAD~1)"
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            pull_request)
+              base="$PR_BASE_SHA"
+              ;;
+            push)
+              base="$PUSH_BEFORE_SHA"
+              ;;
+            workflow_dispatch)
+              base="$MANUAL_COMPARE_REF"
+              ;;
+            *)
+              printf 'unsupported coverage event: %s\n' "$EVENT_NAME" >&2
+              exit 1
+              ;;
+          esac
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            printf 'coverage base is missing or invalid for %s\n' "$EVENT_NAME" >&2
+            exit 1
           fi
-          echo "base=$base" >> "$GITHUB_OUTPUT"
+          if ! base_sha="$(git rev-parse --verify --end-of-options "${base}^{commit}")"; then
+            printf 'coverage base does not resolve to a commit: %s\n' "$base" >&2
+            exit 1
+          fi
+          head_sha="$(git rev-parse --verify HEAD^{commit})"
+          if [[ "$base_sha" == "$head_sha" ]]; then
+            printf 'coverage base must differ from HEAD\n' >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$base_sha" "$head_sha"; then
+            printf 'coverage base is not an ancestor of HEAD\n' >&2
+            exit 1
+          fi
+          printf 'base=%s\n' "$base_sha" >> "$GITHUB_OUTPUT"
 
       - name: Install frontend dependencies
         working-directory: frontend
@@ -306,13 +342,24 @@ jobs:
           set +e
           status=0
           mkdir -p tmp
+          shopt -s nullglob
+          missing_coverage_artifacts=0
           for shard in 0 1 2 3; do
             status_file="tmp/backend-coverage-inputs/backend-shard-${shard}.exitcode"
             shard_status="$(cat "$status_file" 2>/dev/null || echo 1)"
             if [[ "$shard_status" != "0" ]]; then
               status=1
             fi
+            coverage_files=(tmp/backend-coverage-inputs/.coverage.backend-shard-"${shard}".*)
+            if (( ${#coverage_files[@]} == 0 )); then
+              printf 'missing backend coverage artifact for shard %s\n' "$shard" >&2
+              missing_coverage_artifacts=1
+            fi
           done
+          if [[ "$missing_coverage_artifacts" -ne 0 ]]; then
+            printf '%s\n' 1 > tmp/backend-coverage.exitcode
+            exit 1
+          fi
           python3 scripts/verify_repository_unittest_shards.py \
             --manifest-directory tmp/backend-coverage-inputs \
             --shard-count 4 \
