@@ -38,6 +38,15 @@ class Stage9CIContractTests(unittest.TestCase):
         self.assertIn("tmp/backend-postgres-opt-in.log", self.source)
         self.assertIn("tmp/backend-redis-opt-in.log", self.source)
 
+    def test_backend_coverage_is_partitioned_and_recombined_exactly(self):
+        backend = self.workflow["jobs"]["backend-coverage"]
+        self.assertEqual(backend["strategy"]["matrix"]["shard"], [0, 1, 2, 3])
+        self.assertIn("scripts/run_repository_unittest_shard.py", self.source)
+        self.assertIn("scripts/verify_repository_unittest_shards.py", self.source)
+        self.assertIn("merge-multiple: true", self.source)
+        self.assertIn("include-hidden-files: true", self.source)
+        self.assertIn("backend-shard-verification.json", self.source)
+
     def test_stage9_traceability_static_generation_is_not_a_maintained_gate(self):
         makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
         self.assertIn("build_stage9_traceability.py --validate-only", makefile)
