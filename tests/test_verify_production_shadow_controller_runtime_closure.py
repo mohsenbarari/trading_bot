@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -9,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +27,7 @@ SPEC.loader.exec_module(MODULE)
 
 RELEASE_SHA = "1" * 40
 TREE_SHA = "2" * 40
+CAMPAIGN_ID = "7fb08095-7a9e-4a92-9fa9-3f9a301b2944"
 
 
 class RuntimeClosureFixture(unittest.TestCase):
@@ -34,13 +37,16 @@ class RuntimeClosureFixture(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.runtime = self.root / "runtime"
         self.release = self.root / "release"
+        self.plan_root = self.root / "held-plans"
         self.site = self.runtime / MODULE.SITE_PACKAGES_DIRECTORY
         self.runtime.mkdir(mode=0o700)
         self.release.mkdir(mode=0o700)
+        self.plan_root.mkdir(mode=0o700)
         self.site.mkdir(mode=0o700)
         self.uid = os.getuid()
         self.policy = b'{"synthetic":"controller-policy"}'
         self.wheelhouse_manifest = b"synthetic wheel manifest\n"
+        self.wheel_input_receipt = b"synthetic independently trusted wheel receipt\n"
         self.write_release(MODULE.SOURCE_POLICY_RELATIVE, self.policy)
         self.write_release(MODULE.WHEELHOUSE_MANIFEST_RELATIVE, self.wheelhouse_manifest)
         self.sources: dict[str, bytes] = {}
@@ -56,6 +62,7 @@ class RuntimeClosureFixture(unittest.TestCase):
         }
         for relative, payload in self.site_files.items():
             self.write_site(relative, payload)
+        self.write_held_plan()
 
     @staticmethod
     def digest(value: bytes) -> str:
@@ -86,6 +93,7 @@ class RuntimeClosureFixture(unittest.TestCase):
         document: dict[str, object] = {
             "schema": MODULE.RUNTIME_CLOSURE_SCHEMA,
             "namespace": MODULE.RUNTIME_NAMESPACE,
+            "campaign_id": CAMPAIGN_ID,
             "release": {"commit_sha": RELEASE_SHA, "tree_sha": TREE_SHA},
             "python": {
                 "implementation": "cpython",
@@ -95,6 +103,8 @@ class RuntimeClosureFixture(unittest.TestCase):
             },
             "source_policy_sha256": self.digest(self.policy),
             "wheelhouse_manifest_sha256": self.digest(self.wheelhouse_manifest),
+            "held_plan_sha256": self.held_plan_sha256,
+            "wheel_input_receipt_sha256": self.digest(self.wheel_input_receipt),
             "packages": list(MODULE.REQUIRED_PACKAGES),
             "site_packages": {
                 "path": MODULE.SITE_PACKAGES_DIRECTORY,
@@ -104,9 +114,80 @@ class RuntimeClosureFixture(unittest.TestCase):
             },
             "project_sources": project_sources,
             "control_sources": dict(project_sources),
+            "wheel_installation_receipt_sha256": self.digest(self.receipt_payload()),
         }
         document["runtime_binding_sha256"] = MODULE._sha256(document)
         return document
+
+    def receipt(self) -> dict[str, object]:
+        package_by_name = {record["name"]: record for record in MODULE.REQUIRED_PACKAGES}
+        rows: list[dict[str, object]] = []
+        for path in sorted(self.site_files):
+            package = (
+                "cryptography" if path.startswith("cryptography/")
+                else "pycparser" if path.startswith("pycparser/")
+                else "cffi"
+            )
+            rows.append(
+                {
+                    "path": path,
+                    "size": len(self.site_files[path]),
+                    "sha256": self.digest(self.site_files[path]),
+                    "source_wheel": package_by_name[package]["wheel"],
+                    "source_member": path,
+                }
+            )
+        wheels: list[dict[str, object]] = []
+        for package in sorted(package_by_name):
+            record = package_by_name[package]
+            attributed = [row for row in rows if row["source_wheel"] == record["wheel"]]
+            wheels.append(
+                {
+                    "wheel": record["wheel"],
+                    "archive_sha256": record["sha256"],
+                    "record_sha256": self.digest(f"record:{package}".encode()),
+                    "members_sha256": self.digest(f"members:{package}".encode()),
+                    "installed_files_sha256": MODULE._sha256(attributed),
+                }
+            )
+        document: dict[str, object] = {
+            "schema": MODULE.WHEEL_RECEIPT_SCHEMA,
+            "namespace": MODULE.RUNTIME_NAMESPACE,
+            "campaign_id": CAMPAIGN_ID,
+            "release": {"commit_sha": RELEASE_SHA, "tree_sha": TREE_SHA},
+            "source_policy_sha256": self.digest(self.policy),
+            "controller_wheelhouse_sha256": self.digest(self.wheelhouse_manifest),
+            "held_plan_sha256": self.held_plan_sha256,
+            "wheel_input_receipt_sha256": self.digest(self.wheel_input_receipt),
+            "wheels": wheels,
+            "installed_files": rows,
+        }
+        document["receipt_sha256"] = MODULE._sha256(document)
+        return document
+
+    def held_plan(self) -> dict[str, object]:
+        return {
+            "schema": MODULE.HELD_RUNTIME_PLAN_SCHEMA,
+            "campaign_id": CAMPAIGN_ID,
+            "release": {"commit_sha": RELEASE_SHA, "tree_sha": TREE_SHA},
+            "source_policy_sha256": self.digest(self.policy),
+            "controller_wheelhouse_sha256": self.digest(self.wheelhouse_manifest),
+            "wheel_input_receipt_sha256": self.digest(self.wheel_input_receipt),
+        }
+
+    def write_held_plan(self, document: dict[str, object] | None = None) -> Path:
+        directory = self.plan_root / CAMPAIGN_ID
+        directory.mkdir(mode=0o700, exist_ok=True)
+        directory.chmod(0o700)
+        payload = MODULE.canonical_json_bytes(document or self.held_plan())
+        path = directory / MODULE.HELD_RUNTIME_PLAN_FILENAME
+        path.write_bytes(payload)
+        path.chmod(0o600)
+        self.held_plan_sha256 = self.digest(payload)
+        return path
+
+    def receipt_payload(self) -> bytes:
+        return MODULE.canonical_json_bytes(self.receipt())
 
     def write_manifest(self, document: dict[str, object] | None = None) -> Path:
         payload = MODULE.canonical_json_bytes(document or self.manifest())
@@ -115,20 +196,50 @@ class RuntimeClosureFixture(unittest.TestCase):
         path.chmod(0o600)
         return path
 
+    def write_receipt(self, document: dict[str, object] | None = None) -> Path:
+        path = self.runtime / MODULE.WHEEL_RECEIPT_FILENAME
+        path.write_bytes(MODULE.canonical_json_bytes(document or self.receipt()))
+        path.chmod(0o600)
+        return path
+
+    def write_bound_manifest_for_receipt(self, receipt: dict[str, object]) -> None:
+        receipt_payload = MODULE.canonical_json_bytes(receipt)
+        manifest = self.manifest()
+        manifest["wheel_installation_receipt_sha256"] = self.digest(receipt_payload)
+        manifest["runtime_binding_sha256"] = MODULE._sha256(
+            {key: value for key, value in manifest.items() if key != "runtime_binding_sha256"}
+        )
+        self.write_receipt(receipt)
+        self.write_manifest(manifest)
+
     def attest(self):
+        self.write_receipt()
         self.write_manifest()
         attestation = MODULE.attest_runtime_closure(
             self.runtime,
             self.release,
             expected_uid=self.uid,
+            expected_campaign_id=CAMPAIGN_ID,
             expected_release_sha=RELEASE_SHA,
             expected_release_tree_sha=TREE_SHA,
+            expected_held_plan_sha256=self.held_plan_sha256,
         )
         self.addCleanup(attestation.close)
         return attestation
 
 
 class SuccessfulRuntimeClosureTests(RuntimeClosureFixture):
+    def test_reads_exact_root_only_held_plan(self) -> None:
+        plan = MODULE.read_held_runtime_plan(
+            CAMPAIGN_ID,
+            expected_uid=self.uid,
+            plan_root=self.plan_root,
+        )
+        self.assertEqual(plan.campaign_id, CAMPAIGN_ID)
+        self.assertEqual(plan.release_sha, RELEASE_SHA)
+        self.assertEqual(plan.release_tree_sha, TREE_SHA)
+        self.assertEqual(plan.sha256, self.held_plan_sha256)
+
     def test_clean_preimport_state_accepts_real_isolated_python_startup(self) -> None:
         completed = subprocess.run(
             [
@@ -169,14 +280,17 @@ class SuccessfulRuntimeClosureTests(RuntimeClosureFixture):
     def test_manifest_bytes_are_canonical_and_binding_is_required(self) -> None:
         document = self.manifest()
         document["runtime_binding_sha256"] = "f" * 64
+        self.write_receipt()
         self.write_manifest(document)
         with self.assertRaisesRegex(MODULE.RuntimeClosureError, "binding digest differs"):
             MODULE.attest_runtime_closure(
                 self.runtime,
                 self.release,
                 expected_uid=self.uid,
+                expected_campaign_id=CAMPAIGN_ID,
                 expected_release_sha=RELEASE_SHA,
                 expected_release_tree_sha=TREE_SHA,
+                expected_held_plan_sha256=self.held_plan_sha256,
             )
 
     def test_site_capability_close_is_idempotent(self) -> None:
@@ -190,6 +304,53 @@ class SuccessfulRuntimeClosureTests(RuntimeClosureFixture):
 
 
 class RejectionRuntimeClosureTests(RuntimeClosureFixture):
+    def test_verifier_cli_requires_root_and_has_no_uid_override(self) -> None:
+        with mock.patch.object(MODULE, "_require_isolated_startup"), mock.patch.object(
+            MODULE,
+            "require_clean_preimport_state",
+        ), mock.patch.object(MODULE.os, "geteuid", return_value=1000), mock.patch.object(
+            MODULE.os,
+            "getegid",
+            return_value=1000,
+        ), mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            result = MODULE.main(
+                [
+                    "--runtime-root",
+                    str(self.runtime),
+                    "--release-root",
+                    str(self.release),
+                    "--campaign-id",
+                    CAMPAIGN_ID,
+                ]
+            )
+        self.assertEqual(result, 1)
+        self.assertIn("verifier CLI requires root:root", stderr.getvalue())
+
+    def test_cli_rejects_loader_environment_before_argument_or_plan_processing(self) -> None:
+        environment = dict(os.environ)
+        environment["LD_CONTROLLER_RUNTIME_TEST"] = "1"
+        completed = subprocess.run(
+            [
+                "/usr/bin/python3.12",
+                "-I",
+                "-S",
+                "-B",
+                "-X",
+                "utf8",
+                "-X",
+                "pycache_prefix=/dev/null",
+                str(MODULE_PATH),
+            ],
+            cwd=ROOT,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("bootstrap inherited loader or Python environment", completed.stderr)
+        self.assertNotIn("usage:", completed.stderr)
+
     def assert_preimport_subprocess_rejected(self, setup: str) -> None:
         completed = subprocess.run(
             [
@@ -224,11 +385,14 @@ class RejectionRuntimeClosureTests(RuntimeClosureFixture):
                 self.runtime,
                 self.release,
                 expected_uid=self.uid,
+                expected_campaign_id=CAMPAIGN_ID,
                 expected_release_sha=RELEASE_SHA,
                 expected_release_tree_sha=TREE_SHA,
+                expected_held_plan_sha256=self.held_plan_sha256,
             )
 
     def test_uninventoried_runtime_file_is_rejected(self) -> None:
+        self.write_receipt()
         self.write_manifest()
         self.write_site("cryptography/extra.py", b"unexpected")
         self.assert_rejected("site-packages inventory differs")
@@ -255,41 +419,51 @@ class RejectionRuntimeClosureTests(RuntimeClosureFixture):
     def test_runtime_pth_hook_is_rejected_even_when_inventoried(self) -> None:
         self.site_files["injected.pth"] = b"/tmp/untrusted\n"
         self.write_site("injected.pth", self.site_files["injected.pth"])
+        self.write_receipt()
         self.write_manifest()
         self.assert_rejected("startup hook")
 
     def test_hidden_runtime_file_is_rejected(self) -> None:
+        self.write_receipt()
         self.write_manifest()
         self.write_site(".hidden.py", b"unexpected")
         self.assert_rejected("unsafe path")
 
     def test_tampered_release_source_is_rejected(self) -> None:
+        self.write_receipt()
         self.write_manifest()
         relative = sorted(self.sources)[0]
         self.write_release(relative, b"tampered")
         self.assert_rejected("release source digest differs")
 
     def test_tampered_release_bound_policy_is_rejected(self) -> None:
+        self.write_receipt()
         self.write_manifest()
         self.write_release(MODULE.SOURCE_POLICY_RELATIVE, b"tampered policy")
         self.assert_rejected("source policy digest differs")
 
     def test_tampered_release_bound_wheelhouse_manifest_is_rejected(self) -> None:
+        self.write_receipt()
         self.write_manifest()
         self.write_release(MODULE.WHEELHOUSE_MANIFEST_RELATIVE, b"tampered manifest")
         self.assert_rejected("wheelhouse manifest digest differs")
 
     def test_wrong_release_binding_is_rejected(self) -> None:
+        self.write_receipt()
         self.write_manifest()
         with self.assertRaisesRegex(MODULE.RuntimeClosureError, "release commit differs"):
             MODULE.attest_runtime_closure(
                 self.runtime,
                 self.release,
                 expected_uid=self.uid,
+                expected_campaign_id=CAMPAIGN_ID,
                 expected_release_sha="9" * 40,
+                expected_release_tree_sha=TREE_SHA,
+                expected_held_plan_sha256=self.held_plan_sha256,
             )
 
     def test_unexpected_runtime_root_entry_is_rejected(self) -> None:
+        self.write_receipt()
         self.write_manifest()
         extra = self.runtime / "extra"
         extra.write_bytes(b"unexpected")
@@ -306,16 +480,39 @@ class RejectionRuntimeClosureTests(RuntimeClosureFixture):
         document["runtime_binding_sha256"] = MODULE._sha256(
             {key: value for key, value in document.items() if key != "runtime_binding_sha256"}
         )
+        self.write_receipt()
         self.write_manifest(document)
         self.assert_rejected("import origins differ")
 
     def test_symlinked_runtime_file_is_rejected(self) -> None:
+        self.write_receipt()
         self.write_manifest()
         target = self.root / "target"
         target.write_bytes(b"target")
         target.chmod(0o600)
         os.symlink(target, self.site / "linked.py")
         self.assert_rejected("non-regular file")
+
+    def test_receipt_installed_file_size_and_source_member_attribution_are_rejected_when_tampered(self) -> None:
+        for field, value, message in (
+            ("size", 999999, "installed file size differs"),
+            ("source_member", "cffi/other.py", "source member attribution differs"),
+        ):
+            with self.subTest(field=field):
+                receipt = self.receipt()
+                receipt["installed_files"][0][field] = value
+                for wheel in receipt["wheels"]:
+                    attributed = [
+                        row
+                        for row in receipt["installed_files"]
+                        if row["source_wheel"] == wheel["wheel"]
+                    ]
+                    wheel["installed_files_sha256"] = MODULE._sha256(attributed)
+                receipt["receipt_sha256"] = MODULE._sha256(
+                    {key: item for key, item in receipt.items() if key != "receipt_sha256"}
+                )
+                self.write_bound_manifest_for_receipt(receipt)
+                self.assert_rejected(message)
 
 
 if __name__ == "__main__":

@@ -33,11 +33,14 @@ import re
 import stat
 import sys
 from typing import Any, Mapping, Sequence
+from uuid import UUID
 
 
 RUNTIME_CLOSURE_SCHEMA = "production-shadow-controller-runtime-closure-v1"
 RUNTIME_NAMESPACE = "production-shadow-controller-only"
 RUNTIME_MANIFEST_FILENAME = "runtime-closure-manifest.json"
+WHEEL_RECEIPT_FILENAME = "controller-wheel-installation-receipt.json"
+WHEEL_RECEIPT_SCHEMA = "production-shadow-controller-wheel-installation-receipt-v1"
 SITE_PACKAGES_DIRECTORY = "site-packages"
 SYSTEM_PYTHON = "/usr/bin/python3.12"
 EXPECTED_PYTHON_VERSION = (3, 12, 3)
@@ -50,8 +53,15 @@ SOURCE_POLICY_RELATIVE = (
     "deploy/production-shadow-controller-runtime/runtime-closure-policy.json"
 )
 WHEELHOUSE_MANIFEST_RELATIVE = (
-    "deploy/production-shadow-controller-runtime/wheelhouse.sha256"
+    "deploy/production-shadow-controller-runtime/controller-wheelhouse.sha256"
 )
+HELD_RUNTIME_PLAN_ROOT = Path("/etc/trading-bot-three-site/campaigns")
+HELD_RUNTIME_PLAN_FILENAME = "controller-runtime-closure-plan.json"
+HELD_RUNTIME_PLAN_SCHEMA = "production-shadow-controller-runtime-held-plan-v1"
+# The release-FD bootstrap is intentionally a separate checkpoint.  Until it
+# proves the exact detached Git release/tree/blob before imports, this CLI is
+# unavailable rather than accepting a path and self-claimed release values.
+HELD_FD_BOOTSTRAP_IMPLEMENTED = False
 MAX_MANIFEST_BYTES = 4 * 1024 * 1024
 MAX_RUNTIME_FILE_BYTES = 64 * 1024 * 1024
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
@@ -99,24 +109,78 @@ MANIFEST_FIELDS = frozenset(
     {
         "schema",
         "namespace",
+        "campaign_id",
         "release",
         "python",
         "source_policy_sha256",
         "wheelhouse_manifest_sha256",
+        "held_plan_sha256",
+        "wheel_input_receipt_sha256",
         "packages",
         "site_packages",
         "project_sources",
         "control_sources",
+        "wheel_installation_receipt_sha256",
         "runtime_binding_sha256",
     }
 )
 RELEASE_FIELDS = frozenset({"commit_sha", "tree_sha"})
 PYTHON_FIELDS = frozenset({"implementation", "major", "minor", "architecture"})
 SITE_FIELDS = frozenset({"path", "files", "files_sha256", "import_origins"})
+WHEEL_RECEIPT_FIELDS = frozenset(
+    {
+        "schema",
+        "namespace",
+        "campaign_id",
+        "release",
+        "source_policy_sha256",
+        "controller_wheelhouse_sha256",
+        "held_plan_sha256",
+        "wheel_input_receipt_sha256",
+        "wheels",
+        "installed_files",
+        "receipt_sha256",
+    }
+)
+WHEEL_RECEIPT_WHEEL_FIELDS = frozenset(
+    {
+        "wheel",
+        "archive_sha256",
+        "record_sha256",
+        "members_sha256",
+        "installed_files_sha256",
+    }
+)
+INSTALLED_FILE_FIELDS = frozenset(
+    {"path", "size", "sha256", "source_wheel", "source_member"}
+)
+HELD_RUNTIME_PLAN_FIELDS = frozenset(
+    {
+        "schema",
+        "campaign_id",
+        "release",
+        "source_policy_sha256",
+        "controller_wheelhouse_sha256",
+        "wheel_input_receipt_sha256",
+    }
+)
 
 
 class RuntimeClosureError(RuntimeError):
     """The controller runtime closure cannot be proven safe and exact."""
+
+
+@dataclass(frozen=True)
+class HeldRuntimePlan:
+    """One root-only external trust input for a specific controller campaign."""
+
+    campaign_id: str
+    release_sha: str
+    release_tree_sha: str
+    source_policy_sha256: str
+    wheelhouse_manifest_sha256: str
+    wheel_input_receipt_sha256: str
+    sha256: str
 
 
 @dataclass
@@ -397,6 +461,120 @@ def _require_sha40(value: Any, *, label: str) -> str:
     return value
 
 
+def _require_campaign_id(value: Any, *, label: str) -> str:
+    if not isinstance(value, str):
+        raise RuntimeClosureError(f"{label} is not a canonical UUID")
+    try:
+        parsed = UUID(value)
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise RuntimeClosureError(f"{label} is not a canonical UUID") from exc
+    if str(parsed) != value or parsed.int == 0:
+        raise RuntimeClosureError(f"{label} is not a canonical UUID")
+    return value
+
+
+def _assert_root_only_mode(metadata: os.stat_result, *, label: str, file: bool) -> None:
+    expected_mode = 0o600 if file else 0o700
+    if stat.S_IMODE(metadata.st_mode) != expected_mode:
+        raise RuntimeClosureError(f"{label} is not root-only mode {expected_mode:04o}")
+
+
+def read_held_runtime_plan(
+    campaign_id: str,
+    *,
+    expected_uid: int | None = 0,
+    plan_root: Path = HELD_RUNTIME_PLAN_ROOT,
+) -> HeldRuntimePlan:
+    """Read the fixed, root-only plan that supplies runtime trust expectations.
+
+    The plan root is deliberately not a command-line input in the public
+    verifier.  Tests may pass a temporary root explicitly, while production
+    uses the fixed campaign directory below ``/etc``.
+    """
+
+    campaign = _require_campaign_id(campaign_id, label="controller runtime campaign")
+    if not isinstance(plan_root, Path) or not plan_root.is_absolute():
+        raise RuntimeClosureError("controller runtime held plan root is invalid")
+    try:
+        canonical_root = plan_root.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeClosureError("controller runtime held plan root is unavailable") from exc
+    if canonical_root != plan_root:
+        raise RuntimeClosureError("controller runtime held plan root must be canonical")
+    root_descriptor = _open_root(
+        canonical_root,
+        label="controller runtime held plan root",
+        expected_uid=expected_uid,
+    )
+    try:
+        root_metadata = os.fstat(root_descriptor)
+        _assert_root_only_mode(
+            root_metadata,
+            label="controller runtime held plan root",
+            file=False,
+        )
+        campaign_descriptor = _open_child_directory(
+            root_descriptor,
+            campaign,
+            label="controller runtime held campaign plan directory",
+            expected_uid=expected_uid,
+        )
+        try:
+            campaign_metadata = os.fstat(campaign_descriptor)
+            _assert_root_only_mode(
+                campaign_metadata,
+                label="controller runtime held campaign plan directory",
+                file=False,
+            )
+            descriptor, before = _open_relative_regular(
+                campaign_descriptor,
+                HELD_RUNTIME_PLAN_FILENAME,
+                label="controller runtime held plan",
+                expected_uid=expected_uid,
+                maximum=MAX_MANIFEST_BYTES,
+            )
+            try:
+                _assert_root_only_mode(before, label="controller runtime held plan", file=True)
+                raw = _read_descriptor(
+                    descriptor,
+                    before,
+                    label="controller runtime held plan",
+                    maximum=MAX_MANIFEST_BYTES,
+                )
+            finally:
+                os.close(descriptor)
+        finally:
+            os.close(campaign_descriptor)
+    finally:
+        os.close(root_descriptor)
+    document = _strict_json(raw, label="controller runtime held plan")
+    if set(document) != HELD_RUNTIME_PLAN_FIELDS or document.get("schema") != HELD_RUNTIME_PLAN_SCHEMA:
+        raise RuntimeClosureError("controller runtime held plan fields differ")
+    if document.get("campaign_id") != campaign:
+        raise RuntimeClosureError("controller runtime held plan campaign differs")
+    release = document.get("release")
+    if not isinstance(release, dict) or set(release) != RELEASE_FIELDS:
+        raise RuntimeClosureError("controller runtime held plan release differs")
+    return HeldRuntimePlan(
+        campaign_id=campaign,
+        release_sha=_require_sha40(release.get("commit_sha"), label="controller runtime held plan release commit"),
+        release_tree_sha=_require_sha40(release.get("tree_sha"), label="controller runtime held plan release tree"),
+        source_policy_sha256=_require_sha256(
+            document.get("source_policy_sha256"),
+            label="controller runtime held plan source policy",
+        ),
+        wheelhouse_manifest_sha256=_require_sha256(
+            document.get("controller_wheelhouse_sha256"),
+            label="controller runtime held plan wheelhouse manifest",
+        ),
+        wheel_input_receipt_sha256=_require_sha256(
+            document.get("wheel_input_receipt_sha256"),
+            label="controller runtime held plan wheel input receipt",
+        ),
+        sha256=_sha256(raw),
+    )
+
+
 def _hash_mapping(value: Mapping[str, str]) -> str:
     return _sha256({key: value[key] for key in sorted(value)})
 
@@ -420,6 +598,10 @@ def _validate_manifest(document: Mapping[str, Any]) -> dict[str, Any]:
         raise RuntimeClosureError("runtime closure manifest fields differ")
     if document.get("schema") != RUNTIME_CLOSURE_SCHEMA or document.get("namespace") != RUNTIME_NAMESPACE:
         raise RuntimeClosureError("runtime closure manifest schema or namespace differs")
+    campaign_id = _require_campaign_id(
+        document.get("campaign_id"),
+        label="runtime closure campaign",
+    )
     release = document.get("release")
     if not isinstance(release, dict) or set(release) != RELEASE_FIELDS:
         raise RuntimeClosureError("runtime closure release binding differs")
@@ -437,6 +619,18 @@ def _validate_manifest(document: Mapping[str, Any]) -> dict[str, Any]:
         raise RuntimeClosureError("runtime closure Python binding differs")
     _require_sha256(document.get("source_policy_sha256"), label="runtime closure source policy")
     _require_sha256(document.get("wheelhouse_manifest_sha256"), label="runtime closure wheelhouse manifest")
+    held_plan_sha256 = _require_sha256(
+        document.get("held_plan_sha256"),
+        label="runtime closure held plan",
+    )
+    _require_sha256(
+        document.get("wheel_input_receipt_sha256"),
+        label="runtime closure wheel input receipt",
+    )
+    _require_sha256(
+        document.get("wheel_installation_receipt_sha256"),
+        label="runtime closure wheel installation receipt",
+    )
 
     packages = document.get("packages")
     if not isinstance(packages, list) or packages != list(REQUIRED_PACKAGES):
@@ -483,11 +677,96 @@ def _validate_manifest(document: Mapping[str, Any]) -> dict[str, Any]:
     if document.get("runtime_binding_sha256") != _sha256(unsigned):
         raise RuntimeClosureError("runtime closure binding digest differs")
     return {
+        "campaign_id": campaign_id,
         "release_sha": release_sha,
         "release_tree_sha": release_tree_sha,
+        "held_plan_sha256": held_plan_sha256,
         "site_files": normalized_files,
         "project_sources": project_sources,
     }
+
+
+def _validate_wheel_receipt(
+    document: Mapping[str, Any],
+    *,
+    manifest: Mapping[str, Any],
+    site_files: Mapping[str, str],
+    site_file_sizes: Mapping[str, int],
+) -> None:
+    if set(document) != WHEEL_RECEIPT_FIELDS:
+        raise RuntimeClosureError("controller wheel receipt fields differ")
+    if document.get("schema") != WHEEL_RECEIPT_SCHEMA or document.get("namespace") != RUNTIME_NAMESPACE:
+        raise RuntimeClosureError("controller wheel receipt schema or namespace differs")
+    if (
+        document.get("campaign_id") != manifest.get("campaign_id")
+        or document.get("release") != manifest.get("release")
+    ):
+        raise RuntimeClosureError("controller wheel receipt release binding differs")
+    if (
+        document.get("source_policy_sha256") != manifest.get("source_policy_sha256")
+        or document.get("controller_wheelhouse_sha256") != manifest.get("wheelhouse_manifest_sha256")
+        or document.get("held_plan_sha256") != manifest.get("held_plan_sha256")
+        or document.get("wheel_input_receipt_sha256") != manifest.get("wheel_input_receipt_sha256")
+    ):
+        raise RuntimeClosureError("controller wheel receipt input binding differs")
+    wheels = document.get("wheels")
+    if not isinstance(wheels, list) or len(wheels) != len(REQUIRED_PACKAGES):
+        raise RuntimeClosureError("controller wheel receipt wheel set differs")
+    expected_by_wheel = {record["wheel"]: record for record in REQUIRED_PACKAGES}
+    wheel_rows: dict[str, Mapping[str, Any]] = {}
+    for row in wheels:
+        if not isinstance(row, dict) or set(row) != WHEEL_RECEIPT_WHEEL_FIELDS:
+            raise RuntimeClosureError("controller wheel receipt wheel fields differ")
+        wheel = row.get("wheel")
+        if not isinstance(wheel, str) or wheel not in expected_by_wheel or wheel in wheel_rows:
+            raise RuntimeClosureError("controller wheel receipt wheel identity differs")
+        if row.get("archive_sha256") != expected_by_wheel[wheel]["sha256"]:
+            raise RuntimeClosureError("controller wheel receipt archive digest differs")
+        for key in ("record_sha256", "members_sha256", "installed_files_sha256"):
+            _require_sha256(row.get(key), label=f"controller wheel receipt {key}")
+        wheel_rows[wheel] = row
+    if [row.get("wheel") for row in wheels] != sorted(expected_by_wheel):
+        raise RuntimeClosureError("controller wheel receipt wheels are not sorted")
+
+    installed = document.get("installed_files")
+    if not isinstance(installed, list) or not installed:
+        raise RuntimeClosureError("controller wheel receipt installed file set differs")
+    installed_by_wheel: dict[str, list[dict[str, Any]]] = {wheel: [] for wheel in expected_by_wheel}
+    installed_hashes: dict[str, str] = {}
+    ordered_paths: list[str] = []
+    for row in installed:
+        if not isinstance(row, dict) or set(row) != INSTALLED_FILE_FIELDS:
+            raise RuntimeClosureError("controller wheel receipt installed file fields differ")
+        path = row.get("path")
+        member = row.get("source_member")
+        wheel = row.get("source_wheel")
+        if not isinstance(path, str) or not isinstance(member, str):
+            raise RuntimeClosureError("controller wheel receipt installed file path differs")
+        _safe_relative(path, label="controller wheel receipt installed file")
+        _safe_relative(member, label="controller wheel receipt source member")
+        if any(part.startswith(".") for part in PurePosixPath(path).parts):
+            raise RuntimeClosureError("controller wheel receipt installed file path is hidden")
+        if wheel not in expected_by_wheel or path in installed_hashes:
+            raise RuntimeClosureError("controller wheel receipt installed file attribution differs")
+        if member != path:
+            raise RuntimeClosureError("controller wheel receipt source member attribution differs")
+        if type(row.get("size")) is not int or row["size"] < 0:
+            raise RuntimeClosureError("controller wheel receipt installed file size differs")
+        if site_file_sizes.get(path) != row["size"]:
+            raise RuntimeClosureError("controller wheel receipt installed file size differs")
+        digest = _require_sha256(row.get("sha256"), label="controller wheel receipt installed file digest")
+        installed_hashes[path] = digest
+        installed_by_wheel[str(wheel)].append(dict(row))
+        ordered_paths.append(path)
+    if ordered_paths != sorted(ordered_paths) or installed_hashes != dict(site_files):
+        raise RuntimeClosureError("controller wheel receipt installed file inventory differs")
+    for wheel, wheel_row in wheel_rows.items():
+        rows = installed_by_wheel[wheel]
+        if not rows or wheel_row["installed_files_sha256"] != _sha256(rows):
+            raise RuntimeClosureError("controller wheel receipt wheel attribution digest differs")
+    unsigned = {key: document[key] for key in document if key != "receipt_sha256"}
+    if document.get("receipt_sha256") != _sha256(unsigned):
+        raise RuntimeClosureError("controller wheel receipt digest differs")
 
 
 def _scan_site_directory(
@@ -495,7 +774,7 @@ def _scan_site_directory(
     *,
     expected_uid: int | None,
     prefix: str = "",
-) -> dict[str, str]:
+) -> dict[str, tuple[str, int]]:
     _assert_secure_directory(
         directory_descriptor,
         label="runtime closure site-packages directory",
@@ -505,7 +784,7 @@ def _scan_site_directory(
         names = os.listdir(directory_descriptor)
     except OSError as exc:
         raise RuntimeClosureError("cannot list runtime closure site-packages directory") from exc
-    result: dict[str, str] = {}
+    result: dict[str, tuple[str, int]] = {}
     for name in sorted(names):
         if (
             not isinstance(name, str)
@@ -547,10 +826,13 @@ def _scan_site_directory(
             expected_uid=expected_uid,
         )
         try:
-            result[relative] = _hash_descriptor(
-                descriptor,
-                before,
-                label="runtime closure site-packages file",
+            result[relative] = (
+                _hash_descriptor(
+                    descriptor,
+                    before,
+                    label="runtime closure site-packages file",
+                ),
+                before.st_size,
             )
         finally:
             os.close(descriptor)
@@ -581,6 +863,30 @@ def _read_manifest_from_root(
     return _strict_json(raw, label="runtime closure manifest"), raw
 
 
+def _read_wheel_receipt_from_root(
+    runtime_root_descriptor: int,
+    *,
+    expected_uid: int | None,
+) -> tuple[dict[str, Any], bytes]:
+    descriptor, before = _open_relative_regular(
+        runtime_root_descriptor,
+        WHEEL_RECEIPT_FILENAME,
+        label="controller wheel installation receipt",
+        expected_uid=expected_uid,
+        maximum=MAX_MANIFEST_BYTES,
+    )
+    try:
+        raw = _read_descriptor(
+            descriptor,
+            before,
+            label="controller wheel installation receipt",
+            maximum=MAX_MANIFEST_BYTES,
+        )
+    finally:
+        os.close(descriptor)
+    return _strict_json(raw, label="controller wheel installation receipt"), raw
+
+
 def _verify_runtime_root_layout(
     root_descriptor: int,
     *,
@@ -595,7 +901,11 @@ def _verify_runtime_root_layout(
         names = set(os.listdir(root_descriptor))
     except OSError as exc:
         raise RuntimeClosureError("cannot list runtime closure root") from exc
-    if names != {RUNTIME_MANIFEST_FILENAME, SITE_PACKAGES_DIRECTORY}:
+    if names != {
+        RUNTIME_MANIFEST_FILENAME,
+        WHEEL_RECEIPT_FILENAME,
+        SITE_PACKAGES_DIRECTORY,
+    }:
         raise RuntimeClosureError("runtime closure root contains unexpected entries")
     return _open_child_directory(
         root_descriptor,
@@ -657,8 +967,10 @@ def attest_held_runtime_closure(
     runtime_root_descriptor: int,
     release_root_descriptor: int,
     expected_uid: int | None = 0,
-    expected_release_sha: str | None = None,
-    expected_release_tree_sha: str | None = None,
+    expected_campaign_id: str,
+    expected_release_sha: str,
+    expected_release_tree_sha: str,
+    expected_held_plan_sha256: str,
 ) -> RuntimeClosureAttestation:
     """Attest a closure via already-held no-follow directory descriptors."""
 
@@ -666,15 +978,38 @@ def attest_held_runtime_closure(
         raise RuntimeClosureError("runtime closure root descriptor is invalid")
     if type(release_root_descriptor) is not int or release_root_descriptor < 3:
         raise RuntimeClosureError("runtime closure release descriptor is invalid")
+    campaign_id = _require_campaign_id(
+        expected_campaign_id,
+        label="expected controller runtime campaign",
+    )
+    release_sha = _require_sha40(expected_release_sha, label="expected controller runtime release commit")
+    release_tree_sha = _require_sha40(
+        expected_release_tree_sha,
+        label="expected controller runtime release tree",
+    )
+    held_plan_sha256 = _require_sha256(
+        expected_held_plan_sha256,
+        label="expected controller runtime held plan",
+    )
     document, raw = _read_manifest_from_root(
         runtime_root_descriptor,
         expected_uid=expected_uid,
     )
     parsed = _validate_manifest(document)
-    if expected_release_sha is not None and parsed["release_sha"] != expected_release_sha:
+    receipt, receipt_raw = _read_wheel_receipt_from_root(
+        runtime_root_descriptor,
+        expected_uid=expected_uid,
+    )
+    if _sha256(receipt_raw) != document["wheel_installation_receipt_sha256"]:
+        raise RuntimeClosureError("runtime closure wheel installation receipt digest differs")
+    if parsed["campaign_id"] != campaign_id:
+        raise RuntimeClosureError("runtime closure campaign differs")
+    if parsed["release_sha"] != release_sha:
         raise RuntimeClosureError("runtime closure release commit differs")
-    if expected_release_tree_sha is not None and parsed["release_tree_sha"] != expected_release_tree_sha:
+    if parsed["release_tree_sha"] != release_tree_sha:
         raise RuntimeClosureError("runtime closure release tree differs")
+    if parsed["held_plan_sha256"] != held_plan_sha256:
+        raise RuntimeClosureError("runtime closure held plan differs")
     _verify_release_bound_input(
         release_root_descriptor,
         relative=SOURCE_POLICY_RELATIVE,
@@ -695,8 +1030,16 @@ def attest_held_runtime_closure(
     )
     try:
         actual_files = _scan_site_directory(site_descriptor, expected_uid=expected_uid)
-        if actual_files != parsed["site_files"]:
+        actual_file_hashes = {path: value[0] for path, value in actual_files.items()}
+        actual_file_sizes = {path: value[1] for path, value in actual_files.items()}
+        if actual_file_hashes != parsed["site_files"]:
             raise RuntimeClosureError("runtime closure site-packages inventory differs")
+        _validate_wheel_receipt(
+            receipt,
+            manifest=document,
+            site_files=parsed["site_files"],
+            site_file_sizes=actual_file_sizes,
+        )
         _verify_project_sources(
             release_root_descriptor,
             parsed["project_sources"],
@@ -849,8 +1192,10 @@ def attest_runtime_closure(
     release_root: Path,
     *,
     expected_uid: int | None = 0,
-    expected_release_sha: str | None = None,
-    expected_release_tree_sha: str | None = None,
+    expected_campaign_id: str,
+    expected_release_sha: str,
+    expected_release_tree_sha: str,
+    expected_held_plan_sha256: str,
 ) -> RuntimeClosureAttestation:
     runtime_descriptor = _open_root(
         runtime_root,
@@ -867,8 +1212,10 @@ def attest_runtime_closure(
             runtime_root_descriptor=runtime_descriptor,
             release_root_descriptor=release_descriptor,
             expected_uid=expected_uid,
+            expected_campaign_id=expected_campaign_id,
             expected_release_sha=expected_release_sha,
             expected_release_tree_sha=expected_release_tree_sha,
+            expected_held_plan_sha256=expected_held_plan_sha256,
         )
     finally:
         os.close(release_descriptor)
@@ -893,13 +1240,16 @@ def _require_isolated_startup() -> None:
         raise RuntimeClosureError("runtime closure verifier requires isolated clean Python startup")
 
 
+def _require_root_cli() -> None:
+    if os.geteuid() != 0 or os.getegid() != 0:
+        raise RuntimeClosureError("runtime closure verifier CLI requires root:root")
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime-root", type=Path, required=True)
     parser.add_argument("--release-root", type=Path, required=True)
-    parser.add_argument("--expected-uid", type=int, default=0)
-    parser.add_argument("--release-sha", required=True)
-    parser.add_argument("--release-tree-sha", required=True)
+    parser.add_argument("--campaign-id", required=True)
     parser.add_argument("--verify-import-origins", action="store_true")
     return parser
 
@@ -907,15 +1257,25 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     try:
         _require_isolated_startup()
+        require_clean_preimport_state()
+        _require_root_cli()
         args = _parser().parse_args(argv)
-        if args.expected_uid < 0:
-            raise RuntimeClosureError("runtime closure expected uid is invalid")
+        held_plan = read_held_runtime_plan(
+            args.campaign_id,
+            expected_uid=0,
+        )
+        if not HELD_FD_BOOTSTRAP_IMPLEMENTED:
+            raise RuntimeClosureError(
+                "controller runtime verifier CLI is unavailable pending held-FD exact-release bootstrap"
+            )
         attestation = attest_runtime_closure(
             args.runtime_root,
             args.release_root,
-            expected_uid=args.expected_uid,
-            expected_release_sha=args.release_sha,
-            expected_release_tree_sha=args.release_tree_sha,
+            expected_uid=0,
+            expected_campaign_id=held_plan.campaign_id,
+            expected_release_sha=held_plan.release_sha,
+            expected_release_tree_sha=held_plan.release_tree_sha,
+            expected_held_plan_sha256=held_plan.sha256,
         )
         if args.verify_import_origins:
             base_path = list(sys.path)
