@@ -173,6 +173,7 @@ class FakeRunner:
     ) -> None:
         self.fixture = fixture
         self.calls: list[list[str]] = []
+        self.release_verification_launcher_modes: list[int | None] = []
         self.remote_removed = False
         self.loaded: dict[str, dict] = dict(preexisting or {})
         runtime_characters = {
@@ -197,6 +198,9 @@ class FakeRunner:
                 release = Path(argv[-1])
                 release.mkdir(mode=0o700)
                 (release / ".git").mkdir(mode=0o700)
+            elif "checkout" in argv and "--detach" in argv:
+                release = Path(argv[argv.index("-C") + 1])
+                self.fixture.materialize_release_tree(release)
             elif argv[-2:] == ["remote", "remove"] or (
                 "remote" in argv and "remove" in argv
             ):
@@ -204,6 +208,16 @@ class FakeRunner:
             elif argv[-1] == "remote":
                 stdout = b"" if self.remote_removed else b"origin\n"
             elif argv[-1] == "--show-toplevel":
+                launcher = (
+                    self.fixture.paths["release_root"]
+                    / MODULE.CONVERGENCE_SOURCE_SET_LAUNCHER_RELATIVE
+                )
+                if launcher.exists() and not launcher.is_symlink():
+                    self.release_verification_launcher_modes.append(
+                        stat.S_IMODE(launcher.stat(follow_symlinks=False).st_mode)
+                    )
+                else:
+                    self.release_verification_launcher_modes.append(None)
                 stdout = (str(self.fixture.paths["release_root"]) + "\n").encode()
             elif argv[-1] == "HEAD^{tree}":
                 stdout = (RELEASE_TREE_SHA + "\n").encode()
@@ -276,6 +290,7 @@ class StageFixture:
         self.agent_bytes = b"#!/usr/bin/env python3\n# fixed bootstrap\n"
         self.agent_sha256 = hashlib.sha256(self.agent_bytes).hexdigest()
         secure_file(self.paths["agent"], self.agent_bytes, 0o700)
+        self.release_feature = "current"
 
         self.archives: dict[str, bytes] = {}
         self.image_bindings: dict[str, dict] = {}
@@ -305,6 +320,32 @@ class StageFixture:
 
     def close(self) -> None:
         self.stack.close()
+
+    def materialize_release_tree(self, release: Path) -> None:
+        if self.release_feature == "legacy":
+            return
+        scripts = release / "scripts"
+        scripts.mkdir(mode=0o755)
+        scripts.chmod(0o755)
+        producer = scripts / (
+            "produce_production_shadow_convergence_source_set.py"
+        )
+        launcher = scripts / "production_shadow_convergence_source_set_launcher"
+        if self.release_feature != "launcher-only":
+            secure_file(
+                producer,
+                b"#!/usr/bin/env python3\n# source-set producer\n",
+                0o644,
+            )
+        if self.release_feature == "producer-only":
+            return
+        if self.release_feature == "launcher-symlink":
+            launcher.symlink_to("/etc/passwd")
+            return
+        if self.release_feature == "launcher-fifo":
+            os.mkfifo(launcher, 0o600)
+            return
+        secure_file(launcher, b"#!/bin/sh\nexit 0\n", 0o755)
 
     def _manifest_document(self) -> dict:
         artifacts = {
@@ -481,6 +522,231 @@ class ProductionShadowFinlandStageTests(unittest.TestCase):
             "data_mutated",
         ):
             self.assertIs(attestation[field], False)
+
+    def test_current_release_installs_launcher_before_release_verification(self):
+        result = MODULE.stage_operation(
+            self.fixture.request,
+            runner=self.fixture.runner,
+        )
+
+        launcher = (
+            self.fixture.paths["release_root"]
+            / MODULE.CONVERGENCE_SOURCE_SET_LAUNCHER_RELATIVE
+        )
+        metadata = launcher.stat(follow_symlinks=False)
+        self.assertEqual(result["status"], "staged")
+        self.assertTrue(stat.S_ISREG(metadata.st_mode))
+        self.assertFalse(launcher.is_symlink())
+        self.assertEqual(metadata.st_uid, 0)
+        self.assertEqual(metadata.st_gid, 0)
+        self.assertEqual(stat.S_IMODE(metadata.st_mode), 0o700)
+        self.assertEqual(launcher.read_bytes(), b"#!/bin/sh\nexit 0\n")
+        self.assertEqual(
+            self.fixture.runner.release_verification_launcher_modes,
+            [0o700, 0o700],
+        )
+
+    def test_generic_release_verification_does_not_require_stage_launcher_mode(self):
+        release_root = self.fixture.paths["release_root"]
+        release_root.mkdir(mode=0o700)
+        (release_root / ".git").mkdir(mode=0o700)
+        self.fixture.materialize_release_tree(release_root)
+        self.fixture.runner.remote_removed = True
+        launcher = (
+            release_root / MODULE.CONVERGENCE_SOURCE_SET_LAUNCHER_RELATIVE
+        )
+
+        MODULE._verify_materialized_release(
+            release_root,
+            bundle=self.fixture.paths["incoming_root"] / "release.bundle",
+            release_sha=RELEASE_SHA,
+            release_tree_sha=RELEASE_TREE_SHA,
+            required_uid=0,
+            runner=self.fixture.runner,
+        )
+
+        self.assertEqual(
+            stat.S_IMODE(launcher.stat(follow_symlinks=False).st_mode),
+            0o755,
+        )
+
+    def test_legacy_release_without_source_set_pair_remains_stageable(self):
+        self.fixture.release_feature = "legacy"
+
+        result = MODULE.stage_operation(
+            self.fixture.request,
+            runner=self.fixture.runner,
+        )
+
+        self.assertEqual(result["status"], "staged")
+        self.assertEqual(
+            self.fixture.runner.release_verification_launcher_modes,
+            [None, None],
+        )
+
+    def test_incomplete_source_set_pair_is_rejected_before_release_verification(self):
+        self.fixture.release_feature = "producer-only"
+
+        with self.assertRaisesRegex(
+            MODULE.FinlandStageError,
+            "incomplete convergence source-set feature",
+        ):
+            MODULE.stage_operation(
+                self.fixture.request,
+                runner=self.fixture.runner,
+            )
+
+        self.assertEqual(
+            self.fixture.runner.release_verification_launcher_modes,
+            [],
+        )
+        self.assertFalse(
+            any(call[0] == MODULE.DOCKER for call in self.fixture.runner.calls)
+        )
+
+    def test_symlinked_source_set_launcher_is_rejected_before_release_verification(self):
+        self.fixture.release_feature = "launcher-symlink"
+
+        with self.assertRaisesRegex(
+            MODULE.FinlandStageError,
+            "convergence source-set launcher",
+        ):
+            MODULE.stage_operation(
+                self.fixture.request,
+                runner=self.fixture.runner,
+            )
+
+        self.assertEqual(
+            self.fixture.runner.release_verification_launcher_modes,
+            [],
+        )
+        self.assertFalse(
+            any(call[0] == MODULE.DOCKER for call in self.fixture.runner.calls)
+        )
+
+    def test_nonregular_source_set_launcher_is_rejected_before_opening_it(self):
+        self.fixture.release_feature = "launcher-fifo"
+
+        with self.assertRaisesRegex(
+            MODULE.FinlandStageError,
+            "convergence source-set launcher is unsafe",
+        ):
+            MODULE.stage_operation(
+                self.fixture.request,
+                runner=self.fixture.runner,
+            )
+
+        self.assertEqual(
+            self.fixture.runner.release_verification_launcher_modes,
+            [],
+        )
+        self.assertFalse(
+            any(call[0] == MODULE.DOCKER for call in self.fixture.runner.calls)
+        )
+
+    def test_source_set_launcher_verification_opens_nonblocking(self):
+        release_root = self.fixture.root / "nonblocking-launcher-release"
+        release_root.mkdir(mode=0o700)
+        self.fixture.materialize_release_tree(release_root)
+        launcher = (
+            release_root / MODULE.CONVERGENCE_SOURCE_SET_LAUNCHER_RELATIVE
+        )
+        launcher.chmod(0o700)
+
+        with mock.patch.object(MODULE.os, "open", wraps=os.open) as open_file:
+            self.assertTrue(
+                MODULE._verify_convergence_source_set_launcher(
+                    release_root,
+                    required_uid=0,
+                )
+            )
+
+        opens = [
+            call.args[1]
+            for call in open_file.call_args_list
+            if call.args and call.args[0] == launcher
+        ]
+        self.assertEqual(len(opens), 1)
+        self.assertNotEqual(getattr(os, "O_NONBLOCK", 0), 0)
+        self.assertTrue(opens[0] & os.O_NONBLOCK)
+
+    def test_resume_normalizes_pre_hardening_launcher_before_image_rechecks(self):
+        first = MODULE.stage_operation(
+            self.fixture.request,
+            runner=self.fixture.runner,
+        )
+        launcher = (
+            self.fixture.paths["release_root"]
+            / MODULE.CONVERGENCE_SOURCE_SET_LAUNCHER_RELATIVE
+        )
+        launcher.chmod(0o755)
+        image_loads_before = sum(
+            call[0] == MODULE.DOCKER and call[1:3] == ["image", "load"]
+            for call in self.fixture.runner.calls
+        )
+
+        resumed = MODULE.stage_operation(
+            self.fixture.request,
+            runner=self.fixture.runner,
+        )
+
+        self.assertEqual(first["status"], "staged")
+        self.assertEqual(resumed["status"], "staged")
+        self.assertEqual(
+            stat.S_IMODE(launcher.stat(follow_symlinks=False).st_mode),
+            0o700,
+        )
+        self.assertTrue(
+            all(
+                mode == 0o700
+                for mode in self.fixture.runner.release_verification_launcher_modes
+            )
+        )
+        self.assertEqual(
+            sum(
+                call[0] == MODULE.DOCKER and call[1:3] == ["image", "load"]
+                for call in self.fixture.runner.calls
+            ),
+            image_loads_before,
+        )
+
+    def test_foreign_owned_source_set_launcher_is_rejected_before_mode_change(self):
+        release_root = self.fixture.root / "foreign-owner-release"
+        release_root.mkdir(mode=0o700)
+        self.fixture.materialize_release_tree(release_root)
+        launcher = (
+            release_root / MODULE.CONVERGENCE_SOURCE_SET_LAUNCHER_RELATIVE
+        )
+        metadata = launcher.stat(follow_symlinks=False)
+        foreign_owner = os.stat_result(
+            (
+                metadata.st_mode,
+                metadata.st_ino,
+                metadata.st_dev,
+                metadata.st_nlink,
+                1,
+                1,
+                metadata.st_size,
+                metadata.st_atime,
+                metadata.st_mtime,
+                metadata.st_ctime,
+            )
+        )
+
+        with (
+            mock.patch.object(MODULE.os, "fstat", return_value=foreign_owner),
+            mock.patch.object(MODULE.os, "fchmod") as fchmod,
+            self.assertRaisesRegex(
+                MODULE.FinlandStageError,
+                "convergence source-set launcher is unsafe",
+            ),
+        ):
+            MODULE._install_convergence_source_set_launcher(
+                release_root,
+                required_uid=0,
+            )
+
+        fchmod.assert_not_called()
 
     def test_all_archive_validation_precedes_first_docker_load(self):
         archive, binding, inspect = image_archive("nginx", attack="link")
