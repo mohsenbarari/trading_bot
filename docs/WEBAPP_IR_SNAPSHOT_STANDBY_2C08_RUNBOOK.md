@@ -77,67 +77,63 @@ Use these tracked files only as schemas, then create root-only copies outside
 Git:
 
 - `deploy/production/webapp-ir-snapshot-standby-2c08.env.example`
+- `deploy/production/webapp-fi-snapshot-publisher.env.example`
 - `deploy/production/webapp-fi-snapshot-transport.json.example`
 - `deploy/production/webapp-ir-snapshot-transport.json.example`
 
-The WebApp-FI transport config contains its scoped S3 credential and the WA-IR
-public age recipient. The WebApp-IR config contains its independent scoped S3
-credential and local age identity. Neither config contains a presigned URL,
-WebApp-FI TLS key, or WA-IR application activation permission.
+The WebApp-FI source env names only local capture paths and the publisher
+config. The WebApp-FI transport config contains its scoped S3 credential, the
+WA-IR public age recipient, and a new 32-byte raw WebApp-FI Ed25519 private
+signing key. The WebApp-IR config contains its independent scoped S3
+credential, local age identity, and the matching WebApp-FI public signing key.
+Neither config contains a presigned URL, WebApp-FI TLS key, or WA-IR
+application activation permission.
 
 ## Source Capture And Publish
 
-Run this on WebApp-FI from the S3-delivered tooling directory. It uses local
-Docker reads only and leaves all containers running:
+Run the source wrapper on WebApp-FI from the S3-delivered tooling directory.
+It creates the source artifacts with local Docker reads only, requires the
+audit archive, and then invokes only the local immutable Object Storage
+publisher. It does not use SSH, SCP, SFTP, rsync, a peer HTTP receiver, or any
+other FI-to-IR transport. It leaves all application containers running.
 
 ```bash
-GENERATION="snapshot-$(date -u +%Y%m%dt%H%M%Sz)"
-python3 scripts/create_webapp_fi_snapshot_artifacts.py \
-  --output-root /srv/trading-bot-standby-data \
-  --release-sha 2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5 \
-  --alembic-revision f2c7d8e9a0b1 \
-  --generation "$GENERATION" \
-  --db-capture-env /root/secure-envs/trading-bot/webapp-fi-snapshot-reader.env \
-  --include-audit \
+python3 scripts/publish_webapp_fi_snapshot_standby.py \
+  --source-env /root/secure-envs/trading-bot/webapp-fi-snapshot-publisher.env \
+  --capture-script /srv/trading-bot-standby-tools/scripts/create_webapp_fi_snapshot_artifacts.py \
+  --transport-script /srv/trading-bot-standby-tools/scripts/manage_webapp_ir_snapshot.py \
+  --capture-python /usr/local/bin/python3 \
+  --transport-python /usr/local/bin/python3 \
   --apply --json
 ```
 
-The local `snapshot-artifacts.json` records the actual
-`source_db_snapshot_started_at`, `source_capture_completed_at`, and
-`source_database_capture.client_lifetime_seconds`. Pass those exact values to
-the publisher, never guessed timestamps or duration:
+The wrapper takes a root-only non-overlap lock, generates a new source
+generation, passes the actual local capture timestamps and read-only client
+lifetime to the publisher, and records a new root-only local receipt under
+`state/published/`. It never reconstructs timestamps from shell variables.
+Render and install
+`deploy/production/webapp-fi-snapshot-publish.service.template` and
+`deploy/production/webapp-fi-snapshot-publish.timer.template` only after their
+placeholders are locally verified. The timer and both transport configs use the
+same 15-30 second freshness bound, measured from the PostgreSQL snapshot start.
 
 ```bash
-SNAPSHOT_ARTIFACTS="/srv/trading-bot-standby-data/snapshots/$GENERATION/snapshot-artifacts.json"
-SOURCE_DB_SNAPSHOT_STARTED_AT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["source_db_snapshot_started_at"])' "$SNAPSHOT_ARTIFACTS")"
-SOURCE_CAPTURE_COMPLETED_AT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["source_capture_completed_at"])' "$SNAPSHOT_ARTIFACTS")"
-SOURCE_DB_CLIENT_LIFETIME_SECONDS="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["source_database_capture"]["client_lifetime_seconds"])' "$SNAPSHOT_ARTIFACTS")"
+python3 scripts/publish_webapp_fi_snapshot_standby.py \
+  --source-env /root/secure-envs/trading-bot/webapp-fi-snapshot-publisher.env \
+  --capture-script /srv/trading-bot-standby-tools/scripts/create_webapp_fi_snapshot_artifacts.py \
+  --transport-script /srv/trading-bot-standby-tools/scripts/manage_webapp_ir_snapshot.py \
+  --capture-python /usr/local/bin/python3 \
+  --transport-python /usr/local/bin/python3 \
+  --timer-interval-seconds 15 --json
 ```
 
-```bash
-python3 scripts/manage_webapp_ir_snapshot.py publish \
-  --config /root/secure-envs/trading-bot/webapp-fi-snapshot-transport.json \
-  --database-dump "/srv/trading-bot-standby-data/snapshots/$GENERATION/database.dump" \
-  --uploads-archive "/srv/trading-bot-standby-data/snapshots/$GENERATION/uploads.tar.gz" \
-  --audit-archive "/srv/trading-bot-standby-data/snapshots/$GENERATION/audit.tar.gz" \
-  --source-site webapp_fi --destination-site webapp_ir \
-  --generation "$GENERATION" \
-  --release-sha 2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5 \
-  --alembic-revision f2c7d8e9a0b1 \
-  --source-db-snapshot-started-at "$SOURCE_DB_SNAPSHOT_STARTED_AT" \
-  --source-capture-completed-at "$SOURCE_CAPTURE_COMPLETED_AT" \
-  --source-db-client-mode short_lived_read_only \
-  --source-db-client-lifetime-seconds "$SOURCE_DB_CLIENT_LIFETIME_SECONDS" \
-  --source-volume-capture-mode read_only_no_mutation
-```
-
-The audit flag is optional in the transport, but it is enabled above so a
-future promotion can mount the audit volume restored from the same verified
-snapshot. If it is intentionally omitted, the candidate remains fenced and
-data-ready but the promotion compose file has no empty replacement audit
-volume to mount. The publisher creates immutable encrypted database, uploads,
-audit (when supplied), and commit-manifest objects. It reads back each returned
-`VersionId`; it neither overwrites nor deletes a prior object.
+The command without `--apply` is a local plan only; it does not start Docker
+capture or contact Object Storage. With `--apply`, the publisher creates
+immutable age-encrypted database, uploads, audit, and upload-last manifest
+objects, then reads back each returned `VersionId`. It neither overwrites nor
+deletes a prior object. Every attempted local artifact set is deliberately
+retained: do not add automatic cleanup before an explicit capacity and
+recovery policy is reviewed.
 
 ## WA-IR Receive And Candidate Restore
 
