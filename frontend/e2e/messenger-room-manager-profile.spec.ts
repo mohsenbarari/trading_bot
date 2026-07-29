@@ -376,6 +376,24 @@ async function openChannelSettingsPanel(managerRoot: Locator) {
   await expect(titleInput).toBeVisible({ timeout: 30000 })
 }
 
+async function openChannelAdminsPanel(managerRoot: Locator) {
+  const adminHeading = managerOverviewHeading(managerRoot, 'مدیریت ادمین‌ها')
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (await adminHeading.isVisible().catch(() => false)) {
+      return
+    }
+    await clickManagerAction(managerRoot, 'مدیریت ادمین‌ها')
+    const reachedAdmins = await expect(adminHeading)
+      .toBeVisible({ timeout: 2000 })
+      .then(() => true)
+      .catch(() => false)
+    if (reachedAdmins) {
+      return
+    }
+  }
+  await expect(adminHeading).toBeVisible({ timeout: 30000 })
+}
+
 async function clickManagerAction(managerRoot: Locator, label: string) {
   const action = managerRoot.getByRole('button', { name: new RegExp(label) }).first()
   await expect(action).toBeVisible({ timeout: 30000 })
@@ -706,6 +724,7 @@ test.describe('Messenger room manager and public profile flows', () => {
     await expect(candidateRow).toHaveClass(/is-selected/, { timeout: 30000 })
     await expect(addMembersButton).toBeEnabled({ timeout: 30000 })
     await addMembersButton.click()
+    await expect(managerOverviewHeading(channelManager, 'اعضای کانال')).toBeVisible({ timeout: 30000 })
     await expect(channelManager.locator('.chat-user-row').filter({ hasText: candidate.accountName }).first()).toBeVisible({ timeout: 30000 })
 
     await returnToChannelOverview(channelManager)
@@ -874,7 +893,7 @@ test.describe('Messenger room manager and public profile flows', () => {
     await openNamedRoomFromRoute(page, channel.id, title)
 
     await openRoomManagerFromHeader(page, channelManager, 'مدیریت کانال')
-    await clickManagerAction(channelManager, 'مدیریت ادمین‌ها')
+    await openChannelAdminsPanel(channelManager)
 
     const promotableRow = channelManager.locator('.chat-user-row').filter({ hasText: candidateOne.accountName }).first()
     await promotableRow.getByRole('button', { name: 'ارتقا به ادمین' }).click()
