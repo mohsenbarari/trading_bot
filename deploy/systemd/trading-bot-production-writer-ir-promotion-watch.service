@@ -1,0 +1,16 @@
+[Unit]
+Description=GoldTrade WebApp-IR automatic Writer Witness promotion watcher
+After=network-online.target docker.service trading-bot-production-writer-lease-guard.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/srv/trading-bot-three-site/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5
+ExecStart=/usr/bin/python3 /srv/trading-bot-three-site/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5/scripts/production_writer_lease_agent.py --config /etc/trading-bot-three-site/production-writer-lease-agent.json promote-watch --restore-receipt /var/lib/trading-bot-three-site/snapshots/latest-restore-receipt.json --proof-directory /var/lib/trading-bot-three-site/promotion-proofs --poll-seconds 2
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=10s
+
+[Install]
+WantedBy=multi-user.target

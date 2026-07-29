@@ -1,0 +1,16 @@
+[Unit]
+Description=GoldTrade Bot-FI passive Writer Witness lease follower
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/srv/trading-bot-three-site/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5
+ExecStart=/usr/bin/python3 /srv/trading-bot-three-site/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5/scripts/production_writer_lease_agent.py --config /etc/trading-bot-three-site/bot-fi-writer-lease-follower.json guard
+Restart=always
+RestartSec=2s
+TimeoutStopSec=10s
+
+[Install]
+WantedBy=multi-user.target
