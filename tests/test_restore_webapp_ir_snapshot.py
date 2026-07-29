@@ -52,6 +52,18 @@ def write_upload_archive(path: Path, *, unsafe_link: bool = False) -> None:
     os.chmod(path, 0o600)
 
 
+def write_audit_archive(path: Path) -> None:
+    with tarfile.open(path, "w:gz") as archive:
+        directory = tarfile.TarInfo("audit_trail")
+        directory.type = tarfile.DIRTYPE
+        archive.addfile(directory)
+        body = b'{"audit":true}\n'
+        entry = tarfile.TarInfo("audit_trail/audit.jsonl")
+        entry.size = len(body)
+        archive.addfile(entry, io.BytesIO(body))
+    os.chmod(path, 0o600)
+
+
 class RestoreWebappIrSnapshotTests(unittest.TestCase):
     def make_inputs(self, root: Path) -> tuple[Path, Path, Path]:
         data_root = root / "standby-data"
@@ -267,6 +279,8 @@ class RestoreWebappIrSnapshotTests(unittest.TestCase):
                 table_count=1,
                 upload_members=1,
                 upload_bytes=1,
+                audit_members=None,
+                audit_bytes=None,
                 maximum_snapshot_age_seconds=30,
                 source_db_snapshot_age_seconds=1,
             )
@@ -279,6 +293,31 @@ class RestoreWebappIrSnapshotTests(unittest.TestCase):
         self.assertEqual(
             updated["receipt_sha256"], MODULE.canonical_payload_sha256(updated, omit="receipt_sha256")
         )
+
+    def test_optional_audit_archive_is_bound_and_planned_for_its_own_volume(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            standby_env, receipt_path, _ = self.make_inputs(root)
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            audit = receipt_path.parent / "audit.tar.gz"
+            write_audit_archive(audit)
+            receipt["audit_archive_path"] = str(audit)
+            receipt["audit"] = {
+                "sha256": sha256(audit),
+                "bytes": audit.stat().st_size,
+                "format": "tar_gz_audit_trail_root",
+            }
+            receipt["receipt_sha256"] = hashlib.sha256(
+                json.dumps({key: value for key, value in receipt.items() if key != "receipt_sha256"}, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+            ).hexdigest()
+            secure_write(receipt_path, json.dumps(receipt).encode("utf-8"))
+            payload = MODULE.execute(
+                MODULE.build_parser().parse_args(
+                    ["--standby-env", str(standby_env), "--receipt", str(receipt_path)]
+                )
+            )
+        self.assertEqual(payload["audit"]["status"], "planned")
+        self.assertEqual(payload["candidate"]["audit_volume"], "trading_bot_wa_ir_audit_snapshot-20260729-0001")
 
 
 if __name__ == "__main__":

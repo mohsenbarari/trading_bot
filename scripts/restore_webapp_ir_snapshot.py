@@ -45,6 +45,7 @@ ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 VOLUME_LABEL = "com.goldtrade.webapp-ir.snapshot"
 VOLUME_PREFIX = "trading_bot_wa_ir_"
 DEFAULT_MAX_UPLOAD_BYTES = 20 * 1024 * 1024 * 1024
+DEFAULT_MAX_AUDIT_BYTES = 2 * 1024 * 1024 * 1024
 
 
 class RestoreError(RuntimeError):
@@ -78,6 +79,7 @@ class SnapshotReceipt:
     staged_candidate_directory: Path
     database: Artifact
     uploads: Artifact
+    audit: Artifact | None
     raw: dict[str, Any]
     receipt_sha256: str
 
@@ -87,11 +89,13 @@ class Candidate:
     generation: str
     db_volume: str
     uploads_volume: str
+    audit_volume: str
     db_container: str
     compose_project: str
     root: Path
     db_path: Path
     uploads_path: Path
+    audit_path: Path
 
 
 def utc_now() -> str:
@@ -343,6 +347,17 @@ def load_receipt(path: Path, *, workspace_root: Path) -> SnapshotReceipt:
         database_magic = database_handle.read(5)
     if database_magic != b"PGDMP":
         raise RestoreError("database artifact is not a PostgreSQL custom dump")
+    audit: Artifact | None = None
+    has_audit = "audit" in payload or "audit_archive_path" in payload
+    if has_audit:
+        audit_payload = payload.get("audit")
+        if not isinstance(audit_payload, dict):
+            raise RestoreError("snapshot-ready receipt audit artifact is malformed")
+        audit_payload = dict(audit_payload)
+        audit_payload["path"] = require_text(payload, "audit_archive_path", label="snapshot-ready receipt")
+        audit = artifact_from_payload(audit_payload, label="audit artifact", workspace_root=workspace_root)
+        if audit.format != "tar_gz_audit_trail_root":
+            raise RestoreError("audit artifact must use tar_gz_audit_trail_root format")
     return SnapshotReceipt(
         snapshot_id=snapshot_id,
         source_site=source_site,
@@ -361,43 +376,78 @@ def load_receipt(path: Path, *, workspace_root: Path) -> SnapshotReceipt:
         staged_candidate_directory=staged_candidate_directory,
         database=database,
         uploads=uploads,
+        audit=audit,
         raw=payload,
         receipt_sha256=hashlib.sha256(raw_bytes).hexdigest(),
     )
 
 
-def validate_upload_archive(path: Path, *, max_uncompressed_bytes: int) -> tuple[int, int]:
+def validate_rooted_archive(
+    path: Path,
+    *,
+    root_name: str,
+    max_uncompressed_bytes: int,
+    label: str,
+) -> tuple[int, int]:
     member_count = 0
     total_bytes = 0
     try:
         archive = tarfile.open(path, mode="r:gz")
     except (tarfile.TarError, OSError) as exc:
-        raise RestoreError("uploads artifact is not a readable gzip tar archive") from exc
+        raise RestoreError(f"{label} artifact is not a readable gzip tar archive") from exc
     with archive:
         for member in archive:
             name = PurePosixPath(member.name)
             if name.is_absolute() or ".." in name.parts or not name.parts:
-                raise RestoreError("uploads archive contains an unsafe member path")
-            if name.parts[0] != "uploads":
-                raise RestoreError("uploads archive must be rooted at uploads/")
+                raise RestoreError(f"{label} archive contains an unsafe member path")
+            if name.parts[0] != root_name:
+                raise RestoreError(f"{label} archive must be rooted at {root_name}/")
             if not (member.isdir() or member.isreg()):
-                raise RestoreError("uploads archive may not contain links or special files")
+                raise RestoreError(f"{label} archive may not contain links or special files")
             if member.isreg():
                 member_count += 1
                 total_bytes += member.size
                 if total_bytes > max_uncompressed_bytes:
-                    raise RestoreError("uploads archive exceeds the configured uncompressed size limit")
+                    raise RestoreError(f"{label} archive exceeds the configured uncompressed size limit")
     return member_count, total_bytes
 
 
-def extract_upload_archive(path: Path, destination: Path) -> tuple[int, int]:
-    """Extract a prevalidated uploads/ archive without tarfile.extractall()."""
+def validate_upload_archive(path: Path, *, max_uncompressed_bytes: int) -> tuple[int, int]:
+    return validate_rooted_archive(
+        path,
+        root_name="uploads",
+        max_uncompressed_bytes=max_uncompressed_bytes,
+        label="uploads",
+    )
+
+
+def validate_audit_archive(path: Path, *, max_uncompressed_bytes: int) -> tuple[int, int]:
+    return validate_rooted_archive(
+        path,
+        root_name="audit_trail",
+        max_uncompressed_bytes=max_uncompressed_bytes,
+        label="audit",
+    )
+
+
+def extract_rooted_archive(
+    path: Path,
+    destination: Path,
+    *,
+    root_name: str,
+    label: str,
+) -> tuple[int, int]:
+    """Extract a prevalidated root directory without tarfile.extractall()."""
 
     member_count = 0
     total_bytes = 0
     with tarfile.open(path, mode="r:gz") as archive:
         for member in archive:
             relative = PurePosixPath(member.name)
+            if relative.is_absolute() or ".." in relative.parts or not relative.parts or relative.parts[0] != root_name:
+                raise RestoreError(f"{label} archive changed after validation")
+            if not (member.isdir() or member.isreg()):
+                raise RestoreError(f"{label} archive contains an unsupported member during extraction")
             target_parts = relative.parts[1:]
             if not target_parts:
                 continue
@@ -409,13 +459,21 @@ def extract_upload_archive(path: Path, destination: Path) -> tuple[int, int]:
             target.parent.mkdir(parents=True, exist_ok=True)
             source = archive.extractfile(member)
             if source is None:
-                raise RestoreError("uploads archive member could not be opened")
+                raise RestoreError(f"{label} archive member could not be opened")
             with source, target.open("xb") as handle:
                 shutil.copyfileobj(source, handle, length=1024 * 1024)
             os.chmod(target, member.mode & 0o777)
             member_count += 1
             total_bytes += member.size
     return member_count, total_bytes
+
+
+def extract_upload_archive(path: Path, destination: Path) -> tuple[int, int]:
+    return extract_rooted_archive(path, destination, root_name="uploads", label="uploads")
+
+
+def extract_audit_archive(path: Path, destination: Path) -> tuple[int, int]:
+    return extract_rooted_archive(path, destination, root_name="audit_trail", label="audit")
 
 
 def require_absolute_directory(path_value: str, *, label: str) -> Path:
@@ -445,11 +503,13 @@ def build_candidate(data_root: Path, generation: str) -> Candidate:
         generation=generation,
         db_volume=f"{VOLUME_PREFIX}pg_{generation}",
         uploads_volume=f"{VOLUME_PREFIX}uploads_{generation}",
+        audit_volume=f"{VOLUME_PREFIX}audit_{generation}",
         db_container=f"trading_bot_wa_ir_snapshot_db_{generation}",
         compose_project=f"trading_bot_wa_ir_snapshot_{generation}",
         root=root,
         db_path=root / "postgresql",
         uploads_path=root / "uploads",
+        audit_path=root / "audit_trail",
     )
 
 
@@ -669,6 +729,7 @@ def build_restore_marker(*, receipt: SnapshotReceipt, candidate: Candidate) -> d
             "generation": candidate.generation,
             "db_volume": candidate.db_volume,
             "uploads_volume": candidate.uploads_volume,
+            "audit_volume": candidate.audit_volume if receipt.audit is not None else None,
             "db_container": candidate.db_container,
             "compose_project": candidate.compose_project,
         },
@@ -783,10 +844,12 @@ def candidate_payload(
     table_count: int,
     upload_members: int,
     upload_bytes: int,
+    audit_members: int | None,
+    audit_bytes: int | None,
     maximum_snapshot_age_seconds: int,
     source_db_snapshot_age_seconds: float,
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "status": "ready",
         "created_at": utc_now(),
@@ -815,6 +878,7 @@ def candidate_payload(
             "generation": candidate.generation,
             "db_volume": candidate.db_volume,
             "uploads_volume": candidate.uploads_volume,
+            "audit_volume": candidate.audit_volume if receipt.audit is not None else None,
             "db_container": candidate.db_container,
             "compose_project": candidate.compose_project,
         },
@@ -850,6 +914,24 @@ def candidate_payload(
             "restore_marker_path": str(receipt.staged_candidate_directory / "snapshot-restore.json"),
         },
     }
+    if receipt.audit is None:
+        payload["audit"] = {"status": "not_provided"}
+    else:
+        if audit_members is None or audit_bytes is None:
+            raise RestoreError("audit receipt requires validated audit extraction evidence")
+        payload["audit"] = {
+            "sha256": receipt.audit.sha256,
+            "bytes": receipt.audit.byte_count,
+            "format": receipt.audit.format,
+            "member_count": audit_members,
+            "uncompressed_bytes": audit_bytes,
+            "status": "verified",
+        }
+        payload["object_storage"]["audit"] = {
+            key: receipt.raw["audit"].get(key)
+            for key in ("object_key", "version_id", "ciphertext_sha256", "ciphertext_bytes")
+        }
+    return payload
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -862,6 +944,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--keep-previous-running", action="store_true", help="do not stop the prior labelled candidate DB")
     parser.add_argument("--database-timeout-seconds", type=int, default=120)
     parser.add_argument("--max-upload-bytes", type=int, default=DEFAULT_MAX_UPLOAD_BYTES)
+    parser.add_argument("--max-audit-bytes", type=int, default=DEFAULT_MAX_AUDIT_BYTES)
     parser.add_argument("--json", action="store_true")
     return parser
 
@@ -890,8 +973,8 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             location.relative_to(data_root)
         except ValueError as exc:
             raise RestoreError(f"{label} must be below WA_IR_STANDBY_DATA_ROOT") from exc
-    if args.max_upload_bytes < 1:
-        raise RestoreError("max-upload-bytes must be positive")
+    if args.max_upload_bytes < 1 or args.max_audit_bytes < 1:
+        raise RestoreError("max-upload-bytes and max-audit-bytes must be positive")
     receipt = load_receipt(Path(args.receipt), workspace_root=workspace_root)
     if receipt.release_sha != release_sha:
         raise RestoreError("receipt release_sha does not match the pinned standby release")
@@ -903,6 +986,12 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     upload_members, upload_bytes = validate_upload_archive(
         receipt.uploads.path, max_uncompressed_bytes=args.max_upload_bytes
     )
+    audit_members: int | None = None
+    audit_bytes: int | None = None
+    if receipt.audit is not None:
+        audit_members, audit_bytes = validate_audit_archive(
+            receipt.audit.path, max_uncompressed_bytes=args.max_audit_bytes
+        )
     generation = (args.generation or receipt.snapshot_id).lower()
     candidate = build_candidate(data_root, generation)
     if candidate.root.exists():
@@ -954,11 +1043,17 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             "generation": candidate.generation,
             "db_volume": candidate.db_volume,
             "uploads_volume": candidate.uploads_volume,
+            "audit_volume": candidate.audit_volume if receipt.audit is not None else None,
             "db_container": candidate.db_container,
             "compose_project": candidate.compose_project,
         },
         "validated_upload_members": upload_members,
         "validated_upload_uncompressed_bytes": upload_bytes,
+        "audit": {
+            "status": "planned" if receipt.audit is not None else "not_provided",
+            "validated_members": audit_members,
+            "validated_uncompressed_bytes": audit_bytes,
+        },
         "app_started": False,
         "direct_sync_started": False,
         "migration_started": False,
@@ -967,7 +1062,10 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     if not args.apply:
         return plan
 
-    if not docker_volume_absent(runner, candidate.db_volume) or not docker_volume_absent(runner, candidate.uploads_volume):
+    volume_names = [candidate.db_volume, candidate.uploads_volume]
+    if receipt.audit is not None:
+        volume_names.append(candidate.audit_volume)
+    if any(not docker_volume_absent(runner, name) for name in volume_names):
         raise RestoreError("candidate volume already exists")
     if not docker_container_absent(runner, candidate.db_container):
         raise RestoreError("candidate database container already exists")
@@ -975,11 +1073,21 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     candidate.root.mkdir(parents=True, mode=0o700)
     candidate.db_path.mkdir(mode=0o700)
     candidate.uploads_path.mkdir(mode=0o700)
+    if receipt.audit is not None:
+        candidate.audit_path.mkdir(mode=0o700)
     create_bound_volume(runner, name=candidate.db_volume, device=candidate.db_path, generation=candidate.generation)
     create_bound_volume(runner, name=candidate.uploads_volume, device=candidate.uploads_path, generation=candidate.generation)
+    if receipt.audit is not None:
+        create_bound_volume(runner, name=candidate.audit_volume, device=candidate.audit_path, generation=candidate.generation)
     extracted_members, extracted_bytes = extract_upload_archive(receipt.uploads.path, candidate.uploads_path)
     if (extracted_members, extracted_bytes) != (upload_members, upload_bytes):
         raise RestoreError("uploads extraction did not match its prevalidated manifest")
+    extracted_audit_members: int | None = None
+    extracted_audit_bytes: int | None = None
+    if receipt.audit is not None:
+        extracted_audit_members, extracted_audit_bytes = extract_audit_archive(receipt.audit.path, candidate.audit_path)
+        if (extracted_audit_members, extracted_audit_bytes) != (audit_members, audit_bytes):
+            raise RestoreError("audit extraction did not match its prevalidated manifest")
     runner.run(["docker", "image", "inspect", postgres_image])
     runner.run(["docker", "compose", "version"])
     runner.run(
@@ -1020,6 +1128,8 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         table_count=table_count,
         upload_members=extracted_members,
         upload_bytes=extracted_bytes,
+        audit_members=extracted_audit_members,
+        audit_bytes=extracted_audit_bytes,
         maximum_snapshot_age_seconds=maximum_snapshot_age_seconds,
         source_db_snapshot_age_seconds=require_receipt_freshness(
             receipt, maximum_age_seconds=maximum_snapshot_age_seconds

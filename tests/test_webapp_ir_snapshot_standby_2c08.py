@@ -32,6 +32,8 @@ class WebappIrSnapshotStandby2c08Tests(unittest.TestCase):
         self.assertEqual(text.count('profiles: ["promoted"]'), 3)
         self.assertIn('TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"', text)
         self.assertIn('BACKGROUND_JOBS_ENABLED: "false"', text)
+        self.assertIn("WA_IR_CANDIDATE_AUDIT_VOLUME", text)
+        self.assertIn("candidate_audit_data:/app/audit_trail", text)
         self.assertIn("127.0.0.1:${WA_IR_APP_LOCAL_PORT:-18000}:8000", text)
         self.assertNotIn("sync_worker", text)
         self.assertNotIn("migration", text)

@@ -52,6 +52,7 @@ class CreateWebappFiSnapshotArtifactsTests(unittest.TestCase):
         self.assertEqual(payload["remote_transfer"], "none")
         self.assertFalse(payload["services_stopped"])
         self.assertFalse(payload["source_data_mutated"])
+        self.assertFalse(payload["audit_included"])
 
     def test_invalid_container_name_is_rejected_before_docker(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -84,6 +85,7 @@ class CreateWebappFiSnapshotArtifactsTests(unittest.TestCase):
             database = root / "database.dump"
             database.write_bytes(b"PGDMPfixture")
             uploads = root / "uploads.tar.gz"
+            audit = root / "audit.tar.gz"
             import tarfile
             import io
 
@@ -94,12 +96,20 @@ class CreateWebappFiSnapshotArtifactsTests(unittest.TestCase):
                 entry = tarfile.TarInfo("uploads/file.txt")
                 entry.size = 1
                 archive.addfile(entry, io.BytesIO(b"x"))
+            with tarfile.open(audit, "w:gz") as archive:
+                directory = tarfile.TarInfo("audit_trail")
+                directory.type = tarfile.DIRTYPE
+                archive.addfile(directory)
+                entry = tarfile.TarInfo("audit_trail/audit.jsonl")
+                entry.size = 2
+                archive.addfile(entry, io.BytesIO(b"{}"))
             payload = MODULE.make_manifest(
                 generation="snapshot-20260729-0001",
                 release_sha="2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5",
                 alembic_revision="f2c7d8e9a0b1",
                 database=database,
                 uploads=uploads,
+                audit=audit,
                 source_db_snapshot_started_at="2026-07-29T00:00:00Z",
                 source_capture_completed_at="2026-07-29T00:00:01Z",
                 source_db_client_lifetime_seconds=1,
@@ -111,6 +121,11 @@ class CreateWebappFiSnapshotArtifactsTests(unittest.TestCase):
         self.assertEqual(payload["source_database_capture"]["client_mode"], "short_lived_read_only")
         self.assertEqual(payload["source_db_snapshot_started_at"], "2026-07-29T00:00:00Z")
         self.assertEqual(payload["source_capture_completed_at"], "2026-07-29T00:00:01Z")
+        self.assertEqual(payload["audit"]["format"], "tar_gz_audit_trail_root")
+
+    def test_client_lifetime_uses_ceil_and_never_underreports(self) -> None:
+        self.assertEqual(MODULE.conservative_client_lifetime_seconds(300.0001), 301)
+        self.assertEqual(MODULE.conservative_client_lifetime_seconds(0.001), 1)
 
 
 if __name__ == "__main__":

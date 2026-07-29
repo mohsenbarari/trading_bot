@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -25,12 +26,14 @@ from typing import Any, Sequence
 
 from restore_webapp_ir_snapshot import (
     ALEMBIC_RE,
+    DEFAULT_MAX_AUDIT_BYTES,
     DEFAULT_MAX_UPLOAD_BYTES,
     GENERATION_RE,
     RELEASE_RE,
     RestoreError,
     parse_env_file,
     sha256_file,
+    validate_audit_archive,
     validate_upload_archive,
 )
 
@@ -47,6 +50,14 @@ def utc_now() -> str:
 def default_generation() -> str:
     stamp = datetime.now(timezone.utc).strftime("snapshot-%Y%m%dt%H%M%Sz")
     return f"{stamp}-{uuid.uuid4().hex[:12]}"
+
+
+def conservative_client_lifetime_seconds(elapsed_seconds: float) -> int:
+    """Report a client lifetime without ever rounding a partial second down."""
+
+    if elapsed_seconds < 0:
+        raise RestoreError("source pg_dump duration cannot be negative")
+    return max(1, math.ceil(elapsed_seconds))
 
 
 def require_container_name(value: str, *, label: str) -> str:
@@ -183,13 +194,14 @@ def make_manifest(
     alembic_revision: str,
     database: Path,
     uploads: Path,
+    audit: Path | None,
     source_db_snapshot_started_at: str,
     source_capture_completed_at: str,
     source_db_client_lifetime_seconds: int,
 ) -> dict[str, Any]:
     database_sha, database_bytes = sha256_file(database)
     uploads_sha, uploads_bytes = sha256_file(uploads)
-    return {
+    payload: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "status": "ready",
         "snapshot_id": generation,
@@ -221,6 +233,16 @@ def make_manifest(
             "format": "tar_gz_uploads_root",
         },
     }
+    if audit is not None:
+        audit_sha, audit_bytes = sha256_file(audit)
+        payload["audit_archive_path"] = str(audit)
+        payload["audit"] = {
+            "path": str(audit),
+            "sha256": audit_sha,
+            "bytes": audit_bytes,
+            "format": "tar_gz_audit_trail_root",
+        }
+    return payload
 
 
 def write_manifest(path: Path, payload: dict[str, Any]) -> None:
@@ -243,8 +265,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--db-container", default="trading_bot_db")
     parser.add_argument("--app-container", default="trading_bot_app")
     parser.add_argument("--db-capture-env", required=True, help="root-only CAPTURE_DB_USER/PASSWORD for a read-only role")
+    parser.add_argument("--include-audit", action="store_true", help="also capture /app/audit_trail read-only")
     parser.add_argument("--attempts", type=int, default=3)
     parser.add_argument("--max-upload-bytes", type=int, default=DEFAULT_MAX_UPLOAD_BYTES)
+    parser.add_argument("--max-audit-bytes", type=int, default=DEFAULT_MAX_AUDIT_BYTES)
     parser.add_argument("--apply", action="store_true", help="write local artifacts; default is a no-Docker plan")
     parser.add_argument("--json", action="store_true")
     return parser
@@ -262,8 +286,8 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         raise RestoreError("generation is not safe")
     if args.attempts < 1 or args.attempts > 5:
         raise RestoreError("attempts must be between 1 and 5")
-    if args.max_upload_bytes < 1:
-        raise RestoreError("max-upload-bytes must be positive")
+    if args.max_upload_bytes < 1 or args.max_audit_bytes < 1:
+        raise RestoreError("max-upload-bytes and max-audit-bytes must be positive")
     output_root = require_output_root(args.output_root)
     db_container = require_container_name(args.db_container, label="db-container")
     app_container = require_container_name(args.app_container, label="app-container")
@@ -284,6 +308,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         "source_app_container": app_container,
         "source_database_capture": {"client_mode": "short_lived_read_only"},
         "source_volume_capture": {"mode": "read_only_no_mutation"},
+        "audit_included": bool(args.include_audit),
         "remote_transfer": "none",
         "services_stopped": False,
         "source_data_mutated": False,
@@ -298,10 +323,14 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         raise RestoreError("source Alembic revision does not match the pinned production schema")
     database = artifact_dir / "database.dump"
     uploads = artifact_dir / "uploads.tar.gz"
+    audit = artifact_dir / "audit.tar.gz" if args.include_audit else None
     source_db_snapshot_started_at = ""
     source_capture_completed_at = ""
     for attempt in range(1, args.attempts + 1):
-        for temporary in (database, uploads):
+        temporary_artifacts = [database, uploads]
+        if audit is not None:
+            temporary_artifacts.append(audit)
+        for temporary in temporary_artifacts:
             temporary.unlink(missing_ok=True)
         capture_started = time.monotonic()
         # This is the conservative RPO clock.  It must be as close as possible
@@ -317,7 +346,9 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             input_bytes=capture_password,
             timeout=900,
         )
-        source_db_client_lifetime_seconds = max(1, int(round(time.monotonic() - capture_started)))
+        source_db_client_lifetime_seconds = conservative_client_lifetime_seconds(
+            time.monotonic() - capture_started
+        )
         if source_db_client_lifetime_seconds > 300:
             raise RestoreError("source read-only pg_dump exceeded the 300-second lifetime bound")
         os.chmod(database, 0o600)
@@ -339,6 +370,21 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             )
             os.chmod(uploads, 0o600)
             validate_upload_archive(uploads, max_uncompressed_bytes=args.max_upload_bytes)
+            if audit is not None:
+                run_capture(
+                    [
+                        "docker",
+                        "exec",
+                        app_container,
+                        "sh",
+                        "-ec",
+                        "test -d /app/audit_trail && exec tar -C /app -czf - audit_trail",
+                    ],
+                    stdout_path=audit,
+                    timeout=900,
+                )
+                os.chmod(audit, 0o600)
+                validate_audit_archive(audit, max_uncompressed_bytes=args.max_audit_bytes)
             source_capture_completed_at = utc_now()
         except RestoreError:
             if attempt == args.attempts:
@@ -357,6 +403,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         alembic_revision=revision,
         database=database,
         uploads=uploads,
+        audit=audit,
         source_db_snapshot_started_at=source_db_snapshot_started_at,
         source_capture_completed_at=source_capture_completed_at,
         source_db_client_lifetime_seconds=source_db_client_lifetime_seconds,

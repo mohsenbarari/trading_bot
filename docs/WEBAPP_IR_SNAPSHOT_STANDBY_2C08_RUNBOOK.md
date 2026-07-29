@@ -12,8 +12,9 @@ staging image or migration chain.
 
 ## Fixed Boundary
 
-1. WebApp-FI creates a local PostgreSQL custom dump and an `uploads/` gzip
-   archive with a short-lived read-only database role.
+1. WebApp-FI creates a local PostgreSQL custom dump, an `uploads/` gzip
+   archive, and, when requested, an `audit_trail/` gzip archive. The database
+   role is short-lived and read-only; the volume archives are tar reads only.
 2. `manage_webapp_ir_snapshot.py publish` age-encrypts each artifact and an
    upload-last commit manifest, then uses only private, versioned Arvan Object
    Storage. It never uses an FI-to-IR peer address, SCP, SFTP, rsync, or a
@@ -97,6 +98,7 @@ python3 scripts/create_webapp_fi_snapshot_artifacts.py \
   --alembic-revision f2c7d8e9a0b1 \
   --generation "$GENERATION" \
   --db-capture-env /root/secure-envs/trading-bot/webapp-fi-snapshot-reader.env \
+  --include-audit \
   --apply --json
 ```
 
@@ -117,6 +119,7 @@ python3 scripts/manage_webapp_ir_snapshot.py publish \
   --config /root/secure-envs/trading-bot/webapp-fi-snapshot-transport.json \
   --database-dump "/srv/trading-bot-standby-data/snapshots/$GENERATION/database.dump" \
   --uploads-archive "/srv/trading-bot-standby-data/snapshots/$GENERATION/uploads.tar.gz" \
+  --audit-archive "/srv/trading-bot-standby-data/snapshots/$GENERATION/audit.tar.gz" \
   --source-site webapp_fi --destination-site webapp_ir \
   --generation "$GENERATION" \
   --release-sha 2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5 \
@@ -128,9 +131,13 @@ python3 scripts/manage_webapp_ir_snapshot.py publish \
   --source-volume-capture-mode read_only_no_mutation
 ```
 
-The publisher creates exactly immutable encrypted database, uploads, and
-commit-manifest objects. It reads back each returned `VersionId`; it neither
-overwrites nor deletes a prior object.
+The audit flag is optional in the transport, but it is enabled above so a
+future promotion can mount the audit volume restored from the same verified
+snapshot. If it is intentionally omitted, the candidate remains fenced and
+data-ready but the promotion compose file has no empty replacement audit
+volume to mount. The publisher creates immutable encrypted database, uploads,
+audit (when supplied), and commit-manifest objects. It reads back each returned
+`VersionId`; it neither overwrites nor deletes a prior object.
 
 ## WA-IR Receive And Candidate Restore
 
