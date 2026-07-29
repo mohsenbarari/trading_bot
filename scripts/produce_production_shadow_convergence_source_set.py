@@ -43,7 +43,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.secure_file_io import SecureFileError, read_secure_bytes, write_secure_new_bytes  # noqa: E402
-from core.sync_parity import business_snapshot_fingerprint, compare_parity_snapshots  # noqa: E402
+from core.production_shadow_parity import (  # noqa: E402
+    business_snapshot_fingerprint,
+    compare_parity_snapshots,
+)
 from scripts import orchestrate_production_shadow_convergence_gate as BRIDGE  # noqa: E402
 from scripts import production_shadow_convergence_observer_worker as WORKER  # noqa: E402
 from scripts import production_shadow_convergence_blob_roundtrip as BLOB_ROUNDTRIP  # noqa: E402
