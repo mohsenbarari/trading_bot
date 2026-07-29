@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
+from sqlalchemy.sql.elements import TextClause
 
 from core.enums import ChatMemberRole, ChatMembershipStatus, ChatType
 from core.services.chat_room_service import (
@@ -62,12 +63,14 @@ class FakeExecuteResult:
 class FakeDB:
     def __init__(self, execute_results=None):
         self.execute_results = list(execute_results or [])
+        self.executed_statements = []
         self.added = []
         self.flush = AsyncMock(side_effect=self._flush)
         self.commit = AsyncMock()
         self.refresh = AsyncMock()
 
     async def execute(self, _stmt, *_args, **_kwargs):
+        self.executed_statements.append(_stmt)
         if not self.execute_results:
             raise AssertionError("Unexpected execute() call")
         return self.execute_results.pop(0)
@@ -503,6 +506,8 @@ class ChatRoomServiceRoomSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chat.title, "اطلاع\u001dرسانی")
         self.assertEqual(db.added, [])
         db.flush.assert_not_awaited()
+        self.assertNotIsInstance(db.executed_statements[1], TextClause)
+        self.assertIn("pg_try_advisory_xact_lock", str(db.executed_statements[1]))
 
 
 if __name__ == "__main__":
