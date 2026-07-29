@@ -83,16 +83,36 @@ def write_proof(directory: Path, proof: dict, *, suffix: str = "d" * 64) -> Path
     return path
 
 
+def write_listener_receipt(directory: Path, proof: dict, *, activated_at: datetime) -> Path:
+    path = directory / "webapp-ir-promoted-listener.json"
+    payload = {
+        "schema": "gold-trade-wa-ir-promoted-listener-activation-v1",
+        "status": "reloaded",
+        "release_sha": proof["release_sha"],
+        "server_name": "coin.gold-trade.ir",
+        "loopback_upstream": "http://127.0.0.1:18000",
+        "site_config_sha256": "e" * 64,
+        "certificate_sha256": "f" * 64,
+        "activated_at": activated_at.isoformat(),
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    path.chmod(0o600)
+    return path
+
+
 class RouteWebappIrFromPromotionProofTests(unittest.TestCase):
     def test_selects_latest_fresh_proof_and_routes_after_readback(self) -> None:
         now = datetime(2026, 7, 29, tzinfo=timezone.utc)
         fake = FakeApi()
         with tempfile.TemporaryDirectory() as tmpdir:
             directory = Path(tmpdir) / "proofs"
-            write_proof(directory, proof_for(now))
+            proof = proof_for(now - timedelta(seconds=32))
+            write_proof(directory, proof)
+            listener_receipt = write_listener_receipt(directory, proof, activated_at=now)
 
             result = route_from_latest_proof(
                 proof_directory=directory,
+                listener_receipt=listener_receipt,
                 token="secret",
                 apply=True,
                 request_fn=fake,
@@ -109,10 +129,11 @@ class RouteWebappIrFromPromotionProofTests(unittest.TestCase):
         fake = FakeApi()
         with tempfile.TemporaryDirectory() as tmpdir:
             directory = Path(tmpdir) / "proofs"
-            write_proof(directory, proof_for(now - timedelta(seconds=31), age_seconds=2))
+            write_proof(directory, proof_for(now - timedelta(seconds=121), age_seconds=2))
 
             result = route_from_latest_proof(
                 proof_directory=directory,
+                listener_receipt=directory / "webapp-ir-promoted-listener.json",
                 token="secret",
                 apply=True,
                 request_fn=fake,
@@ -120,6 +141,31 @@ class RouteWebappIrFromPromotionProofTests(unittest.TestCase):
             )
 
         self.assertEqual(result, {"status": "no_fresh_promotion_proof", "applied": False})
+        self.assertEqual(fake.calls, [])
+
+    def test_refuses_to_route_without_a_fresh_listener_receipt(self) -> None:
+        now = datetime(2026, 7, 29, tzinfo=timezone.utc)
+        fake = FakeApi()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            directory = Path(tmpdir) / "proofs"
+            proof = proof_for(now - timedelta(seconds=32))
+            write_proof(directory, proof)
+            listener_receipt = write_listener_receipt(
+                directory,
+                proof,
+                activated_at=now - timedelta(seconds=31),
+            )
+
+            with self.assertRaisesRegex(PromotionRouteError, "listener receipt is stale"):
+                route_from_latest_proof(
+                    proof_directory=directory,
+                    listener_receipt=listener_receipt,
+                    token="secret",
+                    apply=True,
+                    request_fn=fake,
+                    now=now,
+                )
+
         self.assertEqual(fake.calls, [])
 
     def test_rejects_group_readable_proof_file(self) -> None:

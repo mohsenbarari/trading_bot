@@ -88,6 +88,40 @@ def _proof(*, site: str, epoch: int = 6) -> dict:
     }
 
 
+def _active_snapshot(*, receipt: dict, receipt_path: Path) -> dict:
+    snapshot_id = receipt["snapshot_id"]
+    return {
+        "schema_version": "gold-trade-snapshot-restore-receipt-v1",
+        "status": "ready",
+        "source_site": receipt["source_site"],
+        "destination_site": receipt["destination_site"],
+        "source_generation": receipt["source_generation"],
+        "snapshot_id": snapshot_id,
+        "release_sha": receipt["release_sha"],
+        "alembic_revision": receipt["alembic_revision"],
+        "source_db_snapshot_started_at": receipt["source_db_snapshot_started_at"],
+        "source_capture_completed_at": receipt["source_capture_completed_at"],
+        "published_at": receipt["published_at"],
+        "ready_at": receipt["ready_at"],
+        "audit": {"status": "verified"},
+        "candidate": {
+            "generation": snapshot_id,
+            "db_volume": f"trading_bot_wa_ir_pg_{snapshot_id}",
+            "uploads_volume": f"trading_bot_wa_ir_uploads_{snapshot_id}",
+            "audit_volume": f"trading_bot_wa_ir_audit_{snapshot_id}",
+            "db_container": f"trading_bot_wa_ir_snapshot_db_{snapshot_id}",
+            "compose_project": f"trading_bot_wa_ir_snapshot_{snapshot_id}",
+        },
+        "witness_restore_receipt": {
+            "path": str(receipt_path),
+            "receipt_sha256": receipt["receipt_sha256"],
+            "stage_receipt_sha256": receipt["stage_receipt_sha256"],
+            "source_generation": receipt["source_generation"],
+            "snapshot_id": snapshot_id,
+        },
+    }
+
+
 class ProductionWriterLeaseAgentTests(unittest.TestCase):
     def _config(
         self,
@@ -96,22 +130,38 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
         site: str,
         mode: str = "writer",
         services: list[str] | None = None,
+        lease_duration_seconds: int | None = None,
+        safety_margin_seconds: int | None = None,
+        renew_interval_seconds: int | None = None,
     ) -> agent.AgentConfig:
         secret = directory / "witness.secret"
         public_key = directory / "witness.pub"
+        promotion_env = directory / "promotion.env"
         config_path = directory / "agent.json"
         _write_private(secret, "s" * 32)
         _write_private(public_key, base64.b64encode(b"p" * 32).decode("ascii"))
+        _write_private(promotion_env, "WA_IR_PROMOTION_RUNTIME_ENV_FILE=/root/secure-envs/wa-ir.env\n")
+        is_ir_writer = mode == "writer" and site == "webapp_ir"
+        default_lease_duration = 60 if is_ir_writer else 180
+        default_safety_margin = 15
+        default_renew_interval = 10 if is_ir_writer else 30
         config = {
             "schema": agent.AGENT_SCHEMA,
             "mode": mode,
             "site": site,
             "lease_file": str(directory / "writer-lease.json") if mode == "writer" else None,
             "runtime": {
-                "compose_file": str(directory / "isolated-compose.yml"),
-                "env_file": None,
+                "compose_file": str(agent.WA_IR_PROMOTED_COMPOSE_FILE) if is_ir_writer else str(directory / "isolated-compose.yml"),
+                "env_file": str(promotion_env) if is_ir_writer else None,
+                "selection_env_file": (
+                    str(directory / "selected-candidate.env")
+                    if is_ir_writer
+                    else None
+                ),
                 "services": services if services is not None else (
-                    ["app", "sync_worker"] if mode == "writer" else ["bot", "sync_worker"]
+                    (["db", "redis", "app"] if is_ir_writer else ["app", "sync_worker"])
+                    if mode == "writer"
+                    else ["bot", "sync_worker"]
                 ),
             },
             "witness": {
@@ -121,9 +171,21 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                 "public_key_file": str(public_key),
                 "ca_bundle": None,
                 "timeout_seconds": 2,
-                "lease_duration_seconds": 180,
-                "safety_margin_seconds": 15,
-                "renew_interval_seconds": 30,
+                "lease_duration_seconds": (
+                    default_lease_duration
+                    if lease_duration_seconds is None
+                    else lease_duration_seconds
+                ),
+                "safety_margin_seconds": (
+                    default_safety_margin
+                    if safety_margin_seconds is None
+                    else safety_margin_seconds
+                ),
+                "renew_interval_seconds": (
+                    default_renew_interval
+                    if renew_interval_seconds is None
+                    else renew_interval_seconds
+                ),
             },
         }
         _write_private(config_path, json.dumps(config))
@@ -131,8 +193,19 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
 
     def test_config_requires_exactly_app_and_sync_worker(self):
         with tempfile.TemporaryDirectory() as raw:
-            with self.assertRaisesRegex(agent.ProductionWriterLeaseAgentError, "unsupported|writer mode"):
+            with self.assertRaisesRegex(agent.ProductionWriterLeaseAgentError, "unsupported|WebApp-FI writer"):
                 self._config(Path(raw), site="webapp_fi", services=["app"])
+
+    def test_ir_config_requires_pinned_emergency_lease_timing(self):
+        with tempfile.TemporaryDirectory() as raw:
+            with self.assertRaisesRegex(agent.ProductionWriterLeaseAgentError, "pinned 60/15/10"):
+                self._config(
+                    Path(raw),
+                    site="webapp_ir",
+                    lease_duration_seconds=180,
+                    safety_margin_seconds=15,
+                    renew_interval_seconds=30,
+                )
 
     def test_bootstrap_writes_lease_and_starts_only_scoped_services(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -233,7 +306,7 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                 "writer_epoch": 4,
                 "lease_id": "lease-4",
                 "issued_at": now.isoformat(),
-                "expires_at": (now + timedelta(seconds=180)).isoformat(),
+                "expires_at": (now + timedelta(seconds=60)).isoformat(),
                 "witness_transition_id": "transition-4",
             }
             signature = private_key.sign(canonical_json_bytes(unsigned))
@@ -345,6 +418,7 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                 "runtime": {
                     "compose_file": str(directory / "isolated-compose.yml"),
                     "env_file": None,
+                    "selection_env_file": None,
                     "services": ["bot", "sync_worker"],
                 },
                 "witness": {
@@ -388,26 +462,31 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
             config = self._config(directory, site="webapp_ir")
             receipt_path = directory / "restore-receipt.json"
             proof_path = directory / "promotion-proof.json"
+            active_snapshot_path = directory / "active-snapshot.json"
+            receipt = _restore_receipt(
+                source_site="webapp_fi",
+                destination_site="webapp_ir",
+                published_at=datetime.now(timezone.utc) - timedelta(seconds=4),
+            )
+            _write_private(receipt_path, json.dumps(receipt))
             _write_private(
-                receipt_path,
-                json.dumps(
-                    _restore_receipt(
-                        source_site="webapp_fi",
-                        destination_site="webapp_ir",
-                        published_at=datetime.now(timezone.utc) - timedelta(seconds=4),
-                    )
-                ),
+                active_snapshot_path,
+                json.dumps(_active_snapshot(receipt=receipt, receipt_path=receipt_path)),
             )
             witness_proof = _proof(site="webapp_ir", epoch=9)
             with (
                 mock.patch.object(agent, "_acquire_proof", return_value=witness_proof) as acquire,
+                mock.patch.object(agent, "_assert_existing_promoted_runtime_matches_selection") as existing,
+                mock.patch.object(agent, "_stop_selected_snapshot_db", return_value=True) as stop_snapshot,
                 mock.patch.object(agent, "_start_scoped_runtime") as start,
+                mock.patch.object(agent, "_renew_activation_proof", return_value=witness_proof) as renew,
             ):
                 result = agent.activate_from_snapshot(
                     config,
                     action="promote_ir",
                     operation_id="93877f06-2671-4d78-b1f8-2c79bf759755",
                     restore_receipt=receipt_path,
+                    active_snapshot=active_snapshot_path,
                     proof_output=proof_path,
                 )
 
@@ -416,24 +495,39 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
             self.assertEqual(proof["target_site"], "webapp_ir")
             self.assertEqual(proof["epoch"], 9)
             acquire.assert_called_once()
+            self.assertFalse(acquire.call_args.kwargs["persist_lease"])
+            existing.assert_called_once()
+            stop_snapshot.assert_called_once()
             start.assert_called_once_with(config)
+            renew.assert_called_once()
             self.assertEqual(os.stat(proof_path).st_mode & 0o777, 0o600)
+            self.assertEqual(
+                (
+                    "WA_IR_CANDIDATE_AUDIT_VOLUME=trading_bot_wa_ir_audit_snapshot-1\n"
+                    "WA_IR_CANDIDATE_DB_VOLUME=trading_bot_wa_ir_pg_snapshot-1\n"
+                    "WA_IR_CANDIDATE_UPLOADS_VOLUME=trading_bot_wa_ir_uploads_snapshot-1\n"
+                    "WA_IR_REDIS_VOLUME_NAME=trading_bot_wa_ir_redis_snapshot-1\n"
+                ),
+                config.runtime.selection_env_file.read_text(encoding="ascii"),
+            )
 
     def test_ir_promotion_rejects_stale_receipt_before_witness_transition(self):
         with tempfile.TemporaryDirectory() as raw:
             directory = Path(raw)
             config = self._config(directory, site="webapp_ir")
             receipt_path = directory / "restore-receipt.json"
+            active_snapshot_path = directory / "active-snapshot.json"
             _write_private(
                 receipt_path,
                 json.dumps(
                     _restore_receipt(
                         source_site="webapp_fi",
                         destination_site="webapp_ir",
-                        published_at=datetime.now(timezone.utc) - timedelta(seconds=31),
+                        published_at=datetime.now(timezone.utc) - timedelta(seconds=151),
                     )
                 ),
             )
+            _write_private(active_snapshot_path, "{}")
             with mock.patch.object(agent, "_acquire_proof") as acquire:
                 with self.assertRaisesRegex(agent.ProductionWriterLeaseAgentError, "cannot support"):
                     agent.activate_from_snapshot(
@@ -441,6 +535,35 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                         action="promote_ir",
                         operation_id="8adcb08f-7fa2-467c-ae59-e5379745a2e7",
                         restore_receipt=receipt_path,
+                        active_snapshot=active_snapshot_path,
+                        proof_output=directory / "promotion-proof.json",
+                    )
+
+            acquire.assert_not_called()
+
+    def test_ir_promotion_rejects_an_unbound_active_snapshot_before_witness_transition(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            config = self._config(directory, site="webapp_ir")
+            receipt_path = directory / "restore-receipt.json"
+            active_snapshot_path = directory / "active-snapshot.json"
+            receipt = _restore_receipt(
+                source_site="webapp_fi",
+                destination_site="webapp_ir",
+                published_at=datetime.now(timezone.utc) - timedelta(seconds=4),
+            )
+            _write_private(receipt_path, json.dumps(receipt))
+            pointer = _active_snapshot(receipt=receipt, receipt_path=receipt_path)
+            pointer["witness_restore_receipt"]["receipt_sha256"] = "0" * 64
+            _write_private(active_snapshot_path, json.dumps(pointer))
+            with mock.patch.object(agent, "_acquire_proof") as acquire:
+                with self.assertRaisesRegex(agent.ProductionWriterLeaseAgentError, "does not bind"):
+                    agent.activate_from_snapshot(
+                        config,
+                        action="promote_ir",
+                        operation_id="3ee0a982-3595-4a3d-b2a0-5963d3c7ef03",
+                        restore_receipt=receipt_path,
+                        active_snapshot=active_snapshot_path,
                         proof_output=directory / "promotion-proof.json",
                     )
 
@@ -451,12 +574,17 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
             directory = Path(raw)
             config = self._config(directory, site="webapp_ir")
             receipt_path = directory / "restore-receipt.json"
+            active_snapshot_path = directory / "active-snapshot.json"
             payload = _restore_receipt(
                 source_site="webapp_fi",
                 destination_site="webapp_ir",
                 published_at=datetime.now(timezone.utc) - timedelta(seconds=4),
             )
             _write_private(receipt_path, json.dumps(payload))
+            _write_private(
+                active_snapshot_path,
+                json.dumps(_active_snapshot(receipt=payload, receipt_path=receipt_path)),
+            )
             expected_operation = agent._automatic_operation_id(
                 action="promote_ir", receipt_sha256=payload["receipt_sha256"]
             )
@@ -468,6 +596,7 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                 result = agent.promote_watch(
                     config,
                     restore_receipt=receipt_path,
+                    active_snapshot=active_snapshot_path,
                     proof_directory=directory / "promotion-proofs",
                     poll_seconds=2,
                     once=True,
@@ -478,6 +607,7 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
             self.assertEqual(
                 activate.call_args.kwargs["expected_receipt_sha256"], payload["receipt_sha256"]
             )
+            self.assertEqual(activate.call_args.kwargs["active_snapshot"], active_snapshot_path)
 
 
 if __name__ == "__main__":

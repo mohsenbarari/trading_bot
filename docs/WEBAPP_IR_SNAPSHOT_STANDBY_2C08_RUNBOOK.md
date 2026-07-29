@@ -208,6 +208,24 @@ matching new receipt; the independent promotion controller must reject the
 latter. Do not enable this path until that controller enforces the pointer
 binding and source-fencing policy.
 
+## Bounded Emergency Term
+
+The standby pointer remains strict: source snapshot start through verified
+WA-IR restore readiness must take no more than 30 seconds.  Promotion permits
+that verified pointer to age only through the bounded former-writer hand-off,
+local snapshot DB stop, promoted runtime health check, listener reload, and
+route change; it rejects any candidate older than 150 seconds at route time.
+This is a refusal boundary, not an expected recovery point.
+
+Use the root-only
+`deploy/production/production-writer-lease-agent.webapp-ir.json.example` as
+the shape of the WA-IR writer config.  Its `60/15/10` term is valid only when
+the Witness service independently pins acquire and renew requests to 60
+seconds.  The snapshot refresh env must set `WA_IR_WRITER_LEASE_FILE` once
+that agent is installed; refresh checks it before download and again before
+restore, so a live local WA-IR writer cannot have its selected candidate
+replaced.
+
 ## TLS And Fenced Listener
 
 Use the constrained DNS-01-only

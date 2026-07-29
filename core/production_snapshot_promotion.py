@@ -20,7 +20,21 @@ from uuid import UUID
 
 RESTORE_RECEIPT_SCHEMA = "gold-trade-snapshot-restore-receipt-v1"
 PROMOTION_PROOF_SCHEMA = "gold-trade-writer-promotion-proof-v1"
-MAX_PROMOTION_SNAPSHOT_AGE_SECONDS = 30
+# A candidate may only become the active WA-IR standby pointer when it was
+# fully staged within this bound.  This measures source snapshot start through
+# local restore readiness, so an old Object Storage artifact cannot be made
+# acceptable by a later pointer update.
+MAX_STAGED_SNAPSHOT_AGE_SECONDS = 30
+
+# A real partition must first let the former Writer Witness term expire before
+# WA-IR can acquire its own term.  The activation bound is deliberately wider
+# than the staging bound to cover that bounded lease hand-off and local health
+# checks, while still rejecting a long-idle standby candidate.
+# Worst case: a 30-second-old active pointer, the 60-second former-writer
+# term, a bounded 25-second refresh cycle, then the fenced DB/app/local-route
+# hand-off.  This is not a staging target; it is the final refusal boundary.
+MAX_PROMOTION_SNAPSHOT_AGE_SECONDS = 150
+MIN_PROMOTION_LEASE_REMAINING_SECONDS = 5
 MAX_RECEIPT_FUTURE_SKEW = timedelta(seconds=5)
 HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 RELEASE_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -179,9 +193,10 @@ def parse_restore_receipt(
 ) -> SnapshotRestoreReceipt:
     """Validate one explicit, fresh Object Storage restore direction.
 
-    Promotion accepts only a source DB snapshot start no older than 30 seconds.
-    Failback additionally pins the final IR source generation, preventing a
-    route back to FI based on an earlier IR snapshot.
+    Promotion accepts only a candidate staged within 30 seconds and an
+    activation whose source DB snapshot remains inside the bounded recovery
+    window.  Failback additionally pins the final IR source generation,
+    preventing a route back to FI based on an earlier IR snapshot.
     """
 
     expected_fields = {
@@ -272,9 +287,16 @@ def parse_restore_receipt(
         )
     ):
         raise SnapshotPromotionError("snapshot restore receipt is in the future")
+    staged_age = max(0, math.ceil((ready_at - source_db_snapshot_started_at).total_seconds()))
+    if staged_age > MAX_STAGED_SNAPSHOT_AGE_SECONDS:
+        raise SnapshotPromotionError(
+            "snapshot restore receipt was not staged within the 30 second standby bound"
+        )
     actual_age = max(0, math.ceil((current - source_db_snapshot_started_at).total_seconds()))
     if actual_age > MAX_PROMOTION_SNAPSHOT_AGE_SECONDS:
-        raise SnapshotPromotionError("snapshot restore receipt exceeds the 30 second promotion RPO")
+        raise SnapshotPromotionError(
+            "snapshot restore receipt exceeds the 150 second promotion recovery window"
+        )
     return SnapshotRestoreReceipt(
         source_site=source_site,
         destination_site=destination_site,
@@ -429,6 +451,11 @@ def validate_promotion_proof(
     unsigned = {key: value for key, value in payload.items() if key != "proof_sha256"}
     if hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest() != payload["proof_sha256"]:
         raise SnapshotPromotionError("promotion proof hash is invalid")
+    staged_age = max(0, math.ceil((snapshot_ready_at - source_db_snapshot_started_at).total_seconds()))
+    if staged_age > MAX_STAGED_SNAPSHOT_AGE_SECONDS:
+        raise SnapshotPromotionError(
+            "promotion proof was not staged within the 30 second standby bound"
+        )
     if now is not None:
         current = now.astimezone(timezone.utc)
         if (
@@ -442,10 +469,13 @@ def validate_promotion_proof(
                     issued_at,
                 )
             )
-            or lease_expires_at <= current
+            or lease_expires_at
+            <= current + timedelta(seconds=MIN_PROMOTION_LEASE_REMAINING_SECONDS)
         ):
-            raise SnapshotPromotionError("promotion proof Witness term is not live")
+            raise SnapshotPromotionError("promotion proof Witness term is not safely live")
         actual_age = max(0, math.ceil((current - source_db_snapshot_started_at).total_seconds()))
         if actual_age > MAX_PROMOTION_SNAPSHOT_AGE_SECONDS:
-            raise SnapshotPromotionError("promotion proof exceeds the 30 second DB snapshot RPO")
+            raise SnapshotPromotionError(
+                "promotion proof exceeds the 150 second DB snapshot recovery window"
+            )
     return dict(payload)

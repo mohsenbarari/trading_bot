@@ -6,6 +6,7 @@ import unittest
 
 from core.production_snapshot_promotion import (
     MAX_PROMOTION_SNAPSHOT_AGE_SECONDS,
+    MAX_STAGED_SNAPSHOT_AGE_SECONDS,
     PROMOTION_PROOF_SCHEMA,
     SnapshotPromotionError,
     build_promotion_proof,
@@ -95,19 +96,50 @@ class SnapshotPromotionTests(unittest.TestCase):
             published_at=NOW - timedelta(seconds=MAX_PROMOTION_SNAPSHOT_AGE_SECONDS + 1)
         )
 
-        with self.assertRaisesRegex(SnapshotPromotionError, "30 second"):
+        with self.assertRaisesRegex(SnapshotPromotionError, "150 second"):
             parse_restore_receipt(payload, action="promote_ir", now=NOW)
 
     def test_promotion_uses_db_snapshot_start_not_later_publication(self):
-        payload = restore_receipt(published_at=NOW - timedelta(seconds=2))
+        payload = restore_receipt(published_at=NOW - timedelta(seconds=140))
         payload["source_db_snapshot_started_at"] = (
             NOW - timedelta(seconds=MAX_PROMOTION_SNAPSHOT_AGE_SECONDS + 1)
         ).isoformat()
-        payload["source_capture_completed_at"] = (NOW - timedelta(seconds=3)).isoformat()
+        payload["source_capture_completed_at"] = (NOW - timedelta(seconds=150)).isoformat()
+        payload["ready_at"] = (NOW - timedelta(seconds=121)).isoformat()
+        payload["restored_at"] = (NOW - timedelta(seconds=120)).isoformat()
+        payload["restore_verified_at"] = (NOW - timedelta(seconds=119)).isoformat()
         unsigned = {key: value for key, value in payload.items() if key != "receipt_sha256"}
         payload["receipt_sha256"] = hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
 
-        with self.assertRaisesRegex(SnapshotPromotionError, "30 second"):
+        with self.assertRaisesRegex(SnapshotPromotionError, "150 second"):
+            parse_restore_receipt(payload, action="promote_ir", now=NOW)
+
+    def test_promotion_accepts_a_recently_staged_candidate_after_lease_handoff(self):
+        payload = restore_receipt(published_at=NOW - timedelta(seconds=60))
+        payload["source_db_snapshot_started_at"] = (NOW - timedelta(seconds=90)).isoformat()
+        payload["source_capture_completed_at"] = (NOW - timedelta(seconds=89)).isoformat()
+        payload["ready_at"] = (NOW - timedelta(seconds=60)).isoformat()
+        payload["restored_at"] = (NOW - timedelta(seconds=59)).isoformat()
+        payload["restore_verified_at"] = (NOW - timedelta(seconds=58)).isoformat()
+        unsigned = {key: value for key, value in payload.items() if key != "receipt_sha256"}
+        payload["receipt_sha256"] = hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
+
+        receipt = parse_restore_receipt(payload, action="promote_ir", now=NOW)
+
+        self.assertEqual(receipt.snapshot_age_seconds, 90)
+
+    def test_promotion_rejects_a_candidate_that_took_too_long_to_stage(self):
+        payload = restore_receipt(published_at=NOW - timedelta(seconds=30))
+        payload["ready_at"] = (NOW - timedelta(seconds=1)).isoformat()
+        payload["restored_at"] = NOW.isoformat()
+        payload["restore_verified_at"] = (NOW + timedelta(seconds=1)).isoformat()
+        unsigned = {key: value for key, value in payload.items() if key != "receipt_sha256"}
+        payload["receipt_sha256"] = hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
+
+        with self.assertRaisesRegex(
+            SnapshotPromotionError,
+            f"{MAX_STAGED_SNAPSHOT_AGE_SECONDS} second standby bound",
+        ):
             parse_restore_receipt(payload, action="promote_ir", now=NOW)
 
     def test_failback_requires_exact_final_ir_generation(self):
@@ -169,8 +201,11 @@ class SnapshotPromotionTests(unittest.TestCase):
             "lease-8",
         )
 
-        with self.assertRaisesRegex(SnapshotPromotionError, "DB snapshot RPO"):
-            validate_promotion_proof(proof, now=NOW + timedelta(seconds=20))
+        with self.assertRaisesRegex(SnapshotPromotionError, "DB snapshot recovery window"):
+            validate_promotion_proof(
+                proof,
+                now=NOW + timedelta(seconds=MAX_PROMOTION_SNAPSHOT_AGE_SECONDS),
+            )
 
         proof["target_site"] = "webapp_fi"
         with self.assertRaisesRegex(SnapshotPromotionError, "direction"):

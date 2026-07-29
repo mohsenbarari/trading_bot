@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
 """Host-level Writer Witness lease agent for the legacy 2c08 production app.
 
-It never touches databases, volumes, images, or routes.  Writer mode starts
-or stops only ``app`` and ``sync_worker``.  Passive observer mode starts
-nothing and may stop only configured ``bot``/``sync_worker`` plus ``app`` if
-that host explicitly declares it writable.  The FI writer and Bot-FI follower
-therefore fail closed before the local term can expire, while IR promotion can
-start its isolated app stack after receiving the next term.
+The normal FI writer starts only ``app`` and ``sync_worker``.  The passive
+Bot-FI observer starts nothing and may stop only its explicitly configured
+``bot``/``sync_worker`` scope.  WA-IR is deliberately different: after a
+fresh, hash-bound restore receipt it can stop only the validated no-network
+snapshot database container and start its own isolated ``db``/``redis``/``app``
+Compose project.  It never starts a legacy direct-sync worker, and a failed
+promotion returns the verified snapshot DB to its no-network warm state.
 """
 
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import base64
+import fcntl
 import hashlib
 import hmac
 import json
@@ -26,7 +29,7 @@ import stat
 import subprocess
 import sys
 import time
-from typing import Any
+from typing import Any, Iterator
 from urllib import error as urlerror
 from urllib import request as urlrequest
 from urllib.parse import urlsplit
@@ -54,6 +57,19 @@ WITNESS_STATUS_PATH = "/v1/writer-witness/status"
 MAX_FILE_BYTES = 128 * 1024
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 PATH_RE = re.compile(r"^/[A-Za-z0-9._/-]+$")
+DOCKER_RESOURCE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+DOCKER_CONTAINER_ID_RE = re.compile(r"^[0-9a-f]{12,64}$")
+WA_IR_PROMOTION_PROJECT_NAME = "trading_bot_wa_ir_promoted_2c08"
+WA_IR_PROMOTION_PROFILE = "promoted"
+WA_IR_EMERGENCY_LEASE_DURATION_SECONDS = 60
+WA_IR_EMERGENCY_SAFETY_MARGIN_SECONDS = 15
+WA_IR_EMERGENCY_RENEW_INTERVAL_SECONDS = 10
+WA_IR_PROMOTION_HEALTH_TIMEOUT_SECONDS = 20
+WA_IR_PROMOTION_HEALTH_POLL_SECONDS = 2
+WA_IR_PROMOTION_LOCK_TIMEOUT_SECONDS = 30
+WA_IR_PROMOTED_COMPOSE_FILE = (
+    REPO_ROOT / "deploy/production/docker-compose.webapp-ir-promoted-2c08.yml"
+).resolve()
 
 
 class ProductionWriterLeaseAgentError(RuntimeError):
@@ -68,6 +84,7 @@ class WriterWitnessUnavailable(ProductionWriterLeaseAgentError):
 class RuntimeConfig:
     compose_file: Path
     env_file: Path | None
+    selection_env_file: Path | None
     services: tuple[str, ...]
 
 
@@ -92,6 +109,17 @@ class AgentConfig:
     lease_file: Path | None
     runtime: RuntimeConfig
     witness: WitnessConfig
+
+
+@dataclass(frozen=True)
+class PromotionRuntimeSelection:
+    db_volume: str
+    uploads_volume: str
+    audit_volume: str
+    db_container: str
+    compose_project: str
+    redis_volume: str
+    release_sha: str
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -231,40 +259,61 @@ def _load_config(path: Path) -> AgentConfig:
         lease_file = None
 
     runtime_raw = raw.get("runtime")
-    runtime_fields = {"compose_file", "env_file", "services"}
+    runtime_fields = {"compose_file", "env_file", "selection_env_file", "services"}
     if not isinstance(runtime_raw, dict) or set(runtime_raw) != runtime_fields:
         raise ProductionWriterLeaseAgentError("managed runtime config is invalid")
     compose_file = _absolute(runtime_raw.get("compose_file"), label="compose file")
     env_value = runtime_raw.get("env_file")
     env_file = _absolute(env_value, label="runtime env file") if env_value is not None else None
+    selection_value = runtime_raw.get("selection_env_file")
+    selection_env_file = (
+        _absolute(selection_value, label="runtime selection env file")
+        if selection_value is not None
+        else None
+    )
     services_raw = runtime_raw.get("services")
     if (
         not isinstance(services_raw, list)
         or not services_raw
         or not all(isinstance(service, str) for service in services_raw)
         or len(set(services_raw)) != len(services_raw)
-        or set(services_raw) not in (
-            {"app", "sync_worker"},
-            {"bot", "sync_worker"},
-            {"app", "bot", "sync_worker"},
-        )
     ):
         raise ProductionWriterLeaseAgentError(
             "managed runtime contains an unsupported writable service scope"
         )
-    if mode == "writer" and set(services_raw) != {"app", "sync_worker"}:
-        raise ProductionWriterLeaseAgentError("writer mode must manage app and sync_worker")
-    if mode == "observer" and set(services_raw) not in (
-        {"bot", "sync_worker"},
-        {"app", "bot", "sync_worker"},
+    if mode == "writer" and site == "webapp_fi" and services_raw != ["app", "sync_worker"]:
+        raise ProductionWriterLeaseAgentError("WebApp-FI writer must manage only app and sync_worker")
+    if mode == "writer" and site == "webapp_ir" and services_raw != ["db", "redis", "app"]:
+        raise ProductionWriterLeaseAgentError(
+            "WebApp-IR writer must manage only the isolated db, redis, and app stack"
+        )
+    if mode == "observer" and services_raw not in (
+        ["bot", "sync_worker"],
+        ["app", "bot", "sync_worker"],
     ):
         raise ProductionWriterLeaseAgentError(
             "observer mode must manage bot and sync_worker, with app only when writable"
         )
+    if mode == "observer" and selection_env_file is not None:
+        raise ProductionWriterLeaseAgentError("observer mode must not configure a runtime selection env file")
+    if mode == "writer" and site == "webapp_ir" and selection_env_file is None:
+        raise ProductionWriterLeaseAgentError(
+            "WebApp-IR writer mode requires a runtime selection env file"
+        )
+    if mode == "writer" and site == "webapp_ir":
+        if compose_file.resolve() != WA_IR_PROMOTED_COMPOSE_FILE:
+            raise ProductionWriterLeaseAgentError(
+                "WebApp-IR writer must use the pinned isolated promotion compose file"
+            )
+        if env_file is None:
+            raise ProductionWriterLeaseAgentError(
+                "WebApp-IR writer requires its root-only promotion environment"
+            )
     runtime = RuntimeConfig(
         compose_file=compose_file,
         env_file=env_file,
-        services=tuple(sorted(services_raw)),
+        selection_env_file=selection_env_file,
+        services=tuple(services_raw),
     )
 
     witness_raw = raw.get("witness")
@@ -324,6 +373,14 @@ def _load_config(path: Path) -> AgentConfig:
         or interval + margin >= duration
     ):
         raise ProductionWriterLeaseAgentError("Witness lease timing is unsafe")
+    if mode == "writer" and site == "webapp_ir" and (
+        duration != WA_IR_EMERGENCY_LEASE_DURATION_SECONDS
+        or margin != WA_IR_EMERGENCY_SAFETY_MARGIN_SECONDS
+        or interval != WA_IR_EMERGENCY_RENEW_INTERVAL_SECONDS
+    ):
+        raise ProductionWriterLeaseAgentError(
+            "WebApp-IR must use the pinned 60/15/10 emergency Witness lease timing"
+        )
     return AgentConfig(
         mode=mode,
         site=site,
@@ -707,30 +764,221 @@ def _write_new_json(path: Path, *, payload: dict[str, Any], label: str) -> None:
         os.close(directory_fd)
 
 
-def _compose(config: AgentConfig, *, action: str) -> None:
-    if action not in {"start", "stop"}:
-        raise ProductionWriterLeaseAgentError("managed runtime action is invalid")
-    command = ["/usr/bin/docker", "compose", "-f", str(config.runtime.compose_file)]
-    if config.runtime.env_file is not None:
-        command.extend(["--env-file", str(config.runtime.env_file)])
-    if action == "start":
-        command.extend(["up", "-d", "--no-deps", "--no-recreate", *config.runtime.services])
-    else:
-        command.extend(["stop", "--timeout", "15", *config.runtime.services])
+@contextmanager
+def _owner_lock(
+    path: Path,
+    *,
+    label: str,
+    nonblocking: bool,
+    timeout_seconds: int | None = None,
+) -> Iterator[bool]:
+    """Take an advisory lock only inside an owner-controlled directory."""
+
+    safe_path = _absolute(str(path), label=label)
+    parent = safe_path.parent
+    try:
+        directory_fd = os.open(
+            parent,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+    except OSError as exc:
+        raise ProductionWriterLeaseAgentError(f"cannot open {label} directory") from exc
+    descriptor = -1
+    try:
+        metadata = os.fstat(directory_fd)
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(metadata.st_mode) & 0o022
+        ):
+            raise ProductionWriterLeaseAgentError(f"{label} directory is not owner controlled")
+        descriptor = os.open(
+            safe_path.name,
+            os.O_RDWR
+            | os.O_CREAT
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+            dir_fd=directory_fd,
+        )
+        lock_metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(lock_metadata.st_mode)
+            or lock_metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(lock_metadata.st_mode) & 0o077
+            or lock_metadata.st_nlink != 1
+        ):
+            raise ProductionWriterLeaseAgentError(f"{label} is not an owner-only regular file")
+        deadline = (
+            time.monotonic() + timeout_seconds
+            if timeout_seconds is not None
+            else None
+        )
+        while True:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                if nonblocking:
+                    yield False
+                    return
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise ProductionWriterLeaseAgentError(f"{label} is busy")
+                time.sleep(0.1)
+                continue
+            break
+        yield True
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        os.close(directory_fd)
+
+
+@contextmanager
+def _ir_writer_transition_lock(config: AgentConfig, *, nonblocking: bool) -> Iterator[bool]:
+    if config.mode != "writer" or config.site != "webapp_ir":
+        yield True
+        return
+    lease_file = _writer_lease_file(config)
+    with _owner_lock(
+        lease_file.parent / "writer-transition.lock",
+        label="WebApp-IR writer transition lock",
+        nonblocking=nonblocking,
+        timeout_seconds=None if nonblocking else WA_IR_PROMOTION_LOCK_TIMEOUT_SECONDS,
+    ) as acquired:
+        yield acquired
+
+
+@contextmanager
+def _standby_refresh_transition_lock(active_snapshot: Path) -> Iterator[None]:
+    safe_pointer = _absolute(str(active_snapshot), label="active snapshot pointer")
+    if safe_pointer.name != "active-snapshot.json":
+        raise ProductionWriterLeaseAgentError("active snapshot pointer has an unexpected name")
+    with _owner_lock(
+        safe_pointer.parent / "refresh.lock",
+        label="WA-IR snapshot refresh lock",
+        nonblocking=False,
+        timeout_seconds=WA_IR_PROMOTION_LOCK_TIMEOUT_SECONDS,
+    ) as acquired:
+        if not acquired:  # Defensive: blocking mode never yields False.
+            raise ProductionWriterLeaseAgentError("WA-IR snapshot refresh lock is busy")
+        yield
+
+
+def _runtime_environment() -> dict[str, str]:
+    return {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"}
+
+
+def _run_runtime_command(
+    command: list[str],
+    *,
+    label: str,
+    timeout: int,
+    capture_stdout: bool = False,
+) -> str:
     try:
         result = subprocess.run(
             command,
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE if capture_stdout else subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            text=capture_stdout,
             check=False,
-            timeout=90,
-            env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"},
+            timeout=timeout,
+            env=_runtime_environment(),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
-        raise ProductionWriterLeaseAgentError("managed runtime command failed") from exc
+        raise ProductionWriterLeaseAgentError(f"{label} command failed") from exc
     if result.returncode != 0:
-        raise ProductionWriterLeaseAgentError("managed runtime command was rejected")
+        raise ProductionWriterLeaseAgentError(f"{label} command was rejected")
+    return result.stdout if capture_stdout and isinstance(result.stdout, str) else ""
+
+
+def _compose_prefix(config: AgentConfig) -> list[str]:
+    command = ["/usr/bin/docker", "compose"]
+    if config.mode == "writer" and config.site == "webapp_ir":
+        # Do not inherit the standby compose project from its environment.
+        # Promotion can touch only this fixed, newly introduced project.
+        command.extend(["--project-name", WA_IR_PROMOTION_PROJECT_NAME, "--profile", WA_IR_PROMOTION_PROFILE])
+    command.extend(["-f", str(config.runtime.compose_file)])
+    if config.runtime.env_file is not None:
+        command.extend(["--env-file", str(config.runtime.env_file)])
+    if config.runtime.selection_env_file is not None:
+        command.extend(["--env-file", str(config.runtime.selection_env_file)])
+    return command
+
+
+def _compose_capture(config: AgentConfig, *, arguments: list[str], label: str, timeout: int = 30) -> str:
+    return _run_runtime_command(
+        [*_compose_prefix(config), *arguments],
+        label=label,
+        timeout=timeout,
+        capture_stdout=True,
+    )
+
+
+def _compose(config: AgentConfig, *, action: str) -> None:
+    if action not in {"start", "stop"}:
+        raise ProductionWriterLeaseAgentError("managed runtime action is invalid")
+    command = _compose_prefix(config)
+    is_ir_promotion = config.mode == "writer" and config.site == "webapp_ir"
+    if action == "start":
+        if is_ir_promotion:
+            # The profile has no sync_worker and Compose must start DB/Redis
+            # dependencies for the exact candidate volumes.  It may not pull,
+            # build, or recreate any existing container.
+            command.extend(["up", "-d", "--no-recreate", *config.runtime.services])
+        else:
+            command.extend(["up", "-d", "--no-deps", "--no-recreate", *config.runtime.services])
+    else:
+        command.extend(["stop", "--timeout", "15", *config.runtime.services])
+    _run_runtime_command(command, label="managed runtime", timeout=90)
+
+
+def _wait_for_ir_app_health(config: AgentConfig) -> None:
+    """Require the newly promoted local app to become healthy before routing."""
+
+    if config.mode != "writer" or config.site != "webapp_ir":
+        return
+    deadline = time.monotonic() + WA_IR_PROMOTION_HEALTH_TIMEOUT_SECONDS
+    last_state = "not-created"
+    while True:
+        container_id = _compose_capture(
+            config,
+            arguments=["ps", "--quiet", "app"],
+            label="promoted app lookup",
+        ).strip()
+        if container_id:
+            lines = container_id.splitlines()
+            if len(lines) != 1 or not DOCKER_CONTAINER_ID_RE.fullmatch(lines[0]):
+                raise ProductionWriterLeaseAgentError("promoted app lookup returned an invalid container id")
+            try:
+                last_state = _run_runtime_command(
+                    [
+                        "/usr/bin/docker",
+                        "inspect",
+                        "--format",
+                        "{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}",
+                        lines[0],
+                    ],
+                    label="promoted app health",
+                    timeout=30,
+                    capture_stdout=True,
+                ).strip()
+            except ProductionWriterLeaseAgentError:
+                last_state = "inspection-unavailable"
+            else:
+                if last_state == "running|healthy":
+                    return
+                if last_state.split("|", 1)[0] in {"dead", "exited", "removing"} or last_state.endswith("|unhealthy"):
+                    raise ProductionWriterLeaseAgentError("promoted app became unhealthy before routing")
+        if time.monotonic() >= deadline:
+            raise ProductionWriterLeaseAgentError(
+                f"promoted app did not become healthy before routing ({last_state})"
+            )
+        time.sleep(WA_IR_PROMOTION_HEALTH_POLL_SECONDS)
 
 
 def _operation_uuid(value: str) -> str:
@@ -814,6 +1062,7 @@ def _acquire_proof(
     purpose: str,
     require_initial_vacant: bool = False,
     allow_live_local_recovery: bool = False,
+    persist_lease: bool = True,
 ) -> dict[str, Any]:
     lease_file = _writer_lease_file(config)
     operation = _operation_uuid(operation_id)
@@ -844,7 +1093,8 @@ def _acquire_proof(
             )
             if proof.get("lease_id") != lease_id:
                 raise ProductionWriterLeaseAgentError("recovery renewal changed the lease identity")
-            _write_lease(lease_file, proof=proof)
+            if persist_lease:
+                _write_lease(lease_file, proof=proof)
             return proof
         raise ProductionWriterLeaseAgentError("predecessor Writer Witness lease is still live")
     transition = _transition(
@@ -860,13 +1110,15 @@ def _acquire_proof(
         config=config.witness,
         expected_epoch=epoch + 1,
     )
-    _write_lease(lease_file, proof=proof)
+    if persist_lease:
+        _write_lease(lease_file, proof=proof)
     return proof
 
 
 def _start_scoped_runtime(config: AgentConfig) -> None:
     try:
         _compose(config, action="start")
+        _wait_for_ir_app_health(config)
     except ProductionWriterLeaseAgentError:
         _best_effort_stop(config)
         raise
@@ -923,6 +1175,415 @@ def _load_restore_receipt(path: Path) -> dict[str, Any]:
     return loads_strict_receipt(raw)
 
 
+def _docker_resource(value: Any, *, label: str, required_prefix: str) -> str:
+    if not isinstance(value, str) or not DOCKER_RESOURCE_RE.fullmatch(value):
+        raise ProductionWriterLeaseAgentError(f"{label} is invalid")
+    if not value.startswith(required_prefix):
+        raise ProductionWriterLeaseAgentError(f"{label} does not use the approved standby namespace")
+    return value
+
+
+def _load_promotion_runtime_selection(
+    active_snapshot_path: Path,
+    *,
+    restore_receipt_path: Path,
+    restore_receipt: dict[str, Any],
+    snapshot: Any,
+) -> PromotionRuntimeSelection:
+    """Bind a fresh Witness receipt to the exact restored WA-IR candidate.
+
+    The canonical receipt is deliberately non-secret and can be replaced as a
+    newer snapshot arrives.  The separately root-owned active pointer is the
+    only source of the Docker volume selection, so an old receipt can never
+    start a newer, different candidate.
+    """
+
+    active_path = _absolute(str(active_snapshot_path), label="active snapshot pointer")
+    payload = loads_strict_receipt(
+        _secure_read(active_path, label="active snapshot pointer", max_size=MAX_FILE_BYTES)
+    )
+    if (
+        payload.get("schema_version") != "gold-trade-snapshot-restore-receipt-v1"
+        or payload.get("status") != "ready"
+    ):
+        raise ProductionWriterLeaseAgentError("active snapshot pointer is not a verified standby candidate")
+    for field in (
+        "source_site",
+        "destination_site",
+        "source_generation",
+        "snapshot_id",
+        "release_sha",
+        "alembic_revision",
+        "source_db_snapshot_started_at",
+        "source_capture_completed_at",
+        "published_at",
+        "ready_at",
+    ):
+        if payload.get(field) != restore_receipt.get(field):
+            raise ProductionWriterLeaseAgentError(
+                f"active snapshot pointer does not bind the Witness receipt {field}"
+            )
+    audit = payload.get("audit")
+    if not isinstance(audit, dict) or audit.get("status") != "verified":
+        raise ProductionWriterLeaseAgentError("active snapshot pointer lacks verified audit evidence")
+    binding = payload.get("witness_restore_receipt")
+    binding_fields = {
+        "path",
+        "receipt_sha256",
+        "stage_receipt_sha256",
+        "source_generation",
+        "snapshot_id",
+    }
+    if not isinstance(binding, dict) or set(binding) != binding_fields:
+        raise ProductionWriterLeaseAgentError("active snapshot pointer lacks a valid Witness receipt binding")
+    bound_path = _absolute(binding.get("path"), label="bound Witness restore receipt")
+    expected_receipt_path = _absolute(str(restore_receipt_path), label="snapshot restore receipt")
+    if bound_path != expected_receipt_path:
+        raise ProductionWriterLeaseAgentError("active snapshot pointer binds a different Witness receipt path")
+    if (
+        binding.get("receipt_sha256") != snapshot.receipt_sha256
+        or binding.get("stage_receipt_sha256") != snapshot.stage_receipt_sha256
+        or binding.get("source_generation") != snapshot.source_generation
+        or binding.get("snapshot_id") != snapshot.snapshot_id
+    ):
+        raise ProductionWriterLeaseAgentError("active snapshot pointer does not bind this fresh Witness receipt")
+    candidate = payload.get("candidate")
+    candidate_fields = {
+        "generation",
+        "db_volume",
+        "uploads_volume",
+        "audit_volume",
+        "db_container",
+        "compose_project",
+    }
+    if not isinstance(candidate, dict) or set(candidate) != candidate_fields:
+        raise ProductionWriterLeaseAgentError("active snapshot candidate selection is invalid")
+    generation = _docker_resource(
+        candidate.get("generation"),
+        label="active snapshot candidate generation",
+        required_prefix="",
+    )
+    if generation != snapshot.snapshot_id:
+        raise ProductionWriterLeaseAgentError("active snapshot candidate generation does not match its receipt")
+    db_volume = _docker_resource(
+        candidate.get("db_volume"),
+        label="active snapshot database volume",
+        required_prefix="trading_bot_wa_ir_pg_",
+    )
+    uploads_volume = _docker_resource(
+        candidate.get("uploads_volume"),
+        label="active snapshot uploads volume",
+        required_prefix="trading_bot_wa_ir_uploads_",
+    )
+    audit_volume = _docker_resource(
+        candidate.get("audit_volume"),
+        label="active snapshot audit volume",
+        required_prefix="trading_bot_wa_ir_audit_",
+    )
+    db_container = _docker_resource(
+        candidate.get("db_container"),
+        label="active snapshot database container",
+        required_prefix="trading_bot_wa_ir_snapshot_db_",
+    )
+    compose_project = _docker_resource(
+        candidate.get("compose_project"),
+        label="active snapshot compose project",
+        required_prefix="trading_bot_wa_ir_snapshot_",
+    )
+    redis_volume = _docker_resource(
+        f"trading_bot_wa_ir_redis_{generation}",
+        label="active snapshot Redis volume",
+        required_prefix="trading_bot_wa_ir_redis_",
+    )
+    return PromotionRuntimeSelection(
+        db_volume=db_volume,
+        uploads_volume=uploads_volume,
+        audit_volume=audit_volume,
+        db_container=db_container,
+        compose_project=compose_project,
+        redis_volume=redis_volume,
+        release_sha=snapshot.release_sha,
+    )
+
+
+def _write_promotion_runtime_selection(path: Path, *, selection: PromotionRuntimeSelection) -> None:
+    """Atomically replace only the non-secret candidate Compose selection."""
+
+    safe_path = _absolute(str(path), label="runtime selection env file")
+    safe_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    directory_fd = os.open(
+        safe_path.parent,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+    )
+    temporary_name = f".{safe_path.name}.{os.getpid()}.{uuid4().hex}.tmp"
+    descriptor = -1
+    try:
+        metadata = os.fstat(directory_fd)
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(metadata.st_mode) & 0o022
+        ):
+            raise ProductionWriterLeaseAgentError("runtime selection directory is not owner controlled")
+        try:
+            existing = os.stat(safe_path.name, dir_fd=directory_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            existing = None
+        if existing is not None and (
+            not stat.S_ISREG(existing.st_mode)
+            or existing.st_uid != os.geteuid()
+            or stat.S_IMODE(existing.st_mode) & 0o077
+            or existing.st_nlink != 1
+        ):
+            raise ProductionWriterLeaseAgentError("runtime selection file is not a root-only regular file")
+        payload = (
+            f"WA_IR_CANDIDATE_AUDIT_VOLUME={selection.audit_volume}\n"
+            f"WA_IR_CANDIDATE_DB_VOLUME={selection.db_volume}\n"
+            f"WA_IR_CANDIDATE_UPLOADS_VOLUME={selection.uploads_volume}\n"
+            f"WA_IR_REDIS_VOLUME_NAME={selection.redis_volume}\n"
+        ).encode("ascii")
+        descriptor = os.open(
+            temporary_name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+            dir_fd=directory_fd,
+        )
+        offset = 0
+        while offset < len(payload):
+            written = os.write(descriptor, payload[offset:])
+            if written <= 0:
+                raise ProductionWriterLeaseAgentError("runtime selection write made no progress")
+            offset += written
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+        os.replace(temporary_name, safe_path.name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
+        os.fsync(directory_fd)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            os.unlink(temporary_name, dir_fd=directory_fd)
+        except FileNotFoundError:
+            pass
+        os.close(directory_fd)
+
+
+def _inspect_labels(container: str, *, label: str) -> dict[str, str]:
+    raw = _run_runtime_command(
+        ["/usr/bin/docker", "inspect", "--format", "{{json .Config.Labels}}", container],
+        label=label,
+        timeout=30,
+        capture_stdout=True,
+    ).strip()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ProductionWriterLeaseAgentError(f"{label} labels are invalid") from exc
+    if not isinstance(payload, dict) or not all(isinstance(key, str) and isinstance(value, str) for key, value in payload.items()):
+        raise ProductionWriterLeaseAgentError(f"{label} labels are invalid")
+    return payload
+
+
+def _inspect_mounts(container: str, *, label: str) -> list[dict[str, Any]]:
+    raw = _run_runtime_command(
+        ["/usr/bin/docker", "inspect", "--format", "{{json .Mounts}}", container],
+        label=label,
+        timeout=30,
+        capture_stdout=True,
+    ).strip()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ProductionWriterLeaseAgentError(f"{label} mounts are invalid") from exc
+    if not isinstance(payload, list) or not all(isinstance(item, dict) for item in payload):
+        raise ProductionWriterLeaseAgentError(f"{label} mounts are invalid")
+    return payload
+
+
+def _snapshot_db_running(selection: PromotionRuntimeSelection) -> bool:
+    """Verify that a candidate DB is the isolated one bound by the pointer."""
+
+    container = _docker_resource(
+        selection.db_container,
+        label="selected snapshot database container",
+        required_prefix="trading_bot_wa_ir_snapshot_db_",
+    )
+    labels = _inspect_labels(container, label="selected snapshot database")
+    if (
+        labels.get("com.goldtrade.webapp-ir.snapshot") != "true"
+        or labels.get("com.goldtrade.webapp-ir.release") != selection.release_sha
+        or labels.get("com.docker.compose.project") != selection.compose_project
+        or labels.get("com.docker.compose.service") != "snapshot_db"
+    ):
+        raise ProductionWriterLeaseAgentError("selected snapshot database identity is invalid")
+    mounts = _inspect_mounts(container, label="selected snapshot database")
+    if len(mounts) != 1:
+        raise ProductionWriterLeaseAgentError("selected snapshot database has an unexpected mount layout")
+    mount = mounts[0]
+    if (
+        mount.get("Type") != "volume"
+        or mount.get("Name") != selection.db_volume
+        or mount.get("Destination") != "/var/lib/postgresql/data"
+        or mount.get("RW") is not True
+    ):
+        raise ProductionWriterLeaseAgentError("selected snapshot database does not mount the bound volume")
+    network_mode = _run_runtime_command(
+        ["/usr/bin/docker", "inspect", "--format", "{{.HostConfig.NetworkMode}}", container],
+        label="selected snapshot database network",
+        timeout=30,
+        capture_stdout=True,
+    ).strip()
+    if network_mode != "none":
+        raise ProductionWriterLeaseAgentError("selected snapshot database is not network-fenced")
+    running = _run_runtime_command(
+        ["/usr/bin/docker", "inspect", "--format", "{{.State.Running}}", container],
+        label="selected snapshot database state",
+        timeout=30,
+        capture_stdout=True,
+    ).strip()
+    if running == "true":
+        return True
+    if running == "false":
+        return False
+    raise ProductionWriterLeaseAgentError("selected snapshot database state is invalid")
+
+
+def _stop_selected_snapshot_db(selection: PromotionRuntimeSelection) -> bool:
+    if not _snapshot_db_running(selection):
+        return False
+    _run_runtime_command(
+        ["/usr/bin/docker", "stop", "--time", "10", selection.db_container],
+        label="selected snapshot database stop",
+        timeout=20,
+    )
+    return True
+
+
+def _best_effort_restart_selected_snapshot_db(selection: PromotionRuntimeSelection) -> None:
+    try:
+        if not _snapshot_db_running(selection):
+            _run_runtime_command(
+                ["/usr/bin/docker", "start", selection.db_container],
+                label="selected snapshot database restart",
+                timeout=45,
+            )
+            if not _snapshot_db_running(selection):
+                raise ProductionWriterLeaseAgentError("selected snapshot database did not restart")
+    except ProductionWriterLeaseAgentError:
+        _emit_event("snapshot_database_rollback_failed", container=selection.db_container)
+
+
+def _assert_promoted_container(
+    container: str,
+    *,
+    service: str,
+    required_volume_names: set[str],
+) -> None:
+    if not DOCKER_CONTAINER_ID_RE.fullmatch(container):
+        raise ProductionWriterLeaseAgentError("promoted runtime returned an invalid container id")
+    labels = _inspect_labels(container, label=f"promoted {service}")
+    if (
+        labels.get("com.docker.compose.project") != WA_IR_PROMOTION_PROJECT_NAME
+        or labels.get("com.docker.compose.service") != service
+    ):
+        raise ProductionWriterLeaseAgentError("promoted runtime container identity is invalid")
+    volume_names = {
+        item.get("Name")
+        for item in _inspect_mounts(container, label=f"promoted {service}")
+        if item.get("Type") == "volume" and isinstance(item.get("Name"), str)
+    }
+    if not required_volume_names.issubset(volume_names):
+        raise ProductionWriterLeaseAgentError("promoted runtime volumes do not match the selected snapshot")
+
+
+def _assert_existing_promoted_runtime_matches_selection(
+    config: AgentConfig,
+    *,
+    selection: PromotionRuntimeSelection,
+) -> None:
+    """Reject partial/stale promotion projects before `--no-recreate` can reuse them."""
+
+    discovered: dict[str, str | None] = {}
+    for service in ("db", "redis", "app"):
+        output = _compose_capture(
+            config,
+            arguments=["ps", "--all", "--quiet", service],
+            label=f"promoted {service} lookup",
+        ).strip()
+        if not output:
+            discovered[service] = None
+            continue
+        lines = output.splitlines()
+        if len(lines) != 1 or not DOCKER_CONTAINER_ID_RE.fullmatch(lines[0]):
+            raise ProductionWriterLeaseAgentError("promoted runtime lookup returned an invalid container set")
+        discovered[service] = lines[0]
+    if all(container is None for container in discovered.values()):
+        return
+    if any(container is None for container in discovered.values()):
+        raise ProductionWriterLeaseAgentError("promoted runtime is partial and cannot be reused")
+    _assert_promoted_container(
+        str(discovered["db"]), service="db", required_volume_names={selection.db_volume}
+    )
+    _assert_promoted_container(
+        str(discovered["redis"]), service="redis", required_volume_names={selection.redis_volume}
+    )
+    _assert_promoted_container(
+        str(discovered["app"]),
+        service="app",
+        required_volume_names={selection.uploads_volume, selection.audit_volume},
+    )
+
+
+def _renew_activation_proof(
+    config: AgentConfig,
+    *,
+    proof: dict[str, Any],
+    operation_id: str,
+) -> dict[str, Any]:
+    """Mint a fresh term only after the isolated runtime is locally healthy."""
+
+    epoch = proof.get("writer_epoch")
+    lease_id = proof.get("lease_id")
+    if type(epoch) is not int or not isinstance(lease_id, str) or not lease_id:
+        raise ProductionWriterLeaseAgentError("activation proof is invalid")
+    transition = _transition(
+        config.witness,
+        action="renew",
+        expected_epoch=epoch,
+        expected_lease_id=lease_id,
+        request_id=_request_id(operation_id, "activation-renew"),
+        reason=f"production activated Writer Witness renewal {operation_id}",
+    )
+    renewed = _validate_proof(transition.get("proof"), config=config.witness, expected_epoch=epoch)
+    if renewed.get("lease_id") != lease_id:
+        raise ProductionWriterLeaseAgentError("activation renewal changed the lease identity")
+    return renewed
+
+
+def _best_effort_drain_failed_promotion(
+    config: AgentConfig,
+    *,
+    proof: dict[str, Any],
+    operation_id: str,
+) -> None:
+    epoch = proof.get("writer_epoch")
+    lease_id = proof.get("lease_id")
+    if type(epoch) is not int or not isinstance(lease_id, str) or not lease_id:
+        return
+    try:
+        _transition(
+            config.witness,
+            action="drain",
+            expected_epoch=epoch,
+            expected_lease_id=lease_id,
+            request_id=_request_id(operation_id, "failed-promotion-drain"),
+            reason=f"production failed Writer Witness promotion drain {operation_id}",
+        )
+    except ProductionWriterLeaseAgentError:
+        _emit_event("failed_promotion_drain_failed", writer_epoch=epoch)
+
+
 def _new_proof_path(path: Path) -> Path:
     safe_path = _absolute(str(path), label="promotion proof output")
     try:
@@ -932,17 +1593,18 @@ def _new_proof_path(path: Path) -> Path:
     raise ProductionWriterLeaseAgentError("promotion proof output already exists")
 
 
-def activate_from_snapshot(
+def _activate_from_snapshot_locked(
     config: AgentConfig,
     *,
     action: str,
     operation_id: str,
     restore_receipt: Path,
     proof_output: Path,
+    active_snapshot: Path | None = None,
     expected_source_generation: str | None = None,
     expected_receipt_sha256: str | None = None,
 ) -> dict[str, Any]:
-    """Acquire a next Witness term, start only app/sync, and emit routing proof."""
+    """Run one transition while the WA-IR promotion/refresh locks are held."""
 
     _require_writer_mode(config)
     expected_target = "webapp_ir" if action == "promote_ir" else "webapp_fi" if action == "failback_fi" else None
@@ -960,24 +1622,91 @@ def activate_from_snapshot(
         raise ProductionWriterLeaseAgentError("snapshot restore receipt cannot support promotion") from exc
     if expected_receipt_sha256 is not None and initial_snapshot.receipt_sha256 != expected_receipt_sha256:
         raise ProductionWriterLeaseAgentError("snapshot restore receipt changed before promotion")
+    if action == "promote_ir":
+        if active_snapshot is None:
+            raise ProductionWriterLeaseAgentError("IR promotion requires the bound active snapshot pointer")
+        if config.runtime.selection_env_file is None:
+            raise ProductionWriterLeaseAgentError("IR promotion requires a runtime selection env file")
+        _load_promotion_runtime_selection(
+            active_snapshot,
+            restore_receipt_path=restore_receipt,
+            restore_receipt=payload,
+            snapshot=initial_snapshot,
+        )
+    elif active_snapshot is not None:
+        raise ProductionWriterLeaseAgentError("only IR promotion may use an active snapshot pointer")
     output_path = _new_proof_path(proof_output)
     proof = _acquire_proof(
         config,
         operation_id=operation,
         purpose="IR promotion" if action == "promote_ir" else "FI failback",
         allow_live_local_recovery=True,
+        # WA-IR does not persist local renewal authority until the new isolated
+        # runtime is healthy.  Its guard shares the transition lock, so a crash
+        # before that point fences the just-started local scope instead of
+        # allowing a non-serving term to renew indefinitely.
+        persist_lease=action != "promote_ir",
     )
+    activation_proof: dict[str, Any] | None = proof if action == "promote_ir" else None
+    selection: PromotionRuntimeSelection | None = None
+    snapshot_stop_attempted = False
     try:
         # The receipt may age during a Witness round trip.  Verify it again
         # immediately before the only runtime start operation.
+        latest_payload = _load_restore_receipt(restore_receipt)
         snapshot = parse_restore_receipt(
-            payload,
+            latest_payload,
             action=action,
             expected_source_generation=expected_source_generation,
         )
+        if snapshot.receipt_sha256 != initial_snapshot.receipt_sha256:
+            raise ProductionWriterLeaseAgentError("snapshot restore receipt changed during promotion")
         if expected_receipt_sha256 is not None and snapshot.receipt_sha256 != expected_receipt_sha256:
             raise ProductionWriterLeaseAgentError("snapshot restore receipt changed during promotion")
+        if action == "promote_ir":
+            if active_snapshot is None or config.runtime.selection_env_file is None:  # Defensive for type narrowing.
+                raise ProductionWriterLeaseAgentError("IR promotion active snapshot binding disappeared")
+            selection = _load_promotion_runtime_selection(
+                active_snapshot,
+                restore_receipt_path=restore_receipt,
+                restore_receipt=latest_payload,
+                snapshot=snapshot,
+            )
+            _write_promotion_runtime_selection(
+                config.runtime.selection_env_file,
+                selection=selection,
+            )
+            _assert_existing_promoted_runtime_matches_selection(config, selection=selection)
+            snapshot_stop_attempted = True
+            _stop_selected_snapshot_db(selection)
         _start_scoped_runtime(config)
+        if action == "promote_ir":
+            if active_snapshot is None or selection is None:
+                raise ProductionWriterLeaseAgentError("IR promotion selection disappeared before activation")
+            # Re-read every root-owned binding after the local health gate.
+            # The shared refresh lock rules out normal timer churn; this check
+            # also catches manual/local corruption before a route proof exists.
+            final_payload = _load_restore_receipt(restore_receipt)
+            final_snapshot = parse_restore_receipt(
+                final_payload,
+                action=action,
+                expected_source_generation=expected_source_generation,
+            )
+            if final_snapshot.receipt_sha256 != snapshot.receipt_sha256:
+                raise ProductionWriterLeaseAgentError("snapshot restore receipt changed after local activation")
+            final_selection = _load_promotion_runtime_selection(
+                active_snapshot,
+                restore_receipt_path=restore_receipt,
+                restore_receipt=final_payload,
+                snapshot=final_snapshot,
+            )
+            if final_selection != selection:
+                raise ProductionWriterLeaseAgentError("active snapshot selection changed after local activation")
+            proof = _renew_activation_proof(config, proof=proof, operation_id=operation)
+            activation_proof = proof
+            _write_lease(_writer_lease_file(config), proof=proof)
+            _local_lease_safety(config)
+            snapshot = final_snapshot
         promotion_proof = build_promotion_proof(
             action=action,
             operation_id=operation,
@@ -987,6 +1716,14 @@ def activate_from_snapshot(
         _write_new_json(output_path, payload=promotion_proof, label="promotion proof")
     except Exception:
         _best_effort_stop(config)
+        if action == "promote_ir" and activation_proof is not None:
+            _best_effort_drain_failed_promotion(
+                config,
+                proof=activation_proof,
+                operation_id=operation,
+            )
+        if action == "promote_ir" and selection is not None and snapshot_stop_attempted:
+            _best_effort_restart_selected_snapshot_db(selection)
         raise
     return {
         "status": "activated",
@@ -997,6 +1734,48 @@ def activate_from_snapshot(
         "snapshot_age_seconds": snapshot.snapshot_age_seconds,
         "proof_sha256": promotion_proof["proof_sha256"],
     }
+
+
+def activate_from_snapshot(
+    config: AgentConfig,
+    *,
+    action: str,
+    operation_id: str,
+    restore_receipt: Path,
+    proof_output: Path,
+    active_snapshot: Path | None = None,
+    expected_source_generation: str | None = None,
+    expected_receipt_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Serialize WA-IR promotion against its lease guard and snapshot timer."""
+
+    if action != "promote_ir":
+        return _activate_from_snapshot_locked(
+            config,
+            action=action,
+            operation_id=operation_id,
+            restore_receipt=restore_receipt,
+            proof_output=proof_output,
+            active_snapshot=active_snapshot,
+            expected_source_generation=expected_source_generation,
+            expected_receipt_sha256=expected_receipt_sha256,
+        )
+    if active_snapshot is None:
+        raise ProductionWriterLeaseAgentError("IR promotion requires the bound active snapshot pointer")
+    with _ir_writer_transition_lock(config, nonblocking=False) as acquired:
+        if not acquired:
+            raise ProductionWriterLeaseAgentError("WebApp-IR writer transition is busy")
+        with _standby_refresh_transition_lock(active_snapshot):
+            return _activate_from_snapshot_locked(
+                config,
+                action=action,
+                operation_id=operation_id,
+                restore_receipt=restore_receipt,
+                proof_output=proof_output,
+                active_snapshot=active_snapshot,
+                expected_source_generation=expected_source_generation,
+                expected_receipt_sha256=expected_receipt_sha256,
+            )
 
 
 def _automatic_operation_id(*, action: str, receipt_sha256: str) -> str:
@@ -1047,6 +1826,7 @@ def promote_watch(
     config: AgentConfig,
     *,
     restore_receipt: Path,
+    active_snapshot: Path,
     proof_directory: Path,
     poll_seconds: int,
     once: bool,
@@ -1090,6 +1870,7 @@ def promote_watch(
                 operation_id=operation_id,
                 restore_receipt=restore_receipt,
                 proof_output=proof_output,
+                active_snapshot=active_snapshot,
                 expected_receipt_sha256=snapshot.receipt_sha256,
             )
         except (ProductionWriterLeaseAgentError, SnapshotPromotionError) as exc:
@@ -1152,58 +1933,71 @@ def drain_and_stop(config: AgentConfig, *, operation_id: str) -> dict[str, Any]:
     return {"status": "drained", "site": config.site, "writer_epoch": lease.writer_epoch}
 
 
-def guard(config: AgentConfig, *, once: bool) -> dict[str, Any]:
-    while True:
-        if config.mode == "observer":
-            try:
-                epoch, expires_at = _observe_active_writer_term(config)
-                result = {
-                    "status": "observed",
-                    "site": config.site,
-                    "writer_epoch": epoch,
-                    "lease_expires_at": expires_at.isoformat(),
-                }
-            except (WriterWitnessUnavailable, ProductionWriterLeaseAgentError):
-                # Bot-FI is deliberately stricter than the WebApp writers:
-                # without a fresh Witness observation it must not keep a
-                # legacy direct sync path alive after FI loses authority.
-                _best_effort_stop(config)
-                raise
-            if once:
-                return result
-            time.sleep(config.witness.renew_interval_seconds)
-            continue
+def _guard_iteration(config: AgentConfig, *, emit_degraded: bool) -> dict[str, Any]:
+    if config.mode == "observer":
+        try:
+            epoch, expires_at = _observe_active_writer_term(config)
+            return {
+                "status": "observed",
+                "site": config.site,
+                "writer_epoch": epoch,
+                "lease_expires_at": expires_at.isoformat(),
+            }
+        except (WriterWitnessUnavailable, ProductionWriterLeaseAgentError):
+            # Bot-FI is deliberately stricter than the WebApp writers:
+            # without a fresh Witness observation it must not keep a legacy
+            # direct-sync path alive after FI loses authority.
+            raise
+    try:
+        lease, remaining = _local_lease_safety(config)
+    except ProductionWriterLeaseAgentError:
+        raise
+    try:
+        return renew_once(config)
+    except WriterWitnessUnavailable as renewal_error:
+        # A transient Witness failure does not itself fence a still-valid local
+        # term.  Re-check after the failed request and stop only when it has
+        # reached its safety margin.
         try:
             lease, remaining = _local_lease_safety(config)
         except ProductionWriterLeaseAgentError:
-            _best_effort_stop(config)
-            raise
+            raise renewal_error
+        result = {
+            "status": "renewal_degraded",
+            "site": config.site,
+            "writer_epoch": lease.writer_epoch,
+            "lease_expires_at": lease.expires_at.isoformat(),
+            "seconds_remaining": max(0, int(remaining)),
+        }
+        if emit_degraded:
+            _emit_event("renewal_degraded", **result)
+        return result
+    except ProductionWriterLeaseAgentError:
+        raise
+
+
+def guard(config: AgentConfig, *, once: bool) -> dict[str, Any]:
+    while True:
         try:
-            result = renew_once(config)
-        except WriterWitnessUnavailable as renewal_error:
-            # A transient Witness failure does not itself fence a still-valid
-            # local term.  Re-check after the failed request and stop only
-            # when the root-owned term has reached its safety margin.
-            try:
-                lease, remaining = _local_lease_safety(config)
-            except ProductionWriterLeaseAgentError:
-                _best_effort_stop(config)
-                raise renewal_error
-            result = {
-                "status": "renewal_degraded",
-                "site": config.site,
-                "writer_epoch": lease.writer_epoch,
-                "lease_expires_at": lease.expires_at.isoformat(),
-                "seconds_remaining": max(0, int(remaining)),
-            }
-            if not once:
-                _emit_event("renewal_degraded", **result)
+            with _ir_writer_transition_lock(config, nonblocking=True) as acquired:
+                if acquired:
+                    result = _guard_iteration(config, emit_degraded=not once)
+                else:
+                    result = {
+                        "status": "promotion_in_progress",
+                        "site": config.site,
+                    }
         except ProductionWriterLeaseAgentError:
             _best_effort_stop(config)
             raise
         if once:
             return result
-        time.sleep(config.witness.renew_interval_seconds)
+        if result["status"] == "promotion_in_progress":
+            # Do not stop or renew while the promotion controller holds its
+            # owner-only lock.  A process crash releases flock automatically.
+            time.sleep(1)
+        else:
+            time.sleep(config.witness.renew_interval_seconds)
 
 
 def _public_status(config: AgentConfig) -> dict[str, Any]:
@@ -1239,9 +2033,11 @@ def build_parser() -> argparse.ArgumentParser:
     promote = subparsers.add_parser("promote")
     promote.add_argument("--operation-id", required=True)
     promote.add_argument("--restore-receipt", required=True, type=Path)
+    promote.add_argument("--active-snapshot", required=True, type=Path)
     promote.add_argument("--proof-output", required=True, type=Path)
     promote_watch_parser = subparsers.add_parser("promote-watch")
     promote_watch_parser.add_argument("--restore-receipt", required=True, type=Path)
+    promote_watch_parser.add_argument("--active-snapshot", required=True, type=Path)
     promote_watch_parser.add_argument("--proof-directory", required=True, type=Path)
     promote_watch_parser.add_argument("--poll-seconds", type=int, default=2)
     promote_watch_parser.add_argument("--once", action="store_true")
@@ -1270,12 +2066,14 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             action="promote_ir",
             operation_id=args.operation_id,
             restore_receipt=args.restore_receipt,
+            active_snapshot=args.active_snapshot,
             proof_output=args.proof_output,
         )
     if args.action == "promote-watch":
         return promote_watch(
             config,
             restore_receipt=args.restore_receipt,
+            active_snapshot=args.active_snapshot,
             proof_directory=args.proof_directory,
             poll_seconds=args.poll_seconds,
             once=bool(args.once),

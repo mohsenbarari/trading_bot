@@ -124,12 +124,36 @@ class ThreeSiteMvpArvanRoutingTests(unittest.TestCase):
 
     def test_verify_proof_rejects_stale_database_snapshot_even_if_proof_is_new(self) -> None:
         now = datetime(2026, 7, 29, tzinfo=timezone.utc)
-        proof = proof_for(now=now, snapshot_age_seconds=31)
+        proof = proof_for(now=now, snapshot_age_seconds=151)
+        proof["source_capture_completed_at"] = (now - timedelta(seconds=150)).isoformat()
+        proof["snapshot_published_at"] = (now - timedelta(seconds=150)).isoformat()
+        proof["snapshot_ready_at"] = (now - timedelta(seconds=121)).isoformat()
         unsigned = dict(proof)
         unsigned.pop("proof_sha256")
         proof["proof_sha256"] = _sha256(_canonical_json_bytes(unsigned))
 
         with self.assertRaisesRegex(ThreeSiteRoutingError, "older than the allowed recovery point"):
+            verify_promotion_proof(proof, target_site="webapp_ir", now=now)
+
+    def test_verify_proof_rejects_a_candidate_that_exceeded_the_stage_bound(self) -> None:
+        now = datetime(2026, 7, 29, tzinfo=timezone.utc)
+        proof = proof_for(now=now, snapshot_age_seconds=31)
+        unsigned = dict(proof)
+        unsigned.pop("proof_sha256")
+        proof["proof_sha256"] = _sha256(_canonical_json_bytes(unsigned))
+
+        with self.assertRaisesRegex(ThreeSiteRoutingError, "staged within"):
+            verify_promotion_proof(proof, target_site="webapp_ir", now=now)
+
+    def test_verify_proof_rejects_a_term_that_cannot_survive_the_route_change(self) -> None:
+        now = datetime(2026, 7, 29, tzinfo=timezone.utc)
+        proof = proof_for(now=now)
+        proof["lease_expires_at"] = (now + timedelta(seconds=5)).isoformat()
+        unsigned = dict(proof)
+        unsigned.pop("proof_sha256")
+        proof["proof_sha256"] = _sha256(_canonical_json_bytes(unsigned))
+
+        with self.assertRaisesRegex(ThreeSiteRoutingError, "too close to expiry"):
             verify_promotion_proof(proof, target_site="webapp_ir", now=now)
 
     def test_normal_route_requires_witness_proof_before_api_access(self) -> None:

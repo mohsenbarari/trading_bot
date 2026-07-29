@@ -9,10 +9,12 @@ User=root
 UMask=0077
 Environment=TZ=UTC
 ExecStart=__TOOL_PYTHON__ __TOOL_ROOT__/scripts/refresh_webapp_ir_snapshot_standby.py --standby-env __STANDBY_ENV__ --transport-script __TOOL_ROOT__/scripts/manage_webapp_ir_snapshot.py --restore-script __TOOL_ROOT__/scripts/restore_webapp_ir_snapshot.py --transport-python __TOOL_PYTHON__ --restore-python __TOOL_PYTHON__ --apply --json
-TimeoutStartSec=20min
+# The wrapper shares a 25-second deadline across consume and restore.  The
+# unit adds only a small cleanup allowance and bounds promotion lock waiting.
+TimeoutStartSec=30s
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
-ReadWritePaths=__STANDBY_DATA_ROOT__
+ReadWritePaths=__STANDBY_DATA_ROOT__ __WITNESS_RECEIPT_ROOT__
 
 # This unit never starts the WebApp service, Nginx, direct sync, or migrations.

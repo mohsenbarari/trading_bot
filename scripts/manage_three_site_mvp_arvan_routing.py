@@ -41,7 +41,12 @@ PROMOTION_PROOF_SCHEMA = "gold-trade-writer-promotion-proof-v1"
 EXPECTED_RELEASE_SHA = "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5"
 EXPECTED_ALEMBIC_REVISION = "f2c7d8e9a0b1"
 MAX_PROOF_AGE_SECONDS = 120
-MAX_SNAPSHOT_AGE_SECONDS = 30
+# The source snapshot must have reached the verified WA-IR standby pointer
+# within 30 seconds.  A separate bounded activation window covers the former
+# writer's Witness lease expiry and the local promoted-runtime health check.
+MAX_STAGED_SNAPSHOT_AGE_SECONDS = 30
+MAX_SNAPSHOT_AGE_SECONDS = 150
+MIN_ROUTE_LEASE_REMAINING_SECONDS = 5
 MAX_CLOCK_SKEW_SECONDS = 15
 MAX_SECRET_BYTES = 16 * 1024
 MAX_PROOF_BYTES = 64 * 1024
@@ -294,8 +299,8 @@ def verify_promotion_proof(
         raise ThreeSiteRoutingError("Witness promotion proof is issued in the future")
     if (reference - issued_at).total_seconds() > max_proof_age_seconds:
         raise ThreeSiteRoutingError("Witness promotion proof is stale")
-    if lease_expires_at <= reference:
-        raise ThreeSiteRoutingError("Witness promotion proof lease has expired")
+    if lease_expires_at <= reference + timedelta(seconds=MIN_ROUTE_LEASE_REMAINING_SECONDS):
+        raise ThreeSiteRoutingError("Witness promotion proof lease is too close to expiry")
     if lease_expires_at <= issued_at:
         raise ThreeSiteRoutingError("Witness promotion proof lease does not outlive issuance")
     if source_db_snapshot_started_at > reference + timedelta(seconds=MAX_CLOCK_SKEW_SECONDS):
@@ -308,6 +313,11 @@ def verify_promotion_proof(
         <= issued_at
     ):
         raise ThreeSiteRoutingError("Witness promotion proof snapshot timing is inconsistent")
+    staged_snapshot_age = math.ceil((ready_at - source_db_snapshot_started_at).total_seconds())
+    if staged_snapshot_age < 0 or staged_snapshot_age > MAX_STAGED_SNAPSHOT_AGE_SECONDS:
+        raise ThreeSiteRoutingError(
+            "database snapshot was not staged within the allowed standby bound"
+        )
     snapshot_age_at_issuance = math.ceil((issued_at - source_db_snapshot_started_at).total_seconds())
     if snapshot_age_at_issuance < 0 or snapshot_age_at_issuance != snapshot_age:
         raise ThreeSiteRoutingError("Witness promotion proof snapshot age does not match its database snapshot start")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import json
 import unittest
 from pathlib import Path
 
@@ -13,6 +14,7 @@ PROMOTED_COMPOSE = (
     ROOT / "deploy/production/docker-compose.webapp-ir-promoted-2c08.yml"
 )
 ENV_EXAMPLE = ROOT / "deploy/production/webapp-ir-snapshot-standby-2c08.env.example"
+WRITER_CONFIG_EXAMPLE = ROOT / "deploy/production/production-writer-lease-agent.webapp-ir.json.example"
 DARK_NGINX = ROOT / "deploy/production/nginx-webapp-ir-standby-dark-https.conf.template"
 
 
@@ -39,6 +41,8 @@ class WebappIrSnapshotStandby2c08Tests(unittest.TestCase):
         self.assertNotIn("migration", text)
         self.assertNotIn("build:", text)
         self.assertEqual(text.count("pull_policy: never"), 3)
+        self.assertIn("start_period: 5s", text)
+        self.assertIn("interval: 3s", text)
 
     def test_release_and_schema_are_pinned_to_actual_production(self) -> None:
         text = ENV_EXAMPLE.read_text(encoding="utf-8")
@@ -49,6 +53,16 @@ class WebappIrSnapshotStandby2c08Tests(unittest.TestCase):
         self.assertIn("WA_IR_SNAPSHOT_MAX_AGE_SECONDS=30", text)
         self.assertIn("Object Storage", text)
         self.assertNotRegex(text, re.compile(r"(?:AWS_SECRET|POSTGRES_PASSWORD|JWT_SECRET_KEY)="))
+
+    def test_ir_writer_config_pins_the_short_emergency_term_and_isolated_runtime(self) -> None:
+        payload = json.loads(WRITER_CONFIG_EXAMPLE.read_text(encoding="utf-8"))
+        self.assertEqual(payload["mode"], "writer")
+        self.assertEqual(payload["site"], "webapp_ir")
+        self.assertEqual(payload["runtime"]["services"], ["db", "redis", "app"])
+        self.assertTrue(payload["runtime"]["compose_file"].endswith("docker-compose.webapp-ir-promoted-2c08.yml"))
+        self.assertEqual(payload["witness"]["lease_duration_seconds"], 60)
+        self.assertEqual(payload["witness"]["safety_margin_seconds"], 15)
+        self.assertEqual(payload["witness"]["renew_interval_seconds"], 10)
 
     def test_dark_nginx_requires_local_tls_and_has_no_sync_or_upstream(self) -> None:
         text = DARK_NGINX.read_text(encoding="utf-8")
