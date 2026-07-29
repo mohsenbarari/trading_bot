@@ -67,6 +67,7 @@ from scripts.wa_ir_production_transport_contract import (  # noqa: E402
 
 
 PLAN_SCHEMA = "production-shadow-convergence-source-set-producer-plan-v1"
+READY_SOURCE_SET_PLAN_SCHEMA = "production-shadow-convergence-ready-source-set-plan-v1"
 TRANSPORT_RECEIPT_SCHEMA = "production-shadow-convergence-observation-transport-receipt-v1"
 AVAILABILITY_SCHEMA = "production-shadow-convergence-observation-source-set-availability-v1"
 CONVERGENCE_ROLE_VALIDATION_SCHEMA = (
@@ -252,6 +253,18 @@ class Ingress:
     receipt: BRIDGE.SecureRecord
     observed_at: datetime
     captured_at: datetime | None
+
+
+@dataclass(frozen=True)
+class PreparedReadySourceSet:
+    context: BRIDGE.EvidenceContext
+    role_validation: Mapping[str, BRIDGE.Reference]
+    observations: Mapping[str, BRIDGE.Reference]
+    document: dict[str, Any]
+    payload: bytes
+    sha256: str
+    output: Path
+    required_confirmation: str
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -1812,6 +1825,236 @@ def _publish_availability(
     return BRIDGE.Reference(path, digest), outcome
 
 
+def _ready_role_validation_references(
+    context: BRIDGE.EvidenceContext,
+    *,
+    digests: Mapping[str, str],
+) -> dict[str, BRIDGE.Reference]:
+    if set(digests) != set(ROLES):
+        raise ConvergenceSourceSetProducerError(
+            "ready source-set role validation digests must cover exactly four roles"
+        )
+    return {
+        role: BRIDGE.Reference(
+            BRIDGE._canonical_role_validation_path(  # noqa: SLF001
+                context.manifest,
+                role=role,
+                digest=_nonzero_sha256(
+                    digests[role],
+                    label=f"ready source-set role validation {role}",
+                ),
+            ),
+            _nonzero_sha256(
+                digests[role],
+                label=f"ready source-set role validation {role}",
+            ),
+        )
+        for role in ROLES
+    }
+
+
+def _ready_observation_references(
+    context: BRIDGE.EvidenceContext,
+    *,
+    digests: Mapping[str, str],
+) -> dict[str, BRIDGE.Reference]:
+    if set(digests) != set(BRIDGE.SOURCE_LABELS):
+        raise ConvergenceSourceSetProducerError(
+            "ready source-set observation digests must cover exactly seven observations"
+        )
+    return {
+        label: BRIDGE.Reference(
+            BRIDGE._canonical_observation_path(  # noqa: SLF001
+                context.manifest,
+                label=label,
+                digest=_nonzero_sha256(
+                    digests[label],
+                    label=f"ready source-set observation {label}",
+                ),
+            ),
+            _nonzero_sha256(
+                digests[label],
+                label=f"ready source-set observation {label}",
+            ),
+        )
+        for label in BRIDGE.SOURCE_LABELS
+    }
+
+
+def _ready_source_set_document(
+    context: BRIDGE.EvidenceContext,
+    *,
+    role_validation: Mapping[str, BRIDGE.Reference],
+    observations: Mapping[str, BRIDGE.Reference],
+) -> dict[str, Any]:
+    document: dict[str, Any] = {
+        "schema": BRIDGE.SOURCE_SET_SCHEMA,
+        "status": "ready",
+        **BRIDGE._source_identity_fields(context),  # noqa: SLF001
+        "phase": PHASE,
+        "phase_started_at": context.journal["started_at"],
+        "role_validation": {
+            role: BRIDGE._reference_document(role_validation[role])  # noqa: SLF001
+            for role in ROLES
+        },
+        "observations": {
+            label: BRIDGE._reference_document(observations[label])  # noqa: SLF001
+            for label in BRIDGE.SOURCE_LABELS
+        },
+        "source_set_closure_sha256": BRIDGE._source_set_closure(  # noqa: SLF001
+            phase_started_at=context.journal["started_at"],
+            role_validation=role_validation,
+            observations=observations,
+        ),
+    }
+    if set(document) != BRIDGE.SOURCE_SET_FIELDS:
+        raise ConvergenceSourceSetProducerError("ready source-set fields differ")
+    return document
+
+
+def prepare_ready_source_set(
+    context: BRIDGE.EvidenceContext,
+    *,
+    role_validation_digests: Mapping[str, str],
+    observation_digests: Mapping[str, str],
+) -> PreparedReadySourceSet:
+    """Prepare a ready source-set from already-published, immutable evidence only."""
+    _validate_context(context)
+    _require_controller_producer_exact_release(context)
+    role_validation = _ready_role_validation_references(
+        context,
+        digests=role_validation_digests,
+    )
+    observations = _ready_observation_references(
+        context,
+        digests=observation_digests,
+    )
+    try:
+        BRIDGE._validate_source_members(  # noqa: SLF001
+            context,
+            role_validation=role_validation,
+            observations=observations,
+            phase_started_at=_timestamp(
+                context.journal["started_at"],
+                label="ready source-set phase start",
+            ),
+            now=_utcnow(),
+            require_fresh=True,
+        )
+    except (BRIDGE.ConvergenceGateError, BRIDGE.ConvergenceSourceUnavailable) as exc:
+        raise ConvergenceSourceSetUnavailable(
+            "published ready source-set members are unavailable or unsafe"
+        ) from exc
+    document = _ready_source_set_document(
+        context,
+        role_validation=role_validation,
+        observations=observations,
+    )
+    payload = _canonical_json(document) + b"\n"
+    digest = _sha256(payload)
+    output = BRIDGE._canonical_source_set_path(context.manifest, digest)  # noqa: SLF001
+    confirmation = (
+        f"publish-{PHASE}-ready-source-set:"
+        f"{context.manifest['operation_id']}:{context.manifest['release_sha']}:{digest}"
+    )
+    return PreparedReadySourceSet(
+        context=context,
+        role_validation=role_validation,
+        observations=observations,
+        document=document,
+        payload=payload,
+        sha256=digest,
+        output=output,
+        required_confirmation=confirmation,
+    )
+
+
+def publish_ready_source_set(
+    prepared: PreparedReadySourceSet,
+    *,
+    confirm: str,
+) -> dict[str, Any]:
+    """Create a ready source-set only after an exact digest-bound confirmation."""
+    if confirm != prepared.required_confirmation:
+        raise ConvergenceSourceSetProducerError(
+            "ready source-set publication requires exact digest-bound confirmation"
+        )
+    # A prepared object is only a plan. Reload every controller-owned input
+    # immediately before the create-only publication so a phase advance,
+    # changed approval, or replaced prior-evidence closure cannot leave a
+    # stale immutable source-set behind.
+    try:
+        current_context = BRIDGE.load_evidence_context(
+            manifest_path=prepared.context.manifest_path,
+            approval_path=prepared.context.approval_path,
+            approval_policy_path=prepared.context.approval_policy_path,
+            prior_evidence_paths=prepared.context.prior_paths,
+        )
+    except BRIDGE.ConvergenceGateError as exc:
+        raise ConvergenceSourceSetProducerError(
+            "trusted convergence context changed or is unavailable before publication"
+        ) from exc
+    refreshed = prepare_ready_source_set(
+        current_context,
+        role_validation_digests={
+            role: prepared.role_validation[role].sha256
+            for role in ROLES
+        },
+        observation_digests={
+            label: prepared.observations[label].sha256
+            for label in BRIDGE.SOURCE_LABELS
+        },
+    )
+    if (
+        refreshed.payload != prepared.payload
+        or refreshed.sha256 != prepared.sha256
+        or refreshed.output != prepared.output
+        or refreshed.required_confirmation != prepared.required_confirmation
+    ):
+        raise ConvergenceSourceSetProducerError(
+            "ready source-set members changed before publication"
+        )
+    # Never publish the caller-provided object. The refresh above reopens the
+    # canonical member closure and recomputes the confirmation from its exact
+    # content; use that freshly validated value for every mutation boundary.
+    if confirm != refreshed.required_confirmation:
+        raise ConvergenceSourceSetProducerError(
+            "ready source-set publication requires exact digest-bound confirmation"
+        )
+    _require_controller_producer_exact_release(refreshed.context)
+    publication = _write_new_or_same(
+        refreshed.output,
+        refreshed.payload,
+        label="ready convergence source-set",
+    )
+    reference = BRIDGE.Reference(refreshed.output, refreshed.sha256)
+    try:
+        BRIDGE._validate_source_set(  # noqa: SLF001
+            refreshed.context,
+            reference,
+            now=_utcnow(),
+            require_fresh=True,
+        )
+    except (BRIDGE.ConvergenceGateError, BRIDGE.ConvergenceSourceUnavailable) as exc:
+        raise ConvergenceSourceSetProducerError(
+            "published ready source-set does not satisfy convergence gate"
+        ) from exc
+    return {
+        "schema": BRIDGE.PUBLICATION_SCHEMA,
+        "status": "published",
+        "kind": "ready-source-set",
+        "phase": PHASE,
+        "operation": OPERATION,
+        "source_set_path": os.fspath(refreshed.output),
+        "source_set_sha256": refreshed.sha256,
+        "source_set_closure_sha256": refreshed.document["source_set_closure_sha256"],
+        "publication": publication,
+        "output_mutated": publication == "created",
+        "journal_mutated": False,
+        "production_contacted": False,
+    }
+
+
 def produce(
     context: BRIDGE.EvidenceContext,
     *,
@@ -2035,6 +2278,63 @@ def _parse_pure_observation_mapping(values: Sequence[str]) -> dict[str, str]:
     return result
 
 
+def _parse_ready_role_validation_mapping(values: Sequence[str]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for value in values:
+        role, separator, digest = value.partition("=")
+        if not separator or role in result or role not in ROLES:
+            raise ConvergenceSourceSetProducerError(
+                "ready source-set role validation mapping is invalid"
+            )
+        result[role] = _nonzero_sha256(
+            digest,
+            label=f"ready source-set role validation {role}",
+        )
+    if set(result) != set(ROLES):
+        raise ConvergenceSourceSetProducerError(
+            "ready source-set role validation mapping must cover exactly four roles"
+        )
+    return result
+
+
+def _parse_ready_observation_mapping(values: Sequence[str]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for value in values:
+        label, separator, digest = value.partition("=")
+        if not separator or label in result or label not in BRIDGE.SOURCE_LABELS:
+            raise ConvergenceSourceSetProducerError(
+                "ready source-set observation mapping is invalid"
+            )
+        result[label] = _nonzero_sha256(
+            digest,
+            label=f"ready source-set observation {label}",
+        )
+    if set(result) != set(BRIDGE.SOURCE_LABELS):
+        raise ConvergenceSourceSetProducerError(
+            "ready source-set observation mapping must cover exactly seven observations"
+        )
+    return result
+
+
+def _prepared_ready_source_set_result(
+    prepared: PreparedReadySourceSet,
+) -> dict[str, Any]:
+    return {
+        "schema": READY_SOURCE_SET_PLAN_SCHEMA,
+        "status": "prepared",
+        "phase": PHASE,
+        "operation": OPERATION,
+        "source_set": _reference_document(
+            BRIDGE.Reference(prepared.output, prepared.sha256)
+        ),
+        "source_set_closure_sha256": prepared.document["source_set_closure_sha256"],
+        "required_confirmation": prepared.required_confirmation,
+        "output_mutated": False,
+        "journal_mutated": False,
+        "production_contacted": False,
+    }
+
+
 def _parse_prior_mapping(values: Sequence[str]) -> dict[str, Path]:
     result: dict[str, Path] = {}
     for value in values:
@@ -2052,7 +2352,12 @@ def _parse_prior_mapping(values: Sequence[str]) -> dict[str, Path]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("plan", "produce"), nargs="?", default="plan")
+    parser.add_argument(
+        "action",
+        choices=("plan", "produce", "ready-source-set"),
+        nargs="?",
+        default="plan",
+    )
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--approval", type=Path)
     parser.add_argument("--approval-policy", type=Path)
@@ -2061,6 +2366,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--role-attestation", action="append", default=[])
     parser.add_argument("--role-receipt", action="append", default=[])
     parser.add_argument("--pure-observation", action="append", default=[])
+    parser.add_argument("--role-validation", action="append", default=[])
+    parser.add_argument("--observation", action="append", default=[])
+    parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--confirm")
     args = parser.parse_args(argv)
     try:
         supplied = (args.manifest, args.approval, args.approval_policy)
@@ -2075,19 +2384,70 @@ def main(argv: list[str] | None = None) -> int:
                 prior_evidence_paths=_parse_prior_mapping(args.prior_evidence),
             )
         if args.action == "plan":
+            if (
+                args.role_validation
+                or args.observation
+                or args.apply
+                or args.confirm is not None
+            ):
+                raise ConvergenceSourceSetProducerError(
+                    "plan does not accept ready source-set publication arguments"
+                )
             print(_canonical_json(build_plan(context)).decode("ascii"))
             return 0
         if context is None:
-            raise ConvergenceSourceSetProducerError("produce requires controller context inputs")
-        result = produce(
-            context,
-            request_digests=_parse_digest_mapping(args.role_request, label="role request"),
-            attestation_digests=_parse_digest_mapping(args.role_attestation, label="role attestation"),
-            receipt_digests=_parse_digest_mapping(args.role_receipt, label="role receipt"),
-            pure_observation_digests=_parse_pure_observation_mapping(
-                args.pure_observation
-            ),
-        )
+            raise ConvergenceSourceSetProducerError(
+                f"{args.action} requires controller context inputs"
+            )
+        if args.action == "produce":
+            if (
+                args.role_validation
+                or args.observation
+                or args.apply
+                or args.confirm is not None
+            ):
+                raise ConvergenceSourceSetProducerError(
+                    "produce does not accept ready source-set publication arguments"
+                )
+            result = produce(
+                context,
+                request_digests=_parse_digest_mapping(args.role_request, label="role request"),
+                attestation_digests=_parse_digest_mapping(args.role_attestation, label="role attestation"),
+                receipt_digests=_parse_digest_mapping(args.role_receipt, label="role receipt"),
+                pure_observation_digests=_parse_pure_observation_mapping(
+                    args.pure_observation
+                ),
+            )
+        else:
+            if (
+                args.role_request
+                or args.role_attestation
+                or args.role_receipt
+                or args.pure_observation
+            ):
+                raise ConvergenceSourceSetProducerError(
+                    "ready-source-set accepts only published member digest mappings"
+                )
+            if args.confirm is not None and not args.apply:
+                raise ConvergenceSourceSetProducerError(
+                    "ready-source-set confirmation requires --apply"
+                )
+            if args.apply and not args.confirm:
+                raise ConvergenceSourceSetProducerError(
+                    "ready-source-set --apply requires --confirm"
+                )
+            prepared = prepare_ready_source_set(
+                context,
+                role_validation_digests=_parse_ready_role_validation_mapping(
+                    args.role_validation
+                ),
+                observation_digests=_parse_ready_observation_mapping(args.observation),
+            )
+            result = (
+                publish_ready_source_set(prepared, confirm=args.confirm)
+                if args.apply
+                else _prepared_ready_source_set_result(prepared)
+            )
         print(_canonical_json(result).decode("ascii"))
         return 0
     except Exception as exc:
