@@ -40,6 +40,7 @@ INSTALL_RECEIPT_SCHEMA = "gold-trade-webapp-fi-source-adoption-install-receipt-v
 ATTESTATION_SCHEMA = "gold-trade-webapp-fi-source-role-attestation-v2"
 IMAGE_EXPORT_RECEIPT_SCHEMA = "gold-trade-webapp-fi-source-image-export-receipt-v2"
 SOURCE_ROLE_CONFIG_SCHEMA = "gold-trade-webapp-fi-source-role-config-v2"
+CAMPAIGN_BOUND_SOURCE_ROLE_CONFIG_SCHEMA = "gold-trade-webapp-fi-source-role-config-v3"
 STATIC_ASSET_PROOF_SCHEMA = "gold-trade-webapp-fi-static-asset-provenance-v1"
 DELIVERY_ENVELOPE_SCHEMA = "gold-trade-webapp-fi-source-adoption-delivery-envelope-v1"
 SIGNER_ENROLLMENT_CERTIFICATE_SCHEMA = "gold-trade-webapp-fi-source-signer-enrollment-certificate-v2"
@@ -70,6 +71,12 @@ PREPARATION_RECEIPT_NAME = "source-adoption-preparation-receipt.json"
 INSTALL_RECEIPT_NAME = "source-adoption-install-receipt.json"
 CANONICAL_RELEASE_TREE_MEMBER = "config/canonical-release-tree.json"
 CONTRACT_MEMBER = "config/source-adoption-contract.json"
+INITIAL_STATIC_POLICY_MEMBER = "config/initial-static-transport-policy.json"
+INITIAL_STATIC_REQUEST_MEMBER = "config/initial-static-upload-request.json"
+INITIAL_STATIC_BOOTSTRAP_MEMBERS = (
+    INITIAL_STATIC_POLICY_MEMBER,
+    INITIAL_STATIC_REQUEST_MEMBER,
+)
 
 PACKAGE_SOURCE_SITE = "bot_fi"
 PACKAGE_DESTINATION_SITE = "webapp_fi"
@@ -126,6 +133,7 @@ SOURCE_PAYLOAD_FILES = (
     "scripts/build_webapp_fi_source_evidence.py",
     "scripts/install_webapp_fi_static_provenance_control_packet.py",
     "scripts/manage_webapp_fi_source_exchange.py",
+    "scripts/prepare_webapp_fi_post_packet_upload.py",
     "scripts/webapp_fi_source_transport_contract.py",
     "scripts/webapp_fi_source_campaign_binding.py",
     "scripts/webapp_fi_static_provenance_control_packet.py",
@@ -133,7 +141,12 @@ SOURCE_PAYLOAD_FILES = (
     "scripts/webapp_ir_image_archive_contract.py",
     "deploy/production/webapp-fi-source-role.json.example",
 )
-PACKAGE_PAYLOAD_FILES = (*SOURCE_PAYLOAD_FILES, CONTRACT_MEMBER, CANONICAL_RELEASE_TREE_MEMBER)
+PACKAGE_PAYLOAD_FILES = (
+    *SOURCE_PAYLOAD_FILES,
+    CONTRACT_MEMBER,
+    CANONICAL_RELEASE_TREE_MEMBER,
+    *INITIAL_STATIC_BOOTSTRAP_MEMBERS,
+)
 PACKAGE_FILES = (*PACKAGE_PAYLOAD_FILES, PACKAGE_MANIFEST_MEMBER)
 
 
@@ -1930,28 +1943,128 @@ def _require_container_name(value: object, *, field: str) -> str:
     return value
 
 
-def load_source_role_config(path: Path, *, expected_application: Mapping[str, str]) -> dict[str, Any]:
+def _require_campaign_bound_role_application(value: object) -> dict[str, str]:
+    if not isinstance(value, Mapping) or set(value) != {
+        "release_sha",
+        "release_tree",
+        "expected_alembic_revision",
+    }:
+        raise SourceAdoptionInstallError("WebApp-FI campaign-bound source role application is invalid")
+    application = _require_application(
+        {
+            "release_sha": value.get("release_sha"),
+            "expected_alembic_revision": value.get("expected_alembic_revision"),
+        },
+        field="WebApp-FI campaign-bound source role application",
+    )
+    tree = value.get("release_tree")
+    if not isinstance(tree, str) or not COMMIT_RE.fullmatch(tree):
+        raise SourceAdoptionInstallError("WebApp-FI campaign-bound source role release tree is invalid")
+    return {**application, "release_tree": tree}
+
+
+FI_SOURCE_SIGNER_CAMPAIGN_ROOT = PurePosixPath("/etc/trading-bot-three-site/campaigns")
+
+
+def _expected_campaign_bound_source_signing_key_path(campaign_id: str) -> str:
+    campaign = _require_campaign_id(campaign_id, field="WebApp-FI campaign-bound source role campaign_id")
+    return str(
+        FI_SOURCE_SIGNER_CAMPAIGN_ROOT
+        / campaign
+        / "webapp-fi"
+        / "source-signing-ed25519.raw"
+    )
+
+
+def load_source_role_config(
+    path: Path,
+    *,
+    expected_application: Mapping[str, str],
+    expected_campaign_id: str | None = None,
+) -> dict[str, Any]:
+    """Load one role config, requiring v3 when a source-stage campaign is set.
+
+    The legacy v2 form is retained only for callers without a campaign-bound
+    source-stage operation.  Every enrolment, attestation, and image-export
+    command supplies ``expected_campaign_id`` and therefore rejects it.
+    """
+
+    if expected_campaign_id is not None:
+        expected_campaign_id = _require_campaign_id(
+            expected_campaign_id,
+            field="expected WebApp-FI source-stage campaign ID",
+        )
     value, raw = _read_private_json(path, field="WebApp-FI source role config")
-    expected = {
+    legacy_expected = {
         "schema", "source_site", "destination_site", "application", "application_container",
         "sync_worker_container", "source_signing_private_key_file",
     }
-    if set(value) != expected or value.get("schema") != SOURCE_ROLE_CONFIG_SCHEMA:
+    bound_expected = {
+        "schema", "campaign_id", "campaign_binding_sha256", "source_site", "destination_site",
+        "application", "tooling", "application_container", "sync_worker_container",
+        "source_signing_private_key_file",
+    }
+    schema = value.get("schema")
+    if schema == SOURCE_ROLE_CONFIG_SCHEMA and set(value) == legacy_expected:
+        if expected_campaign_id is not None:
+            raise SourceAdoptionInstallError(
+                "WebApp-FI campaign-bound source-stage commands require a v3 source role config"
+            )
+        application = _require_application(value.get("application"), field="WebApp-FI source role config application")
+        binding: dict[str, str] | None = None
+    elif schema == CAMPAIGN_BOUND_SOURCE_ROLE_CONFIG_SCHEMA and set(value) == bound_expected:
+        campaign_id = _require_campaign_id(
+            value.get("campaign_id"),
+            field="WebApp-FI campaign-bound source role campaign_id",
+        )
+        binding_sha256 = _require_sha256(
+            value.get("campaign_binding_sha256"),
+            field="WebApp-FI campaign-bound source role binding checksum",
+        )
+        full_application = _require_campaign_bound_role_application(value.get("application"))
+        application = {
+            "release_sha": full_application["release_sha"],
+            "expected_alembic_revision": full_application["expected_alembic_revision"],
+        }
+        tooling = _require_tooling(
+            value.get("tooling"),
+            field="WebApp-FI campaign-bound source role tooling",
+        )
+        binding = {
+            "campaign_id": campaign_id,
+            "campaign_binding_sha256": binding_sha256,
+            "release_tree": full_application["release_tree"],
+            "control_commit": tooling["control_commit"],
+            "control_tree": tooling["control_tree"],
+        }
+        if expected_campaign_id is not None and campaign_id != expected_campaign_id:
+            raise SourceAdoptionInstallError("WebApp-FI source role config campaign does not match the source-stage command")
+    else:
         raise SourceAdoptionInstallError("WebApp-FI source role config is unsupported")
     if value.get("source_site") != PACKAGE_DESTINATION_SITE or value.get("destination_site") != SNAPSHOT_DESTINATION_SITE:
         raise SourceAdoptionInstallError("WebApp-FI source role config site binding is invalid")
-    application = _require_application(value.get("application"), field="WebApp-FI source role config application")
     if application != dict(expected_application):
         raise SourceAdoptionInstallError("WebApp-FI source role config application binding is unexpected")
     signer = value.get("source_signing_private_key_file")
     if not isinstance(signer, str) or not signer.startswith("/"):
         raise SourceAdoptionInstallError("WebApp-FI source role config private reference is invalid")
+    if binding is not None and signer != _expected_campaign_bound_source_signing_key_path(binding["campaign_id"]):
+        raise SourceAdoptionInstallError("WebApp-FI campaign-bound source role signing key path is invalid")
+    application_container = _require_container_name(
+        value.get("application_container"), field="WebApp-FI application container"
+    )
+    sync_worker_container = _require_container_name(
+        value.get("sync_worker_container"), field="WebApp-FI sync worker container"
+    )
+    if application_container == sync_worker_container:
+        raise SourceAdoptionInstallError("WebApp-FI application and sync worker containers must be distinct")
     return {
         "path": require_root_only_file(path, field="WebApp-FI source role config"),
         "sha256": sha256_bytes(raw),
-        "application_container": _require_container_name(value.get("application_container"), field="WebApp-FI application container"),
-        "sync_worker_container": _require_container_name(value.get("sync_worker_container"), field="WebApp-FI sync worker container"),
+        "application_container": application_container,
+        "sync_worker_container": sync_worker_container,
         "source_signing_private_key_file": require_root_only_file(Path(signer), field="WebApp-FI source signing private key", maximum_bytes=32),
+        **({"campaign_binding": binding} if binding is not None else {}),
     }
 
 
@@ -2346,7 +2459,11 @@ def enroll_source_signer(
     campaign_id = _require_campaign_id(campaign_id, field="campaign_id")
     if installed["campaign_id"] != campaign_id or installed["package"]["controller_public_key_base64"] != pinned_controller_public_key_base64:
         raise SourceAdoptionInstallError("WebApp-FI signer enrollment controller or campaign is not bound to the installed package")
-    role_config = load_source_role_config(source_role_config, expected_application=installed["application"])
+    role_config = load_source_role_config(
+        source_role_config,
+        expected_application=installed["application"],
+        expected_campaign_id=campaign_id,
+    )
     certificate_value = _validate_signer_enrollment_certificate(
         certificate=certificate,
         pinned_controller_public_key_base64=pinned_controller_public_key_base64,
@@ -2464,7 +2581,11 @@ def attest_source_role(
     campaign_id = _require_campaign_id(campaign_id, field="campaign_id")
     if installed["campaign_id"] != campaign_id or installed["package"]["controller_public_key_base64"] != pinned_controller_public_key_base64:
         raise SourceAdoptionInstallError("WebApp-FI source attestation controller or campaign is not bound to the installed package")
-    role_config = load_source_role_config(source_role_config, expected_application=installed["application"])
+    role_config = load_source_role_config(
+        source_role_config,
+        expected_application=installed["application"],
+        expected_campaign_id=campaign_id,
+    )
     enrollment = verify_source_signer_enrollment(enrollment_receipt=signer_enrollment_receipt, installed=installed, role_config=role_config, certificate=signer_enrollment_certificate, ssh_host_public_key_file=ssh_host_public_key_file, pinned_controller_public_key_base64=pinned_controller_public_key_base64, campaign_id=campaign_id)
     runtime_before = verify_canonical_runtime_projection(candidate=installed["candidate"], runtime_source_root=runtime_source_root, expected_application=installed["application"])
     static_before = _validate_static_assets_proof(static_assets_descriptor=static_assets_descriptor, runtime_source_root=runtime_source_root, expected_application=installed["application"], pinned_controller_public_key_base64=pinned_controller_public_key_base64, campaign_id=campaign_id)
@@ -3004,7 +3125,11 @@ def export_actual_fi_image(
     export_start = _parse_utc_timestamp(utc_now(), field="WebApp-FI image export start time")
     if attested_at > export_start or (export_start - attested_at).total_seconds() > MAX_OBSERVATION_AGE_SECONDS:
         raise SourceAdoptionInstallError("WebApp-FI source attestation is too old for image export")
-    role_config = load_source_role_config(source_role_config, expected_application=verified["application"])
+    role_config = load_source_role_config(
+        source_role_config,
+        expected_application=verified["application"],
+        expected_campaign_id=expected_campaign_id,
+    )
     enrollment = verify_source_signer_enrollment(
         enrollment_receipt=signer_enrollment_receipt,
         installed=installed,

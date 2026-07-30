@@ -637,12 +637,29 @@ def require_root_private_directory(value):
         raise ReceiveError("root-only directory is unsafe")
     return path
 
-def require_receive_capacity(root, receipt):
-    """Reserve ciphertext plus plaintext before creating an exact candidate."""
+def require_writable_receive_staging_volume(root):
+    """Return a usable statvfs state or fail before any receiver write."""
+    readonly_flag = getattr(os, "ST_RDONLY", None)
+    if (isinstance(readonly_flag, bool) or not isinstance(readonly_flag, int)
+            or readonly_flag <= 0):
+        raise ReceiveError("cannot determine static receive staging-volume read-only status")
     try:
         state = os.statvfs(root)
-        available = state.f_bavail * state.f_frsize
+        mount_flags = state.f_flag
     except (AttributeError, OSError, OverflowError, TypeError, ValueError) as exc:
+        raise ReceiveError("cannot inspect static receive staging-volume mount flags") from exc
+    if (isinstance(mount_flags, bool) or not isinstance(mount_flags, int)
+            or mount_flags < 0):
+        raise ReceiveError("static receive staging-volume mount flags are invalid")
+    if mount_flags & readonly_flag:
+        raise ReceiveError("static receive fixed staging volume is mounted read-only")
+    return state
+
+def require_receive_capacity(receipt, mount_state):
+    """Reserve ciphertext plus plaintext before creating an exact candidate."""
+    try:
+        available = mount_state.f_bavail * mount_state.f_frsize
+    except (AttributeError, OverflowError, TypeError, ValueError) as exc:
         raise ReceiveError("static receive capacity is unavailable") from exc
     if (isinstance(available, bool) or not isinstance(available, int) or available < 0):
         raise ReceiveError("static receive capacity is invalid")
@@ -1115,7 +1132,9 @@ def receive(config, url):
         require_trusted_executable(executable)
     identity = require_root_private_campaign_identity(config["age_identity_file"])
     root = require_root_private_directory(config["receiver_root"])
-    require_receive_capacity(root, receipt)
+    # Inspect the fixed staging mount before capacity, candidate creation, or
+    # network I/O.  The second checks below cover a remount after admission.
+    require_receive_capacity(receipt, require_writable_receive_staging_volume(root))
     version_tag = sha256_bytes(receipt["object"]["version_id"].encode("ascii"))[:16]
     candidate = root / ("static-" + config["application"]["release_sha"] + "-" + config["tooling"]["control_commit"] + "-" + receipt["object_id"] + "-" + version_tag)
     if candidate.parent != root:
@@ -1123,6 +1142,7 @@ def receive(config, url):
     old_umask = os.umask(0o077)
     try:
         try:
+            require_writable_receive_staging_volume(root)
             os.mkdir(candidate, 0o700)
         except FileExistsError as exc:
             raise ReceiveError("static receive candidate already exists") from exc
@@ -1131,6 +1151,7 @@ def receive(config, url):
             raise ReceiveError("static receive candidate creation")
         ciphertext = candidate / ".ciphertext.age"
         archive = candidate / STATIC_ARCHIVE_NAME
+        require_writable_receive_staging_volume(root)
         result = subprocess.run(
             [CURL_BINARY, "--disable", "--silent", "--show-error", "--fail", "--globoff", "--noproxy", "*", "--proto", "=https", "--proto-redir", "=https", "--max-redirs", "0", "--connect-timeout", "20", "--max-time", "180", "--dump-header", "-", "--output", str(ciphertext), "--", url],
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False,

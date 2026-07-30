@@ -34,7 +34,6 @@ from urllib.parse import parse_qs, quote, urlparse
 
 
 REMOTE_HOST = "root@65.109.220.59"
-SSH_OPTIONS = ("-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes")
 
 RECEIVER_CONFIG_SCHEMA = "gold-trade-webapp-fi-source-bootstrap-receive-config-v2"
 PACKAGE_ARCHIVE_NAME = "webapp-fi-source-adoption.tar"
@@ -208,6 +207,9 @@ def _load_exact_sibling(filename: str, module_name: str) -> Any:
 transport = _load_exact_sibling("manage_webapp_fi_source_transport.py", "_webapp_fi_source_transport_receiver")
 preparer = _load_exact_sibling("prepare_webapp_fi_source_adoption.py", "_webapp_fi_source_preparer_receiver")
 provenance = _load_exact_sibling("verify_webapp_fi_source_provenance.py", "_webapp_fi_source_provenance_receiver")
+initial = _load_exact_sibling(
+    "render_webapp_fi_initial_static_upload.py", "_webapp_fi_source_bootstrap_initial"
+)
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -1396,6 +1398,7 @@ def render_receive_command(
     preparation_receipt: Path,
     delivery_envelope: Path,
     pinned_controller_public_key_base64: str,
+    fi_known_hosts: Path,
     presigned_url: str,
     receiver_root: str = DEFAULT_RECEIVER_ROOT,
 ) -> str:
@@ -1433,8 +1436,27 @@ def render_receive_command(
     _assert_control_only_remote_config(remote_config)
     program_b64 = base64.b64encode(REMOTE_RECEIVER_SOURCE.encode("utf-8")).decode("ascii")
     config_b64 = base64.b64encode(canonical_json_bytes(remote_config)).decode("ascii")
-    remote = shlex.join(["/usr/bin/python3", "-I", "-B", "-c", REMOTE_LAUNCHER, program_b64, config_b64, "--", url])
-    return shlex.join(["ssh", *SSH_OPTIONS, REMOTE_HOST, remote])
+    try:
+        if initial.REMOTE_HOST != REMOTE_HOST:
+            raise SourceBootstrapReceiveRenderError("pinned FI SSH target differs between bootstrap controls")
+        return initial._render_pinned_ssh(
+            known_hosts=Path(fi_known_hosts),
+            remote_arguments=[
+                "/usr/bin/python3",
+                "-I",
+                "-B",
+                "-c",
+                REMOTE_LAUNCHER,
+                program_b64,
+                config_b64,
+                "--",
+                url,
+            ],
+        )
+    except SourceBootstrapReceiveRenderError:
+        raise
+    except Exception as exc:
+        raise SourceBootstrapReceiveRenderError("pinned FI SSH bootstrap control cannot be rendered") from exc
 
 
 def _read_presigned_url_stdin() -> str:
@@ -1458,6 +1480,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--preparation-receipt", required=True, type=Path)
     parser.add_argument("--delivery-envelope", required=True, type=Path)
     parser.add_argument("--pinned-controller-public-key-base64", required=True)
+    parser.add_argument("--fi-known-hosts", required=True, type=Path)
     parser.add_argument("--presigned-url-stdin", action="store_true", required=True)
     return parser
 
@@ -1473,6 +1496,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 preparation_receipt=arguments.preparation_receipt,
                 delivery_envelope=arguments.delivery_envelope,
                 pinned_controller_public_key_base64=arguments.pinned_controller_public_key_base64,
+                fi_known_hosts=arguments.fi_known_hosts,
                 presigned_url=_read_presigned_url_stdin(),
             )
         )

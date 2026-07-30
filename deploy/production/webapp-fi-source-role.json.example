@@ -1,10 +1,17 @@
 {
-  "schema": "gold-trade-webapp-fi-source-role-config-v2",
+  "schema": "gold-trade-webapp-fi-source-role-config-v3",
+  "campaign_id": "REPLACE_WITH_CAMPAIGN_ID",
+  "campaign_binding_sha256": "REPLACE_WITH_CAMPAIGN_BINDING_SHA256",
   "source_site": "webapp_fi",
   "destination_site": "webapp_ir",
   "application": {
     "release_sha": "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5",
+    "release_tree": "REPLACE_WITH_APPLICATION_RELEASE_TREE",
     "expected_alembic_revision": "f2c7d8e9a0b1"
+  },
+  "tooling": {
+    "control_commit": "REPLACE_WITH_CONTROL_COMMIT",
+    "control_tree": "REPLACE_WITH_CONTROL_TREE"
   },
   "application_container": "trading_bot_app",
   "sync_worker_container": "trading_bot_sync_worker",

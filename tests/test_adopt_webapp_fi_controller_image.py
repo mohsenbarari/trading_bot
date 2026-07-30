@@ -12,6 +12,7 @@ from pathlib import Path
 import sys
 import tarfile
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -206,6 +207,51 @@ class ControllerImageAdoptionTests(unittest.TestCase):
             )
         ).decode("ascii")
         self.source_public = base64.b64encode(b"f" * 32).decode("ascii")
+        unsigned_binding = {
+            "schema": "gold-trade-webapp-fi-source-campaign-binding-v1",
+            "status": "bound",
+            "campaign_id": CAMPAIGN,
+            "application": {
+                "release_sha": RELEASE,
+                "release_tree": "e" * 40,
+                "expected_alembic_revision": REVISION,
+            },
+            "tooling": {"control_commit": CONTROL_COMMIT, "control_tree": CONTROL_TREE},
+        }
+        binding = {
+            **unsigned_binding,
+            "binding_sha256": hashlib.sha256(
+                json.dumps(unsigned_binding, sort_keys=True, separators=(",", ":")).encode("ascii")
+            ).hexdigest(),
+        }
+        self.campaign_binding = _private(
+            self.inputs / "campaigns" / CAMPAIGN / "webapp-fi-source" / "campaign-binding.json",
+            _canonical(binding),
+        )
+        self.controller_signing_authority = SimpleNamespace(
+            signer=self.controller_key,
+            signing_key=SimpleNamespace(
+                public_key_base64=self.controller_public,
+                key_id="ed25519-sha256:" + hashlib.sha256(base64.b64decode(self.controller_public)).hexdigest(),
+                receipt_sha256=hashlib.sha256(b"fixture-controller-signing-receipt").hexdigest(),
+            ),
+            campaign_binding=SimpleNamespace(
+                campaign_id=CAMPAIGN,
+                application_release_sha=RELEASE,
+                application_release_tree="e" * 40,
+                expected_alembic_revision=REVISION,
+                control_commit=CONTROL_COMMIT,
+                control_tree=CONTROL_TREE,
+                binding_sha256=binding["binding_sha256"],
+            ),
+        )
+        signer_loader = mock.patch.object(
+            adopt,
+            "_load_campaign_bound_controller_signer",
+            return_value=self.controller_signing_authority,
+        )
+        signer_loader.start()
+        self.addCleanup(signer_loader.stop)
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -249,15 +295,10 @@ class ControllerImageAdoptionTests(unittest.TestCase):
                 expected_id=self.redis_id,
             ),
             "pinned_source_signing_public_key_base64": self.source_public,
-            "pinned_controller_public_key_base64": self.controller_public,
-            "expected_campaign_id": CAMPAIGN,
-            "expected_application": self.application,
-            "expected_control_commit": CONTROL_COMMIT,
-            "expected_control_tree": CONTROL_TREE,
+            "campaign_binding_path": self.campaign_binding,
             "expected_canonical_release_tree_sha256": CANONICAL_TREE,
             "expected_app_image_id": self.app_image_id,
             "expected_app_image_reference": APP_REFERENCE,
-            "controller_signing_private_key": self.controller_private,
             "output_directory": self.outputs / output_name,
             "verification_time": VERIFICATION_TIME,
         }

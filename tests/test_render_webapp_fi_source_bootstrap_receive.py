@@ -34,6 +34,10 @@ def _load_module(name: str, path: Path):
 
 renderer = _load_module("render_webapp_fi_source_bootstrap_receive_test", SCRIPT)
 preparer = _load_module("prepare_webapp_fi_source_adoption_for_receiver_test", PREPARER_SCRIPT)
+fixtures = _load_module(
+    "source_stage_fixture_helpers_for_receiver_test",
+    ROOT / "tests" / "source_stage_fixture_helpers.py",
+)
 
 
 CAMPAIGN_ID = "receiver-test-campaign-20260730"
@@ -121,6 +125,19 @@ class RenderWebAppFiSourceBootstrapReceiveTests(unittest.TestCase):
         ).strip()
         (application / "main.py").write_text("print('fixture')\n", encoding="ascii")
         application_release = commit(application)
+        transport_config = self._transport_config(root)
+        _fixture_transport_config, campaign_binding, initial_static_object_id = fixtures.make_initial_static_inputs(
+            root=root,
+            campaign_id=CAMPAIGN_ID,
+            application_repository=application,
+            application_release_sha=application_release,
+            expected_alembic_revision=REVISION,
+            control_commit=control_commit,
+            control_tree=control_tree,
+            controller_recipient=CONTROLLER_RECIPIENT,
+            webapp_fi_recipient=RECIPIENT,
+            webapp_ir_recipient=WA_IR_RECIPIENT,
+        )
         packages = root / "packages"
         packages.mkdir(mode=0o700)
         package = packages / "source-bootstrap"
@@ -130,11 +147,13 @@ class RenderWebAppFiSourceBootstrapReceiveTests(unittest.TestCase):
             control_commit=control_commit,
             application_release_sha=application_release,
             expected_alembic_revision=REVISION,
+            source_transport_config=transport_config,
+            campaign_binding_path=campaign_binding,
+            initial_static_object_id=initial_static_object_id,
             package_id="source-bootstrap",
             destination=package,
             apply=True,
         )
-        transport_config = self._transport_config(root)
         policy = renderer.transport.load_controller_config(transport_config).policy
         request = renderer.transport.SourceObjectRequest(
             campaign_id=CAMPAIGN_ID,
@@ -169,29 +188,43 @@ class RenderWebAppFiSourceBootstrapReceiveTests(unittest.TestCase):
         private_key.write_bytes(os.urandom(32))
         private_key.chmod(0o600)
         envelope_path = root / "receipts" / "delivery-envelope.json"
-        envelope_result = preparer.sign_delivery_envelope(
-            package_directory=package,
-            preparation_receipt=package / preparer.PREPARATION_RECEIPT_NAME,
-            expected_control_commit=control_commit,
-            expected_application_release_sha=application_release,
-            campaign_id=CAMPAIGN_ID,
-            fi_bootstrap_recipient=RECIPIENT,
-            object_key=object_key,
-            version_id="version-001",
-            ciphertext_sha256=descriptor["ciphertext_sha256"],
-            ciphertext_bytes=descriptor["ciphertext_bytes"],
-            plaintext_sha256=descriptor["plaintext_sha256"],
-            plaintext_bytes=descriptor["plaintext_bytes"],
-            controller_signing_private_key=private_key,
-            destination=envelope_path,
-            apply=True,
+        authority = fixtures.campaign_bound_controller_signer(
+            campaign_binding_path=campaign_binding,
+            private_key_raw=private_key.read_bytes(),
         )
+        with mock.patch.object(
+            preparer,
+            "_load_campaign_bound_controller_signer",
+            return_value=authority,
+        ):
+            envelope_result = preparer.sign_delivery_envelope(
+                package_directory=package,
+                preparation_receipt=package / preparer.PREPARATION_RECEIPT_NAME,
+                expected_control_commit=control_commit,
+                expected_application_release_sha=application_release,
+                campaign_binding_path=campaign_binding,
+                fi_bootstrap_recipient=RECIPIENT,
+                object_key=object_key,
+                version_id="version-001",
+                ciphertext_sha256=descriptor["ciphertext_sha256"],
+                ciphertext_bytes=descriptor["ciphertext_bytes"],
+                plaintext_sha256=descriptor["plaintext_sha256"],
+                plaintext_bytes=descriptor["plaintext_bytes"],
+                destination=envelope_path,
+                apply=True,
+            )
         date = now.strftime("%Y%m%dT%H%M%SZ")
         url = (
             f"https://{HOST}/{BUCKET}/{object_key}?versionId=version-001"
             f"&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=credential"
             f"&X-Amz-Date={date}&X-Amz-Expires=300&X-Amz-SignedHeaders=host&X-Amz-Signature=signature"
         )
+        known_hosts = root / "controller" / "fi-known_hosts"
+        known_hosts.write_text(
+            "65.109.220.59 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureKnownHostKey\n",
+            encoding="ascii",
+        )
+        known_hosts.chmod(0o644)
         return {
             "package": package,
             "preparation": package / preparer.PREPARATION_RECEIPT_NAME,
@@ -201,6 +234,7 @@ class RenderWebAppFiSourceBootstrapReceiveTests(unittest.TestCase):
             "pinned_key": envelope_result["controller_public_key_base64"],
             "published": published,
             "url": url,
+            "known_hosts": known_hosts,
             "prepared": prepared,
             "archive": archive,
             "control_commit": control_commit,
@@ -215,15 +249,19 @@ class RenderWebAppFiSourceBootstrapReceiveTests(unittest.TestCase):
             preparation_receipt=fixture["preparation"],
             delivery_envelope=fixture["envelope"],
             pinned_controller_public_key_base64=str(fixture["pinned_key"]),
+            fi_known_hosts=fixture["known_hosts"],
             presigned_url=str(fixture["url"] if url is None else url),
         )
 
-    def _remote(self, command: str) -> tuple[list[str], str, dict[str, object]]:
+    def _remote(self, command: str, *, known_hosts: Path) -> tuple[list[str], str, dict[str, object]]:
         outer = shlex.split(command)
-        self.assertEqual(outer[:5], ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes"])
-        self.assertEqual(outer[5], renderer.REMOTE_HOST)
-        self.assertEqual(len(outer), 7)
-        inner = shlex.split(outer[6])
+        self.assertEqual("ssh", outer[0])
+        self.assertIn("StrictHostKeyChecking=yes", outer)
+        self.assertIn("PasswordAuthentication=no", outer)
+        self.assertIn("GlobalKnownHostsFile=/dev/null", outer)
+        self.assertIn("UserKnownHostsFile=" + str(known_hosts), outer)
+        self.assertEqual(renderer.REMOTE_HOST, outer[-2])
+        inner = shlex.split(outer[-1])
         self.assertEqual(inner[:5], ["/usr/bin/python3", "-I", "-B", "-c", renderer.REMOTE_LAUNCHER])
         self.assertEqual(inner[7], "--")
         program = base64.b64decode(inner[5]).decode("utf-8")
@@ -235,7 +273,7 @@ class RenderWebAppFiSourceBootstrapReceiveTests(unittest.TestCase):
             fixture = self._fixture(Path(temporary))
             with mock.patch.object(renderer, "_utc_now", return_value=NOW):
                 command = self._render(fixture)
-            inner, program, config = self._remote(command)
+            inner, program, config = self._remote(command, known_hosts=Path(fixture["known_hosts"]))
             self.assertEqual(len(inner), 9)
             self.assertEqual(inner[-1], fixture["url"])
             self.assertEqual(inner.count(fixture["url"]), 1)
@@ -360,6 +398,20 @@ class RenderWebAppFiSourceBootstrapReceiveTests(unittest.TestCase):
             ):
                 self._render(fixture)
 
+    def test_render_rejects_known_hosts_without_the_fixed_fi_pin(self):
+        with tempfile.TemporaryDirectory(prefix="fi-bootstrap-render-") as temporary:
+            fixture = self._fixture(Path(temporary))
+            known_hosts = Path(fixture["known_hosts"])
+            known_hosts.write_text(
+                "65.109.220.60 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureKnownHostKey\n",
+                encoding="ascii",
+            )
+            known_hosts.chmod(0o644)
+            with mock.patch.object(renderer, "_utc_now", return_value=NOW), self.assertRaisesRegex(
+                renderer.SourceBootstrapReceiveRenderError, "pinned FI SSH bootstrap control"
+            ):
+                self._render(fixture)
+
     def test_short_lived_sigv4_and_sigv2_urls_are_required(self):
         with tempfile.TemporaryDirectory(prefix="fi-bootstrap-render-") as temporary:
             fixture = self._fixture(Path(temporary))
@@ -447,7 +499,7 @@ class RenderWebAppFiSourceBootstrapReceiveTests(unittest.TestCase):
         fixture = self._fixture(root / "fixture", now=current)
         with mock.patch.object(renderer, "_utc_now", return_value=current):
             command = self._render(fixture)
-        _inner, program, config = self._remote(command)
+        _inner, program, config = self._remote(command, known_hosts=Path(fixture["known_hosts"]))
         receiver_root = root / "receiver-root"
         receiver_root.mkdir(mode=0o700)
         identity_root = root / "identities"
@@ -499,7 +551,11 @@ class RenderWebAppFiSourceBootstrapReceiveTests(unittest.TestCase):
                 if path.is_file():
                     payload = path.read_bytes()
                     self.assertNotIn(url.encode("utf-8"), payload, path)
-                    self.assertNotIn(b"https://", payload, path)
+                    # The staged source archive may legitimately contain a
+                    # static endpoint-construction literal.  Only a live
+                    # capability URL is forbidden from durable artifacts.
+                    if "control" in path.relative_to(receiver_root).parts:
+                        self.assertNotIn(b"https://", payload, path)
         finally:
             temporary.cleanup()
 

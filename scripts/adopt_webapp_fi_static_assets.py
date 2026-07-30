@@ -48,6 +48,64 @@ def _load_portable_verifier() -> Any:
 portable = _load_portable_verifier()
 
 
+def _load_campaign_bound_controller_signer(campaign_binding_path: Path) -> Any:
+    """Load the fixed controller signer selected by a canonical binding."""
+
+    path = Path(__file__).resolve(strict=True).with_name(
+        "manage_controller_campaign_signing_key.py"
+    )
+    try:
+        before = path.lstat()
+        resolved = path.resolve(strict=True)
+        metadata = resolved.lstat()
+    except OSError as exc:  # pragma: no cover - deployment layout invariant.
+        raise StaticAssetAdoptionError(
+            "cannot inspect controller campaign signing-key helper"
+        ) from exc
+    if (
+        resolved != path
+        or stat.S_ISLNK(before.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != 0
+        or metadata.st_nlink != 1
+        or stat.S_IMODE(metadata.st_mode) & 0o022
+    ):
+        raise StaticAssetAdoptionError("controller campaign signing-key helper is unsafe")
+    name = "_static_asset_campaign_signing_key"
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:  # pragma: no cover - deployment layout invariant.
+        raise StaticAssetAdoptionError("cannot load controller campaign signing-key helper")
+    module = importlib.util.module_from_spec(spec)
+    previous = sys.modules.get(name)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+        return module.load_verified_campaign_signer(
+            campaign_binding_path=Path(campaign_binding_path)
+        )
+    except BaseException as exc:
+        if previous is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = previous
+        raise StaticAssetAdoptionError(
+            "static asset signing authority is not bound to the canonical campaign"
+        ) from exc
+
+
+def _campaign_signing_authority_identity(authority: Any) -> tuple[str, str, str, str]:
+    try:
+        return (
+            authority.campaign_binding.campaign_id,
+            authority.campaign_binding.binding_sha256,
+            authority.signing_key.public_key_base64,
+            authority.signing_key.receipt_sha256,
+        )
+    except (AttributeError, TypeError) as exc:
+        raise StaticAssetAdoptionError("static asset signing authority is incomplete") from exc
+
+
 STATIC_ASSET_READBACK_SCHEMA = "gold-trade-webapp-fi-static-assets-readback-v1"
 STATIC_ASSET_ADOPTION_RECEIPT_SCHEMA = "gold-trade-webapp-fi-static-assets-adoption-receipt-v1"
 STATIC_ASSET_PROVENANCE_INPUT_SCHEMA = "gold-trade-webapp-fi-static-assets-provenance-input-v1"
@@ -314,22 +372,6 @@ def _inspect_static_archive(*, archive_path: Path, object_descriptor: Mapping[st
     return files
 
 
-def _load_controller_signer(path: Path) -> tuple[Any, str]:
-    path = _require_private_file(path, field="static asset controller signing private key", maximum_bytes=32)
-    raw = path.read_bytes()
-    if len(raw) != 32:
-        raise StaticAssetAdoptionError("static asset controller signing private key must contain exactly 32 bytes")
-    try:
-        from cryptography.hazmat.primitives import serialization
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-
-        signer = Ed25519PrivateKey.from_private_bytes(raw)
-        public = signer.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
-    except (ImportError, ValueError) as exc:
-        raise StaticAssetAdoptionError("static asset controller signing key is invalid") from exc
-    return signer, base64.b64encode(public).decode("ascii")
-
-
 def _write_new_json(path: Path, value: Mapping[str, Any], *, field: str) -> bytes:
     encoded = canonical_json_bytes(value) + b"\n"
     try:
@@ -354,27 +396,26 @@ def adopt_static_assets(
     *,
     static_archive: Path,
     object_storage_readback: Path,
-    expected_campaign_id: str,
-    expected_application: Mapping[str, str],
-    pinned_controller_public_key_base64: str,
-    controller_signing_private_key: Path,
+    campaign_binding_path: Path,
     output_directory: Path,
     apply: bool,
 ) -> dict[str, Any]:
     """Produce a signed static-assets provenance descriptor from local bytes."""
 
     _require_root_execution()
-    try:
-        campaign_id = portable._campaign(expected_campaign_id, field="expected campaign")
-        application = portable._application(expected_application, field="expected application")
-    except Exception as exc:
-        raise StaticAssetAdoptionError("static asset provenance identity is invalid") from exc
+    authority = _load_campaign_bound_controller_signer(Path(campaign_binding_path))
+    authority_identity = _campaign_signing_authority_identity(authority)
+    campaign_binding = authority.campaign_binding
+    campaign_id = campaign_binding.campaign_id
+    application = {
+        "release_sha": campaign_binding.application_release_sha,
+        "expected_alembic_revision": campaign_binding.expected_alembic_revision,
+    }
     object_descriptor = _load_static_readback(path=object_storage_readback, campaign_id=campaign_id)
     files = _inspect_static_archive(archive_path=static_archive, object_descriptor=object_descriptor)
     files_sha256 = sha256_bytes(canonical_json_bytes(files))
-    signer, controller_public_key_base64 = _load_controller_signer(controller_signing_private_key)
-    if controller_public_key_base64 != pinned_controller_public_key_base64:
-        raise StaticAssetAdoptionError("static asset signer does not match the pinned controller key")
+    signer = authority.signer
+    controller_public_key_base64 = authority.signing_key.public_key_base64
     output_directory = Path(output_directory)
     if not output_directory.is_absolute():
         raise StaticAssetAdoptionError("output_directory must be an absolute path")
@@ -397,6 +438,28 @@ def adopt_static_assets(
     }
     if not apply:
         return plan
+    final_authority = _load_campaign_bound_controller_signer(Path(campaign_binding_path))
+    if _campaign_signing_authority_identity(final_authority) != authority_identity:
+        raise StaticAssetAdoptionError(
+            "canonical campaign signing authority changed before static asset write"
+        )
+    final_object_descriptor = _load_static_readback(
+        path=object_storage_readback,
+        campaign_id=final_authority.campaign_binding.campaign_id,
+    )
+    final_files = _inspect_static_archive(
+        archive_path=static_archive,
+        object_descriptor=final_object_descriptor,
+    )
+    final_files_sha256 = sha256_bytes(canonical_json_bytes(final_files))
+    if (
+        final_object_descriptor != object_descriptor
+        or final_files != files
+        or final_files_sha256 != files_sha256
+    ):
+        raise StaticAssetAdoptionError("static asset inputs changed before static asset write")
+    signer = final_authority.signer
+    controller_public_key_base64 = final_authority.signing_key.public_key_base64
     try:
         output_directory.mkdir(mode=0o700)
     except OSError as exc:
@@ -427,7 +490,7 @@ def adopt_static_assets(
     try:
         portable._static_assets_provenance(
             payload=provenance_payload,
-            pinned_controller_public_key_base64=pinned_controller_public_key_base64,
+            pinned_controller_public_key_base64=controller_public_key_base64,
             expected_campaign_id=campaign_id,
             expected_application=application,
         )
@@ -488,11 +551,7 @@ def _argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--static-archive", type=Path, required=True)
     parser.add_argument("--object-storage-readback", type=Path, required=True)
-    parser.add_argument("--campaign-id", required=True)
-    parser.add_argument("--release-sha", required=True)
-    parser.add_argument("--expected-alembic-revision", required=True)
-    parser.add_argument("--pinned-controller-public-key-base64", required=True)
-    parser.add_argument("--controller-signing-private-key", type=Path, required=True)
+    parser.add_argument("--campaign-binding", type=Path, required=True)
     parser.add_argument("--output-directory", type=Path, required=True)
     parser.add_argument("--apply", action="store_true")
     return parser
@@ -504,13 +563,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = adopt_static_assets(
             static_archive=args.static_archive,
             object_storage_readback=args.object_storage_readback,
-            expected_campaign_id=args.campaign_id,
-            expected_application={
-                "release_sha": args.release_sha,
-                "expected_alembic_revision": args.expected_alembic_revision,
-            },
-            pinned_controller_public_key_base64=args.pinned_controller_public_key_base64,
-            controller_signing_private_key=args.controller_signing_private_key,
+            campaign_binding_path=args.campaign_binding,
             output_directory=args.output_directory,
             apply=args.apply,
         )

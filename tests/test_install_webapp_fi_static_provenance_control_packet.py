@@ -83,6 +83,11 @@ class StaticProvenanceControlPacketReaderTests(unittest.TestCase):
         )
 
         role = json.loads(original_role.read_text(encoding="ascii"))
+        role["schema"] = packet.SOURCE_ROLE_CONFIG_SCHEMA
+        role["campaign_id"] = self.campaign
+        role["campaign_binding_sha256"] = self.binding["binding_sha256"]
+        role["application"] = dict(self.binding["application"])
+        role["tooling"] = dict(self.binding["tooling"])
         role["source_signing_private_key_file"] = packet.expected_source_signing_key_path(self.campaign)
         self.role_path = _canonical_private_json(self.fixture.root / "controller-inputs" / "role.json", role)
         self.certificate_path = certificate
@@ -90,7 +95,7 @@ class StaticProvenanceControlPacketReaderTests(unittest.TestCase):
         self.workspace = self.fixture.root / "exchange-workspace"
         self.workspace.mkdir(mode=0o700)
         self.policy = self._policy()
-        self.packet_payload = packet.build_control_packet_payload(
+        self.packet_payload = self._seal_packet(
             created_at="2026-07-30T00:00:00Z",
             campaign_binding_payload=self.controller_binding_path.read_bytes(),
             signer_enrollment_certificate_payload=self.certificate_path.read_bytes(),
@@ -98,7 +103,6 @@ class StaticProvenanceControlPacketReaderTests(unittest.TestCase):
             static_assets_provenance_payload=self.static_path.read_bytes(),
             source_transport_policy_payload=packet.canonical_json_bytes(self.policy) + b"\n",
             packet_id="packet-reader-one",
-            controller_signing_private_key=self.fixture.controller_private.read_bytes(),
         )
         self.received_directory = self.workspace / "received-one"
         self.received_directory.mkdir(mode=0o700)
@@ -124,6 +128,13 @@ class StaticProvenanceControlPacketReaderTests(unittest.TestCase):
             },
         }
         return {**unsigned, "binding_sha256": packet.sha256_bytes(packet.canonical_json_bytes(unsigned))}
+
+    def _seal_packet(self, **values):
+        return packet.build_control_packet_payload_with_signer(
+            **values,
+            controller_signer=self.fixture.controller_key,
+            controller_public_key_base64=self.fixture.controller_public,
+        )
 
     def _policy(self):
         return {
@@ -318,15 +329,22 @@ class StaticProvenanceControlPacketReaderTests(unittest.TestCase):
             self.fixture.root / "controller-inputs" / "wrong-release-tree-binding.json",
             wrong_binding,
         )
-        self.packet_payload = packet.build_control_packet_payload(
+        wrong_role = json.loads(self.role_path.read_text(encoding="ascii"))
+        wrong_role["campaign_binding_sha256"] = wrong_binding["binding_sha256"]
+        wrong_role["application"] = dict(wrong_binding["application"])
+        wrong_role["tooling"] = dict(wrong_binding["tooling"])
+        wrong_role_path = _canonical_private_json(
+            self.fixture.root / "controller-inputs" / "wrong-release-tree-role.json",
+            wrong_role,
+        )
+        self.packet_payload = self._seal_packet(
             created_at="2026-07-30T00:00:00Z",
             campaign_binding_payload=wrong_binding_path.read_bytes(),
             signer_enrollment_certificate_payload=self.certificate_path.read_bytes(),
-            source_role_config_payload=self.role_path.read_bytes(),
+            source_role_config_payload=wrong_role_path.read_bytes(),
             static_assets_provenance_payload=self.static_path.read_bytes(),
             source_transport_policy_payload=packet.canonical_json_bytes(self.policy) + b"\n",
             packet_id="packet-reader-one",
-            controller_signing_private_key=self.fixture.controller_private.read_bytes(),
         )
         for name in (reader.RECEIVED_PACKET_NAME, reader.EXCHANGE_RECEIPT_NAME):
             (self.received_directory / name).unlink()
@@ -352,7 +370,7 @@ class StaticProvenanceControlPacketReaderTests(unittest.TestCase):
             self.fixture.root / "controller-inputs" / "wrong-candidate-certificate.json",
             certificate,
         )
-        self.packet_payload = packet.build_control_packet_payload(
+        self.packet_payload = self._seal_packet(
             created_at="2026-07-30T00:00:00Z",
             campaign_binding_payload=self.controller_binding_path.read_bytes(),
             signer_enrollment_certificate_payload=certificate_path.read_bytes(),
@@ -360,7 +378,6 @@ class StaticProvenanceControlPacketReaderTests(unittest.TestCase):
             static_assets_provenance_payload=self.static_path.read_bytes(),
             source_transport_policy_payload=packet.canonical_json_bytes(self.policy) + b"\n",
             packet_id="packet-reader-one",
-            controller_signing_private_key=self.fixture.controller_private.read_bytes(),
         )
         for name in (reader.RECEIVED_PACKET_NAME, reader.EXCHANGE_RECEIPT_NAME):
             (self.received_directory / name).unlink()

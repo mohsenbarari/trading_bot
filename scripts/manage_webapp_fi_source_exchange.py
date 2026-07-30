@@ -618,6 +618,69 @@ def _require_outbound_request(policy: Any, request: Any) -> tuple[str, ...]:
     return tuple(recipients)
 
 
+def _require_generic_cli_initial_static_request(policy: Any, request: Any) -> None:
+    """Keep the generic CLI from bypassing post-packet artifact derivation.
+
+    The generic exchange remains the immutable transport primitive shared by
+    the initial-static renderer and the narrow post-packet helper.  Its CLI,
+    however, must not accept a caller-selected raw image or evidence request:
+    those two routes require their fixed plaintext paths and IDs to be
+    derived by ``prepare_webapp_fi_post_packet_upload.py``.  The only
+    caller-supplied request file accepted by this CLI is the initial static
+    archive's canonical dual-recipient route.
+    """
+
+    recipients = _require_outbound_request(policy, request)
+    if (
+        request.source_site != "webapp_fi"
+        or request.destination_site != contract.STATIC_DESTINATION_SITE
+        or request.object_kind != contract.STATIC_OBJECT_KIND
+        or request.mode != contract.STATIC_MODE
+        or tuple(request.recipients)
+        != (policy.controller_age_recipient, policy.webapp_ir_age_recipient)
+        or recipients != (policy.controller_age_recipient, policy.webapp_ir_age_recipient)
+    ):
+        raise SourceExchangeError(
+            "generic FI source exchange CLI may handle only the initial dual-recipient static route"
+        )
+
+
+def _require_generic_cli_initial_static_prepared_upload(policy: Any, prepared_dir: Path) -> None:
+    """Reject raw/evidence prepared uploads before the generic CLI can PUT.
+
+    ``upload_prepared`` remains an internal transport primitive for the
+    packet-derived helper.  The generic CLI must nevertheless re-open the
+    immutable prepared receipt before delegating, because a pre-existing
+    raw-image or evidence directory would otherwise bypass that helper.
+    This performs only root-private local reads; it creates no marker and
+    makes no network request.
+    """
+
+    try:
+        policy = contract.validate_policy(policy)
+    except contract.SourceTransportError as exc:
+        raise SourceExchangeError("FI source exchange policy is invalid") from exc
+    workspace = _require_root_private_directory(policy.workspace, field="source exchange workspace")
+    directory = _require_absolute(Path(prepared_dir), field="prepared FI upload directory")
+    if directory.parent != workspace:
+        raise SourceExchangeError("prepared FI upload directory must be a direct workspace child")
+    directory = _require_root_private_directory(directory, field="prepared FI upload directory")
+    try:
+        request, _recipients, _plaintext, _ciphertext, _prepared_sha256 = _verify_prepared_receipt(
+            policy=policy,
+            payload=_read_private_file(
+                directory / PREPARED_RECEIPT_NAME,
+                field="prepared FI upload receipt",
+                maximum_bytes=MAX_JSON_BYTES,
+            ),
+        )
+    except SourceExchangeError:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive boundary for a malformed local receipt.
+        raise SourceExchangeError("prepared FI upload receipt is invalid") from exc
+    _require_generic_cli_initial_static_request(policy, request)
+
+
 def _require_inbound_static_provenance_request(policy: Any, request: Any) -> None:
     try:
         contract.validate_request(policy, request)
@@ -1436,13 +1499,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         policy = load_policy(args.policy)
         if args.command == "prepare-upload":
+            request = load_request(args.request, policy=policy)
+            _require_generic_cli_initial_static_request(policy, request)
             result = prepare_upload(
                 policy=policy,
-                request=load_request(args.request, policy=policy),
+                request=request,
                 plaintext_path=args.plaintext,
                 prepared_dir=args.prepared_dir,
             )
         elif args.command == "upload-prepared":
+            _require_generic_cli_initial_static_prepared_upload(policy, args.prepared_dir)
             result = upload_prepared(policy=policy, prepared_dir=args.prepared_dir, upload_url=args.upload_url)
         elif args.command == "receive-static-provenance":
             result = receive_static_provenance(

@@ -38,7 +38,6 @@ CONTROL_PACKET_FILENAME = "static-provenance.json"
 
 MAX_CONTROL_INPUT_BYTES = 8 * 1024 * 1024
 MAX_POLICY_INPUT_BYTES = 1024 * 1024
-MAX_SIGNING_KEY_BYTES = 32
 
 
 class StaticProvenanceControlPacketBuildError(RuntimeError):
@@ -286,6 +285,35 @@ control = _load_exact_sibling(
 )
 
 
+def _load_campaign_bound_controller_signer(campaign_binding: Path) -> Any:
+    """Load the sole controller signer selected by the canonical binding."""
+
+    helper = _load_exact_sibling(
+        "manage_controller_campaign_signing_key.py",
+        "_static_packet_campaign_signing_key",
+    )
+    try:
+        return helper.load_verified_campaign_signer(campaign_binding_path=Path(campaign_binding))
+    except Exception as exc:
+        raise StaticProvenanceControlPacketBuildError(
+            "controller static-provenance signing authority is not bound to the canonical campaign"
+        ) from exc
+
+
+def _campaign_signing_authority_identity(authority: Any) -> tuple[str, str, str, str]:
+    try:
+        return (
+            authority.campaign_binding.campaign_id,
+            authority.campaign_binding.binding_sha256,
+            authority.signing_key.public_key_base64,
+            authority.signing_key.receipt_sha256,
+        )
+    except (AttributeError, TypeError) as exc:
+        raise StaticProvenanceControlPacketBuildError(
+            "controller static-provenance signing authority is incomplete"
+        ) from exc
+
+
 def utc_now() -> str:
     return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -315,8 +343,7 @@ def _load_inputs(
     source_role_config: Path,
     static_assets_provenance: Path,
     source_transport_policy: Path,
-    controller_signing_private_key: Path,
-) -> tuple[bytes, bytes, bytes, bytes, bytes, bytes]:
+) -> tuple[bytes, bytes, bytes, bytes, bytes]:
     return (
         _read_root_private_file(campaign_binding_path(campaign_id), field="campaign binding", maximum_bytes=MAX_CONTROL_INPUT_BYTES),
         _read_root_private_file(
@@ -335,12 +362,60 @@ def _load_inputs(
             field="FI source transport policy",
             maximum_bytes=MAX_POLICY_INPUT_BYTES,
         ),
-        _read_root_private_file(
-            controller_signing_private_key,
-            field="controller signing private key",
-            maximum_bytes=MAX_SIGNING_KEY_BYTES,
-        ),
     )
+
+
+def _seal_packet(
+    *,
+    inputs: tuple[bytes, bytes, bytes, bytes, bytes],
+    campaign: str,
+    packet: str,
+    timestamp: str,
+    authority: Any,
+) -> tuple[dict[str, Any], bytes, dict[str, Any]]:
+    """Validate all immutable inputs and seal one packet without writing it."""
+
+    try:
+        binding = control.binding_identity_from_payload(inputs[0])
+        campaign_binding = authority.campaign_binding
+        if (
+            binding["campaign_id"] != campaign
+            or binding["campaign_id"] != campaign_binding.campaign_id
+            or binding["binding_sha256"] != campaign_binding.binding_sha256
+            or binding["application"]
+            != {
+                "release_sha": campaign_binding.application_release_sha,
+                "release_tree": campaign_binding.application_release_tree,
+                "expected_alembic_revision": campaign_binding.expected_alembic_revision,
+            }
+            or binding["tooling"]
+            != {
+                "control_commit": campaign_binding.control_commit,
+                "control_tree": campaign_binding.control_tree,
+            }
+        ):
+            raise StaticProvenanceControlPacketBuildError(
+                "controller campaign binding does not match the fixed signing authority"
+            )
+        payload = control.build_control_packet_payload_with_signer(
+            created_at=timestamp,
+            campaign_binding_payload=inputs[0],
+            signer_enrollment_certificate_payload=inputs[1],
+            source_role_config_payload=inputs[2],
+            static_assets_provenance_payload=inputs[3],
+            source_transport_policy_payload=inputs[4],
+            packet_id=packet,
+            controller_signer=authority.signer,
+            controller_public_key_base64=authority.signing_key.public_key_base64,
+        )
+        verified = control.verify_control_packet_payload(
+            payload=payload,
+            pinned_controller_public_key_base64=authority.signing_key.public_key_base64,
+            expected_campaign_binding_identity=binding,
+        )
+    except control.StaticProvenanceControlPacketError as exc:
+        raise StaticProvenanceControlPacketBuildError(str(exc)) from exc
+    return binding, payload, verified
 
 
 def build_static_provenance_control_packet(
@@ -351,7 +426,6 @@ def build_static_provenance_control_packet(
     source_role_config: Path,
     static_assets_provenance: Path,
     source_transport_policy: Path,
-    controller_signing_private_key: Path,
     apply: bool,
     created_at: str | None = None,
 ) -> dict[str, Any]:
@@ -361,38 +435,24 @@ def build_static_provenance_control_packet(
     campaign = control._require_identifier(campaign_id, field="campaign ID", campaign=True)
     packet = control._require_identifier(packet_id, field="control packet ID")
     output = control_packet_path(campaign_id=campaign, packet_id=packet)
+    binding_path = campaign_binding_path(campaign)
+    authority = _load_campaign_bound_controller_signer(binding_path)
+    authority_identity = _campaign_signing_authority_identity(authority)
     inputs = _load_inputs(
         campaign_id=campaign,
         signer_enrollment_certificate=Path(signer_enrollment_certificate),
         source_role_config=Path(source_role_config),
         static_assets_provenance=Path(static_assets_provenance),
         source_transport_policy=Path(source_transport_policy),
-        controller_signing_private_key=Path(controller_signing_private_key),
     )
     timestamp = created_at or utc_now()
-    try:
-        binding = control.binding_identity_from_payload(inputs[0])
-        if binding["campaign_id"] != campaign:
-            raise StaticProvenanceControlPacketBuildError(
-                "controller campaign binding does not match the requested campaign"
-            )
-        payload = control.build_control_packet_payload(
-            created_at=timestamp,
-            campaign_binding_payload=inputs[0],
-            signer_enrollment_certificate_payload=inputs[1],
-            source_role_config_payload=inputs[2],
-            static_assets_provenance_payload=inputs[3],
-            source_transport_policy_payload=inputs[4],
-            packet_id=packet,
-            controller_signing_private_key=inputs[5],
-        )
-        verified = control.verify_control_packet_payload(
-            payload=payload,
-            pinned_controller_public_key_base64=control.controller_public_key_from_private(inputs[5]),
-            expected_campaign_binding_identity=binding,
-        )
-    except control.StaticProvenanceControlPacketError as exc:
-        raise StaticProvenanceControlPacketBuildError(str(exc)) from exc
+    binding, payload, verified = _seal_packet(
+        inputs=inputs,
+        campaign=campaign,
+        packet=packet,
+        timestamp=timestamp,
+        authority=authority,
+    )
     if output.exists() or output.is_symlink() or output.parent.exists() or output.parent.is_symlink():
         raise StaticProvenanceControlPacketBuildError("refusing to reuse or overwrite a control packet candidate")
     result = {
@@ -407,6 +467,29 @@ def build_static_provenance_control_packet(
     }
     if not apply:
         return result
+    final_authority = _load_campaign_bound_controller_signer(binding_path)
+    if _campaign_signing_authority_identity(final_authority) != authority_identity:
+        raise StaticProvenanceControlPacketBuildError(
+            "canonical campaign signing authority changed before control-packet write"
+        )
+    final_inputs = _load_inputs(
+        campaign_id=campaign,
+        signer_enrollment_certificate=Path(signer_enrollment_certificate),
+        source_role_config=Path(source_role_config),
+        static_assets_provenance=Path(static_assets_provenance),
+        source_transport_policy=Path(source_transport_policy),
+    )
+    final_binding, final_payload, final_verified = _seal_packet(
+        inputs=final_inputs,
+        campaign=campaign,
+        packet=packet,
+        timestamp=timestamp,
+        authority=final_authority,
+    )
+    if final_binding != binding or final_payload != payload or final_verified != verified:
+        raise StaticProvenanceControlPacketBuildError(
+            "static-provenance inputs changed before control-packet write"
+        )
     root = _require_root_private_directory(CONTROL_PACKET_ROOT, field="controller control-packet root")
     campaign_directory = _create_or_require_root_private_directory(
         root,
@@ -449,7 +532,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-role-config", required=True, type=Path)
     parser.add_argument("--static-assets-provenance", required=True, type=Path)
     parser.add_argument("--source-transport-policy", required=True, type=Path)
-    parser.add_argument("--controller-signing-private-key", required=True, type=Path)
     parser.add_argument("--apply", action="store_true")
     return parser
 
@@ -464,7 +546,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             source_role_config=args.source_role_config,
             static_assets_provenance=args.static_assets_provenance,
             source_transport_policy=args.source_transport_policy,
-            controller_signing_private_key=args.controller_signing_private_key,
             apply=args.apply,
         )
         _print_result(result)

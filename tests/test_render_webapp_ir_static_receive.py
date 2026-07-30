@@ -482,7 +482,7 @@ class RenderWebappIrStaticReceiveTests(unittest.TestCase):
     def test_embedded_receiver_blocks_for_capacity_before_creating_a_candidate(self) -> None:
         temporary, config, url, receiver_root, program = self._execution_inputs()
         try:
-            unavailable = type("Statvfs", (), {"f_bavail": 0, "f_frsize": 4096})()
+            unavailable = type("Statvfs", (), {"f_bavail": 0, "f_frsize": 4096, "f_flag": 0})()
             with mock.patch.object(os, "statvfs", return_value=unavailable):
                 result, output = self._execute_remote(program, config, url)
             self.assertEqual(result, 2, output)
@@ -490,6 +490,50 @@ class RenderWebappIrStaticReceiveTests(unittest.TestCase):
             self.assertEqual([], list(receiver_root.iterdir()))
         finally:
             temporary.cleanup()
+
+    @unittest.skipUnless(os.geteuid() == 0, "receiver verifies root-only state")
+    def test_embedded_receiver_blocks_read_only_staging_before_candidate_or_curl(self) -> None:
+        temporary, config, url, receiver_root, program = self._execution_inputs()
+        try:
+            read_only = type(
+                "Statvfs",
+                (),
+                {"f_bavail": 1024 * 1024, "f_frsize": 4096, "f_flag": os.ST_RDONLY},
+            )()
+            with (
+                mock.patch.object(os, "statvfs", return_value=read_only),
+                mock.patch("subprocess.run") as run,
+            ):
+                result, output = self._execute_remote(program, config, url)
+            self.assertEqual(result, 2, output)
+            self.assertIn('"status": "blocked"', output)
+            self.assertEqual([], list(receiver_root.iterdir()))
+            run.assert_not_called()
+        finally:
+            temporary.cleanup()
+
+    @unittest.skipUnless(os.geteuid() == 0, "receiver verifies root-only state")
+    def test_embedded_receiver_rejects_malformed_staging_mount_status_before_download(self) -> None:
+        for name, state, readonly_flag in (
+            ("missing-flag", type("Statvfs", (), {"f_bavail": 1, "f_frsize": 4096})(), os.ST_RDONLY),
+            ("negative-flag", type("Statvfs", (), {"f_bavail": 1, "f_frsize": 4096, "f_flag": -1})(), os.ST_RDONLY),
+            ("invalid-readonly-flag", type("Statvfs", (), {"f_bavail": 1, "f_frsize": 4096, "f_flag": 0})(), False),
+        ):
+            with self.subTest(case=name):
+                temporary, config, url, receiver_root, program = self._execution_inputs()
+                try:
+                    with (
+                        mock.patch.object(os, "statvfs", return_value=state),
+                        mock.patch.object(os, "ST_RDONLY", readonly_flag),
+                        mock.patch("subprocess.run") as run,
+                    ):
+                        result, output = self._execute_remote(program, config, url)
+                    self.assertEqual(result, 2, output)
+                    self.assertIn('"status": "blocked"', output)
+                    self.assertEqual([], list(receiver_root.iterdir()))
+                    run.assert_not_called()
+                finally:
+                    temporary.cleanup()
 
     @unittest.skipUnless(os.geteuid() == 0, "receiver verifies root-only state")
     def test_embedded_receiver_rejects_tampered_proof_and_noncampaign_identity_before_download(self) -> None:

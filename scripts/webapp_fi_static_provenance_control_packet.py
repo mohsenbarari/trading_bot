@@ -39,7 +39,7 @@ EXCHANGE_POLICY_SCHEMA = "gold-trade-webapp-fi-source-transport-config-v1"
 SOURCE_TRANSPORT_POLICY_SCHEMA = "gold-trade-webapp-fi-static-provenance-transport-policy-v1"
 SIGNER_ENROLLMENT_CERTIFICATE_SCHEMA = "gold-trade-webapp-fi-source-signer-enrollment-certificate-v2"
 STATIC_ASSET_PROVENANCE_SCHEMA = "gold-trade-webapp-fi-static-asset-provenance-v1"
-SOURCE_ROLE_CONFIG_SCHEMA = "gold-trade-webapp-fi-source-role-config-v2"
+SOURCE_ROLE_CONFIG_SCHEMA = "gold-trade-webapp-fi-source-role-config-v3"
 CAMPAIGN_BINDING_SCHEMA = "gold-trade-webapp-fi-source-campaign-binding-v1"
 SIGNER_ENROLLMENT_SIGNATURE_DOMAIN = b"gold-trade-webapp-fi-source-signer-enrollment-v2\x00"
 STATIC_ASSET_SIGNATURE_DOMAIN = b"gold-trade-webapp-fi-static-asset-provenance-v1\x00"
@@ -268,51 +268,40 @@ def _verify_signature(
         raise StaticProvenanceControlPacketError(f"{field} signature verification failed") from exc
 
 
-def _sign(unsigned: Mapping[str, Any], private_key_raw: bytes, *, domain: bytes) -> tuple[dict[str, str], str]:
-    if not isinstance(private_key_raw, bytes) or len(private_key_raw) != 32:
-        raise StaticProvenanceControlPacketError("controller signing private key is invalid")
+def controller_public_key_from_signer(signer: Any) -> str:
+    """Derive a public key from an already-verified signer object."""
+
     try:
         from cryptography.hazmat.primitives import serialization
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    except ImportError as exc:
-        raise StaticProvenanceControlPacketError("cryptography Ed25519 support is unavailable") from exc
-    try:
-        signer = Ed25519PrivateKey.from_private_bytes(private_key_raw)
-    except ValueError as exc:
-        raise StaticProvenanceControlPacketError("controller signing private key is invalid") from exc
-    public = signer.public_key().public_bytes(
-        serialization.Encoding.Raw,
-        serialization.PublicFormat.Raw,
-    )
+
+        public = signer.public_key().public_bytes(
+            serialization.Encoding.Raw,
+            serialization.PublicFormat.Raw,
+        )
+    except (ImportError, AttributeError, TypeError, ValueError) as exc:
+        raise StaticProvenanceControlPacketError("controller signing signer is invalid") from exc
     public_base64 = base64.b64encode(public).decode("ascii")
-    signature = signer.sign(domain + canonical_json_bytes(unsigned))
-    if len(signature) != 64:  # pragma: no cover - Ed25519 invariant.
+    _decode_public_key(public_base64, field="controller signing signer public key")
+    return public_base64
+
+
+def _sign_with_signer(
+    unsigned: Mapping[str, Any],
+    signer: Any,
+    *,
+    controller_public_key_base64: str,
+    domain: bytes,
+) -> dict[str, str]:
+    observed_public = controller_public_key_from_signer(signer)
+    if observed_public != controller_public_key_base64:
+        raise StaticProvenanceControlPacketError("controller signing signer changed while sealing packet")
+    try:
+        signature = signer.sign(domain + canonical_json_bytes(unsigned))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise StaticProvenanceControlPacketError("controller signing signer is invalid") from exc
+    if not isinstance(signature, bytes) or len(signature) != 64:
         raise StaticProvenanceControlPacketError("controller signature has an unsafe length")
-    return (
-        {"algorithm": "ed25519", "signature_base64": base64.b64encode(signature).decode("ascii")},
-        public_base64,
-    )
-
-
-def controller_public_key_from_private(private_key_raw: bytes) -> str:
-    """Derive the nonsecret Ed25519 public key without sealing a packet."""
-
-    if not isinstance(private_key_raw, bytes) or len(private_key_raw) != 32:
-        raise StaticProvenanceControlPacketError("controller signing private key is invalid")
-    try:
-        from cryptography.hazmat.primitives import serialization
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    except ImportError as exc:
-        raise StaticProvenanceControlPacketError("cryptography Ed25519 support is unavailable") from exc
-    try:
-        signer = Ed25519PrivateKey.from_private_bytes(private_key_raw)
-    except ValueError as exc:
-        raise StaticProvenanceControlPacketError("controller signing private key is invalid") from exc
-    public = signer.public_key().public_bytes(
-        serialization.Encoding.Raw,
-        serialization.PublicFormat.Raw,
-    )
-    return base64.b64encode(public).decode("ascii")
+    return {"algorithm": "ed25519", "signature_base64": base64.b64encode(signature).decode("ascii")}
 
 
 def _binding_identity(value: object) -> dict[str, Any]:
@@ -403,25 +392,33 @@ def _campaign_binding_artifact(
 def _validate_role_config(
     value: Mapping[str, Any],
     *,
-    application: Mapping[str, str],
-    expected_signing_key_path: str,
+    binding: Mapping[str, Any],
 ) -> None:
     expected = {
-        "schema", "source_site", "destination_site", "application", "application_container",
-        "sync_worker_container", "source_signing_private_key_file",
+        "schema", "campaign_id", "campaign_binding_sha256", "source_site", "destination_site",
+        "application", "tooling", "application_container", "sync_worker_container",
+        "source_signing_private_key_file",
     }
     if set(value) != expected or value.get("schema") != SOURCE_ROLE_CONFIG_SCHEMA:
         raise StaticProvenanceControlPacketError("FI source role config is unsupported")
+    if value.get("campaign_id") != binding["campaign_id"]:
+        raise StaticProvenanceControlPacketError("FI source role config campaign binding is invalid")
+    if value.get("campaign_binding_sha256") != binding["binding_sha256"]:
+        raise StaticProvenanceControlPacketError("FI source role config binding checksum is invalid")
     if value.get("source_site") != "webapp_fi" or value.get("destination_site") != "webapp_ir":
         raise StaticProvenanceControlPacketError("FI source role config site binding is invalid")
-    if _require_application(value.get("application"), include_tree=False, field="FI source role config application") != dict(application):
+    if _require_application(value.get("application"), include_tree=True, field="FI source role config application") != binding["application"]:
         raise StaticProvenanceControlPacketError("FI source role config application binding is invalid")
+    if _require_tooling(value.get("tooling"), field="FI source role config tooling") != binding["tooling"]:
+        raise StaticProvenanceControlPacketError("FI source role config tooling binding is invalid")
     for field in ("application_container", "sync_worker_container"):
         item = value.get(field)
         if not isinstance(item, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", item):
             raise StaticProvenanceControlPacketError(f"FI source role config {field} is invalid")
+    if value["application_container"] == value["sync_worker_container"]:
+        raise StaticProvenanceControlPacketError("FI source role config runtime containers must be distinct")
     signer_path = value.get("source_signing_private_key_file")
-    if signer_path != expected_signing_key_path:
+    if signer_path != expected_source_signing_key_path(binding["campaign_id"]):
         raise StaticProvenanceControlPacketError("FI source role config signing key path is not campaign-derived")
 
 
@@ -783,7 +780,7 @@ def _packet_unsigned(
     }
 
 
-def build_control_packet_payload(
+def build_control_packet_payload_with_signer(
     *,
     created_at: str,
     campaign_binding_payload: bytes,
@@ -792,9 +789,10 @@ def build_control_packet_payload(
     static_assets_provenance_payload: bytes,
     source_transport_policy_payload: bytes,
     packet_id: str,
-    controller_signing_private_key: bytes,
+    controller_signer: Any,
+    controller_public_key_base64: str,
 ) -> bytes:
-    """Validate the full binding plus four existing inputs and seal one packet."""
+    """Seal one packet with an already-verified controller signer object."""
 
     created_at = _require_timestamp(created_at, field="control packet timestamp")
     packet_id = _require_identifier(packet_id, field="control packet ID")
@@ -809,7 +807,6 @@ def build_control_packet_payload(
         },
         field="campaign binding",
     )
-    expected_signing_key_path = expected_source_signing_key_path(binding["campaign_id"])
     certificate, certificate_raw, certificate_sha = _embedded_artifact(
         {
             "payload": parse_canonical_json(
@@ -848,12 +845,9 @@ def build_control_packet_payload(
     )
     policy, policy_raw, policy_sha = source_transport_policy_from_payload(source_transport_policy_payload)
     del binding_raw, certificate_raw, role_raw, static_raw, policy_raw
-    signature, controller_public = _sign(
-        {},
-        controller_signing_private_key,
-        domain=CONTROL_PACKET_SIGNATURE_DOMAIN,
-    )
-    del signature
+    controller_public = controller_public_key_from_signer(controller_signer)
+    if controller_public != controller_public_key_base64:
+        raise StaticProvenanceControlPacketError("controller signing signer does not match its pinned public key")
     _validate_certificate(
         certificate,
         binding=binding,
@@ -861,11 +855,7 @@ def build_control_packet_payload(
     )
     _validate_role_config(
         role_config,
-        application={
-            "release_sha": binding["application"]["release_sha"],
-            "expected_alembic_revision": binding["application"]["expected_alembic_revision"],
-        },
-        expected_signing_key_path=expected_signing_key_path,
+        binding=binding,
     )
     _validate_static_provenance(
         static_provenance,
@@ -888,13 +878,12 @@ def build_control_packet_payload(
         policy_sha256=policy_sha,
         controller_public_key_base64=controller_public,
     )
-    signature, public = _sign(
+    signature = _sign_with_signer(
         unsigned,
-        controller_signing_private_key,
+        controller_signer,
+        controller_public_key_base64=controller_public,
         domain=CONTROL_PACKET_SIGNATURE_DOMAIN,
     )
-    if public != controller_public:  # pragma: no cover - deterministic key derivation.
-        raise StaticProvenanceControlPacketError("controller signing key changed while sealing packet")
     packet = {**unsigned, "controller_signature": signature}
     payload = canonical_json_bytes(packet) + b"\n"
     verify_control_packet_payload(
@@ -930,7 +919,6 @@ def verify_control_packet_payload(
         value.get("campaign_binding"),
         field="campaign binding",
     )
-    expected_signing_key_path = expected_source_signing_key_path(binding["campaign_id"])
     if expected_campaign_binding_identity is not None and binding != _binding_identity(expected_campaign_binding_identity):
         raise StaticProvenanceControlPacketError("control packet campaign binding identity does not match the local binding")
     transport = value.get("transport")
@@ -981,11 +969,7 @@ def verify_control_packet_payload(
     _validate_certificate(certificate, binding=binding, controller_public_key_base64=public)
     _validate_role_config(
         role_config,
-        application={
-            "release_sha": binding["application"]["release_sha"],
-            "expected_alembic_revision": binding["application"]["expected_alembic_revision"],
-        },
-        expected_signing_key_path=expected_signing_key_path,
+        binding=binding,
     )
     _validate_static_provenance(static_provenance, binding=binding, controller_public_key_base64=public)
     normalized_policy = _validate_policy(policy)

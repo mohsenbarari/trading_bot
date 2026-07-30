@@ -138,6 +138,37 @@ preparer = _load_exact_sibling(
 )
 
 
+def _load_campaign_bound_controller_signer(campaign_binding_path: Path) -> Any:
+    """Load the only controller authority selected by this campaign binding."""
+
+    helper = _load_exact_sibling(
+        "manage_controller_campaign_signing_key.py",
+        "_webapp_fi_source_evidence_campaign_signing_key",
+    )
+    try:
+        return helper.load_verified_campaign_signer(
+            campaign_binding_path=Path(campaign_binding_path)
+        )
+    except Exception as exc:
+        raise SourceEvidenceReceiveError(
+            "controller evidence verification authority is not bound to the canonical campaign"
+        ) from exc
+
+
+def _campaign_signing_authority_identity(authority: Any) -> tuple[str, str, str, str]:
+    try:
+        return (
+            authority.campaign_binding.campaign_id,
+            authority.campaign_binding.binding_sha256,
+            authority.signing_key.public_key_base64,
+            authority.signing_key.receipt_sha256,
+        )
+    except (AttributeError, TypeError) as exc:
+        raise SourceEvidenceReceiveError(
+            "controller evidence verification authority is incomplete"
+        ) from exc
+
+
 SOURCE_EVIDENCE_READBACK_SCHEMA = "gold-trade-webapp-fi-source-evidence-readback-v1"
 SOURCE_EVIDENCE_CONSUMPTION_SCHEMA = "gold-trade-webapp-fi-source-evidence-consumption-receipt-v1"
 SOURCE_EVIDENCE_PAYLOAD_NAME = "source-evidence-envelope.json"
@@ -191,6 +222,8 @@ class EvidenceReceivePlan:
     signer_enrollment_certificate_payload: bytes
     static_assets_provenance_payload: bytes
     verification_time: str
+    controller_signing_key_id: str = ""
+    controller_signing_key_receipt_sha256: str = ""
 
 
 def canonical_json_bytes(value: Mapping[str, Any]) -> bytes:
@@ -441,18 +474,6 @@ def _prepared_package_identity(
         raise SourceEvidenceReceiveError("controller-local source-adoption package canonical tree is invalid") from exc
 
 
-def _controller_public_key(private_key: Path) -> str:
-    try:
-        _signer, public = preparer._load_controller_signer(Path(private_key))
-    except Exception as exc:
-        raise SourceEvidenceReceiveError("controller evidence verification signing key is unsafe") from exc
-    try:
-        provenance._key(public, field="controller evidence verification public key")
-    except Exception as exc:
-        raise SourceEvidenceReceiveError("controller evidence verification public key is invalid") from exc
-    return public
-
-
 def prepare_source_evidence_receive(
     *,
     controller_config: Any,
@@ -463,7 +484,6 @@ def prepare_source_evidence_receive(
     controller_delivery_envelope: Path,
     signer_enrollment_certificate: Path,
     static_assets_provenance: Path,
-    controller_signing_private_key: Path,
     verification_time: str,
 ) -> EvidenceReceivePlan:
     """Verify all controller-local inputs before a client is created or read."""
@@ -474,12 +494,36 @@ def prepare_source_evidence_receive(
         upload_report_path=Path(upload_report_path),
     )
     campaign = receive_plan.campaign_binding
+    signing_authority = _load_campaign_bound_controller_signer(
+        Path(campaign_binding_path)
+    )
+    if (
+        signing_authority.campaign_binding.campaign_id != campaign.campaign_id
+        or signing_authority.campaign_binding.binding_sha256 != campaign.binding_sha256
+        or signing_authority.campaign_binding.application_release_sha
+        != campaign.application_release_sha
+        or signing_authority.campaign_binding.application_release_tree
+        != campaign.application_release_tree
+        or signing_authority.campaign_binding.expected_alembic_revision
+        != campaign.expected_alembic_revision
+        or signing_authority.campaign_binding.control_commit != campaign.control_commit
+        or signing_authority.campaign_binding.control_tree != campaign.control_tree
+    ):
+        raise SourceEvidenceReceiveError(
+            "controller evidence verification authority does not match the canonical campaign binding"
+        )
     canonical_tree = _prepared_package_identity(
         package_directory=Path(source_adoption_package_directory),
         preparation_receipt=Path(source_adoption_preparation_receipt),
         campaign=campaign,
     )
-    controller_public = _controller_public_key(Path(controller_signing_private_key))
+    controller_public = signing_authority.signing_key.public_key_base64
+    try:
+        provenance._key(controller_public, field="controller evidence verification public key")
+    except Exception as exc:
+        raise SourceEvidenceReceiveError(
+            "controller evidence verification public key is invalid"
+        ) from exc
     delivery_payload = _read_root_private_file(
         Path(controller_delivery_envelope),
         field="controller-local delivery envelope",
@@ -549,6 +593,8 @@ def prepare_source_evidence_receive(
         campaign_binding_payload=binding_payload,
         canonical_release_tree_sha256=canonical_tree,
         controller_public_key_base64=controller_public,
+        controller_signing_key_id=signing_authority.signing_key.key_id,
+        controller_signing_key_receipt_sha256=signing_authority.signing_key.receipt_sha256,
         source_signing_public_key_base64=source_public,
         controller_delivery_envelope_payload=delivery_payload,
         signer_enrollment_certificate_payload=certificate_payload,
@@ -893,7 +939,6 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--controller-delivery-envelope", required=True, type=Path)
     parser.add_argument("--signer-enrollment-certificate", required=True, type=Path)
     parser.add_argument("--static-assets-provenance", required=True, type=Path)
-    parser.add_argument("--controller-signing-private-key", required=True, type=Path)
     parser.add_argument("--verification-time", required=True)
     parser.add_argument("--apply", action="store_true")
     return parser
@@ -917,7 +962,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 controller_delivery_envelope=args.controller_delivery_envelope,
                 signer_enrollment_certificate=args.signer_enrollment_certificate,
                 static_assets_provenance=args.static_assets_provenance,
-                controller_signing_private_key=args.controller_signing_private_key,
                 verification_time=args.verification_time,
             )
 

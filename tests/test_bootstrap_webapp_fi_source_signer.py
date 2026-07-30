@@ -46,6 +46,10 @@ issuer = _load_module(
     "manage_webapp_fi_source_signer_enrollment_for_source_signer_bootstrap_test",
     ROOT / "scripts" / "manage_webapp_fi_source_signer_enrollment.py",
 )
+fixtures = _load_module(
+    "source_stage_fixture_helpers_for_source_signer_bootstrap_test",
+    ROOT / "tests" / "source_stage_fixture_helpers.py",
+)
 
 
 def _private_file(path, payload, *, mode=0o600):
@@ -106,6 +110,10 @@ class WebAppFiSourceSignerBootstrapTests(unittest.TestCase):
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, target)
         self.control_commit = _commit(self.control)
+        self.control_tree = subprocess.check_output(
+            ["git", "-C", str(self.control), "rev-parse", self.control_commit + "^{tree}"],
+            text=True,
+        ).strip()
         for relative in install.RUNTIME_CODE_PROJECTION_RELATIVES:
             target = self.application / relative
             if "." in relative:
@@ -115,8 +123,28 @@ class WebAppFiSourceSignerBootstrapTests(unittest.TestCase):
                 target.mkdir(parents=True, exist_ok=True)
                 (target / "fixture.py").write_text("fixture " + relative + "\n", encoding="ascii")
         self.release = _commit(self.application)
-        _, controller_raw, self.controller_public = _key_material()
-        self.controller_private = _private_file(self.root / "keys" / "controller.raw", controller_raw)
+        self.transport_config, self.campaign_binding, self.initial_static_object_id = fixtures.make_initial_static_inputs(
+            root=self.root,
+            campaign_id=CAMPAIGN,
+            application_repository=self.application,
+            application_release_sha=self.release,
+            expected_alembic_revision=REVISION,
+            control_commit=self.control_commit,
+            control_tree=self.control_tree,
+        )
+        _, self.controller_raw, self.controller_public = _key_material()
+        self.controller_private = _private_file(self.root / "keys" / "controller.raw", self.controller_raw)
+        self.controller_signing_authority = fixtures.campaign_bound_controller_signer(
+            campaign_binding_path=self.campaign_binding,
+            private_key_raw=self.controller_raw,
+        )
+        signing_loader = patch.object(
+            prepare,
+            "_load_campaign_bound_controller_signer",
+            return_value=self.controller_signing_authority,
+        )
+        signing_loader.start()
+        self.addCleanup(signing_loader.stop)
         self.package_directory = self.root / "packages" / "package-one"
         (self.root / "packages").mkdir(mode=0o700)
         self.prepared = prepare.prepare_source_adoption_package(
@@ -125,6 +153,9 @@ class WebAppFiSourceSignerBootstrapTests(unittest.TestCase):
             control_commit=self.control_commit,
             application_release_sha=self.release,
             expected_alembic_revision=REVISION,
+            source_transport_config=self.transport_config,
+            campaign_binding_path=self.campaign_binding,
+            initial_static_object_id=self.initial_static_object_id,
             package_id="package-one",
             destination=self.package_directory,
             apply=True,
@@ -163,7 +194,7 @@ class WebAppFiSourceSignerBootstrapTests(unittest.TestCase):
             preparation_receipt=self.package_directory / prepare.PREPARATION_RECEIPT_NAME,
             expected_control_commit=self.control_commit,
             expected_application_release_sha=self.release,
-            campaign_id=CAMPAIGN,
+            campaign_binding_path=self.campaign_binding,
             fi_bootstrap_recipient=RECIPIENT,
             object_key=self.delivery_object["object_key"],
             version_id=self.delivery_object["version_id"],
@@ -171,7 +202,6 @@ class WebAppFiSourceSignerBootstrapTests(unittest.TestCase):
             ciphertext_bytes=self.delivery_object["ciphertext_bytes"],
             plaintext_sha256=self.delivery_object["plaintext_sha256"],
             plaintext_bytes=self.delivery_object["plaintext_bytes"],
-            controller_signing_private_key=self.controller_private,
             destination=self.envelope,
             apply=True,
         )
@@ -321,12 +351,24 @@ class WebAppFiSourceSignerBootstrapTests(unittest.TestCase):
             self.root / "controller-inputs" / "fi-source-adoption-install.json",
             Path(self.installed["receipt_path"]).read_bytes(),
         )
-        with patch.object(issuer, "FI_SOURCE_SIGNER_CAMPAIGN_ROOT", self.campaign_root):
+        campaign_binding = self._campaign_binding()
+        authority = fixtures.campaign_bound_controller_signer(
+            campaign_binding_path=campaign_binding,
+            private_key_raw=self.controller_raw,
+        )
+        with (
+            patch.object(issuer, "FI_SOURCE_SIGNER_CAMPAIGN_ROOT", self.campaign_root),
+            patch.object(
+                issuer,
+                "_load_campaign_bound_controller_signer",
+                return_value=authority,
+            ),
+        ):
             certificate = issuer.issue_source_signer_enrollment_certificate(
                 package_directory=self.package_directory,
                 preparation_receipt=self.package_directory / prepare.PREPARATION_RECEIPT_NAME,
                 delivery_envelope=self.envelope,
-                campaign_binding=self._campaign_binding(),
+                campaign_binding=campaign_binding,
                 fi_install_control_receipt=fi_install_control_receipt,
                 bootstrap_signer_receipt=bootstrap_receipt,
                 pinned_fi_ssh_host_public_key_file=self.ssh_public,
@@ -335,7 +377,6 @@ class WebAppFiSourceSignerBootstrapTests(unittest.TestCase):
                 issued_at=issued.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 not_before=issued.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 not_after=(issued + dt.timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                controller_signing_private_key=self.controller_private,
                 output=output,
                 apply=True,
             )

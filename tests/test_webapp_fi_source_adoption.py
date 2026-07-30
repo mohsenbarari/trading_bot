@@ -33,6 +33,7 @@ def _load_module(name, path):
 prepare = _load_module("prepare_webapp_fi_source_adoption_test", ROOT / "scripts" / "prepare_webapp_fi_source_adoption.py")
 install = _load_module("install_webapp_fi_source_adoption_test", ROOT / "scripts" / "install_webapp_fi_source_adoption.py")
 portable = _load_module("verify_webapp_fi_source_provenance_test", ROOT / "scripts" / "verify_webapp_fi_source_provenance.py")
+fixtures = _load_module("source_stage_fixture_helpers_for_source_adoption_test", ROOT / "tests" / "source_stage_fixture_helpers.py")
 
 
 CAMPAIGN = "source-adoption-20260730"
@@ -115,10 +116,42 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
         self.release = _commit(self.application)
-        self.controller_key, controller_raw, self.controller_public = _key_material()
-        self.controller_private = _private_file(self.root / "keys" / "controller.raw", controller_raw)
+        self.transport_config, self.campaign_binding, self.initial_static_object_id = fixtures.make_initial_static_inputs(
+            root=self.root,
+            campaign_id=CAMPAIGN,
+            application_repository=self.application,
+            application_release_sha=self.release,
+            expected_alembic_revision=REVISION,
+            control_commit=self.control_commit,
+            control_tree=self.control_tree,
+        )
+        self.controller_key, self.controller_raw, self.controller_public = _key_material()
+        self.controller_private = _private_file(self.root / "keys" / "controller.raw", self.controller_raw)
+        self.controller_signing_authority = fixtures.campaign_bound_controller_signer(
+            campaign_binding_path=self.campaign_binding,
+            private_key_raw=self.controller_raw,
+        )
+        signing_loader = patch.object(
+            prepare,
+            "_load_campaign_bound_controller_signer",
+            return_value=self.controller_signing_authority,
+        )
+        signing_loader.start()
+        self.addCleanup(signing_loader.stop)
         self.fi_key, fi_raw, self.fi_public = _key_material()
-        self.fi_private = _private_file(self.root / "keys" / "fi.raw", fi_raw)
+        self.fi_campaign_root = self.root / "fi-campaigns"
+        self.fi_campaign_root.mkdir(mode=0o700)
+        self.fi_private = _private_file(
+            self.fi_campaign_root / CAMPAIGN / "webapp-fi" / "source-signing-ed25519.raw",
+            fi_raw,
+        )
+        signer_root = patch.object(
+            install,
+            "FI_SOURCE_SIGNER_CAMPAIGN_ROOT",
+            PurePosixPath(str(self.fi_campaign_root)),
+        )
+        signer_root.start()
+        self.addCleanup(signer_root.stop)
         self.package_dir = self.root / "packages" / "package-one"
         (self.root / "packages").mkdir(mode=0o700)
         self.prepared = prepare.prepare_source_adoption_package(
@@ -127,6 +160,9 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
             control_commit=self.control_commit,
             application_release_sha=self.release,
             expected_alembic_revision=REVISION,
+            source_transport_config=self.transport_config,
+            campaign_binding_path=self.campaign_binding,
+            initial_static_object_id=self.initial_static_object_id,
             package_id="package-one",
             destination=self.package_dir,
             apply=True,
@@ -159,7 +195,7 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
             preparation_receipt=self.preparation_receipt,
             expected_control_commit=self.control_commit,
             expected_application_release_sha=self.release,
-            campaign_id=CAMPAIGN,
+            campaign_binding_path=self.campaign_binding,
             fi_bootstrap_recipient=RECIPIENT,
             object_key=self.delivery_object["object_key"],
             version_id=self.delivery_object["version_id"],
@@ -167,7 +203,6 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
             ciphertext_bytes=self.delivery_object["ciphertext_bytes"],
             plaintext_sha256=self.delivery_object["plaintext_sha256"],
             plaintext_bytes=self.delivery_object["plaintext_bytes"],
-            controller_signing_private_key=self.controller_private,
             destination=self.envelope,
             apply=True,
         )
@@ -217,11 +252,15 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         index = static / "index.html"
         index.write_bytes(b"fixture static asset\n")
         ssh_public = _private_file(self.root / "keys" / "ssh-host-ed25519.pub", b"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest fixture\n")
+        campaign_binding = json.loads(self.campaign_binding.read_text(encoding="utf-8"))
         role = {
-            "schema": install.SOURCE_ROLE_CONFIG_SCHEMA,
+            "schema": install.CAMPAIGN_BOUND_SOURCE_ROLE_CONFIG_SCHEMA,
+            "campaign_id": campaign_binding["campaign_id"],
+            "campaign_binding_sha256": campaign_binding["binding_sha256"],
             "source_site": "webapp_fi",
             "destination_site": "webapp_ir",
-            "application": {"release_sha": self.release, "expected_alembic_revision": REVISION},
+            "application": campaign_binding["application"],
+            "tooling": campaign_binding["tooling"],
             "application_container": "fixture_app",
             "sync_worker_container": "fixture_sync",
             "source_signing_private_key_file": str(self.fi_private),
@@ -490,6 +529,123 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
                 expected_application_release_sha=self.release,
             )
 
+    def test_package_binds_url_free_initial_static_upload_contract(self):
+        controller_config = json.loads(self.transport_config.read_text(encoding="utf-8"))
+        with tarfile.open(self.archive, "r:") as archive:
+            policy_member = archive.extractfile(prepare.INITIAL_STATIC_POLICY_MEMBER)
+            request_member = archive.extractfile(prepare.INITIAL_STATIC_REQUEST_MEMBER)
+            self.assertIsNotNone(policy_member)
+            self.assertIsNotNone(request_member)
+            policy_raw = policy_member.read()
+            request_raw = request_member.read()
+
+        policy = json.loads(policy_raw.decode("utf-8"))
+        request = json.loads(request_raw.decode("utf-8"))
+        self.assertEqual(policy_raw, prepare.canonical_json_bytes(policy) + b"\n")
+        self.assertEqual(request_raw, prepare.canonical_json_bytes(request) + b"\n")
+        self.assertEqual(
+            policy,
+            {
+                "schema": prepare.INITIAL_STATIC_POLICY_SCHEMA,
+                "endpoint_host": "s3.ir-thr-at1.arvanstorage.ir",
+                "region": controller_config["region"],
+                "bucket": controller_config["bucket"],
+                "prefix": controller_config["prefix"],
+                "age_binary": "/usr/bin/age",
+                "workspace": prepare.INITIAL_STATIC_FI_WORKSPACE,
+                "controller_age_recipient": controller_config["controller_age_recipient"],
+                "webapp_fi_age_recipient": controller_config["webapp_fi_age_recipient"],
+                "webapp_ir_age_recipient": controller_config["webapp_ir_age_recipient"],
+                "maximum_plaintext_bytes": controller_config["maximum_plaintext_bytes"],
+            },
+        )
+        self.assertNotIn("endpoint", policy)
+        self.assertNotIn("credentials_file", policy)
+        self.assertNotIn(b"://", policy_raw)
+        self.assertNotIn(b"credentials", policy_raw.lower())
+        self.assertEqual(
+            request,
+            {
+                "campaign_id": CAMPAIGN,
+                "release_sha": self.release,
+                "control_commit": self.control_commit,
+                "control_tree": self.control_tree,
+                "source_site": "webapp_fi",
+                "destination_site": "controller_webapp_ir",
+                "object_kind": "static",
+                "object_id": self.initial_static_object_id,
+                "recipient_mode": "static",
+                "recipients": [
+                    controller_config["controller_age_recipient"],
+                    controller_config["webapp_ir_age_recipient"],
+                ],
+            },
+        )
+        self.assertNotIn(b"://", request_raw)
+
+        installed = self._install()
+        candidate = Path(installed["candidate"])
+        for member, expected in (
+            (prepare.INITIAL_STATIC_POLICY_MEMBER, policy_raw),
+            (prepare.INITIAL_STATIC_REQUEST_MEMBER, request_raw),
+        ):
+            installed_member = candidate / member
+            self.assertEqual(installed_member.read_bytes(), expected)
+            self.assertEqual(stat.S_IMODE(installed_member.stat().st_mode), 0o600)
+            self.assertEqual(installed["files"][member], install.sha256_bytes(expected))
+
+    def test_initial_static_binding_mismatch_blocks_before_package_candidate(self):
+        binding = json.loads(self.campaign_binding.read_text(encoding="utf-8"))
+        binding["application"]["expected_alembic_revision"] = "0" * 12
+        unsigned = {key: value for key, value in binding.items() if key != "binding_sha256"}
+        binding["binding_sha256"] = hashlib.sha256(fixtures.canonical_json_bytes(unsigned)).hexdigest()
+        _private_file(self.campaign_binding, fixtures.canonical_json_bytes(binding) + b"\n")
+        destination = self.root / "packages" / "binding-mismatch"
+        with self.assertRaisesRegex(
+            prepare.SourceAdoptionPreparationError,
+            "initial static controller binding does not match the prepared package",
+        ):
+            prepare.prepare_source_adoption_package(
+                source_repository=self.control,
+                application_source_repository=self.application,
+                control_commit=self.control_commit,
+                application_release_sha=self.release,
+                expected_alembic_revision=REVISION,
+                source_transport_config=self.transport_config,
+                campaign_binding_path=self.campaign_binding,
+                initial_static_object_id="binding-mismatch-static",
+                package_id="binding-mismatch",
+                destination=destination,
+                apply=True,
+        )
+        self.assertFalse(destination.exists())
+
+    def test_initial_static_release_tree_mismatch_blocks_before_package_candidate(self):
+        binding = json.loads(self.campaign_binding.read_text(encoding="utf-8"))
+        binding["application"]["release_tree"] = "0" * 40
+        unsigned = {key: value for key, value in binding.items() if key != "binding_sha256"}
+        binding["binding_sha256"] = hashlib.sha256(fixtures.canonical_json_bytes(unsigned)).hexdigest()
+        _private_file(self.campaign_binding, fixtures.canonical_json_bytes(binding) + b"\n")
+        destination = self.root / "packages" / "release-tree-mismatch"
+        with self.assertRaisesRegex(
+            prepare.SourceAdoptionPreparationError,
+            "initial static controller binding does not match the prepared package",
+        ):
+            prepare.prepare_source_adoption_package(
+                source_repository=self.control,
+                application_source_repository=self.application,
+                control_commit=self.control_commit,
+                application_release_sha=self.release,
+                expected_alembic_revision=REVISION,
+                source_transport_config=self.transport_config,
+                campaign_binding_path=self.campaign_binding,
+                initial_static_object_id="release-tree-mismatch-static",
+                package_id="release-tree-mismatch",
+                destination=destination,
+                apply=True,
+            )
+        self.assertFalse(destination.exists())
+
     def test_invalid_controller_envelope_blocks_before_install_candidate(self):
         value = json.loads(self.envelope.read_text(encoding="utf-8"))
         value["object"]["version_id"] = "tampered"
@@ -525,6 +681,9 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
             control_commit=self.control_commit,
             application_release_sha=self.release,
             expected_alembic_revision=REVISION,
+            source_transport_config=self.transport_config,
+            campaign_binding_path=self.campaign_binding,
+            initial_static_object_id="planned-static-20260730",
             package_id="planned-package",
             destination=package_destination,
             apply=False,
@@ -537,7 +696,7 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
             preparation_receipt=self.preparation_receipt,
             expected_control_commit=self.control_commit,
             expected_application_release_sha=self.release,
-            campaign_id=CAMPAIGN,
+            campaign_binding_path=self.campaign_binding,
             fi_bootstrap_recipient=RECIPIENT,
             object_key=self.delivery_object["object_key"],
             version_id=self.delivery_object["version_id"],
@@ -545,7 +704,6 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
             ciphertext_bytes=self.delivery_object["ciphertext_bytes"],
             plaintext_sha256=self.delivery_object["plaintext_sha256"],
             plaintext_bytes=self.delivery_object["plaintext_bytes"],
-            controller_signing_private_key=self.controller_private,
             destination=envelope_destination,
             apply=False,
         )
@@ -973,9 +1131,10 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
     def test_enrollment_certificate_rejects_controller_source_key_reuse(self):
         installed = self._install()
         _, role_path, ssh_public, _, certificate = self._runtime_and_config(installed)
-        role = json.loads(role_path.read_text(encoding="utf-8"))
-        role["source_signing_private_key_file"] = str(self.controller_private)
-        _canonical_private_json(role_path, role)
+        # Keep the v3 campaign-derived key path intact while replacing only
+        # its key material with the controller key for this negative case.
+        self.fi_private.write_bytes(self.controller_raw)
+        self.fi_private.chmod(0o600)
         reused = json.loads(certificate.read_text(encoding="utf-8"))
         reused["source_signing_public_key_base64"] = self.controller_public
         reused["source_signing_key_id"] = install._public_key_id(self.controller_public)
@@ -987,6 +1146,28 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         _canonical_private_json(certificate, reused)
 
         with self.assertRaisesRegex(install.SourceAdoptionInstallError, "distinct from the controller key"):
+            self._enroll(installed, role_path, ssh_public, certificate)
+        self.assertFalse((Path(installed["candidate"]) / "enrollments" / f"{CAMPAIGN}.json").exists())
+
+    def test_campaign_bound_source_stage_rejects_legacy_v2_role_config_before_enrollment(self):
+        installed = self._install()
+        _, role_path, ssh_public, _, certificate = self._runtime_and_config(installed)
+        _canonical_private_json(
+            role_path,
+            {
+                "schema": install.SOURCE_ROLE_CONFIG_SCHEMA,
+                "source_site": "webapp_fi",
+                "destination_site": "webapp_ir",
+                "application": {
+                    "release_sha": self.release,
+                    "expected_alembic_revision": REVISION,
+                },
+                "application_container": "fixture_app",
+                "sync_worker_container": "fixture_sync",
+                "source_signing_private_key_file": str(self.fi_private),
+            },
+        )
+        with self.assertRaisesRegex(install.SourceAdoptionInstallError, "require a v3 source role config"):
             self._enroll(installed, role_path, ssh_public, certificate)
         self.assertFalse((Path(installed["candidate"]) / "enrollments" / f"{CAMPAIGN}.json").exists())
 

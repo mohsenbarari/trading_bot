@@ -10,6 +10,7 @@ from pathlib import Path
 import stat
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -259,6 +260,25 @@ class SourceEvidenceReceiverTests(unittest.TestCase):
             verification_time="2026-07-30T12:00:00Z",
         )
 
+    def _controller_signing_authority(self, campaign: object) -> object:
+        return SimpleNamespace(
+            signer=None,
+            signing_key=SimpleNamespace(
+                public_key_base64="controller-public",
+                key_id="ed25519-sha256:" + "a" * 64,
+                receipt_sha256="b" * 64,
+            ),
+            campaign_binding=SimpleNamespace(
+                campaign_id=campaign.campaign_id,
+                application_release_sha=campaign.application_release_sha,
+                application_release_tree=campaign.application_release_tree,
+                expected_alembic_revision=campaign.expected_alembic_revision,
+                control_commit=campaign.control_commit,
+                control_tree=campaign.control_tree,
+                binding_sha256=campaign.binding_sha256,
+            ),
+        )
+
     def test_exact_route_accepts_source_evidence_and_rejects_other_fi_objects(self) -> None:
         report_path, _report, _plaintext, _ciphertext = self._write_report()
         plan, binding_payload = evidence_receiver._receive_plan(
@@ -471,7 +491,11 @@ class SourceEvidenceReceiverTests(unittest.TestCase):
         with (
             mock.patch.object(evidence_receiver, "_receive_plan", return_value=(receive_plan, binding_payload)),
             mock.patch.object(evidence_receiver, "_prepared_package_identity", return_value="e" * 64),
-            mock.patch.object(evidence_receiver, "_controller_public_key", return_value="controller-public"),
+            mock.patch.object(
+                evidence_receiver,
+                "_load_campaign_bound_controller_signer",
+                return_value=self._controller_signing_authority(receive_plan.campaign_binding),
+            ),
             mock.patch.object(
                 evidence_receiver,
                 "_read_root_private_file",
@@ -501,7 +525,6 @@ class SourceEvidenceReceiverTests(unittest.TestCase):
                 controller_delivery_envelope=self.inputs / "delivery.json",
                 signer_enrollment_certificate=self.inputs / "certificate.json",
                 static_assets_provenance=self.inputs / "static.json",
-                controller_signing_private_key=self.inputs / "controller.key",
                 verification_time="2026-07-30T12:00:00Z",
             )
 
@@ -522,7 +545,6 @@ class SourceEvidenceReceiverTests(unittest.TestCase):
             "--controller-delivery-envelope", "/etc/delivery.json",
             "--signer-enrollment-certificate", "/etc/certificate.json",
             "--static-assets-provenance", "/etc/static.json",
-            "--controller-signing-private-key", "/etc/controller.key",
             "--verification-time", "2026-07-30T12:00:00Z",
             "--apply",
         ]
@@ -552,7 +574,6 @@ class SourceEvidenceReceiverTests(unittest.TestCase):
             "--controller-delivery-envelope", "/etc/delivery.json",
             "--signer-enrollment-certificate", "/etc/certificate.json",
             "--static-assets-provenance", "/etc/static.json",
-            "--controller-signing-private-key", "/etc/controller.key",
             "--verification-time", "2026-07-30T12:00:00Z",
             "--apply",
         ]

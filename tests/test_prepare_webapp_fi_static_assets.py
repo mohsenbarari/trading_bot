@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -56,11 +57,28 @@ class StaticAssetPreparationTests(unittest.TestCase):
         self.static_root = self.runtime / "mini_app_dist"
         self.output_parent = self.root / "outputs"
         self.runtime.mkdir(mode=0o700)
+        self._git("init")
+        self._git("config", "user.email", "fixture@example.invalid")
+        self._git("config", "user.name", "Static Asset Fixture")
         self.static_root.mkdir(mode=0o755)
         self.output_parent.mkdir(mode=0o700)
         self._write_source("index.html", b"<!doctype html><title>fixture</title>\n")
         self._write_source("assets/app.js", b"console.log('fixture');\n")
-        self.application = {"release_sha": RELEASE, "expected_alembic_revision": REVISION}
+        self._git("add", ".")
+        self._git("commit", "-m", "fixture")
+        self.release = self._git("rev-parse", "HEAD", capture=True)
+        self.application = {"release_sha": self.release, "expected_alembic_revision": REVISION}
+
+    def _git(self, *arguments: str, capture: bool = False) -> str:
+        result = subprocess.run(
+            ["git", "-C", str(self.runtime), *arguments],
+            check=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=capture,
+        )
+        return result.stdout.strip() if capture else ""
 
     def _write_source(self, relative: str, payload: bytes) -> Path:
         path = self.static_root / relative
@@ -81,9 +99,8 @@ class StaticAssetPreparationTests(unittest.TestCase):
         )
 
     def test_plan_and_apply_make_exact_consumer_compatible_ustar_candidate(self) -> None:
-        with mock.patch("subprocess.run", side_effect=AssertionError("no subprocess is permitted")):
-            plan = self._prepare(apply=False)
-            result = self._prepare(apply=True)
+        plan = self._prepare(apply=False)
+        result = self._prepare(apply=True)
 
         candidate = self.output_parent / "candidate"
         self.assertEqual("planned", plan["status"])
@@ -137,6 +154,19 @@ class StaticAssetPreparationTests(unittest.TestCase):
         self.assertEqual("verified", result["verification"]["status"])
         self.assertNotIn("subprocess", PREPARE.__dict__)
         self.assertNotIn("boto3", PREPARE.__dict__)
+
+    def test_checkout_commit_mismatch_blocks_before_candidate_creation(self) -> None:
+        candidate = self.output_parent / "wrong-checkout"
+        wrong_application = {"release_sha": "0" * 40, "expected_alembic_revision": REVISION}
+        with self.assertRaisesRegex(PREPARE.StaticAssetPreparationError, "does not match expected release"):
+            PREPARE.prepare_static_assets(
+                runtime_source_root=self.runtime,
+                output_directory=candidate,
+                expected_campaign_id=CAMPAIGN,
+                expected_application=wrong_application,
+                apply=True,
+            )
+        self.assertFalse(candidate.exists())
 
     def test_capacity_preflight_blocks_before_creating_candidate(self) -> None:
         candidate = self.output_parent / "insufficient-capacity"

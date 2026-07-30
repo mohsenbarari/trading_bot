@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import importlib.util
 import io
 import json
 import os
@@ -35,6 +36,7 @@ import subprocess
 import sys
 import tarfile
 from typing import Any, Mapping, Sequence
+from urllib.parse import urlsplit
 
 
 PACKAGE_SCHEMA = "gold-trade-webapp-fi-source-adoption-package-v1"
@@ -82,6 +84,7 @@ SOURCE_PAYLOAD_FILES = (
     "scripts/build_webapp_fi_source_evidence.py",
     "scripts/install_webapp_fi_static_provenance_control_packet.py",
     "scripts/manage_webapp_fi_source_exchange.py",
+    "scripts/prepare_webapp_fi_post_packet_upload.py",
     "scripts/webapp_fi_source_transport_contract.py",
     "scripts/webapp_fi_source_campaign_binding.py",
     "scripts/webapp_fi_static_provenance_control_packet.py",
@@ -91,7 +94,24 @@ SOURCE_PAYLOAD_FILES = (
 )
 CONTRACT_MEMBER = "config/source-adoption-contract.json"
 CANONICAL_RELEASE_TREE_MEMBER = "config/canonical-release-tree.json"
-PACKAGE_PAYLOAD_FILES = (*SOURCE_PAYLOAD_FILES, CONTRACT_MEMBER, CANONICAL_RELEASE_TREE_MEMBER)
+INITIAL_STATIC_POLICY_MEMBER = "config/initial-static-transport-policy.json"
+INITIAL_STATIC_REQUEST_MEMBER = "config/initial-static-upload-request.json"
+INITIAL_STATIC_BOOTSTRAP_MEMBERS = (
+    INITIAL_STATIC_POLICY_MEMBER,
+    INITIAL_STATIC_REQUEST_MEMBER,
+)
+# Reuse the bootstrap receiver's already-created root-only directory rather
+# than silently creating another persistent FI workspace before the first
+# static upload.  The exchange helper independently requires this directory
+# to be root-only before it uses it.
+INITIAL_STATIC_FI_WORKSPACE = "/srv/trading-bot-three-site-staging-data/webapp-fi-source-bootstrap"
+INITIAL_STATIC_POLICY_SCHEMA = "gold-trade-webapp-fi-static-provenance-transport-policy-v1"
+PACKAGE_PAYLOAD_FILES = (
+    *SOURCE_PAYLOAD_FILES,
+    CONTRACT_MEMBER,
+    CANONICAL_RELEASE_TREE_MEMBER,
+    *INITIAL_STATIC_BOOTSTRAP_MEMBERS,
+)
 PACKAGE_FILES = (*PACKAGE_PAYLOAD_FILES, PACKAGE_MANIFEST_MEMBER)
 
 
@@ -102,6 +122,122 @@ class SourceAdoptionPreparationError(RuntimeError):
 def _require_root_execution() -> None:
     if os.geteuid() != 0:
         raise SourceAdoptionPreparationError("source-adoption package operations must run as root")
+
+
+def _load_controller_source_transport() -> Any:
+    """Load the exact controller transport helper without consulting PATH.
+
+    Package preparation has to derive the first FI static-upload policy from
+    the controller-only configuration.  The resulting payload is public and
+    URL-free, but the derivation must still use the reviewed transport parser
+    rather than accepting caller-selected recipients or an Object Storage
+    namespace.
+    """
+
+    path = Path(__file__).resolve(strict=True).with_name("manage_webapp_fi_source_transport.py")
+    _require_safe_ancestors(path.parent, field="controller source transport helper")
+    try:
+        state = path.lstat()
+        resolved = path.resolve(strict=True)
+        target = resolved.lstat()
+    except OSError as exc:  # pragma: no cover - deployment layout invariant.
+        raise SourceAdoptionPreparationError("cannot inspect controller source transport helper") from exc
+    if (
+        resolved != path
+        or stat.S_ISLNK(state.st_mode)
+        or stat.S_ISLNK(target.st_mode)
+        or not stat.S_ISREG(target.st_mode)
+        or target.st_uid != 0
+        or stat.S_IMODE(target.st_mode) & 0o022
+    ):
+        raise SourceAdoptionPreparationError("controller source transport helper is unsafe")
+    name = "_source_adoption_controller_transport"
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:  # pragma: no cover - deployment layout invariant.
+        raise SourceAdoptionPreparationError("cannot load controller source transport helper")
+    module = importlib.util.module_from_spec(spec)
+    previous = sys.modules.get(name)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        if previous is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = previous
+        raise
+    loaded = getattr(module, "__file__", None)
+    if not isinstance(loaded, str) or Path(loaded).resolve(strict=True) != path:
+        raise SourceAdoptionPreparationError("controller source transport helper loaded from an unexpected path")
+    return module
+
+
+def _load_campaign_bound_controller_signer(campaign_binding_path: Path) -> Any:
+    """Load the fixed controller signer selected by the canonical binding."""
+
+    path = Path(__file__).resolve(strict=True).with_name(
+        "manage_controller_campaign_signing_key.py"
+    )
+    _require_safe_ancestors(path.parent, field="controller campaign signing-key helper")
+    try:
+        state = path.lstat()
+        resolved = path.resolve(strict=True)
+        target = resolved.lstat()
+    except OSError as exc:  # pragma: no cover - deployment layout invariant.
+        raise SourceAdoptionPreparationError(
+            "cannot inspect controller campaign signing-key helper"
+        ) from exc
+    if (
+        resolved != path
+        or stat.S_ISLNK(state.st_mode)
+        or stat.S_ISLNK(target.st_mode)
+        or not stat.S_ISREG(target.st_mode)
+        or target.st_uid != 0
+        or stat.S_IMODE(target.st_mode) & 0o022
+    ):
+        raise SourceAdoptionPreparationError("controller campaign signing-key helper is unsafe")
+    name = "_source_adoption_controller_campaign_signing_key"
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:  # pragma: no cover - deployment layout invariant.
+        raise SourceAdoptionPreparationError("cannot load controller campaign signing-key helper")
+    module = importlib.util.module_from_spec(spec)
+    previous = sys.modules.get(name)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+        authority = module.load_verified_campaign_signer(
+            campaign_binding_path=Path(campaign_binding_path)
+        )
+    except BaseException as exc:
+        if previous is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = previous
+        if isinstance(exc, SourceAdoptionPreparationError):  # pragma: no cover - defensive.
+            raise
+        raise SourceAdoptionPreparationError(
+            "controller delivery-envelope signing authority is not bound to the canonical campaign"
+        ) from exc
+    loaded = getattr(module, "__file__", None)
+    if not isinstance(loaded, str) or Path(loaded).resolve(strict=True) != path:
+        raise SourceAdoptionPreparationError(
+            "controller campaign signing-key helper loaded from an unexpected path"
+        )
+    return authority
+
+
+def _campaign_signing_authority_identity(authority: Any) -> tuple[str, str, str, str]:
+    try:
+        return (
+            authority.campaign_binding.campaign_id,
+            authority.campaign_binding.binding_sha256,
+            authority.signing_key.public_key_base64,
+            authority.signing_key.receipt_sha256,
+        )
+    except (AttributeError, TypeError) as exc:
+        raise SourceAdoptionPreparationError(
+            "controller delivery-envelope signing authority is incomplete"
+        ) from exc
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -864,37 +1000,13 @@ def _require_object_binding(
     }
 
 
-def _load_controller_signer(private_key_path: Path) -> tuple[Any, str]:
-    """Load an already-enrolled controller key; this function never creates one."""
-
-    private_key_path = _require_root_only_file(
-        private_key_path,
-        field="controller delivery-envelope signing private key",
-        maximum_bytes=32,
-    )
-    raw = private_key_path.read_bytes()
-    if len(raw) != 32:
-        raise SourceAdoptionPreparationError("controller delivery-envelope signing private key must contain exactly 32 bytes")
-    try:
-        from cryptography.hazmat.primitives import serialization
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-    except ImportError as exc:
-        raise SourceAdoptionPreparationError("cryptography Ed25519 support is unavailable") from exc
-    try:
-        signer = Ed25519PrivateKey.from_private_bytes(raw)
-        public = signer.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
-    except ValueError as exc:
-        raise SourceAdoptionPreparationError("controller delivery-envelope signing private key is invalid") from exc
-    return signer, base64.b64encode(public).decode("ascii")
-
-
 def sign_delivery_envelope(
     *,
     package_directory: Path,
     preparation_receipt: Path,
     expected_control_commit: str,
     expected_application_release_sha: str,
-    campaign_id: str,
+    campaign_binding_path: Path,
     fi_bootstrap_recipient: str,
     object_key: str,
     version_id: str,
@@ -902,7 +1014,6 @@ def sign_delivery_envelope(
     ciphertext_bytes: int,
     plaintext_sha256: str,
     plaintext_bytes: int,
-    controller_signing_private_key: Path,
     destination: Path,
     apply: bool,
 ) -> dict[str, Any]:
@@ -911,17 +1022,43 @@ def sign_delivery_envelope(
     This is deliberately separate from package preparation and from any S3
     action.  Callers must first complete a separately authorised Object
     Storage upload/read-back, then bind the exact returned VersionId here.
-    The signing private key must already be enrolled by a separate operation.
+    The signer is derived only from ``campaign_binding_path`` and its fixed
+    root-only campaign-key receipt.  No caller may select a private key.
     """
 
     _require_root_execution()
+    authority = _load_campaign_bound_controller_signer(Path(campaign_binding_path))
+    authority_identity = _campaign_signing_authority_identity(authority)
+    campaign_binding = authority.campaign_binding
+    if (
+        expected_control_commit != campaign_binding.control_commit
+        or expected_application_release_sha != campaign_binding.application_release_sha
+    ):
+        raise SourceAdoptionPreparationError(
+            "delivery-envelope expected release pins do not match the canonical campaign binding"
+        )
     verified = verify_prepared_source_adoption_package(
         package_directory=package_directory,
         preparation_receipt=preparation_receipt,
         expected_control_commit=expected_control_commit,
         expected_application_release_sha=expected_application_release_sha,
     )
-    campaign = _require_campaign_id(campaign_id, field="campaign_id")
+    if (
+        verified["application"]
+        != {
+            "release_sha": campaign_binding.application_release_sha,
+            "expected_alembic_revision": campaign_binding.expected_alembic_revision,
+        }
+        or verified["tooling"]
+        != {
+            "control_commit": campaign_binding.control_commit,
+            "control_tree": campaign_binding.control_tree,
+        }
+    ):
+        raise SourceAdoptionPreparationError(
+            "delivery-envelope package does not match the canonical campaign binding"
+        )
+    campaign = campaign_binding.campaign_id
     if not isinstance(fi_bootstrap_recipient, str) or not AGE_RECIPIENT_RE.fullmatch(fi_bootstrap_recipient):
         raise SourceAdoptionPreparationError("fi_bootstrap_recipient is invalid")
     binding = _require_object_binding(
@@ -938,7 +1075,8 @@ def sign_delivery_envelope(
     parent = _require_root_directory(destination.parent, field="delivery envelope destination parent", private=True)
     if destination.exists() or destination.is_symlink() or destination.parent != parent:
         raise SourceAdoptionPreparationError("delivery envelope destination must be a new child of a root-only directory")
-    signer, controller_public_key_base64 = _load_controller_signer(controller_signing_private_key)
+    signer = authority.signer
+    controller_public_key_base64 = authority.signing_key.public_key_base64
     if not apply:
         return {
             "status": "planned",
@@ -949,16 +1087,34 @@ def sign_delivery_envelope(
             "controller_public_key_base64": controller_public_key_base64,
             "object_storage_action": False,
         }
+    final_authority = _load_campaign_bound_controller_signer(Path(campaign_binding_path))
+    if _campaign_signing_authority_identity(final_authority) != authority_identity:
+        raise SourceAdoptionPreparationError(
+            "canonical campaign signing authority changed before delivery-envelope write"
+        )
+    final_binding = final_authority.campaign_binding
+    final_verified = verify_prepared_source_adoption_package(
+        package_directory=package_directory,
+        preparation_receipt=preparation_receipt,
+        expected_control_commit=final_binding.control_commit,
+        expected_application_release_sha=final_binding.application_release_sha,
+    )
+    if final_verified != verified:
+        raise SourceAdoptionPreparationError(
+            "delivery-envelope package changed before delivery-envelope write"
+        )
+    signer = final_authority.signer
+    controller_public_key_base64 = final_authority.signing_key.public_key_base64
     unsigned: dict[str, Any] = {
         "schema": DELIVERY_ENVELOPE_SCHEMA,
         "status": "issued",
         "campaign_id": campaign,
         "source_site": PACKAGE_SOURCE_SITE,
         "destination_site": PACKAGE_DESTINATION_SITE,
-        "package_id": verified["package_id"],
-        "application": verified["application"],
-        "tooling": verified["tooling"],
-        "canonical_release_tree_sha256": verified["canonical_release_tree_sha256"],
+        "package_id": final_verified["package_id"],
+        "application": final_verified["application"],
+        "tooling": final_verified["tooling"],
+        "canonical_release_tree_sha256": final_verified["canonical_release_tree_sha256"],
         "fi_bootstrap_recipient": fi_bootstrap_recipient,
         "object": binding,
         "controller_public_key_base64": controller_public_key_base64,
@@ -974,7 +1130,7 @@ def sign_delivery_envelope(
         "delivery_envelope_path": str(destination),
         "delivery_envelope_sha256": sha256_bytes(encoded),
         "campaign_id": campaign,
-        "package_id": verified["package_id"],
+        "package_id": final_verified["package_id"],
         "object": {"object_key": binding["object_key"], "version_id": binding["version_id"]},
         "controller_public_key_base64": controller_public_key_base64,
     }
@@ -1025,6 +1181,112 @@ def build_contract(
     }
 
 
+def _initial_static_request_value(request: Any) -> dict[str, Any]:
+    return {
+        "campaign_id": request.campaign_id,
+        "release_sha": request.release_sha,
+        "control_commit": request.control_commit,
+        "control_tree": request.control_tree,
+        "source_site": request.source_site,
+        "destination_site": request.destination_site,
+        "object_kind": request.object_kind,
+        "object_id": request.object_id,
+        "recipient_mode": request.mode,
+        "recipients": list(request.recipients),
+    }
+
+
+def _initial_static_bootstrap_payloads(
+    *,
+    source_transport_config: Path,
+    campaign_binding_path: Path,
+    initial_static_object_id: str,
+    application_release_sha: str,
+    application_release_tree: str,
+    expected_alembic_revision: str,
+    control_commit: str,
+    control_tree: str,
+) -> dict[str, bytes]:
+    """Derive the package-bound, public FI control for its first static PUT.
+
+    The FI does not receive controller credentials.  It does receive the
+    immutable request and public transport pins it needs to age-encrypt the
+    first static archive before the later static-provenance packet can install
+    the normal exchange policy.  The policy deliberately persists only the
+    endpoint host, never a URL or credentials.
+    """
+
+    transport = _load_controller_source_transport()
+    try:
+        controller_config = transport.load_controller_config(Path(source_transport_config))
+        binding = transport.campaign_binding.load_campaign_binding(Path(campaign_binding_path))
+    except Exception as exc:
+        raise SourceAdoptionPreparationError("initial static controller transport inputs are invalid") from exc
+    if not COMMIT_RE.fullmatch(application_release_tree):
+        raise SourceAdoptionPreparationError("initial static application release tree is invalid")
+    if (
+        binding.application_release_sha != application_release_sha
+        or binding.application_release_tree != application_release_tree
+        or binding.expected_alembic_revision != expected_alembic_revision
+        or binding.control_commit != control_commit
+        or binding.control_tree != control_tree
+    ):
+        raise SourceAdoptionPreparationError("initial static controller binding does not match the prepared package")
+
+    policy = controller_config.policy
+    try:
+        parsed = urlsplit(policy.endpoint)
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != f"s3.{policy.region}.arvanstorage.ir"
+            or parsed.port is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            raise ValueError("endpoint")
+        request = transport.SourceObjectRequest(
+            campaign_id=binding.campaign_id,
+            release_sha=binding.application_release_sha,
+            control_commit=binding.control_commit,
+            control_tree=binding.control_tree,
+            source_site="webapp_fi",
+            destination_site=transport.STATIC_DESTINATION_SITE,
+            object_kind=transport.STATIC_OBJECT_KIND,
+            object_id=initial_static_object_id,
+            mode=transport.STATIC_MODE,
+            recipients=(policy.controller_age_recipient, policy.webapp_ir_age_recipient),
+        )
+        transport.validate_request(policy, request)
+    except Exception as exc:
+        raise SourceAdoptionPreparationError("initial static upload binding is invalid") from exc
+
+    public_policy = {
+        "schema": INITIAL_STATIC_POLICY_SCHEMA,
+        "endpoint_host": parsed.hostname,
+        "region": policy.region,
+        "bucket": policy.bucket,
+        "prefix": policy.prefix,
+        "age_binary": "/usr/bin/age",
+        "workspace": INITIAL_STATIC_FI_WORKSPACE,
+        "controller_age_recipient": policy.controller_age_recipient,
+        "webapp_fi_age_recipient": policy.webapp_fi_age_recipient,
+        "webapp_ir_age_recipient": policy.webapp_ir_age_recipient,
+        "maximum_plaintext_bytes": policy.maximum_plaintext_bytes,
+    }
+    request_value = _initial_static_request_value(request)
+    policy_raw = canonical_json_bytes(public_policy) + b"\n"
+    request_raw = canonical_json_bytes(request_value) + b"\n"
+    _reject_persisted_url(policy_raw, field="initial static transport policy")
+    _reject_persisted_url(request_raw, field="initial static upload request")
+    return {
+        INITIAL_STATIC_POLICY_MEMBER: policy_raw,
+        INITIAL_STATIC_REQUEST_MEMBER: request_raw,
+    }
+
+
 def prepare_source_adoption_package(
     *,
     source_repository: Path,
@@ -1032,6 +1294,9 @@ def prepare_source_adoption_package(
     control_commit: str,
     application_release_sha: str,
     expected_alembic_revision: str,
+    source_transport_config: Path,
+    campaign_binding_path: Path,
+    initial_static_object_id: str,
     package_id: str,
     destination: Path,
     apply: bool,
@@ -1065,6 +1330,18 @@ def prepare_source_adoption_package(
     _validate_contract(contract_raw)
     payload_files[CONTRACT_MEMBER] = contract_raw
     payload_files[CANONICAL_RELEASE_TREE_MEMBER] = canonical_release_tree_raw
+    payload_files.update(
+        _initial_static_bootstrap_payloads(
+            source_transport_config=source_transport_config,
+            campaign_binding_path=campaign_binding_path,
+            initial_static_object_id=initial_static_object_id,
+            application_release_sha=application_release_sha,
+            application_release_tree=canonical_release_tree["application"]["git_tree"],
+            expected_alembic_revision=expected_alembic_revision,
+            control_commit=control_commit,
+            control_tree=control_tree,
+        )
+    )
     hashes = {name: sha256_bytes(payload) for name, payload in sorted(payload_files.items())}
     manifest: dict[str, Any] = {
         "schema": PACKAGE_SCHEMA,
@@ -1131,6 +1408,9 @@ def _parser() -> argparse.ArgumentParser:
     package.add_argument("--control-commit", required=True)
     package.add_argument("--application-release-sha", required=True)
     package.add_argument("--expected-alembic-revision", required=True)
+    package.add_argument("--source-transport-config", type=Path, required=True)
+    package.add_argument("--campaign-binding", type=Path, required=True)
+    package.add_argument("--initial-static-object-id", required=True)
     package.add_argument("--package-id", required=True)
     package.add_argument("--destination", type=Path, required=True)
     package.add_argument("--apply", action="store_true")
@@ -1139,7 +1419,7 @@ def _parser() -> argparse.ArgumentParser:
     envelope.add_argument("--preparation-receipt", type=Path, required=True)
     envelope.add_argument("--expected-control-commit", required=True)
     envelope.add_argument("--expected-application-release-sha", required=True)
-    envelope.add_argument("--campaign-id", required=True)
+    envelope.add_argument("--campaign-binding", type=Path, required=True)
     envelope.add_argument("--fi-bootstrap-recipient", required=True)
     envelope.add_argument("--object-key", required=True)
     envelope.add_argument("--version-id", required=True)
@@ -1147,7 +1427,6 @@ def _parser() -> argparse.ArgumentParser:
     envelope.add_argument("--ciphertext-bytes", type=int, required=True)
     envelope.add_argument("--plaintext-sha256", required=True)
     envelope.add_argument("--plaintext-bytes", type=int, required=True)
-    envelope.add_argument("--controller-signing-private-key", type=Path, required=True)
     envelope.add_argument("--destination", type=Path, required=True)
     envelope.add_argument("--apply", action="store_true")
     return parser
@@ -1164,6 +1443,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 control_commit=args.control_commit,
                 application_release_sha=args.application_release_sha,
                 expected_alembic_revision=args.expected_alembic_revision,
+                source_transport_config=args.source_transport_config,
+                campaign_binding_path=args.campaign_binding,
+                initial_static_object_id=args.initial_static_object_id,
                 package_id=args.package_id,
                 destination=args.destination,
                 apply=args.apply,
@@ -1174,7 +1456,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 preparation_receipt=args.preparation_receipt,
                 expected_control_commit=args.expected_control_commit,
                 expected_application_release_sha=args.expected_application_release_sha,
-                campaign_id=args.campaign_id,
+                campaign_binding_path=args.campaign_binding,
                 fi_bootstrap_recipient=args.fi_bootstrap_recipient,
                 object_key=args.object_key,
                 version_id=args.version_id,
@@ -1182,7 +1464,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ciphertext_bytes=args.ciphertext_bytes,
                 plaintext_sha256=args.plaintext_sha256,
                 plaintext_bytes=args.plaintext_bytes,
-                controller_signing_private_key=args.controller_signing_private_key,
                 destination=args.destination,
                 apply=args.apply,
             )

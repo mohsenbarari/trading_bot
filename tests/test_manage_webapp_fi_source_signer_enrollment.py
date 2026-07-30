@@ -4,7 +4,7 @@ import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import shutil
 import stat
 import subprocess
@@ -49,6 +49,10 @@ portable = _load_module(
 bootstrap = _load_module(
     "bootstrap_webapp_fi_source_signer_for_signer_issuer_test",
     ROOT / "scripts" / "bootstrap_webapp_fi_source_signer.py",
+)
+fixtures = _load_module(
+    "source_stage_fixture_helpers_for_signer_issuer_test",
+    ROOT / "tests" / "source_stage_fixture_helpers.py",
 )
 
 
@@ -128,8 +132,28 @@ class SourceSignerEnrollmentIssuerTests(unittest.TestCase):
         self.release = _commit(self.application)
         self.application_tree = _tree(self.application, self.release)
         self.control_tree = _tree(self.control, self.control_commit)
-        self.controller_key, controller_raw, self.controller_public = _key_material()
-        self.controller_private = _private_file(self.root / "keys" / "controller.raw", controller_raw)
+        self.transport_config, self.campaign_binding, self.initial_static_object_id = fixtures.make_initial_static_inputs(
+            root=self.root,
+            campaign_id=CAMPAIGN,
+            application_repository=self.application,
+            application_release_sha=self.release,
+            expected_alembic_revision=REVISION,
+            control_commit=self.control_commit,
+            control_tree=self.control_tree,
+        )
+        self.controller_key, self.controller_raw, self.controller_public = _key_material()
+        self.controller_private = _private_file(self.root / "keys" / "controller.raw", self.controller_raw)
+        initial_authority = fixtures.campaign_bound_controller_signer(
+            campaign_binding_path=self.campaign_binding,
+            private_key_raw=self.controller_raw,
+        )
+        preparation_signing_loader = patch.object(
+            prepare,
+            "_load_campaign_bound_controller_signer",
+            return_value=initial_authority,
+        )
+        preparation_signing_loader.start()
+        self.addCleanup(preparation_signing_loader.stop)
         self.ssh_public = _private_file(
             self.root / "keys" / "ssh-host-ed25519.pub",
             b"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest fixture\n",
@@ -142,6 +166,9 @@ class SourceSignerEnrollmentIssuerTests(unittest.TestCase):
             control_commit=self.control_commit,
             application_release_sha=self.release,
             expected_alembic_revision=REVISION,
+            source_transport_config=self.transport_config,
+            campaign_binding_path=self.campaign_binding,
+            initial_static_object_id=self.initial_static_object_id,
             package_id="package-one",
             destination=self.package_dir,
             apply=True,
@@ -180,7 +207,7 @@ class SourceSignerEnrollmentIssuerTests(unittest.TestCase):
             preparation_receipt=self.package_dir / prepare.PREPARATION_RECEIPT_NAME,
             expected_control_commit=self.control_commit,
             expected_application_release_sha=self.release,
-            campaign_id=CAMPAIGN,
+            campaign_binding_path=self.campaign_binding,
             fi_bootstrap_recipient=RECIPIENT,
             object_key=self.delivery_object["object_key"],
             version_id=self.delivery_object["version_id"],
@@ -188,7 +215,6 @@ class SourceSignerEnrollmentIssuerTests(unittest.TestCase):
             ciphertext_bytes=self.delivery_object["ciphertext_bytes"],
             plaintext_sha256=self.delivery_object["plaintext_sha256"],
             plaintext_bytes=self.delivery_object["plaintext_bytes"],
-            controller_signing_private_key=self.controller_private,
             destination=self.envelope,
             apply=True,
         )
@@ -215,6 +241,10 @@ class SourceSignerEnrollmentIssuerTests(unittest.TestCase):
             Path(self.installed["receipt_path"]).read_bytes(),
         )
         self.campaign_binding = self._create_campaign_binding()
+        self.controller_signing_authority = fixtures.campaign_bound_controller_signer(
+            campaign_binding_path=self.campaign_binding,
+            private_key_raw=self.controller_raw,
+        )
         self.fi_campaign_root = self.root / "fi-campaigns"
         self.fi_campaign_root.mkdir(mode=0o700)
         (self.fi_campaign_root / CAMPAIGN).mkdir(mode=0o700)
@@ -230,20 +260,28 @@ class SourceSignerEnrollmentIssuerTests(unittest.TestCase):
             )
         self.fi_private = Path(self.bootstrap_result["source_signing_private_key_file"])
         self.fi_public = self.bootstrap_result["source_signing_public_key_base64"]
+        signer_root = patch.object(
+            install,
+            "FI_SOURCE_SIGNER_CAMPAIGN_ROOT",
+            PurePosixPath(str(self.fi_campaign_root)),
+        )
+        signer_root.start()
+        self.addCleanup(signer_root.stop)
         self.bootstrap_signer_receipt = _private_file(
             self.root / "controller-inputs" / "fi-source-signer-bootstrap.json",
             Path(self.bootstrap_result["receipt_path"]).read_bytes(),
         )
+        campaign_binding = json.loads(self.campaign_binding.read_text(encoding="utf-8"))
         self.role_path = _canonical_private_json(
             self.root / "keys" / "role.json",
             {
-                "schema": install.SOURCE_ROLE_CONFIG_SCHEMA,
+                "schema": install.CAMPAIGN_BOUND_SOURCE_ROLE_CONFIG_SCHEMA,
+                "campaign_id": campaign_binding["campaign_id"],
+                "campaign_binding_sha256": campaign_binding["binding_sha256"],
                 "source_site": "webapp_fi",
                 "destination_site": "webapp_ir",
-                "application": {
-                    "release_sha": self.release,
-                    "expected_alembic_revision": REVISION,
-                },
+                "application": campaign_binding["application"],
+                "tooling": campaign_binding["tooling"],
                 "application_container": "fixture_app",
                 "sync_worker_container": "fixture_sync",
                 "source_signing_private_key_file": str(self.fi_private),
@@ -318,7 +356,14 @@ class SourceSignerEnrollmentIssuerTests(unittest.TestCase):
         }
 
     def _issue(self, output, **overrides):
-        with patch.object(issuer, "FI_SOURCE_SIGNER_CAMPAIGN_ROOT", self.fi_campaign_root):
+        with (
+            patch.object(issuer, "FI_SOURCE_SIGNER_CAMPAIGN_ROOT", self.fi_campaign_root),
+            patch.object(
+                issuer,
+                "_load_campaign_bound_controller_signer",
+                return_value=self.controller_signing_authority,
+            ),
+        ):
             return self._issue_with(issuer, output, **overrides)
 
     def _issue_with(self, module, output, **overrides):
@@ -333,7 +378,6 @@ class SourceSignerEnrollmentIssuerTests(unittest.TestCase):
             "certificate_id": "certificate-one",
             "operation_id": "operation-one",
             **self.timestamp_args,
-            "controller_signing_private_key": self.controller_private,
             "output": output,
             "apply": True,
         }
@@ -403,11 +447,11 @@ class SourceSignerEnrollmentIssuerTests(unittest.TestCase):
             self._issue(output, not_after=too_late.strftime("%Y-%m-%dT%H:%M:%SZ"))
         self.assertFalse(output.exists())
 
-    def test_rejects_controller_key_not_pinned_by_the_installation(self):
+    def test_does_not_accept_a_caller_selected_controller_private_key(self):
         _, wrong_raw, _ = _key_material()
         wrong_key = _private_file(self.root / "keys" / "wrong-controller.raw", wrong_raw)
         output = self.output_parent / "wrong-controller.json"
-        with self.assertRaisesRegex(issuer.SourceSignerEnrollmentIssuerError, "not pinned"):
+        with self.assertRaises(TypeError):
             self._issue(output, controller_signing_private_key=wrong_key)
         self.assertFalse(output.exists())
 

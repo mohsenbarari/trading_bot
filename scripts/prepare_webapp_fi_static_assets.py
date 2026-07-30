@@ -225,6 +225,139 @@ def _require_root_controlled_directory(path: Path, *, field: str) -> Path:
     return resolved
 
 
+def _read_root_controlled_git_file(path: Path, *, field: str) -> bytes:
+    """Read one bounded non-symlink file below a root-controlled Git dir."""
+
+    path = _require_absolute(path, field=field)
+    _require_safe_directory_ancestors(path.parent, field=field)
+    try:
+        before = path.lstat()
+        resolved = path.resolve(strict=True)
+        target = resolved.lstat()
+    except OSError as exc:
+        raise StaticAssetPreparationError(f"cannot inspect {field}") from exc
+    if (
+        resolved != path
+        or stat.S_ISLNK(before.st_mode)
+        or stat.S_ISLNK(target.st_mode)
+        or not stat.S_ISREG(target.st_mode)
+        or target.st_uid != 0
+        or stat.S_IMODE(target.st_mode) & 0o022
+        or target.st_nlink != 1
+        or not 1 <= target.st_size <= 1024
+    ):
+        raise StaticAssetPreparationError(f"{field} is not a bounded root-controlled regular file")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise StaticAssetPreparationError(f"cannot securely open {field}") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_dev != target.st_dev
+            or opened.st_ino != target.st_ino
+            or opened.st_size != target.st_size
+            or opened.st_mtime_ns != target.st_mtime_ns
+            or opened.st_ctime_ns != target.st_ctime_ns
+            or opened.st_uid != 0
+            or stat.S_IMODE(opened.st_mode) & 0o022
+            or opened.st_nlink != 1
+        ):
+            raise StaticAssetPreparationError(f"{field} changed while being opened")
+        payload = os.read(descriptor, 1025)
+        after_opened = os.fstat(descriptor)
+        if len(payload) != opened.st_size or len(payload) > 1024 or (
+            after_opened.st_dev,
+            after_opened.st_ino,
+            after_opened.st_size,
+            after_opened.st_mtime_ns,
+            after_opened.st_ctime_ns,
+        ) != (
+            opened.st_dev,
+            opened.st_ino,
+            opened.st_size,
+            opened.st_mtime_ns,
+            opened.st_ctime_ns,
+        ):
+            raise StaticAssetPreparationError(f"{field} changed while being read")
+    except OSError as exc:
+        raise StaticAssetPreparationError(f"cannot read {field}") from exc
+    finally:
+        os.close(descriptor)
+    try:
+        after = path.lstat()
+    except OSError as exc:
+        raise StaticAssetPreparationError(f"cannot recheck {field}") from exc
+    if (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+    ) != (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+    ):
+        raise StaticAssetPreparationError(f"{field} changed while being read")
+    return payload
+
+
+def _runtime_git_head(runtime_source_root: Path) -> str:
+    """Return only a root-controlled loose ``HEAD`` or ``refs/heads`` SHA."""
+
+    git_directory = _require_root_controlled_directory(runtime_source_root / ".git", field="runtime Git directory")
+    head = _read_root_controlled_git_file(git_directory / "HEAD", field="runtime Git HEAD")
+    try:
+        text = head.decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise StaticAssetPreparationError("runtime Git HEAD is malformed") from exc
+    if text.endswith("\n") and text.count("\n") == 1 and "\r" not in text:
+        value = text[:-1]
+    else:
+        raise StaticAssetPreparationError("runtime Git HEAD is malformed")
+    if RELEASE_RE.fullmatch(value):
+        return value
+    prefix = "ref: refs/heads/"
+    reference = value.removeprefix(prefix)
+    if not reference or reference == value or any(
+        not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", component)
+        for component in reference.split("/")
+    ):
+        raise StaticAssetPreparationError("runtime Git HEAD is not one allowed local branch reference")
+    ref_payload = _read_root_controlled_git_file(
+        git_directory / "refs" / "heads" / Path(reference), field="runtime Git HEAD reference"
+    )
+    try:
+        ref_text = ref_payload.decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise StaticAssetPreparationError("runtime Git HEAD reference is malformed") from exc
+    if not ref_text.endswith("\n") or ref_text.count("\n") != 1 or "\r" in ref_text:
+        raise StaticAssetPreparationError("runtime Git HEAD reference is malformed")
+    commit = ref_text[:-1]
+    if not RELEASE_RE.fullmatch(commit):
+        raise StaticAssetPreparationError("runtime Git HEAD reference is malformed")
+    return commit
+
+
+def _verify_runtime_checkout_commit(*, runtime_source_root: Path, expected_release_sha: str) -> None:
+    """Prove the static source comes from the binding's exact checkout.
+
+    This is a pure local metadata read, not a Git child-process invocation.  It
+    runs before candidate creation so an arbitrary checkout cannot produce a
+    static archive merely because it has a ``mini_app_dist`` directory.
+    """
+
+    if not isinstance(expected_release_sha, str) or not RELEASE_RE.fullmatch(expected_release_sha):
+        raise StaticAssetPreparationError("expected runtime release SHA is invalid")
+    if _runtime_git_head(runtime_source_root) != expected_release_sha:
+        raise StaticAssetPreparationError("runtime source checkout commit does not match expected release")
+
+
 def _require_private_file(path: Path, *, field: str, maximum_bytes: int) -> Path:
     path = _require_absolute(path, field=field)
     _require_root_only_directory(path.parent, field=f"{field} parent")
@@ -885,6 +1018,10 @@ def prepare_static_assets(
     _require_root_execution()
     campaign_id, application = _validate_identity(campaign_id=expected_campaign_id, application=expected_application)
     runtime_source_root = _require_root_only_directory(Path(runtime_source_root), field="runtime source root")
+    _verify_runtime_checkout_commit(
+        runtime_source_root=runtime_source_root,
+        expected_release_sha=application["release_sha"],
+    )
     static_root = _require_root_controlled_directory(
         runtime_source_root / RUNTIME_STATIC_ASSET_RELATIVE,
         field="mini_app_dist source",

@@ -1,11 +1,13 @@
 import base64
 import hashlib
 import importlib.util
+import inspect
 import json
 import os
 from pathlib import Path
 import stat
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -49,16 +51,11 @@ def _canonical_private_json(path, value):
 
 def _key_material():
     key = Ed25519PrivateKey.generate()
-    raw = key.private_bytes(
-        serialization.Encoding.Raw,
-        serialization.PrivateFormat.Raw,
-        serialization.NoEncryption(),
-    )
     public = key.public_key().public_bytes(
         serialization.Encoding.Raw,
         serialization.PublicFormat.Raw,
     )
-    return key, raw, base64.b64encode(public).decode("ascii")
+    return key, base64.b64encode(public).decode("ascii")
 
 
 def _noncanonical_base64_alias(value):
@@ -73,13 +70,21 @@ def _noncanonical_base64_alias(value):
     return value[:-2] + alphabet[index + 1] + "="
 
 
+def _sign_with_fixture_key(key, unsigned, *, domain):
+    signature = key.sign(domain + packet.canonical_json_bytes(unsigned))
+    return {
+        "algorithm": "ed25519",
+        "signature_base64": base64.b64encode(signature).decode("ascii"),
+    }
+
+
 class StaticProvenanceControlPacketTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="static-provenance-packet-")
         self.root = Path(self.temporary.name)
         os.chmod(self.root, 0o700)
-        self.controller_key, self.controller_raw, self.controller_public = _key_material()
-        _, _, self.fi_public = _key_material()
+        self.controller_key, self.controller_public = _key_material()
+        _, self.fi_public = _key_material()
         self.release = "a" * 40
         self.release_tree = "b" * 40
         self.control_commit = "c" * 40
@@ -144,19 +149,26 @@ class StaticProvenanceControlPacketTests(unittest.TestCase):
         }
         return {
             **unsigned,
-            "controller_signature": packet._sign(
+            "controller_signature": _sign_with_fixture_key(
+                self.controller_key,
                 unsigned,
-                self.controller_raw,
                 domain=packet.SIGNER_ENROLLMENT_SIGNATURE_DOMAIN,
-            )[0],
+            ),
         }
 
     def _role(self):
         return {
             "schema": packet.SOURCE_ROLE_CONFIG_SCHEMA,
+            "campaign_id": CAMPAIGN,
+            "campaign_binding_sha256": self.binding["binding_sha256"],
             "source_site": "webapp_fi",
             "destination_site": "webapp_ir",
-            "application": {"release_sha": self.release, "expected_alembic_revision": REVISION},
+            "application": {
+                "release_sha": self.release,
+                "release_tree": self.release_tree,
+                "expected_alembic_revision": REVISION,
+            },
+            "tooling": {"control_commit": self.control_commit, "control_tree": self.control_tree},
             "application_container": "fixture_app",
             "sync_worker_container": "fixture_sync",
             "source_signing_private_key_file": packet.expected_source_signing_key_path(CAMPAIGN),
@@ -184,11 +196,11 @@ class StaticProvenanceControlPacketTests(unittest.TestCase):
         }
         return {
             **unsigned,
-            "controller_signature": packet._sign(
+            "controller_signature": _sign_with_fixture_key(
+                self.controller_key,
                 unsigned,
-                self.controller_raw,
                 domain=packet.STATIC_ASSET_SIGNATURE_DOMAIN,
-            )[0],
+            ),
         }
 
     def _exchange_policy(self):
@@ -215,10 +227,20 @@ class StaticProvenanceControlPacketTests(unittest.TestCase):
             "static_assets_provenance_payload": packet.canonical_json_bytes(self.static_provenance) + b"\n",
             "source_transport_policy_payload": packet.canonical_json_bytes(self.exchange_policy) + b"\n",
             "packet_id": "packet-one",
-            "controller_signing_private_key": self.controller_raw,
+            "controller_signer": self.controller_key,
+            "controller_public_key_base64": self.controller_public,
         }
         values.update(changes)
-        return packet.build_control_packet_payload(**values)
+        return packet.build_control_packet_payload_with_signer(**values)
+
+    def test_raw_key_packet_construction_api_is_not_exported(self):
+        self.assertFalse(hasattr(packet, "build_control_packet_payload"))
+        self.assertFalse(hasattr(packet, "controller_public_key_from_private"))
+        self.assertFalse(hasattr(packet, "_sign"))
+        self.assertNotIn(
+            "controller_signing_private_key",
+            inspect.signature(packet.build_control_packet_payload_with_signer).parameters,
+        )
 
     def test_packet_is_canonical_url_free_and_binds_all_four_inputs(self):
         payload = self._build()
@@ -259,6 +281,11 @@ class StaticProvenanceControlPacketTests(unittest.TestCase):
         with self.assertRaisesRegex(packet.StaticProvenanceControlPacketError, "campaign-derived"):
             self._build(source_role_config_payload=packet.canonical_json_bytes(role) + b"\n")
 
+        role = dict(self.role)
+        role["tooling"] = {"control_commit": self.control_commit, "control_tree": "f" * 40}
+        with self.assertRaisesRegex(packet.StaticProvenanceControlPacketError, "tooling binding"):
+            self._build(source_role_config_payload=packet.canonical_json_bytes(role) + b"\n")
+
         payload = self._build()
         value = json.loads(payload.decode("ascii"))
         value["controller_signature"]["signature_base64"] = "A" * 88
@@ -275,11 +302,11 @@ class StaticProvenanceControlPacketTests(unittest.TestCase):
         static_provenance["files"] = files
         static_provenance["files_sha256"] = packet.sha256_bytes(packet.canonical_json_bytes(files))
         unsigned = {key: item for key, item in static_provenance.items() if key != "controller_signature"}
-        static_provenance["controller_signature"] = packet._sign(
+        static_provenance["controller_signature"] = _sign_with_fixture_key(
+            self.controller_key,
             unsigned,
-            self.controller_raw,
             domain=packet.STATIC_ASSET_SIGNATURE_DOMAIN,
-        )[0]
+        )
         with self.assertRaisesRegex(packet.StaticProvenanceControlPacketError, "forbidden transient URL"):
             self._build(static_assets_provenance_payload=packet.canonical_json_bytes(static_provenance) + b"\n")
 
@@ -289,11 +316,11 @@ class StaticProvenanceControlPacketTests(unittest.TestCase):
         certificate["source_signing_public_key_base64"] = source_alias
         certificate["source_signing_key_id"] = packet.public_key_id(source_alias)
         unsigned = {key: item for key, item in certificate.items() if key != "controller_signature"}
-        certificate["controller_signature"] = packet._sign(
+        certificate["controller_signature"] = _sign_with_fixture_key(
+            self.controller_key,
             unsigned,
-            self.controller_raw,
             domain=packet.SIGNER_ENROLLMENT_SIGNATURE_DOMAIN,
-        )[0]
+        )
         with self.assertRaisesRegex(packet.StaticProvenanceControlPacketError, "must be distinct"):
             self._build(signer_enrollment_certificate_payload=packet.canonical_json_bytes(certificate) + b"\n")
 
@@ -310,10 +337,31 @@ class StaticProvenanceControlPacketTests(unittest.TestCase):
         role = _canonical_private_json(self.root / "inputs" / "role.json", self.role)
         static = _canonical_private_json(self.root / "inputs" / "static.json", self.static_provenance)
         policy = _canonical_private_json(self.root / "inputs" / "policy.json", self.exchange_policy)
-        signer = _private_file(self.root / "inputs" / "controller.raw", self.controller_raw)
+        authority = SimpleNamespace(
+            signer=self.controller_key,
+            signing_key=SimpleNamespace(
+                public_key_base64=self.controller_public,
+                key_id=packet.public_key_id(self.controller_public),
+                receipt_sha256=packet.sha256_bytes(b"fixture-controller-signing-receipt"),
+            ),
+            campaign_binding=SimpleNamespace(
+                campaign_id=CAMPAIGN,
+                application_release_sha=self.release,
+                application_release_tree=self.release_tree,
+                expected_alembic_revision=REVISION,
+                control_commit=self.control_commit,
+                control_tree=self.control_tree,
+                binding_sha256=self.binding["binding_sha256"],
+            ),
+        )
         with (
             patch.object(builder, "CONTROLLER_CAMPAIGN_ROOT", campaign_root),
             patch.object(builder, "CONTROL_PACKET_ROOT", output_root),
+            patch.object(
+                builder,
+                "_load_campaign_bound_controller_signer",
+                return_value=authority,
+            ),
         ):
             plan = builder.build_static_provenance_control_packet(
                 campaign_id=CAMPAIGN,
@@ -322,7 +370,6 @@ class StaticProvenanceControlPacketTests(unittest.TestCase):
                 source_role_config=role,
                 static_assets_provenance=static,
                 source_transport_policy=policy,
-                controller_signing_private_key=signer,
                 apply=False,
                 created_at="2026-07-30T00:00:00Z",
             )
@@ -335,7 +382,6 @@ class StaticProvenanceControlPacketTests(unittest.TestCase):
                 source_role_config=role,
                 static_assets_provenance=static,
                 source_transport_policy=policy,
-                controller_signing_private_key=signer,
                 apply=True,
                 created_at="2026-07-30T00:00:00Z",
             )
@@ -350,7 +396,6 @@ class StaticProvenanceControlPacketTests(unittest.TestCase):
                     source_role_config=role,
                     static_assets_provenance=static,
                     source_transport_policy=policy,
-                    controller_signing_private_key=signer,
                     apply=True,
                     created_at="2026-07-30T00:00:00Z",
                 )
@@ -374,7 +419,6 @@ class StaticProvenanceControlPacketTests(unittest.TestCase):
                     source_role_config=role,
                     static_assets_provenance=static,
                     source_transport_policy=policy,
-                    controller_signing_private_key=signer,
                     apply=False,
                     created_at="2026-07-30T00:00:00Z",
                 )

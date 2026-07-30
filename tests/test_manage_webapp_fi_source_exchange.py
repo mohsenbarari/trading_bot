@@ -262,6 +262,78 @@ class WebAppFiSourceExchangeTests(unittest.TestCase):
                 self.assertIn(self.policy.controller_age_recipient.encode("ascii"), ciphertext)
                 self.assertNotIn(self.policy.webapp_ir_age_recipient.encode("ascii"), ciphertext)
 
+    def test_generic_cli_rejects_post_packet_kinds_before_creating_a_prepared_directory(self) -> None:
+        """Raw/evidence must use the strict packet-derived helper, not this CLI."""
+
+        request = self._request(
+            destination_site="controller",
+            object_kind=contract.RAW_APP_IMAGE_OBJECT_KIND,
+            object_id="raw-image-20260730-01",
+            mode=contract.SINGLE_MODE,
+            recipients=(self.policy.controller_age_recipient,),
+        )
+        request_path = self.root / "raw-request.json"
+        request_path.write_bytes(canonical(exchange._request_to_value(request)))
+        request_path.chmod(0o600)
+        prepared = self.workspace / "blocked-raw"
+        with mock.patch.object(exchange, "_print_result") as printed:
+            result = exchange.main(
+                [
+                    "prepare-upload",
+                    "--policy",
+                    str(self.policy_path),
+                    "--request",
+                    str(request_path),
+                    "--plaintext",
+                    str(self.plaintext),
+                    "--prepared-dir",
+                    str(prepared),
+                ]
+            )
+        self.assertEqual(2, result)
+        self.assertFalse(prepared.exists())
+        self.assertIn("initial dual-recipient static route", printed.call_args.args[0]["error"])
+
+    def test_generic_cli_rejects_prepared_post_packet_upload_before_network(self) -> None:
+        """A pre-existing raw-image receipt cannot bypass the strict helper."""
+
+        request = self._request(
+            destination_site="controller",
+            object_kind=contract.RAW_APP_IMAGE_OBJECT_KIND,
+            object_id="raw-image-20260730-02",
+            mode=contract.SINGLE_MODE,
+            recipients=(self.policy.controller_age_recipient,),
+        )
+        prepared = self.workspace / "prepared-raw-for-cli-rejection"
+        exchange.prepare_upload(
+            policy=self.policy,
+            request=request,
+            plaintext_path=self.plaintext,
+            prepared_dir=prepared,
+            command_runner=self.runner,
+        )
+        with (
+            mock.patch.object(exchange, "_print_result") as printed,
+            mock.patch.object(exchange, "upload_prepared") as upload,
+        ):
+            result = exchange.main(
+                [
+                    "upload-prepared",
+                    "--policy",
+                    str(self.policy_path),
+                    "--prepared-dir",
+                    str(prepared),
+                    "--upload-url",
+                    self._presigned_url(key=contract.source_object_key(self.policy, request)),
+                ]
+            )
+        self.assertEqual(2, result)
+        upload.assert_not_called()
+        self.assertFalse((prepared / exchange.UPLOAD_ATTEMPT_NAME).exists())
+        self.assertFalse((prepared / exchange.UPLOAD_REPORT_NAME).exists())
+        self.assertFalse(any(command[0] == exchange.CURL_BINARY for command in self.runner.commands))
+        self.assertIn("initial dual-recipient static route", printed.call_args.args[0]["error"])
+
     def test_ambiguous_put_leaves_marker_and_blocks_automatic_retry(self) -> None:
         request, prepared, _receipt = self._prepare_static()
         self.runner.fail_put = True

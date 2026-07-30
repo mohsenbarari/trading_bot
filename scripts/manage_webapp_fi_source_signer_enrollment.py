@@ -267,6 +267,37 @@ def _load_verified_local_helper(filename: str, module_name: str) -> tuple[Any, s
     return module, hashlib.sha256(source).hexdigest()
 
 
+def _load_campaign_bound_controller_signer(campaign_binding_path: Path) -> Any:
+    """Return the fixed campaign signer, never a caller-selected key file."""
+
+    helper, _helper_sha = _load_verified_local_helper(
+        "manage_controller_campaign_signing_key.py",
+        "_source_signer_enrollment_campaign_signing_key",
+    )
+    try:
+        return helper.load_verified_campaign_signer(
+            campaign_binding_path=Path(campaign_binding_path)
+        )
+    except Exception as exc:
+        raise SourceSignerEnrollmentIssuerError(
+            "controller signer enrollment authority is not bound to the canonical campaign"
+        ) from exc
+
+
+def _campaign_signing_authority_identity(authority: Any) -> tuple[str, str, str, str]:
+    try:
+        return (
+            authority.campaign_binding.campaign_id,
+            authority.campaign_binding.binding_sha256,
+            authority.signing_key.public_key_base64,
+            authority.signing_key.receipt_sha256,
+        )
+    except (AttributeError, TypeError) as exc:
+        raise SourceSignerEnrollmentIssuerError(
+            "controller signer enrollment authority is incomplete"
+        ) from exc
+
+
 def _require_timestamp(installer: Any, value: object, *, field: str) -> tuple[str, dt.datetime]:
     if not isinstance(value, str) or not _UTC_TIMESTAMP_RE.fullmatch(value):
         raise SourceSignerEnrollmentIssuerError(f"{field} is invalid")
@@ -610,23 +641,6 @@ def _load_bootstrap_signer_receipt(
     }
 
 
-def _load_controller_signer(path: Path) -> tuple[Any, str]:
-    raw = _read_root_controlled_file(
-        Path(path), field="controller signer enrollment private key", maximum_bytes=32, private=True, exact_mode=0o600
-    )
-    if len(raw) != 32:
-        raise SourceSignerEnrollmentIssuerError("controller signer enrollment private key must contain exactly 32 bytes")
-    try:
-        from cryptography.hazmat.primitives import serialization
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-
-        signer = Ed25519PrivateKey.from_private_bytes(raw)
-        public = signer.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
-    except (ImportError, ValueError) as exc:
-        raise SourceSignerEnrollmentIssuerError("controller signer enrollment key is invalid") from exc
-    return signer, base64.b64encode(public).decode("ascii")
-
-
 def _load_pinned_fi_ssh_host_public_key_digest(path: Path) -> str:
     _path, payload = _read_root_private_control_file(
         Path(path), field="pinned FI SSH host public key", maximum_bytes=_MAX_SSH_HOST_PUBLIC_KEY_BYTES
@@ -746,16 +760,35 @@ def _read_all_inputs(
 
 
 def issue_source_signer_enrollment_certificate(
-    *, package_directory: Path, preparation_receipt: Path, delivery_envelope: Path, campaign_binding: Path, fi_install_control_receipt: Path, bootstrap_signer_receipt: Path, pinned_fi_ssh_host_public_key_file: Path, certificate_id: str, operation_id: str, issued_at: str, not_before: str, not_after: str, controller_signing_private_key: Path, output: Path, apply: bool
+    *, package_directory: Path, preparation_receipt: Path, delivery_envelope: Path, campaign_binding: Path, fi_install_control_receipt: Path, bootstrap_signer_receipt: Path, pinned_fi_ssh_host_public_key_file: Path, certificate_id: str, operation_id: str, issued_at: str, not_before: str, not_after: str, output: Path, apply: bool
 ) -> dict[str, Any]:
     _require_root_execution()
     # IDs are parsed by the package-bound installer after the initial read.
     output_path = _require_new_output(Path(output))
-    _unused, controller_public = _load_controller_signer(Path(controller_signing_private_key))
-    del _unused
+    authority = _load_campaign_bound_controller_signer(Path(campaign_binding))
+    authority_identity = _campaign_signing_authority_identity(authority)
+    controller_public = authority.signing_key.public_key_base64
     installer, prepared, delivery, fi_install, binding, bootstrap, installer_sha = _read_all_inputs(
         package_directory=Path(package_directory), preparation_receipt=Path(preparation_receipt), delivery_envelope=Path(delivery_envelope), campaign_binding=Path(campaign_binding), fi_install_control_receipt=Path(fi_install_control_receipt), bootstrap_signer_receipt=Path(bootstrap_signer_receipt), pinned_fi_ssh_host_public_key_file=Path(pinned_fi_ssh_host_public_key_file), controller_public=controller_public
     )
+    if (
+        binding["campaign_id"] != authority.campaign_binding.campaign_id
+        or binding["binding_sha256"] != authority.campaign_binding.binding_sha256
+        or binding["application"]
+        != {
+            "release_sha": authority.campaign_binding.application_release_sha,
+            "release_tree": authority.campaign_binding.application_release_tree,
+            "expected_alembic_revision": authority.campaign_binding.expected_alembic_revision,
+        }
+        or binding["tooling"]
+        != {
+            "control_commit": authority.campaign_binding.control_commit,
+            "control_tree": authority.campaign_binding.control_tree,
+        }
+    ):
+        raise SourceSignerEnrollmentIssuerError(
+            "controller signer enrollment inputs do not match the canonical campaign binding"
+        )
     try:
         certificate = installer._require_attestation_id(certificate_id)
         operation = installer._require_attestation_id(operation_id)
@@ -772,7 +805,13 @@ def issue_source_signer_enrollment_certificate(
     expected_fingerprint = _fingerprint(prepared=prepared, delivery=delivery, fi_install=fi_install, binding=binding, bootstrap=bootstrap, installer_sha=installer_sha)
     signer: Any | None = None
     if apply:
-        signer, final_public = _load_controller_signer(Path(controller_signing_private_key))
+        final_authority = _load_campaign_bound_controller_signer(Path(campaign_binding))
+        if _campaign_signing_authority_identity(final_authority) != authority_identity:
+            raise SourceSignerEnrollmentIssuerError(
+                "canonical campaign signing authority changed before certificate write"
+            )
+        signer = final_authority.signer
+        final_public = final_authority.signing_key.public_key_base64
         if final_public != controller_public:
             raise SourceSignerEnrollmentIssuerError("controller signer enrollment key changed before signing")
         installer, prepared, delivery, fi_install, binding, bootstrap, final_installer_sha = _read_all_inputs(
@@ -780,6 +819,13 @@ def issue_source_signer_enrollment_certificate(
         )
         if _fingerprint(prepared=prepared, delivery=delivery, fi_install=fi_install, binding=binding, bootstrap=bootstrap, installer_sha=final_installer_sha) != expected_fingerprint:
             raise SourceSignerEnrollmentIssuerError("immutable source signer enrollment inputs changed before signing")
+        if (
+            binding["campaign_id"] != final_authority.campaign_binding.campaign_id
+            or binding["binding_sha256"] != final_authority.campaign_binding.binding_sha256
+        ):
+            raise SourceSignerEnrollmentIssuerError(
+                "canonical campaign binding changed before certificate write"
+            )
         source_public = bootstrap["source_signing_public_key_base64"]
         if source_public == controller_public:
             raise SourceSignerEnrollmentIssuerError("source signing public key must be distinct from the controller key")
@@ -813,7 +859,6 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--issued-at", required=True)
     parser.add_argument("--not-before", required=True)
     parser.add_argument("--not-after", required=True)
-    parser.add_argument("--controller-signing-private-key", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--apply", action="store_true")
     return parser
@@ -835,7 +880,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             issued_at=args.issued_at,
             not_before=args.not_before,
             not_after=args.not_after,
-            controller_signing_private_key=args.controller_signing_private_key,
             output=args.output,
             apply=args.apply,
         )
