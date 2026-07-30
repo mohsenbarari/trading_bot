@@ -232,10 +232,32 @@ Use the constrained DNS-01-only
 `scripts/manage_three_site_mvp_arvan_acme_dns.py` hook on WA-IR after its
 separate controlled installation. It keeps the Arvan DNS token and ACME state
 root-only and creates the certificate key locally on WA-IR. Do not use HTTP-01
-and do not copy the WebApp-FI certificate or key. Render
-`deploy/production/nginx-webapp-ir-standby-dark-https.conf.template` with the
-local certificate paths. Before promotion it returns `503` for every external
-request; it has no upstream and no cross-site sync endpoint.
+and do not copy the WebApp-FI certificate or key. After Certbot has already
+issued the local certificate, use the root-only config based on
+`deploy/production/webapp-ir-dark-listener.env.example` with
+`scripts/install_webapp_ir_dark_listener.py --apply`. The installer copies
+only that local pair into the separate WA-IR TLS root, renders only
+`deploy/production/nginx-webapp-ir-standby-dark-https.conf.template`, runs
+`nginx -t`, and reloads only after validation. It restores the prior site,
+enabled link, and TLS files if the test or reload fails. Before promotion it
+returns `503` for every external request; it has no upstream and no cross-site
+sync endpoint. It refuses to overwrite any pre-existing site unless its bytes
+are exactly the rendered dark listener and it is root-owned mode `0644`.
+
+After the root-only config has been installed outside Git, use only this local
+command on WA-IR:
+
+```bash
+python3 scripts/install_webapp_ir_dark_listener.py \
+  --config /etc/trading-bot-three-site/wa-ir/dark-listener.env \
+  --apply --json
+```
+
+For Certbot renewal, configure its deploy hook to invoke the same helper with
+`--certbot-deploy-hook --apply`. The hook accepts only the configured local
+`RENEWED_LINEAGE` and exactly `coin.gold-trade.ir`; it refreshes the local TLS
+pair and validates/reloads the existing local Nginx configuration without
+replacing any listener site or changing public routing.
 
 Only the independent promotion controller may replace this fenced listener
 with the loopback-only `18000` promotion runtime after source fencing. For a
