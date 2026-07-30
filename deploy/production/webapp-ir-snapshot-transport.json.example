@@ -9,7 +9,7 @@
   "age_identity_file": "/root/secure-envs/trading-bot/wa-ir-snapshot-age-identity.txt",
   "signing_source_site": "webapp_fi",
   "source_signing_public_key_base64": "REPLACE_WITH_WEBAPP_FI_ED25519_PUBLIC_KEY_BASE64",
-  "workspace": "/srv/trading-bot-standby-data/ir-transport-work",
+  "workspace": "/srv/trading-bot-three-site-staging-data/wa-ir-standby/ir-transport-work",
   "maximum_database_bytes": 2147483648,
   "maximum_uploads_bytes": 4294967296,
   "maximum_audit_bytes": 2147483648,

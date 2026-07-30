@@ -52,7 +52,10 @@ class WebappIrSnapshotStandby2c08Tests(unittest.TestCase):
         self.assertIn("RELEASE_SHA=2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5", text)
         self.assertIn("EXPECTED_ALEMBIC_REVISION=f2c7d8e9a0b1", text)
         self.assertIn("trading_bot_base:rollback-2c08da14-9ed63dd3e446", text)
-        self.assertIn("WA_IR_STANDBY_DATA_ROOT=", text)
+        self.assertIn(
+            "WA_IR_STANDBY_DATA_ROOT=/srv/trading-bot-three-site-staging-data/wa-ir-standby",
+            text,
+        )
         self.assertIn(
             "WA_IR_RELEASE_ROOT=/srv/trading-bot-three-site/releases/"
             "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5",

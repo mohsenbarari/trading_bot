@@ -173,7 +173,7 @@ The data-ready health check is local and does not activate an app:
 python3 - <<'PY'
 import json
 from pathlib import Path
-p = Path('/srv/trading-bot-standby-data/state/active-snapshot.json')
+p = Path('/srv/trading-bot-three-site-staging-data/wa-ir-standby/state/active-snapshot.json')
 state = json.loads(p.read_text())
 print(state['status'], state['alembic_revision'], state['candidate']['db_container'])
 PY
