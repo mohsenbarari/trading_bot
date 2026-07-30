@@ -1008,6 +1008,102 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         self.assertTrue(plan["exact_bytes_only_unparsed_archive"])
         self.assertFalse(plan["loadability_claimed"])
 
+    def test_export_rejects_live_runtime_destination_before_revalidation_mkdir_or_docker_save(self):
+        installed = self._install()
+        runtime, role_path, ssh_public, static_path, certificate = self._runtime_and_config(installed)
+        self._enroll(installed, role_path, ssh_public, certificate)
+        attestation = self._attest(
+            installed,
+            runtime,
+            role_path,
+            ssh_public,
+            static_path,
+            certificate,
+            attestation_id="attestation-export-runtime-destination",
+        )
+        destination = runtime / "must-not-create-export"
+        with (
+            patch.object(install, "_revalidate_export_runtime", side_effect=AssertionError("runtime destination reached revalidation")),
+            patch.object(install, "_create_directory", side_effect=AssertionError("runtime destination reached mkdir")),
+            patch.object(install, "_export_exact_docker_save_bytes", side_effect=AssertionError("runtime destination reached docker save")),
+        ):
+            with self.assertRaisesRegex(install.SourceAdoptionInstallError, "outside the live source runtime"):
+                install.export_actual_fi_image(
+                    attestation=Path(attestation["attestation_path"]),
+                    source_role_config=role_path,
+                    signer_enrollment_receipt=Path(installed["candidate"]) / "enrollments" / f"{CAMPAIGN}.json",
+                    signer_enrollment_certificate=certificate,
+                    ssh_host_public_key_file=ssh_public,
+                    runtime_source_root=runtime,
+                    static_assets_descriptor=static_path,
+                    pinned_controller_public_key_base64=self.controller_public,
+                    pinned_source_signing_public_key_base64=self.fi_public,
+                    expected_campaign_id=CAMPAIGN,
+                    expected_application=installed["application"],
+                    expected_control_commit=self.control_commit,
+                    expected_canonical_release_tree_sha256=attestation["descriptor_claim"]["canonical_release_tree_sha256"],
+                    expected_app_image_id=IMAGE_ID,
+                    expected_app_image_reference=IMAGE_REFERENCE,
+                    destination=destination,
+                    export_id="export-runtime-destination",
+                    apply=True,
+                )
+        self.assertFalse(destination.exists())
+
+    def test_export_rejects_current_linked_runtime_alias_before_mkdir_or_docker_save(self):
+        installed = self._install()
+        runtime, role_path, ssh_public, static_path, certificate = self._runtime_and_config(installed)
+        self._enroll(installed, role_path, ssh_public, certificate)
+        attestation = self._attest(
+            installed,
+            runtime,
+            role_path,
+            ssh_public,
+            static_path,
+            certificate,
+            attestation_id="attestation-export-runtime-alias",
+        )
+        current_alias = self.root / "current-linked-runtime"
+        current_alias.mkdir(mode=0o700)
+        destination = current_alias / "must-not-create-export"
+        original_samestat = os.path.samestat
+        alias_state = current_alias.stat()
+        runtime_state = runtime.stat()
+
+        def same_stat(left, right):
+            if {left.st_ino, right.st_ino} == {alias_state.st_ino, runtime_state.st_ino} and {left.st_dev, right.st_dev} == {alias_state.st_dev, runtime_state.st_dev}:
+                return True
+            return original_samestat(left, right)
+
+        with (
+            patch.object(install.os.path, "samestat", side_effect=same_stat),
+            patch.object(install, "_revalidate_export_runtime", side_effect=AssertionError("runtime alias reached revalidation")),
+            patch.object(install, "_create_directory", side_effect=AssertionError("runtime alias reached mkdir")),
+            patch.object(install, "_export_exact_docker_save_bytes", side_effect=AssertionError("runtime alias reached docker save")),
+        ):
+            with self.assertRaisesRegex(install.SourceAdoptionInstallError, "outside the live source runtime"):
+                install.export_actual_fi_image(
+                    attestation=Path(attestation["attestation_path"]),
+                    source_role_config=role_path,
+                    signer_enrollment_receipt=Path(installed["candidate"]) / "enrollments" / f"{CAMPAIGN}.json",
+                    signer_enrollment_certificate=certificate,
+                    ssh_host_public_key_file=ssh_public,
+                    runtime_source_root=runtime,
+                    static_assets_descriptor=static_path,
+                    pinned_controller_public_key_base64=self.controller_public,
+                    pinned_source_signing_public_key_base64=self.fi_public,
+                    expected_campaign_id=CAMPAIGN,
+                    expected_application=installed["application"],
+                    expected_control_commit=self.control_commit,
+                    expected_canonical_release_tree_sha256=attestation["descriptor_claim"]["canonical_release_tree_sha256"],
+                    expected_app_image_id=IMAGE_ID,
+                    expected_app_image_reference=IMAGE_REFERENCE,
+                    destination=destination,
+                    export_id="export-runtime-alias",
+                    apply=True,
+                )
+        self.assertFalse(destination.exists())
+
     def test_export_rejects_source_only_enrollment_claim_drift_before_docker(self):
         installed = self._install()
         runtime, role_path, ssh_public, static_path, certificate = self._runtime_and_config(installed)

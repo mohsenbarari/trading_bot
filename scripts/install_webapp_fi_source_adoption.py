@@ -2488,6 +2488,55 @@ def _export_exact_docker_save_bytes(*, archive: Path, expected_image_id: str) ->
     }
 
 
+def _require_export_destination_outside_source_runtime(
+    *,
+    destination: Path,
+    runtime_source_root: Path,
+    attested_runtime_source_root: str,
+) -> Path:
+    """Bind an export destination outside the signed live runtime tree.
+
+    The exact-byte archive must never be written below the host tree mounted
+    into the running application.  Compare canonical paths first, then check
+    every existing ancestor by inode so a bind-mounted/current-linked alias of
+    that tree cannot bypass the lexical boundary.
+    """
+
+    runtime_root = require_root_only_directory(runtime_source_root, field="runtime source root for image export")
+    attested_root = require_root_only_directory(
+        Path(attested_runtime_source_root),
+        field="attested runtime source root for image export",
+    )
+    if runtime_root != attested_root:
+        raise SourceAdoptionInstallError("image export runtime source root differs from the signed attestation")
+    destination = _require_absolute(destination, field="image export destination")
+    parent = require_root_only_directory(destination.parent, field="image export destination parent")
+    if destination.exists() or destination.is_symlink() or destination.parent != parent:
+        raise SourceAdoptionInstallError("image export destination must be a new child of a root-only directory")
+    destination = parent / destination.name
+    try:
+        destination.relative_to(runtime_root)
+    except ValueError:
+        pass
+    else:
+        raise SourceAdoptionInstallError("image export destination must be outside the live source runtime")
+    try:
+        runtime_state = runtime_root.stat()
+    except OSError as exc:
+        raise SourceAdoptionInstallError("cannot inspect runtime source root for image export") from exc
+    current = parent
+    while True:
+        try:
+            if os.path.samestat(current.stat(), runtime_state):
+                raise SourceAdoptionInstallError("image export destination must be outside the live source runtime")
+        except OSError as exc:
+            raise SourceAdoptionInstallError("cannot inspect image export destination ancestry") from exc
+        if current == current.parent:
+            break
+        current = current.parent
+    return destination
+
+
 def _revalidate_export_runtime(
     *,
     installed: Mapping[str, Any],
@@ -2609,10 +2658,11 @@ def export_actual_fi_image(
     ):
         raise SourceAdoptionInstallError("WebApp-FI image export signer enrollment differs from source attestation")
     signer, public_key = _load_fi_signer_from_role_config(role_config, pinned_public_key_base64=pinned_source_signing_public_key_base64)
-    destination = _require_absolute(destination, field="image export destination")
-    parent = require_root_only_directory(destination.parent, field="image export destination parent")
-    if destination.exists() or destination.is_symlink() or destination.parent != parent:
-        raise SourceAdoptionInstallError("image export destination must be a new child of a root-only directory")
+    destination = _require_export_destination_outside_source_runtime(
+        destination=destination,
+        runtime_source_root=runtime_source_root,
+        attested_runtime_source_root=verified["runtime_claim"]["projection"]["runtime_source_root"],
+    )
     plan = {
         "schema": IMAGE_EXPORT_RECEIPT_SCHEMA,
         "status": "planned" if not apply else "exporting",
