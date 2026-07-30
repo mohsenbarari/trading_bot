@@ -38,6 +38,7 @@ REVISION = "f2c7d8e9a0b1"
 RECIPIENT = "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
 IMAGE_ID = "sha256:" + "b" * 64
 IMAGE_REFERENCE = "registry.example/gold-trade/webapp:2c08"
+PROVIDER_VERSION_ID = "3/L4kqtJlcpXroDTDmJ+3DcJKZBjjfM7m1E7S="
 
 
 def _private_file(path, payload):
@@ -86,6 +87,8 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         os.chmod(self.root, 0o700)
+        self.external_certs = self.root / "external-certs"
+        self.external_certs.mkdir(mode=0o700)
         self.control = _new_repo(self.root / "control")
         self.application = _new_repo(self.root / "application")
         for relative in prepare.SOURCE_PAYLOAD_FILES:
@@ -126,7 +129,7 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         self.preparation_receipt = self.package_dir / prepare.PREPARATION_RECEIPT_NAME
         self.delivery_object = {
             "object_key": "source-adoption/package-one.age",
-            "version_id": "version-0001",
+            "version_id": PROVIDER_VERSION_ID,
             "ciphertext_sha256": hashlib.sha256(b"ciphertext").hexdigest(),
             "ciphertext_bytes": len(b"ciphertext"),
             "plaintext_sha256": self.prepared["archive_sha256"],
@@ -266,6 +269,7 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
             ]
             if include_static:
                 records.append({"type": "bind", "source": str(runtime / install.RUNTIME_STATIC_ASSET_RELATIVE), "destination": "/app/" + install.RUNTIME_STATIC_ASSET_RELATIVE, "read_only": False})
+                records.append({"type": "bind", "source": str(self.external_certs), "destination": install.RUNTIME_EXTERNAL_NON_PAYLOAD_MOUNT_TARGET, "read_only": False})
                 records.append({"type": "volume", "source": "fixture_uploads", "destination": "/app/uploads", "read_only": False})
                 records.append({"type": "volume", "source": "fixture_audit", "destination": "/app/audit_trail", "read_only": False})
             return sorted(records, key=lambda item: (item["destination"], item["type"], str(item["source"])))
@@ -290,7 +294,7 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
     def test_prepared_package_contains_only_attest_bootstrap_and_signed_envelope_binds_version(self):
         verified = self._verify_package()
         self.assertEqual(verified["campaign_id"], CAMPAIGN)
-        self.assertEqual(verified["delivery_object"]["version_id"], "version-0001")
+        self.assertEqual(verified["delivery_object"]["version_id"], PROVIDER_VERSION_ID)
         with tarfile.open(self.archive, "r:") as archive:
             self.assertEqual(
                 {item.name for item in archive.getmembers()},
@@ -420,7 +424,7 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
                 expected_app_image_id=IMAGE_ID,
                 expected_app_image_reference=IMAGE_REFERENCE,
             )
-        self.assertEqual(portable_verification["source_adoption_delivery"]["version_id"], "version-0001")
+        self.assertEqual(portable_verification["source_adoption_delivery"]["version_id"], PROVIDER_VERSION_ID)
         portable_result = portable.verify_source_role_attestation_payload(
             payload=Path(attestation["attestation_path"]).read_bytes(),
             pinned_source_signing_public_key_base64=self.fi_public,
@@ -532,6 +536,188 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
                     attestation_id="attestation-unreviewed-mount",
                     apply=True,
                 )
+
+    def test_prepare_paths_reject_an_unsafe_root_owned_ancestor(self):
+        unsafe_parent = self.root / "unsafe-parent"
+        unsafe_parent.mkdir(mode=0o700)
+        directory = unsafe_parent / "candidate"
+        directory.mkdir(mode=0o700)
+        private_file = unsafe_parent / "controller.raw"
+        private_file.write_bytes(b"x" * 32)
+        os.chmod(private_file, 0o600)
+        os.chmod(unsafe_parent, 0o777)
+        with self.assertRaises(prepare.SourceAdoptionPreparationError):
+            prepare._require_root_directory(directory, field="unsafe test directory", private=True)
+        with self.assertRaises(prepare.SourceAdoptionPreparationError):
+            prepare._require_root_only_file(private_file, field="unsafe test file", maximum_bytes=32)
+
+    def test_opaque_provider_version_ids_and_url_free_persistent_writers(self):
+        self.assertEqual(
+            prepare._require_version_id(PROVIDER_VERSION_ID, field="test VersionId"),
+            PROVIDER_VERSION_ID,
+        )
+        self.assertEqual(
+            install._require_version_id(PROVIDER_VERSION_ID, field="test VersionId"),
+            PROVIDER_VERSION_ID,
+        )
+        self.assertEqual(
+            portable._version_id(PROVIDER_VERSION_ID, field="test VersionId"),
+            PROVIDER_VERSION_ID,
+        )
+        for invalid in ("", "null", "NULL", "version:one", "version?one", "version#one", "version one", "version\x1fone"):
+            with self.subTest(version_id=repr(invalid)):
+                with self.assertRaises(prepare.SourceAdoptionPreparationError):
+                    prepare._require_version_id(invalid, field="test VersionId")
+                with self.assertRaises(install.SourceAdoptionInstallError):
+                    install._require_version_id(invalid, field="test VersionId")
+                with self.assertRaises(portable.SourceProvenanceVerificationError):
+                    portable._version_id(invalid, field="test VersionId")
+        metadata = self.root / "metadata"
+        metadata.mkdir(mode=0o700)
+        with self.assertRaises(prepare.SourceAdoptionPreparationError):
+            prepare._write_new_private_json(
+                metadata / "prepare.json",
+                {"control": "HTTPS://example.invalid/object"},
+                field="test preparation metadata",
+            )
+        self.assertFalse((metadata / "prepare.json").exists())
+        with self.assertRaises(install.SourceAdoptionInstallError):
+            install._write_new_private_json(
+                metadata / "install.json",
+                {"control": "HTTPS://example.invalid/object"},
+            )
+        self.assertFalse((metadata / "install.json").exists())
+        with self.assertRaises(portable.SourceProvenanceVerificationError):
+            portable._parse(
+                portable.canonical_json_bytes({"control": "HTTPS://example.invalid/object"}) + b"\n",
+                field="test portable metadata",
+            )
+
+    def test_projection_root_mode_and_mount_bypasses_block_before_schema_query(self):
+        installed = self._install()
+        runtime, role_path, ssh_public, static_path, certificate = self._runtime_and_config(installed)
+        self._enroll(installed, role_path, ssh_public, certificate)
+        os.chmod(runtime / "api", 0o777)
+        with self.assertRaises(install.SourceAdoptionInstallError):
+            install.verify_canonical_runtime_projection(
+                candidate=Path(installed["candidate"]),
+                runtime_source_root=runtime,
+                expected_application=installed["application"],
+            )
+        os.chmod(runtime / "api", 0o755)
+        base_containers = self._container_records(runtime)
+        bypasses = (
+            ("fixture_app", "/app", "bind", str(self.root / "bypass-app")),
+            ("fixture_app", "/", "bind", str(self.root / "bypass-root")),
+            ("fixture_app", "/app/api/override", "bind", str(self.root / "bypass-api")),
+            ("fixture_app", "/app/certs/private", "bind", str(self.root / "bypass-certs-child")),
+            ("fixture_app", install.RUNTIME_EXTERNAL_NON_PAYLOAD_MOUNT_TARGET, "volume", "fixture-certs"),
+            ("fixture_sync", install.RUNTIME_EXTERNAL_NON_PAYLOAD_MOUNT_TARGET, "bind", str(self.external_certs)),
+        )
+        for number, (container_name, destination, mount_type, source) in enumerate(bypasses, 1):
+            with self.subTest(destination=destination, mount_type=mount_type):
+                containers = copy.deepcopy(base_containers)
+                containers[container_name]["mounts"].append(
+                    {"type": mount_type, "source": source, "destination": destination, "read_only": False}
+                )
+                containers[container_name]["mounts"].sort(
+                    key=lambda item: (item["destination"], item["type"], str(item["source"]))
+                )
+                with patch.object(install, "_inspect_container", side_effect=lambda name: copy.deepcopy(containers[name])), patch.object(install, "_read_only_schema_observation", side_effect=AssertionError("mount validation should fail before DB query")):
+                    with self.assertRaises(install.SourceAdoptionInstallError):
+                        install.attest_source_role(
+                            install_receipt=installed["receipt_path"],
+                            source_role_config=role_path,
+                            signer_enrollment_receipt=Path(installed["candidate"]) / "enrollments" / f"{CAMPAIGN}.json",
+                            signer_enrollment_certificate=certificate,
+                            ssh_host_public_key_file=ssh_public,
+                            runtime_source_root=runtime,
+                            static_assets_descriptor=static_path,
+                            pinned_controller_public_key_base64=self.controller_public,
+                            campaign_id=CAMPAIGN,
+                            expected_app_image_id=IMAGE_ID,
+                            expected_app_image_reference=IMAGE_REFERENCE,
+                            attestation_id=f"attestation-bypass-{number}",
+                            apply=True,
+                        )
+
+    def test_portable_verifier_rejects_projection_bypass_and_certificate_overlap(self):
+        installed = self._install()
+        runtime, role_path, ssh_public, static_path, certificate = self._runtime_and_config(installed)
+        self._enroll(installed, role_path, ssh_public, certificate)
+        containers = self._container_records(runtime)
+        image = {
+            "image_id": IMAGE_ID,
+            "image_reference": IMAGE_REFERENCE,
+            "repo_tags": [IMAGE_REFERENCE],
+            "repo_digests": [],
+        }
+        with patch.object(install, "_inspect_container", side_effect=lambda name: copy.deepcopy(containers[name])), patch.object(install, "_inspect_image", return_value=image), patch.object(install, "_read_only_schema_observation", return_value={"observed_alembic_revision": REVISION, "capture_role_verified_read_only": True}):
+            attestation = install.attest_source_role(
+                install_receipt=installed["receipt_path"],
+                source_role_config=role_path,
+                signer_enrollment_receipt=Path(installed["candidate"]) / "enrollments" / f"{CAMPAIGN}.json",
+                signer_enrollment_certificate=certificate,
+                ssh_host_public_key_file=ssh_public,
+                runtime_source_root=runtime,
+                static_assets_descriptor=static_path,
+                pinned_controller_public_key_base64=self.controller_public,
+                campaign_id=CAMPAIGN,
+                expected_app_image_id=IMAGE_ID,
+                expected_app_image_reference=IMAGE_REFERENCE,
+                attestation_id="attestation-portable-bypass",
+                apply=True,
+            )
+        original = json.loads(Path(attestation["attestation_path"]).read_text(encoding="utf-8"))
+        cases = (
+            ("/app", str(self.root / "portable-bypass-app")),
+            ("/", str(self.root / "portable-bypass-root")),
+            ("/app/api/override", str(self.root / "portable-bypass-api")),
+            ("/app/certs/override", str(self.root / "portable-bypass-certs")),
+        )
+        for destination, source in cases:
+            with self.subTest(destination=destination):
+                proof = copy.deepcopy(original)
+                proof["containers"]["application"]["mounts"].append(
+                    {"type": "bind", "source": source, "destination": destination, "read_only": False}
+                )
+                proof["containers"]["application"]["mounts"].sort(
+                    key=lambda item: (item["destination"], item["type"], str(item["source"]))
+                )
+                unsigned = {key: value for key, value in proof.items() if key != "source_signature"}
+                proof["source_signature"] = {
+                    "algorithm": "ed25519",
+                    "signature_base64": _signature(self.fi_key, install.ATTESTATION_SIGNATURE_DOMAIN, unsigned),
+                }
+                with self.assertRaises(portable.SourceProvenanceVerificationError):
+                    portable.verify_source_role_attestation_payload(
+                        payload=portable.canonical_json_bytes(proof) + b"\n",
+                        pinned_source_signing_public_key_base64=self.fi_public,
+                        expected_campaign_id=CAMPAIGN,
+                        expected_application={"release_sha": self.release, "expected_alembic_revision": REVISION},
+                        expected_control_commit=self.control_commit,
+                        expected_app_image_id=IMAGE_ID,
+                        expected_app_image_reference=IMAGE_REFERENCE,
+                    )
+        proof = copy.deepcopy(original)
+        for mount in proof["containers"]["application"]["mounts"]:
+            if mount["destination"] == install.RUNTIME_EXTERNAL_NON_PAYLOAD_MOUNT_TARGET:
+                mount["source"] = str(runtime)
+        unsigned = {key: value for key, value in proof.items() if key != "source_signature"}
+        proof["source_signature"] = {
+            "algorithm": "ed25519",
+            "signature_base64": _signature(self.fi_key, install.ATTESTATION_SIGNATURE_DOMAIN, unsigned),
+        }
+        with self.assertRaises(portable.SourceProvenanceVerificationError):
+            portable.verify_source_role_attestation_payload(
+                payload=portable.canonical_json_bytes(proof) + b"\n",
+                pinned_source_signing_public_key_base64=self.fi_public,
+                expected_campaign_id=CAMPAIGN,
+                expected_application={"release_sha": self.release, "expected_alembic_revision": REVISION},
+                expected_control_commit=self.control_commit,
+                expected_app_image_id=IMAGE_ID,
+                expected_app_image_reference=IMAGE_REFERENCE,
+            )
 
     def test_docker_archive_contract_binds_image_config_and_export_plan_never_inspects_docker(self):
         config = b'{"architecture":"amd64"}'
