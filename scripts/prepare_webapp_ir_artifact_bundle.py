@@ -76,6 +76,19 @@ GIT_OBJECT_ID_RE = re.compile(r"^[a-f0-9]{40,64}$")
 PREPARATION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 IMAGE_ID_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
 IMAGE_REFERENCE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/@:-]{0,511}$")
+SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
+DOCKER_CONFIG_MEMBER_RE = re.compile(r"^[a-f0-9]{64}\.json$")
+
+# Docker ``save`` archives are an input boundary when they return from a
+# source host.  Keep every control-plane structure deliberately small; layer
+# bytes themselves remain bounded by the surrounding artifact contract.
+MAX_DOCKER_ARCHIVE_MEMBERS = 4096
+MAX_DOCKER_ARCHIVE_IMAGES = 32
+MAX_DOCKER_ARCHIVE_TAGS_PER_IMAGE = 128
+MAX_DOCKER_ARCHIVE_LAYERS_PER_IMAGE = 2048
+MAX_DOCKER_ARCHIVE_MANIFEST_BYTES = 1024 * 1024
+MAX_DOCKER_ARCHIVE_CONFIG_BYTES = 2 * 1024 * 1024
+MAX_DOCKER_ARCHIVE_CONTROL_BYTES = 16 * 1024 * 1024
 
 
 class ArtifactPreparationError(RuntimeError):
@@ -108,6 +121,37 @@ class PreparedImage:
             "size_bytes": self.size_bytes,
             "source_ref": self.source_ref,
         }
+
+
+@dataclasses.dataclass(frozen=True)
+class DockerArchiveEntry:
+    config_name: str
+    image_id: str
+    repo_tags: tuple[str, ...]
+    layers: tuple[str, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class DockerArchiveInspection:
+    entries: tuple[DockerArchiveEntry, ...]
+    member_names: frozenset[str]
+    regular_member_names: frozenset[str]
+
+
+class _DockerArchiveTarInfo(tarfile.TarInfo):
+    """Reject tar extensions before ``tarfile`` can buffer their payloads."""
+
+    def _proc_member(self, archive: tarfile.TarFile) -> tarfile.TarInfo:
+        if self.type in {
+            tarfile.GNUTYPE_LONGNAME,
+            tarfile.GNUTYPE_LONGLINK,
+            tarfile.GNUTYPE_SPARSE,
+            tarfile.XHDTYPE,
+            tarfile.XGLTYPE,
+            tarfile.SOLARIS_XHDTYPE,
+        }:
+            raise tarfile.ReadError("Docker image archives must not contain extended tar headers")
+        return super()._proc_member(archive)
 
 
 CommandRunner = Callable[[Sequence[str], Path | None, int], subprocess.CompletedProcess[str]]
@@ -223,6 +267,41 @@ def require_private_regular_file(path: Path, *, field: str, maximum_bytes: int) 
     if metadata.st_size < 1 or metadata.st_size > maximum_bytes:
         raise ArtifactPreparationError(f"{field} exceeds its size bounds")
     return path.resolve(strict=True)
+
+
+def _require_private_docker_archive_input(path: Path, *, field: str) -> Path:
+    path = require_private_regular_file(
+        path,
+        field=field,
+        maximum_bytes=MAXIMUM_ARTIFACT_BYTES,
+    )
+    if _lstat(path, field=field).st_nlink != 1:
+        raise ArtifactPreparationError(f"{field} must not have additional hard links")
+    return path
+
+
+def _require_exact_private_docker_archive(
+    path: Path,
+    *,
+    expected_sha256: str,
+    expected_bytes: int,
+    field: str,
+) -> Path:
+    if not isinstance(expected_sha256, str) or not SHA256_RE.fullmatch(expected_sha256):
+        raise ArtifactPreparationError(f"{field} expected SHA-256 is invalid")
+    expected_bytes = require_positive_int(
+        expected_bytes,
+        field=f"{field} expected byte count",
+        maximum=MAXIMUM_ARTIFACT_BYTES,
+    )
+    path = _require_private_docker_archive_input(path, field=field)
+    try:
+        observed_sha256, observed_bytes = sha256_file(path)
+    except OSError as exc:
+        raise ArtifactPreparationError(f"{field} cannot be hashed") from exc
+    if (observed_sha256, observed_bytes) != (expected_sha256, expected_bytes):
+        raise ArtifactPreparationError(f"{field} changed from its signed raw archive binding")
+    return path
 
 
 def default_command_runner(
@@ -624,7 +703,13 @@ def preflight_artifact_capacity(
 
 
 def _safe_tar_member_name(value: str) -> bool:
-    return bool(value) and not value.startswith("/") and all(part not in {"", ".", ".."} for part in value.split("/"))
+    return (
+        bool(value)
+        and len(value) <= 1024
+        and "\x00" not in value
+        and not value.startswith("/")
+        and all(part not in {"", ".", ".."} for part in value.split("/"))
+    )
 
 
 def bind_isolated_archive_tags(
@@ -656,104 +741,247 @@ def bind_isolated_archive_tags(
     return result
 
 
-def _archive_manifest(
+def _reject_duplicate_json_keys(pairs: Sequence[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate JSON object key")
+        value[key] = item
+    return value
+
+
+def _reject_json_constant(_value: str) -> None:
+    raise ValueError("non-finite JSON constant")
+
+
+def _strict_json_loads(payload: bytes, *, field: str) -> Any:
+    try:
+        return json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=_reject_duplicate_json_keys,
+            parse_constant=_reject_json_constant,
+        )
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
+        raise ArtifactPreparationError(f"{field} is invalid") from exc
+
+
+def _read_archive_metadata_member(
     archive: tarfile.TarFile,
+    member: tarfile.TarInfo,
     *,
-    member_names: set[str],
-) -> list[Mapping[str, Any]]:
+    maximum_bytes: int,
+    field: str,
+) -> bytes:
+    if not member.isreg() or member.issparse() or member.size < 1 or member.size > maximum_bytes:
+        raise ArtifactPreparationError(f"{field} exceeds its fixed bounds")
+    handle = archive.extractfile(member)
+    if handle is None:
+        raise ArtifactPreparationError(f"{field} cannot be read")
     try:
-        manifest_member = archive.getmember("manifest.json")
-    except KeyError as exc:
-        raise ArtifactPreparationError("Docker image archive does not contain manifest.json") from exc
-    if not manifest_member.isreg():
+        payload = handle.read(maximum_bytes + 1)
+    finally:
+        handle.close()
+    if len(payload) != member.size or len(payload) > maximum_bytes:
+        raise ArtifactPreparationError(f"{field} cannot be read safely")
+    return payload
+
+
+def _validate_docker_archive_member(member: tarfile.TarInfo, *, member_names: set[str]) -> None:
+    if not _safe_tar_member_name(member.name):
+        raise ArtifactPreparationError("Docker image archive contains an unsafe member path")
+    if member.name in member_names:
+        raise ArtifactPreparationError("Docker image archive contains duplicate member paths")
+    if len(member_names) >= MAX_DOCKER_ARCHIVE_MEMBERS:
+        raise ArtifactPreparationError("Docker image archive contains too many members")
+    member_names.add(member.name)
+    if member.isdir():
+        return
+    if not member.isreg() or member.issparse() or member.size < 0:
+        raise ArtifactPreparationError("Docker image archive contains unsupported member types")
+
+
+def _parse_docker_archive_manifest(payload: bytes) -> list[Mapping[str, Any]]:
+    manifest = _strict_json_loads(payload, field="Docker image archive manifest")
+    if not isinstance(manifest, list) or not manifest or len(manifest) > MAX_DOCKER_ARCHIVE_IMAGES:
         raise ArtifactPreparationError("Docker image archive manifest is malformed")
-    manifest_handle = archive.extractfile(manifest_member)
-    if manifest_handle is None:
-        raise ArtifactPreparationError("Docker image archive manifest cannot be read")
-    try:
-        manifest = json.loads(manifest_handle.read().decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ArtifactPreparationError("Docker image archive manifest is invalid") from exc
-    if not isinstance(manifest, list) or not manifest:
-        raise ArtifactPreparationError("Docker image archive manifest is malformed")
-    if "manifest.json" not in member_names:  # pragma: no cover - retained for defensive clarity.
-        raise ArtifactPreparationError("Docker image archive does not contain manifest.json")
+    if not all(isinstance(entry, Mapping) for entry in manifest):
+        raise ArtifactPreparationError("Docker image archive manifest entry is malformed")
     return manifest
 
 
-def _archive_entry_image_id(archive: tarfile.TarFile, entry: Mapping[str, Any]) -> str:
-    config_name = entry.get("Config")
-    if not isinstance(config_name, str) or not _safe_tar_member_name(config_name):
-        raise ArtifactPreparationError("Docker image archive config path is malformed")
+def _validate_docker_archive_entries(
+    manifest: Sequence[Mapping[str, Any]],
+    *,
+    member_names: set[str],
+    regular_member_names: set[str],
+    config_payloads: Mapping[str, bytes],
+) -> tuple[DockerArchiveEntry, ...]:
+    entries: list[DockerArchiveEntry] = []
+    for entry in manifest:
+        if set(entry) != {"Config", "RepoTags", "Layers"}:
+            raise ArtifactPreparationError("Docker image archive manifest entry has unsupported fields")
+        config_name = entry.get("Config")
+        if not isinstance(config_name, str) or not DOCKER_CONFIG_MEMBER_RE.fullmatch(config_name):
+            raise ArtifactPreparationError("Docker image archive config path is malformed")
+        config_payload = config_payloads.get(config_name)
+        if config_payload is None:
+            raise ArtifactPreparationError("Docker image archive config path is absent")
+        config = _strict_json_loads(config_payload, field="Docker image archive config")
+        if not isinstance(config, Mapping):
+            raise ArtifactPreparationError("Docker image archive config is malformed")
+        image_id = require_image_id(
+            "sha256:" + sha256_bytes(config_payload),
+            field="Docker archive image ID",
+        )
+        if config_name != image_id.removeprefix("sha256:") + ".json":
+            raise ArtifactPreparationError("Docker image archive config path is not bound to its image ID")
+        repo_tags = entry.get("RepoTags")
+        if repo_tags is None:
+            validated_tags: tuple[str, ...] = ()
+        elif (
+            not isinstance(repo_tags, list)
+            or len(repo_tags) > MAX_DOCKER_ARCHIVE_TAGS_PER_IMAGE
+            or not all(isinstance(tag, str) for tag in repo_tags)
+        ):
+            raise ArtifactPreparationError("Docker image archive RepoTags are malformed")
+        else:
+            validated_tags = tuple(require_image_reference(tag, field="Docker archive RepoTag") for tag in repo_tags)
+        if len(validated_tags) != len(set(validated_tags)):
+            raise ArtifactPreparationError("Docker image archive contains duplicate RepoTags")
+        layers = entry.get("Layers")
+        if (
+            not isinstance(layers, list)
+            or len(layers) > MAX_DOCKER_ARCHIVE_LAYERS_PER_IMAGE
+            or not all(isinstance(layer, str) for layer in layers)
+        ):
+            raise ArtifactPreparationError("Docker image archive Layers are malformed")
+        validated_layers: list[str] = []
+        for layer in layers:
+            if (
+                not _safe_tar_member_name(layer)
+                or layer not in member_names
+                or layer not in regular_member_names
+                or layer in {"manifest.json", "repositories"}
+                or layer in config_payloads
+            ):
+                raise ArtifactPreparationError("Docker image archive layer path is malformed")
+            validated_layers.append(layer)
+        if len(validated_layers) != len(set(validated_layers)):
+            raise ArtifactPreparationError("Docker image archive contains duplicate layer paths")
+        entries.append(
+            DockerArchiveEntry(
+                config_name=config_name,
+                image_id=image_id,
+                repo_tags=validated_tags,
+                layers=tuple(validated_layers),
+            )
+        )
+    return tuple(entries)
+
+
+def inspect_docker_image_archive(*, path: Path) -> DockerArchiveInspection:
+    """Read Docker archive control metadata with bounded, streaming parsing."""
+
+    path = _require_private_docker_archive_input(path, field="Docker image archive")
+    member_names: set[str] = set()
+    regular_member_names: set[str] = set()
+    config_payloads: dict[str, bytes] = {}
+    manifest_payload: bytes | None = None
+    control_bytes = 0
     try:
-        config_member = archive.getmember(config_name)
-    except KeyError as exc:
-        raise ArtifactPreparationError("Docker image archive config path is absent") from exc
-    if not config_member.isreg():
-        raise ArtifactPreparationError("Docker image archive config is not a regular file")
-    config_handle = archive.extractfile(config_member)
-    if config_handle is None:
-        raise ArtifactPreparationError("Docker image archive config cannot be read")
-    return require_image_id(
-        "sha256:" + sha256_bytes(config_handle.read()),
-        field="Docker archive image ID",
+        with tarfile.open(path, "r|", tarinfo=_DockerArchiveTarInfo) as archive:
+            while (member := archive.next()) is not None:
+                _validate_docker_archive_member(member, member_names=member_names)
+                if member.isreg():
+                    regular_member_names.add(member.name)
+                if member.name == "manifest.json":
+                    manifest_payload = _read_archive_metadata_member(
+                        archive,
+                        member,
+                        maximum_bytes=MAX_DOCKER_ARCHIVE_MANIFEST_BYTES,
+                        field="Docker image archive manifest",
+                    )
+                    control_bytes += len(manifest_payload)
+                elif DOCKER_CONFIG_MEMBER_RE.fullmatch(member.name):
+                    if len(config_payloads) >= MAX_DOCKER_ARCHIVE_IMAGES:
+                        raise ArtifactPreparationError("Docker image archive contains too many config members")
+                    config_payload = _read_archive_metadata_member(
+                        archive,
+                        member,
+                        maximum_bytes=MAX_DOCKER_ARCHIVE_CONFIG_BYTES,
+                        field="Docker image archive config",
+                    )
+                    config_payloads[member.name] = config_payload
+                    control_bytes += len(config_payload)
+                if control_bytes > MAX_DOCKER_ARCHIVE_CONTROL_BYTES:
+                    raise ArtifactPreparationError("Docker image archive control metadata exceeds its fixed bounds")
+    except (OSError, tarfile.TarError) as exc:
+        raise ArtifactPreparationError("Docker image archive cannot be validated") from exc
+    if any(
+        name in {"oci-layout", "index.json"} or name.startswith("blobs/")
+        for name in member_names
+    ):
+        raise ArtifactPreparationError("Docker image archive uses an unsupported OCI layout")
+    if manifest_payload is None:
+        raise ArtifactPreparationError("Docker image archive does not contain manifest.json")
+    manifest = _parse_docker_archive_manifest(manifest_payload)
+    entries = _validate_docker_archive_entries(
+        manifest,
+        member_names=member_names,
+        regular_member_names=regular_member_names,
+        config_payloads=config_payloads,
+    )
+    if set(config_payloads) != {entry.config_name for entry in entries}:
+        raise ArtifactPreparationError("Docker image archive contains an unreferenced config member")
+    return DockerArchiveInspection(
+        entries=entries,
+        member_names=frozenset(member_names),
+        regular_member_names=frozenset(regular_member_names),
     )
 
 
-def verify_docker_image_archive(
+def _verify_docker_archive_inspection(
+    inspection: DockerArchiveInspection,
     *,
-    path: Path,
     images: Sequence[PreparedImage],
-    require_isolated_tags: bool = False,
+    require_isolated_tags: bool,
+    require_source_tags: bool,
 ) -> dict[str, Any]:
+    if not images or len(images) > MAX_DOCKER_ARCHIVE_IMAGES:
+        raise ArtifactPreparationError("Docker image archive has an unsafe expected image count")
     expected_ids = {image.image_id for image in images}
+    if len(expected_ids) != len(images):
+        raise ArtifactPreparationError("Docker image archive expected image IDs are not unique")
     expected_tags_by_image = {image.image_id: set(image.repo_tags) for image in images}
     expected_source_tags_by_image = {
         image.image_id: ({image.source_ref} if "@" not in image.source_ref else set())
         for image in images
     }
-    try:
-        with tarfile.open(path, "r") as archive:
-            members = archive.getmembers()
-            member_names: set[str] = set()
-            for member in members:
-                if not _safe_tar_member_name(member.name):
-                    raise ArtifactPreparationError("Docker image archive contains an unsafe member path")
-                if member.name in member_names:
-                    raise ArtifactPreparationError("Docker image archive contains duplicate member paths")
-                member_names.add(member.name)
-                if not member.isdir() and not member.isreg():
-                    raise ArtifactPreparationError("Docker image archive contains unsupported member types")
-            if require_isolated_tags and "repositories" in member_names:
-                raise ArtifactPreparationError("Docker image archive retains legacy repositories tag metadata")
-            manifest = _archive_manifest(archive, member_names=member_names)
-            archive_ids: list[str] = []
-            archive_tags: set[str] = set()
-            for entry in manifest:
-                if not isinstance(entry, Mapping):
-                    raise ArtifactPreparationError("Docker image archive manifest entry is malformed")
-                repo_tags = entry.get("RepoTags")
-                if not isinstance(repo_tags, list) or not all(isinstance(tag, str) for tag in repo_tags):
-                    raise ArtifactPreparationError("Docker image archive RepoTags are malformed")
-                image_id = _archive_entry_image_id(archive, entry)
-                if image_id not in expected_ids:
-                    raise ArtifactPreparationError("Docker image archive contains an unverified image ID")
-                entry_tags = {require_image_reference(tag, field="Docker archive RepoTag") for tag in repo_tags}
-                if require_isolated_tags:
-                    expected_tag = next(image.archive_tag for image in images if image.image_id == image_id)
-                    if expected_tag is None:  # pragma: no cover - bind_isolated_archive_tags is mandatory before final verification.
-                        raise ArtifactPreparationError("Docker image archive is missing its isolated tag binding")
-                    if entry_tags != {expected_tag}:
-                        raise ArtifactPreparationError("Docker image archive contains shared or noncanonical image tags")
-                else:
-                    if not entry_tags.issubset(expected_tags_by_image[image_id]):
-                        raise ArtifactPreparationError("Docker image archive contains an unverified image tag")
-                    if not expected_source_tags_by_image[image_id].issubset(entry_tags):
-                        raise ArtifactPreparationError("Docker image archive does not retain every verified source image tag")
-                archive_ids.append(image_id)
-                archive_tags.update(entry_tags)
-    except (KeyError, OSError, tarfile.TarError) as exc:
-        raise ArtifactPreparationError("Docker image archive cannot be validated") from exc
+    image_by_id = {image.image_id: image for image in images}
+    archive_ids: list[str] = []
+    archive_tags: set[str] = set()
+    for entry in inspection.entries:
+        image_id = entry.image_id
+        if image_id not in expected_ids:
+            raise ArtifactPreparationError("Docker image archive contains an unverified image ID")
+        entry_tags = set(entry.repo_tags)
+        if require_isolated_tags:
+            expected_tag = image_by_id[image_id].archive_tag
+            if expected_tag is None:  # pragma: no cover - bind_isolated_archive_tags is mandatory before final verification.
+                raise ArtifactPreparationError("Docker image archive is missing its isolated tag binding")
+            if entry_tags != {expected_tag}:
+                raise ArtifactPreparationError("Docker image archive contains shared or noncanonical image tags")
+        elif require_source_tags:
+            if not entry_tags:
+                raise ArtifactPreparationError("Docker image archive does not retain every verified source image tag")
+            if not entry_tags.issubset(expected_tags_by_image[image_id]):
+                raise ArtifactPreparationError("Docker image archive contains an unverified image tag")
+            if not expected_source_tags_by_image[image_id].issubset(entry_tags):
+                raise ArtifactPreparationError("Docker image archive does not retain every verified source image tag")
+        elif entry_tags:
+            raise ArtifactPreparationError("untagged Docker image archive unexpectedly retains raw source tags")
+        archive_ids.append(image_id)
+        archive_tags.update(entry_tags)
     if len(archive_ids) != len(set(archive_ids)) or set(archive_ids) != expected_ids:
         raise ArtifactPreparationError("Docker image archive does not contain exactly the verified image IDs")
     return {
@@ -762,54 +990,129 @@ def verify_docker_image_archive(
     }
 
 
+def verify_docker_image_archive(
+    *,
+    path: Path,
+    images: Sequence[PreparedImage],
+    require_isolated_tags: bool = False,
+    require_source_tags: bool = True,
+) -> dict[str, Any]:
+    """Validate archive structure, config identities, and tag isolation only.
+
+    The Docker config hash binds an image ID, but this pure file-level check
+    intentionally does not assert that Docker can load every layer.  Only the
+    legacy Docker-save layout is recognized; OCI layout control files fail
+    closed rather than bypassing the rewritten tag manifest. Returned untagged
+    source archives are accepted only with ``require_source_tags=False`` and
+    only when their exact raw bytes are already signed by the source proof.
+    Docker load remains a later isolated action.
+    """
+
+    inspection = inspect_docker_image_archive(path=path)
+    if require_isolated_tags and "repositories" in inspection.member_names:
+        raise ArtifactPreparationError("Docker image archive retains legacy repositories tag metadata")
+    return _verify_docker_archive_inspection(
+        inspection,
+        images=images,
+        require_isolated_tags=require_isolated_tags,
+        require_source_tags=require_source_tags,
+    )
+
+
+def _open_new_private_binary(path: Path, *, field: str) -> Any:
+    if path.exists() or path.is_symlink():
+        raise ArtifactPreparationError(f"refusing to overwrite the detached {field} output")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(str(path), flags, 0o600)
+    except FileExistsError as exc:
+        raise ArtifactPreparationError(f"refusing to overwrite the detached {field} output") from exc
+    except OSError as exc:
+        raise ArtifactPreparationError(f"cannot create the detached {field} output") from exc
+    return os.fdopen(descriptor, "wb")
+
+
 def rewrite_docker_image_archive_tags(
     *,
     raw_path: Path,
     output_path: Path,
     images: Sequence[PreparedImage],
+    expected_raw_sha256: str,
+    expected_raw_bytes: int,
+    require_source_tags: bool = True,
 ) -> None:
-    """Copy a verified raw ``docker save`` archive with only isolated tags.
+    """Copy one SHA-pinned raw ``docker save`` archive with isolated tags only.
 
     ``docker save`` necessarily serializes the source reference it was given.
     Rewriting its manifest is safer than adding/removing tags on the shared
     source daemon: the final archive has no source tag and no legacy
     ``repositories`` metadata that another Docker version could interpret.
+    This is a structural/tag isolation primitive, not a Docker-loadability
+    claim.  The caller must supply the exact signed raw archive digest and
+    byte count; that input is rechecked before and after the copy.
     """
 
-    if output_path.exists() or output_path.is_symlink():
-        raise ArtifactPreparationError("refusing to overwrite the detached Docker image archive output")
-    verify_docker_image_archive(path=raw_path, images=images)
+    raw_path = _require_exact_private_docker_archive(
+        raw_path,
+        expected_sha256=expected_raw_sha256,
+        expected_bytes=expected_raw_bytes,
+        field="raw Docker image archive",
+    )
+    inspection = inspect_docker_image_archive(path=raw_path)
+    _verify_docker_archive_inspection(
+        inspection,
+        images=images,
+        require_isolated_tags=False,
+        require_source_tags=require_source_tags,
+    )
     expected_tags = {image.image_id: image.archive_tag for image in images}
     if any(tag is None for tag in expected_tags.values()):
         raise ArtifactPreparationError("isolated Docker archive tag bindings are absent")
+    tags_by_config = {entry.config_name: expected_tags[entry.image_id] for entry in inspection.entries}
+    _require_exact_private_docker_archive(
+        raw_path,
+        expected_sha256=expected_raw_sha256,
+        expected_bytes=expected_raw_bytes,
+        field="raw Docker image archive",
+    )
     try:
-        with tarfile.open(raw_path, "r") as source:
-            members = source.getmembers()
-            names = {member.name for member in members}
-            manifest = _archive_manifest(source, member_names=names)
-            rewritten_manifest: list[dict[str, Any]] = []
-            for entry in manifest:
-                if not isinstance(entry, Mapping):
-                    raise ArtifactPreparationError("Docker image archive manifest entry is malformed")
-                image_id = _archive_entry_image_id(source, entry)
-                tag = expected_tags.get(image_id)
-                if tag is None:
-                    raise ArtifactPreparationError("Docker image archive contains an unverified image ID")
-                rewritten = dict(entry)
-                rewritten["RepoTags"] = [tag]
-                rewritten_manifest.append(rewritten)
-            with tarfile.open(output_path, "w", format=tarfile.PAX_FORMAT) as destination:
-                for member in members:
+        with tarfile.open(raw_path, "r|", tarinfo=_DockerArchiveTarInfo) as source, _open_new_private_binary(
+            output_path,
+            field="Docker image archive",
+        ) as output:
+            with tarfile.open(fileobj=output, mode="w", format=tarfile.USTAR_FORMAT) as destination:
+                copied_names: set[str] = set()
+                while (member := source.next()) is not None:
+                    _validate_docker_archive_member(member, member_names=copied_names)
+                    if member.name not in inspection.member_names:
+                        raise ArtifactPreparationError("Docker image archive changed while being rewritten")
                     if member.name in {"manifest.json", "repositories"}:
                         continue
                     copied = copy.copy(member)
+                    copied.pax_headers = {}
+                    copied.uid = 0
+                    copied.gid = 0
+                    copied.uname = ""
+                    copied.gname = ""
+                    copied.mtime = 0
                     if copied.isdir():
                         destination.addfile(copied)
                         continue
                     payload = source.extractfile(member)
                     if payload is None:
                         raise ArtifactPreparationError("Docker image archive member cannot be read")
-                    destination.addfile(copied, payload)
+                    try:
+                        destination.addfile(copied, payload)
+                    finally:
+                        payload.close()
+                if copied_names != set(inspection.member_names):
+                    raise ArtifactPreparationError("Docker image archive changed while being rewritten")
+                rewritten_manifest = [
+                    {"Config": entry.config_name, "Layers": list(entry.layers), "RepoTags": [tags_by_config[entry.config_name]]}
+                    for entry in inspection.entries
+                ]
                 encoded_manifest = canonical_json_bytes(rewritten_manifest)
                 manifest_info = tarfile.TarInfo("manifest.json")
                 manifest_info.mode = 0o600
@@ -818,12 +1121,17 @@ def rewrite_docker_image_archive_tags(
                 manifest_info.mtime = 0
                 manifest_info.size = len(encoded_manifest)
                 destination.addfile(manifest_info, io.BytesIO(encoded_manifest))
+            output.flush()
+            os.fsync(output.fileno())
     except (OSError, tarfile.TarError) as exc:
         raise ArtifactPreparationError("Docker image archive cannot be rewritten safely") from exc
-    try:
-        output_path.chmod(0o600)
-    except OSError as exc:
-        raise ArtifactPreparationError("cannot secure the detached Docker image archive") from exc
+    _require_exact_private_docker_archive(
+        raw_path,
+        expected_sha256=expected_raw_sha256,
+        expected_bytes=expected_raw_bytes,
+        field="raw Docker image archive",
+    )
+    verify_docker_image_archive(path=output_path, images=images, require_isolated_tags=True)
 
 
 def create_and_verify_docker_image_archive(
@@ -852,14 +1160,23 @@ def create_and_verify_docker_image_archive(
             field="temporary raw Docker image archive",
             maximum_bytes=maximum_artifact_bytes,
         )
-        rewrite_docker_image_archive_tags(raw_path=raw_path, output_path=output_path, images=images)
+        raw_sha256, raw_bytes = sha256_file(raw_path)
+        rewrite_docker_image_archive_tags(
+            raw_path=raw_path,
+            output_path=output_path,
+            images=images,
+            expected_raw_sha256=raw_sha256,
+            expected_raw_bytes=raw_bytes,
+        )
     require_private_regular_file(
         output_path,
         field="detached Docker image archive",
         maximum_bytes=maximum_artifact_bytes,
     )
-    verified = verify_docker_image_archive(path=output_path, images=images, require_isolated_tags=True)
     digest, size = sha256_file(output_path)
+    verified = verify_docker_image_archive(path=output_path, images=images, require_isolated_tags=True)
+    if sha256_file(output_path) != (digest, size):
+        raise ArtifactPreparationError("detached Docker image archive changed while being verified")
     return {"bytes": size, "sha256": digest, **verified}
 
 

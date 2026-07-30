@@ -299,7 +299,10 @@ class ArtifactPreparationTests(unittest.TestCase):
     def test_rejects_raw_archive_when_an_image_changes_between_inspection_and_save_before_a_final_archive_exists(self) -> None:
         self.runner.archive_config_overrides[self.first_id] = b'{"architecture":"amd64","config":"repointed"}'
 
-        with self.assertRaisesRegex(prepare.ArtifactPreparationError, "contains an unverified image ID"):
+        with self.assertRaisesRegex(
+            prepare.ArtifactPreparationError,
+            "config path is not bound to its image ID",
+        ):
             self.prepare()
 
         target = prepare.candidate_directory(
@@ -311,6 +314,291 @@ class ArtifactPreparationTests(unittest.TestCase):
         self.assertTrue((target / "release.bundle").is_file())
         self.assertFalse((target / "images.tar").exists())
         self.assertFalse((target / "preparation-receipt.json").exists())
+
+    def test_inspection_rejects_a_config_member_name_not_bound_to_its_payload_hash(self) -> None:
+        archive_path = self.root / "wrong-config-name.tar"
+        wrong_name = "f" * 64 + ".json"
+        manifest = [{"Config": wrong_name, "RepoTags": [self.first_ref], "Layers": []}]
+        with tarfile.open(archive_path, "w") as archive:
+            config_info = tarfile.TarInfo(wrong_name)
+            config_info.size = len(self.config_one)
+            archive.addfile(config_info, io.BytesIO(self.config_one))
+            manifest_bytes = json.dumps(manifest).encode("utf-8")
+            manifest_info = tarfile.TarInfo("manifest.json")
+            manifest_info.size = len(manifest_bytes)
+            archive.addfile(manifest_info, io.BytesIO(manifest_bytes))
+        archive_path.chmod(0o600)
+
+        with self.assertRaisesRegex(prepare.ArtifactPreparationError, "config path is not bound"):
+            prepare.inspect_docker_image_archive(path=archive_path)
+
+    def test_inspection_rejects_unlisted_or_nonregular_layer_paths(self) -> None:
+        archive_path = self.root / "missing-layer.tar"
+        config_name = self.first_id.removeprefix("sha256:") + ".json"
+        manifest = [{"Config": config_name, "RepoTags": [self.first_ref], "Layers": ["missing/layer.tar"]}]
+        with tarfile.open(archive_path, "w") as archive:
+            config_info = tarfile.TarInfo(config_name)
+            config_info.size = len(self.config_one)
+            archive.addfile(config_info, io.BytesIO(self.config_one))
+            manifest_bytes = json.dumps(manifest).encode("utf-8")
+            manifest_info = tarfile.TarInfo("manifest.json")
+            manifest_info.size = len(manifest_bytes)
+            archive.addfile(manifest_info, io.BytesIO(manifest_bytes))
+        archive_path.chmod(0o600)
+
+        with self.assertRaisesRegex(prepare.ArtifactPreparationError, "layer path is malformed"):
+            prepare.inspect_docker_image_archive(path=archive_path)
+
+    def test_inspection_rejects_unreferenced_config_members(self) -> None:
+        archive_path = self.root / "unreferenced-config.tar"
+        config_name = self.first_id.removeprefix("sha256:") + ".json"
+        extra_config = b'{"architecture":"amd64","config":"extra"}'
+        extra_name = image_id(extra_config).removeprefix("sha256:") + ".json"
+        manifest = [{"Config": config_name, "RepoTags": [self.first_ref], "Layers": []}]
+        with tarfile.open(archive_path, "w") as archive:
+            for name, payload in ((config_name, self.config_one), (extra_name, extra_config)):
+                config_info = tarfile.TarInfo(name)
+                config_info.size = len(payload)
+                archive.addfile(config_info, io.BytesIO(payload))
+            manifest_bytes = json.dumps(manifest).encode("utf-8")
+            manifest_info = tarfile.TarInfo("manifest.json")
+            manifest_info.size = len(manifest_bytes)
+            archive.addfile(manifest_info, io.BytesIO(manifest_bytes))
+        archive_path.chmod(0o600)
+
+        with self.assertRaisesRegex(prepare.ArtifactPreparationError, "unreferenced config"):
+            prepare.inspect_docker_image_archive(path=archive_path)
+
+    def test_inspection_rejects_control_metadata_as_a_layer(self) -> None:
+        config_name = self.first_id.removeprefix("sha256:") + ".json"
+        second_name = self.second_id.removeprefix("sha256:") + ".json"
+        for layer_name in ("manifest.json", second_name):
+            with self.subTest(layer_name=layer_name), tempfile.TemporaryDirectory(prefix="reserved-layer-") as raw:
+                archive_path = Path(raw) / "reserved-layer.tar"
+                manifest = [{"Config": config_name, "RepoTags": [self.first_ref], "Layers": [layer_name]}]
+                with tarfile.open(archive_path, "w") as archive:
+                    config_info = tarfile.TarInfo(config_name)
+                    config_info.size = len(self.config_one)
+                    archive.addfile(config_info, io.BytesIO(self.config_one))
+                    if layer_name == second_name:
+                        second_info = tarfile.TarInfo(second_name)
+                        second_info.size = len(self.config_two)
+                        archive.addfile(second_info, io.BytesIO(self.config_two))
+                    manifest_bytes = json.dumps(manifest).encode("utf-8")
+                    manifest_info = tarfile.TarInfo("manifest.json")
+                    manifest_info.size = len(manifest_bytes)
+                    archive.addfile(manifest_info, io.BytesIO(manifest_bytes))
+                archive_path.chmod(0o600)
+
+                with self.assertRaisesRegex(prepare.ArtifactPreparationError, "layer path is malformed"):
+                    prepare.inspect_docker_image_archive(path=archive_path)
+
+    def test_inspection_rejects_pax_extended_headers_before_their_payload_is_processed(self) -> None:
+        archive_path = self.root / "pax-header.tar"
+        with tarfile.open(archive_path, "w", format=tarfile.PAX_FORMAT) as archive:
+            payload = b"x"
+            info = tarfile.TarInfo("p" * 101)
+            info.size = len(payload)
+            archive.addfile(info, io.BytesIO(payload))
+        archive_path.chmod(0o600)
+
+        with self.assertRaisesRegex(prepare.ArtifactPreparationError, "cannot be validated"):
+            prepare.inspect_docker_image_archive(path=archive_path)
+
+    def test_rewrite_preserves_a_standard_layer_payload_and_drops_repositories(self) -> None:
+        raw_path = self.root / "raw-layered.tar"
+        output_path = self.root / "isolated-layered.tar"
+        layer_id = "d" * 64
+        layer_name = layer_id + "/layer.tar"
+        config_name = self.first_id.removeprefix("sha256:") + ".json"
+        manifest = [{"Config": config_name, "RepoTags": [self.first_ref], "Layers": [layer_name]}]
+        with tarfile.open(raw_path, "w") as archive:
+            for name, payload in (
+                (layer_name, b"layer payload"),
+                (layer_id + "/VERSION", b"1.0"),
+                (layer_id + "/json", b"{}"),
+                (config_name, self.config_one),
+                ("repositories", b"{}"),
+            ):
+                info = tarfile.TarInfo(name)
+                info.size = len(payload)
+                archive.addfile(info, io.BytesIO(payload))
+            manifest_bytes = json.dumps(manifest).encode("utf-8")
+            manifest_info = tarfile.TarInfo("manifest.json")
+            manifest_info.size = len(manifest_bytes)
+            archive.addfile(manifest_info, io.BytesIO(manifest_bytes))
+        raw_path.chmod(0o600)
+        image = prepare.bind_isolated_archive_tags(
+            campaign_id="layered-image-proof",
+            release_sha=RELEASE_SHA,
+            images=[
+                prepare.PreparedImage(
+                    source_ref=self.first_ref,
+                    image_id=self.first_id,
+                    repo_digests=(),
+                    repo_tags=(self.first_ref,),
+                    size_bytes=1,
+                )
+            ],
+        )
+        raw_sha256, raw_bytes = prepare.sha256_file(raw_path)
+
+        prepare.rewrite_docker_image_archive_tags(
+            raw_path=raw_path,
+            output_path=output_path,
+            images=image,
+            expected_raw_sha256=raw_sha256,
+            expected_raw_bytes=raw_bytes,
+        )
+
+        prepare.verify_docker_image_archive(path=output_path, images=image, require_isolated_tags=True)
+        with tarfile.open(output_path, "r") as archive:
+            self.assertNotIn("repositories", archive.getnames())
+            self.assertEqual(b"layer payload", archive.extractfile(layer_name).read())
+            self.assertIn(layer_id + "/VERSION", archive.getnames())
+            self.assertIn(layer_id + "/json", archive.getnames())
+
+    def test_rewrite_requires_the_exact_signed_raw_archive_digest(self) -> None:
+        raw_path = self.root / "raw-digest.tar"
+        output_path = self.root / "raw-digest-output.tar"
+        config_name = self.first_id.removeprefix("sha256:") + ".json"
+        manifest = [{"Config": config_name, "RepoTags": [self.first_ref], "Layers": []}]
+        with tarfile.open(raw_path, "w") as archive:
+            config_info = tarfile.TarInfo(config_name)
+            config_info.size = len(self.config_one)
+            archive.addfile(config_info, io.BytesIO(self.config_one))
+            manifest_bytes = json.dumps(manifest).encode("utf-8")
+            manifest_info = tarfile.TarInfo("manifest.json")
+            manifest_info.size = len(manifest_bytes)
+            archive.addfile(manifest_info, io.BytesIO(manifest_bytes))
+        raw_path.chmod(0o600)
+        image = prepare.bind_isolated_archive_tags(
+            campaign_id="digest-image-proof",
+            release_sha=RELEASE_SHA,
+            images=[
+                prepare.PreparedImage(
+                    source_ref=self.first_ref,
+                    image_id=self.first_id,
+                    repo_digests=(),
+                    repo_tags=(self.first_ref,),
+                    size_bytes=1,
+                )
+            ],
+        )
+
+        with self.assertRaisesRegex(prepare.ArtifactPreparationError, "signed raw archive binding"):
+            prepare.rewrite_docker_image_archive_tags(
+                raw_path=raw_path,
+                output_path=output_path,
+                images=image,
+                expected_raw_sha256="0" * 64,
+                expected_raw_bytes=raw_path.stat().st_size,
+            )
+        self.assertFalse(output_path.exists())
+
+    def test_signed_image_id_export_may_be_untagged_but_only_in_explicit_mode(self) -> None:
+        raw_path = self.root / "raw-untagged.tar"
+        output_path = self.root / "isolated-untagged.tar"
+        config_name = self.first_id.removeprefix("sha256:") + ".json"
+        manifest = [{"Config": config_name, "RepoTags": None, "Layers": []}]
+        with tarfile.open(raw_path, "w") as archive:
+            config_info = tarfile.TarInfo(config_name)
+            config_info.size = len(self.config_one)
+            archive.addfile(config_info, io.BytesIO(self.config_one))
+            manifest_bytes = json.dumps(manifest).encode("utf-8")
+            manifest_info = tarfile.TarInfo("manifest.json")
+            manifest_info.size = len(manifest_bytes)
+            archive.addfile(manifest_info, io.BytesIO(manifest_bytes))
+        raw_path.chmod(0o600)
+        image = prepare.bind_isolated_archive_tags(
+            campaign_id="untagged-image-proof",
+            release_sha=RELEASE_SHA,
+            images=[
+                prepare.PreparedImage(
+                    source_ref=self.first_ref,
+                    image_id=self.first_id,
+                    repo_digests=(),
+                    repo_tags=(self.first_ref,),
+                    size_bytes=1,
+                )
+            ],
+        )
+        raw_sha256, raw_bytes = prepare.sha256_file(raw_path)
+
+        with self.assertRaisesRegex(prepare.ArtifactPreparationError, "does not retain every verified source image tag"):
+            prepare.verify_docker_image_archive(path=raw_path, images=image)
+        digest_reference_image = [
+            prepare.dataclasses.replace(
+                image[0],
+                source_ref="registry.example/trading-bot@" + self.first_id,
+            )
+        ]
+        with self.assertRaisesRegex(prepare.ArtifactPreparationError, "does not retain every verified source image tag"):
+            prepare.verify_docker_image_archive(path=raw_path, images=digest_reference_image)
+        prepare.rewrite_docker_image_archive_tags(
+            raw_path=raw_path,
+            output_path=output_path,
+            images=image,
+            expected_raw_sha256=raw_sha256,
+            expected_raw_bytes=raw_bytes,
+            require_source_tags=False,
+        )
+        isolated = prepare.verify_docker_image_archive(
+            path=output_path,
+            images=image,
+            require_isolated_tags=True,
+        )
+        self.assertEqual([image[0].archive_tag], isolated["repo_tags"])
+
+    def test_inspection_rejects_oci_control_files_before_tag_rewrite(self) -> None:
+        archive_path = self.root / "oci-layout.tar"
+        with tarfile.open(archive_path, "w") as archive:
+            for name, payload in (
+                ("oci-layout", b'{"imageLayoutVersion":"1.0.0"}'),
+                ("index.json", b'{"schemaVersion":2,"manifests":[]}'),
+            ):
+                info = tarfile.TarInfo(name)
+                info.size = len(payload)
+                archive.addfile(info, io.BytesIO(payload))
+        archive_path.chmod(0o600)
+
+        with self.assertRaisesRegex(prepare.ArtifactPreparationError, "unsupported OCI layout"):
+            prepare.inspect_docker_image_archive(path=archive_path)
+
+    def test_inspection_rejects_duplicate_manifest_keys_and_member_count_exhaustion(self) -> None:
+        duplicate_path = self.root / "duplicate-manifest-key.tar"
+        config_name = self.first_id.removeprefix("sha256:") + ".json"
+        duplicate_manifest = (
+            b'[{"Config":"' + config_name.encode("ascii") + b'","Config":"' + config_name.encode("ascii")
+            + b'","RepoTags":["' + self.first_ref.encode("ascii") + b'"],"Layers":[]}]'
+        )
+        with tarfile.open(duplicate_path, "w") as archive:
+            config_info = tarfile.TarInfo(config_name)
+            config_info.size = len(self.config_one)
+            archive.addfile(config_info, io.BytesIO(self.config_one))
+            manifest_info = tarfile.TarInfo("manifest.json")
+            manifest_info.size = len(duplicate_manifest)
+            archive.addfile(manifest_info, io.BytesIO(duplicate_manifest))
+        duplicate_path.chmod(0o600)
+        with self.assertRaisesRegex(prepare.ArtifactPreparationError, "manifest is invalid"):
+            prepare.inspect_docker_image_archive(path=duplicate_path)
+
+        crowded_path = self.root / "crowded.tar"
+        valid_manifest = json.dumps(
+            [{"Config": config_name, "RepoTags": [self.first_ref], "Layers": []}]
+        ).encode("utf-8")
+        with tarfile.open(crowded_path, "w") as archive:
+            config_info = tarfile.TarInfo(config_name)
+            config_info.size = len(self.config_one)
+            archive.addfile(config_info, io.BytesIO(self.config_one))
+            archive.addfile(tarfile.TarInfo("extra"), io.BytesIO())
+            manifest_info = tarfile.TarInfo("manifest.json")
+            manifest_info.size = len(valid_manifest)
+            archive.addfile(manifest_info, io.BytesIO(valid_manifest))
+        crowded_path.chmod(0o600)
+        with mock.patch.object(prepare, "MAX_DOCKER_ARCHIVE_MEMBERS", 2):
+            with self.assertRaisesRegex(prepare.ArtifactPreparationError, "too many members"):
+                prepare.inspect_docker_image_archive(path=crowded_path)
 
     def test_final_archive_remaps_every_shared_source_tag_to_the_isolated_namespace(self) -> None:
         shared_tag = "postgres:15-alpine"
