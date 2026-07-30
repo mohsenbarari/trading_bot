@@ -341,11 +341,11 @@ def _read_promotion_application_values(path: Path) -> dict[str, str]:
     return values
 
 
-def _verify_ir_runtime_application_binding(config: AgentConfig) -> None:
+def _verify_ir_runtime_application_binding(config: AgentConfig) -> str | None:
     """Reject mutable Compose inputs unless they equal the receipt identity."""
 
     if config.mode != "writer" or config.site != "webapp_ir":
-        return
+        return None
     if config.release_provenance is None or config.runtime.env_file is None:
         raise ProductionWriterLeaseAgentError("WebApp-IR writer requires receipt-bound application provenance")
     try:
@@ -360,6 +360,12 @@ def _verify_ir_runtime_application_binding(config: AgentConfig) -> None:
         raise ProductionWriterLeaseAgentError(
             "WebApp-IR release provenance receipt does not bind this application release root"
         )
+    runtime_images = installed.get("runtime_images")
+    app_image_id = runtime_images.get("app_image_id") if isinstance(runtime_images, Mapping) else None
+    if not isinstance(app_image_id, str) or not DOCKER_IMAGE_ID_RE.fullmatch(app_image_id):
+        raise ProductionWriterLeaseAgentError(
+            "WebApp-IR release provenance receipt does not bind a valid application image ID"
+        )
     values = _read_promotion_application_values(config.runtime.env_file)
     if (
         values["RELEASE_SHA"] != WA_IR_APPLICATION_RELEASE_SHA
@@ -368,6 +374,7 @@ def _verify_ir_runtime_application_binding(config: AgentConfig) -> None:
         raise ProductionWriterLeaseAgentError(
             "WA-IR promotion runtime environment does not bind the receipt application release"
         )
+    return app_image_id
 
 
 def _verify_ir_selection_environment(config: AgentConfig) -> None:
@@ -1086,13 +1093,55 @@ def _run_runtime_command(
     return result.stdout if capture_stdout and isinstance(result.stdout, str) else ""
 
 
-def _compose_prefix(config: AgentConfig) -> list[str]:
+def _verify_ir_configured_app_image_binding(
+    config: AgentConfig,
+    *,
+    expected_app_image_id: str,
+) -> None:
+    """Require the configured app reference to resolve to the receipt image ID."""
+
+    if not DOCKER_IMAGE_ID_RE.fullmatch(expected_app_image_id):
+        raise ProductionWriterLeaseAgentError("expected WA-IR application image ID is invalid")
+    app_image = _promotion_image_references(config)["app"]
+    actual_app_image_id = _run_runtime_command(
+        [
+            "/usr/bin/docker",
+            "image",
+            "inspect",
+            "--format",
+            "{{.Id}}",
+            app_image,
+        ],
+        label="configured WA-IR application image",
+        timeout=30,
+        capture_stdout=True,
+    ).strip()
+    if not DOCKER_IMAGE_ID_RE.fullmatch(actual_app_image_id):
+        raise ProductionWriterLeaseAgentError("configured WA-IR application image ID is invalid")
+    if actual_app_image_id != expected_app_image_id:
+        raise ProductionWriterLeaseAgentError(
+            "configured WA-IR application image does not match the release provenance receipt"
+        )
+
+
+def _compose_prefix(
+    config: AgentConfig,
+    *,
+    verify_configured_app_image: bool = True,
+) -> list[str]:
     command = ["/usr/bin/docker", "compose"]
     if config.mode == "writer" and config.site == "webapp_ir":
         # Re-read both root-only inputs immediately before every Docker Compose
         # operation.  A stale same-named application root or a later env edit
         # must not reach the runtime merely because startup validation passed.
-        _verify_ir_runtime_application_binding(config)
+        expected_app_image_id = _verify_ir_runtime_application_binding(config)
+        if expected_app_image_id is None:  # Defensive for type narrowing.
+            raise ProductionWriterLeaseAgentError("WebApp-IR receipt-bound application image is unavailable")
+        if verify_configured_app_image:
+            _verify_ir_configured_app_image_binding(
+                config,
+                expected_app_image_id=expected_app_image_id,
+            )
         _verify_ir_selection_environment(config)
         # Do not inherit the standby compose project from its environment.
         # Promotion can touch only this fixed, newly introduced project.
@@ -1117,7 +1166,10 @@ def _compose_capture(config: AgentConfig, *, arguments: list[str], label: str, t
 def _compose(config: AgentConfig, *, action: str) -> None:
     if action not in {"start", "stop"}:
         raise ProductionWriterLeaseAgentError("managed runtime action is invalid")
-    command = _compose_prefix(config)
+    command = _compose_prefix(
+        config,
+        verify_configured_app_image=action == "start",
+    )
     is_ir_promotion = config.mode == "writer" and config.site == "webapp_ir"
     if action == "start":
         if is_ir_promotion:
@@ -1674,6 +1726,7 @@ def _assert_promoted_container(
     *,
     service: str,
     required_volume_names: set[str],
+    expected_image_id: str | None = None,
 ) -> None:
     if not DOCKER_CONTAINER_ID_RE.fullmatch(container):
         raise ProductionWriterLeaseAgentError("promoted runtime returned an invalid container id")
@@ -1690,6 +1743,19 @@ def _assert_promoted_container(
     }
     if not required_volume_names.issubset(volume_names):
         raise ProductionWriterLeaseAgentError("promoted runtime volumes do not match the selected snapshot")
+    if expected_image_id is not None:
+        if not DOCKER_IMAGE_ID_RE.fullmatch(expected_image_id):
+            raise ProductionWriterLeaseAgentError("expected promoted runtime image ID is invalid")
+        image_id = _run_runtime_command(
+            ["/usr/bin/docker", "inspect", "--format", "{{.Image}}", container],
+            label=f"promoted {service} image id",
+            timeout=30,
+            capture_stdout=True,
+        ).strip()
+        if image_id != expected_image_id:
+            raise ProductionWriterLeaseAgentError(
+                "promoted application image does not match the release provenance receipt"
+            )
 
 
 def _assert_existing_promoted_runtime_matches_selection(
@@ -1699,6 +1765,9 @@ def _assert_existing_promoted_runtime_matches_selection(
 ) -> dict[str, str] | None:
     """Reject partial/stale promotion projects before `--no-recreate` can reuse them."""
 
+    expected_app_image_id = _verify_ir_runtime_application_binding(config)
+    if expected_app_image_id is None:  # Defensive for type narrowing.
+        raise ProductionWriterLeaseAgentError("WebApp-IR receipt-bound application image is unavailable")
     discovered: dict[str, str | None] = {}
     for service in ("db", "redis", "app"):
         output = _compose_capture(
@@ -1727,6 +1796,7 @@ def _assert_existing_promoted_runtime_matches_selection(
         str(discovered["app"]),
         service="app",
         required_volume_names={selection.uploads_volume, selection.audit_volume},
+        expected_image_id=expected_app_image_id,
     )
     return {service: str(container) for service, container in discovered.items()}
 
@@ -1986,6 +2056,9 @@ def _capture_promoted_runtime_binding(
     if discovered is None:
         raise ProductionWriterLeaseAgentError("promoted runtime is absent after successful activation")
     images = _promotion_image_references(config)
+    expected_app_image_id = _verify_ir_runtime_application_binding(config)
+    if expected_app_image_id is None:  # Defensive for type narrowing.
+        raise ProductionWriterLeaseAgentError("WebApp-IR receipt-bound application image is unavailable")
     volumes = _required_promoted_volume_names(selection)
     containers = {
         service: _inspect_promoted_container_binding(
@@ -1993,6 +2066,7 @@ def _capture_promoted_runtime_binding(
             service=service,
             expected_image=images[service],
             expected_volume_names=volumes[service],
+            expected_image_id=expected_app_image_id if service == "app" else None,
         )
         for service, container_id in discovered.items()
     }
@@ -2107,6 +2181,9 @@ def _load_promoted_runtime_binding(
     if any(payload.get(field) != value for field, value in expected.items()):
         raise ProductionWriterLeaseAgentError("promoted runtime recovery binding does not match the live promotion proof")
     images = _promotion_image_references(config)
+    expected_app_image_id = _verify_ir_runtime_application_binding(config)
+    if expected_app_image_id is None:  # Defensive for type narrowing.
+        raise ProductionWriterLeaseAgentError("WebApp-IR receipt-bound application image is unavailable")
     volumes = _required_promoted_volume_names(selection)
     raw_containers = payload.get("containers")
     if not isinstance(raw_containers, dict) or set(raw_containers) != {"db", "redis", "app"}:
@@ -2128,6 +2205,7 @@ def _load_promoted_runtime_binding(
             or image != images[service]
             or not isinstance(image_id, str)
             or not DOCKER_IMAGE_ID_RE.fullmatch(image_id)
+            or (service == "app" and image_id != expected_app_image_id)
             or not isinstance(labels_sha256, str)
             or not SHA256_RE.fullmatch(labels_sha256)
             or not isinstance(volume_names, list)
