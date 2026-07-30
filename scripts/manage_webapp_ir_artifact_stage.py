@@ -106,7 +106,7 @@ except ImportError:  # pragma: no cover - deployment requirements already includ
     Ed25519PublicKey = None  # type: ignore[assignment,misc]
 
 
-CONFIG_SCHEMA = "gold-trade-wa-ir-artifact-stage-config-v1"
+CONFIG_SCHEMA = "gold-trade-wa-ir-artifact-stage-config-v3"
 MANIFEST_SCHEMA = "gold-trade-wa-ir-artifact-stage-manifest-v1"
 PUBLISH_RECEIPT_SCHEMA = "gold-trade-wa-ir-artifact-stage-publish-receipt-v1"
 STAGE_RECEIPT_SCHEMA = "gold-trade-wa-ir-artifact-stage-receipt-v1"
@@ -162,6 +162,8 @@ class ConsumerConfig:
     workspace: Path
     source_site: str
     source_signing_public_key: bytes
+    webapp_fi_source_attestation_public_key: bytes
+    webapp_fi_controller_authorization_public_key: bytes
     maximum_artifact_bytes: int
 
 
@@ -351,6 +353,8 @@ def load_consumer_config(path: Path) -> ConsumerConfig:
             "workspace",
             "source_site",
             "source_signing_public_key_base64",
+            "webapp_fi_source_attestation_public_key_base64",
+            "webapp_fi_controller_authorization_public_key_base64",
             "maximum_artifact_bytes",
         },
         role="consumer",
@@ -363,6 +367,16 @@ def load_consumer_config(path: Path) -> ConsumerConfig:
         field="source_signing_public_key_base64",
         expected_bytes=32,
     )
+    webapp_fi_source_attestation_public_key = decode_exact_base64(
+        raw.get("webapp_fi_source_attestation_public_key_base64"),
+        field="webapp_fi_source_attestation_public_key_base64",
+        expected_bytes=32,
+    )
+    webapp_fi_controller_authorization_public_key = decode_exact_base64(
+        raw.get("webapp_fi_controller_authorization_public_key_base64"),
+        field="webapp_fi_controller_authorization_public_key_base64",
+        expected_bytes=32,
+    )
     return ConsumerConfig(
         endpoint=endpoint,
         region=region,
@@ -373,6 +387,8 @@ def load_consumer_config(path: Path) -> ConsumerConfig:
         workspace=workspace,
         source_site=source_site,
         source_signing_public_key=source_public_key,
+        webapp_fi_source_attestation_public_key=webapp_fi_source_attestation_public_key,
+        webapp_fi_controller_authorization_public_key=webapp_fi_controller_authorization_public_key,
         maximum_artifact_bytes=maximum_artifact_bytes,
     )
 
