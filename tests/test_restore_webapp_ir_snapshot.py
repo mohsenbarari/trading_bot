@@ -12,6 +12,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -248,6 +249,157 @@ class RestoreWebappIrSnapshotTests(unittest.TestCase):
         self.assertFalse(payload["migration_started"])
         self.assertFalse(payload["public_routing_changed"])
         self.assertEqual(payload["candidate"]["db_volume"], "trading_bot_wa_ir_pg_snapshot-20260729-0001")
+
+    def test_failed_apply_leaves_durable_inflight_journal_and_closes_future_restore(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            standby_env, receipt_path, _ = self.make_inputs(root)
+            values = MODULE.parse_env_file(standby_env, label="standby env")
+            state_root = Path(values["WA_IR_SNAPSHOT_STATE_ROOT"])
+            data_root = Path(values["WA_IR_STANDBY_DATA_ROOT"])
+            receipt = MODULE.load_receipt(
+                receipt_path,
+                workspace_root=Path(values["WA_IR_SNAPSHOT_WORK_ROOT"]),
+            )
+            candidate = MODULE.build_candidate(data_root, receipt.snapshot_id)
+            arguments = MODULE.build_parser().parse_args(
+                ["--standby-env", str(standby_env), "--receipt", str(receipt_path), "--apply"]
+            )
+
+            with (
+                mock.patch.object(MODULE, "docker_volume_absent", return_value=True),
+                mock.patch.object(MODULE, "docker_container_absent", return_value=True),
+                mock.patch.object(
+                    MODULE,
+                    "create_bound_volume",
+                    side_effect=MODULE.RestoreError("fixture volume failure"),
+                ),
+            ):
+                with self.assertRaisesRegex(MODULE.RestoreError, "fixture volume failure"):
+                    MODULE.execute(arguments)
+
+            journal_path = MODULE.restore_inflight_journal_path(state_root)
+            journal = json.loads(journal_path.read_text(encoding="utf-8"))
+            self.assertEqual(journal["schema"], MODULE.RESTORE_INFLIGHT_SCHEMA)
+            self.assertEqual(journal["status"], "in_progress")
+            self.assertEqual(journal["phase"], "directories_created")
+            self.assertEqual(journal["candidate"]["generation"], receipt.snapshot_id)
+            self.assertEqual(journal["candidate"]["root"], str(candidate.root))
+            self.assertEqual(journal_path.stat().st_mode & 0o777, 0o600)
+            self.assertTrue(candidate.root.is_dir())
+            with self.assertRaisesRegex(MODULE.RestoreError, "recovery is required"):
+                MODULE.require_no_restore_inflight(state_root)
+
+    def test_apply_refuses_existing_inflight_journal_before_docker_inspection(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            standby_env, receipt_path, _ = self.make_inputs(root)
+            values = MODULE.parse_env_file(standby_env, label="standby env")
+            receipt = MODULE.load_receipt(
+                receipt_path,
+                workspace_root=Path(values["WA_IR_SNAPSHOT_WORK_ROOT"]),
+            )
+            candidate = MODULE.build_candidate(
+                Path(values["WA_IR_STANDBY_DATA_ROOT"]), "manual-restore-1"
+            )
+            MODULE.write_restore_inflight_journal(
+                Path(values["WA_IR_SNAPSHOT_STATE_ROOT"]),
+                receipt=receipt,
+                candidate=candidate,
+            )
+            arguments = MODULE.build_parser().parse_args(
+                [
+                    "--standby-env",
+                    str(standby_env),
+                    "--receipt",
+                    str(receipt_path),
+                    "--generation",
+                    "manual-restore-1",
+                    "--apply",
+                ]
+            )
+            with mock.patch.object(
+                MODULE,
+                "docker_volume_absent",
+                side_effect=AssertionError("Docker inspection must not run"),
+            ):
+                with self.assertRaisesRegex(MODULE.RestoreError, "recovery is required"):
+                    MODULE.execute(arguments)
+
+    def test_successful_apply_clears_inflight_journal_only_after_pointer_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            standby_env, receipt_path, _ = self.make_inputs(root)
+            values = MODULE.parse_env_file(standby_env, label="standby env")
+            state_root = Path(values["WA_IR_SNAPSHOT_STATE_ROOT"])
+            arguments = MODULE.build_parser().parse_args(
+                ["--standby-env", str(standby_env), "--receipt", str(receipt_path), "--apply"]
+            )
+            with (
+                mock.patch.object(MODULE, "docker_volume_absent", return_value=True),
+                mock.patch.object(MODULE, "docker_container_absent", return_value=True),
+                mock.patch.object(MODULE, "create_bound_volume"),
+                mock.patch.object(MODULE.DockerRunner, "run", return_value=None),
+                mock.patch.object(MODULE, "wait_for_database"),
+                mock.patch.object(
+                    MODULE,
+                    "restore_database",
+                    return_value=("f2c7d8e9a0b1", 7),
+                ),
+            ):
+                payload = MODULE.execute(arguments)
+
+            self.assertEqual(payload["status"], "ready")
+            self.assertTrue((state_root / "active-snapshot.json").is_file())
+            self.assertFalse(MODULE.restore_inflight_journal_path(state_root).exists())
+
+    def test_failure_after_active_pointer_keeps_the_recovery_gate_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            standby_env, receipt_path, _ = self.make_inputs(root)
+            values = MODULE.parse_env_file(standby_env, label="standby env")
+            state_root = Path(values["WA_IR_SNAPSHOT_STATE_ROOT"])
+            arguments = MODULE.build_parser().parse_args(
+                ["--standby-env", str(standby_env), "--receipt", str(receipt_path), "--apply"]
+            )
+            original_advance = MODULE.advance_restore_inflight_journal
+
+            def fail_after_pointer(
+                path: Path,
+                journal: dict[str, object],
+                *,
+                phase: str,
+            ) -> dict[str, object]:
+                if phase == "active_pointer_committed":
+                    raise MODULE.RestoreError("fixture interruption after pointer")
+                return original_advance(path, journal, phase=phase)
+
+            with (
+                mock.patch.object(MODULE, "docker_volume_absent", return_value=True),
+                mock.patch.object(MODULE, "docker_container_absent", return_value=True),
+                mock.patch.object(MODULE, "create_bound_volume"),
+                mock.patch.object(MODULE.DockerRunner, "run", return_value=None),
+                mock.patch.object(MODULE, "wait_for_database"),
+                mock.patch.object(
+                    MODULE,
+                    "restore_database",
+                    return_value=("f2c7d8e9a0b1", 7),
+                ),
+                mock.patch.object(
+                    MODULE,
+                    "advance_restore_inflight_journal",
+                    side_effect=fail_after_pointer,
+                ),
+            ):
+                with self.assertRaisesRegex(MODULE.RestoreError, "interruption after pointer"):
+                    MODULE.execute(arguments)
+
+            self.assertTrue((state_root / "active-snapshot.json").is_file())
+            journal = json.loads(
+                MODULE.restore_inflight_journal_path(state_root).read_text(encoding="utf-8")
+            )
+            self.assertEqual(journal["status"], "in_progress")
+            self.assertEqual(journal["phase"], "database_verified")
 
     def test_receipt_outside_workspace_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

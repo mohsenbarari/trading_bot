@@ -55,6 +55,38 @@ def write_ir_writer_lease(path: Path, *, expires_at: datetime) -> None:
 
 
 class RefreshWebappIrSnapshotStandbyTests(unittest.TestCase):
+    def write_inflight_journal(self, state_root: Path, *, malformed: bool = False) -> None:
+        path = RESTORE.restore_inflight_journal_path(state_root)
+        if malformed:
+            secure_write(path, "{}\n")
+            return
+        generation = "snapshot-20260729-0001"
+        candidate = RESTORE.build_candidate(state_root.parent, generation)
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        secure_write(
+            path,
+            json.dumps(
+                {
+                    "schema": RESTORE.RESTORE_INFLIGHT_SCHEMA,
+                    "status": "in_progress",
+                    "phase": "database_started",
+                    "created_at": now,
+                    "updated_at": now,
+                    "snapshot_id": generation,
+                    "ready_receipt_sha256": "a" * 64,
+                    "candidate": {
+                        "generation": generation,
+                        "root": str(candidate.root),
+                        "db_volume": candidate.db_volume,
+                        "uploads_volume": candidate.uploads_volume,
+                        "audit_volume": None,
+                        "db_container": candidate.db_container,
+                        "compose_project": candidate.compose_project,
+                    },
+                }
+            ),
+        )
+
     def apply_arguments(self, root: Path, *, writer_lease_file: Path) -> tuple[object, Path]:
         data = root / "data"
         work = data / "work"
@@ -173,6 +205,42 @@ class RefreshWebappIrSnapshotStandbyTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "fenced_by_active_ir_writer")
         self.assertTrue(result["local_writer_fenced"])
+        run.assert_not_called()
+
+    def test_unresolved_restore_journal_blocks_before_object_storage_transport(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            lease_file = root / "writer-lease.json"
+            write_ir_writer_lease(lease_file, expires_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+            arguments, _ = self.apply_arguments(root, writer_lease_file=lease_file)
+            state_root = Path(
+                RESTORE.parse_env_file(Path(arguments.standby_env), label="standby env")[
+                    "WA_IR_SNAPSHOT_STATE_ROOT"
+                ]
+            )
+            self.write_inflight_journal(state_root)
+            with mock.patch.object(MODULE, "run_json_command") as run:
+                with self.assertRaisesRegex(RESTORE.RestoreError, "recovery is required"):
+                    MODULE.execute(arguments)
+
+        run.assert_not_called()
+
+    def test_malformed_restore_journal_also_blocks_before_object_storage_transport(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            lease_file = root / "writer-lease.json"
+            write_ir_writer_lease(lease_file, expires_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+            arguments, _ = self.apply_arguments(root, writer_lease_file=lease_file)
+            state_root = Path(
+                RESTORE.parse_env_file(Path(arguments.standby_env), label="standby env")[
+                    "WA_IR_SNAPSHOT_STATE_ROOT"
+                ]
+            )
+            self.write_inflight_journal(state_root, malformed=True)
+            with mock.patch.object(MODULE, "run_json_command") as run:
+                with self.assertRaisesRegex(RESTORE.RestoreError, "recovery is required"):
+                    MODULE.execute(arguments)
+
         run.assert_not_called()
 
     def test_writer_term_appearing_after_transport_blocks_restore(self) -> None:
