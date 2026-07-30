@@ -655,6 +655,57 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         with self.assertRaises(install.SourceAdoptionInstallError):
             self._enroll(installed, role_path, ssh_public, certificate)
 
+    def test_enrollment_apply_cannot_consume_certificate_before_not_before(self):
+        installed = self._install()
+        _, role_path, ssh_public, _, certificate = self._runtime_and_config(installed)
+        future = json.loads(certificate.read_text(encoding="utf-8"))
+        now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+        future["issued_at"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+        future["not_before"] = (now + dt.timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        future["not_after"] = (now + dt.timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        unsigned = {key: value for key, value in future.items() if key != "controller_signature"}
+        future["controller_signature"] = {
+            "algorithm": "ed25519",
+            "signature_base64": _signature(self.controller_key, install.SIGNER_ENROLLMENT_SIGNATURE_DOMAIN, unsigned),
+        }
+        _canonical_private_json(certificate, future)
+
+        with self.assertRaisesRegex(install.SourceAdoptionInstallError, "outside signer enrollment validity window"):
+            install.enroll_source_signer(
+                install_receipt=installed["receipt_path"],
+                source_role_config=role_path,
+                certificate=certificate,
+                ssh_host_public_key_file=ssh_public,
+                pinned_controller_public_key_base64=self.controller_public,
+                campaign_id=CAMPAIGN,
+                apply=True,
+                verification_time=future["not_before"],
+            )
+
+        self.assertFalse((Path(installed["candidate"]) / "enrollments" / f"{CAMPAIGN}.json").exists())
+        self.assertFalse((Path(installed["candidate"]).parent / "certificate-consumptions" / "certificate-one.json").exists())
+        self.assertFalse((Path(installed["candidate"]).parent / "certificate-consumptions").exists())
+
+    def test_enrollment_certificate_rejects_controller_source_key_reuse(self):
+        installed = self._install()
+        _, role_path, ssh_public, _, certificate = self._runtime_and_config(installed)
+        role = json.loads(role_path.read_text(encoding="utf-8"))
+        role["source_signing_private_key_file"] = str(self.controller_private)
+        _canonical_private_json(role_path, role)
+        reused = json.loads(certificate.read_text(encoding="utf-8"))
+        reused["source_signing_public_key_base64"] = self.controller_public
+        reused["source_signing_key_id"] = install._public_key_id(self.controller_public)
+        unsigned = {key: value for key, value in reused.items() if key != "controller_signature"}
+        reused["controller_signature"] = {
+            "algorithm": "ed25519",
+            "signature_base64": _signature(self.controller_key, install.SIGNER_ENROLLMENT_SIGNATURE_DOMAIN, unsigned),
+        }
+        _canonical_private_json(certificate, reused)
+
+        with self.assertRaisesRegex(install.SourceAdoptionInstallError, "distinct from the controller key"):
+            self._enroll(installed, role_path, ssh_public, certificate)
+        self.assertFalse((Path(installed["candidate"]) / "enrollments" / f"{CAMPAIGN}.json").exists())
+
     def test_enrollment_certificate_binds_exact_delivery_object_and_descriptor(self):
         installed = self._install()
         _, role_path, ssh_public, _, certificate = self._runtime_and_config(installed)
@@ -727,6 +778,26 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         with self.assertRaisesRegex(portable.SourceProvenanceVerificationError, "after source signer enrollment expiry"):
             portable.verify_source_role_attestation_payload(
                 payload=portable.canonical_json_bytes(expired_enrollment) + b"\n",
+                pinned_source_signing_public_key_base64=self.fi_public,
+                expected_campaign_id=CAMPAIGN,
+                expected_application=installed["application"],
+                expected_control_commit=self.control_commit,
+                expected_canonical_release_tree_sha256=attestation["descriptor_claim"]["canonical_release_tree_sha256"],
+                expected_app_image_id=IMAGE_ID,
+                expected_app_image_reference=IMAGE_REFERENCE,
+                verification_time=install.utc_now(),
+            )
+
+        reused_controller_key = copy.deepcopy(original)
+        reused_controller_key["source_signer_enrollment"]["controller_key_id"] = portable.public_key_id(self.fi_public)
+        unsigned = {key: value for key, value in reused_controller_key.items() if key != "source_signature"}
+        reused_controller_key["source_signature"] = {
+            "algorithm": "ed25519",
+            "signature_base64": _signature(self.fi_key, install.ATTESTATION_SIGNATURE_DOMAIN, unsigned),
+        }
+        with self.assertRaisesRegex(portable.SourceProvenanceVerificationError, "reuses the controller key"):
+            portable.verify_source_role_attestation_payload(
+                payload=portable.canonical_json_bytes(reused_controller_key) + b"\n",
                 pinned_source_signing_public_key_base64=self.fi_public,
                 expected_campaign_id=CAMPAIGN,
                 expected_application=installed["application"],
