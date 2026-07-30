@@ -83,6 +83,7 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
             "scripts/manage_webapp_ir_artifact_stage.py": b"# stage consumer\n",
             "scripts/manage_webapp_ir_snapshot.py": b"# snapshot helper\n",
             "scripts/manage_webapp_ir_release_provenance.py": b"# provenance helper\n",
+            "scripts/verify_webapp_fi_source_provenance.py": b"# pure source verifier helper\n",
             "core/standby_snapshot_capacity.py": b"# capacity helper\n",
             "scripts/webapp_ir_image_archive_contract.py": b"# image archive contract\n",
             "config/consumer.json": config_raw,
@@ -412,6 +413,11 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
                     "plaintext_bytes", "package_manifest_sha256", "preparation_receipt_sha256",
                     "consumer_config_sha256",
                 },
+            )
+            verifier = "scripts/verify_webapp_fi_source_provenance.py"
+            self.assertEqual(
+                receipt["files"][verifier],
+                digest(fixture["members"][verifier]),
             )
             self.assertNotIn(fixture["url"], json.dumps(receipt, sort_keys=True))
             with self.assertRaises(namespace["ReceiveError"]):

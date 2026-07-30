@@ -16,13 +16,15 @@ paths are fresh immutable release roots and a create-only root-only receipt.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 from dataclasses import dataclass
 import datetime as dt
 import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import stat
@@ -57,10 +59,12 @@ image_contract = _load_image_archive_contract()
 PREPARATION_SCHEMA = "gold-trade-wa-ir-artifact-preparation-v1"
 IMAGE_MANIFEST_SCHEMA = "gold-trade-wa-ir-image-manifest-v1"
 PROVENANCE_SCHEMA = "gold-trade-wa-ir-release-provenance-v1"
-INSTALL_RECEIPT_SCHEMA = "gold-trade-wa-ir-release-provenance-install-receipt-v1"
+INSTALL_RECEIPT_SCHEMA = "gold-trade-wa-ir-release-provenance-install-receipt-v2"
 STAGE_RECEIPT_SCHEMA = "gold-trade-wa-ir-artifact-stage-receipt-v1"
 BOOTSTRAP_RECEIPT_SCHEMA = "gold-trade-wa-ir-stage-bootstrap-receipt-v1"
 BOOTSTRAP_RECEIPT_NAME = "bootstrap-receipt.json"
+CONSUMER_CONFIG_SCHEMA = "gold-trade-wa-ir-artifact-stage-config-v3"
+BOOTSTRAP_CONSUMER_CONFIG = "config/consumer.json"
 
 LEGACY_APPLICATION_RELEASE_SHA = "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5"
 APPLICATION_BUNDLE_ARTIFACT = "release-bundle"
@@ -73,9 +77,10 @@ BOOTSTRAP_RECEIPT_FILES = frozenset(
         "scripts/manage_webapp_ir_artifact_stage.py",
         "scripts/manage_webapp_ir_snapshot.py",
         "scripts/manage_webapp_ir_release_provenance.py",
+        "scripts/verify_webapp_fi_source_provenance.py",
         "core/standby_snapshot_capacity.py",
         "scripts/webapp_ir_image_archive_contract.py",
-        "config/consumer.json",
+        BOOTSTRAP_CONSUMER_CONFIG,
     }
 )
 APPLICATION_RELEASE_PARENT = Path("/srv/trading-bot-three-site/releases")
@@ -122,6 +127,23 @@ ARTIFACT_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 SITE_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 BUNDLE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 OBJECT_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/=-]{0,1023}$")
+CONSUMER_CONFIG_FIELDS = frozenset(
+    {
+        "schema",
+        "endpoint",
+        "region",
+        "bucket",
+        "prefix",
+        "age_binary",
+        "age_identity_file",
+        "workspace",
+        "source_site",
+        "source_signing_public_key_base64",
+        "webapp_fi_source_attestation_public_key_base64",
+        "webapp_fi_controller_authorization_public_key_base64",
+        "maximum_artifact_bytes",
+    }
+)
 
 
 class ReleaseProvenanceError(RuntimeError):
@@ -205,6 +227,9 @@ class BootstrapReceipt:
     path: Path
     control_commit: str
     control_tree: str
+    consumer_config_sha256: str
+    webapp_fi_source_attestation_public_key: bytes
+    webapp_fi_controller_authorization_public_key: bytes
 
 
 def canonical_json_bytes(value: Mapping[str, Any] | Sequence[Any]) -> bytes:
@@ -387,6 +412,97 @@ def _bindings(value: object, *, field: str) -> dict[str, str]:
             raise ReleaseProvenanceError(f"{field}.{key} is invalid")
         result[key] = item
     return dict(sorted(result.items()))
+
+
+def _decode_exact_public_key(value: object, *, field: str) -> bytes:
+    """Decode one canonical public Ed25519 key without retaining its text form."""
+
+    if not isinstance(value, str) or not value or len(value) > 128:
+        raise ReleaseProvenanceError(f"{field} is invalid")
+    try:
+        decoded = base64.b64decode(value.encode("ascii"), validate=True)
+    except (UnicodeEncodeError, binascii.Error, ValueError) as exc:
+        raise ReleaseProvenanceError(f"{field} is invalid") from exc
+    if len(decoded) != 32 or base64.b64encode(decoded).decode("ascii") != value:
+        raise ReleaseProvenanceError(f"{field} is invalid")
+    return decoded
+
+
+def _bootstrap_member_path(candidate: Path, name: str) -> Path:
+    """Return one fixed bootstrap member only through root-private ancestors."""
+
+    pure = PurePosixPath(name)
+    if (
+        not name
+        or pure.as_posix() != name
+        or pure.is_absolute()
+        or "\\" in name
+        or any(part in ("", ".", "..") for part in pure.parts)
+    ):
+        raise ReleaseProvenanceError("bootstrap receipt contains an unsafe member name")
+    parent = candidate
+    for part in pure.parts[:-1]:
+        parent = parent / part
+        _require_directory(parent, field=f"bootstrap member parent for {name}", private=True)
+    path = parent / pure.name
+    _require_file(path, field=f"bootstrap member {name}", private=True, maximum=MAX_JSON_BYTES)
+    return path
+
+
+def _load_hash_bound_bootstrap_consumer_config(
+    *,
+    candidate_directory: Path,
+    files: Mapping[str, Any],
+    expected_sha256: str,
+) -> tuple[bytes, bytes]:
+    """Read the received v3 config only after rechecking every bootstrap member.
+
+    The receive receipt records hashes that the constrained bootstrap receiver
+    checked before extraction.  Rechecking those members here closes the gap
+    between receive and immutable-root installation, including the portable
+    FI source verifier that will consume these two public pins later.
+    """
+
+    observed: dict[str, str] = {}
+    consumer_config_raw: bytes | None = None
+    for name in sorted(BOOTSTRAP_RECEIPT_FILES):
+        raw = _secure_read(
+            _bootstrap_member_path(candidate_directory, name),
+            field=f"bootstrap member {name}",
+            private=True,
+            maximum=MAX_JSON_BYTES,
+        )
+        observed[name] = sha256_bytes(raw)
+        if name == BOOTSTRAP_CONSUMER_CONFIG:
+            consumer_config_raw = raw
+    if observed != {name: files[name] for name in BOOTSTRAP_RECEIPT_FILES}:
+        raise ReleaseProvenanceError("bootstrap receive receipt file hashes no longer match the received candidate")
+    if consumer_config_raw is None:  # pragma: no cover - fixed set invariant.
+        raise ReleaseProvenanceError("bootstrap receive receipt lacks the consumer config")
+    if observed[BOOTSTRAP_CONSUMER_CONFIG] != expected_sha256:
+        raise ReleaseProvenanceError("bootstrap received consumer config does not match its hash-bound receipt")
+    config = _strict_json(consumer_config_raw, field="bootstrap received consumer config")
+    if set(config) != CONSUMER_CONFIG_FIELDS or config.get("schema") != CONSUMER_CONFIG_SCHEMA:
+        raise ReleaseProvenanceError("bootstrap received consumer config is not the exact v3 schema")
+    if config.get("source_site") != STAGE_SOURCE_SITE:
+        raise ReleaseProvenanceError("bootstrap received consumer config is not pinned to webapp_fi")
+    # The normal stage consumer verifies its own transport settings.  This
+    # control-plane verifier needs only the two separately enrolled public
+    # provenance keys and validates their exact wire representation here.
+    _decode_exact_public_key(
+        config.get("source_signing_public_key_base64"),
+        field="bootstrap received consumer source signing public key",
+    )
+    return (
+        _decode_exact_public_key(
+            config.get("webapp_fi_source_attestation_public_key_base64"),
+            field="bootstrap received consumer WebApp-FI source attestation public key",
+        ),
+        _decode_exact_public_key(
+            config.get("webapp_fi_controller_authorization_public_key_base64"),
+            field="bootstrap received consumer WebApp-FI controller authorization public key",
+        ),
+    )
 
 
 def _artifact(
@@ -974,7 +1090,22 @@ def load_bootstrap_receive_receipt(path: Path) -> BootstrapReceipt:
         raise ReleaseProvenanceError("bootstrap receive receipt bootstrap plaintext_bytes is invalid")
     if isinstance(ciphertext_bytes, bool) or not isinstance(ciphertext_bytes, int) or not 1 <= ciphertext_bytes <= MAX_BOOTSTRAP_CIPHERTEXT_BYTES:
         raise ReleaseProvenanceError("bootstrap receive receipt bootstrap ciphertext_bytes is invalid")
-    return BootstrapReceipt(path=path, control_commit=control_commit, control_tree=control_tree)
+    (
+        webapp_fi_source_attestation_public_key,
+        webapp_fi_controller_authorization_public_key,
+    ) = _load_hash_bound_bootstrap_consumer_config(
+        candidate_directory=candidate_directory,
+        files=files,
+        expected_sha256=bootstrap["consumer_config_sha256"],
+    )
+    return BootstrapReceipt(
+        path=path,
+        control_commit=control_commit,
+        control_tree=control_tree,
+        consumer_config_sha256=bootstrap["consumer_config_sha256"],
+        webapp_fi_source_attestation_public_key=webapp_fi_source_attestation_public_key,
+        webapp_fi_controller_authorization_public_key=webapp_fi_controller_authorization_public_key,
+    )
 
 
 def load_stage_receipt(path: Path) -> StageReceipt:
@@ -1588,6 +1719,7 @@ def _install_receipt(
     provenance: Provenance,
     dispatcher: InstalledDispatcher,
     *,
+    bootstrap: BootstrapReceipt,
     now: dt.datetime,
 ) -> dict[str, Any]:
     timestamp = now.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z")
@@ -1601,7 +1733,7 @@ def _install_receipt(
     }
     if provenance.runtime_images.app_repo_digest is not None:
         runtime_images["app_repo_digest"] = provenance.runtime_images.app_repo_digest
-    return {
+    receipt: dict[str, Any] = {
         "schema": INSTALL_RECEIPT_SCHEMA,
         "status": "installed",
         "installed_at": timestamp,
@@ -1630,7 +1762,22 @@ def _install_receipt(
             "control_release_sha": dispatcher.control_release_sha,
         },
         "runtime_images": runtime_images,
+        # These are public Ed25519 pins only.  They were decoded from the
+        # hash-bound received consumer config and are carried forward for the
+        # later, separately implemented composite FI-source proof verifier.
+        # No source proof is claimed or verified by this installation step.
+        "bootstrap_provenance": {
+            "consumer_config_sha256": bootstrap.consumer_config_sha256,
+            "webapp_fi_source_attestation_public_key_base64": base64.b64encode(
+                bootstrap.webapp_fi_source_attestation_public_key
+            ).decode("ascii"),
+            "webapp_fi_controller_authorization_public_key_base64": base64.b64encode(
+                bootstrap.webapp_fi_controller_authorization_public_key
+            ).decode("ascii"),
+        },
     }
+    receipt["receipt_sha256"] = sha256_bytes(canonical_json_bytes(receipt))
+    return receipt
 
 
 def install_release_roots(
@@ -1677,6 +1824,7 @@ def install_release_roots(
             stage,
             provenance,
             dispatcher,
+            bootstrap=bootstrap,
             now=now or dt.datetime.now(dt.timezone.utc),
         )
         _create_only_json(receipt_path, payload)
@@ -1756,15 +1904,72 @@ def _installed_dispatcher(value: object, *, control: Mapping[str, str]) -> dict[
     }
 
 
-def load_installed_release_receipt(path: Path) -> dict[str, Any]:
-    value = _read_private_json(path, field="installed release provenance receipt")
+def _installed_bootstrap_provenance(value: object) -> dict[str, str]:
+    """Validate the public, config-hash-bound pins persisted by install v2."""
+
+    if not isinstance(value, Mapping):
+        raise ReleaseProvenanceError("installed bootstrap provenance must be an object")
     _fields(
         value,
-        expected={"schema", "status", "installed_at", "stage", "application", "control", "dispatcher", "runtime_images"},
+        expected={
+            "consumer_config_sha256",
+            "webapp_fi_source_attestation_public_key_base64",
+            "webapp_fi_controller_authorization_public_key_base64",
+        },
+        field="installed bootstrap provenance",
+    )
+    consumer_config_sha256 = _require_sha256(
+        value.get("consumer_config_sha256"),
+        field="installed bootstrap provenance consumer_config_sha256",
+    )
+    webapp_fi_source_attestation_public_key = _decode_exact_public_key(
+        value.get("webapp_fi_source_attestation_public_key_base64"),
+        field="installed bootstrap provenance WebApp-FI source attestation public key",
+    )
+    webapp_fi_controller_authorization_public_key = _decode_exact_public_key(
+        value.get("webapp_fi_controller_authorization_public_key_base64"),
+        field="installed bootstrap provenance WebApp-FI controller authorization public key",
+    )
+    return {
+        "consumer_config_sha256": consumer_config_sha256,
+        "webapp_fi_source_attestation_public_key_base64": base64.b64encode(
+            webapp_fi_source_attestation_public_key
+        ).decode("ascii"),
+        "webapp_fi_controller_authorization_public_key_base64": base64.b64encode(
+            webapp_fi_controller_authorization_public_key
+        ).decode("ascii"),
+    }
+
+
+def load_installed_release_receipt(path: Path) -> dict[str, Any]:
+    value = _read_canonical_private_json(path, field="installed release provenance receipt")
+    if value.get("schema") != INSTALL_RECEIPT_SCHEMA:
+        raise ReleaseProvenanceError("installed release provenance receipt schema is unsupported")
+    _fields(
+        value,
+        expected={
+            "schema",
+            "status",
+            "installed_at",
+            "stage",
+            "application",
+            "control",
+            "dispatcher",
+            "runtime_images",
+            "bootstrap_provenance",
+            "receipt_sha256",
+        },
         field="installed release provenance receipt",
     )
-    if value.get("schema") != INSTALL_RECEIPT_SCHEMA or value.get("status") != "installed":
+    if value.get("status") != "installed":
         raise ReleaseProvenanceError("installed release provenance receipt schema or status is unsupported")
+    receipt_sha = _require_sha256(
+        value.get("receipt_sha256"),
+        field="installed release provenance receipt receipt_sha256",
+    )
+    unsigned = {key: item for key, item in value.items() if key != "receipt_sha256"}
+    if sha256_bytes(canonical_json_bytes(unsigned)) != receipt_sha:
+        raise ReleaseProvenanceError("installed release provenance receipt hash is invalid")
     installed_at = value.get("installed_at")
     if not isinstance(installed_at, str) or not installed_at.endswith("Z"):
         raise ReleaseProvenanceError("installed release provenance receipt installed_at is invalid")
@@ -1790,6 +1995,7 @@ def load_installed_release_receipt(path: Path) -> dict[str, Any]:
         raise ReleaseProvenanceError("installed release provenance stage is invalid")
     _require_sha256(stage.get("receipt_sha256"), field="installed stage receipt_sha256")
     dispatcher = _installed_dispatcher(value.get("dispatcher"), control=control)
+    bootstrap_provenance = _installed_bootstrap_provenance(value.get("bootstrap_provenance"))
     images = _runtime_contract(value.get("runtime_images"))
     runtime_images: dict[str, Any] = {
         "app_image_id": images.app_image_id,
@@ -1802,6 +2008,7 @@ def load_installed_release_receipt(path: Path) -> dict[str, Any]:
         "application": application,
         "control": control,
         "dispatcher": dispatcher,
+        "bootstrap_provenance": bootstrap_provenance,
         "runtime_images": runtime_images,
     }
 
