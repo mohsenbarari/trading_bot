@@ -126,6 +126,54 @@ def _active_snapshot(*, receipt: dict, receipt_path: Path) -> dict:
     }
 
 
+def _runtime_binding(*, proof: dict, receipt: dict) -> dict:
+    snapshot_id = receipt["snapshot_id"]
+    labels = {
+        "com.docker.compose.project": agent.WA_IR_PROMOTION_PROJECT_NAME,
+    }
+    expected_volumes = {
+        "db": [f"trading_bot_wa_ir_pg_{snapshot_id}"],
+        "redis": [f"trading_bot_wa_ir_redis_{snapshot_id}"],
+        "app": sorted(
+            [
+                f"trading_bot_wa_ir_uploads_{snapshot_id}",
+                f"trading_bot_wa_ir_audit_{snapshot_id}",
+            ]
+        ),
+    }
+    images = {
+        "db": "postgres:15-alpine",
+        "redis": "redis:7-alpine",
+        "app": "trading-bot:2c08",
+    }
+    containers = {}
+    for service, letter in (("db", "a"), ("redis", "b"), ("app", "c")):
+        containers[service] = {
+            "container_id": letter * 64,
+            "image": images[service],
+            "image_id": f"sha256:{letter * 64}",
+            "labels_sha256": agent._runtime_binding_hash(
+                {**labels, "com.docker.compose.service": service}
+            ),
+            "volume_names": expected_volumes[service],
+            "restart_policy": "no",
+        }
+    payload = {
+        "schema": agent.WA_IR_RUNTIME_BINDING_SCHEMA,
+        "promotion_proof_sha256": proof["proof_sha256"],
+        "snapshot_id": receipt["snapshot_id"],
+        "source_generation": receipt["source_generation"],
+        "release_sha": receipt["release_sha"],
+        "snapshot_restore_receipt_sha256": receipt["receipt_sha256"],
+        "snapshot_stage_receipt_sha256": receipt["stage_receipt_sha256"],
+        "epoch": proof["epoch"],
+        "lease_id": proof["lease_id"],
+        "containers": containers,
+    }
+    payload["binding_sha256"] = agent._runtime_binding_hash(payload)
+    return payload
+
+
 class ProductionWriterLeaseAgentTests(unittest.TestCase):
     def _config(
         self,
@@ -144,7 +192,18 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
         config_path = directory / "agent.json"
         _write_private(secret, "s" * 32)
         _write_private(public_key, base64.b64encode(b"p" * 32).decode("ascii"))
-        _write_private(promotion_env, "WA_IR_PROMOTION_RUNTIME_ENV_FILE=/root/secure-envs/wa-ir.env\n")
+        _write_private(
+            promotion_env,
+            "\n".join(
+                (
+                    "WA_IR_PROMOTION_RUNTIME_ENV_FILE=/root/secure-envs/wa-ir.env",
+                    "WA_IR_POSTGRES_IMAGE=postgres:15-alpine",
+                    "WA_IR_REDIS_IMAGE=redis:7-alpine",
+                    "WA_IR_APP_IMAGE=trading-bot:2c08",
+                    "",
+                )
+            ),
+        )
         is_ir_writer = mode == "writer" and site == "webapp_ir"
         default_lease_duration = 60 if is_ir_writer else 180
         default_safety_margin = 15
@@ -234,6 +293,30 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
         _write_private(proof_path, json.dumps(promotion_proof))
         agent._write_lease(config.lease_file, proof=witness_proof)
         return config, receipt_path, active_snapshot_path, proof_directory, receipt
+
+    def _recovery_fixture(self, directory: Path) -> tuple[
+        agent.AgentConfig,
+        Path,
+        Path,
+        Path,
+        dict,
+    ]:
+        config, receipt_path, active_snapshot_path, proof_directory, receipt = (
+            self._existing_activation_fixture(directory)
+        )
+        snapshot = parse_restore_receipt(receipt, action="promote_ir")
+        proof_path = agent._automatic_proof_path(
+            directory=proof_directory,
+            action="promote_ir",
+            snapshot_id=snapshot.snapshot_id,
+            receipt_sha256=snapshot.receipt_sha256,
+        )
+        proof = json.loads(proof_path.read_text(encoding="utf-8"))
+        _write_private(
+            agent._runtime_binding_path(proof_path),
+            json.dumps(_runtime_binding(proof=proof, receipt=receipt)),
+        )
+        return config, receipt_path, active_snapshot_path, proof_path, receipt
 
     def test_config_requires_exactly_app_and_sync_worker(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -524,6 +607,11 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                 mock.patch.object(agent, "_stop_selected_snapshot_db", return_value=True) as stop_snapshot,
                 mock.patch.object(agent, "_start_scoped_runtime") as start,
                 mock.patch.object(agent, "_renew_activation_proof", return_value=witness_proof) as renew,
+                mock.patch.object(
+                    agent,
+                    "_write_promoted_runtime_binding",
+                    return_value="f" * 64,
+                ) as write_binding,
             ):
                 result = agent.activate_from_snapshot(
                     config,
@@ -544,6 +632,8 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
             stop_snapshot.assert_called_once()
             start.assert_called_once_with(config)
             renew.assert_called_once()
+            write_binding.assert_called_once()
+            self.assertEqual(result["runtime_binding_sha256"], "f" * 64)
             self.assertEqual(os.stat(proof_path).st_mode & 0o777, 0o600)
             self.assertEqual(
                 (
@@ -799,6 +889,158 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
 
         self.assertEqual(selected.call_count, 1)
         health.assert_called_once_with(config)
+
+    def test_explicit_promoted_runtime_recovery_starts_only_persisted_container_ids(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            config, receipt_path, active_snapshot_path, proof_path, _receipt = self._recovery_fixture(directory)
+            stopped = {"db": "exited", "redis": "exited", "app": "exited"}
+            running = {"db": "running", "redis": "running", "app": "running"}
+            with (
+                mock.patch.object(
+                    agent,
+                    "_inspect_bound_promoted_runtime",
+                    side_effect=[stopped, running],
+                ),
+                mock.patch.object(agent, "_start_bound_promoted_container") as start,
+                mock.patch.object(agent, "_wait_for_promoted_container_health") as health,
+                mock.patch.object(agent, "_wait_for_promoted_redis_running") as redis,
+                mock.patch.object(agent, "_promoted_container_health", return_value="running|healthy"),
+                mock.patch.object(agent, "_best_effort_stop_bound_promoted_runtime") as fence,
+                mock.patch.object(agent, "_compose") as compose,
+            ):
+                result = agent.recover_promoted_runtime(
+                    config,
+                    restore_receipt=receipt_path,
+                    active_snapshot=active_snapshot_path,
+                    promotion_proof=proof_path,
+                )
+
+        self.assertEqual(result["status"], "recovered")
+        self.assertEqual(result["action"], "recover-promoted-runtime")
+        self.assertEqual(
+            [call.kwargs["service"] for call in start.call_args_list],
+            ["db", "redis", "app"],
+        )
+        self.assertEqual(
+            [call.args[0].container_id for call in start.call_args_list],
+            ["a" * 64, "b" * 64, "c" * 64],
+        )
+        self.assertEqual([call.kwargs["service"] for call in health.call_args_list], ["db", "app"])
+        redis.assert_called_once()
+        fence.assert_not_called()
+        compose.assert_not_called()
+
+    def test_promoted_runtime_recovery_refuses_missing_binding_before_any_start(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            config, receipt_path, active_snapshot_path, proof_directory, receipt = (
+                self._existing_activation_fixture(directory)
+            )
+            snapshot = parse_restore_receipt(receipt, action="promote_ir")
+            proof_path = agent._automatic_proof_path(
+                directory=proof_directory,
+                action="promote_ir",
+                snapshot_id=snapshot.snapshot_id,
+                receipt_sha256=snapshot.receipt_sha256,
+            )
+            with mock.patch.object(agent, "_start_bound_promoted_container") as start:
+                with self.assertRaisesRegex(
+                    agent.ProductionWriterLeaseAgentError,
+                    "cannot securely open promoted runtime recovery binding",
+                ):
+                    agent.recover_promoted_runtime(
+                        config,
+                        restore_receipt=receipt_path,
+                        active_snapshot=active_snapshot_path,
+                        promotion_proof=proof_path,
+                    )
+
+        start.assert_not_called()
+
+    def test_promoted_runtime_recovery_refuses_to_restart_a_running_app(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            config, receipt_path, active_snapshot_path, proof_path, _receipt = self._recovery_fixture(directory)
+            with (
+                mock.patch.object(
+                    agent,
+                    "_inspect_bound_promoted_runtime",
+                    return_value={"db": "running", "redis": "running", "app": "running"},
+                ),
+                mock.patch.object(agent, "_start_bound_promoted_container") as start,
+            ):
+                with self.assertRaisesRegex(
+                    agent.ProductionWriterLeaseAgentError,
+                    "refuses to restart a running container",
+                ):
+                    agent.recover_promoted_runtime(
+                        config,
+                        restore_receipt=receipt_path,
+                        active_snapshot=active_snapshot_path,
+                        promotion_proof=proof_path,
+                    )
+
+        start.assert_not_called()
+
+    def test_promoted_runtime_recovery_fences_exact_bound_ids_when_final_lease_recheck_fails(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            config, receipt_path, active_snapshot_path, proof_path, _receipt = self._recovery_fixture(directory)
+            lease = load_production_writer_lease(config.lease_file)
+            stopped = {"db": "exited", "redis": "exited", "app": "exited"}
+            running = {"db": "running", "redis": "running", "app": "running"}
+            with (
+                mock.patch.object(
+                    agent,
+                    "_inspect_bound_promoted_runtime",
+                    side_effect=[stopped, running],
+                ),
+                mock.patch.object(agent, "_start_bound_promoted_container"),
+                mock.patch.object(agent, "_wait_for_promoted_container_health"),
+                mock.patch.object(agent, "_wait_for_promoted_redis_running"),
+                mock.patch.object(agent, "_promoted_container_health", return_value="running|healthy"),
+                mock.patch.object(
+                    agent,
+                    "_assert_live_matching_promotion_lease",
+                    side_effect=[lease, agent.ProductionWriterLeaseAgentError("lease changed")],
+                ) as lease_check,
+                mock.patch.object(agent, "_best_effort_stop_bound_promoted_runtime") as fence,
+                mock.patch.object(agent, "_compose") as compose,
+            ):
+                with self.assertRaisesRegex(agent.ProductionWriterLeaseAgentError, "lease changed"):
+                    agent.recover_promoted_runtime(
+                        config,
+                        restore_receipt=receipt_path,
+                        active_snapshot=active_snapshot_path,
+                        promotion_proof=proof_path,
+                    )
+
+        self.assertEqual(lease_check.call_count, 2)
+        fence.assert_called_once()
+        bound_ids = [
+            fence.call_args.args[0][service].container_id
+            for service in ("db", "redis", "app")
+        ]
+        self.assertEqual(bound_ids, ["a" * 64, "b" * 64, "c" * 64])
+        compose.assert_not_called()
+
+    def test_recovery_cli_is_explicit_and_requires_all_three_bindings(self):
+        args = agent.build_parser().parse_args(
+            [
+                "--config",
+                "/etc/trading-bot-three-site/writer.json",
+                "recover-promoted-runtime",
+                "--restore-receipt",
+                "/var/lib/trading-bot-three-site/restore-receipt.json",
+                "--active-snapshot",
+                "/var/lib/trading-bot-three-site/active-snapshot.json",
+                "--promotion-proof",
+                "/var/lib/trading-bot-three-site/proofs/promote.json",
+            ]
+        )
+        self.assertEqual(args.action, "recover-promoted-runtime")
+        self.assertEqual(args.promotion_proof.name, "promote.json")
 
 
 if __name__ == "__main__":
