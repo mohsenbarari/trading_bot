@@ -67,6 +67,8 @@ VOLUME_PREFIX = "trading_bot_wa_ir_"
 DEFAULT_MAX_UPLOAD_BYTES = 20 * 1024 * 1024 * 1024
 DEFAULT_MAX_AUDIT_BYTES = 2 * 1024 * 1024 * 1024
 WITNESS_RECEIPT_FILENAME = "latest-restore-receipt.json"
+DOCKER_ROOT_DIR_FORMAT = "{{.DockerRootDir}}"
+RESTORE_CAPACITY_PREFLIGHT_SCHEMA = "gold-trade-wa-ir-restore-capacity-preflight-v1"
 WITNESS_RECEIPT_FIELDS = frozenset(
     {
         "schema",
@@ -566,19 +568,70 @@ def require_byte_config(values: Mapping[str, str], key: str, *, minimum: int) ->
     return value
 
 
+def paths_share_filesystem(first: Path, second: Path) -> bool:
+    try:
+        return first.stat().st_dev == second.stat().st_dev
+    except OSError as exc:
+        raise RestoreError("cannot compare WA-IR candidate and DockerRootDir filesystems") from exc
+
+
 def require_restore_capacity(
     data_root: Path,
     *,
-    required_new_bytes: int,
+    docker_root: Path,
+    candidate_required_new_bytes: int,
+    docker_restore_required_new_bytes: int,
     minimum_free_bytes: int,
 ) -> dict[str, Any]:
+    """Prove both restore filesystems can absorb their next allocations.
+
+    ``docker cp`` writes the database dump into the candidate container's
+    writable layer before ``pg_restore`` reads it.  That layer is charged to
+    DockerRootDir, not the bind-mounted candidate data root.  When both paths
+    share a filesystem, combine the allocations so two independent checks do
+    not accidentally admit work that only fits once.
+    """
     try:
-        return require_capacity(
-            data_root,
-            required_new_bytes=required_new_bytes,
-            minimum_free_bytes=minimum_free_bytes,
-            label="WA-IR snapshot candidate data root",
-        )
+        if paths_share_filesystem(data_root, docker_root):
+            combined_required_new_bytes = (
+                candidate_required_new_bytes + docker_restore_required_new_bytes
+            )
+            return {
+                "schema": RESTORE_CAPACITY_PREFLIGHT_SCHEMA,
+                "filesystem_layout": "shared",
+                "data_root": str(data_root),
+                "docker_root": str(docker_root),
+                "candidate_required_new_bytes": candidate_required_new_bytes,
+                "docker_restore_required_new_bytes": docker_restore_required_new_bytes,
+                "minimum_free_bytes": minimum_free_bytes,
+                "admission": require_capacity(
+                    data_root,
+                    required_new_bytes=combined_required_new_bytes,
+                    minimum_free_bytes=minimum_free_bytes,
+                    label="WA-IR snapshot candidate data root and DockerRootDir",
+                ),
+            }
+        return {
+            "schema": RESTORE_CAPACITY_PREFLIGHT_SCHEMA,
+            "filesystem_layout": "separate",
+            "data_root": str(data_root),
+            "docker_root": str(docker_root),
+            "candidate_required_new_bytes": candidate_required_new_bytes,
+            "docker_restore_required_new_bytes": docker_restore_required_new_bytes,
+            "minimum_free_bytes": minimum_free_bytes,
+            "candidate_data_admission": require_capacity(
+                data_root,
+                required_new_bytes=candidate_required_new_bytes,
+                minimum_free_bytes=minimum_free_bytes,
+                label="WA-IR snapshot candidate data root",
+            ),
+            "docker_root_admission": require_capacity(
+                docker_root,
+                required_new_bytes=docker_restore_required_new_bytes,
+                minimum_free_bytes=minimum_free_bytes,
+                label="WA-IR DockerRootDir temporary restore workspace",
+            ),
+        }
     except SnapshotCapacityError as exc:
         raise RestoreError(str(exc)) from exc
 
@@ -633,6 +686,37 @@ class DockerRunner:
             # Keep only the operation and exit code in machine-readable evidence.
             raise RestoreError(f"Docker command failed ({command[0]} {command[1] if len(command) > 1 else ''}, exit {result.returncode})")
         return result
+
+
+def require_docker_root_directory(runner: DockerRunner) -> Path:
+    """Resolve DockerRootDir through the daemon before restore-side mutation."""
+
+    result = runner.run(
+        ["docker", "info", "--format", DOCKER_ROOT_DIR_FORMAT],
+        timeout=30,
+    )
+    if result is None:
+        raise RestoreError("DockerRootDir inspection did not execute")
+    if not isinstance(result.stdout, str):
+        raise RestoreError("DockerRootDir inspection returned invalid output")
+    lines = result.stdout.splitlines()
+    if len(lines) != 1 or not lines[0] or lines[0] != lines[0].strip():
+        raise RestoreError("DockerRootDir inspection returned an invalid path")
+    docker_root = Path(lines[0])
+    if not docker_root.is_absolute():
+        raise RestoreError("DockerRootDir must be an absolute path")
+    try:
+        metadata = docker_root.lstat()
+    except OSError as exc:
+        raise RestoreError("DockerRootDir cannot be inspected") from exc
+    if not stat.S_ISDIR(metadata.st_mode) or docker_root.is_symlink():
+        raise RestoreError("DockerRootDir must be an existing non-symlink directory")
+    resolved = docker_root.resolve(strict=True)
+    if resolved != docker_root:
+        raise RestoreError("DockerRootDir must not resolve through a symlink")
+    if metadata.st_uid != 0 or metadata.st_mode & 0o022:
+        raise RestoreError("DockerRootDir must be root-owned and not group- or world-writable")
+    return resolved
 
 
 def docker_volume_absent(runner: DockerRunner, name: str) -> bool:
@@ -1505,6 +1589,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             receipt.audit.path, max_uncompressed_bytes=args.max_audit_bytes
         )
     required_candidate_bytes = database_restore_reserve_bytes + upload_bytes + (audit_bytes or 0)
+    docker_restore_required_bytes = receipt.database.byte_count + database_restore_reserve_bytes
     generation = (args.generation or receipt.snapshot_id).lower()
     candidate = build_candidate(data_root, generation)
     if args.apply:
@@ -1569,6 +1654,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         "capacity_requirement_bytes": required_candidate_bytes,
         "capacity_minimum_free_bytes": minimum_free_bytes,
         "database_restore_reserve_bytes": database_restore_reserve_bytes,
+        "docker_restore_required_bytes": docker_restore_required_bytes,
         "audit": {
             "status": "planned" if receipt.audit is not None else "not_provided",
             "validated_members": audit_members,
@@ -1592,9 +1678,12 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
 
     # The receipt and archives have only been read so far.  Refuse before a
     # journal, directory, Docker volume, or container can be created.
+    docker_root = require_docker_root_directory(runner)
     plan["capacity_preflight"] = require_restore_capacity(
         data_root,
-        required_new_bytes=required_candidate_bytes,
+        docker_root=docker_root,
+        candidate_required_new_bytes=required_candidate_bytes,
+        docker_restore_required_new_bytes=docker_restore_required_bytes,
         minimum_free_bytes=minimum_free_bytes,
     )
 
