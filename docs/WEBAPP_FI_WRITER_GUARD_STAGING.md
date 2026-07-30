@@ -22,11 +22,14 @@ following to match a root-only, operator-reviewed expectation file:
 - a root-only lease-agent config whose Witness timing exactly equals the
   separately recorded intended Witness timing.
 
-The unit repeats the same admission check as `ExecStartPre`.  At that stage it
-also requires a live local WebApp-FI lease with more time remaining than the
-configured safety margin.  It never creates or starts a container.  A missing,
-replaced, unhealthy, or stopped container therefore blocks the guard instead
-of allowing an unattended Docker or Compose restart.
+The unit repeats only the immutable/runtime admission check as `ExecStartPre`.
+`--phase guard-start` remains an explicit diagnostic for an already-issued
+local lease, but it is intentionally not an `ExecStartPre` condition: requiring
+an existing lease there would deadlock initial guard startup after a reboot or
+lease expiry.  The guard's own lifecycle/fencing logic remains responsible for
+the Writer Witness term.  The preflight never creates or starts a container. A
+missing, replaced, unhealthy, or stopped container therefore blocks the guard
+instead of allowing an unattended Docker or Compose restart.
 
 ## Current Status
 
