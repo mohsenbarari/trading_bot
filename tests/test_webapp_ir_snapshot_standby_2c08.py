@@ -46,6 +46,8 @@ class WebappIrSnapshotStandby2c08Tests(unittest.TestCase):
         self.assertIn("interval: 3s", text)
         self.assertIn("only the fenced lease agent may start", text)
         self.assertNotIn("restart:", text)
+        self.assertIn("WA_IR_APPLICATION_RELEASE_ROOT", text)
+        self.assertNotIn("WA_IR_RELEASE_ROOT", text)
 
     def test_release_and_schema_are_pinned_to_actual_production(self) -> None:
         text = ENV_EXAMPLE.read_text(encoding="utf-8")
@@ -57,12 +59,13 @@ class WebappIrSnapshotStandby2c08Tests(unittest.TestCase):
             text,
         )
         self.assertIn(
-            "WA_IR_RELEASE_ROOT=/srv/trading-bot-three-site/releases/"
+            "WA_IR_APPLICATION_RELEASE_ROOT=/srv/trading-bot-three-site/releases/"
             "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5",
             text,
         )
         self.assertIn("WA_IR_SNAPSHOT_MAX_AGE_SECONDS=30", text)
         self.assertIn("Object Storage", text)
+        self.assertIn("Do not point this at the separate control/tooling root", text)
         self.assertNotRegex(text, re.compile(r"(?:AWS_SECRET|POSTGRES_PASSWORD|JWT_SECRET_KEY)="))
 
     def test_ir_writer_config_pins_the_short_emergency_term_and_isolated_runtime(self) -> None:

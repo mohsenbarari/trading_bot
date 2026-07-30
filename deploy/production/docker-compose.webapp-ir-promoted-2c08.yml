@@ -85,7 +85,10 @@ services:
     volumes:
       - candidate_uploads_data:/app/uploads
       - candidate_audit_data:/app/audit_trail
-      - ${WA_IR_RELEASE_ROOT:?immutable S3-delivered release root is required}/trading_settings.json:/app/trading_settings.json:ro
+      # Application assets/configuration stay bound to the legacy 2c08 Git
+      # release.  The compose/control tooling itself comes from the separate
+      # receipt-bound control release and must never be substituted here.
+      - ${WA_IR_APPLICATION_RELEASE_ROOT:?immutable S3-delivered application release root is required}/trading_settings.json:/app/trading_settings.json:ro
     depends_on:
       db:
         condition: service_healthy

@@ -3,9 +3,10 @@
 
 This helper has no Object Storage, DNS, Arvan, or cross-host capability.  It
 only replaces the already-enabled local Nginx site after validating a
-root-only configuration, the local TLS files, the immutable 2c08 static
-release, and the pinned loopback-only listener template.  Nginx configuration
-validation and reload must both succeed before it emits its local receipt.
+root-only configuration, the local TLS files, the immutable 2c08 *application*
+static release, and the pinned loopback-only listener template.  It executes
+from a separate immutable control release.  Nginx configuration validation
+and reload must both succeed before it emits its local receipt.
 """
 
 from __future__ import annotations
@@ -38,7 +39,7 @@ PLACEHOLDER = re.compile(r"__[A-Z0-9_]+__")
 CONFIG_KEYS = frozenset(
     {
         "WA_IR_LISTENER_SERVER_NAME",
-        "WA_IR_LISTENER_RELEASE_ROOT",
+        "WA_IR_LISTENER_APPLICATION_RELEASE_ROOT",
         "WA_IR_LISTENER_TLS_ROOT",
         "WA_IR_LISTENER_CERTIFICATE_PATH",
         "WA_IR_LISTENER_CERTIFICATE_KEY_PATH",
@@ -218,7 +219,8 @@ def load_listener_config(path: Path) -> ListenerConfig:
     if values["WA_IR_LISTENER_SERVER_NAME"] != SERVER_NAME:
         raise ListenerActivationError("listener server name is not the fixed WA-IR production domain")
     release_root = _safe_absolute_path(
-        values["WA_IR_LISTENER_RELEASE_ROOT"], label="WA_IR_LISTENER_RELEASE_ROOT"
+        values["WA_IR_LISTENER_APPLICATION_RELEASE_ROOT"],
+        label="WA_IR_LISTENER_APPLICATION_RELEASE_ROOT",
     )
     if release_root.name != RELEASE_SHA:
         raise ListenerActivationError("listener release root is not the exact 2c08 release")

@@ -1,5 +1,9 @@
 {
   "schema": "gold-trade-wa-ir-promotion-coordinator-v1",
+  "control_release_root": "/srv/trading-bot-three-site/control-releases/REPLACE_WITH_EXACT_CONTROL_GIT_SHA",
+  "control_release_sha": "REPLACE_WITH_EXACT_CONTROL_GIT_SHA",
+  "application_release_sha": "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5",
+  "release_provenance_receipt": "/var/lib/trading-bot-three-site/release-provenance/REPLACE_WITH_UNIQUE_BUNDLE_ID.json",
   "writer_agent_config": "/etc/trading-bot-three-site/production-writer-lease-agent.json",
   "restore_receipt": "/var/lib/trading-bot-three-site/snapshots/latest-restore-receipt.json",
   "active_snapshot": "/srv/trading-bot-three-site-staging-data/wa-ir-standby/state/active-snapshot.json",

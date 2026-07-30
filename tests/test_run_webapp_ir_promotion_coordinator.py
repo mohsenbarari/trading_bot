@@ -14,6 +14,8 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/run_webapp_ir_promotion_coordinator.py"
 SYSTEMD_UNIT = ROOT / "deploy/systemd/trading-bot-production-writer-ir-promotion-watch.service"
+GUARD_SYSTEMD_UNIT = ROOT / "deploy/systemd/trading-bot-production-writer-lease-guard.service"
+COORDINATOR_EXAMPLE = ROOT / "deploy/production/webapp-ir-promotion-coordinator.json.example"
 SPEC = importlib.util.spec_from_file_location("run_webapp_ir_promotion_coordinator", SCRIPT)
 assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
@@ -61,7 +63,8 @@ class WebappIrPromotionCoordinatorTests(unittest.TestCase):
         root = Path(temporary.name)
         root.chmod(0o700)
 
-        release = root / "releases" / MODULE.RELEASE_SHA
+        control_sha = "c" * 40
+        release = root / "control-releases" / control_sha
         scripts = release / "scripts"
         scripts.mkdir(parents=True)
         release.chmod(0o755)
@@ -88,13 +91,18 @@ class WebappIrPromotionCoordinatorTests(unittest.TestCase):
         active_snapshot = state / "active-snapshot.json"
         listener_config = secure / "listener.env"
         token = secure / "route-token"
-        for path in (writer_config, restore_receipt, active_snapshot, listener_config, token):
+        provenance_receipt = state / "release-provenance.json"
+        for path in (writer_config, restore_receipt, active_snapshot, listener_config, token, provenance_receipt):
             write_file(path, "fixture\n")
         listener_receipt = state / "listener.json"
         route_audit = audit / "route.jsonl"
         config = secure / "coordinator.json"
         payload = {
             "schema": MODULE.SCHEMA,
+            "control_release_root": str(release),
+            "control_release_sha": control_sha,
+            "application_release_sha": MODULE.APPLICATION_RELEASE_SHA,
+            "release_provenance_receipt": str(provenance_receipt),
             "writer_agent_config": str(writer_config),
             "restore_receipt": str(restore_receipt),
             "active_snapshot": str(active_snapshot),
@@ -109,6 +117,7 @@ class WebappIrPromotionCoordinatorTests(unittest.TestCase):
         return {
             "root": root,
             "release": release,
+            "control_sha": Path(control_sha),
             "scripts": scripts,
             "writer_config": writer_config,
             "restore_receipt": restore_receipt,
@@ -121,8 +130,20 @@ class WebappIrPromotionCoordinatorTests(unittest.TestCase):
             "config": config,
         }
 
+    def installed_receipt(self, fixture: dict[str, Path]) -> dict:
+        return {
+            "application": {"release_sha": MODULE.APPLICATION_RELEASE_SHA},
+            "control": {
+                "release_sha": fixture["control_sha"].name,
+                "release_root": str(fixture["release"]),
+            },
+        }
+
     def execute_coordinator(self, fixture: dict[str, Path], *, apply: bool, runner: PromotionRunner) -> dict:
-        with mock.patch.object(MODULE, "RELEASE_ROOT", fixture["release"]):
+        with (
+            mock.patch.object(MODULE, "CONTROL_RUNTIME_ROOT", fixture["release"]),
+            mock.patch.object(MODULE, "load_installed_release_receipt", return_value=self.installed_receipt(fixture)),
+        ):
             return MODULE.run_coordinator(fixture["config"], apply=apply, command_runner=runner)
 
     def test_apply_runs_only_the_three_fixed_stages_in_order(self) -> None:
@@ -178,7 +199,10 @@ class WebappIrPromotionCoordinatorTests(unittest.TestCase):
         watch_runner = PromotionRunner(receipt=fixture["listener_receipt"])
         stage_runner = PromotionRunner(receipt=fixture["listener_receipt"])
 
-        with mock.patch.object(MODULE, "RELEASE_ROOT", fixture["release"]):
+        with (
+            mock.patch.object(MODULE, "CONTROL_RUNTIME_ROOT", fixture["release"]),
+            mock.patch.object(MODULE, "load_installed_release_receipt", return_value=self.installed_receipt(fixture)),
+        ):
             result = MODULE.run_coordinator(
                 fixture["config"],
                 apply=True,
@@ -206,10 +230,31 @@ class WebappIrPromotionCoordinatorTests(unittest.TestCase):
         unit = SYSTEMD_UNIT.read_text(encoding="utf-8")
         self.assertIn("run_webapp_ir_promotion_coordinator.py", unit)
         self.assertIn("--apply --json", unit)
+        self.assertIn("EnvironmentFile=/etc/trading-bot-three-site/webapp-ir-control-release.env", unit)
+        self.assertIn("Environment=PYTHONDONTWRITEBYTECODE=1", unit)
+        self.assertIn("${WA_IR_CONTROL_RELEASE_ROOT}", unit)
+        self.assertIn("manage_webapp_ir_release_provenance.py verify-installed", unit)
+        self.assertIn("${WA_IR_RELEASE_PROVENANCE_RECEIPT}", unit)
+        self.assertNotIn("/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5", unit)
         self.assertIn("Requires=trading-bot-production-writer-lease-guard.service", unit)
         self.assertNotIn("ExecStartPost=", unit)
         self.assertNotIn("production_writer_lease_agent.py --config", unit)
         self.assertNotIn("route_webapp_ir_from_promotion_proof.py", unit)
+
+        guard = GUARD_SYSTEMD_UNIT.read_text(encoding="utf-8")
+        self.assertIn("EnvironmentFile=/etc/trading-bot-three-site/webapp-ir-control-release.env", guard)
+        self.assertIn("Environment=PYTHONDONTWRITEBYTECODE=1", guard)
+        self.assertIn("${WA_IR_CONTROL_RELEASE_ROOT}/scripts/production_writer_lease_agent.py", guard)
+        self.assertIn("manage_webapp_ir_release_provenance.py verify-installed", guard)
+        self.assertIn("${WA_IR_RELEASE_PROVENANCE_RECEIPT}", guard)
+        self.assertNotIn("/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5", guard)
+
+    def test_coordinator_config_requires_separate_control_and_application_identities(self) -> None:
+        payload = json.loads(COORDINATOR_EXAMPLE.read_text(encoding="utf-8"))
+        self.assertEqual(payload["application_release_sha"], MODULE.APPLICATION_RELEASE_SHA)
+        self.assertIn("control-releases/REPLACE_WITH_EXACT_CONTROL_GIT_SHA", payload["control_release_root"])
+        self.assertEqual(payload["control_release_sha"], "REPLACE_WITH_EXACT_CONTROL_GIT_SHA")
+        self.assertIn("release-provenance", payload["release_provenance_receipt"])
 
     def test_plan_runs_no_stage(self) -> None:
         fixture = self.make_fixture()
@@ -218,6 +263,8 @@ class WebappIrPromotionCoordinatorTests(unittest.TestCase):
         result = self.execute_coordinator(fixture, apply=False, runner=runner)
 
         self.assertEqual(result["status"], "planned")
+        self.assertEqual(result["application_release_sha"], MODULE.APPLICATION_RELEASE_SHA)
+        self.assertEqual(result["control_release_sha"], fixture["control_sha"].name)
         self.assertFalse(result["external_route_changed"])
         self.assertEqual(runner.calls, [])
 
@@ -280,6 +327,19 @@ class WebappIrPromotionCoordinatorTests(unittest.TestCase):
         fixture["token"].chmod(0o640)
         with self.assertRaisesRegex(MODULE.PromotionCoordinatorError, "route token file must be"):
             MODULE.load_config(fixture["config"])
+
+    def test_receipt_or_runtime_root_mismatch_stops_before_any_stage(self) -> None:
+        fixture = self.make_fixture()
+        runner = PromotionRunner(receipt=fixture["listener_receipt"])
+        invalid = self.installed_receipt(fixture)
+        invalid["control"]["release_sha"] = "d" * 40
+        with (
+            mock.patch.object(MODULE, "CONTROL_RUNTIME_ROOT", fixture["release"]),
+            mock.patch.object(MODULE, "load_installed_release_receipt", return_value=invalid),
+        ):
+            with self.assertRaisesRegex(MODULE.PromotionCoordinatorError, "does not bind"):
+                MODULE.run_coordinator(fixture["config"], apply=True, command_runner=runner)
+        self.assertEqual(runner.calls, [])
 
     def test_implementation_does_not_expose_remote_or_arbitrary_command_knobs(self) -> None:
         source = SCRIPT.read_text(encoding="utf-8")

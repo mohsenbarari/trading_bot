@@ -6,8 +6,11 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/srv/trading-bot-three-site/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5
-ExecStart=/usr/bin/python3 /srv/trading-bot-three-site/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5/scripts/production_writer_lease_agent.py --config /etc/trading-bot-three-site/production-writer-lease-agent.json guard
+EnvironmentFile=/etc/trading-bot-three-site/webapp-ir-control-release.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+WorkingDirectory=${WA_IR_CONTROL_RELEASE_ROOT}
+ExecStartPre=/usr/bin/python3 ${WA_IR_CONTROL_RELEASE_ROOT}/scripts/manage_webapp_ir_release_provenance.py verify-installed --receipt ${WA_IR_RELEASE_PROVENANCE_RECEIPT}
+ExecStart=/usr/bin/python3 ${WA_IR_CONTROL_RELEASE_ROOT}/scripts/production_writer_lease_agent.py --config /etc/trading-bot-three-site/production-writer-lease-agent.json guard
 Restart=always
 RestartSec=2s
 TimeoutStopSec=10s

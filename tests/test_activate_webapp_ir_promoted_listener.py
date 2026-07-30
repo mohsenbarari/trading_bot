@@ -80,7 +80,7 @@ class WebappIrPromotedListenerActivationTests(unittest.TestCase):
         config = root / "listener.env"
         values = {
             "WA_IR_LISTENER_SERVER_NAME": MODULE.SERVER_NAME,
-            "WA_IR_LISTENER_RELEASE_ROOT": str(release),
+            "WA_IR_LISTENER_APPLICATION_RELEASE_ROOT": str(release),
             "WA_IR_LISTENER_TLS_ROOT": str(tls),
             "WA_IR_LISTENER_CERTIFICATE_PATH": str(certificate),
             "WA_IR_LISTENER_CERTIFICATE_KEY_PATH": str(key),

@@ -66,10 +66,115 @@ redis:7-alpine
 
 The rollback app image is approximately 711 MB on Bot-FI. Save/load it only as
 an age-encrypted, private/versioned Object Storage artifact with a recorded
-digest and `VersionId`. Stage the exact Git/release bundle separately beneath
-`/srv/trading-bot/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5`; it
-provides the immutable `trading_settings.json` bind-mounted only after a future
-promotion. Do not build, pull, or mount a later staging image on WA-IR.
+digest and `VersionId`. Do not build, pull, or mount a later staging image on
+WA-IR.
+
+### Separate Application And Control Provenance
+
+The running legacy directory `/srv/trading-bot/current` is not a Git source
+and must never be archived or treated as a release. There are two separately
+verified identities instead:
+
+1. **Application**: the exact trusted Git source
+   `/root/trading-bot/production-main` at
+   `2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5`, installed only below
+   `/srv/trading-bot-three-site/releases/<application SHA>`. It supplies the
+   legacy `trading_settings.json` and static assets for the exact rollback app
+   image.
+2. **Control/tooling**: an exact reviewed commit from the integration Git
+   repository, installed only below
+   `/srv/trading-bot-three-site/control-releases/<control SHA>`. It supplies
+   the coordinator, writer agent, listener gate, route bridge, and compose
+   manifest. It is not an application source-tree override.
+
+On WebApp-FI, first use the root-only preparation primitive from a trusted
+preflight tooling directory. It creates the three immutable **application
+inputs** from `/root/trading-bot/production-main`, never from
+`/srv/trading-bot/current`. `--image` values must be the exact existing local
+image references and immutable IDs from the read-only source inventory.
+
+```bash
+APP_PREPARATION_ID=REPLACE_WITH_NEW_UNIQUE_ID
+python3 /srv/trading-bot-standby-tools/scripts/prepare_webapp_ir_artifact_bundle.py prepare \
+  --source-repo /root/trading-bot/production-main \
+  --release-sha 2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5 \
+  --workspace /root/secure-envs/trading-bot/wa-ir-artifact-workspace \
+  --output-root /root/secure-envs/trading-bot/wa-ir-app-preparations \
+  --preparation-id "$APP_PREPARATION_ID" \
+  --image REPLACE_WITH_EXACT_APP_REF=REPLACE_WITH_EXACT_APP_IMAGE_ID \
+  --image REPLACE_WITH_EXACT_POSTGRES_REF=REPLACE_WITH_EXACT_POSTGRES_IMAGE_ID \
+  --image REPLACE_WITH_EXACT_REDIS_REF=REPLACE_WITH_EXACT_REDIS_IMAGE_ID
+```
+
+That command emits exactly `release-bundle`, `image-bundle`, and
+`image-manifest` descriptors in its root-only `preparation-receipt.json`.
+Then use the provenance helper to create only the two separate **control
+inputs**. `CONTROL_SHA` must be the exact reviewed integration commit and the
+pinned app image values must come from that preparation receipt.
+
+```bash
+CONTROL_SHA=REPLACE_WITH_EXACT_REVIEWED_INTEGRATION_SHA
+APP_PREPARATION_DIRECTORY="/root/secure-envs/trading-bot/wa-ir-app-preparations/prepared-2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5-$APP_PREPARATION_ID"
+APP_PREPARATION_RECEIPT="$APP_PREPARATION_DIRECTORY/preparation-receipt.json"
+python3 /srv/trading-bot-standby-tools/scripts/manage_webapp_ir_release_provenance.py build-control \
+  --application-preparation-receipt "$APP_PREPARATION_RECEIPT" \
+  --control-repository /root/trading-bot/trading_bot \
+  --control-release-sha "$CONTROL_SHA" \
+  --output-directory /root/secure-envs/trading-bot/wa-ir-control-artifacts/REPLACE_WITH_NEW_BUNDLE_ID \
+  --app-image-id REPLACE_WITH_READ_ONLY_APP_IMAGE_ID \
+  --app-repo-digest REPLACE_WITH_READ_ONLY_APP_REPO_DIGEST
+```
+
+The control command performs local Git reads only. It writes
+`control-release-bundle` and `release-provenance`, verifies and carries forward
+the preparer's three application artifacts, and returns one complete
+`stage_publish` argument set. Publish exactly these five files through the
+existing age-encrypted private/versioned artifact-stage transport:
+
+```text
+release-bundle
+image-bundle
+image-manifest
+control-release-bundle
+release-provenance
+```
+
+The signed stage must be only `webapp_fi -> webapp_ir`, and its bindings must
+be exactly the `stage_publish` values returned by `build-control`. The
+provenance record freezes both Git bundle hashes, both commit/tree identities,
+and the selected app image identity. Do not add unrelated artifacts.
+
+After the existing transport has staged exactly those five artifacts on WA-IR,
+run the same verified helper from the already trusted preflight tooling path:
+
+```bash
+python3 /srv/trading-bot-standby-tools/scripts/manage_webapp_ir_release_provenance.py install \
+  --stage-receipt /srv/trading-bot-three-site-staging-data/wa-ir-standby/artifact-stage/webapp_fi/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5/REPLACE_WITH_NEW_BUNDLE_ID/stage-receipt.json \
+  --receipt /var/lib/trading-bot-three-site/release-provenance/REPLACE_WITH_NEW_BUNDLE_ID.json
+```
+
+This creates only two new detached Git roots and a create-only root-only
+receipt. It rejects an arbitrary archive, a wrong commit/tree, mismatched
+bundle hash or artifact binding, a non-`webapp_fi -> webapp_ir` stage, an
+existing root, or a receipt overwrite. A failed install removes only roots
+created by that same failed invocation if no receipt was linked; it never
+replaces an existing root. It does not load images, start a service, change
+`current`, or contact a remote system. The preflight tooling copy of this
+helper must itself be delivered and verified before this step; it cannot be
+taken from the uninstalled control bundle.
+
+The root-only WA-IR promotion runtime env must set both
+`RELEASE_SHA=2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5` and
+`WA_IR_APPLICATION_RELEASE_ROOT=/srv/trading-bot-three-site/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5`.
+The writer agent supplies that promotion env to Compose; the standby refresh
+env is not implicitly inherited during a promotion.
+
+The promotion units set `PYTHONDONTWRITEBYTECODE=1`, because the receipt
+revalidates each installed Git root as clean before control tooling is used.
+No script may write caches, receipts, logs, or other runtime state below either
+immutable release root. Their `ExecStartPre` runs the local
+`verify-installed` command against `WA_IR_RELEASE_PROVENANCE_RECEIPT` before
+the writer guard or promotion coordinator starts.
 
 ## Root-Only Configuration
 
@@ -77,6 +182,8 @@ Use these tracked files only as schemas, then create root-only copies outside
 Git:
 
 - `deploy/production/webapp-ir-snapshot-standby-2c08.env.example`
+- `deploy/production/webapp-ir-control-release.env.example`
+- `deploy/production/webapp-ir-promotion-coordinator.json.example`
 - `deploy/production/webapp-fi-snapshot-publisher.env.example`
 - `deploy/production/webapp-fi-snapshot-transport.json.example`
 - `deploy/production/webapp-ir-snapshot-transport.json.example`
@@ -275,7 +382,7 @@ Create a root-only copy of
 `deploy/production/webapp-ir-promoted-listener-2c08.env.example` outside Git.
 The local TLS directory, certificate, and key must be owned by `root`, private
 (`0700` for the directory and `0600` for both files), and generated locally on
-WA-IR.  The immutable release root must end in the exact `2c08` release SHA,
+WA-IR.  The immutable application release root must end in the exact `2c08` release SHA,
 and the configured Nginx enabled symlink must already target the dark-listener
 site that will be replaced.  The receipt directory must already exist as
 root-only `0700`.
@@ -309,11 +416,14 @@ listener gate and the route bridge with the newly written listener receipt.
 Create a root-only (`0600`) JSON copy of
 `deploy/production/webapp-ir-promotion-coordinator.json.example` outside Git.
 All referenced configs, receipts, proof directories, token files, and audit
-parents must already be root-only.  The config includes the canonical active
-snapshot pointer; the coordinator passes it to the writer watch so the selected
-candidate is bound again immediately before promotion.  It has no configurable
-script paths, SSH, or Object Storage operation, and uses only the three fixed
-scripts from the exact release directory.
+parents must already be root-only. The config also names the exact application
+SHA, the exact separate control SHA/root, and the create-only release
+provenance receipt. The coordinator refuses to run unless its own directory is
+the receipt-bound control root and that receipt binds the fixed legacy `2c08`
+application root. The canonical active snapshot pointer is passed to the writer
+watch so the selected candidate is bound again immediately before promotion.
+It has no configurable script paths, SSH, or Object Storage operation, and
+uses only the three fixed scripts from the verified control release.
 
 ```bash
 python3 scripts/run_webapp_ir_promotion_coordinator.py \

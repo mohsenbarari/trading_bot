@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Run the fixed local WA-IR promotion sequence exactly once.
 
-The coordinator has no SSH, Object Storage, or arbitrary-command interface.
-It serially invokes only the three pinned scripts from the exact 2c08 release:
+The legacy application release and the fenced control/tooling release are
+separate immutable identities.  This coordinator executes only from a staged
+control root whose create-only provenance receipt also binds the exact 2c08
+application root.  It has no SSH, Object Storage, or arbitrary-command
+interface.  It serially invokes only the three pinned local control scripts:
 the Writer Witness promotion watch, the local Nginx listener gate, and the
 route bridge with the listener receipt produced by that gate.
 """
@@ -17,18 +20,34 @@ from pathlib import Path
 import re
 import stat
 import subprocess
+import sys
 from typing import Any, Callable, Sequence
 
 
-RELEASE_SHA = "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5"
-RELEASE_ROOT = Path(f"/srv/trading-bot-three-site/releases/{RELEASE_SHA}")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.manage_webapp_ir_release_provenance import (  # noqa: E402
+    ReleaseProvenanceError,
+    load_installed_release_receipt,
+)
+
+
+APPLICATION_RELEASE_SHA = "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5"
+CONTROL_RUNTIME_ROOT = REPO_ROOT
 PYTHON = Path("/usr/bin/python3")
 SCHEMA = "gold-trade-wa-ir-promotion-coordinator-v1"
 MAX_CONFIG_BYTES = 32 * 1024
 PATH_RE = re.compile(r"^/[A-Za-z0-9._/-]+$")
+SHA_RE = re.compile(r"^[a-f0-9]{40,64}$")
 CONFIG_KEYS = frozenset(
     {
         "schema",
+        "control_release_root",
+        "control_release_sha",
+        "application_release_sha",
+        "release_provenance_receipt",
         "writer_agent_config",
         "restore_receipt",
         "active_snapshot",
@@ -51,6 +70,10 @@ CommandRunner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
 
 @dataclass(frozen=True)
 class CoordinatorConfig:
+    control_release_root: Path
+    control_release_sha: str
+    application_release_sha: str
+    release_provenance_receipt: Path
     writer_agent_config: Path
     restore_receipt: Path
     active_snapshot: Path
@@ -71,6 +94,12 @@ def _safe_path(value: object, *, label: str) -> Path:
     if not isinstance(value, str) or not PATH_RE.fullmatch(value):
         raise PromotionCoordinatorError(f"{label} must be a safe absolute path")
     return Path(value)
+
+
+def _safe_sha(value: object, *, label: str) -> str:
+    if not isinstance(value, str) or not SHA_RE.fullmatch(value):
+        raise PromotionCoordinatorError(f"{label} must be a full lowercase Git SHA")
+    return value
 
 
 def _root_owned_directory(path: Path, *, label: str, private: bool) -> Path:
@@ -206,6 +235,14 @@ def load_config(path: Path) -> CoordinatorConfig:
     if isinstance(poll_seconds, bool) or not isinstance(poll_seconds, int) or not 1 <= poll_seconds <= 30:
         raise PromotionCoordinatorError("promotion coordinator poll_seconds must be between 1 and 30")
     config = CoordinatorConfig(
+        control_release_root=_safe_path(payload["control_release_root"], label="control_release_root"),
+        control_release_sha=_safe_sha(payload["control_release_sha"], label="control_release_sha"),
+        application_release_sha=_safe_sha(
+            payload["application_release_sha"], label="application_release_sha"
+        ),
+        release_provenance_receipt=_safe_path(
+            payload["release_provenance_receipt"], label="release_provenance_receipt"
+        ),
         writer_agent_config=_safe_path(payload["writer_agent_config"], label="writer_agent_config"),
         restore_receipt=_safe_path(payload["restore_receipt"], label="restore_receipt"),
         active_snapshot=_safe_path(payload["active_snapshot"], label="active_snapshot"),
@@ -217,6 +254,7 @@ def load_config(path: Path) -> CoordinatorConfig:
         poll_seconds=poll_seconds,
     )
     for file_path, label in (
+        (config.release_provenance_receipt, "release provenance receipt"),
         (config.writer_agent_config, "writer agent config"),
         (config.restore_receipt, "snapshot restore receipt"),
         (config.active_snapshot, "active snapshot pointer"),
@@ -230,12 +268,37 @@ def load_config(path: Path) -> CoordinatorConfig:
     return config
 
 
-def _release_scripts() -> tuple[Path, Path, Path]:
-    _root_owned_directory(RELEASE_ROOT, label="exact release root", private=False)
-    if RELEASE_ROOT.name != RELEASE_SHA:
-        raise PromotionCoordinatorError("release root is not the exact 2c08 release")
+def _verified_control_release_root(config: CoordinatorConfig) -> Path:
+    if config.application_release_sha != APPLICATION_RELEASE_SHA:
+        raise PromotionCoordinatorError("application release SHA is not the fixed legacy 2c08 release")
+    root = _root_owned_directory(config.control_release_root, label="exact control release root", private=False)
+    if root.name != config.control_release_sha:
+        raise PromotionCoordinatorError("control release root is not named by its exact control SHA")
+    try:
+        runtime_root = CONTROL_RUNTIME_ROOT.resolve(strict=True)
+    except OSError as exc:
+        raise PromotionCoordinatorError("running control release root does not exist") from exc
+    if runtime_root != root:
+        raise PromotionCoordinatorError("coordinator must execute from its receipt-bound control release root")
+    try:
+        installed = load_installed_release_receipt(config.release_provenance_receipt)
+    except ReleaseProvenanceError as exc:
+        raise PromotionCoordinatorError(f"release provenance receipt is invalid: {exc}") from exc
+    application = installed["application"]
+    control = installed["control"]
+    if (
+        application["release_sha"] != config.application_release_sha
+        or control["release_sha"] != config.control_release_sha
+        or control["release_root"] != str(root)
+    ):
+        raise PromotionCoordinatorError("release provenance receipt does not bind this application/control deployment")
+    return root
+
+
+def _release_scripts(config: CoordinatorConfig) -> tuple[Path, Path, Path]:
+    control_root = _verified_control_release_root(config)
     paths = tuple(
-        RELEASE_ROOT / "scripts" / name
+        control_root / "scripts" / name
         for name in (
             "production_writer_lease_agent.py",
             "activate_webapp_ir_promoted_listener.py",
@@ -245,7 +308,7 @@ def _release_scripts() -> tuple[Path, Path, Path]:
     for path in paths:
         _read_root_file(
             path,
-            label=f"fixed in-release script {path.name}",
+            label=f"fixed in-control-release script {path.name}",
             maximum=1024 * 1024,
             private=False,
         )
@@ -339,13 +402,15 @@ def run_coordinator(
     watch_command_runner: CommandRunner | None = None,
 ) -> dict[str, Any]:
     config = load_config(config_path)
-    writer_agent, listener, router = _release_scripts()
+    writer_agent, listener, router = _release_scripts(config)
     python = _python()
     stage_runner = command_runner or _run
     watch_runner = watch_command_runner or (_run_watch if command_runner is None else stage_runner)
     status: dict[str, Any] = {
         "schema": SCHEMA,
         "status": "planned",
+        "application_release_sha": config.application_release_sha,
+        "control_release_sha": config.control_release_sha,
         "external_route_changed": False,
         "stages": {},
     }
