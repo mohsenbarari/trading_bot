@@ -161,20 +161,35 @@ created by that same failed invocation if no receipt was linked; it never
 replaces an existing root. It does not load images, start a service, change
 `current`, or contact a remote system. The preflight tooling copy of this
 helper must itself be delivered and verified before this step; it cannot be
-taken from the uninstalled control bundle.
+taken from the uninstalled control bundle. That preflight copy is used only to
+perform installation. During a successful install it creates the separate
+fixed systemd dispatcher directory exclusively and atomically publishes its
+verified file at
+`/srv/trading-bot-three-site/control-dispatcher/manage_webapp_ir_release_provenance.py`
+from the newly verified control Git root. The create-only receipt records that
+path, its SHA-256, and its control-release SHA. If the fixed dispatcher
+directory already exists, installation fails rather than overwriting it.
 
 The root-only WA-IR promotion runtime env must set both
 `RELEASE_SHA=2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5` and
 `WA_IR_APPLICATION_RELEASE_ROOT=/srv/trading-bot-three-site/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5`.
-The writer agent supplies that promotion env to Compose; the standby refresh
-env is not implicitly inherited during a promotion.
+The writer-agent config must repeat both the application root and the same
+create-only release-provenance receipt in its `release_provenance` object. The
+agent revalidates the receipt and both promotion-env values before every Docker
+Compose command; a same-named alternate directory, a missing receipt, or a
+mutated env file is a fail-closed error. The standby refresh env is not
+implicitly inherited during a promotion.
 
-The promotion units set `PYTHONDONTWRITEBYTECODE=1`, because the receipt
-revalidates each installed Git root as clean before control tooling is used.
-No script may write caches, receipts, logs, or other runtime state below either
-immutable release root. Their `ExecStartPre` runs the local
-`verify-installed` command against `WA_IR_RELEASE_PROVENANCE_RECEIPT` before
-the writer guard or promotion coordinator starts.
+Do not manually copy a systemd dispatcher. The successful provenance install
+creates the fixed, root-owned dispatcher path above from the receipt-verified
+control Git root and records its hash. Every later receipt load re-hashes that
+file. The units invoke only this fixed dispatcher. It loads the root-only
+receipt, compares the environment-selected control root and SHA to the receipt,
+and then `exec`s one fixed target from the receipt-bound root with a scrubbed
+environment. Those target invocations use Python's `-B` mode, because isolated
+mode intentionally ignores `PYTHONDONTWRITEBYTECODE`; no script may write
+caches, receipts, logs, or other runtime state below either immutable release
+root.
 
 ## Root-Only Configuration
 
@@ -183,7 +198,9 @@ Git:
 
 - `deploy/production/webapp-ir-snapshot-standby-2c08.env.example`
 - `deploy/production/webapp-ir-control-release.env.example`
+- `deploy/production/production-writer-lease-agent.webapp-ir.json.example`
 - `deploy/production/webapp-ir-promotion-coordinator.json.example`
+- `deploy/production/webapp-ir-promoted-listener-2c08.env.example`
 - `deploy/production/webapp-fi-snapshot-publisher.env.example`
 - `deploy/production/webapp-fi-snapshot-transport.json.example`
 - `deploy/production/webapp-ir-snapshot-transport.json.example`
@@ -382,10 +399,13 @@ Create a root-only copy of
 `deploy/production/webapp-ir-promoted-listener-2c08.env.example` outside Git.
 The local TLS directory, certificate, and key must be owned by `root`, private
 (`0700` for the directory and `0600` for both files), and generated locally on
-WA-IR.  The immutable application release root must end in the exact `2c08` release SHA,
-and the configured Nginx enabled symlink must already target the dark-listener
-site that will be replaced.  The receipt directory must already exist as
-root-only `0700`.
+WA-IR. The config must also name the same root-only create-only release-
+provenance receipt used by the writer agent. The listener compares the receipt
+application SHA and exact application root before it reads the Nginx template
+or changes the local site. The immutable application release root must end in
+the exact `2c08` release SHA, and the configured Nginx enabled symlink must
+already target the dark-listener site that will be replaced. The receipt
+directory must already exist as root-only `0700`.
 
 Run the gate locally on WA-IR as root:
 
@@ -417,11 +437,12 @@ Create a root-only (`0600`) JSON copy of
 `deploy/production/webapp-ir-promotion-coordinator.json.example` outside Git.
 All referenced configs, receipts, proof directories, token files, and audit
 parents must already be root-only. The config also names the exact application
-SHA, the exact separate control SHA/root, and the create-only release
+SHA/root, the exact separate control SHA/root, and the create-only release
 provenance receipt. The coordinator refuses to run unless its own directory is
-the receipt-bound control root and that receipt binds the fixed legacy `2c08`
-application root. The canonical active snapshot pointer is passed to the writer
-watch so the selected candidate is bound again immediately before promotion.
+the receipt-bound control root and that receipt binds the configured fixed
+legacy `2c08` application root. The canonical active snapshot pointer is
+passed to the writer watch so the selected candidate is bound again immediately
+before promotion.
 It has no configurable script paths, SSH, or Object Storage operation, and
 uses only the three fixed scripts from the verified control release.
 

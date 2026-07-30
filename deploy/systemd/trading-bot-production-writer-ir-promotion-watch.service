@@ -8,10 +8,10 @@ Wants=network-online.target
 Type=simple
 User=root
 EnvironmentFile=/etc/trading-bot-three-site/webapp-ir-control-release.env
-Environment=PYTHONDONTWRITEBYTECODE=1
-WorkingDirectory=${WA_IR_CONTROL_RELEASE_ROOT}
-ExecStartPre=/usr/bin/python3 ${WA_IR_CONTROL_RELEASE_ROOT}/scripts/manage_webapp_ir_release_provenance.py verify-installed --receipt ${WA_IR_RELEASE_PROVENANCE_RECEIPT}
-ExecStart=/usr/bin/python3 ${WA_IR_CONTROL_RELEASE_ROOT}/scripts/run_webapp_ir_promotion_coordinator.py --config /etc/trading-bot-three-site/webapp-ir-promotion-coordinator.json --apply --json
+WorkingDirectory=/
+# This fixed trusted dispatcher verifies the root selected by the environment
+# against the create-only receipt before it opens any code in that root.
+ExecStart=/usr/bin/python3 -I /srv/trading-bot-three-site/control-dispatcher/manage_webapp_ir_release_provenance.py exec-bound-control --receipt ${WA_IR_RELEASE_PROVENANCE_RECEIPT} --control-release-root ${WA_IR_CONTROL_RELEASE_ROOT} --control-release-sha ${WA_IR_CONTROL_RELEASE_SHA} --target promotion-coordinator --config /etc/trading-bot-three-site/webapp-ir-promotion-coordinator.json
 Restart=on-failure
 RestartSec=2s
 TimeoutStopSec=10s

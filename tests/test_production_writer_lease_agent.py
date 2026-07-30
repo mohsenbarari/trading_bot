@@ -175,6 +175,16 @@ def _runtime_binding(*, proof: dict, receipt: dict) -> dict:
 
 
 class ProductionWriterLeaseAgentTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.provenance_by_receipt: dict[Path, dict] = {}
+        patcher = mock.patch.object(
+            agent,
+            "load_installed_release_receipt",
+            side_effect=lambda path: self.provenance_by_receipt[Path(path)],
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _config(
         self,
         directory: Path,
@@ -190,8 +200,21 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
         public_key = directory / "witness.pub"
         promotion_env = directory / "promotion.env"
         config_path = directory / "agent.json"
+        provenance_receipt = directory / "release-provenance.json"
+        application_root = directory / "releases" / RELEASE_SHA
         _write_private(secret, "s" * 32)
         _write_private(public_key, base64.b64encode(b"p" * 32).decode("ascii"))
+        is_ir_writer = mode == "writer" and site == "webapp_ir"
+        if is_ir_writer:
+            application_root.mkdir(parents=True)
+            application_root.chmod(0o755)
+            _write_private(provenance_receipt, "fixture\n")
+            self.provenance_by_receipt[provenance_receipt] = {
+                "application": {
+                    "release_sha": RELEASE_SHA,
+                    "release_root": str(application_root),
+                }
+            }
         _write_private(
             promotion_env,
             "\n".join(
@@ -200,11 +223,12 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                     "WA_IR_POSTGRES_IMAGE=postgres:15-alpine",
                     "WA_IR_REDIS_IMAGE=redis:7-alpine",
                     "WA_IR_APP_IMAGE=trading-bot:2c08",
+                    f"RELEASE_SHA={RELEASE_SHA}",
+                    f"WA_IR_APPLICATION_RELEASE_ROOT={application_root}",
                     "",
                 )
             ),
         )
-        is_ir_writer = mode == "writer" and site == "webapp_ir"
         default_lease_duration = 60 if is_ir_writer else 180
         default_safety_margin = 15
         default_renew_interval = 10 if is_ir_writer else 30
@@ -251,6 +275,12 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                 ),
             },
         }
+        if is_ir_writer:
+            config["release_provenance"] = {
+                "receipt": str(provenance_receipt),
+                "application_release_sha": RELEASE_SHA,
+                "application_release_root": str(application_root),
+            }
         _write_private(config_path, json.dumps(config))
         return agent._load_config(config_path)
 
@@ -333,6 +363,46 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                     safety_margin_seconds=15,
                     renew_interval_seconds=30,
                 )
+
+    def test_ir_config_rejects_same_named_application_root_not_bound_by_receipt(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            self._config(directory, site="webapp_ir")
+            alternate = directory / "alternate-releases" / RELEASE_SHA
+            alternate.mkdir(parents=True)
+            alternate.chmod(0o755)
+            config_path = directory / "agent.json"
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+            payload["release_provenance"]["application_release_root"] = str(alternate)
+            _write_private(config_path, json.dumps(payload))
+
+            with self.assertRaisesRegex(
+                agent.ProductionWriterLeaseAgentError,
+                "does not bind this application release root",
+            ):
+                agent._load_config(config_path)
+
+    def test_ir_compose_rechecks_mutated_application_env_before_docker(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            config = self._config(directory, site="webapp_ir")
+            alternate = directory / "alternate-releases" / RELEASE_SHA
+            alternate.mkdir(parents=True)
+            alternate.chmod(0o755)
+            promotion_env = directory / "promotion.env"
+            values = promotion_env.read_text(encoding="utf-8").replace(
+                f"WA_IR_APPLICATION_RELEASE_ROOT={directory / 'releases' / RELEASE_SHA}",
+                f"WA_IR_APPLICATION_RELEASE_ROOT={alternate}",
+            )
+            _write_private(promotion_env, values)
+            with mock.patch.object(agent.subprocess, "run") as run:
+                with self.assertRaisesRegex(
+                    agent.ProductionWriterLeaseAgentError,
+                    "does not bind the receipt application release",
+                ):
+                    agent._compose(config, action="start")
+
+            run.assert_not_called()
 
     def test_bootstrap_writes_lease_and_starts_only_scoped_services(self):
         with tempfile.TemporaryDirectory() as raw:

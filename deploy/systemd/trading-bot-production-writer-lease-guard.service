@@ -7,10 +7,10 @@ Wants=network-online.target
 Type=simple
 User=root
 EnvironmentFile=/etc/trading-bot-three-site/webapp-ir-control-release.env
-Environment=PYTHONDONTWRITEBYTECODE=1
-WorkingDirectory=${WA_IR_CONTROL_RELEASE_ROOT}
-ExecStartPre=/usr/bin/python3 ${WA_IR_CONTROL_RELEASE_ROOT}/scripts/manage_webapp_ir_release_provenance.py verify-installed --receipt ${WA_IR_RELEASE_PROVENANCE_RECEIPT}
-ExecStart=/usr/bin/python3 ${WA_IR_CONTROL_RELEASE_ROOT}/scripts/production_writer_lease_agent.py --config /etc/trading-bot-three-site/production-writer-lease-agent.json guard
+WorkingDirectory=/
+# This fixed trusted dispatcher verifies the root selected by the environment
+# against the create-only receipt before it opens any code in that root.
+ExecStart=/usr/bin/python3 -I /srv/trading-bot-three-site/control-dispatcher/manage_webapp_ir_release_provenance.py exec-bound-control --receipt ${WA_IR_RELEASE_PROVENANCE_RECEIPT} --control-release-root ${WA_IR_CONTROL_RELEASE_ROOT} --control-release-sha ${WA_IR_CONTROL_RELEASE_SHA} --target lease-guard --config /etc/trading-bot-three-site/production-writer-lease-agent.json
 Restart=always
 RestartSec=2s
 TimeoutStopSec=10s

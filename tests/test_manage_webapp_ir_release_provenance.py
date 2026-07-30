@@ -80,6 +80,8 @@ class ReleaseProvenanceTests(unittest.TestCase):
         self.preparation_parent = self.root / "prepared-application"
         self.output_parent = self.root / "prepared-control"
         self.receipt_parent = self.root / "receipts"
+        self.dispatcher_directory = self.root / "fixed-control-dispatcher"
+        self.dispatcher_path = self.dispatcher_directory / "manage_webapp_ir_release_provenance.py"
         for directory, mode in (
             (self.application_parent, 0o755),
             (self.control_parent, 0o755),
@@ -99,6 +101,13 @@ class ReleaseProvenanceTests(unittest.TestCase):
             filename="control.txt",
             content="fenced control tooling source\n",
         )
+        dispatcher_source = self.control_repository / MODULE.CONTROL_DISPATCHER_SOURCE
+        dispatcher_source.parent.mkdir()
+        dispatcher_source.write_text("# verified control dispatcher fixture\n", encoding="utf-8")
+        git(self.control_repository, "add", str(MODULE.CONTROL_DISPATCHER_SOURCE))
+        git(self.control_repository, "commit", "--quiet", "-m", "add dispatcher")
+        self.control_sha = git(self.control_repository, "rev-parse", "HEAD")
+        self.control_tree = git(self.control_repository, "rev-parse", "HEAD^{tree}")
         self.app_image_id = "sha256:" + "a" * 64
         self.app_repo_digest = "trading_bot_base_iran@sha256:" + "b" * 64
 
@@ -107,6 +116,8 @@ class ReleaseProvenanceTests(unittest.TestCase):
             MODULE,
             APPLICATION_RELEASE_PARENT=self.application_parent,
             CONTROL_RELEASE_PARENT=self.control_parent,
+            CONTROL_DISPATCHER_DIRECTORY=self.dispatcher_directory,
+            TRUSTED_DISPATCHER_PATH=self.dispatcher_path,
             LEGACY_APPLICATION_RELEASE_SHA=self.application_sha,
         )
 
@@ -366,6 +377,13 @@ class ReleaseProvenanceTests(unittest.TestCase):
         self.assertNotEqual(application_root, control_root)
         self.assertEqual(result["application"]["release_root"], str(application_root))
         self.assertEqual(result["control"]["release_root"], str(control_root))
+        self.assertEqual(result["dispatcher"]["path"], str(self.dispatcher_path))
+        self.assertEqual(result["dispatcher"]["control_release_sha"], self.control_sha)
+        self.assertTrue(self.dispatcher_path.is_file())
+        self.assertEqual(
+            self.dispatcher_path.read_bytes(),
+            (control_root / MODULE.CONTROL_DISPATCHER_SOURCE).read_bytes(),
+        )
         self.assertEqual(result["runtime_images"]["app_image_id"], self.app_image_id)
         self.assertEqual(result["runtime_images"]["app_repo_digest"], self.app_repo_digest)
         self.assertEqual(stat.S_IMODE(receipt_path.stat().st_mode), 0o600)
@@ -373,6 +391,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
             installed = MODULE.load_installed_release_receipt(receipt_path)
         self.assertEqual(installed["application"]["release_sha"], self.application_sha)
         self.assertEqual(installed["control"]["release_sha"], self.control_sha)
+        self.assertEqual(installed["dispatcher"]["sha256"], result["dispatcher"]["sha256"])
 
     def test_install_rejects_an_arbitrary_non_git_application_bundle_without_creating_roots(self) -> None:
         prepared = self.build()
@@ -415,6 +434,23 @@ class ReleaseProvenanceTests(unittest.TestCase):
 
         self.assertFalse((self.application_parent / self.application_sha).exists())
         self.assertFalse((self.control_parent / self.control_sha).exists())
+
+    def test_install_refuses_a_preexisting_fixed_dispatcher_without_touching_roots(self) -> None:
+        prepared = self.build()
+        stage_receipt = self.make_candidate(prepared)
+        self.dispatcher_directory.mkdir()
+        self.dispatcher_directory.chmod(0o755)
+        self.dispatcher_path.write_text("untrusted preexisting dispatcher\n", encoding="utf-8")
+        with self.patched_contract():
+            with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "dispatcher directory must not already exist"):
+                MODULE.install_release_roots(
+                    stage_receipt_path=stage_receipt,
+                    receipt_path=self.receipt_parent / "release-roots.json",
+                )
+
+        self.assertFalse((self.application_parent / self.application_sha).exists())
+        self.assertFalse((self.control_parent / self.control_sha).exists())
+        self.assertEqual(self.dispatcher_path.read_text(encoding="utf-8"), "untrusted preexisting dispatcher\n")
 
     def test_build_rejects_a_non_git_control_source_without_creating_an_output(self) -> None:
         preparation = self.make_application_preparation()
@@ -469,7 +505,19 @@ class ReleaseProvenanceTests(unittest.TestCase):
                 MODULE.install_release_roots(stage_receipt_path=stage_receipt, receipt_path=receipt_path)
         self.assertFalse((self.application_parent / self.application_sha).exists())
         self.assertFalse((self.control_parent / self.control_sha).exists())
+        self.assertFalse(self.dispatcher_directory.exists())
         self.assertFalse(receipt_path.exists())
+
+    def test_receipt_load_rejects_a_mutated_fixed_dispatcher(self) -> None:
+        prepared = self.build()
+        stage_receipt = self.make_candidate(prepared)
+        receipt_path = self.receipt_parent / "release-roots.json"
+        with self.patched_contract():
+            MODULE.install_release_roots(stage_receipt_path=stage_receipt, receipt_path=receipt_path)
+        self.dispatcher_path.write_text("tampered dispatcher\n", encoding="utf-8")
+        with self.patched_contract():
+            with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "dispatcher hash does not match"):
+                MODULE.load_installed_release_receipt(receipt_path)
 
     def test_receipt_load_rejects_a_mutated_installed_git_root(self) -> None:
         prepared = self.build()
@@ -495,6 +543,104 @@ class ReleaseProvenanceTests(unittest.TestCase):
         application_root = self.application_parent / self.application_sha
         self.assertEqual(stat.S_IMODE(application_root.stat().st_mode), 0o755)
         self.assertEqual(stat.S_IMODE((application_root / "application.txt").stat().st_mode), 0o644)
+
+    def test_fixed_dispatcher_rejects_a_stale_env_root_before_opening_target_code(self) -> None:
+        receipt = self.receipt_parent / "release-roots.json"
+        config = self.receipt_parent / "writer.json"
+        write_private(receipt, b"fixture\n")
+        write_private(config, b"{}\n")
+        bound_root = self.control_parent / self.control_sha
+        stale_root = self.root / "stale-control" / self.control_sha
+        for root in (bound_root, stale_root):
+            (root / "scripts").mkdir(parents=True)
+            root.chmod(0o755)
+            (root / "scripts").chmod(0o755)
+            (root / "scripts" / "production_writer_lease_agent.py").write_text(
+                "# fixture\n", encoding="utf-8"
+            )
+        installed = {
+            "application": {
+                "release_sha": self.application_sha,
+                "release_root": str(self.application_parent / self.application_sha),
+            },
+            "control": {
+                "release_sha": self.control_sha,
+                "release_root": str(bound_root),
+            },
+        }
+        with (
+            mock.patch.object(MODULE, "TRUSTED_DISPATCHER_PATH", SCRIPT.resolve()),
+            mock.patch.object(MODULE, "load_installed_release_receipt", return_value=installed),
+            mock.patch.object(MODULE.os, "execve") as execve,
+        ):
+            with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "does not bind the expected control release root"):
+                MODULE.exec_receipt_bound_control(
+                    receipt_path=receipt,
+                    control_release_root=stale_root,
+                    control_release_sha=self.control_sha,
+                    target="lease-guard",
+                    config_path=config,
+                )
+
+        execve.assert_not_called()
+
+    def test_fixed_dispatcher_execs_only_a_receipt_bound_fixed_target(self) -> None:
+        receipt = self.receipt_parent / "release-roots.json"
+        config = self.receipt_parent / "writer.json"
+        write_private(receipt, b"fixture\n")
+        write_private(config, b"{}\n")
+        bound_root = self.control_parent / self.control_sha
+        script = bound_root / "scripts" / "production_writer_lease_agent.py"
+        script.parent.mkdir(parents=True)
+        bound_root.chmod(0o755)
+        script.parent.chmod(0o755)
+        script.write_text("# fixture\n", encoding="utf-8")
+        installed = {
+            "application": {
+                "release_sha": self.application_sha,
+                "release_root": str(self.application_parent / self.application_sha),
+            },
+            "control": {
+                "release_sha": self.control_sha,
+                "release_root": str(bound_root),
+            },
+        }
+        with (
+            mock.patch.object(MODULE, "TRUSTED_DISPATCHER_PATH", SCRIPT.resolve()),
+            mock.patch.object(MODULE, "load_installed_release_receipt", return_value=installed),
+            mock.patch.object(MODULE.os, "execve", side_effect=OSError("fixture")) as execve,
+        ):
+            with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "cannot exec receipt-bound control target"):
+                MODULE.exec_receipt_bound_control(
+                    receipt_path=receipt,
+                    control_release_root=bound_root,
+                    control_release_sha=self.control_sha,
+                    target="lease-guard",
+                    config_path=config,
+                )
+
+        command = execve.call_args.args[1]
+        self.assertEqual(
+            command,
+            [
+                str(MODULE.PYTHON_BINARY.resolve()),
+                "-I",
+                "-B",
+                str(script),
+                "--config",
+                str(config),
+                "guard",
+            ],
+        )
+        self.assertEqual(
+            execve.call_args.args[2],
+            {
+                "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "LANG": "C",
+                "LC_ALL": "C",
+                "TZ": "UTC",
+            },
+        )
 
     def test_implementation_has_no_current_s3_docker_or_remote_control_path(self) -> None:
         source = SCRIPT.read_text(encoding="utf-8")

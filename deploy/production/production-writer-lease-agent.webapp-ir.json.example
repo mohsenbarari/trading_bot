@@ -3,6 +3,11 @@
   "mode": "writer",
   "site": "webapp_ir",
   "lease_file": "/var/lib/trading-bot-three-site/writer-lease.json",
+  "release_provenance": {
+    "receipt": "/var/lib/trading-bot-three-site/release-provenance/REPLACE_WITH_UNIQUE_BUNDLE_ID.json",
+    "application_release_sha": "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5",
+    "application_release_root": "/srv/trading-bot-three-site/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5"
+  },
   "runtime": {
     "compose_file": "/srv/trading-bot-three-site/control-releases/REPLACE_WITH_EXACT_CONTROL_GIT_SHA/deploy/production/docker-compose.webapp-ir-promoted-2c08.yml",
     "env_file": "/root/secure-envs/trading-bot/wa-ir-promotion.env",

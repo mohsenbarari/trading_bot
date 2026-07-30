@@ -44,9 +44,26 @@ CONTROL_BUNDLE_ARTIFACT = "control-release-bundle"
 PROVENANCE_ARTIFACT = "release-provenance"
 APPLICATION_RELEASE_PARENT = Path("/srv/trading-bot-three-site/releases")
 CONTROL_RELEASE_PARENT = Path("/srv/trading-bot-three-site/control-releases")
+CONTROL_DISPATCHER_DIRECTORY = Path("/srv/trading-bot-three-site/control-dispatcher")
+TRUSTED_DISPATCHER_PATH = CONTROL_DISPATCHER_DIRECTORY / "manage_webapp_ir_release_provenance.py"
+CONTROL_DISPATCHER_SOURCE = Path("scripts/manage_webapp_ir_release_provenance.py")
 STAGE_SOURCE_SITE = "webapp_fi"
 STAGE_DESTINATION_SITE = "webapp_ir"
 GIT_BINARY = Path("/usr/bin/git")
+PYTHON_BINARY = Path("/usr/bin/python3")
+# systemd must start this command from the fixed dispatcher path installed by
+# ``install`` from an already verified control Git root, never from an
+# environment-selected control release.
+CONTROL_DISPATCH_TARGETS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "lease-guard": (
+        "scripts/production_writer_lease_agent.py",
+        ("guard",),
+    ),
+    "promotion-coordinator": (
+        "scripts/run_webapp_ir_promotion_coordinator.py",
+        ("--apply", "--json"),
+    ),
+}
 # Keep the same upper bounds accepted by the local preparation primitive.  A
 # later stage consumer can impose a lower deployment-specific capacity limit,
 # but this verifier must not reinterpret a valid prepared receipt solely due to
@@ -78,6 +95,15 @@ class ReleaseIdentity:
     bundle_artifact: str
     bundle_sha256: str
     release_root: Path
+
+
+@dataclass(frozen=True)
+class InstalledDispatcher:
+    path: Path
+    sha256: str
+    control_release_sha: str
+    directory_device: int
+    directory_inode: int
 
 
 @dataclass(frozen=True)
@@ -1145,7 +1171,160 @@ def build_control_artifacts(
     }
 
 
-def _install_receipt(stage: StageReceipt, provenance: Provenance, *, now: dt.datetime) -> dict[str, Any]:
+def _remove_new_dispatcher(dispatcher: InstalledDispatcher) -> None:
+    """Remove only the dispatcher directory created by this failed install."""
+
+    directory = dispatcher.path.parent
+    try:
+        metadata = directory.lstat()
+    except OSError:
+        return
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_dev != dispatcher.directory_device
+        or metadata.st_ino != dispatcher.directory_inode
+    ):
+        return
+    try:
+        entries = {entry.name: entry for entry in directory.iterdir()}
+    except OSError:
+        return
+    if entries:
+        if set(entries) != {dispatcher.path.name}:
+            return
+        try:
+            actual_sha, _ = sha256_file(dispatcher.path)
+        except ReleaseProvenanceError:
+            return
+        if actual_sha != dispatcher.sha256:
+            return
+    try:
+        if entries:
+            dispatcher.path.unlink()
+        directory.rmdir()
+        parent_descriptor = os.open(
+            directory.parent,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0),
+        )
+        try:
+            os.fsync(parent_descriptor)
+        finally:
+            os.close(parent_descriptor)
+    except OSError:
+        return
+
+
+def _install_fixed_dispatcher(control: ReleaseIdentity) -> InstalledDispatcher:
+    """Atomically create the one fixed dispatcher from verified control code."""
+
+    if TRUSTED_DISPATCHER_PATH.parent != CONTROL_DISPATCHER_DIRECTORY:
+        raise ReleaseProvenanceError("fixed control dispatcher path is invalid")
+    _require_directory(
+        CONTROL_DISPATCHER_DIRECTORY.parent,
+        field="fixed control dispatcher parent",
+        private=False,
+    )
+    if CONTROL_DISPATCHER_DIRECTORY.exists() or CONTROL_DISPATCHER_DIRECTORY.is_symlink():
+        raise ReleaseProvenanceError("fixed control dispatcher directory must not already exist")
+    source = control.release_root / CONTROL_DISPATCHER_SOURCE
+    source_payload = _secure_read(
+        source,
+        field="verified control dispatcher source",
+        private=False,
+        maximum=4 * 1024 * 1024,
+    )
+    source_sha256 = sha256_bytes(source_payload)
+    temporary: Path | None = None
+    installed: InstalledDispatcher | None = None
+    try:
+        CONTROL_DISPATCHER_DIRECTORY.mkdir(mode=0o755)
+        parent_descriptor = os.open(
+            CONTROL_DISPATCHER_DIRECTORY.parent,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0),
+        )
+        try:
+            os.fsync(parent_descriptor)
+        finally:
+            os.close(parent_descriptor)
+        directory = _require_directory(
+            CONTROL_DISPATCHER_DIRECTORY,
+            field="fixed control dispatcher directory",
+            private=False,
+        )
+        directory_metadata = directory.stat()
+        temporary = directory / ("." + TRUSTED_DISPATCHER_PATH.name + ".tmp-" + os.urandom(8).hex())
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o644,
+        )
+        try:
+            offset = 0
+            while offset < len(source_payload):
+                written = os.write(descriptor, source_payload[offset:])
+                if written <= 0:
+                    raise OSError("short dispatcher write")
+                offset += written
+            os.fchmod(descriptor, 0o644)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        # ``link`` is create-only: unlike rename it can never replace a
+        # pre-existing dispatcher path.
+        os.link(temporary, TRUSTED_DISPATCHER_PATH, follow_symlinks=False)
+        temporary.unlink()
+        temporary = None
+        directory_descriptor = os.open(
+            directory,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0),
+        )
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+        actual_sha256, _ = sha256_file(TRUSTED_DISPATCHER_PATH)
+        if actual_sha256 != source_sha256:
+            raise ReleaseProvenanceError("fixed control dispatcher hash does not match verified control source")
+        installed = InstalledDispatcher(
+            path=TRUSTED_DISPATCHER_PATH,
+            sha256=source_sha256,
+            control_release_sha=control.release_sha,
+            directory_device=directory_metadata.st_dev,
+            directory_inode=directory_metadata.st_ino,
+        )
+        return installed
+    except (OSError, ReleaseProvenanceError) as exc:
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except OSError:
+                pass
+        if installed is None:
+            try:
+                directory_metadata = CONTROL_DISPATCHER_DIRECTORY.lstat()
+            except OSError:
+                directory_metadata = None
+            if directory_metadata is not None and stat.S_ISDIR(directory_metadata.st_mode):
+                provisional = InstalledDispatcher(
+                    path=TRUSTED_DISPATCHER_PATH,
+                    sha256=source_sha256,
+                    control_release_sha=control.release_sha,
+                    directory_device=directory_metadata.st_dev,
+                    directory_inode=directory_metadata.st_ino,
+                )
+                _remove_new_dispatcher(provisional)
+        if isinstance(exc, ReleaseProvenanceError):
+            raise
+        raise ReleaseProvenanceError("cannot create fixed control dispatcher") from exc
+
+
+def _install_receipt(
+    stage: StageReceipt,
+    provenance: Provenance,
+    dispatcher: InstalledDispatcher,
+    *,
+    now: dt.datetime,
+) -> dict[str, Any]:
     timestamp = now.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z")
     return {
         "schema": INSTALL_RECEIPT_SCHEMA,
@@ -1170,6 +1349,11 @@ def _install_receipt(stage: StageReceipt, provenance: Provenance, *, now: dt.dat
             "release_root": str(provenance.control.release_root),
             "bundle_sha256": stage.artifacts[CONTROL_BUNDLE_ARTIFACT].sha256,
         },
+        "dispatcher": {
+            "path": str(dispatcher.path),
+            "sha256": dispatcher.sha256,
+            "control_release_sha": dispatcher.control_release_sha,
+        },
         "runtime_images": {
             "image_bundle_sha256": provenance.runtime_images.image_bundle_sha256,
             "image_manifest_sha256": provenance.runtime_images.image_manifest_sha256,
@@ -1190,6 +1374,7 @@ def install_release_roots(*, stage_receipt_path: Path, receipt_path: Path, now: 
         raise ReleaseProvenanceError("refusing to overwrite a release provenance receipt")
     application_installed = False
     control_installed = False
+    dispatcher: InstalledDispatcher | None = None
     try:
         # Creating the final root with mkdir is exclusive.  It avoids an
         # overwrite-capable rename race while the receipt remains the sole
@@ -1206,7 +1391,13 @@ def install_release_roots(*, stage_receipt_path: Path, receipt_path: Path, now: 
             provenance.control.release_root,
         )
         control_installed = True
-        payload = _install_receipt(stage, provenance, now=now or dt.datetime.now(dt.timezone.utc))
+        dispatcher = _install_fixed_dispatcher(provenance.control)
+        payload = _install_receipt(
+            stage,
+            provenance,
+            dispatcher,
+            now=now or dt.datetime.now(dt.timezone.utc),
+        )
         _create_only_json(receipt_path, payload)
         return payload
     except Exception:
@@ -1214,6 +1405,8 @@ def install_release_roots(*, stage_receipt_path: Path, receipt_path: Path, now: 
         # only if no receipt was linked.  A linked receipt is authoritative
         # even if a subsequent directory fsync reported an error.
         if not receipt_path.exists():
+            if dispatcher is not None:
+                _remove_new_dispatcher(dispatcher)
             if control_installed:
                 shutil.rmtree(provenance.control.release_root, ignore_errors=True)
             if application_installed:
@@ -1248,9 +1441,47 @@ def _installed_identity(value: object, *, role: str, parent: Path) -> dict[str, 
     }
 
 
+def _installed_dispatcher(value: object, *, control: Mapping[str, str]) -> dict[str, str]:
+    if not isinstance(value, Mapping):
+        raise ReleaseProvenanceError("installed fixed control dispatcher must be an object")
+    _fields(
+        value,
+        expected={"path", "sha256", "control_release_sha"},
+        field="installed fixed control dispatcher",
+    )
+    path = _safe_path(value.get("path"), field="installed fixed control dispatcher path")
+    if path != TRUSTED_DISPATCHER_PATH:
+        raise ReleaseProvenanceError("installed fixed control dispatcher path is not pinned")
+    sha256 = _require_sha256(value.get("sha256"), field="installed fixed control dispatcher sha256")
+    control_release_sha = _require_sha(
+        value.get("control_release_sha"),
+        field="installed fixed control dispatcher control_release_sha",
+    )
+    if control_release_sha != control["release_sha"]:
+        raise ReleaseProvenanceError("installed fixed control dispatcher is not bound to the control release")
+    _require_file(
+        path,
+        field="installed fixed control dispatcher",
+        private=False,
+        maximum=4 * 1024 * 1024,
+    )
+    actual_sha256, _ = sha256_file(path)
+    if actual_sha256 != sha256:
+        raise ReleaseProvenanceError("installed fixed control dispatcher hash does not match its receipt")
+    return {
+        "path": str(path),
+        "sha256": sha256,
+        "control_release_sha": control_release_sha,
+    }
+
+
 def load_installed_release_receipt(path: Path) -> dict[str, Any]:
     value = _read_private_json(path, field="installed release provenance receipt")
-    _fields(value, expected={"schema", "status", "installed_at", "stage", "application", "control", "runtime_images"}, field="installed release provenance receipt")
+    _fields(
+        value,
+        expected={"schema", "status", "installed_at", "stage", "application", "control", "dispatcher", "runtime_images"},
+        field="installed release provenance receipt",
+    )
     if value.get("schema") != INSTALL_RECEIPT_SCHEMA or value.get("status") != "installed":
         raise ReleaseProvenanceError("installed release provenance receipt schema or status is unsupported")
     installed_at = value.get("installed_at")
@@ -1277,10 +1508,12 @@ def load_installed_release_receipt(path: Path) -> dict[str, Any]:
     ):
         raise ReleaseProvenanceError("installed release provenance stage is invalid")
     _require_sha256(stage.get("receipt_sha256"), field="installed stage receipt_sha256")
+    dispatcher = _installed_dispatcher(value.get("dispatcher"), control=control)
     images = _runtime_contract(value.get("runtime_images"))
     return {
         "application": application,
         "control": control,
+        "dispatcher": dispatcher,
         "runtime_images": {
             "app_image_id": images.app_image_id,
             "app_repo_digest": images.app_repo_digest,
@@ -1288,6 +1521,131 @@ def load_installed_release_receipt(path: Path) -> dict[str, Any]:
             "image_manifest_sha256": images.image_manifest_sha256,
         },
     }
+
+
+def verify_installed_runtime_binding(
+    receipt_path: Path,
+    *,
+    control_release_root: Path | None = None,
+    control_release_sha: str | None = None,
+    application_release_root: Path | None = None,
+    application_release_sha: str | None = None,
+) -> dict[str, Any]:
+    """Revalidate a receipt and bind explicitly supplied runtime identities.
+
+    The receipt is the only authority for both immutable roots.  Callers may
+    supply values from a root-only config or systemd environment, but those
+    values never select a root on their own: they must exactly equal the
+    already verified receipt identity.
+    """
+
+    installed = load_installed_release_receipt(receipt_path)
+    checks = (
+        ("control", "release_root", control_release_root, "expected control release root"),
+        ("control", "release_sha", control_release_sha, "expected control release SHA"),
+        ("application", "release_root", application_release_root, "expected application release root"),
+        ("application", "release_sha", application_release_sha, "expected application release SHA"),
+    )
+    for role, field, expected, label in checks:
+        if expected is None:
+            continue
+        if field == "release_root":
+            value = str(_safe_path(str(expected), field=label))
+        else:
+            value = _require_sha(expected, field=label)
+        if installed[role][field] != value:
+            raise ReleaseProvenanceError(f"installed receipt does not bind the {label}")
+    return installed
+
+
+def _trusted_dispatcher() -> Path:
+    try:
+        actual = Path(__file__).resolve(strict=True)
+    except OSError as exc:
+        raise ReleaseProvenanceError("cannot resolve trusted control dispatcher") from exc
+    if actual != TRUSTED_DISPATCHER_PATH:
+        raise ReleaseProvenanceError("receipt-bound control dispatcher must run from the fixed dispatcher path")
+    return _require_file(
+        TRUSTED_DISPATCHER_PATH,
+        field="trusted control dispatcher",
+        private=False,
+        maximum=4 * 1024 * 1024,
+    )
+
+
+def _fixed_python() -> Path:
+    try:
+        python = PYTHON_BINARY.resolve(strict=True)
+    except OSError as exc:
+        raise ReleaseProvenanceError("cannot resolve fixed Python interpreter") from exc
+    python = _require_file(
+        python,
+        field="fixed Python interpreter",
+        private=False,
+        maximum=100 * 1024 * 1024,
+    )
+    if not os.access(python, os.X_OK):
+        raise ReleaseProvenanceError("fixed Python interpreter is not executable")
+    return python
+
+
+def exec_receipt_bound_control(
+    *,
+    receipt_path: Path,
+    control_release_root: Path,
+    control_release_sha: str,
+    target: str,
+    config_path: Path,
+) -> None:
+    """Exec only a fixed target from the receipt-bound immutable control root.
+
+    This is intentionally invoked through the fixed dispatcher installed by
+    the trusted preflight helper. It validates the root selected by the
+    root-only systemd environment before opening any target code below that
+    root, then replaces itself with a fixed Python invocation and a scrubbed
+    environment.
+    """
+
+    _trusted_dispatcher()
+    root = _safe_path(str(control_release_root), field="expected control release root")
+    sha = _require_sha(control_release_sha, field="expected control release SHA")
+    config = _safe_path(str(config_path), field="fixed control target config")
+    _require_file(config, field="fixed control target config", private=True, maximum=MAX_JSON_BYTES)
+    verify_installed_runtime_binding(
+        receipt_path,
+        control_release_root=root,
+        control_release_sha=sha,
+    )
+    if target not in CONTROL_DISPATCH_TARGETS:
+        raise ReleaseProvenanceError("control dispatcher target is not allowed")
+    relative_script, fixed_arguments = CONTROL_DISPATCH_TARGETS[target]
+    script = root / relative_script
+    _require_file(
+        script,
+        field="receipt-bound control target",
+        private=False,
+        maximum=4 * 1024 * 1024,
+    )
+    command = [
+        str(_fixed_python()),
+        "-I",
+        "-B",
+        str(script),
+        "--config",
+        str(config),
+        *fixed_arguments,
+    ]
+    environment = {
+        "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "LANG": "C",
+        "LC_ALL": "C",
+        "TZ": "UTC",
+    }
+    try:
+        os.execve(str(_fixed_python()), command, environment)
+    except OSError as exc:
+        raise ReleaseProvenanceError("cannot exec receipt-bound control target") from exc
+    raise ReleaseProvenanceError("receipt-bound control target unexpectedly returned")
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -1305,6 +1663,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     install.add_argument("--receipt", type=Path, required=True)
     verify = commands.add_parser("verify-installed", help="revalidate the create-only receipt and immutable Git roots")
     verify.add_argument("--receipt", type=Path, required=True)
+    dispatch = commands.add_parser(
+        "exec-bound-control",
+        help="from the fixed trusted tooling path, exec one receipt-bound WA-IR control target",
+    )
+    dispatch.add_argument("--receipt", type=Path, required=True)
+    dispatch.add_argument("--control-release-root", type=Path, required=True)
+    dispatch.add_argument("--control-release-sha", required=True)
+    dispatch.add_argument("--target", choices=sorted(CONTROL_DISPATCH_TARGETS), required=True)
+    dispatch.add_argument("--config", type=Path, required=True)
     return parser.parse_args(argv)
 
 
@@ -1325,6 +1692,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = install_release_roots(stage_receipt_path=args.stage_receipt, receipt_path=args.receipt)
         elif args.command == "verify-installed":
             result = load_installed_release_receipt(args.receipt)
+        elif args.command == "exec-bound-control":
+            exec_receipt_bound_control(
+                receipt_path=args.receipt,
+                control_release_root=args.control_release_root,
+                control_release_sha=args.control_release_sha,
+                target=args.target,
+                config_path=args.config,
+            )
+            raise ReleaseProvenanceError("receipt-bound control target unexpectedly returned")
         else:  # pragma: no cover - argparse keeps this unreachable.
             raise ReleaseProvenanceError("unsupported command")
     except ReleaseProvenanceError as exc:

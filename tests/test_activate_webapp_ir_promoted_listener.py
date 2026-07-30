@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +40,16 @@ class FakeNginx:
 
 
 class WebappIrPromotedListenerActivationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.provenance_by_receipt: dict[Path, dict] = {}
+        patcher = mock.patch.object(
+            MODULE,
+            "load_installed_release_receipt",
+            side_effect=lambda path: self.provenance_by_receipt[Path(path)],
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def make_fixture(self) -> dict[str, Path]:
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -74,6 +85,15 @@ class WebappIrPromotedListenerActivationTests(unittest.TestCase):
         receipts = root / "receipts"
         receipts.mkdir()
         receipts.chmod(0o700)
+        provenance_receipt = receipts / "release-provenance.json"
+        write_file(provenance_receipt, "fixture\n", 0o600)
+        self.provenance_by_receipt[provenance_receipt] = {
+            "application": {
+                "release_sha": MODULE.RELEASE_SHA,
+                "release_root": str(release),
+            },
+            "control": {"release_root": str(MODULE.REPO_ROOT.resolve())},
+        }
 
         binary = root / "bin" / "nginx"
         write_file(binary, "#!/bin/false\n", 0o700)
@@ -81,6 +101,7 @@ class WebappIrPromotedListenerActivationTests(unittest.TestCase):
         values = {
             "WA_IR_LISTENER_SERVER_NAME": MODULE.SERVER_NAME,
             "WA_IR_LISTENER_APPLICATION_RELEASE_ROOT": str(release),
+            "WA_IR_LISTENER_RELEASE_PROVENANCE_RECEIPT": str(provenance_receipt),
             "WA_IR_LISTENER_TLS_ROOT": str(tls),
             "WA_IR_LISTENER_CERTIFICATE_PATH": str(certificate),
             "WA_IR_LISTENER_CERTIFICATE_KEY_PATH": str(key),
@@ -98,6 +119,7 @@ class WebappIrPromotedListenerActivationTests(unittest.TestCase):
             "site": site,
             "enabled": enabled,
             "receipts": receipts,
+            "provenance_receipt": provenance_receipt,
             "config": config,
             "binary": binary,
             "template": ROOT / "deploy/production/nginx-webapp-ir-promoted-2c08-https.conf.template",
@@ -227,6 +249,34 @@ class WebappIrPromotedListenerActivationTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(MODULE.ListenerActivationError, "unexpected FI_TLS_PRIVATE_KEY"):
             MODULE.load_listener_config(fixture["config"])
+
+    def test_rejects_same_named_application_root_not_bound_by_receipt_before_nginx(self) -> None:
+        fixture = self.make_fixture()
+        alternate = fixture["root"] / "alternate-releases" / MODULE.RELEASE_SHA
+        alternate_static = alternate / "mini_app_dist"
+        alternate_static.mkdir(parents=True)
+        alternate.chmod(0o755)
+        alternate_static.chmod(0o755)
+        write_file(alternate_static / "index.html", "<!doctype html>\n", 0o644)
+        self.rewrite_config(
+            fixture,
+            WA_IR_LISTENER_APPLICATION_RELEASE_ROOT=str(alternate),
+        )
+        fake = FakeNginx()
+
+        with self.assertRaisesRegex(
+            MODULE.ListenerActivationError,
+            "does not bind this application release root",
+        ):
+            MODULE.activate_listener(
+                config_path=fixture["config"],
+                template_path=fixture["template"],
+                nginx_binary=fixture["binary"],
+                apply=True,
+                command_runner=fake,
+            )
+
+        self.assertEqual(fake.calls, [])
 
     def test_rejects_unsafe_template_without_running_nginx(self) -> None:
         fixture = self.make_fixture()

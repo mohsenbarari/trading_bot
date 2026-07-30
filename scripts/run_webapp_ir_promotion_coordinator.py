@@ -47,6 +47,7 @@ CONFIG_KEYS = frozenset(
         "control_release_root",
         "control_release_sha",
         "application_release_sha",
+        "application_release_root",
         "release_provenance_receipt",
         "writer_agent_config",
         "restore_receipt",
@@ -73,6 +74,7 @@ class CoordinatorConfig:
     control_release_root: Path
     control_release_sha: str
     application_release_sha: str
+    application_release_root: Path
     release_provenance_receipt: Path
     writer_agent_config: Path
     restore_receipt: Path
@@ -240,6 +242,9 @@ def load_config(path: Path) -> CoordinatorConfig:
         application_release_sha=_safe_sha(
             payload["application_release_sha"], label="application_release_sha"
         ),
+        application_release_root=_safe_path(
+            payload["application_release_root"], label="application_release_root"
+        ),
         release_provenance_receipt=_safe_path(
             payload["release_provenance_receipt"], label="release_provenance_receipt"
         ),
@@ -288,6 +293,7 @@ def _verified_control_release_root(config: CoordinatorConfig) -> Path:
     control = installed["control"]
     if (
         application["release_sha"] != config.application_release_sha
+        or application["release_root"] != str(config.application_release_root)
         or control["release_sha"] != config.control_release_sha
         or control["release_root"] != str(root)
     ):
@@ -421,6 +427,8 @@ def run_coordinator(
         watch_runner,
         (
             str(python),
+            "-I",
+            "-B",
             str(writer_agent),
             "--config",
             str(config.writer_agent_config),
@@ -442,7 +450,16 @@ def run_coordinator(
 
     listener_result = _run_stage(
         stage_runner,
-        (str(python), str(listener), "--config", str(config.listener_config), "--apply", "--json"),
+        (
+            str(python),
+            "-I",
+            "-B",
+            str(listener),
+            "--config",
+            str(config.listener_config),
+            "--apply",
+            "--json",
+        ),
         stage="listener activation",
     )
     if (
@@ -458,6 +475,8 @@ def run_coordinator(
         stage_runner,
         (
             str(python),
+            "-I",
+            "-B",
             str(router),
             "--proof-directory",
             str(config.proof_directory),

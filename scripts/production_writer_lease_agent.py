@@ -48,6 +48,10 @@ from core.production_snapshot_promotion import (
     parse_restore_receipt,
     validate_promotion_proof,
 )
+from scripts.manage_webapp_ir_release_provenance import (  # noqa: E402
+    ReleaseProvenanceError,
+    load_installed_release_receipt,
+)
 
 
 AGENT_SCHEMA = "production-writer-lease-agent-v1"
@@ -70,6 +74,7 @@ WA_IR_EMERGENCY_RENEW_INTERVAL_SECONDS = 10
 WA_IR_PROMOTION_HEALTH_TIMEOUT_SECONDS = 20
 WA_IR_PROMOTION_HEALTH_POLL_SECONDS = 2
 WA_IR_PROMOTION_LOCK_TIMEOUT_SECONDS = 30
+WA_IR_APPLICATION_RELEASE_SHA = "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5"
 WA_IR_PROMOTED_COMPOSE_FILE = (
     REPO_ROOT / "deploy/production/docker-compose.webapp-ir-promoted-2c08.yml"
 ).resolve()
@@ -137,12 +142,19 @@ class WitnessConfig:
 
 
 @dataclass(frozen=True)
+class ReleaseProvenanceConfig:
+    receipt_path: Path
+    application_release_root: Path
+
+
+@dataclass(frozen=True)
 class AgentConfig:
     mode: str
     site: str
     lease_file: Path | None
     runtime: RuntimeConfig
     witness: WitnessConfig
+    release_provenance: ReleaseProvenanceConfig | None
 
 
 @dataclass(frozen=True)
@@ -284,6 +296,117 @@ def _absolute(value: Any, *, label: str) -> Path:
     return path
 
 
+def _load_ir_release_provenance(value: Any) -> ReleaseProvenanceConfig:
+    fields = {"receipt", "application_release_sha", "application_release_root"}
+    if not isinstance(value, dict) or set(value) != fields:
+        raise ProductionWriterLeaseAgentError("WebApp-IR release provenance config is invalid")
+    receipt_path = _absolute(value.get("receipt"), label="WebApp-IR release provenance receipt")
+    application_release_root = _absolute(
+        value.get("application_release_root"),
+        label="WebApp-IR application release root",
+    )
+    if value.get("application_release_sha") != WA_IR_APPLICATION_RELEASE_SHA:
+        raise ProductionWriterLeaseAgentError("WebApp-IR application release SHA is not the fixed legacy 2c08 release")
+    return ReleaseProvenanceConfig(
+        receipt_path=receipt_path,
+        application_release_root=application_release_root,
+    )
+
+
+def _read_promotion_application_values(path: Path) -> dict[str, str]:
+    """Extract only the two Compose inputs that choose the application source."""
+
+    required = {"RELEASE_SHA", "WA_IR_APPLICATION_RELEASE_ROOT"}
+    values: dict[str, str] = {}
+    for raw_line in _secure_text(
+        path,
+        label="WA-IR promotion runtime environment",
+        max_size=MAX_FILE_BYTES,
+    ).splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key.strip() in required and key != key.strip():
+            raise ProductionWriterLeaseAgentError("WA-IR promotion application runtime value is invalid")
+        if key not in required:
+            continue
+        if key in values:
+            raise ProductionWriterLeaseAgentError("WA-IR promotion application runtime value is duplicated")
+        if not value or value != value.strip() or "$" in value:
+            raise ProductionWriterLeaseAgentError("WA-IR promotion application runtime value is invalid")
+        values[key] = value
+    if set(values) != required:
+        raise ProductionWriterLeaseAgentError("WA-IR promotion application runtime values are incomplete")
+    return values
+
+
+def _verify_ir_runtime_application_binding(config: AgentConfig) -> None:
+    """Reject mutable Compose inputs unless they equal the receipt identity."""
+
+    if config.mode != "writer" or config.site != "webapp_ir":
+        return
+    if config.release_provenance is None or config.runtime.env_file is None:
+        raise ProductionWriterLeaseAgentError("WebApp-IR writer requires receipt-bound application provenance")
+    try:
+        installed = load_installed_release_receipt(config.release_provenance.receipt_path)
+    except ReleaseProvenanceError as exc:
+        raise ProductionWriterLeaseAgentError(f"WebApp-IR release provenance receipt is invalid: {exc}") from exc
+    application = installed["application"]
+    if (
+        application["release_sha"] != WA_IR_APPLICATION_RELEASE_SHA
+        or application["release_root"] != str(config.release_provenance.application_release_root)
+    ):
+        raise ProductionWriterLeaseAgentError(
+            "WebApp-IR release provenance receipt does not bind this application release root"
+        )
+    values = _read_promotion_application_values(config.runtime.env_file)
+    if (
+        values["RELEASE_SHA"] != WA_IR_APPLICATION_RELEASE_SHA
+        or values["WA_IR_APPLICATION_RELEASE_ROOT"] != str(config.release_provenance.application_release_root)
+    ):
+        raise ProductionWriterLeaseAgentError(
+            "WA-IR promotion runtime environment does not bind the receipt application release"
+        )
+
+
+def _verify_ir_selection_environment(config: AgentConfig) -> None:
+    """The generated candidate selector must not override any app input."""
+
+    if config.mode != "writer" or config.site != "webapp_ir" or config.runtime.selection_env_file is None:
+        return
+    path = config.runtime.selection_env_file
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise ProductionWriterLeaseAgentError("cannot inspect WA-IR runtime selection environment") from exc
+    allowed = {
+        "WA_IR_CANDIDATE_AUDIT_VOLUME",
+        "WA_IR_CANDIDATE_DB_VOLUME",
+        "WA_IR_CANDIDATE_UPLOADS_VOLUME",
+        "WA_IR_REDIS_VOLUME_NAME",
+    }
+    seen: set[str] = set()
+    for raw_line in _secure_text(
+        path,
+        label="WA-IR runtime selection environment",
+        max_size=MAX_FILE_BYTES,
+    ).splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            raise ProductionWriterLeaseAgentError("WA-IR runtime selection environment is malformed")
+        key, value = line.split("=", 1)
+        if key not in allowed or key in seen or not value or value != value.strip() or "$" in value:
+            raise ProductionWriterLeaseAgentError("WA-IR runtime selection environment is not an exact generated selector")
+        seen.add(key)
+    if seen != allowed:
+        raise ProductionWriterLeaseAgentError("WA-IR runtime selection environment is not an exact generated selector")
+
+
 def _load_config(path: Path) -> AgentConfig:
     if os.geteuid() != 0:
         raise ProductionWriterLeaseAgentError("writer lease agent must run as root")
@@ -293,8 +416,8 @@ def _load_config(path: Path) -> AgentConfig:
         raise
     except Exception as exc:
         raise ProductionWriterLeaseAgentError("writer lease agent config is invalid") from exc
-    fields = {"schema", "mode", "site", "lease_file", "runtime", "witness"}
-    if not isinstance(raw, dict) or set(raw) != fields or raw.get("schema") != AGENT_SCHEMA:
+    base_fields = {"schema", "mode", "site", "lease_file", "runtime", "witness"}
+    if not isinstance(raw, dict) or not base_fields.issubset(raw) or set(raw) - (base_fields | {"release_provenance"}) or raw.get("schema") != AGENT_SCHEMA:
         raise ProductionWriterLeaseAgentError("writer lease agent config schema is invalid")
     mode = raw.get("mode")
     if mode not in {"writer", "observer"}:
@@ -302,6 +425,11 @@ def _load_config(path: Path) -> AgentConfig:
     site = str(raw.get("site") or "").strip().lower()
     if site not in WEBAPP_SITES:
         raise ProductionWriterLeaseAgentError("writer lease agent site is invalid")
+    is_ir_writer = mode == "writer" and site == "webapp_ir"
+    expected_fields = base_fields | ({"release_provenance"} if is_ir_writer else set())
+    if set(raw) != expected_fields:
+        raise ProductionWriterLeaseAgentError("writer lease agent config schema is invalid")
+    release_provenance = _load_ir_release_provenance(raw["release_provenance"]) if is_ir_writer else None
     lease_value = raw.get("lease_file")
     if mode == "writer":
         lease_file: Path | None = _absolute(lease_value, label="lease file")
@@ -439,7 +567,7 @@ def _load_config(path: Path) -> AgentConfig:
         raise ProductionWriterLeaseAgentError(
             "WebApp-IR must use the pinned 60/15/10 emergency Witness lease timing"
         )
-    return AgentConfig(
+    config = AgentConfig(
         mode=mode,
         site=site,
         lease_file=lease_file,
@@ -456,7 +584,11 @@ def _load_config(path: Path) -> AgentConfig:
             safety_margin_seconds=margin,
             renew_interval_seconds=interval,
         ),
+        release_provenance=release_provenance,
     )
+    _verify_ir_runtime_application_binding(config)
+    _verify_ir_selection_environment(config)
+    return config
 
 
 def _decode_base64(value: str, *, expected_length: int, label: str) -> bytes:
@@ -957,6 +1089,11 @@ def _run_runtime_command(
 def _compose_prefix(config: AgentConfig) -> list[str]:
     command = ["/usr/bin/docker", "compose"]
     if config.mode == "writer" and config.site == "webapp_ir":
+        # Re-read both root-only inputs immediately before every Docker Compose
+        # operation.  A stale same-named application root or a later env edit
+        # must not reach the runtime merely because startup validation passed.
+        _verify_ir_runtime_application_binding(config)
+        _verify_ir_selection_environment(config)
         # Do not inherit the standby compose project from its environment.
         # Promotion can touch only this fixed, newly introduced project.
         command.extend(["--project-name", WA_IR_PROMOTION_PROJECT_NAME, "--profile", WA_IR_PROMOTION_PROFILE])

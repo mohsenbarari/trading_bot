@@ -38,7 +38,7 @@ class PromotionRunner:
     def __call__(self, command: list[str] | tuple[str, ...]) -> subprocess.CompletedProcess[str]:
         normalized = tuple(command)
         self.calls.append(normalized)
-        script = Path(normalized[1]).name
+        script = Path(normalized[3]).name
         if script == "production_writer_lease_agent.py":
             payload = {"status": "activated", "site": "webapp_ir", "action": "promote_ir"}
         elif script == "activate_webapp_ir_promoted_listener.py":
@@ -65,9 +65,12 @@ class WebappIrPromotionCoordinatorTests(unittest.TestCase):
 
         control_sha = "c" * 40
         release = root / "control-releases" / control_sha
+        application_release = root / "releases" / MODULE.APPLICATION_RELEASE_SHA
         scripts = release / "scripts"
         scripts.mkdir(parents=True)
+        application_release.mkdir(parents=True)
         release.chmod(0o755)
+        application_release.chmod(0o755)
         scripts.chmod(0o755)
         for name in (
             "production_writer_lease_agent.py",
@@ -102,6 +105,7 @@ class WebappIrPromotionCoordinatorTests(unittest.TestCase):
             "control_release_root": str(release),
             "control_release_sha": control_sha,
             "application_release_sha": MODULE.APPLICATION_RELEASE_SHA,
+            "application_release_root": str(application_release),
             "release_provenance_receipt": str(provenance_receipt),
             "writer_agent_config": str(writer_config),
             "restore_receipt": str(restore_receipt),
@@ -117,6 +121,7 @@ class WebappIrPromotionCoordinatorTests(unittest.TestCase):
         return {
             "root": root,
             "release": release,
+            "application_release": application_release,
             "control_sha": Path(control_sha),
             "scripts": scripts,
             "writer_config": writer_config,
@@ -132,7 +137,10 @@ class WebappIrPromotionCoordinatorTests(unittest.TestCase):
 
     def installed_receipt(self, fixture: dict[str, Path]) -> dict:
         return {
-            "application": {"release_sha": MODULE.APPLICATION_RELEASE_SHA},
+            "application": {
+                "release_sha": MODULE.APPLICATION_RELEASE_SHA,
+                "release_root": str(fixture["application_release"]),
+            },
             "control": {
                 "release_sha": fixture["control_sha"].name,
                 "release_root": str(fixture["release"]),
@@ -161,6 +169,8 @@ class WebappIrPromotionCoordinatorTests(unittest.TestCase):
             [
                 (
                     python,
+                    "-I",
+                    "-B",
                     writer,
                     "--config",
                     str(fixture["writer_config"]),
@@ -174,9 +184,20 @@ class WebappIrPromotionCoordinatorTests(unittest.TestCase):
                     "--poll-seconds",
                     "2",
                 ),
-                (python, listener, "--config", str(fixture["listener_config"]), "--apply", "--json"),
                 (
                     python,
+                    "-I",
+                    "-B",
+                    listener,
+                    "--config",
+                    str(fixture["listener_config"]),
+                    "--apply",
+                    "--json",
+                ),
+                (
+                    python,
+                    "-I",
+                    "-B",
                     route,
                     "--proof-directory",
                     str(fixture["proof_directory"]),
@@ -212,10 +233,10 @@ class WebappIrPromotionCoordinatorTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "completed")
         self.assertEqual(len(watch_runner.calls), 1)
-        self.assertIn("production_writer_lease_agent.py", watch_runner.calls[0][1])
+        self.assertIn("production_writer_lease_agent.py", watch_runner.calls[0][3])
         self.assertEqual(len(stage_runner.calls), 2)
-        self.assertIn("activate_webapp_ir_promoted_listener.py", stage_runner.calls[0][1])
-        self.assertIn("route_webapp_ir_from_promotion_proof.py", stage_runner.calls[1][1])
+        self.assertIn("activate_webapp_ir_promoted_listener.py", stage_runner.calls[0][3])
+        self.assertIn("route_webapp_ir_from_promotion_proof.py", stage_runner.calls[1][3])
 
     def test_persistent_watch_runner_has_no_local_timeout_or_stderr_pipe(self) -> None:
         completed = subprocess.CompletedProcess(("fixed",), 0, "{}\n", None)
@@ -228,30 +249,45 @@ class WebappIrPromotionCoordinatorTests(unittest.TestCase):
 
     def test_systemd_uses_only_the_complete_coordinator_sequence(self) -> None:
         unit = SYSTEMD_UNIT.read_text(encoding="utf-8")
-        self.assertIn("run_webapp_ir_promotion_coordinator.py", unit)
-        self.assertIn("--apply --json", unit)
         self.assertIn("EnvironmentFile=/etc/trading-bot-three-site/webapp-ir-control-release.env", unit)
-        self.assertIn("Environment=PYTHONDONTWRITEBYTECODE=1", unit)
+        self.assertIn("WorkingDirectory=/", unit)
+        self.assertIn(
+            "/srv/trading-bot-three-site/control-dispatcher/manage_webapp_ir_release_provenance.py exec-bound-control",
+            unit,
+        )
+        self.assertIn("--target promotion-coordinator", unit)
         self.assertIn("${WA_IR_CONTROL_RELEASE_ROOT}", unit)
-        self.assertIn("manage_webapp_ir_release_provenance.py verify-installed", unit)
+        self.assertIn("${WA_IR_CONTROL_RELEASE_SHA}", unit)
         self.assertIn("${WA_IR_RELEASE_PROVENANCE_RECEIPT}", unit)
         self.assertNotIn("/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5", unit)
         self.assertIn("Requires=trading-bot-production-writer-lease-guard.service", unit)
         self.assertNotIn("ExecStartPost=", unit)
-        self.assertNotIn("production_writer_lease_agent.py --config", unit)
-        self.assertNotIn("route_webapp_ir_from_promotion_proof.py", unit)
 
         guard = GUARD_SYSTEMD_UNIT.read_text(encoding="utf-8")
         self.assertIn("EnvironmentFile=/etc/trading-bot-three-site/webapp-ir-control-release.env", guard)
-        self.assertIn("Environment=PYTHONDONTWRITEBYTECODE=1", guard)
-        self.assertIn("${WA_IR_CONTROL_RELEASE_ROOT}/scripts/production_writer_lease_agent.py", guard)
-        self.assertIn("manage_webapp_ir_release_provenance.py verify-installed", guard)
+        self.assertIn("WorkingDirectory=/", guard)
+        self.assertIn(
+            "/srv/trading-bot-three-site/control-dispatcher/manage_webapp_ir_release_provenance.py exec-bound-control",
+            guard,
+        )
+        self.assertIn("--target lease-guard", guard)
+        self.assertIn("${WA_IR_CONTROL_RELEASE_ROOT}", guard)
+        self.assertIn("${WA_IR_CONTROL_RELEASE_SHA}", guard)
         self.assertIn("${WA_IR_RELEASE_PROVENANCE_RECEIPT}", guard)
         self.assertNotIn("/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5", guard)
+        for service in (unit, guard):
+            working_directories = [
+                line.split("=", 1)[1]
+                for line in service.splitlines()
+                if line.startswith("WorkingDirectory=")
+            ]
+            self.assertEqual(working_directories, ["/"])
+            self.assertTrue(all("$" not in value for value in working_directories))
 
     def test_coordinator_config_requires_separate_control_and_application_identities(self) -> None:
         payload = json.loads(COORDINATOR_EXAMPLE.read_text(encoding="utf-8"))
         self.assertEqual(payload["application_release_sha"], MODULE.APPLICATION_RELEASE_SHA)
+        self.assertIn("releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5", payload["application_release_root"])
         self.assertIn("control-releases/REPLACE_WITH_EXACT_CONTROL_GIT_SHA", payload["control_release_root"])
         self.assertEqual(payload["control_release_sha"], "REPLACE_WITH_EXACT_CONTROL_GIT_SHA")
         self.assertIn("release-provenance", payload["release_provenance_receipt"])
@@ -296,7 +332,7 @@ class WebappIrPromotionCoordinatorTests(unittest.TestCase):
             def __call__(self, command: list[str] | tuple[str, ...]) -> subprocess.CompletedProcess[str]:
                 normalized = tuple(command)
                 self.calls.append(normalized)
-                script = Path(normalized[1]).name
+                script = Path(normalized[3]).name
                 if script == "production_writer_lease_agent.py":
                     payload = {"status": "activated", "site": "webapp_ir"}
                 elif script == "activate_webapp_ir_promoted_listener.py":
@@ -336,6 +372,23 @@ class WebappIrPromotionCoordinatorTests(unittest.TestCase):
         with (
             mock.patch.object(MODULE, "CONTROL_RUNTIME_ROOT", fixture["release"]),
             mock.patch.object(MODULE, "load_installed_release_receipt", return_value=invalid),
+        ):
+            with self.assertRaisesRegex(MODULE.PromotionCoordinatorError, "does not bind"):
+                MODULE.run_coordinator(fixture["config"], apply=True, command_runner=runner)
+        self.assertEqual(runner.calls, [])
+
+    def test_same_named_alternate_application_root_stops_before_any_stage(self) -> None:
+        fixture = self.make_fixture()
+        runner = PromotionRunner(receipt=fixture["listener_receipt"])
+        alternate = fixture["root"] / "alternate-releases" / MODULE.APPLICATION_RELEASE_SHA
+        alternate.mkdir(parents=True)
+        alternate.chmod(0o755)
+        payload = json.loads(fixture["config"].read_text(encoding="utf-8"))
+        payload["application_release_root"] = str(alternate)
+        write_file(fixture["config"], json.dumps(payload) + "\n")
+        with (
+            mock.patch.object(MODULE, "CONTROL_RUNTIME_ROOT", fixture["release"]),
+            mock.patch.object(MODULE, "load_installed_release_receipt", return_value=self.installed_receipt(fixture)),
         ):
             with self.assertRaisesRegex(MODULE.PromotionCoordinatorError, "does not bind"):
                 MODULE.run_coordinator(fixture["config"], apply=True, command_runner=runner)

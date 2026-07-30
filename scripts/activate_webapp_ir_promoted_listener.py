@@ -27,6 +27,14 @@ from typing import Callable, Sequence
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.manage_webapp_ir_release_provenance import (  # noqa: E402
+    ReleaseProvenanceError,
+    load_installed_release_receipt,
+)
+
 DEFAULT_TEMPLATE = REPO_ROOT / "deploy/production/nginx-webapp-ir-promoted-2c08-https.conf.template"
 RELEASE_SHA = "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5"
 SERVER_NAME = "coin.gold-trade.ir"
@@ -40,6 +48,7 @@ CONFIG_KEYS = frozenset(
     {
         "WA_IR_LISTENER_SERVER_NAME",
         "WA_IR_LISTENER_APPLICATION_RELEASE_ROOT",
+        "WA_IR_LISTENER_RELEASE_PROVENANCE_RECEIPT",
         "WA_IR_LISTENER_TLS_ROOT",
         "WA_IR_LISTENER_CERTIFICATE_PATH",
         "WA_IR_LISTENER_CERTIFICATE_KEY_PATH",
@@ -61,6 +70,7 @@ CommandRunner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
 class ListenerConfig:
     server_name: str
     release_root: Path
+    release_provenance_receipt: Path
     tls_root: Path
     certificate_path: Path
     certificate_key_path: Path
@@ -214,6 +224,28 @@ def _read_config_values(path: Path) -> dict[str, str]:
     return values
 
 
+def _verify_application_release_binding(*, receipt_path: Path, release_root: Path) -> None:
+    """Require this local listener to use the receipt-bound application root."""
+
+    try:
+        installed = load_installed_release_receipt(receipt_path)
+    except ReleaseProvenanceError as exc:
+        raise ListenerActivationError(f"listener release provenance receipt is invalid: {exc}") from exc
+    application = installed["application"]
+    control = installed["control"]
+    if (
+        application["release_sha"] != RELEASE_SHA
+        or application["release_root"] != str(release_root)
+    ):
+        raise ListenerActivationError("listener release provenance receipt does not bind this application release root")
+    try:
+        runtime_control_root = REPO_ROOT.resolve(strict=True)
+    except OSError as exc:
+        raise ListenerActivationError("listener control release root does not exist") from exc
+    if control["release_root"] != str(runtime_control_root):
+        raise ListenerActivationError("listener must execute from the receipt-bound control release root")
+
+
 def load_listener_config(path: Path) -> ListenerConfig:
     values = _read_config_values(path)
     if values["WA_IR_LISTENER_SERVER_NAME"] != SERVER_NAME:
@@ -228,6 +260,19 @@ def load_listener_config(path: Path) -> ListenerConfig:
     static_root = release_root / "mini_app_dist"
     _require_root_owned_directory(static_root, label="listener static release root", private=False)
     _require_root_owned_regular_file(static_root / "index.html", label="listener static index", private=False)
+    release_provenance_receipt = _safe_absolute_path(
+        values["WA_IR_LISTENER_RELEASE_PROVENANCE_RECEIPT"],
+        label="WA_IR_LISTENER_RELEASE_PROVENANCE_RECEIPT",
+    )
+    _require_root_owned_regular_file(
+        release_provenance_receipt,
+        label="listener release provenance receipt",
+        private=True,
+    )
+    _verify_application_release_binding(
+        receipt_path=release_provenance_receipt,
+        release_root=release_root,
+    )
 
     tls_root = _safe_absolute_path(values["WA_IR_LISTENER_TLS_ROOT"], label="WA_IR_LISTENER_TLS_ROOT")
     _require_root_owned_directory(tls_root, label="WA-IR local TLS root", private=True)
@@ -271,12 +316,16 @@ def load_listener_config(path: Path) -> ListenerConfig:
     if receipt_path.exists():
         _require_root_owned_regular_file(receipt_path, label="listener receipt", private=True)
 
-    protected = {path.resolve(strict=True) for path in (release_root, tls_root, site_path, enabled_path)}
+    protected = {
+        path.resolve(strict=True)
+        for path in (release_root, release_provenance_receipt, tls_root, site_path, enabled_path)
+    }
     if receipt_path in protected:
         raise ListenerActivationError("listener receipt path conflicts with a protected listener path")
     return ListenerConfig(
         server_name=values["WA_IR_LISTENER_SERVER_NAME"],
         release_root=release_root,
+        release_provenance_receipt=release_provenance_receipt,
         tls_root=tls_root,
         certificate_path=certificate_path,
         certificate_key_path=certificate_key_path,
