@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import contextlib
 from pathlib import Path
 import stat
 import subprocess
@@ -65,6 +66,7 @@ class StagedImageLoaderTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.root.chmod(0o700)
+        self.bootstrap_receipt_path = self.root / "bootstrap-receipt.json"
         self.config_one = b'{"architecture":"amd64","config":"one"}'
         self.config_two = b'{"architecture":"amd64","config":"two"}'
         self.first_id = image_id(self.config_one)
@@ -153,8 +155,13 @@ class StagedImageLoaderTests(unittest.TestCase):
         )
         return self.root / "stage-receipt.json", stage
 
+    @contextlib.contextmanager
     def _verify_context(self, stage: object):
-        return mock.patch.object(loader.provenance, "verify_staged_provenance", return_value=(stage, object()))
+        with (
+            mock.patch.object(loader.provenance, "load_bootstrap_receive_receipt", return_value=object()),
+            mock.patch.object(loader.provenance, "verify_staged_provenance", return_value=(stage, object())),
+        ):
+            yield
 
     def test_load_refuses_preexisting_isolated_tag_without_calling_docker_load(self) -> None:
         receipt, stage = self._stage(self._write_archive())
@@ -163,7 +170,11 @@ class StagedImageLoaderTests(unittest.TestCase):
 
         with self._verify_context(stage):
             with self.assertRaisesRegex(loader.StagedImageLoadError, "refusing to overwrite"):
-                loader.load_verified_staged_images(stage_receipt_path=receipt, runner=runner)
+                loader.load_verified_staged_images(
+                    stage_receipt_path=receipt,
+                    bootstrap_receipt_path=self.bootstrap_receipt_path,
+                    runner=runner,
+                )
 
         self.assertFalse(any(call[1:4] == ["image", "load", "--input"] for call in runner.calls))
 
@@ -175,7 +186,11 @@ class StagedImageLoaderTests(unittest.TestCase):
 
         with self._verify_context(stage):
             with self.assertRaisesRegex(loader.StagedImageLoadError, "not safe for a shared host"):
-                loader.load_verified_staged_images(stage_receipt_path=receipt, runner=runner)
+                loader.load_verified_staged_images(
+                    stage_receipt_path=receipt,
+                    bootstrap_receipt_path=self.bootstrap_receipt_path,
+                    runner=runner,
+                )
 
         self.assertEqual([], runner.calls)
 
@@ -185,7 +200,11 @@ class StagedImageLoaderTests(unittest.TestCase):
 
         with self._verify_context(stage):
             with self.assertRaisesRegex(loader.StagedImageLoadError, "not safe for a shared host"):
-                loader.load_verified_staged_images(stage_receipt_path=receipt, runner=runner)
+                loader.load_verified_staged_images(
+                    stage_receipt_path=receipt,
+                    bootstrap_receipt_path=self.bootstrap_receipt_path,
+                    runner=runner,
+                )
 
         self.assertEqual([], runner.calls)
 
@@ -196,7 +215,11 @@ class StagedImageLoaderTests(unittest.TestCase):
 
         with self._verify_context(stage):
             with self.assertRaisesRegex(loader.StagedImageLoadError, "does not match its immutable"):
-                loader.load_verified_staged_images(stage_receipt_path=receipt, runner=runner)
+                loader.load_verified_staged_images(
+                    stage_receipt_path=receipt,
+                    bootstrap_receipt_path=self.bootstrap_receipt_path,
+                    runner=runner,
+                )
 
         self.assertTrue(any(call[1:4] == ["image", "load", "--input"] for call in runner.calls))
 
@@ -205,7 +228,11 @@ class StagedImageLoaderTests(unittest.TestCase):
         runner = FakeDockerRunner({tag: identifier for identifier, tag in self.tags.items()})
 
         with self._verify_context(stage):
-            result = loader.load_verified_staged_images(stage_receipt_path=receipt, runner=runner)
+            result = loader.load_verified_staged_images(
+                stage_receipt_path=receipt,
+                bootstrap_receipt_path=self.bootstrap_receipt_path,
+                runner=runner,
+            )
 
         self.assertEqual("loaded", result["status"])
         self.assertEqual(set(self.tags.values()), {item["archive_tag"] for item in result["images"]})

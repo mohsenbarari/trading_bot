@@ -25,10 +25,12 @@ class WebappIrPromotedNginx2c08Tests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.text = TEMPLATE.read_text(encoding="utf-8")
 
-    def test_uses_only_local_root_only_tls_and_exact_release_static_root(self) -> None:
+    def test_uses_only_local_root_only_tls_and_separately_verified_static_root(self) -> None:
         self.assertIn("ssl_certificate __WA_IR_CERTIFICATE_PATH__;", self.text)
         self.assertIn("ssl_certificate_key __WA_IR_CERTIFICATE_KEY_PATH__;", self.text)
-        self.assertIn("root __WA_IR_RELEASE_ROOT__/mini_app_dist;", self.text)
+        self.assertIn("root __WA_IR_STATIC_RELEASE_ROOT__;", self.text)
+        self.assertNotIn("__WA_IR_RELEASE_ROOT__", self.text)
+        self.assertNotIn("mini_app_dist", self.text)
         self.assertNotIn("__APP_ROOT__", self.text)
         self.assertNotIn("/srv/trading-bot/current", self.text)
         self.assertNotIn("/etc/letsencrypt/live/", self.text)
@@ -81,14 +83,14 @@ class WebappIrPromotedNginx2c08Tests(unittest.TestCase):
                 "/etc/trading-bot-three-site/wa-ir/tls/privkey.pem",
             )
             .replace(
-                "__WA_IR_RELEASE_ROOT__",
-                "/srv/trading-bot-three-site/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5",
+                "__WA_IR_STATIC_RELEASE_ROOT__",
+                "/srv/trading-bot-three-site/static-releases/campaign-12345678/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             )
         )
         self.assertNotRegex(rendered, r"__[A-Z0-9_]+__")
         self.assertIn("server_name coin.gold-trade.ir;", rendered)
         self.assertIn(
-            "root /srv/trading-bot-three-site/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5/mini_app_dist;",
+            "root /srv/trading-bot-three-site/static-releases/campaign-12345678/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;",
             rendered,
         )
 

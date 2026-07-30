@@ -183,11 +183,19 @@ def _prepared_images_from_manifest(
     return campaign_id, result
 
 
-def verify_staged_image_archive(*, stage_receipt_path: Path) -> dict[str, Any]:
+def verify_staged_image_archive(
+    *,
+    stage_receipt_path: Path,
+    bootstrap_receipt_path: Path,
+) -> dict[str, Any]:
     """Validate the signed stage and its load-safe Docker archive without Docker I/O."""
 
     try:
-        stage, _verified_provenance = provenance.verify_staged_provenance(stage_receipt_path)
+        bootstrap = provenance.load_bootstrap_receive_receipt(bootstrap_receipt_path)
+        stage, _verified_provenance = provenance.verify_staged_provenance(
+            stage_receipt_path,
+            bootstrap=bootstrap,
+        )
     except provenance.ReleaseProvenanceError as exc:
         raise StagedImageLoadError("staged release provenance is invalid") from exc
     try:
@@ -269,12 +277,16 @@ def _require_loaded_id(*, docker_binary: Path, tag: str, expected_id: str, runne
 def load_verified_staged_images(
     *,
     stage_receipt_path: Path,
+    bootstrap_receipt_path: Path,
     docker_binary: Path = Path("/usr/bin/docker"),
     runner: CommandRunner = preparer.default_command_runner,
 ) -> dict[str, Any]:
     """Perform the future explicit load only after all no-overwrite checks pass."""
 
-    verified = verify_staged_image_archive(stage_receipt_path=stage_receipt_path)
+    verified = verify_staged_image_archive(
+        stage_receipt_path=stage_receipt_path,
+        bootstrap_receipt_path=bootstrap_receipt_path,
+    )
     docker_binary = preparer.require_trusted_executable(docker_binary, field="docker_binary")
     for item in verified["images"]:
         _require_tag_absent(docker_binary=docker_binary, tag=item["archive_tag"], runner=runner)
@@ -307,6 +319,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     ):
         command = subparsers.add_parser(name, help=help_text)
         command.add_argument("--stage-receipt", type=Path, required=True)
+        command.add_argument("--bootstrap-receipt", type=Path, required=True)
         command.add_argument("--docker-binary", type=Path, default=Path("/usr/bin/docker"))
     return parser.parse_args(argv)
 
@@ -317,10 +330,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         if os.geteuid() != 0:
             raise StagedImageLoadError("this command must run as root")
         if args.command == "verify":
-            result = verify_staged_image_archive(stage_receipt_path=args.stage_receipt)
+            result = verify_staged_image_archive(
+                stage_receipt_path=args.stage_receipt,
+                bootstrap_receipt_path=args.bootstrap_receipt,
+            )
         else:
             result = load_verified_staged_images(
                 stage_receipt_path=args.stage_receipt,
+                bootstrap_receipt_path=args.bootstrap_receipt,
                 docker_binary=args.docker_binary,
             )
     except StagedImageLoadError as exc:

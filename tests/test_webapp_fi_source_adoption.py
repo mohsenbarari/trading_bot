@@ -98,6 +98,10 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / relative, target)
         self.control_commit = _commit(self.control)
+        self.control_tree = subprocess.check_output(
+            ["git", "-C", str(self.control), "rev-parse", self.control_commit + "^{tree}"],
+            text=True,
+        ).strip()
         self.application_files = {}
         for relative in install.RUNTIME_CODE_PROJECTION_RELATIVES:
             if "." in relative:
@@ -353,6 +357,60 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
                 apply=True,
             )
 
+    def _export(self, installed, runtime, role_path, ssh_public, static_path, certificate, attestation, *, export_id):
+        before = {
+            **attestation["runtime_claim"],
+            "active_application_image": attestation["image_claim"]["active_application_image"],
+        }
+        parent = self.root / ("exports-" + export_id)
+        parent.mkdir(mode=0o700)
+
+        def fake_export(*, archive, expected_image_id):
+            archive.write_bytes(b"exact fixture docker-save bytes")
+            os.chmod(archive, 0o600)
+            return {
+                "docker_save_archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+                "docker_save_archive_bytes": archive.stat().st_size,
+                "docker_save": {
+                    "command": ["docker", "save", "--output", archive.name, expected_image_id],
+                    "docker_executable_sha256": hashlib.sha256(b"docker").hexdigest(),
+                    "docker_executable_bytes": len(b"docker"),
+                    "archive_semantics": "exact_bytes_only_unparsed",
+                    "archive_layout": "not_inspected",
+                    "manifest_semantics_attested": False,
+                    "docker_load_invoked": False,
+                    "loadability_claimed": False,
+                },
+            }
+
+        required_free = 1024 * install.IMAGE_EXPORT_CAPACITY_MULTIPLIER + install.IMAGE_EXPORT_CAPACITY_MARGIN_BYTES
+        with (
+            patch.object(install, "_revalidate_export_runtime", side_effect=[before, before]),
+            patch.object(install, "_inspect_image_storage_bytes", return_value=1024),
+            patch.object(install.shutil, "disk_usage", return_value=SimpleNamespace(free=required_free)),
+            patch.object(install, "_export_exact_docker_save_bytes", side_effect=fake_export),
+        ):
+            return install.export_actual_fi_image(
+                attestation=Path(attestation["attestation_path"]),
+                source_role_config=role_path,
+                signer_enrollment_receipt=Path(installed["candidate"]) / "enrollments" / f"{CAMPAIGN}.json",
+                signer_enrollment_certificate=certificate,
+                ssh_host_public_key_file=ssh_public,
+                runtime_source_root=runtime,
+                static_assets_descriptor=static_path,
+                pinned_controller_public_key_base64=self.controller_public,
+                pinned_source_signing_public_key_base64=self.fi_public,
+                expected_campaign_id=CAMPAIGN,
+                expected_application=installed["application"],
+                expected_control_commit=self.control_commit,
+                expected_canonical_release_tree_sha256=attestation["descriptor_claim"]["canonical_release_tree_sha256"],
+                expected_app_image_id=IMAGE_ID,
+                expected_app_image_reference=IMAGE_REFERENCE,
+                destination=parent / "candidate",
+                export_id=export_id,
+                apply=True,
+            )
+
     def test_prepared_package_contains_only_attest_bootstrap_and_signed_envelope_binds_version(self):
         verified = self._verify_package()
         self.assertEqual(verified["campaign_id"], CAMPAIGN)
@@ -363,6 +421,13 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
                 set(prepare.PACKAGE_FILES),
             )
             self.assertNotIn("scripts/publish_webapp_fi_snapshot_standby.py", {item.name for item in archive.getmembers()})
+            self.assertIn("scripts/prepare_webapp_fi_static_assets.py", {item.name for item in archive.getmembers()})
+            static_preparer = archive.extractfile("scripts/prepare_webapp_fi_static_assets.py")
+            self.assertIsNotNone(static_preparer)
+            static_payload = static_preparer.read()
+            self.assertNotIn(b"boto3", static_payload)
+            self.assertNotIn(b"subprocess", static_payload)
+            self.assertNotIn(b"docker ", static_payload.lower())
         altered = dict(self.delivery_object)
         altered["version_id"] = "version-0002"
         unsigned = {
@@ -1022,6 +1087,203 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
                 expected_app_image_id=IMAGE_ID,
                 expected_app_image_reference=IMAGE_REFERENCE,
                 verification_time=install.utc_now(),
+            )
+
+    def test_composite_provenance_binds_controller_authority_to_isolated_image_artifacts(self):
+        installed = self._install()
+        runtime, role_path, ssh_public, static_path, certificate = self._runtime_and_config(installed)
+        self._enroll(installed, role_path, ssh_public, certificate)
+        attestation = self._attest(
+            installed,
+            runtime,
+            role_path,
+            ssh_public,
+            static_path,
+            certificate,
+            attestation_id="attestation-composite",
+        )
+        exported = self._export(
+            installed,
+            runtime,
+            role_path,
+            ssh_public,
+            static_path,
+            certificate,
+            attestation,
+            export_id="export-composite",
+        )
+        source_role_payload = Path(attestation["attestation_path"]).read_bytes()
+        image_export_payload = Path(exported["receipt_path"]).read_bytes()
+        delivery_payload = self.envelope.read_bytes()
+        certificate_payload = certificate.read_bytes()
+        static_payload = static_path.read_bytes()
+        image_bundle = b"controller-isolated-image-bundle"
+        image_manifest = b"controller-isolated-image-manifest"
+        source_image = exported["image_claim"]
+        proof_sha256 = {
+            "source_role_attestation": hashlib.sha256(source_role_payload).hexdigest(),
+            "image_export_receipt": hashlib.sha256(image_export_payload).hexdigest(),
+            "controller_delivery_envelope": hashlib.sha256(delivery_payload).hexdigest(),
+            "signer_enrollment_certificate": hashlib.sha256(certificate_payload).hexdigest(),
+            "static_assets_provenance": hashlib.sha256(static_payload).hexdigest(),
+        }
+        adoption_unsigned = {
+            "schema": portable.IMAGE_ADOPTION_RECEIPT_SCHEMA,
+            "status": "adopted",
+            "adopted_at": install.utc_now(),
+            "campaign_id": CAMPAIGN,
+            "source_site": "webapp_fi",
+            "destination_site": "webapp_ir",
+            "application": installed["application"],
+            "tooling": {"control_commit": self.control_commit, "control_tree": self.control_tree},
+            "canonical_release_tree_sha256": attestation["descriptor_claim"]["canonical_release_tree_sha256"],
+            "proof_sha256": proof_sha256,
+            "source_image": {
+                "image_id": source_image["image_id"],
+                "image_reference": source_image["image_reference"],
+                "docker_save_archive_sha256": source_image["docker_save_archive_sha256"],
+                "docker_save_archive_bytes": source_image["docker_save_archive_bytes"],
+            },
+            "source_image_object": {
+                "object_key": "campaign/raw-image/fixture.age",
+                "version_id": "raw-image-version-1",
+                "ciphertext_sha256": hashlib.sha256(b"raw image ciphertext").hexdigest(),
+                "ciphertext_bytes": len(b"raw image ciphertext"),
+                "plaintext_sha256": source_image["docker_save_archive_sha256"],
+                "plaintext_bytes": source_image["docker_save_archive_bytes"],
+            },
+            "source_image_transport": {
+                "transport": "private_versioned_age_only",
+                "create_only": True,
+                "read_back_same_version_id": True,
+                "provider_side_sse": False,
+            },
+            "controller_image_artifacts": {
+                "image_bundle_sha256": hashlib.sha256(image_bundle).hexdigest(),
+                "image_bundle_bytes": len(image_bundle),
+                "image_manifest_sha256": hashlib.sha256(image_manifest).hexdigest(),
+                "image_manifest_bytes": len(image_manifest),
+                "image_set_sha256": hashlib.sha256(b"image-set").hexdigest(),
+                "image_ids_sha256": hashlib.sha256(b"image-ids").hexdigest(),
+                "app_image_id": IMAGE_ID,
+                "app_image_archive_tag": portable.image_contract.canonical_archive_tag(
+                    campaign_id=CAMPAIGN,
+                    release_sha=installed["application"]["release_sha"],
+                    image_id=IMAGE_ID,
+                ),
+            },
+            "archive_contract": {
+                "raw_source_archive_loadability_claimed": False,
+                "raw_source_archive_semantics": "exact_bytes_only_unparsed",
+                "controller_output_tags_isolated": True,
+                "controller_docker_load_invoked": False,
+            },
+            "controller_public_key_base64": self.controller_public,
+            "controller_key_id": portable.public_key_id(self.controller_public),
+        }
+        adoption = {
+            **adoption_unsigned,
+            "controller_signature": {
+                "algorithm": "ed25519",
+                "signature_base64": _signature(self.controller_key, portable.IMAGE_ADOPTION_SIGNATURE_DOMAIN, adoption_unsigned),
+            },
+        }
+        adoption_payload = portable.canonical_json_bytes(adoption) + b"\n"
+        def verify(
+            *,
+            source_role: bytes = source_role_payload,
+            image_export: bytes = image_export_payload,
+            controller_adoption: bytes = adoption_payload,
+        ):
+            return portable.verify_composite_webapp_fi_source_provenance(
+                source_role_attestation_payload=source_role,
+                image_export_receipt_payload=image_export,
+                controller_delivery_envelope_payload=delivery_payload,
+                signer_enrollment_certificate_payload=certificate_payload,
+                static_assets_provenance_payload=static_payload,
+                controller_image_adoption_receipt_payload=controller_adoption,
+                pinned_source_signing_public_key_base64=self.fi_public,
+                pinned_controller_public_key_base64=self.controller_public,
+                expected_campaign_id=CAMPAIGN,
+                expected_application=installed["application"],
+                expected_control_commit=self.control_commit,
+                expected_control_tree=self.control_tree,
+                expected_canonical_release_tree_sha256=attestation["descriptor_claim"]["canonical_release_tree_sha256"],
+                expected_app_image_id=IMAGE_ID,
+                expected_app_image_reference=IMAGE_REFERENCE,
+                expected_image_bundle_sha256=hashlib.sha256(image_bundle).hexdigest(),
+                expected_image_bundle_bytes=len(image_bundle),
+                expected_image_manifest_sha256=hashlib.sha256(image_manifest).hexdigest(),
+                expected_image_manifest_bytes=len(image_manifest),
+                verification_time=install.utc_now(),
+            )
+
+        verified = verify()
+        self.assertEqual(proof_sha256, verified["authority"]["proof_sha256"])
+        self.assertEqual(hashlib.sha256(adoption_payload).hexdigest(), verified["image_adoption"]["image_adoption_receipt_sha256"])
+
+        altered = copy.deepcopy(adoption)
+        altered["proof_sha256"]["static_assets_provenance"] = "0" * 64
+        unsigned = {key: value for key, value in altered.items() if key != "controller_signature"}
+        altered["controller_signature"] = {
+            "algorithm": "ed25519",
+            "signature_base64": _signature(self.controller_key, portable.IMAGE_ADOPTION_SIGNATURE_DOMAIN, unsigned),
+        }
+        with self.assertRaisesRegex(portable.SourceProvenanceVerificationError, "proof hashes"):
+            verify(controller_adoption=portable.canonical_json_bytes(altered) + b"\n")
+
+        wrong_package = json.loads(source_role_payload)
+        wrong_package["package_id"] = "other-package"
+        wrong_package_unsigned = {key: value for key, value in wrong_package.items() if key != "source_signature"}
+        wrong_package["source_signature"] = {
+            "algorithm": "ed25519",
+            "signature_base64": _signature(self.fi_key, install.ATTESTATION_SIGNATURE_DOMAIN, wrong_package_unsigned),
+        }
+        with self.assertRaisesRegex(portable.SourceProvenanceVerificationError, "controller-authorized source installation"):
+            verify(source_role=portable.canonical_json_bytes(wrong_package) + b"\n")
+
+        wrong_install_receipt = json.loads(source_role_payload)
+        wrong_install_receipt["source_adoption_install_receipt_sha256"] = "0" * 64
+        wrong_install_unsigned = {key: value for key, value in wrong_install_receipt.items() if key != "source_signature"}
+        wrong_install_receipt["source_signature"] = {
+            "algorithm": "ed25519",
+            "signature_base64": _signature(self.fi_key, install.ATTESTATION_SIGNATURE_DOMAIN, wrong_install_unsigned),
+        }
+        with self.assertRaisesRegex(portable.SourceProvenanceVerificationError, "controller-authorized source installation"):
+            verify(source_role=portable.canonical_json_bytes(wrong_install_receipt) + b"\n")
+
+        live_tag = copy.deepcopy(adoption)
+        live_tag["controller_image_artifacts"]["app_image_archive_tag"] = IMAGE_REFERENCE
+        live_tag_unsigned = {key: value for key, value in live_tag.items() if key != "controller_signature"}
+        live_tag["controller_signature"] = {
+            "algorithm": "ed25519",
+            "signature_base64": _signature(self.controller_key, portable.IMAGE_ADOPTION_SIGNATURE_DOMAIN, live_tag_unsigned),
+        }
+        with self.assertRaisesRegex(portable.SourceProvenanceVerificationError, "application image is invalid"):
+            verify(controller_adoption=portable.canonical_json_bytes(live_tag) + b"\n")
+
+        inverted_export = json.loads(image_export_payload)
+        attested_at = dt.datetime.strptime(attestation["attested_at"], "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=dt.timezone.utc
+        )
+        inverted_export["exported_at"] = (attested_at - dt.timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        inverted_export_unsigned = {key: value for key, value in inverted_export.items() if key != "source_signature"}
+        inverted_export["source_signature"] = {
+            "algorithm": "ed25519",
+            "signature_base64": _signature(self.fi_key, install.IMAGE_EXPORT_SIGNATURE_DOMAIN, inverted_export_unsigned),
+        }
+        inverted_export_payload = portable.canonical_json_bytes(inverted_export) + b"\n"
+        inverted_adoption = copy.deepcopy(adoption)
+        inverted_adoption["proof_sha256"]["image_export_receipt"] = hashlib.sha256(inverted_export_payload).hexdigest()
+        inverted_adoption_unsigned = {key: value for key, value in inverted_adoption.items() if key != "controller_signature"}
+        inverted_adoption["controller_signature"] = {
+            "algorithm": "ed25519",
+            "signature_base64": _signature(self.controller_key, portable.IMAGE_ADOPTION_SIGNATURE_DOMAIN, inverted_adoption_unsigned),
+        }
+        with self.assertRaisesRegex(portable.SourceProvenanceVerificationError, "outside the controller certificate window"):
+            verify(
+                image_export=inverted_export_payload,
+                controller_adoption=portable.canonical_json_bytes(inverted_adoption) + b"\n",
             )
 
     def test_unexpected_sync_app_mount_blocks_without_data_capture(self):

@@ -9,6 +9,7 @@ import shlex
 import tarfile
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 
@@ -83,7 +84,9 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
             "scripts/manage_webapp_ir_artifact_stage.py": b"# stage consumer\n",
             "scripts/manage_webapp_ir_snapshot.py": b"# snapshot helper\n",
             "scripts/manage_webapp_ir_release_provenance.py": b"# provenance helper\n",
+            "scripts/prepare_webapp_ir_artifact_bundle.py": b"# image archive verifier helper\n",
             "scripts/verify_webapp_fi_source_provenance.py": b"# pure source verifier helper\n",
+            "scripts/install_webapp_ir_static_assets.py": b"# detached static installer helper\n",
             "core/standby_snapshot_capacity.py": b"# capacity helper\n",
             "scripts/webapp_ir_image_archive_contract.py": b"# image archive contract\n",
             "config/consumer.json": config_raw,
@@ -360,6 +363,40 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
             for headers in bad_headers:
                 with self.assertRaises(namespace["ReceiveError"]):
                     namespace["validate_headers"](headers, config)
+
+    def test_remote_receive_failure_preserves_its_fresh_candidate_for_inspection(self):
+        with tempfile.TemporaryDirectory(prefix="wa-ir-render-") as temporary:
+            root = Path(temporary)
+            fixture = self._fixture(root)
+            _, namespace, config = self._remote(self._render(fixture))
+            bootstrap_root = root / "bootstrap-root"
+            bootstrap_root.mkdir(mode=0o700)
+            identity = root / "identity.agekey"
+            write_private(identity, b"test identity\n")
+            config = dict(config)
+            config["bootstrap_root"] = str(bootstrap_root)
+            config["age_identity_file"] = str(identity)
+            candidate = bootstrap_root / (
+                "received-" + str(config["control_commit"]) + "-" + str(config["bootstrap_id"])
+            )
+
+            def failed_download(arguments, **_kwargs):
+                output = Path(arguments[arguments.index("--output") + 1])
+                write_private(output, b"partial bootstrap ciphertext")
+                return SimpleNamespace(returncode=23, stdout=b"")
+
+            namespace["validate_url"] = lambda _url, _config: None
+            namespace["require_trusted_executable"] = lambda path: path
+            namespace["require_root_private_file"] = lambda _path: identity
+            namespace["require_root_private_directory"] = lambda _path: bootstrap_root
+            namespace["subprocess"] = SimpleNamespace(DEVNULL=object(), PIPE=object(), run=failed_download)
+
+            with self.assertRaises(namespace["ReceiveError"]):
+                namespace["receive"](config, str(fixture["url"]))
+
+            self.assertTrue(candidate.is_dir())
+            self.assertEqual(b"partial bootstrap ciphertext", (candidate / ".ciphertext").read_bytes())
+            self.assertFalse((candidate / namespace["RECEIPT_NAME"]).exists())
 
     def test_remote_archive_verifier_accepts_exact_archive_and_rejects_unsafe_members(self):
         with tempfile.TemporaryDirectory(prefix="wa-ir-render-") as temporary:

@@ -68,11 +68,14 @@ CAMPAIGN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$")
 AGE_RECIPIENT_RE = re.compile(r"^age1[ac-hj-np-z02-9]{20,128}$")
 VERSION_ID_RE = re.compile(rf"^[A-Za-z0-9._~+/=-]{{1,{MAX_VERSION_ID_BYTES}}}$")
 
-# This bootstrap is intentionally attest-only.  Snapshot capture, Object
-# Storage publication, restore, and any other data-plane capability belong to
-# a separately authorised later phase and are not shipped to WebApp-FI here.
+# This bootstrap is intentionally attest-only.  It also carries the small
+# local-only static-assets archive preparer so a verified FI source can emit
+# the controller-adopter-compatible ``mini_app_dist`` payload without a second
+# helper delivery.  Object Storage publication, restore, and any other
+# data-plane capability remain separately authorised and are not shipped here.
 SOURCE_PAYLOAD_FILES = (
     "scripts/install_webapp_fi_source_adoption.py",
+    "scripts/prepare_webapp_fi_static_assets.py",
     "deploy/production/webapp-fi-source-role.json.example",
 )
 CONTRACT_MEMBER = "config/source-adoption-contract.json"

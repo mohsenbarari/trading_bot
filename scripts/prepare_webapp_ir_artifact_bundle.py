@@ -41,15 +41,9 @@ from typing import Any, Callable, Mapping, Sequence
 
 
 def _load_image_archive_contract() -> Any:
-    """Load the pure tag contract in both direct-script and unit-test modes."""
+    """Load the pure tag contract from the exact sibling source file."""
 
-    module_name = "webapp_ir_image_archive_contract"
-    try:
-        return __import__(module_name)
-    except ModuleNotFoundError as exc:
-        if exc.name != module_name:
-            raise
-    module_path = Path(__file__).with_name(module_name + ".py")
+    module_path = Path(__file__).with_name("webapp_ir_image_archive_contract.py")
     spec = importlib.util.spec_from_file_location("_wa_ir_image_archive_contract", module_path)
     if spec is None or spec.loader is None:  # pragma: no cover - repository invariant.
         raise RuntimeError("cannot load WA-IR image archive contract")

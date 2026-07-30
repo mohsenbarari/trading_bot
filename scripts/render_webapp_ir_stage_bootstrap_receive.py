@@ -56,7 +56,9 @@ PAYLOAD_MEMBERS = (
     "scripts/manage_webapp_ir_artifact_stage.py",
     "scripts/manage_webapp_ir_snapshot.py",
     "scripts/manage_webapp_ir_release_provenance.py",
+    "scripts/prepare_webapp_ir_artifact_bundle.py",
     "scripts/verify_webapp_fi_source_provenance.py",
+    "scripts/install_webapp_ir_static_assets.py",
     "core/standby_snapshot_capacity.py",
     "scripts/webapp_ir_image_archive_contract.py",
     "config/consumer.json",
@@ -643,7 +645,6 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
-import shutil
 import stat
 import subprocess
 import sys
@@ -997,7 +998,6 @@ def receive(config, url):
     candidate = root / ("received-" + config["control_commit"] + "-" + config["bootstrap_id"])
     if candidate.parent != root or candidate.exists() or candidate.is_symlink():
         raise ReceiveError("candidate already exists")
-    completed = False
     os.umask(0o077)
     try:
         os.mkdir(candidate, 0o700)
@@ -1040,11 +1040,11 @@ def receive(config, url):
         verify_extracted(candidate, config)
         receipt = build_receipt(config, candidate)
         write_new_private_json(candidate / RECEIPT_NAME, receipt)
-        completed = True
         print(json.dumps({"status": "received", "candidate_directory": str(candidate), "receipt": str(candidate / RECEIPT_NAME)}, sort_keys=True))
-    finally:
-        if not completed and candidate.exists():
-            shutil.rmtree(candidate, ignore_errors=True)
+    except Exception:
+        # Preserve every failed fresh candidate as root-only evidence.  A later
+        # operator must decide cleanup only after inspecting immutable objects.
+        raise
 
 def load_config(value):
     try:
@@ -1096,8 +1096,10 @@ def load_config(value):
     files = config.get("files")
     required_names = {
         "scripts/manage_webapp_ir_artifact_stage.py", "scripts/manage_webapp_ir_snapshot.py",
-        "scripts/manage_webapp_ir_release_provenance.py", "core/standby_snapshot_capacity.py",
+        "scripts/manage_webapp_ir_release_provenance.py", "scripts/prepare_webapp_ir_artifact_bundle.py",
+        "core/standby_snapshot_capacity.py",
         "scripts/verify_webapp_fi_source_provenance.py",
+        "scripts/install_webapp_ir_static_assets.py",
         "scripts/webapp_ir_image_archive_contract.py",
         "config/consumer.json",
     }

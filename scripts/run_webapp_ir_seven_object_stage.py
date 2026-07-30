@@ -62,6 +62,7 @@ def _load_bootstrap_preparer() -> Any:
 stage = _load_sibling_module("manage_webapp_ir_artifact_stage")
 bootstrap_renderer = _load_sibling_module("render_webapp_ir_stage_bootstrap_receive")
 normal_renderer = _load_sibling_module("render_webapp_ir_stage_consume")
+provenance = _load_sibling_module("manage_webapp_ir_release_provenance")
 
 
 EXPECTED_APPLICATION_RELEASE_SHA = "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5"
@@ -503,7 +504,7 @@ def _verify_prepared_bootstrap_consumer_config(
     bootstrap_package_directory: Path,
     bootstrap_preparation_receipt: Path,
     consumer_config: Any,
-) -> None:
+) -> Mapping[str, Any]:
     """Bind the future WA-IR consumer package to controller-local pins first.
 
     ``publish_bootstrap_package`` repeats package verification immediately
@@ -569,6 +570,64 @@ def _verify_prepared_bootstrap_consumer_config(
         raise SevenObjectStageError(
             "prepared bootstrap provenance key pins do not match the local trusted configuration"
         )
+    try:
+        _require_git_sha40(prepared.get("control_commit"), field="prepared bootstrap control commit")
+        _require_git_sha40(prepared.get("control_tree"), field="prepared bootstrap control tree")
+    except SevenObjectStageError:
+        raise SevenObjectStageError("prepared bootstrap control identity is invalid") from None
+    return prepared
+
+
+def _utc_now_iso() -> str:
+    return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _preflight_normal_artifacts(
+    *,
+    artifacts: Sequence[Any],
+    bootstrap: Mapping[str, Any],
+    consumer_config: Any,
+) -> list[Any]:
+    """Close all local provenance and image gates before SSH/S3 effects."""
+
+    try:
+        snapshots = provenance.verify_publishable_stage_inputs(
+            artifacts=artifacts,
+            bootstrap_control_commit=_require_git_sha40(
+                bootstrap.get("control_commit"), field="prepared bootstrap control commit"
+            ),
+            bootstrap_control_tree=_require_git_sha40(
+                bootstrap.get("control_tree"), field="prepared bootstrap control tree"
+            ),
+            pinned_source_public_key=consumer_config.webapp_fi_source_attestation_public_key,
+            pinned_controller_public_key=consumer_config.webapp_fi_controller_authorization_public_key,
+            maximum_artifact_bytes=consumer_config.maximum_artifact_bytes,
+            verification_time=_utc_now_iso(),
+        )
+    except Exception:
+        raise SevenObjectStageError("normal artifacts do not satisfy the pinned composite provenance gate") from None
+    if not isinstance(snapshots, Mapping) or set(snapshots) != set(EXPECTED_NORMAL_ARTIFACTS):
+        raise SevenObjectStageError("normal artifact composite preflight did not return exact snapshots")
+    bound: list[Any] = []
+    for artifact in artifacts:
+        snapshot = snapshots.get(artifact.name)
+        if not isinstance(snapshot, Mapping):
+            raise SevenObjectStageError("normal artifact composite preflight snapshot is invalid")
+        try:
+            sha256 = _require_sha256(snapshot.get("sha256"), field=f"normal {artifact.name} snapshot SHA-256")
+            bytes_value = _require_positive_integer(snapshot.get("bytes"), field=f"normal {artifact.name} snapshot bytes")
+        except SevenObjectStageError:
+            raise SevenObjectStageError("normal artifact composite preflight snapshot is invalid") from None
+        bound.append(
+            stage.ArtifactInput(
+                name=artifact.name,
+                path=artifact.path,
+                bindings=artifact.bindings,
+                expected_sha256=sha256,
+                expected_bytes=bytes_value,
+            )
+        )
+    return bound
 
 
 def run_stage(
@@ -616,7 +675,7 @@ def run_stage(
         raise SevenObjectStageError("publisher signing key is invalid") from None
     if publisher_public_key != consumer_config.source_signing_public_key:
         raise SevenObjectStageError("publisher signing key does not match the pinned consumer key")
-    _verify_prepared_bootstrap_consumer_config(
+    prepared_bootstrap = _verify_prepared_bootstrap_consumer_config(
         bootstrap_package_directory=bootstrap_package_directory,
         bootstrap_preparation_receipt=bootstrap_preparation_receipt,
         consumer_config=consumer_config,
@@ -627,6 +686,17 @@ def run_stage(
     artifacts = _parse_exact_normal_artifacts(
         artifact_specs=artifact_specs,
         binding_specs=binding_specs,
+    )
+    _require_bootstrap_control_binding(
+        artifacts,
+        bootstrap_control_commit=_require_git_sha40(
+            prepared_bootstrap.get("control_commit"), field="prepared bootstrap control commit"
+        ),
+    )
+    artifacts = _preflight_normal_artifacts(
+        artifacts=artifacts,
+        bootstrap=prepared_bootstrap,
+        consumer_config=consumer_config,
     )
 
     # This is the only remote mutation before the seven immutable object
@@ -659,13 +729,22 @@ def run_stage(
         ) from None
     try:
         _execute_rendered_ssh(bootstrap_command, ssh_runner=ssh_runner)
-        _require_bootstrap_control_binding(artifacts, bootstrap_control_commit=bootstrap["control_commit"])
+        if (
+            bootstrap["control_commit"] != prepared_bootstrap["control_commit"]
+            or bootstrap["control_tree"] != prepared_bootstrap["control_tree"]
+        ):
+            raise SevenObjectStageError("published bootstrap control identity changed after local verification")
     except SevenObjectStageError:
         raise SevenObjectStageError(
             "bootstrap receipt is available but the stage cannot continue",
             evidence=_bootstrap_only_evidence(bootstrap),
         ) from None
     try:
+        artifacts = _preflight_normal_artifacts(
+            artifacts=artifacts,
+            bootstrap=prepared_bootstrap,
+            consumer_config=consumer_config,
+        )
         raw_normal_receipt = stage.publish_bundle(
             client,
             config=publisher_config,

@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import urllib.parse
 from pathlib import Path
 from typing import Any
@@ -279,9 +280,15 @@ class ArtifactStageTests(unittest.TestCase):
         (self.bootstrap_source / "scripts/manage_webapp_ir_release_provenance.py").write_text(
             "# release provenance primitives\nVALUE = 'provenance'\n", encoding="utf-8"
         )
+        (self.bootstrap_source / "scripts/prepare_webapp_ir_artifact_bundle.py").write_text(
+            "# image archive verifier\nVALUE = 'image-preparer'\n", encoding="utf-8"
+        )
         (self.bootstrap_source / "scripts/verify_webapp_fi_source_provenance.py").write_text(
             "# pure WebApp-FI source provenance verifier\nVALUE = 'source-provenance'\n",
             encoding="utf-8",
+        )
+        (self.bootstrap_source / "scripts/install_webapp_ir_static_assets.py").write_text(
+            "# detached static installer\nVALUE = 'static-installer'\n", encoding="utf-8"
         )
         (self.bootstrap_source / "core/standby_snapshot_capacity.py").write_text(
             "# capacity primitives\nVALUE = 'capacity'\n", encoding="utf-8"
@@ -462,6 +469,107 @@ class ArtifactStageTests(unittest.TestCase):
             receipt["receipt_sha256"],
         )
 
+    def test_publisher_rejects_a_stale_controller_snapshot_before_encryption_or_upload(self) -> None:
+        artifact = self.artifacts()[0]
+        expected_sha256, expected_bytes = stage.sha256_file(artifact.path)
+        artifact.path.write_bytes(artifact.path.read_bytes() + b"changed-after-preflight")
+        artifact.path.chmod(0o600)
+        snapshot_bound = dataclasses.replace(
+            artifact,
+            expected_sha256=expected_sha256,
+            expected_bytes=expected_bytes,
+        )
+        encryptor = mock.Mock(side_effect=fake_encrypt)
+
+        with self.assertRaisesRegex(stage.ArtifactStageError, "no longer matches its controller preflight snapshot"):
+            stage.publish_bundle(
+                self.client,
+                config=self.publisher_config,
+                destination_site="webapp_ir",
+                release_sha=RELEASE_SHA,
+                artifacts=[snapshot_bound],
+                bundle_id=BUNDLE_ID,
+                now=NOW,
+                encryptor=encryptor,
+            )
+
+        encryptor.assert_not_called()
+        self.assertEqual([], self.client.put_calls)
+
+    def test_publisher_rejects_a_snapshot_change_during_encryption_before_upload(self) -> None:
+        artifact = self.artifacts()[0]
+        expected_sha256, expected_bytes = stage.sha256_file(artifact.path)
+        snapshot_bound = dataclasses.replace(
+            artifact,
+            expected_sha256=expected_sha256,
+            expected_bytes=expected_bytes,
+        )
+
+        def mutate_after_encrypt(_binary: str, _recipient: str, source: Path, output: Path) -> None:
+            fake_encrypt(_binary, _recipient, source, output)
+            source.write_bytes(source.read_bytes() + b"changed-during-encryption")
+            source.chmod(0o600)
+
+        with self.assertRaisesRegex(stage.ArtifactStageError, "no longer matches its controller preflight snapshot"):
+            stage.publish_bundle(
+                self.client,
+                config=self.publisher_config,
+                destination_site="webapp_ir",
+                release_sha=RELEASE_SHA,
+                artifacts=[snapshot_bound],
+                bundle_id=BUNDLE_ID,
+                now=NOW,
+                encryptor=mutate_after_encrypt,
+            )
+
+        self.assertEqual([], self.client.put_calls)
+
+    def test_publisher_encrypts_the_private_snapshot_when_the_source_is_swapped_and_restored(self) -> None:
+        artifact = self.artifacts()[0]
+        original = artifact.path.read_bytes()
+        expected_sha256, expected_bytes = stage.sha256_file(artifact.path)
+        snapshot_bound = dataclasses.replace(
+            artifact,
+            expected_sha256=expected_sha256,
+            expected_bytes=expected_bytes,
+        )
+        encrypted_sources: list[Path] = []
+
+        def swap_source_before_encrypt(_binary: str, _recipient: str, source: Path, output: Path) -> None:
+            if source.name == "manifest.json":
+                fake_encrypt(_binary, _recipient, source, output)
+                return
+            self.assertNotEqual(artifact.path, source)
+            self.assertTrue(source.name.startswith("plaintext-snapshot-"))
+            self.assertEqual(0o600, stat.S_IMODE(source.stat().st_mode))
+            encrypted_sources.append(source)
+            artifact.path.write_bytes(b"replacement visible only at the original pathname")
+            artifact.path.chmod(0o600)
+            try:
+                fake_encrypt(_binary, _recipient, source, output)
+            finally:
+                artifact.path.write_bytes(original)
+                artifact.path.chmod(0o600)
+
+        published = stage.publish_bundle(
+            self.client,
+            config=self.publisher_config,
+            destination_site="webapp_ir",
+            release_sha=RELEASE_SHA,
+            artifacts=[snapshot_bound],
+            bundle_id=BUNDLE_ID,
+            now=NOW,
+            encryptor=swap_source_before_encrypt,
+        )
+
+        self.assertEqual(1, len(encrypted_sources))
+        self.assertEqual(original, artifact.path.read_bytes())
+        descriptor = published["artifacts"][0]
+        encrypted = self.client._entry(descriptor["object_key"], descriptor["version_id"])["data"]
+        self.assertEqual(b"FAKE-AGE\x00" + original, encrypted)
+        self.assertEqual(expected_sha256, descriptor["sha256"])
+        self.assertEqual(expected_bytes, descriptor["bytes"])
+
     def test_publisher_rejects_prior_version_before_conditional_upload(self) -> None:
         base = stage.artifact_base_key(
             prefix=self.publisher_config.prefix,
@@ -509,6 +617,44 @@ class ArtifactStageTests(unittest.TestCase):
         )
         self.assertIn("versionId=" + published["bootstrap"]["version_id"], published["bootstrap"]["presigned_url"])
         self.assertTrue(all("ServerSideEncryption" not in call for call in self.client.put_calls))
+
+    def test_bootstrap_publisher_encrypts_the_private_snapshot_when_the_archive_is_swapped_and_restored(self) -> None:
+        package_directory, receipt_path, prepared = self.prepare_bootstrap_package(name="bootstrap-snapshot")
+        archive_path = Path(prepared["archive_path"])
+        original = archive_path.read_bytes()
+        encrypted_sources: list[Path] = []
+
+        def swap_archive_before_encrypt(_binary: str, _recipient: str, source: Path, output: Path) -> None:
+            self.assertNotEqual(archive_path, source)
+            self.assertTrue(source.name.startswith("plaintext-snapshot-"))
+            self.assertEqual(0o600, stat.S_IMODE(source.stat().st_mode))
+            encrypted_sources.append(source)
+            archive_path.write_bytes(b"replacement visible only at the original pathname")
+            archive_path.chmod(0o600)
+            try:
+                fake_encrypt(_binary, _recipient, source, output)
+            finally:
+                archive_path.write_bytes(original)
+                archive_path.chmod(0o600)
+
+        published = stage.publish_bootstrap_package(
+            self.client,
+            config=self.publisher_config,
+            bootstrap_package_directory=package_directory,
+            bootstrap_preparation_receipt=receipt_path,
+            bootstrap_id=BUNDLE_ID,
+            now=NOW,
+            encryptor=swap_archive_before_encrypt,
+        )
+
+        self.assertEqual(1, len(encrypted_sources))
+        self.assertEqual(original, archive_path.read_bytes())
+        encrypted = self.client._entry(
+            published["bootstrap"]["object_key"], published["bootstrap"]["version_id"]
+        )["data"]
+        self.assertEqual(b"FAKE-AGE\x00" + original, encrypted)
+        self.assertEqual(prepared["archive_sha256"], published["bootstrap"]["plaintext_sha256"])
+        self.assertEqual(prepared["archive_bytes"], published["bootstrap"]["plaintext_bytes"])
 
     def test_bootstrap_publisher_rejects_existing_object_before_upload(self) -> None:
         package_directory, receipt_path, _prepared = self.prepare_bootstrap_package(name="bootstrap-existing")
@@ -650,6 +796,24 @@ class ArtifactStageTests(unittest.TestCase):
         with self.assertRaisesRegex(stage.ArtifactStageError, "provider-side"):
             self.consume(published)
         self.assertEqual(1, len(self.downloader.calls))
+
+    def test_consumer_preserves_a_failed_fresh_incoming_candidate_for_inspection(self) -> None:
+        published = self.publish()
+
+        def fail_release_bundle(request: Any, timeout: int) -> FakeDownloadResponse:
+            if "/release-bundle.age" in request.full_url:
+                raise OSError("simulated exact-version download failure")
+            return self.downloader(request, timeout)
+
+        with self.assertRaisesRegex(stage.ArtifactStageError, "cannot download the exact presigned"):
+            self.consume(published, downloader=fail_release_bundle)
+
+        parent = self.staging_root / "webapp_fi" / RELEASE_SHA
+        incoming = list(parent.glob(".incoming-" + BUNDLE_ID + "-*"))
+        self.assertEqual(1, len(incoming))
+        self.assertEqual(self.image_bundle.read_bytes(), (incoming[0] / "image-bundle").read_bytes())
+        self.assertFalse((incoming[0] / "stage-receipt.json").exists())
+        self.assertFalse((parent / BUNDLE_ID).exists())
 
     def test_consumer_refuses_to_overwrite_a_detached_candidate(self) -> None:
         published = self.publish()

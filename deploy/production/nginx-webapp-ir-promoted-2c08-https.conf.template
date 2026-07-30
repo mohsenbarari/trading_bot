@@ -24,9 +24,9 @@ server {
     ssl_certificate __WA_IR_CERTIFICATE_PATH__;
     ssl_certificate_key __WA_IR_CERTIFICATE_KEY_PATH__;
 
-    # This is the immutable 2c08 release directory delivered through the
-    # verified Object Storage release path, never a mutable `current` tree.
-    root __WA_IR_RELEASE_ROOT__/mini_app_dist;
+    # Static bytes are separately verified and installed outside the clean Git
+    # release root, never taken from a mutable `current` tree.
+    root __WA_IR_STATIC_RELEASE_ROOT__;
     index index.html;
 
     add_header X-Frame-Options "SAMEORIGIN" always;

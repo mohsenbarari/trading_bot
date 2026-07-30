@@ -83,7 +83,11 @@ def prepared_bootstrap_config(*, consumer: SimpleNamespace | None = None) -> dic
 
 
 def prepared_bootstrap_package(*, consumer: SimpleNamespace | None = None) -> dict[str, object]:
-    return {"consumer_config": prepared_bootstrap_config(consumer=consumer)}
+    return {
+        "consumer_config": prepared_bootstrap_config(consumer=consumer),
+        "control_commit": CONTROL_SHA,
+        "control_tree": CONTROL_TREE,
+    }
 
 
 def bootstrap_receipt(url: str = BOOTSTRAP_URL) -> dict[str, object]:
@@ -212,6 +216,11 @@ class SevenObjectStageControllerTests(unittest.TestCase):
             mock.patch.object(wrapper.stage, "_publisher_public_key", return_value=b"p" * 32),
             mock.patch.object(wrapper.stage, "parse_artifact_specifications", return_value=artifacts),
             mock.patch.object(wrapper.stage, "apply_artifact_bindings", side_effect=lambda parsed, _bindings: parsed),
+            mock.patch.object(
+                wrapper,
+                "_preflight_normal_artifacts",
+                side_effect=lambda *, artifacts, **_kwargs: list(artifacts),
+            ),
         )
 
     def _run(self, **overrides: object) -> dict[str, object]:
@@ -244,7 +253,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
             runner_arguments.append(list(arguments))
             return subprocess.CompletedProcess(list(arguments), 0)
 
-        root, publisher, consumer, public_key, parser, binder = self._common_patches()
+        root, publisher, consumer, public_key, parser, binder, preflight = self._common_patches()
         with (
             root,
             publisher,
@@ -252,6 +261,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
             public_key,
             parser,
             binder,
+            preflight,
             mock.patch.object(wrapper.stage, "create_s3_client", return_value=object()) as create_client,
             mock.patch.object(
                 wrapper.stage,
@@ -300,7 +310,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
         )
 
     def test_invalid_normal_input_stops_before_client_or_bootstrap_publish(self) -> None:
-        root, publisher, consumer, public_key, parser, binder = self._common_patches(parsed=normal_inputs()[:-1])
+        root, publisher, consumer, public_key, parser, binder, preflight = self._common_patches(parsed=normal_inputs()[:-1])
         with (
             root,
             publisher,
@@ -308,6 +318,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
             public_key,
             parser,
             binder,
+            preflight,
             mock.patch.object(wrapper.stage, "create_s3_client") as create_client,
             mock.patch.object(wrapper.stage, "publish_bootstrap_package") as publish_bootstrap,
         ):
@@ -345,7 +356,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
                 assert isinstance(packaged, dict)
                 packaged[field] = base64.b64encode(b"x" * 32).decode("ascii")
                 self.bootstrap_verifier.return_value = prepared
-                root, publisher, consumer, public_key, parser, binder = self._common_patches()
+                root, publisher, consumer, public_key, parser, binder, preflight = self._common_patches()
                 with (
                     root,
                     publisher,
@@ -353,6 +364,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
                     public_key,
                     parser,
                     binder,
+                    preflight,
                     mock.patch.object(wrapper, "_prepare_bootstrap_root") as prepare_root,
                     mock.patch.object(wrapper.stage, "create_s3_client") as create_client,
                     mock.patch.object(wrapper.stage, "publish_bootstrap_package") as publish_bootstrap,
@@ -362,6 +374,36 @@ class SevenObjectStageControllerTests(unittest.TestCase):
                 prepare_root.assert_not_called()
                 create_client.assert_not_called()
                 publish_bootstrap.assert_not_called()
+
+    def test_composite_preflight_failure_stops_before_ssh_or_object_storage(self) -> None:
+        root, publisher, consumer, public_key, parser, binder, _preflight = self._common_patches()
+        ssh_runner = mock.Mock()
+        with (
+            root,
+            publisher,
+            consumer,
+            public_key,
+            parser,
+            binder,
+            mock.patch.object(
+                wrapper,
+                "_preflight_normal_artifacts",
+                side_effect=wrapper.SevenObjectStageError("composite gate rejected fixture"),
+            ) as preflight,
+            mock.patch.object(wrapper, "_prepare_bootstrap_root") as prepare_root,
+            mock.patch.object(wrapper.stage, "create_s3_client") as create_client,
+            mock.patch.object(wrapper.stage, "publish_bootstrap_package") as publish_bootstrap,
+            mock.patch.object(wrapper.stage, "publish_bundle") as publish_normal,
+        ):
+            with self.assertRaisesRegex(wrapper.SevenObjectStageError, "composite gate rejected fixture"):
+                self._run(ssh_runner=ssh_runner)
+
+        preflight.assert_called_once()
+        prepare_root.assert_not_called()
+        create_client.assert_not_called()
+        publish_bootstrap.assert_not_called()
+        publish_normal.assert_not_called()
+        ssh_runner.assert_not_called()
 
     def test_root_is_required_before_controller_configuration_is_read(self) -> None:
         with (
@@ -373,7 +415,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
         load_publisher.assert_not_called()
 
     def test_bootstrap_root_prepare_failure_stops_before_client_or_object_publish(self) -> None:
-        root, publisher, consumer, public_key, parser, binder = self._common_patches()
+        root, publisher, consumer, public_key, parser, binder, preflight = self._common_patches()
         with (
             root,
             publisher,
@@ -381,6 +423,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
             public_key,
             parser,
             binder,
+            preflight,
             mock.patch.object(wrapper.stage, "create_s3_client") as create_client,
             mock.patch.object(wrapper.stage, "publish_bootstrap_package") as publish_bootstrap,
         ):
@@ -390,7 +433,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
         publish_bootstrap.assert_not_called()
 
     def test_failed_bootstrap_ssh_stops_without_normal_publish_or_retry(self) -> None:
-        root, publisher, consumer, public_key, parser, binder = self._common_patches()
+        root, publisher, consumer, public_key, parser, binder, preflight = self._common_patches()
         with (
             root,
             publisher,
@@ -398,6 +441,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
             public_key,
             parser,
             binder,
+            preflight,
             mock.patch.object(wrapper.stage, "create_s3_client", return_value=object()),
             mock.patch.object(wrapper.stage, "publish_bootstrap_package", return_value=bootstrap_receipt()) as publish_bootstrap,
             mock.patch.object(wrapper.bootstrap_renderer, "render_receive_command", return_value=rendered_command(BOOTSTRAP_URL)),
@@ -416,7 +460,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
     def test_malformed_normal_receipt_stops_before_normal_ssh_and_does_not_retry(self) -> None:
         calls: list[list[str]] = []
         malformed = normal_receipt(names=wrapper.EXPECTED_NORMAL_ARTIFACTS[:-1])
-        root, publisher, consumer, public_key, parser, binder = self._common_patches()
+        root, publisher, consumer, public_key, parser, binder, preflight = self._common_patches()
         with (
             root,
             publisher,
@@ -424,6 +468,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
             public_key,
             parser,
             binder,
+            preflight,
             mock.patch.object(wrapper.stage, "create_s3_client", return_value=object()),
             mock.patch.object(wrapper.stage, "publish_bootstrap_package", return_value=bootstrap_receipt()),
             mock.patch.object(wrapper.bootstrap_renderer, "render_receive_command", return_value=rendered_command(BOOTSTRAP_URL)),

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -12,6 +14,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from unittest import mock
@@ -109,19 +112,51 @@ class ReleaseProvenanceTests(unittest.TestCase):
         git(self.control_repository, "commit", "--quiet", "-m", "add dispatcher")
         self.control_sha = git(self.control_repository, "rev-parse", "HEAD")
         self.control_tree = git(self.control_repository, "rev-parse", "HEAD^{tree}")
-        self.app_image_id = "sha256:" + "a" * 64
+        self.app_image_config = b'{"architecture":"amd64","config":"release"}'
+        self.app_image_id = "sha256:" + hashlib.sha256(self.app_image_config).hexdigest()
         self.app_repo_digest = "trading_bot_base_iran@sha256:" + "b" * 64
         self.campaign_id = "current-2c08-standby-campaign"
-
-    def patched_contract(self):
-        return mock.patch.multiple(
-            MODULE,
-            APPLICATION_RELEASE_PARENT=self.application_parent,
-            CONTROL_RELEASE_PARENT=self.control_parent,
-            CONTROL_DISPATCHER_DIRECTORY=self.dispatcher_directory,
-            TRUSTED_DISPATCHER_PATH=self.dispatcher_path,
-            LEGACY_APPLICATION_RELEASE_SHA=self.application_sha,
+        self.expected_alembic_revision = "f2c7d8e9a0b1"
+        self.canonical_release_tree_sha256 = "e" * 64
+        self.source_provenance_input = self.root / "source-provenance-input.json"
+        write_private(
+            self.source_provenance_input,
+            MODULE.canonical_json_bytes(
+                {
+                    "schema": MODULE.WEBAPP_FI_SOURCE_PROVENANCE_INPUT_SCHEMA,
+                    "campaign_id": self.campaign_id,
+                    "proofs": {
+                        name: {"fixture_proof": name}
+                        for name in MODULE.WEBAPP_FI_SOURCE_PROOF_NAMES
+                    },
+                }
+            )
+            + b"\n",
         )
+
+    @contextlib.contextmanager
+    def patched_contract(self):
+        with (
+            mock.patch.multiple(
+                MODULE,
+                APPLICATION_RELEASE_PARENT=self.application_parent,
+                CONTROL_RELEASE_PARENT=self.control_parent,
+                CONTROL_DISPATCHER_DIRECTORY=self.dispatcher_directory,
+                TRUSTED_DISPATCHER_PATH=self.dispatcher_path,
+                LEGACY_APPLICATION_RELEASE_SHA=self.application_sha,
+            ),
+            mock.patch.object(
+                MODULE,
+                "_verify_webapp_fi_source_composite",
+                return_value={"status": "verified"},
+            ),
+            mock.patch.object(
+                MODULE,
+                "_verification_anchor_from_adoption",
+                return_value="2026-07-30T12:00:00Z",
+            ),
+        ):
+            yield
 
     def _artifact_descriptor(self, name: str, path: Path, bindings: dict[str, str]) -> dict:
         sha256, size = digest(path)
@@ -143,8 +178,6 @@ class ReleaseProvenanceTests(unittest.TestCase):
         output.chmod(0o700)
         release_bundle = output / "release.bundle"
         MODULE._create_git_bundle(self.application_repository, self.application_sha, release_bundle)
-        image_bundle = output / "images.tar"
-        write_private(image_bundle, b"verified-image-archive-fixture\n")
         images = [
             {
                 "archive_tag": MODULE.image_contract.canonical_archive_tag(
@@ -159,6 +192,27 @@ class ReleaseProvenanceTests(unittest.TestCase):
                 "source_ref": "trading_bot_base_iran:rollback-2c08",
             }
         ]
+        image_bundle = output / "images.tar"
+        config_name = self.app_image_id.removeprefix("sha256:") + ".json"
+        docker_manifest = MODULE.canonical_json_bytes(
+            [
+                {
+                    "Config": config_name,
+                    "Layers": [],
+                    "RepoTags": [images[0]["archive_tag"]],
+                }
+            ]
+        )
+        with tarfile.open(image_bundle, "w", format=tarfile.USTAR_FORMAT) as archive:
+            config_info = tarfile.TarInfo(config_name)
+            config_info.mode = 0o600
+            config_info.size = len(self.app_image_config)
+            archive.addfile(config_info, io.BytesIO(self.app_image_config))
+            manifest_info = tarfile.TarInfo("manifest.json")
+            manifest_info.mode = 0o600
+            manifest_info.size = len(docker_manifest)
+            archive.addfile(manifest_info, io.BytesIO(docker_manifest))
+        image_bundle.chmod(0o600)
         archive_sha, archive_bytes = digest(image_bundle)
         archive = {
             "bytes": archive_bytes,
@@ -276,6 +330,9 @@ class ReleaseProvenanceTests(unittest.TestCase):
                 control_release_sha=self.control_sha,
                 output_directory=self.output_parent / "control-bound",
                 app_image_id=self.app_image_id,
+                expected_alembic_revision=self.expected_alembic_revision,
+                canonical_release_tree_sha256=self.canonical_release_tree_sha256,
+                webapp_fi_source_provenance_input=self.source_provenance_input,
                 app_repo_digest=self.app_repo_digest,
             )
 
@@ -387,7 +444,9 @@ class ReleaseProvenanceTests(unittest.TestCase):
             "scripts/manage_webapp_ir_artifact_stage.py": b"# stage consumer fixture\n",
             "scripts/manage_webapp_ir_snapshot.py": b"# snapshot fixture\n",
             "scripts/manage_webapp_ir_release_provenance.py": b"# release provenance fixture\n",
+            "scripts/prepare_webapp_ir_artifact_bundle.py": b"# image archive verifier fixture\n",
             "scripts/verify_webapp_fi_source_provenance.py": b"# pure source verifier fixture\n",
+            "scripts/install_webapp_ir_static_assets.py": b"# detached static installer fixture\n",
             "core/standby_snapshot_capacity.py": b"# capacity fixture\n",
             "scripts/webapp_ir_image_archive_contract.py": b"# image archive fixture\n",
             "config/consumer.json": MODULE.canonical_json_bytes(consumer_config) + b"\n",
@@ -510,6 +569,9 @@ class ReleaseProvenanceTests(unittest.TestCase):
                 control_release_sha=self.control_sha,
                 output_directory=self.output_parent / "control-no-repo-digest",
                 app_image_id=self.app_image_id,
+                expected_alembic_revision=self.expected_alembic_revision,
+                canonical_release_tree_sha256=self.canonical_release_tree_sha256,
+                webapp_fi_source_provenance_input=self.source_provenance_input,
             )
         self.assertEqual(prepared["runtime_images"]["app_image_id"], self.app_image_id)
         self.assertNotIn("app_repo_digest", prepared["runtime_images"])
@@ -539,6 +601,9 @@ class ReleaseProvenanceTests(unittest.TestCase):
                     control_release_sha=self.control_sha,
                     output_directory=output,
                     app_image_id="sha256:" + "c" * 64,
+                    expected_alembic_revision=self.expected_alembic_revision,
+                    canonical_release_tree_sha256=self.canonical_release_tree_sha256,
+                    webapp_fi_source_provenance_input=self.source_provenance_input,
                 )
         self.assertFalse(output.exists())
 
@@ -553,6 +618,9 @@ class ReleaseProvenanceTests(unittest.TestCase):
                     control_release_sha=self.control_sha,
                     output_directory=output,
                     app_image_id=self.app_image_id,
+                    expected_alembic_revision=self.expected_alembic_revision,
+                    canonical_release_tree_sha256=self.canonical_release_tree_sha256,
+                    webapp_fi_source_provenance_input=self.source_provenance_input,
                 )
         self.assertFalse(output.exists())
 
@@ -570,6 +638,12 @@ class ReleaseProvenanceTests(unittest.TestCase):
                 "/root/output",
                 "--app-image-id",
                 self.app_image_id,
+                "--expected-alembic-revision",
+                self.expected_alembic_revision,
+                "--canonical-release-tree-sha256",
+                self.canonical_release_tree_sha256,
+                "--webapp-fi-source-provenance-input",
+                str(self.source_provenance_input),
             ]
         )
         self.assertIsNone(parsed.app_repo_digest)
@@ -863,6 +937,25 @@ class ReleaseProvenanceTests(unittest.TestCase):
         self.assertFalse((self.application_parent / self.application_sha).exists())
         self.assertFalse((self.control_parent / self.control_sha).exists())
 
+    def test_install_rejects_an_image_archive_that_fails_structural_verification_before_creating_roots(self) -> None:
+        prepared = self.build()
+        stage_receipt = self.make_candidate(prepared)
+
+        with self.patched_contract(), mock.patch.object(
+            MODULE.artifact_preparer,
+            "verify_docker_image_archive",
+            side_effect=RuntimeError("synthetic archive verifier failure"),
+        ):
+            with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "staged image archive"):
+                MODULE.install_release_roots(
+                    stage_receipt_path=stage_receipt,
+                    bootstrap_receipt_path=self.make_bootstrap_receipt(),
+                    receipt_path=self.receipt_parent / "release-roots.json",
+                )
+
+        self.assertFalse((self.application_parent / self.application_sha).exists())
+        self.assertFalse((self.control_parent / self.control_sha).exists())
+
     def test_install_refuses_a_preexisting_fixed_dispatcher_without_touching_roots(self) -> None:
         prepared = self.build()
         stage_receipt = self.make_candidate(prepared)
@@ -896,6 +989,9 @@ class ReleaseProvenanceTests(unittest.TestCase):
                     control_release_sha=self.control_sha,
                     output_directory=output,
                     app_image_id=self.app_image_id,
+                    expected_alembic_revision=self.expected_alembic_revision,
+                    canonical_release_tree_sha256=self.canonical_release_tree_sha256,
+                    webapp_fi_source_provenance_input=self.source_provenance_input,
                     app_repo_digest=self.app_repo_digest,
                 )
 
@@ -916,6 +1012,9 @@ class ReleaseProvenanceTests(unittest.TestCase):
                     control_release_sha=self.control_sha,
                     output_directory=output,
                     app_image_id=self.app_image_id,
+                    expected_alembic_revision=self.expected_alembic_revision,
+                    canonical_release_tree_sha256=self.canonical_release_tree_sha256,
+                    webapp_fi_source_provenance_input=self.source_provenance_input,
                     app_repo_digest=self.app_repo_digest,
                 )
         self.assertTrue((output / MODULE.CONTROL_BUNDLE_ARTIFACT).is_file())

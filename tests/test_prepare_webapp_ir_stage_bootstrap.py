@@ -61,9 +61,15 @@ class WebAppIrStageBootstrapTests(unittest.TestCase):
         (source / "scripts/manage_webapp_ir_release_provenance.py").write_text(
             "# release provenance primitives\nVALUE = 'provenance'\n", encoding="utf-8"
         )
+        (source / "scripts/prepare_webapp_ir_artifact_bundle.py").write_text(
+            "# image archive verifier\nVALUE = 'image-preparer'\n", encoding="utf-8"
+        )
         (source / "scripts/verify_webapp_fi_source_provenance.py").write_text(
             "# pure WebApp-FI source provenance verifier\nVALUE = 'source-provenance'\n",
             encoding="utf-8",
+        )
+        (source / "scripts/install_webapp_ir_static_assets.py").write_text(
+            "# detached static installer\nVALUE = 'static-installer'\n", encoding="utf-8"
         )
         (source / "core/standby_snapshot_capacity.py").write_text(
             "# capacity primitives\nVALUE = 'capacity'\n", encoding="utf-8"
@@ -117,9 +123,15 @@ class WebAppIrStageBootstrapTests(unittest.TestCase):
                 provenance = package.extractfile("scripts/manage_webapp_ir_release_provenance.py")
                 self.assertIsNotNone(provenance)
                 self.assertIn(b"provenance", provenance.read())
+                preparer = package.extractfile("scripts/prepare_webapp_ir_artifact_bundle.py")
+                self.assertIsNotNone(preparer)
+                self.assertIn(b"image-preparer", preparer.read())
                 source_provenance = package.extractfile("scripts/verify_webapp_fi_source_provenance.py")
                 self.assertIsNotNone(source_provenance)
                 self.assertIn(b"source-provenance", source_provenance.read())
+                static_installer = package.extractfile("scripts/install_webapp_ir_static_assets.py")
+                self.assertIsNotNone(static_installer)
+                self.assertIn(b"static-installer", static_installer.read())
                 capacity = package.extractfile("core/standby_snapshot_capacity.py")
                 self.assertIsNotNone(capacity)
                 self.assertIn(b"capacity", capacity.read())
@@ -169,8 +181,8 @@ class WebAppIrStageBootstrapTests(unittest.TestCase):
                 (second / bootstrap.PACKAGE_ARCHIVE_NAME).read_bytes(),
             )
 
-    def test_prepare_closes_over_the_real_control_tree_source_verifier(self):
-        """The bootstrap package must obtain the real portable verifier from Git."""
+    def test_prepare_closes_over_the_real_control_tree_source_verifier_and_static_installer(self):
+        """The bootstrap package obtains every runtime helper from its Git tree."""
 
         with tempfile.TemporaryDirectory(prefix="wa-ir-bootstrap-real-control-") as value:
             root = Path(value)
@@ -184,6 +196,14 @@ class WebAppIrStageBootstrapTests(unittest.TestCase):
             )
             parent = root / "packages"
             parent.mkdir(mode=0o700)
+            static_installer = source / "scripts/install_webapp_ir_static_assets.py"
+            static_installer.write_bytes((ROOT / "scripts/install_webapp_ir_static_assets.py").read_bytes())
+            static_installer.chmod(0o644)
+            self._run("add", "scripts/install_webapp_ir_static_assets.py", cwd=source)
+            self._run(
+                "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                "commit", "-qm", "add static installer", cwd=source,
+            )
             commit = self._run("rev-parse", "HEAD", cwd=source)
             destination = parent / "candidate"
             bootstrap.prepare_bootstrap_package(
@@ -196,6 +216,9 @@ class WebAppIrStageBootstrapTests(unittest.TestCase):
                 verifier = package.extractfile("scripts/verify_webapp_fi_source_provenance.py")
                 self.assertIsNotNone(verifier)
                 self.assertIn(b"verify_source_role_attestation_payload", verifier.read())
+                installer = package.extractfile("scripts/install_webapp_ir_static_assets.py")
+                self.assertIsNotNone(installer)
+                self.assertIn(b"install_verified_static_assets", installer.read())
 
     def test_prepare_refuses_existing_destination(self):
         with tempfile.TemporaryDirectory(prefix="wa-ir-bootstrap-existing-") as value:

@@ -34,6 +34,10 @@ from scripts.manage_webapp_ir_release_provenance import (  # noqa: E402
     ReleaseProvenanceError,
     load_installed_release_receipt,
 )
+from scripts.install_webapp_ir_static_assets import (  # noqa: E402
+    StaticAssetInstallError,
+    verify_installed_static_assets,
+)
 
 DEFAULT_TEMPLATE = REPO_ROOT / "deploy/production/nginx-webapp-ir-promoted-2c08-https.conf.template"
 RELEASE_SHA = "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5"
@@ -49,6 +53,8 @@ CONFIG_KEYS = frozenset(
         "WA_IR_LISTENER_SERVER_NAME",
         "WA_IR_LISTENER_APPLICATION_RELEASE_ROOT",
         "WA_IR_LISTENER_RELEASE_PROVENANCE_RECEIPT",
+        "WA_IR_LISTENER_STATIC_RELEASE_ROOT",
+        "WA_IR_LISTENER_STATIC_RECEIPT",
         "WA_IR_LISTENER_TLS_ROOT",
         "WA_IR_LISTENER_CERTIFICATE_PATH",
         "WA_IR_LISTENER_CERTIFICATE_KEY_PATH",
@@ -71,6 +77,8 @@ class ListenerConfig:
     server_name: str
     release_root: Path
     release_provenance_receipt: Path
+    static_root: Path
+    static_receipt: Path
     tls_root: Path
     certificate_path: Path
     certificate_key_path: Path
@@ -224,7 +232,7 @@ def _read_config_values(path: Path) -> dict[str, str]:
     return values
 
 
-def _verify_application_release_binding(*, receipt_path: Path, release_root: Path) -> None:
+def _verify_application_release_binding(*, receipt_path: Path, release_root: Path) -> dict[str, object]:
     """Require this local listener to use the receipt-bound application root."""
 
     try:
@@ -244,6 +252,7 @@ def _verify_application_release_binding(*, receipt_path: Path, release_root: Pat
         raise ListenerActivationError("listener control release root does not exist") from exc
     if control["release_root"] != str(runtime_control_root):
         raise ListenerActivationError("listener must execute from the receipt-bound control release root")
+    return installed
 
 
 def load_listener_config(path: Path) -> ListenerConfig:
@@ -257,9 +266,6 @@ def load_listener_config(path: Path) -> ListenerConfig:
     if release_root.name != RELEASE_SHA:
         raise ListenerActivationError("listener release root is not the exact 2c08 release")
     _require_root_owned_directory(release_root, label="listener release root", private=False)
-    static_root = release_root / "mini_app_dist"
-    _require_root_owned_directory(static_root, label="listener static release root", private=False)
-    _require_root_owned_regular_file(static_root / "index.html", label="listener static index", private=False)
     release_provenance_receipt = _safe_absolute_path(
         values["WA_IR_LISTENER_RELEASE_PROVENANCE_RECEIPT"],
         label="WA_IR_LISTENER_RELEASE_PROVENANCE_RECEIPT",
@@ -269,10 +275,45 @@ def load_listener_config(path: Path) -> ListenerConfig:
         label="listener release provenance receipt",
         private=True,
     )
-    _verify_application_release_binding(
+    installed = _verify_application_release_binding(
         receipt_path=release_provenance_receipt,
         release_root=release_root,
     )
+    static_root = _safe_absolute_path(
+        values["WA_IR_LISTENER_STATIC_RELEASE_ROOT"],
+        label="WA_IR_LISTENER_STATIC_RELEASE_ROOT",
+    )
+    static_receipt = _safe_absolute_path(
+        values["WA_IR_LISTENER_STATIC_RECEIPT"],
+        label="WA_IR_LISTENER_STATIC_RECEIPT",
+    )
+    _require_root_owned_regular_file(static_receipt, label="listener static receipt", private=True)
+    try:
+        static_verified = verify_installed_static_assets(
+            receipt_path=static_receipt,
+            expected_application_release_sha=release_root.name,
+            pinned_controller_public_key_base64=str(
+                installed["bootstrap_provenance"]["webapp_fi_controller_authorization_public_key_base64"]
+            ),
+        )
+    except (KeyError, StaticAssetInstallError) as exc:
+        raise ListenerActivationError(f"listener static receipt is invalid: {exc}") from exc
+    if static_verified["static_root"] != str(static_root):
+        raise ListenerActivationError("listener static receipt does not bind the configured static release root")
+    _require_root_owned_directory(static_root, label="listener static release root", private=False)
+    _require_root_owned_regular_file(static_root / "index.html", label="listener static index", private=False)
+    try:
+        static_root.relative_to(release_root)
+    except ValueError:
+        pass
+    else:
+        raise ListenerActivationError("listener static release root must remain outside the Git application release")
+    try:
+        release_root.relative_to(static_root)
+    except ValueError:
+        pass
+    else:
+        raise ListenerActivationError("listener static release root must not contain the Git application release")
 
     tls_root = _safe_absolute_path(values["WA_IR_LISTENER_TLS_ROOT"], label="WA_IR_LISTENER_TLS_ROOT")
     _require_root_owned_directory(tls_root, label="WA-IR local TLS root", private=True)
@@ -318,7 +359,7 @@ def load_listener_config(path: Path) -> ListenerConfig:
 
     protected = {
         path.resolve(strict=True)
-        for path in (release_root, release_provenance_receipt, tls_root, site_path, enabled_path)
+        for path in (release_root, release_provenance_receipt, static_root, static_receipt, tls_root, site_path, enabled_path)
     }
     if receipt_path in protected:
         raise ListenerActivationError("listener receipt path conflicts with a protected listener path")
@@ -326,6 +367,8 @@ def load_listener_config(path: Path) -> ListenerConfig:
         server_name=values["WA_IR_LISTENER_SERVER_NAME"],
         release_root=release_root,
         release_provenance_receipt=release_provenance_receipt,
+        static_root=static_root,
+        static_receipt=static_receipt,
         tls_root=tls_root,
         certificate_path=certificate_path,
         certificate_key_path=certificate_key_path,
@@ -340,12 +383,12 @@ def _validate_template(template: str) -> None:
         "__SERVER_NAME__": 2,
         "__WA_IR_CERTIFICATE_PATH__": 1,
         "__WA_IR_CERTIFICATE_KEY_PATH__": 1,
-        "__WA_IR_RELEASE_ROOT__": 1,
+        "__WA_IR_STATIC_RELEASE_ROOT__": 1,
     }
     placeholders = PLACEHOLDER.findall(template)
     if set(placeholders) != set(expected) or any(template.count(key) != count for key, count in expected.items()):
         raise ListenerActivationError("listener template placeholders are not pinned")
-    if "root __WA_IR_RELEASE_ROOT__/mini_app_dist;" not in template:
+    if "root __WA_IR_STATIC_RELEASE_ROOT__;" not in template:
         raise ListenerActivationError("listener template does not use the immutable static release root")
     if "location = /api/sync/receive" not in template:
         raise ListenerActivationError("listener template does not explicitly fence direct sync")
@@ -376,7 +419,7 @@ def render_listener_config(template_path: Path, config: ListenerConfig) -> bytes
         template.replace("__SERVER_NAME__", config.server_name)
         .replace("__WA_IR_CERTIFICATE_PATH__", str(config.certificate_path))
         .replace("__WA_IR_CERTIFICATE_KEY_PATH__", str(config.certificate_key_path))
-        .replace("__WA_IR_RELEASE_ROOT__", str(config.release_root))
+        .replace("__WA_IR_STATIC_RELEASE_ROOT__", str(config.static_root))
     )
     if PLACEHOLDER.search(rendered):
         raise ListenerActivationError("listener template rendering left an unresolved placeholder")

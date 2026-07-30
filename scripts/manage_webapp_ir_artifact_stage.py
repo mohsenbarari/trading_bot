@@ -42,7 +42,7 @@ import json
 import os
 import re
 import secrets
-import shutil
+import stat
 import sys
 import tempfile
 import urllib.error
@@ -172,6 +172,17 @@ class ArtifactInput:
     name: str
     path: Path
     bindings: Mapping[str, str] = dataclasses.field(default_factory=dict)
+    expected_sha256: str | None = None
+    expected_bytes: int | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class ImmutableArtifactSnapshot:
+    """A controller-created private plaintext snapshot used by one age call."""
+
+    path: Path
+    sha256: str
+    bytes: int
 
 
 def canonical_json_bytes(value: Mapping[str, Any]) -> bytes:
@@ -184,6 +195,146 @@ def sha256_bytes(value: bytes) -> str:
 
 def sha256_file(path: Path) -> tuple[str, int]:
     return snapshot.sha256_file(path)
+
+
+def assert_expected_artifact_snapshot(
+    artifact: ArtifactInput,
+    *,
+    sha256: str,
+    bytes_value: int,
+    maximum_bytes: int,
+) -> None:
+    """Require a controller preflight snapshot when one was supplied."""
+
+    if (artifact.expected_sha256 is None) != (artifact.expected_bytes is None):
+        raise ArtifactStageError("artifact expected snapshot must include both sha256 and bytes")
+    if artifact.expected_sha256 is None:
+        return
+    expected_sha256 = require_id(artifact.expected_sha256, "artifact expected SHA-256", SHA256_RE)
+    expected_bytes = artifact.expected_bytes
+    if (
+        isinstance(expected_bytes, bool)
+        or not isinstance(expected_bytes, int)
+        or not 1 <= expected_bytes <= maximum_bytes
+    ):
+        raise ArtifactStageError("artifact expected bytes is invalid")
+    if sha256 != expected_sha256 or bytes_value != expected_bytes:
+        raise ArtifactStageError("artifact no longer matches its controller preflight snapshot")
+
+
+def create_immutable_workspace_snapshot(
+    *,
+    source_path: Path,
+    workspace: Path,
+    snapshot_name: str,
+    field: str,
+    maximum_bytes: int,
+) -> ImmutableArtifactSnapshot:
+    """Copy one checked source FD into a new private workspace snapshot.
+
+    ``age`` accepts an input pathname and therefore opens it independently.
+    Never give it the mutable controller artifact pathname.  This primitive
+    securely opens the checked source once, streams it into a create-only,
+    root-private workspace file, and returns the hash of that new immutable
+    snapshot.  The caller must encrypt only ``result.path`` and bind its
+    descriptor to ``result.sha256``/``result.bytes``.
+
+    The workspace itself is temporary and root-only.  A failed snapshot is
+    deliberately left in that private workspace for its normal scoped cleanup;
+    no source artifact or external object is removed or retried here.
+    """
+
+    source_path = require_root_only_input(
+        source_path,
+        field=field,
+        maximum_bytes=maximum_bytes,
+    )
+    workspace = require_private_workspace(workspace, field="artifact workspace")
+    safe_name = require_id(snapshot_name, "artifact snapshot name", ARTIFACT_NAME_RE)
+    destination = workspace / ("plaintext-snapshot-" + safe_name)
+    if destination.exists() or destination.is_symlink():
+        raise ArtifactStageError("refusing to overwrite an immutable workspace artifact snapshot")
+
+    try:
+        before = source_path.lstat()
+    except OSError as exc:
+        raise ArtifactStageError(f"cannot inspect {field} before snapshot") from exc
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or before.st_uid != 0
+        or stat.S_IMODE(before.st_mode) & 0o077
+        or before.st_nlink != 1
+        or not 1 <= before.st_size <= maximum_bytes
+    ):
+        raise ArtifactStageError(f"{field} is not a private immutable snapshot input")
+
+    source_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    destination_flags = (
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    source_descriptor: int | None = None
+    destination_descriptor: int | None = None
+    digest = hashlib.sha256()
+    bytes_value = 0
+    try:
+        source_descriptor = os.open(source_path, source_flags)
+        opened = os.fstat(source_descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_uid != 0
+            or stat.S_IMODE(opened.st_mode) & 0o077
+            or opened.st_nlink != 1
+            or opened.st_dev != before.st_dev
+            or opened.st_ino != before.st_ino
+            or opened.st_size != before.st_size
+        ):
+            raise ArtifactStageError(f"{field} changed while being opened for snapshot")
+        destination_descriptor = os.open(destination, destination_flags, 0o600)
+        os.fchmod(destination_descriptor, 0o600)
+        while True:
+            chunk = os.read(source_descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            bytes_value += len(chunk)
+            if bytes_value > maximum_bytes:
+                raise ArtifactStageError(f"{field} exceeds its size bound while being snapshotted")
+            digest.update(chunk)
+            view = memoryview(chunk)
+            while view:
+                written = os.write(destination_descriptor, view)
+                if written <= 0:  # pragma: no cover - os.write does not normally return zero here.
+                    raise OSError("short workspace snapshot write")
+                view = view[written:]
+        if bytes_value != opened.st_size:
+            raise ArtifactStageError(f"{field} changed while being copied into an immutable snapshot")
+        os.fsync(destination_descriptor)
+        source_after = os.fstat(source_descriptor)
+        if (
+            source_after.st_dev != opened.st_dev
+            or source_after.st_ino != opened.st_ino
+            or source_after.st_size != opened.st_size
+            or source_after.st_nlink != opened.st_nlink
+        ):
+            raise ArtifactStageError(f"{field} changed while being copied into an immutable snapshot")
+    except ArtifactStageError:
+        raise
+    except OSError as exc:
+        raise ArtifactStageError(f"cannot create immutable workspace snapshot for {field}") from exc
+    finally:
+        if destination_descriptor is not None:
+            os.close(destination_descriptor)
+        if source_descriptor is not None:
+            os.close(source_descriptor)
+
+    require_private_file(destination, field=f"immutable snapshot for {field}")
+    observed_sha256, observed_bytes = sha256_file(destination)
+    if (observed_sha256, observed_bytes) != (digest.hexdigest(), bytes_value):
+        raise ArtifactStageError(f"immutable workspace snapshot for {field} changed while being verified")
+    return ImmutableArtifactSnapshot(path=destination, sha256=observed_sha256, bytes=observed_bytes)
 
 
 def utc_now() -> dt.datetime:
@@ -546,7 +697,13 @@ def apply_artifact_bindings(artifacts: Sequence[ArtifactInput], values: Sequence
             raise ArtifactStageError("artifact binding keys must be unique per artifact")
         bindings[name].update(normalized)
     return [
-        ArtifactInput(name=artifact.name, path=artifact.path, bindings=dict(sorted(bindings[artifact.name].items())))
+        ArtifactInput(
+            name=artifact.name,
+            path=artifact.path,
+            bindings=dict(sorted(bindings[artifact.name].items())),
+            expected_sha256=artifact.expected_sha256,
+            expected_bytes=artifact.expected_bytes,
+        )
         for artifact in artifacts
     ]
 
@@ -937,13 +1094,44 @@ def publish_bundle(
     with locked_workspace(config.workspace, name="publish-" + bundle_id) as workspace:
         pending_descriptors: list[tuple[ArtifactInput, str, int, dict[str, Any]]] = []
         for artifact in artifact_inputs:
-            plaintext_sha256, plaintext_bytes = sha256_file(artifact.path)
+            plaintext_snapshot = create_immutable_workspace_snapshot(
+                source_path=artifact.path,
+                workspace=workspace,
+                snapshot_name=artifact.name,
+                field=f"artifact {artifact.name}",
+                maximum_bytes=config.maximum_artifact_bytes,
+            )
+            plaintext_sha256, plaintext_bytes = plaintext_snapshot.sha256, plaintext_snapshot.bytes
+            assert_expected_artifact_snapshot(
+                artifact,
+                sha256=plaintext_sha256,
+                bytes_value=plaintext_bytes,
+                maximum_bytes=config.maximum_artifact_bytes,
+            )
             ciphertext = workspace / (artifact.name + ".age")
-            encryptor(config.age_binary, config.age_recipient, artifact.path, ciphertext)
+            encryptor(config.age_binary, config.age_recipient, plaintext_snapshot.path, ciphertext)
             require_private_file(ciphertext, field=f"encrypted artifact {artifact.name}")
-            # Bind the signed descriptor to the exact plaintext actually passed to age.
-            if sha256_file(artifact.path) != (plaintext_sha256, plaintext_bytes):
-                raise ArtifactStageError("artifact changed while it was being encrypted")
+            # Bind the signed descriptor to the exact private snapshot passed to age.
+            post_encrypt_sha256, post_encrypt_bytes = sha256_file(plaintext_snapshot.path)
+            assert_expected_artifact_snapshot(
+                artifact,
+                sha256=post_encrypt_sha256,
+                bytes_value=post_encrypt_bytes,
+                maximum_bytes=config.maximum_artifact_bytes,
+            )
+            if (post_encrypt_sha256, post_encrypt_bytes) != (plaintext_sha256, plaintext_bytes):
+                raise ArtifactStageError("immutable artifact snapshot changed while it was being encrypted")
+            # Preserve the previous conservative source recheck without ever
+            # allowing age to reopen this source pathname.
+            source_post_encrypt_sha256, source_post_encrypt_bytes = sha256_file(artifact.path)
+            assert_expected_artifact_snapshot(
+                artifact,
+                sha256=source_post_encrypt_sha256,
+                bytes_value=source_post_encrypt_bytes,
+                maximum_bytes=config.maximum_artifact_bytes,
+            )
+            if (source_post_encrypt_sha256, source_post_encrypt_bytes) != (plaintext_sha256, plaintext_bytes):
+                raise ArtifactStageError("artifact changed while its immutable snapshot was being encrypted")
             remote = upload_immutable_encrypted_object(
                 client,
                 bucket=config.bucket,
@@ -1095,12 +1283,21 @@ def publish_bootstrap_package(
         bootstrap_id=bootstrap_id,
     )
     with locked_workspace(config.workspace, name="bootstrap-" + bootstrap_id) as workspace:
-        plaintext_sha256, plaintext_bytes = sha256_file(bootstrap_path)
+        plaintext_snapshot = create_immutable_workspace_snapshot(
+            source_path=bootstrap_path,
+            workspace=workspace,
+            snapshot_name="stage-consumer-bootstrap",
+            field="stage consumer bootstrap package",
+            maximum_bytes=bootstrap.MAX_ARCHIVE_BYTES,
+        )
+        plaintext_sha256, plaintext_bytes = plaintext_snapshot.sha256, plaintext_snapshot.bytes
         if (plaintext_sha256, plaintext_bytes) != (prepared["archive_sha256"], prepared["archive_bytes"]):
             raise ArtifactStageError("bootstrap archive changed after preparation verification")
         ciphertext = workspace / "stage-consumer-bootstrap.tar.age"
-        encryptor(config.age_binary, config.age_recipient, bootstrap_path, ciphertext)
+        encryptor(config.age_binary, config.age_recipient, plaintext_snapshot.path, ciphertext)
         require_private_file(ciphertext, field="encrypted stage consumer bootstrap package")
+        if sha256_file(plaintext_snapshot.path) != (plaintext_sha256, plaintext_bytes):
+            raise ArtifactStageError("immutable stage consumer bootstrap snapshot changed while being encrypted")
         if sha256_file(bootstrap_path) != (prepared["archive_sha256"], prepared["archive_bytes"]):
             raise ArtifactStageError("stage consumer bootstrap package changed while being encrypted")
         remote = upload_immutable_encrypted_object(
@@ -1536,7 +1733,8 @@ def stage_bundle(
             os.replace(incoming, candidate)
             return receipt
         except Exception:
-            shutil.rmtree(incoming, ignore_errors=True)
+            # Preserve the fresh root-only incoming directory for inspection.
+            # Cleanup requires a later explicit operator decision.
             raise
 
 

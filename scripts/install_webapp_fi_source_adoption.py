@@ -109,6 +109,7 @@ RUNTIME_EXTERNAL_NON_PAYLOAD_MOUNT_TARGET = "/app/certs"
 
 SOURCE_PAYLOAD_FILES = (
     "scripts/install_webapp_fi_source_adoption.py",
+    "scripts/prepare_webapp_fi_static_assets.py",
     "deploy/production/webapp-fi-source-role.json.example",
 )
 PACKAGE_PAYLOAD_FILES = (*SOURCE_PAYLOAD_FILES, CONTRACT_MEMBER, CANONICAL_RELEASE_TREE_MEMBER)

@@ -42,6 +42,7 @@ class FakeNginx:
 class WebappIrPromotedListenerActivationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.provenance_by_receipt: dict[Path, dict] = {}
+        self.static_by_receipt: dict[Path, Path] = {}
         patcher = mock.patch.object(
             MODULE,
             "load_installed_release_receipt",
@@ -49,6 +50,13 @@ class WebappIrPromotedListenerActivationTests(unittest.TestCase):
         )
         patcher.start()
         self.addCleanup(patcher.stop)
+        static_patcher = mock.patch.object(
+            MODULE,
+            "verify_installed_static_assets",
+            side_effect=lambda *, receipt_path, **_kwargs: {"static_root": str(self.static_by_receipt[Path(receipt_path)])},
+        )
+        static_patcher.start()
+        self.addCleanup(static_patcher.stop)
 
     def make_fixture(self) -> dict[str, Path]:
         temporary = tempfile.TemporaryDirectory()
@@ -57,7 +65,8 @@ class WebappIrPromotedListenerActivationTests(unittest.TestCase):
         root.chmod(0o700)
 
         release = root / "releases" / MODULE.RELEASE_SHA
-        static = release / "mini_app_dist"
+        static = root / "static-releases" / "campaign-12345678" / MODULE.RELEASE_SHA / ("a" * 64)
+        release.mkdir(parents=True)
         static.mkdir(parents=True)
         release.chmod(0o755)
         static.chmod(0o755)
@@ -93,7 +102,13 @@ class WebappIrPromotedListenerActivationTests(unittest.TestCase):
                 "release_root": str(release),
             },
             "control": {"release_root": str(MODULE.REPO_ROOT.resolve())},
+            "bootstrap_provenance": {
+                "webapp_fi_controller_authorization_public_key_base64": "fixture-controller-public-key",
+            },
         }
+        static_receipt = receipts / "static-install.json"
+        write_file(static_receipt, "fixture\n", 0o600)
+        self.static_by_receipt[static_receipt] = static
 
         binary = root / "bin" / "nginx"
         write_file(binary, "#!/bin/false\n", 0o700)
@@ -102,6 +117,8 @@ class WebappIrPromotedListenerActivationTests(unittest.TestCase):
             "WA_IR_LISTENER_SERVER_NAME": MODULE.SERVER_NAME,
             "WA_IR_LISTENER_APPLICATION_RELEASE_ROOT": str(release),
             "WA_IR_LISTENER_RELEASE_PROVENANCE_RECEIPT": str(provenance_receipt),
+            "WA_IR_LISTENER_STATIC_RELEASE_ROOT": str(static),
+            "WA_IR_LISTENER_STATIC_RECEIPT": str(static_receipt),
             "WA_IR_LISTENER_TLS_ROOT": str(tls),
             "WA_IR_LISTENER_CERTIFICATE_PATH": str(certificate),
             "WA_IR_LISTENER_CERTIFICATE_KEY_PATH": str(key),
@@ -113,6 +130,8 @@ class WebappIrPromotedListenerActivationTests(unittest.TestCase):
         return {
             "root": root,
             "release": release,
+            "static": static,
+            "static_receipt": static_receipt,
             "tls": tls,
             "certificate": certificate,
             "key": key,
@@ -174,7 +193,7 @@ class WebappIrPromotedListenerActivationTests(unittest.TestCase):
         rendered = fixture["site"].read_text(encoding="utf-8")
         self.assertIn("proxy_pass http://127.0.0.1:18000;", rendered)
         self.assertIn(str(fixture["certificate"]), rendered)
-        self.assertIn(str(fixture["release"] / "mini_app_dist"), rendered)
+        self.assertIn(str(fixture["static"]), rendered)
         self.assertEqual(stat.S_IMODE(fixture["site"].stat().st_mode), 0o600)
 
         receipt_path = fixture["receipts"] / "activation.json"
@@ -236,7 +255,7 @@ class WebappIrPromotedListenerActivationTests(unittest.TestCase):
 
     def test_rejects_tls_outside_local_root_and_unknown_source_site_material(self) -> None:
         fixture = self.make_fixture()
-        self.rewrite_config(fixture, WA_IR_LISTENER_CERTIFICATE_PATH=str(fixture["release"] / "mini_app_dist/index.html"))
+        self.rewrite_config(fixture, WA_IR_LISTENER_CERTIFICATE_PATH=str(fixture["static"] / "index.html"))
         with self.assertRaisesRegex(MODULE.ListenerActivationError, "remain under WA-IR local TLS root"):
             MODULE.load_listener_config(fixture["config"])
 
@@ -267,6 +286,29 @@ class WebappIrPromotedListenerActivationTests(unittest.TestCase):
         with self.assertRaisesRegex(
             MODULE.ListenerActivationError,
             "does not bind this application release root",
+        ):
+            MODULE.activate_listener(
+                config_path=fixture["config"],
+                template_path=fixture["template"],
+                nginx_binary=fixture["binary"],
+                apply=True,
+                command_runner=fake,
+            )
+
+        self.assertEqual(fake.calls, [])
+
+    def test_rejects_a_static_receipt_bound_to_another_root_before_nginx(self) -> None:
+        fixture = self.make_fixture()
+        alternate = fixture["root"] / "static-releases" / "campaign-12345678" / MODULE.RELEASE_SHA / ("b" * 64)
+        alternate.mkdir(parents=True)
+        alternate.chmod(0o755)
+        write_file(alternate / "index.html", "<!doctype html>\n", 0o644)
+        self.static_by_receipt[fixture["static_receipt"]] = alternate
+        fake = FakeNginx()
+
+        with self.assertRaisesRegex(
+            MODULE.ListenerActivationError,
+            "does not bind the configured static release root",
         ):
             MODULE.activate_listener(
                 config_path=fixture["config"],
