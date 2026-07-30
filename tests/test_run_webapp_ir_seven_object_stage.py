@@ -234,9 +234,12 @@ class SevenObjectStageControllerTests(unittest.TestCase):
         self.assertEqual(1, publish_bootstrap.call_count)
         self.assertEqual(1, publish_normal.call_count)
         self.assertEqual(["bootstrap", "bootstrap-render", "normal", "normal-render"], [name for name, _ in events])
-        self.assertEqual(2, len(runner_arguments))
+        self.assertEqual(3, len(runner_arguments))
         self.assertTrue(all(arguments[0] == "ssh" for arguments in runner_arguments))
         self.assertTrue(all(arguments[-1] for arguments in runner_arguments))
+        self.assertIn("install -d -o root -g root -m 700", runner_arguments[0][-1])
+        self.assertNotIn(BOOTSTRAP_URL, runner_arguments[0][-1])
+        self.assertNotIn(MANIFEST_URL, runner_arguments[0][-1])
         self.assertEqual(7, evidence["object_count"])
         rendered_evidence = json.dumps(evidence, sort_keys=True)
         self.assertNotIn(BOOTSTRAP_URL, rendered_evidence)
@@ -294,6 +297,23 @@ class SevenObjectStageControllerTests(unittest.TestCase):
                 self._run()
         load_publisher.assert_not_called()
 
+    def test_bootstrap_root_prepare_failure_stops_before_client_or_object_publish(self) -> None:
+        root, publisher, consumer, public_key, parser, binder = self._common_patches()
+        with (
+            root,
+            publisher,
+            consumer,
+            public_key,
+            parser,
+            binder,
+            mock.patch.object(wrapper.stage, "create_s3_client") as create_client,
+            mock.patch.object(wrapper.stage, "publish_bootstrap_package") as publish_bootstrap,
+        ):
+            with self.assertRaisesRegex(wrapper.SevenObjectStageError, "bootstrap root could not be prepared"):
+                self._run(ssh_runner=lambda arguments: subprocess.CompletedProcess(list(arguments), 23))
+        create_client.assert_not_called()
+        publish_bootstrap.assert_not_called()
+
     def test_failed_bootstrap_ssh_stops_without_normal_publish_or_retry(self) -> None:
         root, publisher, consumer, public_key, parser, binder = self._common_patches()
         with (
@@ -308,8 +328,11 @@ class SevenObjectStageControllerTests(unittest.TestCase):
             mock.patch.object(wrapper.bootstrap_renderer, "render_receive_command", return_value=rendered_command(BOOTSTRAP_URL)),
             mock.patch.object(wrapper.stage, "publish_bundle") as publish_normal,
         ):
+            runner_results = iter((0, 23))
             with self.assertRaisesRegex(wrapper.SevenObjectStageError, "stage cannot continue") as error:
-                self._run(ssh_runner=lambda arguments: subprocess.CompletedProcess(list(arguments), 23))
+                self._run(
+                    ssh_runner=lambda arguments: subprocess.CompletedProcess(list(arguments), next(runner_results))
+                )
         self.assertEqual(1, publish_bootstrap.call_count)
         publish_normal.assert_not_called()
         self.assertEqual(1, error.exception.evidence["object_count"])
@@ -338,7 +361,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
                 )
         self.assertEqual(1, publish_normal.call_count)
         render_normal.assert_not_called()
-        self.assertEqual(1, len(calls))
+        self.assertEqual(2, len(calls))
 
     def test_main_drops_url_bearing_exception_text(self) -> None:
         output = io.StringIO()

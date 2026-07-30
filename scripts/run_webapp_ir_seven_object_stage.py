@@ -64,6 +64,7 @@ DESTINATION_SITE = "webapp_ir"
 BOOTSTRAP_ROOT = "/srv/trading-bot-three-site-staging-data/wa-ir-bootstrap"
 STAGING_ROOT = "/srv/trading-bot-three-site-staging-data/wa-ir-standby/artifact-stage"
 SSH_TIMEOUT_SECONDS = 900
+SSH_OPTIONS = ("-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes")
 EXPECTED_NORMAL_ARTIFACTS = (
     "control-release-bundle",
     "image-bundle",
@@ -375,12 +376,47 @@ def _ssh_argv(rendered_command: str) -> list[str]:
         argv = shlex.split(rendered_command, posix=True)
     except ValueError as exc:
         raise SevenObjectStageError("renderer returned an unusable SSH command") from exc
-    expected_prefix = ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes"]
+    expected_prefix = ["ssh", *SSH_OPTIONS]
     if len(argv) != len(expected_prefix) + 2 or argv[: len(expected_prefix)] != expected_prefix:
         raise SevenObjectStageError("renderer returned an unexpected SSH command")
     if argv[len(expected_prefix)] != bootstrap_renderer.REMOTE_HOST or not argv[-1]:
         raise SevenObjectStageError("renderer returned an unexpected SSH destination")
     return argv
+
+
+def _render_bootstrap_root_prepare_command() -> str:
+    """Create the one approved WA-IR bootstrap root before any object upload.
+
+    The bootstrap receiver requires this root to exist.  Refusing an existing
+    path makes a fresh stage deterministic and prevents an Object Storage write
+    from being consumed merely to discover an unsafe remote filesystem state.
+    The remote program is fully constant; no receipt, URL, or local input is
+    interpolated into it.
+    """
+
+    path = shlex.quote(BOOTSTRAP_ROOT)
+    remote_program = "; ".join(
+        (
+            "set -eu",
+            f"test ! -e {path}",
+            f"test ! -L {path}",
+            f"/usr/bin/install -d -o root -g root -m 700 {path}",
+            f"test -d {path}",
+            f"test ! -L {path}",
+            f"test \"$(/usr/bin/stat -c '%U:%G:%a' {path})\" = root:root:700",
+        )
+    )
+    remote = shlex.join(("/bin/sh", "-ec", remote_program))
+    return shlex.join(("ssh", *SSH_OPTIONS, bootstrap_renderer.REMOTE_HOST, remote))
+
+
+def _prepare_bootstrap_root(*, ssh_runner: SshRunner) -> None:
+    """Perform only the approved new root-only WA-IR directory operation."""
+
+    try:
+        _execute_rendered_ssh(_render_bootstrap_root_prepare_command(), ssh_runner=ssh_runner)
+    except SevenObjectStageError:
+        raise SevenObjectStageError("WA-IR bootstrap root could not be prepared before object upload") from None
 
 
 def _run_ssh_silently(arguments: Sequence[str]) -> subprocess.CompletedProcess[Any]:
@@ -508,6 +544,10 @@ def run_stage(
         artifact_specs=artifact_specs,
         binding_specs=binding_specs,
     )
+
+    # This is the only remote mutation before the seven immutable object
+    # uploads.  It fails before creating an object when the host is not fresh.
+    _prepare_bootstrap_root(ssh_runner=ssh_runner)
 
     try:
         client = stage.create_s3_client(publisher_config)
