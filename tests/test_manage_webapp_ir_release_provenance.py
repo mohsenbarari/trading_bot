@@ -350,20 +350,25 @@ class ReleaseProvenanceTests(unittest.TestCase):
         *,
         control_commit: str | None = None,
         control_tree: str | None = None,
-        receipt_name: str = "bootstrap-receipt.json",
     ) -> Path:
         """Create the URL-free receiver receipt consumed by provenance install."""
 
+        receipt_control_commit = control_commit or self.control_sha
+        receipt_control_tree = control_tree or self.control_tree
+        bootstrap_id = "20260730T110000Z-0123456789abcdef01234567"
+        candidate = self.root / f"received-{receipt_control_commit}-{bootstrap_id}"
+        candidate.mkdir(mode=0o700)
+        candidate.chmod(0o700)
         payload = {
             "schema": MODULE.BOOTSTRAP_RECEIPT_SCHEMA,
             "status": "received",
             "received_at": "2026-07-30T12:00:00Z",
             "source_site": "webapp_fi",
             "destination_site": "webapp_ir",
-            "control_commit": control_commit or self.control_sha,
-            "control_tree": control_tree or self.control_tree,
-            "bootstrap_id": "20260730T110000Z-0123456789abcdef01234567",
-            "candidate_directory": str(self.root / "bootstrap-candidate"),
+            "control_commit": receipt_control_commit,
+            "control_tree": receipt_control_tree,
+            "bootstrap_id": bootstrap_id,
+            "candidate_directory": str(candidate),
             "files": {
                 "scripts/manage_webapp_ir_artifact_stage.py": "a" * 64,
                 "scripts/manage_webapp_ir_snapshot.py": "b" * 64,
@@ -378,12 +383,12 @@ class ReleaseProvenanceTests(unittest.TestCase):
                 "plaintext_sha256": "0" * 64,
                 "plaintext_bytes": 1024,
                 "package_manifest_sha256": "1" * 64,
-                "consumer_config_sha256": "2" * 64,
+                "consumer_config_sha256": "d" * 64,
                 "preparation_receipt_sha256": "3" * 64,
             },
         }
         payload["receipt_sha256"] = hashlib.sha256(MODULE.canonical_json_bytes(payload)).hexdigest()
-        path = self.receipt_parent / receipt_name
+        path = candidate / MODULE.BOOTSTRAP_RECEIPT_NAME
         write_private(path, MODULE.canonical_json_bytes(payload) + b"\n")
         return path
 
@@ -590,6 +595,73 @@ class ReleaseProvenanceTests(unittest.TestCase):
 
         with self.patched_contract():
             with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "bootstrap receive receipt files are invalid"):
+                MODULE.install_release_roots(
+                    stage_receipt_path=stage_receipt,
+                    bootstrap_receipt_path=bootstrap_receipt,
+                    receipt_path=self.receipt_parent / "release-roots.json",
+                )
+
+        self.assertFalse((self.application_parent / self.application_sha).exists())
+        self.assertFalse((self.control_parent / self.control_sha).exists())
+        self.assertFalse(self.dispatcher_directory.exists())
+
+    def test_install_rejects_a_bootstrap_receipt_moved_outside_its_candidate(self) -> None:
+        prepared = self.build()
+        stage_receipt = self.make_candidate(prepared)
+        bootstrap_receipt = self.make_bootstrap_receipt()
+        copied_receipt = self.receipt_parent / MODULE.BOOTSTRAP_RECEIPT_NAME
+        shutil.copyfile(bootstrap_receipt, copied_receipt)
+        copied_receipt.chmod(0o600)
+
+        with self.patched_contract():
+            with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "must remain at its candidate path"):
+                MODULE.install_release_roots(
+                    stage_receipt_path=stage_receipt,
+                    bootstrap_receipt_path=copied_receipt,
+                    receipt_path=self.receipt_parent / "release-roots.json",
+                )
+
+        self.assertFalse((self.application_parent / self.application_sha).exists())
+        self.assertFalse((self.control_parent / self.control_sha).exists())
+        self.assertFalse(self.dispatcher_directory.exists())
+
+    def test_install_rejects_a_bootstrap_candidate_not_named_for_its_control_and_id(self) -> None:
+        prepared = self.build()
+        stage_receipt = self.make_candidate(prepared)
+        bootstrap_receipt = self.make_bootstrap_receipt()
+        invalid_candidate = self.root / "received-not-receipt-bound"
+        bootstrap_receipt.parent.rename(invalid_candidate)
+        bootstrap_receipt = invalid_candidate / MODULE.BOOTSTRAP_RECEIPT_NAME
+        payload = json.loads(bootstrap_receipt.read_text(encoding="utf-8"))
+        payload["candidate_directory"] = str(invalid_candidate)
+        unsigned = {key: value for key, value in payload.items() if key != "receipt_sha256"}
+        payload["receipt_sha256"] = hashlib.sha256(MODULE.canonical_json_bytes(unsigned)).hexdigest()
+        write_private(bootstrap_receipt, MODULE.canonical_json_bytes(payload) + b"\n")
+
+        with self.patched_contract():
+            with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "candidate_directory is not receipt-bound"):
+                MODULE.install_release_roots(
+                    stage_receipt_path=stage_receipt,
+                    bootstrap_receipt_path=bootstrap_receipt,
+                    receipt_path=self.receipt_parent / "release-roots.json",
+                )
+
+        self.assertFalse((self.application_parent / self.application_sha).exists())
+        self.assertFalse((self.control_parent / self.control_sha).exists())
+        self.assertFalse(self.dispatcher_directory.exists())
+
+    def test_install_rejects_a_bootstrap_receipt_with_a_mismatched_consumer_config_hash(self) -> None:
+        prepared = self.build()
+        stage_receipt = self.make_candidate(prepared)
+        bootstrap_receipt = self.make_bootstrap_receipt()
+        payload = json.loads(bootstrap_receipt.read_text(encoding="utf-8"))
+        payload["bootstrap"]["consumer_config_sha256"] = "f" * 64
+        unsigned = {key: value for key, value in payload.items() if key != "receipt_sha256"}
+        payload["receipt_sha256"] = hashlib.sha256(MODULE.canonical_json_bytes(unsigned)).hexdigest()
+        write_private(bootstrap_receipt, MODULE.canonical_json_bytes(payload) + b"\n")
+
+        with self.patched_contract():
+            with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "consumer config hash is inconsistent"):
                 MODULE.install_release_roots(
                     stage_receipt_path=stage_receipt,
                     bootstrap_receipt_path=bootstrap_receipt,
