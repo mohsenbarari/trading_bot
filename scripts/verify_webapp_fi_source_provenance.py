@@ -615,9 +615,9 @@ def verify_image_export_receipt_payload(
     _sha(image.get("docker_save_archive_sha256"), field="image export raw docker-save archive sha256")
     _size(image.get("docker_save_archive_bytes"), field="image export raw docker-save archive bytes", maximum=100 * 1024 * 1024 * 1024)
     docker_save = image.get("docker_save")
-    if not isinstance(docker_save, Mapping) or set(docker_save) != {"command", "docker_executable_sha256", "docker_executable_bytes", "archive_semantics", "docker_load_invoked", "loadability_claimed"}:
+    if not isinstance(docker_save, Mapping) or set(docker_save) != {"command", "docker_executable_sha256", "docker_executable_bytes", "archive_semantics", "archive_layout", "manifest_semantics_attested", "docker_load_invoked", "loadability_claimed"}:
         raise SourceProvenanceVerificationError("image export docker save binding is invalid")
-    if docker_save.get("command") != ["docker", "save", "--output", "webapp-fi-active-app-image.tar", expected_app_image_id] or _sha(docker_save.get("docker_executable_sha256"), field="image export docker executable sha256") is None or _size(docker_save.get("docker_executable_bytes"), field="image export docker executable bytes", maximum=10 * 1024 * 1024 * 1024) < 1 or docker_save.get("archive_semantics") != "exact_bytes_only_unparsed" or docker_save.get("docker_load_invoked") is not False or docker_save.get("loadability_claimed") is not False:
+    if docker_save.get("command") != ["docker", "save", "--output", "webapp-fi-active-app-image.tar", expected_app_image_id] or _sha(docker_save.get("docker_executable_sha256"), field="image export docker executable sha256") is None or _size(docker_save.get("docker_executable_bytes"), field="image export docker executable bytes", maximum=10 * 1024 * 1024 * 1024) < 1 or docker_save.get("archive_semantics") != "exact_bytes_only_unparsed" or docker_save.get("archive_layout") != "not_inspected" or docker_save.get("manifest_semantics_attested") is not False or docker_save.get("docker_load_invoked") is not False or docker_save.get("loadability_claimed") is not False:
         raise SourceProvenanceVerificationError("image export docker save binding is invalid")
     before = _export_runtime_claim(
         value.get("pre_export_runtime"),

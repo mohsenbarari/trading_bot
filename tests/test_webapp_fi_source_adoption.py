@@ -519,6 +519,8 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
                     "docker_executable_sha256": hashlib.sha256(b"docker").hexdigest(),
                     "docker_executable_bytes": len(b"docker"),
                     "archive_semantics": "exact_bytes_only_unparsed",
+                    "archive_layout": "not_inspected",
+                    "manifest_semantics_attested": False,
                     "docker_load_invoked": False,
                     "loadability_claimed": False,
                 },
@@ -1073,6 +1075,8 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         self.assertNotIn("load", observed_commands[0])
         self.assertEqual(exported["docker_save_archive_sha256"], hashlib.sha256(destination.read_bytes()).hexdigest())
         self.assertEqual(exported["docker_save"]["archive_semantics"], "exact_bytes_only_unparsed")
+        self.assertEqual(exported["docker_save"]["archive_layout"], "not_inspected")
+        self.assertFalse(exported["docker_save"]["manifest_semantics_attested"])
         self.assertFalse(exported["docker_save"]["loadability_claimed"])
 
     def test_export_revalidates_before_and_after_and_withholds_receipt_on_drift(self):
@@ -1108,6 +1112,8 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
                     "docker_executable_sha256": hashlib.sha256(b"docker").hexdigest(),
                     "docker_executable_bytes": len(b"docker"),
                     "archive_semantics": "exact_bytes_only_unparsed",
+                    "archive_layout": "not_inspected",
+                    "manifest_semantics_attested": False,
                     "docker_load_invoked": False,
                     "loadability_claimed": False,
                 },

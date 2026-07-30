@@ -2480,6 +2480,8 @@ def _export_exact_docker_save_bytes(*, archive: Path, expected_image_id: str) ->
             "docker_executable_sha256": docker_sha256,
             "docker_executable_bytes": docker_bytes,
             "archive_semantics": "exact_bytes_only_unparsed",
+            "archive_layout": "not_inspected",
+            "manifest_semantics_attested": False,
             "docker_load_invoked": False,
             "loadability_claimed": False,
         },
