@@ -11,16 +11,17 @@ from __future__ import annotations
 
 import base64
 import binascii
+import datetime as dt
 import hashlib
 import json
 import re
 from typing import Any, Mapping, Sequence
 
 
-ATTESTATION_SCHEMA = "gold-trade-webapp-fi-source-role-attestation-v1"
-IMAGE_EXPORT_RECEIPT_SCHEMA = "gold-trade-webapp-fi-source-image-export-receipt-v1"
-ATTESTATION_SIGNATURE_DOMAIN = b"gold-trade-webapp-fi-source-role-attestation-v1\x00"
-IMAGE_EXPORT_SIGNATURE_DOMAIN = b"gold-trade-webapp-fi-source-image-export-v1\x00"
+ATTESTATION_SCHEMA = "gold-trade-webapp-fi-source-role-attestation-v2"
+IMAGE_EXPORT_RECEIPT_SCHEMA = "gold-trade-webapp-fi-source-image-export-receipt-v2"
+ATTESTATION_SIGNATURE_DOMAIN = b"gold-trade-webapp-fi-source-role-attestation-v2\x00"
+IMAGE_EXPORT_SIGNATURE_DOMAIN = b"gold-trade-webapp-fi-source-image-export-v2\x00"
 
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 RELEASE_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -31,6 +32,8 @@ IMAGE_REFERENCE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/@:-]{0,511}$")
 OBJECT_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/=-]{2,1023}$")
 CAMPAIGN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$")
 PACKAGE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+UTC_TIMESTAMP_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
+MAX_OBSERVATION_AGE_SECONDS = 15 * 60
 
 CODE_PROJECTIONS = (
     "api",
@@ -153,9 +156,28 @@ def _campaign(value: object, *, field: str) -> str:
     return value
 
 
-def _timestamp(value: object, *, field: str) -> str:
-    if not isinstance(value, str) or not value.endswith("Z") or "T" not in value:
+def _timestamp(value: object, *, field: str) -> dt.datetime:
+    if not isinstance(value, str) or not UTC_TIMESTAMP_RE.fullmatch(value):
         raise SourceProvenanceVerificationError(f"{field} is invalid")
+    try:
+        return dt.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc)
+    except ValueError as exc:
+        raise SourceProvenanceVerificationError(f"{field} is invalid") from exc
+
+
+def _fresh_timestamp(
+    value: object,
+    *,
+    field: str,
+    verification_time: str,
+    maximum_age_seconds: int,
+) -> str:
+    observed = _timestamp(value, field=field)
+    now = _timestamp(verification_time, field="verification time")
+    if isinstance(maximum_age_seconds, bool) or not isinstance(maximum_age_seconds, int) or not 1 <= maximum_age_seconds <= MAX_OBSERVATION_AGE_SECONDS:
+        raise SourceProvenanceVerificationError("maximum observation age is invalid")
+    if observed > now or (now - observed).total_seconds() > maximum_age_seconds:
+        raise SourceProvenanceVerificationError(f"{field} is stale or from the future")
     return value
 
 
@@ -280,16 +302,37 @@ def verify_source_role_attestation_payload(
     expected_campaign_id: str,
     expected_application: Mapping[str, str],
     expected_control_commit: str,
+    expected_canonical_release_tree_sha256: str,
     expected_app_image_id: str,
     expected_app_image_reference: str,
+    verification_time: str,
+    maximum_observation_age_seconds: int = MAX_OBSERVATION_AGE_SECONDS,
 ) -> dict[str, Any]:
-    """Verify a complete FI runtime proof without accessing FI state."""
+    """Verify only FI's fresh, point-in-time source-key signed claims.
+
+    This pure verifier intentionally does not assert controller authorization.
+    A source signing key can authenticate these claims, but enrollment
+    certificate authority must be verified separately against a controller
+    key and the exact local consumption state.
+    """
 
     value = _parse(payload, field="WebApp-FI source role attestation")
-    expected = {"schema", "status", "attested_at", "campaign_id", "source_site", "destination_site", "package_id", "application", "application_release_tree", "tooling", "source_adoption_install_receipt_sha256", "source_adoption_delivery", "canonical_release_tree_sha256", "source_signer_enrollment", "runtime_projection", "static_assets_proof", "containers", "active_application_image", "schema_observation", "race_check", "snapshot_transport", "source_signing_public_key_base64", "source_signing_key_id", "source_signature"}
+    expected = {
+        "schema", "status", "attested_at", "campaign_id", "source_site", "destination_site", "package_id",
+        "application", "application_release_tree", "tooling", "source_adoption_install_receipt_sha256",
+        "source_adoption_delivery", "canonical_release_tree_sha256", "source_signer_enrollment",
+        "observation_scope", "runtime_projection", "static_assets_proof", "containers",
+        "active_application_image", "race_check", "source_signing_public_key_base64", "source_signing_key_id",
+        "source_signature",
+    }
     if set(value) != expected or value.get("schema") != ATTESTATION_SCHEMA or value.get("status") != "attested":
         raise SourceProvenanceVerificationError("WebApp-FI source role attestation is unsupported")
-    _timestamp(value.get("attested_at"), field="attestation timestamp")
+    _fresh_timestamp(
+        value.get("attested_at"),
+        field="attestation timestamp",
+        verification_time=verification_time,
+        maximum_age_seconds=maximum_observation_age_seconds,
+    )
     expected_campaign_id = _campaign(expected_campaign_id, field="expected campaign")
     application = _application(value.get("application"), field="attestation application")
     if value.get("campaign_id") != expected_campaign_id or value.get("source_site") != "webapp_fi" or value.get("destination_site") != "webapp_ir" or not isinstance(value.get("package_id"), str) or not PACKAGE_ID_RE.fullmatch(value["package_id"]) or application != _application(expected_application, field="expected application"):
@@ -300,14 +343,30 @@ def verify_source_role_attestation_payload(
     _sha(value.get("source_adoption_install_receipt_sha256"), field="install receipt sha256")
     delivery = _delivery(value.get("source_adoption_delivery"))
     descriptor_sha = _sha(value.get("canonical_release_tree_sha256"), field="canonical descriptor sha256")
+    if descriptor_sha != _sha(expected_canonical_release_tree_sha256, field="expected canonical descriptor sha256"):
+        raise SourceProvenanceVerificationError("attestation canonical descriptor is unexpected")
     enrollment = value.get("source_signer_enrollment")
-    if not isinstance(enrollment, Mapping) or set(enrollment) != {"receipt_sha256", "certificate_sha256", "fi_ssh_host_public_key_sha256", "controller_public_key_base64", "source_signing_public_key_base64"}:
+    if not isinstance(enrollment, Mapping) or set(enrollment) != {
+        "receipt_sha256", "certificate_sha256", "certificate_id", "operation_id", "certificate_consumption_sha256",
+        "not_after", "fi_ssh_host_public_key_sha256", "controller_key_id", "source_signing_public_key_base64",
+        "source_signing_key_id",
+    }:
         raise SourceProvenanceVerificationError("source signer enrollment is invalid")
-    for name in ("receipt_sha256", "certificate_sha256", "fi_ssh_host_public_key_sha256"):
+    for name in ("receipt_sha256", "certificate_sha256", "certificate_consumption_sha256", "fi_ssh_host_public_key_sha256"):
         _sha(enrollment.get(name), field=f"source signer enrollment {name}")
-    _key(enrollment.get("controller_public_key_base64"), field="source signer controller key")
-    if enrollment.get("source_signing_public_key_base64") != pinned_source_signing_public_key_base64 or value.get("source_signing_public_key_base64") != pinned_source_signing_public_key_base64 or value.get("source_signing_key_id") != public_key_id(pinned_source_signing_public_key_base64):
+    if not isinstance(enrollment.get("certificate_id"), str) or not PACKAGE_ID_RE.fullmatch(enrollment["certificate_id"]) or not isinstance(enrollment.get("operation_id"), str) or not PACKAGE_ID_RE.fullmatch(enrollment["operation_id"]) or not isinstance(enrollment.get("controller_key_id"), str) or not enrollment["controller_key_id"].startswith("ed25519-sha256:"):
+        raise SourceProvenanceVerificationError("source signer enrollment is invalid")
+    _timestamp(enrollment.get("not_after"), field="source signer enrollment not_after")
+    if enrollment.get("source_signing_public_key_base64") != pinned_source_signing_public_key_base64 or value.get("source_signing_public_key_base64") != pinned_source_signing_public_key_base64 or value.get("source_signing_key_id") != public_key_id(pinned_source_signing_public_key_base64) or enrollment.get("source_signing_key_id") != value.get("source_signing_key_id"):
         raise SourceProvenanceVerificationError("source signing key is not pinned")
+    if value.get("observation_scope") != {
+        "point_in_time_only": True,
+        "data_capture_performed": False,
+        "schema_capture_performed": False,
+        "promotion_ready": False,
+        "later_snapshot_requires_separate_authorization": True,
+    }:
+        raise SourceProvenanceVerificationError("attestation observation scope is invalid")
     projection = value.get("runtime_projection")
     if not isinstance(projection, Mapping) or set(projection) != {"before", "after"}:
         raise SourceProvenanceVerificationError("runtime projection race proof is invalid")
@@ -321,9 +380,9 @@ def verify_source_role_attestation_payload(
     if _static(static["before"]) != _static(static["after"]):
         raise SourceProvenanceVerificationError("static asset proof race check is invalid")
     containers = value.get("containers")
-    if not isinstance(containers, Mapping) or set(containers) != {"database", "application", "sync_worker"}:
+    if not isinstance(containers, Mapping) or set(containers) != {"application", "sync_worker"}:
         raise SourceProvenanceVerificationError("attestation containers are invalid")
-    database, app, sync = _container(containers["database"]), _container(containers["application"]), _container(containers["sync_worker"])
+    app, sync = _container(containers["application"]), _container(containers["sync_worker"])
     _assert_app_projection_mounts(container=app, root=before["runtime_source_root"], static=True)
     _assert_app_projection_mounts(container=sync, root=before["runtime_source_root"], static=False)
     if app["image_id"] != expected_app_image_id or app["image_reference"] != expected_app_image_reference or sync["image_id"] != expected_app_image_id or sync["image_reference"] != expected_app_image_reference:
@@ -337,14 +396,79 @@ def verify_source_role_attestation_payload(
         raise SourceProvenanceVerificationError("active image is invalid")
     if active.get("image_id") != expected_app_image_id or active.get("image_reference") != expected_app_image_reference or expected_app_image_reference not in set(repo_tags) | set(repo_digests):
         raise SourceProvenanceVerificationError("active image is invalid")
-    if value.get("schema_observation") != {"observed_alembic_revision": application["expected_alembic_revision"], "capture_role_verified_read_only": True}:
-        raise SourceProvenanceVerificationError("schema observation is invalid")
-    if value.get("race_check") != {"runtime_projection_unchanged": True, "static_assets_unchanged": True, "application_container_unchanged": True, "sync_worker_container_unchanged": True, "database_container_unchanged": True, "active_image_unchanged": True, "schema_unchanged": True}:
+    if value.get("race_check") != {
+        "runtime_projection_unchanged": True,
+        "static_assets_unchanged": True,
+        "application_container_unchanged": True,
+        "sync_worker_container_unchanged": True,
+        "active_image_unchanged": True,
+    }:
         raise SourceProvenanceVerificationError("race check is invalid")
-    if value.get("snapshot_transport") != {"payload_path": "private_versioned_object_storage_age_only", "one_off_publication_only": True, "direct_webapp_fi_to_webapp_ir_transfer": False, "automatic_deletion": False}:
-        raise SourceProvenanceVerificationError("snapshot transport is invalid")
     _verify_signature(unsigned={key: item for key, item in value.items() if key != "source_signature"}, signature=value["source_signature"], public_key_base64=pinned_source_signing_public_key_base64, domain=ATTESTATION_SIGNATURE_DOMAIN)
-    return {"status": "verified", "attestation_sha256": sha256_bytes(payload), "campaign_id": expected_campaign_id, "application": application, "application_release_tree": value["application_release_tree"], "tooling": tooling, "source_adoption_delivery": delivery, "canonical_release_tree_sha256": descriptor_sha, "runtime_image": {"image_id": expected_app_image_id, "image_reference": expected_app_image_reference}, "source_signing_key_id": value["source_signing_key_id"], "source_signing_public_key_base64": pinned_source_signing_public_key_base64, "containers": {"database": database, "application": app, "sync_worker": sync}}
+    return {
+        "status": "verified",
+        "attestation_sha256": sha256_bytes(payload),
+        "attested_at": value["attested_at"],
+        "campaign_id": expected_campaign_id,
+        "application": application,
+        "tooling": tooling,
+        "descriptor_claim": {
+            "canonical_release_tree_sha256": descriptor_sha,
+            "application_release_tree": value["application_release_tree"],
+            "application": application,
+        },
+        "runtime_claim": {
+            "projection": before,
+            "static_assets": _static(static["before"]),
+            "containers": {"application": app, "sync_worker": sync},
+        },
+        "image_claim": {"image_id": expected_app_image_id, "image_reference": expected_app_image_reference, "active_application_image": dict(active)},
+        "source_adoption_delivery_claim": delivery,
+        "source_signing_key_id": value["source_signing_key_id"],
+        "source_signing_public_key_base64": pinned_source_signing_public_key_base64,
+        "point_in_time_observation_only": True,
+    }
+
+
+def _export_runtime_claim(
+    value: object,
+    *,
+    application: Mapping[str, str],
+    expected_descriptor_sha256: str,
+    expected_application_release_tree: str,
+    expected_app_image_id: str,
+    expected_app_image_reference: str,
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != {"projection", "static_assets", "containers", "active_application_image"}:
+        raise SourceProvenanceVerificationError("image export runtime proof is invalid")
+    projection = _projection(value["projection"], application=application)
+    if projection["descriptor_sha256"] != expected_descriptor_sha256 or projection["git_tree"] != expected_application_release_tree:
+        raise SourceProvenanceVerificationError("image export runtime projection is invalid")
+    static_assets = _static(value["static_assets"])
+    containers_value = value["containers"]
+    if not isinstance(containers_value, Mapping) or set(containers_value) != {"application", "sync_worker"}:
+        raise SourceProvenanceVerificationError("image export runtime containers are invalid")
+    application_container = _container(containers_value["application"])
+    sync_worker = _container(containers_value["sync_worker"])
+    _assert_app_projection_mounts(container=application_container, root=projection["runtime_source_root"], static=True)
+    _assert_app_projection_mounts(container=sync_worker, root=projection["runtime_source_root"], static=False)
+    if application_container["image_id"] != expected_app_image_id or application_container["image_reference"] != expected_app_image_reference or sync_worker["image_id"] != expected_app_image_id or sync_worker["image_reference"] != expected_app_image_reference:
+        raise SourceProvenanceVerificationError("image export runtime image is invalid")
+    active = value["active_application_image"]
+    if not isinstance(active, Mapping) or set(active) != {"image_id", "image_reference", "repo_tags", "repo_digests"}:
+        raise SourceProvenanceVerificationError("image export active image is invalid")
+    repo_tags = active.get("repo_tags")
+    repo_digests = active.get("repo_digests")
+    if not isinstance(repo_tags, list) or not isinstance(repo_digests, list) or not all(isinstance(item, str) and IMAGE_REFERENCE_RE.fullmatch(item) for item in repo_tags + repo_digests):
+        raise SourceProvenanceVerificationError("image export active image is invalid")
+    if active.get("image_id") != expected_app_image_id or active.get("image_reference") != expected_app_image_reference or expected_app_image_reference not in set(repo_tags) | set(repo_digests):
+        raise SourceProvenanceVerificationError("image export active image is invalid")
+    return {
+        "projection": projection,
+        "static_assets": static_assets,
+        "containers": {"application": application_container, "sync_worker": sync_worker},
+        "active_application_image": dict(active),
+    }
 
 
 def verify_image_export_receipt_payload(
@@ -355,45 +479,104 @@ def verify_image_export_receipt_payload(
     expected_application: Mapping[str, str],
     expected_control_commit: str,
     expected_application_release_tree: str,
+    expected_canonical_release_tree_sha256: str,
     expected_attestation_sha256: str,
     expected_app_image_id: str,
     expected_app_image_reference: str,
+    verification_time: str,
+    maximum_observation_age_seconds: int = MAX_OBSERVATION_AGE_SECONDS,
 ) -> dict[str, Any]:
-    """Verify FI's local image-export receipt without Docker loading it."""
+    """Verify a fresh source-key signed exact-byte image export receipt.
+
+    The receipt makes no claim that a Docker archive is loadable.  It only
+    binds bytes emitted by the trusted FI ``docker save`` invocation to the
+    same before/after runtime observation.
+    """
 
     value = _parse(payload, field="WebApp-FI image export receipt")
-    expected = {"schema", "status", "exported_at", "export_id", "campaign_id", "source_site", "destination_site", "application", "application_release_tree", "tooling", "canonical_release_tree_sha256", "source_role_attestation_sha256", "image", "pre_export_runtime", "post_export_runtime", "image_archive_does_not_prove_bind_mounted_runtime", "archive_consumption", "object_storage_export_required", "source_signing_public_key_base64", "source_signing_key_id", "source_signature"}
+    expected = {
+        "schema", "status", "exported_at", "export_id", "campaign_id", "source_site", "destination_site",
+        "application", "application_release_tree", "tooling", "canonical_release_tree_sha256",
+        "source_role_attestation_sha256", "observation_scope", "image", "pre_export_runtime",
+        "post_export_runtime", "exact_byte_export", "archive_consumption", "object_storage_export_required",
+        "source_signing_public_key_base64", "source_signing_key_id", "source_signature",
+    }
     if set(value) != expected or value.get("schema") != IMAGE_EXPORT_RECEIPT_SCHEMA or value.get("status") != "exported":
         raise SourceProvenanceVerificationError("WebApp-FI image export receipt is unsupported")
-    _timestamp(value.get("exported_at"), field="image export timestamp")
+    _fresh_timestamp(
+        value.get("exported_at"),
+        field="image export timestamp",
+        verification_time=verification_time,
+        maximum_age_seconds=maximum_observation_age_seconds,
+    )
     if not isinstance(value.get("export_id"), str) or not PACKAGE_ID_RE.fullmatch(value["export_id"]) or value.get("campaign_id") != _campaign(expected_campaign_id, field="expected campaign") or value.get("source_site") != "webapp_fi" or value.get("destination_site") != "webapp_ir" or _application(value.get("application"), field="image export application") != _application(expected_application, field="expected application"):
         raise SourceProvenanceVerificationError("image export binding is invalid")
     tooling = _tooling(value.get("tooling"), field="image export tooling")
+    expected_descriptor = _sha(expected_canonical_release_tree_sha256, field="expected image export canonical descriptor sha256")
     if tooling["control_commit"] != expected_control_commit or not COMMIT_RE.fullmatch(expected_application_release_tree) or value.get("application_release_tree") != expected_application_release_tree or _sha(value.get("source_role_attestation_sha256"), field="image export attestation sha256") != _sha(expected_attestation_sha256, field="expected attestation sha256"):
         raise SourceProvenanceVerificationError("image export provenance binding is invalid")
-    _sha(value.get("canonical_release_tree_sha256"), field="image export canonical descriptor sha256")
+    if _sha(value.get("canonical_release_tree_sha256"), field="image export canonical descriptor sha256") != expected_descriptor:
+        raise SourceProvenanceVerificationError("image export canonical descriptor is unexpected")
+    if value.get("observation_scope") != {
+        "point_in_time_only": True,
+        "data_capture_performed": False,
+        "schema_capture_performed": False,
+        "promotion_ready": False,
+        "later_snapshot_requires_separate_authorization": True,
+    }:
+        raise SourceProvenanceVerificationError("image export observation scope is invalid")
     image = value.get("image")
-    image_fields = {"image_id", "image_reference", "archive_sha256", "archive_bytes", "docker_manifest_sha256", "docker_config_sha256", "layer_count", "repo_tags"}
+    image_fields = {"image_id", "image_reference", "archive_sha256", "archive_bytes", "docker_save"}
     if not isinstance(image, Mapping) or set(image) != image_fields or image.get("image_id") != expected_app_image_id or image.get("image_reference") != expected_app_image_reference:
         raise SourceProvenanceVerificationError("image export image binding is invalid")
-    for name in ("archive_sha256", "docker_manifest_sha256", "docker_config_sha256"):
-        _sha(image.get(name), field=f"image export {name}")
+    _sha(image.get("archive_sha256"), field="image export archive sha256")
     _size(image.get("archive_bytes"), field="image export archive bytes", maximum=100 * 1024 * 1024 * 1024)
-    _size(image.get("layer_count"), field="image export layer count", maximum=100_000)
-    if not isinstance(image.get("repo_tags"), list) or not all(isinstance(tag, str) and IMAGE_REFERENCE_RE.fullmatch(tag) for tag in image["repo_tags"]):
-        raise SourceProvenanceVerificationError("image export repo tags are invalid")
-    for runtime_name in ("pre_export_runtime", "post_export_runtime"):
-        runtime = value.get(runtime_name)
-        if not isinstance(runtime, Mapping) or set(runtime) != {"application", "sync_worker", "active_image"}:
-            raise SourceProvenanceVerificationError("image export runtime proof is invalid")
-        app, sync = _container(runtime["application"]), _container(runtime["sync_worker"])
-        if app["image_id"] != expected_app_image_id or app["image_reference"] != expected_app_image_reference or sync["image_id"] != expected_app_image_id or sync["image_reference"] != expected_app_image_reference:
-            raise SourceProvenanceVerificationError("image export runtime image is invalid")
-    if value["pre_export_runtime"] != value["post_export_runtime"] or value.get("image_archive_does_not_prove_bind_mounted_runtime") is not True:
+    docker_save = image.get("docker_save")
+    if not isinstance(docker_save, Mapping) or set(docker_save) != {"command", "docker_executable_sha256", "docker_executable_bytes", "archive_semantics", "docker_load_invoked", "loadability_claimed"}:
+        raise SourceProvenanceVerificationError("image export docker save binding is invalid")
+    if docker_save.get("command") != ["docker", "save", "--output", "webapp-fi-active-app-image.tar", expected_app_image_id] or _sha(docker_save.get("docker_executable_sha256"), field="image export docker executable sha256") is None or _size(docker_save.get("docker_executable_bytes"), field="image export docker executable bytes", maximum=10 * 1024 * 1024 * 1024) < 1 or docker_save.get("archive_semantics") != "exact_bytes_only_unparsed" or docker_save.get("docker_load_invoked") is not False or docker_save.get("loadability_claimed") is not False:
+        raise SourceProvenanceVerificationError("image export docker save binding is invalid")
+    before = _export_runtime_claim(
+        value.get("pre_export_runtime"),
+        application=_application(value["application"], field="image export application"),
+        expected_descriptor_sha256=expected_descriptor,
+        expected_application_release_tree=expected_application_release_tree,
+        expected_app_image_id=expected_app_image_id,
+        expected_app_image_reference=expected_app_image_reference,
+    )
+    after = _export_runtime_claim(
+        value.get("post_export_runtime"),
+        application=_application(value["application"], field="image export application"),
+        expected_descriptor_sha256=expected_descriptor,
+        expected_application_release_tree=expected_application_release_tree,
+        expected_app_image_id=expected_app_image_id,
+        expected_app_image_reference=expected_app_image_reference,
+    )
+    if before != after:
         raise SourceProvenanceVerificationError("image export runtime race proof is invalid")
-    if value.get("archive_consumption") != {"docker_load_prohibited": True, "fi_local_archive_verification_before_age_encryption": True, "controller_read_back_verification_after_age_encryption": True, "raw_repo_tags_are_not_authorization": True} or value.get("object_storage_export_required") != {"transport": "private_versioned_age_only", "create_only": True, "read_back_same_version_id": True, "direct_webapp_fi_to_webapp_ir_transfer": False}:
+    if value.get("exact_byte_export") != {"archive_is_unparsed_exact_bytes": True, "docker_load_invoked": False, "loadability_claimed": False, "bind_mounted_runtime_revalidated_before_and_after": True}:
+        raise SourceProvenanceVerificationError("image export exact-byte policy is invalid")
+    if value.get("archive_consumption") != {"docker_load_prohibited": True, "fi_local_exact_byte_hash_before_age_encryption": True, "controller_read_back_exact_byte_hash_after_age_encryption": True, "raw_repo_tags_are_not_authorization": True} or value.get("object_storage_export_required") != {"transport": "private_versioned_age_only", "create_only": True, "read_back_same_version_id": True, "direct_webapp_fi_to_webapp_ir_transfer": False}:
         raise SourceProvenanceVerificationError("image export transport policy is invalid")
     if value.get("source_signing_public_key_base64") != pinned_source_signing_public_key_base64 or value.get("source_signing_key_id") != public_key_id(pinned_source_signing_public_key_base64):
         raise SourceProvenanceVerificationError("image export signing key is not pinned")
     _verify_signature(unsigned={key: item for key, item in value.items() if key != "source_signature"}, signature=value["source_signature"], public_key_base64=pinned_source_signing_public_key_base64, domain=IMAGE_EXPORT_SIGNATURE_DOMAIN)
-    return {"status": "verified", "image_export_receipt_sha256": sha256_bytes(payload), "campaign_id": expected_campaign_id, "application": _application(value["application"], field="image export application"), "tooling": tooling, "image": dict(image), "source_role_attestation_sha256": value["source_role_attestation_sha256"], "source_signing_key_id": value["source_signing_key_id"]}
+    return {
+        "status": "verified",
+        "image_export_receipt_sha256": sha256_bytes(payload),
+        "exported_at": value["exported_at"],
+        "campaign_id": expected_campaign_id,
+        "application": _application(value["application"], field="image export application"),
+        "tooling": tooling,
+        "descriptor_claim": {
+            "canonical_release_tree_sha256": expected_descriptor,
+            "application_release_tree": expected_application_release_tree,
+            "application": _application(value["application"], field="image export application"),
+        },
+        "runtime_claim": before,
+        "image_claim": dict(image),
+        "source_role_attestation_sha256": value["source_role_attestation_sha256"],
+        "source_signing_key_id": value["source_signing_key_id"],
+        "source_signing_public_key_base64": pinned_source_signing_public_key_base64,
+        "point_in_time_observation_only": True,
+    }
