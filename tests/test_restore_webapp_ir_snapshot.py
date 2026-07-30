@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import os
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -71,6 +72,12 @@ def write_audit_archive(path: Path) -> None:
 
 
 class RestoreWebappIrSnapshotTests(unittest.TestCase):
+    def make_docker_root(self, root: Path) -> Path:
+        docker_root = root / "docker-root"
+        docker_root.mkdir()
+        os.chmod(docker_root, 0o700)
+        return docker_root
+
     def make_inputs(self, root: Path) -> tuple[Path, Path, Path]:
         data_root = root / "standby-data"
         workspace = data_root / "work"
@@ -256,6 +263,7 @@ class RestoreWebappIrSnapshotTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             standby_env, receipt_path, _ = self.make_inputs(root)
+            docker_root = self.make_docker_root(root)
             arguments = MODULE.build_parser().parse_args(
                 ["--standby-env", str(standby_env), "--receipt", str(receipt_path), "--apply"]
             )
@@ -264,6 +272,10 @@ class RestoreWebappIrSnapshotTests(unittest.TestCase):
                 MODULE,
                 "require_capacity",
                 side_effect=MODULE.SnapshotCapacityError("fixture capacity failure"),
+            ), mock.patch.object(
+                MODULE,
+                "require_docker_root_directory",
+                return_value=docker_root,
             ), mock.patch.object(MODULE, "docker_volume_absent") as volume_absent:
                 with self.assertRaisesRegex(MODULE.RestoreError, "fixture capacity failure"):
                     MODULE.execute(arguments)
@@ -271,10 +283,104 @@ class RestoreWebappIrSnapshotTests(unittest.TestCase):
         self.assertFalse(MODULE.restore_inflight_journal_path(state_root).exists())
         volume_absent.assert_not_called()
 
+    def test_docker_root_capacity_failure_precedes_journal_and_volume_inspection(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            standby_env, receipt_path, _ = self.make_inputs(root)
+            docker_root = self.make_docker_root(root)
+            values = MODULE.parse_env_file(standby_env, label="standby env")
+            data_root = Path(values["WA_IR_STANDBY_DATA_ROOT"])
+            state_root = Path(values["WA_IR_SNAPSHOT_STATE_ROOT"])
+            receipt = MODULE.load_receipt(
+                receipt_path,
+                workspace_root=Path(values["WA_IR_SNAPSHOT_WORK_ROOT"]),
+            )
+            candidate = MODULE.build_candidate(data_root, receipt.snapshot_id)
+            arguments = MODULE.build_parser().parse_args(
+                ["--standby-env", str(standby_env), "--receipt", str(receipt_path), "--apply"]
+            )
+
+            def capacity(path: Path, **kwargs: object) -> dict[str, object]:
+                if kwargs["label"] == "WA-IR DockerRootDir temporary restore workspace":
+                    self.assertEqual(path, docker_root)
+                    self.assertEqual(
+                        kwargs["required_new_bytes"],
+                        receipt.database.byte_count + 1024,
+                    )
+                    raise MODULE.SnapshotCapacityError("fixture DockerRootDir capacity failure")
+                return {"path": str(path), "label": kwargs["label"]}
+
+            with (
+                mock.patch.object(
+                    MODULE,
+                    "require_docker_root_directory",
+                    return_value=docker_root,
+                ),
+                mock.patch.object(MODULE, "paths_share_filesystem", return_value=False),
+                mock.patch.object(MODULE, "require_capacity", side_effect=capacity),
+                mock.patch.object(MODULE, "docker_volume_absent") as volume_absent,
+            ):
+                with self.assertRaisesRegex(MODULE.RestoreError, "DockerRootDir capacity failure"):
+                    MODULE.execute(arguments)
+
+        self.assertFalse(MODULE.restore_inflight_journal_path(state_root).exists())
+        self.assertFalse(candidate.root.exists())
+        volume_absent.assert_not_called()
+
+    def test_shared_filesystem_capacity_combines_candidate_and_docker_bounds(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            data_root = root / "data"
+            docker_root = root / "docker"
+            data_root.mkdir()
+            docker_root.mkdir()
+            os.chmod(data_root, 0o700)
+            os.chmod(docker_root, 0o700)
+            admission = {"available_bytes": 1000}
+            with mock.patch.object(MODULE, "require_capacity", return_value=admission) as capacity:
+                result = MODULE.require_restore_capacity(
+                    data_root,
+                    docker_root=docker_root,
+                    candidate_required_new_bytes=101,
+                    docker_restore_required_new_bytes=37,
+                    minimum_free_bytes=11,
+                )
+
+        capacity.assert_called_once_with(
+            data_root,
+            required_new_bytes=138,
+            minimum_free_bytes=11,
+            label="WA-IR snapshot candidate data root and DockerRootDir",
+        )
+        self.assertEqual(result["filesystem_layout"], "shared")
+        self.assertEqual(result["candidate_required_new_bytes"], 101)
+        self.assertEqual(result["docker_restore_required_new_bytes"], 37)
+        self.assertEqual(result["admission"], admission)
+
+    def test_docker_root_inspection_uses_read_only_daemon_command(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            docker_root = self.make_docker_root(root)
+            runner = mock.Mock()
+            runner.run.return_value = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=f"{docker_root}\n",
+                stderr="",
+            )
+            observed = MODULE.require_docker_root_directory(runner)
+
+        self.assertEqual(observed, docker_root)
+        runner.run.assert_called_once_with(
+            ["docker", "info", "--format", MODULE.DOCKER_ROOT_DIR_FORMAT],
+            timeout=30,
+        )
+
     def test_failed_apply_leaves_durable_inflight_journal_and_closes_future_restore(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             standby_env, receipt_path, _ = self.make_inputs(root)
+            docker_root = self.make_docker_root(root)
             values = MODULE.parse_env_file(standby_env, label="standby env")
             state_root = Path(values["WA_IR_SNAPSHOT_STATE_ROOT"])
             data_root = Path(values["WA_IR_STANDBY_DATA_ROOT"])
@@ -288,6 +394,11 @@ class RestoreWebappIrSnapshotTests(unittest.TestCase):
             )
 
             with (
+                mock.patch.object(
+                    MODULE,
+                    "require_docker_root_directory",
+                    return_value=docker_root,
+                ),
                 mock.patch.object(MODULE, "docker_volume_absent", return_value=True),
                 mock.patch.object(MODULE, "docker_container_absent", return_value=True),
                 mock.patch.object(
@@ -351,12 +462,18 @@ class RestoreWebappIrSnapshotTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             standby_env, receipt_path, _ = self.make_inputs(root)
+            docker_root = self.make_docker_root(root)
             values = MODULE.parse_env_file(standby_env, label="standby env")
             state_root = Path(values["WA_IR_SNAPSHOT_STATE_ROOT"])
             arguments = MODULE.build_parser().parse_args(
                 ["--standby-env", str(standby_env), "--receipt", str(receipt_path), "--apply"]
             )
             with (
+                mock.patch.object(
+                    MODULE,
+                    "require_docker_root_directory",
+                    return_value=docker_root,
+                ),
                 mock.patch.object(MODULE, "docker_volume_absent", return_value=True),
                 mock.patch.object(MODULE, "docker_container_absent", return_value=True),
                 mock.patch.object(MODULE, "create_bound_volume"),
@@ -378,6 +495,7 @@ class RestoreWebappIrSnapshotTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             standby_env, receipt_path, _ = self.make_inputs(root)
+            docker_root = self.make_docker_root(root)
             values = MODULE.parse_env_file(standby_env, label="standby env")
             state_root = Path(values["WA_IR_SNAPSHOT_STATE_ROOT"])
             arguments = MODULE.build_parser().parse_args(
@@ -396,6 +514,11 @@ class RestoreWebappIrSnapshotTests(unittest.TestCase):
                 return original_advance(path, journal, phase=phase)
 
             with (
+                mock.patch.object(
+                    MODULE,
+                    "require_docker_root_directory",
+                    return_value=docker_root,
+                ),
                 mock.patch.object(MODULE, "docker_volume_absent", return_value=True),
                 mock.patch.object(MODULE, "docker_container_absent", return_value=True),
                 mock.patch.object(MODULE, "create_bound_volume"),
