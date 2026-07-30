@@ -12,6 +12,7 @@ import stat
 import subprocess
 import tarfile
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -1053,7 +1054,10 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         )
         parent = self.root / "exports"
         parent.mkdir(mode=0o700)
-        with patch.object(install, "_inspect_container", side_effect=AssertionError("export plan touched Docker")):
+        with (
+            patch.object(install, "_inspect_container", side_effect=AssertionError("export plan touched Docker")),
+            patch.object(install, "_inspect_image_storage_bytes", side_effect=AssertionError("export plan inspected image storage")),
+        ):
             plan = install.export_actual_fi_image(
                 attestation=Path(attestation["attestation_path"]),
                 source_role_config=role_path,
@@ -1077,7 +1081,104 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         self.assertTrue(plan["object_storage_export_required"]["create_only"])
         self.assertTrue(plan["revalidate_projection_static_containers_before_and_after_docker_save"])
         self.assertTrue(plan["exact_bytes_only_unparsed_archive"])
+        self.assertEqual(
+            {
+                "before_destination_mkdir": True,
+                "trusted_local_image_storage_size": True,
+                "required_free_bytes_formula": "2x_inspected_image_storage_bytes_plus_1073741824",
+            },
+            plan["local_capacity_admission"],
+        )
         self.assertFalse(plan["loadability_claimed"])
+
+    def test_image_export_capacity_reserves_double_trusted_storage_plus_margin(self):
+        parent = self.root / "exports-capacity"
+        parent.mkdir(mode=0o700)
+        destination = parent / "candidate"
+        storage_bytes = 32 * 1024 * 1024
+        required_free_bytes = storage_bytes * install.IMAGE_EXPORT_CAPACITY_MULTIPLIER + install.IMAGE_EXPORT_CAPACITY_MARGIN_BYTES
+
+        with patch.object(install, "_inspect_image_storage_bytes", return_value=storage_bytes):
+            admission = install._preflight_image_export_capacity(
+                destination=destination,
+                expected_image_id=IMAGE_ID,
+                disk_usage=lambda _path: SimpleNamespace(free=required_free_bytes),
+            )
+
+        self.assertFalse(destination.exists())
+        self.assertEqual(storage_bytes, admission["image_storage_bytes"])
+        self.assertEqual(required_free_bytes, admission["required_free_bytes"])
+        self.assertEqual(required_free_bytes, admission["available_free_bytes"])
+        self.assertEqual(install.IMAGE_EXPORT_CAPACITY_MULTIPLIER, admission["reserve_multiplier"])
+        self.assertEqual(install.IMAGE_EXPORT_CAPACITY_MARGIN_BYTES, admission["reserve_margin_bytes"])
+
+    def test_image_export_capacity_rejects_invalid_trusted_storage_size_without_writing(self):
+        parent = self.root / "exports-capacity-invalid"
+        parent.mkdir(mode=0o700)
+        destination = parent / "candidate"
+
+        with patch.object(install, "_inspect_image_storage_bytes", return_value=0):
+            with self.assertRaisesRegex(install.SourceAdoptionInstallError, "source image storage size is invalid"):
+                install._preflight_image_export_capacity(
+                    destination=destination,
+                    expected_image_id=IMAGE_ID,
+                    disk_usage=lambda _path: SimpleNamespace(free=10 * install.IMAGE_EXPORT_CAPACITY_MARGIN_BYTES),
+                )
+
+        self.assertFalse(destination.exists())
+
+    def test_export_rejects_insufficient_capacity_before_candidate_mkdir_or_docker_save(self):
+        installed = self._install()
+        runtime, role_path, ssh_public, static_path, certificate = self._runtime_and_config(installed)
+        self._enroll(installed, role_path, ssh_public, certificate)
+        attestation = self._attest(
+            installed,
+            runtime,
+            role_path,
+            ssh_public,
+            static_path,
+            certificate,
+            attestation_id="attestation-export-capacity",
+        )
+        before = {
+            **attestation["runtime_claim"],
+            "active_application_image": attestation["image_claim"]["active_application_image"],
+        }
+        parent = self.root / "exports-capacity-failure"
+        parent.mkdir(mode=0o700)
+        destination = parent / "candidate"
+
+        with (
+            patch.object(install, "_revalidate_export_runtime", return_value=before) as revalidate,
+            patch.object(install, "_inspect_image_storage_bytes", return_value=1024),
+            patch.object(install.shutil, "disk_usage", return_value=SimpleNamespace(free=0)),
+            patch.object(install, "_create_directory", side_effect=AssertionError("capacity failure reached mkdir")),
+            patch.object(install, "_export_exact_docker_save_bytes", side_effect=AssertionError("capacity failure reached docker save")),
+        ):
+            with self.assertRaisesRegex(install.SourceAdoptionInstallError, "insufficient free space for exact WebApp-FI image export"):
+                install.export_actual_fi_image(
+                    attestation=Path(attestation["attestation_path"]),
+                    source_role_config=role_path,
+                    signer_enrollment_receipt=Path(installed["candidate"]) / "enrollments" / f"{CAMPAIGN}.json",
+                    signer_enrollment_certificate=certificate,
+                    ssh_host_public_key_file=ssh_public,
+                    runtime_source_root=runtime,
+                    static_assets_descriptor=static_path,
+                    pinned_controller_public_key_base64=self.controller_public,
+                    pinned_source_signing_public_key_base64=self.fi_public,
+                    expected_campaign_id=CAMPAIGN,
+                    expected_application=installed["application"],
+                    expected_control_commit=self.control_commit,
+                    expected_canonical_release_tree_sha256=attestation["descriptor_claim"]["canonical_release_tree_sha256"],
+                    expected_app_image_id=IMAGE_ID,
+                    expected_app_image_reference=IMAGE_REFERENCE,
+                    destination=destination,
+                    export_id="export-capacity-failure",
+                    apply=True,
+                )
+
+        self.assertEqual(1, revalidate.call_count)
+        self.assertFalse(destination.exists())
 
     def test_export_rejects_live_runtime_destination_before_revalidation_mkdir_or_docker_save(self):
         installed = self._install()
@@ -1286,7 +1387,18 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
                 },
             }
 
-        with patch.object(install, "_revalidate_export_runtime", side_effect=[before, after]) as revalidate, patch.object(install, "_export_exact_docker_save_bytes", side_effect=fake_export):
+        with (
+            patch.object(install, "_revalidate_export_runtime", side_effect=[before, after]) as revalidate,
+            patch.object(install, "_inspect_image_storage_bytes", return_value=1024),
+            patch.object(
+                install.shutil,
+                "disk_usage",
+                return_value=SimpleNamespace(
+                    free=1024 * install.IMAGE_EXPORT_CAPACITY_MULTIPLIER + install.IMAGE_EXPORT_CAPACITY_MARGIN_BYTES
+                ),
+            ),
+            patch.object(install, "_export_exact_docker_save_bytes", side_effect=fake_export),
+        ):
             with self.assertRaisesRegex(install.SourceAdoptionInstallError, "changed during exact-byte export"):
                 install.export_actual_fi_image(
                     attestation=Path(attestation["attestation_path"]),

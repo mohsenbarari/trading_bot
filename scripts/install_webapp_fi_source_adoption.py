@@ -24,11 +24,12 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import shutil
 import stat
 import subprocess
 import sys
 import tarfile
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 
 PACKAGE_SCHEMA = "gold-trade-webapp-fi-source-adoption-package-v1"
@@ -67,6 +68,8 @@ MAX_PACKAGE_MEMBER_BYTES = 8 * 1024 * 1024
 MAX_RECEIPT_BYTES = 8 * 1024 * 1024
 MAX_CANONICAL_RELEASE_FILES = 100_000
 MAX_IMAGE_EXPORT_BYTES = 100 * 1024 * 1024 * 1024
+IMAGE_EXPORT_CAPACITY_MULTIPLIER = 2
+IMAGE_EXPORT_CAPACITY_MARGIN_BYTES = 1024 * 1024 * 1024
 MAX_ENROLLMENT_CERTIFICATE_LIFETIME_SECONDS = 60 * 60
 MAX_OBSERVATION_AGE_SECONDS = 15 * 60
 MAX_VERSION_ID_BYTES = 1024
@@ -1144,7 +1147,7 @@ def _inspect_container(name: str) -> dict[str, Any]:
     }
 
 
-def _inspect_image(image_id: str) -> dict[str, Any]:
+def _inspect_image_metadata(image_id: str) -> Mapping[str, Any]:
     if not IMAGE_ID_RE.fullmatch(image_id):
         raise SourceAdoptionInstallError("image ID is invalid")
     docker = _require_trusted_executable(Path("/usr/bin/docker"), field="docker")
@@ -1178,7 +1181,25 @@ def _inspect_image(image_id: str) -> dict[str, Any]:
     digests = item.get("RepoDigests") or []
     if not isinstance(tags, list) or not isinstance(digests, list) or not all(isinstance(value, str) and IMAGE_REFERENCE_RE.fullmatch(value) for value in tags + digests):
         raise SourceAdoptionInstallError("source image inspection returned unsafe image references")
+    return item
+
+
+def _inspect_image(image_id: str) -> dict[str, Any]:
+    item = _inspect_image_metadata(image_id)
+    tags = item.get("RepoTags") or []
+    digests = item.get("RepoDigests") or []
     return {"image_id": image_id, "repo_tags": sorted(tags), "repo_digests": sorted(digests)}
+
+
+def _inspect_image_storage_bytes(image_id: str) -> int:
+    """Read the trusted Docker daemon's local storage size for one exact image."""
+
+    item = _inspect_image_metadata(image_id)
+    return _require_size(
+        item.get("Size"),
+        field="source image storage size",
+        maximum=MAX_IMAGE_EXPORT_BYTES,
+    )
 
 
 def _decode_pinned_public_key(value: str) -> bytes:
@@ -2576,6 +2597,50 @@ def _require_export_destination_outside_source_runtime(
     return destination
 
 
+def _preflight_image_export_capacity(
+    *,
+    destination: Path,
+    expected_image_id: str,
+    disk_usage: Callable[[Path], Any] | None = None,
+) -> dict[str, int]:
+    """Reserve destination filesystem capacity before creating an export candidate.
+
+    Docker's inspected ``Size`` is trusted local image storage metadata, not a
+    promise about the archive layout.  Reserve twice that value plus a fixed
+    1 GiB margin so an exact-byte ``docker save`` cannot begin where the
+    destination filesystem is already too close to exhaustion.
+    """
+
+    destination = _require_absolute(destination, field="image export destination")
+    parent = require_root_only_directory(destination.parent, field="image export destination capacity parent")
+    if destination.parent != parent or destination.exists() or destination.is_symlink():
+        raise SourceAdoptionInstallError("image export capacity destination must be a new child of a root-only directory")
+    image_storage_bytes = _require_size(
+        _inspect_image_storage_bytes(expected_image_id),
+        field="source image storage size",
+        maximum=MAX_IMAGE_EXPORT_BYTES,
+    )
+    required_free_bytes = image_storage_bytes * IMAGE_EXPORT_CAPACITY_MULTIPLIER + IMAGE_EXPORT_CAPACITY_MARGIN_BYTES
+    try:
+        usage = (shutil.disk_usage if disk_usage is None else disk_usage)(parent)
+        free_bytes = usage.free
+    except (AttributeError, OSError, OverflowError, TypeError, ValueError) as exc:
+        raise SourceAdoptionInstallError("cannot inspect image export destination capacity") from exc
+    if isinstance(free_bytes, bool) or not isinstance(free_bytes, int) or free_bytes < 0:
+        raise SourceAdoptionInstallError("image export destination capacity is invalid")
+    if free_bytes < required_free_bytes:
+        raise SourceAdoptionInstallError(
+            "insufficient free space for exact WebApp-FI image export; use a dedicated root-only destination filesystem"
+        )
+    return {
+        "image_storage_bytes": image_storage_bytes,
+        "reserve_multiplier": IMAGE_EXPORT_CAPACITY_MULTIPLIER,
+        "reserve_margin_bytes": IMAGE_EXPORT_CAPACITY_MARGIN_BYTES,
+        "required_free_bytes": required_free_bytes,
+        "available_free_bytes": free_bytes,
+    }
+
+
 def _revalidate_export_runtime(
     *,
     installed: Mapping[str, Any],
@@ -2715,6 +2780,11 @@ def export_actual_fi_image(
         "object_storage_export_required": {"transport": "private_versioned_age_only", "create_only": True, "read_back_same_version_id": True, "direct_webapp_fi_to_webapp_ir_transfer": False},
         "revalidate_projection_static_containers_before_and_after_docker_save": True,
         "exact_bytes_only_unparsed_archive": True,
+        "local_capacity_admission": {
+            "before_destination_mkdir": True,
+            "trusted_local_image_storage_size": True,
+            "required_free_bytes_formula": "2x_inspected_image_storage_bytes_plus_1073741824",
+        },
         "docker_load_invoked": False,
         "loadability_claimed": False,
         "service_changed": False,
@@ -2742,6 +2812,10 @@ def export_actual_fi_image(
         or before["active_application_image"] != verified["image_claim"]["active_application_image"]
     ):
         raise SourceAdoptionInstallError("WebApp-FI source/image state no longer matches the signed point-in-time attestation")
+    capacity_admission = _preflight_image_export_capacity(
+        destination=destination,
+        expected_image_id=expected_app_image_id,
+    )
     _create_directory(destination)
     archive = destination / "webapp-fi-active-app-image.tar"
     archive_info = _export_exact_docker_save_bytes(archive=archive, expected_image_id=expected_app_image_id)
@@ -2812,6 +2886,7 @@ def export_actual_fi_image(
         "descriptor_claim": verified["descriptor_claim"],
         "runtime_claim": after,
         "image_claim": {"image_id": expected_app_image_id, "image_reference": expected_app_image_reference, **archive_info},
+        "capacity_admission": capacity_admission,
         "object_storage_export_required": unsigned["object_storage_export_required"],
     }
 
