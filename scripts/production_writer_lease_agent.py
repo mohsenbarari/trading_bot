@@ -59,6 +59,9 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 PATH_RE = re.compile(r"^/[A-Za-z0-9._/-]+$")
 DOCKER_RESOURCE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 DOCKER_CONTAINER_ID_RE = re.compile(r"^[0-9a-f]{12,64}$")
+DOCKER_FULL_CONTAINER_ID_RE = re.compile(r"^[0-9a-f]{64}$")
+DOCKER_IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+DOCKER_IMAGE_REFERENCE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/@:+-]{0,511}$")
 WA_IR_PROMOTION_PROJECT_NAME = "trading_bot_wa_ir_promoted_2c08"
 WA_IR_PROMOTION_PROFILE = "promoted"
 WA_IR_EMERGENCY_LEASE_DURATION_SECONDS = 60
@@ -70,6 +73,37 @@ WA_IR_PROMOTION_LOCK_TIMEOUT_SECONDS = 30
 WA_IR_PROMOTED_COMPOSE_FILE = (
     REPO_ROOT / "deploy/production/docker-compose.webapp-ir-promoted-2c08.yml"
 ).resolve()
+WA_IR_RUNTIME_BINDING_SCHEMA = "gold-trade-wa-ir-promoted-runtime-binding-v1"
+WA_IR_RUNTIME_BINDING_FIELDS = frozenset(
+    {
+        "schema",
+        "promotion_proof_sha256",
+        "snapshot_id",
+        "source_generation",
+        "release_sha",
+        "snapshot_restore_receipt_sha256",
+        "snapshot_stage_receipt_sha256",
+        "epoch",
+        "lease_id",
+        "containers",
+        "binding_sha256",
+    }
+)
+WA_IR_RUNTIME_CONTAINER_BINDING_FIELDS = frozenset(
+    {
+        "container_id",
+        "image",
+        "image_id",
+        "labels_sha256",
+        "volume_names",
+        "restart_policy",
+    }
+)
+WA_IR_RUNTIME_IMAGE_ENV = {
+    "db": "WA_IR_POSTGRES_IMAGE",
+    "redis": "WA_IR_REDIS_IMAGE",
+    "app": "WA_IR_APP_IMAGE",
+}
 
 
 class ProductionWriterLeaseAgentError(RuntimeError):
@@ -120,6 +154,30 @@ class PromotionRuntimeSelection:
     compose_project: str
     redis_volume: str
     release_sha: str
+
+
+@dataclass(frozen=True)
+class PromotedRuntimeContainerBinding:
+    container_id: str
+    image: str
+    image_id: str
+    labels_sha256: str
+    volume_names: tuple[str, ...]
+    restart_policy: str
+
+
+@dataclass(frozen=True)
+class PromotedRuntimeBinding:
+    promotion_proof_sha256: str
+    snapshot_id: str
+    source_generation: str
+    release_sha: str
+    snapshot_restore_receipt_sha256: str
+    snapshot_stage_receipt_sha256: str
+    epoch: int
+    lease_id: str
+    containers: Mapping[str, PromotedRuntimeContainerBinding]
+    binding_sha256: str
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -1536,6 +1594,473 @@ def _assert_existing_promoted_runtime_matches_selection(
     return {service: str(container) for service, container in discovered.items()}
 
 
+def _runtime_binding_path(proof_path: Path) -> Path:
+    """Return the immutable recovery sidecar for one promotion proof."""
+
+    safe_path = _absolute(str(proof_path), label="promotion proof path")
+    if safe_path.suffix != ".json" or not safe_path.stem:
+        raise ProductionWriterLeaseAgentError("promotion proof path cannot bind a runtime recovery record")
+    return safe_path.with_name(f"{safe_path.stem}.runtime-binding.json")
+
+
+def _runtime_binding_hash(payload: Mapping[str, Any]) -> str:
+    return hashlib.sha256(canonical_json_bytes(dict(payload))).hexdigest()
+
+
+def _promotion_image_references(config: AgentConfig) -> dict[str, str]:
+    """Read only the three literal, preloaded promoted-runtime image refs.
+
+    The root-only Compose environment also contains application secrets.  This
+    parser deliberately extracts no value other than the three image refs and
+    refuses interpolation, so a recovery cannot silently adopt a different
+    local image through a mutable shell-style value.
+    """
+
+    if config.mode != "writer" or config.site != "webapp_ir" or config.runtime.env_file is None:
+        raise ProductionWriterLeaseAgentError("WA-IR recovery requires a root-only promotion runtime environment")
+    values: dict[str, str] = {}
+    by_name = {name: service for service, name in WA_IR_RUNTIME_IMAGE_ENV.items()}
+    for raw_line in _secure_text(
+        config.runtime.env_file,
+        label="WA-IR promotion runtime environment",
+        max_size=MAX_FILE_BYTES,
+    ).splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        service = by_name.get(key)
+        if service is None:
+            continue
+        if service in values:
+            raise ProductionWriterLeaseAgentError("WA-IR promotion runtime image is duplicated")
+        if (
+            not value
+            or value != value.strip()
+            or "$" in value
+            or not DOCKER_IMAGE_REFERENCE_RE.fullmatch(value)
+        ):
+            raise ProductionWriterLeaseAgentError("WA-IR promotion runtime image reference is invalid")
+        values[service] = value
+    if set(values) != set(WA_IR_RUNTIME_IMAGE_ENV):
+        raise ProductionWriterLeaseAgentError("WA-IR promotion runtime image references are incomplete")
+    return values
+
+
+def _required_promoted_volume_names(selection: PromotionRuntimeSelection) -> dict[str, tuple[str, ...]]:
+    return {
+        "db": (selection.db_volume,),
+        "redis": (selection.redis_volume,),
+        "app": tuple(sorted((selection.uploads_volume, selection.audit_volume))),
+    }
+
+
+def _inspect_promoted_container_binding(
+    container: str,
+    *,
+    service: str,
+    expected_image: str,
+    expected_volume_names: tuple[str, ...],
+    expected_container_id: str | None = None,
+    expected_image_id: str | None = None,
+    expected_labels_sha256: str | None = None,
+    expected_restart_policy: str | None = None,
+) -> PromotedRuntimeContainerBinding:
+    """Inspect one exact existing container without invoking Compose.
+
+    The caller gives either a Compose-discovered ID during initial promotion
+    or the full ID persisted at that time.  Recovery always uses the latter,
+    so Docker cannot choose a newly created container by name or project.
+    """
+
+    if service not in {"db", "redis", "app"}:
+        raise ProductionWriterLeaseAgentError("promoted runtime service is invalid")
+    if not DOCKER_IMAGE_REFERENCE_RE.fullmatch(expected_image):
+        raise ProductionWriterLeaseAgentError("expected promoted image reference is invalid")
+    if expected_container_id is not None and not DOCKER_FULL_CONTAINER_ID_RE.fullmatch(expected_container_id):
+        raise ProductionWriterLeaseAgentError("expected promoted container id is invalid")
+    full_id = _run_runtime_command(
+        ["/usr/bin/docker", "inspect", "--format", "{{.Id}}", container],
+        label=f"promoted {service} container id",
+        timeout=30,
+        capture_stdout=True,
+    ).strip()
+    if not DOCKER_FULL_CONTAINER_ID_RE.fullmatch(full_id):
+        raise ProductionWriterLeaseAgentError("promoted runtime returned an invalid full container id")
+    if expected_container_id is not None and full_id != expected_container_id:
+        raise ProductionWriterLeaseAgentError("promoted runtime container id no longer matches its recovery binding")
+    labels = _inspect_labels(full_id, label=f"promoted {service}")
+    if (
+        labels.get("com.docker.compose.project") != WA_IR_PROMOTION_PROJECT_NAME
+        or labels.get("com.docker.compose.service") != service
+    ):
+        raise ProductionWriterLeaseAgentError("promoted runtime container identity is invalid")
+    labels_sha256 = _runtime_binding_hash(labels)
+    if expected_labels_sha256 is not None and labels_sha256 != expected_labels_sha256:
+        raise ProductionWriterLeaseAgentError("promoted runtime labels no longer match its recovery binding")
+    volume_names = tuple(
+        sorted(
+            item["Name"]
+            for item in _inspect_mounts(full_id, label=f"promoted {service}")
+            if item.get("Type") == "volume" and isinstance(item.get("Name"), str)
+        )
+    )
+    if len(volume_names) != len(set(volume_names)) or volume_names != expected_volume_names:
+        raise ProductionWriterLeaseAgentError("promoted runtime volumes do not exactly match the selected snapshot")
+    image = _run_runtime_command(
+        ["/usr/bin/docker", "inspect", "--format", "{{.Config.Image}}", full_id],
+        label=f"promoted {service} image reference",
+        timeout=30,
+        capture_stdout=True,
+    ).strip()
+    if image != expected_image:
+        raise ProductionWriterLeaseAgentError("promoted runtime image does not match the pinned recovery image")
+    image_id = _run_runtime_command(
+        ["/usr/bin/docker", "inspect", "--format", "{{.Image}}", full_id],
+        label=f"promoted {service} image id",
+        timeout=30,
+        capture_stdout=True,
+    ).strip()
+    if not DOCKER_IMAGE_ID_RE.fullmatch(image_id):
+        raise ProductionWriterLeaseAgentError("promoted runtime image id is invalid")
+    if expected_image_id is not None and image_id != expected_image_id:
+        raise ProductionWriterLeaseAgentError("promoted runtime image id no longer matches its recovery binding")
+    restart_policy = _run_runtime_command(
+        ["/usr/bin/docker", "inspect", "--format", "{{.HostConfig.RestartPolicy.Name}}", full_id],
+        label=f"promoted {service} restart policy",
+        timeout=30,
+        capture_stdout=True,
+    ).strip()
+    if restart_policy != "no":
+        raise ProductionWriterLeaseAgentError("promoted runtime restart policy must remain disabled")
+    if expected_restart_policy is not None and restart_policy != expected_restart_policy:
+        raise ProductionWriterLeaseAgentError("promoted runtime restart policy no longer matches its recovery binding")
+    return PromotedRuntimeContainerBinding(
+        container_id=full_id,
+        image=image,
+        image_id=image_id,
+        labels_sha256=labels_sha256,
+        volume_names=volume_names,
+        restart_policy=restart_policy,
+    )
+
+
+def _promoted_container_state(container: PromotedRuntimeContainerBinding, *, service: str) -> str:
+    state = _run_runtime_command(
+        ["/usr/bin/docker", "inspect", "--format", "{{.State.Status}}|{{.State.Running}}", container.container_id],
+        label=f"promoted {service} state",
+        timeout=30,
+        capture_stdout=True,
+    ).strip()
+    if state == "running|true":
+        return "running"
+    if state == "exited|false":
+        return "exited"
+    raise ProductionWriterLeaseAgentError("promoted runtime container is in an unsafe restart state")
+
+
+def _promoted_container_health(container: PromotedRuntimeContainerBinding, *, service: str) -> str:
+    return _run_runtime_command(
+        [
+            "/usr/bin/docker",
+            "inspect",
+            "--format",
+            "{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}",
+            container.container_id,
+        ],
+        label=f"promoted {service} health",
+        timeout=30,
+        capture_stdout=True,
+    ).strip()
+
+
+def _wait_for_promoted_container_health(
+    container: PromotedRuntimeContainerBinding,
+    *,
+    service: str,
+) -> None:
+    deadline = time.monotonic() + WA_IR_PROMOTION_HEALTH_TIMEOUT_SECONDS
+    last_state = "not-started"
+    while True:
+        try:
+            last_state = _promoted_container_health(container, service=service)
+        except ProductionWriterLeaseAgentError:
+            last_state = "inspection-unavailable"
+        else:
+            if last_state == "running|healthy":
+                return
+            if last_state.split("|", 1)[0] in {"dead", "exited", "removing"} or last_state.endswith("|unhealthy"):
+                raise ProductionWriterLeaseAgentError(f"promoted {service} became unhealthy during recovery")
+        if time.monotonic() >= deadline:
+            raise ProductionWriterLeaseAgentError(
+                f"promoted {service} did not become healthy during recovery ({last_state})"
+            )
+        time.sleep(WA_IR_PROMOTION_HEALTH_POLL_SECONDS)
+
+
+def _wait_for_promoted_redis_running(container: PromotedRuntimeContainerBinding) -> None:
+    deadline = time.monotonic() + WA_IR_PROMOTION_HEALTH_TIMEOUT_SECONDS
+    while True:
+        try:
+            if _promoted_container_state(container, service="redis") == "running":
+                return
+        except ProductionWriterLeaseAgentError:
+            pass
+        if time.monotonic() >= deadline:
+            raise ProductionWriterLeaseAgentError("promoted redis did not become running during recovery")
+        time.sleep(WA_IR_PROMOTION_HEALTH_POLL_SECONDS)
+
+
+def _start_bound_promoted_container(container: PromotedRuntimeContainerBinding, *, service: str) -> None:
+    _run_runtime_command(
+        ["/usr/bin/docker", "start", container.container_id],
+        label=f"promoted {service} recovery start",
+        timeout=45,
+    )
+
+
+def _best_effort_stop_bound_promoted_runtime(
+    containers: Mapping[str, PromotedRuntimeContainerBinding],
+) -> None:
+    """Fence only the exact persisted IDs after a failed recovery attempt."""
+
+    for service in ("app", "redis", "db"):
+        container = containers.get(service)
+        if container is None:
+            continue
+        try:
+            _run_runtime_command(
+                ["/usr/bin/docker", "stop", "--time", "15", container.container_id],
+                label=f"promoted {service} recovery fence",
+                timeout=25,
+            )
+        except ProductionWriterLeaseAgentError:
+            _emit_event("promoted_runtime_recovery_fence_failed", service=service)
+
+
+def _capture_promoted_runtime_binding(
+    config: AgentConfig,
+    *,
+    selection: PromotionRuntimeSelection,
+) -> dict[str, PromotedRuntimeContainerBinding]:
+    """Capture the post-health, pre-existing container identities once."""
+
+    discovered = _assert_existing_promoted_runtime_matches_selection(config, selection=selection)
+    if discovered is None:
+        raise ProductionWriterLeaseAgentError("promoted runtime is absent after successful activation")
+    images = _promotion_image_references(config)
+    volumes = _required_promoted_volume_names(selection)
+    containers = {
+        service: _inspect_promoted_container_binding(
+            container_id,
+            service=service,
+            expected_image=images[service],
+            expected_volume_names=volumes[service],
+        )
+        for service, container_id in discovered.items()
+    }
+    if set(containers) != {"db", "redis", "app"}:
+        raise ProductionWriterLeaseAgentError("promoted runtime container binding is incomplete")
+    if _promoted_container_state(containers["db"], service="db") != "running":
+        raise ProductionWriterLeaseAgentError("promoted database is not running after activation")
+    if _promoted_container_state(containers["redis"], service="redis") != "running":
+        raise ProductionWriterLeaseAgentError("promoted redis is not running after activation")
+    if _promoted_container_state(containers["app"], service="app") != "running":
+        raise ProductionWriterLeaseAgentError("promoted app is not running after activation")
+    if _promoted_container_health(containers["db"], service="db") != "running|healthy":
+        raise ProductionWriterLeaseAgentError("promoted database is not healthy after activation")
+    if _promoted_container_health(containers["app"], service="app") != "running|healthy":
+        raise ProductionWriterLeaseAgentError("promoted app is not healthy after activation")
+    return containers
+
+
+def _write_promoted_runtime_binding(
+    proof_path: Path,
+    *,
+    config: AgentConfig,
+    selection: PromotionRuntimeSelection,
+    proof: Mapping[str, Any],
+) -> str:
+    containers = _capture_promoted_runtime_binding(config, selection=selection)
+    payload: dict[str, Any] = {
+        "schema": WA_IR_RUNTIME_BINDING_SCHEMA,
+        "promotion_proof_sha256": proof["proof_sha256"],
+        "snapshot_id": proof["snapshot_id"],
+        "source_generation": proof["source_generation"],
+        "release_sha": proof["release_sha"],
+        "snapshot_restore_receipt_sha256": proof["snapshot_restore_receipt_sha256"],
+        "snapshot_stage_receipt_sha256": proof["snapshot_stage_receipt_sha256"],
+        "epoch": proof["epoch"],
+        "lease_id": proof["lease_id"],
+        "containers": {
+            service: {
+                "container_id": container.container_id,
+                "image": container.image,
+                "image_id": container.image_id,
+                "labels_sha256": container.labels_sha256,
+                "volume_names": list(container.volume_names),
+                "restart_policy": container.restart_policy,
+            }
+            for service, container in sorted(containers.items())
+        },
+    }
+    payload["binding_sha256"] = _runtime_binding_hash(payload)
+    _write_new_json(
+        _runtime_binding_path(proof_path),
+        payload=payload,
+        label="promoted runtime recovery binding",
+    )
+    return str(payload["binding_sha256"])
+
+
+def _assert_promotion_proof_matches_snapshot(proof: Mapping[str, Any], *, snapshot: Any) -> None:
+    expected = {
+        "snapshot_id": snapshot.snapshot_id,
+        "source_generation": snapshot.source_generation,
+        "release_sha": snapshot.release_sha,
+        "alembic_revision": snapshot.alembic_revision,
+        "snapshot_restore_receipt_sha256": snapshot.receipt_sha256,
+        "snapshot_stage_receipt_sha256": snapshot.stage_receipt_sha256,
+    }
+    if any(proof.get(field) != value for field, value in expected.items()):
+        raise ProductionWriterLeaseAgentError("promotion proof does not match the active snapshot")
+
+
+def _load_promoted_runtime_binding(
+    proof_path: Path,
+    *,
+    proof: Mapping[str, Any],
+    snapshot: Any,
+    selection: PromotionRuntimeSelection,
+    config: AgentConfig,
+) -> PromotedRuntimeBinding:
+    binding_path = _runtime_binding_path(proof_path)
+    try:
+        payload = loads_strict_receipt(
+            _secure_read(
+                binding_path,
+                label="promoted runtime recovery binding",
+                max_size=MAX_FILE_BYTES,
+            )
+        )
+    except SnapshotPromotionError as exc:
+        raise ProductionWriterLeaseAgentError("promoted runtime recovery binding is invalid") from exc
+    if set(payload) != WA_IR_RUNTIME_BINDING_FIELDS or payload.get("schema") != WA_IR_RUNTIME_BINDING_SCHEMA:
+        raise ProductionWriterLeaseAgentError("promoted runtime recovery binding schema is invalid")
+    binding_sha256 = payload.get("binding_sha256")
+    unsigned = {key: value for key, value in payload.items() if key != "binding_sha256"}
+    if (
+        not isinstance(binding_sha256, str)
+        or not SHA256_RE.fullmatch(binding_sha256)
+        or type(payload.get("epoch")) is not int
+        or not isinstance(payload.get("lease_id"), str)
+        or _runtime_binding_hash(unsigned) != binding_sha256
+    ):
+        raise ProductionWriterLeaseAgentError("promoted runtime recovery binding hash is invalid")
+    expected = {
+        "promotion_proof_sha256": proof.get("proof_sha256"),
+        "snapshot_id": snapshot.snapshot_id,
+        "source_generation": snapshot.source_generation,
+        "release_sha": snapshot.release_sha,
+        "snapshot_restore_receipt_sha256": snapshot.receipt_sha256,
+        "snapshot_stage_receipt_sha256": snapshot.stage_receipt_sha256,
+        "epoch": proof.get("epoch"),
+        "lease_id": proof.get("lease_id"),
+    }
+    if any(payload.get(field) != value for field, value in expected.items()):
+        raise ProductionWriterLeaseAgentError("promoted runtime recovery binding does not match the live promotion proof")
+    images = _promotion_image_references(config)
+    volumes = _required_promoted_volume_names(selection)
+    raw_containers = payload.get("containers")
+    if not isinstance(raw_containers, dict) or set(raw_containers) != {"db", "redis", "app"}:
+        raise ProductionWriterLeaseAgentError("promoted runtime recovery binding containers are invalid")
+    containers: dict[str, PromotedRuntimeContainerBinding] = {}
+    for service in ("db", "redis", "app"):
+        item = raw_containers[service]
+        if not isinstance(item, dict) or set(item) != WA_IR_RUNTIME_CONTAINER_BINDING_FIELDS:
+            raise ProductionWriterLeaseAgentError("promoted runtime recovery binding container is invalid")
+        container_id = item.get("container_id")
+        image = item.get("image")
+        image_id = item.get("image_id")
+        labels_sha256 = item.get("labels_sha256")
+        volume_names = item.get("volume_names")
+        restart_policy = item.get("restart_policy")
+        if (
+            not isinstance(container_id, str)
+            or not DOCKER_FULL_CONTAINER_ID_RE.fullmatch(container_id)
+            or image != images[service]
+            or not isinstance(image_id, str)
+            or not DOCKER_IMAGE_ID_RE.fullmatch(image_id)
+            or not isinstance(labels_sha256, str)
+            or not SHA256_RE.fullmatch(labels_sha256)
+            or not isinstance(volume_names, list)
+            or tuple(volume_names) != volumes[service]
+            or not all(isinstance(name, str) and DOCKER_RESOURCE_RE.fullmatch(name) for name in volume_names)
+            or restart_policy != "no"
+        ):
+            raise ProductionWriterLeaseAgentError("promoted runtime recovery binding container is unsafe")
+        containers[service] = PromotedRuntimeContainerBinding(
+            container_id=container_id,
+            image=image,
+            image_id=image_id,
+            labels_sha256=labels_sha256,
+            volume_names=tuple(volume_names),
+            restart_policy=restart_policy,
+        )
+    return PromotedRuntimeBinding(
+        promotion_proof_sha256=str(payload["promotion_proof_sha256"]),
+        snapshot_id=str(payload["snapshot_id"]),
+        source_generation=str(payload["source_generation"]),
+        release_sha=str(payload["release_sha"]),
+        snapshot_restore_receipt_sha256=str(payload["snapshot_restore_receipt_sha256"]),
+        snapshot_stage_receipt_sha256=str(payload["snapshot_stage_receipt_sha256"]),
+        epoch=int(payload["epoch"]),
+        lease_id=str(payload["lease_id"]),
+        containers=containers,
+        binding_sha256=binding_sha256,
+    )
+
+
+def _inspect_bound_promoted_runtime(
+    binding: PromotedRuntimeBinding,
+    *,
+    selection: PromotionRuntimeSelection,
+) -> dict[str, str]:
+    volumes = _required_promoted_volume_names(selection)
+    states: dict[str, str] = {}
+    for service in ("db", "redis", "app"):
+        expected = binding.containers[service]
+        actual = _inspect_promoted_container_binding(
+            expected.container_id,
+            service=service,
+            expected_image=expected.image,
+            expected_volume_names=volumes[service],
+            expected_container_id=expected.container_id,
+            expected_image_id=expected.image_id,
+            expected_labels_sha256=expected.labels_sha256,
+            expected_restart_policy=expected.restart_policy,
+        )
+        if actual != expected:
+            raise ProductionWriterLeaseAgentError("promoted runtime no longer matches its recovery binding")
+        states[service] = _promoted_container_state(actual, service=service)
+    return states
+
+
+def _assert_live_matching_promotion_lease(
+    config: AgentConfig,
+    *,
+    proof: Mapping[str, Any],
+) -> Any:
+    lease, _remaining = _local_lease_safety(config)
+    if (
+        lease.writer_epoch != proof.get("epoch")
+        or lease.lease_id != proof.get("lease_id")
+        or lease.proof_sha256 != proof.get("witness_proof_sha256")
+    ):
+        raise ProductionWriterLeaseAgentError("local Writer Witness lease does not match the persisted promotion proof")
+    return lease
+
+
 def _assert_existing_ir_activation_is_safe(
     config: AgentConfig,
     *,
@@ -1716,6 +2241,7 @@ def _activate_from_snapshot_locked(
     activation_proof: dict[str, Any] | None = proof if action == "promote_ir" else None
     selection: PromotionRuntimeSelection | None = None
     snapshot_stop_attempted = False
+    runtime_binding_sha256: str | None = None
     try:
         # The receipt may age during a Witness round trip.  Verify it again
         # immediately before the only runtime start operation.
@@ -1780,6 +2306,18 @@ def _activate_from_snapshot_locked(
             witness_proof=proof,
         )
         _write_new_json(output_path, payload=promotion_proof, label="promotion proof")
+        if action == "promote_ir":
+            if selection is None:
+                raise ProductionWriterLeaseAgentError("IR promotion runtime selection disappeared before recovery binding")
+            # The sidecar is create-only and captures the exact existing
+            # containers after the local health gate.  A later recovery never
+            # asks Compose to discover or create a replacement runtime.
+            runtime_binding_sha256 = _write_promoted_runtime_binding(
+                output_path,
+                config=config,
+                selection=selection,
+                proof=promotion_proof,
+            )
     except Exception:
         _best_effort_stop(config)
         if action == "promote_ir" and activation_proof is not None:
@@ -1799,6 +2337,7 @@ def _activate_from_snapshot_locked(
         "lease_expires_at": proof["expires_at"],
         "snapshot_age_seconds": promotion_proof["snapshot_age_seconds"],
         "proof_sha256": promotion_proof["proof_sha256"],
+        "runtime_binding_sha256": runtime_binding_sha256,
     }
 
 
@@ -1841,6 +2380,159 @@ def activate_from_snapshot(
                 active_snapshot=active_snapshot,
                 expected_source_generation=expected_source_generation,
                 expected_receipt_sha256=expected_receipt_sha256,
+            )
+
+
+def _load_live_ir_promotion_proof(path: Path) -> dict[str, Any]:
+    safe_path = _absolute(str(path), label="persisted promotion proof")
+    try:
+        payload = loads_strict_receipt(
+            _secure_read(safe_path, label="persisted promotion proof", max_size=MAX_FILE_BYTES)
+        )
+        proof = validate_promotion_proof(payload, now=datetime.now(timezone.utc))
+    except SnapshotPromotionError as exc:
+        raise ProductionWriterLeaseAgentError("persisted promotion proof is invalid or no longer live") from exc
+    if proof.get("action") != "promote_ir" or proof.get("target_site") != "webapp_ir":
+        raise ProductionWriterLeaseAgentError("persisted promotion proof is not a WA-IR promotion")
+    return proof
+
+
+def _recover_promoted_runtime_locked(
+    config: AgentConfig,
+    *,
+    restore_receipt: Path,
+    active_snapshot: Path,
+    promotion_proof: Path,
+) -> dict[str, Any]:
+    """Start only one previously-bound, stopped WA-IR promotion runtime.
+
+    This path intentionally performs no Witness transition and never asks
+    Compose to create, recreate, pull, build, or resolve a container.  It is
+    a bounded recovery for a just-promoted runtime whose Docker daemon or
+    existing containers stopped while the same local Witness term remains
+    valid.
+    """
+
+    _require_writer_mode(config)
+    if config.site != "webapp_ir":
+        raise ProductionWriterLeaseAgentError("promoted-runtime recovery is allowed only on WebApp-IR")
+    payload = _load_restore_receipt(restore_receipt)
+    try:
+        snapshot = parse_restore_receipt(payload, action="promote_ir")
+    except SnapshotPromotionError as exc:
+        raise ProductionWriterLeaseAgentError("snapshot restore receipt cannot support promoted-runtime recovery") from exc
+    proof = _load_live_ir_promotion_proof(promotion_proof)
+    _assert_promotion_proof_matches_snapshot(proof, snapshot=snapshot)
+    selection = _load_promotion_runtime_selection(
+        active_snapshot,
+        restore_receipt_path=restore_receipt,
+        restore_receipt=payload,
+        snapshot=snapshot,
+    )
+    binding = _load_promoted_runtime_binding(
+        promotion_proof,
+        proof=proof,
+        snapshot=snapshot,
+        selection=selection,
+        config=config,
+    )
+    lease = _assert_live_matching_promotion_lease(config, proof=proof)
+    states = _inspect_bound_promoted_runtime(binding, selection=selection)
+    if states["app"] != "exited":
+        raise ProductionWriterLeaseAgentError("promoted app is not stopped; recovery refuses to restart a running container")
+    if states["db"] not in {"running", "exited"} or states["redis"] not in {"running", "exited"}:
+        raise ProductionWriterLeaseAgentError("promoted runtime is not in a recoverable stopped state")
+
+    start_attempted = False
+    try:
+        if states["db"] == "exited":
+            start_attempted = True
+            _start_bound_promoted_container(binding.containers["db"], service="db")
+        _wait_for_promoted_container_health(binding.containers["db"], service="db")
+        if states["redis"] == "exited":
+            start_attempted = True
+            _start_bound_promoted_container(binding.containers["redis"], service="redis")
+        _wait_for_promoted_redis_running(binding.containers["redis"])
+        start_attempted = True
+        _start_bound_promoted_container(binding.containers["app"], service="app")
+        _wait_for_promoted_container_health(binding.containers["app"], service="app")
+
+        # Health probes consume a meaningful part of the short emergency
+        # lease.  Re-read every immutable/root-only binding before returning
+        # success, and fence these exact IDs if anything changed or expired.
+        final_payload = _load_restore_receipt(restore_receipt)
+        try:
+            final_snapshot = parse_restore_receipt(final_payload, action="promote_ir")
+        except SnapshotPromotionError as exc:
+            raise ProductionWriterLeaseAgentError(
+                "snapshot restore receipt became invalid during promoted-runtime recovery"
+            ) from exc
+        if final_snapshot.receipt_sha256 != snapshot.receipt_sha256:
+            raise ProductionWriterLeaseAgentError("snapshot restore receipt changed during promoted-runtime recovery")
+        final_proof = _load_live_ir_promotion_proof(promotion_proof)
+        if final_proof != proof:
+            raise ProductionWriterLeaseAgentError("persisted promotion proof changed during promoted-runtime recovery")
+        _assert_promotion_proof_matches_snapshot(final_proof, snapshot=final_snapshot)
+        final_selection = _load_promotion_runtime_selection(
+            active_snapshot,
+            restore_receipt_path=restore_receipt,
+            restore_receipt=final_payload,
+            snapshot=final_snapshot,
+        )
+        if final_selection != selection:
+            raise ProductionWriterLeaseAgentError("active snapshot selection changed during promoted-runtime recovery")
+        final_binding = _load_promoted_runtime_binding(
+            promotion_proof,
+            proof=final_proof,
+            snapshot=final_snapshot,
+            selection=final_selection,
+            config=config,
+        )
+        if final_binding != binding:
+            raise ProductionWriterLeaseAgentError("runtime recovery binding changed during promoted-runtime recovery")
+        final_lease = _assert_live_matching_promotion_lease(config, proof=final_proof)
+        final_states = _inspect_bound_promoted_runtime(final_binding, selection=final_selection)
+        if any(final_states[service] != "running" for service in ("db", "redis", "app")):
+            raise ProductionWriterLeaseAgentError("promoted runtime did not remain running after recovery")
+        if _promoted_container_health(final_binding.containers["db"], service="db") != "running|healthy":
+            raise ProductionWriterLeaseAgentError("promoted database is unhealthy after recovery")
+        if _promoted_container_health(final_binding.containers["app"], service="app") != "running|healthy":
+            raise ProductionWriterLeaseAgentError("promoted app is unhealthy after recovery")
+    except Exception:
+        if start_attempted:
+            _best_effort_stop_bound_promoted_runtime(binding.containers)
+        raise
+    return {
+        "status": "recovered",
+        "action": "recover-promoted-runtime",
+        "site": "webapp_ir",
+        "writer_epoch": lease.writer_epoch,
+        "lease_expires_at": final_lease.expires_at.isoformat(),
+        "proof_sha256": proof["proof_sha256"],
+        "runtime_binding_sha256": binding.binding_sha256,
+    }
+
+
+def recover_promoted_runtime(
+    config: AgentConfig,
+    *,
+    restore_receipt: Path,
+    active_snapshot: Path,
+    promotion_proof: Path,
+) -> dict[str, Any]:
+    """Explicit-only WA-IR restart recovery for a still-live promotion term."""
+
+    if config.mode != "writer" or config.site != "webapp_ir":
+        raise ProductionWriterLeaseAgentError("promoted-runtime recovery is allowed only on WebApp-IR writer")
+    with _ir_writer_transition_lock(config, nonblocking=False) as acquired:
+        if not acquired:
+            raise ProductionWriterLeaseAgentError("WebApp-IR writer transition is busy")
+        with _standby_refresh_transition_lock(active_snapshot):
+            return _recover_promoted_runtime_locked(
+                config,
+                restore_receipt=restore_receipt,
+                active_snapshot=active_snapshot,
+                promotion_proof=promotion_proof,
             )
 
 
@@ -2125,6 +2817,13 @@ def build_parser() -> argparse.ArgumentParser:
     promote_watch_parser.add_argument("--proof-directory", required=True, type=Path)
     promote_watch_parser.add_argument("--poll-seconds", type=int, default=2)
     promote_watch_parser.add_argument("--once", action="store_true")
+    recover = subparsers.add_parser(
+        "recover-promoted-runtime",
+        help="explicitly start only the exact stopped WA-IR containers bound to a live promotion proof",
+    )
+    recover.add_argument("--restore-receipt", required=True, type=Path)
+    recover.add_argument("--active-snapshot", required=True, type=Path)
+    recover.add_argument("--promotion-proof", required=True, type=Path)
     failback = subparsers.add_parser("failback")
     failback.add_argument("--operation-id", required=True)
     failback.add_argument("--restore-receipt", required=True, type=Path)
@@ -2161,6 +2860,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             proof_directory=args.proof_directory,
             poll_seconds=args.poll_seconds,
             once=bool(args.once),
+        )
+    if args.action == "recover-promoted-runtime":
+        return recover_promoted_runtime(
+            config,
+            restore_receipt=args.restore_receipt,
+            active_snapshot=args.active_snapshot,
+            promotion_proof=args.promotion_proof,
         )
     if args.action == "failback":
         return activate_from_snapshot(
