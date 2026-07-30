@@ -156,21 +156,25 @@ run the same verified helper from the already trusted preflight tooling path:
 ```bash
 python3 /srv/trading-bot-standby-tools/scripts/manage_webapp_ir_release_provenance.py install \
   --stage-receipt /srv/trading-bot-three-site-staging-data/wa-ir-standby/artifact-stage/webapp_fi/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5/REPLACE_WITH_NEW_BUNDLE_ID/stage-receipt.json \
+  --bootstrap-receipt /srv/trading-bot-three-site-staging-data/wa-ir-standby/artifact-stage-bootstrap/REPLACE_WITH_BOOTSTRAP_ID/bootstrap-receipt.json \
   --receipt /var/lib/trading-bot-three-site/release-provenance/REPLACE_WITH_NEW_BUNDLE_ID.json
 ```
 
 This creates only two new detached Git roots and a create-only root-only
 receipt. It rejects an arbitrary archive, a wrong commit/tree, mismatched
 bundle hash or artifact binding, a non-`webapp_fi -> webapp_ir` stage, an
-existing root, or a receipt overwrite. A failed install removes only roots
-created by that same failed invocation if no receipt was linked; it never
-replaces an existing root. It does not load images, start a service, change
-`current`, or contact a remote system. The preflight tooling copy of this
-helper must itself be delivered and verified before this step; it cannot be
-taken from the uninstalled control bundle. That preflight copy is used only to
-perform installation. During a successful install it creates the separate
-fixed systemd dispatcher directory exclusively and atomically publishes its
-verified file at
+existing root, or a receipt overwrite. It also requires the root-only,
+canonical, URL-free bootstrap receive receipt written by the first Object
+Storage receiver. Its reviewed bootstrap control commit and tree must exactly
+match the staged control bundle before any release root or dispatcher is
+created. A failed install removes only roots created by that same failed
+invocation if no receipt was linked; it never replaces an existing root. It
+does not load images, start a service, change `current`, or contact a remote
+system. The preflight tooling copy of this helper must itself be delivered and
+verified before this step; it cannot be taken from the uninstalled control
+bundle. That preflight copy is used only to perform installation. During a
+successful install it creates the separate fixed systemd dispatcher directory
+exclusively and atomically publishes its verified file at
 `/srv/trading-bot-three-site/control-dispatcher/manage_webapp_ir_release_provenance.py`
 from the newly verified control Git root. The create-only receipt records that
 path, its SHA-256, and its control-release SHA. If the fixed dispatcher
