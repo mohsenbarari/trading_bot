@@ -416,13 +416,19 @@ def verify_source_role_attestation_payload(
         raise SourceProvenanceVerificationError("source signer enrollment is invalid")
     for name in ("receipt_sha256", "certificate_sha256", "certificate_consumption_sha256", "fi_ssh_host_public_key_sha256"):
         _sha(enrollment.get(name), field=f"source signer enrollment {name}")
-    if not isinstance(enrollment.get("certificate_id"), str) or not PACKAGE_ID_RE.fullmatch(enrollment["certificate_id"]) or not isinstance(enrollment.get("operation_id"), str) or not PACKAGE_ID_RE.fullmatch(enrollment["operation_id"]) or not isinstance(enrollment.get("controller_key_id"), str) or not enrollment["controller_key_id"].startswith("ed25519-sha256:"):
+    if not isinstance(enrollment.get("certificate_id"), str) or not PACKAGE_ID_RE.fullmatch(enrollment["certificate_id"]) or not isinstance(enrollment.get("operation_id"), str) or not PACKAGE_ID_RE.fullmatch(enrollment["operation_id"]) or not isinstance(enrollment.get("controller_key_id"), str) or not re.fullmatch(r"ed25519-sha256:[0-9a-f]{64}", enrollment["controller_key_id"]):
         raise SourceProvenanceVerificationError("source signer enrollment is invalid")
     enrollment_not_after = _timestamp(enrollment.get("not_after"), field="source signer enrollment not_after")
     if attested_at > enrollment_not_after:
         raise SourceProvenanceVerificationError("attestation was made after source signer enrollment expiry")
-    if enrollment.get("source_signing_public_key_base64") != pinned_source_signing_public_key_base64 or value.get("source_signing_public_key_base64") != pinned_source_signing_public_key_base64 or value.get("source_signing_key_id") != public_key_id(pinned_source_signing_public_key_base64) or enrollment.get("source_signing_key_id") != value.get("source_signing_key_id"):
+    source_key_id = public_key_id(pinned_source_signing_public_key_base64)
+    if enrollment.get("source_signing_public_key_base64") != pinned_source_signing_public_key_base64 or value.get("source_signing_public_key_base64") != pinned_source_signing_public_key_base64 or value.get("source_signing_key_id") != source_key_id or enrollment.get("source_signing_key_id") != value.get("source_signing_key_id"):
         raise SourceProvenanceVerificationError("source signing key is not pinned")
+    if (
+        delivery["controller_public_key_base64"] == pinned_source_signing_public_key_base64
+        or enrollment.get("controller_key_id") == source_key_id
+    ):
+        raise SourceProvenanceVerificationError("source signing key reuses the controller key")
     if value.get("observation_scope") != {
         "point_in_time_only": True,
         "data_capture_performed": False,
@@ -593,13 +599,16 @@ def verify_image_export_receipt_payload(
         raise SourceProvenanceVerificationError("image export signer enrollment is invalid")
     for name in ("receipt_sha256", "certificate_sha256", "certificate_consumption_sha256", "fi_ssh_host_public_key_sha256"):
         _sha(enrollment.get(name), field=f"image export signer enrollment {name}")
-    if not isinstance(enrollment.get("certificate_id"), str) or not PACKAGE_ID_RE.fullmatch(enrollment["certificate_id"]) or not isinstance(enrollment.get("operation_id"), str) or not PACKAGE_ID_RE.fullmatch(enrollment["operation_id"]) or not isinstance(enrollment.get("controller_key_id"), str) or not enrollment["controller_key_id"].startswith("ed25519-sha256:"):
+    if not isinstance(enrollment.get("certificate_id"), str) or not PACKAGE_ID_RE.fullmatch(enrollment["certificate_id"]) or not isinstance(enrollment.get("operation_id"), str) or not PACKAGE_ID_RE.fullmatch(enrollment["operation_id"]) or not isinstance(enrollment.get("controller_key_id"), str) or not re.fullmatch(r"ed25519-sha256:[0-9a-f]{64}", enrollment["controller_key_id"]):
         raise SourceProvenanceVerificationError("image export signer enrollment is invalid")
     enrollment_not_after = _timestamp(enrollment.get("not_after"), field="image export signer enrollment not_after")
     if exported_at > enrollment_not_after:
         raise SourceProvenanceVerificationError("image export was made after source signer enrollment expiry")
-    if enrollment.get("source_signing_public_key_base64") != pinned_source_signing_public_key_base64 or enrollment.get("source_signing_key_id") != public_key_id(pinned_source_signing_public_key_base64):
+    source_key_id = public_key_id(pinned_source_signing_public_key_base64)
+    if enrollment.get("source_signing_public_key_base64") != pinned_source_signing_public_key_base64 or enrollment.get("source_signing_key_id") != source_key_id:
         raise SourceProvenanceVerificationError("image export signer enrollment is not pinned")
+    if enrollment.get("controller_key_id") == source_key_id:
+        raise SourceProvenanceVerificationError("image export source signing key reuses the controller key")
     if value.get("observation_scope") != {
         "point_in_time_only": True,
         "data_capture_performed": False,

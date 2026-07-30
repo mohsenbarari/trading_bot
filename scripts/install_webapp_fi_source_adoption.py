@@ -1412,8 +1412,11 @@ def _validate_signer_enrollment_certificate(
         raise SourceAdoptionInstallError("WebApp-FI signer enrollment certificate does not bind the local key")
     if value.get("source_signing_key_id") != _public_key_id(certificate_public):
         raise SourceAdoptionInstallError("WebApp-FI signer enrollment certificate source key ID is invalid")
-    if value.get("controller_public_key_base64") != pinned_controller_public_key_base64 or value.get("controller_key_id") != _public_key_id(pinned_controller_public_key_base64):
+    controller_key_id = _public_key_id(pinned_controller_public_key_base64)
+    if value.get("controller_public_key_base64") != pinned_controller_public_key_base64 or value.get("controller_key_id") != controller_key_id:
         raise SourceAdoptionInstallError("WebApp-FI signer enrollment certificate controller key is not pinned")
+    if certificate_public == pinned_controller_public_key_base64 or value.get("source_signing_key_id") == controller_key_id:
+        raise SourceAdoptionInstallError("WebApp-FI source signing key must be distinct from the controller key")
     signature = value.get("controller_signature")
     if not isinstance(signature, Mapping) or set(signature) != {"algorithm", "signature_base64"} or signature.get("algorithm") != "ed25519":
         raise SourceAdoptionInstallError("WebApp-FI signer enrollment certificate signature is invalid")
@@ -1427,6 +1430,7 @@ def _validate_signer_enrollment_certificate(
         "campaign_id": campaign_id,
         "certificate_id": certificate_id,
         "operation_id": operation_id,
+        "not_before": value["not_before"],
         "not_after": value["not_after"],
         "source_signing_public_key_base64": certificate_public,
         "source_signing_key_id": value["source_signing_key_id"],
@@ -1723,6 +1727,23 @@ def _require_timestamp_not_after(*, timestamp: str, not_after: object, field: st
     return timestamp
 
 
+def _require_timestamp_within_certificate_window(
+    *,
+    timestamp: str,
+    not_before: object,
+    not_after: object,
+    field: str,
+) -> str:
+    """Require an actual mutation to occur inside its signed validity window."""
+
+    observed = _parse_utc_timestamp(timestamp, field=field)
+    starts_at = _parse_utc_timestamp(not_before, field=f"{field} not_before")
+    expires_at = _parse_utc_timestamp(not_after, field=f"{field} not_after")
+    if observed < starts_at or observed > expires_at:
+        raise SourceAdoptionInstallError(f"{field} is outside signer enrollment validity window")
+    return timestamp
+
+
 def _require_positive_seconds(value: object, *, field: str, maximum: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= maximum:
         raise SourceAdoptionInstallError(f"{field} is invalid")
@@ -1906,6 +1927,22 @@ def _consume_enrollment_certificate(
     certificate_sha256: str,
     campaign_id: str,
 ) -> dict[str, Any]:
+    # Check the live validity window before creating even the consumption
+    # directory, so a caller cannot leave state behind by presenting a
+    # certificate early via a synthetic verification time.
+    path = _certificate_consumption_path(
+        candidate=candidate,
+        certificate_id=certificate_value["certificate_id"],
+        create_directory=False,
+    )
+    if path.exists() or path.is_symlink():
+        raise SourceAdoptionInstallError("WebApp-FI signer enrollment certificate was already consumed locally")
+    consumed_at = _require_timestamp_within_certificate_window(
+        timestamp=utc_now(),
+        not_before=certificate_value["not_before"],
+        not_after=certificate_value["not_after"],
+        field="WebApp-FI signer enrollment certificate consumption timestamp",
+    )
     path = _certificate_consumption_path(
         candidate=candidate,
         certificate_id=certificate_value["certificate_id"],
@@ -1913,11 +1950,6 @@ def _consume_enrollment_certificate(
     )
     if path.exists() or path.is_symlink():
         raise SourceAdoptionInstallError("WebApp-FI signer enrollment certificate was already consumed locally")
-    consumed_at = _require_timestamp_not_after(
-        timestamp=utc_now(),
-        not_after=certificate_value["not_after"],
-        field="WebApp-FI signer enrollment certificate consumption timestamp",
-    )
     receipt: dict[str, Any] = {
         "schema": SIGNER_ENROLLMENT_CONSUMPTION_SCHEMA,
         "status": "consumed",
@@ -2080,8 +2112,9 @@ def enroll_source_signer(
         campaign_id=campaign_id,
     )
     ssh_hash = sha256_file(require_root_only_file(ssh_host_public_key_file, field="WebApp-FI SSH host public key"))[0]
-    enrolled_at = _require_timestamp_not_after(
+    enrolled_at = _require_timestamp_within_certificate_window(
         timestamp=utc_now(),
+        not_before=certificate_value["not_before"],
         not_after=certificate_value["not_after"],
         field="WebApp-FI source signer enrollment receipt timestamp",
     )
@@ -2349,12 +2382,18 @@ def verify_source_role_attestation(
     enrollment_not_after = _parse_utc_timestamp(enrollment.get("not_after"), field="WebApp-FI source role attestation enrollment not_after")
     if attested_at > enrollment_not_after:
         raise SourceAdoptionInstallError("WebApp-FI source role attestation was made after signer enrollment expiry")
-    if not isinstance(enrollment.get("controller_key_id"), str) or not enrollment["controller_key_id"].startswith("ed25519-sha256:") or not isinstance(enrollment.get("source_signing_public_key_base64"), str):
+    if not isinstance(enrollment.get("controller_key_id"), str) or not re.fullmatch(r"ed25519-sha256:[0-9a-f]{64}", enrollment["controller_key_id"]) or not isinstance(enrollment.get("source_signing_public_key_base64"), str):
         raise SourceAdoptionInstallError("WebApp-FI source role attestation signer enrollment key is invalid")
     if enrollment["source_signing_public_key_base64"] != pinned_source_signing_public_key_base64 or value.get("source_signing_public_key_base64") != pinned_source_signing_public_key_base64:
         raise SourceAdoptionInstallError("WebApp-FI source role attestation signing key is not enrolled and pinned")
-    if value.get("source_signing_key_id") != _public_key_id(pinned_source_signing_public_key_base64) or enrollment.get("source_signing_key_id") != value.get("source_signing_key_id"):
+    source_key_id = _public_key_id(pinned_source_signing_public_key_base64)
+    if value.get("source_signing_key_id") != source_key_id or enrollment.get("source_signing_key_id") != value.get("source_signing_key_id"):
         raise SourceAdoptionInstallError("WebApp-FI source role attestation signing key ID is invalid")
+    if (
+        delivery["controller_public_key_base64"] == pinned_source_signing_public_key_base64
+        or enrollment.get("controller_key_id") == source_key_id
+    ):
+        raise SourceAdoptionInstallError("WebApp-FI source role attestation reuses the controller signing key")
     if value.get("observation_scope") != {
         "point_in_time_only": True,
         "data_capture_performed": False,
