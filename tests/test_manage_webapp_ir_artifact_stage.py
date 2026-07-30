@@ -278,6 +278,9 @@ class ArtifactStageTests(unittest.TestCase):
         (self.bootstrap_source / "core/standby_snapshot_capacity.py").write_text(
             "# capacity primitives\nVALUE = 'capacity'\n", encoding="utf-8"
         )
+        (self.bootstrap_source / "scripts/webapp_ir_image_archive_contract.py").write_text(
+            "# image archive contract\nVALUE = 'image-contract'\n", encoding="utf-8"
+        )
         self._run_git("init", "-q", cwd=self.bootstrap_source)
         self._run_git("add", ".", cwd=self.bootstrap_source)
         self._run_git(
