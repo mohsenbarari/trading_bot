@@ -68,14 +68,25 @@ CAMPAIGN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$")
 AGE_RECIPIENT_RE = re.compile(r"^age1[ac-hj-np-z02-9]{20,128}$")
 VERSION_ID_RE = re.compile(rf"^[A-Za-z0-9._~+/=-]{{1,{MAX_VERSION_ID_BYTES}}}$")
 
-# This bootstrap is intentionally attest-only.  It also carries the small
-# local-only static-assets archive preparer so a verified FI source can emit
-# the controller-adopter-compatible ``mini_app_dist`` payload without a second
-# helper delivery.  Object Storage publication, restore, and any other
-# data-plane capability remain separately authorised and are not shipped here.
+# This bootstrap is intentionally source-phase bounded.  It carries the small
+# local-only static-assets archive preparer, the FI-only presigned-URL
+# exchange helper and pure contract, the create-only source signer bootstrap,
+# and the source-evidence builder with its portable proof-verifier closure.
+# None has Object Storage credentials or a controller transport client.
+# Restore and every other data-plane capability remain separately authorised
+# and are not shipped here.
 SOURCE_PAYLOAD_FILES = (
     "scripts/install_webapp_fi_source_adoption.py",
     "scripts/prepare_webapp_fi_static_assets.py",
+    "scripts/bootstrap_webapp_fi_source_signer.py",
+    "scripts/build_webapp_fi_source_evidence.py",
+    "scripts/install_webapp_fi_static_provenance_control_packet.py",
+    "scripts/manage_webapp_fi_source_exchange.py",
+    "scripts/webapp_fi_source_transport_contract.py",
+    "scripts/webapp_fi_source_campaign_binding.py",
+    "scripts/webapp_fi_static_provenance_control_packet.py",
+    "scripts/verify_webapp_fi_source_provenance.py",
+    "scripts/webapp_ir_image_archive_contract.py",
     "deploy/production/webapp-fi-source-role.json.example",
 )
 CONTRACT_MEMBER = "config/source-adoption-contract.json"

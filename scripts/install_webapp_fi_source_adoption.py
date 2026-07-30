@@ -46,6 +46,18 @@ SIGNER_ENROLLMENT_CERTIFICATE_SCHEMA = "gold-trade-webapp-fi-source-signer-enrol
 SIGNER_ENROLLMENT_RECEIPT_SCHEMA = "gold-trade-webapp-fi-source-signer-enrollment-receipt-v2"
 SIGNER_ENROLLMENT_CONSUMPTION_SCHEMA = "gold-trade-webapp-fi-source-signer-enrollment-consumption-v2"
 
+CONTROLLER_STATIC_PROVENANCE_DIRECTORY = "controller-static-provenance"
+CONTROLLER_STATIC_PROVENANCE_FILES = frozenset(
+    {
+        "control-packet.json",
+        "signer-enrollment-certificate.json",
+        "source-role-config.json",
+        "static-assets-provenance.json",
+        "source-transport-policy.json",
+        "static-provenance-install-receipt.json",
+    }
+)
+
 ATTESTATION_SIGNATURE_DOMAIN = b"gold-trade-webapp-fi-source-role-attestation-v2\x00"
 IMAGE_EXPORT_SIGNATURE_DOMAIN = b"gold-trade-webapp-fi-source-image-export-v2\x00"
 STATIC_ASSET_SIGNATURE_DOMAIN = b"gold-trade-webapp-fi-static-asset-provenance-v1\x00"
@@ -110,6 +122,15 @@ RUNTIME_EXTERNAL_NON_PAYLOAD_MOUNT_TARGET = "/app/certs"
 SOURCE_PAYLOAD_FILES = (
     "scripts/install_webapp_fi_source_adoption.py",
     "scripts/prepare_webapp_fi_static_assets.py",
+    "scripts/bootstrap_webapp_fi_source_signer.py",
+    "scripts/build_webapp_fi_source_evidence.py",
+    "scripts/install_webapp_fi_static_provenance_control_packet.py",
+    "scripts/manage_webapp_fi_source_exchange.py",
+    "scripts/webapp_fi_source_transport_contract.py",
+    "scripts/webapp_fi_source_campaign_binding.py",
+    "scripts/webapp_fi_static_provenance_control_packet.py",
+    "scripts/verify_webapp_fi_source_provenance.py",
+    "scripts/webapp_ir_image_archive_contract.py",
     "deploy/production/webapp-fi-source-role.json.example",
 )
 PACKAGE_PAYLOAD_FILES = (*SOURCE_PAYLOAD_FILES, CONTRACT_MEMBER, CANONICAL_RELEASE_TREE_MEMBER)
@@ -1010,9 +1031,11 @@ def _validate_candidate_layout(candidate: Path) -> None:
         while parent.as_posix() != ".":
             allowed_directories.add(parent.as_posix())
             parent = parent.parent
-    allowed_directories.update({"attestations", "enrollments"})
+    allowed_directories.update({"attestations", "enrollments", CONTROLLER_STATIC_PROVENANCE_DIRECTORY})
     observed_files: set[str] = set()
     observed_directories: set[str] = set()
+    static_provenance_directories: set[str] = set()
+    static_provenance_files: dict[str, set[str]] = {}
     for root_text, directories, filenames in os.walk(candidate, topdown=True, followlinks=False):
         root = Path(root_text)
         for directory in directories:
@@ -1021,6 +1044,11 @@ def _validate_candidate_layout(candidate: Path) -> None:
             metadata = path.lstat()
             if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != 0 or stat.S_IMODE(metadata.st_mode) != 0o700:
                 raise SourceAdoptionInstallError("source-adoption candidate contains an unsafe directory")
+            parts = PurePosixPath(relative).parts
+            if len(parts) > 1 and parts[0] == CONTROLLER_STATIC_PROVENANCE_DIRECTORY:
+                if len(parts) != 2 or not ATTESTATION_ID_RE.fullmatch(parts[1]):
+                    raise SourceAdoptionInstallError("source-adoption candidate contains an unexpected controller static-provenance directory")
+                static_provenance_directories.add(parts[1])
             observed_directories.add(relative)
         for filename in filenames:
             path = root / filename
@@ -1034,10 +1062,27 @@ def _validate_candidate_layout(candidate: Path) -> None:
             elif relative.startswith("enrollments/"):
                 if PurePosixPath(relative).parent.as_posix() != "enrollments" or not CAMPAIGN_ID_RE.fullmatch(PurePosixPath(relative).stem):
                     raise SourceAdoptionInstallError("source-adoption candidate contains an unexpected signer enrollment")
+            elif relative.startswith(CONTROLLER_STATIC_PROVENANCE_DIRECTORY + "/"):
+                parts = PurePosixPath(relative).parts
+                if (
+                    len(parts) != 3
+                    or not ATTESTATION_ID_RE.fullmatch(parts[1])
+                    or parts[2] not in CONTROLLER_STATIC_PROVENANCE_FILES
+                ):
+                    raise SourceAdoptionInstallError("source-adoption candidate contains an unexpected controller static-provenance file")
+                static_provenance_files.setdefault(parts[1], set()).add(parts[2])
             elif relative not in expected_files:
                 raise SourceAdoptionInstallError("source-adoption candidate contains an unexpected file")
             observed_files.add(relative)
-    if not expected_files.issubset(observed_files) or not observed_directories.issubset(allowed_directories):
+    if (
+        not expected_files.issubset(observed_files)
+        or not observed_directories.issubset(
+            allowed_directories
+            | {f"{CONTROLLER_STATIC_PROVENANCE_DIRECTORY}/{identifier}" for identifier in static_provenance_directories}
+        )
+        or set(static_provenance_files) != static_provenance_directories
+        or any(files != CONTROLLER_STATIC_PROVENANCE_FILES for files in static_provenance_files.values())
+    ):
         raise SourceAdoptionInstallError("source-adoption candidate layout is incomplete or unexpected")
 
 

@@ -411,23 +411,59 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
                 apply=True,
             )
 
-    def test_prepared_package_contains_only_attest_bootstrap_and_signed_envelope_binds_version(self):
+    def test_prepared_package_carries_only_fi_source_phase_payloads_and_signed_envelope_binds_version(self):
         verified = self._verify_package()
         self.assertEqual(verified["campaign_id"], CAMPAIGN)
         self.assertEqual(verified["delivery_object"]["version_id"], PROVIDER_VERSION_ID)
+        self.assertEqual(prepare.SOURCE_PAYLOAD_FILES, install.SOURCE_PAYLOAD_FILES)
+        co_shipped = {
+            "scripts/bootstrap_webapp_fi_source_signer.py",
+            "scripts/build_webapp_fi_source_evidence.py",
+            "scripts/install_webapp_fi_static_provenance_control_packet.py",
+            "scripts/manage_webapp_fi_source_exchange.py",
+            "scripts/webapp_fi_source_transport_contract.py",
+            "scripts/webapp_fi_source_campaign_binding.py",
+            "scripts/webapp_fi_static_provenance_control_packet.py",
+            "scripts/verify_webapp_fi_source_provenance.py",
+            "scripts/webapp_ir_image_archive_contract.py",
+        }
         with tarfile.open(self.archive, "r:") as archive:
+            member_names = {item.name for item in archive.getmembers()}
             self.assertEqual(
-                {item.name for item in archive.getmembers()},
+                member_names,
                 set(prepare.PACKAGE_FILES),
             )
-            self.assertNotIn("scripts/publish_webapp_fi_snapshot_standby.py", {item.name for item in archive.getmembers()})
-            self.assertIn("scripts/prepare_webapp_fi_static_assets.py", {item.name for item in archive.getmembers()})
+            self.assertTrue(co_shipped.issubset(member_names))
+            self.assertNotIn("scripts/publish_webapp_fi_snapshot_standby.py", member_names)
+            self.assertNotIn("scripts/manage_webapp_fi_source_transport.py", member_names)
+            self.assertIn("scripts/prepare_webapp_fi_static_assets.py", member_names)
+            role_example = archive.extractfile("deploy/production/webapp-fi-source-role.json.example")
+            self.assertIsNotNone(role_example)
+            role_payload = role_example.read()
+            self.assertIn(b"/etc/trading-bot-three-site/campaigns/REPLACE_WITH_CAMPAIGN_ID/webapp-fi/source-signing-ed25519.raw", role_payload)
+            self.assertNotIn(b"/root/secure-envs/trading-bot/webapp-fi-source-ed25519.raw", role_payload)
             static_preparer = archive.extractfile("scripts/prepare_webapp_fi_static_assets.py")
             self.assertIsNotNone(static_preparer)
             static_payload = static_preparer.read()
             self.assertNotIn(b"boto3", static_payload)
             self.assertNotIn(b"subprocess", static_payload)
             self.assertNotIn(b"docker ", static_payload.lower())
+            for relative in sorted(co_shipped):
+                member = archive.extractfile(relative)
+                self.assertIsNotNone(member)
+                payload = member.read()
+                self.assertEqual(payload, (ROOT / relative).read_bytes())
+                self.assertNotIn(b"boto3", payload)
+                self.assertNotIn(b"ControllerS3Config", payload)
+                self.assertNotIn(b"aws_access_key_id", payload)
+                self.assertNotIn(b"aws_secret_access_key", payload)
+        installed = self._install()
+        candidate = Path(installed["candidate"])
+        for relative in sorted(co_shipped):
+            installed_member = candidate / relative
+            self.assertTrue(installed_member.is_file())
+            self.assertEqual(installed_member.read_bytes(), (ROOT / relative).read_bytes())
+            self.assertEqual(installed["files"][relative], install.sha256_bytes((ROOT / relative).read_bytes()))
         altered = dict(self.delivery_object)
         altered["version_id"] = "version-0002"
         unsigned = {

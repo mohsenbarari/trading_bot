@@ -8,5 +8,5 @@
   },
   "application_container": "trading_bot_app",
   "sync_worker_container": "trading_bot_sync_worker",
-  "source_signing_private_key_file": "/root/secure-envs/trading-bot/webapp-fi-source-ed25519.raw"
+  "source_signing_private_key_file": "/etc/trading-bot-three-site/campaigns/REPLACE_WITH_CAMPAIGN_ID/webapp-fi/source-signing-ed25519.raw"
 }
