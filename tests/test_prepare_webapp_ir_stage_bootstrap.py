@@ -20,7 +20,7 @@ SPEC.loader.exec_module(bootstrap)
 
 def consumer_config() -> dict[str, object]:
     return {
-        "schema": "gold-trade-wa-ir-artifact-stage-config-v1",
+        "schema": "gold-trade-wa-ir-artifact-stage-config-v3",
         "endpoint": "https://s3.ir-thr-at1.arvanstorage.ir",
         "region": "ir-thr-at1",
         "bucket": "three-site-private",
@@ -30,6 +30,8 @@ def consumer_config() -> dict[str, object]:
         "workspace": "/srv/trading-bot-three-site-staging-data/workspace",
         "source_site": "webapp_fi",
         "source_signing_public_key_base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "webapp_fi_source_attestation_public_key_base64": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+        "webapp_fi_controller_authorization_public_key_base64": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=",
         "maximum_artifact_bytes": 21474836480,
     }
 
@@ -275,6 +277,22 @@ class WebAppIrStageBootstrapTests(unittest.TestCase):
             invalid = consumer_config()
             invalid["age_identity_file"] = "/etc/trading-bot-three-site/wa-ir/untrusted.agekey"
             with self.assertRaisesRegex(bootstrap.BootstrapPreparationError, "pin the WA-IR bootstrap age identity"):
+                bootstrap.prepare_bootstrap_package(
+                    source_repository=source,
+                    control_release_sha=commit,
+                    consumer_config=self._config(root, invalid),
+                    destination=parent / "candidate",
+                )
+
+    def test_prepare_rejects_consumer_config_with_an_invalid_controller_authorization_key(self):
+        with tempfile.TemporaryDirectory(prefix="wa-ir-bootstrap-controller-key-") as value:
+            root = Path(value)
+            source, commit = self._source(root)
+            parent = root / "packages"
+            parent.mkdir(mode=0o700)
+            invalid = consumer_config()
+            invalid["webapp_fi_controller_authorization_public_key_base64"] = "AQ=="
+            with self.assertRaisesRegex(bootstrap.BootstrapPreparationError, "controller authorization key"):
                 bootstrap.prepare_bootstrap_package(
                     source_repository=source,
                     control_release_sha=commit,
