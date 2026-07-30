@@ -74,7 +74,10 @@ services:
       SERVER_MODE: iran
       RELEASE_SHA: ${RELEASE_SHA:?exact release SHA is required}
       TRADING_BOT_SERVICE: api
-      BACKGROUND_JOBS_ENABLED: "false"
+      # The exact 2c08 image enforces the Iran-only authority matrix in
+      # main.py.  Enable only those local writer jobs after the fenced agent
+      # has started this promoted runtime; direct sync remains absent below.
+      BACKGROUND_JOBS_ENABLED: "true"
       TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"
       AUDIT_TRAIL_PATH: /app/audit_trail/audit.jsonl
     ports:
