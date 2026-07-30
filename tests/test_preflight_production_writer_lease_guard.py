@@ -203,6 +203,7 @@ class WriterGuardPreflightTests(unittest.TestCase):
         ]
 
     def test_stage_validates_exact_runtime_using_only_read_only_docker_commands(self) -> None:
+        self.assertFalse(self.lease_file.exists())
         results = self._runtime_results()
         with mock.patch.object(preflight.subprocess, "run", side_effect=results) as run:
             result = preflight.run(config_path=self.preflight_config, phase="stage")
@@ -250,6 +251,10 @@ class WriterGuardPreflightTests(unittest.TestCase):
         run.assert_not_called()
 
     def test_rendered_systemd_unit_is_valid(self) -> None:
+        unit = self.unit_file.read_text(encoding="utf-8")
+        self.assertIn("--phase stage", unit)
+        self.assertNotIn("--phase guard-start", unit)
+        self.assertFalse(self.lease_file.exists())
         if shutil.which("systemd-analyze") is None:
             self.skipTest("systemd-analyze is unavailable")
         result = subprocess.run(
