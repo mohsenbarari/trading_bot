@@ -47,7 +47,8 @@ portable = _load_sibling("verify_webapp_fi_source_provenance")
 
 
 STATIC_RECEIVE_RECEIPT_SCHEMA = "gold-trade-wa-ir-static-assets-receive-v1"
-STATIC_INSTALL_RECEIPT_SCHEMA = "gold-trade-wa-ir-static-assets-install-receipt-v1"
+STATIC_INSTALL_MARKER_SCHEMA = "gold-trade-wa-ir-static-assets-install-marker-v1"
+STATIC_INSTALL_RECEIPT_SCHEMA = "gold-trade-wa-ir-static-assets-install-receipt-v2"
 STATIC_TRANSPORT = {
     "transport": "private_versioned_age_only",
     "create_only": True,
@@ -113,8 +114,36 @@ def _require_absolute(path: Path, *, field: str) -> Path:
     return path
 
 
+def _require_root_controlled_ancestors(path: Path, *, field: str) -> None:
+    """Reject a path beneath an untrusted or symlinked directory.
+
+    A sticky, root-owned system temporary directory is acceptable only as an
+    ancestor.  Its sticky bit prevents a non-owner from replacing the
+    root-owned child directory used by the test and runtime workspaces.
+    """
+
+    _require_absolute(path, field=field)
+    current = Path(path.anchor)
+    for component in path.parts[1:]:
+        current = current / component
+        try:
+            metadata = current.lstat()
+        except OSError as exc:
+            raise StaticAssetInstallError(f"cannot inspect {field} ancestor") from exc
+        mode = stat.S_IMODE(metadata.st_mode)
+        sticky_root_directory = metadata.st_uid == 0 and bool(mode & stat.S_ISVTX)
+        if (
+            stat.S_ISLNK(metadata.st_mode)
+            or not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != 0
+            or (mode & 0o022 and not sticky_root_directory)
+        ):
+            raise StaticAssetInstallError(f"{field} has an unsafe ancestor")
+
+
 def _require_directory(path: Path, *, field: str, private: bool) -> Path:
     _require_absolute(path, field=field)
+    _require_root_controlled_ancestors(path, field=field)
     try:
         metadata = path.lstat()
         resolved = path.resolve(strict=True)
@@ -135,6 +164,7 @@ def _require_directory(path: Path, *, field: str, private: bool) -> Path:
 
 def _open_checked_file(path: Path, *, field: str, private: bool, maximum: int) -> tuple[int, os.stat_result]:
     _require_absolute(path, field=field)
+    _require_root_controlled_ancestors(path.parent, field=field)
     try:
         before = path.lstat()
     except OSError as exc:
@@ -284,6 +314,18 @@ def _proof_files(value: object) -> list[dict[str, Any]]:
     return result
 
 
+def _archive_summary(value: object, *, field: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != {"sha256", "bytes"}:
+        raise StaticAssetInstallError(f"{field} is invalid")
+    bytes_value = value.get("bytes")
+    if isinstance(bytes_value, bool) or not isinstance(bytes_value, int) or not 1 <= bytes_value <= MAX_STATIC_ARCHIVE_BYTES:
+        raise StaticAssetInstallError(f"{field} is invalid")
+    return {
+        "sha256": _require_sha256(value.get("sha256"), field=f"{field} SHA-256"),
+        "bytes": bytes_value,
+    }
+
+
 def _load_receive_record(
     *,
     path: Path,
@@ -345,9 +387,12 @@ def _static_claim_from_stage(*, stage_receipt_path: Path, bootstrap_receipt_path
         raise StaticAssetInstallError("staged static asset proof file hash is invalid")
     if static_claim["files_sha256"] != proof_value["files_sha256"] or static_claim["file_count"] != len(files):
         raise StaticAssetInstallError("staged static asset proof is inconsistent")
+    if not any(item["path"] == "index.html" for item in files):
+        raise StaticAssetInstallError("staged static asset proof must include index.html")
     return {
         "campaign_id": source_claim["campaign_id"],
         "application": source_claim["application"],
+        "application_release_root": str(staged_provenance.application.release_root),
         "stage": {
             "source_site": stage.source_site,
             "destination_site": stage.destination_site,
@@ -390,6 +435,38 @@ def _static_destination(*, static_release_parent: Path, claim: Mapping[str, Any]
     return static_release_parent / campaign_id / release_sha / files_sha256
 
 
+def _paths_overlap(left: Path, right: Path) -> bool:
+    try:
+        left.relative_to(right)
+        return True
+    except ValueError:
+        pass
+    try:
+        right.relative_to(left)
+        return True
+    except ValueError:
+        return False
+
+
+def _require_static_parent_outside_application(*, static_release_parent: Path, application_release_root: object) -> None:
+    """Keep non-Git static files out of the immutable application checkout."""
+
+    static_release_parent = _require_directory(
+        static_release_parent,
+        field="static release parent",
+        private=False,
+    )
+    try:
+        application_root = _require_absolute(
+            Path(application_release_root),
+            field="staged application release root",
+        )
+    except (TypeError, ValueError) as exc:
+        raise StaticAssetInstallError("staged application release root is invalid") from exc
+    if _paths_overlap(static_release_parent, application_root):
+        raise StaticAssetInstallError("static release parent must remain outside the staged Git application release")
+
+
 def verify_static_install_inputs(
     *,
     stage_receipt_path: Path,
@@ -421,6 +498,10 @@ def verify_static_install_inputs(
         or archive_bytes != claim["static_object"]["plaintext_bytes"]
     ):
         raise StaticAssetInstallError("age-decrypted static archive does not match the signed Object Storage binding")
+    _require_static_parent_outside_application(
+        static_release_parent=static_release_parent,
+        application_release_root=claim["application_release_root"],
+    )
     destination = _static_destination(static_release_parent=static_release_parent, claim=claim)
     return {
         **claim,
@@ -533,190 +614,13 @@ def _finalize_static_tree(root: Path) -> None:
             os.close(descriptor)
 
 
-def _create_only_json(path: Path, value: Mapping[str, Any], *, field: str) -> bytes:
-    if path.exists() or path.is_symlink():
-        raise StaticAssetInstallError(f"refusing to overwrite {field}")
-    payload = canonical_json_bytes(value) + b"\n"
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-    try:
-        descriptor = os.open(path, flags, 0o600)
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-    except OSError as exc:
-        raise StaticAssetInstallError(f"cannot create {field}") from exc
-    return payload
+def _verify_static_tree(*, static_root: Path, files: Sequence[Mapping[str, Any]]) -> None:
+    """Verify one existing immutable root against the already signed file list."""
 
-
-def install_verified_static_assets(
-    *,
-    stage_receipt_path: Path,
-    bootstrap_receipt_path: Path,
-    static_archive: Path,
-    static_receive_receipt: Path,
-    static_release_parent: Path,
-    receipt_path: Path,
-    now: dt.datetime | None = None,
-) -> dict[str, Any]:
-    """Extract one immutable verified static root and emit a root-only receipt."""
-
-    verified = verify_static_install_inputs(
-        stage_receipt_path=stage_receipt_path,
-        bootstrap_receipt_path=bootstrap_receipt_path,
-        static_archive=static_archive,
-        static_receive_receipt=static_receive_receipt,
-        static_release_parent=static_release_parent,
-    )
-    static_root = Path(verified["static_root"])
-    receipt_path = _require_absolute(Path(receipt_path), field="static install receipt path")
-    _require_directory(receipt_path.parent, field="static install receipt parent", private=True)
-    if static_root.exists() or static_root.is_symlink():
-        raise StaticAssetInstallError("refusing to overwrite an immutable static release root")
-    if receipt_path.exists() or receipt_path.is_symlink():
-        raise StaticAssetInstallError("refusing to overwrite a static install receipt")
-    static_root.parent.mkdir(parents=True, mode=0o755, exist_ok=False)
-    _require_directory(static_root.parent.parent, field="static campaign release directory", private=False)
-    _require_directory(static_root.parent, field="static application release directory", private=False)
-    candidate = Path(tempfile.mkdtemp(prefix=".incoming-static-", dir=str(static_root.parent)))
-    candidate.chmod(0o700)
-    _require_directory(candidate, field="static extraction candidate", private=True)
-    try:
-        descriptor, opened = _open_checked_file(
-            static_archive,
-            field="age-decrypted static asset archive",
-            private=True,
-            maximum=MAX_STATIC_ARCHIVE_BYTES,
-        )
-        try:
-            with os.fdopen(descriptor, "rb", closefd=False) as handle:
-                with tarfile.open(fileobj=handle, mode="r|", tarinfo=_StaticTarInfo) as archive:
-                    for expected in verified["files"]:
-                        member = archive.next()
-                        if member is None:
-                            raise StaticAssetInstallError("static archive ends before its signed file manifest")
-                        _write_file_from_tar(archive=archive, member=member, expected=expected, output_root=candidate)
-                    if archive.next() is not None:
-                        raise StaticAssetInstallError("static archive contains files absent from its signed file manifest")
-            after = os.fstat(descriptor)
-            if after.st_size != opened.st_size or after.st_dev != opened.st_dev or after.st_ino != opened.st_ino:
-                raise StaticAssetInstallError("age-decrypted static archive changed while being extracted")
-        finally:
-            os.close(descriptor)
-        _finalize_static_tree(candidate)
-        # ``os.rename`` is non-overwriting because the destination was checked
-        # absent and its parent is root-owned/non-writable by other users.
-        os.rename(candidate, static_root)
-        parent_descriptor = os.open(static_root.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-        try:
-            os.fsync(parent_descriptor)
-        finally:
-            os.close(parent_descriptor)
-        installed_at = (now or dt.datetime.now(dt.timezone.utc)).astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z")
-        unsigned = {
-            "schema": STATIC_INSTALL_RECEIPT_SCHEMA,
-            "status": "installed",
-            "installed_at": installed_at,
-            "campaign_id": verified["campaign_id"],
-            "application": verified["application"],
-            "stage": verified["stage"],
-            "static_root": str(static_root),
-            "archive": verified["static_archive"],
-            "static_object": verified["static_object"],
-            "files_sha256": verified["files_sha256"],
-            "file_count": len(verified["files"]),
-            "static_assets_provenance": verified["static_assets_provenance"],
-            "static_assets_provenance_sha256": verified["static_assets_provenance_sha256"],
-        }
-        receipt = {**unsigned, "receipt_sha256": sha256_bytes(canonical_json_bytes(unsigned))}
-        _create_only_json(receipt_path, receipt, field="static install receipt")
-        return {
-            "status": "installed",
-            "static_root": str(static_root),
-            "receipt_path": str(receipt_path),
-            "files_sha256": verified["files_sha256"],
-            "file_count": len(verified["files"]),
-            "object_storage_action": False,
-            "age_action": False,
-            "ssh_action": False,
-            "docker_action": False,
-            "service_changed": False,
-        }
-    except Exception:
-        # Preserve a fresh root-only candidate for audit.  Removing it would
-        # erase evidence of the exact failed input and needs a later decision.
-        raise
-
-
-def verify_installed_static_assets(
-    *,
-    receipt_path: Path,
-    expected_application_release_sha: str,
-    pinned_controller_public_key_base64: str,
-) -> dict[str, Any]:
-    """Revalidate a static install receipt and every readable static file."""
-
-    _require_root()
-    value, raw = _read_private_json(receipt_path, field="static install receipt")
-    _fields(
-        value,
-        expected={
-            "schema", "status", "installed_at", "campaign_id", "application", "stage", "static_root", "archive",
-            "static_object", "files_sha256", "file_count", "static_assets_provenance",
-            "static_assets_provenance_sha256", "receipt_sha256",
-        },
-        field="static install receipt",
-    )
-    if value.get("schema") != STATIC_INSTALL_RECEIPT_SCHEMA or value.get("status") != "installed":
-        raise StaticAssetInstallError("static install receipt schema or status is unsupported")
-    unsigned = {key: item for key, item in value.items() if key != "receipt_sha256"}
-    if value.get("receipt_sha256") != sha256_bytes(canonical_json_bytes(unsigned)):
-        raise StaticAssetInstallError("static install receipt hash is invalid")
-    if raw != canonical_json_bytes(value) + b"\n":  # defensive clarity for this public entrypoint.
-        raise StaticAssetInstallError("static install receipt is not canonical")
-    application = value.get("application")
-    try:
-        application = portable._application(application, field="installed static application")
-    except Exception as exc:
-        raise StaticAssetInstallError("installed static application is invalid") from exc
-    if application["release_sha"] != expected_application_release_sha:
-        raise StaticAssetInstallError("installed static application release does not match the listener release")
-    campaign_id = value.get("campaign_id")
-    if not isinstance(campaign_id, str) or not CAMPAIGN_RE.fullmatch(campaign_id):
-        raise StaticAssetInstallError("installed static campaign is invalid")
-    proof = value.get("static_assets_provenance")
-    if not isinstance(proof, Mapping):
-        raise StaticAssetInstallError("installed static proof is invalid")
-    proof_value = dict(proof)
-    proof_payload = canonical_json_bytes(proof_value) + b"\n"
-    if value.get("static_assets_provenance_sha256") != sha256_bytes(proof_payload):
-        raise StaticAssetInstallError("installed static proof hash is invalid")
-    try:
-        static_claim = portable._static_assets_provenance(
-            payload=proof_payload,
-            pinned_controller_public_key_base64=pinned_controller_public_key_base64,
-            expected_campaign_id=campaign_id,
-            expected_application=application,
-        )
-    except Exception as exc:
-        raise StaticAssetInstallError("installed static proof signature is invalid") from exc
-    files = _proof_files(proof_value.get("files"))
-    if (
-        static_claim["artifact"] != value.get("static_object")
-        or static_claim["files_sha256"] != value.get("files_sha256")
-        or static_claim["file_count"] != value.get("file_count")
-        or value.get("files_sha256") != sha256_bytes(canonical_json_bytes(files))
-    ):
-        raise StaticAssetInstallError("installed static receipt does not match its signed proof")
-    static_root = _require_absolute(Path(value.get("static_root", "")), field="installed static root")
-    expected_root = _static_destination(
-        static_release_parent=static_root.parents[2],
-        claim={"campaign_id": campaign_id, "application": application, "files_sha256": value["files_sha256"]},
-    )
-    if static_root != expected_root:
-        raise StaticAssetInstallError("installed static root is not receipt-bound")
     _require_directory(static_root, field="installed static root", private=False)
     expected_paths = {item["path"] for item in files}
+    if "index.html" not in expected_paths:
+        raise StaticAssetInstallError("static asset proof must include index.html")
     observed_paths: set[str] = set()
     for root, directories, filenames in os.walk(static_root, topdown=True, followlinks=False):
         current = Path(root)
@@ -749,10 +653,435 @@ def verify_installed_static_assets(
         )
         if (digest, bytes_value) != (item["sha256"], item["bytes"]):
             raise StaticAssetInstallError("installed static file does not match the signed proof")
+
+
+def _create_or_verify_directory(path: Path, *, field: str, mode: int) -> Path:
+    """Create one root-controlled intermediate directory without replacing it."""
+
+    _require_directory(path.parent, field=f"{field} parent", private=False)
+    created = False
+    try:
+        path.mkdir(mode=mode)
+        created = True
+    except FileExistsError:
+        pass
+    except OSError as exc:
+        raise StaticAssetInstallError(f"cannot create {field}") from exc
+    if created:
+        try:
+            os.chmod(path, mode)
+        except OSError as exc:
+            raise StaticAssetInstallError(f"cannot finalize {field}") from exc
+    return _require_directory(path, field=field, private=False)
+
+
+def _ensure_static_destination_parent(static_root: Path) -> None:
+    """Make only the campaign/release ancestors; failed candidates remain reusable."""
+
+    try:
+        static_release_parent = static_root.parents[2]
+        campaign_directory = static_root.parents[1]
+        release_directory = static_root.parent
+    except IndexError as exc:  # pragma: no cover - _static_destination supplies this shape.
+        raise StaticAssetInstallError("static release destination has an invalid layout") from exc
+    _require_directory(static_release_parent, field="static release parent", private=False)
+    _create_or_verify_directory(campaign_directory, field="static campaign directory", mode=0o755)
+    _create_or_verify_directory(release_directory, field="static application release directory", mode=0o755)
+
+
+def _static_install_marker_path(static_root: Path) -> Path:
+    if not SHA256_RE.fullmatch(static_root.name):
+        raise StaticAssetInstallError("static release root cannot name an install marker")
+    return static_root.parent / f".static-install-marker-{static_root.name}.json"
+
+
+def _static_install_marker_value(
+    *,
+    campaign_id: object,
+    application: object,
+    stage: object,
+    static_root: Path,
+    archive: object,
+    static_object: object,
+    files_sha256: object,
+    file_count: object,
+    static_assets_provenance_sha256: object,
+) -> dict[str, Any]:
+    """Build the durable pre-rename binding needed for safe receipt recovery."""
+
+    marker_path = _static_install_marker_path(static_root)
+    unsigned = {
+        "schema": STATIC_INSTALL_MARKER_SCHEMA,
+        "status": "prepared",
+        "campaign_id": campaign_id,
+        "application": application,
+        "stage": stage,
+        "static_root": str(static_root),
+        "archive": archive,
+        "static_object": static_object,
+        "files_sha256": files_sha256,
+        "file_count": file_count,
+        "static_assets_provenance_sha256": static_assets_provenance_sha256,
+    }
+    return {
+        **unsigned,
+        "marker_path": str(marker_path),
+        "marker_sha256": sha256_bytes(canonical_json_bytes(unsigned)),
+    }
+
+
+def _ensure_static_install_marker(
+    *,
+    verified: Mapping[str, Any],
+    static_root: Path,
+    allow_create: bool,
+) -> dict[str, str]:
+    expected = _static_install_marker_value(
+        campaign_id=verified["campaign_id"],
+        application=verified["application"],
+        stage=verified["stage"],
+        static_root=static_root,
+        archive=verified["static_archive"],
+        static_object=verified["static_object"],
+        files_sha256=verified["files_sha256"],
+        file_count=len(verified["files"]),
+        static_assets_provenance_sha256=verified["static_assets_provenance_sha256"],
+    )
+    marker_path = Path(expected["marker_path"])
+    _require_directory(marker_path.parent, field="static install marker parent", private=False)
+    if marker_path.exists() or marker_path.is_symlink():
+        observed, _ = _read_private_json(marker_path, field="static install marker")
+        if observed != expected:
+            raise StaticAssetInstallError("static install marker does not match the exact staged static object")
+    else:
+        if not allow_create:
+            raise StaticAssetInstallError("existing static root has no exact staged-object install marker")
+        _create_only_json(marker_path, expected, field="static install marker")
+    return {"path": str(marker_path), "sha256": expected["marker_sha256"]}
+
+
+def _verify_static_install_marker(
+    *,
+    descriptor: object,
+    campaign_id: object,
+    application: object,
+    stage: object,
+    static_root: Path,
+    archive: object,
+    static_object: object,
+    files_sha256: object,
+    file_count: object,
+    static_assets_provenance_sha256: object,
+) -> dict[str, str]:
+    if not isinstance(descriptor, Mapping) or set(descriptor) != {"path", "sha256"}:
+        raise StaticAssetInstallError("static install marker descriptor is invalid")
+    expected = _static_install_marker_value(
+        campaign_id=campaign_id,
+        application=application,
+        stage=stage,
+        static_root=static_root,
+        archive=archive,
+        static_object=static_object,
+        files_sha256=files_sha256,
+        file_count=file_count,
+        static_assets_provenance_sha256=static_assets_provenance_sha256,
+    )
+    if descriptor != {"path": expected["marker_path"], "sha256": expected["marker_sha256"]}:
+        raise StaticAssetInstallError("static install marker descriptor is not receipt-bound")
+    observed, _ = _read_private_json(Path(expected["marker_path"]), field="static install marker")
+    if observed != expected:
+        raise StaticAssetInstallError("static install marker does not match the exact staged static object")
+    return {"path": expected["marker_path"], "sha256": expected["marker_sha256"]}
+
+
+def _install_receipt_value(
+    *,
+    verified: Mapping[str, Any],
+    static_root: Path,
+    marker: Mapping[str, str],
+    now: dt.datetime | None,
+) -> dict[str, Any]:
+    installed_at = (now or dt.datetime.now(dt.timezone.utc)).astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+    unsigned = {
+        "schema": STATIC_INSTALL_RECEIPT_SCHEMA,
+        "status": "installed",
+        "installed_at": installed_at,
+        "campaign_id": verified["campaign_id"],
+        "application": verified["application"],
+        "stage": verified["stage"],
+        "static_root": str(static_root),
+        "archive": verified["static_archive"],
+        "static_object": verified["static_object"],
+        "files_sha256": verified["files_sha256"],
+        "file_count": len(verified["files"]),
+        "static_assets_provenance": verified["static_assets_provenance"],
+        "static_assets_provenance_sha256": verified["static_assets_provenance_sha256"],
+        "install_marker": dict(marker),
+    }
+    return {**unsigned, "receipt_sha256": sha256_bytes(canonical_json_bytes(unsigned))}
+
+
+def _create_only_json(path: Path, value: Mapping[str, Any], *, field: str) -> bytes:
+    if path.exists() or path.is_symlink():
+        raise StaticAssetInstallError(f"refusing to overwrite {field}")
+    payload = canonical_json_bytes(value) + b"\n"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags, 0o600)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except OSError as exc:
+        raise StaticAssetInstallError(f"cannot create {field}") from exc
+    return payload
+
+
+def _normalized_stage(value: object, *, expected_release_sha: str, field: str) -> dict[str, str]:
+    if not isinstance(value, Mapping):
+        raise StaticAssetInstallError(f"{field} is invalid")
+    _fields(
+        value,
+        expected={"source_site", "destination_site", "release_sha", "bundle_id", "receipt_sha256"},
+        field=field,
+    )
+    source_site = value.get("source_site")
+    destination_site = value.get("destination_site")
+    release_sha = value.get("release_sha")
+    bundle_id = value.get("bundle_id")
+    if (
+        source_site != "webapp_fi"
+        or destination_site != "webapp_ir"
+        or release_sha != expected_release_sha
+        or not isinstance(bundle_id, str)
+        or not provenance.BUNDLE_ID_RE.fullmatch(bundle_id)
+    ):
+        raise StaticAssetInstallError(f"{field} is invalid")
+    return {
+        "source_site": source_site,
+        "destination_site": destination_site,
+        "release_sha": release_sha,
+        "bundle_id": bundle_id,
+        "receipt_sha256": _require_sha256(value.get("receipt_sha256"), field=f"{field} receipt SHA-256"),
+    }
+
+
+def install_verified_static_assets(
+    *,
+    stage_receipt_path: Path,
+    bootstrap_receipt_path: Path,
+    static_archive: Path,
+    static_receive_receipt: Path,
+    static_release_parent: Path,
+    receipt_path: Path,
+    now: dt.datetime | None = None,
+) -> dict[str, Any]:
+    """Extract one immutable verified static root and emit a root-only receipt."""
+
+    verified = verify_static_install_inputs(
+        stage_receipt_path=stage_receipt_path,
+        bootstrap_receipt_path=bootstrap_receipt_path,
+        static_archive=static_archive,
+        static_receive_receipt=static_receive_receipt,
+        static_release_parent=static_release_parent,
+    )
+    static_root = Path(verified["static_root"])
+    receipt_path = _require_absolute(Path(receipt_path), field="static install receipt path")
+    _require_directory(receipt_path.parent, field="static install receipt parent", private=True)
+    if receipt_path.exists() or receipt_path.is_symlink():
+        raise StaticAssetInstallError("refusing to overwrite a static install receipt")
+    if static_root.exists() or static_root.is_symlink():
+        if static_root.is_symlink():
+            raise StaticAssetInstallError("refusing to overwrite an immutable static release root")
+        # Receipt creation can fail after a successful create-only rename.
+        # A later invocation may recover only that exact root after verifying
+        # every signed file; it can never replace or modify it.
+        marker = _ensure_static_install_marker(verified=verified, static_root=static_root, allow_create=False)
+        _verify_static_tree(static_root=static_root, files=verified["files"])
+        receipt = _install_receipt_value(verified=verified, static_root=static_root, marker=marker, now=now)
+        _create_only_json(receipt_path, receipt, field="static install receipt")
+        return {
+            "status": "recovered",
+            "static_root": str(static_root),
+            "receipt_path": str(receipt_path),
+            "files_sha256": verified["files_sha256"],
+            "file_count": len(verified["files"]),
+            "object_storage_action": False,
+            "age_action": False,
+            "ssh_action": False,
+            "docker_action": False,
+            "service_changed": False,
+        }
+    _ensure_static_destination_parent(static_root)
+    marker = _ensure_static_install_marker(verified=verified, static_root=static_root, allow_create=True)
+    try:
+        candidate = Path(tempfile.mkdtemp(prefix=".incoming-static-", dir=str(static_root.parent)))
+        candidate.chmod(0o700)
+    except OSError as exc:
+        raise StaticAssetInstallError("cannot create static extraction candidate") from exc
+    _require_directory(candidate, field="static extraction candidate", private=True)
+    try:
+        descriptor, opened = _open_checked_file(
+            static_archive,
+            field="age-decrypted static asset archive",
+            private=True,
+            maximum=MAX_STATIC_ARCHIVE_BYTES,
+        )
+        try:
+            with os.fdopen(descriptor, "rb", closefd=False) as handle:
+                with tarfile.open(fileobj=handle, mode="r|", tarinfo=_StaticTarInfo) as archive:
+                    for expected in verified["files"]:
+                        member = archive.next()
+                        if member is None:
+                            raise StaticAssetInstallError("static archive ends before its signed file manifest")
+                        _write_file_from_tar(archive=archive, member=member, expected=expected, output_root=candidate)
+                    if archive.next() is not None:
+                        raise StaticAssetInstallError("static archive contains files absent from its signed file manifest")
+            after = os.fstat(descriptor)
+            if after.st_size != opened.st_size or after.st_dev != opened.st_dev or after.st_ino != opened.st_ino:
+                raise StaticAssetInstallError("age-decrypted static archive changed while being extracted")
+        finally:
+            os.close(descriptor)
+        _finalize_static_tree(candidate)
+        # The checked, root-controlled parent prevents an unprivileged writer
+        # from preempting this rename.  A failure leaves the candidate intact.
+        os.rename(candidate, static_root)
+        parent_descriptor = os.open(static_root.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(parent_descriptor)
+        finally:
+            os.close(parent_descriptor)
+        receipt = _install_receipt_value(verified=verified, static_root=static_root, marker=marker, now=now)
+        _create_only_json(receipt_path, receipt, field="static install receipt")
+        return {
+            "status": "installed",
+            "static_root": str(static_root),
+            "receipt_path": str(receipt_path),
+            "files_sha256": verified["files_sha256"],
+            "file_count": len(verified["files"]),
+            "object_storage_action": False,
+            "age_action": False,
+            "ssh_action": False,
+            "docker_action": False,
+            "service_changed": False,
+        }
+    except Exception:
+        # Preserve a fresh root-only candidate for audit.  Removing it would
+        # erase evidence of the exact failed input and needs a later decision.
+        raise
+
+
+def verify_installed_static_assets(
+    *,
+    receipt_path: Path,
+    expected_application_release_sha: str,
+    pinned_controller_public_key_base64: str,
+    expected_stage: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Revalidate a static install receipt and every readable static file."""
+
+    _require_root()
+    value, raw = _read_private_json(receipt_path, field="static install receipt")
+    _fields(
+        value,
+        expected={
+            "schema", "status", "installed_at", "campaign_id", "application", "stage", "static_root", "archive",
+            "static_object", "files_sha256", "file_count", "static_assets_provenance",
+            "static_assets_provenance_sha256", "install_marker", "receipt_sha256",
+        },
+        field="static install receipt",
+    )
+    if value.get("schema") != STATIC_INSTALL_RECEIPT_SCHEMA or value.get("status") != "installed":
+        raise StaticAssetInstallError("static install receipt schema or status is unsupported")
+    unsigned = {key: item for key, item in value.items() if key != "receipt_sha256"}
+    if value.get("receipt_sha256") != sha256_bytes(canonical_json_bytes(unsigned)):
+        raise StaticAssetInstallError("static install receipt hash is invalid")
+    if raw != canonical_json_bytes(value) + b"\n":  # defensive clarity for this public entrypoint.
+        raise StaticAssetInstallError("static install receipt is not canonical")
+    application = value.get("application")
+    try:
+        application = portable._application(application, field="installed static application")
+    except Exception as exc:
+        raise StaticAssetInstallError("installed static application is invalid") from exc
+    if application["release_sha"] != expected_application_release_sha:
+        raise StaticAssetInstallError("installed static application release does not match the listener release")
+    stage = _normalized_stage(
+        value.get("stage"),
+        expected_release_sha=application["release_sha"],
+        field="installed static stage",
+    )
+    expected_stage_value = _normalized_stage(
+        expected_stage,
+        expected_release_sha=application["release_sha"],
+        field="expected installed release stage",
+    )
+    if stage != expected_stage_value:
+        raise StaticAssetInstallError("installed static stage does not match the installed release provenance")
+    campaign_id = value.get("campaign_id")
+    if not isinstance(campaign_id, str) or not CAMPAIGN_RE.fullmatch(campaign_id):
+        raise StaticAssetInstallError("installed static campaign is invalid")
+    proof = value.get("static_assets_provenance")
+    if not isinstance(proof, Mapping):
+        raise StaticAssetInstallError("installed static proof is invalid")
+    proof_value = dict(proof)
+    proof_payload = canonical_json_bytes(proof_value) + b"\n"
+    if value.get("static_assets_provenance_sha256") != sha256_bytes(proof_payload):
+        raise StaticAssetInstallError("installed static proof hash is invalid")
+    try:
+        static_claim = portable._static_assets_provenance(
+            payload=proof_payload,
+            pinned_controller_public_key_base64=pinned_controller_public_key_base64,
+            expected_campaign_id=campaign_id,
+            expected_application=application,
+        )
+    except Exception as exc:
+        raise StaticAssetInstallError("installed static proof signature is invalid") from exc
+    files = _proof_files(proof_value.get("files"))
+    archive = _archive_summary(value.get("archive"), field="installed static archive")
+    file_count = value.get("file_count")
+    if (
+        static_claim["artifact"] != value.get("static_object")
+        or archive
+        != {
+            "sha256": static_claim["artifact"]["plaintext_sha256"],
+            "bytes": static_claim["artifact"]["plaintext_bytes"],
+        }
+        or static_claim["files_sha256"] != value.get("files_sha256")
+        or isinstance(file_count, bool)
+        or file_count != len(files)
+        or static_claim["file_count"] != file_count
+        or value.get("files_sha256") != sha256_bytes(canonical_json_bytes(files))
+    ):
+        raise StaticAssetInstallError("installed static receipt does not match its signed proof")
+    static_root = _require_absolute(Path(value.get("static_root", "")), field="installed static root")
+    try:
+        static_release_parent = static_root.parents[2]
+    except IndexError as exc:
+        raise StaticAssetInstallError("installed static root has an invalid layout") from exc
+    expected_root = _static_destination(
+        static_release_parent=static_release_parent,
+        claim={"campaign_id": campaign_id, "application": application, "files_sha256": value["files_sha256"]},
+    )
+    if static_root != expected_root:
+        raise StaticAssetInstallError("installed static root is not receipt-bound")
+    _verify_static_install_marker(
+        descriptor=value.get("install_marker"),
+        campaign_id=campaign_id,
+        application=application,
+        stage=stage,
+        static_root=static_root,
+        archive=archive,
+        static_object=value.get("static_object"),
+        files_sha256=value.get("files_sha256"),
+        file_count=file_count,
+        static_assets_provenance_sha256=value.get("static_assets_provenance_sha256"),
+    )
+    _verify_static_tree(static_root=static_root, files=files)
     return {
         "status": "verified",
         "campaign_id": campaign_id,
         "application": application,
+        "stage": stage,
         "static_root": str(static_root),
         "files_sha256": value["files_sha256"],
         "file_count": len(files),

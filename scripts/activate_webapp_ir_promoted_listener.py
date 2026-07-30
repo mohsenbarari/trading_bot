@@ -295,6 +295,7 @@ def load_listener_config(path: Path) -> ListenerConfig:
             pinned_controller_public_key_base64=str(
                 installed["bootstrap_provenance"]["webapp_fi_controller_authorization_public_key_base64"]
             ),
+            expected_stage=installed["stage"],
         )
     except (KeyError, StaticAssetInstallError) as exc:
         raise ListenerActivationError(f"listener static receipt is invalid: {exc}") from exc

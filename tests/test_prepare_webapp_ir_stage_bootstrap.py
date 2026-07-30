@@ -196,14 +196,6 @@ class WebAppIrStageBootstrapTests(unittest.TestCase):
             )
             parent = root / "packages"
             parent.mkdir(mode=0o700)
-            static_installer = source / "scripts/install_webapp_ir_static_assets.py"
-            static_installer.write_bytes((ROOT / "scripts/install_webapp_ir_static_assets.py").read_bytes())
-            static_installer.chmod(0o644)
-            self._run("add", "scripts/install_webapp_ir_static_assets.py", cwd=source)
-            self._run(
-                "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
-                "commit", "-qm", "add static installer", cwd=source,
-            )
             commit = self._run("rev-parse", "HEAD", cwd=source)
             destination = parent / "candidate"
             bootstrap.prepare_bootstrap_package(

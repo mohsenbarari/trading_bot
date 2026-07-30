@@ -43,6 +43,7 @@ class WebappIrPromotedListenerActivationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.provenance_by_receipt: dict[Path, dict] = {}
         self.static_by_receipt: dict[Path, Path] = {}
+        self.static_verification_calls: list[dict] = []
         patcher = mock.patch.object(
             MODULE,
             "load_installed_release_receipt",
@@ -53,7 +54,10 @@ class WebappIrPromotedListenerActivationTests(unittest.TestCase):
         static_patcher = mock.patch.object(
             MODULE,
             "verify_installed_static_assets",
-            side_effect=lambda *, receipt_path, **_kwargs: {"static_root": str(self.static_by_receipt[Path(receipt_path)])},
+            side_effect=lambda *, receipt_path, **kwargs: (
+                self.static_verification_calls.append(dict(kwargs))
+                or {"static_root": str(self.static_by_receipt[Path(receipt_path)])}
+            ),
         )
         static_patcher.start()
         self.addCleanup(static_patcher.stop)
@@ -102,6 +106,13 @@ class WebappIrPromotedListenerActivationTests(unittest.TestCase):
                 "release_root": str(release),
             },
             "control": {"release_root": str(MODULE.REPO_ROOT.resolve())},
+            "stage": {
+                "source_site": "webapp_fi",
+                "destination_site": "webapp_ir",
+                "release_sha": MODULE.RELEASE_SHA,
+                "bundle_id": "fixture-stage-bundle",
+                "receipt_sha256": "a" * 64,
+            },
             "bootstrap_provenance": {
                 "webapp_fi_controller_authorization_public_key_base64": "fixture-controller-public-key",
             },
@@ -171,6 +182,10 @@ class WebappIrPromotedListenerActivationTests(unittest.TestCase):
         self.assertEqual(fake.calls, [])
         self.assertEqual(fixture["site"].read_bytes(), before)
         self.assertFalse((fixture["receipts"] / "activation.json").exists())
+        self.assertEqual(
+            self.provenance_by_receipt[fixture["provenance_receipt"]]["stage"],
+            self.static_verification_calls[-1]["expected_stage"],
+        )
 
     def test_apply_tests_and_reloads_local_nginx_before_emitting_receipt(self) -> None:
         fixture = self.make_fixture()

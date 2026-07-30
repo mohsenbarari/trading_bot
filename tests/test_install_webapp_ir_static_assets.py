@@ -80,6 +80,7 @@ class WebappIrStaticAssetInstallTests(unittest.TestCase):
         self.inputs.mkdir(mode=0o700)
         self.receipts.mkdir(mode=0o700)
         self.static_parent.mkdir(mode=0o755)
+        self.application_release_root = self.root / "application-releases" / RELEASE
         self.application = {"release_sha": RELEASE, "expected_alembic_revision": REVISION}
         self.entries = {
             "assets/app.js": b"console.log('fixture');\n",
@@ -130,6 +131,7 @@ class WebappIrStaticAssetInstallTests(unittest.TestCase):
             receipt_sha256="b" * 64,
         )
         self.staged_provenance = SimpleNamespace(
+            application=SimpleNamespace(release_root=self.application_release_root),
             webapp_fi_source_provenance={
                 "campaign_id": CAMPAIGN,
                 "application": self.application,
@@ -179,6 +181,15 @@ class WebappIrStaticAssetInstallTests(unittest.TestCase):
             ),
         )
 
+    def expected_stage(self) -> dict[str, str]:
+        return {
+            "source_site": self.stage.source_site,
+            "destination_site": self.stage.destination_site,
+            "release_sha": self.stage.release_sha,
+            "bundle_id": self.stage.bundle_id,
+            "receipt_sha256": self.stage.receipt_sha256,
+        }
+
     def install(self, *, receipt_name: str = "static-install.json") -> dict:
         first, second = self.stage_mocks()
         with first, second:
@@ -224,6 +235,7 @@ class WebappIrStaticAssetInstallTests(unittest.TestCase):
             receipt_path=self.receipts / "static-install.json",
             expected_application_release_sha=RELEASE,
             pinned_controller_public_key_base64=self.controller_public,
+            expected_stage=self.expected_stage(),
         )
         self.assertEqual("verified", verified["status"])
         self.assertEqual(str(static_root), verified["static_root"])
@@ -268,6 +280,139 @@ class WebappIrStaticAssetInstallTests(unittest.TestCase):
         self.assertEqual(0o700, mode(candidates[0]))
         self.assertFalse((self.receipts / "unexpected.json").exists())
 
+    def test_failed_candidate_does_not_block_a_new_verified_retry(self) -> None:
+        signed_entries = dict(self.entries)
+        invalid_entries = {**signed_entries, "unexpected.txt": b"unexpected"}
+        deterministic_archive(self.archive, invalid_entries)
+        self.archive_sha256 = hashlib.sha256(self.archive.read_bytes()).hexdigest()
+        self.archive_bytes = self.archive.stat().st_size
+        self.static_object["plaintext_sha256"] = self.archive_sha256
+        self.static_object["plaintext_bytes"] = self.archive_bytes
+        self.proof = self.make_static_proof(entries=signed_entries)
+        self.staged_provenance.webapp_fi_source_provenance["proofs"]["static_assets_provenance"] = self.proof
+        receive = json.loads(self.receive_receipt.read_text(encoding="ascii"))
+        receive["object"] = self.static_object
+        private_file(self.receive_receipt, canonical(receive))
+        with self.assertRaisesRegex(MODULE.StaticAssetInstallError, "contains files absent"):
+            self.install(receipt_name="failed.json")
+
+        retry_entries = {
+            "assets/app.js": b"console.log('retry');\n",
+            "index.html": b"<!doctype html><title>retry</title>\n",
+        }
+        deterministic_archive(self.archive, retry_entries)
+        self.archive_sha256 = hashlib.sha256(self.archive.read_bytes()).hexdigest()
+        self.archive_bytes = self.archive.stat().st_size
+        self.static_object["version_id"] = "fixture-static-version-2"
+        self.static_object["plaintext_sha256"] = self.archive_sha256
+        self.static_object["plaintext_bytes"] = self.archive_bytes
+        self.proof = self.make_static_proof(entries=retry_entries)
+        self.staged_provenance.webapp_fi_source_provenance["proofs"]["static_assets_provenance"] = self.proof
+        receive = json.loads(self.receive_receipt.read_text(encoding="ascii"))
+        receive["object"] = self.static_object
+        private_file(self.receive_receipt, canonical(receive))
+
+        result = self.install(receipt_name="retry.json")
+        self.assertEqual("installed", result["status"])
+        candidates = list((self.static_parent / CAMPAIGN / RELEASE).glob(".incoming-static-*"))
+        self.assertEqual(1, len(candidates))
+        self.assertTrue((self.receipts / "retry.json").is_file())
+
+    def test_rejects_a_signed_static_proof_without_index_before_creating_a_root(self) -> None:
+        entries = {"assets/app.js": b"console.log('no-index');\n"}
+        deterministic_archive(self.archive, entries)
+        self.archive_sha256 = hashlib.sha256(self.archive.read_bytes()).hexdigest()
+        self.archive_bytes = self.archive.stat().st_size
+        self.static_object["plaintext_sha256"] = self.archive_sha256
+        self.static_object["plaintext_bytes"] = self.archive_bytes
+        self.proof = self.make_static_proof(entries=entries)
+        self.staged_provenance.webapp_fi_source_provenance["proofs"]["static_assets_provenance"] = self.proof
+        receive = json.loads(self.receive_receipt.read_text(encoding="ascii"))
+        receive["object"] = self.static_object
+        private_file(self.receive_receipt, canonical(receive))
+
+        with self.assertRaisesRegex(MODULE.StaticAssetInstallError, "must include index.html"):
+            self.install(receipt_name="no-index.json")
+        self.assertEqual([], list(self.static_parent.iterdir()))
+
+    def test_rejects_a_static_parent_inside_the_staged_git_application_release(self) -> None:
+        nested_parent = self.application_release_root / "static-assets"
+        nested_parent.mkdir(parents=True, mode=0o755)
+        nested_parent.chmod(0o755)
+        self.application_release_root.chmod(0o755)
+        self.application_release_root.parent.chmod(0o755)
+        first, second = self.stage_mocks()
+        with first, second:
+            with self.assertRaisesRegex(MODULE.StaticAssetInstallError, "outside the staged Git application release"):
+                MODULE.verify_static_install_inputs(
+                    stage_receipt_path=self.inputs / "stage-receipt.json",
+                    bootstrap_receipt_path=self.inputs / "bootstrap-receipt.json",
+                    static_archive=self.archive,
+                    static_receive_receipt=self.receive_receipt,
+                    static_release_parent=nested_parent,
+                )
+        self.assertFalse((nested_parent / CAMPAIGN).exists())
+
+    def test_rejects_a_static_parent_below_a_nonsticky_writable_ancestor(self) -> None:
+        unsafe = self.root / "unsafe"
+        unsafe.mkdir(mode=0o777)
+        unsafe.chmod(0o777)
+        nested_parent = unsafe / "static-releases"
+        nested_parent.mkdir(mode=0o755)
+        nested_parent.chmod(0o755)
+        first, second = self.stage_mocks()
+        with first, second:
+            with self.assertRaisesRegex(MODULE.StaticAssetInstallError, "unsafe ancestor"):
+                MODULE.verify_static_install_inputs(
+                    stage_receipt_path=self.inputs / "stage-receipt.json",
+                    bootstrap_receipt_path=self.inputs / "bootstrap-receipt.json",
+                    static_archive=self.archive,
+                    static_receive_receipt=self.receive_receipt,
+                    static_release_parent=nested_parent,
+                )
+
+    def test_recovers_an_exact_root_when_only_receipt_creation_failed(self) -> None:
+        original_create_only = MODULE._create_only_json
+
+        def fail_only_receipt(path, value, *, field):
+            if field == "static install receipt":
+                raise MODULE.StaticAssetInstallError("simulated receipt failure")
+            return original_create_only(path, value, field=field)
+
+        with mock.patch.object(MODULE, "_create_only_json", side_effect=fail_only_receipt):
+            with self.assertRaisesRegex(MODULE.StaticAssetInstallError, "simulated receipt failure"):
+                self.install()
+        static_root = self.static_parent / CAMPAIGN / RELEASE / self.proof["files_sha256"]
+        self.assertTrue(static_root.is_dir())
+        self.assertFalse((self.receipts / "static-install.json").exists())
+
+        result = self.install()
+        self.assertEqual("recovered", result["status"])
+        self.assertTrue((self.receipts / "static-install.json").is_file())
+
+    def test_existing_static_root_without_its_create_only_marker_cannot_recover(self) -> None:
+        result = self.install()
+        receipt_path = Path(result["receipt_path"])
+        receipt = json.loads(receipt_path.read_text(encoding="ascii"))
+        marker = Path(receipt["install_marker"]["path"])
+        receipt_path.unlink()
+        marker.unlink()
+
+        with self.assertRaisesRegex(MODULE.StaticAssetInstallError, "has no exact staged-object install marker"):
+            self.install()
+
+    def test_installed_verifier_rejects_a_static_receipt_for_another_stage(self) -> None:
+        self.install()
+        stale_stage = self.expected_stage()
+        stale_stage["receipt_sha256"] = "c" * 64
+        with self.assertRaisesRegex(MODULE.StaticAssetInstallError, "does not match the installed release provenance"):
+            MODULE.verify_installed_static_assets(
+                receipt_path=self.receipts / "static-install.json",
+                expected_application_release_sha=RELEASE,
+                pinned_controller_public_key_base64=self.controller_public,
+                expected_stage=stale_stage,
+            )
+
     def test_rejects_mutated_installed_static_file(self) -> None:
         result = self.install()
         static_root = Path(result["static_root"])
@@ -279,6 +424,7 @@ class WebappIrStaticAssetInstallTests(unittest.TestCase):
                 receipt_path=self.receipts / "static-install.json",
                 expected_application_release_sha=RELEASE,
                 pinned_controller_public_key_base64=self.controller_public,
+                expected_stage=self.expected_stage(),
             )
 
     def test_installed_verifier_rejects_a_listener_bound_to_another_application_release(self) -> None:
@@ -288,6 +434,7 @@ class WebappIrStaticAssetInstallTests(unittest.TestCase):
                 receipt_path=self.receipts / "static-install.json",
                 expected_application_release_sha="c" * 40,
                 pinned_controller_public_key_base64=self.controller_public,
+                expected_stage=self.expected_stage(),
             )
 
     def test_implementation_has_no_transport_or_runtime_client(self) -> None:

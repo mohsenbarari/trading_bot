@@ -557,6 +557,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
             installed = MODULE.load_installed_release_receipt(receipt_path)
         self.assertEqual(installed["application"]["release_sha"], self.application_sha)
         self.assertEqual(installed["control"]["release_sha"], self.control_sha)
+        self.assertEqual(installed["stage"], result["stage"])
         self.assertEqual(installed["dispatcher"]["sha256"], result["dispatcher"]["sha256"])
         self.assertEqual(installed["bootstrap_provenance"], result["bootstrap_provenance"])
 

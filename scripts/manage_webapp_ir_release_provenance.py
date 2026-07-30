@@ -2440,6 +2440,7 @@ def load_installed_release_receipt(path: Path) -> dict[str, Any]:
     if images.app_repo_digest is not None:
         runtime_images["app_repo_digest"] = images.app_repo_digest
     return {
+        "stage": dict(stage),
         "application": application,
         "control": control,
         "dispatcher": dispatcher,
