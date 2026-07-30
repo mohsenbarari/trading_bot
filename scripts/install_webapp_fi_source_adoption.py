@@ -2471,8 +2471,9 @@ def attest_source_role(
         "delivery_envelope_sha256": package["delivery_envelope_sha256"],
         "controller_public_key_base64": package["controller_public_key_base64"],
     }
-    attested_at = _require_timestamp_not_after(
+    attested_at = _require_timestamp_within_certificate_window(
         timestamp=utc_now(),
+        not_before=enrollment["not_before"],
         not_after=enrollment["not_after"],
         field="WebApp-FI source role attestation timestamp",
     )
@@ -3055,8 +3056,9 @@ def export_actual_fi_image(
     )
     if after != before:
         raise SourceAdoptionInstallError("WebApp-FI source/image runtime changed during exact-byte export; archive is retained without a receipt")
-    exported_at = _require_timestamp_not_after(
+    exported_at = _require_timestamp_within_certificate_window(
         timestamp=utc_now(),
+        not_before=enrollment["not_before"],
         not_after=enrollment["not_after"],
         field="WebApp-FI image export timestamp",
     )
