@@ -279,6 +279,10 @@ class ArtifactStageTests(unittest.TestCase):
         (self.bootstrap_source / "scripts/manage_webapp_ir_release_provenance.py").write_text(
             "# release provenance primitives\nVALUE = 'provenance'\n", encoding="utf-8"
         )
+        (self.bootstrap_source / "scripts/verify_webapp_fi_source_provenance.py").write_text(
+            "# pure WebApp-FI source provenance verifier\nVALUE = 'source-provenance'\n",
+            encoding="utf-8",
+        )
         (self.bootstrap_source / "core/standby_snapshot_capacity.py").write_text(
             "# capacity primitives\nVALUE = 'capacity'\n", encoding="utf-8"
         )

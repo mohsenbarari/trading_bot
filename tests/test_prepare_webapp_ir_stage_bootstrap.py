@@ -61,6 +61,10 @@ class WebAppIrStageBootstrapTests(unittest.TestCase):
         (source / "scripts/manage_webapp_ir_release_provenance.py").write_text(
             "# release provenance primitives\nVALUE = 'provenance'\n", encoding="utf-8"
         )
+        (source / "scripts/verify_webapp_fi_source_provenance.py").write_text(
+            "# pure WebApp-FI source provenance verifier\nVALUE = 'source-provenance'\n",
+            encoding="utf-8",
+        )
         (source / "core/standby_snapshot_capacity.py").write_text(
             "# capacity primitives\nVALUE = 'capacity'\n", encoding="utf-8"
         )
@@ -113,6 +117,9 @@ class WebAppIrStageBootstrapTests(unittest.TestCase):
                 provenance = package.extractfile("scripts/manage_webapp_ir_release_provenance.py")
                 self.assertIsNotNone(provenance)
                 self.assertIn(b"provenance", provenance.read())
+                source_provenance = package.extractfile("scripts/verify_webapp_fi_source_provenance.py")
+                self.assertIsNotNone(source_provenance)
+                self.assertIn(b"source-provenance", source_provenance.read())
                 capacity = package.extractfile("core/standby_snapshot_capacity.py")
                 self.assertIsNotNone(capacity)
                 self.assertIn(b"capacity", capacity.read())
