@@ -56,6 +56,7 @@ MAX_SOURCE_FILE_BYTES = 4 * 1024 * 1024
 MAX_PACKAGE_MEMBER_BYTES = 8 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 24 * 1024 * 1024
 MAX_CANONICAL_RELEASE_FILES = 100_000
+MAX_VERSION_ID_BYTES = 1024
 
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 RELEASE_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -65,6 +66,7 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 OBJECT_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/=-]{2,1023}$")
 CAMPAIGN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$")
 AGE_RECIPIENT_RE = re.compile(r"^age1[ac-hj-np-z02-9]{20,128}$")
+VERSION_ID_RE = re.compile(rf"^[A-Za-z0-9._~+/=-]{{1,{MAX_VERSION_ID_BYTES}}}$")
 
 # This bootstrap is intentionally attest-only.  Snapshot capture, Object
 # Storage publication, restore, and any other data-plane capability belong to
@@ -121,8 +123,30 @@ def _require_absolute(path: Path, *, field: str) -> Path:
     return path
 
 
+def _require_safe_ancestors(path: Path, *, field: str) -> None:
+    """Reject a root-owned leaf below an attacker-controlled parent path."""
+
+    path = _require_absolute(path, field=field)
+    current = Path(path.anchor)
+    for part in (None, *path.parts[1:]):
+        if part is not None:
+            current = current / part
+        try:
+            state = current.lstat()
+        except OSError as exc:
+            raise SourceAdoptionPreparationError(f"{field} ancestor does not exist") from exc
+        if (
+            stat.S_ISLNK(state.st_mode)
+            or not stat.S_ISDIR(state.st_mode)
+            or state.st_uid != 0
+            or stat.S_IMODE(state.st_mode) & 0o022
+        ):
+            raise SourceAdoptionPreparationError(f"{field} has an unsafe ancestor")
+
+
 def _require_root_directory(path: Path, *, field: str, private: bool) -> Path:
     path = _require_absolute(path, field=field)
+    _require_safe_ancestors(path.parent, field=field)
     try:
         state = path.lstat()
         resolved = path.resolve(strict=True)
@@ -330,6 +354,8 @@ def _require_new_package_directory(destination: Path) -> Path:
 
 
 def _write_new_private_file(path: Path, value: bytes) -> None:
+    path = _require_absolute(path, field="source-adoption private file destination")
+    _require_safe_ancestors(path.parent, field="source-adoption private file destination")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(path, flags, 0o600)
@@ -346,7 +372,18 @@ def _write_new_private_file(path: Path, value: bytes) -> None:
         raise
 
 
+def _write_new_private_json(path: Path, value: Mapping[str, Any], *, field: str) -> bytes:
+    """Create one URL-free, canonical persistent metadata record."""
+
+    encoded = canonical_json_bytes(value) + b"\n"
+    _reject_persisted_url(encoded, field=field)
+    _write_new_private_file(path, encoded)
+    return encoded
+
+
 def _write_deterministic_archive(path: Path, files: Mapping[str, bytes]) -> tuple[str, int]:
+    path = _require_absolute(path, field="source-adoption archive destination")
+    _require_safe_ancestors(path.parent, field="source-adoption archive destination")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(path, flags, 0o600)
@@ -357,6 +394,8 @@ def _write_deterministic_archive(path: Path, files: Mapping[str, bytes]) -> tupl
             with tarfile.open(fileobj=handle, mode="w:", format=tarfile.PAX_FORMAT) as archive:
                 for name in sorted(files):
                     payload = files[name]
+                    if name.endswith(".json") or name.endswith(".json.example"):
+                        _reject_persisted_url(payload, field=f"source-adoption archive member {name}")
                     entry = tarfile.TarInfo(name)
                     entry.size = len(payload)
                     entry.mode = 0o600
@@ -386,6 +425,14 @@ def _parse_canonical_json(payload: bytes, *, field: str) -> dict[str, Any]:
     if payload != canonical_json_bytes(value) + b"\n":
         raise SourceAdoptionPreparationError(f"{field} must use canonical JSON")
     return value
+
+
+def _reject_persisted_url(payload: bytes, *, field: str) -> None:
+    """Persistent source-adoption metadata must never retain a control URL."""
+
+    lowered = payload.lower()
+    if b"://" in lowered or b"presigned" in lowered or b'"url"' in lowered:
+        raise SourceAdoptionPreparationError(f"{field} must not persist a URL")
 
 
 def _require_sha256(value: object, *, field: str) -> str:
@@ -594,6 +641,8 @@ def _read_archive_members(path: Path) -> dict[str, bytes]:
                 value = handle.read(entry.size + 1)
                 if len(value) != entry.size:
                     raise SourceAdoptionPreparationError("source-adoption archive member size changed")
+                if entry.name.endswith(".json") or entry.name.endswith(".json.example"):
+                    _reject_persisted_url(value, field=f"source-adoption archive member {entry.name}")
                 members[entry.name] = value
     except (OSError, tarfile.TarError) as exc:
         raise SourceAdoptionPreparationError("source-adoption archive cannot be verified") from exc
@@ -602,6 +651,7 @@ def _read_archive_members(path: Path) -> dict[str, bytes]:
 
 def _read_private_json(path: Path, *, field: str) -> tuple[dict[str, Any], bytes]:
     path = _require_absolute(path, field=field)
+    _require_safe_ancestors(path.parent, field=field)
     try:
         state = path.lstat()
         resolved = path.resolve(strict=True)
@@ -621,6 +671,7 @@ def _read_private_json(path: Path, *, field: str) -> tuple[dict[str, Any], bytes
         raw = path.read_bytes()
     except OSError as exc:
         raise SourceAdoptionPreparationError(f"cannot read {field}") from exc
+    _reject_persisted_url(raw, field=field)
     return _parse_canonical_json(raw, field=field), raw
 
 
@@ -746,6 +797,7 @@ def verify_prepared_source_adoption_package(
 
 def _require_root_only_file(path: Path, *, field: str, maximum_bytes: int) -> Path:
     path = _require_absolute(path, field=field)
+    _require_safe_ancestors(path.parent, field=field)
     try:
         state = path.lstat()
         resolved = path.resolve(strict=True)
@@ -761,6 +813,14 @@ def _require_root_only_file(path: Path, *, field: str, maximum_bytes: int) -> Pa
     ):
         raise SourceAdoptionPreparationError(f"{field} has unsafe ownership, mode, or size")
     return resolved
+
+
+def _require_version_id(value: object, *, field: str) -> str:
+    """Accept provider-opaque VersionIds while rejecting unversioned/control data."""
+
+    if not isinstance(value, str) or value.lower() == "null" or not VERSION_ID_RE.fullmatch(value):
+        raise SourceAdoptionPreparationError(f"{field} is invalid")
+    return value
 
 
 def _require_campaign_id(value: object, *, field: str) -> str:
@@ -780,11 +840,9 @@ def _require_object_binding(
 ) -> dict[str, Any]:
     if not isinstance(object_key, str) or not OBJECT_KEY_RE.fullmatch(object_key):
         raise SourceAdoptionPreparationError("delivery object_key is invalid")
-    if not isinstance(version_id, str) or not version_id or len(version_id) > 1024 or any(ord(item) < 0x20 for item in version_id):
-        raise SourceAdoptionPreparationError("delivery version_id is invalid")
     return {
         "object_key": object_key,
-        "version_id": version_id,
+        "version_id": _require_version_id(version_id, field="delivery version_id"),
         "ciphertext_sha256": _require_sha256(ciphertext_sha256, field="delivery ciphertext_sha256"),
         "ciphertext_bytes": _require_size(ciphertext_bytes, field="delivery ciphertext_bytes", maximum=MAX_ARCHIVE_BYTES + 1024 * 1024),
         "plaintext_sha256": _require_sha256(plaintext_sha256, field="delivery plaintext_sha256"),
@@ -896,10 +954,7 @@ def sign_delivery_envelope(
         **unsigned,
         "controller_signature": {"algorithm": "ed25519", "signature_base64": base64.b64encode(signature).decode("ascii")},
     }
-    encoded = canonical_json_bytes(envelope) + b"\n"
-    if b"https://" in encoded or b"presigned" in encoded.lower() or b'"url"' in encoded.lower():
-        raise SourceAdoptionPreparationError("delivery envelope must not persist a URL")
-    _write_new_private_file(destination, encoded)
+    encoded = _write_new_private_json(destination, envelope, field="delivery envelope")
     return {
         "status": "issued",
         "delivery_envelope_path": str(destination),
@@ -1044,7 +1099,7 @@ def prepare_source_adoption_package(
     }
     receipt["receipt_sha256"] = sha256_bytes(canonical_json_bytes(receipt))
     receipt_path = package / PREPARATION_RECEIPT_NAME
-    _write_new_private_file(receipt_path, canonical_json_bytes(receipt) + b"\n")
+    _write_new_private_json(receipt_path, receipt, field="source-adoption preparation receipt")
     return verify_prepared_source_adoption_package(
         package_directory=package,
         preparation_receipt=receipt_path,

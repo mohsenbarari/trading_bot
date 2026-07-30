@@ -14,6 +14,7 @@ import binascii
 import datetime as dt
 import hashlib
 import json
+from pathlib import PurePosixPath
 import re
 from typing import Any, Mapping, Sequence
 
@@ -34,6 +35,8 @@ CAMPAIGN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$")
 PACKAGE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 UTC_TIMESTAMP_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 MAX_OBSERVATION_AGE_SECONDS = 15 * 60
+MAX_VERSION_ID_BYTES = 1024
+VERSION_ID_RE = re.compile(rf"^[A-Za-z0-9._~+/=-]{{1,{MAX_VERSION_ID_BYTES}}}$")
 
 CODE_PROJECTIONS = (
     "api",
@@ -47,6 +50,8 @@ CODE_PROJECTIONS = (
     "schemas.py",
     "trading_settings.json",
 )
+RUNTIME_DATA_MOUNT_TARGETS = frozenset({"/app/uploads", "/app/audit_trail"})
+RUNTIME_EXTERNAL_NON_PAYLOAD_MOUNT_TARGET = "/app/certs"
 
 
 class SourceProvenanceVerificationError(RuntimeError):
@@ -77,15 +82,49 @@ def _parse(payload: bytes, *, field: str) -> dict[str, Any]:
         raise SourceProvenanceVerificationError(f"{field} is not strict UTF-8 JSON") from exc
     if not isinstance(value, dict) or payload != canonical_json_bytes(value) + b"\n":
         raise SourceProvenanceVerificationError(f"{field} is not canonical JSON")
-    if b"https://" in payload or b"presigned" in payload.lower() or b'"url"' in payload.lower():
-        raise SourceProvenanceVerificationError(f"{field} persists a forbidden URL")
+    _reject_persisted_url(payload, field=field)
     return value
+
+
+def _reject_persisted_url(payload: bytes, *, field: str) -> None:
+    """Portable proofs must never retain an Object Storage control URL."""
+
+    lowered = payload.lower()
+    if b"://" in lowered or b"presigned" in lowered or b'"url"' in lowered:
+        raise SourceProvenanceVerificationError(f"{field} persists a forbidden URL")
 
 
 def _sha(value: object, *, field: str) -> str:
     if not isinstance(value, str) or not SHA256_RE.fullmatch(value):
         raise SourceProvenanceVerificationError(f"{field} is invalid")
     return value
+
+
+def _version_id(value: object, *, field: str) -> str:
+    if not isinstance(value, str) or value.lower() == "null" or not VERSION_ID_RE.fullmatch(value):
+        raise SourceProvenanceVerificationError(f"{field} is invalid")
+    return value
+
+
+def _canonical_mount_path(value: object, *, field: str, allow_root: bool) -> str:
+    if not isinstance(value, str) or not value.startswith("/") or "\x00" in value:
+        raise SourceProvenanceVerificationError(f"{field} is invalid")
+    pure = PurePosixPath(value)
+    if (
+        pure.anchor != "/"
+        or pure.as_posix() != value
+        or any(part in {".", ".."} for part in pure.parts)
+        or (not allow_root and value == "/")
+    ):
+        raise SourceProvenanceVerificationError(f"{field} is invalid")
+    return value
+
+
+def _paths_overlap(left: str, right: str) -> bool:
+    def contains(parent: str, child: str) -> bool:
+        return parent == "/" or parent == child or child.startswith(parent + "/")
+
+    return contains(left, right) or contains(right, left)
 
 
 def _size(value: object, *, field: str, maximum: int, minimum: int = 1) -> int:
@@ -187,9 +226,9 @@ def _delivery(value: object) -> dict[str, Any]:
         raise SourceProvenanceVerificationError("source adoption delivery is invalid")
     key = value.get("object_key")
     version = value.get("version_id")
-    if not isinstance(key, str) or not OBJECT_KEY_RE.fullmatch(key) or not isinstance(version, str) or not version or len(version) > 1024:
+    if not isinstance(key, str) or not OBJECT_KEY_RE.fullmatch(key):
         raise SourceProvenanceVerificationError("source adoption delivery is invalid")
-    result = {"object_key": key, "version_id": version}
+    result = {"object_key": key, "version_id": _version_id(version, field="source adoption delivery version ID")}
     for name in ("ciphertext_sha256", "plaintext_sha256", "delivery_envelope_sha256"):
         result[name] = _sha(value.get(name), field=f"source adoption delivery {name}")
     result["ciphertext_bytes"] = _size(value.get("ciphertext_bytes"), field="source adoption delivery ciphertext bytes", maximum=25 * 1024 * 1024)
@@ -207,8 +246,9 @@ def _projection(value: object, *, application: Mapping[str, str]) -> dict[str, A
     root = value.get("runtime_source_root")
     tree = value.get("git_tree")
     projections = value.get("projections")
-    if not isinstance(root, str) or not root.startswith("/") or value.get("release_sha") != application["release_sha"] or not isinstance(tree, str) or not COMMIT_RE.fullmatch(tree) or not isinstance(projections, Mapping) or set(projections) != set(CODE_PROJECTIONS):
+    if value.get("release_sha") != application["release_sha"] or not isinstance(tree, str) or not COMMIT_RE.fullmatch(tree) or not isinstance(projections, Mapping) or set(projections) != set(CODE_PROJECTIONS):
         raise SourceProvenanceVerificationError("runtime projection is invalid")
+    root = _canonical_mount_path(root, field="runtime projection root", allow_root=False)
     normalized: dict[str, list[dict[str, Any]]] = {}
     for relative in CODE_PROJECTIONS:
         entries = projections.get(relative)
@@ -239,8 +279,9 @@ def _static(value: object) -> dict[str, Any]:
     fields = {"object_key", "version_id", "ciphertext_sha256", "ciphertext_bytes", "plaintext_sha256", "plaintext_bytes"}
     if not isinstance(artifact, Mapping) or set(artifact) != fields:
         raise SourceProvenanceVerificationError("static asset proof artifact is invalid")
-    if not isinstance(artifact.get("object_key"), str) or not OBJECT_KEY_RE.fullmatch(artifact["object_key"]) or not isinstance(artifact.get("version_id"), str) or not artifact["version_id"]:
+    if not isinstance(artifact.get("object_key"), str) or not OBJECT_KEY_RE.fullmatch(artifact["object_key"]):
         raise SourceProvenanceVerificationError("static asset proof artifact is invalid")
+    _version_id(artifact.get("version_id"), field="static asset proof artifact version ID")
     for name in ("ciphertext_sha256", "plaintext_sha256"):
         _sha(artifact.get(name), field=f"static artifact {name}")
     for name in ("ciphertext_bytes", "plaintext_bytes"):
@@ -257,10 +298,15 @@ def _mounts(value: object) -> list[dict[str, Any]]:
         if not isinstance(item, Mapping) or set(item) != {"type", "source", "destination", "read_only"}:
             raise SourceProvenanceVerificationError("container mount is invalid")
         mount_type, source, destination, read_only = item.get("type"), item.get("source"), item.get("destination"), item.get("read_only")
-        if mount_type not in {"bind", "volume", "tmpfs"} or not isinstance(destination, str) or not destination.startswith("/") or destination in destinations or not isinstance(read_only, bool):
+        if mount_type not in {"bind", "volume", "tmpfs"}:
+            raise SourceProvenanceVerificationError("container mount is invalid")
+        destination = _canonical_mount_path(destination, field="container mount destination", allow_root=True)
+        if destination in destinations or not isinstance(read_only, bool):
             raise SourceProvenanceVerificationError("container mount is invalid")
         if mount_type == "bind" and (not isinstance(source, str) or not source.startswith("/")):
             raise SourceProvenanceVerificationError("container bind source is invalid")
+        if mount_type == "bind":
+            source = _canonical_mount_path(source, field="container bind source", allow_root=False)
         if mount_type != "bind" and source is not None and not isinstance(source, str):
             raise SourceProvenanceVerificationError("container mount source is invalid")
         destinations.add(destination)
@@ -283,16 +329,31 @@ def _assert_app_projection_mounts(*, container: Mapping[str, Any], root: str, st
     if static:
         required["/app/mini_app_dist"] = root + "/mini_app_dist"
     observed: dict[str, Mapping[str, Any]] = {}
+    external_certs: Mapping[str, Any] | None = None
     for mount in container["mounts"]:
         destination = mount["destination"]
         if destination in required:
             if mount["type"] != "bind" or mount["source"] != required[destination]:
                 raise SourceProvenanceVerificationError("runtime projection mount is invalid")
             observed[destination] = mount
-        elif destination.startswith("/app/") and destination not in {"/app/uploads", "/app/audit_trail"}:
+        elif any(_paths_overlap(destination, expected) for expected in required):
+            raise SourceProvenanceVerificationError("container mount overlaps a reviewed runtime projection")
+        elif destination == RUNTIME_EXTERNAL_NON_PAYLOAD_MOUNT_TARGET:
+            if not static or mount["type"] != "bind" or not isinstance(mount["source"], str):
+                raise SourceProvenanceVerificationError("external non-payload mount is invalid")
+            if _paths_overlap(mount["source"], root):
+                raise SourceProvenanceVerificationError("external non-payload mount source overlaps runtime root")
+            if external_certs is not None:
+                raise SourceProvenanceVerificationError("external non-payload mount is duplicated")
+            external_certs = mount
+        elif destination in RUNTIME_DATA_MOUNT_TARGETS:
+            continue
+        elif destination == "/app" or destination.startswith("/app/"):
             raise SourceProvenanceVerificationError("unexpected mount exists below /app")
     if set(observed) != set(required):
         raise SourceProvenanceVerificationError("runtime projection mount is incomplete")
+    if static and external_certs is None:
+        raise SourceProvenanceVerificationError("application certificate mount is incomplete")
 
 
 def verify_source_role_attestation_payload(
