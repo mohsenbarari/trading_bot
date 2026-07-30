@@ -1,0 +1,25 @@
+[Unit]
+Description=GoldTrade WebApp-FI Writer Witness lease guard
+Requires=docker.service
+After=network-online.target docker.service
+Wants=network-online.target
+ConditionPathExists=__RELEASE_ROOT__/scripts/preflight_production_writer_lease_guard.py
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=__RELEASE_ROOT__
+UMask=0077
+ExecStartPre=/usr/bin/python3 __RELEASE_ROOT__/scripts/preflight_production_writer_lease_guard.py --config __PREFLIGHT_CONFIG__ --phase guard-start
+ExecStart=/usr/bin/python3 __RELEASE_ROOT__/scripts/production_writer_lease_agent.py --config __AGENT_CONFIG__ guard
+Restart=always
+RestartSec=2s
+TimeoutStopSec=10s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/var/lib/trading-bot-three-site
+
+[Install]
+WantedBy=multi-user.target

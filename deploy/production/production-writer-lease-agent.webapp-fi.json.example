@@ -1,0 +1,23 @@
+{
+  "schema": "production-writer-lease-agent-v1",
+  "mode": "writer",
+  "site": "webapp_fi",
+  "lease_file": "/var/lib/trading-bot-three-site/writer-lease.json",
+  "runtime": {
+    "compose_file": "/srv/trading-bot-three-site/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5/docker-compose.yml",
+    "env_file": "/root/secure-envs/trading-bot/wa-fi-writer-runtime.env",
+    "selection_env_file": null,
+    "services": ["app", "sync_worker"]
+  },
+  "witness": {
+    "url": "https://witness.example.invalid",
+    "key_id": "REPLACE_WITH_WA_FI_KEY_ID",
+    "secret_file": "/root/secure-envs/trading-bot/wa-fi-witness-client.secret",
+    "public_key_file": "/root/secure-envs/trading-bot/witness-ed25519-public.key",
+    "ca_bundle": "/root/secure-envs/trading-bot/witness-ca.pem",
+    "timeout_seconds": 3,
+    "lease_duration_seconds": "REPLACE_WITH_WITNESS_DURATION_SECONDS",
+    "safety_margin_seconds": "REPLACE_WITH_WITNESS_SAFETY_MARGIN_SECONDS",
+    "renew_interval_seconds": "REPLACE_WITH_WITNESS_RENEW_INTERVAL_SECONDS"
+  }
+}
