@@ -121,9 +121,15 @@ python3 /srv/trading-bot-standby-tools/scripts/manage_webapp_ir_release_provenan
   --control-repository /root/trading-bot/trading_bot \
   --control-release-sha "$CONTROL_SHA" \
   --output-directory /root/secure-envs/trading-bot/wa-ir-control-artifacts/REPLACE_WITH_NEW_BUNDLE_ID \
-  --app-image-id REPLACE_WITH_READ_ONLY_APP_IMAGE_ID \
-  --app-repo-digest REPLACE_WITH_READ_ONLY_APP_REPO_DIGEST
+  --app-image-id REPLACE_WITH_READ_ONLY_APP_IMAGE_ID
 ```
+
+When the selected application image's prepared `repo_digests` list is
+nonempty, add `--app-repo-digest` with one exact value from that list. When the
+verified local image has an empty `repo_digests` list, omit that option; never
+substitute a mutable tag or invent a digest. The exact immutable image ID and
+the image archive, image-manifest, image-set, and image-ID hashes remain bound
+in either case.
 
 The control command performs local Git reads only. It writes
 `control-release-bundle` and `release-provenance`, verifies and carries forward

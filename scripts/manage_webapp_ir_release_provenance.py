@@ -109,7 +109,7 @@ class InstalledDispatcher:
 @dataclass(frozen=True)
 class RuntimeImageContract:
     app_image_id: str
-    app_repo_digest: str
+    app_repo_digest: str | None
     image_bundle_sha256: str
     image_manifest_sha256: str
     image_set_sha256: str
@@ -646,25 +646,26 @@ def _identity(value: object, *, role: str, artifact: str, parent: Path, must_abs
 def _runtime_contract(value: object) -> RuntimeImageContract:
     if not isinstance(value, Mapping):
         raise ReleaseProvenanceError("runtime_images provenance must be an object")
-    _fields(
-        value,
-        expected={
-            "app_image_id",
-            "app_repo_digest",
-            "image_bundle_sha256",
-            "image_manifest_sha256",
-            "image_set_sha256",
-            "image_ids_sha256",
-            "image_count",
-        },
-        field="runtime_images provenance",
-    )
+    required = {
+        "app_image_id",
+        "image_bundle_sha256",
+        "image_manifest_sha256",
+        "image_set_sha256",
+        "image_ids_sha256",
+        "image_count",
+    }
+    fields = set(value)
+    if fields not in (required, required | {"app_repo_digest"}):
+        raise ReleaseProvenanceError("runtime_images provenance fields are unsupported")
     app_image_id = value.get("app_image_id")
-    app_repo_digest = value.get("app_repo_digest")
     if not isinstance(app_image_id, str) or not IMAGE_ID_RE.fullmatch(app_image_id):
         raise ReleaseProvenanceError("runtime app_image_id is invalid")
-    if not isinstance(app_repo_digest, str) or not IMAGE_DIGEST_RE.fullmatch(app_repo_digest):
-        raise ReleaseProvenanceError("runtime app_repo_digest is invalid")
+    if "app_repo_digest" in value:
+        app_repo_digest = value["app_repo_digest"]
+        if not isinstance(app_repo_digest, str) or not IMAGE_DIGEST_RE.fullmatch(app_repo_digest):
+            raise ReleaseProvenanceError("runtime app_repo_digest is invalid")
+    else:
+        app_repo_digest = None
     image_count = value.get("image_count")
     if isinstance(image_count, bool) or not isinstance(image_count, int) or image_count < 1:
         raise ReleaseProvenanceError("runtime image_count is invalid")
@@ -817,7 +818,13 @@ def _validate_staged_image_manifest(path: Path, provenance: Provenance) -> None:
     ):
         raise ReleaseProvenanceError("staged image manifest does not match release provenance")
     matched = [item for item in images if item["image_id"] == provenance.runtime_images.app_image_id]
-    if len(matched) != 1 or provenance.runtime_images.app_repo_digest not in matched[0]["repo_digests"]:
+    if len(matched) != 1:
+        raise ReleaseProvenanceError("staged image manifest does not contain the pinned application image")
+    app_repo_digest = provenance.runtime_images.app_repo_digest
+    if app_repo_digest is None:
+        if matched[0]["repo_digests"]:
+            raise ReleaseProvenanceError("staged image manifest has an unpinned application repo digest")
+    elif app_repo_digest not in matched[0]["repo_digests"]:
         raise ReleaseProvenanceError("staged image manifest does not contain the pinned application image")
 
 
@@ -1060,7 +1067,7 @@ def build_control_artifacts(
     control_release_sha: str,
     output_directory: Path,
     app_image_id: str,
-    app_repo_digest: str,
+    app_repo_digest: str | None = None,
 ) -> dict[str, Any]:
     """Create only control/provenance artifacts tied to a prepared app receipt."""
 
@@ -1068,10 +1075,19 @@ def build_control_artifacts(
     control_sha, control_tree = _inspect_commit(control_repository, control_release_sha)
     if control_sha == preparation.release_sha:
         raise ReleaseProvenanceError("application and control commits must be distinct")
-    if not IMAGE_ID_RE.fullmatch(app_image_id) or not IMAGE_DIGEST_RE.fullmatch(app_repo_digest):
+    if not IMAGE_ID_RE.fullmatch(app_image_id):
+        raise ReleaseProvenanceError("pinned application image identity is invalid")
+    if app_repo_digest is not None and (
+        not isinstance(app_repo_digest, str) or not IMAGE_DIGEST_RE.fullmatch(app_repo_digest)
+    ):
         raise ReleaseProvenanceError("pinned application image identity is invalid")
     selected = [item for item in preparation.images if item["image_id"] == app_image_id]
-    if len(selected) != 1 or app_repo_digest not in selected[0]["repo_digests"]:
+    if len(selected) != 1:
+        raise ReleaseProvenanceError("pinned application image is absent from the prepared image manifest")
+    if app_repo_digest is None:
+        if selected[0]["repo_digests"]:
+            raise ReleaseProvenanceError("pinned application image has a repo digest that must be bound")
+    elif app_repo_digest not in selected[0]["repo_digests"]:
         raise ReleaseProvenanceError("pinned application image is absent from the prepared image manifest")
     output = _safe_path(str(output_directory), field="output_directory")
     _require_directory(output.parent, field="output_directory parent", private=True)
@@ -1092,6 +1108,16 @@ def build_control_artifacts(
     # can inspect the failure rather than silently losing forensic evidence.
     _create_git_bundle(control_repository, control_sha, output / CONTROL_BUNDLE_ARTIFACT)
     control_sha256, control_bytes = sha256_file(output / CONTROL_BUNDLE_ARTIFACT)
+    runtime_images: dict[str, Any] = {
+        "app_image_id": runtime.app_image_id,
+        "image_bundle_sha256": runtime.image_bundle_sha256,
+        "image_manifest_sha256": runtime.image_manifest_sha256,
+        "image_set_sha256": runtime.image_set_sha256,
+        "image_ids_sha256": runtime.image_ids_sha256,
+        "image_count": runtime.image_count,
+    }
+    if runtime.app_repo_digest is not None:
+        runtime_images["app_repo_digest"] = runtime.app_repo_digest
     provenance_payload: dict[str, Any] = {
         "schema": PROVENANCE_SCHEMA,
         "application": {
@@ -1108,15 +1134,7 @@ def build_control_artifacts(
             "bundle_sha256": control_sha256,
             "release_root": str(CONTROL_RELEASE_PARENT / control_sha),
         },
-        "runtime_images": {
-            "app_image_id": runtime.app_image_id,
-            "app_repo_digest": runtime.app_repo_digest,
-            "image_bundle_sha256": runtime.image_bundle_sha256,
-            "image_manifest_sha256": runtime.image_manifest_sha256,
-            "image_set_sha256": runtime.image_set_sha256,
-            "image_ids_sha256": runtime.image_ids_sha256,
-            "image_count": runtime.image_count,
-        },
+        "runtime_images": runtime_images,
     }
     _create_only_json(output / PROVENANCE_ARTIFACT, provenance_payload)
     provenance_sha256, provenance_bytes = sha256_file(output / PROVENANCE_ARTIFACT)
@@ -1326,6 +1344,16 @@ def _install_receipt(
     now: dt.datetime,
 ) -> dict[str, Any]:
     timestamp = now.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+    runtime_images: dict[str, Any] = {
+        "image_bundle_sha256": provenance.runtime_images.image_bundle_sha256,
+        "image_manifest_sha256": provenance.runtime_images.image_manifest_sha256,
+        "image_set_sha256": provenance.runtime_images.image_set_sha256,
+        "image_ids_sha256": provenance.runtime_images.image_ids_sha256,
+        "image_count": provenance.runtime_images.image_count,
+        "app_image_id": provenance.runtime_images.app_image_id,
+    }
+    if provenance.runtime_images.app_repo_digest is not None:
+        runtime_images["app_repo_digest"] = provenance.runtime_images.app_repo_digest
     return {
         "schema": INSTALL_RECEIPT_SCHEMA,
         "status": "installed",
@@ -1354,15 +1382,7 @@ def _install_receipt(
             "sha256": dispatcher.sha256,
             "control_release_sha": dispatcher.control_release_sha,
         },
-        "runtime_images": {
-            "image_bundle_sha256": provenance.runtime_images.image_bundle_sha256,
-            "image_manifest_sha256": provenance.runtime_images.image_manifest_sha256,
-            "image_set_sha256": provenance.runtime_images.image_set_sha256,
-            "image_ids_sha256": provenance.runtime_images.image_ids_sha256,
-            "image_count": provenance.runtime_images.image_count,
-            "app_image_id": provenance.runtime_images.app_image_id,
-            "app_repo_digest": provenance.runtime_images.app_repo_digest,
-        },
+        "runtime_images": runtime_images,
     }
 
 
@@ -1510,16 +1530,18 @@ def load_installed_release_receipt(path: Path) -> dict[str, Any]:
     _require_sha256(stage.get("receipt_sha256"), field="installed stage receipt_sha256")
     dispatcher = _installed_dispatcher(value.get("dispatcher"), control=control)
     images = _runtime_contract(value.get("runtime_images"))
+    runtime_images: dict[str, Any] = {
+        "app_image_id": images.app_image_id,
+        "image_bundle_sha256": images.image_bundle_sha256,
+        "image_manifest_sha256": images.image_manifest_sha256,
+    }
+    if images.app_repo_digest is not None:
+        runtime_images["app_repo_digest"] = images.app_repo_digest
     return {
         "application": application,
         "control": control,
         "dispatcher": dispatcher,
-        "runtime_images": {
-            "app_image_id": images.app_image_id,
-            "app_repo_digest": images.app_repo_digest,
-            "image_bundle_sha256": images.image_bundle_sha256,
-            "image_manifest_sha256": images.image_manifest_sha256,
-        },
+        "runtime_images": runtime_images,
     }
 
 
@@ -1657,7 +1679,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     build.add_argument("--control-release-sha", required=True)
     build.add_argument("--output-directory", type=Path, required=True)
     build.add_argument("--app-image-id", required=True)
-    build.add_argument("--app-repo-digest", required=True)
+    build.add_argument("--app-repo-digest", required=False)
     install = commands.add_parser("install", help="install fresh application/control roots from one verified stage candidate")
     install.add_argument("--stage-receipt", type=Path, required=True)
     install.add_argument("--receipt", type=Path, required=True)
