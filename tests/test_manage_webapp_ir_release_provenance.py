@@ -345,6 +345,49 @@ class ReleaseProvenanceTests(unittest.TestCase):
         write_private(receipt_path, MODULE.canonical_json_bytes(receipt) + b"\n")
         return receipt_path
 
+    def make_bootstrap_receipt(
+        self,
+        *,
+        control_commit: str | None = None,
+        control_tree: str | None = None,
+        receipt_name: str = "bootstrap-receipt.json",
+    ) -> Path:
+        """Create the URL-free receiver receipt consumed by provenance install."""
+
+        payload = {
+            "schema": MODULE.BOOTSTRAP_RECEIPT_SCHEMA,
+            "status": "received",
+            "received_at": "2026-07-30T12:00:00Z",
+            "source_site": "webapp_fi",
+            "destination_site": "webapp_ir",
+            "control_commit": control_commit or self.control_sha,
+            "control_tree": control_tree or self.control_tree,
+            "bootstrap_id": "20260730T110000Z-0123456789abcdef01234567",
+            "candidate_directory": str(self.root / "bootstrap-candidate"),
+            "files": {
+                "scripts/manage_webapp_ir_artifact_stage.py": "a" * 64,
+                "scripts/manage_webapp_ir_snapshot.py": "b" * 64,
+                "scripts/manage_webapp_ir_release_provenance.py": "c" * 64,
+                "config/consumer.json": "d" * 64,
+                "bootstrap-package.json": "e" * 64,
+            },
+            "bootstrap": {
+                "object_key": "campaign/bootstrap/v1/webapp_fi/webapp_ir/stage-consumer-bootstrap.tar.age",
+                "version_id": "version-bootstrap",
+                "ciphertext_sha256": "f" * 64,
+                "ciphertext_bytes": 2048,
+                "plaintext_sha256": "0" * 64,
+                "plaintext_bytes": 1024,
+                "package_manifest_sha256": "1" * 64,
+                "consumer_config_sha256": "2" * 64,
+                "preparation_receipt_sha256": "3" * 64,
+            },
+        }
+        payload["receipt_sha256"] = hashlib.sha256(MODULE.canonical_json_bytes(payload)).hexdigest()
+        path = self.receipt_parent / receipt_name
+        write_private(path, MODULE.canonical_json_bytes(payload) + b"\n")
+        return path
+
     def test_build_and_install_bind_the_preparer_artifacts_to_a_distinct_control_root(self) -> None:
         prepared = self.build()
         paths, _ = self._stage_inputs(prepared)
@@ -365,6 +408,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
         with self.patched_contract():
             result = MODULE.install_release_roots(
                 stage_receipt_path=stage_receipt,
+                bootstrap_receipt_path=self.make_bootstrap_receipt(),
                 receipt_path=receipt_path,
             )
 
@@ -411,6 +455,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
         with self.patched_contract():
             installed = MODULE.install_release_roots(
                 stage_receipt_path=stage_receipt,
+                bootstrap_receipt_path=self.make_bootstrap_receipt(),
                 receipt_path=receipt_path,
             )
             loaded = MODULE.load_installed_release_receipt(receipt_path)
@@ -487,11 +532,52 @@ class ReleaseProvenanceTests(unittest.TestCase):
             with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "staged application bundle does not match"):
                 MODULE.install_release_roots(
                     stage_receipt_path=stage_receipt,
+                    bootstrap_receipt_path=self.make_bootstrap_receipt(),
                     receipt_path=self.receipt_parent / "release-roots.json",
                 )
 
         self.assertFalse((self.application_parent / self.application_sha).exists())
         self.assertFalse((self.control_parent / self.control_sha).exists())
+
+    def test_install_rejects_a_valid_stage_with_a_control_identity_other_than_bootstrap(self) -> None:
+        prepared = self.build()
+        stage_receipt = self.make_candidate(prepared)
+        bootstrap_receipt = self.make_bootstrap_receipt(
+            control_commit="d" * 40,
+            control_tree="e" * 40,
+        )
+
+        with self.patched_contract():
+            with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "does not match the validated bootstrap control identity"):
+                MODULE.install_release_roots(
+                    stage_receipt_path=stage_receipt,
+                    bootstrap_receipt_path=bootstrap_receipt,
+                    receipt_path=self.receipt_parent / "release-roots.json",
+                )
+
+        self.assertFalse((self.application_parent / self.application_sha).exists())
+        self.assertFalse((self.control_parent / self.control_sha).exists())
+        self.assertFalse(self.dispatcher_directory.exists())
+
+    def test_install_rejects_a_bootstrap_receipt_with_an_invalid_self_hash_before_creating_roots(self) -> None:
+        prepared = self.build()
+        stage_receipt = self.make_candidate(prepared)
+        bootstrap_receipt = self.make_bootstrap_receipt()
+        payload = json.loads(bootstrap_receipt.read_text(encoding="utf-8"))
+        payload["control_tree"] = "f" * 40
+        write_private(bootstrap_receipt, MODULE.canonical_json_bytes(payload) + b"\n")
+
+        with self.patched_contract():
+            with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "bootstrap receive receipt hash is invalid"):
+                MODULE.install_release_roots(
+                    stage_receipt_path=stage_receipt,
+                    bootstrap_receipt_path=bootstrap_receipt,
+                    receipt_path=self.receipt_parent / "release-roots.json",
+                )
+
+        self.assertFalse((self.application_parent / self.application_sha).exists())
+        self.assertFalse((self.control_parent / self.control_sha).exists())
+        self.assertFalse(self.dispatcher_directory.exists())
 
     def test_install_rejects_a_stage_for_any_site_pair_other_than_webapp_fi_to_webapp_ir(self) -> None:
         prepared = self.build()
@@ -501,6 +587,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
             with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "fixed webapp_fi to webapp_ir transfer"):
                 MODULE.install_release_roots(
                     stage_receipt_path=stage_receipt,
+                    bootstrap_receipt_path=self.make_bootstrap_receipt(),
                     receipt_path=self.receipt_parent / "release-roots.json",
                 )
 
@@ -515,6 +602,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
             with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "bindings do not match"):
                 MODULE.install_release_roots(
                     stage_receipt_path=stage_receipt,
+                    bootstrap_receipt_path=self.make_bootstrap_receipt(),
                     receipt_path=self.receipt_parent / "release-roots.json",
                 )
 
@@ -531,6 +619,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
             with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "dispatcher directory must not already exist"):
                 MODULE.install_release_roots(
                     stage_receipt_path=stage_receipt,
+                    bootstrap_receipt_path=self.make_bootstrap_receipt(),
                     receipt_path=self.receipt_parent / "release-roots.json",
                 )
 
@@ -588,7 +677,11 @@ class ReleaseProvenanceTests(unittest.TestCase):
             side_effect=MODULE.ReleaseProvenanceError("synthetic receipt write failure"),
         ):
             with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "synthetic receipt write failure"):
-                MODULE.install_release_roots(stage_receipt_path=stage_receipt, receipt_path=receipt_path)
+                MODULE.install_release_roots(
+                    stage_receipt_path=stage_receipt,
+                    bootstrap_receipt_path=self.make_bootstrap_receipt(),
+                    receipt_path=receipt_path,
+                )
         self.assertFalse((self.application_parent / self.application_sha).exists())
         self.assertFalse((self.control_parent / self.control_sha).exists())
         self.assertFalse(self.dispatcher_directory.exists())
@@ -599,7 +692,11 @@ class ReleaseProvenanceTests(unittest.TestCase):
         stage_receipt = self.make_candidate(prepared)
         receipt_path = self.receipt_parent / "release-roots.json"
         with self.patched_contract():
-            MODULE.install_release_roots(stage_receipt_path=stage_receipt, receipt_path=receipt_path)
+            MODULE.install_release_roots(
+                stage_receipt_path=stage_receipt,
+                bootstrap_receipt_path=self.make_bootstrap_receipt(),
+                receipt_path=receipt_path,
+            )
         self.dispatcher_path.write_text("tampered dispatcher\n", encoding="utf-8")
         with self.patched_contract():
             with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "dispatcher hash does not match"):
@@ -610,7 +707,11 @@ class ReleaseProvenanceTests(unittest.TestCase):
         stage_receipt = self.make_candidate(prepared)
         receipt_path = self.receipt_parent / "release-roots.json"
         with self.patched_contract():
-            MODULE.install_release_roots(stage_receipt_path=stage_receipt, receipt_path=receipt_path)
+            MODULE.install_release_roots(
+                stage_receipt_path=stage_receipt,
+                bootstrap_receipt_path=self.make_bootstrap_receipt(),
+                receipt_path=receipt_path,
+            )
         (self.application_parent / self.application_sha / "application.txt").write_text("tampered\n", encoding="utf-8")
         with self.patched_contract():
             with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "installed application release root does not match"):
@@ -623,7 +724,11 @@ class ReleaseProvenanceTests(unittest.TestCase):
         prior_umask = os.umask(0o077)
         try:
             with self.patched_contract():
-                MODULE.install_release_roots(stage_receipt_path=stage_receipt, receipt_path=receipt_path)
+                MODULE.install_release_roots(
+                    stage_receipt_path=stage_receipt,
+                    bootstrap_receipt_path=self.make_bootstrap_receipt(),
+                    receipt_path=receipt_path,
+                )
         finally:
             os.umask(prior_umask)
         application_root = self.application_parent / self.application_sha

@@ -35,6 +35,7 @@ IMAGE_MANIFEST_SCHEMA = "gold-trade-wa-ir-image-manifest-v1"
 PROVENANCE_SCHEMA = "gold-trade-wa-ir-release-provenance-v1"
 INSTALL_RECEIPT_SCHEMA = "gold-trade-wa-ir-release-provenance-install-receipt-v1"
 STAGE_RECEIPT_SCHEMA = "gold-trade-wa-ir-artifact-stage-receipt-v1"
+BOOTSTRAP_RECEIPT_SCHEMA = "gold-trade-wa-ir-stage-bootstrap-receipt-v1"
 
 LEGACY_APPLICATION_RELEASE_SHA = "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5"
 APPLICATION_BUNDLE_ARTIFACT = "release-bundle"
@@ -42,6 +43,15 @@ IMAGE_BUNDLE_ARTIFACT = "image-bundle"
 IMAGE_MANIFEST_ARTIFACT = "image-manifest"
 CONTROL_BUNDLE_ARTIFACT = "control-release-bundle"
 PROVENANCE_ARTIFACT = "release-provenance"
+BOOTSTRAP_RECEIPT_FILES = frozenset(
+    {
+        "scripts/manage_webapp_ir_artifact_stage.py",
+        "scripts/manage_webapp_ir_snapshot.py",
+        "scripts/manage_webapp_ir_release_provenance.py",
+        "config/consumer.json",
+        "bootstrap-package.json",
+    }
+)
 APPLICATION_RELEASE_PARENT = Path("/srv/trading-bot-three-site/releases")
 CONTROL_RELEASE_PARENT = Path("/srv/trading-bot-three-site/control-releases")
 CONTROL_DISPATCHER_DIRECTORY = Path("/srv/trading-bot-three-site/control-dispatcher")
@@ -70,8 +80,11 @@ CONTROL_DISPATCH_TARGETS: dict[str, tuple[str, tuple[str, ...]]] = {
 # a smaller parser limit.
 MAX_JSON_BYTES = 1024 * 1024
 MAX_ARTIFACT_BYTES = 100 * 1024 * 1024 * 1024
+MAX_BOOTSTRAP_ARCHIVE_BYTES = 8 * 1024 * 1024
+MAX_BOOTSTRAP_CIPHERTEXT_BYTES = MAX_BOOTSTRAP_ARCHIVE_BYTES + 1024 * 1024
 
 SHA_RE = re.compile(r"^[a-f0-9]{40,64}$")
+BOOTSTRAP_SHA_RE = re.compile(r"^[a-f0-9]{40}$")
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 IMAGE_ID_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
 # Match the preparation primitive's accepted immutable Docker repo-digest
@@ -82,6 +95,7 @@ PATH_RE = re.compile(r"^/[A-Za-z0-9._/-]+$")
 ARTIFACT_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 SITE_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 BUNDLE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+OBJECT_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/=-]{0,1023}$")
 
 
 class ReleaseProvenanceError(RuntimeError):
@@ -155,6 +169,15 @@ class StageReceipt:
     bundle_id: str
     candidate_directory: Path
     artifacts: dict[str, Artifact]
+
+
+@dataclass(frozen=True)
+class BootstrapReceipt:
+    """URL-free proof emitted by the first WA-IR bootstrap receiver."""
+
+    path: Path
+    control_commit: str
+    control_tree: str
 
 
 def canonical_json_bytes(value: Mapping[str, Any] | Sequence[Any]) -> bytes:
@@ -299,6 +322,16 @@ def _strict_json(raw: bytes, *, field: str) -> dict[str, Any]:
 
 def _read_private_json(path: Path, *, field: str, maximum: int = MAX_JSON_BYTES) -> dict[str, Any]:
     return _strict_json(_secure_read(path, field=field, private=True, maximum=maximum), field=field)
+
+
+def _read_canonical_private_json(path: Path, *, field: str, maximum: int = MAX_JSON_BYTES) -> dict[str, Any]:
+    """Read a root-only receipt whose self-hash has one unambiguous encoding."""
+
+    raw = _secure_read(path, field=field, private=True, maximum=maximum)
+    value = _strict_json(raw, field=field)
+    if raw != canonical_json_bytes(value) + b"\n":
+        raise ReleaseProvenanceError(f"{field} must use canonical JSON")
+    return value
 
 
 def _fields(value: Mapping[str, Any], *, expected: set[str], field: str) -> None:
@@ -741,6 +774,111 @@ def _stage_artifact(value: object, *, candidate: Path) -> Artifact:
     if not isinstance(value.get("object_key"), str) or not value["object_key"] or not isinstance(value.get("version_id"), str) or not value["version_id"]:
         raise ReleaseProvenanceError(f"staged {name} object identity is invalid")
     return Artifact(name=name, path=path, sha256=digest, bytes=bytes_value, bindings=_bindings(value.get("bindings"), field=f"staged {name} bindings"))
+
+
+def load_bootstrap_receive_receipt(path: Path) -> BootstrapReceipt:
+    """Validate the URL-free receipt created while installing the stage consumer.
+
+    The bootstrap receiver is the only component allowed to consume the first
+    encrypted package.  Installation of normal application/control roots must
+    retain its exact reviewed control identity, rather than treating a later
+    signed stage as authority to select unrelated control tooling.
+    """
+
+    value = _read_canonical_private_json(path, field="bootstrap receive receipt")
+    _fields(
+        value,
+        expected={
+            "schema",
+            "status",
+            "received_at",
+            "source_site",
+            "destination_site",
+            "control_commit",
+            "control_tree",
+            "bootstrap_id",
+            "candidate_directory",
+            "files",
+            "bootstrap",
+            "receipt_sha256",
+        },
+        field="bootstrap receive receipt",
+    )
+    if value.get("schema") != BOOTSTRAP_RECEIPT_SCHEMA or value.get("status") != "received":
+        raise ReleaseProvenanceError("bootstrap receive receipt schema or status is unsupported")
+    receipt_sha = _require_sha256(value.get("receipt_sha256"), field="bootstrap receive receipt receipt_sha256")
+    unsigned = {key: item for key, item in value.items() if key != "receipt_sha256"}
+    if sha256_bytes(canonical_json_bytes(unsigned)) != receipt_sha:
+        raise ReleaseProvenanceError("bootstrap receive receipt hash is invalid")
+    received_at = value.get("received_at")
+    if not isinstance(received_at, str) or not received_at.endswith("Z"):
+        raise ReleaseProvenanceError("bootstrap receive receipt received_at is invalid")
+    try:
+        if dt.datetime.fromisoformat(received_at.replace("Z", "+00:00")).tzinfo is None:
+            raise ValueError
+    except ValueError as exc:
+        raise ReleaseProvenanceError("bootstrap receive receipt received_at is invalid") from exc
+    if value.get("source_site") != STAGE_SOURCE_SITE or value.get("destination_site") != STAGE_DESTINATION_SITE:
+        raise ReleaseProvenanceError("bootstrap receive receipt is not the fixed webapp_fi to webapp_ir transfer")
+    control_commit = value.get("control_commit")
+    control_tree = value.get("control_tree")
+    if not isinstance(control_commit, str) or not BOOTSTRAP_SHA_RE.fullmatch(control_commit):
+        raise ReleaseProvenanceError("bootstrap receive receipt control_commit is invalid")
+    if not isinstance(control_tree, str) or not BOOTSTRAP_SHA_RE.fullmatch(control_tree):
+        raise ReleaseProvenanceError("bootstrap receive receipt control_tree is invalid")
+    bootstrap_id = value.get("bootstrap_id")
+    if not isinstance(bootstrap_id, str) or not BUNDLE_ID_RE.fullmatch(bootstrap_id):
+        raise ReleaseProvenanceError("bootstrap receive receipt bootstrap_id is invalid")
+    _safe_path(value.get("candidate_directory"), field="bootstrap receive receipt candidate_directory")
+    files = value.get("files")
+    if not isinstance(files, Mapping) or set(files) != BOOTSTRAP_RECEIPT_FILES:
+        raise ReleaseProvenanceError("bootstrap receive receipt files are invalid")
+    for name in sorted(BOOTSTRAP_RECEIPT_FILES):
+        _require_sha256(files.get(name), field=f"bootstrap receive receipt files.{name}")
+    bootstrap = value.get("bootstrap")
+    if not isinstance(bootstrap, Mapping):
+        raise ReleaseProvenanceError("bootstrap receive receipt bootstrap is invalid")
+    _fields(
+        bootstrap,
+        expected={
+            "object_key",
+            "version_id",
+            "ciphertext_sha256",
+            "ciphertext_bytes",
+            "plaintext_sha256",
+            "plaintext_bytes",
+            "package_manifest_sha256",
+            "consumer_config_sha256",
+            "preparation_receipt_sha256",
+        },
+        field="bootstrap receive receipt bootstrap",
+    )
+    object_key = bootstrap.get("object_key")
+    if not isinstance(object_key, str) or not OBJECT_KEY_RE.fullmatch(object_key):
+        raise ReleaseProvenanceError("bootstrap receive receipt bootstrap object_key is invalid")
+    version_id = bootstrap.get("version_id")
+    if (
+        not isinstance(version_id, str)
+        or not version_id
+        or len(version_id) > 1024
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in version_id)
+    ):
+        raise ReleaseProvenanceError("bootstrap receive receipt bootstrap version_id is invalid")
+    for field in (
+        "ciphertext_sha256",
+        "plaintext_sha256",
+        "package_manifest_sha256",
+        "consumer_config_sha256",
+        "preparation_receipt_sha256",
+    ):
+        _require_sha256(bootstrap.get(field), field=f"bootstrap receive receipt bootstrap {field}")
+    plaintext_bytes = bootstrap.get("plaintext_bytes")
+    ciphertext_bytes = bootstrap.get("ciphertext_bytes")
+    if isinstance(plaintext_bytes, bool) or not isinstance(plaintext_bytes, int) or not 1 <= plaintext_bytes <= MAX_BOOTSTRAP_ARCHIVE_BYTES:
+        raise ReleaseProvenanceError("bootstrap receive receipt bootstrap plaintext_bytes is invalid")
+    if isinstance(ciphertext_bytes, bool) or not isinstance(ciphertext_bytes, int) or not 1 <= ciphertext_bytes <= MAX_BOOTSTRAP_CIPHERTEXT_BYTES:
+        raise ReleaseProvenanceError("bootstrap receive receipt bootstrap ciphertext_bytes is invalid")
+    return BootstrapReceipt(path=path, control_commit=control_commit, control_tree=control_tree)
 
 
 def load_stage_receipt(path: Path) -> StageReceipt:
@@ -1386,8 +1524,22 @@ def _install_receipt(
     }
 
 
-def install_release_roots(*, stage_receipt_path: Path, receipt_path: Path, now: dt.datetime | None = None) -> dict[str, Any]:
+def install_release_roots(
+    *,
+    stage_receipt_path: Path,
+    bootstrap_receipt_path: Path,
+    receipt_path: Path,
+    now: dt.datetime | None = None,
+) -> dict[str, Any]:
+    bootstrap = load_bootstrap_receive_receipt(bootstrap_receipt_path)
     stage, provenance = verify_staged_provenance(stage_receipt_path)
+    if (
+        bootstrap.control_commit != provenance.control.release_sha
+        or bootstrap.control_tree != provenance.control.tree_sha
+    ):
+        raise ReleaseProvenanceError(
+            "staged control release does not match the validated bootstrap control identity"
+        )
     receipt_path = _safe_path(str(receipt_path), field="receipt_path")
     _require_directory(receipt_path.parent, field="receipt parent", private=True)
     if receipt_path.exists() or receipt_path.is_symlink():
@@ -1682,6 +1834,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     build.add_argument("--app-repo-digest", required=False)
     install = commands.add_parser("install", help="install fresh application/control roots from one verified stage candidate")
     install.add_argument("--stage-receipt", type=Path, required=True)
+    install.add_argument("--bootstrap-receipt", type=Path, required=True)
     install.add_argument("--receipt", type=Path, required=True)
     verify = commands.add_parser("verify-installed", help="revalidate the create-only receipt and immutable Git roots")
     verify.add_argument("--receipt", type=Path, required=True)
@@ -1711,7 +1864,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 app_repo_digest=args.app_repo_digest,
             )
         elif args.command == "install":
-            result = install_release_roots(stage_receipt_path=args.stage_receipt, receipt_path=args.receipt)
+            result = install_release_roots(
+                stage_receipt_path=args.stage_receipt,
+                bootstrap_receipt_path=args.bootstrap_receipt,
+                receipt_path=args.receipt,
+            )
         elif args.command == "verify-installed":
             result = load_installed_release_receipt(args.receipt)
         elif args.command == "exec-bound-control":
