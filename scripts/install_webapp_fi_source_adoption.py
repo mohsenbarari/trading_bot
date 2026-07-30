@@ -69,6 +69,7 @@ MAX_CANONICAL_RELEASE_FILES = 100_000
 MAX_IMAGE_EXPORT_BYTES = 100 * 1024 * 1024 * 1024
 MAX_ENROLLMENT_CERTIFICATE_LIFETIME_SECONDS = 60 * 60
 MAX_OBSERVATION_AGE_SECONDS = 15 * 60
+MAX_VERSION_ID_BYTES = 1024
 
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 RELEASE_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -82,6 +83,7 @@ OBJECT_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/=-]{2,1023}$")
 CAMPAIGN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$")
 AGE_RECIPIENT_RE = re.compile(r"^age1[ac-hj-np-z02-9]{20,128}$")
 UTC_TIMESTAMP_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
+VERSION_ID_RE = re.compile(rf"^[A-Za-z0-9._~+/=-]{{1,{MAX_VERSION_ID_BYTES}}}$")
 
 RUNTIME_CODE_PROJECTION_RELATIVES = (
     "api",
@@ -97,6 +99,7 @@ RUNTIME_CODE_PROJECTION_RELATIVES = (
 )
 RUNTIME_STATIC_ASSET_RELATIVE = "mini_app_dist"
 RUNTIME_DATA_MOUNT_TARGETS = frozenset({"/app/uploads", "/app/audit_trail"})
+RUNTIME_EXTERNAL_NON_PAYLOAD_MOUNT_TARGET = "/app/certs"
 
 SOURCE_PAYLOAD_FILES = (
     "scripts/install_webapp_fi_source_adoption.py",
@@ -208,17 +211,34 @@ def _parse_canonical_json(payload: bytes, *, field: str) -> dict[str, Any]:
     return value
 
 
+def _reject_persisted_url(payload: bytes, *, field: str) -> None:
+    """Persistent source-adoption metadata must never retain a control URL."""
+
+    lowered = payload.lower()
+    if b"://" in lowered or b"presigned" in lowered or b'"url"' in lowered:
+        raise SourceAdoptionInstallError(f"{field} must not persist a URL")
+
+
 def _read_private_json(path: Path, *, field: str, maximum_bytes: int = MAX_RECEIPT_BYTES) -> tuple[dict[str, Any], bytes]:
     path = require_root_only_file(path, field=field, maximum_bytes=maximum_bytes)
     try:
         payload = path.read_bytes()
     except OSError as exc:
         raise SourceAdoptionInstallError(f"cannot read {field}") from exc
+    _reject_persisted_url(payload, field=field)
     return _parse_canonical_json(payload, field=field), payload
 
 
 def _require_sha256(value: object, *, field: str) -> str:
     if not isinstance(value, str) or not SHA256_RE.fullmatch(value):
+        raise SourceAdoptionInstallError(f"{field} is invalid")
+    return value
+
+
+def _require_version_id(value: object, *, field: str) -> str:
+    """Accept provider-opaque VersionIds while rejecting unversioned/control data."""
+
+    if not isinstance(value, str) or value.lower() == "null" or not VERSION_ID_RE.fullmatch(value):
         raise SourceAdoptionInstallError(f"{field} is invalid")
     return value
 
@@ -471,11 +491,12 @@ def _validate_delivery_receipt(value: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(object_value, Mapping) or set(object_value) != object_expected:
         raise SourceAdoptionInstallError("source-adoption delivery receipt object is invalid")
     object_key = object_value.get("object_key")
-    version_id = object_value.get("version_id")
     if not isinstance(object_key, str) or not OBJECT_KEY_RE.fullmatch(object_key):
         raise SourceAdoptionInstallError("source-adoption delivery receipt object key is invalid")
-    if not isinstance(version_id, str) or not version_id or len(version_id) > 1024 or any(ord(item) < 0x20 for item in version_id):
-        raise SourceAdoptionInstallError("source-adoption delivery receipt version_id is invalid")
+    version_id = _require_version_id(
+        object_value.get("version_id"),
+        field="source-adoption delivery receipt version_id",
+    )
     archive = value.get("archive")
     if not isinstance(archive, Mapping) or set(archive) != {"sha256", "bytes"}:
         raise SourceAdoptionInstallError("source-adoption delivery receipt archive is invalid")
@@ -521,6 +542,8 @@ def _read_archive_members(path: Path) -> dict[str, bytes]:
                 content = handle.read(entry.size + 1)
                 if len(content) != entry.size:
                     raise SourceAdoptionInstallError("source-adoption archive member size changed")
+                if entry.name.endswith(".json") or entry.name.endswith(".json.example"):
+                    _reject_persisted_url(content, field=f"source-adoption archive member {entry.name}")
                 members[entry.name] = content
     except (OSError, tarfile.TarError) as exc:
         raise SourceAdoptionInstallError("source-adoption archive cannot be verified") from exc
@@ -640,6 +663,8 @@ def _write_new_member(candidate: Path, relative: str, content: bytes) -> Path:
     pure = PurePosixPath(relative)
     if pure.as_posix() != relative or relative.startswith("/") or ".." in pure.parts:
         raise SourceAdoptionInstallError("source-adoption member path is unsafe")
+    if relative.endswith(".json") or relative.endswith(".json.example"):
+        _reject_persisted_url(content, field=f"source-adoption member {relative}")
     parent = candidate
     for part in pure.parts[:-1]:
         parent = parent / part
@@ -669,8 +694,7 @@ def _write_new_member(candidate: Path, relative: str, content: bytes) -> Path:
 
 def _write_new_private_json(path: Path, value: Mapping[str, Any]) -> None:
     encoded = canonical_json_bytes(value) + b"\n"
-    if b"https://" in encoded or b"presigned" in encoded.lower() or b"\"url\"" in encoded.lower():
-        raise SourceAdoptionInstallError("receipt must not persist a URL")
+    _reject_persisted_url(encoded, field="receipt")
     _write_new_member(path.parent, path.name, encoded)
 
 
@@ -855,9 +879,10 @@ def verify_installed_source_adoption(receipt_path: Path) -> dict[str, Any]:
     object_key = package.get("object_key")
     if not isinstance(object_key, str) or not OBJECT_KEY_RE.fullmatch(object_key):
         raise SourceAdoptionInstallError("source-adoption install receipt object key is invalid")
-    version_id = package.get("version_id")
-    if not isinstance(version_id, str) or not version_id or len(version_id) > 1024:
-        raise SourceAdoptionInstallError("source-adoption install receipt version_id is invalid")
+    version_id = _require_version_id(
+        package.get("version_id"),
+        field="source-adoption install receipt version_id",
+    )
     _require_sha256(package.get("ciphertext_sha256"), field="source-adoption install receipt ciphertext sha256")
     _require_size(package.get("ciphertext_bytes"), field="source-adoption install receipt ciphertext bytes", maximum=MAX_ARCHIVE_BYTES + 1024 * 1024)
     _validate_candidate_layout(candidate)
@@ -894,6 +919,27 @@ def _require_safe_projection_path(value: str) -> PurePosixPath:
     return pure
 
 
+def _require_canonical_mount_path(value: object, *, field: str, allow_root: bool) -> str:
+    if not isinstance(value, str) or not value.startswith("/") or "\x00" in value:
+        raise SourceAdoptionInstallError(f"{field} is invalid")
+    pure = PurePosixPath(value)
+    if (
+        pure.anchor != "/"
+        or pure.as_posix() != value
+        or any(part in {".", ".."} for part in pure.parts)
+        or (not allow_root and value == "/")
+    ):
+        raise SourceAdoptionInstallError(f"{field} is invalid")
+    return value
+
+
+def _paths_overlap(left: str, right: str) -> bool:
+    def contains(parent: str, child: str) -> bool:
+        return parent == "/" or parent == child or child.startswith(parent + "/")
+
+    return contains(left, right) or contains(right, left)
+
+
 def _verify_projection_subtree(
     *,
     runtime_root: Path,
@@ -912,6 +958,8 @@ def _verify_projection_subtree(
         raise SourceAdoptionInstallError("canonical release descriptor does not cover a runtime source projection")
     observed: set[str] = set()
     if stat.S_ISDIR(state.st_mode):
+        if state.st_uid != 0 or stat.S_IMODE(state.st_mode) & 0o022:
+            raise SourceAdoptionInstallError("runtime source projection root has unsafe ownership or mode")
         for root_text, directories, filenames in os.walk(target, topdown=True, followlinks=False):
             root = Path(root_text)
             for directory in directories:
@@ -1024,14 +1072,20 @@ def _normalize_mounts(value: object) -> list[dict[str, Any]]:
         writable = item.get("RW")
         if mount_type not in {"bind", "volume", "tmpfs"}:
             raise SourceAdoptionInstallError("source container mount type is invalid")
-        if not isinstance(destination, str) or not destination.startswith("/") or "\x00" in destination:
-            raise SourceAdoptionInstallError("source container mount destination is invalid")
+        destination = _require_canonical_mount_path(
+            destination,
+            field="source container mount destination",
+            allow_root=True,
+        )
         if destination in destinations:
             raise SourceAdoptionInstallError("source container repeats a mount destination")
         destinations.add(destination)
         if mount_type == "bind":
-            if not isinstance(source, str) or not source.startswith("/") or "\x00" in source:
-                raise SourceAdoptionInstallError("source bind mount source is invalid")
+            source = _require_canonical_mount_path(
+                source,
+                field="source bind mount source",
+                allow_root=False,
+            )
         elif source is not None and (not isinstance(source, str) or "\x00" in source):
             raise SourceAdoptionInstallError("source container mount source is invalid")
         if not isinstance(writable, bool):
@@ -1225,11 +1279,12 @@ def _validate_signed_delivery_envelope(
     if not isinstance(object_value, Mapping) or set(object_value) != expected_object:
         raise SourceAdoptionInstallError("controller-signed source-adoption delivery envelope object is invalid")
     object_key = object_value.get("object_key")
-    version_id = object_value.get("version_id")
     if not isinstance(object_key, str) or not OBJECT_KEY_RE.fullmatch(object_key):
         raise SourceAdoptionInstallError("controller-signed source-adoption delivery envelope object key is invalid")
-    if not isinstance(version_id, str) or not version_id or len(version_id) > 1024:
-        raise SourceAdoptionInstallError("controller-signed source-adoption delivery envelope version ID is invalid")
+    version_id = _require_version_id(
+        object_value.get("version_id"),
+        field="controller-signed source-adoption delivery envelope version ID",
+    )
     normalized_object = {
         "object_key": object_key,
         "version_id": version_id,
@@ -1418,26 +1473,57 @@ def _validate_mount_projection(
         expected_code["/app/" + RUNTIME_STATIC_ASSET_RELATIVE] = str(runtime_source_root / RUNTIME_STATIC_ASSET_RELATIVE)
     code_mounts: dict[str, dict[str, Any]] = {}
     data_mounts: list[dict[str, Any]] = []
+    external_certs_mount: dict[str, Any] | None = None
     for item in mounts:
         if not isinstance(item, Mapping):
             raise SourceAdoptionInstallError("source container mount map is invalid")
-        destination = item.get("destination")
-        if not isinstance(destination, str):
-            raise SourceAdoptionInstallError("source container mount destination is invalid")
+        destination = _require_canonical_mount_path(
+            item.get("destination"),
+            field="source container mount destination",
+            allow_root=True,
+        )
+        mount_type = item.get("type")
+        if mount_type not in {"bind", "volume", "tmpfs"} or not isinstance(item.get("read_only"), bool):
+            raise SourceAdoptionInstallError("source container mount map is invalid")
+        source = item.get("source")
+        if mount_type == "bind":
+            source = _require_canonical_mount_path(
+                source,
+                field="source bind mount source",
+                allow_root=False,
+            )
+        elif source is not None and not isinstance(source, str):
+            raise SourceAdoptionInstallError("source container mount map is invalid")
         if destination in expected_code:
-            if item.get("type") != "bind" or item.get("source") != expected_code[destination]:
+            if mount_type != "bind" or source != expected_code[destination]:
                 raise SourceAdoptionInstallError("runtime code mount does not match the reviewed source projection")
             if destination in code_mounts:
                 raise SourceAdoptionInstallError("runtime code mount is duplicated")
             code_mounts[destination] = dict(item)
             continue
-        if destination.startswith("/app/"):
-            if destination not in RUNTIME_DATA_MOUNT_TARGETS:
-                raise SourceAdoptionInstallError("container has an unexpected bind or volume below /app")
+        if any(_paths_overlap(destination, expected_destination) for expected_destination in expected_code):
+            raise SourceAdoptionInstallError("container mount overlaps a reviewed runtime source projection")
+        if destination == RUNTIME_EXTERNAL_NON_PAYLOAD_MOUNT_TARGET:
+            if not allow_static_assets or mount_type != "bind" or not isinstance(source, str):
+                raise SourceAdoptionInstallError("container has an unsafe external non-payload mount")
+            if _paths_overlap(source, str(runtime_source_root)):
+                raise SourceAdoptionInstallError("external non-payload mount source overlaps runtime source root")
+            if external_certs_mount is not None:
+                raise SourceAdoptionInstallError("container repeats the external non-payload mount")
+            external_certs_mount = dict(item)
+            continue
+        if destination in RUNTIME_DATA_MOUNT_TARGETS:
             data_mounts.append(dict(item))
+            continue
+        if destination == "/app" or destination.startswith("/app/"):
+            raise SourceAdoptionInstallError("container has an unexpected bind or volume below /app")
     if set(code_mounts) != set(expected_code):
         raise SourceAdoptionInstallError("container is missing an expected runtime source projection mount")
+    if allow_static_assets and external_certs_mount is None:
+        raise SourceAdoptionInstallError("application container is missing the external non-payload certificate mount")
     normalized = [code_mounts[key] for key in sorted(code_mounts)]
+    if external_certs_mount is not None:
+        normalized.append(external_certs_mount)
     normalized.extend(sorted(data_mounts, key=lambda item: item["destination"]))
     return normalized
 
@@ -1471,11 +1557,12 @@ def _validate_static_assets_proof(
     if not isinstance(artifact, Mapping) or set(artifact) != expected_artifact:
         raise SourceAdoptionInstallError("WebApp-FI static asset provenance artifact is invalid")
     object_key = artifact.get("object_key")
-    version_id = artifact.get("version_id")
     if not isinstance(object_key, str) or not OBJECT_KEY_RE.fullmatch(object_key):
         raise SourceAdoptionInstallError("WebApp-FI static asset provenance object key is invalid")
-    if not isinstance(version_id, str) or not version_id or len(version_id) > 1024:
-        raise SourceAdoptionInstallError("WebApp-FI static asset provenance version ID is invalid")
+    version_id = _require_version_id(
+        artifact.get("version_id"),
+        field="WebApp-FI static asset provenance version ID",
+    )
     for name in ("ciphertext_sha256", "plaintext_sha256"):
         _require_sha256(artifact.get(name), field=f"WebApp-FI static asset provenance {name}")
     for name in ("ciphertext_bytes", "plaintext_bytes"):
@@ -1642,14 +1729,22 @@ def _validate_recorded_mounts(value: object, *, field: str) -> list[dict[str, An
         source = item.get("source")
         destination = item.get("destination")
         read_only = item.get("read_only")
-        if mount_type not in {"bind", "volume", "tmpfs"} or not isinstance(destination, str) or not destination.startswith("/") or "\x00" in destination:
+        if mount_type not in {"bind", "volume", "tmpfs"}:
             raise SourceAdoptionInstallError(f"{field} is invalid")
+        destination = _require_canonical_mount_path(
+            destination,
+            field=f"{field} destination",
+            allow_root=True,
+        )
         if destination in destinations or not isinstance(read_only, bool):
             raise SourceAdoptionInstallError(f"{field} is invalid")
         destinations.add(destination)
         if mount_type == "bind":
-            if not isinstance(source, str) or not source.startswith("/") or "\x00" in source:
-                raise SourceAdoptionInstallError(f"{field} is invalid")
+            source = _require_canonical_mount_path(
+                source,
+                field=f"{field} bind source",
+                allow_root=False,
+            )
         elif source is not None and (not isinstance(source, str) or "\x00" in source):
             raise SourceAdoptionInstallError(f"{field} is invalid")
         normalized.append({"type": mount_type, "source": source, "destination": destination, "read_only": read_only})
@@ -1677,9 +1772,11 @@ def _validate_recorded_container(value: object, *, field: str) -> dict[str, Any]
 def _validate_projection_record(value: object, *, field: str, expected_application: Mapping[str, str]) -> dict[str, Any]:
     if not isinstance(value, Mapping) or set(value) != {"runtime_source_root", "release_sha", "git_tree", "descriptor_sha256", "projections", "projection_sha256"}:
         raise SourceAdoptionInstallError(f"{field} is invalid")
-    runtime_root = value.get("runtime_source_root")
-    if not isinstance(runtime_root, str) or not runtime_root.startswith("/"):
-        raise SourceAdoptionInstallError(f"{field} source root is invalid")
+    runtime_root = _require_canonical_mount_path(
+        value.get("runtime_source_root"),
+        field=f"{field} source root",
+        allow_root=False,
+    )
     if value.get("release_sha") != expected_application["release_sha"] or not isinstance(value.get("git_tree"), str) or not COMMIT_RE.fullmatch(value["git_tree"]):
         raise SourceAdoptionInstallError(f"{field} release binding is invalid")
     descriptor_sha = _require_sha256(value.get("descriptor_sha256"), field=f"{field} descriptor sha256")
@@ -1725,8 +1822,7 @@ def _validate_static_proof_record(value: object, *, field: str) -> dict[str, Any
         raise SourceAdoptionInstallError(f"{field} artifact is invalid")
     if not isinstance(artifact.get("object_key"), str) or not OBJECT_KEY_RE.fullmatch(artifact["object_key"]):
         raise SourceAdoptionInstallError(f"{field} artifact object key is invalid")
-    if not isinstance(artifact.get("version_id"), str) or not artifact["version_id"] or len(artifact["version_id"]) > 1024:
-        raise SourceAdoptionInstallError(f"{field} artifact version is invalid")
+    _require_version_id(artifact.get("version_id"), field=f"{field} artifact version")
     for key in ("ciphertext_sha256", "plaintext_sha256"):
         _require_sha256(artifact.get(key), field=f"{field} artifact {key}")
     for key in ("ciphertext_bytes", "plaintext_bytes"):
@@ -2196,8 +2292,9 @@ def verify_source_role_attestation(
     _require_sha256(value.get("source_adoption_install_receipt_sha256"), field="WebApp-FI source role attestation install receipt sha256")
     delivery = value.get("source_adoption_delivery")
     delivery_expected = {"object_key", "version_id", "ciphertext_sha256", "ciphertext_bytes", "plaintext_sha256", "plaintext_bytes", "delivery_envelope_sha256", "controller_public_key_base64"}
-    if not isinstance(delivery, Mapping) or set(delivery) != delivery_expected or not isinstance(delivery.get("object_key"), str) or not OBJECT_KEY_RE.fullmatch(delivery["object_key"]) or not isinstance(delivery.get("version_id"), str) or not delivery["version_id"] or len(delivery["version_id"]) > 1024:
+    if not isinstance(delivery, Mapping) or set(delivery) != delivery_expected or not isinstance(delivery.get("object_key"), str) or not OBJECT_KEY_RE.fullmatch(delivery["object_key"]):
         raise SourceAdoptionInstallError("WebApp-FI source role attestation adoption delivery is invalid")
+    _require_version_id(delivery.get("version_id"), field="WebApp-FI source role attestation adoption delivery version ID")
     for field in ("ciphertext_sha256", "plaintext_sha256", "delivery_envelope_sha256"):
         _require_sha256(delivery.get(field), field=f"WebApp-FI source role attestation adoption delivery {field}")
     for field in ("ciphertext_bytes", "plaintext_bytes"):
