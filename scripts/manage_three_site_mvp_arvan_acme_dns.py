@@ -39,6 +39,7 @@ CHALLENGE_RECORD = "_acme-challenge.coin"
 DEFAULT_TTL = 120
 MAX_STATE_BYTES = 16 * 1024
 _VALIDATION = re.compile(r"^[A-Za-z0-9_-]{20,256}$")
+_RECORD_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
 _STATE_FIELDS = {"schema", "domain", "record_name", "validation", "record_id"}
 
 
@@ -91,6 +92,32 @@ def _matching_record(
     if len(matches) != 1:
         raise AcmeDnsError(f"expected exactly one matching ACME TXT record, found {len(matches)}")
     return matches[0]
+
+
+def _safe_record_id(record: Mapping[str, Any]) -> str:
+    record_id = record.get("id")
+    if not isinstance(record_id, str) or not _RECORD_ID.fullmatch(record_id):
+        raise AcmeDnsError("matching ACME TXT record has no safe immutable id")
+    return record_id
+
+
+def _created_record_id(response: Mapping[str, Any], *, validation: str) -> str | None:
+    """Return a validated POST record ID when the provider exposes one."""
+
+    created = response.get("data")
+    if isinstance(created, Mapping):
+        try:
+            record = _matching_record({"data": [dict(created)]}, validation=validation)
+        except AcmeDnsError:
+            return None
+        return _safe_record_id(record)
+    if isinstance(created, list):
+        try:
+            record = _matching_record({"data": created}, validation=validation)
+        except AcmeDnsError:
+            return None
+        return _safe_record_id(record)
+    return None
 
 
 def _secure_state_path(state_dir: Path) -> Path:
@@ -213,23 +240,45 @@ def present(
         "ttl": DEFAULT_TTL,
     }
     try:
-        request_fn("POST", records_url, token, payload)
-        matching = _matching_record(request_fn("GET", records_url, token, None), validation=validation)
+        created = request_fn("POST", records_url, token, payload)
     except ThreeSiteRoutingError as exc:
         raise AcmeDnsError(str(exc)) from exc
-    record_id = matching.get("id")
-    if not isinstance(record_id, str) or not record_id:
-        raise AcmeDnsError("matching ACME TXT record has no immutable id")
-    state = {
-        "schema": "gold-trade-acme-dns-state-v1",
-        "domain": domain,
-        "record_name": CHALLENGE_RECORD,
-        "validation": validation,
-        "record_id": record_id,
-    }
-    _write_state(state_path, state)
+    record_id = _created_record_id(created, validation=validation)
+    state: dict[str, str] | None = None
+    if record_id is not None:
+        state = {
+            "schema": "gold-trade-acme-dns-state-v1",
+            "domain": domain,
+            "record_name": CHALLENGE_RECORD,
+            "validation": validation,
+            "record_id": record_id,
+        }
+        # Retain the immutable ID before the verification GET.  If that request
+        # is transiently unavailable after a successful POST, Certbot's cleanup
+        # hook can still remove exactly this record rather than leaving an orphan.
+        _write_state(state_path, state)
+    try:
+        matching = _matching_record(
+            request_fn("GET", records_url, token, None),
+            validation=validation,
+            require_id=record_id,
+        )
+    except ThreeSiteRoutingError as exc:
+        raise AcmeDnsError(str(exc)) from exc
+    if record_id is None:
+        record_id = _safe_record_id(matching)
+        state = {
+            "schema": "gold-trade-acme-dns-state-v1",
+            "domain": domain,
+            "record_name": CHALLENGE_RECORD,
+            "validation": validation,
+            "record_id": record_id,
+        }
+        _write_state(state_path, state)
     if propagation_seconds:
         sleep_fn(propagation_seconds)
+    if state is None:  # pragma: no cover - both branches above set a state.
+        raise AcmeDnsError("ACME cleanup state was not created")
     return state
 
 

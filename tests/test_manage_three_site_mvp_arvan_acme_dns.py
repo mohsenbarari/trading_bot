@@ -12,6 +12,7 @@ from scripts.manage_three_site_mvp_arvan_acme_dns import (
     cleanup,
     present,
 )
+from scripts.manage_three_site_mvp_arvan_routing import ThreeSiteRoutingError
 
 
 VALIDATION = "a" * 43
@@ -21,6 +22,8 @@ class FakeApi:
     def __init__(self) -> None:
         self.records: list[dict] = []
         self.calls: list[tuple[str, str, dict | None]] = []
+        self.fail_next_get = False
+        self.opaque_post_response = False
 
     def __call__(self, method: str, url: str, token: str, payload: dict | None) -> dict:
         if token != "secret":
@@ -38,8 +41,13 @@ class FakeApi:
                     "ttl": payload["ttl"],
                 }
             )
+            if self.opaque_post_response:
+                return {"data": {"accepted": True}}
             return {"data": copy.deepcopy(self.records[-1])}
         if method == "GET":
+            if self.fail_next_get:
+                self.fail_next_get = False
+                raise ThreeSiteRoutingError("transient Arvan DNS read failure")
             return {"data": copy.deepcopy(self.records)}
         if method == "DELETE":
             record_id = url.rsplit("/", 1)[-1]
@@ -97,6 +105,52 @@ class ArvanAcmeDnsTests(unittest.TestCase):
 
             self.assertEqual(result["record_id"], "record-1")
             self.assertEqual([call[0] for call in fake.calls], ["POST", "GET"])
+
+    def test_present_retains_exact_cleanup_state_when_post_verification_get_fails(self) -> None:
+        fake = FakeApi()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            fake.fail_next_get = True
+            with self.assertRaisesRegex(AcmeDnsError, "transient Arvan DNS read failure"):
+                present(
+                    domain=CERTIFICATE_DOMAIN,
+                    validation=VALIDATION,
+                    token="secret",
+                    state_dir=state_dir,
+                    request_fn=fake,
+                    propagation_seconds=0,
+                )
+
+            state_path = state_dir / "coin.gold-trade.ir.json"
+            self.assertTrue(state_path.is_file())
+            self.assertEqual("record-1", json.loads(state_path.read_text(encoding="utf-8"))["record_id"])
+            result = cleanup(
+                domain=CERTIFICATE_DOMAIN,
+                validation=VALIDATION,
+                token="secret",
+                state_dir=state_dir,
+                request_fn=fake,
+            )
+
+        self.assertEqual("record-1", result["record_id"])
+        self.assertEqual([], fake.records)
+
+    def test_present_falls_back_to_exact_get_when_provider_post_response_is_opaque(self) -> None:
+        fake = FakeApi()
+        fake.opaque_post_response = True
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_dir = Path(tmpdir) / "state"
+            result = present(
+                domain=CERTIFICATE_DOMAIN,
+                validation=VALIDATION,
+                token="secret",
+                state_dir=state_dir,
+                request_fn=fake,
+                propagation_seconds=0,
+            )
+
+        self.assertEqual("record-1", result["record_id"])
+        self.assertEqual(["POST", "GET"], [call[0] for call in fake.calls])
 
     def test_cleanup_verifies_exact_record_before_delete(self) -> None:
         fake = FakeApi()
