@@ -311,6 +311,23 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
             apply=True,
         )
 
+    def _set_certificate_window(self, certificate, *, issued, not_before, not_after):
+        value = json.loads(certificate.read_text(encoding="utf-8"))
+        value["issued_at"] = issued.strftime("%Y-%m-%dT%H:%M:%SZ")
+        value["not_before"] = not_before.strftime("%Y-%m-%dT%H:%M:%SZ")
+        value["not_after"] = not_after.strftime("%Y-%m-%dT%H:%M:%SZ")
+        unsigned = {key: item for key, item in value.items() if key != "controller_signature"}
+        value["controller_signature"] = {
+            "algorithm": "ed25519",
+            "signature_base64": _signature(self.controller_key, install.SIGNER_ENROLLMENT_SIGNATURE_DOMAIN, unsigned),
+        }
+        _canonical_private_json(certificate, value)
+        return {
+            "issued_at": value["issued_at"],
+            "not_before": value["not_before"],
+            "not_after": value["not_after"],
+        }
+
     def _attest(self, installed, runtime, role_path, ssh_public, static_path, certificate, *, attestation_id):
         containers = self._container_records(runtime)
         image = {
@@ -686,6 +703,171 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         self.assertFalse((Path(installed["candidate"]) / "enrollments" / f"{CAMPAIGN}.json").exists())
         self.assertFalse((Path(installed["candidate"]).parent / "certificate-consumptions" / "certificate-one.json").exists())
         self.assertFalse((Path(installed["candidate"]).parent / "certificate-consumptions").exists())
+
+    def test_attestation_rechecks_not_before_at_final_signature_time(self):
+        installed = self._install()
+        runtime, role_path, ssh_public, static_path, certificate = self._runtime_and_config(installed)
+        issued = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+        not_before = issued + dt.timedelta(minutes=5)
+        window = self._set_certificate_window(
+            certificate,
+            issued=issued,
+            not_before=not_before,
+            not_after=not_before + dt.timedelta(minutes=5),
+        )
+
+        with patch.object(install, "utc_now", side_effect=[window["not_before"], window["not_before"]]):
+            install.enroll_source_signer(
+                install_receipt=installed["receipt_path"],
+                source_role_config=role_path,
+                certificate=certificate,
+                ssh_host_public_key_file=ssh_public,
+                pinned_controller_public_key_base64=self.controller_public,
+                campaign_id=CAMPAIGN,
+                apply=True,
+                verification_time=window["not_before"],
+            )
+
+        containers = self._container_records(runtime)
+        image = {
+            "image_id": IMAGE_ID,
+            "image_reference": IMAGE_REFERENCE,
+            "repo_tags": [IMAGE_REFERENCE],
+            "repo_digests": [],
+        }
+        with (
+            patch.object(install, "utc_now", side_effect=[window["not_before"], window["issued_at"]]),
+            patch.object(install, "_inspect_container", side_effect=lambda name: copy.deepcopy(containers[name])),
+            patch.object(install, "_inspect_image", return_value=image),
+        ):
+            with self.assertRaisesRegex(install.SourceAdoptionInstallError, "outside signer enrollment validity window"):
+                install.attest_source_role(
+                    install_receipt=installed["receipt_path"],
+                    source_role_config=role_path,
+                    signer_enrollment_receipt=Path(installed["candidate"]) / "enrollments" / f"{CAMPAIGN}.json",
+                    signer_enrollment_certificate=certificate,
+                    ssh_host_public_key_file=ssh_public,
+                    runtime_source_root=runtime,
+                    static_assets_descriptor=static_path,
+                    pinned_controller_public_key_base64=self.controller_public,
+                    campaign_id=CAMPAIGN,
+                    expected_app_image_id=IMAGE_ID,
+                    expected_app_image_reference=IMAGE_REFERENCE,
+                    attestation_id="attestation-clock-regression",
+                    apply=True,
+                )
+
+        self.assertFalse((Path(installed["candidate"]) / "attestations" / "attestation-clock-regression.json").exists())
+
+    def test_export_rechecks_not_before_at_final_signature_time(self):
+        installed = self._install()
+        runtime, role_path, ssh_public, static_path, certificate = self._runtime_and_config(installed)
+        issued = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+        not_before = issued + dt.timedelta(minutes=5)
+        window = self._set_certificate_window(
+            certificate,
+            issued=issued,
+            not_before=not_before,
+            not_after=not_before + dt.timedelta(minutes=5),
+        )
+
+        with patch.object(install, "utc_now", side_effect=[window["not_before"], window["not_before"]]):
+            install.enroll_source_signer(
+                install_receipt=installed["receipt_path"],
+                source_role_config=role_path,
+                certificate=certificate,
+                ssh_host_public_key_file=ssh_public,
+                pinned_controller_public_key_base64=self.controller_public,
+                campaign_id=CAMPAIGN,
+                apply=True,
+                verification_time=window["not_before"],
+            )
+
+        containers = self._container_records(runtime)
+        image = {
+            "image_id": IMAGE_ID,
+            "image_reference": IMAGE_REFERENCE,
+            "repo_tags": [IMAGE_REFERENCE],
+            "repo_digests": [],
+        }
+        with (
+            patch.object(install, "utc_now", side_effect=[window["not_before"], window["not_before"]]),
+            patch.object(install, "_inspect_container", side_effect=lambda name: copy.deepcopy(containers[name])),
+            patch.object(install, "_inspect_image", return_value=image),
+        ):
+            attestation = install.attest_source_role(
+                install_receipt=installed["receipt_path"],
+                source_role_config=role_path,
+                signer_enrollment_receipt=Path(installed["candidate"]) / "enrollments" / f"{CAMPAIGN}.json",
+                signer_enrollment_certificate=certificate,
+                ssh_host_public_key_file=ssh_public,
+                runtime_source_root=runtime,
+                static_assets_descriptor=static_path,
+                pinned_controller_public_key_base64=self.controller_public,
+                campaign_id=CAMPAIGN,
+                expected_app_image_id=IMAGE_ID,
+                expected_app_image_reference=IMAGE_REFERENCE,
+                attestation_id="attestation-export-clock-regression",
+                apply=True,
+            )
+
+        before = {
+            **attestation["runtime_claim"],
+            "active_application_image": attestation["image_claim"]["active_application_image"],
+        }
+        parent = self.root / "exports-clock-regression"
+        parent.mkdir(mode=0o700)
+
+        def fake_export(*, archive, expected_image_id):
+            archive.write_bytes(b"retained exact bytes after clock regression")
+            os.chmod(archive, 0o600)
+            return {
+                "docker_save_archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+                "docker_save_archive_bytes": archive.stat().st_size,
+                "docker_save": {
+                    "command": ["docker", "save", "--output", archive.name, expected_image_id],
+                    "docker_executable_sha256": hashlib.sha256(b"docker").hexdigest(),
+                    "docker_executable_bytes": len(b"docker"),
+                    "archive_semantics": "exact_bytes_only_unparsed",
+                    "archive_layout": "not_inspected",
+                    "manifest_semantics_attested": False,
+                    "docker_load_invoked": False,
+                    "loadability_claimed": False,
+                },
+            }
+
+        required_free = 1024 * install.IMAGE_EXPORT_CAPACITY_MULTIPLIER + install.IMAGE_EXPORT_CAPACITY_MARGIN_BYTES
+        with (
+            patch.object(install, "utc_now", side_effect=[window["not_before"], window["not_before"], window["issued_at"]]),
+            patch.object(install, "_revalidate_export_runtime", side_effect=[before, before]),
+            patch.object(install, "_inspect_image_storage_bytes", return_value=1024),
+            patch.object(install.shutil, "disk_usage", return_value=SimpleNamespace(free=required_free)),
+            patch.object(install, "_export_exact_docker_save_bytes", side_effect=fake_export),
+        ):
+            with self.assertRaisesRegex(install.SourceAdoptionInstallError, "outside signer enrollment validity window"):
+                install.export_actual_fi_image(
+                    attestation=Path(attestation["attestation_path"]),
+                    source_role_config=role_path,
+                    signer_enrollment_receipt=Path(installed["candidate"]) / "enrollments" / f"{CAMPAIGN}.json",
+                    signer_enrollment_certificate=certificate,
+                    ssh_host_public_key_file=ssh_public,
+                    runtime_source_root=runtime,
+                    static_assets_descriptor=static_path,
+                    pinned_controller_public_key_base64=self.controller_public,
+                    pinned_source_signing_public_key_base64=self.fi_public,
+                    expected_campaign_id=CAMPAIGN,
+                    expected_application=installed["application"],
+                    expected_control_commit=self.control_commit,
+                    expected_canonical_release_tree_sha256=attestation["descriptor_claim"]["canonical_release_tree_sha256"],
+                    expected_app_image_id=IMAGE_ID,
+                    expected_app_image_reference=IMAGE_REFERENCE,
+                    destination=parent / "candidate",
+                    export_id="export-clock-regression",
+                    apply=True,
+                )
+
+        self.assertTrue((parent / "candidate" / "webapp-fi-active-app-image.tar").exists())
+        self.assertFalse((parent / "candidate" / "image-export-receipt.json").exists())
 
     def test_enrollment_certificate_rejects_controller_source_key_reuse(self):
         installed = self._install()
