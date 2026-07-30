@@ -1,5 +1,6 @@
 import base64
 import copy
+import datetime as dt
 import hashlib
 import importlib.util
 import io
@@ -208,16 +209,13 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         index = static / "index.html"
         index.write_bytes(b"fixture static asset\n")
         ssh_public = _private_file(self.root / "keys" / "ssh-host-ed25519.pub", b"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest fixture\n")
-        reader = _private_file(self.root / "keys" / "reader.env", b"CAPTURE_DB_USER=reader\nCAPTURE_DB_PASSWORD=fixture-password\n")
         role = {
             "schema": install.SOURCE_ROLE_CONFIG_SCHEMA,
             "source_site": "webapp_fi",
             "destination_site": "webapp_ir",
             "application": {"release_sha": self.release, "expected_alembic_revision": REVISION},
-            "database_container": "fixture_db",
             "application_container": "fixture_app",
             "sync_worker_container": "fixture_sync",
-            "read_only_capture_env_file": str(reader),
             "source_signing_private_key_file": str(self.fi_private),
         }
         role_path = _canonical_private_json(self.root / "keys" / "role.json", role)
@@ -242,17 +240,39 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         }
         static_proof = {**static_unsigned, "controller_signature": {"algorithm": "ed25519", "signature_base64": _signature(self.controller_key, install.STATIC_ASSET_SIGNATURE_DOMAIN, static_unsigned)}}
         static_path = _canonical_private_json(self.root / "keys" / "static-proof.json", static_proof)
+        issued = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+        not_after = issued + dt.timedelta(minutes=10)
         certificate_unsigned = {
             "schema": install.SIGNER_ENROLLMENT_CERTIFICATE_SCHEMA,
             "status": "issued",
+            "certificate_id": "certificate-one",
+            "operation_id": "enrollment-one",
+            "issued_at": issued.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "not_before": issued.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "not_after": not_after.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "campaign_id": CAMPAIGN,
             "source_site": "webapp_fi",
             "destination_site": "webapp_ir",
             "package_id": installed["package_id"],
             "application": installed["application"],
+            "tooling": installed["tooling"],
+            "canonical_release_tree_sha256": installed["canonical_release_tree_sha256"],
+            "source_adoption_install_receipt_sha256": installed["receipt_sha256"],
+            "delivery_envelope_sha256": installed["package"]["delivery_envelope_sha256"],
+            "source_adoption_object": {
+                "object_key": installed["package"]["object_key"],
+                "version_id": installed["package"]["version_id"],
+                "ciphertext_sha256": installed["package"]["ciphertext_sha256"],
+                "ciphertext_bytes": installed["package"]["ciphertext_bytes"],
+                "plaintext_sha256": installed["package"]["archive_sha256"],
+                "plaintext_bytes": installed["package"]["archive_bytes"],
+            },
+            "fi_bootstrap_recipient": installed["package"]["fi_bootstrap_recipient"],
             "fi_ssh_host_public_key_sha256": install.sha256_file(ssh_public)[0],
             "source_signing_public_key_base64": self.fi_public,
+            "source_signing_key_id": install._public_key_id(self.fi_public),
             "controller_public_key_base64": self.controller_public,
+            "controller_key_id": install._public_key_id(self.controller_public),
         }
         certificate = {**certificate_unsigned, "controller_signature": {"algorithm": "ed25519", "signature_base64": _signature(self.controller_key, install.SIGNER_ENROLLMENT_SIGNATURE_DOMAIN, certificate_unsigned)}}
         certificate_path = _canonical_private_json(self.root / "keys" / "certificate.json", certificate)
@@ -273,7 +293,6 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         return {
             "fixture_app": {"name": "fixture_app", "container_id": "a" * 64, "image_id": IMAGE_ID, "image_reference": IMAGE_REFERENCE, "mounts": mounts(True)},
             "fixture_sync": {"name": "fixture_sync", "container_id": "c" * 64, "image_id": IMAGE_ID, "image_reference": IMAGE_REFERENCE, "mounts": mounts(False)},
-            "fixture_db": {"name": "fixture_db", "container_id": "d" * 64, "image_id": "sha256:" + "e" * 64, "image_reference": "postgres:16", "mounts": []},
         }
 
     def _enroll(self, installed, role_path, ssh_public, certificate):
@@ -286,6 +305,31 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
             campaign_id=CAMPAIGN,
             apply=True,
         )
+
+    def _attest(self, installed, runtime, role_path, ssh_public, static_path, certificate, *, attestation_id):
+        containers = self._container_records(runtime)
+        image = {
+            "image_id": IMAGE_ID,
+            "image_reference": IMAGE_REFERENCE,
+            "repo_tags": [IMAGE_REFERENCE],
+            "repo_digests": [],
+        }
+        with patch.object(install, "_inspect_container", side_effect=lambda name: copy.deepcopy(containers[name])), patch.object(install, "_inspect_image", return_value=image):
+            return install.attest_source_role(
+                install_receipt=installed["receipt_path"],
+                source_role_config=role_path,
+                signer_enrollment_receipt=Path(installed["candidate"]) / "enrollments" / f"{CAMPAIGN}.json",
+                signer_enrollment_certificate=certificate,
+                ssh_host_public_key_file=ssh_public,
+                runtime_source_root=runtime,
+                static_assets_descriptor=static_path,
+                pinned_controller_public_key_base64=self.controller_public,
+                campaign_id=CAMPAIGN,
+                expected_app_image_id=IMAGE_ID,
+                expected_app_image_reference=IMAGE_REFERENCE,
+                attestation_id=attestation_id,
+                apply=True,
+            )
 
     def test_prepared_package_contains_only_attest_bootstrap_and_signed_envelope_binds_version(self):
         verified = self._verify_package()
@@ -391,7 +435,7 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         enrollment = self._enroll(installed, role_path, ssh_public, certificate)
         containers = self._container_records(runtime)
         image = {"image_id": IMAGE_ID, "image_reference": IMAGE_REFERENCE, "repo_tags": [IMAGE_REFERENCE], "repo_digests": []}
-        with patch.object(install, "_inspect_container", side_effect=lambda name: copy.deepcopy(containers[name])), patch.object(install, "_inspect_image", return_value=image), patch.object(install, "_read_only_schema_observation", return_value={"observed_alembic_revision": REVISION, "capture_role_verified_read_only": True}):
+        with patch.object(install, "_inspect_container", side_effect=lambda name: copy.deepcopy(containers[name])), patch.object(install, "_inspect_image", return_value=image):
             attestation = install.attest_source_role(
                 install_receipt=installed["receipt_path"],
                 source_role_config=role_path,
@@ -417,48 +461,66 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
                 expected_campaign_id=CAMPAIGN,
                 expected_application={"release_sha": self.release, "expected_alembic_revision": REVISION},
                 expected_control_commit=self.control_commit,
+                expected_canonical_release_tree_sha256=attestation["descriptor_claim"]["canonical_release_tree_sha256"],
                 expected_app_image_id=IMAGE_ID,
                 expected_app_image_reference=IMAGE_REFERENCE,
             )
-        self.assertEqual(portable_verification["source_adoption_delivery"]["version_id"], "version-0001")
+        self.assertEqual(portable_verification["source_adoption_delivery_claim"]["version_id"], "version-0001")
         portable_result = portable.verify_source_role_attestation_payload(
             payload=Path(attestation["attestation_path"]).read_bytes(),
             pinned_source_signing_public_key_base64=self.fi_public,
             expected_campaign_id=CAMPAIGN,
             expected_application={"release_sha": self.release, "expected_alembic_revision": REVISION},
             expected_control_commit=self.control_commit,
+            expected_canonical_release_tree_sha256=attestation["descriptor_claim"]["canonical_release_tree_sha256"],
             expected_app_image_id=IMAGE_ID,
             expected_app_image_reference=IMAGE_REFERENCE,
+            verification_time=install.utc_now(),
         )
-        self.assertEqual(portable_result["application_release_tree"], attestation["application_release_tree"])
+        self.assertEqual(portable_result["descriptor_claim"]["application_release_tree"], attestation["descriptor_claim"]["application_release_tree"])
         archive_payload = b"fixture exported image archive"
+        export_runtime = {
+            **portable_result["runtime_claim"],
+            "active_application_image": portable_result["image_claim"]["active_application_image"],
+        }
         image_unsigned = {
             "schema": install.IMAGE_EXPORT_RECEIPT_SCHEMA,
             "status": "exported",
-            "exported_at": "2026-07-30T00:00:00Z",
+            "exported_at": install.utc_now(),
             "export_id": "export-one",
             "campaign_id": CAMPAIGN,
             "source_site": "webapp_fi",
             "destination_site": "webapp_ir",
             "application": {"release_sha": self.release, "expected_alembic_revision": REVISION},
-            "application_release_tree": attestation["application_release_tree"],
+            "application_release_tree": attestation["descriptor_claim"]["application_release_tree"],
             "tooling": {"control_commit": self.control_commit, "control_tree": self.control_commit},
-            "canonical_release_tree_sha256": attestation["canonical_release_tree_sha256"],
+            "canonical_release_tree_sha256": attestation["descriptor_claim"]["canonical_release_tree_sha256"],
             "source_role_attestation_sha256": attestation["attestation_sha256"],
+            "observation_scope": {
+                "point_in_time_only": True,
+                "data_capture_performed": False,
+                "schema_capture_performed": False,
+                "promotion_ready": False,
+                "later_snapshot_requires_separate_authorization": True,
+            },
             "image": {
                 "image_id": IMAGE_ID,
                 "image_reference": IMAGE_REFERENCE,
                 "archive_sha256": hashlib.sha256(archive_payload).hexdigest(),
                 "archive_bytes": len(archive_payload),
-                "docker_manifest_sha256": hashlib.sha256(b"manifest").hexdigest(),
-                "docker_config_sha256": hashlib.sha256(b"config").hexdigest(),
-                "layer_count": 1,
-                "repo_tags": [IMAGE_REFERENCE],
+                "docker_save": {
+                    "command": ["docker", "save", "--output", "webapp-fi-active-app-image.tar", IMAGE_ID],
+                    "docker_executable_sha256": hashlib.sha256(b"docker").hexdigest(),
+                    "docker_executable_bytes": len(b"docker"),
+                    "archive_semantics": "exact_bytes_only_unparsed",
+                    "docker_load_invoked": False,
+                    "loadability_claimed": False,
+                },
             },
-            "pre_export_runtime": {"application": containers["fixture_app"], "sync_worker": containers["fixture_sync"], "active_image": image},
-            "post_export_runtime": {"application": containers["fixture_app"], "sync_worker": containers["fixture_sync"], "active_image": image},
-            "image_archive_does_not_prove_bind_mounted_runtime": True,
-            "archive_consumption": {"docker_load_prohibited": True, "fi_local_archive_verification_before_age_encryption": True, "controller_read_back_verification_after_age_encryption": True, "raw_repo_tags_are_not_authorization": True},
+            "pre_export_runtime": export_runtime,
+            "post_export_runtime": export_runtime,
+            "exact_byte_export": {"archive_is_unparsed_exact_bytes": True, "docker_load_invoked": False, "loadability_claimed": False, "bind_mounted_runtime_revalidated_before_and_after": True},
+            "archive_consumption": {"docker_load_prohibited": True, "fi_local_exact_byte_hash_before_age_encryption": True, "controller_read_back_exact_byte_hash_after_age_encryption": True, "raw_repo_tags_are_not_authorization": True},
             "object_storage_export_required": {"transport": "private_versioned_age_only", "create_only": True, "read_back_same_version_id": True, "direct_webapp_fi_to_webapp_ir_transfer": False},
             "source_signing_public_key_base64": self.fi_public,
             "source_signing_key_id": portable.public_key_id(self.fi_public),
@@ -470,12 +532,14 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
             expected_campaign_id=CAMPAIGN,
             expected_application={"release_sha": self.release, "expected_alembic_revision": REVISION},
             expected_control_commit=self.control_commit,
-            expected_application_release_tree=attestation["application_release_tree"],
+            expected_application_release_tree=attestation["descriptor_claim"]["application_release_tree"],
+            expected_canonical_release_tree_sha256=attestation["descriptor_claim"]["canonical_release_tree_sha256"],
             expected_attestation_sha256=attestation["attestation_sha256"],
             expected_app_image_id=IMAGE_ID,
             expected_app_image_reference=IMAGE_REFERENCE,
+            verification_time=install.utc_now(),
         )
-        self.assertEqual(image_result["image"]["archive_sha256"], hashlib.sha256(archive_payload).hexdigest())
+        self.assertEqual(image_result["image_claim"]["archive_sha256"], hashlib.sha256(archive_payload).hexdigest())
 
     def test_static_asset_drift_blocks_attestation_without_docker(self):
         installed = self._install()
@@ -508,14 +572,14 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         with self.assertRaises(install.SourceAdoptionInstallError):
             self._enroll(installed, role_path, ssh_public, certificate)
 
-    def test_unexpected_sync_app_mount_blocks_before_schema_query(self):
+    def test_unexpected_sync_app_mount_blocks_without_data_capture(self):
         installed = self._install()
         runtime, role_path, ssh_public, static_path, certificate = self._runtime_and_config(installed)
         self._enroll(installed, role_path, ssh_public, certificate)
         containers = self._container_records(runtime)
         containers["fixture_sync"]["mounts"].append({"type": "bind", "source": str(runtime / "unreviewed"), "destination": "/app/unreviewed", "read_only": False})
         containers["fixture_sync"]["mounts"].sort(key=lambda item: (item["destination"], item["type"], str(item["source"])))
-        with patch.object(install, "_inspect_container", side_effect=lambda name: copy.deepcopy(containers[name])), patch.object(install, "_read_only_schema_observation", side_effect=AssertionError("mount validation should fail before DB query")):
+        with patch.object(install, "_inspect_container", side_effect=lambda name: copy.deepcopy(containers[name])):
             with self.assertRaises(install.SourceAdoptionInstallError):
                 install.attest_source_role(
                     install_receipt=installed["receipt_path"],
@@ -533,25 +597,13 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
                     apply=True,
                 )
 
-    def test_docker_archive_contract_binds_image_config_and_export_plan_never_inspects_docker(self):
-        config = b'{"architecture":"amd64"}'
-        image_id = "sha256:" + hashlib.sha256(config).hexdigest()
-        archive = self.root / "archive.tar"
-        with tarfile.open(archive, "w:") as output:
-            manifest = json.dumps([{"Config": image_id.removeprefix("sha256:") + ".json", "RepoTags": [IMAGE_REFERENCE], "Layers": ["layer.tar"]}], separators=(",", ":")).encode("utf-8")
-            for name, payload in (("manifest.json", manifest), (image_id.removeprefix("sha256:") + ".json", config), ("layer.tar", b"layer")):
-                item = tarfile.TarInfo(name)
-                item.size = len(payload)
-                output.addfile(item, io.BytesIO(payload))
-        os.chmod(archive, 0o600)
-        info = install._verify_docker_save_archive(archive=archive, expected_image_id=image_id)
-        self.assertEqual(info["docker_config_sha256"], image_id.removeprefix("sha256:"))
+    def test_exact_byte_export_plan_never_invokes_docker_and_requires_revalidation_inputs(self):
         installed = self._install()
         runtime, role_path, ssh_public, static_path, certificate = self._runtime_and_config(installed)
         self._enroll(installed, role_path, ssh_public, certificate)
         containers = self._container_records(runtime)
         image = {"image_id": IMAGE_ID, "image_reference": IMAGE_REFERENCE, "repo_tags": [IMAGE_REFERENCE], "repo_digests": []}
-        with patch.object(install, "_inspect_container", side_effect=lambda name: copy.deepcopy(containers[name])), patch.object(install, "_inspect_image", return_value=image), patch.object(install, "_read_only_schema_observation", return_value={"observed_alembic_revision": REVISION, "capture_role_verified_read_only": True}):
+        with patch.object(install, "_inspect_container", side_effect=lambda name: copy.deepcopy(containers[name])), patch.object(install, "_inspect_image", return_value=image):
             attestation = install.attest_source_role(
                 install_receipt=installed["receipt_path"], source_role_config=role_path, signer_enrollment_receipt=Path(installed["candidate"]) / "enrollments" / f"{CAMPAIGN}.json", signer_enrollment_certificate=certificate, ssh_host_public_key_file=ssh_public, runtime_source_root=runtime, static_assets_descriptor=static_path, pinned_controller_public_key_base64=self.controller_public, campaign_id=CAMPAIGN, expected_app_image_id=IMAGE_ID, expected_app_image_reference=IMAGE_REFERENCE, attestation_id="attestation-export-plan", apply=True,
             )
@@ -559,9 +611,29 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         parent.mkdir(mode=0o700)
         with patch.object(install, "_inspect_container", side_effect=AssertionError("export plan touched Docker")):
             plan = install.export_actual_fi_image(
-                attestation=Path(attestation["attestation_path"]), source_role_config=role_path, pinned_source_signing_public_key_base64=self.fi_public, expected_campaign_id=CAMPAIGN, expected_application={"release_sha": self.release, "expected_alembic_revision": REVISION}, expected_control_commit=self.control_commit, expected_app_image_id=IMAGE_ID, expected_app_image_reference=IMAGE_REFERENCE, destination=parent / "fresh", export_id="export-one", apply=False,
+                attestation=Path(attestation["attestation_path"]),
+                source_role_config=role_path,
+                signer_enrollment_receipt=Path(installed["candidate"]) / "enrollments" / f"{CAMPAIGN}.json",
+                signer_enrollment_certificate=certificate,
+                ssh_host_public_key_file=ssh_public,
+                runtime_source_root=runtime,
+                static_assets_descriptor=static_path,
+                pinned_controller_public_key_base64=self.controller_public,
+                pinned_source_signing_public_key_base64=self.fi_public,
+                expected_campaign_id=CAMPAIGN,
+                expected_application={"release_sha": self.release, "expected_alembic_revision": REVISION},
+                expected_control_commit=self.control_commit,
+                expected_canonical_release_tree_sha256=attestation["descriptor_claim"]["canonical_release_tree_sha256"],
+                expected_app_image_id=IMAGE_ID,
+                expected_app_image_reference=IMAGE_REFERENCE,
+                destination=parent / "fresh",
+                export_id="export-one",
+                apply=False,
             )
         self.assertTrue(plan["object_storage_export_required"]["create_only"])
+        self.assertTrue(plan["revalidate_projection_static_containers_before_and_after_docker_save"])
+        self.assertTrue(plan["exact_bytes_only_unparsed_archive"])
+        self.assertFalse(plan["loadability_claimed"])
 
 
 if __name__ == "__main__":

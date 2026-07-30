@@ -510,7 +510,6 @@ def _validate_contract(payload: bytes) -> dict[str, Any]:
     expected_material = [
         "fresh_webapp_fi_bootstrap_age_identity",
         "separately_authorized_webapp_fi_source_signing_key_enrollment",
-        "root_only_read_only_database_capture_reference",
         "wa_ir_public_age_recipient",
         "ephemeral_version_bound_object_storage_control",
     ]
@@ -934,7 +933,6 @@ def build_contract(
         "external_material": [
             "fresh_webapp_fi_bootstrap_age_identity",
             "separately_authorized_webapp_fi_source_signing_key_enrollment",
-            "root_only_read_only_database_capture_reference",
             "wa_ir_public_age_recipient",
             "ephemeral_version_bound_object_storage_control",
         ],

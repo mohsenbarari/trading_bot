@@ -26,6 +26,7 @@ from pathlib import Path, PurePosixPath
 import re
 import stat
 import subprocess
+import sys
 import tarfile
 from typing import Any, Mapping, Sequence
 
@@ -35,19 +36,20 @@ CONTRACT_SCHEMA = "gold-trade-webapp-fi-source-adoption-contract-v1"
 PREPARATION_RECEIPT_SCHEMA = "gold-trade-webapp-fi-source-adoption-preparation-v1"
 DELIVERY_RECEIPT_SCHEMA = "gold-trade-webapp-fi-source-adoption-delivery-v1"
 INSTALL_RECEIPT_SCHEMA = "gold-trade-webapp-fi-source-adoption-install-receipt-v1"
-ATTESTATION_SCHEMA = "gold-trade-webapp-fi-source-role-attestation-v1"
-IMAGE_EXPORT_RECEIPT_SCHEMA = "gold-trade-webapp-fi-source-image-export-receipt-v1"
-SOURCE_ROLE_CONFIG_SCHEMA = "gold-trade-webapp-fi-source-role-config-v1"
+ATTESTATION_SCHEMA = "gold-trade-webapp-fi-source-role-attestation-v2"
+IMAGE_EXPORT_RECEIPT_SCHEMA = "gold-trade-webapp-fi-source-image-export-receipt-v2"
+SOURCE_ROLE_CONFIG_SCHEMA = "gold-trade-webapp-fi-source-role-config-v2"
 STATIC_ASSET_PROOF_SCHEMA = "gold-trade-webapp-fi-static-asset-provenance-v1"
 DELIVERY_ENVELOPE_SCHEMA = "gold-trade-webapp-fi-source-adoption-delivery-envelope-v1"
-SIGNER_ENROLLMENT_CERTIFICATE_SCHEMA = "gold-trade-webapp-fi-source-signer-enrollment-certificate-v1"
-SIGNER_ENROLLMENT_RECEIPT_SCHEMA = "gold-trade-webapp-fi-source-signer-enrollment-receipt-v1"
+SIGNER_ENROLLMENT_CERTIFICATE_SCHEMA = "gold-trade-webapp-fi-source-signer-enrollment-certificate-v2"
+SIGNER_ENROLLMENT_RECEIPT_SCHEMA = "gold-trade-webapp-fi-source-signer-enrollment-receipt-v2"
+SIGNER_ENROLLMENT_CONSUMPTION_SCHEMA = "gold-trade-webapp-fi-source-signer-enrollment-consumption-v2"
 
-ATTESTATION_SIGNATURE_DOMAIN = b"gold-trade-webapp-fi-source-role-attestation-v1\x00"
-IMAGE_EXPORT_SIGNATURE_DOMAIN = b"gold-trade-webapp-fi-source-image-export-v1\x00"
+ATTESTATION_SIGNATURE_DOMAIN = b"gold-trade-webapp-fi-source-role-attestation-v2\x00"
+IMAGE_EXPORT_SIGNATURE_DOMAIN = b"gold-trade-webapp-fi-source-image-export-v2\x00"
 STATIC_ASSET_SIGNATURE_DOMAIN = b"gold-trade-webapp-fi-static-asset-provenance-v1\x00"
 DELIVERY_ENVELOPE_SIGNATURE_DOMAIN = b"gold-trade-webapp-fi-source-adoption-delivery-envelope-v1\x00"
-SIGNER_ENROLLMENT_SIGNATURE_DOMAIN = b"gold-trade-webapp-fi-source-signer-enrollment-v1\x00"
+SIGNER_ENROLLMENT_SIGNATURE_DOMAIN = b"gold-trade-webapp-fi-source-signer-enrollment-v2\x00"
 
 PACKAGE_ARCHIVE_NAME = "webapp-fi-source-adoption.tar"
 PACKAGE_MANIFEST_MEMBER = "source-adoption-package.json"
@@ -65,6 +67,8 @@ MAX_PACKAGE_MEMBER_BYTES = 8 * 1024 * 1024
 MAX_RECEIPT_BYTES = 8 * 1024 * 1024
 MAX_CANONICAL_RELEASE_FILES = 100_000
 MAX_IMAGE_EXPORT_BYTES = 100 * 1024 * 1024 * 1024
+MAX_ENROLLMENT_CERTIFICATE_LIFETIME_SECONDS = 60 * 60
+MAX_OBSERVATION_AGE_SECONDS = 15 * 60
 
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 RELEASE_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -77,6 +81,7 @@ IMAGE_REFERENCE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/@:-]{0,511}$")
 OBJECT_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/=-]{2,1023}$")
 CAMPAIGN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$")
 AGE_RECIPIENT_RE = re.compile(r"^age1[ac-hj-np-z02-9]{20,128}$")
+UTC_TIMESTAMP_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 
 RUNTIME_CODE_PROJECTION_RELATIVES = (
     "api",
@@ -138,7 +143,7 @@ def sha256_file(path: Path) -> tuple[str, int]:
 
 
 def utc_now() -> str:
-    return dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+    return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _require_absolute(path: Path, *, field: str) -> Path:
@@ -343,7 +348,6 @@ def _validate_contract(payload: bytes) -> dict[str, Any]:
     if contract.get("external_material") != [
         "fresh_webapp_fi_bootstrap_age_identity",
         "separately_authorized_webapp_fi_source_signing_key_enrollment",
-        "root_only_read_only_database_capture_reference",
         "wa_ir_public_age_recipient",
         "ephemeral_version_bound_object_storage_control",
     ]:
@@ -1272,18 +1276,72 @@ def _validate_signer_enrollment_certificate(
     installed: Mapping[str, Any],
     role_config: Mapping[str, Any],
     ssh_host_public_key_file: Path,
+    verification_time: str | None = None,
 ) -> dict[str, Any]:
+    """Validate one controller-authorized, short-lived FI signing enrollment.
+
+    The certificate intentionally binds every locally observed input that the
+    source key may later sign.  It is not a generic trust-on-first-use key
+    enrollment and it is not reusable once consumed below the local staging
+    root.
+    """
+
     value, raw = _read_private_json(certificate, field="WebApp-FI signer enrollment certificate")
     expected = {
-        "schema", "status", "campaign_id", "source_site", "destination_site", "package_id", "application",
-        "fi_ssh_host_public_key_sha256", "source_signing_public_key_base64", "controller_public_key_base64", "controller_signature",
+        "schema", "status", "certificate_id", "operation_id", "issued_at", "not_before", "not_after",
+        "campaign_id", "source_site", "destination_site", "package_id", "application", "tooling",
+        "canonical_release_tree_sha256", "source_adoption_install_receipt_sha256", "delivery_envelope_sha256",
+        "source_adoption_object", "fi_bootstrap_recipient", "fi_ssh_host_public_key_sha256",
+        "source_signing_public_key_base64", "source_signing_key_id", "controller_public_key_base64",
+        "controller_key_id", "controller_signature",
     }
     if set(value) != expected or value.get("schema") != SIGNER_ENROLLMENT_CERTIFICATE_SCHEMA or value.get("status") != "issued":
         raise SourceAdoptionInstallError("WebApp-FI signer enrollment certificate is unsupported")
+    certificate_id = _require_attestation_id(value.get("certificate_id"))
+    operation_id = _require_attestation_id(value.get("operation_id"))
+    issued_at = _parse_utc_timestamp(value.get("issued_at"), field="WebApp-FI signer enrollment certificate issued_at")
+    not_before = _parse_utc_timestamp(value.get("not_before"), field="WebApp-FI signer enrollment certificate not_before")
+    not_after = _parse_utc_timestamp(value.get("not_after"), field="WebApp-FI signer enrollment certificate not_after")
+    now = _parse_utc_timestamp(verification_time or utc_now(), field="WebApp-FI signer enrollment verification time")
+    if issued_at > not_before or not_before > not_after or (not_after - issued_at).total_seconds() > MAX_ENROLLMENT_CERTIFICATE_LIFETIME_SECONDS:
+        raise SourceAdoptionInstallError("WebApp-FI signer enrollment certificate lifetime is invalid")
+    if now < not_before or now > not_after:
+        raise SourceAdoptionInstallError("WebApp-FI signer enrollment certificate is not currently valid")
     if value.get("campaign_id") != campaign_id or value.get("source_site") != PACKAGE_DESTINATION_SITE or value.get("destination_site") != SNAPSHOT_DESTINATION_SITE:
         raise SourceAdoptionInstallError("WebApp-FI signer enrollment certificate binding is invalid")
-    if value.get("package_id") != installed["package_id"] or _require_application(value.get("application"), field="WebApp-FI signer enrollment certificate application") != installed["application"]:
+    if (
+        value.get("package_id") != installed["package_id"]
+        or _require_application(value.get("application"), field="WebApp-FI signer enrollment certificate application") != installed["application"]
+        or _require_tooling(value.get("tooling"), field="WebApp-FI signer enrollment certificate tooling") != installed["tooling"]
+        or _require_sha256(value.get("canonical_release_tree_sha256"), field="WebApp-FI signer enrollment certificate descriptor sha256") != installed["canonical_release_tree_sha256"]
+        or _require_sha256(value.get("source_adoption_install_receipt_sha256"), field="WebApp-FI signer enrollment certificate install receipt sha256") != installed["receipt_sha256"]
+        or _require_sha256(value.get("delivery_envelope_sha256"), field="WebApp-FI signer enrollment certificate delivery envelope sha256") != installed["package"]["delivery_envelope_sha256"]
+    ):
         raise SourceAdoptionInstallError("WebApp-FI signer enrollment certificate package binding is invalid")
+    object_value = value.get("source_adoption_object")
+    object_expected = {"object_key", "version_id", "ciphertext_sha256", "ciphertext_bytes", "plaintext_sha256", "plaintext_bytes"}
+    if not isinstance(object_value, Mapping) or set(object_value) != object_expected:
+        raise SourceAdoptionInstallError("WebApp-FI signer enrollment certificate object binding is invalid")
+    normalized_object = {
+        "object_key": object_value.get("object_key"),
+        "version_id": object_value.get("version_id"),
+        "ciphertext_sha256": _require_sha256(object_value.get("ciphertext_sha256"), field="WebApp-FI signer enrollment certificate ciphertext sha256"),
+        "ciphertext_bytes": _require_size(object_value.get("ciphertext_bytes"), field="WebApp-FI signer enrollment certificate ciphertext bytes", maximum=MAX_ARCHIVE_BYTES + 1024 * 1024),
+        "plaintext_sha256": _require_sha256(object_value.get("plaintext_sha256"), field="WebApp-FI signer enrollment certificate plaintext sha256"),
+        "plaintext_bytes": _require_size(object_value.get("plaintext_bytes"), field="WebApp-FI signer enrollment certificate plaintext bytes", maximum=MAX_ARCHIVE_BYTES),
+    }
+    if not isinstance(normalized_object["object_key"], str) or not OBJECT_KEY_RE.fullmatch(normalized_object["object_key"]) or not isinstance(normalized_object["version_id"], str) or not normalized_object["version_id"] or len(normalized_object["version_id"]) > 1024:
+        raise SourceAdoptionInstallError("WebApp-FI signer enrollment certificate object binding is invalid")
+    expected_object = {
+        "object_key": installed["package"]["object_key"],
+        "version_id": installed["package"]["version_id"],
+        "ciphertext_sha256": installed["package"]["ciphertext_sha256"],
+        "ciphertext_bytes": installed["package"]["ciphertext_bytes"],
+        "plaintext_sha256": installed["package"]["archive_sha256"],
+        "plaintext_bytes": installed["package"]["archive_bytes"],
+    }
+    if normalized_object != expected_object or value.get("fi_bootstrap_recipient") != installed["package"]["fi_bootstrap_recipient"]:
+        raise SourceAdoptionInstallError("WebApp-FI signer enrollment certificate delivery target is invalid")
     ssh_public = require_root_only_file(ssh_host_public_key_file, field="WebApp-FI SSH host public key")
     if _require_sha256(value.get("fi_ssh_host_public_key_sha256"), field="WebApp-FI signer enrollment certificate SSH host key sha256") != sha256_file(ssh_public)[0]:
         raise SourceAdoptionInstallError("WebApp-FI signer enrollment certificate is not bound to this SSH host identity")
@@ -1294,7 +1352,9 @@ def _validate_signer_enrollment_certificate(
     del signer
     if local_public != certificate_public:
         raise SourceAdoptionInstallError("WebApp-FI signer enrollment certificate does not bind the local key")
-    if value.get("controller_public_key_base64") != pinned_controller_public_key_base64:
+    if value.get("source_signing_key_id") != _public_key_id(certificate_public):
+        raise SourceAdoptionInstallError("WebApp-FI signer enrollment certificate source key ID is invalid")
+    if value.get("controller_public_key_base64") != pinned_controller_public_key_base64 or value.get("controller_key_id") != _public_key_id(pinned_controller_public_key_base64):
         raise SourceAdoptionInstallError("WebApp-FI signer enrollment certificate controller key is not pinned")
     signature = value.get("controller_signature")
     if not isinstance(signature, Mapping) or set(signature) != {"algorithm", "signature_base64"} or signature.get("algorithm") != "ed25519":
@@ -1307,9 +1367,17 @@ def _validate_signer_enrollment_certificate(
     )
     return {
         "campaign_id": campaign_id,
+        "certificate_id": certificate_id,
+        "operation_id": operation_id,
+        "not_after": value["not_after"],
         "source_signing_public_key_base64": certificate_public,
+        "source_signing_key_id": value["source_signing_key_id"],
         "certificate_sha256": sha256_bytes(raw),
         "controller_public_key_base64": pinned_controller_public_key_base64,
+        "controller_key_id": value["controller_key_id"],
+        "delivery_envelope_sha256": value["delivery_envelope_sha256"],
+        "source_adoption_object": normalized_object,
+        "fi_bootstrap_recipient": value["fi_bootstrap_recipient"],
     }
 
 
@@ -1492,8 +1560,8 @@ def _require_container_name(value: object, *, field: str) -> str:
 def load_source_role_config(path: Path, *, expected_application: Mapping[str, str]) -> dict[str, Any]:
     value, raw = _read_private_json(path, field="WebApp-FI source role config")
     expected = {
-        "schema", "source_site", "destination_site", "application", "database_container", "application_container",
-        "sync_worker_container", "read_only_capture_env_file", "source_signing_private_key_file",
+        "schema", "source_site", "destination_site", "application", "application_container",
+        "sync_worker_container", "source_signing_private_key_file",
     }
     if set(value) != expected or value.get("schema") != SOURCE_ROLE_CONFIG_SCHEMA:
         raise SourceAdoptionInstallError("WebApp-FI source role config is unsupported")
@@ -1502,91 +1570,16 @@ def load_source_role_config(path: Path, *, expected_application: Mapping[str, st
     application = _require_application(value.get("application"), field="WebApp-FI source role config application")
     if application != dict(expected_application):
         raise SourceAdoptionInstallError("WebApp-FI source role config application binding is unexpected")
-    reader_env = value.get("read_only_capture_env_file")
     signer = value.get("source_signing_private_key_file")
-    if not isinstance(reader_env, str) or not reader_env.startswith("/") or not isinstance(signer, str) or not signer.startswith("/"):
+    if not isinstance(signer, str) or not signer.startswith("/"):
         raise SourceAdoptionInstallError("WebApp-FI source role config private reference is invalid")
     return {
         "path": require_root_only_file(path, field="WebApp-FI source role config"),
         "sha256": sha256_bytes(raw),
-        "database_container": _require_container_name(value.get("database_container"), field="WebApp-FI database container"),
         "application_container": _require_container_name(value.get("application_container"), field="WebApp-FI application container"),
         "sync_worker_container": _require_container_name(value.get("sync_worker_container"), field="WebApp-FI sync worker container"),
-        "read_only_capture_env_file": require_root_only_file(Path(reader_env), field="WebApp-FI read-only capture env"),
         "source_signing_private_key_file": require_root_only_file(Path(signer), field="WebApp-FI source signing private key", maximum_bytes=32),
     }
-
-
-def _load_read_only_capture_credentials(path: Path) -> tuple[str, bytes]:
-    raw = require_root_only_file(path, field="WebApp-FI read-only capture env").read_text(encoding="utf-8")
-    values: dict[str, str] = {}
-    for number, line in enumerate(raw.splitlines(), 1):
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" not in line:
-            raise SourceAdoptionInstallError(f"WebApp-FI read-only capture env line {number} is malformed")
-        key, value = line.split("=", 1)
-        key = key.strip()
-        if not re.fullmatch(r"[A-Z][A-Z0-9_]*", key) or key in values:
-            raise SourceAdoptionInstallError("WebApp-FI read-only capture env is invalid")
-        values[key] = value.strip().strip("'\"")
-    user = values.get("CAPTURE_DB_USER", "")
-    password = values.get("CAPTURE_DB_PASSWORD", "")
-    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_$]{0,62}", user) or not password or "\n" in password or "\r" in password:
-        raise SourceAdoptionInstallError("WebApp-FI read-only capture credentials are invalid")
-    return user, (password + "\n").encode("utf-8")
-
-
-def _run_read_only_db_query(*, database_container: str, user: str, password: bytes, query: str) -> str:
-    docker = _require_trusted_executable(Path("/usr/bin/docker"), field="docker")
-    command = [
-        str(docker), "exec", "-i", "-e", f"CAPTURE_DB_USER={user}", database_container, "sh", "-ec",
-        "IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -v ON_ERROR_STOP=1 -U \"$CAPTURE_DB_USER\" -d \"$POSTGRES_DB\" -tAc \"" + query + "\"",
-    ]
-    try:
-        result = subprocess.run(
-            command,
-            input=password,
-            stdin=None,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            env=_docker_environment(),
-            timeout=60,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise SourceAdoptionInstallError("WebApp-FI read-only database query could not start") from exc
-    if result.returncode != 0:
-        raise SourceAdoptionInstallError("WebApp-FI read-only database query failed")
-    try:
-        return result.stdout.decode("utf-8", errors="strict").strip()
-    except UnicodeDecodeError as exc:
-        raise SourceAdoptionInstallError("WebApp-FI read-only database query returned invalid output") from exc
-
-
-def _read_only_schema_observation(role_config: Mapping[str, Any], expected: Mapping[str, str]) -> dict[str, Any]:
-    user, password = _load_read_only_capture_credentials(role_config["read_only_capture_env_file"])
-    read_only_query = (
-        "WITH candidate_tables AS (SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
-        "WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND c.relkind IN ('r','p','v','m','f')) "
-        "SELECT CASE WHEN NOT (SELECT rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls FROM pg_roles WHERE rolname=current_user) "
-        "AND NOT has_database_privilege(current_user,current_database(),'CREATE') AND NOT EXISTS (SELECT 1 FROM candidate_tables WHERE "
-        "has_table_privilege(current_user,oid,'INSERT') OR has_table_privilege(current_user,oid,'UPDATE') OR has_table_privilege(current_user,oid,'DELETE') OR "
-        "has_table_privilege(current_user,oid,'TRUNCATE') OR has_table_privilege(current_user,oid,'REFERENCES') OR has_table_privilege(current_user,oid,'TRIGGER')) "
-        "THEN 'read_only' ELSE 'write_capable' END;"
-    )
-    if _run_read_only_db_query(database_container=role_config["database_container"], user=user, password=password, query=read_only_query) != "read_only":
-        raise SourceAdoptionInstallError("WebApp-FI capture role is not read-only")
-    revision = _run_read_only_db_query(
-        database_container=role_config["database_container"],
-        user=user,
-        password=password,
-        query="SELECT version_num FROM alembic_version LIMIT 1;",
-    ).lower()
-    if revision != expected["expected_alembic_revision"]:
-        raise SourceAdoptionInstallError("WebApp-FI observed Alembic revision does not match the installed application release")
-    return {"observed_alembic_revision": revision, "capture_role_verified_read_only": True}
 
 
 def _write_attestation(candidate: Path, *, attestation_id: str, value: Mapping[str, Any]) -> Path:
@@ -1609,14 +1602,30 @@ def _require_attestation_id(value: object) -> str:
     return value
 
 
-def _require_timestamp(value: object, *, field: str) -> str:
-    if not isinstance(value, str) or not value.endswith("Z"):
+def _parse_utc_timestamp(value: object, *, field: str) -> dt.datetime:
+    """Accept exactly a whole-second UTC RFC3339 timestamp.
+
+    Signed operation artifacts must not accept offset aliases, fractional
+    precision ambiguity, or timezone-naive values.  Returning the parsed
+    instant keeps all lifetime checks on one representation.
+    """
+
+    if not isinstance(value, str) or not UTC_TIMESTAMP_RE.fullmatch(value):
         raise SourceAdoptionInstallError(f"{field} is invalid")
     try:
-        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = dt.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc)
     except ValueError as exc:
         raise SourceAdoptionInstallError(f"{field} is invalid") from exc
-    if parsed.tzinfo is None:
+    return parsed
+
+
+def _require_timestamp(value: object, *, field: str) -> str:
+    _parse_utc_timestamp(value, field=field)
+    return value
+
+
+def _require_positive_seconds(value: object, *, field: str, maximum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= maximum:
         raise SourceAdoptionInstallError(f"{field} is invalid")
     return value
 
@@ -1738,6 +1747,86 @@ def _write_enrollment(candidate: Path, *, campaign_id: str, value: Mapping[str, 
     return require_root_only_file(path, field="source-adoption signer enrollment")
 
 
+def _certificate_consumption_path(*, candidate: Path, certificate_id: str, create_directory: bool) -> Path:
+    """Return the staging-root-local, create-only certificate consumption path."""
+
+    _require_attestation_id(certificate_id)
+    staging_root = require_root_only_directory(candidate.parent, field="source-adoption staging root")
+    directory = staging_root / "certificate-consumptions"
+    if create_directory and not directory.exists():
+        _create_directory(directory)
+    if directory.exists() or directory.is_symlink():
+        directory = require_root_only_directory(directory, field="source-adoption certificate consumption directory")
+    return directory / f"{certificate_id}.json"
+
+
+def _validate_certificate_consumption(
+    *,
+    path: Path,
+    certificate_value: Mapping[str, Any],
+    certificate_sha256: str,
+    candidate: Path,
+    campaign_id: str,
+) -> dict[str, Any]:
+    value, raw = _read_private_json(path, field="WebApp-FI signer enrollment certificate consumption")
+    expected = {
+        "schema", "status", "consumed_at", "certificate_id", "operation_id", "certificate_sha256",
+        "candidate_directory", "campaign_id", "source_signing_key_id", "receipt_sha256",
+    }
+    if set(value) != expected or value.get("schema") != SIGNER_ENROLLMENT_CONSUMPTION_SCHEMA or value.get("status") != "consumed":
+        raise SourceAdoptionInstallError("WebApp-FI signer enrollment certificate consumption is unsupported")
+    _parse_utc_timestamp(value.get("consumed_at"), field="WebApp-FI signer enrollment certificate consumption timestamp")
+    receipt_sha = _require_sha256(value.get("receipt_sha256"), field="WebApp-FI signer enrollment certificate consumption receipt sha256")
+    if sha256_bytes(canonical_json_bytes({key: item for key, item in value.items() if key != "receipt_sha256"})) != receipt_sha:
+        raise SourceAdoptionInstallError("WebApp-FI signer enrollment certificate consumption receipt hash is invalid")
+    if (
+        value.get("certificate_id") != certificate_value["certificate_id"]
+        or value.get("operation_id") != certificate_value["operation_id"]
+        or _require_sha256(value.get("certificate_sha256"), field="WebApp-FI signer enrollment certificate consumption certificate sha256") != certificate_sha256
+        or value.get("candidate_directory") != str(candidate)
+        or value.get("campaign_id") != campaign_id
+        or value.get("source_signing_key_id") != certificate_value["source_signing_key_id"]
+    ):
+        raise SourceAdoptionInstallError("WebApp-FI signer enrollment certificate consumption binding is invalid")
+    return {"path": path, "sha256": sha256_bytes(raw)}
+
+
+def _consume_enrollment_certificate(
+    *,
+    candidate: Path,
+    certificate_value: Mapping[str, Any],
+    certificate_sha256: str,
+    campaign_id: str,
+) -> dict[str, Any]:
+    path = _certificate_consumption_path(
+        candidate=candidate,
+        certificate_id=certificate_value["certificate_id"],
+        create_directory=True,
+    )
+    if path.exists() or path.is_symlink():
+        raise SourceAdoptionInstallError("WebApp-FI signer enrollment certificate was already consumed locally")
+    receipt: dict[str, Any] = {
+        "schema": SIGNER_ENROLLMENT_CONSUMPTION_SCHEMA,
+        "status": "consumed",
+        "consumed_at": utc_now(),
+        "certificate_id": certificate_value["certificate_id"],
+        "operation_id": certificate_value["operation_id"],
+        "certificate_sha256": certificate_sha256,
+        "candidate_directory": str(candidate),
+        "campaign_id": campaign_id,
+        "source_signing_key_id": certificate_value["source_signing_key_id"],
+    }
+    receipt["receipt_sha256"] = sha256_bytes(canonical_json_bytes(receipt))
+    _write_new_private_json(path, receipt)
+    return _validate_certificate_consumption(
+        path=path,
+        certificate_value=certificate_value,
+        certificate_sha256=certificate_sha256,
+        candidate=candidate,
+        campaign_id=campaign_id,
+    )
+
+
 def verify_source_signer_enrollment(
     *,
     enrollment_receipt: Path,
@@ -1747,9 +1836,17 @@ def verify_source_signer_enrollment(
     ssh_host_public_key_file: Path,
     pinned_controller_public_key_base64: str,
     campaign_id: str,
+    verification_time: str | None = None,
 ) -> dict[str, Any]:
     value, raw = _read_private_json(enrollment_receipt, field="WebApp-FI source signer enrollment receipt")
-    expected = {"schema", "status", "enrolled_at", "candidate_directory", "campaign_id", "source_site", "destination_site", "package_id", "application", "tooling", "source_role_config_sha256", "fi_ssh_host_public_key_sha256", "certificate_sha256", "controller_public_key_base64", "source_signing_public_key_base64", "receipt_sha256"}
+    expected = {
+        "schema", "status", "enrolled_at", "candidate_directory", "campaign_id", "source_site",
+        "destination_site", "package_id", "application", "tooling", "canonical_release_tree_sha256",
+        "source_adoption_install_receipt_sha256", "delivery_envelope_sha256", "certificate_id", "operation_id",
+        "certificate_sha256", "certificate_consumption_sha256", "source_role_config_sha256",
+        "fi_ssh_host_public_key_sha256", "controller_public_key_base64", "controller_key_id",
+        "source_signing_public_key_base64", "source_signing_key_id", "not_after", "receipt_sha256",
+    }
     if set(value) != expected or value.get("schema") != SIGNER_ENROLLMENT_RECEIPT_SCHEMA or value.get("status") != "enrolled":
         raise SourceAdoptionInstallError("WebApp-FI source signer enrollment receipt is unsupported")
     _require_timestamp(value.get("enrolled_at"), field="WebApp-FI source signer enrollment receipt timestamp")
@@ -1762,13 +1859,52 @@ def verify_source_signer_enrollment(
         raise SourceAdoptionInstallError("WebApp-FI source signer enrollment receipt is not candidate-bound")
     if value.get("campaign_id") != campaign_id or value.get("source_site") != PACKAGE_DESTINATION_SITE or value.get("destination_site") != SNAPSHOT_DESTINATION_SITE:
         raise SourceAdoptionInstallError("WebApp-FI source signer enrollment receipt binding is invalid")
-    if value.get("package_id") != installed["package_id"] or _require_application(value.get("application"), field="WebApp-FI source signer enrollment receipt application") != installed["application"] or _require_tooling(value.get("tooling"), field="WebApp-FI source signer enrollment receipt tooling") != installed["tooling"]:
+    if (
+        value.get("package_id") != installed["package_id"]
+        or _require_application(value.get("application"), field="WebApp-FI source signer enrollment receipt application") != installed["application"]
+        or _require_tooling(value.get("tooling"), field="WebApp-FI source signer enrollment receipt tooling") != installed["tooling"]
+        or _require_sha256(value.get("canonical_release_tree_sha256"), field="WebApp-FI source signer enrollment receipt descriptor sha256") != installed["canonical_release_tree_sha256"]
+        or _require_sha256(value.get("source_adoption_install_receipt_sha256"), field="WebApp-FI source signer enrollment receipt install receipt sha256") != installed["receipt_sha256"]
+        or _require_sha256(value.get("delivery_envelope_sha256"), field="WebApp-FI source signer enrollment receipt delivery envelope sha256") != installed["package"]["delivery_envelope_sha256"]
+    ):
         raise SourceAdoptionInstallError("WebApp-FI source signer enrollment receipt release binding is invalid")
-    certificate_value = _validate_signer_enrollment_certificate(certificate=certificate, pinned_controller_public_key_base64=pinned_controller_public_key_base64, campaign_id=campaign_id, installed=installed, role_config=role_config, ssh_host_public_key_file=ssh_host_public_key_file)
+    certificate_value = _validate_signer_enrollment_certificate(
+        certificate=certificate,
+        pinned_controller_public_key_base64=pinned_controller_public_key_base64,
+        campaign_id=campaign_id,
+        installed=installed,
+        role_config=role_config,
+        ssh_host_public_key_file=ssh_host_public_key_file,
+        verification_time=verification_time,
+    )
     ssh_hash = sha256_file(require_root_only_file(ssh_host_public_key_file, field="WebApp-FI SSH host public key"))[0]
-    if value.get("source_role_config_sha256") != role_config["sha256"] or value.get("fi_ssh_host_public_key_sha256") != ssh_hash or value.get("certificate_sha256") != certificate_value["certificate_sha256"] or value.get("controller_public_key_base64") != pinned_controller_public_key_base64 or value.get("source_signing_public_key_base64") != certificate_value["source_signing_public_key_base64"]:
+    consumption_path = _certificate_consumption_path(
+        candidate=candidate,
+        certificate_id=certificate_value["certificate_id"],
+        create_directory=False,
+    )
+    consumption = _validate_certificate_consumption(
+        path=consumption_path,
+        certificate_value=certificate_value,
+        certificate_sha256=certificate_value["certificate_sha256"],
+        candidate=candidate,
+        campaign_id=campaign_id,
+    )
+    if (
+        value.get("certificate_id") != certificate_value["certificate_id"]
+        or value.get("operation_id") != certificate_value["operation_id"]
+        or value.get("source_role_config_sha256") != role_config["sha256"]
+        or value.get("fi_ssh_host_public_key_sha256") != ssh_hash
+        or value.get("certificate_sha256") != certificate_value["certificate_sha256"]
+        or value.get("certificate_consumption_sha256") != consumption["sha256"]
+        or value.get("controller_public_key_base64") != pinned_controller_public_key_base64
+        or value.get("controller_key_id") != certificate_value["controller_key_id"]
+        or value.get("source_signing_public_key_base64") != certificate_value["source_signing_public_key_base64"]
+        or value.get("source_signing_key_id") != certificate_value["source_signing_key_id"]
+        or value.get("not_after") != certificate_value["not_after"]
+    ):
         raise SourceAdoptionInstallError("WebApp-FI source signer enrollment receipt does not match trusted enrollment material")
-    return {"status": "verified", "receipt_sha256": sha256_bytes(raw), **certificate_value}
+    return {"status": "verified", "receipt_sha256": sha256_bytes(raw), "certificate_consumption_sha256": consumption["sha256"], **certificate_value}
 
 
 def enroll_source_signer(
@@ -1780,6 +1916,7 @@ def enroll_source_signer(
     pinned_controller_public_key_base64: str,
     campaign_id: str,
     apply: bool,
+    verification_time: str | None = None,
 ) -> dict[str, Any]:
     _require_root_execution()
     installed = verify_installed_source_adoption(install_receipt)
@@ -1787,18 +1924,87 @@ def enroll_source_signer(
     if installed["campaign_id"] != campaign_id or installed["package"]["controller_public_key_base64"] != pinned_controller_public_key_base64:
         raise SourceAdoptionInstallError("WebApp-FI signer enrollment controller or campaign is not bound to the installed package")
     role_config = load_source_role_config(source_role_config, expected_application=installed["application"])
-    certificate_value = _validate_signer_enrollment_certificate(certificate=certificate, pinned_controller_public_key_base64=pinned_controller_public_key_base64, campaign_id=campaign_id, installed=installed, role_config=role_config, ssh_host_public_key_file=ssh_host_public_key_file)
+    certificate_value = _validate_signer_enrollment_certificate(
+        certificate=certificate,
+        pinned_controller_public_key_base64=pinned_controller_public_key_base64,
+        campaign_id=campaign_id,
+        installed=installed,
+        role_config=role_config,
+        ssh_host_public_key_file=ssh_host_public_key_file,
+        verification_time=verification_time,
+    )
     path = installed["candidate"] / "enrollments" / f"{campaign_id}.json"
-    plan = {"schema": SIGNER_ENROLLMENT_RECEIPT_SCHEMA, "status": "planned" if not apply else "enrolling", "candidate_directory": str(installed["candidate"]), "campaign_id": campaign_id, "certificate_sha256": certificate_value["certificate_sha256"], "source_signing_public_key_base64": certificate_value["source_signing_public_key_base64"], "private_key_creation": False, "current_changed": False, "service_changed": False, "container_changed": False, "volume_changed": False, "application_data_changed": False}
+    consumption_path = _certificate_consumption_path(
+        candidate=installed["candidate"],
+        certificate_id=certificate_value["certificate_id"],
+        create_directory=False,
+    )
+    plan = {
+        "schema": SIGNER_ENROLLMENT_RECEIPT_SCHEMA,
+        "status": "planned" if not apply else "enrolling",
+        "candidate_directory": str(installed["candidate"]),
+        "campaign_id": campaign_id,
+        "certificate_id": certificate_value["certificate_id"],
+        "operation_id": certificate_value["operation_id"],
+        "certificate_sha256": certificate_value["certificate_sha256"],
+        "certificate_consumption_path": str(consumption_path),
+        "source_signing_public_key_base64": certificate_value["source_signing_public_key_base64"],
+        "private_key_creation": False,
+        "current_changed": False,
+        "service_changed": False,
+        "container_changed": False,
+        "volume_changed": False,
+        "application_data_changed": False,
+    }
     if not apply:
         return plan
     if path.exists() or path.is_symlink():
         raise SourceAdoptionInstallError("WebApp-FI source signer enrollment already exists")
+    consumption = _consume_enrollment_certificate(
+        candidate=installed["candidate"],
+        certificate_value=certificate_value,
+        certificate_sha256=certificate_value["certificate_sha256"],
+        campaign_id=campaign_id,
+    )
     ssh_hash = sha256_file(require_root_only_file(ssh_host_public_key_file, field="WebApp-FI SSH host public key"))[0]
-    receipt: dict[str, Any] = {"schema": SIGNER_ENROLLMENT_RECEIPT_SCHEMA, "status": "enrolled", "enrolled_at": utc_now(), "candidate_directory": str(installed["candidate"]), "campaign_id": campaign_id, "source_site": PACKAGE_DESTINATION_SITE, "destination_site": SNAPSHOT_DESTINATION_SITE, "package_id": installed["package_id"], "application": installed["application"], "tooling": installed["tooling"], "source_role_config_sha256": role_config["sha256"], "fi_ssh_host_public_key_sha256": ssh_hash, "certificate_sha256": certificate_value["certificate_sha256"], "controller_public_key_base64": pinned_controller_public_key_base64, "source_signing_public_key_base64": certificate_value["source_signing_public_key_base64"]}
+    receipt: dict[str, Any] = {
+        "schema": SIGNER_ENROLLMENT_RECEIPT_SCHEMA,
+        "status": "enrolled",
+        "enrolled_at": utc_now(),
+        "candidate_directory": str(installed["candidate"]),
+        "campaign_id": campaign_id,
+        "source_site": PACKAGE_DESTINATION_SITE,
+        "destination_site": SNAPSHOT_DESTINATION_SITE,
+        "package_id": installed["package_id"],
+        "application": installed["application"],
+        "tooling": installed["tooling"],
+        "canonical_release_tree_sha256": installed["canonical_release_tree_sha256"],
+        "source_adoption_install_receipt_sha256": installed["receipt_sha256"],
+        "delivery_envelope_sha256": installed["package"]["delivery_envelope_sha256"],
+        "certificate_id": certificate_value["certificate_id"],
+        "operation_id": certificate_value["operation_id"],
+        "certificate_sha256": certificate_value["certificate_sha256"],
+        "certificate_consumption_sha256": consumption["sha256"],
+        "source_role_config_sha256": role_config["sha256"],
+        "fi_ssh_host_public_key_sha256": ssh_hash,
+        "controller_public_key_base64": pinned_controller_public_key_base64,
+        "controller_key_id": certificate_value["controller_key_id"],
+        "source_signing_public_key_base64": certificate_value["source_signing_public_key_base64"],
+        "source_signing_key_id": certificate_value["source_signing_key_id"],
+        "not_after": certificate_value["not_after"],
+    }
     receipt["receipt_sha256"] = sha256_bytes(canonical_json_bytes(receipt))
     enrollment_path = _write_enrollment(installed["candidate"], campaign_id=campaign_id, value=receipt)
-    return verify_source_signer_enrollment(enrollment_receipt=enrollment_path, installed=installed, role_config=role_config, certificate=certificate, ssh_host_public_key_file=ssh_host_public_key_file, pinned_controller_public_key_base64=pinned_controller_public_key_base64, campaign_id=campaign_id)
+    return verify_source_signer_enrollment(
+        enrollment_receipt=enrollment_path,
+        installed=installed,
+        role_config=role_config,
+        certificate=certificate,
+        ssh_host_public_key_file=ssh_host_public_key_file,
+        pinned_controller_public_key_base64=pinned_controller_public_key_base64,
+        campaign_id=campaign_id,
+        verification_time=verification_time,
+    )
 
 
 def _validate_active_runtime_images(*, application: Mapping[str, Any], sync_worker: Mapping[str, Any], expected_image_id: str, expected_image_reference: str) -> dict[str, Any]:
@@ -1833,26 +2039,42 @@ def attest_source_role(
     enrollment = verify_source_signer_enrollment(enrollment_receipt=signer_enrollment_receipt, installed=installed, role_config=role_config, certificate=signer_enrollment_certificate, ssh_host_public_key_file=ssh_host_public_key_file, pinned_controller_public_key_base64=pinned_controller_public_key_base64, campaign_id=campaign_id)
     runtime_before = verify_canonical_runtime_projection(candidate=installed["candidate"], runtime_source_root=runtime_source_root, expected_application=installed["application"])
     static_before = _validate_static_assets_proof(static_assets_descriptor=static_assets_descriptor, runtime_source_root=runtime_source_root, expected_application=installed["application"], pinned_controller_public_key_base64=pinned_controller_public_key_base64, campaign_id=campaign_id)
-    plan = {"schema": ATTESTATION_SCHEMA, "status": "planned" if not apply else "attesting", "campaign_id": campaign_id, "application": installed["application"], "tooling": installed["tooling"], "runtime_projection_sha256": runtime_before["projection_sha256"], "static_assets_proof_sha256": static_before["descriptor_sha256"], "expected_active_app_image_id": expected_app_image_id, "expected_active_app_image_reference": expected_app_image_reference, "requires_read_only_schema_observation": True, "requires_app_and_sync_mount_race_check": True, "current_changed": False, "service_changed": False, "container_changed": False, "volume_changed": False, "application_data_changed": False, "direct_webapp_fi_to_webapp_ir_transfer": False}
+    plan = {
+        "schema": ATTESTATION_SCHEMA,
+        "status": "planned" if not apply else "attesting",
+        "campaign_id": campaign_id,
+        "application": installed["application"],
+        "tooling": installed["tooling"],
+        "canonical_release_tree_sha256": installed["canonical_release_tree_sha256"],
+        "runtime_projection_sha256": runtime_before["projection_sha256"],
+        "static_assets_proof_sha256": static_before["descriptor_sha256"],
+        "expected_active_app_image_id": expected_app_image_id,
+        "expected_active_app_image_reference": expected_app_image_reference,
+        "point_in_time_observation_only": True,
+        "data_or_schema_capture_performed": False,
+        "requires_app_and_sync_mount_race_check": True,
+        "current_changed": False,
+        "service_changed": False,
+        "container_changed": False,
+        "volume_changed": False,
+        "application_data_changed": False,
+        "direct_webapp_fi_to_webapp_ir_transfer": False,
+    }
     if not apply:
         return plan
     application_before = _inspect_container(role_config["application_container"])
     sync_before = _inspect_container(role_config["sync_worker_container"])
-    database_before = _inspect_container(role_config["database_container"])
     _validate_mount_projection(container=application_before, runtime_source_root=runtime_source_root, allow_static_assets=True)
     _validate_mount_projection(container=sync_before, runtime_source_root=runtime_source_root, allow_static_assets=False)
     active_image_before = _validate_active_runtime_images(application=application_before, sync_worker=sync_before, expected_image_id=expected_app_image_id, expected_image_reference=expected_app_image_reference)
-    schema_before = _read_only_schema_observation(role_config, installed["application"])
     runtime_after = verify_canonical_runtime_projection(candidate=installed["candidate"], runtime_source_root=runtime_source_root, expected_application=installed["application"])
     static_after = _validate_static_assets_proof(static_assets_descriptor=static_assets_descriptor, runtime_source_root=runtime_source_root, expected_application=installed["application"], pinned_controller_public_key_base64=pinned_controller_public_key_base64, campaign_id=campaign_id)
     application_after = _inspect_container(role_config["application_container"])
     sync_after = _inspect_container(role_config["sync_worker_container"])
-    database_after = _inspect_container(role_config["database_container"])
     _validate_mount_projection(container=application_after, runtime_source_root=runtime_source_root, allow_static_assets=True)
     _validate_mount_projection(container=sync_after, runtime_source_root=runtime_source_root, allow_static_assets=False)
     active_image_after = _validate_active_runtime_images(application=application_after, sync_worker=sync_after, expected_image_id=expected_app_image_id, expected_image_reference=expected_app_image_reference)
-    schema_after = _read_only_schema_observation(role_config, installed["application"])
-    if runtime_before != runtime_after or static_before != static_after or application_before != application_after or sync_before != sync_after or database_before != database_after or active_image_before != active_image_after or schema_before != schema_after:
+    if runtime_before != runtime_after or static_before != static_after or application_before != application_after or sync_before != sync_after or active_image_before != active_image_after:
         raise SourceAdoptionInstallError("WebApp-FI source changed during attestation; unsafe candidate is retained without an attestation")
     signer, public_key = _load_fi_signer_from_role_config(role_config, pinned_public_key_base64=enrollment["source_signing_public_key_base64"])
     package = installed["package"]
@@ -1866,11 +2088,66 @@ def attest_source_role(
         "delivery_envelope_sha256": package["delivery_envelope_sha256"],
         "controller_public_key_base64": package["controller_public_key_base64"],
     }
-    unsigned: dict[str, Any] = {"schema": ATTESTATION_SCHEMA, "status": "attested", "attested_at": utc_now(), "campaign_id": campaign_id, "source_site": PACKAGE_DESTINATION_SITE, "destination_site": SNAPSHOT_DESTINATION_SITE, "package_id": installed["package_id"], "application": installed["application"], "application_release_tree": runtime_before["git_tree"], "tooling": installed["tooling"], "source_adoption_install_receipt_sha256": installed["receipt_sha256"], "source_adoption_delivery": source_adoption_delivery, "canonical_release_tree_sha256": installed["canonical_release_tree_sha256"], "source_signer_enrollment": {"receipt_sha256": enrollment["receipt_sha256"], "certificate_sha256": enrollment["certificate_sha256"], "fi_ssh_host_public_key_sha256": sha256_file(require_root_only_file(ssh_host_public_key_file, field="WebApp-FI SSH host public key"))[0], "controller_public_key_base64": pinned_controller_public_key_base64, "source_signing_public_key_base64": public_key}, "runtime_projection": {"before": runtime_before, "after": runtime_after}, "static_assets_proof": {"before": static_before, "after": static_after, "proof_is_not_static_payload": True, "promotion_requires_verified_immutable_age_object": True}, "containers": {"database": database_before, "application": application_before, "sync_worker": sync_before}, "active_application_image": active_image_before, "schema_observation": schema_before, "race_check": {"runtime_projection_unchanged": True, "static_assets_unchanged": True, "application_container_unchanged": True, "sync_worker_container_unchanged": True, "database_container_unchanged": True, "active_image_unchanged": True, "schema_unchanged": True}, "snapshot_transport": {"payload_path": "private_versioned_object_storage_age_only", "one_off_publication_only": True, "direct_webapp_fi_to_webapp_ir_transfer": False, "automatic_deletion": False}, "source_signing_public_key_base64": public_key, "source_signing_key_id": _public_key_id(public_key)}
+    unsigned: dict[str, Any] = {
+        "schema": ATTESTATION_SCHEMA,
+        "status": "attested",
+        "attested_at": utc_now(),
+        "campaign_id": campaign_id,
+        "source_site": PACKAGE_DESTINATION_SITE,
+        "destination_site": SNAPSHOT_DESTINATION_SITE,
+        "package_id": installed["package_id"],
+        "application": installed["application"],
+        "application_release_tree": runtime_before["git_tree"],
+        "tooling": installed["tooling"],
+        "source_adoption_install_receipt_sha256": installed["receipt_sha256"],
+        "source_adoption_delivery": source_adoption_delivery,
+        "canonical_release_tree_sha256": installed["canonical_release_tree_sha256"],
+        "source_signer_enrollment": {
+            "receipt_sha256": enrollment["receipt_sha256"],
+            "certificate_sha256": enrollment["certificate_sha256"],
+            "certificate_id": enrollment["certificate_id"],
+            "operation_id": enrollment["operation_id"],
+            "certificate_consumption_sha256": enrollment["certificate_consumption_sha256"],
+            "not_after": enrollment["not_after"],
+            "fi_ssh_host_public_key_sha256": sha256_file(require_root_only_file(ssh_host_public_key_file, field="WebApp-FI SSH host public key"))[0],
+            "controller_key_id": enrollment["controller_key_id"],
+            "source_signing_public_key_base64": public_key,
+            "source_signing_key_id": enrollment["source_signing_key_id"],
+        },
+        "observation_scope": {
+            "point_in_time_only": True,
+            "data_capture_performed": False,
+            "schema_capture_performed": False,
+            "promotion_ready": False,
+            "later_snapshot_requires_separate_authorization": True,
+        },
+        "runtime_projection": {"before": runtime_before, "after": runtime_after},
+        "static_assets_proof": {"before": static_before, "after": static_after, "proof_is_not_static_payload": True, "promotion_requires_verified_immutable_age_object": True},
+        "containers": {"application": application_before, "sync_worker": sync_before},
+        "active_application_image": active_image_before,
+        "race_check": {
+            "runtime_projection_unchanged": True,
+            "static_assets_unchanged": True,
+            "application_container_unchanged": True,
+            "sync_worker_container_unchanged": True,
+            "active_image_unchanged": True,
+        },
+        "source_signing_public_key_base64": public_key,
+        "source_signing_key_id": _public_key_id(public_key),
+    }
     signature = signer.sign(ATTESTATION_SIGNATURE_DOMAIN + canonical_json_bytes(unsigned))
     receipt = {**unsigned, "source_signature": {"algorithm": "ed25519", "signature_base64": base64.b64encode(signature).decode("ascii")}}
     path = _write_attestation(installed["candidate"], attestation_id=attestation_id, value=receipt)
-    return verify_source_role_attestation(attestation=path, pinned_source_signing_public_key_base64=public_key, expected_campaign_id=campaign_id, expected_application=installed["application"], expected_control_commit=installed["tooling"]["control_commit"], expected_app_image_id=expected_app_image_id, expected_app_image_reference=expected_app_image_reference)
+    return verify_source_role_attestation(
+        attestation=path,
+        pinned_source_signing_public_key_base64=public_key,
+        expected_campaign_id=campaign_id,
+        expected_application=installed["application"],
+        expected_control_commit=installed["tooling"]["control_commit"],
+        expected_canonical_release_tree_sha256=installed["canonical_release_tree_sha256"],
+        expected_app_image_id=expected_app_image_id,
+        expected_app_image_reference=expected_app_image_reference,
+    )
 
 
 def verify_source_role_attestation(
@@ -1880,15 +2157,32 @@ def verify_source_role_attestation(
     expected_campaign_id: str,
     expected_application: Mapping[str, str],
     expected_control_commit: str,
+    expected_canonical_release_tree_sha256: str,
     expected_app_image_id: str,
     expected_app_image_reference: str,
 ) -> dict[str, Any]:
+    """Verify FI's signature and normalize only its point-in-time claims.
+
+    This helper verifies an FI source key.  It deliberately does not treat
+    fields naming a controller key, package delivery, or enrollment as proof
+    of controller authorization; that proof is separately established by the
+    local certificate consumption path and by controller-side consumers.
+    """
+
     expected_campaign_id = _require_campaign_id(expected_campaign_id, field="expected_campaign_id")
     expected_application = _require_application(expected_application, field="expected_application")
+    expected_descriptor = _require_sha256(expected_canonical_release_tree_sha256, field="expected canonical release descriptor sha256")
     if not COMMIT_RE.fullmatch(expected_control_commit) or not IMAGE_ID_RE.fullmatch(expected_app_image_id) or not IMAGE_REFERENCE_RE.fullmatch(expected_app_image_reference):
         raise SourceAdoptionInstallError("expected source attestation binding is invalid")
     value, raw = _read_private_json(attestation, field="WebApp-FI source role attestation")
-    expected = {"schema", "status", "attested_at", "campaign_id", "source_site", "destination_site", "package_id", "application", "application_release_tree", "tooling", "source_adoption_install_receipt_sha256", "source_adoption_delivery", "canonical_release_tree_sha256", "source_signer_enrollment", "runtime_projection", "static_assets_proof", "containers", "active_application_image", "schema_observation", "race_check", "snapshot_transport", "source_signing_public_key_base64", "source_signing_key_id", "source_signature"}
+    expected = {
+        "schema", "status", "attested_at", "campaign_id", "source_site", "destination_site", "package_id",
+        "application", "application_release_tree", "tooling", "source_adoption_install_receipt_sha256",
+        "source_adoption_delivery", "canonical_release_tree_sha256", "source_signer_enrollment",
+        "observation_scope", "runtime_projection", "static_assets_proof", "containers",
+        "active_application_image", "race_check", "source_signing_public_key_base64", "source_signing_key_id",
+        "source_signature",
+    }
     if set(value) != expected or value.get("schema") != ATTESTATION_SCHEMA or value.get("status") != "attested":
         raise SourceAdoptionInstallError("WebApp-FI source role attestation is unsupported")
     _require_timestamp(value.get("attested_at"), field="WebApp-FI source role attestation timestamp")
@@ -1912,21 +2206,37 @@ def verify_source_role_attestation(
         raise SourceAdoptionInstallError("WebApp-FI source role attestation adoption delivery controller key is invalid")
     _decode_pinned_public_key(delivery["controller_public_key_base64"])
     descriptor_sha = _require_sha256(value.get("canonical_release_tree_sha256"), field="WebApp-FI source role attestation descriptor sha256")
+    if descriptor_sha != expected_descriptor:
+        raise SourceAdoptionInstallError("WebApp-FI source role attestation descriptor is unexpected")
     if not isinstance(value.get("application_release_tree"), str) or not COMMIT_RE.fullmatch(value["application_release_tree"]):
         raise SourceAdoptionInstallError("WebApp-FI source role attestation application release tree is invalid")
     enrollment = value.get("source_signer_enrollment")
-    enrollment_expected = {"receipt_sha256", "certificate_sha256", "fi_ssh_host_public_key_sha256", "controller_public_key_base64", "source_signing_public_key_base64"}
+    enrollment_expected = {
+        "receipt_sha256", "certificate_sha256", "certificate_id", "operation_id", "certificate_consumption_sha256",
+        "not_after", "fi_ssh_host_public_key_sha256", "controller_key_id", "source_signing_public_key_base64",
+        "source_signing_key_id",
+    }
     if not isinstance(enrollment, Mapping) or set(enrollment) != enrollment_expected:
         raise SourceAdoptionInstallError("WebApp-FI source role attestation signer enrollment is invalid")
-    for field in ("receipt_sha256", "certificate_sha256", "fi_ssh_host_public_key_sha256"):
+    for field in ("receipt_sha256", "certificate_sha256", "certificate_consumption_sha256", "fi_ssh_host_public_key_sha256"):
         _require_sha256(enrollment.get(field), field=f"WebApp-FI source role attestation enrollment {field}")
-    if not isinstance(enrollment.get("controller_public_key_base64"), str) or not isinstance(enrollment.get("source_signing_public_key_base64"), str):
+    _require_attestation_id(enrollment.get("certificate_id"))
+    _require_attestation_id(enrollment.get("operation_id"))
+    _require_timestamp(enrollment.get("not_after"), field="WebApp-FI source role attestation enrollment not_after")
+    if not isinstance(enrollment.get("controller_key_id"), str) or not enrollment["controller_key_id"].startswith("ed25519-sha256:") or not isinstance(enrollment.get("source_signing_public_key_base64"), str):
         raise SourceAdoptionInstallError("WebApp-FI source role attestation signer enrollment key is invalid")
-    _decode_pinned_public_key(enrollment["controller_public_key_base64"])
     if enrollment["source_signing_public_key_base64"] != pinned_source_signing_public_key_base64 or value.get("source_signing_public_key_base64") != pinned_source_signing_public_key_base64:
         raise SourceAdoptionInstallError("WebApp-FI source role attestation signing key is not enrolled and pinned")
-    if value.get("source_signing_key_id") != _public_key_id(pinned_source_signing_public_key_base64):
+    if value.get("source_signing_key_id") != _public_key_id(pinned_source_signing_public_key_base64) or enrollment.get("source_signing_key_id") != value.get("source_signing_key_id"):
         raise SourceAdoptionInstallError("WebApp-FI source role attestation signing key ID is invalid")
+    if value.get("observation_scope") != {
+        "point_in_time_only": True,
+        "data_capture_performed": False,
+        "schema_capture_performed": False,
+        "promotion_ready": False,
+        "later_snapshot_requires_separate_authorization": True,
+    }:
+        raise SourceAdoptionInstallError("WebApp-FI source role attestation observation scope is invalid")
     before = _validate_projection_record(value.get("runtime_projection", {}).get("before") if isinstance(value.get("runtime_projection"), Mapping) else None, field="WebApp-FI source role attestation runtime projection before", expected_application=application)
     after = _validate_projection_record(value.get("runtime_projection", {}).get("after") if isinstance(value.get("runtime_projection"), Mapping) else None, field="WebApp-FI source role attestation runtime projection after", expected_application=application)
     if before != after or before["descriptor_sha256"] != descriptor_sha or before["git_tree"] != value["application_release_tree"]:
@@ -1939,9 +2249,8 @@ def verify_source_role_attestation(
     if static_before != static_after:
         raise SourceAdoptionInstallError("WebApp-FI source role attestation static assets changed during proof")
     containers = value.get("containers")
-    if not isinstance(containers, Mapping) or set(containers) != {"database", "application", "sync_worker"}:
+    if not isinstance(containers, Mapping) or set(containers) != {"application", "sync_worker"}:
         raise SourceAdoptionInstallError("WebApp-FI source role attestation containers are invalid")
-    database = _validate_recorded_container(containers["database"], field="WebApp-FI source role attestation database container")
     app = _validate_recorded_container(containers["application"], field="WebApp-FI source role attestation application container")
     sync = _validate_recorded_container(containers["sync_worker"], field="WebApp-FI source role attestation sync worker container")
     runtime_root = Path(before["runtime_source_root"])
@@ -1958,125 +2267,315 @@ def verify_source_role_attestation(
         raise SourceAdoptionInstallError("WebApp-FI source role attestation active image references are invalid")
     if active.get("image_id") != expected_app_image_id or active.get("image_reference") != expected_app_image_reference or expected_app_image_reference not in set(repo_tags) | set(repo_digests):
         raise SourceAdoptionInstallError("WebApp-FI source role attestation active image is unexpected")
-    schema = value.get("schema_observation")
-    if schema != {"observed_alembic_revision": application["expected_alembic_revision"], "capture_role_verified_read_only": True}:
-        raise SourceAdoptionInstallError("WebApp-FI source role attestation schema observation is invalid")
-    if value.get("race_check") != {"runtime_projection_unchanged": True, "static_assets_unchanged": True, "application_container_unchanged": True, "sync_worker_container_unchanged": True, "database_container_unchanged": True, "active_image_unchanged": True, "schema_unchanged": True}:
+    if value.get("race_check") != {
+        "runtime_projection_unchanged": True,
+        "static_assets_unchanged": True,
+        "application_container_unchanged": True,
+        "sync_worker_container_unchanged": True,
+        "active_image_unchanged": True,
+    }:
         raise SourceAdoptionInstallError("WebApp-FI source role attestation race check is invalid")
-    if value.get("snapshot_transport") != {"payload_path": "private_versioned_object_storage_age_only", "one_off_publication_only": True, "direct_webapp_fi_to_webapp_ir_transfer": False, "automatic_deletion": False}:
-        raise SourceAdoptionInstallError("WebApp-FI source role attestation transport is invalid")
     signature = value.get("source_signature")
     if not isinstance(signature, Mapping) or set(signature) != {"algorithm", "signature_base64"} or signature.get("algorithm") != "ed25519":
         raise SourceAdoptionInstallError("WebApp-FI source role attestation signature envelope is invalid")
     _verify_signature(unsigned={key: item for key, item in value.items() if key != "source_signature"}, signature_base64=signature.get("signature_base64"), pinned_public_key_base64=pinned_source_signing_public_key_base64, domain=ATTESTATION_SIGNATURE_DOMAIN)
-    return {"status": "verified", "attestation_path": str(attestation), "attestation_sha256": sha256_bytes(raw), "campaign_id": expected_campaign_id, "package_id": package_id, "application": application, "application_release_tree": value["application_release_tree"], "tooling": tooling, "source_adoption_delivery": dict(delivery), "canonical_release_tree_sha256": descriptor_sha, "active_application_image": dict(active), "containers": {"database": database, "application": app, "sync_worker": sync}, "source_signing_public_key_base64": pinned_source_signing_public_key_base64, "source_signing_key_id": value["source_signing_key_id"], "source_site": PACKAGE_DESTINATION_SITE, "destination_site": SNAPSHOT_DESTINATION_SITE, "direct_webapp_fi_to_webapp_ir_transfer": False}
+    descriptor_claim = {
+        "canonical_release_tree_sha256": descriptor_sha,
+        "application_release_tree": value["application_release_tree"],
+        "application": application,
+    }
+    runtime_claim = {
+        "projection": before,
+        "static_assets": static_before,
+        "containers": {"application": app, "sync_worker": sync},
+    }
+    image_claim = {"active_application_image": dict(active), "image_id": expected_app_image_id, "image_reference": expected_app_image_reference}
+    return {
+        "status": "verified",
+        "attestation_path": str(attestation),
+        "attestation_sha256": sha256_bytes(raw),
+        "attested_at": value["attested_at"],
+        "campaign_id": expected_campaign_id,
+        "package_id": package_id,
+        "application": application,
+        "tooling": tooling,
+        "descriptor_claim": descriptor_claim,
+        "runtime_claim": runtime_claim,
+        "image_claim": image_claim,
+        "source_adoption_delivery_claim": dict(delivery),
+        "source_signing_public_key_base64": pinned_source_signing_public_key_base64,
+        "source_signing_key_id": value["source_signing_key_id"],
+        "source_site": PACKAGE_DESTINATION_SITE,
+        "destination_site": SNAPSHOT_DESTINATION_SITE,
+        "point_in_time_observation_only": True,
+        "controller_authorization_verified": False,
+    }
 
 
-def _verify_docker_save_archive(*, archive: Path, expected_image_id: str) -> dict[str, Any]:
+def _export_exact_docker_save_bytes(*, archive: Path, expected_image_id: str) -> dict[str, Any]:
+    """Run the trusted Docker binary and bind only the resulting exact bytes.
+
+    A Docker save archive is not a stable semantic format contract for this
+    campaign.  Parsing a handful of tar members cannot prove it is safe to
+    load, nor can it establish all image semantics.  The authoritative source
+    binding is the trusted ``docker image inspect`` before/after the exact
+    ``docker save`` invocation.  The archive receives a byte hash only and is
+    never Docker-loaded by this helper.
+    """
+
+    if not IMAGE_ID_RE.fullmatch(expected_image_id):
+        raise SourceAdoptionInstallError("actual WebApp-FI image export image ID is invalid")
+    if archive.exists() or archive.is_symlink():
+        raise SourceAdoptionInstallError("actual WebApp-FI image archive destination already exists")
+    docker = _require_trusted_executable(Path("/usr/bin/docker"), field="docker")
+    docker_sha256, docker_bytes = sha256_file(docker)
+    try:
+        result = subprocess.run(
+            [str(docker), "save", "--output", str(archive), expected_image_id],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=_docker_environment(),
+            timeout=1800,
+            check=False,
+            umask=0o077,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise SourceAdoptionInstallError("actual WebApp-FI image export could not start") from exc
+    if result.returncode != 0:
+        raise SourceAdoptionInstallError("actual WebApp-FI image export failed")
     archive = require_root_only_file(archive, field="actual WebApp-FI image archive", maximum_bytes=MAX_IMAGE_EXPORT_BYTES)
-    names: set[str] = set()
-    contents: dict[str, bytes] = {}
-    try:
-        with tarfile.open(archive, mode="r:") as source:
-            entries = source.getmembers()
-            if not 2 <= len(entries) <= 100_000:
-                raise SourceAdoptionInstallError("actual WebApp-FI image archive has an unsafe member count")
-            for entry in entries:
-                pure = PurePosixPath(entry.name)
-                if pure.as_posix() != entry.name or entry.name.startswith("/") or ".." in pure.parts or not entry.isfile() or entry.issym() or entry.islnk() or entry.name in names or entry.size < 0 or entry.size > MAX_IMAGE_EXPORT_BYTES:
-                    raise SourceAdoptionInstallError("actual WebApp-FI image archive contains an unsafe member")
-                names.add(entry.name)
-                if entry.name == "manifest.json" or entry.name.endswith(".json"):
-                    handle = source.extractfile(entry)
-                    if handle is None:
-                        raise SourceAdoptionInstallError("actual WebApp-FI image archive member cannot be read")
-                    contents[entry.name] = handle.read(entry.size + 1)
-                    if len(contents[entry.name]) != entry.size:
-                        raise SourceAdoptionInstallError("actual WebApp-FI image archive member changed while reading")
-    except (OSError, tarfile.TarError) as exc:
-        raise SourceAdoptionInstallError("actual WebApp-FI image archive cannot be verified") from exc
-    manifest_raw = contents.get("manifest.json")
-    if manifest_raw is None:
-        raise SourceAdoptionInstallError("actual WebApp-FI image archive lacks manifest.json")
-    try:
-        manifest = json.loads(manifest_raw.decode("utf-8"), object_pairs_hook=_strict_object)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise SourceAdoptionInstallError("actual WebApp-FI image archive manifest is invalid") from exc
-    if not isinstance(manifest, list) or len(manifest) != 1 or not isinstance(manifest[0], Mapping):
-        raise SourceAdoptionInstallError("actual WebApp-FI image archive must contain exactly one image")
-    entry = manifest[0]
-    if set(entry) != {"Config", "RepoTags", "Layers"} or not isinstance(entry.get("Config"), str) or not isinstance(entry.get("RepoTags"), list) or not isinstance(entry.get("Layers"), list) or not entry["Layers"]:
-        raise SourceAdoptionInstallError("actual WebApp-FI image archive manifest shape is invalid")
-    config_name = entry["Config"]
-    if config_name not in names or not re.fullmatch(r"[0-9a-f]{64}\.json", config_name):
-        raise SourceAdoptionInstallError("actual WebApp-FI image archive config member is invalid")
-    config_raw = contents.get(config_name)
-    if config_raw is None or sha256_bytes(config_raw) != expected_image_id.removeprefix("sha256:"):
-        raise SourceAdoptionInstallError("actual WebApp-FI image archive does not bind the expected image ID")
-    if not all(isinstance(tag, str) and IMAGE_REFERENCE_RE.fullmatch(tag) for tag in entry["RepoTags"]):
-        raise SourceAdoptionInstallError("actual WebApp-FI image archive repo tags are invalid")
-    if not all(isinstance(layer, str) and layer in names for layer in entry["Layers"]):
-        raise SourceAdoptionInstallError("actual WebApp-FI image archive layers are invalid")
-    digest, size = sha256_file(archive)
-    return {"archive_sha256": digest, "archive_bytes": size, "docker_manifest_sha256": sha256_bytes(manifest_raw), "docker_config_sha256": sha256_bytes(config_raw), "layer_count": len(entry["Layers"]), "repo_tags": sorted(entry["RepoTags"])}
+    archive_sha256, archive_bytes = sha256_file(archive)
+    return {
+        "archive_sha256": archive_sha256,
+        "archive_bytes": archive_bytes,
+        "docker_save": {
+            "command": ["docker", "save", "--output", archive.name, expected_image_id],
+            "docker_executable_sha256": docker_sha256,
+            "docker_executable_bytes": docker_bytes,
+            "archive_semantics": "exact_bytes_only_unparsed",
+            "docker_load_invoked": False,
+            "loadability_claimed": False,
+        },
+    }
+
+
+def _revalidate_export_runtime(
+    *,
+    installed: Mapping[str, Any],
+    role_config: Mapping[str, Any],
+    runtime_source_root: Path,
+    static_assets_descriptor: Path,
+    pinned_controller_public_key_base64: str,
+    campaign_id: str,
+    expected_app_image_id: str,
+    expected_app_image_reference: str,
+) -> dict[str, Any]:
+    """Read the exact live FI source/image state without changing Docker."""
+
+    projection = verify_canonical_runtime_projection(
+        candidate=installed["candidate"],
+        runtime_source_root=runtime_source_root,
+        expected_application=installed["application"],
+    )
+    static_assets = _validate_static_assets_proof(
+        static_assets_descriptor=static_assets_descriptor,
+        runtime_source_root=runtime_source_root,
+        expected_application=installed["application"],
+        pinned_controller_public_key_base64=pinned_controller_public_key_base64,
+        campaign_id=campaign_id,
+    )
+    application = _inspect_container(role_config["application_container"])
+    sync_worker = _inspect_container(role_config["sync_worker_container"])
+    _validate_mount_projection(container=application, runtime_source_root=runtime_source_root, allow_static_assets=True)
+    _validate_mount_projection(container=sync_worker, runtime_source_root=runtime_source_root, allow_static_assets=False)
+    active_image = _validate_active_runtime_images(
+        application=application,
+        sync_worker=sync_worker,
+        expected_image_id=expected_app_image_id,
+        expected_image_reference=expected_app_image_reference,
+    )
+    return {
+        "projection": projection,
+        "static_assets": static_assets,
+        "containers": {"application": application, "sync_worker": sync_worker},
+        "active_application_image": active_image,
+    }
 
 
 def export_actual_fi_image(
     *,
     attestation: Path,
     source_role_config: Path,
+    signer_enrollment_receipt: Path,
+    signer_enrollment_certificate: Path,
+    ssh_host_public_key_file: Path,
+    runtime_source_root: Path,
+    static_assets_descriptor: Path,
+    pinned_controller_public_key_base64: str,
     pinned_source_signing_public_key_base64: str,
     expected_campaign_id: str,
     expected_application: Mapping[str, str],
     expected_control_commit: str,
+    expected_canonical_release_tree_sha256: str,
     expected_app_image_id: str,
     expected_app_image_reference: str,
     destination: Path,
     export_id: str,
     apply: bool,
 ) -> dict[str, Any]:
-    """Export only the locally inspected FI image; it cannot publish or transfer it."""
+    """Export exact FI image bytes only after a fresh full source recheck."""
 
     _require_root_execution()
-    verified = verify_source_role_attestation(attestation=attestation, pinned_source_signing_public_key_base64=pinned_source_signing_public_key_base64, expected_campaign_id=expected_campaign_id, expected_application=expected_application, expected_control_commit=expected_control_commit, expected_app_image_id=expected_app_image_id, expected_app_image_reference=expected_app_image_reference)
+    expected_application = _require_application(expected_application, field="expected image export application")
+    expected_descriptor = _require_sha256(expected_canonical_release_tree_sha256, field="expected image export descriptor sha256")
+    attestation = require_root_only_file(attestation, field="WebApp-FI source role attestation")
+    candidate = require_root_only_directory(attestation.parent.parent, field="source-adoption installed candidate")
+    if attestation.parent != candidate / "attestations":
+        raise SourceAdoptionInstallError("WebApp-FI source role attestation is not candidate-bound for export")
+    installed = verify_installed_source_adoption(candidate / INSTALL_RECEIPT_NAME)
+    if installed["campaign_id"] != expected_campaign_id or installed["application"] != expected_application or installed["tooling"]["control_commit"] != expected_control_commit or installed["canonical_release_tree_sha256"] != expected_descriptor:
+        raise SourceAdoptionInstallError("WebApp-FI image export installed candidate is not the expected operation")
+    verified = verify_source_role_attestation(
+        attestation=attestation,
+        pinned_source_signing_public_key_base64=pinned_source_signing_public_key_base64,
+        expected_campaign_id=expected_campaign_id,
+        expected_application=expected_application,
+        expected_control_commit=expected_control_commit,
+        expected_canonical_release_tree_sha256=expected_descriptor,
+        expected_app_image_id=expected_app_image_id,
+        expected_app_image_reference=expected_app_image_reference,
+    )
     if not ATTESTATION_ID_RE.fullmatch(export_id):
         raise SourceAdoptionInstallError("image export_id is invalid")
+    attested_at = _parse_utc_timestamp(verified["attested_at"], field="WebApp-FI source attestation export freshness")
+    export_start = _parse_utc_timestamp(utc_now(), field="WebApp-FI image export start time")
+    if attested_at > export_start or (export_start - attested_at).total_seconds() > MAX_OBSERVATION_AGE_SECONDS:
+        raise SourceAdoptionInstallError("WebApp-FI source attestation is too old for image export")
     role_config = load_source_role_config(source_role_config, expected_application=verified["application"])
+    enrollment = verify_source_signer_enrollment(
+        enrollment_receipt=signer_enrollment_receipt,
+        installed=installed,
+        role_config=role_config,
+        certificate=signer_enrollment_certificate,
+        ssh_host_public_key_file=ssh_host_public_key_file,
+        pinned_controller_public_key_base64=pinned_controller_public_key_base64,
+        campaign_id=expected_campaign_id,
+        verification_time=utc_now(),
+    )
+    if enrollment["source_signing_public_key_base64"] != pinned_source_signing_public_key_base64:
+        raise SourceAdoptionInstallError("WebApp-FI image export signer enrollment differs from source attestation")
     signer, public_key = _load_fi_signer_from_role_config(role_config, pinned_public_key_base64=pinned_source_signing_public_key_base64)
     destination = _require_absolute(destination, field="image export destination")
     parent = require_root_only_directory(destination.parent, field="image export destination parent")
     if destination.exists() or destination.is_symlink() or destination.parent != parent:
         raise SourceAdoptionInstallError("image export destination must be a new child of a root-only directory")
-    plan = {"schema": IMAGE_EXPORT_RECEIPT_SCHEMA, "status": "planned" if not apply else "exporting", "source_site": PACKAGE_DESTINATION_SITE, "destination_site": SNAPSHOT_DESTINATION_SITE, "campaign_id": expected_campaign_id, "application": verified["application"], "active_application_image": verified["active_application_image"], "destination": str(destination), "object_storage_export_required": {"transport": "private_versioned_age_only", "create_only": True, "read_back_same_version_id": True, "direct_webapp_fi_to_webapp_ir_transfer": False}, "effective_runtime_proof_required": True, "service_changed": False, "container_changed": False, "current_changed": False, "volume_changed": False, "application_data_changed": False}
+    plan = {
+        "schema": IMAGE_EXPORT_RECEIPT_SCHEMA,
+        "status": "planned" if not apply else "exporting",
+        "source_site": PACKAGE_DESTINATION_SITE,
+        "destination_site": SNAPSHOT_DESTINATION_SITE,
+        "campaign_id": expected_campaign_id,
+        "application": verified["application"],
+        "canonical_release_tree_sha256": expected_descriptor,
+        "active_application_image": verified["image_claim"]["active_application_image"],
+        "destination": str(destination),
+        "object_storage_export_required": {"transport": "private_versioned_age_only", "create_only": True, "read_back_same_version_id": True, "direct_webapp_fi_to_webapp_ir_transfer": False},
+        "revalidate_projection_static_containers_before_and_after_docker_save": True,
+        "exact_bytes_only_unparsed_archive": True,
+        "docker_load_invoked": False,
+        "loadability_claimed": False,
+        "service_changed": False,
+        "container_changed": False,
+        "current_changed": False,
+        "volume_changed": False,
+        "application_data_changed": False,
+    }
     if not apply:
         return plan
-    application_before = _inspect_container(role_config["application_container"])
-    sync_before = _inspect_container(role_config["sync_worker_container"])
-    _validate_active_runtime_images(application=application_before, sync_worker=sync_before, expected_image_id=expected_app_image_id, expected_image_reference=expected_app_image_reference)
-    if application_before != verified["containers"]["application"] or sync_before != verified["containers"]["sync_worker"]:
-        raise SourceAdoptionInstallError("active WebApp-FI app or sync runtime no longer matches signed source attestation")
+    before = _revalidate_export_runtime(
+        installed=installed,
+        role_config=role_config,
+        runtime_source_root=runtime_source_root,
+        static_assets_descriptor=static_assets_descriptor,
+        pinned_controller_public_key_base64=pinned_controller_public_key_base64,
+        campaign_id=expected_campaign_id,
+        expected_app_image_id=expected_app_image_id,
+        expected_app_image_reference=expected_app_image_reference,
+    )
+    if (
+        before["projection"] != verified["runtime_claim"]["projection"]
+        or before["static_assets"] != verified["runtime_claim"]["static_assets"]
+        or before["containers"] != verified["runtime_claim"]["containers"]
+        or before["active_application_image"] != verified["image_claim"]["active_application_image"]
+    ):
+        raise SourceAdoptionInstallError("WebApp-FI source/image state no longer matches the signed point-in-time attestation")
     _create_directory(destination)
     archive = destination / "webapp-fi-active-app-image.tar"
-    if archive.exists() or archive.is_symlink():
-        raise SourceAdoptionInstallError("actual WebApp-FI image archive destination already exists")
-    docker = _require_trusted_executable(Path("/usr/bin/docker"), field="docker")
-    try:
-        result = subprocess.run([str(docker), "save", "--output", str(archive), expected_app_image_id], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=_docker_environment(), timeout=1800, check=False, umask=0o077)
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise SourceAdoptionInstallError("actual WebApp-FI image export could not start") from exc
-    if result.returncode != 0:
-        raise SourceAdoptionInstallError("actual WebApp-FI image export failed")
-    archive_info = _verify_docker_save_archive(archive=archive, expected_image_id=expected_app_image_id)
-    application_after = _inspect_container(role_config["application_container"])
-    sync_after = _inspect_container(role_config["sync_worker_container"])
-    image_after = _validate_active_runtime_images(application=application_after, sync_worker=sync_after, expected_image_id=expected_app_image_id, expected_image_reference=expected_app_image_reference)
-    if application_before != application_after or sync_before != sync_after or image_after != verified["active_application_image"]:
-        raise SourceAdoptionInstallError("WebApp-FI image or runtime changed during export; archive is retained without a receipt")
-    unsigned: dict[str, Any] = {"schema": IMAGE_EXPORT_RECEIPT_SCHEMA, "status": "exported", "exported_at": utc_now(), "export_id": export_id, "campaign_id": expected_campaign_id, "source_site": PACKAGE_DESTINATION_SITE, "destination_site": SNAPSHOT_DESTINATION_SITE, "application": verified["application"], "application_release_tree": verified["application_release_tree"], "tooling": verified["tooling"], "canonical_release_tree_sha256": verified["canonical_release_tree_sha256"], "source_role_attestation_sha256": verified["attestation_sha256"], "image": {"image_id": expected_app_image_id, "image_reference": expected_app_image_reference, **archive_info}, "pre_export_runtime": {"application": application_before, "sync_worker": sync_before, "active_image": verified["active_application_image"]}, "post_export_runtime": {"application": application_after, "sync_worker": sync_after, "active_image": image_after}, "image_archive_does_not_prove_bind_mounted_runtime": True, "archive_consumption": {"docker_load_prohibited": True, "fi_local_archive_verification_before_age_encryption": True, "controller_read_back_verification_after_age_encryption": True, "raw_repo_tags_are_not_authorization": True}, "object_storage_export_required": {"transport": "private_versioned_age_only", "create_only": True, "read_back_same_version_id": True, "direct_webapp_fi_to_webapp_ir_transfer": False}, "source_signing_public_key_base64": public_key, "source_signing_key_id": _public_key_id(public_key)}
+    archive_info = _export_exact_docker_save_bytes(archive=archive, expected_image_id=expected_app_image_id)
+    after = _revalidate_export_runtime(
+        installed=installed,
+        role_config=role_config,
+        runtime_source_root=runtime_source_root,
+        static_assets_descriptor=static_assets_descriptor,
+        pinned_controller_public_key_base64=pinned_controller_public_key_base64,
+        campaign_id=expected_campaign_id,
+        expected_app_image_id=expected_app_image_id,
+        expected_app_image_reference=expected_app_image_reference,
+    )
+    if after != before:
+        raise SourceAdoptionInstallError("WebApp-FI source/image runtime changed during exact-byte export; archive is retained without a receipt")
+    unsigned: dict[str, Any] = {
+        "schema": IMAGE_EXPORT_RECEIPT_SCHEMA,
+        "status": "exported",
+        "exported_at": utc_now(),
+        "export_id": export_id,
+        "campaign_id": expected_campaign_id,
+        "source_site": PACKAGE_DESTINATION_SITE,
+        "destination_site": SNAPSHOT_DESTINATION_SITE,
+        "application": verified["application"],
+        "application_release_tree": verified["descriptor_claim"]["application_release_tree"],
+        "tooling": verified["tooling"],
+        "canonical_release_tree_sha256": expected_descriptor,
+        "source_role_attestation_sha256": verified["attestation_sha256"],
+        "observation_scope": {
+            "point_in_time_only": True,
+            "data_capture_performed": False,
+            "schema_capture_performed": False,
+            "promotion_ready": False,
+            "later_snapshot_requires_separate_authorization": True,
+        },
+        "image": {"image_id": expected_app_image_id, "image_reference": expected_app_image_reference, **archive_info},
+        "pre_export_runtime": before,
+        "post_export_runtime": after,
+        "exact_byte_export": {
+            "archive_is_unparsed_exact_bytes": True,
+            "docker_load_invoked": False,
+            "loadability_claimed": False,
+            "bind_mounted_runtime_revalidated_before_and_after": True,
+        },
+        "archive_consumption": {
+            "docker_load_prohibited": True,
+            "fi_local_exact_byte_hash_before_age_encryption": True,
+            "controller_read_back_exact_byte_hash_after_age_encryption": True,
+            "raw_repo_tags_are_not_authorization": True,
+        },
+        "object_storage_export_required": {"transport": "private_versioned_age_only", "create_only": True, "read_back_same_version_id": True, "direct_webapp_fi_to_webapp_ir_transfer": False},
+        "source_signing_public_key_base64": public_key,
+        "source_signing_key_id": _public_key_id(public_key),
+    }
     signature = signer.sign(IMAGE_EXPORT_SIGNATURE_DOMAIN + canonical_json_bytes(unsigned))
     receipt = {**unsigned, "source_signature": {"algorithm": "ed25519", "signature_base64": base64.b64encode(signature).decode("ascii")}}
     _write_new_private_json(destination / "image-export-receipt.json", receipt)
-    return {"status": "exported", "archive_path": str(archive), "receipt_path": str(destination / "image-export-receipt.json"), **archive_info, "object_storage_export_required": unsigned["object_storage_export_required"]}
+    return {
+        "status": "exported",
+        "archive_path": str(archive),
+        "receipt_path": str(destination / "image-export-receipt.json"),
+        "descriptor_claim": verified["descriptor_claim"],
+        "runtime_claim": after,
+        "image_claim": {"image_id": expected_app_image_id, "image_reference": expected_app_image_reference, **archive_info},
+        "object_storage_export_required": unsigned["object_storage_export_required"],
+    }
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -2119,11 +2618,18 @@ def _parser() -> argparse.ArgumentParser:
     export = actions.add_parser("export-image")
     export.add_argument("--attestation", type=Path, required=True)
     export.add_argument("--source-role-config", type=Path, required=True)
+    export.add_argument("--signer-enrollment-receipt", type=Path, required=True)
+    export.add_argument("--signer-enrollment-certificate", type=Path, required=True)
+    export.add_argument("--ssh-host-public-key-file", type=Path, required=True)
+    export.add_argument("--runtime-source-root", type=Path, required=True)
+    export.add_argument("--static-assets-descriptor", type=Path, required=True)
+    export.add_argument("--pinned-controller-public-key-base64", required=True)
     export.add_argument("--pinned-source-signing-public-key-base64", required=True)
     export.add_argument("--expected-campaign-id", required=True)
     export.add_argument("--expected-application-release-sha", required=True)
     export.add_argument("--expected-alembic-revision", required=True)
     export.add_argument("--expected-control-commit", required=True)
+    export.add_argument("--expected-canonical-release-tree-sha256", required=True)
     export.add_argument("--expected-app-image-id", required=True)
     export.add_argument("--expected-app-image-reference", required=True)
     export.add_argument("--destination", type=Path, required=True)
@@ -2180,10 +2686,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = export_actual_fi_image(
                 attestation=args.attestation,
                 source_role_config=args.source_role_config,
+                signer_enrollment_receipt=args.signer_enrollment_receipt,
+                signer_enrollment_certificate=args.signer_enrollment_certificate,
+                ssh_host_public_key_file=args.ssh_host_public_key_file,
+                runtime_source_root=args.runtime_source_root,
+                static_assets_descriptor=args.static_assets_descriptor,
+                pinned_controller_public_key_base64=args.pinned_controller_public_key_base64,
                 pinned_source_signing_public_key_base64=args.pinned_source_signing_public_key_base64,
                 expected_campaign_id=args.expected_campaign_id,
                 expected_application={"release_sha": args.expected_application_release_sha, "expected_alembic_revision": args.expected_alembic_revision},
                 expected_control_commit=args.expected_control_commit,
+                expected_canonical_release_tree_sha256=args.expected_canonical_release_tree_sha256,
                 expected_app_image_id=args.expected_app_image_id,
                 expected_app_image_reference=args.expected_app_image_reference,
                 destination=args.destination,
