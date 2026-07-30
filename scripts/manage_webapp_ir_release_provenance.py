@@ -49,6 +49,7 @@ BOOTSTRAP_RECEIPT_FILES = frozenset(
         "scripts/manage_webapp_ir_artifact_stage.py",
         "scripts/manage_webapp_ir_snapshot.py",
         "scripts/manage_webapp_ir_release_provenance.py",
+        "core/standby_snapshot_capacity.py",
         "config/consumer.json",
     }
 )

@@ -44,6 +44,19 @@ from urllib.parse import urlparse
 
 import fcntl
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from core.standby_snapshot_capacity import (
+    MAXIMUM_MANIFEST_CIPHERTEXT_BYTES,
+    MAXIMUM_MANIFEST_PLAINTEXT_BYTES,
+    SnapshotCapacityError,
+    age_ciphertext_reservation_bytes,
+    manifest_workspace_reservation_bytes,
+    require_capacity,
+)
+
 try:  # This repository already pins python-jose[cryptography].
     from cryptography.exceptions import InvalidSignature
     from cryptography.hazmat.primitives import serialization
@@ -73,7 +86,6 @@ DEFAULT_MAXIMUM_DATABASE_BYTES = 2 * 1024 * 1024 * 1024
 DEFAULT_MAXIMUM_UPLOADS_BYTES = 4 * 1024 * 1024 * 1024
 DEFAULT_MAXIMUM_AUDIT_BYTES = 2 * 1024 * 1024 * 1024
 MAXIMUM_SOURCE_DB_CLIENT_LIFETIME_SECONDS = 300
-DEFAULT_MAXIMUM_RETAINED_CANDIDATES = 2
 RESTORE_RECEIPT_SCHEMA = "gold-trade-snapshot-restore-receipt-v1"
 READY_RECEIPT_FILENAME = "snapshot-ready.json"
 RESTORE_RECEIPT_FILENAME = "snapshot-restore.json"
@@ -106,7 +118,8 @@ class TransportConfig:
     maximum_uploads_bytes: int
     maximum_audit_bytes: int
     maximum_snapshot_age_seconds: int
-    maximum_retained_candidates: int
+    minimum_free_bytes: int
+    local_artifact_retention: str
     signing_source_site: str | None
     source_signing_private_key_file: Path | None
     source_signing_public_key: bytes | None
@@ -371,11 +384,12 @@ def load_transport_config(path: Path, *, workspace_override: str | None = None) 
         "maximum_snapshot_age_seconds",
         minimum=1,
     )
-    maximum_retained_candidates = require_nonnegative_int(
-        raw.get("maximum_retained_candidates", DEFAULT_MAXIMUM_RETAINED_CANDIDATES),
-        "maximum_retained_candidates",
-        minimum=1,
+    minimum_free_bytes = require_nonnegative_int(
+        raw.get("minimum_free_bytes"), "minimum_free_bytes", minimum=0
     )
+    local_artifact_retention = raw.get("local_artifact_retention", "preserve")
+    if local_artifact_retention != "preserve":
+        raise SnapshotTransportError("local_artifact_retention must be preserve")
     return TransportConfig(
         endpoint=endpoint,
         region=region,
@@ -390,7 +404,8 @@ def load_transport_config(path: Path, *, workspace_override: str | None = None) 
         maximum_uploads_bytes=maximum_uploads_bytes,
         maximum_audit_bytes=maximum_audit_bytes,
         maximum_snapshot_age_seconds=maximum_snapshot_age_seconds,
-        maximum_retained_candidates=maximum_retained_candidates,
+        minimum_free_bytes=minimum_free_bytes,
+        local_artifact_retention=local_artifact_retention,
         signing_source_site=signing_source_site,
         source_signing_private_key_file=source_signing_private_key_file,
         source_signing_public_key=source_signing_public_key,
@@ -759,10 +774,23 @@ def _response_metadata(response: Mapping[str, Any]) -> Mapping[str, Any]:
     return metadata
 
 
-def write_response_body(response: Mapping[str, Any], output_path: Path) -> tuple[str, int]:
+def write_response_body(
+    response: Mapping[str, Any],
+    output_path: Path,
+    *,
+    maximum_bytes: int | None = None,
+) -> tuple[str, int]:
     body = response.get("Body")
     if body is None or not hasattr(body, "read"):
         raise SnapshotTransportError("object response has no readable body")
+    if maximum_bytes is not None:
+        maximum_bytes = require_nonnegative_int(maximum_bytes, "maximum object bytes", minimum=1)
+        content_length = response.get("ContentLength")
+        if content_length is not None:
+            if isinstance(content_length, bool) or not isinstance(content_length, int) or content_length < 0:
+                raise SnapshotTransportError("object response content length is malformed")
+            if content_length > maximum_bytes:
+                raise SnapshotTransportError("object response exceeds its capacity reservation")
     digest = hashlib.sha256()
     total = 0
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
@@ -782,6 +810,8 @@ def write_response_body(response: Mapping[str, Any], output_path: Path) -> tuple
                     break
                 if not isinstance(chunk, bytes):
                     raise SnapshotTransportError("object body returned non-bytes data")
+                if maximum_bytes is not None and len(chunk) > maximum_bytes - total:
+                    raise SnapshotTransportError("object response exceeds its capacity reservation")
                 handle.write(chunk)
                 digest.update(chunk)
                 total += len(chunk)
@@ -802,6 +832,7 @@ def get_exact_object_to_file(
     output_path: Path,
     expected_sha256: str | None = None,
     expected_bytes: int | None = None,
+    maximum_bytes: int | None = None,
 ) -> tuple[str, int, str]:
     request: dict[str, Any] = {"Bucket": bucket, "Key": key}
     if version_id is not None:
@@ -819,7 +850,12 @@ def get_exact_object_to_file(
         raise SnapshotTransportError("object read returned a different VersionId")
     if response.get("ServerSideEncryption"):
         raise SnapshotTransportError("provider-side object encryption is not permitted for this transport")
-    digest, total = write_response_body(response, output_path)
+    if maximum_bytes is not None:
+        maximum_bytes = require_nonnegative_int(maximum_bytes, "maximum object bytes", minimum=1)
+    if expected_bytes is not None:
+        expected_bytes = require_nonnegative_int(expected_bytes, "expected ciphertext bytes", minimum=1)
+        maximum_bytes = expected_bytes if maximum_bytes is None else min(maximum_bytes, expected_bytes)
+    digest, total = write_response_body(response, output_path, maximum_bytes=maximum_bytes)
     metadata = _response_metadata(response)
     if metadata.get("transport-schema") != TRANSPORT_SCHEMA or metadata.get("encryption") != OBJECT_ENCRYPTION:
         raise SnapshotTransportError("object metadata does not identify the required encryption transport")
@@ -1134,11 +1170,49 @@ def exclusive_workspace_lock(workspace: Path, *, name: str) -> Any:
             os.close(descriptor)
 
 
+def capacity_preflight(
+    path: Path,
+    *,
+    required_new_bytes: int,
+    minimum_free_bytes: int,
+    label: str,
+) -> dict[str, Any]:
+    """Convert the shared capacity error into this transport's fail-closed error."""
+
+    # The configured root is an empty control directory on first use.  Its
+    # creation is the existing setup behavior; no snapshot artifact, Object
+    # Storage object, or candidate data is created before the capacity check.
+    ensure_root_only_directory(path, field=label)
+    try:
+        return require_capacity(
+            path,
+            required_new_bytes=required_new_bytes,
+            minimum_free_bytes=minimum_free_bytes,
+            label=label,
+        )
+    except SnapshotCapacityError as exc:
+        raise SnapshotTransportError(str(exc)) from exc
+
+
 @contextlib.contextmanager
-def locked_workspace_context(config: TransportConfig, *, lock_name: str) -> Any:
+def locked_workspace_capacity_context(
+    config: TransportConfig,
+    *,
+    lock_name: str,
+    required_new_bytes: int,
+    label: str,
+) -> Any:
+    """Serialize capacity admission with the workspace allocation it protects."""
+
     with exclusive_workspace_lock(config.workspace, name=lock_name):
+        capacity = capacity_preflight(
+            config.workspace,
+            required_new_bytes=required_new_bytes,
+            minimum_free_bytes=config.minimum_free_bytes,
+            label=label,
+        )
         with _workspace_context(config) as workspace:
-            yield workspace
+            yield workspace, capacity
 
 
 def publish_snapshot(
@@ -1206,9 +1280,26 @@ def publish_snapshot(
         maximum_snapshot_age_seconds=config.maximum_snapshot_age_seconds,
         error_message="source snapshot is outside the configured freshness bound before publication",
     )
+    plaintext_sizes = [database_bytes, uploads_bytes]
+    if audit_bytes is not None:
+        plaintext_sizes.append(audit_bytes)
+    ciphertext_reservations = [age_ciphertext_reservation_bytes(size) for size in plaintext_sizes]
+    # All ciphertexts coexist during the upload-last transaction, and each
+    # upload performs one exact read-back before the corresponding ciphertext
+    # can be released by the temporary workspace cleanup.
+    workspace_required_bytes = (
+        sum(ciphertext_reservations)
+        + max(ciphertext_reservations)
+        + manifest_workspace_reservation_bytes()
+    )
     base = snapshot_base_key(config, source_site, generation, snapshot_id)
 
-    with locked_workspace_context(config, lock_name=f"publish-{source_site}-{destination_site}") as temporary_name:
+    with locked_workspace_capacity_context(
+        config,
+        lock_name=f"publish-{source_site}-{destination_site}",
+        required_new_bytes=workspace_required_bytes,
+        label="snapshot publish workspace",
+    ) as (temporary_name, capacity):
         temporary = Path(temporary_name)
         database_ciphertext = temporary / "database.dump.age"
         uploads_ciphertext = temporary / "uploads.tar.gz.age"
@@ -1296,9 +1387,13 @@ def publish_snapshot(
         manifest["source_signature"] = sign_manifest(manifest, config=config, source_site=source_site)
         manifest_plaintext = temporary / "manifest.json"
         atomic_write_json(manifest_plaintext, manifest)
+        if manifest_plaintext.stat().st_size > MAXIMUM_MANIFEST_PLAINTEXT_BYTES:
+            raise SnapshotTransportError("manifest exceeds its capacity reservation")
         manifest_ciphertext = temporary / "manifest.json.age"
         encryptor(config.age_binary, recipient, manifest_plaintext, manifest_ciphertext)
         require_root_only_file(manifest_ciphertext, field="manifest ciphertext")
+        if manifest_ciphertext.stat().st_size > MAXIMUM_MANIFEST_CIPHERTEXT_BYTES:
+            raise SnapshotTransportError("manifest ciphertext exceeds its capacity reservation")
         # Encryption is normally tiny, but a delayed process must never commit a stale manifest.
         final_commit_check_time = now or utc_now()
         assert_snapshot_freshness(
@@ -1341,6 +1436,7 @@ def publish_snapshot(
         "published_at": published_at,
         "source_database_capture": source_database_capture,
         "source_volume_capture": source_volume_capture,
+        "capacity_preflight": capacity,
         "database": database,
         "uploads": uploads,
         "manifest": manifest_remote,
@@ -1393,6 +1489,11 @@ def decrypt_manifest_to_value(
 ) -> dict[str, Any]:
     decryptor(config.age_binary, identity_file, encrypted_manifest, output_path)
     try:
+        if output_path.stat().st_size > MAXIMUM_MANIFEST_PLAINTEXT_BYTES:
+            raise SnapshotTransportError("decrypted manifest exceeds its capacity reservation")
+    except OSError as exc:
+        raise SnapshotTransportError("decrypted manifest cannot be inspected") from exc
+    try:
         value = json.loads(output_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise SnapshotTransportError("decrypted manifest is not valid JSON") from exc
@@ -1432,6 +1533,7 @@ def discover_latest_manifest(
                 key=key,
                 version_id=manifest_version_id,
                 output_path=encrypted_manifest,
+                maximum_bytes=MAXIMUM_MANIFEST_CIPHERTEXT_BYTES,
             )
             manifest = decrypt_manifest_to_value(
                 config=config,
@@ -1570,6 +1672,45 @@ def load_candidate_ready_receipt(candidate: Path) -> dict[str, Any]:
             raise SnapshotTransportError(f"candidate ready receipt {field} binding is invalid")
         normalized[field] = str(expected_path)
     normalized["candidate_directory"] = str(candidate)
+    # The ready-receipt schema is unchanged.  Existing immutable candidates
+    # therefore remain valid and preserved even though they predate the new
+    # capacity evidence fields.  Newly staged candidates always include both.
+    if "local_artifact_retention" in receipt:
+        if receipt["local_artifact_retention"] != "preserve":
+            raise SnapshotTransportError("candidate ready receipt retention policy is unsupported")
+        normalized["local_artifact_retention"] = "preserve"
+    if "capacity_preflight" in receipt:
+        capacity = receipt["capacity_preflight"]
+        if not isinstance(capacity, Mapping):
+            raise SnapshotTransportError("candidate ready receipt capacity preflight is malformed")
+        expected_capacity_fields = {
+            "label",
+            "path",
+            "available_bytes",
+            "required_new_bytes",
+            "minimum_free_bytes",
+            "remaining_bytes",
+        }
+        if set(capacity) != expected_capacity_fields:
+            raise SnapshotTransportError("candidate ready receipt capacity preflight is malformed")
+        if not isinstance(capacity.get("label"), str) or not capacity["label"]:
+            raise SnapshotTransportError("candidate ready receipt capacity label is invalid")
+        if not isinstance(capacity.get("path"), str) or not Path(capacity["path"]).is_absolute():
+            raise SnapshotTransportError("candidate ready receipt capacity path is invalid")
+        normalized_capacity = {"label": capacity["label"], "path": capacity["path"]}
+        for field in ("available_bytes", "required_new_bytes", "minimum_free_bytes", "remaining_bytes"):
+            normalized_capacity[field] = require_nonnegative_int(
+                capacity.get(field), f"candidate ready receipt capacity {field}"
+            )
+        if normalized_capacity["available_bytes"] < (
+            normalized_capacity["required_new_bytes"] + normalized_capacity["minimum_free_bytes"]
+        ):
+            raise SnapshotTransportError("candidate ready receipt capacity preflight is inconsistent")
+        if normalized_capacity["remaining_bytes"] != (
+            normalized_capacity["available_bytes"] - normalized_capacity["required_new_bytes"]
+        ):
+            raise SnapshotTransportError("candidate ready receipt capacity remaining bytes is inconsistent")
+        normalized["capacity_preflight"] = normalized_capacity
     normalized["database"] = _require_artifact_descriptor(
         receipt.get("database"), field="candidate ready database", expected_format="pg_dump_custom"
     )
@@ -1698,39 +1839,6 @@ def reject_pending_candidate_records(records: Sequence[Mapping[str, Any]]) -> No
             raise SnapshotTransportError("an earlier candidate still awaits verified restore; refusing to stage another")
 
 
-def prune_candidate_artifacts(candidate: Path, ready: Mapping[str, Any]) -> None:
-    names = ["database.dump", "uploads.tar.gz"]
-    if "audit" in ready:
-        names.append("audit.tar.gz")
-    for name in names:
-        artifact = candidate / name
-        if not artifact.exists():
-            continue
-        if artifact.is_symlink():
-            raise SnapshotTransportError("refusing to remove a symlinked candidate artifact")
-        require_root_only_file(artifact, field="candidate artifact")
-        artifact.unlink()
-
-
-def cleanup_restored_candidate_artifacts(
-    candidate_parent: Path,
-    *,
-    keep_candidate: Path,
-    maximum_retained_candidates: int,
-) -> None:
-    records = scan_candidate_records(candidate_parent)
-    artifact_records = [record for record in records if record["has_artifacts"]]
-    keep_paths = {record["path"] for record in artifact_records[:maximum_retained_candidates]}
-    keep_paths.add(keep_candidate)
-    for record in artifact_records:
-        if record["path"] in keep_paths:
-            continue
-        restore = record["restore"]
-        if restore is None or restore.get("active_pointer_state") != "inactive":
-            continue
-        prune_candidate_artifacts(record["path"], record["ready"])
-
-
 def _consume_artifact(
     client: Any,
     *,
@@ -1768,6 +1876,7 @@ def build_ready_receipt(
     source_capture_age_seconds: int,
     source_capture_duration_seconds: int,
     publish_lag_seconds: int,
+    capacity_preflight: Mapping[str, Any],
 ) -> dict[str, Any]:
     database = dict(manifest["database"])
     uploads = dict(manifest["uploads"])
@@ -1794,6 +1903,8 @@ def build_ready_receipt(
         "database_dump_path": str(candidate / "database.dump"),
         "uploads_archive_path": str(candidate / "uploads.tar.gz"),
         "candidate_directory": str(candidate),
+        "local_artifact_retention": "preserve",
+        "capacity_preflight": dict(capacity_preflight),
         "database": database,
         "uploads": uploads,
         "manifest": dict(manifest_remote),
@@ -1824,9 +1935,15 @@ def consume_snapshot(
     selected_identity = require_root_only_file(selected_identity, field="age_identity_file")
     # Fail before reading bucket state if this host does not pin the requested source key.
     _configured_source_public_key(config, source_site=source_site)
+    # Manifest discovery needs a bounded private temporary directory.  Its
+    # capacity admission is serialized with the ensuing workspace allocation.
     assert_private_versioned_bucket(client, config.bucket)
-    ensure_root_only_directory(config.workspace, field="workspace")
-    with locked_workspace_context(config, lock_name=f"consume-{source_site}-{destination_site}") as temporary_name:
+    with locked_workspace_capacity_context(
+        config,
+        lock_name=f"consume-{source_site}-{destination_site}",
+        required_new_bytes=manifest_workspace_reservation_bytes(),
+        label="snapshot consume workspace",
+    ) as (temporary_name, _workspace_capacity):
         temporary = Path(temporary_name)
         manifest, manifest_remote = discover_latest_manifest(
             client,
@@ -1856,27 +1973,45 @@ def consume_snapshot(
         elapsed_seconds_ceil(published_at, source_capture_time, field="manifest publication lag")
         candidate = _safe_candidate_directory(candidate_root, manifest)
         candidate_parent = candidate.parent
-        ensure_root_only_directory(candidate_parent, field="candidate_root")
         if candidate.exists() or candidate.is_symlink():
-            receipt = verify_existing_candidate(
+            return verify_existing_candidate(
                 candidate,
                 manifest=manifest,
                 manifest_remote=manifest_remote,
                 config=config,
             )
-            cleanup_restored_candidate_artifacts(
-                candidate_parent,
-                keep_candidate=candidate,
-                maximum_retained_candidates=config.maximum_retained_candidates,
+        plaintext_sizes = [
+            require_nonnegative_int(manifest["database"].get("bytes"), "database.bytes", minimum=1),
+            require_nonnegative_int(manifest["uploads"].get("bytes"), "uploads.bytes", minimum=1),
+        ]
+        ciphertext_sizes = [
+            require_nonnegative_int(
+                manifest["database"].get("ciphertext_bytes"), "database.ciphertext_bytes", minimum=1
+            ),
+            require_nonnegative_int(
+                manifest["uploads"].get("ciphertext_bytes"), "uploads.ciphertext_bytes", minimum=1
+            ),
+        ]
+        if "audit" in manifest:
+            plaintext_sizes.append(
+                require_nonnegative_int(manifest["audit"].get("bytes"), "audit.bytes", minimum=1)
             )
-            return receipt
+            ciphertext_sizes.append(
+                require_nonnegative_int(
+                    manifest["audit"].get("ciphertext_bytes"), "audit.ciphertext_bytes", minimum=1
+                )
+            )
+        # The incoming candidate retains every plaintext artifact.  Only one
+        # encrypted artifact is present at a time during download/decryption.
+        receive_capacity = capacity_preflight(
+            candidate_root,
+            required_new_bytes=sum(plaintext_sizes) + max(ciphertext_sizes),
+            minimum_free_bytes=config.minimum_free_bytes,
+            label="snapshot receive candidate root",
+        )
+        ensure_root_only_directory(candidate_parent, field="candidate_root")
         records = scan_candidate_records(candidate_parent)
         reject_pending_candidate_records(records)
-        cleanup_restored_candidate_artifacts(
-            candidate_parent,
-            keep_candidate=candidate,
-            maximum_retained_candidates=config.maximum_retained_candidates,
-        )
         incoming = candidate_parent / (".incoming-" + manifest["snapshot_id"] + "-" + secrets.token_hex(8))
         try:
             incoming.mkdir(mode=0o700)
@@ -1944,16 +2079,12 @@ def consume_snapshot(
                 source_capture_age_seconds=source_capture_age_seconds,
                 source_capture_duration_seconds=source_capture_duration_seconds,
                 publish_lag_seconds=publish_lag_seconds,
+                capacity_preflight=receive_capacity,
             )
             atomic_write_json(incoming / READY_RECEIPT_FILENAME, receipt)
             if candidate.exists() or candidate.is_symlink():
                 raise SnapshotTransportError("refusing to overwrite an existing candidate snapshot")
             os.replace(incoming, candidate)
-            cleanup_restored_candidate_artifacts(
-                candidate_parent,
-                keep_candidate=candidate,
-                maximum_retained_candidates=config.maximum_retained_candidates,
-            )
             return receipt
         except Exception:
             shutil.rmtree(incoming, ignore_errors=True)

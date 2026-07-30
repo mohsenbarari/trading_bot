@@ -75,6 +75,7 @@ class PublishWebappFiSnapshotStandbyTests(unittest.TestCase):
                     "maximum_uploads_bytes": 1024,
                     "maximum_audit_bytes": 1024,
                     "maximum_snapshot_age_seconds": 30,
+                    "minimum_free_bytes": 0,
                     "signing_source_site": "webapp_fi",
                     "source_signing_private_key_file": str(self.signing_key),
                 }
@@ -213,6 +214,8 @@ class PublishWebappFiSnapshotStandbyTests(unittest.TestCase):
         self.assertEqual(capture_label, "local source artifact capture")
         self.assertEqual(transport_label, "local immutable Object Storage publisher")
         self.assertIn("--include-audit", capture_arguments)
+        self.assertIn("--max-database-bytes", capture_arguments)
+        self.assertIn("--minimum-free-bytes", capture_arguments)
         self.assertIn("--apply", capture_arguments)
         self.assertEqual(transport_arguments[2], "publish")
         self.assertIn("--audit-archive", transport_arguments)
@@ -227,6 +230,18 @@ class PublishWebappFiSnapshotStandbyTests(unittest.TestCase):
         self.assertEqual(recorded["status"], "published")
         self.assertFalse(recorded["direct_fi_to_ir_transfer"])
         self.assertEqual(recorded["remote_execution"], "none")
+        self.assertIn("capacity_preflight", recorded)
+
+    def test_capacity_failure_precedes_source_capture(self) -> None:
+        with mock.patch.object(
+            MODULE,
+            "require_capacity",
+            side_effect=MODULE.SnapshotCapacityError("fixture capacity failure"),
+        ):
+            with mock.patch.object(MODULE, "run_json_command") as run:
+                with self.assertRaisesRegex(MODULE.SourceSnapshotPublishError, "fixture capacity failure"):
+                    MODULE.execute(MODULE.build_parser().parse_args(self.arguments("--apply")))
+        run.assert_not_called()
 
     def test_capture_contract_mismatch_stops_before_transport_publish(self) -> None:
         calls: list[str] = []

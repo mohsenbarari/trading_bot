@@ -131,6 +131,45 @@ class CreateWebappFiSnapshotArtifactsTests(unittest.TestCase):
         self.assertEqual(MODULE.conservative_client_lifetime_seconds(300.0001), 301)
         self.assertEqual(MODULE.conservative_client_lifetime_seconds(0.001), 1)
 
+    def test_capacity_failure_precedes_capture_and_artifact_directory_creation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            os.chmod(root, 0o700)
+            capture_env = root / "capture.env"
+            capture_env.write_text(
+                "CAPTURE_DB_USER=snapshot_reader\nCAPTURE_DB_PASSWORD=not-printed\n",
+                encoding="utf-8",
+            )
+            os.chmod(capture_env, 0o600)
+            arguments = MODULE.build_parser().parse_args(
+                [
+                    "--output-root",
+                    str(root),
+                    "--release-sha",
+                    "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5",
+                    "--alembic-revision",
+                    "f2c7d8e9a0b1",
+                    "--generation",
+                    "snapshot-20260729-0001",
+                    "--db-capture-env",
+                    str(capture_env),
+                    "--apply",
+                ]
+            )
+            with (
+                mock.patch.object(
+                    MODULE,
+                    "require_capacity",
+                    side_effect=MODULE.SnapshotCapacityError("fixture capacity failure"),
+                ),
+                mock.patch.object(MODULE, "run_capture") as capture,
+            ):
+                with self.assertRaisesRegex(RESTORE_MODULE.RestoreError, "fixture capacity failure"):
+                    MODULE.execute(arguments)
+
+            capture.assert_not_called()
+            self.assertFalse((root / "snapshots").exists())
+
     def test_applied_capture_reports_ready_only_after_manifest_is_written(self) -> None:
         def fake_capture(_arguments, *, stdout_path=None, **_kwargs):
             assert stdout_path is not None
@@ -166,6 +205,9 @@ class CreateWebappFiSnapshotArtifactsTests(unittest.TestCase):
                     "--generation", "snapshot-20260729-0002",
                     "--db-capture-env", str(capture_env),
                     "--include-audit",
+                    "--max-database-bytes", "1024",
+                    "--max-upload-bytes", "1024",
+                    "--max-audit-bytes", "1024",
                     "--apply",
                 ]
             )

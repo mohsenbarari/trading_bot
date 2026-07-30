@@ -49,6 +49,7 @@ class WebAppIrStageBootstrapTests(unittest.TestCase):
     def _source(self, root: Path) -> tuple[Path, str]:
         source = root / "source"
         (source / "scripts").mkdir(parents=True, mode=0o700)
+        (source / "core").mkdir(mode=0o700)
         (source / "scripts/manage_webapp_ir_artifact_stage.py").write_text(
             "# stage consumer\nVALUE = 'stage'\n", encoding="utf-8"
         )
@@ -57,6 +58,9 @@ class WebAppIrStageBootstrapTests(unittest.TestCase):
         )
         (source / "scripts/manage_webapp_ir_release_provenance.py").write_text(
             "# release provenance primitives\nVALUE = 'provenance'\n", encoding="utf-8"
+        )
+        (source / "core/standby_snapshot_capacity.py").write_text(
+            "# capacity primitives\nVALUE = 'capacity'\n", encoding="utf-8"
         )
         self._run("init", "-q", cwd=source)
         self._run("add", ".", cwd=source)
@@ -104,6 +108,9 @@ class WebAppIrStageBootstrapTests(unittest.TestCase):
                 provenance = package.extractfile("scripts/manage_webapp_ir_release_provenance.py")
                 self.assertIsNotNone(provenance)
                 self.assertIn(b"provenance", provenance.read())
+                capacity = package.extractfile("core/standby_snapshot_capacity.py")
+                self.assertIsNotNone(capacity)
+                self.assertIn(b"capacity", capacity.read())
                 embedded = package.extractfile(bootstrap.PACKAGE_MANIFEST_MEMBER)
                 self.assertIsNotNone(embedded)
                 embedded_bytes = embedded.read()

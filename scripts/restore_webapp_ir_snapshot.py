@@ -36,6 +36,11 @@ from typing import Any, Mapping, Sequence
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from core.standby_snapshot_capacity import SnapshotCapacityError, require_capacity
+
 DEFAULT_COMPOSE_FILE = (
     REPO_ROOT / "deploy/production/docker-compose.webapp-ir-snapshot-standby-2c08.yml"
 )
@@ -548,6 +553,34 @@ def require_config(values: Mapping[str, str], key: str) -> str:
     if not value:
         raise RestoreError(f"standby env is missing {key}")
     return value
+
+
+def require_byte_config(values: Mapping[str, str], key: str, *, minimum: int) -> int:
+    raw = require_config(values, key)
+    try:
+        value = int(raw, 10)
+    except ValueError as exc:
+        raise RestoreError(f"standby env {key} must be an integer") from exc
+    if value < minimum:
+        raise RestoreError(f"standby env {key} must be >= {minimum}")
+    return value
+
+
+def require_restore_capacity(
+    data_root: Path,
+    *,
+    required_new_bytes: int,
+    minimum_free_bytes: int,
+) -> dict[str, Any]:
+    try:
+        return require_capacity(
+            data_root,
+            required_new_bytes=required_new_bytes,
+            minimum_free_bytes=minimum_free_bytes,
+            label="WA-IR snapshot candidate data root",
+        )
+    except SnapshotCapacityError as exc:
+        raise RestoreError(str(exc)) from exc
 
 
 def build_candidate(data_root: Path, generation: str) -> Candidate:
@@ -1428,6 +1461,10 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     if not ALEMBIC_RE.fullmatch(expected_revision):
         raise RestoreError("standby env EXPECTED_ALEMBIC_REVISION is invalid")
     maximum_snapshot_age_seconds = require_snapshot_maximum_age(values)
+    minimum_free_bytes = require_byte_config(values, "WA_IR_SNAPSHOT_MIN_FREE_BYTES", minimum=0)
+    database_restore_reserve_bytes = require_byte_config(
+        values, "WA_IR_SNAPSHOT_DATABASE_RESTORE_RESERVE_BYTES", minimum=1
+    )
     data_root = require_absolute_directory(
         require_config(values, "WA_IR_STANDBY_DATA_ROOT"), label="WA_IR_STANDBY_DATA_ROOT"
     )
@@ -1467,6 +1504,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         audit_members, audit_bytes = validate_audit_archive(
             receipt.audit.path, max_uncompressed_bytes=args.max_audit_bytes
         )
+    required_candidate_bytes = database_restore_reserve_bytes + upload_bytes + (audit_bytes or 0)
     generation = (args.generation or receipt.snapshot_id).lower()
     candidate = build_candidate(data_root, generation)
     if args.apply:
@@ -1528,6 +1566,9 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         },
         "validated_upload_members": upload_members,
         "validated_upload_uncompressed_bytes": upload_bytes,
+        "capacity_requirement_bytes": required_candidate_bytes,
+        "capacity_minimum_free_bytes": minimum_free_bytes,
+        "database_restore_reserve_bytes": database_restore_reserve_bytes,
         "audit": {
             "status": "planned" if receipt.audit is not None else "not_provided",
             "validated_members": audit_members,
@@ -1548,6 +1589,14 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         }
     if not args.apply:
         return plan
+
+    # The receipt and archives have only been read so far.  Refuse before a
+    # journal, directory, Docker volume, or container can be created.
+    plan["capacity_preflight"] = require_restore_capacity(
+        data_root,
+        required_new_bytes=required_candidate_bytes,
+        minimum_free_bytes=minimum_free_bytes,
+    )
 
     volume_names = [candidate.db_volume, candidate.uploads_volume]
     if receipt.audit is not None:
@@ -1650,6 +1699,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
             receipt, maximum_age_seconds=maximum_snapshot_age_seconds
         ),
     )
+    evidence["capacity_preflight"] = dict(plan["capacity_preflight"])
     evidence["status"] = "ready"
     evidence["completed_at"] = utc_now()
     write_atomic_json(state_root / f"restore-{candidate.generation}.json", evidence)

@@ -265,6 +265,7 @@ class ArtifactStageTests(unittest.TestCase):
 
         self.bootstrap_source = self.root / "bootstrap-source"
         (self.bootstrap_source / "scripts").mkdir(parents=True, mode=0o700)
+        (self.bootstrap_source / "core").mkdir(mode=0o700)
         (self.bootstrap_source / "scripts/manage_webapp_ir_artifact_stage.py").write_text(
             "# stage consumer\nVALUE = 'stage'\n", encoding="utf-8"
         )
@@ -273,6 +274,9 @@ class ArtifactStageTests(unittest.TestCase):
         )
         (self.bootstrap_source / "scripts/manage_webapp_ir_release_provenance.py").write_text(
             "# release provenance primitives\nVALUE = 'provenance'\n", encoding="utf-8"
+        )
+        (self.bootstrap_source / "core/standby_snapshot_capacity.py").write_text(
+            "# capacity primitives\nVALUE = 'capacity'\n", encoding="utf-8"
         )
         self._run_git("init", "-q", cwd=self.bootstrap_source)
         self._run_git("add", ".", cwd=self.bootstrap_source)

@@ -56,6 +56,7 @@ PAYLOAD_MEMBERS = (
     "scripts/manage_webapp_ir_artifact_stage.py",
     "scripts/manage_webapp_ir_snapshot.py",
     "scripts/manage_webapp_ir_release_provenance.py",
+    "core/standby_snapshot_capacity.py",
     "config/consumer.json",
 )
 
@@ -1068,7 +1069,8 @@ def load_config(value):
     files = config.get("files")
     required_names = {
         "scripts/manage_webapp_ir_artifact_stage.py", "scripts/manage_webapp_ir_snapshot.py",
-        "scripts/manage_webapp_ir_release_provenance.py", "config/consumer.json",
+        "scripts/manage_webapp_ir_release_provenance.py", "core/standby_snapshot_capacity.py",
+        "config/consumer.json",
     }
     if not isinstance(files, dict) or set(files) != required_names:
         raise ReceiveError("receiver file binding")

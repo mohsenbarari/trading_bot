@@ -24,6 +24,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from core.standby_snapshot_capacity import SnapshotCapacityError, require_capacity
+
 from restore_webapp_ir_snapshot import (
     ALEMBIC_RE,
     DEFAULT_MAX_AUDIT_BYTES,
@@ -41,6 +47,7 @@ from restore_webapp_ir_snapshot import (
 SCHEMA_VERSION = "webapp_ir_snapshot_artifacts_v1"
 CONTAINER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 DATABASE_USER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]{0,62}$")
+DEFAULT_MAX_DATABASE_BYTES = 2 * 1024 * 1024 * 1024
 
 
 def utc_now() -> str:
@@ -76,6 +83,23 @@ def require_output_root(value: str) -> Path:
     if metadata.st_uid != 0 or metadata.st_mode & 0o077:
         raise RestoreError("output-root must be root-only")
     return root.resolve(strict=True)
+
+
+def require_capture_capacity(
+    output_root: Path,
+    *,
+    required_new_bytes: int,
+    minimum_free_bytes: int,
+) -> dict[str, Any]:
+    try:
+        return require_capacity(
+            output_root,
+            required_new_bytes=required_new_bytes,
+            minimum_free_bytes=minimum_free_bytes,
+            label="WebApp-FI snapshot capture output root",
+        )
+    except SnapshotCapacityError as exc:
+        raise RestoreError(str(exc)) from exc
 
 
 def run_capture(
@@ -267,8 +291,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--db-capture-env", required=True, help="root-only CAPTURE_DB_USER/PASSWORD for a read-only role")
     parser.add_argument("--include-audit", action="store_true", help="also capture /app/audit_trail read-only")
     parser.add_argument("--attempts", type=int, default=3)
+    parser.add_argument("--max-database-bytes", type=int, default=DEFAULT_MAX_DATABASE_BYTES)
     parser.add_argument("--max-upload-bytes", type=int, default=DEFAULT_MAX_UPLOAD_BYTES)
     parser.add_argument("--max-audit-bytes", type=int, default=DEFAULT_MAX_AUDIT_BYTES)
+    parser.add_argument("--minimum-free-bytes", type=int, default=0)
     parser.add_argument("--apply", action="store_true", help="write local artifacts; default is a no-Docker plan")
     parser.add_argument("--json", action="store_true")
     return parser
@@ -286,8 +312,10 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         raise RestoreError("generation is not safe")
     if args.attempts < 1 or args.attempts > 5:
         raise RestoreError("attempts must be between 1 and 5")
-    if args.max_upload_bytes < 1 or args.max_audit_bytes < 1:
-        raise RestoreError("max-upload-bytes and max-audit-bytes must be positive")
+    if args.max_database_bytes < 1 or args.max_upload_bytes < 1 or args.max_audit_bytes < 1:
+        raise RestoreError("max-database-bytes, max-upload-bytes, and max-audit-bytes must be positive")
+    if args.minimum_free_bytes < 0:
+        raise RestoreError("minimum-free-bytes must be non-negative")
     output_root = require_output_root(args.output_root)
     db_container = require_container_name(args.db_container, label="db-container")
     app_container = require_container_name(args.app_container, label="app-container")
@@ -295,6 +323,9 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     artifact_dir = output_root / "snapshots" / generation
     if artifact_dir.exists():
         raise RestoreError("generation output directory already exists")
+    capture_required_bytes = args.max_database_bytes + args.max_upload_bytes
+    if args.include_audit:
+        capture_required_bytes += args.max_audit_bytes
     plan: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "status": "planned" if not args.apply else "running",
@@ -309,6 +340,8 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         "source_database_capture": {"client_mode": "short_lived_read_only"},
         "source_volume_capture": {"mode": "read_only_no_mutation"},
         "audit_included": bool(args.include_audit),
+        "capacity_requirement_bytes": capture_required_bytes,
+        "capacity_minimum_free_bytes": args.minimum_free_bytes,
         "remote_transfer": "none",
         "services_stopped": False,
         "source_data_mutated": False,
@@ -316,6 +349,11 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     if not args.apply:
         return plan
 
+    plan["capacity_preflight"] = require_capture_capacity(
+        output_root,
+        required_new_bytes=capture_required_bytes,
+        minimum_free_bytes=args.minimum_free_bytes,
+    )
     artifact_dir.mkdir(parents=True, mode=0o700)
     assert_source_role_read_only(db_container, user=capture_user, password=capture_password)
     source_before = source_alembic_revision(db_container, user=capture_user, password=capture_password)
@@ -355,6 +393,8 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         with database.open("rb") as handle:
             if handle.read(5) != b"PGDMP":
                 raise RestoreError("source pg_dump did not produce PostgreSQL custom format")
+        if database.stat().st_size > args.max_database_bytes:
+            raise RestoreError("source pg_dump exceeds the configured database size limit")
         try:
             run_capture(
                 [
