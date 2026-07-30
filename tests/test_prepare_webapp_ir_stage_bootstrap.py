@@ -169,6 +169,34 @@ class WebAppIrStageBootstrapTests(unittest.TestCase):
                 (second / bootstrap.PACKAGE_ARCHIVE_NAME).read_bytes(),
             )
 
+    def test_prepare_closes_over_the_real_control_tree_source_verifier(self):
+        """The bootstrap package must obtain the real portable verifier from Git."""
+
+        with tempfile.TemporaryDirectory(prefix="wa-ir-bootstrap-real-control-") as value:
+            root = Path(value)
+            source = root / "control-source"
+            subprocess.run(
+                ["/usr/bin/git", "clone", "--quiet", "--no-local", str(ROOT), str(source)],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            parent = root / "packages"
+            parent.mkdir(mode=0o700)
+            commit = self._run("rev-parse", "HEAD", cwd=source)
+            destination = parent / "candidate"
+            bootstrap.prepare_bootstrap_package(
+                source_repository=source,
+                control_release_sha=commit,
+                consumer_config=self._config(root),
+                destination=destination,
+            )
+            with tarfile.open(destination / bootstrap.PACKAGE_ARCHIVE_NAME, "r:") as package:
+                verifier = package.extractfile("scripts/verify_webapp_fi_source_provenance.py")
+                self.assertIsNotNone(verifier)
+                self.assertIn(b"verify_source_role_attestation_payload", verifier.read())
+
     def test_prepare_refuses_existing_destination(self):
         with tempfile.TemporaryDirectory(prefix="wa-ir-bootstrap-existing-") as value:
             root = Path(value)
