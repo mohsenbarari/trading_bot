@@ -482,6 +482,7 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
             verification_time=install.utc_now(),
         )
         self.assertEqual(portable_result["descriptor_claim"]["application_release_tree"], attestation["descriptor_claim"]["application_release_tree"])
+        self.assertNotIn("controller_authorization_verified", portable_result)
         archive_payload = b"fixture exported image archive"
         export_runtime = {
             **portable_result["runtime_claim"],
@@ -500,6 +501,7 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
             "tooling": {"control_commit": self.control_commit, "control_tree": self.control_commit},
             "canonical_release_tree_sha256": attestation["descriptor_claim"]["canonical_release_tree_sha256"],
             "source_role_attestation_sha256": attestation["attestation_sha256"],
+            "source_signer_enrollment": portable_result["source_signer_enrollment_claim"],
             "observation_scope": {
                 "point_in_time_only": True,
                 "data_capture_performed": False,
@@ -510,8 +512,8 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
             "image": {
                 "image_id": IMAGE_ID,
                 "image_reference": IMAGE_REFERENCE,
-                "archive_sha256": hashlib.sha256(archive_payload).hexdigest(),
-                "archive_bytes": len(archive_payload),
+                "docker_save_archive_sha256": hashlib.sha256(archive_payload).hexdigest(),
+                "docker_save_archive_bytes": len(archive_payload),
                 "docker_save": {
                     "command": ["docker", "save", "--output", "webapp-fi-active-app-image.tar", IMAGE_ID],
                     "docker_executable_sha256": hashlib.sha256(b"docker").hexdigest(),
@@ -543,7 +545,32 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
             expected_app_image_reference=IMAGE_REFERENCE,
             verification_time=install.utc_now(),
         )
-        self.assertEqual(image_result["image_claim"]["archive_sha256"], hashlib.sha256(archive_payload).hexdigest())
+        self.assertEqual(image_result["image_claim"]["docker_save_archive_sha256"], hashlib.sha256(archive_payload).hexdigest())
+        self.assertEqual(image_result["source_signer_enrollment_claim"], portable_result["source_signer_enrollment_claim"])
+        self.assertNotIn("controller_authorization_verified", image_result)
+        invalid_image = copy.deepcopy(image_unsigned)
+        invalid_image["image"]["image_reference"] = "registry.example/gold-trade/webapp:unexpected"
+        invalid_image_receipt = {
+            **invalid_image,
+            "source_signature": {
+                "algorithm": "ed25519",
+                "signature_base64": _signature(self.fi_key, install.IMAGE_EXPORT_SIGNATURE_DOMAIN, invalid_image),
+            },
+        }
+        with self.assertRaises(portable.SourceProvenanceVerificationError):
+            portable.verify_image_export_receipt_payload(
+                payload=portable.canonical_json_bytes(invalid_image_receipt) + b"\n",
+                pinned_source_signing_public_key_base64=self.fi_public,
+                expected_campaign_id=CAMPAIGN,
+                expected_application=installed["application"],
+                expected_control_commit=self.control_commit,
+                expected_application_release_tree=attestation["descriptor_claim"]["application_release_tree"],
+                expected_canonical_release_tree_sha256=attestation["descriptor_claim"]["canonical_release_tree_sha256"],
+                expected_attestation_sha256=attestation["attestation_sha256"],
+                expected_app_image_id=IMAGE_ID,
+                expected_app_image_reference=IMAGE_REFERENCE,
+                verification_time=install.utc_now(),
+            )
 
     def test_static_asset_drift_blocks_attestation_without_docker(self):
         installed = self._install()
@@ -575,6 +602,171 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         os.chmod(ssh_public, 0o600)
         with self.assertRaises(install.SourceAdoptionInstallError):
             self._enroll(installed, role_path, ssh_public, certificate)
+
+    def test_enrollment_certificate_is_locally_single_use_after_interruption(self):
+        installed = self._install()
+        _, role_path, ssh_public, _, certificate = self._runtime_and_config(installed)
+        role_config = install.load_source_role_config(role_path, expected_application=installed["application"])
+        certificate_value = install._validate_signer_enrollment_certificate(
+            certificate=certificate,
+            pinned_controller_public_key_base64=self.controller_public,
+            campaign_id=CAMPAIGN,
+            installed=installed,
+            role_config=role_config,
+            ssh_host_public_key_file=ssh_public,
+        )
+        consumption = install._consume_enrollment_certificate(
+            candidate=Path(installed["candidate"]),
+            certificate_value=certificate_value,
+            certificate_sha256=certificate_value["certificate_sha256"],
+            campaign_id=CAMPAIGN,
+        )
+        self.assertTrue(Path(consumption["path"]).exists())
+        with self.assertRaisesRegex(install.SourceAdoptionInstallError, "already consumed"):
+            self._enroll(installed, role_path, ssh_public, certificate)
+
+    def test_enrollment_certificate_rejects_expired_and_non_utc_timestamps(self):
+        installed = self._install()
+        _, role_path, ssh_public, _, certificate = self._runtime_and_config(installed)
+        expired = json.loads(certificate.read_text(encoding="utf-8"))
+        now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+        expired["issued_at"] = (now - dt.timedelta(minutes=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        expired["not_before"] = (now - dt.timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        expired["not_after"] = (now - dt.timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        unsigned = {key: value for key, value in expired.items() if key != "controller_signature"}
+        expired["controller_signature"] = {
+            "algorithm": "ed25519",
+            "signature_base64": _signature(self.controller_key, install.SIGNER_ENROLLMENT_SIGNATURE_DOMAIN, unsigned),
+        }
+        _canonical_private_json(certificate, expired)
+        with self.assertRaisesRegex(install.SourceAdoptionInstallError, "not currently valid"):
+            self._enroll(installed, role_path, ssh_public, certificate)
+
+        non_utc = dict(expired)
+        non_utc["issued_at"] = "2026-07-30T00:00:00+00:00"
+        unsigned = {key: value for key, value in non_utc.items() if key != "controller_signature"}
+        non_utc["controller_signature"] = {
+            "algorithm": "ed25519",
+            "signature_base64": _signature(self.controller_key, install.SIGNER_ENROLLMENT_SIGNATURE_DOMAIN, unsigned),
+        }
+        _canonical_private_json(certificate, non_utc)
+        with self.assertRaises(install.SourceAdoptionInstallError):
+            self._enroll(installed, role_path, ssh_public, certificate)
+
+    def test_enrollment_certificate_binds_exact_delivery_object_and_descriptor(self):
+        installed = self._install()
+        _, role_path, ssh_public, _, certificate = self._runtime_and_config(installed)
+        altered = json.loads(certificate.read_text(encoding="utf-8"))
+        altered["source_adoption_object"]["version_id"] = "different-version-id"
+        unsigned = {key: value for key, value in altered.items() if key != "controller_signature"}
+        altered["controller_signature"] = {
+            "algorithm": "ed25519",
+            "signature_base64": _signature(self.controller_key, install.SIGNER_ENROLLMENT_SIGNATURE_DOMAIN, unsigned),
+        }
+        _canonical_private_json(certificate, altered)
+        with self.assertRaisesRegex(install.SourceAdoptionInstallError, "delivery target"):
+            self._enroll(installed, role_path, ssh_public, certificate)
+
+        unversioned = json.loads(certificate.read_text(encoding="utf-8"))
+        unversioned["source_adoption_object"]["version_id"] = "null"
+        unsigned = {key: value for key, value in unversioned.items() if key != "controller_signature"}
+        unversioned["controller_signature"] = {
+            "algorithm": "ed25519",
+            "signature_base64": _signature(self.controller_key, install.SIGNER_ENROLLMENT_SIGNATURE_DOMAIN, unsigned),
+        }
+        _canonical_private_json(certificate, unversioned)
+        with self.assertRaisesRegex(install.SourceAdoptionInstallError, "version ID"):
+            self._enroll(installed, role_path, ssh_public, certificate)
+
+    def test_portable_v2_rejects_stale_observation_and_incorrect_image_metadata(self):
+        installed = self._install()
+        runtime, role_path, ssh_public, static_path, certificate = self._runtime_and_config(installed)
+        self._enroll(installed, role_path, ssh_public, certificate)
+        attestation = self._attest(
+            installed,
+            runtime,
+            role_path,
+            ssh_public,
+            static_path,
+            certificate,
+            attestation_id="attestation-v2-negatives",
+        )
+        original = json.loads(Path(attestation["attestation_path"]).read_text(encoding="utf-8"))
+
+        stale = copy.deepcopy(original)
+        stale["attested_at"] = "2020-01-01T00:00:00Z"
+        unsigned = {key: value for key, value in stale.items() if key != "source_signature"}
+        stale["source_signature"] = {
+            "algorithm": "ed25519",
+            "signature_base64": _signature(self.fi_key, install.ATTESTATION_SIGNATURE_DOMAIN, unsigned),
+        }
+        with self.assertRaisesRegex(portable.SourceProvenanceVerificationError, "stale"):
+            portable.verify_source_role_attestation_payload(
+                payload=portable.canonical_json_bytes(stale) + b"\n",
+                pinned_source_signing_public_key_base64=self.fi_public,
+                expected_campaign_id=CAMPAIGN,
+                expected_application=installed["application"],
+                expected_control_commit=self.control_commit,
+                expected_canonical_release_tree_sha256=attestation["descriptor_claim"]["canonical_release_tree_sha256"],
+                expected_app_image_id=IMAGE_ID,
+                expected_app_image_reference=IMAGE_REFERENCE,
+                verification_time=install.utc_now(),
+                maximum_observation_age_seconds=60,
+            )
+
+        expired_enrollment = copy.deepcopy(original)
+        attested_at = dt.datetime.strptime(original["attested_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc)
+        expired_enrollment["source_signer_enrollment"]["not_after"] = (attested_at - dt.timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        unsigned = {key: value for key, value in expired_enrollment.items() if key != "source_signature"}
+        expired_enrollment["source_signature"] = {
+            "algorithm": "ed25519",
+            "signature_base64": _signature(self.fi_key, install.ATTESTATION_SIGNATURE_DOMAIN, unsigned),
+        }
+        with self.assertRaisesRegex(portable.SourceProvenanceVerificationError, "after source signer enrollment expiry"):
+            portable.verify_source_role_attestation_payload(
+                payload=portable.canonical_json_bytes(expired_enrollment) + b"\n",
+                pinned_source_signing_public_key_base64=self.fi_public,
+                expected_campaign_id=CAMPAIGN,
+                expected_application=installed["application"],
+                expected_control_commit=self.control_commit,
+                expected_canonical_release_tree_sha256=attestation["descriptor_claim"]["canonical_release_tree_sha256"],
+                expected_app_image_id=IMAGE_ID,
+                expected_app_image_reference=IMAGE_REFERENCE,
+                verification_time=install.utc_now(),
+            )
+
+        bad_image = copy.deepcopy(original)
+        bad_image["active_application_image"]["image_reference"] = "registry.example/gold-trade/webapp:wrong"
+        unsigned = {key: value for key, value in bad_image.items() if key != "source_signature"}
+        bad_image["source_signature"] = {
+            "algorithm": "ed25519",
+            "signature_base64": _signature(self.fi_key, install.ATTESTATION_SIGNATURE_DOMAIN, unsigned),
+        }
+        with self.assertRaises(portable.SourceProvenanceVerificationError):
+            portable.verify_source_role_attestation_payload(
+                payload=portable.canonical_json_bytes(bad_image) + b"\n",
+                pinned_source_signing_public_key_base64=self.fi_public,
+                expected_campaign_id=CAMPAIGN,
+                expected_application=installed["application"],
+                expected_control_commit=self.control_commit,
+                expected_canonical_release_tree_sha256=attestation["descriptor_claim"]["canonical_release_tree_sha256"],
+                expected_app_image_id=IMAGE_ID,
+                expected_app_image_reference=IMAGE_REFERENCE,
+                verification_time=install.utc_now(),
+            )
+
+        with self.assertRaisesRegex(portable.SourceProvenanceVerificationError, "canonical descriptor"):
+            portable.verify_source_role_attestation_payload(
+                payload=portable.canonical_json_bytes(original) + b"\n",
+                pinned_source_signing_public_key_base64=self.fi_public,
+                expected_campaign_id=CAMPAIGN,
+                expected_application=installed["application"],
+                expected_control_commit=self.control_commit,
+                expected_canonical_release_tree_sha256="0" * 64,
+                expected_app_image_id=IMAGE_ID,
+                expected_app_image_reference=IMAGE_REFERENCE,
+                verification_time=install.utc_now(),
+            )
 
     def test_unexpected_sync_app_mount_blocks_without_data_capture(self):
         installed = self._install()
@@ -813,6 +1005,138 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         self.assertTrue(plan["revalidate_projection_static_containers_before_and_after_docker_save"])
         self.assertTrue(plan["exact_bytes_only_unparsed_archive"])
         self.assertFalse(plan["loadability_claimed"])
+
+    def test_export_rejects_source_only_enrollment_claim_drift_before_docker(self):
+        installed = self._install()
+        runtime, role_path, ssh_public, static_path, certificate = self._runtime_and_config(installed)
+        self._enroll(installed, role_path, ssh_public, certificate)
+        attestation = self._attest(
+            installed,
+            runtime,
+            role_path,
+            ssh_public,
+            static_path,
+            certificate,
+            attestation_id="attestation-enrollment-drift",
+        )
+        attestation_path = Path(attestation["attestation_path"])
+        altered = json.loads(attestation_path.read_text(encoding="utf-8"))
+        altered["source_signer_enrollment"]["controller_key_id"] = "ed25519-sha256:" + "0" * 64
+        unsigned = {key: value for key, value in altered.items() if key != "source_signature"}
+        altered["source_signature"] = {
+            "algorithm": "ed25519",
+            "signature_base64": _signature(self.fi_key, install.ATTESTATION_SIGNATURE_DOMAIN, unsigned),
+        }
+        _canonical_private_json(attestation_path, altered)
+        parent = self.root / "exports-enrollment-drift"
+        parent.mkdir(mode=0o700)
+        with patch.object(install, "_inspect_container", side_effect=AssertionError("enrollment mismatch touched Docker")):
+            with self.assertRaisesRegex(install.SourceAdoptionInstallError, "signer enrollment differs"):
+                install.export_actual_fi_image(
+                    attestation=attestation_path,
+                    source_role_config=role_path,
+                    signer_enrollment_receipt=Path(installed["candidate"]) / "enrollments" / f"{CAMPAIGN}.json",
+                    signer_enrollment_certificate=certificate,
+                    ssh_host_public_key_file=ssh_public,
+                    runtime_source_root=runtime,
+                    static_assets_descriptor=static_path,
+                    pinned_controller_public_key_base64=self.controller_public,
+                    pinned_source_signing_public_key_base64=self.fi_public,
+                    expected_campaign_id=CAMPAIGN,
+                    expected_application=installed["application"],
+                    expected_control_commit=self.control_commit,
+                    expected_canonical_release_tree_sha256=attestation["descriptor_claim"]["canonical_release_tree_sha256"],
+                    expected_app_image_id=IMAGE_ID,
+                    expected_app_image_reference=IMAGE_REFERENCE,
+                    destination=parent / "candidate",
+                    export_id="export-enrollment-drift",
+                    apply=False,
+                )
+
+    def test_exact_byte_export_invokes_only_docker_save_and_hashes_unparsed_bytes(self):
+        executable = _private_file(self.root / "tools" / "docker", b"fixture trusted docker\n")
+        os.chmod(executable, 0o700)
+        destination = self.root / "exports" / "archive.tar"
+        destination.parent.mkdir(mode=0o700)
+        observed_commands = []
+
+        def fake_run(command, **_kwargs):
+            observed_commands.append(command)
+            output = Path(command[command.index("--output") + 1])
+            output.write_bytes(b"opaque docker save byte stream")
+            os.chmod(output, 0o600)
+            return subprocess.CompletedProcess(command, 0)
+
+        with patch.object(install, "_require_trusted_executable", return_value=executable), patch.object(install.subprocess, "run", side_effect=fake_run):
+            exported = install._export_exact_docker_save_bytes(archive=destination, expected_image_id=IMAGE_ID)
+        self.assertEqual(observed_commands, [[str(executable), "save", "--output", str(destination), IMAGE_ID]])
+        self.assertNotIn("load", observed_commands[0])
+        self.assertEqual(exported["docker_save_archive_sha256"], hashlib.sha256(destination.read_bytes()).hexdigest())
+        self.assertEqual(exported["docker_save"]["archive_semantics"], "exact_bytes_only_unparsed")
+        self.assertFalse(exported["docker_save"]["loadability_claimed"])
+
+    def test_export_revalidates_before_and_after_and_withholds_receipt_on_drift(self):
+        installed = self._install()
+        runtime, role_path, ssh_public, static_path, certificate = self._runtime_and_config(installed)
+        self._enroll(installed, role_path, ssh_public, certificate)
+        attestation = self._attest(
+            installed,
+            runtime,
+            role_path,
+            ssh_public,
+            static_path,
+            certificate,
+            attestation_id="attestation-export-drift",
+        )
+        before = {
+            **attestation["runtime_claim"],
+            "active_application_image": attestation["image_claim"]["active_application_image"],
+        }
+        after = copy.deepcopy(before)
+        after["active_application_image"]["repo_tags"] = [IMAGE_REFERENCE, "registry.example/gold-trade/webapp:changed"]
+        parent = self.root / "exports-drift"
+        parent.mkdir(mode=0o700)
+
+        def fake_export(*, archive, expected_image_id):
+            archive.write_bytes(b"retained untrusted exact bytes")
+            os.chmod(archive, 0o600)
+            return {
+                "docker_save_archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+                "docker_save_archive_bytes": archive.stat().st_size,
+                "docker_save": {
+                    "command": ["docker", "save", "--output", archive.name, expected_image_id],
+                    "docker_executable_sha256": hashlib.sha256(b"docker").hexdigest(),
+                    "docker_executable_bytes": len(b"docker"),
+                    "archive_semantics": "exact_bytes_only_unparsed",
+                    "docker_load_invoked": False,
+                    "loadability_claimed": False,
+                },
+            }
+
+        with patch.object(install, "_revalidate_export_runtime", side_effect=[before, after]) as revalidate, patch.object(install, "_export_exact_docker_save_bytes", side_effect=fake_export):
+            with self.assertRaisesRegex(install.SourceAdoptionInstallError, "changed during exact-byte export"):
+                install.export_actual_fi_image(
+                    attestation=Path(attestation["attestation_path"]),
+                    source_role_config=role_path,
+                    signer_enrollment_receipt=Path(installed["candidate"]) / "enrollments" / f"{CAMPAIGN}.json",
+                    signer_enrollment_certificate=certificate,
+                    ssh_host_public_key_file=ssh_public,
+                    runtime_source_root=runtime,
+                    static_assets_descriptor=static_path,
+                    pinned_controller_public_key_base64=self.controller_public,
+                    pinned_source_signing_public_key_base64=self.fi_public,
+                    expected_campaign_id=CAMPAIGN,
+                    expected_application=installed["application"],
+                    expected_control_commit=self.control_commit,
+                    expected_canonical_release_tree_sha256=attestation["descriptor_claim"]["canonical_release_tree_sha256"],
+                    expected_app_image_id=IMAGE_ID,
+                    expected_app_image_reference=IMAGE_REFERENCE,
+                    destination=parent / "candidate",
+                    export_id="export-drift",
+                    apply=True,
+                )
+        self.assertEqual(revalidate.call_count, 2)
+        self.assertFalse((parent / "candidate" / "image-export-receipt.json").exists())
 
 
 if __name__ == "__main__":

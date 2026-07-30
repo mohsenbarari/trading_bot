@@ -388,6 +388,7 @@ def verify_source_role_attestation_payload(
     }
     if set(value) != expected or value.get("schema") != ATTESTATION_SCHEMA or value.get("status") != "attested":
         raise SourceProvenanceVerificationError("WebApp-FI source role attestation is unsupported")
+    attested_at = _timestamp(value.get("attested_at"), field="attestation timestamp")
     _fresh_timestamp(
         value.get("attested_at"),
         field="attestation timestamp",
@@ -417,7 +418,9 @@ def verify_source_role_attestation_payload(
         _sha(enrollment.get(name), field=f"source signer enrollment {name}")
     if not isinstance(enrollment.get("certificate_id"), str) or not PACKAGE_ID_RE.fullmatch(enrollment["certificate_id"]) or not isinstance(enrollment.get("operation_id"), str) or not PACKAGE_ID_RE.fullmatch(enrollment["operation_id"]) or not isinstance(enrollment.get("controller_key_id"), str) or not enrollment["controller_key_id"].startswith("ed25519-sha256:"):
         raise SourceProvenanceVerificationError("source signer enrollment is invalid")
-    _timestamp(enrollment.get("not_after"), field="source signer enrollment not_after")
+    enrollment_not_after = _timestamp(enrollment.get("not_after"), field="source signer enrollment not_after")
+    if attested_at > enrollment_not_after:
+        raise SourceProvenanceVerificationError("attestation was made after source signer enrollment expiry")
     if enrollment.get("source_signing_public_key_base64") != pinned_source_signing_public_key_base64 or value.get("source_signing_public_key_base64") != pinned_source_signing_public_key_base64 or value.get("source_signing_key_id") != public_key_id(pinned_source_signing_public_key_base64) or enrollment.get("source_signing_key_id") != value.get("source_signing_key_id"):
         raise SourceProvenanceVerificationError("source signing key is not pinned")
     if value.get("observation_scope") != {
@@ -485,6 +488,7 @@ def verify_source_role_attestation_payload(
         },
         "image_claim": {"image_id": expected_app_image_id, "image_reference": expected_app_image_reference, "active_application_image": dict(active)},
         "source_adoption_delivery_claim": delivery,
+        "source_signer_enrollment_claim": dict(enrollment),
         "source_signing_key_id": value["source_signing_key_id"],
         "source_signing_public_key_base64": pinned_source_signing_public_key_base64,
         "point_in_time_observation_only": True,
@@ -558,12 +562,13 @@ def verify_image_export_receipt_payload(
     expected = {
         "schema", "status", "exported_at", "export_id", "campaign_id", "source_site", "destination_site",
         "application", "application_release_tree", "tooling", "canonical_release_tree_sha256",
-        "source_role_attestation_sha256", "observation_scope", "image", "pre_export_runtime",
+        "source_role_attestation_sha256", "source_signer_enrollment", "observation_scope", "image", "pre_export_runtime",
         "post_export_runtime", "exact_byte_export", "archive_consumption", "object_storage_export_required",
         "source_signing_public_key_base64", "source_signing_key_id", "source_signature",
     }
     if set(value) != expected or value.get("schema") != IMAGE_EXPORT_RECEIPT_SCHEMA or value.get("status") != "exported":
         raise SourceProvenanceVerificationError("WebApp-FI image export receipt is unsupported")
+    exported_at = _timestamp(value.get("exported_at"), field="image export timestamp")
     _fresh_timestamp(
         value.get("exported_at"),
         field="image export timestamp",
@@ -578,6 +583,23 @@ def verify_image_export_receipt_payload(
         raise SourceProvenanceVerificationError("image export provenance binding is invalid")
     if _sha(value.get("canonical_release_tree_sha256"), field="image export canonical descriptor sha256") != expected_descriptor:
         raise SourceProvenanceVerificationError("image export canonical descriptor is unexpected")
+    enrollment = value.get("source_signer_enrollment")
+    enrollment_expected = {
+        "receipt_sha256", "certificate_sha256", "certificate_id", "operation_id", "certificate_consumption_sha256",
+        "not_after", "fi_ssh_host_public_key_sha256", "controller_key_id", "source_signing_public_key_base64",
+        "source_signing_key_id",
+    }
+    if not isinstance(enrollment, Mapping) or set(enrollment) != enrollment_expected:
+        raise SourceProvenanceVerificationError("image export signer enrollment is invalid")
+    for name in ("receipt_sha256", "certificate_sha256", "certificate_consumption_sha256", "fi_ssh_host_public_key_sha256"):
+        _sha(enrollment.get(name), field=f"image export signer enrollment {name}")
+    if not isinstance(enrollment.get("certificate_id"), str) or not PACKAGE_ID_RE.fullmatch(enrollment["certificate_id"]) or not isinstance(enrollment.get("operation_id"), str) or not PACKAGE_ID_RE.fullmatch(enrollment["operation_id"]) or not isinstance(enrollment.get("controller_key_id"), str) or not enrollment["controller_key_id"].startswith("ed25519-sha256:"):
+        raise SourceProvenanceVerificationError("image export signer enrollment is invalid")
+    enrollment_not_after = _timestamp(enrollment.get("not_after"), field="image export signer enrollment not_after")
+    if exported_at > enrollment_not_after:
+        raise SourceProvenanceVerificationError("image export was made after source signer enrollment expiry")
+    if enrollment.get("source_signing_public_key_base64") != pinned_source_signing_public_key_base64 or enrollment.get("source_signing_key_id") != public_key_id(pinned_source_signing_public_key_base64):
+        raise SourceProvenanceVerificationError("image export signer enrollment is not pinned")
     if value.get("observation_scope") != {
         "point_in_time_only": True,
         "data_capture_performed": False,
@@ -587,11 +609,11 @@ def verify_image_export_receipt_payload(
     }:
         raise SourceProvenanceVerificationError("image export observation scope is invalid")
     image = value.get("image")
-    image_fields = {"image_id", "image_reference", "archive_sha256", "archive_bytes", "docker_save"}
+    image_fields = {"image_id", "image_reference", "docker_save_archive_sha256", "docker_save_archive_bytes", "docker_save"}
     if not isinstance(image, Mapping) or set(image) != image_fields or image.get("image_id") != expected_app_image_id or image.get("image_reference") != expected_app_image_reference:
         raise SourceProvenanceVerificationError("image export image binding is invalid")
-    _sha(image.get("archive_sha256"), field="image export archive sha256")
-    _size(image.get("archive_bytes"), field="image export archive bytes", maximum=100 * 1024 * 1024 * 1024)
+    _sha(image.get("docker_save_archive_sha256"), field="image export raw docker-save archive sha256")
+    _size(image.get("docker_save_archive_bytes"), field="image export raw docker-save archive bytes", maximum=100 * 1024 * 1024 * 1024)
     docker_save = image.get("docker_save")
     if not isinstance(docker_save, Mapping) or set(docker_save) != {"command", "docker_executable_sha256", "docker_executable_bytes", "archive_semantics", "docker_load_invoked", "loadability_claimed"}:
         raise SourceProvenanceVerificationError("image export docker save binding is invalid")
@@ -637,6 +659,7 @@ def verify_image_export_receipt_payload(
         "runtime_claim": before,
         "image_claim": dict(image),
         "source_role_attestation_sha256": value["source_role_attestation_sha256"],
+        "source_signer_enrollment_claim": dict(enrollment),
         "source_signing_key_id": value["source_signing_key_id"],
         "source_signing_public_key_base64": pinned_source_signing_public_key_base64,
         "point_in_time_observation_only": True,
