@@ -110,6 +110,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
         self.control_tree = git(self.control_repository, "rev-parse", "HEAD^{tree}")
         self.app_image_id = "sha256:" + "a" * 64
         self.app_repo_digest = "trading_bot_base_iran@sha256:" + "b" * 64
+        self.campaign_id = "current-2c08-standby-campaign"
 
     def patched_contract(self):
         return mock.patch.multiple(
@@ -145,6 +146,11 @@ class ReleaseProvenanceTests(unittest.TestCase):
         write_private(image_bundle, b"verified-image-archive-fixture\n")
         images = [
             {
+                "archive_tag": MODULE.image_contract.canonical_archive_tag(
+                    campaign_id=self.campaign_id,
+                    release_sha=self.application_sha,
+                    image_id=self.app_image_id,
+                ),
                 "image_id": self.app_image_id,
                 "repo_digests": [self.app_repo_digest] if app_repo_digests is None else app_repo_digests,
                 "repo_tags": ["trading_bot_base_iran:rollback-2c08"],
@@ -156,7 +162,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
         archive = {
             "bytes": archive_bytes,
             "image_ids": [self.app_image_id],
-            "repo_tags": ["trading_bot_base_iran:rollback-2c08"],
+            "repo_tags": [images[0]["archive_tag"]],
             "sha256": archive_sha,
         }
         image_set_sha = hashlib.sha256(MODULE.canonical_json_bytes(images)).hexdigest()
@@ -167,6 +173,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
             MODULE.canonical_json_bytes(
                 {
                     "archive": archive,
+                    "campaign_id": self.campaign_id,
                     "image_set_sha256": image_set_sha,
                     "images": images,
                     "release_sha": self.application_sha,
@@ -230,6 +237,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
         }
         receipt = {
             "artifacts": artifacts,
+            "campaign_id": self.campaign_id,
             "capacity_preflight": {
                 "image_logical_bytes": 123,
                 "output_free_bytes": 1_000_000,
@@ -373,8 +381,9 @@ class ReleaseProvenanceTests(unittest.TestCase):
                 "scripts/manage_webapp_ir_artifact_stage.py": "a" * 64,
                 "scripts/manage_webapp_ir_snapshot.py": "b" * 64,
                 "scripts/manage_webapp_ir_release_provenance.py": "c" * 64,
-                "core/standby_snapshot_capacity.py": "e" * 64,
-                "config/consumer.json": "d" * 64,
+                "core/standby_snapshot_capacity.py": "d" * 64,
+                "scripts/webapp_ir_image_archive_contract.py": "e" * 64,
+                "config/consumer.json": "f" * 64,
             },
             "bootstrap": {
                 "object_key": "campaign/bootstrap/v1/webapp_fi/webapp_ir/stage-consumer-bootstrap.tar.age",
@@ -384,7 +393,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
                 "plaintext_sha256": "0" * 64,
                 "plaintext_bytes": 1024,
                 "package_manifest_sha256": "1" * 64,
-                "consumer_config_sha256": "d" * 64,
+                "consumer_config_sha256": "f" * 64,
                 "preparation_receipt_sha256": "3" * 64,
             },
         }
@@ -656,7 +665,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
         stage_receipt = self.make_candidate(prepared)
         bootstrap_receipt = self.make_bootstrap_receipt()
         payload = json.loads(bootstrap_receipt.read_text(encoding="utf-8"))
-        payload["bootstrap"]["consumer_config_sha256"] = "f" * 64
+        payload["bootstrap"]["consumer_config_sha256"] = "e" * 64
         unsigned = {key: value for key, value in payload.items() if key != "receipt_sha256"}
         payload["receipt_sha256"] = hashlib.sha256(MODULE.canonical_json_bytes(unsigned)).hexdigest()
         write_private(bootstrap_receipt, MODULE.canonical_json_bytes(payload) + b"\n")

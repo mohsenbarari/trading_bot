@@ -241,8 +241,30 @@ class ArtifactPreparationTests(unittest.TestCase):
         self.assertEqual("2", image_bindings["image_count"])
         self.assertIn("image_manifest_sha256", image_bindings)
         manifest = json.loads((target / "image-manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(PREPARATION_ID, receipt["campaign_id"])
+        self.assertEqual(PREPARATION_ID, manifest["campaign_id"])
         self.assertEqual(sorted([self.first_ref, self.second_ref]), [item["source_ref"] for item in manifest["images"]])
         self.assertEqual(sorted([self.first_id, self.second_id]), manifest["archive"]["image_ids"])
+        expected_archive_tags = {
+            prepare.image_contract.canonical_archive_tag(
+                campaign_id=PREPARATION_ID,
+                release_sha=RELEASE_SHA,
+                image_id=self.first_id,
+            ),
+            prepare.image_contract.canonical_archive_tag(
+                campaign_id=PREPARATION_ID,
+                release_sha=RELEASE_SHA,
+                image_id=self.second_id,
+            ),
+        }
+        self.assertEqual(expected_archive_tags, set(manifest["archive"]["repo_tags"]))
+        self.assertEqual(expected_archive_tags, {item["archive_tag"] for item in manifest["images"]})
+        with tarfile.open(target / "images.tar", "r") as archive:
+            self.assertNotIn("repositories", archive.getnames())
+            archive_manifest = json.loads(archive.extractfile("manifest.json").read().decode("utf-8"))
+        self.assertEqual(expected_archive_tags, {tag for entry in archive_manifest for tag in entry["RepoTags"]})
+        self.assertTrue(all(self.first_ref not in entry["RepoTags"] for entry in archive_manifest))
+        self.assertTrue(all(self.second_ref not in entry["RepoTags"] for entry in archive_manifest))
 
         save_call = next(call for call in self.runner.calls if call[:3] == ["/usr/bin/docker", "image", "save"])
         self.assertEqual(sorted(self.images), save_call[save_call.index("--output") + 2 :])
@@ -258,7 +280,7 @@ class ArtifactPreparationTests(unittest.TestCase):
         self.assertFalse(any(call[:3] == ["/usr/bin/docker", "image", "save"] for call in self.runner.calls))
         self.assertEqual([], list(self.output_root.iterdir()))
 
-    def test_rejects_archive_when_the_verified_source_tag_is_missing(self) -> None:
+    def test_rejects_raw_archive_when_the_verified_source_tag_is_missing_before_a_final_archive_exists(self) -> None:
         self.runner.archive_drop_tags = True
 
         with self.assertRaisesRegex(prepare.ArtifactPreparationError, "does not retain every verified source image tag"):
@@ -271,10 +293,10 @@ class ArtifactPreparationTests(unittest.TestCase):
         )
         self.assertTrue(target.is_dir())
         self.assertTrue((target / "release.bundle").is_file())
-        self.assertTrue((target / "images.tar").is_file())
+        self.assertFalse((target / "images.tar").exists())
         self.assertFalse((target / "preparation-receipt.json").exists())
 
-    def test_rejects_archive_when_a_tag_changes_between_inspection_and_save(self) -> None:
+    def test_rejects_raw_archive_when_an_image_changes_between_inspection_and_save_before_a_final_archive_exists(self) -> None:
         self.runner.archive_config_overrides[self.first_id] = b'{"architecture":"amd64","config":"repointed"}'
 
         with self.assertRaisesRegex(prepare.ArtifactPreparationError, "contains an unverified image ID"):
@@ -287,8 +309,60 @@ class ArtifactPreparationTests(unittest.TestCase):
         )
         self.assertTrue(target.is_dir())
         self.assertTrue((target / "release.bundle").is_file())
-        self.assertTrue((target / "images.tar").is_file())
+        self.assertFalse((target / "images.tar").exists())
         self.assertFalse((target / "preparation-receipt.json").exists())
+
+    def test_final_archive_remaps_every_shared_source_tag_to_the_isolated_namespace(self) -> None:
+        shared_tag = "postgres:15-alpine"
+        self.images[self.second_ref]["RepoTags"].append(shared_tag)
+
+        receipt = self.prepare(campaign_id="current-2c08-standby-campaign")
+        target = Path(receipt["output_directory"])
+        manifest = json.loads((target / "image-manifest.json").read_text(encoding="utf-8"))
+        self.assertIn(shared_tag, next(item for item in manifest["images"] if item["image_id"] == self.second_id)["repo_tags"])
+        self.assertNotIn(shared_tag, manifest["archive"]["repo_tags"])
+        with tarfile.open(target / "images.tar", "r") as archive:
+            archive_manifest = json.loads(archive.extractfile("manifest.json").read().decode("utf-8"))
+        self.assertNotIn(shared_tag, {tag for entry in archive_manifest for tag in entry["RepoTags"]})
+
+    def test_archive_tag_is_deterministically_bound_to_campaign_release_and_image_id(self) -> None:
+        tag = prepare.image_contract.canonical_archive_tag(
+            campaign_id="campaign-a",
+            release_sha=RELEASE_SHA,
+            image_id=self.first_id,
+        )
+        self.assertEqual(
+            tag,
+            prepare.image_contract.canonical_archive_tag(
+                campaign_id="campaign-a",
+                release_sha=RELEASE_SHA,
+                image_id=self.first_id,
+            ),
+        )
+        self.assertNotEqual(
+            tag,
+            prepare.image_contract.canonical_archive_tag(
+                campaign_id="campaign-b",
+                release_sha=RELEASE_SHA,
+                image_id=self.first_id,
+            ),
+        )
+        self.assertNotEqual(
+            tag,
+            prepare.image_contract.canonical_archive_tag(
+                campaign_id="campaign-a",
+                release_sha="c" * 40,
+                image_id=self.first_id,
+            ),
+        )
+        self.assertNotEqual(
+            tag,
+            prepare.image_contract.canonical_archive_tag(
+                campaign_id="campaign-a",
+                release_sha=RELEASE_SHA,
+                image_id=self.second_id,
+            ),
+        )
 
     def test_rejects_non_git_runtime_before_docker_inspection(self) -> None:
         self.runner.missing_git = True

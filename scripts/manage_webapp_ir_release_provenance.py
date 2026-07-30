@@ -19,6 +19,7 @@ import argparse
 from dataclasses import dataclass
 import datetime as dt
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -26,8 +27,31 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 from typing import Any, Mapping, Sequence
+
+
+def _load_image_archive_contract() -> Any:
+    """Load the pure archive-tag contract from the receipt-bound control code."""
+
+    module_name = "webapp_ir_image_archive_contract"
+    try:
+        return __import__(module_name)
+    except ModuleNotFoundError as exc:
+        if exc.name != module_name:
+            raise
+    module_path = Path(__file__).with_name(module_name + ".py")
+    spec = importlib.util.spec_from_file_location("_wa_ir_image_archive_contract", module_path)
+    if spec is None or spec.loader is None:  # pragma: no cover - repository invariant.
+        raise RuntimeError("cannot load WA-IR image archive contract")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+image_contract = _load_image_archive_contract()
 
 
 PREPARATION_SCHEMA = "gold-trade-wa-ir-artifact-preparation-v1"
@@ -50,6 +74,7 @@ BOOTSTRAP_RECEIPT_FILES = frozenset(
         "scripts/manage_webapp_ir_snapshot.py",
         "scripts/manage_webapp_ir_release_provenance.py",
         "core/standby_snapshot_capacity.py",
+        "scripts/webapp_ir_image_archive_contract.py",
         "config/consumer.json",
     }
 )
@@ -152,6 +177,7 @@ class Artifact:
 class Preparation:
     receipt_path: Path
     receipt_sha256: str
+    campaign_id: str
     release_sha: str
     release_tree: str
     output_directory: Path
@@ -405,9 +431,10 @@ def _image_values(value: object, *, field: str) -> tuple[dict[str, Any], ...]:
             raise ReleaseProvenanceError(f"{field} contains an invalid image")
         _fields(
             item,
-            expected={"source_ref", "image_id", "repo_digests", "repo_tags", "size_bytes"},
+            expected={"archive_tag", "source_ref", "image_id", "repo_digests", "repo_tags", "size_bytes"},
             field=f"{field} image",
         )
+        archive_tag = item.get("archive_tag")
         image_id = item.get("image_id")
         source_ref = item.get("source_ref")
         repo_digests = item.get("repo_digests")
@@ -417,6 +444,8 @@ def _image_values(value: object, *, field: str) -> tuple[dict[str, Any], ...]:
             not isinstance(image_id, str)
             or not IMAGE_ID_RE.fullmatch(image_id)
             or image_id in seen_ids
+            or not isinstance(archive_tag, str)
+            or not archive_tag
             or not isinstance(source_ref, str)
             or not source_ref
             or not isinstance(repo_digests, list)
@@ -437,9 +466,41 @@ def _image_values(value: object, *, field: str) -> tuple[dict[str, Any], ...]:
     return tuple(images)
 
 
+def _validate_isolated_archive_tags(
+    images: Sequence[Mapping[str, Any]],
+    *,
+    campaign_id: object,
+    release_sha: object,
+    field: str,
+) -> str:
+    """Require one safe, deterministic tag for every staged image identity."""
+
+    try:
+        campaign = image_contract.require_campaign_id(campaign_id, field=f"{field} campaign_id")
+        release = image_contract.require_release_sha(release_sha, field=f"{field} release_sha")
+        observed: set[str] = set()
+        for image in images:
+            tag = image.get("archive_tag")
+            image_id = image.get("image_id")
+            image_contract.require_canonical_archive_tag(
+                tag,
+                campaign_id=campaign,
+                release_sha=release,
+                image_id=image_id,
+                field=f"{field} image archive_tag",
+            )
+            if tag in observed:
+                raise image_contract.ImageArchiveContractError("archive tags are duplicated")
+            observed.add(tag)
+    except image_contract.ImageArchiveContractError as exc:
+        raise ReleaseProvenanceError(f"{field} does not use isolated image archive tags") from exc
+    return campaign
+
+
 def _image_manifest(
     path: Path,
     *,
+    campaign_id: str,
     release_sha: str,
     images: tuple[dict[str, Any], ...],
     archive: Mapping[str, Any],
@@ -447,13 +508,19 @@ def _image_manifest(
     value = _read_private_json(path, field="prepared image manifest")
     _fields(
         value,
-        expected={"schema", "status", "release_sha", "archive", "image_set_sha256", "images"},
+        expected={"schema", "status", "campaign_id", "release_sha", "archive", "image_set_sha256", "images"},
         field="prepared image manifest",
     )
     if value.get("schema") != IMAGE_MANIFEST_SCHEMA or value.get("status") != "prepared":
         raise ReleaseProvenanceError("prepared image manifest schema or status is unsupported")
-    if value.get("release_sha") != release_sha or value.get("images") != list(images) or value.get("archive") != archive:
+    if (
+        value.get("campaign_id") != campaign_id
+        or value.get("release_sha") != release_sha
+        or value.get("images") != list(images)
+        or value.get("archive") != archive
+    ):
         raise ReleaseProvenanceError("prepared image manifest does not bind the preparation receipt")
+    _validate_isolated_archive_tags(images, campaign_id=campaign_id, release_sha=release_sha, field="prepared image manifest")
     image_set_sha = _require_sha256(value.get("image_set_sha256"), field="prepared image manifest image_set_sha256")
     if image_set_sha != sha256_bytes(canonical_json_bytes(list(images))):
         raise ReleaseProvenanceError("prepared image manifest image set hash is invalid")
@@ -466,6 +533,7 @@ def _preparation_receipt(path: Path) -> Preparation:
         value,
         expected={
             "artifacts",
+            "campaign_id",
             "capacity_preflight",
             "image_archive",
             "images",
@@ -501,6 +569,11 @@ def _preparation_receipt(path: Path) -> Preparation:
     preparation_id = value.get("preparation_id")
     if not isinstance(preparation_id, str) or not BUNDLE_ID_RE.fullmatch(preparation_id):
         raise ReleaseProvenanceError("application preparation ID is invalid")
+    campaign_id = value.get("campaign_id")
+    try:
+        campaign_id = image_contract.require_campaign_id(campaign_id)
+    except image_contract.ImageArchiveContractError as exc:
+        raise ReleaseProvenanceError("application preparation campaign_id is invalid") from exc
     output = _safe_path(value.get("output_directory"), field="application preparation output_directory")
     _require_directory(output, field="application preparation output_directory", private=True)
     if path != output / "preparation-receipt.json":
@@ -556,6 +629,12 @@ def _preparation_receipt(path: Path) -> Preparation:
     if artifacts[APPLICATION_BUNDLE_ARTIFACT].bindings != expected_release_bindings:
         raise ReleaseProvenanceError("application release bundle bindings are invalid")
     images = _image_values(value.get("images"), field="application preparation images")
+    _validate_isolated_archive_tags(
+        images,
+        campaign_id=campaign_id,
+        release_sha=release_sha,
+        field="application preparation images",
+    )
     archive = value.get("image_archive")
     if not isinstance(archive, Mapping):
         raise ReleaseProvenanceError("application preparation image archive is invalid")
@@ -568,10 +647,15 @@ def _preparation_receipt(path: Path) -> Preparation:
         raise ReleaseProvenanceError("application preparation image IDs are invalid")
     if image_ids != sorted(image_ids) or len(set(image_ids)) != len(image_ids) or set(image_ids) != {item["image_id"] for item in images}:
         raise ReleaseProvenanceError("application preparation image IDs do not match inspected images")
+    archive_tags = archive.get("repo_tags")
+    expected_archive_tags = sorted(item["archive_tag"] for item in images)
+    if archive_tags != expected_archive_tags:
+        raise ReleaseProvenanceError("application preparation image archive retains shared or noncanonical tags")
     image_set_sha = sha256_bytes(canonical_json_bytes(list(images)))
     image_ids_sha = sha256_bytes(canonical_json_bytes([item["image_id"] for item in images]))
     manifest = _image_manifest(
         artifacts[IMAGE_MANIFEST_ARTIFACT].path,
+        campaign_id=campaign_id,
         release_sha=release_sha,
         images=images,
         archive=archive,
@@ -632,6 +716,7 @@ def _preparation_receipt(path: Path) -> Preparation:
     return Preparation(
         receipt_path=path,
         receipt_sha256=receipt_sha,
+        campaign_id=campaign_id,
         release_sha=release_sha,
         release_tree=release_tree,
         output_directory=output,
@@ -949,15 +1034,28 @@ def _exact_bindings(artifact: Artifact, expected: Mapping[str, str]) -> None:
 
 def _validate_staged_image_manifest(path: Path, provenance: Provenance) -> None:
     value = _read_private_json(path, field="staged image manifest")
-    _fields(value, expected={"schema", "status", "release_sha", "archive", "image_set_sha256", "images"}, field="staged image manifest")
+    _fields(
+        value,
+        expected={"schema", "status", "campaign_id", "release_sha", "archive", "image_set_sha256", "images"},
+        field="staged image manifest",
+    )
     if value.get("schema") != IMAGE_MANIFEST_SCHEMA or value.get("status") != "prepared" or value.get("release_sha") != provenance.application.release_sha:
         raise ReleaseProvenanceError("staged image manifest schema or release is invalid")
     images = _image_values(value.get("images"), field="staged image manifest images")
+    _validate_isolated_archive_tags(
+        images,
+        campaign_id=value.get("campaign_id"),
+        release_sha=value.get("release_sha"),
+        field="staged image manifest",
+    )
     image_set = sha256_bytes(canonical_json_bytes(list(images)))
     image_ids = sha256_bytes(canonical_json_bytes([item["image_id"] for item in images]))
     archive = value.get("archive")
     if not isinstance(archive, Mapping):
         raise ReleaseProvenanceError("staged image manifest archive is invalid")
+    archive_tags = archive.get("repo_tags")
+    if archive_tags != sorted(item["archive_tag"] for item in images):
+        raise ReleaseProvenanceError("staged image manifest archive retains shared or noncanonical tags")
     if (
         value.get("image_set_sha256") != provenance.runtime_images.image_set_sha256
         or image_set != provenance.runtime_images.image_set_sha256

@@ -62,6 +62,9 @@ class WebAppIrStageBootstrapTests(unittest.TestCase):
         (source / "core/standby_snapshot_capacity.py").write_text(
             "# capacity primitives\nVALUE = 'capacity'\n", encoding="utf-8"
         )
+        (source / "scripts/webapp_ir_image_archive_contract.py").write_text(
+            "# isolated image archive tag contract\nVALUE = 'image-contract'\n", encoding="utf-8"
+        )
         self._run("init", "-q", cwd=source)
         self._run("add", ".", cwd=source)
         self._run("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "control", cwd=source)
@@ -111,6 +114,9 @@ class WebAppIrStageBootstrapTests(unittest.TestCase):
                 capacity = package.extractfile("core/standby_snapshot_capacity.py")
                 self.assertIsNotNone(capacity)
                 self.assertIn(b"capacity", capacity.read())
+                contract = package.extractfile("scripts/webapp_ir_image_archive_contract.py")
+                self.assertIsNotNone(contract)
+                self.assertIn(b"image-contract", contract.read())
                 embedded = package.extractfile(bootstrap.PACKAGE_MANIFEST_MEMBER)
                 self.assertIsNotNone(embedded)
                 embedded_bytes = embedded.read()
