@@ -13,5 +13,7 @@
   "maximum_database_bytes": 2147483648,
   "maximum_uploads_bytes": 4294967296,
   "maximum_audit_bytes": 2147483648,
-  "maximum_snapshot_age_seconds": 30
+  "maximum_snapshot_age_seconds": 30,
+  "minimum_free_bytes": 8589934592,
+  "local_artifact_retention": "preserve"
 }

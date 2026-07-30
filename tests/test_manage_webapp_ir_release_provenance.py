@@ -373,6 +373,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
                 "scripts/manage_webapp_ir_artifact_stage.py": "a" * 64,
                 "scripts/manage_webapp_ir_snapshot.py": "b" * 64,
                 "scripts/manage_webapp_ir_release_provenance.py": "c" * 64,
+                "core/standby_snapshot_capacity.py": "e" * 64,
                 "config/consumer.json": "d" * 64,
             },
             "bootstrap": {

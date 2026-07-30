@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import datetime as dt
 import importlib.util
 import io
@@ -15,6 +16,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any, Mapping
+from unittest import mock
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -191,7 +193,8 @@ class SnapshotTransportTests(unittest.TestCase):
             maximum_uploads_bytes=1024 * 1024,
             maximum_audit_bytes=1024 * 1024,
             maximum_snapshot_age_seconds=30,
-            maximum_retained_candidates=2,
+            minimum_free_bytes=0,
+            local_artifact_retention="preserve",
             signing_source_site="webapp_fi",
             source_signing_private_key_file=self.signing_private_key,
             source_signing_public_key=None,
@@ -482,6 +485,35 @@ class SnapshotTransportTests(unittest.TestCase):
         self.assertEqual(len(b"ciphertext"), size)
         self.assertEqual(0o600, stat.S_IMODE(target.stat().st_mode))
 
+    def test_downloaded_ciphertext_never_exceeds_its_capacity_reservation(self) -> None:
+        target = self.root / "too-large.age"
+
+        with self.assertRaisesRegex(snapshot.SnapshotTransportError, "capacity reservation"):
+            snapshot.write_response_body(
+                {"Body": FakeBody(b"ciphertext")}, target, maximum_bytes=len(b"ciphertext") - 1
+            )
+
+        self.assertFalse(target.exists())
+
+    def test_decrypted_manifest_rejects_an_output_beyond_its_reservation(self) -> None:
+        encrypted = self.root / "manifest.age"
+        output = self.root / "manifest.json"
+        encrypted.write_bytes(b"fixture")
+        encrypted.chmod(0o600)
+
+        def oversized_decrypt(_binary: str, _identity: Path, _source: Path, target: Path) -> None:
+            target.write_bytes(b"x" * (snapshot.MAXIMUM_MANIFEST_PLAINTEXT_BYTES + 1))
+            target.chmod(0o600)
+
+        with self.assertRaisesRegex(snapshot.SnapshotTransportError, "capacity reservation"):
+            snapshot.decrypt_manifest_to_value(
+                config=self.consumer_config,
+                encrypted_manifest=encrypted,
+                output_path=output,
+                identity_file=self.identity,
+                decryptor=oversized_decrypt,
+            )
+
     def test_secure_directory_allows_non_writable_755_ancestors_but_requires_private_final(self) -> None:
         service_root = self.root / "srv"
         service_root.mkdir(mode=0o755)
@@ -629,6 +661,29 @@ class SnapshotTransportTests(unittest.TestCase):
                 source_capture_completed_at=NOW,
             )
 
+    def test_publish_capacity_failure_precedes_any_object_write(self) -> None:
+        with mock.patch.object(
+            snapshot,
+            "require_capacity",
+            side_effect=snapshot.SnapshotCapacityError("fixture capacity failure"),
+        ):
+            with self.assertRaisesRegex(snapshot.SnapshotTransportError, "fixture capacity failure"):
+                self.publish()
+        self.assertEqual([], self.client.put_calls)
+
+    def test_consume_capacity_failure_precedes_manifest_and_artifact_download(self) -> None:
+        self.publish()
+        get_calls_before = len(self.client.get_calls)
+        with mock.patch.object(
+            snapshot,
+            "require_capacity",
+            side_effect=snapshot.SnapshotCapacityError("fixture capacity failure"),
+        ):
+            with self.assertRaisesRegex(snapshot.SnapshotTransportError, "fixture capacity failure"):
+                self.consume()
+        self.assertEqual(get_calls_before, len(self.client.get_calls))
+        self.assertFalse(self.candidate_root.exists())
+
     def test_publisher_rejects_capture_completion_before_db_snapshot_start(self) -> None:
         with self.assertRaisesRegex(snapshot.SnapshotTransportError, "precedes"):
             self.publish(
@@ -649,6 +704,31 @@ class SnapshotTransportTests(unittest.TestCase):
             [call for call in self.client.get_calls if call.get("VersionId") in {"version-1", "version-2"}]
         )
         self.assertEqual(exact_data_reads_before, exact_data_reads_after)
+
+    def test_legacy_ready_receipt_remains_a_valid_preserved_candidate(self) -> None:
+        first_id = "20260729T120001Z-111111111111111111111111"
+        second_id = "20260729T120002Z-222222222222222222222222"
+        self.publish(snapshot_id=first_id)
+        ready = self.consume()
+        path = Path(ready["candidate_directory"]) / "snapshot-ready.json"
+        legacy = json.loads(path.read_text(encoding="utf-8"))
+        legacy.pop("capacity_preflight")
+        legacy.pop("local_artifact_retention")
+        legacy["receipt_sha256"] = snapshot.sha256_bytes(
+            snapshot.canonical_json_bytes({key: value for key, value in legacy.items() if key != "receipt_sha256"})
+        )
+        path.unlink()
+        snapshot.atomic_write_json(path, legacy)
+        legacy_ready = dict(ready)
+        legacy_ready["receipt_sha256"] = legacy["receipt_sha256"]
+        self.write_restore_receipt(legacy_ready, active_pointer_state="inactive")
+
+        self.publish(snapshot_id=second_id)
+        staged = self.consume()
+
+        self.assertEqual(second_id, staged["snapshot_id"])
+        self.assertTrue((Path(ready["candidate_directory"]) / "database.dump").is_file())
+        self.assertNotIn("capacity_preflight", snapshot.load_candidate_ready_receipt(Path(ready["candidate_directory"])))
 
     def write_restore_receipt(self, ready: dict[str, Any], *, active_pointer_state: str) -> None:
         payload: dict[str, Any] = {
@@ -678,10 +758,7 @@ class SnapshotTransportTests(unittest.TestCase):
         with self.assertRaisesRegex(snapshot.SnapshotTransportError, "awaits verified restore"):
             self.consume()
 
-    def test_retention_prunes_only_old_inactive_restored_artifacts(self) -> None:
-        self.publisher_config = snapshot.dataclasses.replace(self.publisher_config, maximum_retained_candidates=2)
-        self.consumer_config = snapshot.dataclasses.replace(self.consumer_config, maximum_retained_candidates=2)
-        self.config = self.publisher_config
+    def test_retention_preserves_old_inactive_restored_artifacts_by_default(self) -> None:
         first_id = "20260729T120001Z-111111111111111111111111"
         second_id = "20260729T120002Z-222222222222222222222222"
         third_id = "20260729T120003Z-333333333333333333333333"
@@ -696,17 +773,14 @@ class SnapshotTransportTests(unittest.TestCase):
 
         first_candidate = Path(first["candidate_directory"])
         second_candidate = Path(second["candidate_directory"])
-        self.assertFalse((first_candidate / "database.dump").exists())
-        self.assertFalse((first_candidate / "uploads.tar.gz").exists())
+        self.assertTrue((first_candidate / "database.dump").is_file())
+        self.assertTrue((first_candidate / "uploads.tar.gz").is_file())
         self.assertTrue((first_candidate / "snapshot-ready.json").is_file())
         self.assertTrue((first_candidate / "snapshot-restore.json").is_file())
         self.assertTrue((second_candidate / "database.dump").is_file())
         self.assertTrue(Path(third["database_dump_path"]).is_file())
 
     def test_retention_never_prunes_an_active_restored_candidate(self) -> None:
-        self.publisher_config = snapshot.dataclasses.replace(self.publisher_config, maximum_retained_candidates=1)
-        self.consumer_config = snapshot.dataclasses.replace(self.consumer_config, maximum_retained_candidates=1)
-        self.config = self.publisher_config
         first_id = "20260729T120001Z-111111111111111111111111"
         second_id = "20260729T120002Z-222222222222222222222222"
         self.publish(snapshot_id=first_id)
@@ -811,6 +885,38 @@ class SnapshotTransportTests(unittest.TestCase):
                 with snapshot.exclusive_workspace_lock(self.workspace, name="publish-webapp_fi-webapp_ir"):
                     pass
 
+    def test_workspace_capacity_admission_is_locked_before_temporary_allocation(self) -> None:
+        order: list[str] = []
+
+        @contextlib.contextmanager
+        def fake_lock(_workspace: Path, *, name: str):
+            self.assertEqual("fixture", name)
+            order.append("lock")
+            yield
+
+        @contextlib.contextmanager
+        def fake_workspace(_config: snapshot.TransportConfig):
+            order.append("workspace")
+            yield "fixture-workspace"
+
+        capacity = {"label": "fixture"}
+        with (
+            mock.patch.object(snapshot, "exclusive_workspace_lock", fake_lock),
+            mock.patch.object(snapshot, "capacity_preflight", side_effect=lambda *_args, **_kwargs: order.append("capacity") or capacity),
+            mock.patch.object(snapshot, "_workspace_context", fake_workspace),
+        ):
+            with snapshot.locked_workspace_capacity_context(
+                self.config,
+                lock_name="fixture",
+                required_new_bytes=1,
+                label="fixture",
+            ) as (workspace, admitted):
+                order.append("body")
+
+        self.assertEqual("fixture-workspace", workspace)
+        self.assertIs(capacity, admitted)
+        self.assertEqual(["lock", "capacity", "workspace", "body"], order)
+
     def test_age_backend_encrypts_for_recipient_and_decrypts_only_with_identity(self) -> None:
         identity = self.root / "real-age-identity.txt"
         generated = subprocess.run(
@@ -888,6 +994,7 @@ class SnapshotTransportTests(unittest.TestCase):
                     "bucket": "private-snapshots",
                     "prefix": "campaigns/three-site",
                     "credentials_file": "/root/credentials.json",
+                    "minimum_free_bytes": 0,
                     "signing_source_site": "webapp_fi",
                     "source_signing_public_key_base64": public_key,
                 }
@@ -909,6 +1016,7 @@ class SnapshotTransportTests(unittest.TestCase):
                     "bucket": "private-snapshots",
                     "prefix": "campaigns/three-site",
                     "credentials_file": "/root/credentials.json",
+                    "minimum_free_bytes": 0,
                     "signing_source_site": "webapp_fi",
                     "source_signing_private_key_file": "/root/webapp-fi-private.key",
                     "source_signing_public_key_base64": public_key,

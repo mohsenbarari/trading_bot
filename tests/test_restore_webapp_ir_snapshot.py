@@ -146,6 +146,8 @@ class RestoreWebappIrSnapshotTests(unittest.TestCase):
                 f"WA_IR_SNAPSHOT_WORK_ROOT={workspace}\n"
                 f"WA_IR_SNAPSHOT_STATE_ROOT={state}\n"
                 "WA_IR_SNAPSHOT_MAX_AGE_SECONDS=30\n"
+                "WA_IR_SNAPSHOT_MIN_FREE_BYTES=0\n"
+                "WA_IR_SNAPSHOT_DATABASE_RESTORE_RESERVE_BYTES=1024\n"
                 f"WA_IR_STANDBY_DATABASE_ENV_FILE={database_env}\n"
                 "WA_IR_POSTGRES_IMAGE=postgres:15-alpine\n"
             ).encode("utf-8"),
@@ -249,6 +251,25 @@ class RestoreWebappIrSnapshotTests(unittest.TestCase):
         self.assertFalse(payload["migration_started"])
         self.assertFalse(payload["public_routing_changed"])
         self.assertEqual(payload["candidate"]["db_volume"], "trading_bot_wa_ir_pg_snapshot-20260729-0001")
+
+    def test_capacity_failure_precedes_journal_and_docker_inspection(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            standby_env, receipt_path, _ = self.make_inputs(root)
+            arguments = MODULE.build_parser().parse_args(
+                ["--standby-env", str(standby_env), "--receipt", str(receipt_path), "--apply"]
+            )
+            state_root = Path(MODULE.parse_env_file(standby_env, label="standby env")["WA_IR_SNAPSHOT_STATE_ROOT"])
+            with mock.patch.object(
+                MODULE,
+                "require_capacity",
+                side_effect=MODULE.SnapshotCapacityError("fixture capacity failure"),
+            ), mock.patch.object(MODULE, "docker_volume_absent") as volume_absent:
+                with self.assertRaisesRegex(MODULE.RestoreError, "fixture capacity failure"):
+                    MODULE.execute(arguments)
+
+        self.assertFalse(MODULE.restore_inflight_journal_path(state_root).exists())
+        volume_absent.assert_not_called()
 
     def test_failed_apply_leaves_durable_inflight_journal_and_closes_future_restore(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

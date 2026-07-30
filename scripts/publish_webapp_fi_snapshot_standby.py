@@ -34,6 +34,16 @@ from typing import Any, Iterator, Mapping, Sequence
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from core.standby_snapshot_capacity import (
+    SnapshotCapacityError,
+    age_ciphertext_reservation_bytes,
+    manifest_workspace_reservation_bytes,
+    require_capacity,
+)
+
 DEFAULT_CAPTURE_SCRIPT = REPO_ROOT / "scripts/create_webapp_fi_snapshot_artifacts.py"
 DEFAULT_TRANSPORT_SCRIPT = REPO_ROOT / "scripts/manage_webapp_ir_snapshot.py"
 
@@ -60,8 +70,10 @@ class TransportSettings:
     config_path: Path
     workspace: Path
     maximum_snapshot_age_seconds: int
+    maximum_database_bytes: int
     maximum_uploads_bytes: int
     maximum_audit_bytes: int
+    minimum_free_bytes: int
 
 
 @dataclass(frozen=True)
@@ -198,6 +210,12 @@ def require_int(value: str, *, field: str, minimum: int, maximum: int) -> int:
     return parsed
 
 
+def require_json_int(value: object, *, field: str, minimum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        raise SourceSnapshotPublishError(f"source transport {field} must be an integer >= {minimum}")
+    return value
+
+
 def require_transport_settings(path: Path, *, data_root: Path) -> TransportSettings:
     config_path = require_root_only_file(path, field="source transport config")
     try:
@@ -209,11 +227,12 @@ def require_transport_settings(path: Path, *, data_root: Path) -> TransportSetti
     maximum_age = raw.get("maximum_snapshot_age_seconds")
     if isinstance(maximum_age, bool) or not isinstance(maximum_age, int) or not 15 <= maximum_age <= 30:
         raise SourceSnapshotPublishError("source transport maximum_snapshot_age_seconds must be between 15 and 30")
-    maximum_uploads = raw.get("maximum_uploads_bytes")
-    maximum_audit = raw.get("maximum_audit_bytes")
-    for value, field in ((maximum_uploads, "maximum_uploads_bytes"), (maximum_audit, "maximum_audit_bytes")):
-        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-            raise SourceSnapshotPublishError(f"source transport {field} must be a positive integer")
+    maximum_database = require_json_int(raw.get("maximum_database_bytes"), field="maximum_database_bytes", minimum=1)
+    maximum_uploads = require_json_int(raw.get("maximum_uploads_bytes"), field="maximum_uploads_bytes", minimum=1)
+    maximum_audit = require_json_int(raw.get("maximum_audit_bytes"), field="maximum_audit_bytes", minimum=1)
+    minimum_free = require_json_int(raw.get("minimum_free_bytes"), field="minimum_free_bytes", minimum=0)
+    if raw.get("local_artifact_retention", "preserve") != "preserve":
+        raise SourceSnapshotPublishError("source transport local_artifact_retention must be preserve")
     age_recipient = raw.get("age_recipient")
     if not isinstance(age_recipient, str) or not AGE_RECIPIENT_RE.fullmatch(age_recipient):
         raise SourceSnapshotPublishError("source transport must contain the WA-IR age recipient")
@@ -253,8 +272,10 @@ def require_transport_settings(path: Path, *, data_root: Path) -> TransportSetti
         config_path=config_path,
         workspace=workspace,
         maximum_snapshot_age_seconds=maximum_age,
+        maximum_database_bytes=maximum_database,
         maximum_uploads_bytes=maximum_uploads,
         maximum_audit_bytes=maximum_audit,
+        minimum_free_bytes=minimum_free,
     )
 
 
@@ -326,6 +347,35 @@ def require_generation(value: str) -> str:
     if not GENERATION_RE.fullmatch(generation):
         raise SourceSnapshotPublishError("snapshot generation is invalid")
     return generation
+
+
+def source_capacity_requirement(config: SourceConfig) -> int:
+    """Reserve source archives, concurrent ciphertexts, and one read-back."""
+
+    plaintext_sizes = (
+        config.transport.maximum_database_bytes,
+        config.transport.maximum_uploads_bytes,
+        config.transport.maximum_audit_bytes,
+    )
+    ciphertext_sizes = [age_ciphertext_reservation_bytes(size) for size in plaintext_sizes]
+    return (
+        sum(plaintext_sizes)
+        + sum(ciphertext_sizes)
+        + max(ciphertext_sizes)
+        + manifest_workspace_reservation_bytes()
+    )
+
+
+def require_source_capacity(config: SourceConfig) -> dict[str, Any]:
+    try:
+        return require_capacity(
+            config.data_root,
+            required_new_bytes=source_capacity_requirement(config),
+            minimum_free_bytes=config.transport.minimum_free_bytes,
+            label="WebApp-FI snapshot source data root",
+        )
+    except SnapshotCapacityError as exc:
+        raise SourceSnapshotPublishError(str(exc)) from exc
 
 
 def child_environment() -> dict[str, str]:
@@ -607,6 +657,8 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         "alembic_revision": config.alembic_revision,
         "timer_interval_seconds": args.timer_interval_seconds,
         "maximum_snapshot_age_seconds": config.transport.maximum_snapshot_age_seconds,
+        "capacity_requirement_bytes": source_capacity_requirement(config),
+        "local_artifact_retention": "preserve",
         "artifact_directory": str(planned_artifact_directory),
         "object_storage_transport": "private_versioned_age_only",
         "direct_fi_to_ir_transfer": False,
@@ -618,6 +670,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     if not args.apply:
         return plan
     with publication_lock(config.state_root):
+        capacity = require_source_capacity(config)
         capture = run_json_command(
             [
                 args.capture_python,
@@ -639,10 +692,14 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
                 "--include-audit",
                 "--attempts",
                 str(config.capture_attempts),
+                "--max-database-bytes",
+                str(config.transport.maximum_database_bytes),
                 "--max-upload-bytes",
                 str(config.transport.maximum_uploads_bytes),
                 "--max-audit-bytes",
                 str(config.transport.maximum_audit_bytes),
+                "--minimum-free-bytes",
+                str(config.transport.minimum_free_bytes),
                 "--apply",
                 "--json",
             ],
@@ -700,6 +757,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
                 "source_capture_completed_at": validated_capture["source_capture_completed_at"],
                 "source_db_client_lifetime_seconds": validated_capture["source_db_client_lifetime_seconds"],
             },
+            "capacity_preflight": capacity,
             "transport": published,
             "object_storage_transport": "private_versioned_age_only",
             "direct_fi_to_ir_transfer": False,
@@ -713,6 +771,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         **plan,
         "status": "published",
         "capture": receipt["capture"],
+        "capacity_preflight": capacity,
         "transport": published,
         "receipt_path": str(receipt_path),
     }
