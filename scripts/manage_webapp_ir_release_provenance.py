@@ -49,7 +49,6 @@ BOOTSTRAP_RECEIPT_FILES = frozenset(
         "scripts/manage_webapp_ir_snapshot.py",
         "scripts/manage_webapp_ir_release_provenance.py",
         "config/consumer.json",
-        "bootstrap-package.json",
     }
 )
 APPLICATION_RELEASE_PARENT = Path("/srv/trading-bot-three-site/releases")
@@ -81,7 +80,7 @@ CONTROL_DISPATCH_TARGETS: dict[str, tuple[str, tuple[str, ...]]] = {
 MAX_JSON_BYTES = 1024 * 1024
 MAX_ARTIFACT_BYTES = 100 * 1024 * 1024 * 1024
 MAX_BOOTSTRAP_ARCHIVE_BYTES = 8 * 1024 * 1024
-MAX_BOOTSTRAP_CIPHERTEXT_BYTES = MAX_BOOTSTRAP_ARCHIVE_BYTES + 1024 * 1024
+MAX_BOOTSTRAP_CIPHERTEXT_BYTES = MAX_BOOTSTRAP_ARCHIVE_BYTES + 2 * 1024 * 1024
 
 SHA_RE = re.compile(r"^[a-f0-9]{40,64}$")
 BOOTSTRAP_SHA_RE = re.compile(r"^[a-f0-9]{40}$")

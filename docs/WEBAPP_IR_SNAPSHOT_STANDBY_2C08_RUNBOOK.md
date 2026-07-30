@@ -151,12 +151,21 @@ provenance record freezes both Git bundle hashes, both commit/tree identities,
 and the selected app image identity. Do not add unrelated artifacts.
 
 After the existing transport has staged exactly those five artifacts on WA-IR,
-run the same verified helper from the already trusted preflight tooling path:
+use only the provenance helper extracted by the bootstrap receiver. Its path is
+the `candidate_directory` from the same root-only canonical bootstrap receipt;
+do not substitute an older preflight-tooling copy or construct a candidate
+path manually. The receipt has exactly four payload-file hashes
+(`manage_webapp_ir_artifact_stage.py`, `manage_webapp_ir_snapshot.py`,
+`manage_webapp_ir_release_provenance.py`, and `config/consumer.json`); the
+embedded `bootstrap-package.json` is separately bound by
+`bootstrap.package_manifest_sha256`.
 
 ```bash
-python3 /srv/trading-bot-standby-tools/scripts/manage_webapp_ir_release_provenance.py install \
+BOOTSTRAP_RECEIPT=/srv/trading-bot-three-site-staging-data/wa-ir-standby/artifact-stage-bootstrap/REPLACE_WITH_BOOTSTRAP_ID/bootstrap-receipt.json
+BOOTSTRAP_CANDIDATE="$(/usr/bin/python3 -I -B -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["candidate_directory"])' "$BOOTSTRAP_RECEIPT")"
+/usr/bin/python3 -I -B "$BOOTSTRAP_CANDIDATE/scripts/manage_webapp_ir_release_provenance.py" install \
   --stage-receipt /srv/trading-bot-three-site-staging-data/wa-ir-standby/artifact-stage/webapp_fi/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5/REPLACE_WITH_NEW_BUNDLE_ID/stage-receipt.json \
-  --bootstrap-receipt /srv/trading-bot-three-site-staging-data/wa-ir-standby/artifact-stage-bootstrap/REPLACE_WITH_BOOTSTRAP_ID/bootstrap-receipt.json \
+  --bootstrap-receipt "$BOOTSTRAP_RECEIPT" \
   --receipt /var/lib/trading-bot-three-site/release-provenance/REPLACE_WITH_NEW_BUNDLE_ID.json
 ```
 
@@ -170,11 +179,10 @@ match the staged control bundle before any release root or dispatcher is
 created. A failed install removes only roots created by that same failed
 invocation if no receipt was linked; it never replaces an existing root. It
 does not load images, start a service, change `current`, or contact a remote
-system. The preflight tooling copy of this helper must itself be delivered and
-verified before this step; it cannot be taken from the uninstalled control
-bundle. That preflight copy is used only to perform installation. During a
-successful install it creates the separate fixed systemd dispatcher directory
-exclusively and atomically publishes its verified file at
+system. The bootstrap-extracted helper is used only to perform installation;
+it cannot be taken from the uninstalled control bundle. During a successful
+install it creates the separate fixed systemd dispatcher directory exclusively
+and atomically publishes its verified file at
 `/srv/trading-bot-three-site/control-dispatcher/manage_webapp_ir_release_provenance.py`
 from the newly verified control Git root. The create-only receipt records that
 path, its SHA-256, and its control-release SHA. If the fixed dispatcher

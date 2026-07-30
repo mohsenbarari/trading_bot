@@ -369,7 +369,6 @@ class ReleaseProvenanceTests(unittest.TestCase):
                 "scripts/manage_webapp_ir_snapshot.py": "b" * 64,
                 "scripts/manage_webapp_ir_release_provenance.py": "c" * 64,
                 "config/consumer.json": "d" * 64,
-                "bootstrap-package.json": "e" * 64,
             },
             "bootstrap": {
                 "object_key": "campaign/bootstrap/v1/webapp_fi/webapp_ir/stage-consumer-bootstrap.tar.age",
@@ -569,6 +568,28 @@ class ReleaseProvenanceTests(unittest.TestCase):
 
         with self.patched_contract():
             with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "bootstrap receive receipt hash is invalid"):
+                MODULE.install_release_roots(
+                    stage_receipt_path=stage_receipt,
+                    bootstrap_receipt_path=bootstrap_receipt,
+                    receipt_path=self.receipt_parent / "release-roots.json",
+                )
+
+        self.assertFalse((self.application_parent / self.application_sha).exists())
+        self.assertFalse((self.control_parent / self.control_sha).exists())
+        self.assertFalse(self.dispatcher_directory.exists())
+
+    def test_install_rejects_a_bootstrap_manifest_misclassified_as_a_payload_file(self) -> None:
+        prepared = self.build()
+        stage_receipt = self.make_candidate(prepared)
+        bootstrap_receipt = self.make_bootstrap_receipt()
+        payload = json.loads(bootstrap_receipt.read_text(encoding="utf-8"))
+        payload["files"]["bootstrap-package.json"] = "e" * 64
+        unsigned = {key: value for key, value in payload.items() if key != "receipt_sha256"}
+        payload["receipt_sha256"] = hashlib.sha256(MODULE.canonical_json_bytes(unsigned)).hexdigest()
+        write_private(bootstrap_receipt, MODULE.canonical_json_bytes(payload) + b"\n")
+
+        with self.patched_contract():
+            with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "bootstrap receive receipt files are invalid"):
                 MODULE.install_release_roots(
                     stage_receipt_path=stage_receipt,
                     bootstrap_receipt_path=bootstrap_receipt,
