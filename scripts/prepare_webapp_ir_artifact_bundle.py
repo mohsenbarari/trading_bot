@@ -842,105 +842,104 @@ def prepare_artifacts(
         target.mkdir(mode=0o700)
     except OSError as exc:
         raise ArtifactPreparationError("cannot create a detached preparation directory") from exc
-    try:
-        bundle_path = target / "release.bundle"
-        bundle = create_and_verify_git_bundle(
-            git_binary=git_binary,
-            source_repo=source_repo,
-            workspace=workspace,
-            output_path=bundle_path,
-            release_sha=release_sha,
-            expected_tree=expected_tree,
-            maximum_artifact_bytes=maximum_artifact_bytes,
-            runner=runner,
-        )
-        image_path = target / "images.tar"
-        image_archive = create_and_verify_docker_image_archive(
-            docker_binary=docker_binary,
-            output_path=image_path,
-            images=images,
-            maximum_artifact_bytes=maximum_artifact_bytes,
-            runner=runner,
-        )
-        image_values = [item.as_manifest_value() for item in images]
-        image_set_sha256 = sha256_bytes(canonical_json_bytes(image_values))
-        image_ids_sha256 = sha256_bytes(canonical_json_bytes([item.image_id for item in images]))
-        image_manifest_path = target / "image-manifest.json"
-        write_new_private_json(
+    # Do not delete this fresh candidate on a later validation failure.  It is
+    # deliberately retained without a success receipt for forensic evidence;
+    # retries must use a different preparation ID rather than overwrite it.
+    bundle_path = target / "release.bundle"
+    bundle = create_and_verify_git_bundle(
+        git_binary=git_binary,
+        source_repo=source_repo,
+        workspace=workspace,
+        output_path=bundle_path,
+        release_sha=release_sha,
+        expected_tree=expected_tree,
+        maximum_artifact_bytes=maximum_artifact_bytes,
+        runner=runner,
+    )
+    image_path = target / "images.tar"
+    image_archive = create_and_verify_docker_image_archive(
+        docker_binary=docker_binary,
+        output_path=image_path,
+        images=images,
+        maximum_artifact_bytes=maximum_artifact_bytes,
+        runner=runner,
+    )
+    image_values = [item.as_manifest_value() for item in images]
+    image_set_sha256 = sha256_bytes(canonical_json_bytes(image_values))
+    image_ids_sha256 = sha256_bytes(canonical_json_bytes([item.image_id for item in images]))
+    image_manifest_path = target / "image-manifest.json"
+    write_new_private_json(
+        image_manifest_path,
+        {
+            "archive": image_archive,
+            "image_set_sha256": image_set_sha256,
+            "images": image_values,
+            "release_sha": release_sha,
+            "schema": IMAGE_MANIFEST_SCHEMA,
+            "status": "prepared",
+        },
+    )
+    require_private_regular_file(
+        image_manifest_path,
+        field="detached image manifest",
+        maximum_bytes=1024 * 1024,
+    )
+    artifacts = [
+        _artifact_descriptor(
+            "image-bundle",
+            image_path,
+            {
+                "artifact_sha256": image_archive["sha256"],
+                "image_count": str(len(images)),
+                "image_ids_sha256": image_ids_sha256,
+                "image_manifest_sha256": sha256_file(image_manifest_path)[0],
+                "image_set_sha256": image_set_sha256,
+                "release_sha": release_sha,
+            },
+        ),
+        _artifact_descriptor(
+            "image-manifest",
             image_manifest_path,
             {
-                "archive": image_archive,
+                "artifact_sha256": sha256_file(image_manifest_path)[0],
                 "image_set_sha256": image_set_sha256,
-                "images": image_values,
                 "release_sha": release_sha,
-                "schema": IMAGE_MANIFEST_SCHEMA,
-                "status": "prepared",
             },
-        )
-        require_private_regular_file(
-            image_manifest_path,
-            field="detached image manifest",
-            maximum_bytes=1024 * 1024,
-        )
-        artifacts = [
-            _artifact_descriptor(
-                "image-bundle",
-                image_path,
-                {
-                    "artifact_sha256": image_archive["sha256"],
-                    "image_count": str(len(images)),
-                    "image_ids_sha256": image_ids_sha256,
-                    "image_manifest_sha256": sha256_file(image_manifest_path)[0],
-                    "image_set_sha256": image_set_sha256,
-                    "release_sha": release_sha,
-                },
-            ),
-            _artifact_descriptor(
-                "image-manifest",
-                image_manifest_path,
-                {
-                    "artifact_sha256": sha256_file(image_manifest_path)[0],
-                    "image_set_sha256": image_set_sha256,
-                    "release_sha": release_sha,
-                },
-            ),
-            _artifact_descriptor(
-                "release-bundle",
-                bundle_path,
-                {
-                    "artifact_sha256": bundle["sha256"],
-                    "git_commit": release_sha,
-                    "git_tree": expected_tree,
-                    "release_sha": release_sha,
-                },
-            ),
-        ]
-        receipt: dict[str, Any] = {
-            "artifacts": artifacts,
-            "capacity_preflight": capacity_preflight,
-            "image_archive": image_archive,
-            "images": image_values,
-            "output_directory": str(target),
-            "preparation_id": preparation_id,
-            "release_bundle": bundle,
-            "release_sha": release_sha,
-            "schema": PREPARATION_SCHEMA,
-            "stage_publish": _stage_arguments(artifacts),
-            "status": "prepared",
-            "prepared_at": utc_iso(now or utc_now()),
-        }
-        receipt["receipt_sha256"] = sha256_bytes(canonical_json_bytes(receipt))
-        receipt_path = target / "preparation-receipt.json"
-        write_new_private_json(receipt_path, receipt)
-        require_private_regular_file(
-            receipt_path,
-            field="detached preparation receipt",
-            maximum_bytes=1024 * 1024,
-        )
-        return receipt
-    except Exception:
-        shutil.rmtree(target, ignore_errors=True)
-        raise
+        ),
+        _artifact_descriptor(
+            "release-bundle",
+            bundle_path,
+            {
+                "artifact_sha256": bundle["sha256"],
+                "git_commit": release_sha,
+                "git_tree": expected_tree,
+                "release_sha": release_sha,
+            },
+        ),
+    ]
+    receipt: dict[str, Any] = {
+        "artifacts": artifacts,
+        "capacity_preflight": capacity_preflight,
+        "image_archive": image_archive,
+        "images": image_values,
+        "output_directory": str(target),
+        "preparation_id": preparation_id,
+        "release_bundle": bundle,
+        "release_sha": release_sha,
+        "schema": PREPARATION_SCHEMA,
+        "stage_publish": _stage_arguments(artifacts),
+        "status": "prepared",
+        "prepared_at": utc_iso(now or utc_now()),
+    }
+    receipt["receipt_sha256"] = sha256_bytes(canonical_json_bytes(receipt))
+    receipt_path = target / "preparation-receipt.json"
+    write_new_private_json(receipt_path, receipt)
+    require_private_regular_file(
+        receipt_path,
+        field="detached preparation receipt",
+        maximum_bytes=1024 * 1024,
+    )
+    return receipt
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

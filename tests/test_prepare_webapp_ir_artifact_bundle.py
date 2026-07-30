@@ -264,7 +264,15 @@ class ArtifactPreparationTests(unittest.TestCase):
         with self.assertRaisesRegex(prepare.ArtifactPreparationError, "does not retain every verified source image tag"):
             self.prepare()
 
-        self.assertEqual([], list(self.output_root.iterdir()))
+        target = prepare.candidate_directory(
+            self.output_root,
+            release_sha=RELEASE_SHA,
+            preparation_id=PREPARATION_ID,
+        )
+        self.assertTrue(target.is_dir())
+        self.assertTrue((target / "release.bundle").is_file())
+        self.assertTrue((target / "images.tar").is_file())
+        self.assertFalse((target / "preparation-receipt.json").exists())
 
     def test_rejects_archive_when_a_tag_changes_between_inspection_and_save(self) -> None:
         self.runner.archive_config_overrides[self.first_id] = b'{"architecture":"amd64","config":"repointed"}'
@@ -272,7 +280,15 @@ class ArtifactPreparationTests(unittest.TestCase):
         with self.assertRaisesRegex(prepare.ArtifactPreparationError, "contains an unverified image ID"):
             self.prepare()
 
-        self.assertEqual([], list(self.output_root.iterdir()))
+        target = prepare.candidate_directory(
+            self.output_root,
+            release_sha=RELEASE_SHA,
+            preparation_id=PREPARATION_ID,
+        )
+        self.assertTrue(target.is_dir())
+        self.assertTrue((target / "release.bundle").is_file())
+        self.assertTrue((target / "images.tar").is_file())
+        self.assertFalse((target / "preparation-receipt.json").exists())
 
     def test_rejects_non_git_runtime_before_docker_inspection(self) -> None:
         self.runner.missing_git = True
