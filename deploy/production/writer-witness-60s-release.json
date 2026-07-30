@@ -1,0 +1,23 @@
+{
+  "schema": "gold-trade-writer-witness-release-profile-v1",
+  "release_id": "writer-witness-be6067c0c61a8eabea3241448c8adc32257ce631-60s",
+  "source_commit": "be6067c0c61a8eabea3241448c8adc32257ce631",
+  "witness": {
+    "logical_authority": "webapp",
+    "physical_site": "witness",
+    "authoritative_site": "webapp_fi",
+    "lease_duration_seconds": 60,
+    "enforce_configured_lease_duration": true,
+    "renew_interval_seconds": 10,
+    "safety_margin_seconds": 15,
+    "max_clock_skew_seconds": 5,
+    "auth_max_age_seconds": 15
+  },
+  "webapp_fi_client": {
+    "mode": "writer",
+    "site": "webapp_fi",
+    "lease_duration_seconds": 60,
+    "renew_interval_seconds": 10,
+    "safety_margin_seconds": 15
+  }
+}
