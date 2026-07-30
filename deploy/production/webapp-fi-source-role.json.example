@@ -1,0 +1,14 @@
+{
+  "schema": "gold-trade-webapp-fi-source-role-config-v1",
+  "source_site": "webapp_fi",
+  "destination_site": "webapp_ir",
+  "application": {
+    "release_sha": "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5",
+    "expected_alembic_revision": "f2c7d8e9a0b1"
+  },
+  "database_container": "trading_bot_db",
+  "application_container": "trading_bot_app",
+  "sync_worker_container": "trading_bot_sync_worker",
+  "read_only_capture_env_file": "/root/secure-envs/trading-bot/webapp-fi-source-reader.env",
+  "source_signing_private_key_file": "/root/secure-envs/trading-bot/webapp-fi-source-ed25519.raw"
+}
