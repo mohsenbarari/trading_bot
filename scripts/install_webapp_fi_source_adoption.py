@@ -70,6 +70,8 @@ MAX_IMAGE_EXPORT_BYTES = 100 * 1024 * 1024 * 1024
 MAX_ENROLLMENT_CERTIFICATE_LIFETIME_SECONDS = 60 * 60
 MAX_OBSERVATION_AGE_SECONDS = 15 * 60
 MAX_VERSION_ID_BYTES = 1024
+MAX_MOUNTINFO_BYTES = 4 * 1024 * 1024
+MAX_MOUNTINFO_RECORDS = 16_384
 
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 RELEASE_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -84,6 +86,7 @@ CAMPAIGN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$")
 AGE_RECIPIENT_RE = re.compile(r"^age1[ac-hj-np-z02-9]{20,128}$")
 UTC_TIMESTAMP_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 VERSION_ID_RE = re.compile(rf"^[A-Za-z0-9._~+/=-]{{1,{MAX_VERSION_ID_BYTES}}}$")
+MOUNTINFO_DEVICE_RE = re.compile(r"^[0-9]{1,10}:[0-9]{1,10}$")
 
 RUNTIME_CODE_PROJECTION_RELATIVES = (
     "api",
@@ -111,6 +114,27 @@ PACKAGE_FILES = (*PACKAGE_PAYLOAD_FILES, PACKAGE_MANIFEST_MEMBER)
 
 class SourceAdoptionInstallError(RuntimeError):
     """A source-adoption install or read-only attestation is unsafe."""
+
+
+class _MountInfoRecord:
+    """One bounded, validated Linux mountinfo record used for alias checks."""
+
+    __slots__ = ("mount_id", "parent_id", "device", "root", "mount_point")
+
+    def __init__(
+        self,
+        *,
+        mount_id: int,
+        parent_id: int,
+        device: tuple[int, int],
+        root: PurePosixPath | None,
+        mount_point: Path,
+    ) -> None:
+        self.mount_id = mount_id
+        self.parent_id = parent_id
+        self.device = device
+        self.root = root
+        self.mount_point = mount_point
 
 
 def _require_root_execution() -> None:
@@ -197,6 +221,193 @@ def require_root_only_file(path: Path, *, field: str, maximum_bytes: int = MAX_R
     if state.st_uid != 0 or stat.S_IMODE(state.st_mode) & 0o077 or not 1 <= state.st_size <= maximum_bytes:
         raise SourceAdoptionInstallError(f"{field} has unsafe ownership, mode, or size")
     return resolved
+
+
+def _decode_mountinfo_path(value: str, *, field: str, allow_non_path: bool) -> PurePosixPath | None:
+    """Decode one mountinfo path without accepting a lossy representation."""
+
+    encoded = bytearray()
+    index = 0
+    while index < len(value):
+        character = value[index]
+        if character != "\\":
+            encoded.extend(character.encode("utf-8"))
+            index += 1
+            continue
+        escaped = value[index + 1 : index + 4]
+        if len(escaped) != 3 or not all("0" <= item <= "7" for item in escaped):
+            raise SourceAdoptionInstallError(f"mountinfo {field} is malformed")
+        encoded.append(int(escaped, 8))
+        index += 4
+    decoded = os.fsdecode(bytes(encoded))
+    if "\x00" in decoded:
+        raise SourceAdoptionInstallError(f"mountinfo {field} is malformed")
+    if not decoded.startswith("/"):
+        if allow_non_path:
+            return None
+        raise SourceAdoptionInstallError(f"mountinfo {field} is not an absolute path")
+    pure = PurePosixPath(decoded)
+    if pure.as_posix() != decoded or "//" in decoded or any(part in {".", ".."} for part in pure.parts):
+        raise SourceAdoptionInstallError(f"mountinfo {field} is not canonical")
+    return pure
+
+
+def _read_mountinfo_records() -> tuple[_MountInfoRecord, ...]:
+    """Read a bounded mount topology snapshot for runtime-alias rejection.
+
+    This intentionally reads only Linux's mount table; it never walks the
+    runtime tree.  Records whose kernel ``root`` is not a filesystem path
+    (for example an nsfs entry) cannot establish a safe source coordinate and
+    are retained with ``root=None`` so a relevant use fails closed later.
+    """
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open("/proc/self/mountinfo", flags)
+    except OSError as exc:
+        raise SourceAdoptionInstallError("cannot read mountinfo for image export") from exc
+    try:
+        with os.fdopen(descriptor, "rb") as handle:
+            payload = handle.read(MAX_MOUNTINFO_BYTES + 1)
+    except OSError as exc:
+        raise SourceAdoptionInstallError("cannot read mountinfo for image export") from exc
+    if not payload or len(payload) > MAX_MOUNTINFO_BYTES or not payload.endswith(b"\n"):
+        raise SourceAdoptionInstallError("mountinfo for image export is unsafe or incomplete")
+    try:
+        lines = payload.decode("utf-8", "strict").splitlines()
+    except UnicodeDecodeError as exc:
+        raise SourceAdoptionInstallError("mountinfo for image export is not valid UTF-8") from exc
+    if not lines or len(lines) > MAX_MOUNTINFO_RECORDS:
+        raise SourceAdoptionInstallError("mountinfo for image export has an unsafe record count")
+    records: list[_MountInfoRecord] = []
+    identifiers: set[int] = set()
+    for line in lines:
+        fields = line.split(" ")
+        try:
+            separator = fields.index("-")
+        except ValueError as exc:
+            raise SourceAdoptionInstallError("mountinfo record is malformed") from exc
+        if separator < 6 or len(fields) - separator < 4:
+            raise SourceAdoptionInstallError("mountinfo record is malformed")
+        mount_id_text, parent_id_text, device_text, root_text, mount_point_text, _mount_options = fields[:6]
+        if not mount_id_text.isdecimal() or not parent_id_text.isdecimal() or not MOUNTINFO_DEVICE_RE.fullmatch(device_text):
+            raise SourceAdoptionInstallError("mountinfo record is malformed")
+        mount_id = int(mount_id_text)
+        parent_id = int(parent_id_text)
+        if mount_id <= 0 or parent_id < 0 or mount_id in identifiers:
+            raise SourceAdoptionInstallError("mountinfo record is malformed")
+        major_text, minor_text = device_text.split(":", 1)
+        try:
+            device = (int(major_text), int(minor_text))
+            os.makedev(*device)
+        except (OverflowError, ValueError) as exc:
+            raise SourceAdoptionInstallError("mountinfo record device is invalid") from exc
+        root = _decode_mountinfo_path(root_text, field="root", allow_non_path=True)
+        mount_point = _decode_mountinfo_path(mount_point_text, field="mount point", allow_non_path=False)
+        if mount_point is None:
+            raise SourceAdoptionInstallError("mountinfo mount point is invalid")
+        identifiers.add(mount_id)
+        records.append(
+            _MountInfoRecord(
+                mount_id=mount_id,
+                parent_id=parent_id,
+                device=device,
+                root=root,
+                mount_point=Path(mount_point),
+            )
+        )
+    return tuple(records)
+
+
+def _path_is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _device_from_stat(state: os.stat_result, *, field: str) -> tuple[int, int]:
+    try:
+        return os.major(state.st_dev), os.minor(state.st_dev)
+    except (AttributeError, OSError, ValueError) as exc:
+        raise SourceAdoptionInstallError(f"cannot inspect {field} device") from exc
+
+
+def _mount_coordinate_for_path(
+    *,
+    path: Path,
+    records: Sequence[_MountInfoRecord],
+    field: str,
+) -> tuple[tuple[int, int], PurePosixPath]:
+    """Map a visible host path to its mount device/root coordinate."""
+
+    try:
+        state = path.stat()
+    except OSError as exc:
+        raise SourceAdoptionInstallError(f"cannot inspect {field}") from exc
+    device = _device_from_stat(state, field=field)
+    candidates = [
+        item
+        for item in records
+        if item.root is not None and item.device == device and _path_is_within(path, item.mount_point)
+    ]
+    if not candidates:
+        raise SourceAdoptionInstallError(f"cannot map {field} into mountinfo")
+    depth = max(len(item.mount_point.parts) for item in candidates)
+    deepest = [item for item in candidates if len(item.mount_point.parts) == depth]
+    if len(deepest) != 1:
+        raise SourceAdoptionInstallError(f"cannot unambiguously map {field} into mountinfo")
+    record = deepest[0]
+    assert record.root is not None
+    relative = path.relative_to(record.mount_point)
+    coordinate = record.root
+    for part in relative.parts:
+        coordinate /= part
+    return device, coordinate
+
+
+def _runtime_subtree_mount_coordinates(
+    *,
+    runtime_root: Path,
+    records: Sequence[_MountInfoRecord],
+) -> frozenset[tuple[tuple[int, int], PurePosixPath]]:
+    """Return source coordinates for the runtime root and its live mounts."""
+
+    coordinates = {
+        _mount_coordinate_for_path(
+            path=runtime_root,
+            records=records,
+            field="runtime source root for image export",
+        )
+    }
+    for record in records:
+        if not _path_is_within(record.mount_point, runtime_root):
+            continue
+        if record.root is None:
+            raise SourceAdoptionInstallError("cannot map a live runtime submount into mountinfo")
+        try:
+            state = record.mount_point.stat()
+        except OSError as exc:
+            raise SourceAdoptionInstallError("cannot inspect a live runtime submount") from exc
+        if _device_from_stat(state, field="live runtime submount") != record.device:
+            raise SourceAdoptionInstallError("live runtime submount changed while checking image export destination")
+        coordinates.add((record.device, record.root))
+    return frozenset(coordinates)
+
+
+def _mount_coordinate_is_within(
+    *,
+    candidate: tuple[tuple[int, int], PurePosixPath],
+    root: tuple[tuple[int, int], PurePosixPath],
+) -> bool:
+    if candidate[0] != root[0]:
+        return False
+    try:
+        candidate[1].relative_to(root[1])
+    except ValueError:
+        return False
+    return True
 
 
 def _parse_canonical_json(payload: bytes, *, field: str) -> dict[str, Any]:
@@ -2537,8 +2748,9 @@ def _require_export_destination_outside_source_runtime(
 
     The exact-byte archive must never be written below the host tree mounted
     into the running application.  Compare canonical paths first, then check
-    every existing ancestor by inode so a bind-mounted/current-linked alias of
-    that tree cannot bypass the lexical boundary.
+    every existing ancestor by both mountinfo source coordinate and inode so a
+    bind-mounted/current-linked alias of that tree, including an alias of a
+    live runtime submount, cannot bypass the lexical boundary.
     """
 
     runtime_root = require_root_only_directory(runtime_source_root, field="runtime source root for image export")
@@ -2563,6 +2775,8 @@ def _require_export_destination_outside_source_runtime(
         runtime_state = runtime_root.stat()
     except OSError as exc:
         raise SourceAdoptionInstallError("cannot inspect runtime source root for image export") from exc
+    mountinfo = _read_mountinfo_records()
+    runtime_coordinates = _runtime_subtree_mount_coordinates(runtime_root=runtime_root, records=mountinfo)
     current = parent
     while True:
         try:
@@ -2570,6 +2784,16 @@ def _require_export_destination_outside_source_runtime(
                 raise SourceAdoptionInstallError("image export destination must be outside the live source runtime")
         except OSError as exc:
             raise SourceAdoptionInstallError("cannot inspect image export destination ancestry") from exc
+        ancestor_coordinate = _mount_coordinate_for_path(
+            path=current,
+            records=mountinfo,
+            field="image export destination ancestry",
+        )
+        if any(
+            _mount_coordinate_is_within(candidate=ancestor_coordinate, root=runtime_coordinate)
+            for runtime_coordinate in runtime_coordinates
+        ):
+            raise SourceAdoptionInstallError("image export destination must be outside the live source runtime")
         if current == current.parent:
             break
         current = current.parent

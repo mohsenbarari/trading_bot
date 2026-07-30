@@ -6,7 +6,7 @@ import importlib.util
 import io
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import shutil
 import stat
 import subprocess
@@ -1171,6 +1171,71 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
                     expected_app_image_reference=IMAGE_REFERENCE,
                     destination=destination,
                     export_id="export-runtime-alias",
+                    apply=True,
+                )
+        self.assertFalse(destination.exists())
+
+    def test_export_rejects_bind_alias_of_runtime_child_before_revalidation_mkdir_or_docker_save(self):
+        installed = self._install()
+        runtime, role_path, ssh_public, static_path, certificate = self._runtime_and_config(installed)
+        self._enroll(installed, role_path, ssh_public, certificate)
+        attestation = self._attest(
+            installed,
+            runtime,
+            role_path,
+            ssh_public,
+            static_path,
+            certificate,
+            attestation_id="attestation-export-runtime-child-alias",
+        )
+        runtime_child = runtime / "api"
+        bind_alias = self.root / "runtime-child-bind-alias"
+        bind_alias.mkdir(mode=0o700)
+        destination_parent = bind_alias / "nested"
+        destination_parent.mkdir(mode=0o700)
+        destination = destination_parent / "must-not-create-export"
+        runtime_device = (os.major(runtime.stat().st_dev), os.minor(runtime.stat().st_dev))
+        mountinfo = (
+            install._MountInfoRecord(
+                mount_id=1,
+                parent_id=0,
+                device=runtime_device,
+                root=PurePosixPath("/"),
+                mount_point=Path("/"),
+            ),
+            install._MountInfoRecord(
+                mount_id=2,
+                parent_id=1,
+                device=runtime_device,
+                root=PurePosixPath(str(runtime_child)),
+                mount_point=bind_alias,
+            ),
+        )
+        with (
+            patch.object(install, "_read_mountinfo_records", return_value=mountinfo),
+            patch.object(install, "_revalidate_export_runtime", side_effect=AssertionError("runtime child alias reached revalidation")),
+            patch.object(install, "_create_directory", side_effect=AssertionError("runtime child alias reached mkdir")),
+            patch.object(install, "_export_exact_docker_save_bytes", side_effect=AssertionError("runtime child alias reached docker save")),
+        ):
+            with self.assertRaisesRegex(install.SourceAdoptionInstallError, "outside the live source runtime"):
+                install.export_actual_fi_image(
+                    attestation=Path(attestation["attestation_path"]),
+                    source_role_config=role_path,
+                    signer_enrollment_receipt=Path(installed["candidate"]) / "enrollments" / f"{CAMPAIGN}.json",
+                    signer_enrollment_certificate=certificate,
+                    ssh_host_public_key_file=ssh_public,
+                    runtime_source_root=runtime,
+                    static_assets_descriptor=static_path,
+                    pinned_controller_public_key_base64=self.controller_public,
+                    pinned_source_signing_public_key_base64=self.fi_public,
+                    expected_campaign_id=CAMPAIGN,
+                    expected_application=installed["application"],
+                    expected_control_commit=self.control_commit,
+                    expected_canonical_release_tree_sha256=attestation["descriptor_claim"]["canonical_release_tree_sha256"],
+                    expected_app_image_id=IMAGE_ID,
+                    expected_app_image_reference=IMAGE_REFERENCE,
+                    destination=destination,
+                    export_id="export-runtime-child-alias",
                     apply=True,
                 )
         self.assertFalse(destination.exists())
