@@ -22,6 +22,7 @@ from scripts import production_writer_lease_agent as agent
 
 
 RELEASE_SHA = "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5"
+APP_IMAGE_ID = "sha256:" + "c" * 64
 
 
 def _write_private(path: Path, value: str) -> None:
@@ -213,7 +214,8 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                 "application": {
                     "release_sha": RELEASE_SHA,
                     "release_root": str(application_root),
-                }
+                },
+                "runtime_images": {"app_image_id": APP_IMAGE_ID},
             }
         _write_private(
             promotion_env,
@@ -382,6 +384,18 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
             ):
                 agent._load_config(config_path)
 
+    def test_ir_config_requires_receipt_bound_application_image_id(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            config = self._config(directory, site="webapp_ir")
+            del self.provenance_by_receipt[config.release_provenance.receipt_path]["runtime_images"]
+
+            with self.assertRaisesRegex(
+                agent.ProductionWriterLeaseAgentError,
+                "does not bind a valid application image ID",
+            ):
+                agent._load_config(directory / "agent.json")
+
     def test_ir_compose_rechecks_mutated_application_env_before_docker(self):
         with tempfile.TemporaryDirectory() as raw:
             directory = Path(raw)
@@ -403,6 +417,98 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                     agent._compose(config, action="start")
 
             run.assert_not_called()
+
+    def test_ir_compose_rejects_configured_app_image_not_matching_receipt(self):
+        with tempfile.TemporaryDirectory() as raw:
+            config = self._config(Path(raw), site="webapp_ir")
+            unexpected_image_id = "sha256:" + "d" * 64
+            with mock.patch.object(
+                agent,
+                "_run_runtime_command",
+                return_value=unexpected_image_id,
+            ) as run:
+                with self.assertRaisesRegex(
+                    agent.ProductionWriterLeaseAgentError,
+                    "configured WA-IR application image does not match",
+                ):
+                    agent._compose(config, action="start")
+
+        run.assert_called_once_with(
+            [
+                "/usr/bin/docker",
+                "image",
+                "inspect",
+                "--format",
+                "{{.Id}}",
+                "trading-bot:2c08",
+            ],
+            label="configured WA-IR application image",
+            timeout=30,
+            capture_stdout=True,
+        )
+
+    def test_ir_existing_promoted_app_requires_receipt_image_id(self):
+        with tempfile.TemporaryDirectory() as raw:
+            config = self._config(Path(raw), site="webapp_ir")
+            selection = agent.PromotionRuntimeSelection(
+                db_volume="trading_bot_wa_ir_pg_snapshot-1",
+                uploads_volume="trading_bot_wa_ir_uploads_snapshot-1",
+                audit_volume="trading_bot_wa_ir_audit_snapshot-1",
+                db_container="trading_bot_wa_ir_snapshot_db_snapshot-1",
+                compose_project="trading_bot_wa_ir_snapshot_snapshot-1",
+                redis_volume="trading_bot_wa_ir_redis_snapshot-1",
+                release_sha=RELEASE_SHA,
+            )
+            containers = {"db": "a" * 12, "redis": "b" * 12, "app": "c" * 12}
+            services = {container: service for service, container in containers.items()}
+            volumes = {
+                containers["db"]: [{"Type": "volume", "Name": selection.db_volume}],
+                containers["redis"]: [{"Type": "volume", "Name": selection.redis_volume}],
+                containers["app"]: [
+                    {"Type": "volume", "Name": selection.uploads_volume},
+                    {"Type": "volume", "Name": selection.audit_volume},
+                ],
+            }
+            with (
+                mock.patch.object(
+                    agent,
+                    "_compose_capture",
+                    side_effect=[containers["db"], containers["redis"], containers["app"]],
+                ),
+                mock.patch.object(
+                    agent,
+                    "_inspect_labels",
+                    side_effect=lambda container, **_: {
+                        "com.docker.compose.project": agent.WA_IR_PROMOTION_PROJECT_NAME,
+                        "com.docker.compose.service": services[container],
+                    },
+                ),
+                mock.patch.object(
+                    agent,
+                    "_inspect_mounts",
+                    side_effect=lambda container, **_: volumes[container],
+                ),
+                mock.patch.object(
+                    agent,
+                    "_run_runtime_command",
+                    return_value="sha256:" + "d" * 64,
+                ) as run,
+            ):
+                with self.assertRaisesRegex(
+                    agent.ProductionWriterLeaseAgentError,
+                    "promoted application image does not match",
+                ):
+                    agent._assert_existing_promoted_runtime_matches_selection(
+                        config,
+                        selection=selection,
+                    )
+
+        run.assert_called_once_with(
+            ["/usr/bin/docker", "inspect", "--format", "{{.Image}}", containers["app"]],
+            label="promoted app image id",
+            timeout=30,
+            capture_stdout=True,
+        )
 
     def test_bootstrap_writes_lease_and_starts_only_scoped_services(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -1000,6 +1106,38 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
         redis.assert_called_once()
         fence.assert_not_called()
         compose.assert_not_called()
+
+    def test_promoted_runtime_recovery_binding_requires_receipt_app_image_id(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            config, receipt_path, active_snapshot_path, proof_path, receipt = self._recovery_fixture(directory)
+            binding_path = agent._runtime_binding_path(proof_path)
+            binding = json.loads(binding_path.read_text(encoding="utf-8"))
+            binding["containers"]["app"]["image_id"] = "sha256:" + "d" * 64
+            binding["binding_sha256"] = agent._runtime_binding_hash(
+                {key: value for key, value in binding.items() if key != "binding_sha256"}
+            )
+            _write_private(binding_path, json.dumps(binding))
+            proof = json.loads(proof_path.read_text(encoding="utf-8"))
+            snapshot = parse_restore_receipt(receipt, action="promote_ir")
+            selection = agent._load_promotion_runtime_selection(
+                active_snapshot_path,
+                restore_receipt_path=receipt_path,
+                restore_receipt=receipt,
+                snapshot=snapshot,
+            )
+
+            with self.assertRaisesRegex(
+                agent.ProductionWriterLeaseAgentError,
+                "recovery binding container is unsafe",
+            ):
+                agent._load_promoted_runtime_binding(
+                    proof_path,
+                    proof=proof,
+                    snapshot=snapshot,
+                    selection=selection,
+                    config=config,
+                )
 
     def test_promoted_runtime_recovery_refuses_missing_binding_before_any_start(self):
         with tempfile.TemporaryDirectory() as raw:
