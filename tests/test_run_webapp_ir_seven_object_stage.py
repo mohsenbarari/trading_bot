@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import importlib.util
 import io
 import json
@@ -48,8 +49,41 @@ def consumer_config() -> SimpleNamespace:
         region="ir-thr-at1",
         bucket="private-stage-bucket",
         prefix="campaign/wa-ir",
+        age_binary="/usr/bin/age",
+        age_identity_file=Path("/etc/trading-bot-three-site/wa-ir/artifact-stage-2c08.agekey"),
+        workspace=Path("/srv/trading-bot-three-site-staging-data/wa-ir-standby/workspace"),
         source_signing_public_key=b"p" * 32,
+        webapp_fi_source_attestation_public_key=b"f" * 32,
+        webapp_fi_controller_authorization_public_key=b"c" * 32,
+        maximum_artifact_bytes=20 * 1024 * 1024 * 1024,
     )
+
+
+def prepared_bootstrap_config(*, consumer: SimpleNamespace | None = None) -> dict[str, object]:
+    consumer = consumer or consumer_config()
+    return {
+        "schema": wrapper.stage.CONFIG_SCHEMA,
+        "endpoint": consumer.endpoint,
+        "region": consumer.region,
+        "bucket": consumer.bucket,
+        "prefix": consumer.prefix,
+        "age_binary": consumer.age_binary,
+        "age_identity_file": str(consumer.age_identity_file),
+        "workspace": str(consumer.workspace),
+        "source_site": consumer.source_site,
+        "source_signing_public_key_base64": base64.b64encode(consumer.source_signing_public_key).decode("ascii"),
+        "webapp_fi_source_attestation_public_key_base64": base64.b64encode(
+            consumer.webapp_fi_source_attestation_public_key
+        ).decode("ascii"),
+        "webapp_fi_controller_authorization_public_key_base64": base64.b64encode(
+            consumer.webapp_fi_controller_authorization_public_key
+        ).decode("ascii"),
+        "maximum_artifact_bytes": consumer.maximum_artifact_bytes,
+    }
+
+
+def prepared_bootstrap_package(*, consumer: SimpleNamespace | None = None) -> dict[str, object]:
+    return {"consumer_config": prepared_bootstrap_config(consumer=consumer)}
 
 
 def bootstrap_receipt(url: str = BOOTSTRAP_URL) -> dict[str, object]:
@@ -157,6 +191,18 @@ def rendered_command(url: str) -> str:
 
 
 class SevenObjectStageControllerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.bootstrap_verifier = mock.Mock(return_value=prepared_bootstrap_package())
+        self.bootstrap_preparer = mock.patch.object(
+            wrapper,
+            "_load_bootstrap_preparer",
+            return_value=SimpleNamespace(
+                verify_prepared_bootstrap_package=self.bootstrap_verifier,
+            ),
+        )
+        self.bootstrap_preparer.start()
+        self.addCleanup(self.bootstrap_preparer.stop)
+
     def _common_patches(self, *, parsed: list[object] | None = None):
         artifacts = normal_inputs() if parsed is None else parsed
         return (
@@ -287,6 +333,35 @@ class SevenObjectStageControllerTests(unittest.TestCase):
                 self._run()
         create_client.assert_not_called()
         publish_bootstrap.assert_not_called()
+
+    def test_mismatched_prepared_bootstrap_provenance_pin_stops_before_ssh_or_s3(self) -> None:
+        for field in (
+            "webapp_fi_source_attestation_public_key_base64",
+            "webapp_fi_controller_authorization_public_key_base64",
+        ):
+            with self.subTest(field=field):
+                prepared = prepared_bootstrap_package()
+                packaged = prepared["consumer_config"]
+                assert isinstance(packaged, dict)
+                packaged[field] = base64.b64encode(b"x" * 32).decode("ascii")
+                self.bootstrap_verifier.return_value = prepared
+                root, publisher, consumer, public_key, parser, binder = self._common_patches()
+                with (
+                    root,
+                    publisher,
+                    consumer,
+                    public_key,
+                    parser,
+                    binder,
+                    mock.patch.object(wrapper, "_prepare_bootstrap_root") as prepare_root,
+                    mock.patch.object(wrapper.stage, "create_s3_client") as create_client,
+                    mock.patch.object(wrapper.stage, "publish_bootstrap_package") as publish_bootstrap,
+                ):
+                    with self.assertRaisesRegex(wrapper.SevenObjectStageError, "provenance key pins do not match"):
+                        self._run()
+                prepare_root.assert_not_called()
+                create_client.assert_not_called()
+                publish_bootstrap.assert_not_called()
 
     def test_root_is_required_before_controller_configuration_is_read(self) -> None:
         with (
