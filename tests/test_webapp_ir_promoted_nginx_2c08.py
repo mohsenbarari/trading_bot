@@ -82,13 +82,13 @@ class WebappIrPromotedNginx2c08Tests(unittest.TestCase):
             )
             .replace(
                 "__WA_IR_RELEASE_ROOT__",
-                "/srv/trading-bot/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5",
+                "/srv/trading-bot-three-site/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5",
             )
         )
         self.assertNotRegex(rendered, r"__[A-Z0-9_]+__")
         self.assertIn("server_name coin.gold-trade.ir;", rendered)
         self.assertIn(
-            "root /srv/trading-bot/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5/mini_app_dist;",
+            "root /srv/trading-bot-three-site/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5/mini_app_dist;",
             rendered,
         )
 
