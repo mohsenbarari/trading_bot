@@ -60,6 +60,7 @@ SOURCE_SCRIPT_FILES = (
     "scripts/manage_webapp_ir_artifact_stage.py",
     "scripts/manage_webapp_ir_snapshot.py",
     "scripts/manage_webapp_ir_release_provenance.py",
+    "scripts/webapp_ir_image_archive_contract.py",
 )
 PAYLOAD_FILES = (
     *SOURCE_SCRIPT_FILES,
