@@ -53,6 +53,12 @@ def _load_sibling_module(name: str) -> Any:
     return module
 
 
+def _load_bootstrap_preparer() -> Any:
+    """Load the local-only bootstrap package verifier on the controller."""
+
+    return _load_sibling_module("prepare_webapp_ir_stage_bootstrap")
+
+
 stage = _load_sibling_module("manage_webapp_ir_artifact_stage")
 bootstrap_renderer = _load_sibling_module("render_webapp_ir_stage_bootstrap_receive")
 normal_renderer = _load_sibling_module("render_webapp_ir_stage_consume")
@@ -492,6 +498,79 @@ def _bootstrap_only_evidence(bootstrap: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _verify_prepared_bootstrap_consumer_config(
+    *,
+    bootstrap_package_directory: Path,
+    bootstrap_preparation_receipt: Path,
+    consumer_config: Any,
+) -> None:
+    """Bind the future WA-IR consumer package to controller-local pins first.
+
+    ``publish_bootstrap_package`` repeats package verification immediately
+    before upload. This earlier check prevents even the one permitted
+    bootstrap object or remote-directory preparation when a separately
+    prepared package carries different consumer provenance pins.
+    """
+
+    bootstrap = _load_bootstrap_preparer()
+    try:
+        prepared = bootstrap.verify_prepared_bootstrap_package(
+            package_directory=bootstrap_package_directory,
+            preparation_receipt=bootstrap_preparation_receipt,
+        )
+    except Exception:
+        raise SevenObjectStageError("prepared bootstrap package is invalid") from None
+    if not isinstance(prepared, Mapping):
+        raise SevenObjectStageError("prepared bootstrap package is invalid")
+    packaged = prepared.get("consumer_config")
+    if not isinstance(packaged, Mapping):
+        raise SevenObjectStageError("prepared bootstrap consumer configuration is invalid")
+
+    expected_values = {
+        "schema": stage.CONFIG_SCHEMA,
+        "endpoint": consumer_config.endpoint,
+        "region": consumer_config.region,
+        "bucket": consumer_config.bucket,
+        "prefix": consumer_config.prefix,
+        "age_binary": consumer_config.age_binary,
+        "age_identity_file": str(consumer_config.age_identity_file),
+        "workspace": str(consumer_config.workspace),
+        "source_site": consumer_config.source_site,
+        "maximum_artifact_bytes": consumer_config.maximum_artifact_bytes,
+    }
+    if any(packaged.get(field) != expected for field, expected in expected_values.items()):
+        raise SevenObjectStageError(
+            "prepared bootstrap consumer configuration does not match the local trusted configuration"
+        )
+
+    try:
+        packaged_source_key = stage.decode_exact_base64(
+            packaged.get("source_signing_public_key_base64"),
+            field="prepared bootstrap source_signing_public_key_base64",
+            expected_bytes=32,
+        )
+        packaged_fi_key = stage.decode_exact_base64(
+            packaged.get("webapp_fi_source_attestation_public_key_base64"),
+            field="prepared bootstrap webapp_fi_source_attestation_public_key_base64",
+            expected_bytes=32,
+        )
+        packaged_controller_key = stage.decode_exact_base64(
+            packaged.get("webapp_fi_controller_authorization_public_key_base64"),
+            field="prepared bootstrap webapp_fi_controller_authorization_public_key_base64",
+            expected_bytes=32,
+        )
+    except Exception:
+        raise SevenObjectStageError("prepared bootstrap provenance key pins are invalid") from None
+    if (
+        packaged_source_key != consumer_config.source_signing_public_key
+        or packaged_fi_key != consumer_config.webapp_fi_source_attestation_public_key
+        or packaged_controller_key != consumer_config.webapp_fi_controller_authorization_public_key
+    ):
+        raise SevenObjectStageError(
+            "prepared bootstrap provenance key pins do not match the local trusted configuration"
+        )
+
+
 def run_stage(
     *,
     publisher_config_path: Path,
@@ -537,6 +616,11 @@ def run_stage(
         raise SevenObjectStageError("publisher signing key is invalid") from None
     if publisher_public_key != consumer_config.source_signing_public_key:
         raise SevenObjectStageError("publisher signing key does not match the pinned consumer key")
+    _verify_prepared_bootstrap_consumer_config(
+        bootstrap_package_directory=bootstrap_package_directory,
+        bootstrap_preparation_receipt=bootstrap_preparation_receipt,
+        consumer_config=consumer_config,
+    )
 
     # Fail before contacting Object Storage when the input could never satisfy
     # the fixed 1 + 5 + manifest contract.
