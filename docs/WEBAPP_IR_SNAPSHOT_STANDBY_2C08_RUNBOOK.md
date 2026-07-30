@@ -154,15 +154,17 @@ After the existing transport has staged exactly those five artifacts on WA-IR,
 use only the provenance helper extracted by the bootstrap receiver. Its path is
 the `candidate_directory` from the same root-only canonical bootstrap receipt;
 do not substitute an older preflight-tooling copy or construct a candidate
-path manually. The receipt has exactly four payload-file hashes
+path manually. Copy the exact `candidate_directory` emitted by the successful
+receiver SSH result; the controlled placeholders below stand for that output.
+The receipt has exactly four payload-file hashes
 (`manage_webapp_ir_artifact_stage.py`, `manage_webapp_ir_snapshot.py`,
 `manage_webapp_ir_release_provenance.py`, and `config/consumer.json`); the
 embedded `bootstrap-package.json` is separately bound by
 `bootstrap.package_manifest_sha256`.
 
 ```bash
-BOOTSTRAP_RECEIPT=/srv/trading-bot-three-site-staging-data/wa-ir-standby/artifact-stage-bootstrap/REPLACE_WITH_BOOTSTRAP_ID/bootstrap-receipt.json
-BOOTSTRAP_CANDIDATE="$(/usr/bin/python3 -I -B -c 'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["candidate_directory"])' "$BOOTSTRAP_RECEIPT")"
+BOOTSTRAP_CANDIDATE=/srv/trading-bot-three-site-staging-data/wa-ir-bootstrap/received-REPLACE_WITH_EXACT_CONTROL_COMMIT-REPLACE_WITH_EXACT_BOOTSTRAP_ID
+BOOTSTRAP_RECEIPT="$BOOTSTRAP_CANDIDATE/bootstrap-receipt.json"
 /usr/bin/python3 -I -B "$BOOTSTRAP_CANDIDATE/scripts/manage_webapp_ir_release_provenance.py" install \
   --stage-receipt /srv/trading-bot-three-site-staging-data/wa-ir-standby/artifact-stage/webapp_fi/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5/REPLACE_WITH_NEW_BUNDLE_ID/stage-receipt.json \
   --bootstrap-receipt "$BOOTSTRAP_RECEIPT" \

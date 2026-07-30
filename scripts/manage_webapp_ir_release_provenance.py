@@ -36,6 +36,7 @@ PROVENANCE_SCHEMA = "gold-trade-wa-ir-release-provenance-v1"
 INSTALL_RECEIPT_SCHEMA = "gold-trade-wa-ir-release-provenance-install-receipt-v1"
 STAGE_RECEIPT_SCHEMA = "gold-trade-wa-ir-artifact-stage-receipt-v1"
 BOOTSTRAP_RECEIPT_SCHEMA = "gold-trade-wa-ir-stage-bootstrap-receipt-v1"
+BOOTSTRAP_RECEIPT_NAME = "bootstrap-receipt.json"
 
 LEGACY_APPLICATION_RELEASE_SHA = "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5"
 APPLICATION_BUNDLE_ARTIFACT = "release-bundle"
@@ -828,7 +829,15 @@ def load_bootstrap_receive_receipt(path: Path) -> BootstrapReceipt:
     bootstrap_id = value.get("bootstrap_id")
     if not isinstance(bootstrap_id, str) or not BUNDLE_ID_RE.fullmatch(bootstrap_id):
         raise ReleaseProvenanceError("bootstrap receive receipt bootstrap_id is invalid")
-    _safe_path(value.get("candidate_directory"), field="bootstrap receive receipt candidate_directory")
+    candidate_directory = _safe_path(
+        value.get("candidate_directory"),
+        field="bootstrap receive receipt candidate_directory",
+    )
+    _require_directory(candidate_directory, field="bootstrap receive receipt candidate_directory", private=True)
+    if candidate_directory.name != f"received-{control_commit}-{bootstrap_id}":
+        raise ReleaseProvenanceError("bootstrap receive receipt candidate_directory is not receipt-bound")
+    if path != candidate_directory / BOOTSTRAP_RECEIPT_NAME:
+        raise ReleaseProvenanceError("bootstrap receive receipt must remain at its candidate path")
     files = value.get("files")
     if not isinstance(files, Mapping) or set(files) != BOOTSTRAP_RECEIPT_FILES:
         raise ReleaseProvenanceError("bootstrap receive receipt files are invalid")
@@ -871,6 +880,8 @@ def load_bootstrap_receive_receipt(path: Path) -> BootstrapReceipt:
         "preparation_receipt_sha256",
     ):
         _require_sha256(bootstrap.get(field), field=f"bootstrap receive receipt bootstrap {field}")
+    if files["config/consumer.json"] != bootstrap["consumer_config_sha256"]:
+        raise ReleaseProvenanceError("bootstrap receive receipt consumer config hash is inconsistent")
     plaintext_bytes = bootstrap.get("plaintext_bytes")
     ciphertext_bytes = bootstrap.get("ciphertext_bytes")
     if isinstance(plaintext_bytes, bool) or not isinstance(plaintext_bytes, int) or not 1 <= plaintext_bytes <= MAX_BOOTSTRAP_ARCHIVE_BYTES:
