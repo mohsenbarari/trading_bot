@@ -82,6 +82,7 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
             "scripts/manage_webapp_ir_snapshot.py": b"# snapshot helper\n",
             "scripts/manage_webapp_ir_release_provenance.py": b"# provenance helper\n",
             "core/standby_snapshot_capacity.py": b"# capacity helper\n",
+            "scripts/webapp_ir_image_archive_contract.py": b"# image archive contract\n",
             "config/consumer.json": config_raw,
         }
         manifest = {
