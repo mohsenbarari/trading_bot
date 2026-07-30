@@ -10,6 +10,9 @@ outside this command's surface.
 Every restore uses new, generation-qualified Docker volumes backed by the
 configured standby data mount.  The previous known-good candidate is retained
 for rollback and is never overwritten or deleted by this script.
+
+Before its first local mutation, an apply run records a root-only inflight
+journal.  An interrupted run stays fenced until explicit recovery inspects it.
 """
 
 from __future__ import annotations
@@ -37,6 +40,18 @@ DEFAULT_COMPOSE_FILE = (
     REPO_ROOT / "deploy/production/docker-compose.webapp-ir-snapshot-standby-2c08.yml"
 )
 SCHEMA_VERSION = "gold-trade-snapshot-restore-receipt-v1"
+RESTORE_INFLIGHT_SCHEMA = "gold-trade-wa-ir-restore-inflight-v1"
+RESTORE_INFLIGHT_FILENAME = "restore-inflight.json"
+RESTORE_INFLIGHT_PHASES = frozenset(
+    {
+        "prepared",
+        "directories_created",
+        "volumes_created",
+        "database_started",
+        "database_verified",
+        "active_pointer_committed",
+    }
+)
 RELEASE_RE = re.compile(r"^[0-9a-f]{40}$")
 ALEMBIC_RE = re.compile(r"^[0-9a-f]{12}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -1015,6 +1030,152 @@ def write_new_json(path: Path, payload: Mapping[str, Any]) -> None:
         raise
 
 
+def restore_inflight_journal_path(state_root: Path) -> Path:
+    """Return the sole root-only journal which fences interrupted restores.
+
+    There is intentionally only one journal per standby state root.  A timer
+    must never begin a second candidate restore until a prior interrupted
+    restore has been inspected and explicitly recovered.
+    """
+
+    return state_root / RESTORE_INFLIGHT_FILENAME
+
+
+def build_restore_inflight_journal(
+    *,
+    receipt: SnapshotReceipt,
+    candidate: Candidate,
+) -> dict[str, Any]:
+    now = utc_now()
+    return {
+        "schema": RESTORE_INFLIGHT_SCHEMA,
+        "status": "in_progress",
+        "phase": "prepared",
+        "created_at": now,
+        "updated_at": now,
+        "snapshot_id": receipt.snapshot_id,
+        "ready_receipt_sha256": require_text(
+            receipt.raw, "receipt_sha256", label="snapshot-ready receipt"
+        ).lower(),
+        "candidate": {
+            "generation": candidate.generation,
+            "root": str(candidate.root),
+            "db_volume": candidate.db_volume,
+            "uploads_volume": candidate.uploads_volume,
+            "audit_volume": candidate.audit_volume if receipt.audit is not None else None,
+            "db_container": candidate.db_container,
+            "compose_project": candidate.compose_project,
+        },
+    }
+
+
+def _load_restore_inflight_journal(path: Path) -> dict[str, Any]:
+    require_secure_regular_file(path, label="restore-inflight journal")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RestoreError("restore-inflight journal is not valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise RestoreError("restore-inflight journal must be an object")
+    if payload.get("schema") != RESTORE_INFLIGHT_SCHEMA:
+        raise RestoreError("restore-inflight journal schema is unsupported")
+    if payload.get("status") != "in_progress":
+        raise RestoreError("restore-inflight journal status is unsupported")
+    phase = payload.get("phase")
+    if phase not in RESTORE_INFLIGHT_PHASES:
+        raise RestoreError("restore-inflight journal phase is unsupported")
+    snapshot_id = payload.get("snapshot_id")
+    if not isinstance(snapshot_id, str) or not GENERATION_RE.fullmatch(snapshot_id):
+        raise RestoreError("restore-inflight journal snapshot_id is invalid")
+    ready_receipt_sha256 = payload.get("ready_receipt_sha256")
+    if not isinstance(ready_receipt_sha256, str) or not SHA256_RE.fullmatch(ready_receipt_sha256):
+        raise RestoreError("restore-inflight journal ready receipt hash is invalid")
+    for timestamp_field in ("created_at", "updated_at"):
+        value = payload.get(timestamp_field)
+        if not isinstance(value, str):
+            raise RestoreError(f"restore-inflight journal {timestamp_field} is invalid")
+        parse_utc_timestamp(value, label=f"restore-inflight journal {timestamp_field}")
+    candidate = payload.get("candidate")
+    if not isinstance(candidate, Mapping):
+        raise RestoreError("restore-inflight journal candidate is invalid")
+    generation = candidate.get("generation")
+    if not isinstance(generation, str) or not GENERATION_RE.fullmatch(generation):
+        raise RestoreError("restore-inflight journal candidate generation is invalid")
+    if not isinstance(candidate.get("root"), str) or not Path(candidate["root"]).is_absolute():
+        raise RestoreError("restore-inflight journal candidate root is invalid")
+    for field in ("db_volume", "uploads_volume", "db_container", "compose_project"):
+        if not isinstance(candidate.get(field), str) or not candidate[field]:
+            raise RestoreError(f"restore-inflight journal candidate {field} is invalid")
+    audit_volume = candidate.get("audit_volume")
+    if audit_volume is not None and (not isinstance(audit_volume, str) or not audit_volume):
+        raise RestoreError("restore-inflight journal candidate audit_volume is invalid")
+    return dict(payload)
+
+
+def load_restore_inflight_journal(state_root: Path) -> dict[str, Any] | None:
+    path = restore_inflight_journal_path(state_root)
+    if not path.exists() and not path.is_symlink():
+        return None
+    return _load_restore_inflight_journal(path)
+
+
+def require_no_restore_inflight(state_root: Path) -> None:
+    """Fail closed until an interrupted candidate restore is recovered.
+
+    This deliberately performs no deletion.  A process can be killed after
+    Docker has created a volume or detached DB container, so cleanup must be
+    an explicit, ownership-verified recovery operation rather than a timer
+    side effect.
+    """
+
+    try:
+        journal = load_restore_inflight_journal(state_root)
+    except RestoreError as exc:
+        raise RestoreError(
+            "WA-IR snapshot restore recovery is required; restore-inflight journal is invalid"
+        ) from exc
+    if journal is None:
+        return
+    candidate = journal["candidate"]
+    raise RestoreError(
+        "WA-IR snapshot restore recovery is required before another refresh "
+        f"(generation {candidate['generation']}, phase {journal['phase']}, status {journal['status']})"
+    )
+
+
+def write_restore_inflight_journal(
+    state_root: Path,
+    *,
+    receipt: SnapshotReceipt,
+    candidate: Candidate,
+) -> tuple[Path, dict[str, Any]]:
+    path = restore_inflight_journal_path(state_root)
+    journal = build_restore_inflight_journal(receipt=receipt, candidate=candidate)
+    write_new_json(path, journal)
+    return path, journal
+
+
+def advance_restore_inflight_journal(
+    path: Path,
+    journal: Mapping[str, Any],
+    *,
+    phase: str,
+) -> dict[str, Any]:
+    if phase not in RESTORE_INFLIGHT_PHASES:
+        raise RestoreError("restore-inflight journal phase is unsupported")
+    _load_restore_inflight_journal(path)
+    updated = dict(journal)
+    updated["phase"] = phase
+    updated["updated_at"] = utc_now()
+    write_atomic_json(path, updated)
+    return updated
+
+
+def clear_restore_inflight_journal(path: Path) -> None:
+    require_secure_regular_file(path, label="restore-inflight journal")
+    path.unlink()
+
+
 def build_restore_marker(*, receipt: SnapshotReceipt, candidate: Candidate) -> dict[str, Any]:
     marker: dict[str, Any] = {
         "schema": SCHEMA_VERSION,
@@ -1308,6 +1469,10 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         )
     generation = (args.generation or receipt.snapshot_id).lower()
     candidate = build_candidate(data_root, generation)
+    if args.apply:
+        # Prefer the durable recovery signal over a coincidental existing
+        # candidate path when a previous restore was interrupted.
+        require_no_restore_inflight(state_root)
     if candidate.root.exists():
         raise RestoreError("candidate generation already exists; choose a new immutable generation")
     database_env = parse_env_file(
@@ -1392,22 +1557,48 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     if not docker_container_absent(runner, candidate.db_container):
         raise RestoreError("candidate database container already exists")
     previous = previous_candidate(state_root)
+    journal_path, journal = write_restore_inflight_journal(
+        state_root,
+        receipt=receipt,
+        candidate=candidate,
+    )
     candidate.root.mkdir(parents=True, mode=0o700)
     candidate.db_path.mkdir(mode=0o700)
     candidate.uploads_path.mkdir(mode=0o700)
     if receipt.audit is not None:
         candidate.audit_path.mkdir(mode=0o700)
-    create_bound_volume(runner, name=candidate.db_volume, device=candidate.db_path, generation=candidate.generation)
-    create_bound_volume(runner, name=candidate.uploads_volume, device=candidate.uploads_path, generation=candidate.generation)
+    journal = advance_restore_inflight_journal(
+        journal_path, journal, phase="directories_created"
+    )
+    create_bound_volume(
+        runner,
+        name=candidate.db_volume,
+        device=candidate.db_path,
+        generation=candidate.generation,
+    )
+    create_bound_volume(
+        runner,
+        name=candidate.uploads_volume,
+        device=candidate.uploads_path,
+        generation=candidate.generation,
+    )
     if receipt.audit is not None:
-        create_bound_volume(runner, name=candidate.audit_volume, device=candidate.audit_path, generation=candidate.generation)
+        create_bound_volume(
+            runner,
+            name=candidate.audit_volume,
+            device=candidate.audit_path,
+            generation=candidate.generation,
+        )
+    journal = advance_restore_inflight_journal(journal_path, journal, phase="volumes_created")
     extracted_members, extracted_bytes = extract_upload_archive(receipt.uploads.path, candidate.uploads_path)
     if (extracted_members, extracted_bytes) != (upload_members, upload_bytes):
         raise RestoreError("uploads extraction did not match its prevalidated manifest")
     extracted_audit_members: int | None = None
     extracted_audit_bytes: int | None = None
     if receipt.audit is not None:
-        extracted_audit_members, extracted_audit_bytes = extract_audit_archive(receipt.audit.path, candidate.audit_path)
+        extracted_audit_members, extracted_audit_bytes = extract_audit_archive(
+            receipt.audit.path, candidate.audit_path
+        )
         if (extracted_audit_members, extracted_audit_bytes) != (audit_members, audit_bytes):
             raise RestoreError("audit extraction did not match its prevalidated manifest")
     runner.run(["docker", "image", "inspect", postgres_image])
@@ -1440,10 +1631,12 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         ],
         timeout=180,
     )
+    journal = advance_restore_inflight_journal(journal_path, journal, phase="database_started")
     wait_for_database(runner, container=candidate.db_container, timeout_seconds=args.database_timeout_seconds)
     restored_revision, table_count = restore_database(runner, candidate=candidate, dump=receipt.database.path)
     if restored_revision != expected_revision:
         raise RestoreError("restored Alembic revision does not match the pinned production schema")
+    journal = advance_restore_inflight_journal(journal_path, journal, phase="database_verified")
     evidence = candidate_payload(
         receipt=receipt,
         candidate=candidate,
@@ -1468,6 +1661,9 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     evidence["freshness"]["source_db_snapshot_age_seconds"] = round(active_snapshot_age_seconds, 3)
     evidence["completed_at"] = utc_now()
     write_atomic_json(state_root / "active-snapshot.json", evidence)
+    journal = advance_restore_inflight_journal(
+        journal_path, journal, phase="active_pointer_committed"
+    )
     if witness_receipt_path is not None:
         # Stage the target first.  The active pointer is then updated with the
         # exact hash before the watched canonical path becomes visible.  A
@@ -1507,6 +1703,10 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         evidence["previous_transport_marker_state"] = mark_previous_transport_candidate_inactive(
             previous, workspace_root=workspace_root
         )
+    # The new candidate is durable and bound before any best-effort work on
+    # the prior candidate. A later old-container stop failure must not
+    # misclassify this committed candidate as interrupted.
+    clear_restore_inflight_journal(journal_path)
     if not args.keep_previous_running:
         retire_previous_candidate(runner, previous)
     evidence["commands"] = [[item for item in command] for command in runner.commands]

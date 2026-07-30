@@ -29,6 +29,7 @@ from restore_webapp_ir_snapshot import (
     parse_env_file,
     require_absolute_directory,
     require_config,
+    require_no_restore_inflight,
     require_secure_regular_file,
     require_snapshot_maximum_age,
 )
@@ -219,6 +220,10 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
     if not args.apply:
         return plan
     with refresh_lock(state_root):
+        # A killed restore can leave bind volumes or a detached database
+        # container behind.  Do not contact Object Storage or attempt a new
+        # candidate until an explicit recovery has inspected that journal.
+        require_no_restore_inflight(state_root)
         if active_ir_writer_lease(values):
             return {
                 **plan,
