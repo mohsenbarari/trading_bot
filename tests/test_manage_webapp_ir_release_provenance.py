@@ -131,7 +131,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
             "sha256": sha256,
         }
 
-    def make_application_preparation(self) -> Path:
+    def make_application_preparation(self, *, app_repo_digests: list[str] | None = None) -> Path:
         """Make the exact root-only receipt contract emitted by the preparer."""
 
         # The preparer uses a new, private output directory.  Use the same file
@@ -146,7 +146,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
         images = [
             {
                 "image_id": self.app_image_id,
-                "repo_digests": [self.app_repo_digest],
+                "repo_digests": [self.app_repo_digest] if app_repo_digests is None else app_repo_digests,
                 "repo_tags": ["trading_bot_base_iran:rollback-2c08"],
                 "size_bytes": 123,
                 "source_ref": "trading_bot_base_iran:rollback-2c08",
@@ -392,6 +392,92 @@ class ReleaseProvenanceTests(unittest.TestCase):
         self.assertEqual(installed["application"]["release_sha"], self.application_sha)
         self.assertEqual(installed["control"]["release_sha"], self.control_sha)
         self.assertEqual(installed["dispatcher"]["sha256"], result["dispatcher"]["sha256"])
+
+    def test_build_and_install_bind_a_verified_app_image_without_a_repo_digest(self) -> None:
+        preparation = self.make_application_preparation(app_repo_digests=[])
+        with self.patched_contract():
+            prepared = MODULE.build_control_artifacts(
+                application_preparation_receipt=preparation,
+                control_repository=self.control_repository,
+                control_release_sha=self.control_sha,
+                output_directory=self.output_parent / "control-no-repo-digest",
+                app_image_id=self.app_image_id,
+            )
+        self.assertEqual(prepared["runtime_images"]["app_image_id"], self.app_image_id)
+        self.assertNotIn("app_repo_digest", prepared["runtime_images"])
+
+        stage_receipt = self.make_candidate(prepared)
+        receipt_path = self.receipt_parent / "release-roots-no-repo-digest.json"
+        with self.patched_contract():
+            installed = MODULE.install_release_roots(
+                stage_receipt_path=stage_receipt,
+                receipt_path=receipt_path,
+            )
+            loaded = MODULE.load_installed_release_receipt(receipt_path)
+
+        self.assertEqual(installed["runtime_images"]["app_image_id"], self.app_image_id)
+        self.assertNotIn("app_repo_digest", installed["runtime_images"])
+        self.assertNotIn("app_repo_digest", loaded["runtime_images"])
+
+    def test_build_rejects_an_unverified_app_image_id_without_a_repo_digest(self) -> None:
+        preparation = self.make_application_preparation(app_repo_digests=[])
+        output = self.output_parent / "unverified-app-image"
+        with self.patched_contract():
+            with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "absent from the prepared image manifest"):
+                MODULE.build_control_artifacts(
+                    application_preparation_receipt=preparation,
+                    control_repository=self.control_repository,
+                    control_release_sha=self.control_sha,
+                    output_directory=output,
+                    app_image_id="sha256:" + "c" * 64,
+                )
+        self.assertFalse(output.exists())
+
+    def test_build_requires_a_present_repo_digest_to_be_bound(self) -> None:
+        preparation = self.make_application_preparation()
+        output = self.output_parent / "missing-app-repo-digest"
+        with self.patched_contract():
+            with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "repo digest that must be bound"):
+                MODULE.build_control_artifacts(
+                    application_preparation_receipt=preparation,
+                    control_repository=self.control_repository,
+                    control_release_sha=self.control_sha,
+                    output_directory=output,
+                    app_image_id=self.app_image_id,
+                )
+        self.assertFalse(output.exists())
+
+    def test_build_parser_allows_an_absent_app_repo_digest(self) -> None:
+        parsed = MODULE.parse_args(
+            [
+                "build-control",
+                "--application-preparation-receipt",
+                "/root/preparation-receipt.json",
+                "--control-repository",
+                "/root/control",
+                "--control-release-sha",
+                self.control_sha,
+                "--output-directory",
+                "/root/output",
+                "--app-image-id",
+                self.app_image_id,
+            ]
+        )
+        self.assertIsNone(parsed.app_repo_digest)
+
+    def test_runtime_contract_rejects_a_null_repo_digest_field(self) -> None:
+        with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "runtime app_repo_digest is invalid"):
+            MODULE._runtime_contract(
+                {
+                    "app_image_id": self.app_image_id,
+                    "app_repo_digest": None,
+                    "image_bundle_sha256": "a" * 64,
+                    "image_manifest_sha256": "b" * 64,
+                    "image_set_sha256": "c" * 64,
+                    "image_ids_sha256": "d" * 64,
+                    "image_count": 1,
+                }
+            )
 
     def test_install_rejects_an_arbitrary_non_git_application_bundle_without_creating_roots(self) -> None:
         prepared = self.build()
