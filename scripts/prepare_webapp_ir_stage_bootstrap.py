@@ -42,16 +42,30 @@ CONSUMER_CONFIG_SCHEMA = "gold-trade-wa-ir-artifact-stage-config-v1"
 MAX_CONTROL_FILE_BYTES = 2 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 8 * 1024 * 1024
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 SITE_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 BUCKET_RE = re.compile(r"^[a-z0-9][a-z0-9.-]{2,62}$")
 PREFIX_COMPONENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._=-]{0,127}$")
 
-PACKAGE_FILES = (
+WA_IR_BOOTSTRAP_SOURCE_SITE = "webapp_fi"
+WA_IR_BOOTSTRAP_DESTINATION_SITE = "webapp_ir"
+WA_IR_BOOTSTRAP_AGE_RECIPIENT = "age1t9xuwava6480yfrqzkcq086pk4f8x082hmu4s5z2d2gykxm5s9qsq0c26t"
+WA_IR_BOOTSTRAP_IDENTITY_FILE = "/etc/trading-bot-three-site/wa-ir/artifact-stage-2c08.agekey"
+
+PACKAGE_ARCHIVE_NAME = "wa-ir-artifact-stage-consumer.tar"
+PACKAGE_MANIFEST_MEMBER = "bootstrap-package.json"
+PREPARATION_RECEIPT_NAME = "bootstrap-preparation-receipt.json"
+
+SOURCE_SCRIPT_FILES = (
     "scripts/manage_webapp_ir_artifact_stage.py",
     "scripts/manage_webapp_ir_snapshot.py",
+    "scripts/manage_webapp_ir_release_provenance.py",
+)
+PAYLOAD_FILES = (
+    *SOURCE_SCRIPT_FILES,
     "config/consumer.json",
 )
-SOURCE_SCRIPT_FILES = PACKAGE_FILES[:2]
+PACKAGE_FILES = (*PAYLOAD_FILES, PACKAGE_MANIFEST_MEMBER)
 
 
 class BootstrapPreparationError(RuntimeError):
@@ -116,7 +130,12 @@ def _require_root_directory(path: Path, *, field: str, private: bool) -> Path:
     return resolved
 
 
-def _read_root_only_file(path: Path, *, field: str) -> bytes:
+def _read_root_only_file(
+    path: Path,
+    *,
+    field: str,
+    maximum_bytes: int = MAX_CONTROL_FILE_BYTES,
+) -> bytes:
     path = _require_absolute(path, field=field)
     try:
         metadata = path.lstat()
@@ -137,7 +156,7 @@ def _read_root_only_file(path: Path, *, field: str) -> bytes:
             or before.st_uid != 0
             or before.st_nlink != 1
             or before.st_size < 1
-            or before.st_size > MAX_CONTROL_FILE_BYTES
+            or before.st_size > maximum_bytes
             or before.st_mode & 0o077
         ):
             raise BootstrapPreparationError(f"{field} has unsafe ownership, mode, or size")
@@ -273,6 +292,12 @@ def _validate_consumer_config(payload: bytes) -> dict[str, Any]:
     region = _require_string(value.get("region"), "consumer config region", maximum=128)
     parsed_endpoint = urlparse(endpoint)
     expected_host = f"s3.{region}.arvanstorage.ir"
+    try:
+        has_port = parsed_endpoint.port is not None
+    except ValueError as exc:
+        raise BootstrapPreparationError(
+            "consumer config endpoint must be the HTTPS Arvan S3 endpoint for its configured region"
+        ) from exc
     if (
         parsed_endpoint.scheme != "https"
         or parsed_endpoint.hostname != expected_host
@@ -281,7 +306,7 @@ def _validate_consumer_config(payload: bytes) -> dict[str, Any]:
         or parsed_endpoint.fragment
         or parsed_endpoint.username
         or parsed_endpoint.password
-        or parsed_endpoint.port is not None
+        or has_port
     ):
         raise BootstrapPreparationError(
             "consumer config endpoint must be the HTTPS Arvan S3 endpoint for its configured region"
@@ -297,8 +322,10 @@ def _validate_consumer_config(payload: bytes) -> dict[str, Any]:
         if not path.startswith("/"):
             raise BootstrapPreparationError("consumer config " + field + " must be absolute")
     site = _require_string(value.get("source_site"), "consumer config source_site", maximum=64)
-    if site != "webapp_fi" or not SITE_RE.fullmatch(site):
+    if site != WA_IR_BOOTSTRAP_SOURCE_SITE or not SITE_RE.fullmatch(site):
         raise BootstrapPreparationError("consumer config must pin source_site to webapp_fi")
+    if value.get("age_identity_file") != WA_IR_BOOTSTRAP_IDENTITY_FILE:
+        raise BootstrapPreparationError("consumer config must pin the WA-IR bootstrap age identity path")
     encoded_key = _require_string(
         value.get("source_signing_public_key_base64"),
         "consumer config source_signing_public_key_base64",
@@ -387,10 +414,154 @@ def _write_deterministic_archive(path: Path, files: Mapping[str, bytes]) -> tupl
     return digest, size
 
 
-def _verify_archive(path: Path, expected: Mapping[str, str]) -> None:
-    observed: dict[str, str] = {}
+def _parse_canonical_json(payload: bytes, *, field: str) -> dict[str, Any]:
     try:
-        with tarfile.open(path, mode="r:") as archive:
+        value = json.loads(payload.decode("utf-8"), object_pairs_hook=_strict_object)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise BootstrapPreparationError(f"{field} is not valid strict UTF-8 JSON") from exc
+    if not isinstance(value, dict):
+        raise BootstrapPreparationError(f"{field} must be a JSON object")
+    if payload != _canonical_json_bytes(value) + b"\n":
+        raise BootstrapPreparationError(f"{field} must use canonical JSON")
+    return value
+
+
+def _require_sha256(value: object, *, field: str) -> str:
+    if not isinstance(value, str) or not SHA256_RE.fullmatch(value):
+        raise BootstrapPreparationError(f"{field} is invalid")
+    return value
+
+
+def _require_positive_size(value: object, *, field: str, maximum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= maximum:
+        raise BootstrapPreparationError(f"{field} is invalid")
+    return value
+
+
+def _require_control(value: object, *, field: str) -> dict[str, str]:
+    if not isinstance(value, Mapping) or set(value) != {"commit", "tree"}:
+        raise BootstrapPreparationError(f"{field} is invalid")
+    commit = value.get("commit")
+    tree = value.get("tree")
+    if not isinstance(commit, str) or not COMMIT_RE.fullmatch(commit):
+        raise BootstrapPreparationError(f"{field}.commit is invalid")
+    if not isinstance(tree, str) or not COMMIT_RE.fullmatch(tree):
+        raise BootstrapPreparationError(f"{field}.tree is invalid")
+    return {"commit": commit, "tree": tree}
+
+
+def _require_file_hashes(value: object, *, field: str, names: Sequence[str]) -> dict[str, str]:
+    if not isinstance(value, Mapping) or set(value) != set(names):
+        raise BootstrapPreparationError(f"{field} does not match the package contract")
+    result: dict[str, str] = {}
+    for name in names:
+        result[name] = _require_sha256(value.get(name), field=f"{field}.{name}")
+    return result
+
+
+def _require_archive_descriptor(value: object, *, field: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != {"name", "sha256", "bytes"}:
+        raise BootstrapPreparationError(f"{field} is invalid")
+    if value.get("name") != PACKAGE_ARCHIVE_NAME:
+        raise BootstrapPreparationError(f"{field}.name is invalid")
+    return {
+        "name": PACKAGE_ARCHIVE_NAME,
+        "sha256": _require_sha256(value.get("sha256"), field=f"{field}.sha256"),
+        "bytes": _require_positive_size(value.get("bytes"), field=f"{field}.bytes", maximum=MAX_ARCHIVE_BYTES),
+    }
+
+
+def _require_package_manifest_descriptor(value: object, *, field: str) -> dict[str, str]:
+    if not isinstance(value, Mapping) or set(value) != {"name", "sha256"}:
+        raise BootstrapPreparationError(f"{field} is invalid")
+    if value.get("name") != PACKAGE_MANIFEST_MEMBER:
+        raise BootstrapPreparationError(f"{field}.name is invalid")
+    return {
+        "name": PACKAGE_MANIFEST_MEMBER,
+        "sha256": _require_sha256(value.get("sha256"), field=f"{field}.sha256"),
+    }
+
+
+def _validate_inner_package_manifest(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise BootstrapPreparationError("embedded bootstrap package manifest must be an object")
+    manifest = dict(value)
+    expected = {"schema", "status", "control", "files", "consumer_config_sha256"}
+    if set(manifest) != expected or manifest.get("schema") != PACKAGE_SCHEMA or manifest.get("status") != "prepared":
+        raise BootstrapPreparationError("embedded bootstrap package manifest is unsupported")
+    control = _require_control(manifest.get("control"), field="embedded bootstrap package manifest control")
+    hashes = _require_file_hashes(manifest.get("files"), field="embedded bootstrap package manifest files", names=PAYLOAD_FILES)
+    config_sha256 = _require_sha256(
+        manifest.get("consumer_config_sha256"),
+        field="embedded bootstrap package manifest consumer_config_sha256",
+    )
+    if config_sha256 != hashes["config/consumer.json"]:
+        raise BootstrapPreparationError("embedded bootstrap package manifest consumer config hash is inconsistent")
+    return {
+        "schema": PACKAGE_SCHEMA,
+        "status": "prepared",
+        "control": control,
+        "files": hashes,
+        "consumer_config_sha256": config_sha256,
+    }
+
+
+def _validate_preparation_receipt(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise BootstrapPreparationError("bootstrap preparation receipt must be an object")
+    receipt = dict(value)
+    expected = {
+        "schema",
+        "status",
+        "package_directory",
+        "control_commit",
+        "control_tree",
+        "bootstrap_archive",
+        "package_manifest",
+        "consumer_config_sha256",
+        "receipt_sha256",
+    }
+    if set(receipt) != expected or receipt.get("schema") != RECEIPT_SCHEMA or receipt.get("status") != "prepared":
+        raise BootstrapPreparationError("bootstrap preparation receipt is unsupported")
+    package_directory = receipt.get("package_directory")
+    if not isinstance(package_directory, str) or not package_directory.startswith("/"):
+        raise BootstrapPreparationError("bootstrap preparation receipt package_directory is invalid")
+    control_commit = receipt.get("control_commit")
+    control_tree = receipt.get("control_tree")
+    if not isinstance(control_commit, str) or not COMMIT_RE.fullmatch(control_commit):
+        raise BootstrapPreparationError("bootstrap preparation receipt control_commit is invalid")
+    if not isinstance(control_tree, str) or not COMMIT_RE.fullmatch(control_tree):
+        raise BootstrapPreparationError("bootstrap preparation receipt control_tree is invalid")
+    archive = _require_archive_descriptor(receipt.get("bootstrap_archive"), field="bootstrap preparation receipt bootstrap_archive")
+    package_manifest = _require_package_manifest_descriptor(
+        receipt.get("package_manifest"), field="bootstrap preparation receipt package_manifest"
+    )
+    config_sha256 = _require_sha256(
+        receipt.get("consumer_config_sha256"), field="bootstrap preparation receipt consumer_config_sha256"
+    )
+    receipt_sha256 = _require_sha256(receipt.get("receipt_sha256"), field="bootstrap preparation receipt receipt_sha256")
+    unsigned = {key: item for key, item in receipt.items() if key != "receipt_sha256"}
+    if _sha256_bytes(_canonical_json_bytes(unsigned)) != receipt_sha256:
+        raise BootstrapPreparationError("bootstrap preparation receipt hash is invalid")
+    return {
+        "schema": RECEIPT_SCHEMA,
+        "status": "prepared",
+        "package_directory": package_directory,
+        "control_commit": control_commit,
+        "control_tree": control_tree,
+        "bootstrap_archive": archive,
+        "package_manifest": package_manifest,
+        "consumer_config_sha256": config_sha256,
+        "receipt_sha256": receipt_sha256,
+    }
+
+
+def _read_archive_members(payload: bytes) -> dict[str, bytes]:
+    if not 1 <= len(payload) <= MAX_ARCHIVE_BYTES:
+        raise BootstrapPreparationError("bootstrap archive has an unsafe size")
+    result: dict[str, bytes] = {}
+    try:
+        with tarfile.open(fileobj=io.BytesIO(payload), mode="r:") as archive:
             for entry in archive:
                 pure = PurePosixPath(entry.name)
                 if (
@@ -400,24 +571,104 @@ def _verify_archive(path: Path, expected: Mapping[str, str]) -> None:
                     or any(part in ("", ".", "..") for part in pure.parts)
                     or not entry.isfile()
                     or entry.linkname
+                    or entry.mode != 0o600
+                    or entry.uid != 0
+                    or entry.gid != 0
+                    or entry.mtime != 0
+                    or entry.size < 1
+                    or entry.size > MAX_CONTROL_FILE_BYTES
+                    or entry.name in result
                 ):
                     raise BootstrapPreparationError("bootstrap archive has an unsafe entry")
-                if entry.name not in expected or entry.name in observed:
-                    raise BootstrapPreparationError("bootstrap archive contents do not match the package contract")
                 source = archive.extractfile(entry)
                 if source is None:
                     raise BootstrapPreparationError("bootstrap archive entry cannot be read")
-                digest = hashlib.sha256()
-                while True:
-                    chunk = source.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    digest.update(chunk)
-                observed[entry.name] = digest.hexdigest()
+                entry_payload = source.read(entry.size + 1)
+                if len(entry_payload) != entry.size:
+                    raise BootstrapPreparationError("bootstrap archive entry has an unsafe size")
+                result[entry.name] = entry_payload
     except (OSError, tarfile.TarError) as exc:
         raise BootstrapPreparationError("bootstrap archive cannot be safely verified") from exc
+    return result
+
+
+def _verify_archive(path: Path, expected: Mapping[str, str]) -> None:
+    try:
+        payload = path.read_bytes()
+    except OSError as exc:
+        raise BootstrapPreparationError("bootstrap archive cannot be safely verified") from exc
+    observed = {name: _sha256_bytes(value) for name, value in _read_archive_members(payload).items()}
     if observed != dict(expected):
         raise BootstrapPreparationError("bootstrap archive does not match expected file hashes")
+
+
+def verify_prepared_bootstrap_package(
+    *,
+    package_directory: Path,
+    preparation_receipt: Path,
+    expected_control_release_sha: str | None = None,
+) -> dict[str, Any]:
+    """Verify one local bootstrap preparation before it may reach Object Storage."""
+
+    package = _require_root_directory(package_directory, field="bootstrap package directory", private=True)
+    expected_receipt_path = package / PREPARATION_RECEIPT_NAME
+    if preparation_receipt != expected_receipt_path:
+        raise BootstrapPreparationError("bootstrap preparation receipt must be the canonical package receipt")
+    receipt_raw = _read_root_only_file(preparation_receipt, field="bootstrap preparation receipt")
+    receipt = _validate_preparation_receipt(
+        _parse_canonical_json(receipt_raw, field="bootstrap preparation receipt")
+    )
+    if receipt["package_directory"] != str(package):
+        raise BootstrapPreparationError("bootstrap preparation receipt package_directory does not match")
+    if expected_control_release_sha is not None:
+        if not COMMIT_RE.fullmatch(expected_control_release_sha) or receipt["control_commit"] != expected_control_release_sha:
+            raise BootstrapPreparationError("bootstrap preparation receipt control commit does not match")
+
+    archive_path = package / PACKAGE_ARCHIVE_NAME
+    archive_raw = _read_root_only_file(
+        archive_path,
+        field="bootstrap archive",
+        maximum_bytes=MAX_ARCHIVE_BYTES,
+    )
+    archive_sha256 = _sha256_bytes(archive_raw)
+    archive_bytes = len(archive_raw)
+    if archive_sha256 != receipt["bootstrap_archive"]["sha256"] or archive_bytes != receipt["bootstrap_archive"]["bytes"]:
+        raise BootstrapPreparationError("bootstrap archive does not match the preparation receipt")
+
+    members = _read_archive_members(archive_raw)
+    if tuple(members) != tuple(sorted(PACKAGE_FILES)):
+        raise BootstrapPreparationError("bootstrap archive member schema is unsupported")
+    inner_raw = members[PACKAGE_MANIFEST_MEMBER]
+    inner_manifest = _validate_inner_package_manifest(
+        _parse_canonical_json(inner_raw, field="embedded bootstrap package manifest")
+    )
+    if _sha256_bytes(inner_raw) != receipt["package_manifest"]["sha256"]:
+        raise BootstrapPreparationError("embedded bootstrap package manifest hash does not match")
+    payload_hashes = {name: _sha256_bytes(members[name]) for name in PAYLOAD_FILES}
+    if payload_hashes != inner_manifest["files"]:
+        raise BootstrapPreparationError("bootstrap archive payload hashes do not match the embedded manifest")
+    if (
+        inner_manifest["control"]["commit"] != receipt["control_commit"]
+        or inner_manifest["control"]["tree"] != receipt["control_tree"]
+        or inner_manifest["consumer_config_sha256"] != receipt["consumer_config_sha256"]
+        or payload_hashes["config/consumer.json"] != receipt["consumer_config_sha256"]
+    ):
+        raise BootstrapPreparationError("bootstrap package control or consumer config binding is inconsistent")
+    consumer_config = _validate_consumer_config(members["config/consumer.json"])
+    return {
+        "package_directory": str(package),
+        "preparation_receipt": str(preparation_receipt),
+        "archive_path": str(archive_path),
+        "archive_sha256": archive_sha256,
+        "archive_bytes": archive_bytes,
+        "control_commit": receipt["control_commit"],
+        "control_tree": receipt["control_tree"],
+        "package_manifest_sha256": receipt["package_manifest"]["sha256"],
+        "consumer_config_sha256": receipt["consumer_config_sha256"],
+        "preparation_receipt_sha256": _sha256_bytes(receipt_raw),
+        "receipt_sha256": receipt["receipt_sha256"],
+        "consumer_config": consumer_config,
+    }
 
 
 def prepare_bootstrap_package(
@@ -432,49 +683,50 @@ def prepare_bootstrap_package(
     repository, control_tree = _require_control_source(source_repository, control_release_sha)
     config_bytes = _read_root_only_file(consumer_config, field="consumer config")
     _validate_consumer_config(config_bytes)
-    files = {
+    payload_files = {
         relative: _source_file(repository, control_release_sha, relative)
         for relative in SOURCE_SCRIPT_FILES
     }
-    files["config/consumer.json"] = config_bytes
-    package = _require_new_package_directory(destination)
-    hashes = {name: _sha256_bytes(payload) for name, payload in sorted(files.items())}
-    archive = package / "wa-ir-artifact-stage-consumer.tar"
-    archive_sha256, archive_bytes = _write_deterministic_archive(archive, files)
-    _verify_archive(archive, hashes)
-    manifest: dict[str, Any] = {
+    payload_files["config/consumer.json"] = config_bytes
+    hashes = {name: _sha256_bytes(payload) for name, payload in sorted(payload_files.items())}
+    embedded_manifest: dict[str, Any] = {
         "schema": PACKAGE_SCHEMA,
         "status": "prepared",
         "control": {"commit": control_release_sha, "tree": control_tree},
-        "archive": {
-            "name": archive.name,
-            "sha256": archive_sha256,
-            "bytes": archive_bytes,
-        },
         "files": hashes,
         "consumer_config_sha256": hashes["config/consumer.json"],
     }
-    _write_new_private_file(package / "bootstrap-package.json", _canonical_json_bytes(manifest) + b"\n")
+    embedded_manifest_bytes = _canonical_json_bytes(embedded_manifest) + b"\n"
+    files = {**payload_files, PACKAGE_MANIFEST_MEMBER: embedded_manifest_bytes}
+    package = _require_new_package_directory(destination)
+    archive = package / PACKAGE_ARCHIVE_NAME
+    archive_sha256, archive_bytes = _write_deterministic_archive(archive, files)
+    _verify_archive(archive, {name: _sha256_bytes(payload) for name, payload in sorted(files.items())})
     receipt: dict[str, Any] = {
         "schema": RECEIPT_SCHEMA,
         "status": "prepared",
         "package_directory": str(package),
         "control_commit": control_release_sha,
         "control_tree": control_tree,
-        "bootstrap_archive": manifest["archive"],
-        "bootstrap_manifest_sha256": _sha256_file(package / "bootstrap-package.json")[0],
-        "stage_publish": {
-            "artifact": f"stage-consumer-bootstrap={archive}",
-            "artifact_bindings": [
-                f"stage-consumer-bootstrap=artifact_sha256={archive_sha256}",
-                f"stage-consumer-bootstrap=control_commit={control_release_sha}",
-                f"stage-consumer-bootstrap=control_tree={control_tree}",
-                f"stage-consumer-bootstrap=consumer_config_sha256={hashes['config/consumer.json']}",
-            ],
+        "bootstrap_archive": {
+            "name": archive.name,
+            "sha256": archive_sha256,
+            "bytes": archive_bytes,
         },
+        "package_manifest": {
+            "name": PACKAGE_MANIFEST_MEMBER,
+            "sha256": _sha256_bytes(embedded_manifest_bytes),
+        },
+        "consumer_config_sha256": hashes["config/consumer.json"],
     }
     receipt["receipt_sha256"] = _sha256_bytes(_canonical_json_bytes(receipt))
-    _write_new_private_file(package / "bootstrap-preparation-receipt.json", _canonical_json_bytes(receipt) + b"\n")
+    receipt_path = package / PREPARATION_RECEIPT_NAME
+    _write_new_private_file(receipt_path, _canonical_json_bytes(receipt) + b"\n")
+    verify_prepared_bootstrap_package(
+        package_directory=package,
+        preparation_receipt=receipt_path,
+        expected_control_release_sha=control_release_sha,
+    )
     return receipt
 
 

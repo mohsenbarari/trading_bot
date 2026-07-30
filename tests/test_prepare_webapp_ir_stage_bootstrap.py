@@ -1,5 +1,6 @@
 import hashlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import stat
@@ -25,7 +26,7 @@ def consumer_config() -> dict[str, object]:
         "bucket": "three-site-private",
         "prefix": "campaign-current/artifacts",
         "age_binary": "/usr/bin/age",
-        "age_identity_file": "/etc/trading-bot-three-site/wa-ir/artifact-stage.agekey",
+        "age_identity_file": bootstrap.WA_IR_BOOTSTRAP_IDENTITY_FILE,
         "workspace": "/srv/trading-bot-three-site-staging-data/workspace",
         "source_site": "webapp_fi",
         "source_signing_public_key_base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
@@ -54,6 +55,9 @@ class WebAppIrStageBootstrapTests(unittest.TestCase):
         (source / "scripts/manage_webapp_ir_snapshot.py").write_text(
             "# snapshot primitives\nVALUE = 'snapshot'\n", encoding="utf-8"
         )
+        (source / "scripts/manage_webapp_ir_release_provenance.py").write_text(
+            "# release provenance primitives\nVALUE = 'provenance'\n", encoding="utf-8"
+        )
         self._run("init", "-q", cwd=source)
         self._run("add", ".", cwd=source)
         self._run("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "control", cwd=source)
@@ -81,16 +85,15 @@ class WebAppIrStageBootstrapTests(unittest.TestCase):
             self.assertEqual(result["status"], "prepared")
             self.assertEqual(result["control_commit"], commit)
             self.assertEqual(stat.S_IMODE(destination.stat().st_mode), 0o700)
-            archive = destination / "wa-ir-artifact-stage-consumer.tar"
-            manifest = json.loads((destination / "bootstrap-package.json").read_text())
-            self.assertEqual(manifest["control"]["commit"], commit)
+            archive = destination / bootstrap.PACKAGE_ARCHIVE_NAME
+            receipt = json.loads((destination / bootstrap.PREPARATION_RECEIPT_NAME).read_text())
             self.assertEqual(
                 hashlib.sha256(archive.read_bytes()).hexdigest(),
-                manifest["archive"]["sha256"],
+                receipt["bootstrap_archive"]["sha256"],
             )
             self.assertEqual(stat.S_IMODE(archive.stat().st_mode), 0o600)
             self.assertEqual(
-                stat.S_IMODE((destination / "bootstrap-preparation-receipt.json").stat().st_mode),
+                stat.S_IMODE((destination / bootstrap.PREPARATION_RECEIPT_NAME).stat().st_mode),
                 0o600,
             )
             with tarfile.open(archive, "r:") as package:
@@ -98,6 +101,51 @@ class WebAppIrStageBootstrapTests(unittest.TestCase):
                 stage = package.extractfile("scripts/manage_webapp_ir_artifact_stage.py")
                 self.assertIsNotNone(stage)
                 self.assertIn(b"stage", stage.read())
+                provenance = package.extractfile("scripts/manage_webapp_ir_release_provenance.py")
+                self.assertIsNotNone(provenance)
+                self.assertIn(b"provenance", provenance.read())
+                embedded = package.extractfile(bootstrap.PACKAGE_MANIFEST_MEMBER)
+                self.assertIsNotNone(embedded)
+                embedded_bytes = embedded.read()
+            manifest = json.loads(embedded_bytes)
+            self.assertEqual(manifest["control"]["commit"], commit)
+            self.assertNotIn("archive", manifest)
+            self.assertEqual(
+                hashlib.sha256(embedded_bytes).hexdigest(),
+                receipt["package_manifest"]["sha256"],
+            )
+            verified = bootstrap.verify_prepared_bootstrap_package(
+                package_directory=destination,
+                preparation_receipt=destination / bootstrap.PREPARATION_RECEIPT_NAME,
+                expected_control_release_sha=commit,
+            )
+            self.assertEqual(verified["archive_sha256"], receipt["bootstrap_archive"]["sha256"])
+            self.assertEqual(verified["package_manifest_sha256"], receipt["package_manifest"]["sha256"])
+
+    def test_prepare_is_byte_deterministic_for_the_same_control_and_config(self):
+        with tempfile.TemporaryDirectory(prefix="wa-ir-bootstrap-deterministic-") as value:
+            root = Path(value)
+            source, commit = self._source(root)
+            parent = root / "packages"
+            parent.mkdir(mode=0o700)
+            first = parent / "candidate-a"
+            second = parent / "candidate-b"
+            bootstrap.prepare_bootstrap_package(
+                source_repository=source,
+                control_release_sha=commit,
+                consumer_config=self._config(root),
+                destination=first,
+            )
+            bootstrap.prepare_bootstrap_package(
+                source_repository=source,
+                control_release_sha=commit,
+                consumer_config=self._config(root),
+                destination=second,
+            )
+            self.assertEqual(
+                (first / bootstrap.PACKAGE_ARCHIVE_NAME).read_bytes(),
+                (second / bootstrap.PACKAGE_ARCHIVE_NAME).read_bytes(),
+            )
 
     def test_prepare_refuses_existing_destination(self):
         with tempfile.TemporaryDirectory(prefix="wa-ir-bootstrap-existing-") as value:
@@ -205,6 +253,22 @@ class WebAppIrStageBootstrapTests(unittest.TestCase):
                     destination=parent / "candidate",
                 )
 
+    def test_prepare_rejects_consumer_config_with_an_unpinned_identity_path(self):
+        with tempfile.TemporaryDirectory(prefix="wa-ir-bootstrap-identity-") as value:
+            root = Path(value)
+            source, commit = self._source(root)
+            parent = root / "packages"
+            parent.mkdir(mode=0o700)
+            invalid = consumer_config()
+            invalid["age_identity_file"] = "/etc/trading-bot-three-site/wa-ir/untrusted.agekey"
+            with self.assertRaisesRegex(bootstrap.BootstrapPreparationError, "pin the WA-IR bootstrap age identity"):
+                bootstrap.prepare_bootstrap_package(
+                    source_repository=source,
+                    control_release_sha=commit,
+                    consumer_config=self._config(root, invalid),
+                    destination=parent / "candidate",
+                )
+
     def test_prepare_rejects_group_writable_source(self):
         with tempfile.TemporaryDirectory(prefix="wa-ir-bootstrap-source-mode-") as value:
             root = Path(value)
@@ -226,8 +290,12 @@ class WebAppIrStageBootstrapTests(unittest.TestCase):
             with tarfile.open(path, "w:") as archive:
                 info = tarfile.TarInfo("unexpected.txt")
                 info.size = 1
-                archive.addfile(info, __import__("io").BytesIO(b"x"))
-            with self.assertRaisesRegex(bootstrap.BootstrapPreparationError, "contents do not match"):
+                info.mode = 0o600
+                info.uid = 0
+                info.gid = 0
+                info.mtime = 0
+                archive.addfile(info, io.BytesIO(b"x"))
+            with self.assertRaisesRegex(bootstrap.BootstrapPreparationError, "does not match expected"):
                 bootstrap._verify_archive(path, {"scripts/manage_webapp_ir_artifact_stage.py": "0" * 64})
 
 
