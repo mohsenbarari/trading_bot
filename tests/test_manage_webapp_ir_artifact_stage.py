@@ -350,6 +350,63 @@ class ArtifactStageTests(unittest.TestCase):
             self.publish()
         self.assertEqual([], self.client.put_calls)
 
+    def test_bootstrap_publisher_creates_one_exact_readback_object_without_signing_key_use(self) -> None:
+        bootstrap = self.root / "stage-consumer-bootstrap.tar"
+        bootstrap.write_bytes(b"trusted bootstrap package")
+        bootstrap.chmod(0o600)
+        # The bootstrap has no manifest to sign yet.  Its integrity is bound by
+        # the returned plaintext/ciphertext hashes and exact Object VersionId.
+        self.private_key.unlink()
+
+        published = stage.publish_bootstrap_package(
+            self.client,
+            config=self.publisher_config,
+            destination_site="webapp_ir",
+            control_release_sha=RELEASE_SHA,
+            bootstrap_path=bootstrap,
+            bootstrap_id=BUNDLE_ID,
+            now=NOW,
+            encryptor=fake_encrypt,
+        )
+
+        self.assertEqual(stage.BOOTSTRAP_PUBLISH_RECEIPT_SCHEMA, published["schema"])
+        self.assertEqual("published", published["status"])
+        self.assertEqual(1, len(self.client.put_calls))
+        self.assertEqual(1, len(self.client.get_calls), "bootstrap upload must exact-VersionId read-back")
+        self.assertEqual(1, len(self.client.presign_calls))
+        expected_key = (
+            f"{self.publisher_config.prefix}/bootstrap-artifacts/v1/webapp_fi/webapp_ir/"
+            f"{RELEASE_SHA}/{BUNDLE_ID}/stage-consumer-bootstrap.tar.age"
+        )
+        self.assertEqual(expected_key, published["bootstrap"]["object_key"])
+        self.assertEqual(stage.sha256_file(bootstrap)[0], published["bootstrap"]["plaintext_sha256"])
+        self.assertEqual(bootstrap.stat().st_size, published["bootstrap"]["plaintext_bytes"])
+        self.assertIn("versionId=" + published["bootstrap"]["version_id"], published["bootstrap"]["presigned_url"])
+        self.assertTrue(all("ServerSideEncryption" not in call for call in self.client.put_calls))
+
+    def test_bootstrap_publisher_rejects_existing_object_before_upload(self) -> None:
+        bootstrap = self.root / "stage-consumer-bootstrap.tar"
+        bootstrap.write_bytes(b"trusted bootstrap package")
+        bootstrap.chmod(0o600)
+        key = (
+            f"{self.publisher_config.prefix}/bootstrap-artifacts/v1/webapp_fi/webapp_ir/"
+            f"{RELEASE_SHA}/{BUNDLE_ID}/stage-consumer-bootstrap.tar.age"
+        )
+        self.client.objects[key] = [{"version_id": "old"}]
+
+        with self.assertRaisesRegex(stage.ArtifactStageError, "prior versions"):
+            stage.publish_bootstrap_package(
+                self.client,
+                config=self.publisher_config,
+                destination_site="webapp_ir",
+                control_release_sha=RELEASE_SHA,
+                bootstrap_path=bootstrap,
+                bootstrap_id=BUNDLE_ID,
+                now=NOW,
+                encryptor=fake_encrypt,
+            )
+        self.assertEqual([], self.client.put_calls)
+
     def test_consumer_rejects_manifest_url_with_a_different_version_before_network(self) -> None:
         published = self.publish()
         wrong_url = published["manifest"]["presigned_url"].replace("version-3", "wrong-version")

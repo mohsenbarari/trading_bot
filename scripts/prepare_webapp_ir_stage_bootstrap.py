@@ -32,6 +32,7 @@ import subprocess
 import sys
 import tarfile
 from typing import Any, Mapping, Sequence
+from urllib.parse import urlparse
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -269,9 +270,22 @@ def _validate_consumer_config(payload: bytes) -> dict[str, Any]:
     if value.get("schema") != CONSUMER_CONFIG_SCHEMA:
         raise BootstrapPreparationError("consumer config schema is unsupported")
     endpoint = _require_string(value.get("endpoint"), "consumer config endpoint")
-    if not endpoint.startswith("https://") or "/" in endpoint[len("https://") :]:
-        raise BootstrapPreparationError("consumer config endpoint must be one HTTPS origin")
-    _require_string(value.get("region"), "consumer config region", maximum=128)
+    region = _require_string(value.get("region"), "consumer config region", maximum=128)
+    parsed_endpoint = urlparse(endpoint)
+    expected_host = f"s3.{region}.arvanstorage.ir"
+    if (
+        parsed_endpoint.scheme != "https"
+        or parsed_endpoint.hostname != expected_host
+        or parsed_endpoint.path not in ("", "/")
+        or parsed_endpoint.query
+        or parsed_endpoint.fragment
+        or parsed_endpoint.username
+        or parsed_endpoint.password
+        or parsed_endpoint.port is not None
+    ):
+        raise BootstrapPreparationError(
+            "consumer config endpoint must be the HTTPS Arvan S3 endpoint for its configured region"
+        )
     bucket = _require_string(value.get("bucket"), "consumer config bucket", maximum=63)
     if not BUCKET_RE.fullmatch(bucket):
         raise BootstrapPreparationError("consumer config bucket is invalid")

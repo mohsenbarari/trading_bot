@@ -20,7 +20,7 @@ SPEC.loader.exec_module(bootstrap)
 def consumer_config() -> dict[str, object]:
     return {
         "schema": "gold-trade-wa-ir-artifact-stage-config-v1",
-        "endpoint": "https://s3.example.invalid",
+        "endpoint": "https://s3.ir-thr-at1.arvanstorage.ir",
         "region": "ir-thr-at1",
         "bucket": "three-site-private",
         "prefix": "campaign-current/artifacts",
@@ -187,6 +187,22 @@ class WebAppIrStageBootstrapTests(unittest.TestCase):
                     control_release_sha=commit,
                     consumer_config=config,
                     destination=parent / "candidate-b",
+                )
+
+    def test_prepare_rejects_consumer_endpoint_that_the_packaged_consumer_would_reject(self):
+        with tempfile.TemporaryDirectory(prefix="wa-ir-bootstrap-endpoint-") as value:
+            root = Path(value)
+            source, commit = self._source(root)
+            parent = root / "packages"
+            parent.mkdir(mode=0o700)
+            invalid = consumer_config()
+            invalid["endpoint"] = "https://s3.example.invalid"
+            with self.assertRaisesRegex(bootstrap.BootstrapPreparationError, "HTTPS Arvan S3 endpoint"):
+                bootstrap.prepare_bootstrap_package(
+                    source_repository=source,
+                    control_release_sha=commit,
+                    consumer_config=self._config(root, invalid),
+                    destination=parent / "candidate",
                 )
 
     def test_prepare_rejects_group_writable_source(self):

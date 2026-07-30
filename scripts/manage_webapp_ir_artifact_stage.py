@@ -20,6 +20,12 @@ It decrypts only into a fresh, detached candidate directory and records a
 root-only receipt without retaining the presigned URLs.  A later, explicitly
 authorised host operation may inspect that detached candidate and perform a
 Docker load or release stage; this tool does neither.
+
+Before that consumer exists on WA-IR, ``publish-bootstrap`` can create one
+separate encrypted, create-only consumer-package object.  Its returned URL is
+transient control-plane output for a later authorised Object-Storage-only
+bootstrap downloader; it is not a release manifest and does not install or
+activate anything by itself.
 """
 
 from __future__ import annotations
@@ -81,6 +87,7 @@ CONFIG_SCHEMA = "gold-trade-wa-ir-artifact-stage-config-v1"
 MANIFEST_SCHEMA = "gold-trade-wa-ir-artifact-stage-manifest-v1"
 PUBLISH_RECEIPT_SCHEMA = "gold-trade-wa-ir-artifact-stage-publish-receipt-v1"
 STAGE_RECEIPT_SCHEMA = "gold-trade-wa-ir-artifact-stage-receipt-v1"
+BOOTSTRAP_PUBLISH_RECEIPT_SCHEMA = "gold-trade-wa-ir-artifact-stage-bootstrap-publish-receipt-v1"
 TRANSPORT_SCHEMA = "gold-trade-wa-ir-artifact-stage-v1"
 MANIFEST_SIGNATURE_DOMAIN = b"gold-trade-wa-ir-artifact-stage-manifest-v1\x00"
 MANIFEST_SIGNATURE_ALGORITHM = "ed25519"
@@ -417,6 +424,33 @@ def _artifact_key(base: str, name: str) -> str:
 
 def _manifest_key(base: str) -> str:
     return base + "/manifest.json.age"
+
+
+def bootstrap_base_key(
+    *,
+    prefix: str,
+    source_site: str,
+    destination_site: str,
+    control_release_sha: str,
+    bootstrap_id: str,
+) -> str:
+    """Return the isolated, create-only namespace for the first consumer package."""
+
+    return "/".join(
+        (
+            prefix,
+            "bootstrap-artifacts",
+            OBJECT_LAYOUT_VERSION,
+            source_site,
+            destination_site,
+            control_release_sha,
+            bootstrap_id,
+        )
+    )
+
+
+def _bootstrap_key(base: str) -> str:
+    return base + "/stage-consumer-bootstrap.tar.age"
 
 
 def parse_artifact_specifications(values: Sequence[str]) -> list[ArtifactInput]:
@@ -942,6 +976,86 @@ def publish_bundle(
     }
 
 
+def publish_bootstrap_package(
+    client: Any,
+    *,
+    config: PublisherConfig,
+    destination_site: str,
+    control_release_sha: str,
+    bootstrap_path: Path,
+    bootstrap_id: str | None = None,
+    now: dt.datetime | None = None,
+    encryptor: Callable[[str, str, Path, Path], None] = run_age_encrypt,
+) -> dict[str, Any]:
+    """Publish exactly one encrypted consumer bootstrap before any stage manifest exists.
+
+    The regular ``publish`` command intentionally returns only the encrypted
+    manifest URL, because artifact URLs belong inside its signed manifest.
+    WA-IR has no consumer before the first delivery, so its minimal consumer
+    package needs this separate one-object bootstrap path.  The caller must
+    use the returned short-lived version-bound URL only as a transient SSH
+    control argument; this helper never writes it to disk.
+    """
+
+    destination_site = require_id(destination_site, "destination_site", SITE_RE)
+    if destination_site == config.source_site:
+        raise ArtifactStageError("source_site and destination_site must differ")
+    control_release_sha = require_id(control_release_sha, "control_release_sha", RELEASE_SHA_RE)
+    bootstrap_id = require_id(
+        bootstrap_id or generate_bundle_id(now),
+        "bootstrap_id",
+        BUNDLE_ID_RE,
+    )
+    bootstrap_path = require_root_only_input(
+        bootstrap_path,
+        field="stage consumer bootstrap package",
+        maximum_bytes=config.maximum_artifact_bytes,
+    )
+    _snapshot_error(lambda: snapshot.assert_private_versioned_bucket(client, config.bucket))
+    base = bootstrap_base_key(
+        prefix=config.prefix,
+        source_site=config.source_site,
+        destination_site=destination_site,
+        control_release_sha=control_release_sha,
+        bootstrap_id=bootstrap_id,
+    )
+    with locked_workspace(config.workspace, name="bootstrap-" + bootstrap_id) as workspace:
+        plaintext_sha256, plaintext_bytes = sha256_file(bootstrap_path)
+        ciphertext = workspace / "stage-consumer-bootstrap.tar.age"
+        encryptor(config.age_binary, config.age_recipient, bootstrap_path, ciphertext)
+        require_private_file(ciphertext, field="encrypted stage consumer bootstrap package")
+        if sha256_file(bootstrap_path) != (plaintext_sha256, plaintext_bytes):
+            raise ArtifactStageError("stage consumer bootstrap package changed while being encrypted")
+        remote = upload_immutable_encrypted_object(
+            client,
+            bucket=config.bucket,
+            key=_bootstrap_key(base),
+            ciphertext_path=ciphertext,
+            workspace=workspace,
+        )
+        presigned_url = create_version_bound_presigned_url(
+            client,
+            config=config,
+            object_key=remote["object_key"],
+            version_id=remote["version_id"],
+        )
+    return {
+        "schema": BOOTSTRAP_PUBLISH_RECEIPT_SCHEMA,
+        "status": "published",
+        "source_site": config.source_site,
+        "destination_site": destination_site,
+        "control_release_sha": control_release_sha,
+        "bootstrap_id": bootstrap_id,
+        "published_at": utc_iso(now or utc_now()),
+        "bootstrap": {
+            **remote,
+            "plaintext_sha256": plaintext_sha256,
+            "plaintext_bytes": plaintext_bytes,
+            "presigned_url": presigned_url,
+        },
+    }
+
+
 def _header(headers: Any, name: str) -> str | None:
     if headers is None:
         return None
@@ -1364,6 +1478,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="signed non-secret artifact metadata, for example image-bundle=repo_digest=...",
     )
 
+    bootstrap = subparsers.add_parser(
+        "publish-bootstrap",
+        help="publish exactly one encrypted WA-IR stage-consumer bootstrap package",
+    )
+    bootstrap.add_argument("--config", required=True, type=Path)
+    bootstrap.add_argument("--destination-site", required=True)
+    bootstrap.add_argument("--control-release-sha", required=True)
+    bootstrap.add_argument("--bootstrap-package", required=True, type=Path)
+    bootstrap.add_argument("--bootstrap-id", default=None)
+
     consume = subparsers.add_parser("consume", help="stage one exact encrypted artifact bundle via presigned URLs")
     consume.add_argument("--config", required=True, type=Path)
     consume.add_argument("--destination-site", required=True)
@@ -1392,6 +1516,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                     args.artifact_binding,
                 ),
                 bundle_id=args.bundle_id,
+            )
+        elif args.command == "publish-bootstrap":
+            config = load_publisher_config(args.config)
+            result = publish_bootstrap_package(
+                create_s3_client(config),
+                config=config,
+                destination_site=args.destination_site,
+                control_release_sha=args.control_release_sha,
+                bootstrap_path=args.bootstrap_package,
+                bootstrap_id=args.bootstrap_id,
             )
         elif args.command == "consume":
             config = load_consumer_config(args.config)
