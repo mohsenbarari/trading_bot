@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import base64
+import dataclasses
 import datetime as dt
 import importlib.util
 import json
+import os
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -25,12 +28,19 @@ stage = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = stage
 SPEC.loader.exec_module(stage)
 
+BOOTSTRAP_MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "prepare_webapp_ir_stage_bootstrap.py"
+BOOTSTRAP_SPEC = importlib.util.spec_from_file_location("prepare_webapp_ir_stage_bootstrap", BOOTSTRAP_MODULE_PATH)
+assert BOOTSTRAP_SPEC and BOOTSTRAP_SPEC.loader
+bootstrap = importlib.util.module_from_spec(BOOTSTRAP_SPEC)
+sys.modules[BOOTSTRAP_SPEC.name] = bootstrap
+BOOTSTRAP_SPEC.loader.exec_module(bootstrap)
+
 
 UTC = dt.timezone.utc
 NOW = dt.datetime(2026, 7, 30, 12, 0, 0, tzinfo=UTC)
 RELEASE_SHA = "a" * 40
 BUNDLE_ID = "20260730T120000Z-0123456789abcdef01234567"
-AGE_RECIPIENT = "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
+AGE_RECIPIENT = bootstrap.WA_IR_BOOTSTRAP_AGE_RECIPIENT
 
 
 class FakeBody:
@@ -253,8 +263,103 @@ class ArtifactStageTests(unittest.TestCase):
         self.client = FakeS3()
         self.downloader = FakeDownloader(self.client)
 
+        self.bootstrap_source = self.root / "bootstrap-source"
+        (self.bootstrap_source / "scripts").mkdir(parents=True, mode=0o700)
+        (self.bootstrap_source / "scripts/manage_webapp_ir_artifact_stage.py").write_text(
+            "# stage consumer\nVALUE = 'stage'\n", encoding="utf-8"
+        )
+        (self.bootstrap_source / "scripts/manage_webapp_ir_snapshot.py").write_text(
+            "# snapshot primitives\nVALUE = 'snapshot'\n", encoding="utf-8"
+        )
+        (self.bootstrap_source / "scripts/manage_webapp_ir_release_provenance.py").write_text(
+            "# release provenance primitives\nVALUE = 'provenance'\n", encoding="utf-8"
+        )
+        self._run_git("init", "-q", cwd=self.bootstrap_source)
+        self._run_git("add", ".", cwd=self.bootstrap_source)
+        self._run_git(
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "bootstrap-control",
+            cwd=self.bootstrap_source,
+        )
+        self.bootstrap_commit = self._run_git("rev-parse", "HEAD", cwd=self.bootstrap_source)
+
     def tearDown(self) -> None:
         self._temporary.cleanup()
+
+    def _run_git(self, *arguments: str, cwd: Path) -> str:
+        result = subprocess.run(
+            ["/usr/bin/git", *arguments],
+            cwd=cwd,
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        return result.stdout.strip()
+
+    def prepare_bootstrap_package(
+        self,
+        *,
+        name: str,
+        source_signing_public_key: bytes | None = None,
+        age_identity_file: str | None = None,
+    ) -> tuple[Path, Path, dict[str, Any]]:
+        config = {
+            "schema": stage.CONFIG_SCHEMA,
+            "endpoint": self.publisher_config.endpoint,
+            "region": self.publisher_config.region,
+            "bucket": self.publisher_config.bucket,
+            "prefix": self.publisher_config.prefix,
+            "age_binary": "/usr/bin/age",
+            "age_identity_file": age_identity_file or bootstrap.WA_IR_BOOTSTRAP_IDENTITY_FILE,
+            "workspace": "/srv/trading-bot-three-site-staging-data/workspace",
+            "source_site": bootstrap.WA_IR_BOOTSTRAP_SOURCE_SITE,
+            "source_signing_public_key_base64": base64.b64encode(
+                source_signing_public_key or self.public_key
+            ).decode("ascii"),
+            "maximum_artifact_bytes": 1024 * 1024,
+        }
+        config_path = self.root / (name + "-consumer.json")
+        config_path.write_text(json.dumps(config), encoding="utf-8")
+        config_path.chmod(0o600)
+        package_directory = self.root / name
+        bootstrap.prepare_bootstrap_package(
+            source_repository=self.bootstrap_source,
+            control_release_sha=self.bootstrap_commit,
+            consumer_config=config_path,
+            destination=package_directory,
+        )
+        receipt = package_directory / bootstrap.PREPARATION_RECEIPT_NAME
+        return (
+            package_directory,
+            receipt,
+            bootstrap.verify_prepared_bootstrap_package(
+                package_directory=package_directory,
+                preparation_receipt=receipt,
+            ),
+        )
+
+    def replace_bootstrap_archive_with_unexpected_member(self, package_directory: Path, receipt_path: Path) -> None:
+        archive_path = package_directory / bootstrap.PACKAGE_ARCHIVE_NAME
+        files = bootstrap._read_archive_members(archive_path.read_bytes())
+        files["unexpected.txt"] = b"unexpected"
+        replacement = package_directory / "replacement.tar"
+        archive_sha256, archive_bytes = bootstrap._write_deterministic_archive(replacement, files)
+        os.replace(replacement, archive_path)
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        receipt["bootstrap_archive"]["sha256"] = archive_sha256
+        receipt["bootstrap_archive"]["bytes"] = archive_bytes
+        receipt.pop("receipt_sha256")
+        receipt["receipt_sha256"] = bootstrap._sha256_bytes(bootstrap._canonical_json_bytes(receipt))
+        replacement_receipt = package_directory / "replacement-receipt.json"
+        replacement_receipt.write_bytes(bootstrap._canonical_json_bytes(receipt) + b"\n")
+        replacement_receipt.chmod(0o600)
+        os.replace(replacement_receipt, receipt_path)
 
     def artifacts(self) -> list[Any]:
         return [
@@ -350,20 +455,13 @@ class ArtifactStageTests(unittest.TestCase):
             self.publish()
         self.assertEqual([], self.client.put_calls)
 
-    def test_bootstrap_publisher_creates_one_exact_readback_object_without_signing_key_use(self) -> None:
-        bootstrap = self.root / "stage-consumer-bootstrap.tar"
-        bootstrap.write_bytes(b"trusted bootstrap package")
-        bootstrap.chmod(0o600)
-        # The bootstrap has no manifest to sign yet.  Its integrity is bound by
-        # the returned plaintext/ciphertext hashes and exact Object VersionId.
-        self.private_key.unlink()
-
+    def test_bootstrap_publisher_creates_one_exact_readback_object_from_a_verified_preparation(self) -> None:
+        package_directory, receipt_path, prepared = self.prepare_bootstrap_package(name="bootstrap-package")
         published = stage.publish_bootstrap_package(
             self.client,
             config=self.publisher_config,
-            destination_site="webapp_ir",
-            control_release_sha=RELEASE_SHA,
-            bootstrap_path=bootstrap,
+            bootstrap_package_directory=package_directory,
+            bootstrap_preparation_receipt=receipt_path,
             bootstrap_id=BUNDLE_ID,
             now=NOW,
             encryptor=fake_encrypt,
@@ -376,21 +474,26 @@ class ArtifactStageTests(unittest.TestCase):
         self.assertEqual(1, len(self.client.presign_calls))
         expected_key = (
             f"{self.publisher_config.prefix}/bootstrap-artifacts/v1/webapp_fi/webapp_ir/"
-            f"{RELEASE_SHA}/{BUNDLE_ID}/stage-consumer-bootstrap.tar.age"
+            f"{self.bootstrap_commit}/{BUNDLE_ID}/stage-consumer-bootstrap.tar.age"
         )
         self.assertEqual(expected_key, published["bootstrap"]["object_key"])
-        self.assertEqual(stage.sha256_file(bootstrap)[0], published["bootstrap"]["plaintext_sha256"])
-        self.assertEqual(bootstrap.stat().st_size, published["bootstrap"]["plaintext_bytes"])
+        self.assertEqual(self.bootstrap_commit, published["control_commit"])
+        self.assertEqual(prepared["control_tree"], published["control_tree"])
+        self.assertEqual(prepared["archive_sha256"], published["bootstrap"]["plaintext_sha256"])
+        self.assertEqual(prepared["archive_bytes"], published["bootstrap"]["plaintext_bytes"])
+        self.assertEqual(prepared["package_manifest_sha256"], published["bootstrap"]["manifest_sha256"])
+        self.assertEqual(
+            prepared["preparation_receipt_sha256"],
+            published["bootstrap"]["preparation_receipt_sha256"],
+        )
         self.assertIn("versionId=" + published["bootstrap"]["version_id"], published["bootstrap"]["presigned_url"])
         self.assertTrue(all("ServerSideEncryption" not in call for call in self.client.put_calls))
 
     def test_bootstrap_publisher_rejects_existing_object_before_upload(self) -> None:
-        bootstrap = self.root / "stage-consumer-bootstrap.tar"
-        bootstrap.write_bytes(b"trusted bootstrap package")
-        bootstrap.chmod(0o600)
+        package_directory, receipt_path, _prepared = self.prepare_bootstrap_package(name="bootstrap-existing")
         key = (
             f"{self.publisher_config.prefix}/bootstrap-artifacts/v1/webapp_fi/webapp_ir/"
-            f"{RELEASE_SHA}/{BUNDLE_ID}/stage-consumer-bootstrap.tar.age"
+            f"{self.bootstrap_commit}/{BUNDLE_ID}/stage-consumer-bootstrap.tar.age"
         )
         self.client.objects[key] = [{"version_id": "old"}]
 
@@ -398,9 +501,92 @@ class ArtifactStageTests(unittest.TestCase):
             stage.publish_bootstrap_package(
                 self.client,
                 config=self.publisher_config,
-                destination_site="webapp_ir",
-                control_release_sha=RELEASE_SHA,
-                bootstrap_path=bootstrap,
+                bootstrap_package_directory=package_directory,
+                bootstrap_preparation_receipt=receipt_path,
+                bootstrap_id=BUNDLE_ID,
+                now=NOW,
+                encryptor=fake_encrypt,
+            )
+        self.assertEqual([], self.client.put_calls)
+
+    def test_bootstrap_publisher_rejects_a_consumer_key_that_does_not_match_the_publisher(self) -> None:
+        wrong_key = Ed25519PrivateKey.generate().public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        package_directory, receipt_path, _prepared = self.prepare_bootstrap_package(
+            name="bootstrap-wrong-key",
+            source_signing_public_key=wrong_key,
+        )
+
+        with self.assertRaisesRegex(stage.ArtifactStageError, "does not match the publisher key"):
+            stage.publish_bootstrap_package(
+                self.client,
+                config=self.publisher_config,
+                bootstrap_package_directory=package_directory,
+                bootstrap_preparation_receipt=receipt_path,
+                bootstrap_id=BUNDLE_ID,
+                now=NOW,
+                encryptor=fake_encrypt,
+            )
+        self.assertEqual([], self.client.put_calls)
+
+    def test_bootstrap_publisher_rejects_an_unpinned_recipient_before_object_storage(self) -> None:
+        package_directory, receipt_path, _prepared = self.prepare_bootstrap_package(name="bootstrap-wrong-recipient")
+        wrong_recipient = "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
+
+        with self.assertRaisesRegex(stage.ArtifactStageError, "fixed WA-IR recipient"):
+            stage.publish_bootstrap_package(
+                self.client,
+                config=dataclasses.replace(self.publisher_config, age_recipient=wrong_recipient),
+                bootstrap_package_directory=package_directory,
+                bootstrap_preparation_receipt=receipt_path,
+                bootstrap_id=BUNDLE_ID,
+                now=NOW,
+                encryptor=fake_encrypt,
+            )
+        self.assertEqual([], self.client.put_calls)
+
+    def test_bootstrap_publisher_rejects_a_non_webapp_fi_source_before_object_storage(self) -> None:
+        package_directory, receipt_path, _prepared = self.prepare_bootstrap_package(name="bootstrap-wrong-source")
+
+        with self.assertRaisesRegex(stage.ArtifactStageError, "source_site must be webapp_fi"):
+            stage.publish_bootstrap_package(
+                self.client,
+                config=dataclasses.replace(self.publisher_config, source_site="bot_fi"),
+                bootstrap_package_directory=package_directory,
+                bootstrap_preparation_receipt=receipt_path,
+                bootstrap_id=BUNDLE_ID,
+                now=NOW,
+                encryptor=fake_encrypt,
+            )
+        self.assertEqual([], self.client.put_calls)
+
+    def test_bootstrap_publisher_rejects_transport_config_drift_before_object_storage(self) -> None:
+        package_directory, receipt_path, _prepared = self.prepare_bootstrap_package(name="bootstrap-transport-drift")
+
+        with self.assertRaisesRegex(stage.ArtifactStageError, "transport config does not match"):
+            stage.publish_bootstrap_package(
+                self.client,
+                config=dataclasses.replace(self.publisher_config, prefix="campaigns/other"),
+                bootstrap_package_directory=package_directory,
+                bootstrap_preparation_receipt=receipt_path,
+                bootstrap_id=BUNDLE_ID,
+                now=NOW,
+                encryptor=fake_encrypt,
+            )
+        self.assertEqual([], self.client.put_calls)
+
+    def test_bootstrap_publisher_rejects_an_archive_with_an_unexpected_member_before_object_storage(self) -> None:
+        package_directory, receipt_path, _prepared = self.prepare_bootstrap_package(name="bootstrap-extra-member")
+        self.replace_bootstrap_archive_with_unexpected_member(package_directory, receipt_path)
+
+        with self.assertRaisesRegex(stage.ArtifactStageError, "member schema"):
+            stage.publish_bootstrap_package(
+                self.client,
+                config=self.publisher_config,
+                bootstrap_package_directory=package_directory,
+                bootstrap_preparation_receipt=receipt_path,
                 bootstrap_id=BUNDLE_ID,
                 now=NOW,
                 encryptor=fake_encrypt,

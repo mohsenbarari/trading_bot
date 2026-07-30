@@ -72,6 +72,29 @@ def _load_snapshot_primitives() -> Any:
 
 snapshot = _load_snapshot_primitives()
 
+
+def _load_bootstrap_preparation_primitives() -> Any:
+    """Load local-only bootstrap verification only for publisher-side use.
+
+    The extracted WA-IR consumer intentionally does not contain the preparation
+    helper, so this remains lazy and is never needed by ``consume``.
+    """
+
+    module_name = "prepare_webapp_ir_stage_bootstrap"
+    try:
+        return __import__(module_name)
+    except ModuleNotFoundError as exc:
+        if exc.name != module_name:
+            raise
+    module_path = Path(__file__).with_name(module_name + ".py")
+    spec = importlib.util.spec_from_file_location("_webapp_ir_bootstrap_preparation", module_path)
+    if spec is None or spec.loader is None:  # pragma: no cover - local repository invariant.
+        raise RuntimeError("cannot load bootstrap preparation primitives")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
 try:
     from cryptography.exceptions import InvalidSignature
     from cryptography.hazmat.primitives import serialization
@@ -717,6 +740,15 @@ def _load_private_signing_key(path: Path) -> Any:
         raise ArtifactStageError("source_signing_private_key_file is invalid") from exc
 
 
+def _publisher_public_key(config: PublisherConfig) -> bytes:
+    private_key = _load_private_signing_key(config.source_signing_private_key_file)
+    _require_ed25519_backend()
+    return private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+
+
 def sign_manifest(manifest: Mapping[str, Any], *, config: PublisherConfig) -> dict[str, str]:
     private_key = _load_private_signing_key(config.source_signing_private_key_file)
     signature = private_key.sign(unsigned_manifest_payload(manifest))
@@ -980,9 +1012,8 @@ def publish_bootstrap_package(
     client: Any,
     *,
     config: PublisherConfig,
-    destination_site: str,
-    control_release_sha: str,
-    bootstrap_path: Path,
+    bootstrap_package_directory: Path,
+    bootstrap_preparation_receipt: Path,
     bootstrap_id: str | None = None,
     now: dt.datetime | None = None,
     encryptor: Callable[[str, str, Path, Path], None] = run_age_encrypt,
@@ -993,38 +1024,68 @@ def publish_bootstrap_package(
     manifest URL, because artifact URLs belong inside its signed manifest.
     WA-IR has no consumer before the first delivery, so its minimal consumer
     package needs this separate one-object bootstrap path.  The caller must
-    use the returned short-lived version-bound URL only as a transient SSH
-    control argument; this helper never writes it to disk.
+    present the root-only package directory and its canonical preparation
+    receipt, then use the returned short-lived version-bound URL only as a
+    transient SSH control argument.  This helper never writes that URL to disk.
     """
 
-    destination_site = require_id(destination_site, "destination_site", SITE_RE)
-    if destination_site == config.source_site:
-        raise ArtifactStageError("source_site and destination_site must differ")
-    control_release_sha = require_id(control_release_sha, "control_release_sha", RELEASE_SHA_RE)
+    bootstrap = _load_bootstrap_preparation_primitives()
+    if config.source_site != bootstrap.WA_IR_BOOTSTRAP_SOURCE_SITE:
+        raise ArtifactStageError("bootstrap publisher source_site must be webapp_fi")
+    if config.age_recipient != bootstrap.WA_IR_BOOTSTRAP_AGE_RECIPIENT:
+        raise ArtifactStageError("bootstrap publisher age_recipient is not the fixed WA-IR recipient")
+    try:
+        prepared = bootstrap.verify_prepared_bootstrap_package(
+            package_directory=bootstrap_package_directory,
+            preparation_receipt=bootstrap_preparation_receipt,
+        )
+    except bootstrap.BootstrapPreparationError as exc:
+        raise ArtifactStageError(f"bootstrap preparation verification failed: {exc}") from exc
+    consumer_config = prepared["consumer_config"]
+    if consumer_config.get("source_site") != bootstrap.WA_IR_BOOTSTRAP_SOURCE_SITE:
+        raise ArtifactStageError("bootstrap consumer config source_site must be webapp_fi")
+    if consumer_config.get("age_identity_file") != bootstrap.WA_IR_BOOTSTRAP_IDENTITY_FILE:
+        raise ArtifactStageError("bootstrap consumer config does not use the fixed WA-IR identity path")
+    if any(
+        consumer_config[field] != getattr(config, field)
+        for field in ("endpoint", "region", "bucket", "prefix")
+    ):
+        raise ArtifactStageError("bootstrap consumer transport config does not match the publisher config")
+    try:
+        configured_public_key = base64.b64decode(
+            str(consumer_config["source_signing_public_key_base64"]), validate=True
+        )
+    except (KeyError, ValueError, binascii.Error) as exc:  # pragma: no cover - preparation verifies this schema.
+        raise ArtifactStageError("bootstrap consumer config source signing key is invalid") from exc
+    if _publisher_public_key(config) != configured_public_key:
+        raise ArtifactStageError("bootstrap consumer config source signing key does not match the publisher key")
+    control_release_sha = prepared["control_commit"]
+    if not bootstrap.COMMIT_RE.fullmatch(control_release_sha):  # pragma: no cover - preparation verifies this contract.
+        raise ArtifactStageError("bootstrap control commit must be exactly 40 lowercase hexadecimal characters")
+    bootstrap_path = Path(prepared["archive_path"])
+    if prepared["archive_bytes"] > bootstrap.MAX_ARCHIVE_BYTES:  # pragma: no cover - preparation verifies this contract.
+        raise ArtifactStageError("bootstrap archive exceeds the fixed 8 MiB maximum")
     bootstrap_id = require_id(
         bootstrap_id or generate_bundle_id(now),
         "bootstrap_id",
         BUNDLE_ID_RE,
     )
-    bootstrap_path = require_root_only_input(
-        bootstrap_path,
-        field="stage consumer bootstrap package",
-        maximum_bytes=config.maximum_artifact_bytes,
-    )
     _snapshot_error(lambda: snapshot.assert_private_versioned_bucket(client, config.bucket))
     base = bootstrap_base_key(
         prefix=config.prefix,
-        source_site=config.source_site,
-        destination_site=destination_site,
+        source_site=bootstrap.WA_IR_BOOTSTRAP_SOURCE_SITE,
+        destination_site=bootstrap.WA_IR_BOOTSTRAP_DESTINATION_SITE,
         control_release_sha=control_release_sha,
         bootstrap_id=bootstrap_id,
     )
     with locked_workspace(config.workspace, name="bootstrap-" + bootstrap_id) as workspace:
         plaintext_sha256, plaintext_bytes = sha256_file(bootstrap_path)
+        if (plaintext_sha256, plaintext_bytes) != (prepared["archive_sha256"], prepared["archive_bytes"]):
+            raise ArtifactStageError("bootstrap archive changed after preparation verification")
         ciphertext = workspace / "stage-consumer-bootstrap.tar.age"
         encryptor(config.age_binary, config.age_recipient, bootstrap_path, ciphertext)
         require_private_file(ciphertext, field="encrypted stage consumer bootstrap package")
-        if sha256_file(bootstrap_path) != (plaintext_sha256, plaintext_bytes):
+        if sha256_file(bootstrap_path) != (prepared["archive_sha256"], prepared["archive_bytes"]):
             raise ArtifactStageError("stage consumer bootstrap package changed while being encrypted")
         remote = upload_immutable_encrypted_object(
             client,
@@ -1042,15 +1103,18 @@ def publish_bootstrap_package(
     return {
         "schema": BOOTSTRAP_PUBLISH_RECEIPT_SCHEMA,
         "status": "published",
-        "source_site": config.source_site,
-        "destination_site": destination_site,
-        "control_release_sha": control_release_sha,
+        "source_site": bootstrap.WA_IR_BOOTSTRAP_SOURCE_SITE,
+        "destination_site": bootstrap.WA_IR_BOOTSTRAP_DESTINATION_SITE,
+        "control_commit": control_release_sha,
+        "control_tree": prepared["control_tree"],
         "bootstrap_id": bootstrap_id,
         "published_at": utc_iso(now or utc_now()),
         "bootstrap": {
             **remote,
             "plaintext_sha256": plaintext_sha256,
             "plaintext_bytes": plaintext_bytes,
+            "manifest_sha256": prepared["package_manifest_sha256"],
+            "preparation_receipt_sha256": prepared["preparation_receipt_sha256"],
             "presigned_url": presigned_url,
         },
     }
@@ -1483,9 +1547,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="publish exactly one encrypted WA-IR stage-consumer bootstrap package",
     )
     bootstrap.add_argument("--config", required=True, type=Path)
-    bootstrap.add_argument("--destination-site", required=True)
-    bootstrap.add_argument("--control-release-sha", required=True)
-    bootstrap.add_argument("--bootstrap-package", required=True, type=Path)
+    bootstrap.add_argument("--bootstrap-package-directory", required=True, type=Path)
+    bootstrap.add_argument("--bootstrap-preparation-receipt", required=True, type=Path)
     bootstrap.add_argument("--bootstrap-id", default=None)
 
     consume = subparsers.add_parser("consume", help="stage one exact encrypted artifact bundle via presigned URLs")
@@ -1522,9 +1585,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = publish_bootstrap_package(
                 create_s3_client(config),
                 config=config,
-                destination_site=args.destination_site,
-                control_release_sha=args.control_release_sha,
-                bootstrap_path=args.bootstrap_package,
+                bootstrap_package_directory=args.bootstrap_package_directory,
+                bootstrap_preparation_receipt=args.bootstrap_preparation_receipt,
                 bootstrap_id=args.bootstrap_id,
             )
         elif args.command == "consume":
