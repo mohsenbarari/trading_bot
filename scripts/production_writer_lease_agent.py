@@ -29,7 +29,7 @@ import stat
 import subprocess
 import sys
 import time
-from typing import Any, Iterator
+from typing import Any, Iterator, Mapping
 from urllib import error as urlerror
 from urllib import request as urlrequest
 from urllib.parse import urlsplit
@@ -1501,7 +1501,7 @@ def _assert_existing_promoted_runtime_matches_selection(
     config: AgentConfig,
     *,
     selection: PromotionRuntimeSelection,
-) -> None:
+) -> dict[str, str] | None:
     """Reject partial/stale promotion projects before `--no-recreate` can reuse them."""
 
     discovered: dict[str, str | None] = {}
@@ -1519,7 +1519,7 @@ def _assert_existing_promoted_runtime_matches_selection(
             raise ProductionWriterLeaseAgentError("promoted runtime lookup returned an invalid container set")
         discovered[service] = lines[0]
     if all(container is None for container in discovered.values()):
-        return
+        return None
     if any(container is None for container in discovered.values()):
         raise ProductionWriterLeaseAgentError("promoted runtime is partial and cannot be reused")
     _assert_promoted_container(
@@ -1533,6 +1533,72 @@ def _assert_existing_promoted_runtime_matches_selection(
         service="app",
         required_volume_names={selection.uploads_volume, selection.audit_volume},
     )
+    return {service: str(container) for service, container in discovered.items()}
+
+
+def _assert_existing_ir_activation_is_safe(
+    config: AgentConfig,
+    *,
+    restore_receipt_path: Path,
+    restore_receipt: dict[str, Any],
+    active_snapshot: Path,
+    snapshot: Any,
+    proof: Mapping[str, Any],
+) -> None:
+    """Revalidate a prior automatic activation before allowing any route stage.
+
+    A promotion proof is immutable, but the controller may restart while its
+    original short-term proof still exists.  Returning ``already_activated``
+    therefore means the exact candidate is still selected, the same local
+    Writer Witness term is safely live, and the isolated application is
+    healthy now; it is never merely evidence that activation once succeeded.
+    """
+
+    if config.mode != "writer" or config.site != "webapp_ir":
+        raise ProductionWriterLeaseAgentError("existing activation may be reused only on WebApp-IR writer")
+    expected = {
+        "snapshot_id": snapshot.snapshot_id,
+        "source_generation": snapshot.source_generation,
+        "release_sha": snapshot.release_sha,
+        "alembic_revision": snapshot.alembic_revision,
+        "snapshot_restore_receipt_sha256": snapshot.receipt_sha256,
+        "snapshot_stage_receipt_sha256": snapshot.stage_receipt_sha256,
+    }
+    if any(proof.get(field) != value for field, value in expected.items()):
+        raise ProductionWriterLeaseAgentError("existing promotion proof does not match the active snapshot")
+    selection = _load_promotion_runtime_selection(
+        active_snapshot,
+        restore_receipt_path=restore_receipt_path,
+        restore_receipt=restore_receipt,
+        snapshot=snapshot,
+    )
+    lease, _remaining = _local_lease_safety(config)
+    if lease.writer_epoch != proof.get("epoch") or lease.lease_id != proof.get("lease_id"):
+        raise ProductionWriterLeaseAgentError("local Writer Witness lease does not match existing promotion proof")
+    if _assert_existing_promoted_runtime_matches_selection(config, selection=selection) is None:
+        raise ProductionWriterLeaseAgentError("existing promoted runtime is absent")
+    _wait_for_ir_app_health(config)
+    # Health probes take time.  Re-check the same local term immediately before
+    # the coordinator is allowed to activate the listener or route traffic.
+    final_lease, _remaining = _local_lease_safety(config)
+    if final_lease.writer_epoch != proof.get("epoch") or final_lease.lease_id != proof.get("lease_id"):
+        raise ProductionWriterLeaseAgentError("local Writer Witness lease changed during existing activation verification")
+    try:
+        validate_promotion_proof(dict(proof), now=datetime.now(timezone.utc))
+    except SnapshotPromotionError as exc:
+        raise ProductionWriterLeaseAgentError(
+            "existing promotion proof is no longer safely live after health verification"
+        ) from exc
+    final_selection = _load_promotion_runtime_selection(
+        active_snapshot,
+        restore_receipt_path=restore_receipt_path,
+        restore_receipt=restore_receipt,
+        snapshot=snapshot,
+    )
+    if final_selection != selection:
+        raise ProductionWriterLeaseAgentError("active snapshot selection changed during existing activation verification")
+    if _assert_existing_promoted_runtime_matches_selection(config, selection=selection) is None:
+        raise ProductionWriterLeaseAgentError("existing promoted runtime disappeared during health verification")
 
 
 def _renew_activation_proof(
@@ -1792,6 +1858,11 @@ def _automatic_proof_path(*, directory: Path, action: str, snapshot_id: str, rec
 def _existing_automatic_proof(
     path: Path,
     *,
+    config: AgentConfig,
+    restore_receipt_path: Path,
+    restore_receipt: dict[str, Any],
+    active_snapshot: Path,
+    snapshot: Any,
     receipt_sha256: str,
 ) -> dict[str, Any] | None:
     try:
@@ -1811,6 +1882,14 @@ def _existing_automatic_proof(
         or proof.get("snapshot_restore_receipt_sha256") != receipt_sha256
     ):
         raise ProductionWriterLeaseAgentError("existing promotion proof does not match this receipt")
+    _assert_existing_ir_activation_is_safe(
+        config,
+        restore_receipt_path=restore_receipt_path,
+        restore_receipt=restore_receipt,
+        active_snapshot=active_snapshot,
+        snapshot=snapshot,
+        proof=proof,
+    )
     return {
         "status": "already_activated",
         "action": "promote_ir",
@@ -1860,6 +1939,11 @@ def promote_watch(
             )
             existing = _existing_automatic_proof(
                 proof_output,
+                config=config,
+                restore_receipt_path=restore_receipt,
+                restore_receipt=payload,
+                active_snapshot=active_snapshot,
+                snapshot=snapshot,
                 receipt_sha256=snapshot.receipt_sha256,
             )
             if existing is not None:

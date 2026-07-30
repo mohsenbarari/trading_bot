@@ -12,7 +12,11 @@ import unittest
 from unittest import mock
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from core.production_snapshot_promotion import canonical_json_bytes
+from core.production_snapshot_promotion import (
+    build_promotion_proof,
+    canonical_json_bytes,
+    parse_restore_receipt,
+)
 from core.production_writer_lease import load_production_writer_lease
 from scripts import production_writer_lease_agent as agent
 
@@ -190,6 +194,46 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
         }
         _write_private(config_path, json.dumps(config))
         return agent._load_config(config_path)
+
+    def _existing_activation_fixture(self, directory: Path) -> tuple[
+        agent.AgentConfig,
+        Path,
+        Path,
+        Path,
+        dict,
+    ]:
+        config = self._config(directory, site="webapp_ir")
+        receipt_path = directory / "restore-receipt.json"
+        active_snapshot_path = directory / "active-snapshot.json"
+        proof_directory = directory / "promotion-proofs"
+        proof_directory.mkdir(mode=0o700)
+        receipt = _restore_receipt(
+            source_site="webapp_fi",
+            destination_site="webapp_ir",
+            published_at=datetime.now(timezone.utc) - timedelta(seconds=4),
+        )
+        _write_private(receipt_path, json.dumps(receipt))
+        _write_private(
+            active_snapshot_path,
+            json.dumps(_active_snapshot(receipt=receipt, receipt_path=receipt_path)),
+        )
+        snapshot = parse_restore_receipt(receipt, action="promote_ir")
+        witness_proof = _proof(site="webapp_ir", epoch=9)
+        promotion_proof = build_promotion_proof(
+            action="promote_ir",
+            operation_id="93877f06-2671-4d78-b1f8-2c79bf759755",
+            snapshot=snapshot,
+            witness_proof=witness_proof,
+        )
+        proof_path = agent._automatic_proof_path(
+            directory=proof_directory,
+            action="promote_ir",
+            snapshot_id=snapshot.snapshot_id,
+            receipt_sha256=snapshot.receipt_sha256,
+        )
+        _write_private(proof_path, json.dumps(promotion_proof))
+        agent._write_lease(config.lease_file, proof=witness_proof)
+        return config, receipt_path, active_snapshot_path, proof_directory, receipt
 
     def test_config_requires_exactly_app_and_sync_worker(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -608,6 +652,153 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                 activate.call_args.kwargs["expected_receipt_sha256"], payload["receipt_sha256"]
             )
             self.assertEqual(activate.call_args.kwargs["active_snapshot"], active_snapshot_path)
+
+    def test_existing_proof_requires_bound_live_selected_and_healthy_runtime(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            config, receipt_path, active_snapshot_path, proof_directory, _receipt = (
+                self._existing_activation_fixture(directory)
+            )
+            runtime = {"db": "a" * 12, "redis": "b" * 12, "app": "c" * 12}
+            with (
+                mock.patch.object(
+                    agent,
+                    "_assert_existing_promoted_runtime_matches_selection",
+                    return_value=runtime,
+                ) as selected,
+                mock.patch.object(agent, "_wait_for_ir_app_health") as health,
+                mock.patch.object(agent, "activate_from_snapshot") as activate,
+            ):
+                result = agent.promote_watch(
+                    config,
+                    restore_receipt=receipt_path,
+                    active_snapshot=active_snapshot_path,
+                    proof_directory=proof_directory,
+                    poll_seconds=2,
+                    once=True,
+                )
+
+        self.assertEqual(result["status"], "already_activated")
+        self.assertEqual(result["writer_epoch"], 9)
+        self.assertEqual(selected.call_count, 2)
+        health.assert_called_once_with(config)
+        activate.assert_not_called()
+
+    def test_existing_proof_refuses_mismatched_live_local_term_before_runtime_access(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            config, receipt_path, active_snapshot_path, proof_directory, _receipt = (
+                self._existing_activation_fixture(directory)
+            )
+            agent._write_lease(config.lease_file, proof=_proof(site="webapp_ir", epoch=10))
+            with (
+                mock.patch.object(agent, "_assert_existing_promoted_runtime_matches_selection") as selected,
+                mock.patch.object(agent, "_wait_for_ir_app_health") as health,
+            ):
+                with self.assertRaisesRegex(
+                    agent.ProductionWriterLeaseAgentError,
+                    "does not match existing promotion proof",
+                ):
+                    agent.promote_watch(
+                        config,
+                        restore_receipt=receipt_path,
+                        active_snapshot=active_snapshot_path,
+                        proof_directory=proof_directory,
+                        poll_seconds=2,
+                        once=True,
+                    )
+
+        selected.assert_not_called()
+        health.assert_not_called()
+
+    def test_existing_proof_refuses_unbound_active_snapshot_before_runtime_access(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            config, receipt_path, active_snapshot_path, proof_directory, receipt = (
+                self._existing_activation_fixture(directory)
+            )
+            pointer = _active_snapshot(receipt=receipt, receipt_path=receipt_path)
+            pointer["witness_restore_receipt"]["receipt_sha256"] = "0" * 64
+            _write_private(active_snapshot_path, json.dumps(pointer))
+            with (
+                mock.patch.object(agent, "_assert_existing_promoted_runtime_matches_selection") as selected,
+                mock.patch.object(agent, "_wait_for_ir_app_health") as health,
+            ):
+                with self.assertRaisesRegex(
+                    agent.ProductionWriterLeaseAgentError,
+                    "does not bind this fresh Witness receipt",
+                ):
+                    agent.promote_watch(
+                        config,
+                        restore_receipt=receipt_path,
+                        active_snapshot=active_snapshot_path,
+                        proof_directory=proof_directory,
+                        poll_seconds=2,
+                        once=True,
+                    )
+
+        selected.assert_not_called()
+        health.assert_not_called()
+
+    def test_existing_proof_refuses_absent_or_unhealthy_runtime(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            config, receipt_path, active_snapshot_path, proof_directory, _receipt = (
+                self._existing_activation_fixture(directory)
+            )
+            with (
+                mock.patch.object(
+                    agent,
+                    "_assert_existing_promoted_runtime_matches_selection",
+                    return_value=None,
+                ) as selected,
+                mock.patch.object(agent, "_wait_for_ir_app_health") as health,
+            ):
+                with self.assertRaisesRegex(agent.ProductionWriterLeaseAgentError, "runtime is absent"):
+                    agent.promote_watch(
+                        config,
+                        restore_receipt=receipt_path,
+                        active_snapshot=active_snapshot_path,
+                        proof_directory=proof_directory,
+                        poll_seconds=2,
+                        once=True,
+                    )
+
+            health.assert_not_called()
+            self.assertEqual(selected.call_count, 1)
+
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            config, receipt_path, active_snapshot_path, proof_directory, _receipt = (
+                self._existing_activation_fixture(directory)
+            )
+            runtime = {"db": "a" * 12, "redis": "b" * 12, "app": "c" * 12}
+            with (
+                mock.patch.object(
+                    agent,
+                    "_assert_existing_promoted_runtime_matches_selection",
+                    return_value=runtime,
+                ) as selected,
+                mock.patch.object(
+                    agent,
+                    "_wait_for_ir_app_health",
+                    side_effect=agent.ProductionWriterLeaseAgentError(
+                        "promoted app became unhealthy before routing"
+                    ),
+                ) as health,
+            ):
+                with self.assertRaisesRegex(agent.ProductionWriterLeaseAgentError, "unhealthy"):
+                    agent.promote_watch(
+                        config,
+                        restore_receipt=receipt_path,
+                        active_snapshot=active_snapshot_path,
+                        proof_directory=proof_directory,
+                        poll_seconds=2,
+                        once=True,
+                    )
+
+        self.assertEqual(selected.call_count, 1)
+        health.assert_called_once_with(config)
 
 
 if __name__ == "__main__":
