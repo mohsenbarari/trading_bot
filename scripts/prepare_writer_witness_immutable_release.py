@@ -33,6 +33,7 @@ SOURCE_ARCHIVE_PREFIX = "writer-witness-source"
 MAX_CONTROL_FILE_BYTES = 1024 * 1024
 MAX_AGENT_CONFIG_BYTES = 1024 * 1024
 MAX_SOURCE_ARCHIVE_BYTES = 512 * 1024 * 1024
+MAX_GIT_POINTER_BYTES = 16 * 1024
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 RELEASE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$")
 
@@ -165,6 +166,134 @@ def _read_controlled_file(path: Path, *, field: str, root_only: bool) -> bytes:
         return result
     finally:
         os.close(descriptor)
+
+
+def _require_root_owned_directory(
+    path: Path,
+    *,
+    field: str,
+    private: bool,
+    allow_indirect: bool = False,
+) -> Path:
+    """Resolve one trusted directory without accepting an unsafe ownership boundary."""
+
+    if not path.is_absolute():
+        raise WitnessReleasePreparationError(f"{field} must be an absolute path")
+    try:
+        resolved = path.resolve(strict=True)
+        metadata = path.lstat()
+        resolved_metadata = resolved.lstat()
+    except OSError as exc:
+        raise WitnessReleasePreparationError(f"cannot inspect {field}") from exc
+    if (
+        (not allow_indirect and resolved != path)
+        or stat.S_ISLNK(metadata.st_mode)
+        or stat.S_ISLNK(resolved_metadata.st_mode)
+        or not stat.S_ISDIR(resolved_metadata.st_mode)
+    ):
+        raise WitnessReleasePreparationError(f"{field} must be one canonical non-symlink directory")
+    disallowed_permissions = 0o077 if private else 0o022
+    if resolved_metadata.st_uid != 0 or resolved_metadata.st_mode & disallowed_permissions:
+        requirement = "private" if private else "non-group-or-other-writable"
+        raise WitnessReleasePreparationError(f"{field} is not root-owned and {requirement}")
+    return resolved
+
+
+def _read_root_owned_nonwritable_file(path: Path, *, field: str, maximum_bytes: int) -> bytes:
+    """Read a root-owned control file while rejecting links and replacement races."""
+
+    path = _require_absolute_file(path, field=field)
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise WitnessReleasePreparationError(f"cannot safely open {field}") from exc
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != 0
+            or before.st_nlink != 1
+            or before.st_size < 1
+            or before.st_size > maximum_bytes
+            or before.st_mode & 0o022
+        ):
+            raise WitnessReleasePreparationError(f"{field} has unsafe ownership or mode")
+        chunks: list[bytes] = []
+        remaining = before.st_size + 1
+        while remaining:
+            chunk = os.read(descriptor, min(65536, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        result = b"".join(chunks)
+        after = os.fstat(descriptor)
+        identity = (
+            "st_dev",
+            "st_ino",
+            "st_mode",
+            "st_uid",
+            "st_gid",
+            "st_nlink",
+            "st_size",
+            "st_mtime_ns",
+            "st_ctime_ns",
+        )
+        if len(result) != before.st_size or any(
+            getattr(before, name) != getattr(after, name) for name in identity
+        ):
+            raise WitnessReleasePreparationError(f"{field} changed while being read")
+        return result
+    finally:
+        os.close(descriptor)
+
+
+def _resolve_worktree_git_directory(worktree: Path) -> Path:
+    """Resolve either a `.git` directory or a normal worktree gitdir pointer."""
+
+    entry = worktree / ".git"
+    try:
+        metadata = entry.lstat()
+    except OSError as exc:
+        raise WitnessReleasePreparationError("source worktree has no inspectable .git entry") from exc
+    if stat.S_ISDIR(metadata.st_mode):
+        return _require_root_owned_directory(
+            entry,
+            field="source Git directory",
+            private=False,
+        )
+    if not stat.S_ISREG(metadata.st_mode):
+        raise WitnessReleasePreparationError("source worktree .git entry is neither a directory nor a file")
+    pointer = _read_root_owned_nonwritable_file(
+        entry,
+        field="source worktree .git pointer",
+        maximum_bytes=MAX_GIT_POINTER_BYTES,
+    )
+    if pointer.endswith(b"\n"):
+        pointer = pointer[:-1]
+    if (
+        not pointer.startswith(b"gitdir: ")
+        or b"\n" in pointer
+        or b"\r" in pointer
+        or b"\x00" in pointer
+    ):
+        raise WitnessReleasePreparationError("source worktree .git pointer is malformed")
+    try:
+        raw_target = pointer[len(b"gitdir: ") :].decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise WitnessReleasePreparationError("source worktree .git pointer is not UTF-8") from exc
+    if not raw_target:
+        raise WitnessReleasePreparationError("source worktree .git pointer has no target")
+    target = Path(raw_target)
+    if not target.is_absolute():
+        target = entry.parent / target
+    return _require_root_owned_directory(
+        target,
+        field="resolved source Git directory",
+        private=False,
+        allow_indirect=True,
+    )
 
 
 def _load_json_bytes(value: bytes, *, field: str) -> dict[str, Any]:
@@ -323,22 +452,73 @@ def _run_git(
         raise WitnessReleasePreparationError("cannot verify the pinned Witness source repository") from exc
 
 
-def _require_source_repository(path: Path) -> tuple[Path, str]:
-    if not path.is_absolute():
-        raise WitnessReleasePreparationError("source repository must be an absolute path")
+def _reported_git_directory(
+    repository: Path,
+    *,
+    argument: str,
+    field: str,
+) -> Path:
+    raw = _run_git(
+        repository,
+        ["rev-parse", argument, "--path-format=absolute"],
+    ).stdout.strip()
     try:
-        repository = path.resolve(strict=True)
-    except OSError as exc:
-        raise WitnessReleasePreparationError("source repository cannot be resolved") from exc
-    if not repository.is_dir():
-        raise WitnessReleasePreparationError("source repository is not a directory")
+        value = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise WitnessReleasePreparationError(f"{field} is not UTF-8") from exc
+    if not value or "\n" in value or "\r" in value or "\x00" in value:
+        raise WitnessReleasePreparationError(f"{field} is malformed")
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        candidate = repository / candidate
+    return _require_root_owned_directory(
+        candidate,
+        field=field,
+        private=False,
+        allow_indirect=True,
+    )
+
+
+def _require_source_repository(path: Path) -> tuple[Path, str]:
+    repository = _require_root_owned_directory(
+        path,
+        field="source worktree",
+        private=False,
+    )
+    pointer_git_directory = _resolve_worktree_git_directory(repository)
     inside = _run_git(repository, ["rev-parse", "--is-inside-work-tree"]).stdout.strip()
     if inside != b"true":
         raise WitnessReleasePreparationError("source repository is not a Git worktree")
-    commit = _run_git(repository, ["rev-parse", "--verify", PINNED_SOURCE_COMMIT + "^{commit}"]).stdout.strip().decode("ascii")
+    reported_git_directory = _reported_git_directory(
+        repository,
+        argument="--git-dir",
+        field="reported source Git directory",
+    )
+    if reported_git_directory != pointer_git_directory:
+        raise WitnessReleasePreparationError("source worktree Git directory does not match its .git entry")
+    _reported_git_directory(
+        repository,
+        argument="--git-common-dir",
+        field="resolved source common Git directory",
+    )
+    try:
+        commit = (
+            _run_git(repository, ["rev-parse", "--verify", PINNED_SOURCE_COMMIT + "^{commit}"])
+            .stdout.strip()
+            .decode("ascii")
+        )
+    except UnicodeDecodeError as exc:
+        raise WitnessReleasePreparationError("approved Witness source commit is not ASCII") from exc
     if commit != PINNED_SOURCE_COMMIT or not COMMIT_RE.fullmatch(commit):
         raise WitnessReleasePreparationError("source repository lacks the approved Witness commit")
-    tree = _run_git(repository, ["rev-parse", PINNED_SOURCE_COMMIT + "^{tree}"]).stdout.strip().decode("ascii")
+    try:
+        tree = (
+            _run_git(repository, ["rev-parse", PINNED_SOURCE_COMMIT + "^{tree}"])
+            .stdout.strip()
+            .decode("ascii")
+        )
+    except UnicodeDecodeError as exc:
+        raise WitnessReleasePreparationError("approved Witness source tree identity is not ASCII") from exc
     if not COMMIT_RE.fullmatch(tree):
         raise WitnessReleasePreparationError("approved Witness source tree identity is invalid")
     return repository, tree
@@ -379,7 +559,9 @@ def _write_new_file(path: Path, payload: bytes, *, mode: int = 0o600) -> None:
             handle.flush()
             os.fsync(handle.fileno())
     except Exception:
-        path.unlink(missing_ok=True)
+        # Preserve a newly created partial artifact for forensic inspection.
+        # A failed package is never reused because its directory is immutable
+        # to this helper after the first create attempt.
         raise
 
 
@@ -406,7 +588,9 @@ def _archive_source_tree(repository: Path, destination: Path) -> tuple[str, int]
             handle.flush()
             os.fsync(handle.fileno())
     except Exception:
-        destination.unlink(missing_ok=True)
+        # Keep a failed archive in the new package directory. It may contain
+        # the only useful evidence of a source/archive failure, and this
+        # helper never deletes package artifacts automatically.
         raise
     digest, size = _sha256_file(destination)
     if size < 1 or size > MAX_SOURCE_ARCHIVE_BYTES:
@@ -459,18 +643,59 @@ def _require_new_directory(path: Path) -> Path:
         raise WitnessReleasePreparationError("destination must be an absolute path")
     if path.exists() or path.is_symlink():
         raise WitnessReleasePreparationError("destination must not already exist")
-    parent = path.parent
+    if not path.name or path.name in {".", ".."}:
+        raise WitnessReleasePreparationError("destination name is invalid")
+    parent = _require_root_owned_directory(
+        path.parent,
+        field="destination parent",
+        private=True,
+    )
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_DIRECTORY", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
     try:
-        parent_metadata = parent.stat()
+        parent_descriptor = os.open(parent, flags)
     except OSError as exc:
-        raise WitnessReleasePreparationError("destination parent cannot be inspected") from exc
-    if not stat.S_ISDIR(parent_metadata.st_mode):
-        raise WitnessReleasePreparationError("destination parent is not a directory")
+        raise WitnessReleasePreparationError("destination parent cannot be safely opened") from exc
     try:
-        path.mkdir(mode=0o700)
+        parent_metadata = os.fstat(parent_descriptor)
+        if (
+            not stat.S_ISDIR(parent_metadata.st_mode)
+            or parent_metadata.st_uid != 0
+            or parent_metadata.st_mode & 0o077
+        ):
+            raise WitnessReleasePreparationError("destination parent is no longer root-private")
+        try:
+            os.mkdir(path.name, mode=0o700, dir_fd=parent_descriptor)
+        except OSError as exc:
+            raise WitnessReleasePreparationError("cannot create package destination") from exc
+        child_flags = flags
+        try:
+            child_descriptor = os.open(path.name, child_flags, dir_fd=parent_descriptor)
+        except OSError as exc:
+            raise WitnessReleasePreparationError("cannot safely reopen package destination") from exc
+        try:
+            os.fchmod(child_descriptor, 0o700)
+            child_metadata = os.fstat(child_descriptor)
+            if (
+                not stat.S_ISDIR(child_metadata.st_mode)
+                or child_metadata.st_uid != 0
+                or stat.S_IMODE(child_metadata.st_mode) != 0o700
+            ):
+                raise WitnessReleasePreparationError("new package destination has unsafe ownership or mode")
+        finally:
+            os.close(child_descriptor)
+    finally:
+        os.close(parent_descriptor)
+    created = parent / path.name
+    try:
+        resolved = created.resolve(strict=True)
+        metadata = created.lstat()
     except OSError as exc:
-        raise WitnessReleasePreparationError("cannot create package destination") from exc
-    return path.resolve(strict=True)
+        raise WitnessReleasePreparationError("new package destination cannot be inspected") from exc
+    if resolved != created or stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        raise WitnessReleasePreparationError("new package destination is not one canonical directory")
+    return resolved
 
 
 def prepare_release_package(

@@ -25,7 +25,8 @@ its promotion agent to 60/10/15 too, but its installed root-only configuration
 must be checked before a real failover drill.
 
 Prepare the transferable local package without contacting a host or Object
-Storage:
+Storage. The destination parent must already be a canonical, non-symlink
+`root:root` directory with mode `0700`; the destination itself must not exist.
 
 ```bash
 python3 scripts/prepare_writer_witness_immutable_release.py prepare \
@@ -39,4 +40,8 @@ separately authorized transaction must stage it through the private/versioned
 Object Storage path, attest the detached source, build the host release with
 the approved offline wheelhouse, verify the release manifest, then use the
 reversible Witness activation procedure. It does not copy legacy key, issuer,
-state, or TLS material.
+state, or TLS material. If preparation fails after creating its destination,
+the helper intentionally preserves the partial artifacts for forensic review;
+do not reuse that directory for another attempt. The source worktree and its
+resolved Git directories, including a normal worktree `.git` pointer target,
+must be root-owned and not writable by group or other users.

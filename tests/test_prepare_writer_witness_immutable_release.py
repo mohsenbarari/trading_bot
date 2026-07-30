@@ -6,6 +6,7 @@ import stat
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,6 +44,61 @@ def agent_config(*, duration: int = 60) -> dict[str, object]:
 
 
 class WriterWitnessImmutableReleaseTests(unittest.TestCase):
+    def test_normal_worktree_git_pointer_resolves_to_a_root_controlled_git_directory(self):
+        git_directory = release_package._resolve_worktree_git_directory(ROOT)
+
+        metadata = git_directory.stat()
+        self.assertTrue(git_directory.is_dir())
+        self.assertEqual(metadata.st_uid, 0)
+        self.assertFalse(metadata.st_mode & 0o022)
+
+    def test_source_worktree_rejects_group_or_other_writable_directory(self):
+        with tempfile.TemporaryDirectory(prefix="writer-witness-source-insecure-") as value:
+            worktree = Path(value) / "worktree"
+            worktree.mkdir(mode=0o777)
+            worktree.chmod(0o777)
+
+            with self.assertRaisesRegex(
+                release_package.WitnessReleasePreparationError,
+                "source worktree is not root-owned",
+            ):
+                release_package._require_source_repository(worktree)
+
+    def test_git_pointer_rejects_a_group_or_other_writable_target(self):
+        with tempfile.TemporaryDirectory(prefix="writer-witness-git-pointer-") as value:
+            root = Path(value)
+            worktree = root / "worktree"
+            git_directory = root / "git-directory"
+            worktree.mkdir(mode=0o700)
+            git_directory.mkdir(mode=0o777)
+            git_directory.chmod(0o777)
+            pointer = worktree / ".git"
+            pointer.write_text(f"gitdir: {git_directory}\n", encoding="utf-8")
+            pointer.chmod(0o600)
+
+            with self.assertRaisesRegex(
+                release_package.WitnessReleasePreparationError,
+                "resolved source Git directory is not root-owned",
+            ):
+                release_package._resolve_worktree_git_directory(worktree)
+
+    def test_git_pointer_file_must_not_be_group_or_other_writable(self):
+        with tempfile.TemporaryDirectory(prefix="writer-witness-git-pointer-mode-") as value:
+            root = Path(value)
+            worktree = root / "worktree"
+            git_directory = root / "git-directory"
+            worktree.mkdir(mode=0o700)
+            git_directory.mkdir(mode=0o700)
+            pointer = worktree / ".git"
+            pointer.write_text(f"gitdir: {git_directory}\n", encoding="utf-8")
+            pointer.chmod(0o666)
+
+            with self.assertRaisesRegex(
+                release_package.WitnessReleasePreparationError,
+                r"source worktree \.git pointer (is writable|has unsafe ownership)",
+            ):
+                release_package._resolve_worktree_git_directory(worktree)
+
     def test_prepare_creates_a_detached_hash_bound_source_package(self):
         with tempfile.TemporaryDirectory(prefix="writer-witness-package-") as value:
             destination = Path(value) / "package"
@@ -92,6 +148,59 @@ class WriterWitnessImmutableReleaseTests(unittest.TestCase):
                     source_repository=ROOT,
                     destination=destination,
                 )
+
+    def test_destination_parent_must_be_root_private(self):
+        with tempfile.TemporaryDirectory(prefix="writer-witness-parent-mode-") as value:
+            parent = Path(value) / "shared-parent"
+            parent.mkdir(mode=0o755)
+            parent.chmod(0o755)
+
+            with self.assertRaisesRegex(
+                release_package.WitnessReleasePreparationError,
+                "destination parent is not root-owned",
+            ):
+                release_package._require_new_directory(parent / "package")
+
+    def test_destination_parent_symlink_is_rejected(self):
+        with tempfile.TemporaryDirectory(prefix="writer-witness-parent-link-") as value:
+            root = Path(value)
+            actual_parent = root / "actual-parent"
+            actual_parent.mkdir(mode=0o700)
+            link_parent = root / "linked-parent"
+            link_parent.symlink_to(actual_parent, target_is_directory=True)
+
+            with self.assertRaisesRegex(
+                release_package.WitnessReleasePreparationError,
+                "destination parent must be one canonical non-symlink",
+            ):
+                release_package._require_new_directory(link_parent / "package")
+
+    def test_failed_new_file_is_preserved_for_forensics(self):
+        with tempfile.TemporaryDirectory(prefix="writer-witness-file-preserve-") as value:
+            artifact = Path(value) / "artifact.json"
+            with mock.patch.object(release_package.os, "fsync", side_effect=OSError("disk failed")):
+                with self.assertRaises(OSError):
+                    release_package._write_new_file(artifact, b"partial-evidence")
+
+            self.assertTrue(artifact.exists())
+            self.assertEqual(artifact.read_bytes(), b"partial-evidence")
+
+    def test_failed_source_archive_is_preserved_for_forensics(self):
+        with tempfile.TemporaryDirectory(prefix="writer-witness-archive-preserve-") as value:
+            archive = Path(value) / "source.tar"
+            with mock.patch.object(
+                release_package,
+                "_run_git",
+                side_effect=release_package.WitnessReleasePreparationError("archive failed"),
+            ):
+                with self.assertRaisesRegex(
+                    release_package.WitnessReleasePreparationError,
+                    "archive failed",
+                ):
+                    release_package._archive_source_tree(ROOT, archive)
+
+            self.assertTrue(archive.exists())
+            self.assertEqual(stat.S_IMODE(archive.stat().st_mode), 0o600)
 
     def test_profile_requires_the_pinned_60_second_contract(self):
         profile = release_package._load_profile(release_package.DEFAULT_PROFILE_PATH)
