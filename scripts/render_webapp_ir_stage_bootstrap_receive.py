@@ -66,6 +66,7 @@ SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 BUNDLE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 BUCKET_RE = re.compile(r"^[a-z0-9][a-z0-9.-]{2,62}$")
 PREFIX_COMPONENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._=-]{0,127}$")
+INSTALLER_PATH_RE = re.compile(r"^/[A-Za-z0-9._/-]+$")
 
 
 class BootstrapReceiveRenderError(RuntimeError):
@@ -113,6 +114,13 @@ def _require_absolute_path(value: object, *, field: str) -> str:
     ):
         raise BootstrapReceiveRenderError(f"{field} must be one canonical absolute path")
     return value
+
+
+def _require_installer_compatible_path(value: object, *, field: str) -> str:
+    path = _require_absolute_path(value, field=field)
+    if not INSTALLER_PATH_RE.fullmatch(path):
+        raise BootstrapReceiveRenderError(f"{field} is incompatible with the provenance installer")
+    return path
 
 
 def _read_root_only_file(path: Path, *, field: str, maximum_bytes: int = MAX_CONTROL_FILE_BYTES) -> bytes:
@@ -1083,7 +1091,7 @@ def render_receive_command(
 ) -> str:
     """Validate local inputs and return one SSH control command without executing it."""
 
-    bootstrap_root = _require_absolute_path(bootstrap_root, field="bootstrap root")
+    bootstrap_root = _require_installer_compatible_path(bootstrap_root, field="bootstrap root")
     publish_raw = _read_root_only_file(publish_receipt, field="bootstrap publish receipt")
     package, preparation, consumer = _verify_local_bootstrap_package(
         package_directory=bootstrap_package_directory,

@@ -205,6 +205,20 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
             self.assertEqual(len(inner), 9)
             self.assertEqual(inner[4], receiver.REMOTE_LAUNCHER)
 
+    def test_rejects_a_bootstrap_root_the_provenance_installer_cannot_read(self):
+        with tempfile.TemporaryDirectory(prefix="wa-ir-render-") as temporary:
+            fixture = self._fixture(Path(temporary))
+            with self.assertRaisesRegex(
+                receiver.BootstrapReceiveRenderError,
+                "incompatible with the provenance installer",
+            ):
+                receiver.render_receive_command(
+                    publish_receipt=fixture["publish"],
+                    bootstrap_package_directory=fixture["package"],
+                    preparation_receipt=fixture["preparation"],
+                    bootstrap_root="/srv/wa-ir+bootstrap",
+                )
+
     def test_rejects_non_https_versionless_or_unbound_publish_url(self):
         with tempfile.TemporaryDirectory(prefix="wa-ir-render-") as temporary:
             fixture = self._fixture(Path(temporary))
