@@ -9,7 +9,8 @@ age, or tar itself.
 
 The short-lived presigned URL is the final transient remote argument.  It is
 not embedded in the generated Python payload and the remote receiver writes no
-URL to its persistent receipt.
+URL to its persistent receipt.  A just-published bootstrap receipt can also be
+read directly from stdin, so its URL need not be written to a durable file.
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 
 REMOTE_HOST = "root@95.38.164.29"
+SSH_OPTIONS = ("-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes")
 BOOTSTRAP_PUBLISH_RECEIPT_SCHEMA = "gold-trade-wa-ir-artifact-stage-bootstrap-publish-receipt-v1"
 PREPARATION_RECEIPT_SCHEMA = "gold-trade-wa-ir-stage-bootstrap-preparation-v1"
 PACKAGE_MANIFEST_SCHEMA = "gold-trade-wa-ir-stage-bootstrap-package-v1"
@@ -166,6 +168,23 @@ def _read_root_only_file(path: Path, *, field: str, maximum_bytes: int = MAX_CON
         return result
     finally:
         os.close(descriptor)
+
+
+def _read_publish_receipt_stdin() -> bytes:
+    """Read one bounded, transient publish receipt without creating a file."""
+
+    stream = getattr(sys.stdin, "buffer", sys.stdin)
+    try:
+        payload = stream.read(MAX_CONTROL_FILE_BYTES + 1)
+    except OSError as exc:
+        raise BootstrapReceiveRenderError("cannot read bootstrap publish receipt from stdin") from exc
+    if not isinstance(payload, bytes):
+        raise BootstrapReceiveRenderError("bootstrap publish receipt stdin must be binary")
+    if not payload:
+        raise BootstrapReceiveRenderError("bootstrap publish receipt stdin is empty")
+    if len(payload) > MAX_CONTROL_FILE_BYTES:
+        raise BootstrapReceiveRenderError("bootstrap publish receipt stdin exceeds the fixed size bound")
+    return payload
 
 
 def _require_root_private_directory(path: Path, *, field: str) -> Path:
@@ -1084,7 +1103,8 @@ REMOTE_LAUNCHER = (
 
 def render_receive_command(
     *,
-    publish_receipt: Path,
+    publish_receipt: Path | None = None,
+    publish_receipt_bytes: bytes | None = None,
     bootstrap_package_directory: Path,
     preparation_receipt: Path,
     bootstrap_root: str,
@@ -1092,7 +1112,16 @@ def render_receive_command(
     """Validate local inputs and return one SSH control command without executing it."""
 
     bootstrap_root = _require_installer_compatible_path(bootstrap_root, field="bootstrap root")
-    publish_raw = _read_root_only_file(publish_receipt, field="bootstrap publish receipt")
+    if (publish_receipt is None) == (publish_receipt_bytes is None):
+        raise BootstrapReceiveRenderError("provide exactly one bootstrap publish receipt source")
+    if publish_receipt is not None:
+        publish_raw = _read_root_only_file(publish_receipt, field="bootstrap publish receipt")
+    else:
+        if not isinstance(publish_receipt_bytes, bytes):
+            raise BootstrapReceiveRenderError("bootstrap publish receipt bytes are invalid")
+        if not publish_receipt_bytes or len(publish_receipt_bytes) > MAX_CONTROL_FILE_BYTES:
+            raise BootstrapReceiveRenderError("bootstrap publish receipt bytes exceed the fixed size bound")
+        publish_raw = publish_receipt_bytes
     package, preparation, consumer = _verify_local_bootstrap_package(
         package_directory=bootstrap_package_directory,
         preparation_receipt=preparation_receipt,
@@ -1118,12 +1147,18 @@ def render_receive_command(
         "/usr/bin/python3", "-I", "-B", "-c", REMOTE_LAUNCHER, program_b64, config_b64, "--",
         published["presigned_url"],
     ])
-    return shlex.join(["ssh", REMOTE_HOST, remote])
+    return shlex.join(["ssh", *SSH_OPTIONS, REMOTE_HOST, remote])
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--publish-receipt", required=True, type=Path)
+    publish_receipt = parser.add_mutually_exclusive_group(required=True)
+    publish_receipt.add_argument("--publish-receipt", type=Path)
+    publish_receipt.add_argument(
+        "--publish-receipt-stdin",
+        action="store_true",
+        help="read one just-published receipt from stdin without writing its presigned URL to disk",
+    )
     parser.add_argument("--bootstrap-package-directory", required=True, type=Path)
     parser.add_argument("--preparation-receipt", required=True, type=Path)
     parser.add_argument("--bootstrap-root", required=True)
@@ -1133,9 +1168,11 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     try:
+        publish_receipt_bytes = _read_publish_receipt_stdin() if arguments.publish_receipt_stdin else None
         print(
             render_receive_command(
                 publish_receipt=arguments.publish_receipt,
+                publish_receipt_bytes=publish_receipt_bytes,
                 bootstrap_package_directory=arguments.bootstrap_package_directory,
                 preparation_receipt=arguments.preparation_receipt,
                 bootstrap_root=arguments.bootstrap_root,

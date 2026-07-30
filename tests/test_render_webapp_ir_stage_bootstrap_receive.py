@@ -1,4 +1,5 @@
 import base64
+import contextlib
 import hashlib
 import importlib.util
 import io
@@ -8,6 +9,7 @@ import shlex
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -159,9 +161,10 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
 
     def _remote(self, command: str) -> tuple[list[str], dict[str, object], dict[str, object]]:
         outer = shlex.split(command)
-        self.assertEqual(outer[:2], ["ssh", receiver.REMOTE_HOST])
-        self.assertEqual(len(outer), 3)
-        inner = shlex.split(outer[2])
+        self.assertEqual(outer[:5], ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes"])
+        self.assertEqual(outer[5], receiver.REMOTE_HOST)
+        self.assertEqual(len(outer), 7)
+        inner = shlex.split(outer[6])
         self.assertEqual(inner[:5], ["/usr/bin/python3", "-I", "-B", "-c", receiver.REMOTE_LAUNCHER])
         self.assertEqual(inner[7], "--")
         program = base64.b64decode(inner[5]).decode("utf-8")
@@ -192,9 +195,65 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
             self.assertNotIn(fixture["url"], base64.b64decode(inner[6]).decode("utf-8"))
             self.assertNotIn("presigned_url", config)
             self.assertNotIn("presigned_url", base64.b64decode(inner[5]).decode("utf-8"))
+            self.assertNotIn("StrictHostKeyChecking=accept-new", command)
+            self.assertNotIn("BatchMode=no", command)
             self.assertEqual(namespace["load_config"](inner[6]), config)
             namespace["validate_url"](fixture["url"], config)
             namespace["validate_headers"](self._valid_headers(config), config)
+
+    def test_just_published_receipt_can_be_consumed_from_stdin_without_a_durable_file(self):
+        with tempfile.TemporaryDirectory(prefix="wa-ir-render-") as temporary:
+            fixture = self._fixture(Path(temporary))
+            payload = fixture["publish"].read_bytes()
+            fixture["publish"].unlink()
+            command = receiver.render_receive_command(
+                publish_receipt_bytes=payload,
+                bootstrap_package_directory=fixture["package"],
+                preparation_receipt=fixture["preparation"],
+                bootstrap_root="/srv/trading-bot-three-site-staging-data/wa-ir-bootstrap",
+            )
+            inner, _, _ = self._remote(command)
+            self.assertEqual(inner[-1], fixture["url"])
+            self.assertEqual(inner.count(fixture["url"]), 1)
+
+    def test_cli_consumes_the_just_published_receipt_from_binary_stdin(self):
+        with tempfile.TemporaryDirectory(prefix="wa-ir-render-") as temporary:
+            fixture = self._fixture(Path(temporary))
+            fixture["publish"].unlink()
+            stdin = io.TextIOWrapper(io.BytesIO(json.dumps(fixture["published"]).encode("utf-8")), encoding="utf-8")
+            stdout = io.StringIO()
+            with mock.patch.object(receiver.sys, "stdin", stdin), contextlib.redirect_stdout(stdout):
+                result = receiver.main([
+                    "--publish-receipt-stdin",
+                    "--bootstrap-package-directory", str(fixture["package"]),
+                    "--preparation-receipt", str(fixture["preparation"]),
+                    "--bootstrap-root", "/srv/trading-bot-three-site-staging-data/wa-ir-bootstrap",
+                ])
+            self.assertEqual(result, 0)
+            inner, _, _ = self._remote(stdout.getvalue().strip())
+            self.assertEqual(inner[-1], fixture["url"])
+
+    def test_rejects_ambiguous_or_oversized_publish_receipt_sources(self):
+        with tempfile.TemporaryDirectory(prefix="wa-ir-render-") as temporary:
+            fixture = self._fixture(Path(temporary))
+            shared = {
+                "bootstrap_package_directory": fixture["package"],
+                "preparation_receipt": fixture["preparation"],
+                "bootstrap_root": "/srv/trading-bot-three-site-staging-data/wa-ir-bootstrap",
+            }
+            with self.assertRaisesRegex(receiver.BootstrapReceiveRenderError, "exactly one"):
+                receiver.render_receive_command(**shared)
+            with self.assertRaisesRegex(receiver.BootstrapReceiveRenderError, "exactly one"):
+                receiver.render_receive_command(
+                    publish_receipt=fixture["publish"],
+                    publish_receipt_bytes=fixture["publish"].read_bytes(),
+                    **shared,
+                )
+            with self.assertRaisesRegex(receiver.BootstrapReceiveRenderError, "fixed size bound"):
+                receiver.render_receive_command(
+                    publish_receipt_bytes=b"x" * (receiver.MAX_CONTROL_FILE_BYTES + 1),
+                    **shared,
+                )
 
     def test_url_shell_metacharacters_remain_one_final_remote_argument(self):
         with tempfile.TemporaryDirectory(prefix="wa-ir-render-") as temporary:
