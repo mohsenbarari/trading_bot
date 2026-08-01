@@ -44,14 +44,30 @@ class FakeClientError(RuntimeError):
 class FakeS3:
     """A strict in-memory versioned S3 surface; it never opens a socket."""
 
-    def __init__(self, *, versioning: bool = True, private: bool = True, corrupt_get: bool = False) -> None:
+    OWNER_ID = "emergency-owner-canonical-id"
+
+    def __init__(
+        self,
+        *,
+        versioning: bool = True,
+        private: bool = True,
+        corrupt_get: bool = False,
+        foreign_bucket_grant: bool = False,
+        foreign_object_grant: bool = False,
+        has_bucket_policy: bool = False,
+    ) -> None:
         self.versioning = versioning
         self.private = private
         self.corrupt_get = corrupt_get
+        self.foreign_bucket_grant = foreign_bucket_grant
+        self.foreign_object_grant = foreign_object_grant
+        self.has_bucket_policy = has_bucket_policy
         self.objects: dict[tuple[str, str], list[tuple[str, bytes]]] = {}
         self.put_calls: list[tuple[str, str]] = []
+        self.put_kwargs: list[dict[str, object]] = []
         self.get_calls: list[tuple[str, str, str]] = []
         self.head_calls: list[tuple[str, str, str | None]] = []
+        self.object_acl_calls: list[tuple[str, str, str]] = []
         self._sequence = 0
 
     def get_bucket_versioning(self, *, Bucket: str) -> dict[str, str]:
@@ -68,20 +84,39 @@ class FakeS3:
             }
         }
 
-    def get_bucket_policy_status(self, *, Bucket: str) -> dict[str, object]:
-        return {"PolicyStatus": {"IsPublic": not self.private}}
+    def get_bucket_policy(self, *, Bucket: str) -> dict[str, object]:
+        if not self.has_bucket_policy:
+            raise FakeClientError("NoSuchBucketPolicy")
+        return {"Policy": "{\\\"Statement\\\":[]}"}
 
-    def get_bucket_acl(self, *, Bucket: str) -> dict[str, object]:
-        grants: list[dict[str, object]] = []
+    def _acl(self, *, foreign_grant: bool) -> dict[str, object]:
+        grants: list[dict[str, object]] = [
+            {
+                "Grantee": {"Type": "CanonicalUser", "ID": self.OWNER_ID},
+                "Permission": "FULL_CONTROL",
+            }
+        ]
+        if foreign_grant:
+            grants.append(
+                {
+                    "Grantee": {"Type": "CanonicalUser", "ID": "unapproved-foreign-principal"},
+                    "Permission": "READ",
+                }
+            )
         if not self.private:
             grants.append(
                 {
                     "Grantee": {
+                        "Type": "Group",
                         "URI": "http://acs.amazonaws.com/groups/global/AllUsers",
-                    }
+                    },
+                    "Permission": "READ",
                 }
             )
-        return {"Grants": grants}
+        return {"Owner": {"ID": self.OWNER_ID}, "Grants": grants}
+
+    def get_bucket_acl(self, *, Bucket: str) -> dict[str, object]:
+        return self._acl(foreign_grant=self.foreign_bucket_grant)
 
     def _select(self, bucket: str, key: str, version_id: str | None) -> tuple[str, bytes]:
         versions = self.objects.get((bucket, key))
@@ -99,12 +134,26 @@ class FakeS3:
         version, payload = self._select(Bucket, Key, VersionId)
         return {"VersionId": version, "ContentLength": len(payload)}
 
-    def put_object(self, *, Bucket: str, Key: str, Body: io.BufferedReader, **_kwargs: object) -> dict[str, str]:
+    def list_object_versions(self, *, Bucket: str, Prefix: str) -> dict[str, object]:
+        versions = [
+            {"Key": key, "VersionId": version}
+            for (bucket, key), entries in self.objects.items()
+            if bucket == Bucket and key.startswith(Prefix)
+            for version, _payload in entries
+        ]
+        return {"IsTruncated": False, "Versions": versions, "DeleteMarkers": []}
+
+    def put_object(self, *, Bucket: str, Key: str, Body: io.BufferedReader, **kwargs: object) -> dict[str, str]:
+        if kwargs.get("ACL") != "private" or kwargs.get("IfNoneMatch") != "*":
+            raise AssertionError("publisher must use private conditional object creation")
+        if (Bucket, Key) in self.objects:
+            raise FakeClientError("PreconditionFailed")
         payload = Body.read()
         self._sequence += 1
         version = f"version-{self._sequence:02d}"
         self.objects.setdefault((Bucket, Key), []).append((version, payload))
         self.put_calls.append((Bucket, Key))
+        self.put_kwargs.append(dict(kwargs))
         return {"VersionId": version}
 
     def get_object(self, *, Bucket: str, Key: str, VersionId: str) -> dict[str, object]:
@@ -112,6 +161,11 @@ class FakeS3:
         version, payload = self._select(Bucket, Key, VersionId)
         observed = payload + b"x" if self.corrupt_get else payload
         return {"VersionId": version, "ContentLength": len(payload), "Body": io.BytesIO(observed)}
+
+    def get_object_acl(self, *, Bucket: str, Key: str, VersionId: str) -> dict[str, object]:
+        self._select(Bucket, Key, VersionId)
+        self.object_acl_calls.append((Bucket, Key, VersionId))
+        return self._acl(foreign_grant=self.foreign_object_grant)
 
     def generate_presigned_url(
         self,
@@ -319,7 +373,14 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             self.assertEqual(result["artifact_count"], 4)
             self.assertEqual(len(client.put_calls), 7)
             self.assertEqual(len(client.get_calls), 7)
+            self.assertEqual(len(client.object_acl_calls), 7)
             self.assertEqual(len(client.objects), 7)
+            self.assertTrue(
+                all(
+                    values.get("ACL") == "private" and values.get("IfNoneMatch") == "*"
+                    for values in client.put_kwargs
+                )
+            )
             self.assertNotIn("https://", json.dumps(result))
             for output in dataclasses.astuple(outputs):
                 self.assertTrue(output.is_file())
@@ -367,6 +428,65 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
                             ttl_seconds=300,
                         )
                     self.assertEqual(client.put_calls, [])
+
+    def test_bucket_rejects_nonpublic_foreign_acl_grant_before_any_upload(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            _plan_path, plan = self.write_plan(root)
+            private, public = self.write_keypair(root)
+            client = FakeS3(foreign_bucket_grant=True)
+            with self.assertRaisesRegex(publisher.EmergencyPublisherError, "ACL"):
+                publisher.publish(
+                    client=client,
+                    plan=plan,
+                    signing_private_key_path=private,
+                    signing_public_key_path=public,
+                    repo=REPO_ROOT,
+                    outputs=self.outputs(root),
+                    ttl_seconds=300,
+                )
+            self.assertEqual(client.put_calls, [])
+
+    def test_object_acl_must_remain_owner_only_after_upload(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            _plan_path, plan = self.write_plan(root)
+            private, public = self.write_keypair(root)
+            client = FakeS3(foreign_object_grant=True)
+            with self.assertRaisesRegex(publisher.EmergencyPublisherError, "ACL"):
+                publisher.publish(
+                    client=client,
+                    plan=plan,
+                    signing_private_key_path=private,
+                    signing_public_key_path=public,
+                    repo=REPO_ROOT,
+                    outputs=self.outputs(root),
+                    ttl_seconds=300,
+                )
+            self.assertEqual(len(client.put_calls), 1)
+
+    def test_existing_object_version_blocks_campaign_before_any_upload(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            _plan_path, plan = self.write_plan(root)
+            private, public = self.write_keypair(root)
+            client = FakeS3()
+            existing_key = publisher._control_key(plan, "receiver_bundle")
+            client.objects[(plan.bucket, existing_key)] = [("old-version", b"prior")]
+            with self.assertRaisesRegex(publisher.EmergencyPublisherError, "existing Emergency campaign object version"):
+                publisher.publish(
+                    client=client,
+                    plan=plan,
+                    signing_private_key_path=private,
+                    signing_public_key_path=public,
+                    repo=REPO_ROOT,
+                    outputs=self.outputs(root),
+                    ttl_seconds=300,
+                )
+            self.assertEqual(client.put_calls, [])
 
     def test_corrupt_immutable_readback_blocks_before_manifest_is_written(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:

@@ -80,12 +80,6 @@ CONTROL_FILENAMES = {
     "manifest": "sealed-manifest.json",
     "url_map": "presigned-urls.json",
 }
-PUBLIC_GRANTEE_URIS = frozenset(
-    {
-        "http://acs.amazonaws.com/groups/global/AllUsers",
-        "http://acs.amazonaws.com/groups/global/AuthenticatedUsers",
-    }
-)
 PRESIGNED_QUERY_FIELDS = frozenset(
     {
         "X-Amz-Algorithm",
@@ -98,6 +92,7 @@ PRESIGNED_QUERY_FIELDS = frozenset(
     }
 )
 _NOT_FOUND_CODES = frozenset({"404", "NoSuchKey", "NoSuchVersion", "NotFound"})
+OWNER_ONLY_ACL_PERMISSION = "FULL_CONTROL"
 # Object Storage is the only approved payload transport for Emergency, but it
 # must still be a direct connection to the fixed private Arvan endpoint.  Do
 # not allow a signed request, S3 credentials, or a presigned URL to traverse a
@@ -603,7 +598,48 @@ def _require_immutable_version(value: object, *, label: str) -> str:
     return value
 
 
-def _require_private_versioned_bucket(client: Any, *, bucket: str) -> None:
+def _require_owner_only_acl(
+    value: object,
+    *,
+    label: str,
+    expected_owner_id: str | None = None,
+) -> str:
+    """Require an exact canonical-owner-only ACL, not merely a non-public one."""
+
+    if not isinstance(value, Mapping):
+        _fail(f"{label} ACL cannot be verified")
+    owner = value.get("Owner")
+    owner_id = owner.get("ID") if isinstance(owner, Mapping) else None
+    if (
+        not isinstance(owner_id, str)
+        or not owner_id
+        or len(owner_id) > 1024
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in owner_id)
+    ):
+        _fail(f"{label} ACL owner cannot be verified")
+    if expected_owner_id is not None and owner_id != expected_owner_id:
+        _fail(f"{label} ACL owner differs from the dedicated Emergency bucket owner")
+    grants = value.get("Grants")
+    if not isinstance(grants, list) or not grants:
+        _fail(f"{label} ACL grants cannot be verified")
+    for grant in grants:
+        if not isinstance(grant, Mapping):
+            _fail(f"{label} ACL grant is invalid")
+        grantee = grant.get("Grantee")
+        permission = grant.get("Permission")
+        if (
+            not isinstance(grantee, Mapping)
+            or grantee.get("Type") != "CanonicalUser"
+            or grantee.get("ID") != owner_id
+            or grantee.get("URI") is not None
+            or grantee.get("EmailAddress") is not None
+            or permission != OWNER_ONLY_ACL_PERMISSION
+        ):
+            _fail(f"{label} ACL must grant full control only to the dedicated bucket owner")
+    return owner_id
+
+
+def _require_private_versioned_bucket(client: Any, *, bucket: str) -> str:
     """Fail closed unless all bucket privacy and versioning controls are visible."""
 
     try:
@@ -623,23 +659,14 @@ def _require_private_versioned_bucket(client: Any, *, bucket: str) -> None:
         ):
             _fail("Arvan bucket public-access block must be fully enabled")
         try:
-            policy_status = client.get_bucket_policy_status(Bucket=bucket)
-        except Exception as exc:  # no policy is safe; every other unknown response is not.
+            client.get_bucket_policy(Bucket=bucket)
+        except Exception as exc:  # No policy is safe; every other unknown response is not.
             if _s3_error_code(exc) != "NoSuchBucketPolicy":
                 raise
         else:
-            status = policy_status.get("PolicyStatus") if isinstance(policy_status, Mapping) else None
-            if not isinstance(status, Mapping) or status.get("IsPublic") is not False:
-                _fail("Arvan bucket policy must not be public")
+            _fail("dedicated Emergency bucket must not have a bucket policy")
         acl = client.get_bucket_acl(Bucket=bucket)
-        grants = acl.get("Grants") if isinstance(acl, Mapping) else None
-        if not isinstance(grants, list):
-            _fail("Arvan bucket ACL cannot be verified")
-        for grant in grants:
-            grantee = grant.get("Grantee") if isinstance(grant, Mapping) else None
-            uri = grantee.get("URI") if isinstance(grantee, Mapping) else None
-            if uri in PUBLIC_GRANTEE_URIS:
-                _fail("Arvan bucket ACL must not grant public access")
+        return _require_owner_only_acl(acl, label="Arvan bucket")
     except EmergencyPublisherError:
         raise
     except Exception as exc:
@@ -647,6 +674,30 @@ def _require_private_versioned_bucket(client: Any, *, bucket: str) -> None:
 
 
 def _assert_key_unused(client: Any, *, bucket: str, key: str) -> None:
+    """Reject every pre-existing version before the later conditional write.
+
+    ``IfNoneMatch=*`` prevents a concurrent current-object replacement.  The
+    manifest still binds the returned immutable VersionId because versioning
+    alone cannot make a key permanently single-write without Object Lock.
+    """
+
+    try:
+        listing = client.list_object_versions(Bucket=bucket, Prefix=key)
+        if not isinstance(listing, Mapping) or listing.get("IsTruncated") is True:
+            _fail("Object Storage version history cannot be completely verified")
+        versions = listing.get("Versions") or []
+        delete_markers = listing.get("DeleteMarkers") or []
+        if not isinstance(versions, list) or not isinstance(delete_markers, list):
+            _fail("Object Storage version history cannot be verified")
+        for item in [*versions, *delete_markers]:
+            if not isinstance(item, Mapping):
+                _fail("Object Storage version history cannot be verified")
+            if item.get("Key") == key:
+                _fail("refusing to publish over an existing Emergency campaign object version")
+    except EmergencyPublisherError:
+        raise
+    except Exception as exc:
+        raise EmergencyPublisherError("Object Storage version history cannot be verified") from exc
     try:
         client.head_object(Bucket=bucket, Key=key)
     except Exception as exc:
@@ -664,6 +715,7 @@ def _readback_object(
     version_id: str,
     expected_sha256: str,
     expected_bytes: int,
+    expected_bucket_owner_id: str,
 ) -> None:
     """Verify the object stream selected by the returned immutable VersionId."""
 
@@ -700,6 +752,11 @@ def _readback_object(
                 closer()
         if observed != expected_bytes or digest.hexdigest() != expected_sha256:
             _fail("Object Storage immutable GET hash/size differs from the uploaded object")
+        _require_owner_only_acl(
+            client.get_object_acl(Bucket=bucket, Key=key, VersionId=version_id),
+            label="Emergency object",
+            expected_owner_id=expected_bucket_owner_id,
+        )
     except EmergencyPublisherError:
         raise
     except Exception as exc:
@@ -716,6 +773,7 @@ def _upload_and_readback(
     expected_sha256: str,
     expected_bytes: int,
     label: str,
+    expected_bucket_owner_id: str,
 ) -> UploadedObject:
     """Create one fresh object version then verify exactly that version's body."""
 
@@ -728,6 +786,8 @@ def _upload_and_readback(
             Body=source,
             ContentType="application/octet-stream",
             Metadata={"sha256": expected_sha256, "emergency-artifact": label},
+            ACL="private",
+            IfNoneMatch="*",
         )
         version_id = _require_immutable_version(
             response.get("VersionId") if isinstance(response, Mapping) else None,
@@ -749,6 +809,7 @@ def _upload_and_readback(
         version_id=version_id,
         expected_sha256=expected_sha256,
         expected_bytes=expected_bytes,
+        expected_bucket_owner_id=expected_bucket_owner_id,
     )
     return UploadedObject(key=key, version_id=version_id, sha256=expected_sha256, bytes=expected_bytes)
 
@@ -953,7 +1014,7 @@ def publish(
     if manifest.signer_key_id(private_key.public_key()) != manifest.signer_key_id(public_key):
         _fail("Emergency signing private/public keys do not form the pinned keypair")
     verified_artifacts = tuple(_verify_local_ciphertext(item) for item in plan.artifacts)
-    _require_private_versioned_bucket(client, bucket=plan.bucket)
+    bucket_owner_id = _require_private_versioned_bucket(client, bucket=plan.bucket)
 
     # Verify all campaign locations are unused before writing a local control
     # artifact or uploading the first byte.  Each later result is still bound
@@ -985,6 +1046,7 @@ def publish(
         expected_sha256=bundle_hash,
         expected_bytes=bundle_bytes,
         label="receiver bootstrap bundle",
+        expected_bucket_owner_id=bucket_owner_id,
     )
 
     uploaded_artifacts: dict[str, UploadedObject] = {}
@@ -1001,6 +1063,7 @@ def publish(
             expected_sha256=descriptor.ciphertext_sha256,
             expected_bytes=descriptor.ciphertext_bytes,
             label=f"Emergency artifact {descriptor.kind}",
+            expected_bucket_owner_id=bucket_owner_id,
         )
 
     unsigned = _unsigned_manifest(
@@ -1026,6 +1089,7 @@ def publish(
         expected_sha256=manifest_hash,
         expected_bytes=manifest_bytes,
         label="sealed manifest",
+        expected_bucket_owner_id=bucket_owner_id,
     )
 
     url_map_payload = _build_url_map(
@@ -1051,6 +1115,7 @@ def publish(
         expected_sha256=map_hash,
         expected_bytes=map_bytes,
         label="presigned URL map",
+        expected_bucket_owner_id=bucket_owner_id,
     )
 
     descriptor_payload = _build_bootstrap_descriptor(
