@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import argparse
+import ast
+import base64
+import hashlib
 import importlib.util
+import io
 import json
+import os
 from pathlib import Path
+import re
 import stat
+import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -13,11 +21,16 @@ from unittest.mock import patch
 
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "run_emergency_ir_object_storage_receive.py"
+REPO_ROOT = MODULE_PATH.parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 SPEC = importlib.util.spec_from_file_location("run_emergency_ir_object_storage_receive", MODULE_PATH)
 assert SPEC and SPEC.loader
 runner = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = runner
 SPEC.loader.exec_module(runner)
+
+from scripts import build_emergency_ir_receiver_bundle as receiver_bundle
 
 
 def artifact(name: str, size: int) -> dict[str, object]:
@@ -140,7 +153,153 @@ class RunEmergencyIrObjectStorageReceiveTests(unittest.TestCase):
         compile(runner.REMOTE_BOOTSTRAP, "<emergency-bootstrap>", "exec")
         self.assertIn("def existing(target,digest,size):", runner.REMOTE_BOOTSTRAP)
         self.assertIn("def bundle_ready(target):", runner.REMOTE_BOOTSTRAP)
+        self.assertIn("scripts/emergency_ir_standalone_activate.py", runner.REMOTE_BOOTSTRAP)
+        self.assertIn("def bundled_key_id(path):", runner.REMOTE_BOOTSTRAP)
+        self.assertIn("receiver bundle signing public key does not match descriptor", runner.REMOTE_BOOTSTRAP)
+        self.assertIn('(\"receiver-\"+bundle_hash)', runner.REMOTE_BOOTSTRAP)
+        self.assertNotIn("bundle_hash[:16]", runner.REMOTE_BOOTSTRAP)
+        self.assertNotIn("os.rename(temporary,target)", runner.REMOTE_BOOTSTRAP)
+        self.assertIn("try: target.mkdir(mode=0o700)", runner.REMOTE_BOOTSTRAP)
+        self.assertIn("refusing to overwrite receiver bundle directory", runner.REMOTE_BOOTSTRAP)
+        raw_allowed = [
+            ast.literal_eval(value)
+            for value in re.findall(r"(?m)^ allowed=(\{[^\n]+\})$", runner.REMOTE_BOOTSTRAP)
+        ]
+        expected_allowed = {target for _source, target in receiver_bundle.BUNDLE_MEMBERS} | {
+            "signing-public.key"
+        }
+        self.assertEqual(raw_allowed, [expected_allowed, expected_allowed])
+        self.assertNotIn("scripts/__init__.py", expected_allowed)
         self.assertIn("already-received", (Path(__file__).resolve().parents[1] / "scripts" / "emergency_ir_object_storage_receiver.py").read_text(encoding="utf-8"))
+
+    @unittest.skipUnless(os.geteuid() == 0, "raw Emergency bootstrap is intentionally root-only")
+    def test_raw_bootstrap_rejects_a_bundle_with_the_wrong_pinned_public_key_before_execution(self) -> None:
+        """A hash-valid archive cannot swap the public key used by the receiver."""
+
+        def root_controlled_directory(path: Path) -> bool:
+            current = Path("/")
+            for component in path.resolve().parts[1:]:
+                current /= component
+                try:
+                    state = current.lstat()
+                except OSError:
+                    return False
+                if (
+                    state.st_uid != 0
+                    or not stat.S_ISDIR(state.st_mode)
+                    or stat.S_ISLNK(state.st_mode)
+                    or stat.S_IMODE(state.st_mode) & 0o022
+                ):
+                    return False
+            return True
+
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-raw-source-") as raw:
+            source = Path(raw)
+            source.chmod(0o700)
+            runtime_directory: tempfile.TemporaryDirectory[str] | None = None
+            for candidate in (Path("/run"), Path.cwd(), *Path.cwd().parents):
+                if not root_controlled_directory(candidate):
+                    continue
+                try:
+                    runtime_directory = tempfile.TemporaryDirectory(
+                        prefix="emergency-ir-raw-runtime-", dir=candidate
+                    )
+                except OSError:
+                    continue
+                break
+            if runtime_directory is None:
+                self.skipTest("a root-owned test namespace is unavailable")
+            with runtime_directory as runtime_raw:
+                runtime = Path(runtime_raw)
+                marker = runtime / "receiver-was-executed"
+                expected_key = b"x" * 32
+                bundled_key = b"y" * 32
+                members = {
+                    "run_receiver.py": (
+                        "from pathlib import Path\n"
+                        f"Path({json.dumps(str(marker))}).write_text('unexpected', encoding='utf-8')\n"
+                    ).encode("utf-8"),
+                    "signing-public.key": base64.b64encode(bundled_key) + b"\n",
+                    "scripts/emergency_ir_object_storage_manifest.py": b"placeholder-manifest\n",
+                    "scripts/emergency_ir_object_storage_receiver.py": b"placeholder-receiver\n",
+                    "scripts/emergency_ir_standalone_activate.py": b"placeholder-activator\n",
+                }
+                bundle = source / "receiver.tar.gz"
+                with tarfile.open(bundle, "w:gz") as archive:
+                    for name, payload in members.items():
+                        entry = tarfile.TarInfo(name)
+                        entry.size = len(payload)
+                        entry.mode = 0o600
+                        archive.addfile(entry, io.BytesIO(payload))
+                sealed_manifest = source / "sealed-manifest.json"
+                sealed_manifest.write_bytes(b"sealed-manifest")
+                url_map = source / "presigned-urls.json"
+                url_map.write_bytes(b"url-map")
+                for path in (bundle, sealed_manifest, url_map):
+                    path.chmod(0o600)
+
+                def args_for(path: Path) -> tuple[str, str, str]:
+                    payload = path.read_bytes()
+                    return path.as_uri(), hashlib.sha256(payload).hexdigest(), str(len(payload))
+
+                bundle_url, bundle_hash, bundle_bytes = args_for(bundle)
+                manifest_url, manifest_hash, manifest_bytes = args_for(sealed_manifest)
+                url_map_url, url_map_hash, url_map_bytes = args_for(url_map)
+                # ``file://`` is only a no-network test transport. Its response
+                # exposes ``status=None`` while the production HTTPS handler
+                # returns 200, so relax that one transport assertion without
+                # changing the bootstrap's signer/layout code under test.
+                test_bootstrap = runner.REMOTE_BOOTSTRAP.replace(
+                    'getattr(response,"status",200)!=200',
+                    'getattr(response,"status",200) not in (None,200)',
+                )
+                command = [
+                    sys.executable,
+                    "-c",
+                    test_bootstrap,
+                    str(runtime),
+                    "20260801T210000Z-emergency-ir-03",
+                    bundle_url,
+                    bundle_hash,
+                    bundle_bytes,
+                    manifest_url,
+                    manifest_hash,
+                    manifest_bytes,
+                    url_map_url,
+                    url_map_hash,
+                    url_map_bytes,
+                    "a" * 40,
+                    bundle_hash,
+                    bundle_bytes,
+                    "ed25519-sha256:" + hashlib.sha256(expected_key).hexdigest(),
+                ]
+                completed = subprocess.run(
+                    command,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn("signing public key does not match descriptor", completed.stderr)
+                self.assertFalse(marker.exists())
+
+                receiver_directory = runtime / "20260801T210000Z-emergency-ir-03" / (
+                    "receiver-" + bundle_hash
+                )
+                sentinel = receiver_directory / "forensic-sentinel"
+                sentinel.write_text("must-not-be-replaced\n", encoding="utf-8")
+                sentinel.chmod(0o600)
+                completed = subprocess.run(
+                    command,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn("existing receiver bundle is incomplete", completed.stderr)
+                self.assertEqual(sentinel.read_text(encoding="utf-8"), "must-not-be-replaced\n")
 
 
 if __name__ == "__main__":

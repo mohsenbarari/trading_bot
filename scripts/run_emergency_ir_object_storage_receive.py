@@ -155,12 +155,13 @@ def existing(target,digest,size):
 def fetch(url,digest,size,target):
  target=pathlib.Path(target); secure_dir(target.parent)
  if existing(target,digest,size): return
- temporary=target.with_name("."+target.name+".download")
+ temporary=target.with_name("."+target.name+"."+str(os.getpid())+".download")
  opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect(),urllib.request.HTTPSHandler(context=ssl.create_default_context()))
- observed=hashlib.sha256(); total=0
+ observed=hashlib.sha256(); total=0; temporary_created=False
  try:
   request=urllib.request.Request(url,headers={"User-Agent":"gold-trade-emergency-ir-bootstrap/1"},method="GET")
   with opener.open(request,timeout=120) as response, temporary.open("xb") as output:
+   temporary_created=True
    if getattr(response,"status",200)!=200 or response.geturl()!=url: fail("bootstrap response differs from request")
    while True:
     chunk=response.read(65536)
@@ -174,9 +175,12 @@ def fetch(url,digest,size,target):
   try: os.link(temporary,target,follow_symlinks=False)
   except FileExistsError: fail("refusing to overwrite bootstrap artifact")
   temporary.unlink()
+ except FileExistsError:
+  fail("stale bootstrap temporary already exists")
  except Exception:
-  try: temporary.unlink()
-  except FileNotFoundError: pass
+  if temporary_created:
+   try: temporary.unlink()
+   except FileNotFoundError: pass
   raise
 def bundle_ready(target):
  target=pathlib.Path(target)
@@ -184,17 +188,23 @@ def bundle_ready(target):
  except FileNotFoundError: return False
  if stat.S_ISLNK(state.st_mode) or not stat.S_ISDIR(state.st_mode) or state.st_uid!=0 or stat.S_IMODE(state.st_mode)&0o022: fail("existing receiver bundle directory is unsafe")
  allowed={"run_receiver.py","signing-public.key","scripts/emergency_ir_object_storage_manifest.py","scripts/emergency_ir_object_storage_receiver.py","scripts/emergency_ir_standalone_activate.py"}
- actual={str(item.relative_to(target)) for item in target.rglob("*") if item.is_file()}
- if actual!=allowed: fail("existing receiver bundle is incomplete")
+ actual=set(); directories=set()
+ for item in target.rglob("*"):
+  member=item.lstat(); relative=str(item.relative_to(target))
+  if stat.S_ISLNK(member.st_mode): fail("existing receiver bundle member is unsafe")
+  if stat.S_ISDIR(member.st_mode): directories.add(relative); continue
+  if not stat.S_ISREG(member.st_mode): fail("existing receiver bundle member is unsafe")
+  actual.add(relative)
+ if actual!=allowed or directories!={"scripts"}: fail("existing receiver bundle is incomplete")
  for name in allowed:
   item=target/name; member=item.lstat()
-  if stat.S_ISLNK(member.st_mode) or not stat.S_ISREG(member.st_mode) or member.st_uid!=0 or stat.S_IMODE(member.st_mode)&0o077: fail("existing receiver bundle member is unsafe")
+  if stat.S_ISLNK(member.st_mode) or not stat.S_ISREG(member.st_mode) or member.st_uid!=0 or member.st_nlink!=1 or stat.S_IMODE(member.st_mode)!=0o600: fail("existing receiver bundle member is unsafe")
  return True
 def extract_bundle(bundle,target):
  allowed={"run_receiver.py","signing-public.key","scripts/emergency_ir_object_storage_manifest.py","scripts/emergency_ir_object_storage_receiver.py","scripts/emergency_ir_standalone_activate.py"}
  if bundle_ready(target): return
- temporary=target.with_name("."+target.name+"."+str(os.getpid())+".extract")
- secure_dir(temporary)
+ try: target.mkdir(mode=0o700)
+ except FileExistsError: fail("refusing to overwrite receiver bundle directory")
  with tarfile.open(bundle,"r:gz") as archive:
   members=archive.getmembers()
   if {member.name for member in members}!=allowed or len(members)!=len(allowed): fail("bootstrap bundle layout is invalid")
@@ -202,15 +212,14 @@ def extract_bundle(bundle,target):
    if not member.isreg() or member.issym() or member.size<1 or member.size>1048576: fail("bootstrap bundle member is unsafe")
    payload=archive.extractfile(member)
    if payload is None: fail("bootstrap bundle member is unreadable")
-   destination=temporary/member.name; secure_dir(destination.parent)
+   destination=target/member.name; secure_dir(destination.parent)
    with destination.open("xb") as output:
     while True:
      chunk=payload.read(65536)
      if not chunk: break
      output.write(chunk)
    os.chmod(destination,0o600)
- try: os.rename(temporary,target)
- except FileExistsError: fail("refusing to overwrite receiver bundle directory")
+ if not bundle_ready(target): fail("receiver bundle extraction is incomplete")
 def bundled_key_id(path):
  try:
   encoded=pathlib.Path(path).read_bytes().decode("ascii").strip()
@@ -228,7 +237,7 @@ if re.fullmatch(r"[a-f0-9]{64}",bundle_provenance_hash) is None or not 1<=bundle
 if re.fullmatch(r"ed25519-sha256:[a-f0-9]{64}",expected_signer_key_id) is None: fail("bootstrap signer key identity is invalid")
 if bundle_hash!=bundle_provenance_hash or bundle_bytes!=bundle_provenance_bytes: fail("receiver bundle differs from descriptor provenance")
 campaign_root=root/campaign; secure_dir(campaign_root)
-bundle=campaign_root/"receiver.tar.gz"; sealed=campaign_root/"sealed-manifest.json"; urlmap=campaign_root/"presigned-urls.json"; receiver=campaign_root/("receiver-"+bundle_hash[:16])
+bundle=campaign_root/"receiver.tar.gz"; sealed=campaign_root/"sealed-manifest.json"; urlmap=campaign_root/"presigned-urls.json"; receiver=campaign_root/("receiver-"+bundle_hash)
 fetch(bundle_url,bundle_hash,bundle_bytes,bundle); fetch(manifest_url,manifest_hash,manifest_bytes,sealed); fetch(urlmap_url,urlmap_hash,urlmap_bytes,urlmap); extract_bundle(bundle,receiver)
 if bundled_key_id(receiver/"signing-public.key")!=expected_signer_key_id: fail("receiver bundle signing public key does not match descriptor")
 result=subprocess.run(["/usr/bin/python3","-I","-B",str(receiver/"run_receiver.py"),"--manifest",str(sealed),"--signing-public-key",str(receiver/"signing-public.key"),"--url-map",str(urlmap),"--expected-publisher-source-revision",source_revision,"--expected-receiver-bundle-sha256",bundle_provenance_hash,"--expected-receiver-bundle-bytes",str(bundle_provenance_bytes),"--expected-signer-key-id",expected_signer_key_id],capture_output=True,text=True,timeout=7200)

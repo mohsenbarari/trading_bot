@@ -218,17 +218,23 @@ class EmergencyIrObjectStorageReceiverTests(unittest.TestCase):
                 encoding="ascii",
             )
             public_key_path.chmod(0o600)
-            expected = dict(self.plan["bootstrap_provenance"])
-            expected["receiver_bundle_sha256"] = "f" * 64
-            with patch.object(receiver, "_download_ciphertext") as download:
-                with self.assertRaisesRegex(receiver.EmergencyReceiverError, "bootstrap provenance differs"):
-                    receiver.receive(
-                        manifest_path=manifest_path,
-                        signing_public_key=public_key_path,
-                        url_map_path=root / "not-read.json",
-                        expected_bootstrap_provenance=expected,
-                    )
-            download.assert_not_called()
+            for label, replacement in (
+                ("publisher revision", {"publisher_source_revision": "c" * 40}),
+                ("receiver bundle", {"receiver_bundle_sha256": "f" * 64}),
+                ("signer key", {"signer_key_id": "ed25519-sha256:" + "f" * 64}),
+            ):
+                with self.subTest(field=label):
+                    expected = dict(self.plan["bootstrap_provenance"])
+                    expected.update(replacement)
+                    with patch.object(receiver, "_download_ciphertext") as download:
+                        with self.assertRaisesRegex(receiver.EmergencyReceiverError, "bootstrap provenance differs"):
+                            receiver.receive(
+                                manifest_path=manifest_path,
+                                signing_public_key=public_key_path,
+                                url_map_path=root / "not-read.json",
+                                expected_bootstrap_provenance=expected,
+                            )
+                    download.assert_not_called()
 
 
 if __name__ == "__main__":

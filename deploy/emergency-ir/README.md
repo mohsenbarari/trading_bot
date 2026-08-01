@@ -102,6 +102,15 @@ a generic proxy.
    bucket.  The sealed manifest binds exactly the encrypted image bundle,
    package tar, database snapshot, and settings tar to immutable VersionIds,
    hashes, the WA-IR age recipient, and allowlisted Emergency inbox paths.
+   Run the controller-side publisher, receiver-bundle builder, and release
+   package builder only through `/usr/bin/python3 -I -B`. Their real CLI modes
+   reject ambient Python import state. The publisher renders its executable
+   receiver bundle from immutable Git blobs of one captured revision, refuses
+   proxy/CA overrides, and pins sealed artifacts to the fixed WA-IR recipient
+   `age1hxt7paq6kp3cr4ey6tp0ne2dpvmz7az9h7jh09vfr9gpsm30fa7qa8zmkt`.
+   Its dry run prints that non-secret recipient plus the full confirmation
+   scope (bundle provenance and artifact hashes/sizes) before an apply can be
+   approved.
 2. Verify the manifest with its pinned Ed25519 public key before downloading.
    Verify ciphertext and plaintext hashes after download/decryption.
 3. Load images, render a fresh root-only runtime environment locally, restore

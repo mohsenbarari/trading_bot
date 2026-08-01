@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import importlib.util
+import io
 from pathlib import Path
 import stat
 import subprocess
@@ -9,6 +10,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -57,6 +59,7 @@ class BuildEmergencyIrReceiverBundleTests(unittest.TestCase):
                     {member.name for member in archive.getmembers()},
                     {target for _, target in bundle.BUNDLE_MEMBERS} | {"signing-public.key"},
                 )
+                self.assertNotIn("scripts/__init__.py", {member.name for member in archive.getmembers()})
                 self.assertTrue(all(member.isreg() for member in archive.getmembers()))
 
     def test_refuses_to_overwrite_a_bundle(self) -> None:
@@ -68,6 +71,36 @@ class BuildEmergencyIrReceiverBundleTests(unittest.TestCase):
             bundle.build_bundle(signing_public_key=public_key, output=output)
             with self.assertRaisesRegex(bundle.ReceiverBundleError, "overwrite"):
                 bundle.build_bundle(signing_public_key=public_key, output=output)
+
+    def test_bundle_reads_committed_blobs_not_a_mutable_checkout_path(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-receiver-source-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            repository = root / "repository"
+            source = repository / "scripts" / "bootstrap.py"
+            source.parent.mkdir(parents=True)
+            source.write_text("committed source\n", encoding="utf-8")
+            source.chmod(0o600)
+            subprocess.run(["git", "init", "-q", str(repository)], check=True)
+            subprocess.run(["git", "-C", str(repository), "config", "user.email", "test@example.invalid"], check=True)
+            subprocess.run(["git", "-C", str(repository), "config", "user.name", "Emergency Test"], check=True)
+            subprocess.run(["git", "-C", str(repository), "add", "scripts/bootstrap.py"], check=True)
+            subprocess.run(["git", "-C", str(repository), "commit", "-qm", "fixture"], check=True)
+            revision = subprocess.check_output(
+                ["git", "-C", str(repository), "rev-parse", "HEAD"], text=True
+            ).strip()
+            source.write_text("mutable replacement\n", encoding="utf-8")
+            source.chmod(0o600)
+            with (
+                patch.object(bundle, "REPO_ROOT", repository),
+                patch.object(bundle, "BUNDLE_MEMBERS", (("scripts/bootstrap.py", "scripts/bootstrap.py"),)),
+            ):
+                payload = bundle.render_bundle(
+                    signing_public_key=self.public_key(root), source_revision=revision
+                )
+            with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
+                bundled = archive.extractfile("scripts/bootstrap.py").read()
+            self.assertEqual(bundled, b"committed source\n")
 
     def test_entrypoint_runs_with_the_same_isolated_python_flag_as_wa_ir_bootstrap(self) -> None:
         result = subprocess.run(
@@ -87,11 +120,21 @@ class BuildEmergencyIrReceiverBundleTests(unittest.TestCase):
         self.assertIn("--signing-public-key", result.stdout)
         self.assertNotIn("--repo", result.stdout)
 
-    def test_builder_entrypoint_is_directly_invocable_from_the_repository_root(self) -> None:
-        result = subprocess.run(
+    def test_builder_entrypoint_requires_the_isolated_direct_script_contract(self) -> None:
+        plain = subprocess.run(
             [sys.executable, str(MODULE_PATH), "--help"],
             cwd=REPO_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(plain.returncode, 2)
+        self.assertIn("-I -B", plain.stderr)
 
+        result = subprocess.run(
+            [sys.executable, "-I", "-B", str(MODULE_PATH), "--help"],
+            cwd=REPO_ROOT,
             check=False,
             capture_output=True,
             text=True,
@@ -99,6 +142,55 @@ class BuildEmergencyIrReceiverBundleTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--signing-public-key", result.stdout)
+
+    def test_isolated_entrypoints_ignore_an_ambient_scripts_regular_package(self) -> None:
+        """An implicit namespace must not be shadowed by a system-site package."""
+
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-ambient-scripts-") as raw:
+            root = Path(raw)
+            ambient = root / "ambient"
+            package = ambient / "scripts"
+            package.mkdir(parents=True)
+            (package / "__init__.py").write_text(
+                "raise RuntimeError('ambient scripts initializer executed')\n", encoding="utf-8"
+            )
+            code = (
+                "import runpy, sys; "
+                f"sys.path.append({str(ambient)!r}); "
+                f"runpy.run_path({str(MODULE_PATH)!r}, run_name='__main__')"
+            )
+            result = subprocess.run(
+                [sys.executable, "-I", "-B", "-c", code, "--help"],
+                cwd=REPO_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("--signing-public-key", result.stdout)
+
+            for entrypoint, expected_option in (
+                (REPO_ROOT / "deploy/emergency-ir/run_object_storage_receiver.py", "--signing-public-key"),
+                (REPO_ROOT / "scripts/emergency_ir_object_storage_receiver.py", "--signing-public-key"),
+                (REPO_ROOT / "scripts/emergency_ir_standalone_activate.py", "--stage"),
+            ):
+                with self.subTest(entrypoint=entrypoint.name):
+                    code = (
+                        "import runpy, sys; "
+                        f"sys.path.append({str(ambient)!r}); "
+                        f"runpy.run_path({str(entrypoint)!r}, run_name='__main__')"
+                    )
+                    result = subprocess.run(
+                        [sys.executable, "-I", "-B", "-c", code, "--help"],
+                        cwd=REPO_ROOT,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn(expected_option, result.stdout)
 
     def test_activator_runs_with_isolated_python_from_the_pinned_bundle_layout(self) -> None:
         result = subprocess.run(

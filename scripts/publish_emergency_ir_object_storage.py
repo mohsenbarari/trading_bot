@@ -25,12 +25,14 @@ The CLI rejects a non-isolated interpreter before parsing a campaign.
 
 from __future__ import annotations
 
+import hmac
 import os
 from pathlib import Path
 import re
 import stat
 import subprocess
 import sys
+import types
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 # The fetched receiver bundle executes on WA-IR as root.  It must therefore be
@@ -46,6 +48,9 @@ PUBLISHER_SOURCE_PATHS = (
     "scripts/emergency_ir_standalone_activate.py",
 )
 GIT_REVISION_RE = re.compile(r"^(?:[a-f0-9]{40}|[a-f0-9]{64})$", re.ASCII)
+MAX_BOOTSTRAP_SOURCE_BYTES = 4 * 1024 * 1024
+WA_IR_AGE_RECIPIENT = "age1hxt7paq6kp3cr4ey6tp0ne2dpvmz7az9h7jh09vfr9gpsm30fa7qa8zmkt"
+WA_IR_AGE_RECIPIENT_KEY_ID = "age-recipient-sha256:8ab221e2abb62642e85960a38ba07f2de379d1744c222a44efcc922cf435418d"
 
 
 class EmergencyPublisherError(RuntimeError):
@@ -108,8 +113,99 @@ def _run_publisher_git(*arguments: str) -> str:
     return completed.stdout
 
 
-def _assert_preimport_scripts_surface(*, repo_root: Path = REPO_ROOT) -> None:
-    """Reject a package initializer that could execute before provenance checks.
+def _publisher_head_blob(*, revision: str, relative: str) -> bytes:
+    """Read one bounded bootstrap source blob from the captured revision."""
+
+    try:
+        completed = subprocess.run(
+            [
+                "/usr/bin/git",
+                "-c",
+                "core.fsmonitor=false",
+                "-c",
+                "core.untrackedCache=false",
+                "-c",
+                "core.preloadIndex=false",
+                "-c",
+                f"core.worktree={REPO_ROOT}",
+                "-C",
+                str(REPO_ROOT),
+                "show",
+                f"{revision}:{relative}",
+            ],
+            capture_output=True,
+            check=False,
+            env=_publisher_git_environment(),
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise EmergencyPublisherError("publisher source provenance cannot be inspected") from exc
+    if completed.returncode != 0 or not 1 <= len(completed.stdout) <= MAX_BOOTSTRAP_SOURCE_BYTES:
+        _fail("publisher bootstrap source blob is unavailable at its fixed revision")
+    return bytes(completed.stdout)
+
+
+def _source_file_identity(value: os.stat_result) -> tuple[int, int, int, int, int, int, int]:
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_mode,
+        value.st_uid,
+        value.st_gid,
+        value.st_nlink,
+        value.st_size,
+    )
+
+
+def _read_publisher_worktree_blob(relative: str) -> bytes:
+    """Read only a stable, owner-controlled executable bootstrap source file."""
+
+    path = REPO_ROOT / relative
+    try:
+        before = path.lstat()
+    except OSError as exc:
+        raise EmergencyPublisherError("publisher bootstrap source cannot be inspected") from exc
+    if (
+        stat.S_ISLNK(before.st_mode)
+        or not stat.S_ISREG(before.st_mode)
+        or before.st_uid != os.geteuid()
+        or before.st_nlink != 1
+        or stat.S_IMODE(before.st_mode) & 0o022
+        or not 1 <= before.st_size <= MAX_BOOTSTRAP_SOURCE_BYTES
+    ):
+        _fail("publisher bootstrap source is not one bounded owner-controlled regular file")
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        opened = os.fstat(descriptor)
+        if _source_file_identity(opened) != _source_file_identity(before):
+            _fail("publisher bootstrap source changed while being opened")
+        payload = bytearray()
+        while len(payload) <= MAX_BOOTSTRAP_SOURCE_BYTES:
+            chunk = os.read(descriptor, min(65536, MAX_BOOTSTRAP_SOURCE_BYTES + 1 - len(payload)))
+            if not chunk:
+                break
+            payload.extend(chunk)
+        after = os.fstat(descriptor)
+        if (
+            len(payload) != opened.st_size
+            or len(payload) > MAX_BOOTSTRAP_SOURCE_BYTES
+            or _source_file_identity(after) != _source_file_identity(opened)
+        ):
+            _fail("publisher bootstrap source changed while being read")
+        return bytes(payload)
+    except OSError as exc:
+        raise EmergencyPublisherError("publisher bootstrap source cannot be read") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _assert_preimport_scripts_surface(*, repo_root: Path = REPO_ROOT) -> Path:
+    """Return one safe implicit namespace before importing any ``scripts`` code.
 
     ``scripts`` is intentionally an implicit namespace package in this
     bootstrap.  An untracked ``scripts/__init__.py`` would otherwise execute
@@ -125,6 +221,7 @@ def _assert_preimport_scripts_surface(*, repo_root: Path = REPO_ROOT) -> None:
     if (
         stat.S_ISLNK(directory.st_mode)
         or not stat.S_ISDIR(directory.st_mode)
+        or directory.st_uid != os.geteuid()
         or stat.S_IMODE(directory.st_mode) & 0o022
     ):
         _fail("publisher scripts directory is not a safe import surface")
@@ -132,14 +229,41 @@ def _assert_preimport_scripts_surface(*, repo_root: Path = REPO_ROOT) -> None:
     try:
         initializer.lstat()
     except FileNotFoundError:
-        return
+        return scripts_root
     except OSError as exc:
         raise EmergencyPublisherError("publisher scripts package initializer cannot be inspected") from exc
     _fail("publisher source contains an unsupported scripts package initializer")
 
 
+def _install_pinned_scripts_namespace(*, repo_root: Path = REPO_ROOT) -> None:
+    """Prevent a later regular ``scripts`` package from shadowing this checkout.
+
+    An implicit namespace directory in ``repo_root`` by itself is not enough:
+    Python can keep searching ``sys.path`` and select a regular package from a
+    system site directory.  Install one synthetic namespace only after the
+    local directory and initializer boundary have been verified.
+    """
+
+    scripts_root = _assert_preimport_scripts_surface(repo_root=repo_root)
+    expected = str(scripts_root)
+    present = sys.modules.get("scripts")
+    if present is not None:
+        paths = getattr(present, "__path__", None)
+        if (
+            getattr(present, "__file__", None) is not None
+            or paths is None
+            or [str(item) for item in paths] != [expected]
+        ):
+            _fail("publisher scripts namespace was preloaded from an ambient path")
+        return
+    namespace = types.ModuleType("scripts")
+    namespace.__package__ = "scripts"
+    namespace.__path__ = [expected]  # type: ignore[attr-defined]
+    sys.modules["scripts"] = namespace
+
+
 def _fixed_publisher_source_revision() -> str:
-    """Return the current revision only after the entire checkout is clean."""
+    """Return the revision only if executable bootstrap bytes equal it exactly."""
 
     observed_root = Path(_run_publisher_git("rev-parse", "--show-toplevel").strip())
     try:
@@ -158,6 +282,15 @@ def _fixed_publisher_source_revision() -> str:
     revision = _run_publisher_git("rev-parse", "--verify", "HEAD^{commit}").strip()
     if GIT_REVISION_RE.fullmatch(revision) is None:
         _fail("publisher source revision is unsafe")
+    # ``git status`` can be made to ignore a changed ``skip-worktree`` file.
+    # Compare every actual executable source byte with the captured immutable
+    # Git object instead; the source revision in signed provenance then cannot
+    # describe a different bundle input.
+    for relative in PUBLISHER_SOURCE_PATHS:
+        expected = _publisher_head_blob(revision=revision, relative=relative)
+        actual = _read_publisher_worktree_blob(relative)
+        if not hmac.compare_digest(actual, expected):
+            _fail("publisher bootstrap source differs from its fixed revision")
     return revision
 
 
@@ -171,7 +304,7 @@ def _require_isolated_cli() -> None:
 # This guard must run before every import from ``scripts``.  The actual
 # revision is deliberately derived only after both its filesystem and Git
 # boundaries have been validated.
-_assert_preimport_scripts_surface()
+_install_pinned_scripts_namespace()
 if __name__ == "__main__":
     try:
         _require_isolated_cli()
@@ -188,11 +321,8 @@ import json
 from typing import Any, BinaryIO, Callable, Mapping
 from urllib.parse import parse_qs, quote, urlsplit
 
-# The guarded CLI is a direct, isolated script invocation.  It adds only this
-# fixed checked-out root, after the pre-import source checks above, so bundled
-# helper imports cannot inherit a caller-provided ``PYTHONPATH``.
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+# The pinned namespace above is the only admissible ``scripts`` source.  Do
+# not leave implicit-namespace resolution to arbitrary system-site paths.
 
 from scripts import build_emergency_ir_receiver_bundle as receiver_bundle
 from scripts import emergency_ir_object_storage_manifest as manifest
@@ -493,6 +623,7 @@ def _bootstrap_provenance(*, signing_public_key_path: Path) -> BootstrapProvenan
     try:
         bundle_sha256, bundle_bytes = receiver_bundle.bundle_digest(
             signing_public_key=signing_public_key_path,
+            source_revision=source_revision,
         )
     except receiver_bundle.ReceiverBundleError as exc:
         raise EmergencyPublisherError("pinned-key receiver bootstrap bundle cannot be preflighted") from exc
@@ -610,6 +741,8 @@ def load_publish_plan(path: Path) -> PublishPlan:
         )
     except manifest.EmergencyManifestError as exc:
         raise EmergencyPublisherError("Emergency publish plan does not satisfy the sealed manifest contract") from exc
+    if normalized["destination_age_recipient_key_id"] != WA_IR_AGE_RECIPIENT_KEY_ID:
+        _fail("Emergency publish plan must use the fixed WA-IR age recipient")
     return PublishPlan(
         campaign_id=str(normalized["campaign_id"]),
         bucket=str(normalized["bucket"]),
@@ -634,6 +767,7 @@ def _plan_identity(
         "bucket": plan.bucket,
         "prefix": plan.prefix,
         "created_at": plan.created_at,
+        "destination_age_recipient": WA_IR_AGE_RECIPIENT,
         "destination_age_recipient_key_id": plan.destination_age_recipient_key_id,
         "bootstrap_provenance": bootstrap_provenance.as_manifest(),
         "presigned_ttl_seconds": ttl_seconds,
@@ -661,6 +795,38 @@ def confirmation_phrase(
         f"publish-emergency-ir:{plan.campaign_id}:"
         f"{_plan_identity(plan, bootstrap_provenance=bootstrap_provenance, ttl_seconds=ttl_seconds)}"
     )
+
+
+def _confirmation_scope(
+    plan: PublishPlan,
+    *,
+    bootstrap_provenance: BootstrapProvenance,
+    ttl_seconds: int,
+) -> dict[str, Any]:
+    """Return the non-secret exact facts a human approval is binding."""
+
+    return {
+        "source_site": manifest.SOURCE_SITE,
+        "destination_site": manifest.DESTINATION_SITE,
+        "campaign_id": plan.campaign_id,
+        "bucket": plan.bucket,
+        "prefix": plan.prefix,
+        "created_at": plan.created_at,
+        "presigned_ttl_seconds": ttl_seconds,
+        "destination_age_recipient": WA_IR_AGE_RECIPIENT,
+        "destination_age_recipient_key_id": plan.destination_age_recipient_key_id,
+        "bootstrap": bootstrap_provenance.as_manifest(),
+        "artifacts": [
+            {
+                "kind": item.kind,
+                "plaintext_sha256": item.plaintext_sha256,
+                "plaintext_bytes": item.plaintext_bytes,
+                "ciphertext_sha256": item.ciphertext_sha256,
+                "ciphertext_bytes": item.ciphertext_bytes,
+            }
+            for item in plan.artifacts
+        ],
+    }
 
 
 def _verify_local_ciphertext(descriptor: ArtifactDescriptor) -> VerifiedLocalArtifact:
@@ -1257,6 +1423,7 @@ def publish(
         receiver_bundle.build_bundle(
             signing_public_key=signing_public_key_path,
             output=outputs.receiver_bundle,
+            source_revision=bootstrap_provenance.publisher_source_revision,
         )
     except receiver_bundle.ReceiverBundleError as exc:
         raise EmergencyPublisherError("pinned-key receiver bootstrap bundle cannot be built") from exc
@@ -1477,6 +1644,11 @@ def execute(
             "payload_transport": "private-arvan-object-storage-only",
             "required_confirmation": expected_confirmation,
             "bootstrap_provenance": bootstrap_provenance.as_manifest(),
+            "confirmation_scope": _confirmation_scope(
+                plan,
+                bootstrap_provenance=bootstrap_provenance,
+                ttl_seconds=args.ttl_seconds,
+            ),
         }
     if args.confirm != expected_confirmation:
         _fail("Emergency Object Storage publish confirmation mismatch")

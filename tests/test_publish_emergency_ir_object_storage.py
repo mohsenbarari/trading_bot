@@ -34,7 +34,7 @@ from scripts import run_emergency_ir_object_storage_receive as receiver_bootstra
 
 
 CAMPAIGN_ID = "20260801T213000Z-emergency-ir-publish"
-RECIPIENT_KEY_ID = "age-recipient-sha256:" + "b" * 64
+RECIPIENT_KEY_ID = "age-recipient-sha256:8ab221e2abb62642e85960a38ba07f2de379d1744c222a44efcc922cf435418d"
 
 
 class FakeClientError(RuntimeError):
@@ -194,9 +194,15 @@ class FakeS3:
 
 
 class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
-    def bootstrap_provenance(self, public_key: Path, *, revision: str = "a" * 40) -> publisher.BootstrapProvenance:
+    def bootstrap_provenance(
+        self, public_key: Path, *, revision: str | None = None
+    ) -> publisher.BootstrapProvenance:
+        revision = revision or subprocess.check_output(
+            ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"], text=True
+        ).strip()
         bundle_sha256, bundle_bytes = publisher.receiver_bundle.bundle_digest(
             signing_public_key=public_key,
+            source_revision=revision,
         )
         return publisher.BootstrapProvenance(
             publisher_source_revision=revision,
@@ -334,6 +340,16 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
                 ),
             )
             self.assertEqual(result["bootstrap_provenance"], provenance.as_manifest())
+            scope = result["confirmation_scope"]
+            self.assertEqual(scope["campaign_id"], CAMPAIGN_ID)
+            self.assertEqual(scope["destination_age_recipient"], publisher.WA_IR_AGE_RECIPIENT)
+            self.assertEqual(scope["destination_age_recipient_key_id"], RECIPIENT_KEY_ID)
+            self.assertEqual(scope["bootstrap"], provenance.as_manifest())
+            self.assertEqual(
+                [item["ciphertext_sha256"] for item in scope["artifacts"]],
+                [item.ciphertext_sha256 for item in plan.artifacts],
+            )
+            self.assertNotIn("ciphertext_path", json.dumps(scope))
 
     def test_preflight_pins_checkout_revision_and_exact_bundle_digest(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:
@@ -348,10 +364,84 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
                 text=True,
                 timeout=30,
             ).stdout.strip()
-            digest, size = publisher.receiver_bundle.bundle_digest(signing_public_key=public)
+            digest, size = publisher.receiver_bundle.bundle_digest(
+                signing_public_key=public,
+                source_revision=revision,
+            )
             self.assertEqual(provenance.publisher_source_revision, revision)
             self.assertEqual(provenance.receiver_bundle_sha256, digest)
             self.assertEqual(provenance.receiver_bundle_bytes, size)
+            self.assertIn("scripts/emergency_ir_standalone_activate.py", publisher.PUBLISHER_SOURCE_PATHS)
+            self.assertNotIn("scripts/__init__.py", publisher.PUBLISHER_SOURCE_PATHS)
+
+    def test_publish_plan_rejects_any_non_wa_ir_age_recipient(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-recipient-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            plan_path, _plan = self.write_plan(root)
+            payload = json.loads(plan_path.read_text(encoding="utf-8"))
+            payload["destination_age_recipient_key_id"] = "age-recipient-sha256:" + "f" * 64
+            plan_path.write_text(json.dumps(payload), encoding="utf-8")
+            plan_path.chmod(0o600)
+            with self.assertRaisesRegex(publisher.EmergencyPublisherError, "fixed WA-IR age recipient"):
+                publisher.load_publish_plan(plan_path)
+
+    def test_preflight_rejects_a_skip_worktree_bootstrap_source_substitution(self) -> None:
+        """A clean-looking Git status must not falsify executable provenance."""
+
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-source-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            repository = root / "repository"
+            source = repository / "scripts" / "trusted.py"
+            source.parent.mkdir(parents=True)
+            source.write_text("committed source\n", encoding="utf-8")
+            source.chmod(0o600)
+            subprocess.run(["git", "init", "-q", str(repository)], check=True)
+            subprocess.run(["git", "-C", str(repository), "config", "user.email", "test@example.invalid"], check=True)
+            subprocess.run(["git", "-C", str(repository), "config", "user.name", "Emergency Test"], check=True)
+            subprocess.run(["git", "-C", str(repository), "add", "scripts/trusted.py"], check=True)
+            subprocess.run(["git", "-C", str(repository), "commit", "-qm", "fixture"], check=True)
+            subprocess.run(
+                ["git", "-C", str(repository), "update-index", "--skip-worktree", "scripts/trusted.py"],
+                check=True,
+            )
+            source.write_text("substituted source\n", encoding="utf-8")
+            source.chmod(0o600)
+            status = subprocess.run(
+                ["git", "-C", str(repository), "status", "--porcelain=v1", "--", "scripts/trusted.py"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(status.stdout, "")
+            with (
+                patch.object(publisher, "REPO_ROOT", repository),
+                patch.object(publisher, "PUBLISHER_SOURCE_PATHS", ("scripts/trusted.py",)),
+            ):
+                with self.assertRaisesRegex(publisher.EmergencyPublisherError, "differs from its fixed revision"):
+                    publisher._fixed_publisher_source_revision()
+
+    def test_preflight_uses_one_captured_revision_for_every_head_blob(self) -> None:
+        revision = "a" * 40
+        head_blob = Mock(return_value=b"trusted source\n")
+        with (
+            patch.object(publisher, "PUBLISHER_SOURCE_PATHS", ("scripts/trusted.py",)),
+            patch.object(
+                publisher,
+                "_run_publisher_git",
+                side_effect=(
+                    f"{REPO_ROOT}\n",
+                    "scripts/trusted.py\n",
+                    "",
+                    revision + "\n",
+                ),
+            ),
+            patch.object(publisher, "_publisher_head_blob", head_blob),
+            patch.object(publisher, "_read_publisher_worktree_blob", return_value=b"trusted source\n"),
+        ):
+            self.assertEqual(publisher._fixed_publisher_source_revision(), revision)
+        head_blob.assert_called_once_with(revision=revision, relative="scripts/trusted.py")
 
     def test_preimport_guard_rejects_an_untracked_scripts_initializer(self) -> None:
         """A package initializer would execute before a later ``from scripts`` import."""
@@ -453,7 +543,7 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             factory.assert_not_called()
             self.assertFalse(any(path.exists() for path in dataclasses.astuple(outputs)))
 
-    def test_same_confirmation_rejects_substituted_receiver_bundle_provenance(self) -> None:
+    def test_same_confirmation_rejects_any_substituted_bootstrap_provenance_fact(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:
             root = Path(raw)
             root.chmod(0o700)
@@ -461,29 +551,43 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             private, public = self.write_keypair(root)
             outputs = self.outputs(root)
             original = self.bootstrap_provenance(public)
-            substituted = dataclasses.replace(original, receiver_bundle_sha256="f" * 64)
             confirmation = publisher.confirmation_phrase(
                 plan,
                 bootstrap_provenance=original,
                 ttl_seconds=300,
             )
-            factory = Mock(side_effect=AssertionError("provenance mismatch must precede client construction"))
-            with patch.object(publisher, "_bootstrap_provenance", return_value=substituted):
-                with self.assertRaisesRegex(publisher.EmergencyPublisherError, "confirmation"):
-                    publisher.execute(
-                        self.arguments(
-                            plan=plan_path,
-                            private=private,
-                            public=public,
-                            outputs=outputs,
-                            apply=True,
-                            confirm=confirmation,
-                            credentials=root / "credentials.json",
+            for label, replacement in (
+                ("publisher revision", {"publisher_source_revision": "c" * 40}),
+                ("receiver bundle", {"receiver_bundle_sha256": "f" * 64}),
+                ("signer key", {"signer_key_id": "ed25519-sha256:" + "f" * 64}),
+            ):
+                with self.subTest(field=label):
+                    substituted = dataclasses.replace(original, **replacement)
+                    self.assertNotEqual(
+                        publisher.confirmation_phrase(
+                            plan,
+                            bootstrap_provenance=substituted,
+                            ttl_seconds=300,
                         ),
-                        client_factory=factory,
+                        confirmation,
                     )
-            factory.assert_not_called()
-            self.assertFalse(any(path.exists() for path in dataclasses.astuple(outputs)))
+                    factory = Mock(side_effect=AssertionError("provenance mismatch must precede client construction"))
+                    with patch.object(publisher, "_bootstrap_provenance", return_value=substituted):
+                        with self.assertRaisesRegex(publisher.EmergencyPublisherError, "confirmation"):
+                            publisher.execute(
+                                self.arguments(
+                                    plan=plan_path,
+                                    private=private,
+                                    public=public,
+                                    outputs=outputs,
+                                    apply=True,
+                                    confirm=confirmation,
+                                    credentials=root / "credentials.json",
+                                ),
+                                client_factory=factory,
+                            )
+                    factory.assert_not_called()
+                    self.assertFalse(any(path.exists() for path in dataclasses.astuple(outputs)))
 
     def test_publisher_cli_rejects_a_caller_selected_repository(self) -> None:
         stderr = io.StringIO()
@@ -740,6 +844,30 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
         self.assertEqual(isolated.returncode, 0, isolated.stderr)
         self.assertIn("--apply", isolated.stdout)
         self.assertNotIn("--repo", isolated.stdout)
+
+    def test_publisher_ignores_an_ambient_scripts_regular_package(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-ambient-scripts-") as raw:
+            root = Path(raw)
+            ambient = root / "ambient" / "scripts"
+            ambient.mkdir(parents=True)
+            (ambient / "__init__.py").write_text(
+                "raise RuntimeError('ambient scripts initializer executed')\n", encoding="utf-8"
+            )
+            code = (
+                "import runpy, sys; "
+                f"sys.path.append({str(ambient.parent)!r}); "
+                f"runpy.run_path({str(REPO_ROOT / 'scripts/publish_emergency_ir_object_storage.py')!r}, run_name='__main__')"
+            )
+            result = subprocess.run(
+                [sys.executable, "-I", "-B", "-c", code, "--help"],
+                cwd=REPO_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("--apply", result.stdout)
 
     def test_client_rejects_proxy_environment_before_reading_credentials(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:

@@ -31,17 +31,56 @@ import subprocess
 import sys
 import tarfile
 import time
+import types
 from typing import Any, Callable, Iterable, Mapping, Sequence
 from urllib.error import URLError
 from urllib.request import ProxyHandler, Request, build_opener
 
 
-# The bootstrap bundle executes this module with ``scripts`` one directory
-# below sys.path.  The installed package uses the same layout.  Do not rely on
-# the caller's current directory for a security boundary.
 MODULE_ROOT = Path(__file__).resolve().parents[1]
-if str(MODULE_ROOT) not in sys.path:
-    sys.path.insert(0, str(MODULE_ROOT))
+
+
+def _install_pinned_scripts_namespace() -> None:
+    """Resolve ``scripts`` only from the verified bundle/package root."""
+
+    scripts_root = MODULE_ROOT / "scripts"
+    try:
+        state = scripts_root.lstat()
+    except OSError as exc:
+        raise RuntimeError("Emergency activation scripts directory cannot be inspected") from exc
+    if (
+        stat.S_ISLNK(state.st_mode)
+        or not stat.S_ISDIR(state.st_mode)
+        or state.st_uid != os.geteuid()
+        or stat.S_IMODE(state.st_mode) & 0o022
+    ):
+        raise RuntimeError("Emergency activation scripts directory is not safe")
+    try:
+        (scripts_root / "__init__.py").lstat()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise RuntimeError("Emergency activation scripts initializer cannot be inspected") from exc
+    else:
+        raise RuntimeError("Emergency activation scripts initializer is unsupported")
+    expected = str(scripts_root)
+    present = sys.modules.get("scripts")
+    if present is not None:
+        paths = getattr(present, "__path__", None)
+        if (
+            getattr(present, "__file__", None) is not None
+            or paths is None
+            or [str(item) for item in paths] != [expected]
+        ):
+            raise RuntimeError("Emergency activation scripts namespace was preloaded from an ambient path")
+        return
+    namespace = types.ModuleType("scripts")
+    namespace.__package__ = "scripts"
+    namespace.__path__ = [expected]  # type: ignore[attr-defined]
+    sys.modules["scripts"] = namespace
+
+
+_install_pinned_scripts_namespace()
 
 from scripts import emergency_ir_object_storage_manifest as manifest  # noqa: E402
 
