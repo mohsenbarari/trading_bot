@@ -1913,7 +1913,12 @@ async def webapp_login(
         # Override platform to telegram_mini_app for webapp login
         device_info["platform"] = Platform.TELEGRAM_MINI_APP
         device_info["device_name"] = "Telegram Mini App"
-        login_home_server = SERVER_FOREIGN
+        # Normal deployments preserve the historical foreign WebApp session
+        # authority.  The isolated Emergency IR runtime has no peer by design;
+        # it explicitly opts in to a local Iran session authority instead.
+        login_home_server = (
+            SERVER_IRAN if settings.emergency_ir_standalone else SERVER_FOREIGN
+        )
         await assert_login_allowed_for_server(db, user, requested_server=login_home_server)
         session_result = await handle_login_session(
             db, user, refresh_token,

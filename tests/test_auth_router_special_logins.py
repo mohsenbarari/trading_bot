@@ -250,7 +250,9 @@ class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
         user = SimpleNamespace(id=7, telegram_id=123, is_deleted=False, home_server="iran")
         approval_request = SimpleNamespace(id="req-1", expires_at=datetime(2026, 1, 1, 12, 0, 0))
 
-        with patch.object(auth.settings, "bot_token", "bot-token"), patch(
+        with patch.object(auth.settings, "bot_token", "bot-token"), patch.object(
+            auth.settings, "emergency_ir_standalone", False
+        ), patch(
             "api.routers.auth.create_refresh_token",
             return_value="refresh-token",
         ), patch(
@@ -268,7 +270,9 @@ class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(handle_session_mock.await_args.kwargs["platform"], Platform.TELEGRAM_MINI_APP)
         self.assertEqual(handle_session_mock.await_args.kwargs["home_server"], auth.SERVER_FOREIGN)
 
-        with patch.object(auth.settings, "bot_token", "bot-token"), patch(
+        with patch.object(auth.settings, "bot_token", "bot-token"), patch.object(
+            auth.settings, "emergency_ir_standalone", False
+        ), patch(
             "api.routers.auth.create_refresh_token",
             return_value="refresh-token",
         ), patch(
@@ -294,7 +298,9 @@ class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-        with patch.object(auth.settings, "bot_token", "bot-token"), patch(
+        with patch.object(auth.settings, "bot_token", "bot-token"), patch.object(
+            auth.settings, "emergency_ir_standalone", False
+        ), patch(
             "api.routers.auth.create_refresh_token",
             return_value="refresh-token",
         ), patch(
@@ -308,6 +314,35 @@ class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
                 await webapp_login(WebAppLogin(init_data=init_data), raw_request=request, db=FakeDB([FakeExecuteResult(user)]))
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "Authentication failed")
+
+    async def test_webapp_login_uses_local_iran_authority_only_in_explicit_emergency_mode(self):
+        request = make_request(headers={"user-agent": "Telegram"}, host="10.0.0.8")
+        init_data = build_webapp_init_data("bot-token", {"id": 123})
+        user = SimpleNamespace(id=7, telegram_id=123, is_deleted=False, home_server="iran")
+
+        with patch.object(auth.settings, "bot_token", "bot-token"), patch.object(
+            auth.settings, "emergency_ir_standalone", True
+        ), patch(
+            "api.routers.auth.create_refresh_token", return_value="refresh-token"
+        ), patch(
+            "api.routers.auth.assert_login_allowed_for_server", new=AsyncMock()
+        ) as authority_mock, patch(
+            "api.routers.auth.handle_login_session",
+            new=AsyncMock(return_value={"action": "ok", "session": SimpleNamespace(id="session-1")}),
+        ) as handle_session_mock, patch(
+            "api.routers.auth.create_access_token", return_value="access-token"
+        ) as access_mock:
+            result = await webapp_login(
+                WebAppLogin(init_data=init_data),
+                raw_request=request,
+                db=FakeDB([FakeExecuteResult(user)]),
+            )
+
+        authority_mock.assert_awaited_once()
+        self.assertEqual(authority_mock.await_args.kwargs["requested_server"], auth.SERVER_IRAN)
+        self.assertEqual(handle_session_mock.await_args.kwargs["home_server"], auth.SERVER_IRAN)
+        access_mock.assert_called_once_with(subject=7, session_id="session-1", server_id=auth.SERVER_IRAN)
+        self.assertEqual(result["access_token"], "access-token")
 
     async def test_webapp_login_returns_blocked_for_inactive_accounts(self):
         request = make_request(headers={"user-agent": "Telegram"}, host="10.0.0.8")

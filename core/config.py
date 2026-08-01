@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     sync_parity_status_max_age_seconds: int = 900
     sync_watermark_strict_mode: bool = False
     environment: str = "production"
+    # Emergency-only opt-in.  This is false for every normal production,
+    # staging, and three-site runtime; the dedicated IR standalone image uses
+    # it solely to keep Telegram WebApp session authority local after an Iran
+    # connectivity cut.
+    emergency_ir_standalone: bool = False
     release_sha: str | None = None
     log_level: str = "INFO"
     log_format: str = "json"
