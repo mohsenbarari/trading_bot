@@ -15,7 +15,7 @@ agent configuration without printing any secret:
 
 ```bash
 python3 scripts/prepare_writer_witness_immutable_release.py verify-client-timing \
-  --webapp-fi-agent-config /etc/trading-bot-three-site/production-writer-lease-agent.json
+  --webapp-fi-agent-config /etc/trading-bot-three-site/production-writer-lease-agent.webapp-fi-fenced-2c08.json
 ```
 
 An old 180-second WebApp-FI client is incompatible. It must be changed and
@@ -23,6 +23,13 @@ verified before the Witness starts enforcing 60 seconds, otherwise its next
 renewal is rejected and the FI writer loses its lease. WebApp-IR is pinned by
 its promotion agent to 60/10/15 too, but its installed root-only configuration
 must be checked before a real failover drill.
+
+This timing attestation is intentionally narrower than the fenced FI
+preflight. It does not verify the signed Release-0 identity, control-release
+bytes, Compose bytes, image repository digests, or post-health runtime
+receipt. Those checks must pass through `preflight_fenced_fi_writer.py
+--phase cutover-pre` before a future controlled FI cutover can acquire a
+Writer Witness term.
 
 Prepare the transferable local package without contacting a host or Object
 Storage. The destination parent must already be a canonical, non-symlink

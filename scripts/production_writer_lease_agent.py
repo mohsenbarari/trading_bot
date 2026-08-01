@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Host-level Writer Witness lease agent for the legacy 2c08 production app.
+"""Host-level Writer Witness lease agent for the isolated three-site runtime.
 
-The normal FI writer starts only ``app`` and ``sync_worker``.  The passive
-Bot-FI observer starts nothing and may stop only its explicitly configured
-``bot``/``sync_worker`` scope.  WA-IR is deliberately different: after a
-fresh, hash-bound restore receipt it can stop only the validated no-network
-snapshot database container and start its own isolated ``db``/``redis``/``app``
-Compose project.  It never starts a legacy direct-sync worker, and a failed
-promotion returns the verified snapshot DB to its no-network warm state.
+WebApp-FI may be a writer only through the fixed ``fenced_fi_writer`` project,
+which starts exactly ``app`` and ``bot`` after an explicit cutover has observed
+the legacy scope stopped.  Generic ``writer``/``webapp_fi`` configurations are
+retired: they can select a root Compose file and revive the direct peer-sync
+worker.  WA-IR is deliberately different: after a fresh, hash-bound restore
+receipt it can stop only the validated no-network snapshot database container
+and start its own isolated ``db``/``redis``/``app`` Compose project.  It never
+starts a legacy direct-sync worker, and a failed promotion returns the verified
+snapshot DB to its no-network warm state.
 """
 
 from __future__ import annotations
@@ -78,6 +80,64 @@ WA_IR_APPLICATION_RELEASE_SHA = "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5"
 WA_IR_PROMOTED_COMPOSE_FILE = (
     REPO_ROOT / "deploy/production/docker-compose.webapp-ir-promoted-2c08.yml"
 ).resolve()
+WA_FI_FENCED_WRITER_PROJECT_NAME = "trading_bot_wa_fi_writer_2c08"
+WA_FI_FENCED_WRITER_PROFILE = "fenced-fi-writer"
+WA_FI_FENCED_WRITER_HEALTH_TIMEOUT_SECONDS = 45
+WA_FI_FENCED_WRITER_HEALTH_POLL_SECONDS = 2
+WA_FI_FENCED_WRITER_LOCK_TIMEOUT_SECONDS = 30
+# The final local lease check is intentionally immediately adjacent to the
+# one command that can create the fenced app/bot pair.  Leave a small,
+# explicit dispatch window beyond the ordinary Witness safety margin so a
+# scheduler stall cannot turn a term which was merely "not stale" into a
+# start authorization.
+WA_FI_FENCED_WRITER_START_DISPATCH_MARGIN_SECONDS = 5
+# Keep the staged FI listener distinct from the legacy Nginx upstream on
+# 127.0.0.1:8000.  A later, separately authorized routing gate may select it
+# only after the fenced guard is active; cutover itself must never replace the
+# live public upstream merely by binding the old port.
+WA_FI_FENCED_APP_LOCAL_PORT = 18001
+WA_FI_FENCED_WRITER_COMPOSE_FILE = (
+    REPO_ROOT / "deploy/production/docker-compose.webapp-fi-writer-2c08.yml"
+).resolve()
+WA_FI_FENCED_RUNTIME_RECEIPT_SCHEMA = "fenced-fi-writer-runtime-receipt-v1"
+WA_FI_FENCED_RUNTIME_RECEIPT_NAME = "fenced-fi-runtime-receipt.json"
+WA_FI_FENCED_RUNTIME_RECEIPT_FIELDS = frozenset(
+    {
+        "schema",
+        "release_sha",
+        "compose_project",
+        "profile",
+        "writer_epoch",
+        "lease_id",
+        "witness_proof_sha256",
+        "containers",
+        "runtime_receipt_sha256",
+    }
+)
+WA_FI_FENCED_RUNTIME_CONTAINER_FIELDS = frozenset(
+    {
+        "container_id",
+        "container_name",
+        "image",
+        "image_id",
+        "labels_sha256",
+        "restart_policy",
+    }
+)
+WA_FI_LEGACY_CUTOVER_CONTAINERS = (
+    "trading_bot_app",
+    "trading_bot_bot",
+    "trading_bot_sync_worker",
+    "trading_bot_migration",
+)
+WA_FI_FENCED_CONTAINER_NAMES = {
+    "app": "trading_bot_wa_fi_writer_2c08_app",
+    "bot": "trading_bot_wa_fi_writer_2c08_bot",
+}
+WA_FI_LEGACY_COMPOSE_SERVICES = frozenset({"app", "bot", "sync_worker", "migration"})
+WA_FI_LEGACY_DEPLOY_PROCESS_RE = re.compile(
+    r"(?:^|\s)(?:\S*/)?(?:deploy\.sh\s+foreign|production_deploy_online\.sh(?:\s+\S+)*\s+deploy-foreign)(?:\s|$)"
+)
 WA_IR_RUNTIME_BINDING_SCHEMA = "gold-trade-wa-ir-promoted-runtime-binding-v1"
 WA_IR_RUNTIME_BINDING_FIELDS = frozenset(
     {
@@ -155,6 +215,12 @@ class AgentConfig:
     runtime: RuntimeConfig
     witness: WitnessConfig
     release_provenance: ReleaseProvenanceConfig | None
+    # The fenced FI cutover is not allowed to start merely because the lease
+    # agent config names the fixed Compose file.  This root-only path names
+    # the independent preflight which binds the signed release identity,
+    # static image identities, and the installed guard unit before any term is
+    # acquired or container can be created.
+    fenced_preflight_config: Path | None
 
 
 @dataclass(frozen=True)
@@ -190,6 +256,14 @@ class PromotedRuntimeBinding:
     lease_id: str
     containers: Mapping[str, PromotedRuntimeContainerBinding]
     binding_sha256: str
+
+
+def _is_fenced_fi_writer(config: AgentConfig) -> bool:
+    return config.mode == "fenced_fi_writer" and config.site == "webapp_fi"
+
+
+def _is_writer_mode(config: AgentConfig) -> bool:
+    return config.mode in {"writer", "fenced_fi_writer"}
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -414,6 +488,103 @@ def _verify_ir_selection_environment(config: AgentConfig) -> None:
         raise ProductionWriterLeaseAgentError("WA-IR runtime selection environment is not an exact generated selector")
 
 
+def _verify_fenced_fi_runtime_environment(config: AgentConfig) -> dict[str, str]:
+    """Reject a mutable FI compose input before Docker can interpret it.
+
+    This mode has no release-provenance receipt yet, but it still must not
+    accept an arbitrary compose environment, service image, network, or
+    release root.  The root-only env file is both the Compose interpolation
+    input and the service env file, so its self-reference is checked too.
+    """
+
+    if not _is_fenced_fi_writer(config):
+        return {}
+    if config.runtime.env_file is None:  # Defensive: _load_config enforces it.
+        raise ProductionWriterLeaseAgentError("fenced WebApp-FI writer has no runtime environment")
+    required = {
+        "RELEASE_SHA",
+        "WA_FI_WRITER_APP_IMAGE",
+        "WA_FI_WRITER_BOT_IMAGE",
+        "WA_FI_WRITER_RUNTIME_ENV_FILE",
+        "WA_FI_WRITER_APPLICATION_RELEASE_ROOT",
+        "WA_FI_WRITER_TERM_PARENT_DIRECTORY",
+        "WA_FI_WRITER_RUNTIME_NETWORK_NAME",
+        "WA_FI_WRITER_UPLOADS_VOLUME",
+        "WA_FI_WRITER_AUDIT_VOLUME",
+        "WA_FI_WRITER_APP_LOCAL_PORT",
+        "APPLICATION_WRITER_TERM_SAFETY_MARGIN_SECONDS",
+        "APPLICATION_WRITER_TERM_MAX_LEASE_DURATION_SECONDS",
+    }
+    values: dict[str, str] = {}
+    for raw_line in _secure_text(
+        config.runtime.env_file,
+        label="fenced WebApp-FI runtime environment",
+        max_size=MAX_FILE_BYTES,
+    ).splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key not in required:
+            continue
+        if key in values or key != key.strip() or not value or value != value.strip() or "$" in value:
+            raise ProductionWriterLeaseAgentError("fenced WebApp-FI runtime environment is invalid")
+        values[key] = value
+    if set(values) != required:
+        raise ProductionWriterLeaseAgentError("fenced WebApp-FI runtime environment is incomplete")
+    if values["RELEASE_SHA"] != WA_IR_APPLICATION_RELEASE_SHA:
+        raise ProductionWriterLeaseAgentError("fenced WebApp-FI runtime release SHA is not the fixed legacy 2c08 release")
+    if values["WA_FI_WRITER_RUNTIME_ENV_FILE"] != str(config.runtime.env_file):
+        raise ProductionWriterLeaseAgentError("fenced WebApp-FI runtime environment self-reference is invalid")
+    for field in ("WA_FI_WRITER_APP_IMAGE", "WA_FI_WRITER_BOT_IMAGE"):
+        if not DOCKER_IMAGE_REFERENCE_RE.fullmatch(values[field]):
+            raise ProductionWriterLeaseAgentError("fenced WebApp-FI runtime image reference is invalid")
+    release_root = _absolute(
+        values["WA_FI_WRITER_APPLICATION_RELEASE_ROOT"],
+        label="fenced WebApp-FI application release root",
+    )
+    if release_root.name != WA_IR_APPLICATION_RELEASE_SHA:
+        raise ProductionWriterLeaseAgentError("fenced WebApp-FI application release root is not the fixed legacy 2c08 release")
+    term_parent_directory = _absolute(
+        values["WA_FI_WRITER_TERM_PARENT_DIRECTORY"],
+        label="fenced WebApp-FI writer term parent directory",
+    )
+    if config.lease_file != term_parent_directory / "writer-lease.json":
+        raise ProductionWriterLeaseAgentError(
+            "fenced WebApp-FI lease file must be the writer-lease leaf in the configured term parent directory"
+        )
+    for field in (
+        "WA_FI_WRITER_RUNTIME_NETWORK_NAME",
+        "WA_FI_WRITER_UPLOADS_VOLUME",
+        "WA_FI_WRITER_AUDIT_VOLUME",
+    ):
+        if not DOCKER_RESOURCE_RE.fullmatch(values[field]):
+            raise ProductionWriterLeaseAgentError("fenced WebApp-FI runtime resource name is invalid")
+    try:
+        port = int(values["WA_FI_WRITER_APP_LOCAL_PORT"])
+    except ValueError as exc:
+        raise ProductionWriterLeaseAgentError("fenced WebApp-FI app loopback port is invalid") from exc
+    if port != WA_FI_FENCED_APP_LOCAL_PORT:
+        raise ProductionWriterLeaseAgentError(
+            "fenced WebApp-FI app loopback port must remain the isolated staged listener"
+        )
+    if not 1024 <= port <= 65535:
+        raise ProductionWriterLeaseAgentError("fenced WebApp-FI app loopback port is invalid")
+    try:
+        application_margin = int(values["APPLICATION_WRITER_TERM_SAFETY_MARGIN_SECONDS"])
+        application_duration = int(values["APPLICATION_WRITER_TERM_MAX_LEASE_DURATION_SECONDS"])
+    except ValueError as exc:
+        raise ProductionWriterLeaseAgentError("fenced WebApp-FI application term timing is invalid") from exc
+    if (
+        application_margin != config.witness.safety_margin_seconds
+        or application_duration != config.witness.lease_duration_seconds
+    ):
+        raise ProductionWriterLeaseAgentError(
+            "fenced WebApp-FI application term timing does not match the Witness timing"
+        )
+    return values
+
+
 def _load_config(path: Path) -> AgentConfig:
     if os.geteuid() != 0:
         raise ProductionWriterLeaseAgentError("writer lease agent must run as root")
@@ -424,21 +595,44 @@ def _load_config(path: Path) -> AgentConfig:
     except Exception as exc:
         raise ProductionWriterLeaseAgentError("writer lease agent config is invalid") from exc
     base_fields = {"schema", "mode", "site", "lease_file", "runtime", "witness"}
-    if not isinstance(raw, dict) or not base_fields.issubset(raw) or set(raw) - (base_fields | {"release_provenance"}) or raw.get("schema") != AGENT_SCHEMA:
+    if not isinstance(raw, dict) or not base_fields.issubset(raw) or set(raw) - (base_fields | {"release_provenance", "fenced_preflight_config"}) or raw.get("schema") != AGENT_SCHEMA:
         raise ProductionWriterLeaseAgentError("writer lease agent config schema is invalid")
     mode = raw.get("mode")
-    if mode not in {"writer", "observer"}:
+    if mode not in {"writer", "observer", "fenced_fi_writer"}:
         raise ProductionWriterLeaseAgentError("writer lease agent mode is invalid")
     site = str(raw.get("site") or "").strip().lower()
     if site not in WEBAPP_SITES:
         raise ProductionWriterLeaseAgentError("writer lease agent site is invalid")
+    if mode == "writer" and site == "webapp_fi":
+        # Refuse before runtime/secret parsing and before any Docker command
+        # can be assembled.  The historical generic FI mode accepted a
+        # caller-supplied Compose path plus ``sync_worker``, which is an
+        # executable direct FI<->IR transport bypass.
+        raise ProductionWriterLeaseAgentError(
+            "generic WebApp-FI writer mode is retired; use fenced_fi_writer with the pinned isolated compose file"
+        )
     is_ir_writer = mode == "writer" and site == "webapp_ir"
-    expected_fields = base_fields | ({"release_provenance"} if is_ir_writer else set())
+    is_fenced_fi_writer = mode == "fenced_fi_writer" and site == "webapp_fi"
+    if mode == "fenced_fi_writer" and not is_fenced_fi_writer:
+        raise ProductionWriterLeaseAgentError("fenced FI writer mode is allowed only for WebApp-FI")
+    expected_fields = (
+        base_fields
+        | ({"release_provenance"} if is_ir_writer else set())
+        | ({"fenced_preflight_config"} if is_fenced_fi_writer else set())
+    )
     if set(raw) != expected_fields:
         raise ProductionWriterLeaseAgentError("writer lease agent config schema is invalid")
     release_provenance = _load_ir_release_provenance(raw["release_provenance"]) if is_ir_writer else None
+    fenced_preflight_config = (
+        _absolute(
+            raw.get("fenced_preflight_config"),
+            label="fenced WebApp-FI preflight config",
+        )
+        if is_fenced_fi_writer
+        else None
+    )
     lease_value = raw.get("lease_file")
-    if mode == "writer":
+    if mode in {"writer", "fenced_fi_writer"}:
         lease_file: Path | None = _absolute(lease_value, label="lease file")
     else:
         # Bot-FI is a passive observer.  It must never receive a copied lease
@@ -474,8 +668,8 @@ def _load_config(path: Path) -> AgentConfig:
         raise ProductionWriterLeaseAgentError(
             "managed runtime contains an unsupported writable service scope"
         )
-    if mode == "writer" and site == "webapp_fi" and services_raw != ["app", "sync_worker"]:
-        raise ProductionWriterLeaseAgentError("WebApp-FI writer must manage only app and sync_worker")
+    if is_fenced_fi_writer and services_raw != ["app", "bot"]:
+        raise ProductionWriterLeaseAgentError("fenced WebApp-FI writer must manage only app and bot")
     if mode == "writer" and site == "webapp_ir" and services_raw != ["db", "redis", "app"]:
         raise ProductionWriterLeaseAgentError(
             "WebApp-IR writer must manage only the isolated db, redis, and app stack"
@@ -489,6 +683,10 @@ def _load_config(path: Path) -> AgentConfig:
         )
     if mode == "observer" and selection_env_file is not None:
         raise ProductionWriterLeaseAgentError("observer mode must not configure a runtime selection env file")
+    if is_fenced_fi_writer and selection_env_file is not None:
+        raise ProductionWriterLeaseAgentError(
+            "fenced WebApp-FI writer must not configure a runtime selection env file"
+        )
     if mode == "writer" and site == "webapp_ir" and selection_env_file is None:
         raise ProductionWriterLeaseAgentError(
             "WebApp-IR writer mode requires a runtime selection env file"
@@ -501,6 +699,15 @@ def _load_config(path: Path) -> AgentConfig:
         if env_file is None:
             raise ProductionWriterLeaseAgentError(
                 "WebApp-IR writer requires its root-only promotion environment"
+            )
+    if is_fenced_fi_writer:
+        if compose_file.resolve() != WA_FI_FENCED_WRITER_COMPOSE_FILE:
+            raise ProductionWriterLeaseAgentError(
+                "fenced WebApp-FI writer must use the pinned isolated writer compose file"
+            )
+        if env_file is None:
+            raise ProductionWriterLeaseAgentError(
+                "fenced WebApp-FI writer requires its root-only runtime environment"
             )
     runtime = RuntimeConfig(
         compose_file=compose_file,
@@ -592,9 +799,11 @@ def _load_config(path: Path) -> AgentConfig:
             renew_interval_seconds=interval,
         ),
         release_provenance=release_provenance,
+        fenced_preflight_config=fenced_preflight_config,
     )
     _verify_ir_runtime_application_binding(config)
     _verify_ir_selection_environment(config)
+    _verify_fenced_fi_runtime_environment(config)
     return config
 
 
@@ -961,6 +1170,63 @@ def _write_new_json(path: Path, *, payload: dict[str, Any], label: str) -> None:
         os.close(directory_fd)
 
 
+def _write_replace_json(path: Path, *, payload: Mapping[str, Any], label: str) -> None:
+    """Atomically replace one root-only non-secret runtime receipt."""
+
+    encoded = canonical_json_bytes(dict(payload)) + b"\n"
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    directory_fd = os.open(
+        path.parent,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+    )
+    temporary_name = f".{path.name}.{os.getpid()}.{uuid4().hex}.tmp"
+    descriptor = -1
+    try:
+        metadata = os.fstat(directory_fd)
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or stat.S_IMODE(metadata.st_mode) & 0o022
+        ):
+            raise ProductionWriterLeaseAgentError(f"{label} directory is not owner controlled")
+        try:
+            existing = os.stat(path.name, dir_fd=directory_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            existing = None
+        if existing is not None and (
+            not stat.S_ISREG(existing.st_mode)
+            or existing.st_uid != os.geteuid()
+            or stat.S_IMODE(existing.st_mode) & 0o077
+            or existing.st_nlink != 1
+        ):
+            raise ProductionWriterLeaseAgentError(f"{label} is not a root-only regular file")
+        descriptor = os.open(
+            temporary_name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+            dir_fd=directory_fd,
+        )
+        offset = 0
+        while offset < len(encoded):
+            written = os.write(descriptor, encoded[offset:])
+            if written <= 0:
+                raise ProductionWriterLeaseAgentError(f"{label} write made no progress")
+            offset += written
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+        os.replace(temporary_name, path.name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd)
+        os.fsync(directory_fd)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            os.unlink(temporary_name, dir_fd=directory_fd)
+        except FileNotFoundError:
+            pass
+        os.close(directory_fd)
+
+
 @contextmanager
 def _owner_lock(
     path: Path,
@@ -1049,6 +1315,29 @@ def _ir_writer_transition_lock(config: AgentConfig, *, nonblocking: bool) -> Ite
 
 
 @contextmanager
+def _fenced_fi_cutover_deployment_lock(config: AgentConfig, *, nonblocking: bool) -> Iterator[bool]:
+    """Serialize the fenced replacement against its guard and legacy deploys.
+
+    The lock lives beside the root-only mounted Writer Witness lease so the
+    separately installed FI deployment entrypoint can use the exact same
+    advisory-flock inode.  It is held across the whole cutover transition,
+    never copied into a container, and is not used by the legacy writer mode.
+    """
+
+    if not _is_fenced_fi_writer(config):
+        yield True
+        return
+    lease_file = _writer_lease_file(config)
+    with _owner_lock(
+        lease_file.parent / "fenced-fi-cutover-deployment.lock",
+        label="fenced WebApp-FI cutover/deployment lock",
+        nonblocking=nonblocking,
+        timeout_seconds=None if nonblocking else WA_FI_FENCED_WRITER_LOCK_TIMEOUT_SECONDS,
+    ) as acquired:
+        yield acquired
+
+
+@contextmanager
 def _standby_refresh_transition_lock(active_snapshot: Path) -> Iterator[None]:
     safe_pointer = _absolute(str(active_snapshot), label="active snapshot pointer")
     if safe_pointer.name != "active-snapshot.json":
@@ -1128,6 +1417,7 @@ def _compose_prefix(
     config: AgentConfig,
     *,
     verify_configured_app_image: bool = True,
+    verify_fenced_fi_start_inputs: bool = True,
 ) -> list[str]:
     command = ["/usr/bin/docker", "compose"]
     if config.mode == "writer" and config.site == "webapp_ir":
@@ -1146,6 +1436,23 @@ def _compose_prefix(
         # Do not inherit the standby compose project from its environment.
         # Promotion can touch only this fixed, newly introduced project.
         command.extend(["--project-name", WA_IR_PROMOTION_PROJECT_NAME, "--profile", WA_IR_PROMOTION_PROFILE])
+    elif _is_fenced_fi_writer(config):
+        # The fenced FI runtime must never inherit COMPOSE_PROJECT_NAME or an
+        # arbitrary profile from its environment.  Re-read the root-only input
+        # before every *start* operation, not only during config parsing.
+        # Emergency fencing is deliberately different: it must still be able
+        # to stop the fixed app/bot names after this mutable input is missing
+        # or malformed.
+        if verify_fenced_fi_start_inputs:
+            _verify_fenced_fi_runtime_environment(config)
+        command.extend(
+            [
+                "--project-name",
+                WA_FI_FENCED_WRITER_PROJECT_NAME,
+                "--profile",
+                WA_FI_FENCED_WRITER_PROFILE,
+            ]
+        )
     command.extend(["-f", str(config.runtime.compose_file)])
     if config.runtime.env_file is not None:
         command.extend(["--env-file", str(config.runtime.env_file)])
@@ -1166,9 +1473,14 @@ def _compose_capture(config: AgentConfig, *, arguments: list[str], label: str, t
 def _compose(config: AgentConfig, *, action: str) -> None:
     if action not in {"start", "stop"}:
         raise ProductionWriterLeaseAgentError("managed runtime action is invalid")
+    is_fenced_fi = _is_fenced_fi_writer(config)
+    if action == "stop" and is_fenced_fi:
+        _stop_fenced_fi_scope()
+        return
     command = _compose_prefix(
         config,
         verify_configured_app_image=action == "start",
+        verify_fenced_fi_start_inputs=action == "start",
     )
     is_ir_promotion = config.mode == "writer" and config.site == "webapp_ir"
     if action == "start":
@@ -1177,11 +1489,61 @@ def _compose(config: AgentConfig, *, action: str) -> None:
             # dependencies for the exact candidate volumes.  It may not pull,
             # build, or recreate any existing container.
             command.extend(["up", "-d", "--no-recreate", *config.runtime.services])
+        elif is_fenced_fi:
+            # This scope owns no dependency services.  The only allowed FI
+            # start is the preloaded app+bot pair in the fixed profile/project.
+            command.extend(
+                [
+                    "up",
+                    "-d",
+                    "--no-deps",
+                    "--no-recreate",
+                    "--no-build",
+                    "--pull",
+                    "never",
+                    *config.runtime.services,
+                ]
+            )
         else:
             command.extend(["up", "-d", "--no-deps", "--no-recreate", *config.runtime.services])
     else:
         command.extend(["stop", "--timeout", "15", *config.runtime.services])
     _run_runtime_command(command, label="managed runtime", timeout=90)
+
+
+def _stop_fenced_fi_scope() -> None:
+    """Best-effort emergency fence for the two immutable FI container names.
+
+    Do not route this through Compose: it expands the mutable runtime env even
+    for ``stop`` and can therefore turn a malformed descriptor/env into an
+    inability to fence writes.  The exact names are compile-time scope, so no
+    caller-supplied project, profile, service, or image can widen this action.
+    """
+
+    failures: list[str] = []
+    for service in ("app", "bot"):
+        try:
+            _run_runtime_command(
+                [
+                    "/usr/bin/docker",
+                    "container",
+                    "stop",
+                    "--time",
+                    "15",
+                    WA_FI_FENCED_CONTAINER_NAMES[service],
+                ],
+                label=f"fenced WebApp-FI {service} emergency stop",
+                timeout=30,
+            )
+        except ProductionWriterLeaseAgentError:
+            # Continue to the sibling fence even if a container is already
+            # absent or Docker rejects one stop attempt, but never report a
+            # strict operator-requested drain as successful afterward.
+            failures.append(service)
+    if failures:
+        raise ProductionWriterLeaseAgentError(
+            "fenced WebApp-FI emergency stop was not confirmed for: " + ",".join(failures)
+        )
 
 
 def _wait_for_ir_app_health(config: AgentConfig) -> None:
@@ -1228,6 +1590,102 @@ def _wait_for_ir_app_health(config: AgentConfig) -> None:
         time.sleep(WA_IR_PROMOTION_HEALTH_POLL_SECONDS)
 
 
+def _wait_for_fenced_fi_app_health(config: AgentConfig) -> None:
+    """Require the local-only FI app healthcheck before controlled routing."""
+
+    if not _is_fenced_fi_writer(config):
+        return
+    deadline = time.monotonic() + WA_FI_FENCED_WRITER_HEALTH_TIMEOUT_SECONDS
+    last_state = "not-created"
+    while True:
+        container_id = _compose_capture(
+            config,
+            arguments=["ps", "--quiet", "app"],
+            label="fenced WebApp-FI app lookup",
+        ).strip()
+        if container_id:
+            lines = container_id.splitlines()
+            if len(lines) != 1 or not DOCKER_CONTAINER_ID_RE.fullmatch(lines[0]):
+                raise ProductionWriterLeaseAgentError(
+                    "fenced WebApp-FI app lookup returned an invalid container id"
+                )
+            try:
+                last_state = _run_runtime_command(
+                    [
+                        "/usr/bin/docker",
+                        "inspect",
+                        "--format",
+                        "{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}",
+                        lines[0],
+                    ],
+                    label="fenced WebApp-FI app health",
+                    timeout=30,
+                    capture_stdout=True,
+                ).strip()
+            except ProductionWriterLeaseAgentError:
+                last_state = "inspection-unavailable"
+            else:
+                if last_state == "running|healthy":
+                    return
+                if last_state.split("|", 1)[0] in {"dead", "exited", "removing"} or last_state.endswith("|unhealthy"):
+                    raise ProductionWriterLeaseAgentError(
+                        "fenced WebApp-FI app became unhealthy before routing"
+                    )
+        if time.monotonic() >= deadline:
+            raise ProductionWriterLeaseAgentError(
+                f"fenced WebApp-FI app did not become healthy before routing ({last_state})"
+            )
+        time.sleep(WA_FI_FENCED_WRITER_HEALTH_POLL_SECONDS)
+
+
+def _wait_for_fenced_fi_bot_health(config: AgentConfig) -> None:
+    """Require authenticated bot readiness, not merely a running process."""
+
+    if not _is_fenced_fi_writer(config):
+        return
+    deadline = time.monotonic() + WA_FI_FENCED_WRITER_HEALTH_TIMEOUT_SECONDS
+    last_state = "not-created"
+    while True:
+        container_id = _compose_capture(
+            config,
+            arguments=["ps", "--quiet", "bot"],
+            label="fenced WebApp-FI bot lookup",
+        ).strip()
+        if container_id:
+            lines = container_id.splitlines()
+            if len(lines) != 1 or not DOCKER_CONTAINER_ID_RE.fullmatch(lines[0]):
+                raise ProductionWriterLeaseAgentError(
+                    "fenced WebApp-FI bot lookup returned an invalid container id"
+                )
+            try:
+                last_state = _run_runtime_command(
+                    [
+                        "/usr/bin/docker",
+                        "inspect",
+                        "--format",
+                        "{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}",
+                        lines[0],
+                    ],
+                    label="fenced WebApp-FI bot state",
+                    timeout=30,
+                    capture_stdout=True,
+                ).strip()
+            except ProductionWriterLeaseAgentError:
+                last_state = "inspection-unavailable"
+            else:
+                if last_state == "running|healthy":
+                    return
+                if last_state.split("|", 1)[0] in {"dead", "exited", "removing"} or last_state.endswith("|unhealthy"):
+                    raise ProductionWriterLeaseAgentError(
+                        "fenced WebApp-FI bot did not become authenticated and healthy before controlled cutover"
+                    )
+        if time.monotonic() >= deadline:
+            raise ProductionWriterLeaseAgentError(
+                f"fenced WebApp-FI bot did not become authenticated and healthy before controlled cutover ({last_state})"
+            )
+        time.sleep(WA_FI_FENCED_WRITER_HEALTH_POLL_SECONDS)
+
+
 def _operation_uuid(value: str) -> str:
     try:
         return str(UUID(value))
@@ -1256,6 +1714,320 @@ def _best_effort_stop(config: AgentConfig) -> None:
         pass
 
 
+def _assert_fenced_fi_legacy_scope_is_stopped() -> None:
+    """Read-only precondition for the explicit FI replacement path.
+
+    The legacy project has fixed container names.  This agent never stops or
+    changes them; a human-controlled drain must make the old app, bot, and
+    direct-sync process, and schema task absent or exited with restart disabled
+    before this separate project can acquire a Writer Witness term.
+    """
+
+    for container in WA_FI_LEGACY_CUTOVER_CONTAINERS:
+        output = _run_runtime_command(
+            [
+                "/usr/bin/docker",
+                "ps",
+                "--all",
+                "--filter",
+                f"name=^/{container}$",
+                "--format",
+                "{{.ID}}",
+            ],
+            label=f"legacy WebApp-FI {container} cutover precondition",
+            timeout=30,
+            capture_stdout=True,
+        ).strip()
+        if not output:
+            continue
+        lines = output.splitlines()
+        if len(lines) != 1:
+            raise ProductionWriterLeaseAgentError(
+                "legacy WebApp-FI cutover precondition returned an ambiguous container set"
+            )
+        container_id = lines[0]
+        if not DOCKER_CONTAINER_ID_RE.fullmatch(container_id):
+            raise ProductionWriterLeaseAgentError(
+                "legacy WebApp-FI cutover precondition returned an invalid container id"
+            )
+        inspected = _run_runtime_command(
+            [
+                "/usr/bin/docker",
+                "container",
+                "inspect",
+                "--format",
+                "{{.Name}}|{{.State.Status}}|{{.HostConfig.RestartPolicy.Name}}",
+                container_id,
+            ],
+            label=f"legacy WebApp-FI {container} restart-policy precondition",
+            timeout=30,
+            capture_stdout=True,
+        ).strip()
+        name, separator, remainder = inspected.partition("|")
+        state, separator_two, restart_policy = remainder.partition("|")
+        if (
+            name != f"/{container}"
+            or not separator
+            or not separator_two
+            or state != "exited"
+            or restart_policy not in {"", "no"}
+        ):
+            raise ProductionWriterLeaseAgentError(
+                "legacy WebApp-FI app, bot, sync worker, and schema task must be stopped with restart disabled before fenced cutover"
+            )
+
+    # Fixed container names do not cover `docker compose run` one-offs.  Scan
+    # the active Compose-labelled set, but scope the rejection to services
+    # that can read, migrate, or write this application's shared state.
+    labelled = _run_runtime_command(
+        [
+            "/usr/bin/docker",
+            "ps",
+            "--all",
+            "--filter",
+            "label=com.docker.compose.project",
+            "--format",
+            "{{.ID}}",
+        ],
+        label="legacy WebApp-FI Compose runtime precondition",
+        timeout=30,
+        capture_stdout=True,
+    ).strip()
+    for container_id in labelled.splitlines():
+        if not container_id:
+            continue
+        if not DOCKER_CONTAINER_ID_RE.fullmatch(container_id):
+            raise ProductionWriterLeaseAgentError(
+                "legacy WebApp-FI Compose runtime precondition returned an invalid container id"
+            )
+        inspected = _run_runtime_command(
+            [
+                "/usr/bin/docker",
+                "container",
+                "inspect",
+                "--format",
+                "{{.State.Status}}|{{index .Config.Labels \"com.docker.compose.project\"}}|{{index .Config.Labels \"com.docker.compose.service\"}}|{{index .Config.Labels \"com.docker.compose.oneoff\"}}",
+                container_id,
+            ],
+            label="legacy WebApp-FI Compose runtime identity precondition",
+            timeout=30,
+            capture_stdout=True,
+        ).strip()
+        state, separator, remainder = inspected.partition("|")
+        project, separator_two, remainder = remainder.partition("|")
+        service, separator_three, oneoff = remainder.partition("|")
+        if not separator or not separator_two or not separator_three:
+            raise ProductionWriterLeaseAgentError(
+                "legacy WebApp-FI Compose runtime identity precondition is malformed"
+            )
+        if (
+            project != WA_FI_FENCED_WRITER_PROJECT_NAME
+            and state in {"created", "restarting", "running", "paused"}
+            and service in WA_FI_LEGACY_COMPOSE_SERVICES
+        ):
+            qualifier = " one-off" if oneoff.lower() == "true" else ""
+            raise ProductionWriterLeaseAgentError(
+                "legacy WebApp-FI Compose"
+                f"{qualifier} service is active and blocks fenced cutover"
+            )
+
+    # A legacy deploy can be between Compose invocations.  Its shared flock
+    # blocks the race once installed; this read-only process check makes the
+    # admission decision explicit rather than waiting until an image or
+    # migration command has already begun.
+    processes = _run_runtime_command(
+        ["/usr/bin/ps", "-eo", "pid=,args="],
+        label="legacy WebApp-FI deployment process precondition",
+        timeout=30,
+        capture_stdout=True,
+    )
+    for line in processes.splitlines():
+        fields = line.strip().split(maxsplit=1)
+        if len(fields) != 2 or not fields[0].isdigit():
+            continue
+        if WA_FI_LEGACY_DEPLOY_PROCESS_RE.search(fields[1]):
+            raise ProductionWriterLeaseAgentError(
+                "active legacy WebApp-FI deployment process blocks fenced cutover"
+            )
+
+
+def _assert_fenced_fi_runtime_scope_is_absent() -> None:
+    """Refuse to reuse an old fenced container under a new Witness term.
+
+    The controlled start uses `--no-recreate`. A stopped leftover could retain
+    an old environment, mount, or image and become runnable before the
+    post-health gate detects it. Retrying a failed fenced cutover therefore
+    requires explicit reviewed cleanup outside this lease agent.
+    """
+
+    for service, container_name in WA_FI_FENCED_CONTAINER_NAMES.items():
+        output = _run_runtime_command(
+            [
+                "/usr/bin/docker",
+                "ps",
+                "--all",
+                "--filter",
+                f"name=^/{container_name}$",
+                "--format",
+                "{{.ID}}",
+            ],
+            label=f"fenced WebApp-FI {service} clean-start precondition",
+            timeout=30,
+            capture_stdout=True,
+        ).strip()
+        if not output:
+            continue
+        lines = output.splitlines()
+        if len(lines) != 1 or not DOCKER_CONTAINER_ID_RE.fullmatch(lines[0]):
+            raise ProductionWriterLeaseAgentError(
+                "fenced WebApp-FI clean-start precondition returned an invalid container id"
+            )
+        raise ProductionWriterLeaseAgentError(
+            f"fenced WebApp-FI {service} container already exists; explicit reviewed cleanup is required before cutover"
+        )
+
+
+def _fenced_fi_runtime_receipt_path(config: AgentConfig) -> Path:
+    """Return the one replaceable receipt bound to the mounted lease parent."""
+
+    if not _is_fenced_fi_writer(config):
+        raise ProductionWriterLeaseAgentError("fenced runtime receipt requires the pinned WebApp-FI writer mode")
+    return _writer_lease_file(config).parent / WA_FI_FENCED_RUNTIME_RECEIPT_NAME
+
+
+def _capture_fenced_fi_runtime_container(
+    config: AgentConfig,
+    *,
+    service: str,
+    expected_image: str,
+) -> dict[str, str]:
+    """Bind one healthy Fenced FI container to its immutable Docker identity."""
+
+    if service not in {"app", "bot"}:
+        raise ProductionWriterLeaseAgentError("fenced WebApp-FI runtime service is invalid")
+    if not DOCKER_IMAGE_REFERENCE_RE.fullmatch(expected_image):
+        raise ProductionWriterLeaseAgentError("fenced WebApp-FI expected image is invalid")
+    discovered = _compose_capture(
+        config,
+        arguments=["ps", "--quiet", service],
+        label=f"fenced WebApp-FI {service} runtime lookup",
+    ).strip()
+    lines = discovered.splitlines()
+    if len(lines) != 1 or not DOCKER_CONTAINER_ID_RE.fullmatch(lines[0]):
+        raise ProductionWriterLeaseAgentError(
+            f"fenced WebApp-FI {service} runtime lookup did not return exactly one container"
+        )
+    full_id = _run_runtime_command(
+        ["/usr/bin/docker", "container", "inspect", "--format", "{{.Id}}", lines[0]],
+        label=f"fenced WebApp-FI {service} runtime id",
+        timeout=30,
+        capture_stdout=True,
+    ).strip().lower()
+    if not DOCKER_FULL_CONTAINER_ID_RE.fullmatch(full_id):
+        raise ProductionWriterLeaseAgentError(
+            f"fenced WebApp-FI {service} runtime returned an invalid full container id"
+        )
+    inspected = _run_runtime_command(
+        [
+            "/usr/bin/docker",
+            "container",
+            "inspect",
+            "--format",
+            "{{.Name}}|{{.Config.Image}}|{{.Image}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}|{{.HostConfig.RestartPolicy.Name}}",
+            full_id,
+        ],
+        label=f"fenced WebApp-FI {service} runtime identity",
+        timeout=30,
+        capture_stdout=True,
+    ).strip()
+    parts = inspected.split("|")
+    if len(parts) != 6:
+        raise ProductionWriterLeaseAgentError(
+            f"fenced WebApp-FI {service} runtime identity is malformed"
+        )
+    container_name, image, image_id, state, health, restart_policy = parts
+    if (
+        container_name != f"/{WA_FI_FENCED_CONTAINER_NAMES[service]}"
+        or image != expected_image
+        or not DOCKER_IMAGE_ID_RE.fullmatch(image_id)
+        or state != "running"
+        or health != "healthy"
+        or restart_policy not in {"", "no"}
+    ):
+        raise ProductionWriterLeaseAgentError(
+            f"fenced WebApp-FI {service} runtime does not match the healthy pinned identity"
+        )
+    labels = _inspect_labels(full_id, label=f"fenced WebApp-FI {service} runtime")
+    if (
+        labels.get("com.docker.compose.project") != WA_FI_FENCED_WRITER_PROJECT_NAME
+        or labels.get("com.docker.compose.service") != service
+    ):
+        raise ProductionWriterLeaseAgentError(
+            f"fenced WebApp-FI {service} runtime labels are invalid"
+        )
+    return {
+        "container_id": full_id,
+        "container_name": WA_FI_FENCED_CONTAINER_NAMES[service],
+        "image": image,
+        "image_id": image_id,
+        "labels_sha256": _runtime_binding_hash(labels),
+        "restart_policy": "no",
+    }
+
+
+def _write_fenced_fi_runtime_receipt(
+    config: AgentConfig,
+    *,
+    proof: Mapping[str, Any],
+) -> tuple[Path, str]:
+    """Persist a root-only post-health binding for the guard-start preflight.
+
+    The receipt is deliberately written only after both healthchecks have
+    passed.  It is replaceable because a later explicitly controlled cutover
+    obtains a new Writer Witness epoch, while every consumer still validates
+    the saved epoch and lease identity against the live local lease.
+    """
+
+    if not _is_fenced_fi_writer(config):
+        raise ProductionWriterLeaseAgentError("fenced runtime receipt requires the pinned WebApp-FI writer mode")
+    writer_epoch = proof.get("writer_epoch")
+    lease_id = proof.get("lease_id")
+    if type(writer_epoch) is not int or writer_epoch < 1 or not isinstance(lease_id, str) or not lease_id:
+        raise ProductionWriterLeaseAgentError("fenced WebApp-FI cutover proof is invalid for runtime receipt")
+    inputs = _verify_fenced_fi_runtime_environment(config)
+    containers = {
+        "app": _capture_fenced_fi_runtime_container(
+            config,
+            service="app",
+            expected_image=inputs["WA_FI_WRITER_APP_IMAGE"],
+        ),
+        "bot": _capture_fenced_fi_runtime_container(
+            config,
+            service="bot",
+            expected_image=inputs["WA_FI_WRITER_BOT_IMAGE"],
+        ),
+    }
+    payload: dict[str, Any] = {
+        "schema": WA_FI_FENCED_RUNTIME_RECEIPT_SCHEMA,
+        "release_sha": WA_IR_APPLICATION_RELEASE_SHA,
+        "compose_project": WA_FI_FENCED_WRITER_PROJECT_NAME,
+        "profile": WA_FI_FENCED_WRITER_PROFILE,
+        "writer_epoch": writer_epoch,
+        "lease_id": lease_id,
+        "witness_proof_sha256": hashlib.sha256(canonical_json_bytes(dict(proof))).hexdigest(),
+        "containers": containers,
+    }
+    receipt_sha256 = _runtime_binding_hash(payload)
+    payload["runtime_receipt_sha256"] = receipt_sha256
+    receipt_path = _fenced_fi_runtime_receipt_path(config)
+    _write_replace_json(
+        receipt_path,
+        payload=payload,
+        label="fenced WebApp-FI runtime receipt",
+    )
+    return receipt_path, receipt_sha256
+
+
 def _local_lease_safety(config: AgentConfig) -> tuple[Any, float]:
     if config.lease_file is None:
         raise ProductionWriterLeaseAgentError("this operation requires a local writer lease")
@@ -1269,7 +2041,7 @@ def _local_lease_safety(config: AgentConfig) -> tuple[Any, float]:
 
 
 def _require_writer_mode(config: AgentConfig) -> None:
-    if config.mode != "writer":
+    if not _is_writer_mode(config):
         raise ProductionWriterLeaseAgentError("this command requires writer mode")
 
 
@@ -1362,10 +2134,75 @@ def _acquire_proof(
     return proof
 
 
-def _start_scoped_runtime(config: AgentConfig) -> None:
+def _assert_fenced_fi_start_term_is_fresh(
+    config: AgentConfig,
+    *,
+    proof: Mapping[str, Any],
+) -> None:
+    """Bind the just-renewed FI term to the immediate Compose start.
+
+    The static cutover preflight can take a material fraction of the short
+    Writer Witness term (for example while it verifies immutable Git trees
+    and local image IDs).  A term acquired before that work must therefore
+    never authorize ``compose up`` by itself.  The cutover renews the exact
+    term after the final static preflight, writes that proof atomically, then
+    this function verifies the same local proof and a bounded dispatch budget
+    directly before Docker can create either writer container.
+
+    This is a host-side admission boundary, not a substitute for the required
+    in-image term fence: application startup still has to refuse all side
+    effects when the mounted term is invalid or expires.
+    """
+
+    if not _is_fenced_fi_writer(config):
+        raise ProductionWriterLeaseAgentError("fenced FI start-term check requires fenced WebApp-FI writer mode")
+    epoch = proof.get("writer_epoch")
+    lease_id = proof.get("lease_id")
+    if type(epoch) is not int or epoch < 1 or not isinstance(lease_id, str) or not lease_id:
+        raise ProductionWriterLeaseAgentError("fenced WebApp-FI start proof is invalid")
+    lease, remaining = _local_lease_safety(config)
+    expected_proof_sha256 = hashlib.sha256(canonical_json_bytes(dict(proof))).hexdigest()
+    if (
+        lease.writer_epoch != epoch
+        or lease.lease_id != lease_id
+        or lease.proof_sha256 != expected_proof_sha256
+    ):
+        raise ProductionWriterLeaseAgentError(
+            "fenced WebApp-FI local lease does not match the just-renewed start proof"
+        )
+    minimum_remaining = (
+        config.witness.safety_margin_seconds + WA_FI_FENCED_WRITER_START_DISPATCH_MARGIN_SECONDS
+    )
+    if remaining <= minimum_remaining:
+        raise ProductionWriterLeaseAgentError(
+            "fenced WebApp-FI term does not retain the required pre-start dispatch safety budget"
+        )
+
+
+def _start_scoped_runtime(
+    config: AgentConfig,
+    *,
+    fenced_start_proof: Mapping[str, Any] | None = None,
+) -> None:
     try:
+        if _is_fenced_fi_writer(config):
+            # Repeat the read-only cutover check after Witness acquisition to
+            # catch a legacy container that was started during the transition.
+            _assert_fenced_fi_legacy_scope_is_stopped()
+            _assert_fenced_fi_runtime_scope_is_absent()
+            if fenced_start_proof is None:
+                raise ProductionWriterLeaseAgentError(
+                    "fenced WebApp-FI start requires a just-renewed Writer Witness proof"
+                )
+            _assert_fenced_fi_start_term_is_fresh(config, proof=fenced_start_proof)
+        elif fenced_start_proof is not None:
+            raise ProductionWriterLeaseAgentError(
+                "only the fenced WebApp-FI runtime may receive a fenced start proof"
+            )
         _compose(config, action="start")
         _wait_for_ir_app_health(config)
+        _wait_for_fenced_fi_app_health(config)
+        _wait_for_fenced_fi_bot_health(config)
     except ProductionWriterLeaseAgentError:
         _best_effort_stop(config)
         raise
@@ -1401,6 +2238,10 @@ def bootstrap_fi_and_start(config: AgentConfig, *, operation_id: str) -> dict[st
     _require_writer_mode(config)
     if config.site != "webapp_fi":
         raise ProductionWriterLeaseAgentError("only WebApp-FI may bootstrap the normal writer term")
+    if _is_fenced_fi_writer(config):
+        raise ProductionWriterLeaseAgentError(
+            "fenced WebApp-FI writer must use the explicit controlled cutover action"
+        )
     proof = _acquire_proof_and_start(
         config,
         operation_id=operation_id,
@@ -1414,6 +2255,197 @@ def bootstrap_fi_and_start(config: AgentConfig, *, operation_id: str) -> dict[st
         "lease_expires_at": proof["expires_at"],
         "witness_proof_sha256": hashlib.sha256(canonical_json_bytes(proof)).hexdigest(),
     }
+
+
+def _best_effort_drain_failed_fenced_fi_cutover(
+    config: AgentConfig,
+    *,
+    proof: Mapping[str, Any],
+    operation_id: str,
+) -> None:
+    """Do not retain a new FI term if the new app+bot pair did not start."""
+
+    epoch = proof.get("writer_epoch")
+    lease_id = proof.get("lease_id")
+    if type(epoch) is not int or not isinstance(lease_id, str) or not lease_id:
+        return
+    try:
+        _transition(
+            config.witness,
+            action="drain",
+            expected_epoch=epoch,
+            expected_lease_id=lease_id,
+            request_id=_request_id(operation_id, "failed-fenced-fi-cutover-drain"),
+            reason=f"production failed fenced WebApp-FI cutover drain {operation_id}",
+        )
+    except ProductionWriterLeaseAgentError:
+        _emit_event("failed_fenced_fi_cutover_drain_failed", writer_epoch=epoch)
+
+
+def _run_fenced_fi_preflight(config: AgentConfig, *, phase: str) -> None:
+    """Run the independent FI identity gate at one fixed lifecycle boundary.
+
+    The preflight imports this module to validate the exact lease-agent
+    configuration, so its import is deliberately delayed until an explicit
+    fenced action.  That keeps normal observer and WA-IR paths independent
+    and avoids an import cycle at process startup.
+    """
+
+    if not _is_fenced_fi_writer(config) or config.fenced_preflight_config is None:
+        raise ProductionWriterLeaseAgentError(
+            "fenced WebApp-FI writer requires its independent identity preflight config"
+        )
+    try:
+        from scripts import preflight_fenced_fi_writer as fenced_preflight
+    except Exception as exc:  # pragma: no cover - import failures are host faults.
+        raise ProductionWriterLeaseAgentError(
+            "fenced WebApp-FI identity preflight is unavailable"
+        ) from exc
+    try:
+        result = fenced_preflight.run(
+            config_path=config.fenced_preflight_config,
+            phase=phase,
+        )
+    except fenced_preflight.FencedFiWriterPreflightError as exc:
+        raise ProductionWriterLeaseAgentError(
+            f"fenced WebApp-FI identity preflight refused {phase}"
+        ) from exc
+    if (
+        not isinstance(result, Mapping)
+        or result.get("status") != "ready"
+        or result.get("phase") != phase
+    ):
+        raise ProductionWriterLeaseAgentError(
+            "fenced WebApp-FI identity preflight returned an invalid result"
+        )
+
+
+def _run_fenced_fi_cutover_preflight(config: AgentConfig) -> None:
+    """Require static signed identity admission before FI acquires a term."""
+
+    _run_fenced_fi_preflight(config, phase="cutover-pre")
+
+
+def _run_fenced_fi_guard_start_preflight(config: AgentConfig) -> None:
+    """Require post-health identity admission before any FI renewal loop."""
+
+    _run_fenced_fi_preflight(config, phase="guard-start")
+
+
+def _refresh_fenced_fi_cutover_proof(
+    config: AgentConfig,
+    *,
+    proof: Mapping[str, Any],
+    operation_id: str,
+) -> dict[str, Any]:
+    """Renew exactly the acquired FI term after the final static admission.
+
+    A new acquire before an expensive preflight can be too old by the time
+    Docker is allowed to start.  Renewal is conditional on the exact epoch
+    and lease ID we just acquired, so it cannot turn an intervening witness
+    transition into an authorization to start.  Unlike a second acquire, a
+    failed or expired predecessor is rejected rather than silently creating a
+    later term during an uncertain cutover.
+    """
+
+    if not _is_fenced_fi_writer(config):
+        raise ProductionWriterLeaseAgentError("fenced FI term refresh requires fenced WebApp-FI writer mode")
+    epoch = proof.get("writer_epoch")
+    lease_id = proof.get("lease_id")
+    if type(epoch) is not int or epoch < 1 or not isinstance(lease_id, str) or not lease_id:
+        raise ProductionWriterLeaseAgentError("fenced WebApp-FI cutover proof is invalid before renewal")
+    refreshed_transition = _transition(
+        config.witness,
+        action="renew",
+        expected_epoch=epoch,
+        expected_lease_id=lease_id,
+        request_id=_request_id(operation_id, "fenced-fi-cutover-prestart-renew"),
+        reason=f"production fenced WebApp-FI pre-start renewal {operation_id}",
+    )
+    refreshed = _validate_proof(
+        refreshed_transition.get("proof"),
+        config=config.witness,
+        expected_epoch=epoch,
+    )
+    if refreshed.get("lease_id") != lease_id:
+        raise ProductionWriterLeaseAgentError("fenced WebApp-FI pre-start renewal changed the lease identity")
+    _write_lease(_writer_lease_file(config), proof=refreshed)
+    return refreshed
+
+
+def cutover_fenced_fi_and_start(config: AgentConfig, *, operation_id: str) -> dict[str, Any]:
+    """Start only the fixed FI app+bot project after a controlled legacy drain.
+
+    This command deliberately does not stop, recreate, or change the legacy
+    runtime.  It can run only after a separate controller has drained that
+    scope (including its one-shot schema task), disabled each restart path,
+    and switched routing only after this local app healthcheck succeeds.
+    """
+
+    if not _is_fenced_fi_writer(config):
+        raise ProductionWriterLeaseAgentError(
+            "controlled fenced cutover is allowed only for the pinned WebApp-FI writer mode"
+        )
+    operation = _operation_uuid(operation_id)
+    with _fenced_fi_cutover_deployment_lock(config, nonblocking=False) as acquired:
+        if not acquired:  # Defensive: blocking mode never yields False.
+            raise ProductionWriterLeaseAgentError("fenced WebApp-FI cutover/deployment lock is busy")
+        _run_fenced_fi_cutover_preflight(config)
+        _assert_fenced_fi_legacy_scope_is_stopped()
+        # Do not mutate the sole Witness term just to discover that a stopped
+        # fenced container would be reused.  The same condition is checked
+        # again immediately before start to close the race.
+        _assert_fenced_fi_runtime_scope_is_absent()
+        proof = _acquire_proof(
+            config,
+            operation_id=operation,
+            purpose="fenced WebApp-FI controlled cutover",
+        )
+        try:
+            # A root-owned runtime environment is re-read by Docker at start.
+            # Re-run the static gate after term acquisition so a replacement
+            # between the first admission and `compose up` cannot reach the
+            # app or bot under a fresh Writer Witness term.
+            _run_fenced_fi_cutover_preflight(config)
+            # Static validation can legitimately take longer than a 60-second
+            # term.  Reissue the exact acquired term only after it completes,
+            # then make the last local lease check inside `_start_scoped_runtime`
+            # directly adjacent to `docker compose up`.
+            proof = _refresh_fenced_fi_cutover_proof(
+                config,
+                proof=proof,
+                operation_id=operation,
+            )
+            _start_scoped_runtime(config, fenced_start_proof=proof)
+            runtime_receipt_path, runtime_receipt_sha256 = _write_fenced_fi_runtime_receipt(
+                config,
+                proof=proof,
+            )
+            # Do not report even a staged result until the post-health receipt
+            # and live containers pass the same guard-start gate systemd will
+            # run.  The external routing controller still needs a separate
+            # unit-active proof and must not treat this result as authorization.
+            _run_fenced_fi_guard_start_preflight(config)
+        except Exception:
+            _best_effort_stop(config)
+            _best_effort_drain_failed_fenced_fi_cutover(
+                config,
+                proof=proof,
+                operation_id=operation,
+            )
+            raise
+        return {
+            "status": "staged",
+            "action": "cutover-fenced-fi",
+            "site": config.site,
+            "routing_authorized": False,
+            "guard_start_preflight": "ready",
+            "writer_epoch": proof["writer_epoch"],
+            "lease_expires_at": proof["expires_at"],
+            "witness_proof_sha256": hashlib.sha256(canonical_json_bytes(proof)).hexdigest(),
+            "runtime_receipt_path": str(runtime_receipt_path),
+            "runtime_receipt_sha256": runtime_receipt_sha256,
+        }
 
 
 def _load_restore_receipt(path: Path) -> dict[str, Any]:
@@ -2939,12 +3971,17 @@ def _guard_iteration(config: AgentConfig, *, emit_degraded: bool) -> dict[str, A
             # without a fresh Witness observation it must not keep a legacy
             # direct-sync path alive after FI loses authority.
             raise
+    if _is_fenced_fi_writer(config):
+        _assert_fenced_fi_legacy_scope_is_stopped()
     try:
         lease, remaining = _local_lease_safety(config)
     except ProductionWriterLeaseAgentError:
         raise
     try:
-        return renew_once(config)
+        result = renew_once(config)
+        if _is_fenced_fi_writer(config):
+            _assert_fenced_fi_legacy_scope_is_stopped()
+        return result
     except WriterWitnessUnavailable as renewal_error:
         # A transient Witness failure does not itself fence a still-valid local
         # term.  Re-check after the failed request and stop only when it has
@@ -2968,22 +4005,40 @@ def _guard_iteration(config: AgentConfig, *, emit_degraded: bool) -> dict[str, A
 
 
 def guard(config: AgentConfig, *, once: bool) -> dict[str, Any]:
+    if _is_fenced_fi_writer(config):
+        try:
+            # Keep the gate inside the guard process rather than ExecStartPre:
+            # on admission failure this process can emergency-stop the fixed
+            # app/bot scope before systemd retries it.  It also prevents a
+            # direct root CLI invocation from renewing an existing FI term
+            # after bypassing the unit boundary.
+            _run_fenced_fi_guard_start_preflight(config)
+        except ProductionWriterLeaseAgentError:
+            _best_effort_stop(config)
+            raise
     while True:
         try:
             with _ir_writer_transition_lock(config, nonblocking=True) as acquired:
-                if acquired:
-                    result = _guard_iteration(config, emit_degraded=not once)
-                else:
+                if not acquired:
                     result = {
                         "status": "promotion_in_progress",
                         "site": config.site,
                     }
+                else:
+                    with _fenced_fi_cutover_deployment_lock(config, nonblocking=True) as fi_acquired:
+                        if fi_acquired:
+                            result = _guard_iteration(config, emit_degraded=not once)
+                        else:
+                            result = {
+                                "status": "fenced_fi_cutover_in_progress",
+                                "site": config.site,
+                            }
         except ProductionWriterLeaseAgentError:
             _best_effort_stop(config)
             raise
         if once:
             return result
-        if result["status"] == "promotion_in_progress":
+        if result["status"] in {"promotion_in_progress", "fenced_fi_cutover_in_progress"}:
             # Do not stop or renew while the promotion controller holds its
             # owner-only lock.  A process crash releases flock automatically.
             time.sleep(1)
@@ -3021,6 +4076,11 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("status")
     bootstrap = subparsers.add_parser("bootstrap-fi")
     bootstrap.add_argument("--operation-id", required=True)
+    fenced_cutover = subparsers.add_parser(
+        "cutover-fenced-fi",
+        help="explicitly start only the pinned app+bot FI project after the legacy scope is stopped",
+    )
+    fenced_cutover.add_argument("--operation-id", required=True)
     promote = subparsers.add_parser("promote")
     promote.add_argument("--operation-id", required=True)
     promote.add_argument("--restore-receipt", required=True, type=Path)
@@ -3054,8 +4114,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
     config = _load_config(args.config)
+    if _is_fenced_fi_writer(config) and args.action not in {
+        "status",
+        "cutover-fenced-fi",
+        "drain",
+        "guard",
+    }:
+        raise ProductionWriterLeaseAgentError(
+            "fenced WebApp-FI writer accepts only its explicit controlled cutover and lease commands"
+        )
     if args.action == "status":
         return _public_status(config)
+    if args.action == "cutover-fenced-fi":
+        return cutover_fenced_fi_and_start(config, operation_id=args.operation_id)
     if args.action == "bootstrap-fi":
         return bootstrap_fi_and_start(config, operation_id=args.operation_id)
     if args.action == "promote":

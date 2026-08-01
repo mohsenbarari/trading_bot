@@ -389,6 +389,10 @@ def _validate_agent_config(config: WriterGuardPreflightConfig) -> lease_agent.Ag
     try:
         agent_config = lease_agent._load_config(config.agent_config)
     except lease_agent.ProductionWriterLeaseAgentError as exc:
+        if "generic WebApp-FI writer mode is retired" in str(exc):
+            raise WriterGuardPreflightError(
+                "legacy WebApp-FI writer guard is retired; use the fenced FI writer preflight"
+            ) from exc
         raise WriterGuardPreflightError("writer guard agent config is not ready") from exc
     if (
         agent_config.mode != "writer"
