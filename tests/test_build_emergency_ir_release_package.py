@@ -45,6 +45,9 @@ class BuildEmergencyIrReleasePackageTests(unittest.TestCase):
                 self.assertIn(
                     f"{package.PACKAGE_ROOT}/scripts/verify_emergency_ir_sms_egress_image.py", members
                 )
+                self.assertIn(
+                    f"{package.PACKAGE_ROOT}/scripts/emergency_ir_standalone_activate.py", members
+                )
                 self.assertNotIn(f"{package.PACKAGE_ROOT}/app/main.py", members)
                 release = json.loads(archive.extractfile(f"{package.PACKAGE_ROOT}/RELEASE.json").read())
                 self.assertEqual(release["emergency_patch_sha"], self.head())

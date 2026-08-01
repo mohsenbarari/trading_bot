@@ -168,7 +168,7 @@ def bundle_ready(target):
  try: state=target.lstat()
  except FileNotFoundError: return False
  if stat.S_ISLNK(state.st_mode) or not stat.S_ISDIR(state.st_mode) or state.st_uid!=0 or stat.S_IMODE(state.st_mode)&0o022: fail("existing receiver bundle directory is unsafe")
- allowed={"run_receiver.py","signing-public.key","scripts/emergency_ir_object_storage_manifest.py","scripts/emergency_ir_object_storage_receiver.py"}
+ allowed={"run_receiver.py","signing-public.key","scripts/emergency_ir_object_storage_manifest.py","scripts/emergency_ir_object_storage_receiver.py","scripts/emergency_ir_standalone_activate.py"}
  actual={str(item.relative_to(target)) for item in target.rglob("*") if item.is_file()}
  if actual!=allowed: fail("existing receiver bundle is incomplete")
  for name in allowed:
@@ -176,7 +176,7 @@ def bundle_ready(target):
   if stat.S_ISLNK(member.st_mode) or not stat.S_ISREG(member.st_mode) or member.st_uid!=0 or stat.S_IMODE(member.st_mode)&0o077: fail("existing receiver bundle member is unsafe")
  return True
 def extract_bundle(bundle,target):
- allowed={"run_receiver.py","signing-public.key","scripts/emergency_ir_object_storage_manifest.py","scripts/emergency_ir_object_storage_receiver.py"}
+ allowed={"run_receiver.py","signing-public.key","scripts/emergency_ir_object_storage_manifest.py","scripts/emergency_ir_object_storage_receiver.py","scripts/emergency_ir_standalone_activate.py"}
  if bundle_ready(target): return
  temporary=target.with_name("."+target.name+"."+str(os.getpid())+".extract")
  secure_dir(temporary)

@@ -112,6 +112,58 @@ a generic proxy.
 The DNS-01 certificate currently expires on 2026-10-30.  Renewal needs a
 manual DNS challenge before that date; it is not an automatic renewal setup.
 
+## Fail-closed local activation
+
+`scripts/emergency_ir_standalone_activate.py` is included in the pinned
+receiver bootstrap as well as the sealed release package.  It has no Object
+Storage, SSH, registry, or DNS client: it consumes only the four ciphertexts
+already received in the fixed Emergency inbox.  First run its plan mode on
+WA-IR as root:
+
+```text
+python3 -I -B /run/trading-bot-emergency-bootstrap/<campaign>/receiver/scripts/emergency_ir_standalone_activate.py --campaign <campaign>
+```
+
+The result contains a distinct confirmation phrase for each stage.  Copy the
+phrase for exactly one stage into `--confirm`, together with `--apply` and
+`--stage prepare`, then repeat in order for `images`, `database`, `api`, and
+finally `prearm`.  The activator re-checks the pinned manifest/public key,
+age recipient identity, ciphertext hash/size, and plaintext hash/size before
+it decrypts or uses an artifact.  It uses create-only files and receipts, so a
+failed attempt is intentionally not retried by overwriting state.
+
+The `prepare` stage accepts the following exact uncompressed `settings.tar`
+member layout and nothing else:
+
+```text
+trading_settings.json
+webapp_initdata_token
+```
+
+For the separately selected `--profile sms-otp`, it additionally requires
+exactly:
+
+```text
+smsir_api_key
+smsir_otp_template_id
+smsir_otp_template_parameter
+```
+
+Secrets are read from these root-only artifact members into the renderer's
+stdin; they are never accepted on a command line or emitted in a receipt.
+The SMS profile also refuses Nginx/UFW prearm without a root-only canonical
+provider-preflight receipt for the same campaign.
+
+Before any Docker mutation, the image tar is inspected for the exact app tag,
+provenance labels, isolated image namespace, expected image count, regular
+layers, and no pre-existing target tags.  The database stage refuses an
+existing Emergency volume/network/container, starts only DB and Redis,
+restores the custom dump, runs session reset, then runs migration.  It never
+uses a broad `compose up` before this sequence.  The ingress stage moves the
+existing default Nginx *symlink* to a root-only backup and restores it by
+rename if `nginx -t` fails; it never deletes the prior configuration or a
+Docker resource.
+
 ## Rollback
 
 Keep the existing Nginx default-site backup and do not delete any Docker

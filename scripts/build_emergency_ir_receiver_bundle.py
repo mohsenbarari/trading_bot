@@ -40,6 +40,10 @@ BUNDLE_MEMBERS = (
     ("deploy/emergency-ir/run_object_storage_receiver.py", "run_receiver.py"),
     ("scripts/emergency_ir_object_storage_manifest.py", "scripts/emergency_ir_object_storage_manifest.py"),
     ("scripts/emergency_ir_object_storage_receiver.py", "scripts/emergency_ir_object_storage_receiver.py"),
+    # The activator remains in the pinned bootstrap bundle so package tar
+    # extraction is not a bootstrap trust gap.  It only operates on already
+    # received local files; it has no network or Object Storage client.
+    ("scripts/emergency_ir_standalone_activate.py", "scripts/emergency_ir_standalone_activate.py"),
 )
 
 
