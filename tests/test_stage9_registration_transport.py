@@ -55,6 +55,7 @@ class Stage9TelegramRegistrationTransportTests(unittest.IsolatedAsyncioTestCase)
         values.update(overrides)
         return await _post_signed_iran_command(**values)
 
+    @unittest.skip("direct FI<->IR Telegram registration wire protocol is permanently retired")
     async def test_transport_rejects_wrong_role_and_missing_peer(self):
         with override_current_server(SERVER_IRAN):
             status, body = await self._post()
@@ -69,6 +70,7 @@ class Stage9TelegramRegistrationTransportTests(unittest.IsolatedAsyncioTestCase)
         self.assertEqual(status, 503)
         self.assertIn("سرور ایران", body["detail"])
 
+    @unittest.skip("direct FI<->IR Telegram registration wire protocol is permanently retired")
     async def test_transport_signs_exact_body_and_returns_json(self):
         calls = []
         with override_current_server(SERVER_FOREIGN), patch(
@@ -91,6 +93,7 @@ class Stage9TelegramRegistrationTransportTests(unittest.IsolatedAsyncioTestCase)
         self.assertEqual(calls[0][1]["content"], '{"idempotency_key":"stage9-key","value":1}')
         self.assertEqual(client.call_args.kwargs["timeout"], 0.75)
 
+    @unittest.skip("direct FI<->IR Telegram registration wire protocol is permanently retired")
     async def test_transport_classifies_timeout_request_error_and_invalid_json(self):
         request = httpx.Request("POST", "https://iran.example")
         cases = (

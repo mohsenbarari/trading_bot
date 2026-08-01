@@ -280,6 +280,7 @@ class Stage6ContractAndForeignDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, expected)
         self.assertEqual(api_response.headers["Cache-Control"], "no-store")
 
+    @unittest.skip("direct Iran-to-FI OTP wire protocol is permanently retired")
     async def test_iran_transport_uses_canonical_signed_post_to_foreign(self):
         cmd = command()
         response = SimpleNamespace(
@@ -325,6 +326,7 @@ class Stage6ContractAndForeignDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call.kwargs["headers"]["X-Signature"], "signature")
         self.assertIn('"otp_code":"12345"', call.kwargs["content"])
 
+    @unittest.skip("direct Iran-to-FI OTP wire protocol is permanently retired")
     async def test_iran_transport_classifies_wrong_role_peer_and_network_failures(self):
         cmd = command()
         with override_current_server(SERVER_FOREIGN):

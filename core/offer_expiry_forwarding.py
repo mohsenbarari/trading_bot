@@ -9,6 +9,10 @@ from typing import Any, Tuple
 import httpx
 
 from core.config import settings
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+)
 from core.server_routing import current_server, normalize_server, peer_server_url_for
 from core.services.offer_expiry_command_receipt_service import OfferExpiryReceiptOutcome
 from core.trade_forwarding import sign_internal_payload
@@ -44,6 +48,22 @@ def _safe_forward_log_context(target_server: str, payload: dict[str, Any]) -> di
 
 
 async def forward_offer_expiry_to_home_server(target_server: str, payload: dict[str, Any]) -> Tuple[int, Any]:
+    # No compatibility flag may revive the old signed FI<->IR command path.
+    try:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="offer-expiry-forwarding",
+            operation="direct FI-to-IR or IR-to-FI offer-expiry command",
+        )
+    except LegacyDirectFiIrTransportRetiredError:
+        logger.warning(
+            "offer_expiry_forward.direct_transport_retired",
+            extra={
+                "event": "offer_expiry_forward.direct_transport_retired",
+                "target_server": normalize_server(target_server, default=""),
+            },
+        )
+        return 503, {"detail": "سرور مرجع لفظ در دسترس نیست."}
+
     target_url = peer_server_url_for(target_server)
     source_server = current_server()
     log_context = _safe_forward_log_context(target_server, payload)
