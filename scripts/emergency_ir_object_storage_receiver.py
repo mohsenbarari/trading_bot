@@ -366,15 +366,38 @@ def _download_ciphertext(*, url: str, artifact: Mapping[str, Any]) -> str:
                 pass
 
 
-def receive(*, manifest_path: Path, signing_public_key: Path, url_map_path: Path) -> dict[str, Any]:
-    """Verify one sealed manifest then fetch only its four encrypted objects."""
+def _expected_bootstrap_provenance(value: object) -> dict[str, Any]:
+    """Normalize the descriptor identity that authorized this receiver run."""
 
+    try:
+        return manifest.validate_bootstrap_provenance(value)
+    except manifest.EmergencyManifestError as exc:
+        raise EmergencyReceiverError("expected bootstrap provenance is invalid") from exc
+
+
+def receive(
+    *,
+    manifest_path: Path,
+    signing_public_key: Path,
+    url_map_path: Path,
+    expected_bootstrap_provenance: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Verify one sealed manifest then fetch only its four encrypted objects.
+
+    The raw WA-IR bootstrap supplies an independently authenticated descriptor
+    identity.  A manifest signed by the pinned bundle key is still rejected if
+    it was made for a different source revision, bundle digest, or key ID.
+    """
+
+    expected = _expected_bootstrap_provenance(expected_bootstrap_provenance)
     raw_manifest = _read_root_only_regular(
         manifest_path, label="sealed Emergency manifest", maximum_bytes=manifest.MAX_MANIFEST_BYTES
     )
     public_key = manifest.load_public_key(signing_public_key)
     verified = manifest.verify_manifest_bytes(raw_manifest, public_key=public_key)
     plan = verified.as_receive_plan()
+    if plan["bootstrap_provenance"] != expected:
+        _fail("sealed manifest bootstrap provenance differs from the controller descriptor")
     urls = _parse_url_map(
         _read_root_only_regular(url_map_path, label="Emergency presigned URL map", maximum_bytes=MAX_URL_MAP_BYTES),
         manifest_sha256=plan["manifest_sha256"],
@@ -405,12 +428,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--signing-public-key", type=Path, required=True)
     parser.add_argument("--url-map", type=Path, required=True)
+    parser.add_argument("--expected-publisher-source-revision", required=True)
+    parser.add_argument("--expected-receiver-bundle-sha256", required=True)
+    parser.add_argument("--expected-receiver-bundle-bytes", type=int, required=True)
+    parser.add_argument("--expected-signer-key-id", required=True)
     args = parser.parse_args(argv)
     try:
         result = receive(
             manifest_path=args.manifest,
             signing_public_key=args.signing_public_key,
             url_map_path=args.url_map,
+            expected_bootstrap_provenance={
+                "schema": manifest.BOOTSTRAP_PROVENANCE_SCHEMA,
+                "publisher_source_revision": args.expected_publisher_source_revision,
+                "receiver_bundle_sha256": args.expected_receiver_bundle_sha256,
+                "receiver_bundle_bytes": args.expected_receiver_bundle_bytes,
+                "signer_key_id": args.expected_signer_key_id,
+            },
         )
     except EmergencyReceiverError as exc:
         print(json.dumps({"status": "blocked", "error": str(exc), "error_class": type(exc).__name__}, sort_keys=True))

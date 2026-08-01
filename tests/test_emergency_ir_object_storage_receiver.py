@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import base64
 from datetime import datetime, timezone
 import hashlib
 import importlib.util
@@ -9,9 +10,11 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from urllib.parse import urlencode
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives import serialization
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -32,7 +35,9 @@ CAMPAIGN_ID = "20260801T203000Z-emergency-ir-02"
 RECIPIENT_KEY_ID = "age-recipient-sha256:" + "d" * 64
 
 
-def unsigned_manifest() -> dict[str, object]:
+def unsigned_manifest(
+    *, signer_key_id: str = "ed25519-sha256:" + "a" * 64
+) -> dict[str, object]:
     prefix = "emergency-ir"
     artifacts: list[dict[str, object]] = []
     for index, kind in enumerate(manifest.ARTIFACT_ORDER):
@@ -63,6 +68,13 @@ def unsigned_manifest() -> dict[str, object]:
         "prefix": prefix,
         "created_at": datetime(2026, 8, 1, 20, 30, tzinfo=timezone.utc).isoformat().replace("+00:00", "Z"),
         "destination_age_recipient_key_id": RECIPIENT_KEY_ID,
+        "bootstrap_provenance": {
+            "schema": manifest.BOOTSTRAP_PROVENANCE_SCHEMA,
+            "publisher_source_revision": "a" * 40,
+            "receiver_bundle_sha256": "b" * 64,
+            "receiver_bundle_bytes": 4096,
+            "signer_key_id": signer_key_id,
+        },
         "artifacts": artifacts,
     }
 
@@ -84,10 +96,13 @@ def presigned_url(*, bucket: str, artifact: dict[str, object], version_id: str |
 
 class EmergencyIrObjectStorageReceiverTests(unittest.TestCase):
     def setUp(self) -> None:
-        private_key = Ed25519PrivateKey.generate()
-        signed = manifest.sign_manifest(unsigned_manifest(), private_key=private_key)
+        self.private_key = Ed25519PrivateKey.generate()
+        self.signed = manifest.sign_manifest(
+            unsigned_manifest(signer_key_id=manifest.signer_key_id(self.private_key.public_key())),
+            private_key=self.private_key,
+        )
         self.plan = manifest.verify_manifest_bytes(
-            manifest.canonical_json_bytes(signed), public_key=private_key.public_key()
+            manifest.canonical_json_bytes(self.signed), public_key=self.private_key.public_key()
         ).as_receive_plan()
 
     def url_map(self) -> dict[str, object]:
@@ -184,6 +199,36 @@ class EmergencyIrObjectStorageReceiverTests(unittest.TestCase):
                     expected_bytes=len(payload),
                     expected_hash="0" * 64,
                 )
+
+    def test_receive_rejects_descriptor_provenance_mismatch_before_any_download(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-receiver-provenance-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            manifest_path = root / "sealed-manifest.json"
+            manifest_path.write_bytes(manifest.canonical_json_bytes(self.signed))
+            manifest_path.chmod(0o600)
+            public_key_path = root / "signing-public.key"
+            public_key_path.write_text(
+                base64.b64encode(
+                    self.private_key.public_key().public_bytes(
+                        serialization.Encoding.Raw,
+                        serialization.PublicFormat.Raw,
+                    )
+                ).decode("ascii"),
+                encoding="ascii",
+            )
+            public_key_path.chmod(0o600)
+            expected = dict(self.plan["bootstrap_provenance"])
+            expected["receiver_bundle_sha256"] = "f" * 64
+            with patch.object(receiver, "_download_ciphertext") as download:
+                with self.assertRaisesRegex(receiver.EmergencyReceiverError, "bootstrap provenance differs"):
+                    receiver.receive(
+                        manifest_path=manifest_path,
+                        signing_public_key=public_key_path,
+                        url_map_path=root / "not-read.json",
+                        expected_bootstrap_provenance=expected,
+                    )
+            download.assert_not_called()
 
 
 if __name__ == "__main__":

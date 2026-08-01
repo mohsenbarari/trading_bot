@@ -47,9 +47,13 @@ except ImportError:  # pragma: no cover - production requirements include crypto
     Ed25519PublicKey = None  # type: ignore[assignment,misc]
 
 
-MANIFEST_SCHEMA = "gold-trade-emergency-ir-object-storage-manifest-v1"
-SIGNATURE_DOMAIN = b"gold-trade-emergency-ir-object-storage-manifest-v1\x00"
+# v2 makes bootstrap provenance mandatory.  There is no compatibility path for
+# a manifest that lacks this field: the Emergency receiver must never execute
+# a fetched bundle whose source/key identity is outside the signed campaign.
+MANIFEST_SCHEMA = "gold-trade-emergency-ir-object-storage-manifest-v2"
+SIGNATURE_DOMAIN = b"gold-trade-emergency-ir-object-storage-manifest-v2\x00"
 SIGNATURE_ALGORITHM = "ed25519"
+BOOTSTRAP_PROVENANCE_SCHEMA = "gold-trade-emergency-ir-bootstrap-provenance-v1"
 
 # This is an endpoint allowlist, not an S3 configuration default.  The helper
 # intentionally has no bucket or credential built in, so an Emergency transfer
@@ -63,6 +67,7 @@ MAX_MANIFEST_BYTES = 128 * 1024
 MAX_ARTIFACT_BYTES = 100 * 1024 * 1024 * 1024
 MAX_CIPHERTEXT_BYTES = MAX_ARTIFACT_BYTES + 2 * 1024 * 1024
 MAX_KEY_FILE_BYTES = 1024
+MAX_RECEIVER_BUNDLE_BYTES = 4 * 1024 * 1024
 
 CAMPAIGN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$", re.ASCII)
 BUCKET_RE = re.compile(r"^[a-z0-9][a-z0-9.-]{2,62}$", re.ASCII)
@@ -70,6 +75,7 @@ PREFIX_COMPONENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._=-]{0,127}$", re.ASCI
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$", re.ASCII)
 RECIPIENT_KEY_ID_RE = re.compile(r"^age-recipient-sha256:[a-f0-9]{64}$", re.ASCII)
 SIGNER_KEY_ID_RE = re.compile(r"^ed25519-sha256:[a-f0-9]{64}$", re.ASCII)
+GIT_REVISION_RE = re.compile(r"^(?:[a-f0-9]{40}|[a-f0-9]{64})$", re.ASCII)
 
 
 class EmergencyManifestError(ValueError):
@@ -87,6 +93,7 @@ class VerifiedEmergencyManifest:
     bucket: str
     prefix: str
     destination_age_recipient_key_id: str
+    bootstrap_provenance: dict[str, Any]
     artifacts: tuple[dict[str, Any], ...]
 
     def as_receive_plan(self) -> dict[str, Any]:
@@ -109,6 +116,7 @@ class VerifiedEmergencyManifest:
             "bucket": self.bucket,
             "prefix": self.prefix,
             "destination_age_recipient_key_id": self.destination_age_recipient_key_id,
+            "bootstrap_provenance": dict(self.bootstrap_provenance),
             "artifacts": [dict(item) for item in self.artifacts],
         }
 
@@ -153,6 +161,7 @@ UNSIGNED_FIELDS = frozenset(
         "prefix",
         "created_at",
         "destination_age_recipient_key_id",
+        "bootstrap_provenance",
         "artifacts",
     }
 )
@@ -176,6 +185,15 @@ ARTIFACT_FIELDS = frozenset(
     }
 )
 ENCRYPTION_FIELDS = frozenset({"algorithm", "recipient_key_id"})
+BOOTSTRAP_PROVENANCE_FIELDS = frozenset(
+    {
+        "schema",
+        "publisher_source_revision",
+        "receiver_bundle_sha256",
+        "receiver_bundle_bytes",
+        "signer_key_id",
+    }
+)
 
 
 def _fail(message: str) -> None:
@@ -347,6 +365,42 @@ def _validate_artifact(
     return artifact
 
 
+def validate_bootstrap_provenance(value: object) -> dict[str, Any]:
+    """Validate the signed identity of the fetched receiver bootstrap.
+
+    This is deliberately a strict, standalone value so the controller
+    descriptor and the raw WA-IR bootstrap can carry the same bounded identity
+    without accepting an arbitrary source tree or key.
+    """
+
+    if not isinstance(value, Mapping) or set(value) != BOOTSTRAP_PROVENANCE_FIELDS:
+        _fail("bootstrap provenance fields are unsupported")
+    provenance = dict(value)
+    if provenance.get("schema") != BOOTSTRAP_PROVENANCE_SCHEMA:
+        _fail("bootstrap provenance schema is unsupported")
+    _require_pattern(
+        provenance.get("publisher_source_revision"),
+        field="bootstrap publisher_source_revision",
+        pattern=GIT_REVISION_RE,
+    )
+    _require_pattern(
+        provenance.get("receiver_bundle_sha256"),
+        field="bootstrap receiver_bundle_sha256",
+        pattern=SHA256_RE,
+    )
+    _require_positive_bytes(
+        provenance.get("receiver_bundle_bytes"),
+        field="bootstrap receiver_bundle_bytes",
+        maximum=MAX_RECEIVER_BUNDLE_BYTES,
+    )
+    _require_pattern(
+        provenance.get("signer_key_id"),
+        field="bootstrap signer_key_id",
+        pattern=SIGNER_KEY_ID_RE,
+    )
+    return provenance
+
+
 def validate_unsigned_manifest(value: object) -> dict[str, Any]:
     """Validate one unsigned manifest specification without any I/O."""
 
@@ -369,6 +423,9 @@ def validate_unsigned_manifest(value: object) -> dict[str, Any]:
         manifest.get("destination_age_recipient_key_id"),
         field="destination_age_recipient_key_id",
         pattern=RECIPIENT_KEY_ID_RE,
+    )
+    manifest["bootstrap_provenance"] = validate_bootstrap_provenance(
+        manifest.get("bootstrap_provenance")
     )
     artifacts = manifest.get("artifacts")
     if not isinstance(artifacts, list) or len(artifacts) != len(ARTIFACT_ORDER):
@@ -454,6 +511,8 @@ def verify_manifest(
     )
     if provided_key_id != signer_key_id(public_key):
         _fail("manifest signer key does not match the pinned public key")
+    if normalized["bootstrap_provenance"]["signer_key_id"] != provided_key_id:
+        _fail("bootstrap provenance signer key does not match the manifest signer")
     signature = _decode_exact_base64(
         manifest.get("signature_base64"), field="signature_base64", expected_bytes=64
     )
@@ -470,6 +529,7 @@ def verify_manifest(
         bucket=normalized["bucket"],
         prefix=normalized["prefix"],
         destination_age_recipient_key_id=normalized["destination_age_recipient_key_id"],
+        bootstrap_provenance=dict(normalized["bootstrap_provenance"]),
         artifacts=tuple(dict(item) for item in normalized["artifacts"]),
     )
 

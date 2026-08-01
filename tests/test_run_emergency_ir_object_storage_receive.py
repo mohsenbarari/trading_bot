@@ -31,6 +31,13 @@ class RunEmergencyIrObjectStorageReceiveTests(unittest.TestCase):
             "schema": runner.SCHEMA,
             "campaign_id": "20260801T210000Z-emergency-ir-03",
             "expires_in_seconds": 300,
+            "bootstrap_provenance": {
+                "schema": runner.BOOTSTRAP_PROVENANCE_SCHEMA,
+                "publisher_source_revision": "a" * 40,
+                "receiver_bundle_sha256": "a" * 64,
+                "receiver_bundle_bytes": 4096,
+                "signer_key_id": "ed25519-sha256:" + "b" * 64,
+            },
             "receiver_bundle": artifact("agent", 4096),
             "manifest": artifact("manifest", 4096),
             "url_map": artifact("urls", 4096),
@@ -53,6 +60,8 @@ class RunEmergencyIrObjectStorageReceiveTests(unittest.TestCase):
             command = runner.remote_command(payload)
             self.assertIn("sudo -n -- /usr/bin/python3", command)
             self.assertIn("trading-bot-emergency-bootstrap", command)
+            self.assertIn("--expected-publisher-source-revision", runner.REMOTE_BOOTSTRAP)
+            self.assertIn(payload["bootstrap_provenance"]["signer_key_id"], command)
             self.assertLess(len(command.encode("utf-8")), 65_536)
 
     def test_rejects_insecure_descriptor_and_unpinned_target_values(self) -> None:
@@ -69,6 +78,13 @@ class RunEmergencyIrObjectStorageReceiveTests(unittest.TestCase):
             secure.write_text(json.dumps(bad), encoding="utf-8")
             secure.chmod(0o600)
             with self.assertRaisesRegex(runner.EmergencyBootstrapError, "approved Arvan"):
+                runner.load_descriptor(secure)
+
+            bad_provenance = self.descriptor()
+            bad_provenance["bootstrap_provenance"]["receiver_bundle_sha256"] = "b" * 64
+            secure.write_text(json.dumps(bad_provenance), encoding="utf-8")
+            secure.chmod(0o600)
+            with self.assertRaisesRegex(runner.EmergencyBootstrapError, "differs from its provenance"):
                 runner.load_descriptor(secure)
 
     def test_remote_bootstrap_never_carries_a_payload_file_over_ssh(self) -> None:

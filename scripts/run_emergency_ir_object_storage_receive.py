@@ -23,10 +23,15 @@ from typing import Any, Mapping
 from urllib.parse import urlsplit
 
 
-SCHEMA = "gold-trade-emergency-ir-object-storage-bootstrap-v1"
+# v2 requires the controller descriptor to carry the signed bootstrap
+# provenance.  Existing v1 descriptors therefore fail closed rather than
+# silently launching a bundle without a provenance check.
+SCHEMA = "gold-trade-emergency-ir-object-storage-bootstrap-v2"
 WA_IR_HOST = "95.38.164.29"
 WA_IR_USER = "ubuntu"
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$", re.ASCII)
+SIGNER_KEY_ID_RE = re.compile(r"^ed25519-sha256:[a-f0-9]{64}$", re.ASCII)
+GIT_REVISION_RE = re.compile(r"^(?:[a-f0-9]{40}|[a-f0-9]{64})$", re.ASCII)
 CAMPAIGN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$", re.ASCII)
 MAX_DESCRIPTOR_BYTES = 128 * 1024
 MAX_RECEIVER_BUNDLE_BYTES = 4 * 1024 * 1024
@@ -34,6 +39,16 @@ MAX_SEALED_MANIFEST_BYTES = 128 * 1024
 MAX_URL_MAP_BYTES = 64 * 1024
 REMOTE_ROOT = "/run/trading-bot-emergency-bootstrap"
 ARVAN_OBJECT_STORAGE_HOST = "s3.ir-thr-at1.arvanstorage.ir"
+BOOTSTRAP_PROVENANCE_SCHEMA = "gold-trade-emergency-ir-bootstrap-provenance-v1"
+BOOTSTRAP_PROVENANCE_FIELDS = frozenset(
+    {
+        "schema",
+        "publisher_source_revision",
+        "receiver_bundle_sha256",
+        "receiver_bundle_bytes",
+        "signer_key_id",
+    }
+)
 
 
 class EmergencyBootstrapError(RuntimeError):
@@ -106,7 +121,7 @@ def _read_private_descriptor(path: Path) -> str:
 # downloads all files itself over HTTPS and accepts only a fixed, tiny archive
 # layout.  The archive's hash arrives in the root-only descriptor and is
 # checked before its pinned public key is used to verify the sealed manifest.
-REMOTE_BOOTSTRAP = r'''import hashlib,json,os,pathlib,ssl,stat,subprocess,sys,tarfile,urllib.error,urllib.request
+REMOTE_BOOTSTRAP = r'''import base64,hashlib,json,os,pathlib,re,ssl,stat,subprocess,sys,tarfile,urllib.error,urllib.request
 class BootstrapError(RuntimeError): pass
 class NoRedirect(urllib.request.HTTPRedirectHandler):
  def redirect_request(self,*args,**kwargs): raise BootstrapError("unexpected redirect")
@@ -196,14 +211,27 @@ def extract_bundle(bundle,target):
    os.chmod(destination,0o600)
  try: os.rename(temporary,target)
  except FileExistsError: fail("refusing to overwrite receiver bundle directory")
+def bundled_key_id(path):
+ try:
+  encoded=pathlib.Path(path).read_bytes().decode("ascii").strip()
+  key=base64.b64decode(encoded.encode("ascii"),validate=True)
+ except Exception: fail("receiver bundle signing public key is invalid")
+ if len(key)!=32: fail("receiver bundle signing public key is invalid")
+ return "ed25519-sha256:"+hashlib.sha256(key).hexdigest()
 root=pathlib.Path(sys.argv[1]); campaign=sys.argv[2]
 bundle_url,bundle_hash,bundle_bytes=sys.argv[3],sys.argv[4],int(sys.argv[5])
 manifest_url,manifest_hash,manifest_bytes=sys.argv[6],sys.argv[7],int(sys.argv[8])
 urlmap_url,urlmap_hash,urlmap_bytes=sys.argv[9],sys.argv[10],int(sys.argv[11])
+source_revision,bundle_provenance_hash,bundle_provenance_bytes,expected_signer_key_id=sys.argv[12],sys.argv[13],int(sys.argv[14]),sys.argv[15]
+if re.fullmatch(r"(?:[a-f0-9]{40}|[a-f0-9]{64})",source_revision) is None: fail("bootstrap publisher source revision is invalid")
+if re.fullmatch(r"[a-f0-9]{64}",bundle_provenance_hash) is None or not 1<=bundle_provenance_bytes<=4194304: fail("bootstrap receiver bundle provenance is invalid")
+if re.fullmatch(r"ed25519-sha256:[a-f0-9]{64}",expected_signer_key_id) is None: fail("bootstrap signer key identity is invalid")
+if bundle_hash!=bundle_provenance_hash or bundle_bytes!=bundle_provenance_bytes: fail("receiver bundle differs from descriptor provenance")
 campaign_root=root/campaign; secure_dir(campaign_root)
 bundle=campaign_root/"receiver.tar.gz"; sealed=campaign_root/"sealed-manifest.json"; urlmap=campaign_root/"presigned-urls.json"; receiver=campaign_root/("receiver-"+bundle_hash[:16])
 fetch(bundle_url,bundle_hash,bundle_bytes,bundle); fetch(manifest_url,manifest_hash,manifest_bytes,sealed); fetch(urlmap_url,urlmap_hash,urlmap_bytes,urlmap); extract_bundle(bundle,receiver)
-result=subprocess.run(["/usr/bin/python3","-I","-B",str(receiver/"run_receiver.py"),"--manifest",str(sealed),"--signing-public-key",str(receiver/"signing-public.key"),"--url-map",str(urlmap)],capture_output=True,text=True,timeout=7200)
+if bundled_key_id(receiver/"signing-public.key")!=expected_signer_key_id: fail("receiver bundle signing public key does not match descriptor")
+result=subprocess.run(["/usr/bin/python3","-I","-B",str(receiver/"run_receiver.py"),"--manifest",str(sealed),"--signing-public-key",str(receiver/"signing-public.key"),"--url-map",str(urlmap),"--expected-publisher-source-revision",source_revision,"--expected-receiver-bundle-sha256",bundle_provenance_hash,"--expected-receiver-bundle-bytes",str(bundle_provenance_bytes),"--expected-signer-key-id",expected_signer_key_id],capture_output=True,text=True,timeout=7200)
 sys.stdout.write(result.stdout); sys.stderr.write(result.stderr); raise SystemExit(result.returncode)
 '''
 
@@ -232,6 +260,33 @@ def _artifact(value: object, *, label: str, maximum_bytes: int) -> dict[str, Any
     return dict(value)
 
 
+def _bootstrap_provenance(value: object) -> dict[str, Any]:
+    """Validate the descriptor's signed-bootstrap identity without imports.
+
+    The controller runs before the fetched bundle exists, so it repeats the
+    narrow wire contract locally.  The bundled verifier later checks the same
+    value against the signed manifest before accepting campaign artifacts.
+    """
+
+    if not isinstance(value, dict) or set(value) != BOOTSTRAP_PROVENANCE_FIELDS:
+        raise EmergencyBootstrapError("Emergency bootstrap provenance fields are invalid")
+    if value.get("schema") != BOOTSTRAP_PROVENANCE_SCHEMA:
+        raise EmergencyBootstrapError("Emergency bootstrap provenance schema is invalid")
+    revision = value.get("publisher_source_revision")
+    if not isinstance(revision, str) or GIT_REVISION_RE.fullmatch(revision) is None:
+        raise EmergencyBootstrapError("Emergency bootstrap publisher source revision is invalid")
+    bundle_hash = value.get("receiver_bundle_sha256")
+    if not isinstance(bundle_hash, str) or SHA256_RE.fullmatch(bundle_hash) is None:
+        raise EmergencyBootstrapError("Emergency bootstrap receiver bundle hash is invalid")
+    bundle_bytes = value.get("receiver_bundle_bytes")
+    if isinstance(bundle_bytes, bool) or not isinstance(bundle_bytes, int) or not 1 <= bundle_bytes <= MAX_RECEIVER_BUNDLE_BYTES:
+        raise EmergencyBootstrapError("Emergency bootstrap receiver bundle byte count is invalid")
+    signer_key_id = value.get("signer_key_id")
+    if not isinstance(signer_key_id, str) or SIGNER_KEY_ID_RE.fullmatch(signer_key_id) is None:
+        raise EmergencyBootstrapError("Emergency bootstrap signer key identity is invalid")
+    return dict(value)
+
+
 def load_descriptor(path: Path) -> dict[str, Any]:
     try:
         state = path.lstat()
@@ -250,7 +305,7 @@ def load_descriptor(path: Path) -> dict[str, Any]:
     except Exception as exc:
         raise EmergencyBootstrapError("Emergency bootstrap descriptor is unavailable or invalid") from exc
     if not isinstance(payload, dict) or set(payload) != {
-        "schema", "campaign_id", "expires_in_seconds", "receiver_bundle", "manifest", "url_map"
+        "schema", "campaign_id", "expires_in_seconds", "bootstrap_provenance", "receiver_bundle", "manifest", "url_map"
     }:
         raise EmergencyBootstrapError("Emergency bootstrap descriptor fields are invalid")
     campaign_id = payload.get("campaign_id")
@@ -261,6 +316,7 @@ def load_descriptor(path: Path) -> dict[str, Any]:
         raise EmergencyBootstrapError("Emergency bootstrap lifetime is invalid")
     if payload.get("schema") != SCHEMA:
         raise EmergencyBootstrapError("Emergency bootstrap schema is invalid")
+    payload["bootstrap_provenance"] = _bootstrap_provenance(payload["bootstrap_provenance"])
     payload["receiver_bundle"] = _artifact(
         payload["receiver_bundle"], label="receiver bundle", maximum_bytes=MAX_RECEIVER_BUNDLE_BYTES
     )
@@ -270,23 +326,37 @@ def load_descriptor(path: Path) -> dict[str, Any]:
     payload["url_map"] = _artifact(
         payload["url_map"], label="presigned URL map", maximum_bytes=MAX_URL_MAP_BYTES
     )
+    if (
+        payload["receiver_bundle"]["sha256"] != payload["bootstrap_provenance"]["receiver_bundle_sha256"]
+        or payload["receiver_bundle"]["bytes"] != payload["bootstrap_provenance"]["receiver_bundle_bytes"]
+    ):
+        raise EmergencyBootstrapError("Emergency bootstrap receiver bundle differs from its provenance")
     return payload
 
 
 def confirmation_phrase(payload: Mapping[str, Any]) -> str:
-    return f"receive-emergency-ir:{payload['campaign_id']}:{payload['manifest']['sha256']}"
+    provenance = payload["bootstrap_provenance"]
+    return (
+        f"receive-emergency-ir:{payload['campaign_id']}:{payload['manifest']['sha256']}:"
+        f"{provenance['receiver_bundle_sha256']}"
+    )
 
 
 def remote_command(payload: Mapping[str, Any]) -> str:
     bundle = payload["receiver_bundle"]
     sealed = payload["manifest"]
     url_map = payload["url_map"]
+    provenance = payload["bootstrap_provenance"]
     arguments = (
         "/usr/bin/python3", "-I", "-B", "-c", REMOTE_BOOTSTRAP,
         REMOTE_ROOT, str(payload["campaign_id"]),
         str(bundle["url"]), str(bundle["sha256"]), str(bundle["bytes"]),
         str(sealed["url"]), str(sealed["sha256"]), str(sealed["bytes"]),
         str(url_map["url"]), str(url_map["sha256"]), str(url_map["bytes"]),
+        str(provenance["publisher_source_revision"]),
+        str(provenance["receiver_bundle_sha256"]),
+        str(provenance["receiver_bundle_bytes"]),
+        str(provenance["signer_key_id"]),
     )
     command = "sudo -n -- " + " ".join(shlex.quote(item) for item in arguments)
     if len(command.encode("utf-8")) > 65_536:

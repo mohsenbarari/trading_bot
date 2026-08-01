@@ -41,10 +41,15 @@ class BuildEmergencyIrReceiverBundleTests(unittest.TestCase):
             directory = Path(raw)
             directory.chmod(0o700)
             output = directory / "receiver.tar.gz"
-            digest, size = bundle.build_bundle(
-                repo=REPO_ROOT, signing_public_key=self.public_key(directory), output=output
+            key = self.public_key(directory)
+            expected_digest, expected_size = bundle.bundle_digest(
+                repo=REPO_ROOT, signing_public_key=key
             )
-            self.assertEqual(len(digest), 64)
+            digest, size = bundle.build_bundle(
+                repo=REPO_ROOT, signing_public_key=key, output=output
+            )
+            self.assertEqual(digest, expected_digest)
+            self.assertEqual(size, expected_size)
             self.assertEqual(size, output.stat().st_size)
             self.assertEqual(output.stat().st_mode & 0o777, 0o600)
             with tarfile.open(output, "r:gz") as archive:

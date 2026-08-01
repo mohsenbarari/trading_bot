@@ -33,7 +33,9 @@ CAMPAIGN_ID = "20260801T201500Z-emergency-ir-01"
 RECIPIENT_KEY_ID = "age-recipient-sha256:" + "d" * 64
 
 
-def unsigned_manifest() -> dict[str, object]:
+def unsigned_manifest(
+    *, signer_key_id: str = "ed25519-sha256:" + "a" * 64
+) -> dict[str, object]:
     prefix = "emergency-ir"
     artifacts: list[dict[str, object]] = []
     for index, kind in enumerate(manifest.ARTIFACT_ORDER):
@@ -72,6 +74,13 @@ def unsigned_manifest() -> dict[str, object]:
         "prefix": prefix,
         "created_at": "2026-08-01T20:15:00Z",
         "destination_age_recipient_key_id": RECIPIENT_KEY_ID,
+        "bootstrap_provenance": {
+            "schema": manifest.BOOTSTRAP_PROVENANCE_SCHEMA,
+            "publisher_source_revision": "a" * 40,
+            "receiver_bundle_sha256": "b" * 64,
+            "receiver_bundle_bytes": 4096,
+            "signer_key_id": signer_key_id,
+        },
         "artifacts": artifacts,
     }
 
@@ -82,7 +91,10 @@ class EmergencyIrObjectStorageManifestTests(unittest.TestCase):
         self.public_key = self.private_key.public_key()
 
     def test_sign_and_verify_emit_complete_allowlisted_receive_plan(self) -> None:
-        signed = manifest.sign_manifest(unsigned_manifest(), private_key=self.private_key)
+        signed = manifest.sign_manifest(
+            unsigned_manifest(signer_key_id=manifest.signer_key_id(self.public_key)),
+            private_key=self.private_key,
+        )
         verified = manifest.verify_manifest_bytes(
             manifest.canonical_json_bytes(signed), public_key=self.public_key
         )
@@ -92,6 +104,9 @@ class EmergencyIrObjectStorageManifestTests(unittest.TestCase):
         self.assertEqual(plan["campaign_id"], CAMPAIGN_ID)
         self.assertEqual(plan["endpoint"], manifest.APPROVED_ARVAN_ENDPOINT)
         self.assertEqual(plan["bucket"], "emergency-ir-artifacts")
+        self.assertEqual(
+            plan["bootstrap_provenance"]["signer_key_id"], manifest.signer_key_id(self.public_key)
+        )
         self.assertEqual([item["kind"] for item in plan["artifacts"]], list(manifest.ARTIFACT_ORDER))
         self.assertEqual(
             [item["target_path"] for item in plan["artifacts"]],
@@ -104,7 +119,10 @@ class EmergencyIrObjectStorageManifestTests(unittest.TestCase):
         self.assertNotIn("deploy", json.dumps(plan).lower())
 
     def test_signature_tampering_and_noncanonical_signed_bytes_are_rejected(self) -> None:
-        signed = manifest.sign_manifest(unsigned_manifest(), private_key=self.private_key)
+        signed = manifest.sign_manifest(
+            unsigned_manifest(signer_key_id=manifest.signer_key_id(self.public_key)),
+            private_key=self.private_key,
+        )
         tampered = copy.deepcopy(signed)
         tampered["artifacts"][0]["ciphertext_sha256"] = "0" * 64
         with self.assertRaisesRegex(manifest.EmergencyManifestError, "signature"):
@@ -119,6 +137,19 @@ class EmergencyIrObjectStorageManifestTests(unittest.TestCase):
         noncanonical = json.dumps(signed, sort_keys=True).encode("utf-8")
         with self.assertRaisesRegex(manifest.EmergencyManifestError, "canonical JSON"):
             manifest.verify_manifest_bytes(noncanonical, public_key=self.public_key)
+
+    def test_signed_manifest_requires_bootstrap_provenance_for_the_pinned_signer(self) -> None:
+        valid = unsigned_manifest(signer_key_id=manifest.signer_key_id(self.public_key))
+        missing = copy.deepcopy(valid)
+        del missing["bootstrap_provenance"]
+        with self.assertRaisesRegex(manifest.EmergencyManifestError, "fields"):
+            manifest.validate_unsigned_manifest(missing)
+
+        wrong_signer = copy.deepcopy(valid)
+        wrong_signer["bootstrap_provenance"]["signer_key_id"] = "ed25519-sha256:" + "f" * 64
+        signed = manifest.sign_manifest(wrong_signer, private_key=self.private_key)
+        with self.assertRaisesRegex(manifest.EmergencyManifestError, "bootstrap provenance signer"):
+            manifest.verify_manifest(signed, public_key=self.public_key)
 
     def test_duplicate_json_unknown_fields_and_non_arvan_endpoint_fail_closed(self) -> None:
         duplicate = b'{"schema":"one","schema":"two"}'
@@ -165,12 +196,30 @@ class EmergencyIrObjectStorageManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(manifest.EmergencyManifestError, "fixed order"):
             manifest.validate_unsigned_manifest(reordered)
 
+    def test_bootstrap_provenance_is_strict_and_must_match_the_manifest_signer(self) -> None:
+        missing = unsigned_manifest()
+        missing.pop("bootstrap_provenance")
+        with self.assertRaisesRegex(manifest.EmergencyManifestError, "fields"):
+            manifest.validate_unsigned_manifest(missing)
+
+        unknown = unsigned_manifest()
+        unknown["bootstrap_provenance"]["unexpected"] = "value"
+        with self.assertRaisesRegex(manifest.EmergencyManifestError, "provenance fields"):
+            manifest.validate_unsigned_manifest(unknown)
+
+        wrong_signer = unsigned_manifest(signer_key_id="ed25519-sha256:" + "f" * 64)
+        with self.assertRaisesRegex(manifest.EmergencyManifestError, "bootstrap provenance signer"):
+            manifest.sign_manifest(wrong_signer, private_key=self.private_key)
+
     def test_cli_build_and_verify_are_local_create_only_operations(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-manifest-") as temporary:
             root = Path(temporary)
             root.chmod(0o700)
             spec_path = root / "spec.json"
-            spec_path.write_text(json.dumps(unsigned_manifest(), indent=2), encoding="utf-8")
+            spec_path.write_text(
+                json.dumps(unsigned_manifest(signer_key_id=manifest.signer_key_id(self.public_key)), indent=2),
+                encoding="utf-8",
+            )
             spec_path.chmod(0o600)
 
             private_path = root / "signing-private.key"

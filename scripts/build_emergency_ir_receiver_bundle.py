@@ -127,15 +127,28 @@ def _write_create_only(path: Path, payload: bytes) -> None:
             os.close(descriptor)
 
 
-def build_bundle(*, repo: Path, signing_public_key: Path, output: Path) -> tuple[str, int]:
-    """Build one deterministic gzip tar and return its ciphertext-free digest."""
+def render_bundle(*, signing_public_key: Path) -> bytes:
+    """Return the deterministic receiver bundle bytes without writing an output.
+
+    The publisher uses this in its no-network planning phase to bind the
+    exact executable bootstrap bytes into the human confirmation and sealed
+    manifest.  Keeping rendering separate from the create-only write makes a
+    dry run unable to leave a bundle behind.
+    """
 
     try:
         manifest.load_public_key(signing_public_key)
     except Exception as exc:
         raise ReceiverBundleError("Emergency signing public key is unavailable or invalid") from exc
     files: list[tuple[str, bytes]] = [
-        (target, _read_regular(repo / source, label=f"receiver bundle {source}", maximum_bytes=MAX_MEMBER_BYTES))
+        (
+            target,
+            _read_regular(
+                REPO_ROOT / source,
+                label=f"receiver bundle {source}",
+                maximum_bytes=MAX_MEMBER_BYTES,
+            ),
+        )
         for source, target in BUNDLE_MEMBERS
     ]
     files.append(("signing-public.key", _read_regular(signing_public_key, label="Emergency signing public key", maximum_bytes=1024)))
@@ -155,19 +168,32 @@ def build_bundle(*, repo: Path, signing_public_key: Path, output: Path) -> tuple
     payload = raw.getvalue()
     if not 1 <= len(payload) <= MAX_BUNDLE_BYTES:
         raise ReceiverBundleError("receiver bootstrap bundle exceeds its fixed size bound")
+    return payload
+
+
+def bundle_digest(*, signing_public_key: Path) -> tuple[str, int]:
+    """Return the exact digest/size of the bundle that would be created."""
+
+    payload = render_bundle(signing_public_key=signing_public_key)
+    return hashlib.sha256(payload).hexdigest(), len(payload)
+
+
+def build_bundle(*, signing_public_key: Path, output: Path) -> tuple[str, int]:
+    """Build one deterministic gzip tar and return its ciphertext-free digest."""
+
+    payload = render_bundle(signing_public_key=signing_public_key)
     _write_create_only(output, payload)
     return hashlib.sha256(payload).hexdigest(), len(payload)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", type=Path, default=REPO_ROOT)
     parser.add_argument("--signing-public-key", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         digest, size = build_bundle(
-            repo=args.repo.resolve(), signing_public_key=args.signing_public_key, output=args.output
+            signing_public_key=args.signing_public_key, output=args.output
         )
     except ReceiverBundleError as exc:
         print(json.dumps({"status": "blocked", "error": str(exc), "error_class": type(exc).__name__}, sort_keys=True))
