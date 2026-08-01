@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail closed on the immutable Emergency IR application image identity."""
+"""Fail closed on the immutable fixed-upstream Emergency SMS relay image."""
 
 from __future__ import annotations
 
@@ -11,36 +11,32 @@ from typing import Any, Callable
 
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-EMERGENCY_SCOPE = "ir-standalone"
-EMERGENCY_AUTH_SCOPE = "webapp-initdata-and-local-sms-otp"
+SMS_EGRESS_SCOPE = "ir-standalone-sms-egress"
+SMS_EGRESS_CONTRACT = "fixed-api.sms.ir-v1-send-verify"
 FORBIDDEN_IMAGE_ENV = frozenset(
     {
+        "SMSIR_API_KEY",
         "BOT_TOKEN",
         "SYNC_API_KEY",
         "PEER_SERVER_URL",
         "IRAN_SERVER_URL",
         "GERMANY_SERVER_URL",
         "FOREIGN_SERVER_URL",
-        "SMSIR_API_KEY",
-        "SMSIR_BASE_URL",
-        "SMSIR_TRUST_ENV",
         "HTTP_PROXY",
         "HTTPS_PROXY",
         "ALL_PROXY",
-        "WEB_PUSH_VAPID_PRIVATE_KEY",
-        "WRITER_WITNESS_CLIENT_SECRET",
     }
 )
 
 
-class EmergencyImageProvenanceError(RuntimeError):
+class EmergencySmsEgressImageError(RuntimeError):
     pass
 
 
 def expected_image_tag(patch_sha: str) -> str:
     if not SHA_RE.fullmatch(patch_sha):
-        raise EmergencyImageProvenanceError("Emergency patch SHA is invalid")
-    return f"trading_bot_emergency_ir_app:{patch_sha}"
+        raise EmergencySmsEgressImageError("Emergency patch SHA is invalid")
+    return f"trading_bot_emergency_ir_sms_egress:{patch_sha}"
 
 
 def verify_payload(*, payload: Any, source_release_sha: str, emergency_patch_sha: str) -> list[str]:
@@ -51,7 +47,6 @@ def verify_payload(*, payload: Any, source_release_sha: str, emergency_patch_sha
         return ["Emergency patch SHA is invalid"]
     if not isinstance(payload, dict):
         return ["Docker image inspection is malformed"]
-
     config = payload.get("Config")
     if not isinstance(config, dict):
         return ["Docker image Config is missing"]
@@ -61,20 +56,18 @@ def verify_payload(*, payload: Any, source_release_sha: str, emergency_patch_sha
     expected_labels = {
         "org.opencontainers.image.revision": emergency_patch_sha,
         "org.goldtrade.emergency.base-revision": source_release_sha,
-        "org.goldtrade.emergency.scope": EMERGENCY_SCOPE,
-        "org.goldtrade.emergency.auth": EMERGENCY_AUTH_SCOPE,
+        "org.goldtrade.emergency.scope": SMS_EGRESS_SCOPE,
+        "org.goldtrade.emergency.egress": SMS_EGRESS_CONTRACT,
     }
     for key, expected in expected_labels.items():
         if labels.get(key) != expected:
-            failures.append(f"image label {key} differs from the Emergency provenance contract")
-
+            failures.append(f"image label {key} differs from the Emergency SMS relay contract")
     expected_tag = expected_image_tag(emergency_patch_sha)
     tags = payload.get("RepoTags")
     if not isinstance(tags, list) or expected_tag not in tags:
-        failures.append("image does not retain the exact Emergency application tag")
+        failures.append("image does not retain the exact Emergency SMS relay tag")
     if any(not isinstance(tag, str) or "three_site" in tag.lower() or "staging" in tag.lower() for tag in tags or []):
         failures.append("image carries a forbidden staging/three-site tag")
-
     env = config.get("Env")
     if not isinstance(env, list) or any(not isinstance(item, str) for item in env):
         failures.append("image environment metadata is malformed")
@@ -83,7 +76,7 @@ def verify_payload(*, payload: Any, source_release_sha: str, emergency_patch_sha
             item.partition("=")[0] for item in env if item.partition("=")[0] in FORBIDDEN_IMAGE_ENV
         )
         if forbidden:
-            failures.append("image embeds forbidden credential keys: " + ",".join(forbidden))
+            failures.append("image embeds forbidden credential or proxy keys: " + ",".join(forbidden))
     return failures
 
 
@@ -135,9 +128,5 @@ def main() -> int:
         for failure in failures:
             print(f"FAIL: {failure}")
         return 1
-    print("Emergency IR application image provenance verification passed")
+    print("Emergency IR SMS relay image provenance verification passed")
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

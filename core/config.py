@@ -116,6 +116,9 @@ class Settings(BaseSettings):
     foreign_server_url: str | None = None
     public_webapp_url: str | None = None
     sync_api_key: str | None = None
+    # Kept in Settings as well as the sync helper's environment check so the
+    # Emergency IR fail-closed profile can validate it at process startup.
+    trading_bot_disable_direct_sync_push: bool = False
     sync_direct_push_cooldown_seconds: float = 90.0
     sync_verify_tls: bool = True
     sync_ca_bundle: str | None = None
@@ -123,6 +126,12 @@ class Settings(BaseSettings):
     sync_watermark_strict_mode: bool = False
     environment: str = "production"
     release_sha: str | None = None
+    # These switches are ignored by normal deployments.  Emergency IR uses
+    # them to make the opt-in auth profile part of the application's own
+    # fail-closed settings contract, not merely a Compose convention.
+    emergency_ir_standalone: bool = False
+    emergency_auth_profile: str | None = None
+    emergency_sms_otp_enabled: bool = False
     log_level: str = "INFO"
     log_format: str = "json"
     error_tracking_dsn: str | None = None
@@ -271,6 +280,9 @@ class Settings(BaseSettings):
     smsir_api_key: str | None = None
     smsir_line_number: int | None = None
     smsir_base_url: str = "https://api.sms.ir"
+    # Emergency IR may point SMS.ir at an internal fixed-upstream relay.  In
+    # that profile it must not inherit ambient proxy environment variables.
+    smsir_trust_env: bool = True
     smsir_timeout_seconds: float = 10.0
     smsir_otp_template_id: str | None = "585147"
     smsir_otp_template_parameter: str = "CODE"
@@ -374,6 +386,93 @@ class Settings(BaseSettings):
             raise ValueError(
                 "telegram_delivery_queue_primary_m0_reservation_must_leave_general_capacity"
             )
+        return self
+
+    @model_validator(mode="after")
+    def validate_emergency_ir_auth_profile(self):
+        """Keep the temporary Iran-only profile from widening by env drift.
+
+        The normal application has legitimate SMS/Telegram deployment modes,
+        so this guard is deliberately scoped to the explicit isolated
+        Emergency IR runtime.  The SMS option is a direct local Stage-6 SMS
+        flow despite its historical ``telegram_login_otp_enabled`` setting
+        name; automatic Telegram fallback remains disabled.
+        """
+
+        if not self.emergency_ir_standalone:
+            return self
+
+        profile = str(self.emergency_auth_profile or "").strip().lower()
+        if profile not in {"telegram-only", "sms-otp"}:
+            raise ValueError("emergency_ir_auth_profile_invalid")
+
+        if any(
+            value
+            for value in (
+                self.bot_token,
+                self.sync_api_key,
+                self.peer_server_url,
+                self.iran_server_url,
+                self.germany_server_url,
+                self.foreign_server_url,
+            )
+        ):
+            raise ValueError("emergency_ir_cross_site_or_bot_credential_forbidden")
+        if self.background_jobs_enabled or not self.trading_bot_disable_direct_sync_push:
+            raise ValueError("emergency_ir_background_or_direct_sync_forbidden")
+        if any(
+            (
+                self.three_site_dr_enabled,
+                self.dark_standby_mode,
+                self.dr_event_protocol_enabled,
+                self.dr_event_protocol_strict,
+                self.dr_effect_worker_enabled,
+                self.writer_witness_required,
+                self.writer_witness_service_enabled,
+                self.writer_witness_auto_renew_enabled,
+            )
+        ):
+            raise ValueError("emergency_ir_three_site_or_witness_forbidden")
+        if any(
+            (
+                self.invitation_sms_standard_enabled,
+                self.invitation_sms_customer_tier1_enabled,
+                self.invitation_sms_accountant_enabled,
+                self.invitation_sms_customer_tier2_enabled,
+                self.smsir_line_number is not None,
+            )
+        ):
+            raise ValueError("emergency_ir_non_otp_sms_forbidden")
+        if any(
+            (
+                self.telegram_direct_registration_enabled,
+                self.telegram_registration_reconciliation_enabled,
+                self.registration_sync_v2_enabled,
+                self.registration_sync_accept_unversioned,
+                self.invitation_contract_v2_enabled,
+            )
+        ):
+            raise ValueError("emergency_ir_registration_or_sync_forbidden")
+
+        if profile == "telegram-only":
+            if (
+                self.emergency_sms_otp_enabled
+                or self.telegram_login_otp_enabled
+                or self.smsir_api_key
+            ):
+                raise ValueError("emergency_ir_telegram_only_sms_forbidden")
+            return self
+
+        if not self.emergency_sms_otp_enabled:
+            raise ValueError("emergency_ir_sms_otp_requires_explicit_enablement")
+        if not self.telegram_login_otp_enabled or self.otp_sms_auto_fallback_enabled:
+            raise ValueError("emergency_ir_sms_otp_delivery_mode_invalid")
+        if self.smsir_base_url != "http://sms-egress:8080" or self.smsir_trust_env:
+            raise ValueError("emergency_ir_sms_otp_relay_contract_invalid")
+        if not self.smsir_api_key or not self.smsir_otp_template_id:
+            raise ValueError("emergency_ir_sms_otp_credentials_incomplete")
+        if len(str(self.otp_delivery_state_secret or "")) < 32:
+            raise ValueError("emergency_ir_sms_otp_state_secret_invalid")
         return self
     
     class Config:
