@@ -24,6 +24,27 @@ def root_file(path: Path, payload: bytes, mode: int = 0o600) -> None:
     path.chmod(mode)
 
 
+def valid_settings(**overrides: object) -> bytes:
+    value: dict[str, object] = {
+        "anti_abuse_daily_base": 2,
+        "anti_abuse_monthly_base": 7,
+        "anti_abuse_weekly_base": 5,
+        "competitive_price_validation_enabled": False,
+        "invitation_expiry_days": 2,
+        "max_active_offers": 4,
+        "offer_expire_daily_limit_after_threshold": 10,
+        "offer_expire_rate_per_minute": 2,
+        "offer_expiry_minutes": 2,
+        "offer_max_quantity": 50,
+        "offer_min_quantity": 5,
+        "offer_price_warning_enabled": True,
+    }
+    value.update(overrides)
+    import json
+
+    return json.dumps(value, sort_keys=True).encode("utf-8")
+
+
 class BuildEmergencyIrSettingsBundleTests(unittest.TestCase):
     def test_default_bundle_has_exact_two_member_layout_and_activation_contract(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-settings-") as raw:
@@ -32,7 +53,7 @@ class BuildEmergencyIrSettingsBundleTests(unittest.TestCase):
             settings = root / "trading_settings.json"
             token = root / "webapp-token"
             output = root / "settings.tar"
-            root_file(settings, b'{"currency":"IRR","spread":1}', 0o640)
+            root_file(settings, valid_settings(), 0o640)
             root_file(token, b"123456789:emergency-webapp-hmac-token-only\n")
 
             result = BUILDER.build_settings_bundle(
@@ -68,7 +89,7 @@ class BuildEmergencyIrSettingsBundleTests(unittest.TestCase):
             template_id = root / "template-id"
             parameter = root / "template-parameter"
             output = root / "settings.tar"
-            root_file(settings, b'{"currency":"IRR"}')
+            root_file(settings, valid_settings())
             root_file(token, b"123456789:emergency-webapp-hmac-token-only")
             root_file(api_key, b"smsir-test-key")
             root_file(template_id, b"585147")
@@ -106,7 +127,7 @@ class BuildEmergencyIrSettingsBundleTests(unittest.TestCase):
             settings = root / "trading_settings.json"
             token = root / "webapp-token"
             output = root / "settings.tar"
-            root_file(settings, b'{"currency":"IRR"}')
+            root_file(settings, valid_settings())
             root_file(token, b"token", 0o644)
             with self.assertRaisesRegex(BUILDER.EmergencySettingsBundleError, "WebApp initData token"):
                 BUILDER.build_settings_bundle(
@@ -130,6 +151,29 @@ class BuildEmergencyIrSettingsBundleTests(unittest.TestCase):
                     webapp_initdata_token=token,
                     profile="sms-otp",
                     smsir_api_key=root / "missing",
+                )
+
+    def test_rejects_secret_or_nonpublic_trading_settings_drift(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-settings-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            token = root / "webapp-token"
+            root_file(token, b"123456789:emergency-webapp-hmac-token-only")
+            secret_settings = root / "secret.json"
+            root_file(secret_settings, valid_settings(bot_token="must-not-transfer"))
+            with self.assertRaisesRegex(BUILDER.EmergencySettingsBundleError, "public Emergency schema"):
+                BUILDER.build_settings_bundle(
+                    output=root / "secret.tar",
+                    trading_settings=secret_settings,
+                    webapp_initdata_token=token,
+                )
+            malformed_settings = root / "malformed.json"
+            root_file(malformed_settings, valid_settings(offer_min_quantity=True))
+            with self.assertRaisesRegex(BUILDER.EmergencySettingsBundleError, "positive integer"):
+                BUILDER.build_settings_bundle(
+                    output=root / "malformed.tar",
+                    trading_settings=malformed_settings,
+                    webapp_initdata_token=token,
                 )
 
     def test_cli_requires_isolated_interpreter(self) -> None:

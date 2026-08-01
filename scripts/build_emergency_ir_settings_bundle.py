@@ -34,6 +34,35 @@ MAX_SETTINGS_MEMBER_BYTES = activation.MAX_SETTINGS_MEMBER_BYTES
 MAX_SECRET_BYTES = activation.MAX_SECRET_BYTES
 SMS_PARAMETER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$", re.ASCII)
 
+# The Emergency bundle is deliberately narrower than an arbitrary application
+# configuration file.  These are the complete, public fields in the current
+# production ``trading_settings.json`` snapshot.  Requiring this exact schema
+# means a future credential, peer endpoint, or feature flag cannot silently
+# hitch a ride in the encrypted settings artifact.
+PUBLIC_TRADING_SETTINGS_INTEGER_KEYS = frozenset(
+    {
+        "anti_abuse_daily_base",
+        "anti_abuse_monthly_base",
+        "anti_abuse_weekly_base",
+        "invitation_expiry_days",
+        "max_active_offers",
+        "offer_expire_daily_limit_after_threshold",
+        "offer_expire_rate_per_minute",
+        "offer_expiry_minutes",
+        "offer_max_quantity",
+        "offer_min_quantity",
+    }
+)
+PUBLIC_TRADING_SETTINGS_BOOLEAN_KEYS = frozenset(
+    {
+        "competitive_price_validation_enabled",
+        "offer_price_warning_enabled",
+    }
+)
+PUBLIC_TRADING_SETTINGS_KEYS = (
+    PUBLIC_TRADING_SETTINGS_INTEGER_KEYS | PUBLIC_TRADING_SETTINGS_BOOLEAN_KEYS
+)
+
 
 class EmergencySettingsBundleError(RuntimeError):
     pass
@@ -110,13 +139,39 @@ def _trading_settings(path: Path) -> bytes:
         maximum_bytes=MAX_SETTINGS_MEMBER_BYTES,
         private=False,
     )
+    def reject_constant(_: str) -> object:
+        _fail("trading settings must not contain non-finite JSON values")
+
+    def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, item in pairs:
+            if key in result:
+                _fail("trading settings must not contain duplicate keys")
+            result[key] = item
+        return result
+
     try:
-        value = json.loads(payload.decode("utf-8"))
+        value = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=unique_object,
+            parse_constant=reject_constant,
+        )
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise EmergencySettingsBundleError("trading settings must be strict JSON") from exc
-    if not isinstance(value, dict) or not value:
-        _fail("trading settings must be one non-empty JSON object")
-    return payload
+    if not isinstance(value, dict) or set(value) != PUBLIC_TRADING_SETTINGS_KEYS:
+        _fail("trading settings must contain exactly the public Emergency schema")
+    for key in PUBLIC_TRADING_SETTINGS_INTEGER_KEYS:
+        item = value[key]
+        if not isinstance(item, int) or isinstance(item, bool) or item <= 0:
+            _fail(f"trading setting {key} must be a positive integer")
+    for key in PUBLIC_TRADING_SETTINGS_BOOLEAN_KEYS:
+        if not isinstance(value[key], bool):
+            _fail(f"trading setting {key} must be boolean")
+    if value["offer_min_quantity"] > value["offer_max_quantity"]:
+        _fail("trading settings must have offer_min_quantity <= offer_max_quantity")
+    # Canonical payload prevents source formatting from becoming a hidden data
+    # channel and gives later integrity checks stable bytes.
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
 def _write_create_only(path: Path, payload: bytes) -> None:
