@@ -52,6 +52,25 @@ class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
         leader_mock.assert_not_called()
         close_redis_mock.assert_awaited_once()
 
+    async def test_lifespan_emergency_snapshot_does_not_reconcile_mandatory_channel_memberships(self):
+        redis_client = AsyncMock()
+
+        with patch.object(main.settings, "emergency_ir_standalone", True), patch.object(
+            main.settings, "background_jobs_enabled", False
+        ), patch("main.init_db", new=AsyncMock()), patch(
+            "main.init_redis", new=AsyncMock(return_value=redis_client)
+        ), patch("main.close_redis", new=AsyncMock()) as close_redis_mock, patch(
+            "main.setup_event_listeners"
+        ), patch("main.ensure_mandatory_channel_rollout", new=AsyncMock()) as rollout_mock, patch(
+            "main._start_background_leader_task"
+        ) as leader_mock:
+            async with main.lifespan(main.app):
+                pass
+
+        rollout_mock.assert_not_awaited()
+        leader_mock.assert_not_called()
+        close_redis_mock.assert_awaited_once()
+
     async def test_lifespan_starts_background_leader_and_closes_redis(self):
         session = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
         redis_client = AsyncMock()

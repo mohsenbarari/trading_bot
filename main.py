@@ -359,24 +359,34 @@ async def lifespan(app: FastAPI):
     redis_client = await init_redis()
     setup_event_listeners()
 
-    async with AsyncSessionLocal() as session:
-        try:
-            await ensure_mandatory_channel_rollout(session)
-            await session.commit()
-        except IntegrityError as exc:
-            await session.rollback()
-            if not _is_mandatory_channel_membership_race(exc):
+    # The Emergency IR snapshot is intentionally a frozen, isolated recovery
+    # copy.  Its startup must not create or reconcile chat memberships beyond
+    # the narrowly scoped session reset performed before migration.  Normal
+    # production keeps the existing rollout behaviour unchanged.
+    if settings.emergency_ir_standalone:
+        logger.info(
+            "Skipping mandatory channel rollout for isolated Emergency IR startup",
+            extra={"event": "emergency_ir.mandatory_channel_rollout_skipped"},
+        )
+    else:
+        async with AsyncSessionLocal() as session:
+            try:
+                await ensure_mandatory_channel_rollout(session)
+                await session.commit()
+            except IntegrityError as exc:
+                await session.rollback()
+                if not _is_mandatory_channel_membership_race(exc):
+                    raise
+                logger.warning(
+                    "Mandatory channel rollout hit a concurrent active-membership insert; continuing startup.",
+                    extra={
+                        "event": "mandatory_channel_rollout.membership_race_ignored",
+                        "error_class": type(exc).__name__,
+                    },
+                )
+            except Exception:
+                await session.rollback()
                 raise
-            logger.warning(
-                "Mandatory channel rollout hit a concurrent active-membership insert; continuing startup.",
-                extra={
-                    "event": "mandatory_channel_rollout.membership_race_ignored",
-                    "error_class": type(exc).__name__,
-                },
-            )
-        except Exception:
-            await session.rollback()
-            raise
     background_leader_task = None
     if settings.background_jobs_enabled:
         background_leader_task = _start_background_leader_task(redis_client)
