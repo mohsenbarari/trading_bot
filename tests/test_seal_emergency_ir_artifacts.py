@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,16 +53,15 @@ class SealEmergencyIrArtifactsTests(unittest.TestCase):
                 root_file(path, (kind + "-payload").encode("ascii"))
                 plain[kind] = path
 
-            result = SEAL.seal_artifacts(
-                campaign_id="campaign-20260801",
-                bucket="gold-trade-emergency-ir-20260801",
-                prefix="emergency-ir",
-                created_at="2026-08-01T22:30:00Z",
-                recipient=RECIPIENT,
-                plaintext_paths=plain,
-                output_directory=output,
-                age_binary=age,
-            )
+            with patch.object(SEAL, "DEFAULT_AGE_BINARY", age):
+                result = SEAL.seal_artifacts(
+                    campaign_id="campaign-20260801",
+                    bucket="gold-trade-emergency-ir-20260801",
+                    prefix="emergency-ir",
+                    created_at="2026-08-01T22:30:00Z",
+                    plaintext_paths=plain,
+                    output_directory=output,
+                )
 
             self.assertEqual(result["status"], "sealed-local-only")
             self.assertEqual(result["campaign_id"], "campaign-20260801")
@@ -71,6 +71,7 @@ class SealEmergencyIrArtifactsTests(unittest.TestCase):
             plan = json.loads(plan_path.read_text(encoding="utf-8"))
             self.assertEqual([item["kind"] for item in plan["artifacts"]], list(KINDS))
             self.assertEqual(plan["destination_age_recipient_key_id"], result["destination_age_recipient_key_id"])
+            self.assertEqual(result["destination_age_recipient"], RECIPIENT)
             for item, kind in zip(plan["artifacts"], KINDS, strict=True):
                 ciphertext = Path(item["ciphertext_path"])
                 self.assertEqual(ciphertext, output / SEAL.OUTPUT_FILENAMES[kind])
@@ -94,25 +95,25 @@ class SealEmergencyIrArtifactsTests(unittest.TestCase):
                 root_file(path, b"payload")
                 plain[kind] = path
 
-            with self.assertRaisesRegex(SEAL.EmergencyArtifactSealError, "must be empty"):
-                SEAL.seal_artifacts(
-                    campaign_id="campaign-20260801",
-                    bucket="gold-trade-emergency-ir-20260801",
-                    prefix="emergency-ir",
-                    created_at="2026-08-01T22:30:00Z",
-                    recipient=RECIPIENT,
-                    plaintext_paths=plain,
-                    output_directory=output,
-                    age_binary=age,
-                )
+            with patch.object(SEAL, "DEFAULT_AGE_BINARY", age):
+                with self.assertRaisesRegex(SEAL.EmergencyArtifactSealError, "must be empty"):
+                    SEAL.seal_artifacts(
+                        campaign_id="campaign-20260801",
+                        bucket="gold-trade-emergency-ir-20260801",
+                        prefix="emergency-ir",
+                        created_at="2026-08-01T22:30:00Z",
+                        plaintext_paths=plain,
+                        output_directory=output,
+                    )
             self.assertEqual((output / "prior").read_bytes(), b"preserve")
             self.assertEqual(len(list(output.iterdir())), 1)
 
     def test_canonical_timestamp_and_recipient_reject_unsafe_values(self) -> None:
         with self.assertRaisesRegex(SEAL.EmergencyArtifactSealError, "created_at"):
             SEAL._canonical_created_at("2026-08-01T22:30:00+00:00")
-        with self.assertRaisesRegex(SEAL.EmergencyArtifactSealError, "recipient"):
-            SEAL._recipient_key_id("not-an-age-recipient")
+        with patch.object(SEAL, "WA_IR_AGE_RECIPIENT", "not-an-age-recipient"):
+            with self.assertRaisesRegex(SEAL.EmergencyArtifactSealError, "recipient"):
+                SEAL._wa_ir_recipient_key_id()
 
     def test_cli_requires_isolated_interpreter(self) -> None:
         completed = subprocess.run(
@@ -123,6 +124,46 @@ class SealEmergencyIrArtifactsTests(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 2)
         self.assertIn("python3 -I -B", completed.stdout)
+
+    def test_finalization_never_replaces_a_target_created_after_precheck(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="seal-emergency-ir-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            temporary = root / ".images.tar.age.1.part"
+            output = root / "images.tar.age"
+            root_file(temporary, b"candidate")
+
+            def race_link(source: Path, destination: Path, **_: object) -> None:
+                self.assertEqual(source, temporary)
+                self.assertEqual(destination, output)
+                root_file(output, b"racing-owner")
+                raise FileExistsError
+
+            with patch.object(SEAL.os, "link", side_effect=race_link):
+                with self.assertRaisesRegex(SEAL.EmergencyArtifactSealError, "overwrite existing"):
+                    SEAL._finalize_create_only(
+                        temporary=temporary,
+                        output_path=output,
+                        label="image_bundle",
+                    )
+            self.assertEqual(output.read_bytes(), b"racing-owner")
+            self.assertEqual(temporary.read_bytes(), b"candidate")
+
+    def test_rejects_symlink_or_writable_pinned_age_binary(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="seal-emergency-ir-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            real = root / "real-age"
+            fake_age(real)
+            link = root / "age-link"
+            link.symlink_to(real)
+            with patch.object(SEAL, "DEFAULT_AGE_BINARY", link):
+                with self.assertRaisesRegex(SEAL.EmergencyArtifactSealError, "root-owned"):
+                    SEAL._require_fixed_age_binary()
+            real.chmod(0o777)
+            with patch.object(SEAL, "DEFAULT_AGE_BINARY", real):
+                with self.assertRaisesRegex(SEAL.EmergencyArtifactSealError, "root-owned"):
+                    SEAL._require_fixed_age_binary()
 
 
 if __name__ == "__main__":

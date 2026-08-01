@@ -40,6 +40,7 @@ AGE_RECIPIENT_RE = re.compile(r"^age1[ac-hj-np-z02-9]{10,200}$", re.ASCII)
 AGE_HEADER = b"age-encryption.org/v1\n"
 HASH_CHUNK_BYTES = 1024 * 1024
 DEFAULT_AGE_BINARY = Path("/usr/bin/age")
+WA_IR_AGE_RECIPIENT = "age1hxt7paq6kp3cr4ey6tp0ne2dpvmz7az9h7jh09vfr9gpsm30fa7qa8zmkt"
 OUTPUT_FILENAMES = {
     "image_bundle": "images.tar.age",
     "package_tar": "package.tar.age",
@@ -191,6 +192,51 @@ def _digest_path(path: Path, *, label: str) -> FileDigest:
         return _digest_open_file(source, opened, path=path, label=label)
 
 
+def _require_fixed_age_binary() -> Path:
+    """Accept only the host's pinned, root-owned age executable.
+
+    This is intentionally not a CLI parameter: a caller-selectable program
+    could claim to create age ciphertext while copying plaintext elsewhere.
+    """
+
+    try:
+        state = DEFAULT_AGE_BINARY.lstat()
+    except OSError as exc:
+        raise EmergencyArtifactSealError("pinned age binary cannot be inspected") from exc
+    if (
+        stat.S_ISLNK(state.st_mode)
+        or not stat.S_ISREG(state.st_mode)
+        or state.st_uid != 0
+        or stat.S_IMODE(state.st_mode) & 0o022
+        or not bool(state.st_mode & stat.S_IXUSR)
+        or state.st_size < 1
+    ):
+        _fail("pinned age binary is not one root-owned non-writable executable")
+    return DEFAULT_AGE_BINARY
+
+
+def _finalize_create_only(*, temporary: Path, output_path: Path, label: str) -> None:
+    """Atomically publish a same-directory temporary without replacement."""
+
+    try:
+        os.link(temporary, output_path, follow_symlinks=False)
+    except FileExistsError as exc:
+        raise EmergencyArtifactSealError(f"refusing to overwrite existing {label} ciphertext") from exc
+    except OSError as exc:
+        raise EmergencyArtifactSealError(f"{label} ciphertext cannot be finalized") from exc
+    directory_fd: int | None = None
+    try:
+        directory_fd = os.open(output_path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        os.fsync(directory_fd)
+        os.unlink(temporary)
+        os.fsync(directory_fd)
+    except OSError as exc:
+        raise EmergencyArtifactSealError(f"{label} ciphertext finalization could not be completed") from exc
+    finally:
+        if directory_fd is not None:
+            os.close(directory_fd)
+
+
 def _seal_one(
     *,
     source_path: Path,
@@ -250,17 +296,14 @@ def _seal_one(
     with temporary.open("rb") as handle:
         if handle.read(len(AGE_HEADER)) != AGE_HEADER:
             _fail(f"{label} ciphertext is not an age-v1 stream")
-    try:
-        os.rename(temporary, output_path)
-    except OSError as exc:
-        raise EmergencyArtifactSealError(f"{label} ciphertext cannot be finalized") from exc
+    _finalize_create_only(temporary=temporary, output_path=output_path, label=label)
     return plaintext, FileDigest(path=output_path, sha256=ciphertext.sha256, bytes=ciphertext.bytes)
 
 
-def _recipient_key_id(recipient: str) -> str:
-    if AGE_RECIPIENT_RE.fullmatch(recipient) is None:
-        _fail("destination age recipient is invalid")
-    return "age-recipient-sha256:" + hashlib.sha256(recipient.encode("ascii")).hexdigest()
+def _wa_ir_recipient_key_id() -> str:
+    if AGE_RECIPIENT_RE.fullmatch(WA_IR_AGE_RECIPIENT) is None:
+        _fail("pinned WA-IR age recipient is invalid")
+    return "age-recipient-sha256:" + hashlib.sha256(WA_IR_AGE_RECIPIENT.encode("ascii")).hexdigest()
 
 
 def build_publish_plan(
@@ -310,26 +353,23 @@ def seal_artifacts(
     bucket: str,
     prefix: str,
     created_at: str | None,
-    recipient: str,
     plaintext_paths: Mapping[str, Path],
     output_directory: Path,
-    age_binary: Path = DEFAULT_AGE_BINARY,
 ) -> dict[str, Any]:
     """Seal exactly four ready plaintexts and emit a create-only publish plan."""
 
     if set(plaintext_paths) != set(manifest.ARTIFACT_ORDER):
         _fail("plaintext inputs must cover exactly the fixed Emergency set")
     _secure_directory(output_directory, label="Emergency artifact output directory", empty=True)
-    if not age_binary.is_absolute() or not age_binary.is_file() or not os.access(age_binary, os.X_OK):
-        _fail("age binary must be one executable absolute file")
-    recipient_key_id = _recipient_key_id(recipient)
+    age_binary = _require_fixed_age_binary()
+    recipient_key_id = _wa_ir_recipient_key_id()
     timestamp = _canonical_created_at(created_at)
     sealed: dict[str, tuple[FileDigest, FileDigest]] = {}
     for kind in manifest.ARTIFACT_ORDER:
         sealed[kind] = _seal_one(
             source_path=plaintext_paths[kind],
             output_path=output_directory / OUTPUT_FILENAMES[kind],
-            recipient=recipient,
+            recipient=WA_IR_AGE_RECIPIENT,
             age_binary=age_binary,
             label=kind,
         )
@@ -351,6 +391,7 @@ def seal_artifacts(
     return {
         "status": "sealed-local-only",
         "campaign_id": campaign_id,
+        "destination_age_recipient": WA_IR_AGE_RECIPIENT,
         "destination_age_recipient_key_id": recipient_key_id,
         "publish_plan": str(plan_path),
         "artifacts": [
@@ -372,13 +413,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--bucket", required=True)
     parser.add_argument("--prefix", required=True)
     parser.add_argument("--created-at")
-    parser.add_argument("--destination-age-recipient", required=True)
     parser.add_argument("--image-bundle", type=Path, required=True)
     parser.add_argument("--package-tar", type=Path, required=True)
     parser.add_argument("--snapshot", type=Path, required=True)
     parser.add_argument("--settings", type=Path, required=True)
     parser.add_argument("--output-directory", type=Path, required=True)
-    parser.add_argument("--age-binary", type=Path, default=DEFAULT_AGE_BINARY)
     return parser.parse_args(argv)
 
 
@@ -392,7 +431,6 @@ def main(argv: list[str] | None = None) -> int:
             bucket=args.bucket,
             prefix=args.prefix,
             created_at=args.created_at,
-            recipient=args.destination_age_recipient,
             plaintext_paths={
                 "image_bundle": args.image_bundle,
                 "package_tar": args.package_tar,
@@ -400,7 +438,6 @@ def main(argv: list[str] | None = None) -> int:
                 "settings": args.settings,
             },
             output_directory=args.output_directory,
-            age_binary=args.age_binary,
         )
     except EmergencyArtifactSealError as exc:
         print(json.dumps({"status": "blocked", "error": str(exc), "error_class": type(exc).__name__}, sort_keys=True))
