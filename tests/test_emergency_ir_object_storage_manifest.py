@@ -245,6 +245,47 @@ class EmergencyIrObjectStorageManifestTests(unittest.TestCase):
             self.assertEqual(repeat_rc, 2)
             self.assertIn("refusing to overwrite", stdout.getvalue())
 
+    def test_cli_generates_create_only_root_style_keypair_without_printing_key_material(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-manifest-keypair-") as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            private_path = root / "signing-private.key"
+            public_path = root / "signing-public.key"
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                rc = manifest._main(
+                    [
+                        "generate-keypair",
+                        "--private-key",
+                        str(private_path),
+                        "--public-key",
+                        str(public_path),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            result = json.loads(stdout.getvalue())
+            self.assertEqual(result["status"], "keypair-created-local-only")
+            self.assertIn("ed25519-sha256:", result["signer_key_id"])
+            self.assertNotIn(base64.b64encode(private_path.read_bytes()).decode("ascii"), stdout.getvalue())
+            self.assertEqual(private_path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(public_path.stat().st_mode & 0o777, 0o600)
+            self.assertIsInstance(manifest.load_private_key(private_path), Ed25519PrivateKey)
+            self.assertIsNotNone(manifest.load_public_key(public_path))
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                repeated_rc = manifest._main(
+                    [
+                        "generate-keypair",
+                        "--private-key",
+                        str(private_path),
+                        "--public-key",
+                        str(public_path),
+                    ]
+                )
+            self.assertEqual(repeated_rc, 2)
+            self.assertIn("refusing to overwrite", stdout.getvalue())
+
     def test_module_has_no_network_or_host_execution_surface(self) -> None:
         source = MODULE_PATH.read_text(encoding="utf-8")
         for forbidden in ("boto3", "urllib", "requests", "socket", "subprocess", "ssh"):
