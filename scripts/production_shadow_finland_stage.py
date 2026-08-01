@@ -64,6 +64,9 @@ CONVERGENCE_SOURCE_SET_PRODUCER_RELATIVE = Path(
 CONVERGENCE_SOURCE_SET_LAUNCHER_RELATIVE = Path(
     "scripts/production_shadow_convergence_source_set_launcher"
 )
+CONVERGENCE_OBSERVER_LAUNCHER_RELATIVE = Path(
+    "scripts/production_shadow_convergence_observer_launcher"
+)
 
 GIT = "/usr/bin/git"
 DOCKER = "/usr/bin/docker"
@@ -238,6 +241,7 @@ MAX_JOURNAL_BYTES = 2 * 1024 * 1024
 MAX_ATTESTATION_BYTES = 2 * 1024 * 1024
 MAX_AGENT_BYTES = 8 * 1024 * 1024
 MAX_CONVERGENCE_SOURCE_SET_LAUNCHER_BYTES = 1024 * 1024
+MAX_CONVERGENCE_OBSERVER_LAUNCHER_BYTES = 1024 * 1024
 MAX_ARTIFACT_BYTES = 64 * 1024 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 250_000
 MAX_ARCHIVE_CONFIG_BYTES = 16 * 1024 * 1024
@@ -2321,20 +2325,15 @@ def _convergence_source_set_feature_paths(
     return producer, launcher
 
 
-def _install_convergence_source_set_launcher(
-    release_root: Path,
+def _install_private_release_launcher(
+    launcher: Path,
     *,
+    label: str,
+    maximum: int,
     required_uid: int,
-) -> bool:
-    """Set mode only after validating the checkout's root-owned launcher."""
+) -> None:
+    """Set mode only after validating one root-owned release launcher."""
 
-    paths = _convergence_source_set_feature_paths(
-        release_root,
-        required_uid=required_uid,
-    )
-    if paths is None:
-        return False
-    _producer, launcher = paths
     descriptor = -1
     try:
         descriptor = os.open(
@@ -2350,9 +2349,9 @@ def _install_convergence_source_set_launcher(
             or before.st_uid != required_uid
             or before.st_gid != required_uid
             or before.st_nlink != 1
-            or not 1 <= before.st_size <= MAX_CONVERGENCE_SOURCE_SET_LAUNCHER_BYTES
+            or not 1 <= before.st_size <= maximum
         ):
-            raise FinlandStageError("convergence source-set launcher is unsafe")
+            raise FinlandStageError(f"{label} is unsafe")
         os.fchmod(descriptor, 0o700)
         os.fsync(descriptor)
         after = os.fstat(descriptor)
@@ -2362,19 +2361,61 @@ def _install_convergence_source_set_launcher(
             or after.st_gid != required_uid
             or stat.S_IMODE(after.st_mode) != 0o700
             or after.st_nlink != 1
-            or not 1 <= after.st_size <= MAX_CONVERGENCE_SOURCE_SET_LAUNCHER_BYTES
+            or not 1 <= after.st_size <= maximum
         ):
-            raise FinlandStageError("convergence source-set launcher is unsafe")
+            raise FinlandStageError(f"{label} is unsafe")
     except FinlandStageError:
         raise
     except OSError as exc:
-        raise FinlandStageError(
-            "convergence source-set launcher mode could not be fixed"
-        ) from exc
+        raise FinlandStageError(f"{label} mode could not be fixed") from exc
     finally:
         if descriptor >= 0:
             os.close(descriptor)
     _fsync_directory(launcher.parent)
+
+
+def _verify_private_release_launcher(
+    launcher: Path,
+    *,
+    label: str,
+    maximum: int,
+    required_uid: int,
+) -> None:
+    """Verify one root-only staged launcher before release verification."""
+
+    with _held_file(
+        launcher,
+        required_uid=required_uid,
+        expected_mode=0o700,
+        maximum=maximum,
+        nonblocking=True,
+    ) as (stream, metadata):
+        if metadata.st_gid != required_uid:
+            raise FinlandStageError(f"{label} is unsafe")
+        while stream.read(1024 * 1024):
+            pass
+
+
+def _install_convergence_source_set_launcher(
+    release_root: Path,
+    *,
+    required_uid: int,
+) -> bool:
+    """Set mode only after validating the checkout's root-owned launcher."""
+
+    paths = _convergence_source_set_feature_paths(
+        release_root,
+        required_uid=required_uid,
+    )
+    if paths is None:
+        return False
+    _producer, launcher = paths
+    _install_private_release_launcher(
+        launcher,
+        label="convergence source-set launcher",
+        maximum=MAX_CONVERGENCE_SOURCE_SET_LAUNCHER_BYTES,
+        required_uid=required_uid,
+    )
     return True
 
 
@@ -2392,17 +2433,88 @@ def _verify_convergence_source_set_launcher(
     if paths is None:
         return False
     _producer, launcher = paths
-    with _held_file(
+    _verify_private_release_launcher(
         launcher,
-        required_uid=required_uid,
-        expected_mode=0o700,
+        label="convergence source-set launcher",
         maximum=MAX_CONVERGENCE_SOURCE_SET_LAUNCHER_BYTES,
-        nonblocking=True,
-    ) as (stream, metadata):
-        if metadata.st_gid != required_uid:
-            raise FinlandStageError("convergence source-set launcher is unsafe")
-        while stream.read(1024 * 1024):
-            pass
+        required_uid=required_uid,
+    )
+    return True
+
+
+def _convergence_observer_launcher_path(
+    release_root: Path,
+    *,
+    required_uid: int,
+) -> Path | None:
+    """Return the observer launcher when present, or permit a legacy release."""
+
+    scripts_directory = release_root / "scripts"
+    scripts_metadata = _release_child_metadata(
+        scripts_directory,
+        label="materialized release scripts directory",
+    )
+    if scripts_metadata is None:
+        return None
+    _assert_directory(
+        scripts_directory,
+        required_uid=required_uid,
+        private=False,
+    )
+
+    launcher = release_root / CONVERGENCE_OBSERVER_LAUNCHER_RELATIVE
+    launcher_metadata = _release_child_metadata(
+        launcher,
+        label="convergence observer launcher",
+    )
+    if launcher_metadata is None:
+        return None
+    if not stat.S_ISREG(launcher_metadata.st_mode):
+        raise FinlandStageError("convergence observer launcher is unsafe")
+    return launcher
+
+
+def _install_convergence_observer_launcher(
+    release_root: Path,
+    *,
+    required_uid: int,
+) -> bool:
+    """Set mode only after validating the checkout's root-owned observer launcher."""
+
+    launcher = _convergence_observer_launcher_path(
+        release_root,
+        required_uid=required_uid,
+    )
+    if launcher is None:
+        return False
+    _install_private_release_launcher(
+        launcher,
+        label="convergence observer launcher",
+        maximum=MAX_CONVERGENCE_OBSERVER_LAUNCHER_BYTES,
+        required_uid=required_uid,
+    )
+    return True
+
+
+def _verify_convergence_observer_launcher(
+    release_root: Path,
+    *,
+    required_uid: int,
+) -> bool:
+    """Verify the staged observer launcher before treating its release as exact."""
+
+    launcher = _convergence_observer_launcher_path(
+        release_root,
+        required_uid=required_uid,
+    )
+    if launcher is None:
+        return False
+    _verify_private_release_launcher(
+        launcher,
+        label="convergence observer launcher",
+        maximum=MAX_CONVERGENCE_OBSERVER_LAUNCHER_BYTES,
+        required_uid=required_uid,
+    )
     return True
 
 
@@ -2552,7 +2664,15 @@ def _materialize_release(
         release_root,
         required_uid=required_uid,
     )
+    _install_convergence_observer_launcher(
+        release_root,
+        required_uid=required_uid,
+    )
     _verify_convergence_source_set_launcher(
+        release_root,
+        required_uid=required_uid,
+    )
+    _verify_convergence_observer_launcher(
         release_root,
         required_uid=required_uid,
     )
@@ -3581,6 +3701,10 @@ def stage_operation(
                 paths["release_root"],  # type: ignore[arg-type]
                 required_uid=required_uid,
             )
+            _install_convergence_observer_launcher(
+                paths["release_root"],  # type: ignore[arg-type]
+                required_uid=required_uid,
+            )
         verified_archives = {}
         for image_role in IMAGE_ROLES:
             archive = (
@@ -3684,6 +3808,10 @@ def stage_operation(
             )
 
         _verify_convergence_source_set_launcher(
+            paths["release_root"],  # type: ignore[arg-type]
+            required_uid=required_uid,
+        )
+        _verify_convergence_observer_launcher(
             paths["release_root"],  # type: ignore[arg-type]
             required_uid=required_uid,
         )

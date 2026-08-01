@@ -174,6 +174,7 @@ class FakeRunner:
         self.fixture = fixture
         self.calls: list[list[str]] = []
         self.release_verification_launcher_modes: list[int | None] = []
+        self.release_verification_observer_launcher_modes: list[int | None] = []
         self.remote_removed = False
         self.loaded: dict[str, dict] = dict(preexisting or {})
         runtime_characters = {
@@ -208,16 +209,23 @@ class FakeRunner:
             elif argv[-1] == "remote":
                 stdout = b"" if self.remote_removed else b"origin\n"
             elif argv[-1] == "--show-toplevel":
-                launcher = (
-                    self.fixture.paths["release_root"]
-                    / MODULE.CONVERGENCE_SOURCE_SET_LAUNCHER_RELATIVE
-                )
-                if launcher.exists() and not launcher.is_symlink():
-                    self.release_verification_launcher_modes.append(
-                        stat.S_IMODE(launcher.stat(follow_symlinks=False).st_mode)
-                    )
-                else:
-                    self.release_verification_launcher_modes.append(None)
+                for relative, modes in (
+                    (
+                        MODULE.CONVERGENCE_SOURCE_SET_LAUNCHER_RELATIVE,
+                        self.release_verification_launcher_modes,
+                    ),
+                    (
+                        MODULE.CONVERGENCE_OBSERVER_LAUNCHER_RELATIVE,
+                        self.release_verification_observer_launcher_modes,
+                    ),
+                ):
+                    launcher = self.fixture.paths["release_root"] / relative
+                    if launcher.exists() and not launcher.is_symlink():
+                        modes.append(
+                            stat.S_IMODE(launcher.stat(follow_symlinks=False).st_mode)
+                        )
+                    else:
+                        modes.append(None)
                 stdout = (str(self.fixture.paths["release_root"]) + "\n").encode()
             elif argv[-1] == "HEAD^{tree}":
                 stdout = (RELEASE_TREE_SHA + "\n").encode()
@@ -291,6 +299,7 @@ class StageFixture:
         self.agent_sha256 = hashlib.sha256(self.agent_bytes).hexdigest()
         secure_file(self.paths["agent"], self.agent_bytes, 0o700)
         self.release_feature = "current"
+        self.observer_feature = "current"
 
         self.archives: dict[str, bytes] = {}
         self.image_bindings: dict[str, dict] = {}
@@ -346,6 +355,12 @@ class StageFixture:
             os.mkfifo(launcher, 0o600)
             return
         secure_file(launcher, b"#!/bin/sh\nexit 0\n", 0o755)
+
+        observer_launcher = scripts / "production_shadow_convergence_observer_launcher"
+        if self.observer_feature == "launcher-symlink":
+            observer_launcher.symlink_to("/etc/passwd")
+            return
+        secure_file(observer_launcher, b"#!/bin/sh\nexit 0\n", 0o755)
 
     def _manifest_document(self) -> dict:
         artifacts = {
@@ -523,26 +538,35 @@ class ProductionShadowFinlandStageTests(unittest.TestCase):
         ):
             self.assertIs(attestation[field], False)
 
-    def test_current_release_installs_launcher_before_release_verification(self):
+    def test_current_release_installs_launchers_before_release_verification(self):
         result = MODULE.stage_operation(
             self.fixture.request,
             runner=self.fixture.runner,
         )
 
-        launcher = (
+        source_set_launcher = (
             self.fixture.paths["release_root"]
             / MODULE.CONVERGENCE_SOURCE_SET_LAUNCHER_RELATIVE
         )
-        metadata = launcher.stat(follow_symlinks=False)
+        observer_launcher = (
+            self.fixture.paths["release_root"]
+            / MODULE.CONVERGENCE_OBSERVER_LAUNCHER_RELATIVE
+        )
         self.assertEqual(result["status"], "staged")
-        self.assertTrue(stat.S_ISREG(metadata.st_mode))
-        self.assertFalse(launcher.is_symlink())
-        self.assertEqual(metadata.st_uid, 0)
-        self.assertEqual(metadata.st_gid, 0)
-        self.assertEqual(stat.S_IMODE(metadata.st_mode), 0o700)
-        self.assertEqual(launcher.read_bytes(), b"#!/bin/sh\nexit 0\n")
+        for launcher in (source_set_launcher, observer_launcher):
+            metadata = launcher.stat(follow_symlinks=False)
+            self.assertTrue(stat.S_ISREG(metadata.st_mode))
+            self.assertFalse(launcher.is_symlink())
+            self.assertEqual(metadata.st_uid, 0)
+            self.assertEqual(metadata.st_gid, 0)
+            self.assertEqual(stat.S_IMODE(metadata.st_mode), 0o700)
+            self.assertEqual(launcher.read_bytes(), b"#!/bin/sh\nexit 0\n")
         self.assertEqual(
             self.fixture.runner.release_verification_launcher_modes,
+            [0o700, 0o700],
+        )
+        self.assertEqual(
+            self.fixture.runner.release_verification_observer_launcher_modes,
             [0o700, 0o700],
         )
 
@@ -552,8 +576,11 @@ class ProductionShadowFinlandStageTests(unittest.TestCase):
         (release_root / ".git").mkdir(mode=0o700)
         self.fixture.materialize_release_tree(release_root)
         self.fixture.runner.remote_removed = True
-        launcher = (
+        source_set_launcher = (
             release_root / MODULE.CONVERGENCE_SOURCE_SET_LAUNCHER_RELATIVE
+        )
+        observer_launcher = (
+            release_root / MODULE.CONVERGENCE_OBSERVER_LAUNCHER_RELATIVE
         )
 
         MODULE._verify_materialized_release(
@@ -566,7 +593,11 @@ class ProductionShadowFinlandStageTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            stat.S_IMODE(launcher.stat(follow_symlinks=False).st_mode),
+            stat.S_IMODE(source_set_launcher.stat(follow_symlinks=False).st_mode),
+            0o755,
+        )
+        self.assertEqual(
+            stat.S_IMODE(observer_launcher.stat(follow_symlinks=False).st_mode),
             0o755,
         )
 
@@ -581,6 +612,10 @@ class ProductionShadowFinlandStageTests(unittest.TestCase):
         self.assertEqual(result["status"], "staged")
         self.assertEqual(
             self.fixture.runner.release_verification_launcher_modes,
+            [None, None],
+        )
+        self.assertEqual(
+            self.fixture.runner.release_verification_observer_launcher_modes,
             [None, None],
         )
 
@@ -670,16 +705,69 @@ class ProductionShadowFinlandStageTests(unittest.TestCase):
         self.assertNotEqual(getattr(os, "O_NONBLOCK", 0), 0)
         self.assertTrue(opens[0] & os.O_NONBLOCK)
 
-    def test_resume_normalizes_pre_hardening_launcher_before_image_rechecks(self):
+    def test_observer_launcher_verification_opens_nonblocking(self):
+        release_root = self.fixture.root / "nonblocking-observer-launcher-release"
+        release_root.mkdir(mode=0o700)
+        self.fixture.materialize_release_tree(release_root)
+        launcher = release_root / MODULE.CONVERGENCE_OBSERVER_LAUNCHER_RELATIVE
+        launcher.chmod(0o700)
+
+        with mock.patch.object(MODULE.os, "open", wraps=os.open) as open_file:
+            self.assertTrue(
+                MODULE._verify_convergence_observer_launcher(
+                    release_root,
+                    required_uid=0,
+                )
+            )
+
+        opens = [
+            call.args[1]
+            for call in open_file.call_args_list
+            if call.args and call.args[0] == launcher
+        ]
+        self.assertEqual(len(opens), 1)
+        self.assertNotEqual(getattr(os, "O_NONBLOCK", 0), 0)
+        self.assertTrue(opens[0] & os.O_NONBLOCK)
+
+    def test_symlinked_observer_launcher_is_rejected_before_release_verification(self):
+        self.fixture.observer_feature = "launcher-symlink"
+
+        with self.assertRaisesRegex(
+            MODULE.FinlandStageError,
+            "convergence observer launcher",
+        ):
+            MODULE.stage_operation(
+                self.fixture.request,
+                runner=self.fixture.runner,
+            )
+
+        self.assertEqual(
+            self.fixture.runner.release_verification_launcher_modes,
+            [],
+        )
+        self.assertEqual(
+            self.fixture.runner.release_verification_observer_launcher_modes,
+            [],
+        )
+        self.assertFalse(
+            any(call[0] == MODULE.DOCKER for call in self.fixture.runner.calls)
+        )
+
+    def test_resume_normalizes_pre_hardening_launchers_before_image_rechecks(self):
         first = MODULE.stage_operation(
             self.fixture.request,
             runner=self.fixture.runner,
         )
-        launcher = (
+        source_set_launcher = (
             self.fixture.paths["release_root"]
             / MODULE.CONVERGENCE_SOURCE_SET_LAUNCHER_RELATIVE
         )
-        launcher.chmod(0o755)
+        observer_launcher = (
+            self.fixture.paths["release_root"]
+            / MODULE.CONVERGENCE_OBSERVER_LAUNCHER_RELATIVE
+        )
+        source_set_launcher.chmod(0o755)
+        observer_launcher.chmod(0o755)
         image_loads_before = sum(
             call[0] == MODULE.DOCKER and call[1:3] == ["image", "load"]
             for call in self.fixture.runner.calls
@@ -692,14 +780,21 @@ class ProductionShadowFinlandStageTests(unittest.TestCase):
 
         self.assertEqual(first["status"], "staged")
         self.assertEqual(resumed["status"], "staged")
-        self.assertEqual(
-            stat.S_IMODE(launcher.stat(follow_symlinks=False).st_mode),
-            0o700,
-        )
+        for launcher in (source_set_launcher, observer_launcher):
+            self.assertEqual(
+                stat.S_IMODE(launcher.stat(follow_symlinks=False).st_mode),
+                0o700,
+            )
         self.assertTrue(
             all(
                 mode == 0o700
                 for mode in self.fixture.runner.release_verification_launcher_modes
+            )
+        )
+        self.assertTrue(
+            all(
+                mode == 0o700
+                for mode in self.fixture.runner.release_verification_observer_launcher_modes
             )
         )
         self.assertEqual(
