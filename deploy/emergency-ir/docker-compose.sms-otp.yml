@@ -1,0 +1,126 @@
+# Explicit opt-in overlay for domestic SMS OTP in Emergency IR Standalone.
+#
+# Invoke only together with docker-compose.standalone.yml and --profile sms-otp.
+# The API remains isolated from the Internet: it receives a second *internal*
+# network only.  The relay is the sole service with an egress network and its
+# Nginx configuration can forward only POST /v1/send/verify to api.sms.ir.
+
+services:
+  # Giving every service the same profile means combining this overlay without
+  # --profile sms-otp cannot accidentally create a database, cache, or API.
+  db:
+    profiles: ["sms-otp"]
+
+  redis:
+    profiles: ["sms-otp"]
+
+  migration:
+    profiles: ["sms-otp"]
+    # The migration process never needs the SMS credential.  It retains the
+    # base isolated topology but is deliberately a Telegram-only settings
+    # process while schema work is performed.
+    environment:
+      EMERGENCY_AUTH_PROFILE: "telegram-only"
+      EMERGENCY_SMS_OTP_ENABLED: "false"
+      TELEGRAM_LOGIN_OTP_ENABLED: "false"
+      OTP_SMS_AUTO_FALLBACK_ENABLED: "false"
+      SMSIR_API_KEY: ""
+      OTP_DELIVERY_STATE_SECRET: ""
+
+  api:
+    profiles: ["sms-otp"]
+    command:
+      - sh
+      - -ec
+      - >-
+        test "$${EMERGENCY_AUTH_PROFILE:-}" = sms-otp &&
+        test "$${EMERGENCY_SMS_OTP_ENABLED:-}" = true &&
+        test "$${TELEGRAM_LOGIN_OTP_ENABLED:-}" = true &&
+        test "$${OTP_SMS_AUTO_FALLBACK_ENABLED:-}" = false &&
+        test "$${SMSIR_BASE_URL:-}" = http://sms-egress:8080 &&
+        test "$${SMSIR_TRUST_ENV:-}" = false &&
+        test -n "$${SMSIR_API_KEY:-}" &&
+        test -n "$${SMSIR_OTP_TEMPLATE_ID:-}" &&
+        test "$${#OTP_DELIVERY_STATE_SECRET}" -ge 32 &&
+        test -z "$${BOT_TOKEN:-}" &&
+        test -z "$${SYNC_API_KEY:-}" &&
+        test -z "$${PEER_SERVER_URL:-}" &&
+        exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
+        --proxy-headers --forwarded-allow-ips 127.0.0.1,172.29.250.1
+    environment:
+      EMERGENCY_AUTH_PROFILE: "sms-otp"
+      EMERGENCY_SMS_OTP_ENABLED: "true"
+      TELEGRAM_LOGIN_OTP_ENABLED: "true"
+      OTP_SMS_AUTO_FALLBACK_ENABLED: "false"
+      SMSIR_BASE_URL: "http://sms-egress:8080"
+      SMSIR_TRUST_ENV: "false"
+      SMSIR_TIMEOUT_SECONDS: "10"
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      ALL_PROXY: ""
+      NO_PROXY: "*"
+      http_proxy: ""
+      https_proxy: ""
+      all_proxy: ""
+      no_proxy: "*"
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      sms-egress:
+        condition: service_healthy
+    networks:
+      emergency_ir_internal: {}
+      emergency_ir_sms_relay:
+        ipv4_address: 172.29.251.2
+
+  sms-egress:
+    image: "${EMERGENCY_SMS_EGRESS_IMAGE:?attested Emergency SMS relay image is required}"
+    profiles: ["sms-otp"]
+    restart: unless-stopped
+    # YAML anchors from the base Compose document do not cross file boundaries.
+    # Keep the same bounded local log policy explicitly in this overlay.
+    logging:
+      driver: json-file
+      options:
+        max-size: "${DOCKER_LOG_MAX_SIZE:-20m}"
+        max-file: "${DOCKER_LOG_MAX_FILE:-5}"
+    entrypoint: ["/usr/sbin/nginx"]
+    command: ["-g", "daemon off;"]
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:rw,nosuid,nodev,noexec,mode=0755
+      - /var/run:rw,nosuid,nodev,noexec,mode=0755
+      - /tmp:rw,nosuid,nodev,noexec,mode=1777
+    # The fixed-upstream configuration is baked into this attested image.
+    # Do not bind-mount a mutable relay configuration from the host.
+    networks:
+      emergency_ir_sms_relay:
+        ipv4_address: 172.29.251.3
+      emergency_ir_sms_egress:
+        ipv4_address: 172.29.252.2
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t -q"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+    mem_limit: 128m
+    cpus: "0.25"
+    pids_limit: 64
+    security_opt: ["no-new-privileges:true"]
+
+networks:
+  emergency_ir_sms_relay:
+    name: trading-bot-emergency-ir-sms-relay
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.29.251.0/29
+  emergency_ir_sms_egress:
+    name: trading-bot-emergency-ir-sms-egress
+    internal: false
+    ipam:
+      config:
+        - subnet: 172.29.252.0/29

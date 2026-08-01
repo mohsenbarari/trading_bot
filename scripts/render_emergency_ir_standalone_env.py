@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """Render a fresh root-only runtime environment for Emergency IR Standalone.
 
-This intentionally generates new local credentials on WA-IR.  The only copied
-credential is a narrowly scoped Telegram WebApp initData validation token; it
-never becomes BOT_TOKEN and cannot start a bot.  The runtime never copies sync,
-witness, SMS, or web-push credentials.
+This intentionally generates new local credentials on WA-IR.  The default
+profile accepts only a narrowly scoped Telegram WebApp initData validation
+token; it never becomes BOT_TOKEN and cannot start a bot.  A separate,
+explicitly requested SMS-OTP profile can accept an SMS.ir API key for the
+fixed-upstream local relay only.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import secrets
@@ -21,10 +23,15 @@ from pathlib import Path
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 APP_IMAGE_RE = re.compile(r"^trading_bot_emergency_ir_app:([0-9a-f]{40})$")
 BASE_IMAGE_RE = re.compile(r"^trading_bot_emergency_ir_(?:postgres|redis):[a-z0-9][a-z0-9._-]{0,127}$")
+SMS_EGRESS_IMAGE_RE = re.compile(r"^trading_bot_emergency_ir_sms_egress:([0-9a-f]{40})$")
+SMSIR_TEMPLATE_PARAMETER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
 DOMAIN = "coin.gold-trade.ir"
 RUNTIME_PATH = Path("/etc/trading-bot-emergency/standalone/runtime.env")
 SETTINGS_PATH = Path("/srv/trading-bot-emergency/current/trading_settings.json")
 NETWORK_GATEWAY = "172.29.250.1"
+AUTH_PROFILE_TELEGRAM_ONLY = "telegram-only"
+AUTH_PROFILE_SMS_OTP = "sms-otp"
+SMSIR_RELAY_URL = "http://sms-egress:8080"
 
 
 class EmergencyEnvError(RuntimeError):
@@ -79,6 +86,61 @@ def _validate_webapp_initdata_token(raw_value: str) -> str:
     if any(ord(character) < 33 or ord(character) > 126 for character in value):
         raise EmergencyEnvError("Telegram WebApp validation token is invalid")
     return value
+
+
+def _validate_smsir_api_key(raw_value: str | None) -> str:
+    value = str(raw_value or "").strip()
+    if not value or len(value) > 1024:
+        raise EmergencyEnvError("SMS.ir API key is invalid")
+    if any(ord(character) < 33 or ord(character) > 126 for character in value):
+        raise EmergencyEnvError("SMS.ir API key is invalid")
+    return value
+
+
+def _validate_sms_otp_profile(
+    *,
+    emergency_patch_sha: str,
+    smsir_api_key: str | None,
+    smsir_otp_template_id: str | int | None,
+    smsir_otp_template_parameter: str,
+    sms_egress_image: str | None,
+) -> tuple[str, str, str, str]:
+    api_key = _validate_smsir_api_key(smsir_api_key)
+    try:
+        template_id = int(str(smsir_otp_template_id or "").strip())
+    except ValueError as exc:
+        raise EmergencyEnvError("SMS.ir OTP template ID must be a positive integer") from exc
+    if template_id <= 0 or template_id > 2_147_483_647:
+        raise EmergencyEnvError("SMS.ir OTP template ID must be a positive integer")
+    parameter = str(smsir_otp_template_parameter or "").strip()
+    if not SMSIR_TEMPLATE_PARAMETER_RE.fullmatch(parameter):
+        raise EmergencyEnvError("SMS.ir OTP template parameter is invalid")
+    image = str(sms_egress_image or "").strip()
+    match = SMS_EGRESS_IMAGE_RE.fullmatch(image)
+    if match is None or match.group(1) != emergency_patch_sha:
+        raise EmergencyEnvError("SMS egress image must be tagged by the exact Emergency patch SHA")
+    return api_key, str(template_id), parameter, image
+
+
+def _read_sms_otp_secrets(raw_value: bytes) -> tuple[str, str]:
+    """Read both copied secrets once without putting either on the command line."""
+
+    if len(raw_value) > 4096:
+        raise EmergencyEnvError("SMS OTP secret input is invalid")
+    try:
+        payload = json.loads(raw_value.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise EmergencyEnvError("SMS OTP secret input is invalid") from exc
+    if not isinstance(payload, dict) or set(payload) != {
+        "webapp_initdata_token",
+        "smsir_api_key",
+    }:
+        raise EmergencyEnvError("SMS OTP secret input must contain exactly the required keys")
+    token = payload.get("webapp_initdata_token")
+    api_key = payload.get("smsir_api_key")
+    if not isinstance(token, str) or not isinstance(api_key, str):
+        raise EmergencyEnvError("SMS OTP secret input is invalid")
+    return token, api_key
 
 
 def _secure_atomic_write(path: Path, payload: bytes) -> None:
@@ -136,6 +198,11 @@ def render(
     postgres_image: str,
     redis_image: str,
     webapp_initdata_token: str,
+    enable_sms_otp: bool = False,
+    smsir_api_key: str | None = None,
+    smsir_otp_template_id: str | int | None = None,
+    smsir_otp_template_parameter: str = "CODE",
+    sms_egress_image: str | None = None,
 ) -> None:
     _require_root()
     _validate_output(output)
@@ -143,6 +210,24 @@ def render(
         source_release_sha, emergency_patch_sha, app_image, postgres_image, redis_image
     )
     webapp_initdata_token = _validate_webapp_initdata_token(webapp_initdata_token)
+    if enable_sms_otp:
+        (
+            smsir_api_key,
+            smsir_otp_template_id,
+            smsir_otp_template_parameter,
+            sms_egress_image,
+        ) = _validate_sms_otp_profile(
+            emergency_patch_sha=emergency_patch_sha,
+            smsir_api_key=smsir_api_key,
+            smsir_otp_template_id=smsir_otp_template_id,
+            smsir_otp_template_parameter=smsir_otp_template_parameter,
+            sms_egress_image=sms_egress_image,
+        )
+    elif any(
+        value is not None
+        for value in (smsir_api_key, smsir_otp_template_id, sms_egress_image)
+    ):
+        raise EmergencyEnvError("SMS OTP material requires explicit SMS OTP enablement")
     password = secrets.token_urlsafe(48)
     jwt_secret = secrets.token_urlsafe(64)
     values = {
@@ -161,6 +246,10 @@ def render(
         "SERVER_MODE": "iran",
         "ENVIRONMENT": "emergency-ir-standalone",
         "EMERGENCY_IR_STANDALONE": "true",
+        "EMERGENCY_AUTH_PROFILE": (
+            AUTH_PROFILE_SMS_OTP if enable_sms_otp else AUTH_PROFILE_TELEGRAM_ONLY
+        ),
+        "EMERGENCY_SMS_OTP_ENABLED": "true" if enable_sms_otp else "false",
         "FRONTEND_URL": f"https://{DOMAIN}",
         "PUBLIC_WEBAPP_URL": f"https://{DOMAIN}",
         "POSTGRES_USER": "emergency_webapp",
@@ -208,11 +297,31 @@ def render(
         "LOG_FORMAT": "json",
         "LOG_LEVEL": "INFO",
     }
+    if enable_sms_otp:
+        values.update(
+            {
+                # Stage-6 direct-SMS mode.  The historical flag name is
+                # retained by the application, but auto fallback stays false
+                # so no Telegram, peer, or worker path can run.
+                "TELEGRAM_LOGIN_OTP_ENABLED": "true",
+                "OTP_SMS_AUTO_FALLBACK_ENABLED": "false",
+                "OTP_DELIVERY_STATE_SECRET": secrets.token_urlsafe(48),
+                "SMSIR_API_KEY": smsir_api_key,
+                "SMSIR_BASE_URL": SMSIR_RELAY_URL,
+                "SMSIR_TRUST_ENV": "false",
+                "SMSIR_TIMEOUT_SECONDS": "10",
+                "SMSIR_OTP_TEMPLATE_ID": smsir_otp_template_id,
+                "SMSIR_OTP_TEMPLATE_PARAMETER": smsir_otp_template_parameter,
+                "EMERGENCY_SMS_EGRESS_IMAGE": sms_egress_image,
+            }
+        )
     forbidden = {
         "BOT_TOKEN", "SYNC_API_KEY", "PEER_SERVER_URL", "IRAN_SERVER_URL",
-        "GERMANY_SERVER_URL", "FOREIGN_SERVER_URL", "SMSIR_API_KEY",
+        "GERMANY_SERVER_URL", "FOREIGN_SERVER_URL",
         "WEB_PUSH_VAPID_PRIVATE_KEY", "WRITER_WITNESS_CLIENT_SECRET",
     }
+    if not enable_sms_otp:
+        forbidden.add("SMSIR_API_KEY")
     if forbidden & values.keys():
         raise EmergencyEnvError("renderer attempted to include a forbidden cross-site credential")
     payload = (
@@ -231,20 +340,50 @@ def main() -> int:
     parser.add_argument("--app-image", required=True)
     parser.add_argument("--postgres-image", required=True)
     parser.add_argument("--redis-image", required=True)
-    parser.add_argument(
+    input_mode = parser.add_mutually_exclusive_group(required=True)
+    input_mode.add_argument(
         "--webapp-initdata-token-stdin",
         action="store_true",
-        required=True,
         help="read the Telegram WebApp HMAC token from stdin without persisting it separately",
     )
+    input_mode.add_argument(
+        "--sms-otp-secrets-stdin",
+        action="store_true",
+        help="read JSON with WebApp token and SMS.ir API key from stdin without persisting either separately",
+    )
+    parser.add_argument(
+        "--enable-sms-otp",
+        action="store_true",
+        help="explicitly render the separate SMS OTP profile; default remains Telegram-only",
+    )
+    parser.add_argument("--smsir-otp-template-id")
+    parser.add_argument("--smsir-otp-template-parameter")
+    parser.add_argument("--sms-egress-image")
     args = parser.parse_args()
-    raw_token = sys.stdin.buffer.read(1025)
-    if len(raw_token) > 1024:
-        raise EmergencyEnvError("Telegram WebApp validation token is invalid")
-    try:
-        webapp_initdata_token = raw_token.decode("ascii")
-    except UnicodeDecodeError as exc:
-        raise EmergencyEnvError("Telegram WebApp validation token is invalid") from exc
+    if args.enable_sms_otp != args.sms_otp_secrets_stdin:
+        parser.error("--enable-sms-otp requires --sms-otp-secrets-stdin and vice versa")
+    if args.enable_sms_otp and (not args.smsir_otp_template_id or not args.sms_egress_image):
+        parser.error("SMS OTP requires --smsir-otp-template-id and --sms-egress-image")
+    if not args.enable_sms_otp and any(
+        value is not None
+        for value in (
+            args.smsir_otp_template_id,
+            args.smsir_otp_template_parameter,
+            args.sms_egress_image,
+        )
+    ):
+        parser.error("SMS OTP options require --enable-sms-otp")
+    raw_input = sys.stdin.buffer.read(4097)
+    if args.sms_otp_secrets_stdin:
+        webapp_initdata_token, smsir_api_key = _read_sms_otp_secrets(raw_input)
+    else:
+        if len(raw_input) > 1024:
+            raise EmergencyEnvError("Telegram WebApp validation token is invalid")
+        try:
+            webapp_initdata_token = raw_input.decode("ascii")
+        except UnicodeDecodeError as exc:
+            raise EmergencyEnvError("Telegram WebApp validation token is invalid") from exc
+        smsir_api_key = None
     render(
         output=Path(args.output),
         source_release_sha=args.source_release_sha,
@@ -253,6 +392,11 @@ def main() -> int:
         postgres_image=args.postgres_image,
         redis_image=args.redis_image,
         webapp_initdata_token=webapp_initdata_token,
+        enable_sms_otp=args.enable_sms_otp,
+        smsir_api_key=smsir_api_key,
+        smsir_otp_template_id=args.smsir_otp_template_id,
+        smsir_otp_template_parameter=args.smsir_otp_template_parameter or "CODE",
+        sms_egress_image=args.sms_egress_image,
     )
     print("Emergency IR standalone runtime env rendered; values suppressed")
     return 0

@@ -1,0 +1,134 @@
+# Prearmed host-Nginx ingress for the explicit Emergency SMS-OTP profile.
+# Install only after the dedicated Docker stack and SMS relay pass local checks.
+# This replaces (rather than overlays) nginx.standalone.conf.template, and the
+# matching nginx.sms-otp.rate-limit.conf must first be installed in http{}.
+
+server {
+    listen 80 default_server;
+    server_name _;
+    return 444;
+}
+
+server {
+    listen 443 ssl default_server;
+    server_name _;
+    ssl_certificate /etc/trading-bot-emergency/acme/config/live/emergency-coin-gold-trade-ir/fullchain.pem;
+    ssl_certificate_key /etc/trading-bot-emergency/acme/config/live/emergency-coin-gold-trade-ir/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_reject_handshake on;
+}
+
+server {
+    listen 80;
+    server_name coin.gold-trade.ir;
+    client_max_body_size 50m;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name coin.gold-trade.ir;
+    client_max_body_size 50m;
+    server_tokens off;
+
+    ssl_certificate /etc/trading-bot-emergency/acme/config/live/emergency-coin-gold-trade-ir/fullchain.pem;
+    ssl_certificate_key /etc/trading-bot-emergency/acme/config/live/emergency-coin-gold-trade-ir/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Referrer-Policy "same-origin" always;
+
+    # No synchronization, DR, peer-control, registration, or metrics surface
+    # exists here.  Only the three established login OTP endpoints are opened.
+    location ^~ /api/sync { return 404; }
+    location ^~ /api/dr-sync { return 404; }
+    location ^~ /api/sessions/internal { return 404; }
+    location ^~ /api/trades/internal { return 404; }
+    location ^~ /api/offers/internal { return 404; }
+    location ^~ /api/invitations/internal { return 404; }
+    location ^~ /api/auth/internal/telegram-registration { return 404; }
+    location ^~ /api/auth/internal/telegram-link { return 404; }
+    location ^~ /api/auth/internal/telegram-otp { return 404; }
+    location ^~ /api/auth/register-otp-request { return 404; }
+    location ^~ /api/auth/register-otp-verify { return 404; }
+    location ^~ /api/auth/register-complete { return 404; }
+    location ^~ /api/auth/telegram-link-token { return 404; }
+    location = /metrics { return 404; }
+
+    location = /api/auth/request-otp {
+        limit_req zone=emergency_sms_otp_per_ip burst=5 nodelay;
+        limit_req_status 429;
+        limit_except POST { deny all; }
+        proxy_pass http://127.0.0.1:18000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 15s;
+        proxy_read_timeout 15s;
+    }
+
+    location = /api/auth/resend-otp-sms {
+        limit_req zone=emergency_sms_otp_per_ip burst=5 nodelay;
+        limit_req_status 429;
+        limit_except POST { deny all; }
+        proxy_pass http://127.0.0.1:18000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 15s;
+        proxy_read_timeout 15s;
+    }
+
+    location = /api/auth/verify-otp {
+        limit_req zone=emergency_sms_otp_per_ip burst=5 nodelay;
+        limit_req_status 429;
+        limit_except POST { deny all; }
+        proxy_pass http://127.0.0.1:18000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 15s;
+        proxy_read_timeout 15s;
+    }
+
+    location /api/realtime/ws {
+        proxy_pass http://127.0.0.1:18000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 30s;
+        proxy_send_timeout 7d;
+        proxy_read_timeout 7d;
+        proxy_buffering off;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:18000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}
