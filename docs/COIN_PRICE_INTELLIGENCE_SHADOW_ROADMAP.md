@@ -476,3 +476,91 @@ repository checkout, and must not overlap. The blank template is
 requirements.
 
 Enabling Shadow does not authorize staging or production deployment.
+
+## Training audit — 2026-08-01
+
+The current runtime evidence was rebuilt after reconciling the rolling private
+group staging window with the preserved active history. This audit changed
+data artifacts and Shadow candidates only; it did not promote a numerical
+candidate or enable a repository feature flag.
+
+### Evaluation rules now enforced
+
+- all point-in-time features are strictly prior to the target trade;
+- the target offer/reply economic chain is purged from its own features;
+- chronological fit/validation/test chain splits replace random row splits;
+- hyperparameters are selected on validation only, while promotion evidence is
+  reported on the untouched test split;
+- confidence intervals use paired, chain-level bootstrap samples;
+- results are sliced by commodity, settlement, trade form, regime, freshness,
+  and sparse/cold-start condition where sample size permits;
+- no candidate is promoted without enough independent test chains, distinct
+  test days, non-Imam evidence, interval coverage, and a statistically positive
+  improvement.
+
+### Current evidence and decisions
+
+The group-anchor snapshot contains 1,317 eligible offers and 91 independent
+confirmed-trade chains. Its untouched test contains only 19 chains from one
+day. The best simple prior-event anchor reached 0.150% MAPE versus 0.156% for
+the latest-offer baseline; the paired confidence interval includes no material
+improvement. The tuned weighted anchor was worse at 0.174% MAPE. It remains
+Shadow because the sample and day counts are insufficient.
+
+The relevance classifier uses 9,230 frozen reviewed examples plus 136 explicit
+adjudications. On its chronological holdout, the selected auto-keep threshold
+achieves 95.4% precision. No threshold demonstrates the required 98% safe
+auto-reject target, so automatic rejection is disabled and uncertain messages
+are retained for review. The trade-pair candidate similarly failed the
+auto-confirm precision gate; it is restricted to reject-only second opinion,
+where its measured negative predictive value is 98.8%.
+
+The updated numerical candidate accepted 6,250 weighted observations. On a
+shared confirmed-trade comparison it reduced point MAPE from about 0.997% to
+0.390%, but its paired evidence and coverage are not uniformly adequate. In
+particular, interval coverage for half and one-gram coins is sparse and poor.
+The registry therefore rejected promotion. CatBoost challengers also remain
+Shadow: the confirmed-only and chain-purged variants underperformed, while the
+offer-augmented variant improved point MAPE by about 15% but achieved only
+about 70% interval coverage. The four-fold walk-forward audit reports 0.595%
+online-prior MAPE and 86.1% interval coverage; it is diagnostic evidence, not a
+promotion result. IME history currently covers only one usable source day and
+cannot support a promotion claim.
+
+The Gold lifecycle slice currently covers 2026-07-30 through 2026-08-01 and
+contains about 54,000 model events, including about 6,100 confirmed trades and
+8,200 minute-feature rows. Cross-source minute matching validates the new
+normal-paper feed against NaghdP and Abshdh: median differences are 0 bps and
+median absolute differences are approximately 2.5 and 1.9 bps respectively.
+Reverse and swim quotes retain their expected directional basis and therefore
+remain separate features. Physical-today quotes align closely with Abshdh
+(about 3.1 bps median absolute difference), while physical-tomorrow has much
+lower overlap and a roughly 46 bps basis; the latter must not be merged as if
+it were the same market. This short window supports feature validation, not a
+supervised promotion decision.
+
+Gemma remains a strict parser second opinion. It is not a numerical pricing
+authority and cannot replace deterministic parsing, causal price validation,
+or abstention. Fine-tuning is deferred until a larger, balanced, human-reviewed
+corpus exists; prompt-only benchmark results are versioned separately from
+production decisions.
+
+The 2026-08-01 CPU audit also verified the serving contract. An unconstrained
+legacy ten-case prompt achieved only 60% exact-row accuracy after reasoning was
+correctly disabled (field accuracies 80–100%). The repository adapter, which
+uses the exact JSON Schema and independent validation, returned the expected
+result on all four contract smoke cases: three explicit commodities and one
+unnamed offer that correctly abstained while retaining the explicit numeric
+fields. Per-message latency was 29–38 seconds on this CPU, confirming that the
+model is suitable only for sampled background comparison at present.
+
+### Retraining cadence
+
+Live ingestion and deterministic reconciliation run continuously. Relevance
+scoring is score-only in the live loop; model retraining runs separately from
+frozen/reviewed labels. Training-snapshot and evaluation jobs fingerprint their
+inputs and produce no new artifacts when data has not changed. Trade-pair and
+numerical challengers train on a slower cadence and always remain candidates
+until all activation gates above pass. Previous and daily known-good data
+backups permit rollback without accumulating a backup for every incoming
+message.

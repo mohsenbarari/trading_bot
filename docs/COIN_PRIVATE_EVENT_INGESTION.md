@@ -76,3 +76,40 @@ until explicitly configured and scheduled. Model prediction is never a label;
 only validated confirmed trades or reviewed labels may enter trusted training.
 The three-site data plane and the project-authenticated operator UI remain
 separate, deferred implementation slices.
+
+## Shadow-training and reconciliation contract
+
+The private group pipeline uses three distinct evidence classes. They must not
+be collapsed into one self-training loop:
+
+- relevance labels come only from the frozen reviewed corpus and explicit
+  operator adjudications; a parser/model decision is never copied back as a
+  label;
+- exact reply-ID linkage remains authoritative for confirmed trades; the
+  statistical trade-pair model is only a reject-side second opinion and may
+  neither confirm a trade nor create a label;
+- price/range candidates train on quality-eligible offers and confirmed trades,
+  with confirmed trades receiving the greatest weight.
+
+The active-conversation reconciler is state-replacing for records that are
+still present in the rolling staging window, but history-preserving outside
+that window. Consequently, a three-day staging retention cannot erase older
+already-promoted offers, trades, or messages. Each reconciliation records a
+source fingerprint, produces at most one current import, and becomes a no-op
+when the source state has not changed. Promotion requires matching candidate
+and report hashes, the current reconciliation schema, successful quality
+annotation, and an atomic replacement with rolling plus daily backups.
+
+The privacy-minimized training snapshot contains no Telegram/source message
+identifiers. A local `economic_chain_id` groups the source offer and all of its
+partial fills. Splits and bootstraps operate on these chains, and the combined
+weight of repeated partial fills grows sublinearly instead of counting every
+fill as an independent full-weight observation. Immutable versioned snapshots
+are retained in a bounded set; unchanged source fingerprints do not create a
+new snapshot.
+
+Relevance thresholds are chosen on a chronological holdout. Auto-keep requires
+at least 95% precision. Auto-reject requires at least 98% negative predictive
+value; when that target cannot be demonstrated, auto-reject is disabled and
+the messages remain in review. Live scoring uses a score-only path and cannot
+silently retrain the classifier from its own outputs.
