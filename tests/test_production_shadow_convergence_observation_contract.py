@@ -194,38 +194,60 @@ class ObservationContractTests(unittest.TestCase):
                 request = _request(role=role)
                 self.assertEqual(WORKER.validate_request(request, now=NOW), request)
                 self.assertEqual(CONTRACT.validate_request(request, now=NOW), request)
+                self.assertEqual(
+                    CONTRACT._request_digest(request),
+                    WORKER._request_digest(request),  # noqa: SLF001
+                )
 
     def test_contract_rejects_noncanonical_serialized_request_path_spellings(
         self,
     ) -> None:
-        request = _request()
         # A worker-built request always uses these canonical spellings.  The
         # controller contract rejects aliases without consulting a local host
         # filesystem, so a path spelling cannot acquire meaning through a
         # controller-side symlink check.
-        malformed_spellings = {
-            "release_root": str(request["release_root"]).replace(
-                "/releases/",
-                "//releases/",
-                1,
-            ),
-            "worker_path": str(request["worker_path"]).replace(
-                "/scripts/",
-                "/scripts/./",
-                1,
-            ),
-            "output_root": f"{request['output_root']}/",
-        }
-        for field, spelling in malformed_spellings.items():
-            with self.subTest(field=field, spelling=spelling):
-                malformed = copy.deepcopy(request)
-                malformed[field] = spelling
-                malformed["request_sha256"] = CONTRACT._request_digest(malformed)
-                with self.assertRaisesRegex(
-                    CONTRACT.ConvergenceObservationContractError,
-                    "not canonical",
-                ):
-                    CONTRACT.validate_request(malformed, now=NOW)
+        for role in WORKER.ROLES:
+            request = _request(role=role)
+            malformed_spellings = (
+                (
+                    "release-root-double-separator",
+                    "release_root",
+                    str(request["release_root"]).replace(
+                        "/releases/",
+                        "//releases/",
+                        1,
+                    ),
+                ),
+                (
+                    "release-root-parent-segment",
+                    "release_root",
+                    f"{request['release_root']}/../{RELEASE_SHA}",
+                ),
+                (
+                    "worker-path-current-segment",
+                    "worker_path",
+                    str(request["worker_path"]).replace(
+                        "/scripts/",
+                        "/scripts/./",
+                        1,
+                    ),
+                ),
+                (
+                    "output-root-trailing-separator",
+                    "output_root",
+                    f"{request['output_root']}/",
+                ),
+            )
+            for case, field, spelling in malformed_spellings:
+                with self.subTest(role=role, case=case, spelling=spelling):
+                    malformed = copy.deepcopy(request)
+                    malformed[field] = spelling
+                    malformed["request_sha256"] = CONTRACT._request_digest(malformed)
+                    with self.assertRaisesRegex(
+                        CONTRACT.ConvergenceObservationContractError,
+                        "not canonical",
+                    ):
+                        CONTRACT.validate_request(malformed, now=NOW)
 
     def test_contract_accepts_a_worker_compatible_request_and_attestation(self) -> None:
         request = _request()
@@ -497,6 +519,118 @@ class ObservationContractTests(unittest.TestCase):
         )
         self.assertFalse(forbidden_imports)
         self.assertFalse(forbidden_calls)
+
+        # The exact import list above prevents aliases for filesystem, loader,
+        # process, or transport modules.  Keep the remaining dynamic surface
+        # equally narrow: a new call must be a pure parser/hash primitive, a
+        # validator defined in this module, or a data-container method.  This
+        # catches indirect builtins such as ``getattr(__builtins__, "open")``
+        # and loader escapes that a short deny-list of call names misses.
+        forbidden_names = {
+            "__builtins__",
+            "__import__",
+            "breakpoint",
+            "compile",
+            "delattr",
+            "eval",
+            "exec",
+            "getattr",
+            "globals",
+            "input",
+            "locals",
+            "open",
+            "setattr",
+            "vars",
+        }
+        forbidden_attributes = {
+            "__builtins__",
+            "__cached__",
+            "__class__",
+            "__code__",
+            "__dict__",
+            "__file__",
+            "__getattribute__",
+            "__globals__",
+            "__import__",
+            "__loader__",
+            "__mro__",
+            "__path__",
+            "__reduce__",
+            "__reduce_ex__",
+            "__spec__",
+            "__subclasses__",
+        }
+        forbidden_references = {
+            node.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Name) and node.id in forbidden_names
+        }
+        forbidden_references.update(
+            f"attribute:{node.attr}"
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Attribute) and node.attr in forbidden_attributes
+        )
+        self.assertFalse(forbidden_references)
+
+        module_definitions = {
+            node.name
+            for node in tree.body
+            if isinstance(
+                node,
+                (ast.AsyncFunctionDef, ast.ClassDef, ast.FunctionDef),
+            )
+        }
+        safe_direct_calls = module_definitions | {
+            "PurePosixPath",
+            "UUID",
+            "any",
+            "dict",
+            "frozenset",
+            "isinstance",
+            "set",
+            "str",
+            "timedelta",
+            "type",
+        }
+        safe_imported_calls = {
+            "datetime.datetime.fromisoformat",
+            "datetime.datetime.now",
+            "hashlib.sha256",
+            "ipaddress.IPv4Address",
+            "json.dumps",
+            "json.loads",
+            "re.compile",
+            "re.fullmatch",
+        }
+        safe_data_methods = {
+            "astimezone",
+            "decode",
+            "encode",
+            "fullmatch",
+            "get",
+            "hexdigest",
+            "is_absolute",
+            "items",
+            "replace",
+            "utcoffset",
+        }
+        unexpected_calls: list[str] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            raw = dotted_name(node.func)
+            resolved = resolved_name(node.func)
+            if isinstance(node.func, ast.Name) and raw in safe_direct_calls:
+                continue
+            if resolved in safe_imported_calls:
+                continue
+            if (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr in safe_data_methods
+            ):
+                continue
+            unexpected_calls.append(resolved or raw or "<dynamic-call-target>")
+        self.assertEqual(unexpected_calls, [])
 
 
 if __name__ == "__main__":
