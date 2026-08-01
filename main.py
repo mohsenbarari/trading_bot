@@ -20,7 +20,13 @@ from api.routers import customers
 from core.config import settings
 from core.deployment_surface import allowed_cors_origins
 from core.redis import init_redis, close_redis, get_redis_client
-from core.db import AsyncSessionLocal, init_db
+from core.application_writer_term import ApplicationWriterTermError
+from core.db import (
+    AsyncSessionLocal,
+    init_db,
+    require_application_writer_term,
+    validate_application_writer_term_runtime_settings,
+)
 from core.events import setup_event_listeners
 from core.server_routing import SERVER_FOREIGN, normalize_server
 from core.background_job_authority import (
@@ -56,10 +62,6 @@ from core.security import constant_time_secret_equals
 from core.request_logging import install_request_logging_middleware
 from core.public_webapp_url import public_webapp_url_for_links
 
-# -------------------------------------------------------
-# 📋 تنظیمات اولیه
-# -------------------------------------------------------
-configure_logging("api")
 logger = logging.getLogger(__name__)
 _PROCESS_STARTED_AT = time.monotonic()
 OBSERVABILITY_API_KEY_HEADER = "X-Observability-Api-Key"
@@ -336,6 +338,22 @@ def _start_background_leader_task(redis_client) -> asyncio.Task:
     return asyncio.create_task(_run_background_leader(redis_client))
 
 
+def _validate_writer_term_api_startup() -> None:
+    """Prove a fenced API may start before it opens any runtime dependency."""
+
+    policy = validate_application_writer_term_runtime_settings(expected_service="api")
+    if policy.enabled is False:
+        return
+    if settings.background_jobs_enabled is not False:
+        # The legacy leader owns autonomous jobs with historical lifecycle
+        # assumptions.  It must not be started inside this first immutable
+        # writer release; each future worker needs its own reviewed term gate.
+        raise ApplicationWriterTermError(
+            "BACKGROUND_JOBS_ENABLED must be false when Writer Witness enforcement is enabled"
+        )
+    require_application_writer_term()
+
+
 def _is_mandatory_channel_membership_race(exc: IntegrityError) -> bool:
     message = str(exc).lower()
     return (
@@ -350,7 +368,13 @@ def _is_mandatory_channel_membership_race(exc: IntegrityError) -> bool:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
+    # This is intentionally first.  Do not initialize the DB, Redis, event
+    # listeners, or autonomous jobs before a term-enforced process proves its
+    # current Writer Witness lease.
+    _validate_writer_term_api_startup()
+    # Logging setup may initialize an optional remote error sink, so it stays
+    # below the process-start term proof as well.
+    configure_logging("api")
     logger.info("🚀 Starting up...")
     validate_otp_delivery_runtime_settings(settings)
     if settings.invitation_contract_v2_enabled:
@@ -407,6 +431,17 @@ app = FastAPI(
     openapi_url=None,
 )
 install_request_logging_middleware(app)
+
+
+@app.exception_handler(ApplicationWriterTermError)
+async def application_writer_term_error_response(_request: Request, _exc: ApplicationWriterTermError):
+    """Do not turn a dynamic Writer Witness term loss into a successful write."""
+
+    return JSONResponse(
+        {"detail": "Service temporarily unavailable"},
+        status_code=503,
+        headers={"Cache-Control": "no-store"},
+    )
 
 # -------------------------------------------------------
 # 🔒 CORS Configuration
@@ -472,6 +507,30 @@ async def enforce_production_test_isolation(request: Request, call_next):
         status_code=503,
         headers={"Cache-Control": "no-store"},
     )
+
+
+@app.middleware("http")
+async def enforce_application_writer_term(request: Request, call_next):
+    """Revalidate a live Writer Witness term before any HTTP route executes."""
+
+    try:
+        require_application_writer_term()
+    except ApplicationWriterTermError as exc:
+        logger.warning(
+            "Blocked HTTP request because the local writer term is unavailable",
+            extra={
+                "event": "application_writer_term.http_blocked",
+                "path": request.url.path,
+                "client_host": request.client.host if request.client else None,
+                "error_class": type(exc).__name__,
+            },
+        )
+        return JSONResponse(
+            {"detail": "Service temporarily unavailable"},
+            status_code=503,
+            headers={"Cache-Control": "no-store"},
+        )
+    return await call_next(request)
 
 # -------------------------------------------------------
 # 🛣️ API Routers
