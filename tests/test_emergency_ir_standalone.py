@@ -26,6 +26,7 @@ VERIFY_SPEC.loader.exec_module(VERIFY)
 
 
 SHA = "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5"
+WEBAPP_BOT_TOKEN = "123456789:emergency-webapp-hmac-token-only"
 
 
 class EmergencyStandaloneTests(unittest.TestCase):
@@ -60,6 +61,7 @@ class EmergencyStandaloneTests(unittest.TestCase):
                     app_image=f"trading_bot_emergency_ir_app:{SHA}",
                     postgres_image="trading_bot_emergency_ir_postgres:15-alpine-a1b2",
                     redis_image="trading_bot_emergency_ir_redis:7-alpine-a1b2",
+                    webapp_bot_token=WEBAPP_BOT_TOKEN,
                 )
                 values = {}
                 for line in output.read_text(encoding="utf-8").splitlines():
@@ -68,8 +70,9 @@ class EmergencyStandaloneTests(unittest.TestCase):
                         values[key] = value
                 self.assertEqual(values["BACKGROUND_JOBS_ENABLED"], "false")
                 self.assertEqual(values["DATABASE_URL"].split("@")[-1], "db/trading_bot_emergency")
-                self.assertNotIn("BOT_TOKEN", values)
                 self.assertNotIn("SYNC_API_KEY", values)
+                self.assertEqual(values["BOT_TOKEN"], WEBAPP_BOT_TOKEN)
+                self.assertEqual(values["TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH"], "true")
                 self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o600)
                 with self.assertRaises(RENDER.EmergencyEnvError):
                     RENDER.render(
@@ -78,6 +81,7 @@ class EmergencyStandaloneTests(unittest.TestCase):
                         app_image=f"trading_bot_three_site_staging:{SHA}",
                         postgres_image="trading_bot_emergency_ir_postgres:15-alpine-a1b2",
                         redis_image="trading_bot_emergency_ir_redis:7-alpine-a1b2",
+                        webapp_bot_token=WEBAPP_BOT_TOKEN,
                     )
 
     def test_verifier_rejects_cross_site_credential(self) -> None:
@@ -98,11 +102,12 @@ class EmergencyStandaloneTests(unittest.TestCase):
             REDIS_URL="redis://redis:6379/0",
             JWT_SECRET_KEY="not-a-real-secret",
             DEV_API_KEY="not-a-real-secret",
+            BOT_TOKEN=WEBAPP_BOT_TOKEN,
             FRONTEND_URL="https://coin.gold-trade.ir",
             PUBLIC_WEBAPP_URL="https://coin.gold-trade.ir",
-            BOT_TOKEN="forbidden",
+            SYNC_API_KEY="forbidden",
         )
-        self.assertIn("forbidden runtime keys: BOT_TOKEN", VERIFY.verify_values(values))
+        self.assertIn("forbidden runtime keys: SYNC_API_KEY", VERIFY.verify_values(values))
 
 
 if __name__ == "__main__":
