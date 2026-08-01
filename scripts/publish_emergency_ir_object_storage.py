@@ -98,6 +98,30 @@ PRESIGNED_QUERY_FIELDS = frozenset(
     }
 )
 _NOT_FOUND_CODES = frozenset({"404", "NoSuchKey", "NoSuchVersion", "NotFound"})
+# Object Storage is the only approved payload transport for Emergency, but it
+# must still be a direct connection to the fixed private Arvan endpoint.  Do
+# not allow a signed request, S3 credentials, or a presigned URL to traverse a
+# controller-wide proxy accidentally inherited from the shell environment.
+PROXY_ENVIRONMENT_KEYS = (
+    "ALL_PROXY",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "all_proxy",
+    "https_proxy",
+    "http_proxy",
+)
+# Botocore may honor ambient CA-bundle overrides when ``verify`` is not pinned
+# by the caller.  A campaign must use the platform trust store directly; a
+# custom bundle is a separate security decision and is intentionally outside
+# this Emergency transfer path.
+TLS_CA_OVERRIDE_ENVIRONMENT_KEYS = (
+    "AWS_CA_BUNDLE",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "aws_ca_bundle",
+    "requests_ca_bundle",
+    "curl_ca_bundle",
+)
 
 
 class EmergencyPublisherError(RuntimeError):
@@ -1079,9 +1103,19 @@ def _load_credentials(path: Path) -> dict[str, str]:
     return result
 
 
+def _require_direct_object_storage_transport() -> None:
+    """Fail before credentials/client construction when a proxy is configured."""
+
+    if any(str(os.environ.get(key) or "").strip() for key in PROXY_ENVIRONMENT_KEYS):
+        _fail("direct private Arvan transport requires proxy environment variables to be unset")
+    if any(str(os.environ.get(key) or "").strip() for key in TLS_CA_OVERRIDE_ENVIRONMENT_KEYS):
+        _fail("direct private Arvan transport requires CA override environment variables to be unset")
+
+
 def make_s3_client(credentials_path: Path) -> Any:
     """Create the one fixed-endpoint S3 client lazily, after confirmation."""
 
+    _require_direct_object_storage_transport()
     credentials = _load_credentials(credentials_path)
     try:
         import boto3
@@ -1098,7 +1132,14 @@ def make_s3_client(credentials_path: Path) -> Any:
             "s3",
             endpoint_url=manifest.APPROVED_ARVAN_ENDPOINT,
             region_name=manifest.APPROVED_ARVAN_REGION,
-            config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+            verify=True,
+            # Redundant with the fail-closed environment check above: retain
+            # the direct-only invariant in botocore's own request config.
+            config=Config(
+                signature_version="s3v4",
+                s3={"addressing_style": "path"},
+                proxies={},
+            ),
         )
     except Exception as exc:
         raise EmergencyPublisherError("Arvan Object Storage client cannot be initialized") from exc

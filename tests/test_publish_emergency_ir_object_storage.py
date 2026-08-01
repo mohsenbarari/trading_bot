@@ -7,13 +7,14 @@ from datetime import datetime, timezone
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from urllib.parse import urlencode
 
 from cryptography.hazmat.primitives import serialization
@@ -402,6 +403,40 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--apply", result.stdout)
+
+    def test_client_rejects_proxy_environment_before_reading_credentials(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            with patch.dict(os.environ, {"HTTPS_PROXY": "http://proxy.invalid:8080"}, clear=True):
+                with self.assertRaisesRegex(publisher.EmergencyPublisherError, "proxy environment"):
+                    publisher.make_s3_client(root / "credentials.json")
+
+    def test_client_rejects_ca_bundle_override_before_reading_credentials(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            with patch.dict(os.environ, {"REQUESTS_CA_BUNDLE": "/tmp/untrusted-ca.pem"}, clear=True):
+                with self.assertRaisesRegex(publisher.EmergencyPublisherError, "CA override"):
+                    publisher.make_s3_client(root / "credentials.json")
+
+    def test_client_explicitly_disables_botocore_proxy_inheritance(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            credentials = root / "credentials.json"
+            credentials.write_text(
+                json.dumps({"access_key_id": "test-access", "secret_access_key": "test-secret"}),
+                encoding="utf-8",
+            )
+            credentials.chmod(0o600)
+            with patch.dict(os.environ, {}, clear=True), patch("boto3.session.Session") as session_class:
+                publisher.make_s3_client(credentials)
+
+            kwargs = session_class.return_value.client.call_args.kwargs
+            self.assertEqual(kwargs["endpoint_url"], manifest.APPROVED_ARVAN_ENDPOINT)
+            self.assertIs(kwargs["verify"], True)
+            self.assertEqual(kwargs["config"].proxies, {})
 
 
 if __name__ == "__main__":
