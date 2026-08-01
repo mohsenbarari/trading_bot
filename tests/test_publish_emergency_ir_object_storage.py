@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import dataclasses
 from datetime import datetime, timezone
 import hashlib
@@ -192,6 +193,17 @@ class FakeS3:
 
 
 class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
+    def bootstrap_provenance(self, public_key: Path, *, revision: str = "a" * 40) -> publisher.BootstrapProvenance:
+        bundle_sha256, bundle_bytes = publisher.receiver_bundle.bundle_digest(
+            signing_public_key=public_key,
+        )
+        return publisher.BootstrapProvenance(
+            publisher_source_revision=revision,
+            receiver_bundle_sha256=bundle_sha256,
+            receiver_bundle_bytes=bundle_bytes,
+            signer_key_id=publisher._load_public_key_id(public_key),
+        )
+
     def write_keypair(self, root: Path) -> tuple[Path, Path]:
         private = Ed25519PrivateKey.generate()
         private_path = root / "signing-private.key"
@@ -299,12 +311,14 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             private, public = self.write_keypair(root)
             outputs = self.outputs(root)
             factory = Mock(side_effect=AssertionError("dry run must not construct an S3 client"))
-            result = publisher.execute(
-                self.arguments(
-                    plan=plan_path, private=private, public=public, outputs=outputs, apply=False
-                ),
-                client_factory=factory,
-            )
+            provenance = self.bootstrap_provenance(public)
+            with patch.object(publisher, "_bootstrap_provenance", return_value=provenance):
+                result = publisher.execute(
+                    self.arguments(
+                        plan=plan_path, private=private, public=public, outputs=outputs, apply=False
+                    ),
+                    client_factory=factory,
+                )
             self.assertEqual(result["status"], "planned-no-network")
             self.assertEqual(result["campaign_id"], CAMPAIGN_ID)
             self.assertTrue(result["required_confirmation"].startswith("publish-emergency-ir:"))
@@ -314,12 +328,53 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
                 result["required_confirmation"],
                 publisher.confirmation_phrase(
                     plan,
-                    bootstrap_provenance=publisher._bootstrap_provenance(
-                        signing_public_key_path=public
-                    ),
+                    bootstrap_provenance=provenance,
                     ttl_seconds=300,
                 ),
             )
+            self.assertEqual(result["bootstrap_provenance"], provenance.as_manifest())
+
+    def test_preflight_pins_checkout_revision_and_exact_bundle_digest(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            _private, public = self.write_keypair(root)
+            provenance = publisher._bootstrap_provenance(signing_public_key_path=public)
+            revision = subprocess.run(
+                ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            ).stdout.strip()
+            digest, size = publisher.receiver_bundle.bundle_digest(signing_public_key=public)
+            self.assertEqual(provenance.publisher_source_revision, revision)
+            self.assertEqual(provenance.receiver_bundle_sha256, digest)
+            self.assertEqual(provenance.receiver_bundle_bytes, size)
+
+    def test_publish_rejects_a_different_provenance_signer_before_upload(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            _plan_path, plan = self.write_plan(root)
+            private, public = self.write_keypair(root)
+            provenance = self.bootstrap_provenance(public)
+            mismatched = dataclasses.replace(
+                provenance, signer_key_id="ed25519-sha256:" + "f" * 64
+            )
+            client = FakeS3()
+            with patch.object(publisher, "_bootstrap_provenance", return_value=provenance):
+                with self.assertRaisesRegex(publisher.EmergencyPublisherError, "signer"):
+                    publisher.publish(
+                        client=client,
+                        plan=plan,
+                        signing_private_key_path=private,
+                        signing_public_key_path=public,
+                        bootstrap_provenance=mismatched,
+                        outputs=self.outputs(root),
+                        ttl_seconds=300,
+                    )
+            self.assertEqual(client.put_calls, [])
 
     def test_apply_rejects_wrong_confirmation_before_client_or_output(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:
@@ -329,21 +384,76 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             private, public = self.write_keypair(root)
             outputs = self.outputs(root)
             factory = Mock(side_effect=AssertionError("client must remain unused"))
-            with self.assertRaisesRegex(publisher.EmergencyPublisherError, "confirmation"):
-                publisher.execute(
-                    self.arguments(
-                        plan=plan_path,
-                        private=private,
-                        public=public,
-                        outputs=outputs,
-                        apply=True,
-                        confirm="publish-emergency-ir:wrong",
-                        credentials=root / "credentials.json",
-                    ),
-                    client_factory=factory,
-                )
+            with patch.object(
+                publisher,
+                "_bootstrap_provenance",
+                return_value=self.bootstrap_provenance(public),
+            ):
+                with self.assertRaisesRegex(publisher.EmergencyPublisherError, "confirmation"):
+                    publisher.execute(
+                        self.arguments(
+                            plan=plan_path,
+                            private=private,
+                            public=public,
+                            outputs=outputs,
+                            apply=True,
+                            confirm="publish-emergency-ir:wrong",
+                            credentials=root / "credentials.json",
+                        ),
+                        client_factory=factory,
+                    )
             factory.assert_not_called()
             self.assertFalse(any(path.exists() for path in dataclasses.astuple(outputs)))
+
+    def test_same_confirmation_rejects_substituted_receiver_bundle_provenance(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            plan_path, plan = self.write_plan(root)
+            private, public = self.write_keypair(root)
+            outputs = self.outputs(root)
+            original = self.bootstrap_provenance(public)
+            substituted = dataclasses.replace(original, receiver_bundle_sha256="f" * 64)
+            confirmation = publisher.confirmation_phrase(
+                plan,
+                bootstrap_provenance=original,
+                ttl_seconds=300,
+            )
+            factory = Mock(side_effect=AssertionError("provenance mismatch must precede client construction"))
+            with patch.object(publisher, "_bootstrap_provenance", return_value=substituted):
+                with self.assertRaisesRegex(publisher.EmergencyPublisherError, "confirmation"):
+                    publisher.execute(
+                        self.arguments(
+                            plan=plan_path,
+                            private=private,
+                            public=public,
+                            outputs=outputs,
+                            apply=True,
+                            confirm=confirmation,
+                            credentials=root / "credentials.json",
+                        ),
+                        client_factory=factory,
+                    )
+            factory.assert_not_called()
+            self.assertFalse(any(path.exists() for path in dataclasses.astuple(outputs)))
+
+    def test_publisher_cli_rejects_a_caller_selected_repository(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit):
+                publisher.parse_args(
+                    [
+                        "--plan", "/tmp/plan.json",
+                        "--signing-private-key", "/tmp/private.key",
+                        "--signing-public-key", "/tmp/public.key",
+                        "--receiver-bundle-output", "/tmp/receiver.tar.gz",
+                        "--sealed-manifest-output", "/tmp/manifest.json",
+                        "--url-map-output", "/tmp/urls.json",
+                        "--descriptor-output", "/tmp/descriptor.json",
+                        "--repo", "/tmp/substituted-checkout",
+                    ]
+                )
+        self.assertIn("--repo", stderr.getvalue())
 
     def test_mocked_publish_binds_versions_and_creates_only_private_bootstrap_files(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:
@@ -353,25 +463,32 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             private, public = self.write_keypair(root)
             outputs = self.outputs(root)
             client = FakeS3()
+            provenance = self.bootstrap_provenance(public)
             confirmation = publisher.confirmation_phrase(
                 plan,
-                bootstrap_provenance=publisher._bootstrap_provenance(
-                    signing_public_key_path=public
-                ),
+                bootstrap_provenance=provenance,
                 ttl_seconds=300,
             )
-            result = publisher.execute(
-                self.arguments(
-                    plan=plan_path,
-                    private=private,
-                    public=public,
-                    outputs=outputs,
-                    apply=True,
-                    confirm=confirmation,
-                    credentials=root / "credentials.json",
+            with (
+                patch.object(publisher, "_bootstrap_provenance", return_value=provenance),
+                patch.object(
+                    publisher,
+                    "_fixed_publisher_source_revision",
+                    return_value=provenance.publisher_source_revision,
                 ),
-                client_factory=lambda _path: client,
-            )
+            ):
+                result = publisher.execute(
+                    self.arguments(
+                        plan=plan_path,
+                        private=private,
+                        public=public,
+                        outputs=outputs,
+                        apply=True,
+                        confirm=confirmation,
+                        credentials=root / "credentials.json",
+                    ),
+                    client_factory=lambda _path: client,
+                )
             self.assertEqual(result["status"], "published-sealed")
             self.assertEqual(result["artifact_count"], 4)
             self.assertEqual(len(client.put_calls), 7)
@@ -419,7 +536,7 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             )
             self.assertEqual(
                 descriptor["bootstrap_provenance"],
-                publisher._bootstrap_provenance(signing_public_key_path=public).as_manifest(),
+                provenance.as_manifest(),
             )
             self.assertEqual(
                 receive_plan["bootstrap_provenance"], descriptor["bootstrap_provenance"]
@@ -431,22 +548,24 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             root.chmod(0o700)
             _plan_path, plan = self.write_plan(root)
             private, public = self.write_keypair(root)
+            provenance = self.bootstrap_provenance(public)
             for client in (FakeS3(versioning=False), FakeS3(private=False)):
                 with self.subTest(versioning=client.versioning, private=client.private):
                     output_root = root / f"output-{client.versioning}-{client.private}"
                     output_root.mkdir(mode=0o700)
-                    with self.assertRaisesRegex(publisher.EmergencyPublisherError, "bucket"):
-                        publisher.publish(
-                            client=client,
-                        plan=plan,
-                        signing_private_key_path=private,
-                        signing_public_key_path=public,
-                        bootstrap_provenance=publisher._bootstrap_provenance(
-                            signing_public_key_path=public
-                        ),
-                        outputs=self.outputs(output_root),
-                            ttl_seconds=300,
-                        )
+                    with patch.object(
+                        publisher, "_bootstrap_provenance", return_value=provenance
+                    ):
+                        with self.assertRaisesRegex(publisher.EmergencyPublisherError, "bucket"):
+                            publisher.publish(
+                                client=client,
+                                plan=plan,
+                                signing_private_key_path=private,
+                                signing_public_key_path=public,
+                                bootstrap_provenance=provenance,
+                                outputs=self.outputs(output_root),
+                                ttl_seconds=300,
+                            )
                     self.assertEqual(client.put_calls, [])
 
     def test_bucket_rejects_nonpublic_foreign_acl_grant_before_any_upload(self) -> None:
@@ -515,18 +634,25 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             _plan_path, plan = self.write_plan(root)
             private, public = self.write_keypair(root)
             outputs = self.outputs(root)
-            with self.assertRaisesRegex(publisher.EmergencyPublisherError, "immutable GET|readback"):
-                publisher.publish(
-                    client=FakeS3(corrupt_get=True),
-                    plan=plan,
-                    signing_private_key_path=private,
-                    signing_public_key_path=public,
-                    bootstrap_provenance=publisher._bootstrap_provenance(
-                        signing_public_key_path=public
-                    ),
-                    outputs=outputs,
-                    ttl_seconds=300,
-                )
+            provenance = self.bootstrap_provenance(public)
+            with (
+                patch.object(publisher, "_bootstrap_provenance", return_value=provenance),
+                patch.object(
+                    publisher,
+                    "_fixed_publisher_source_revision",
+                    return_value=provenance.publisher_source_revision,
+                ),
+            ):
+                with self.assertRaisesRegex(publisher.EmergencyPublisherError, "immutable GET|readback"):
+                    publisher.publish(
+                        client=FakeS3(corrupt_get=True),
+                        plan=plan,
+                        signing_private_key_path=private,
+                        signing_public_key_path=public,
+                        bootstrap_provenance=provenance,
+                        outputs=outputs,
+                        ttl_seconds=300,
+                    )
             self.assertTrue(outputs.receiver_bundle.exists())
             self.assertFalse(outputs.sealed_manifest.exists())
 
@@ -545,6 +671,7 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--apply", result.stdout)
+        self.assertNotIn("--repo", result.stdout)
 
     def test_client_rejects_proxy_environment_before_reading_credentials(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:

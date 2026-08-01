@@ -147,9 +147,8 @@ class EmergencyIrObjectStorageManifestTests(unittest.TestCase):
 
         wrong_signer = copy.deepcopy(valid)
         wrong_signer["bootstrap_provenance"]["signer_key_id"] = "ed25519-sha256:" + "f" * 64
-        signed = manifest.sign_manifest(wrong_signer, private_key=self.private_key)
         with self.assertRaisesRegex(manifest.EmergencyManifestError, "bootstrap provenance signer"):
-            manifest.verify_manifest(signed, public_key=self.public_key)
+            manifest.sign_manifest(wrong_signer, private_key=self.private_key)
 
     def test_duplicate_json_unknown_fields_and_non_arvan_endpoint_fail_closed(self) -> None:
         duplicate = b'{"schema":"one","schema":"two"}'

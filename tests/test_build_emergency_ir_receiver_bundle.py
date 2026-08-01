@@ -43,10 +43,10 @@ class BuildEmergencyIrReceiverBundleTests(unittest.TestCase):
             output = directory / "receiver.tar.gz"
             key = self.public_key(directory)
             expected_digest, expected_size = bundle.bundle_digest(
-                repo=REPO_ROOT, signing_public_key=key
+                signing_public_key=key
             )
             digest, size = bundle.build_bundle(
-                repo=REPO_ROOT, signing_public_key=key, output=output
+                signing_public_key=key, output=output
             )
             self.assertEqual(digest, expected_digest)
             self.assertEqual(size, expected_size)
@@ -65,9 +65,9 @@ class BuildEmergencyIrReceiverBundleTests(unittest.TestCase):
             directory.chmod(0o700)
             output = directory / "receiver.tar.gz"
             public_key = self.public_key(directory)
-            bundle.build_bundle(repo=REPO_ROOT, signing_public_key=public_key, output=output)
+            bundle.build_bundle(signing_public_key=public_key, output=output)
             with self.assertRaisesRegex(bundle.ReceiverBundleError, "overwrite"):
-                bundle.build_bundle(repo=REPO_ROOT, signing_public_key=public_key, output=output)
+                bundle.build_bundle(signing_public_key=public_key, output=output)
 
     def test_entrypoint_runs_with_the_same_isolated_python_flag_as_wa_ir_bootstrap(self) -> None:
         result = subprocess.run(
@@ -85,6 +85,7 @@ class BuildEmergencyIrReceiverBundleTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--signing-public-key", result.stdout)
+        self.assertNotIn("--repo", result.stdout)
 
     def test_builder_entrypoint_is_directly_invocable_from_the_repository_root(self) -> None:
         result = subprocess.run(
