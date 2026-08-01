@@ -228,19 +228,62 @@ def _secure_directory(path: Path) -> None:
             _fail("artifact target directory is not root-controlled")
 
 
+def _verify_existing_ciphertext(path: Path, *, expected_bytes: int, expected_hash: str) -> bool:
+    """Accept a prior complete receive only when it exactly matches the seal."""
+
+    try:
+        before = path.lstat()
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise EmergencyReceiverError("existing artifact target cannot be inspected") from exc
+    if (
+        stat.S_ISLNK(before.st_mode)
+        or not stat.S_ISREG(before.st_mode)
+        or before.st_uid != 0
+        or before.st_nlink != 1
+        or stat.S_IMODE(before.st_mode) & 0o077
+        or before.st_size != expected_bytes
+    ):
+        _fail("existing Emergency artifact is not one sealed root-only ciphertext")
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        opened = os.fstat(descriptor)
+        fields = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink", "st_size")
+        if any(getattr(before, field) != getattr(opened, field) for field in fields):
+            _fail("existing Emergency artifact changed while being opened")
+        digest = hashlib.sha256()
+        observed = 0
+        while True:
+            chunk = os.read(descriptor, DOWNLOAD_CHUNK_BYTES)
+            if not chunk:
+                break
+            observed += len(chunk)
+            if observed > expected_bytes:
+                _fail("existing Emergency artifact exceeds its sealed size")
+            digest.update(chunk)
+        after = os.fstat(descriptor)
+        if observed != expected_bytes or digest.hexdigest() != expected_hash:
+            _fail("existing Emergency artifact differs from the sealed manifest")
+        if any(getattr(opened, field) != getattr(after, field) for field in fields):
+            _fail("existing Emergency artifact changed while being read")
+        return True
+    except OSError as exc:
+        raise EmergencyReceiverError("existing Emergency artifact cannot be read") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
 def _open_output(path: Path, *, expected_bytes: int) -> tuple[int, Path]:
     _secure_directory(path.parent)
     free_bytes = shutil.disk_usage(path.parent).free
     if free_bytes < expected_bytes + DISK_HEADROOM_BYTES:
         _fail("insufficient free disk space for the encrypted artifact")
-    try:
-        existing = path.lstat()
-    except FileNotFoundError:
-        existing = None
-    except OSError as exc:
-        raise EmergencyReceiverError("artifact target cannot be inspected") from exc
-    if existing is not None:
-        _fail("refusing to overwrite an existing Emergency artifact")
     directory_fd = os.open(
         path.parent,
         os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
@@ -264,10 +307,14 @@ def _open_output(path: Path, *, expected_bytes: int) -> tuple[int, Path]:
     return descriptor, path.parent / temporary
 
 
-def _download_ciphertext(*, url: str, artifact: Mapping[str, Any]) -> None:
+def _download_ciphertext(*, url: str, artifact: Mapping[str, Any]) -> str:
     target = Path(str(artifact["target_path"]))
     expected_bytes = int(artifact["ciphertext_bytes"])
     expected_hash = str(artifact["ciphertext_sha256"])
+    if _verify_existing_ciphertext(
+        target, expected_bytes=expected_bytes, expected_hash=expected_hash
+    ):
+        return "already-received"
     descriptor, temporary = _open_output(target, expected_bytes=expected_bytes)
     completed = False
     try:
@@ -298,8 +345,15 @@ def _download_ciphertext(*, url: str, artifact: Mapping[str, Any]) -> None:
         os.fsync(descriptor)
         os.close(descriptor)
         descriptor = -1
-        os.replace(temporary, target)
+        try:
+            # link(2) is create-only at the final name, unlike rename/replace;
+            # a concurrent or stale target can never be overwritten.
+            os.link(temporary, target, follow_symlinks=False)
+        except FileExistsError as exc:
+            raise EmergencyReceiverError("refusing to overwrite an existing Emergency artifact") from exc
+        os.unlink(temporary)
         completed = True
+        return "downloaded"
     except (HTTPError, URLError, OSError) as exc:
         raise EmergencyReceiverError("Object Storage artifact download failed") from exc
     finally:
@@ -329,12 +383,13 @@ def receive(*, manifest_path: Path, signing_public_key: Path, url_map_path: Path
     for artifact in plan["artifacts"]:
         kind = str(artifact["kind"])
         _validate_presigned_url(url=urls[kind], plan=plan, artifact=artifact)
-        _download_ciphertext(url=urls[kind], artifact=artifact)
+        receive_state = _download_ciphertext(url=urls[kind], artifact=artifact)
         received.append(
             {
                 "kind": kind,
                 "target_path": str(artifact["target_path"]),
                 "ciphertext_sha256": str(artifact["ciphertext_sha256"]),
+                "receive_state": receive_state,
             }
         )
     return {

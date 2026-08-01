@@ -80,6 +80,12 @@ class RunEmergencyIrObjectStorageReceiveTests(unittest.TestCase):
         self.assertNotIn("scp", source)
         self.assertNotIn("rsync", source)
 
+    def test_remote_bootstrap_is_syntactically_valid_and_can_resume_a_sealed_campaign(self) -> None:
+        compile(runner.REMOTE_BOOTSTRAP, "<emergency-bootstrap>", "exec")
+        self.assertIn("def existing(target,digest,size):", runner.REMOTE_BOOTSTRAP)
+        self.assertIn("def bundle_ready(target):", runner.REMOTE_BOOTSTRAP)
+        self.assertIn("already-received", (Path(__file__).resolve().parents[1] / "scripts" / "emergency_ir_object_storage_receiver.py").read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()

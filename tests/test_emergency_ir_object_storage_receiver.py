@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import copy
 from datetime import datetime, timezone
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 from urllib.parse import urlencode
 
@@ -162,6 +164,26 @@ class EmergencyIrObjectStorageReceiverTests(unittest.TestCase):
             receiver._parse_url_map(
                 json.dumps(unknown).encode("utf-8"), manifest_sha256=self.plan["manifest_sha256"]
             )
+
+    def test_complete_ciphertext_can_resume_only_when_it_still_matches_the_seal(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-resume-") as raw:
+            target = Path(raw) / "ciphertext.age"
+            payload = b"sealed-ciphertext-for-resume"
+            target.write_bytes(payload)
+            target.chmod(0o600)
+            self.assertTrue(
+                receiver._verify_existing_ciphertext(
+                    target,
+                    expected_bytes=len(payload),
+                    expected_hash=hashlib.sha256(payload).hexdigest(),
+                )
+            )
+            with self.assertRaisesRegex(receiver.EmergencyReceiverError, "differs"):
+                receiver._verify_existing_ciphertext(
+                    target,
+                    expected_bytes=len(payload),
+                    expected_hash="0" * 64,
+                )
 
 
 if __name__ == "__main__":

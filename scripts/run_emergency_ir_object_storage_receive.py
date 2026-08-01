@@ -121,9 +121,25 @@ def secure_dir(path):
   except FileNotFoundError:
    current.mkdir(mode=0o700); state=current.lstat()
   if stat.S_ISLNK(state.st_mode) or not stat.S_ISDIR(state.st_mode) or state.st_uid != 0 or stat.S_IMODE(state.st_mode)&0o022: fail("remote root is unsafe")
+def existing(target,digest,size):
+ target=pathlib.Path(target)
+ try: before=target.lstat()
+ except FileNotFoundError: return False
+ if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode) or before.st_uid!=0 or before.st_nlink!=1 or stat.S_IMODE(before.st_mode)&0o077 or before.st_size!=size: fail("existing bootstrap artifact is unsafe")
+ observed=hashlib.sha256(); total=0
+ with target.open("rb") as source:
+  while True:
+   chunk=source.read(65536)
+   if not chunk: break
+   total+=len(chunk)
+   if total>size: fail("existing bootstrap artifact exceeds its sealed size")
+   observed.update(chunk)
+ after=target.lstat()
+ if before.st_dev!=after.st_dev or before.st_ino!=after.st_ino or before.st_size!=after.st_size or observed.hexdigest()!=digest or total!=size: fail("existing bootstrap artifact differs from its sealed hash")
+ return True
 def fetch(url,digest,size,target):
  target=pathlib.Path(target); secure_dir(target.parent)
- if target.exists(): fail("refusing to overwrite bootstrap artifact")
+ if existing(target,digest,size): return
  temporary=target.with_name("."+target.name+".download")
  opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect(),urllib.request.HTTPSHandler(context=ssl.create_default_context()))
  observed=hashlib.sha256(); total=0
@@ -139,14 +155,31 @@ def fetch(url,digest,size,target):
     observed.update(chunk); output.write(chunk)
    output.flush(); os.fsync(output.fileno())
   if total!=size or observed.hexdigest()!=digest: fail("bootstrap artifact hash/size mismatch")
-  os.chmod(temporary,0o600); os.replace(temporary,target)
+  os.chmod(temporary,0o600)
+  try: os.link(temporary,target,follow_symlinks=False)
+  except FileExistsError: fail("refusing to overwrite bootstrap artifact")
+  temporary.unlink()
  except Exception:
   try: temporary.unlink()
   except FileNotFoundError: pass
   raise
+def bundle_ready(target):
+ target=pathlib.Path(target)
+ try: state=target.lstat()
+ except FileNotFoundError: return False
+ if stat.S_ISLNK(state.st_mode) or not stat.S_ISDIR(state.st_mode) or state.st_uid!=0 or stat.S_IMODE(state.st_mode)&0o022: fail("existing receiver bundle directory is unsafe")
+ allowed={"run_receiver.py","signing-public.key","scripts/emergency_ir_object_storage_manifest.py","scripts/emergency_ir_object_storage_receiver.py"}
+ actual={str(item.relative_to(target)) for item in target.rglob("*") if item.is_file()}
+ if actual!=allowed: fail("existing receiver bundle is incomplete")
+ for name in allowed:
+  item=target/name; member=item.lstat()
+  if stat.S_ISLNK(member.st_mode) or not stat.S_ISREG(member.st_mode) or member.st_uid!=0 or stat.S_IMODE(member.st_mode)&0o077: fail("existing receiver bundle member is unsafe")
+ return True
 def extract_bundle(bundle,target):
  allowed={"run_receiver.py","signing-public.key","scripts/emergency_ir_object_storage_manifest.py","scripts/emergency_ir_object_storage_receiver.py"}
- secure_dir(target)
+ if bundle_ready(target): return
+ temporary=target.with_name("."+target.name+"."+str(os.getpid())+".extract")
+ secure_dir(temporary)
  with tarfile.open(bundle,"r:gz") as archive:
   members=archive.getmembers()
   if {member.name for member in members}!=allowed or len(members)!=len(allowed): fail("bootstrap bundle layout is invalid")
@@ -154,19 +187,21 @@ def extract_bundle(bundle,target):
    if not member.isreg() or member.issym() or member.size<1 or member.size>1048576: fail("bootstrap bundle member is unsafe")
    payload=archive.extractfile(member)
    if payload is None: fail("bootstrap bundle member is unreadable")
-   destination=target/member.name; secure_dir(destination.parent)
+   destination=temporary/member.name; secure_dir(destination.parent)
    with destination.open("xb") as output:
     while True:
      chunk=payload.read(65536)
      if not chunk: break
      output.write(chunk)
    os.chmod(destination,0o600)
+ try: os.rename(temporary,target)
+ except FileExistsError: fail("refusing to overwrite receiver bundle directory")
 root=pathlib.Path(sys.argv[1]); campaign=sys.argv[2]
 bundle_url,bundle_hash,bundle_bytes=sys.argv[3],sys.argv[4],int(sys.argv[5])
 manifest_url,manifest_hash,manifest_bytes=sys.argv[6],sys.argv[7],int(sys.argv[8])
 urlmap_url,urlmap_hash,urlmap_bytes=sys.argv[9],sys.argv[10],int(sys.argv[11])
 campaign_root=root/campaign; secure_dir(campaign_root)
-bundle=campaign_root/"receiver.tar.gz"; sealed=campaign_root/"sealed-manifest.json"; urlmap=campaign_root/"presigned-urls.json"; receiver=campaign_root/"receiver"
+bundle=campaign_root/"receiver.tar.gz"; sealed=campaign_root/"sealed-manifest.json"; urlmap=campaign_root/"presigned-urls.json"; receiver=campaign_root/("receiver-"+bundle_hash[:16])
 fetch(bundle_url,bundle_hash,bundle_bytes,bundle); fetch(manifest_url,manifest_hash,manifest_bytes,sealed); fetch(urlmap_url,urlmap_hash,urlmap_bytes,urlmap); extract_bundle(bundle,receiver)
 result=subprocess.run(["/usr/bin/python3","-I","-B",str(receiver/"run_receiver.py"),"--manifest",str(sealed),"--signing-public-key",str(receiver/"signing-public.key"),"--url-map",str(urlmap)],capture_output=True,text=True,timeout=7200)
 sys.stdout.write(result.stdout); sys.stderr.write(result.stderr); raise SystemExit(result.returncode)
