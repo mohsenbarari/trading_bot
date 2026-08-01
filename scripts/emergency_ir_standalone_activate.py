@@ -1355,6 +1355,36 @@ def _nginx_static_contract(package_root: Path, *, profile: str) -> Path:
     return candidate
 
 
+def _restore_default_nginx_after_failed_prearm(
+    *,
+    paths: ActivationPaths,
+    backup: Path,
+    failed: Path,
+    runner: Callable[..., Any] = subprocess.run,
+) -> None:
+    """Preserve the failed Emergency link and restore the original default.
+
+    This is deliberately rename-only: a failed prearm must leave both the
+    original default site and the failed Emergency candidate available for
+    forensic review, without deleting either configuration.  The same helper
+    covers a failed syntax test, a failed reload, and a failed bounded UFW
+    change so none of those paths can leave a later daemon reload pointing at
+    the Emergency site.
+    """
+
+    try:
+        os.rename(paths.nginx_enabled, failed)
+        os.rename(backup, paths.nginx_default)
+    except OSError as exc:
+        raise EmergencyActivationError("Nginx prearm failed and the default site could not be restored") from exc
+    restored_test = runner([NGINX_BINARY, "-t"], check=False, capture_output=True, timeout=60)
+    if getattr(restored_test, "returncode", 1) != 0:
+        _fail("Nginx prearm failed; the default site was restored but its configuration test failed")
+    restored_reload = runner([SYSTEMCTL_BINARY, "reload", "nginx"], check=False, capture_output=True, timeout=60)
+    if getattr(restored_reload, "returncode", 1) != 0:
+        _fail("Nginx prearm failed; the default site was restored but could not be reloaded")
+
+
 def _prearm_nginx(
     *,
     paths: ActivationPaths,
@@ -1390,23 +1420,42 @@ def _prearm_nginx(
         raise EmergencyActivationError("recoverable Nginx prearm cannot move the default site") from exc
     tested = runner([NGINX_BINARY, "-t"], check=False, capture_output=True, timeout=60)
     if getattr(tested, "returncode", 1) != 0:
-        # Preserve the failed Emergency link separately and restore the exact
-        # default link.  This is a rename-only rollback; nothing is deleted.
-        try:
-            os.rename(paths.nginx_enabled, failed)
-            os.rename(backup, paths.nginx_default)
-            runner([NGINX_BINARY, "-t"], check=False, capture_output=True, timeout=60)
-            runner([SYSTEMCTL_BINARY, "reload", "nginx"], check=False, capture_output=True, timeout=60)
-        except OSError as exc:
-            raise EmergencyActivationError("Nginx test failed and the recoverable default restoration failed") from exc
+        _restore_default_nginx_after_failed_prearm(
+            paths=paths, backup=backup, failed=failed, runner=runner
+        )
         _fail("Nginx test failed; the previous default site was restored")
     reloaded = runner([SYSTEMCTL_BINARY, "reload", "nginx"], check=False, capture_output=True, timeout=60)
     if getattr(reloaded, "returncode", 1) != 0:
-        _fail("Nginx configuration tested but could not be reloaded")
-    for port in ("80/tcp", "443/tcp"):
-        allowed = runner([UFW_BINARY, "allow", port], check=False, capture_output=True, timeout=60)
-        if getattr(allowed, "returncode", 1) != 0:
-            _fail("Nginx is active but the bounded Emergency UFW rule could not be added")
+        _restore_default_nginx_after_failed_prearm(
+            paths=paths, backup=backup, failed=failed, runner=runner
+        )
+        _fail("Nginx configuration could not be reloaded; the previous default site was restored")
+    # A single UFW transaction avoids an 80-only partial success.  If it
+    # fails, restore Nginx rather than leaving a future reload/cutover armed.
+    allowed = runner(
+        [
+            UFW_BINARY,
+            "allow",
+            "proto",
+            "tcp",
+            "from",
+            "any",
+            "to",
+            "any",
+            "port",
+            "80,443",
+            "comment",
+            "trading-bot-emergency-ir",
+        ],
+        check=False,
+        capture_output=True,
+        timeout=60,
+    )
+    if getattr(allowed, "returncode", 1) != 0:
+        _restore_default_nginx_after_failed_prearm(
+            paths=paths, backup=backup, failed=failed, runner=runner
+        )
+        _fail("bounded Emergency UFW rule could not be added; the previous default site was restored")
 
 
 def prearm(
@@ -1431,7 +1480,11 @@ def prearm(
         profile=profile,
         runner=runner,
     )
-    payload = {"profile": profile, "nginx": "prearmed", "ufw_rules_added": ["80/tcp", "443/tcp"]}
+    payload = {
+        "profile": profile,
+        "nginx": "prearmed",
+        "ufw_rule_added": "allow proto tcp from any to any port 80,443 comment trading-bot-emergency-ir",
+    }
     _write_receipt(paths, campaign, stage="prearmed", payload=payload)
     return payload
 
