@@ -11,7 +11,9 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -182,6 +184,32 @@ def write_image_bundle(path: Path, *, bad_app_labels: bool = False) -> None:
 
 
 class EmergencyIrStandaloneActivationTests(unittest.TestCase):
+    def test_prepare_requires_aggregate_plaintext_disk_budget_before_decrypt(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-activation-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            campaign = ACTIVATE.VerifiedCampaign(
+                campaign_id="20260801T220000Z-emergency-ir-01",
+                manifest_sha256="d" * 64,
+                plan={},
+                artifacts={
+                    kind: {"plaintext_bytes": 100 + index}
+                    for index, kind in enumerate(ACTIVATE.manifest.ARTIFACT_ORDER)
+                },
+            )
+            paths = ACTIVATE.ActivationPaths(
+                emergency_root=root,
+                activation_root=root / "activation",
+            )
+            required = ACTIVATE.DISK_HEADROOM_BYTES + sum(
+                int(item["plaintext_bytes"]) for item in campaign.artifacts.values()
+            )
+            with patch.object(ACTIVATE.shutil, "disk_usage", return_value=SimpleNamespace(free=required)):
+                ACTIVATE._require_prepare_disk_budget(campaign=campaign, paths=paths)
+            with patch.object(ACTIVATE.shutil, "disk_usage", return_value=SimpleNamespace(free=required - 1)):
+                with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "aggregate"):
+                    ACTIVATE._require_prepare_disk_budget(campaign=campaign, paths=paths)
+
     def test_package_release_hashes_and_exact_members_extract_create_only(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-activation-") as raw:
             root = Path(raw)

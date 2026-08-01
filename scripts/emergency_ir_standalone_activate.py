@@ -653,6 +653,37 @@ def _decrypt_artifact(
     return target
 
 
+def _require_prepare_disk_budget(*, campaign: VerifiedCampaign, paths: ActivationPaths) -> None:
+    """Require room for the complete plaintext set before the first decrypt.
+
+    Each individual artifact is still checked again in ``_decrypt_artifact``.
+    This aggregate preflight prevents a fresh, create-only activation from
+    writing some plaintext artifacts and then failing midway through the
+    four-artifact set solely because the remaining free space was consumed by
+    earlier decrypts.
+    """
+
+    required = DISK_HEADROOM_BYTES
+    for kind in manifest.ARTIFACT_ORDER:
+        artifact = campaign.artifacts.get(kind)
+        if not isinstance(artifact, Mapping):
+            _fail("verified Emergency artifact set is incomplete")
+        expected = artifact.get("plaintext_bytes")
+        maximum = _artifact_maximum(kind)
+        if isinstance(expected, bool) or not isinstance(expected, int) or not 1 <= expected <= maximum:
+            _fail("verified Emergency artifact plaintext size is invalid")
+        required += expected
+    # ``verify_campaign`` already required the inbox below this same
+    # Emergency root, so its parent exists on a fresh host without creating a
+    # mutable activation directory merely to inspect capacity.
+    try:
+        free = shutil.disk_usage(paths.activation_root.parent).free
+    except OSError as exc:
+        raise EmergencyActivationError("cannot inspect aggregate Emergency activation disk space") from exc
+    if free < required:
+        _fail("insufficient aggregate free space for all decrypted Emergency artifacts")
+
+
 def _release_file_specs(release: Mapping[str, Any]) -> list[dict[str, Any]]:
     if set(release) != {"schema", "source_release_sha", "emergency_patch_sha", "files"}:
         _fail("package RELEASE.json fields are unsupported")
@@ -973,6 +1004,7 @@ def prepare(
 
     if _receipt_path(paths, campaign.campaign_id, "prepared").exists():
         _fail("Emergency prepare receipt already exists; refusing to overwrite a prior activation")
+    _require_prepare_disk_budget(campaign=campaign, paths=paths)
     decrypted = {
         kind: _decrypt_artifact(campaign=campaign, paths=paths, kind=kind, runner=runner)
         for kind in manifest.ARTIFACT_ORDER
