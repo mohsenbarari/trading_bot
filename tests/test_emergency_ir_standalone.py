@@ -18,11 +18,17 @@ VERIFY_SPEC = importlib.util.spec_from_file_location(
     "verify_emergency_ir_standalone",
     ROOT / "scripts" / "verify_emergency_ir_standalone.py",
 )
-assert RENDER_SPEC and RENDER_SPEC.loader and VERIFY_SPEC and VERIFY_SPEC.loader
+IMAGE_VERIFY_SPEC = importlib.util.spec_from_file_location(
+    "verify_emergency_ir_image_provenance",
+    ROOT / "scripts" / "verify_emergency_ir_image_provenance.py",
+)
+assert RENDER_SPEC and RENDER_SPEC.loader and VERIFY_SPEC and VERIFY_SPEC.loader and IMAGE_VERIFY_SPEC and IMAGE_VERIFY_SPEC.loader
 RENDER = importlib.util.module_from_spec(RENDER_SPEC)
 VERIFY = importlib.util.module_from_spec(VERIFY_SPEC)
 RENDER_SPEC.loader.exec_module(RENDER)
 VERIFY_SPEC.loader.exec_module(VERIFY)
+IMAGE_VERIFY = importlib.util.module_from_spec(IMAGE_VERIFY_SPEC)
+IMAGE_VERIFY_SPEC.loader.exec_module(IMAGE_VERIFY)
 
 
 SOURCE_SHA = "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5"
@@ -43,6 +49,37 @@ class EmergencyStandaloneTests(unittest.TestCase):
         reset = ROOT / "deploy/emergency-ir/reset-emergency-sessions.sql"
         self.assertEqual(VERIFY.verify_session_reset(reset), [])
         self.assertNotIn("delete ", reset.read_text(encoding="utf-8").lower())
+
+    def test_image_provenance_rejects_staging_or_embedded_sync_secret(self) -> None:
+        payload = {
+            "RepoTags": [f"trading_bot_emergency_ir_app:{PATCH_SHA}"],
+            "Config": {
+                "Labels": {
+                    "org.opencontainers.image.revision": PATCH_SHA,
+                    "org.goldtrade.emergency.base-revision": SOURCE_SHA,
+                    "org.goldtrade.emergency.scope": "ir-standalone",
+                    "org.goldtrade.emergency.auth": "webapp-initdata-only",
+                },
+                "Env": ["PATH=/usr/local/bin"],
+            },
+        }
+        self.assertEqual(
+            IMAGE_VERIFY.verify_payload(
+                payload=payload,
+                source_release_sha=SOURCE_SHA,
+                emergency_patch_sha=PATCH_SHA,
+            ),
+            [],
+        )
+        payload["RepoTags"].append("trading_bot_three_site_staging:unsafe")
+        payload["Config"]["Env"].append("SYNC_API_KEY=forbidden")
+        failures = IMAGE_VERIFY.verify_payload(
+            payload=payload,
+            source_release_sha=SOURCE_SHA,
+            emergency_patch_sha=PATCH_SHA,
+        )
+        self.assertTrue(any("staging" in failure for failure in failures))
+        self.assertTrue(any("SYNC_API_KEY" in failure for failure in failures))
 
     def test_nginx_verifier_requires_a_certificate_for_the_default_tls_vhost(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
