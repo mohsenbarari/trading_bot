@@ -27,6 +27,11 @@ if str(REPO_ROOT) not in sys.path:
 from scripts.deploy_config import resolve_deploy_settings
 from core.sync_transport import sync_transport_security_status_from_values
 from core.sync_parity_observability import strict_alert_gate_from_parity_summary, summarize_parity_comparison
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+    blocked_legacy_direct_fi_ir_transport_payload,
+)
 
 
 SCHEMA_VERSION = "sync_parity_stage9_production_rollout_v1"
@@ -94,15 +99,11 @@ def command_payload(command: CommandSpec) -> dict[str, Any]:
 
 
 def ssh_args(settings: dict[str, str], command: str) -> list[str]:
-    return [
-        "ssh",
-        "-o",
-        f"StrictHostKeyChecking={SSH_STRICT_HOST_KEY_CHECKING}",
-        "-p",
-        settings.get("IRAN_SSH_PORT", "37067"),
-        f"{settings.get('IRAN_SSH_USER', 'root')}@{settings['IRAN_HOST']}",
-        command,
-    ]
+    del settings, command
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="stage-p9-sync-parity-production-rollout",
+        operation="Iran SSH rollout command construction",
+    )
 
 
 def compose_probe_script(compose_file: str, body: str) -> str:
@@ -576,6 +577,10 @@ def build_transport_security_gate(settings: dict[str, str]) -> dict[str, Any]:
 
 
 def build_plan(args: argparse.Namespace) -> dict[str, Any]:
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="stage-p9-sync-parity-production-rollout",
+        operation="legacy two-site rollout plan construction",
+    )
     settings = resolve_deploy_settings(manifest_path=args.manifest)
     current_branch = run_git_value(["branch", "--show-current"])
     local_gates = build_local_release_gates(args)
@@ -700,6 +705,11 @@ def execute_section(plan: dict[str, Any], section_name: str) -> tuple[dict[str, 
 
 
 def execute_plan(plan: dict[str, Any], args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    del plan, args
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="stage-p9-sync-parity-production-rollout",
+        operation="legacy two-site rollout plan execution",
+    )
     if not plan["branch_gate"]["planning_passed"]:
         plan["status"] = "blocked_wrong_branch"
         return plan, 2
@@ -787,15 +797,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-    args.artifact_dir.mkdir(parents=True, exist_ok=True)
-    plan = build_plan(args)
-    exit_code = 0
-    if args.mode != "plan":
-        plan, exit_code = execute_plan(plan, args)
-    write_json(args.output, plan)
-    print(json.dumps(plan, ensure_ascii=False, sort_keys=True))
-    return exit_code
+    del argv
+    try:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="stage-p9-sync-parity-production-rollout",
+            operation="legacy two-site rollout CLI",
+        )
+    except LegacyDirectFiIrTransportRetiredError:
+        print(json.dumps(blocked_legacy_direct_fi_ir_transport_payload(
+            component="stage-p9-sync-parity-production-rollout"
+        ), ensure_ascii=False, sort_keys=True))
+        return 2
 
 
 if __name__ == "__main__":

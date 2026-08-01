@@ -129,6 +129,8 @@ class SourceSignerEnrollmentIssuerTests(unittest.TestCase):
             else:
                 target.mkdir(parents=True, exist_ok=True)
                 (target / "fixture.py").write_text("fixture " + relative + "\n", encoding="ascii")
+        (self.application / "mini_app_dist").mkdir(mode=0o700)
+        (self.application / "mini_app_dist" / "index.html").write_text("<!doctype html>fixture\n", encoding="ascii")
         self.release = _commit(self.application)
         self.application_tree = _tree(self.application, self.release)
         self.control_tree = _tree(self.control, self.control_commit)
@@ -141,6 +143,35 @@ class SourceSignerEnrollmentIssuerTests(unittest.TestCase):
             control_commit=self.control_commit,
             control_tree=self.control_tree,
         )
+        self.expected_static_assets_manifest = fixtures.make_expected_static_assets_manifest(
+            root=self.root,
+            campaign_id=CAMPAIGN,
+            application_repository=self.application,
+            application_release_sha=self.release,
+            expected_alembic_revision=REVISION,
+            control_commit=self.control_commit,
+            control_tree=self.control_tree,
+        )
+        campaigns_root, workspace_root = fixtures.source_transport_fixture_roots(self.root)
+        controller_transport = prepare._load_controller_source_transport()
+        transport_campaigns_root = patch.object(controller_transport, "CAMPAIGNS_ROOT", campaigns_root)
+        transport_workspace_root = patch.object(
+            controller_transport.contract, "SOURCE_TRANSPORT_WORKSPACE_ROOT", workspace_root
+        )
+        trusted_e53_environment = patch.object(
+            controller_transport,
+            "TRUSTED_E53_S3_ENVIRONMENT_PATH",
+            fixtures.trusted_e53_s3_environment_path(self.root),
+        )
+        transport_loader = patch.object(prepare, "_load_controller_source_transport", return_value=controller_transport)
+        transport_campaigns_root.start()
+        transport_workspace_root.start()
+        trusted_e53_environment.start()
+        transport_loader.start()
+        self.addCleanup(transport_campaigns_root.stop)
+        self.addCleanup(transport_workspace_root.stop)
+        self.addCleanup(trusted_e53_environment.stop)
+        self.addCleanup(transport_loader.stop)
         self.controller_key, self.controller_raw, self.controller_public = _key_material()
         self.controller_private = _private_file(self.root / "keys" / "controller.raw", self.controller_raw)
         initial_authority = fixtures.campaign_bound_controller_signer(
@@ -163,6 +194,7 @@ class SourceSignerEnrollmentIssuerTests(unittest.TestCase):
         self.prepared = prepare.prepare_source_adoption_package(
             source_repository=self.control,
             application_source_repository=self.application,
+            expected_static_assets_manifest=self.expected_static_assets_manifest,
             control_commit=self.control_commit,
             application_release_sha=self.release,
             expected_alembic_revision=REVISION,

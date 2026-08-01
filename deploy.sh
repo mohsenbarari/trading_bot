@@ -2,10 +2,11 @@
 set -e
 
 # ==========================================
-# 🚀 Deploy Script — Two-Server Architecture
+# Retired legacy root-Compose deployment entrypoint
 # ==========================================
-# Foreign Server (Germany): Bot + Sync + API
-# Iran Server:              API + Nginx + Frontend
+# Three-site production is operated only through the isolated Writer-Witness
+# control plane.  This script remains solely as an explicit fail-closed
+# compatibility boundary; it must never deploy the generic root Compose.
 # ==========================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,6 +27,53 @@ DEPLOY_FORCE_REBUILD="${DEPLOY_FORCE_REBUILD:-${IRAN_FORCE_RELEASE_REFRESH:-0}}"
 FOREIGN_COMPOSE_PROJECT_NAME="${FOREIGN_COMPOSE_PROJECT_NAME:-trading_bot}"
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$FOREIGN_COMPOSE_PROJECT_NAME}"
 LOCAL_COMPOSE_CMD=""
+# Every historical target is retired before configuration, build, Docker, or
+# peer work.  The generic root Compose is local-development-only and cannot
+# be a production writer, even for the formerly host-local ``foreign`` path.
+TARGET="${1:-all}"  # all | frontend | foreign | iran
+LEGACY_DIRECT_FI_IR_TRANSPORT_REASON="Legacy direct FI-to-IR deployment is retired; use the private, versioned Object Storage pull path and witnessed writer control."
+# This is intentionally the same inode used by the fenced WebApp-FI Writer
+# lease agent.  It is not configurable: letting an environment value redirect
+# it would make a legacy deploy able to bypass an active cutover.
+FENCED_FI_CUTOVER_DEPLOYMENT_LOCK="/var/lib/trading-bot-three-site/writer-terms/fenced-fi-cutover-deployment.lock"
+# A successful fenced cutover writes this root-owned receipt next to the
+# shared lock.  It is deliberately a persistent retirement marker, rather
+# than a second advisory lock: after the cutover process exits, an old
+# ``deploy.sh foreign`` must not become able to recreate the generic app/bot
+# stack and run its schema task beside the isolated Writer-Witness runtime.
+# Removing or replacing this marker is an explicit rollback operation outside
+# this historical deploy entrypoint.
+FENCED_FI_RUNTIME_RECEIPT="/var/lib/trading-bot-three-site/writer-terms/fenced-fi-runtime-receipt.json"
+FENCED_FI_CUTOVER_LOCK_FD=""
+
+assert_legacy_direct_fi_ir_transport_fenced() {
+    # Do not accept an environment or configuration override.  The historical
+    # targets below contain direct rsync/SSH peer control only for forensic
+    # comparison and must be unreachable before configuration is loaded.
+    echo "ERROR: $LEGACY_DIRECT_FI_IR_TRANSPORT_REASON" >&2
+    exit 2
+}
+
+assert_legacy_generic_root_compose_deploy_fenced() {
+    # This is intentionally unconditional.  A root Compose deployment is not
+    # a valid pre-cutover fallback: its app/migration/bot scope has been
+    # profile-retired to local development and lacks the isolated
+    # Writer-Witness lifecycle.  Fail before a build, host check, Docker
+    # probe, or configuration read can make it look operational.
+    echo "ERROR: legacy generic root-Compose deployment is retired for the three-site architecture; use the isolated Writer-Witness deployment control plane." >&2
+    exit 2
+}
+
+assert_legacy_foreign_runtime_not_retired() {
+    # Fail before the historical target even prepares wheels/frontend assets
+    # if a prior controlled FI cutover has completed.  ``deploy_foreign``
+    # repeats a stricter trusted-parent check while holding the cutover lock,
+    # which closes the race with a cutover that begins after this early check.
+    if [[ -e "$FENCED_FI_RUNTIME_RECEIPT" || -L "$FENCED_FI_RUNTIME_RECEIPT" ]]; then
+        echo "ERROR: legacy foreign deployment is retired after fenced WebApp-FI activation; use the isolated Writer-Witness runtime." >&2
+        exit 2
+    fi
+}
 
 normalize_arch() {
     case "${1:-}" in
@@ -43,6 +91,89 @@ resolve_local_compose_cmd() {
     else
         echo "No Docker Compose command is available locally." >&2
         exit 1
+    fi
+}
+
+acquire_fenced_fi_cutover_deployment_lock() {
+    # A missing file means the separate fenced runtime has not been installed
+    # on this host yet.  Once it exists, validate the root-only file created by
+    # the lease agent and hold its advisory flock for this entire legacy deploy.
+    local lock_dir
+    lock_dir="$(dirname "$FENCED_FI_CUTOVER_DEPLOYMENT_LOCK")"
+    if [[ ! -e "$FENCED_FI_CUTOVER_DEPLOYMENT_LOCK" && ! -L "$FENCED_FI_CUTOVER_DEPLOYMENT_LOCK" ]]; then
+        # Once the fenced runtime parent exists, a missing lock is an
+        # incomplete/ambiguous installation and must fence legacy deploys.
+        # Only a host without that parent is treated as pre-fence legacy.
+        if [[ -d "$lock_dir" ]]; then
+            echo "❌ Legacy foreign deployment is blocked: fenced FI lock is missing from its trusted parent." >&2
+            return 1
+        fi
+        return 0
+    fi
+
+    local lock_dir_uid lock_dir_gid lock_dir_mode
+    lock_dir_uid="$(stat -c '%u' -- "$lock_dir")" || {
+        echo "❌ Legacy foreign deployment is blocked: cannot inspect fenced FI lock directory owner." >&2
+        return 1
+    }
+    lock_dir_gid="$(stat -c '%g' -- "$lock_dir")" || {
+        echo "❌ Legacy foreign deployment is blocked: cannot inspect fenced FI lock directory group." >&2
+        return 1
+    }
+    lock_dir_mode="$(stat -c '%a' -- "$lock_dir")" || {
+        echo "❌ Legacy foreign deployment is blocked: cannot inspect fenced FI lock directory mode." >&2
+        return 1
+    }
+    if [[ ! -d "$lock_dir" || -L "$lock_dir" || "$lock_dir_uid" != "0" || "$lock_dir_gid" != "0" || $((8#$lock_dir_mode & 077)) -ne 0 ]]; then
+        echo "❌ Legacy foreign deployment is blocked: fenced FI lock directory is not a trusted owner directory." >&2
+        return 1
+    fi
+
+    # The receipt is written only after the isolated FI app and bot have
+    # passed their health checks.  Do not parse it here: any present,
+    # malformed, or symlinked marker is an ambiguous post-cutover state and
+    # therefore must fail closed before Docker, migration, or image work.
+    # This check is intentionally after trusted-parent validation and before
+    # opening the advisory lock, so a completed cutover remains a hard
+    # retirement boundary even when no cutover process is currently running.
+    if [[ -e "$FENCED_FI_RUNTIME_RECEIPT" || -L "$FENCED_FI_RUNTIME_RECEIPT" ]]; then
+        echo "❌ Legacy foreign deployment is blocked: the fenced WebApp-FI runtime receipt marks the generic deployment path retired." >&2
+        return 1
+    fi
+
+    local lock_uid lock_gid
+    lock_uid="$(stat -c '%u' -- "$FENCED_FI_CUTOVER_DEPLOYMENT_LOCK")" || return 1
+    lock_gid="$(stat -c '%g' -- "$FENCED_FI_CUTOVER_DEPLOYMENT_LOCK")" || return 1
+    if [[ -L "$FENCED_FI_CUTOVER_DEPLOYMENT_LOCK" || ! -f "$FENCED_FI_CUTOVER_DEPLOYMENT_LOCK" || "$lock_uid" != "0" || "$lock_gid" != "0" || ! -O "$FENCED_FI_CUTOVER_DEPLOYMENT_LOCK" ]]; then
+        echo "❌ Legacy foreign deployment is blocked: fenced FI cutover lock is not a trusted owner-only regular file." >&2
+        return 1
+    fi
+
+    local lock_mode lock_links
+    lock_mode="$(stat -c '%a' -- "$FENCED_FI_CUTOVER_DEPLOYMENT_LOCK")" || {
+        echo "❌ Legacy foreign deployment is blocked: cannot inspect fenced FI cutover lock." >&2
+        return 1
+    }
+    lock_links="$(stat -c '%h' -- "$FENCED_FI_CUTOVER_DEPLOYMENT_LOCK")" || {
+        echo "❌ Legacy foreign deployment is blocked: cannot inspect fenced FI cutover lock links." >&2
+        return 1
+    }
+    if (( (8#$lock_mode & 077) != 0 )) || [[ "$lock_links" != "1" ]]; then
+        echo "❌ Legacy foreign deployment is blocked: fenced FI cutover lock must remain root-only and unlinked." >&2
+        return 1
+    fi
+    if ! command -v flock >/dev/null 2>&1; then
+        echo "❌ Legacy foreign deployment is blocked: flock is required to honor the fenced FI cutover lock." >&2
+        return 1
+    fi
+
+    # This descriptor remains open only in deploy_foreign's subshell.  A crash
+    # closes it automatically, while a concurrent fenced cutover causes this
+    # legacy deployment to fail before Docker compose or migration commands.
+    exec {FENCED_FI_CUTOVER_LOCK_FD}>>"$FENCED_FI_CUTOVER_DEPLOYMENT_LOCK"
+    if ! flock -n "$FENCED_FI_CUTOVER_LOCK_FD"; then
+        echo "❌ Legacy foreign deployment is blocked: a fenced WebApp-FI cutover is in progress." >&2
+        return 1
     fi
 }
 
@@ -94,7 +225,25 @@ load_shared_deploy_surface() {
     : "${IRAN_PROJECT_DIR:?IRAN_PROJECT_DIR is required. Define it in DEPLOY_MANIFEST or environment.}"
 }
 
-load_shared_deploy_surface
+case "$TARGET" in
+    foreign)
+        assert_legacy_generic_root_compose_deploy_fenced
+        ;;
+    all|frontend|iran)
+        assert_legacy_direct_fi_ir_transport_fenced
+        ;;
+    *)
+        echo "Usage: ./deploy.sh [all|frontend|iran|foreign]" >&2
+        exit 2
+        ;;
+esac
+
+# The surviving ``foreign`` target is entirely local and has no need to read
+# the old Iran deployment surface.  Keeping that distinction here prevents a
+# local rebuild from implicitly obtaining peer authority.
+if [[ "$TARGET" != "foreign" ]]; then
+    load_shared_deploy_surface
+fi
 
 # ==========================================
 # Helper Functions
@@ -340,11 +489,6 @@ auto_cleanup_iran() {
         fi"
 }
 
-# ==========================================
-# Parse Arguments
-# ==========================================
-TARGET="${1:-all}"  # all | frontend | foreign | iran
-
 print_header "🚀 Deploy: $TARGET"
 
 # ==========================================
@@ -515,37 +659,46 @@ deploy_iran() {
 # 3. Deploy to Foreign Server (this machine)
 # ==========================================
 deploy_foreign() {
-    print_header "🌍 Deploying Foreign Server (local)"
-    local core_services=(app bot sync_worker)
+    # The subshell owns the shared flock descriptor for the entire legacy
+    # deployment.  It releases automatically on every success/failure path.
+    (
+        acquire_fenced_fi_cutover_deployment_lock
 
-    cd "$PROJECT_DIR"
-    ensure_local_host_timezone
-    resolve_local_compose_cmd
+        print_header "🌍 Deploying Foreign Server (local)"
+        # ``sync_worker`` implements the retired direct FI<->IR HTTP route.
+        # Root Compose also pins it fail-closed for manual starts, but do not
+        # schedule that legacy process from the surviving host-local deploy.
+        local core_services=(app bot)
 
-    mkdir -p "$DEPLOY_STATE_DIR"
-    local image_signature
-    image_signature="$(foreign_image_signature)"
-    if [ "$DEPLOY_FORCE_REBUILD" != "1" ] && [ -f "$FOREIGN_IMAGE_SIGNATURE_FILE" ] && [ "$(cat "$FOREIGN_IMAGE_SIGNATURE_FILE")" = "$image_signature" ] && docker image inspect trading_bot_base >/dev/null 2>&1; then
-        echo "✅ Foreign Docker image inputs unchanged. Skipping docker build."
-    else
-        echo "⏳ Building Docker image explicitly to prevent compose parallel export OOM..."
-        run_with_local_resource_guard "Foreign Docker image build" env DOCKER_BUILDKIT=1 docker build -t trading_bot_base .
-        echo "$image_signature" > "$FOREIGN_IMAGE_SIGNATURE_FILE"
-    fi
+        cd "$PROJECT_DIR"
+        ensure_local_host_timezone
+        resolve_local_compose_cmd
 
-    echo "ℹ️ Standard foreign deploy only refreshes core services: ${core_services[*]}"
-    echo "ℹ️ Optional support services (tileserver) are left untouched to avoid a cold-boot CPU spike after crashes or reboots."
-    echo "⏳ Starting stateful dependencies without recreating them..."
-    run_with_local_resource_guard "Foreign stateful dependencies startup" bash -lc "$LOCAL_COMPOSE_CMD up -d --no-recreate --wait --wait-timeout 180 db redis"
-    echo "⏳ Running migrations and validating the trade-number sequence..."
-    run_with_local_resource_guard "Foreign database migration" bash -lc "$LOCAL_COMPOSE_CMD run --rm --no-deps migration"
-    echo "⏳ Waiting for foreign core services to become ready..."
-    run_with_local_resource_guard "Foreign core service startup" bash -lc "$LOCAL_COMPOSE_CMD up -d --wait --wait-timeout 180 ${core_services[*]}"
+        mkdir -p "$DEPLOY_STATE_DIR"
+        local image_signature
+        image_signature="$(foreign_image_signature)"
+        if [ "$DEPLOY_FORCE_REBUILD" != "1" ] && [ -f "$FOREIGN_IMAGE_SIGNATURE_FILE" ] && [ "$(cat "$FOREIGN_IMAGE_SIGNATURE_FILE")" = "$image_signature" ] && docker image inspect trading_bot_base >/dev/null 2>&1; then
+            echo "✅ Foreign Docker image inputs unchanged. Skipping docker build."
+        else
+            echo "⏳ Building Docker image explicitly to prevent compose parallel export OOM..."
+            run_with_local_resource_guard "Foreign Docker image build" env DOCKER_BUILDKIT=1 docker build -t trading_bot_base .
+            echo "$image_signature" > "$FOREIGN_IMAGE_SIGNATURE_FILE"
+        fi
 
-    echo "✅ Foreign deployment complete!"
-    bash -lc "$LOCAL_COMPOSE_CMD ps"
+        echo "ℹ️ Standard foreign deploy only refreshes core services: ${core_services[*]}"
+        echo "ℹ️ Optional support services (tileserver) are left untouched to avoid a cold-boot CPU spike after crashes or reboots."
+        echo "⏳ Starting stateful dependencies without recreating them..."
+        run_with_local_resource_guard "Foreign stateful dependencies startup" bash -lc "$LOCAL_COMPOSE_CMD up -d --no-recreate --wait --wait-timeout 180 db redis"
+        echo "⏳ Running migrations and validating the trade-number sequence..."
+        run_with_local_resource_guard "Foreign database migration" bash -lc "$LOCAL_COMPOSE_CMD run --rm --no-deps migration"
+        echo "⏳ Waiting for foreign core services to become ready..."
+        run_with_local_resource_guard "Foreign core service startup" bash -lc "$LOCAL_COMPOSE_CMD up -d --wait --wait-timeout 180 ${core_services[*]}"
 
-    auto_cleanup_local
+        echo "✅ Foreign deployment complete!"
+        bash -lc "$LOCAL_COMPOSE_CMD ps"
+
+        auto_cleanup_local
+    )
 }
 
 run_post_full_deploy_sync_recovery() {

@@ -3,9 +3,11 @@
 
 This controller-local renderer never opens SSH or Object Storage.  It verifies
 the generic source-transport receipt, the detached source-adoption package and
-the controller-signed delivery envelope, then emits one SSH control command.
-The presigned GET URL is a transient final argv item; it is deliberately absent
-from every receipt, envelope and receiver configuration.
+the controller-signed delivery envelope, then makes one SSH control command
+available only through its reviewed in-process API.  The presigned GET URL is
+a transient final argv item; it is deliberately absent from every receipt,
+envelope and receiver configuration, and direct CLI rendering is disabled so
+the URL cannot be serialized to terminal output.
 
 The embedded receiver is intentionally small and self-contained.  It performs
 only one version-bound Object Storage GET, age decryption, creation of a new
@@ -104,6 +106,14 @@ ALLOWED_CONTROL_BASE64_PATHS = frozenset(
 
 class SourceBootstrapReceiveRenderError(RuntimeError):
     """The controller cannot safely render a source-bootstrap receive."""
+
+
+def _reject_direct_url_render() -> None:
+    """Fence the transient GET credential from terminal and audit paths."""
+
+    raise SourceBootstrapReceiveRenderError(
+        "direct CLI rendering of the URL-bearing WebApp-FI bootstrap receive control is disabled"
+    )
 
 
 def _require_root_controlled_directory_chain(path: Path, *, field: str) -> None:
@@ -359,39 +369,28 @@ def webapp_fi_bootstrap_identity_file(campaign_id: object) -> str:
     return value
 
 
-def _require_presigned_lifetime(query: Mapping[str, list[str]], *, now: dt.datetime) -> None:
-    sigv4_fields = (
-        "X-Amz-Algorithm",
-        "X-Amz-Credential",
-        "X-Amz-Signature",
-        "X-Amz-Date",
-        "X-Amz-Expires",
-        "X-Amz-SignedHeaders",
-    )
-    sigv2_fields = ("AWSAccessKeyId", "Signature", "Expires")
-    sigv4 = all(len(query.get(name, [])) == 1 and bool(query[name][0]) for name in sigv4_fields)
-    sigv2 = all(len(query.get(name, [])) == 1 and bool(query[name][0]) for name in sigv2_fields)
-    if sigv4 == sigv2:
-        raise SourceBootstrapReceiveRenderError("presigned URL must contain exactly one supported signed-request envelope")
+def _require_current_presigned_url(value: str, *, now: dt.datetime) -> None:
+    """Add a current-time check after the shared strict SigV4 contract.
+
+    ``require_version_bound_presigned_get_url`` rejects unknown/duplicate
+    query fields and validates the exact endpoint, object, VersionId,
+    credential scope, and signed-header set.  This renderer additionally
+    rejects a syntactically valid URL that has already expired.
+    """
+
+    try:
+        query = parse_qs(urlparse(value).query, keep_blank_values=True, strict_parsing=True)
+        issued = dt.datetime.strptime(query["X-Amz-Date"][0], "%Y%m%dT%H%M%SZ").replace(
+            tzinfo=dt.timezone.utc
+        )
+        expires = int(query["X-Amz-Expires"][0], 10)
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        raise SourceBootstrapReceiveRenderError("source bootstrap presigned URL has an invalid current-time envelope") from exc
     now = now.astimezone(dt.timezone.utc)
-    if sigv4:
-        if query["X-Amz-Algorithm"] != ["AWS4-HMAC-SHA256"] or query["X-Amz-SignedHeaders"] != ["host"]:
-            raise SourceBootstrapReceiveRenderError("presigned URL SigV4 algorithm or signed headers are invalid")
-        try:
-            issued = dt.datetime.strptime(query["X-Amz-Date"][0], "%Y%m%dT%H%M%SZ").replace(tzinfo=dt.timezone.utc)
-            expires = int(query["X-Amz-Expires"][0], 10)
-        except (TypeError, ValueError) as exc:
-            raise SourceBootstrapReceiveRenderError("presigned URL SigV4 expiry is invalid") from exc
-        if not 1 <= expires <= MAX_PRESIGNED_LIFETIME_SECONDS or now < issued or now > issued + dt.timedelta(seconds=expires):
-            raise SourceBootstrapReceiveRenderError("presigned URL SigV4 expiry is not current and short-lived")
-        return
-    expires_text = query["Expires"][0]
-    if not re.fullmatch(r"[0-9]{1,16}", expires_text):
-        raise SourceBootstrapReceiveRenderError("presigned URL SigV2 expiry is invalid")
-    expires = int(expires_text, 10)
-    now_seconds = int(now.timestamp())
-    if expires < now_seconds or expires - now_seconds > MAX_PRESIGNED_LIFETIME_SECONDS:
-        raise SourceBootstrapReceiveRenderError("presigned URL SigV2 expiry is not current and short-lived")
+    if not 1 <= expires <= MAX_PRESIGNED_LIFETIME_SECONDS or now < issued or now > issued + dt.timedelta(
+        seconds=expires
+    ):
+        raise SourceBootstrapReceiveRenderError("source bootstrap presigned URL is not current and short-lived")
 
 
 def _validate_presigned_url(
@@ -401,42 +400,39 @@ def _validate_presigned_url(
     object_value: Mapping[str, Any],
     now: dt.datetime | None = None,
 ) -> str:
-    url = _require_text(value, field="source bootstrap presigned URL", maximum=MAX_URL_BYTES)
-    if any(character.isspace() for character in url):
-        raise SourceBootstrapReceiveRenderError("source bootstrap presigned URL contains whitespace")
-    parsed = urlparse(url)
-    endpoint = urlparse(policy.endpoint)
     try:
-        has_port = parsed.port is not None
+        url = transport.require_version_bound_presigned_get_url(
+            value,
+            policy=policy,
+            object_key=object_value["object_key"],
+            version_id=object_value["version_id"],
+        )
     except ValueError as exc:
         raise SourceBootstrapReceiveRenderError("source bootstrap presigned URL is invalid") from exc
-    expected_path = "/" + quote(policy.bucket, safe="") + "/" + quote(object_value["object_key"], safe="/")
-    if (
-        parsed.scheme != "https"
-        or parsed.hostname != endpoint.hostname
-        or has_port
-        or parsed.username
-        or parsed.password
-        or parsed.fragment
-        or parsed.path != expected_path
-    ):
-        raise SourceBootstrapReceiveRenderError("source bootstrap presigned URL is not bound to the configured Object Storage endpoint")
-    try:
-        query = parse_qs(parsed.query, keep_blank_values=True, strict_parsing=True)
-    except ValueError as exc:
-        raise SourceBootstrapReceiveRenderError("source bootstrap presigned URL query is invalid") from exc
-    if query.get("versionId") != [object_value["version_id"]]:
-        raise SourceBootstrapReceiveRenderError("source bootstrap presigned URL must bind exactly one matching VersionId")
-    _require_presigned_lifetime(query, now=now or _utc_now())
+    except Exception as exc:
+        raise SourceBootstrapReceiveRenderError(
+            "source bootstrap presigned URL is not bound to the exact immutable object"
+        ) from exc
+    _require_current_presigned_url(url, now=now or _utc_now())
     return url
 
 
-def _load_transport_policy(path: Path) -> Any:
+def _load_transport_config(path: Path) -> Any:
     _require_root_execution()
     try:
-        return transport.load_controller_config(path).policy
+        return transport.load_controller_config(path)
     except Exception as exc:
         raise SourceBootstrapReceiveRenderError("source transport controller configuration is unsafe") from exc
+
+
+def _load_transport_policy(path: Path) -> Any:
+    """Return the policy for URL-free planning callers only.
+
+    The receive renderer itself retains the complete config long enough to
+    bind its path-derived campaign identity to the verified receipt.
+    """
+
+    return _load_transport_config(path).policy
 
 
 def _verify_prepared_package(*, package_directory: Path, preparation_receipt: Path) -> tuple[dict[str, Any], dict[str, Any], bytes]:
@@ -1405,13 +1401,24 @@ def render_receive_command(
     """Return one transient SSH control command after complete local checks."""
 
     _require_fixed_receiver_root(receiver_root)
-    policy = _load_transport_policy(source_transport_config)
+    controller_config = _load_transport_config(source_transport_config)
+    policy = controller_config.policy
     prepared, preparation_value, _preparation_raw = _verify_prepared_package(
         package_directory=source_adoption_package_directory,
         preparation_receipt=preparation_receipt,
     )
     publish_raw = _read_root_only_file(transport_publish_receipt, field="generic source transport publish receipt")
     published = _verify_generic_transport_receipt(payload=publish_raw, policy=policy, prepared=prepared)
+    try:
+        controller_config = transport.require_controller_config_for_campaign(
+            controller_config=controller_config,
+            campaign_id=published["campaign_id"],
+        )
+    except Exception as exc:
+        raise SourceBootstrapReceiveRenderError(
+            "source transport controller configuration does not bind the published campaign"
+        ) from exc
+    policy = controller_config.policy
     envelope_raw = _read_root_only_file(delivery_envelope, field="controller-signed delivery envelope")
     _envelope_verified, envelope_value = _verify_delivery_envelope(
         payload=envelope_raw,
@@ -1488,18 +1495,7 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     try:
-        print(
-            render_receive_command(
-                transport_publish_receipt=arguments.transport_publish_receipt,
-                source_transport_config=arguments.source_transport_config,
-                source_adoption_package_directory=arguments.source_adoption_package_directory,
-                preparation_receipt=arguments.preparation_receipt,
-                delivery_envelope=arguments.delivery_envelope,
-                pinned_controller_public_key_base64=arguments.pinned_controller_public_key_base64,
-                fi_known_hosts=arguments.fi_known_hosts,
-                presigned_url=_read_presigned_url_stdin(),
-            )
-        )
+        _reject_direct_url_render()
     except SourceBootstrapReceiveRenderError as exc:
         print(json.dumps({"status": "blocked", "error": str(exc), "error_class": type(exc).__name__}, sort_keys=True), file=sys.stderr)
         return 2

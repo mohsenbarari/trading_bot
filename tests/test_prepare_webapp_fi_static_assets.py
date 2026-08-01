@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -31,6 +32,7 @@ PREPARE = _load_module(
     "prepare_webapp_fi_static_assets_test",
     ROOT / "scripts" / "prepare_webapp_fi_static_assets.py",
 )
+ORIGINAL_PREPARER_PATH = Path(PREPARE.__file__).resolve()
 ADOPT = _load_module(
     "adopt_webapp_fi_static_assets_for_preparation_test",
     ROOT / "scripts" / "adopt_webapp_fi_static_assets.py",
@@ -67,7 +69,24 @@ class StaticAssetPreparationTests(unittest.TestCase):
         self._git("add", ".")
         self._git("commit", "-m", "fixture")
         self.release = self._git("rev-parse", "HEAD", capture=True)
+        self.release_tree = self._git("rev-parse", "HEAD^{tree}", capture=True)
         self.application = {"release_sha": self.release, "expected_alembic_revision": REVISION}
+        self.source_adoption_candidate = self.root / "source-adoption-candidate"
+        self.source_adoption_candidate.mkdir(mode=0o700)
+        scripts = self.source_adoption_candidate / "scripts"
+        config = self.source_adoption_candidate / "config"
+        scripts.mkdir(mode=0o700)
+        config.mkdir(mode=0o700)
+        self.installed_preparer = scripts / "prepare_webapp_fi_static_assets.py"
+        shutil.copyfile(ORIGINAL_PREPARER_PATH, self.installed_preparer)
+        self.installed_preparer.chmod(0o600)
+        self._write_expected_static_manifest()
+        installed_path = mock.patch.object(PREPARE, "__file__", str(self.installed_preparer))
+        runtime_path = mock.patch.object(PREPARE, "FI_RUNTIME_SOURCE_ROOT", self.runtime)
+        installed_path.start()
+        runtime_path.start()
+        self.addCleanup(installed_path.stop)
+        self.addCleanup(runtime_path.stop)
 
     def _git(self, *arguments: str, capture: bool = False) -> str:
         result = subprocess.run(
@@ -88,6 +107,27 @@ class StaticAssetPreparationTests(unittest.TestCase):
         path.write_bytes(payload)
         path.chmod(0o644)
         return path
+
+    def _write_expected_static_manifest(self, *, files: list[dict[str, object]] | None = None) -> None:
+        if files is None:
+            files = PREPARE._public_files(PREPARE._scan_static_source(self.static_root))
+        value = {
+            "schema": PREPARE.EXPECTED_STATIC_ASSETS_SCHEMA,
+            "status": "prepared",
+            "campaign_id": CAMPAIGN,
+            "application": {
+                "release_sha": self.release,
+                "release_tree": self.release_tree,
+                "expected_alembic_revision": REVISION,
+            },
+            "tooling": {"control_commit": "b" * 40, "control_tree": "c" * 40},
+            "static_root": PREPARE.RUNTIME_STATIC_ASSET_RELATIVE,
+            "files": files,
+            "files_sha256": PREPARE._files_sha256(files),
+        }
+        path = self.source_adoption_candidate / PREPARE.EXPECTED_STATIC_ASSETS_MEMBER
+        path.write_bytes(PREPARE.canonical_json_bytes(value) + b"\n")
+        path.chmod(0o600)
 
     def _prepare(self, *, candidate: str = "candidate", **kwargs: object) -> dict[str, object]:
         return PREPARE.prepare_static_assets(
@@ -155,17 +195,17 @@ class StaticAssetPreparationTests(unittest.TestCase):
         self.assertNotIn("subprocess", PREPARE.__dict__)
         self.assertNotIn("boto3", PREPARE.__dict__)
 
-    def test_checkout_commit_mismatch_blocks_before_candidate_creation(self) -> None:
-        candidate = self.output_parent / "wrong-checkout"
-        wrong_application = {"release_sha": "0" * 40, "expected_alembic_revision": REVISION}
-        with self.assertRaisesRegex(PREPARE.StaticAssetPreparationError, "does not match expected release"):
-            PREPARE.prepare_static_assets(
-                runtime_source_root=self.runtime,
-                output_directory=candidate,
-                expected_campaign_id=CAMPAIGN,
-                expected_application=wrong_application,
-                apply=True,
-            )
+    def test_missing_runtime_git_metadata_uses_controller_bound_manifest(self) -> None:
+        os.replace(self.runtime / ".git", self.runtime / ".git-detached")
+        plan = self._prepare(apply=False)
+        self.assertFalse((self.runtime / ".git").exists())
+        self.assertEqual("planned", plan["status"])
+
+    def test_controller_bound_manifest_mismatch_blocks_before_candidate_creation(self) -> None:
+        self._write_source("index.html", b"tampered runtime static asset\n")
+        candidate = self.output_parent / "manifest-mismatch"
+        with self.assertRaisesRegex(PREPARE.StaticAssetPreparationError, "controller-bound expected static manifest"):
+            self._prepare(candidate=candidate.name, apply=True)
         self.assertFalse(candidate.exists())
 
     def test_capacity_preflight_blocks_before_creating_candidate(self) -> None:
@@ -217,7 +257,17 @@ class StaticAssetPreparationTests(unittest.TestCase):
         first = "a" * 100
         second = "b" * 100
         third = "c" * 100
-        self._write_source(first + "/" + second + "/" + third + "/entry.js", b"fixture\n")
+        source = self._write_source(first + "/" + second + "/" + third + "/entry.js", b"fixture\n")
+        digest, size = PREPARE.sha256_file(source)
+        existing = json.loads(
+            (self.source_adoption_candidate / PREPARE.EXPECTED_STATIC_ASSETS_MEMBER).read_text(encoding="ascii")
+        )["files"]
+        self._write_expected_static_manifest(
+            files=sorted(
+                [*existing, {"path": source.relative_to(self.static_root).as_posix(), "sha256": digest, "bytes": size}],
+                key=lambda item: str(item["path"]),
+            )
+        )
         candidate = self.output_parent / "long-ustar-path"
         with self.assertRaisesRegex(PREPARE.StaticAssetPreparationError, "cannot be represented in USTAR"):
             self._prepare(candidate=candidate.name, apply=True)

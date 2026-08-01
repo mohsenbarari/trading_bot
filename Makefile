@@ -1,9 +1,10 @@
 
 # ==========================================
-# Trading Bot — Two-Server Deployment
+# Retired legacy root-Compose operational shortcuts
 # ==========================================
-# Foreign (Germany): Bot + Sync + API
-# Iran:              API + Nginx + Frontend
+# Three-site production is controlled by the isolated Writer-Witness runtime.
+# Root Compose is local-development-only and these historical Make targets are
+# explicit fail-closed compatibility markers, not a production control plane.
 # ==========================================
 
 IRAN_HOST ?= $(shell python3 scripts/deploy_config.py --key IRAN_SSH_TARGET 2>/dev/null)
@@ -13,20 +14,21 @@ IRAN_SSH_PORT ?= $(shell python3 scripts/deploy_config.py --key IRAN_SSH_PORT 2>
 SSH_IRAN_OPTS = -o StrictHostKeyChecking=accept-new -p $(IRAN_SSH_PORT)
 LOCAL_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then printf '%s' 'docker compose'; elif command -v docker-compose >/dev/null 2>&1; then printf '%s' 'docker-compose'; else printf '%s' 'docker compose'; fi)
 IRAN_REMOTE_COMPOSE = if docker compose version >/dev/null 2>&1; then compose_cmd="docker compose"; elif command -v docker-compose >/dev/null 2>&1; then compose_cmd="docker-compose"; else echo "No Docker Compose command is available on the Iran host." >&2; exit 1; fi
+# Do not let a command-line/environment Make variable redirect this fixed
+# post-cutover marker and revive the generic runtime. ``override`` takes
+# precedence over user supplied Make variables by design.
+override FENCED_FI_RUNTIME_RECEIPT := /var/lib/trading-bot-three-site/writer-terms/fenced-fi-runtime-receipt.json
 
-.PHONY: help up deploy frontend iran foreign sync-recover sync-health sync-health-iran sync-health-sample sync-health-monitor-install audit-anchor-export audit-anchor-monitor-install audit-anchor-ship audit-anchor-ship-install metrics-targets deployment-surface-guard restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs observability-overhead observability-readiness observability-gate audit-log-export test-report test-gate test-diff-gate stage9-infrastructure-gate stage9-runtime-evidence stage9-evidence-gate stage9-mutation-gate stage9-test-matrix frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans production-read-path-query-plans production-read-path-attribution messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all production-alerts production-alerts-monitor-install production-backup-foreign production-backup-iran production-backup-all production-recoverability-report production-recoverability-drill production-deployment-restart production-release-gate production-data-hygiene production-data-hygiene-iran production-benchmark-baseline production-benchmark-quick production-benchmark-targeted production-benchmark-full production-load-runner-bootstrap production-load-fixtures production-load-realistic production-load-sampler production-load-pool-matrix production-full-matrix-manifest production-full-matrix-run production-full-matrix-plan production-release production-online-help production-online-check production-online-bootstrap production-online-nginx production-online-cert production-online-build production-online-sync production-online-ship-images production-online-load-images production-online-deploy production-online-inspect-shared production-online-seed-shared production-online-health
+.PHONY: help up deploy frontend iran foreign sync-recover sync-health sync-health-iran sync-health-sample sync-health-monitor-install audit-anchor-export audit-anchor-monitor-install audit-anchor-ship audit-anchor-ship-install metrics-targets deployment-surface-guard restore-default-commodities dev-admin create-superadmin create-admin create-user list-users show-user change-password force-password-change set-role set-status set-max-sessions reset-sessions unlock-login down logs logs-api logs-bot logs-jobs logs-follow metrics logs-iran restart restart-iran status observability-up observability-down observability-logs observability-overhead observability-readiness observability-gate audit-log-export test-report test-gate test-diff-gate stage9-infrastructure-gate stage9-runtime-evidence stage9-evidence-gate stage9-mutation-gate stage9-test-matrix frontend-test-e2e frontend-test-e2e-firefox frontend-test-e2e-webkit frontend-test-e2e-matrix messenger-surface-report messenger-query-plans production-read-path-query-plans production-read-path-attribution messenger-benchmark-prepare messenger-benchmark-run messenger-benchmark-report messenger-benchmark-all production-alerts production-alerts-monitor-install production-backup-foreign production-backup-iran production-backup-all production-recoverability-report production-recoverability-drill production-deployment-restart production-release-gate production-data-hygiene production-data-hygiene-iran production-benchmark-baseline production-benchmark-quick production-benchmark-targeted production-benchmark-full production-load-runner-bootstrap production-load-fixtures production-load-realistic production-load-sampler production-load-pool-matrix production-full-matrix-manifest production-full-matrix-run production-full-matrix-plan production-release production-online-help production-online-check production-online-bootstrap production-online-nginx production-online-cert production-online-build production-online-sync production-online-ship-images production-online-load-images production-online-deploy production-online-inspect-shared production-online-seed-shared production-online-health legacy-direct-fi-ir-transport-blocked legacy-generic-fi-runtime-fenced legacy-root-compose-deploy-retired
 
 help:
 	@echo ""
 	@echo "🚀 Available commands:"
 	@echo ""
-	@echo "  make up         - Full deploy: build frontend + deploy both servers + auto sync recovery"
-	@echo "  make frontend   - Build frontend + deploy to Iran only"
-	@echo "  make iran       - Build frontend + full Iran deploy"
-	@echo "  make foreign    - Rebuild Docker on foreign server only"
+	@echo "  make up/frontend/iran/foreign - Retired: generic root-Compose deployment is blocked"
 	@echo "  make sync-recover - Manual fallback to catch up both servers after Iran reconnects"
 	@echo "  make sync-health - Show local/foreign sync backlog and lag"
-	@echo "  make sync-health-iran - Show Iran sync backlog and lag through SSH"
+	@echo "  make sync-health-iran - Retired: direct FI-to-IR SSH is blocked"
 	@echo "  make sync-health-sample - Sample local and Iran sync health from the foreign host"
 	@echo "  make sync-health-monitor-install - Install the 1-minute sync health sampler on the foreign host"
 	@echo "  make audit-anchor-export - Export the current durable audit head as a compact anchor"
@@ -57,10 +59,10 @@ help:
 	@echo "  make logs-jobs   - Follow app/bot logs where background jobs emit events"
 	@echo "  make logs-follow - Follow all local runtime logs with a bounded tail"
 	@echo "  make metrics     - Print Prometheus metrics from the local API"
-	@echo "  make logs-iran   - Iran server logs"
+	@echo "  make logs-iran   - Retired: direct FI-to-IR SSH is blocked"
 	@echo "  make restart     - Restart foreign containers"
-	@echo "  make restart-iran - Restart Iran containers"
-	@echo "  make status      - Show status of both servers"
+	@echo "  make restart-iran - Retired: direct FI-to-IR SSH is blocked"
+	@echo "  make status      - Show local status only"
 	@echo "  make observability-up   - Start local Loki/Promtail/Grafana stack"
 	@echo "  make observability-down - Stop local observability stack"
 	@echo "  make observability-logs - Follow observability stack logs"
@@ -105,7 +107,7 @@ help:
 	@echo "  make production-deployment-restart - Run the Stage P10 deploy/restart/backup benchmark"
 	@echo "  make production-release-gate  - Run the Stage P11 final release gate"
 	@echo "  make production-data-hygiene  - Run read-only dev/test artifact guard on the foreign DB"
-	@echo "  make production-data-hygiene-iran - Run read-only dev/test artifact guard on the Iran DB"
+	@echo "  make production-data-hygiene-iran - Retired: direct FI-to-IR SSH is blocked"
 	@echo "  make production-online-help   - Show the production release helper usage"
 	@echo "  make production-online-check  - Validate the production deploy manifest and SSH access"
 	@echo "  make production-online-bootstrap - Install Iran host prerequisites over SSH"
@@ -124,19 +126,19 @@ help:
 # --- Deploy Commands ---
 
 up: deploy
-deploy:
+deploy: legacy-root-compose-deploy-retired
 	@chmod +x ./deploy.sh
 	@./deploy.sh all
 
-frontend:
+frontend: legacy-root-compose-deploy-retired
 	@chmod +x ./deploy.sh
 	@./deploy.sh frontend
 
-iran:
+iran: legacy-root-compose-deploy-retired
 	@chmod +x ./deploy.sh
 	@./deploy.sh iran
 
-foreign:
+foreign: legacy-root-compose-deploy-retired
 	@chmod +x ./deploy.sh
 	@./deploy.sh foreign
 
@@ -144,11 +146,23 @@ sync-recover:
 	@chmod +x ./scripts/recover_cross_server_sync.sh
 	@./scripts/recover_cross_server_sync.sh
 
-sync-health:
+sync-health: legacy-generic-fi-runtime-fenced
 	@docker compose exec -T app python -c "import os, urllib.request; req = urllib.request.Request('http://127.0.0.1:8000/api/sync/health', headers={'X-Observability-Api-Key': os.environ.get('OBSERVABILITY_API_KEY', '')}); print(urllib.request.urlopen(req, timeout=15).read().decode())"
 
-sync-health-iran:
-	@ssh $(SSH_IRAN_OPTS) $(IRAN_HOST) 'cd $(IRAN_DIR) && $(IRAN_REMOTE_COMPOSE); $$compose_cmd -f docker-compose.iran.yml exec -T app python -c "import os, urllib.request; req = urllib.request.Request(\"http://127.0.0.1:8000/api/sync/health\", headers={\"X-Observability-Api-Key\": os.environ.get(\"OBSERVABILITY_API_KEY\", \"\")}); print(urllib.request.urlopen(req, timeout=15).read().decode())"'
+legacy-direct-fi-ir-transport-blocked:
+	@echo "ERROR: legacy direct FI-to-IR SSH/SCP/rsync transport is retired; use the private versioned Object Storage pull path." >&2
+	@exit 2
+
+# A root Compose app/db project is never a three-site runtime. The fixed
+# receipt is retained as forensic cutover evidence, but it is not a switch
+# that can re-enable this generic CLI surface.
+legacy-generic-fi-runtime-fenced:
+	@echo "ERROR: generic root-Compose FI runtime is retired for the three-site architecture; use the isolated Writer-Witness controls." >&2
+	@exit 2
+
+legacy-root-compose-deploy-retired: legacy-generic-fi-runtime-fenced
+
+sync-health-iran: legacy-direct-fi-ir-transport-blocked
 
 sync-health-sample:
 	@python3 scripts/sample_sync_health.py $${ARGS}
@@ -177,46 +191,46 @@ metrics-targets:
 deployment-surface-guard:
 	@python3 scripts/check_deployment_surface_guard.py
 
-restore-default-commodities:
+restore-default-commodities: legacy-generic-fi-runtime-fenced
 	@$(LOCAL_COMPOSE) run --rm migration python scripts/restore_default_commodities.py
 
-dev-admin:
+dev-admin: legacy-generic-fi-runtime-fenced
 	@$(LOCAL_COMPOSE) exec -T app python scripts/dev_admin.py $${ARGS}
 
-create-superadmin:
+create-superadmin: legacy-generic-fi-runtime-fenced
 	@$(LOCAL_COMPOSE) exec app python scripts/dev_admin.py create-superadmin
 
-create-admin:
+create-admin: legacy-generic-fi-runtime-fenced
 	@$(LOCAL_COMPOSE) exec app python scripts/dev_admin.py create-admin
 
-create-user:
+create-user: legacy-generic-fi-runtime-fenced
 	@$(LOCAL_COMPOSE) exec app python scripts/dev_admin.py create-user
 
-list-users:
+list-users: legacy-generic-fi-runtime-fenced
 	@$(LOCAL_COMPOSE) exec -T app python scripts/dev_admin.py list-users $${ARGS}
 
-show-user:
+show-user: legacy-generic-fi-runtime-fenced
 	@$(LOCAL_COMPOSE) exec app python scripts/dev_admin.py show-user
 
-change-password:
+change-password: legacy-generic-fi-runtime-fenced
 	@$(LOCAL_COMPOSE) exec app python scripts/dev_admin.py change-password
 
-force-password-change:
+force-password-change: legacy-generic-fi-runtime-fenced
 	@$(LOCAL_COMPOSE) exec app python scripts/dev_admin.py force-password-change
 
-set-role:
+set-role: legacy-generic-fi-runtime-fenced
 	@$(LOCAL_COMPOSE) exec app python scripts/dev_admin.py set-role
 
-set-status:
+set-status: legacy-generic-fi-runtime-fenced
 	@$(LOCAL_COMPOSE) exec app python scripts/dev_admin.py set-status
 
-set-max-sessions:
+set-max-sessions: legacy-generic-fi-runtime-fenced
 	@$(LOCAL_COMPOSE) exec app python scripts/dev_admin.py set-max-sessions
 
-reset-sessions:
+reset-sessions: legacy-generic-fi-runtime-fenced
 	@$(LOCAL_COMPOSE) exec app python scripts/dev_admin.py reset-sessions
 
-unlock-login:
+unlock-login: legacy-generic-fi-runtime-fenced
 	@$(LOCAL_COMPOSE) exec app python scripts/dev_admin.py unlock-login
 
 # --- Management Commands ---
@@ -239,25 +253,22 @@ logs-jobs:
 logs-follow:
 	@docker compose logs -f --tail=100 app bot redis db
 
-metrics:
+metrics: legacy-generic-fi-runtime-fenced
 	@curl -fsS http://127.0.0.1:8000/metrics
 
-logs-iran:
-	@ssh $(SSH_IRAN_OPTS) $(IRAN_HOST) 'cd $(IRAN_DIR) && $(IRAN_REMOTE_COMPOSE); $$compose_cmd -f docker-compose.iran.yml logs -f --tail=50'
+logs-iran: legacy-direct-fi-ir-transport-blocked
 
-restart:
+restart: legacy-generic-fi-runtime-fenced
 	@docker compose restart
 
-restart-iran:
-	@ssh $(SSH_IRAN_OPTS) $(IRAN_HOST) 'cd $(IRAN_DIR) && $(IRAN_REMOTE_COMPOSE); $$compose_cmd -f docker-compose.iran.yml restart'
+restart-iran: legacy-direct-fi-ir-transport-blocked
 
-status:
+status: legacy-generic-fi-runtime-fenced
 	@echo ""
 	@echo "🌍 Foreign Server (local):"
 	@docker compose ps
 	@echo ""
-	@echo "🇮🇷 Iran Server ($(IRAN_HOST_DISPLAY)):"
-	@ssh $(SSH_IRAN_OPTS) $(IRAN_HOST) 'cd $(IRAN_DIR) && $(IRAN_REMOTE_COMPOSE); $$compose_cmd -f docker-compose.iran.yml ps'
+	@echo "WA-IR status is intentionally not queried from this host; collect it locally through the approved role-local evidence path."
 
 observability-up:
 	@docker compose -f docker-compose.observability.yml up -d
@@ -331,11 +342,10 @@ production-deployment-restart:
 production-release-gate:
 	@python3 scripts/report_final_release_gate.py --manifest $${MANIFEST:-./deploy/production/online.env} $${ARGS}
 
-production-data-hygiene:
+production-data-hygiene: legacy-generic-fi-runtime-fenced
 	@$(LOCAL_COMPOSE) exec -T app python scripts/check_production_data_hygiene.py --role foreign --json $${ARGS}
 
-production-data-hygiene-iran:
-	@ssh $(SSH_IRAN_OPTS) $(IRAN_HOST) 'cd $(IRAN_DIR) && $(IRAN_REMOTE_COMPOSE); $$compose_cmd -f docker-compose.iran.yml exec -T app python scripts/check_production_data_hygiene.py --role iran --json' $${ARGS}
+production-data-hygiene-iran: legacy-direct-fi-ir-transport-blocked
 
 production-backup-foreign:
 	@python3 scripts/run_production_backup.py --manifest $${MANIFEST:-./deploy/production/online.env} --role foreign --json $${ARGS}

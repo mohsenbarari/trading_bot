@@ -7,8 +7,9 @@ from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
+from core.legacy_direct_fi_ir_transport_fence import LegacyDirectFiIrTransportRetiredError
 from core.sync_parity import build_table_parity_snapshot
-from scripts.compare_sync_parity import _compare
+from scripts.compare_sync_parity import _compare, _fetch_json, main
 
 
 def write_snapshot(path: Path, table_name: str, rows: list[dict]) -> None:
@@ -143,6 +144,58 @@ class SyncParityScriptTests(unittest.TestCase):
         self.assertEqual(posted[0]["url"], "http://127.0.0.1:8000/api/sync/parity/status")
         self.assertEqual(posted[0]["headers"]["X-observability-api-key"], "obs-key")
         self.assertEqual(posted[0]["body"]["status"], "ok")
+
+    def test_remote_snapshot_url_is_fenced_before_any_request_or_snapshot_read(self):
+        args = SimpleNamespace(
+            local_snapshot="should-not-be-read.json",
+            peer_snapshot=None,
+            local_url=None,
+            peer_url="https://wa-ir.example/api/sync/parity",
+            local_observability_key=None,
+            peer_observability_key=None,
+            sample_limit=5,
+            record_url=[],
+            record_observability_key=None,
+        )
+
+        with unittest.mock.patch(
+            "scripts.compare_sync_parity._read_json",
+            side_effect=AssertionError("snapshot read"),
+        ), unittest.mock.patch(
+            "scripts.compare_sync_parity.urllib.request.urlopen",
+            side_effect=AssertionError("network request"),
+        ):
+            with self.assertRaises(LegacyDirectFiIrTransportRetiredError):
+                _compare(args)
+
+    def test_remote_publication_url_is_fenced_before_request_creation(self):
+        with unittest.mock.patch(
+            "scripts.compare_sync_parity.urllib.request.urlopen",
+            side_effect=AssertionError("network request"),
+        ):
+            with self.assertRaises(LegacyDirectFiIrTransportRetiredError):
+                _fetch_json("https://wa-ir.example/api/sync/parity", None)
+
+    def test_cli_emits_redacted_blocked_payload_for_remote_url(self):
+        stdout = StringIO()
+        argv = [
+            "compare_sync_parity.py",
+            "compare",
+            "--local-url",
+            "https://wa-fi.example/api/sync/parity",
+            "--peer-snapshot",
+            "not-read.json",
+        ]
+        with unittest.mock.patch("sys.argv", argv), unittest.mock.patch(
+            "scripts.compare_sync_parity.urllib.request.urlopen",
+            side_effect=AssertionError("network request"),
+        ), redirect_stdout(stdout):
+            code = main()
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(code, 2)
+        self.assertEqual(payload["status"], "blocked_legacy_direct_fi_ir_transport_retired")
+        self.assertEqual(payload["component"], "sync-parity-compare")
 
     def test_compare_adds_complete_artifact_metadata_when_available(self):
         with tempfile.TemporaryDirectory() as tmp:

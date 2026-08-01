@@ -12,6 +12,11 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+    blocked_legacy_direct_fi_ir_transport_payload,
+)
 from scripts.capture_production_baseline import DEFAULT_ARTIFACT_ROOT, display_path, run_command, utc_iso, utc_stamp
 from scripts.deploy_config import resolve_deploy_settings
 
@@ -345,6 +350,11 @@ def parse_sync_health_from_command(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def run_live_checks(*, manifest: str, logs_dir: Path, skip: bool) -> dict[str, Any]:
+    del manifest, logs_dir, skip
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="final-release-gate",
+        operation="legacy two-site live health and sync gate",
+    )
     if skip:
         return {"status": "skipped", "commands": [], "sync_health": {}}
     commands = [
@@ -461,6 +471,11 @@ def write_summary(path: Path, payload: dict[str, Any]) -> None:
 
 
 def run_gate(args: argparse.Namespace) -> dict[str, Any]:
+    del args
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="final-release-gate",
+        operation="legacy two-site final release gate",
+    )
     stamp = args.timestamp or utc_stamp()
     scenario_dir = Path(args.artifact_root) / stamp / "final-release-p11"
     logs_dir = scenario_dir / "logs"
@@ -513,6 +528,20 @@ def run_gate(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="final-release-gate",
+            operation="legacy two-site final release gate CLI",
+        )
+    except LegacyDirectFiIrTransportRetiredError:
+        print(
+            json.dumps(
+                blocked_legacy_direct_fi_ir_transport_payload(component="final-release-gate"),
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+        return 2
     args = parse_args(argv)
     payload = run_gate(args)
     if args.json:

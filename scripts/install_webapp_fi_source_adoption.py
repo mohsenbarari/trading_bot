@@ -70,6 +70,7 @@ PACKAGE_MANIFEST_MEMBER = "source-adoption-package.json"
 PREPARATION_RECEIPT_NAME = "source-adoption-preparation-receipt.json"
 INSTALL_RECEIPT_NAME = "source-adoption-install-receipt.json"
 CANONICAL_RELEASE_TREE_MEMBER = "config/canonical-release-tree.json"
+EXPECTED_STATIC_ASSETS_MEMBER = "config/expected-static-assets.json"
 CONTRACT_MEMBER = "config/source-adoption-contract.json"
 INITIAL_STATIC_POLICY_MEMBER = "config/initial-static-transport-policy.json"
 INITIAL_STATIC_REQUEST_MEMBER = "config/initial-static-upload-request.json"
@@ -86,6 +87,8 @@ MAX_ARCHIVE_BYTES = 24 * 1024 * 1024
 MAX_PACKAGE_MEMBER_BYTES = 8 * 1024 * 1024
 MAX_RECEIPT_BYTES = 8 * 1024 * 1024
 MAX_CANONICAL_RELEASE_FILES = 100_000
+MAX_STATIC_ASSET_FILE_BYTES = 100 * 1024 * 1024
+MAX_STATIC_ASSET_PATH_BYTES = 512
 MAX_IMAGE_EXPORT_BYTES = 100 * 1024 * 1024 * 1024
 IMAGE_EXPORT_CAPACITY_MULTIPLIER = 2
 IMAGE_EXPORT_CAPACITY_MARGIN_BYTES = 1024 * 1024 * 1024
@@ -123,6 +126,7 @@ RUNTIME_CODE_PROJECTION_RELATIVES = (
     "trading_settings.json",
 )
 RUNTIME_STATIC_ASSET_RELATIVE = "mini_app_dist"
+EXPECTED_STATIC_ASSETS_SCHEMA = "gold-trade-webapp-fi-expected-static-assets-v2"
 RUNTIME_DATA_MOUNT_TARGETS = frozenset({"/app/uploads", "/app/audit_trail"})
 RUNTIME_EXTERNAL_NON_PAYLOAD_MOUNT_TARGET = "/app/certs"
 
@@ -145,6 +149,7 @@ PACKAGE_PAYLOAD_FILES = (
     *SOURCE_PAYLOAD_FILES,
     CONTRACT_MEMBER,
     CANONICAL_RELEASE_TREE_MEMBER,
+    EXPECTED_STATIC_ASSETS_MEMBER,
     *INITIAL_STATIC_BOOTSTRAP_MEMBERS,
 )
 PACKAGE_FILES = (*PACKAGE_PAYLOAD_FILES, PACKAGE_MANIFEST_MEMBER)
@@ -591,6 +596,87 @@ def _validate_canonical_release_tree_descriptor(payload: bytes) -> dict[str, Any
     return {"application": {"release_sha": release, "git_tree": tree}, "files": files}
 
 
+def _require_expected_static_asset_path(value: object, *, field: str) -> str:
+    if not isinstance(value, str) or not value or len(value.encode("utf-8")) > MAX_STATIC_ASSET_PATH_BYTES:
+        raise SourceAdoptionInstallError(f"{field} is invalid")
+    if any(ord(character) < 0x20 or ord(character) > 0x7E for character in value):
+        raise SourceAdoptionInstallError(f"{field} must be printable ASCII")
+    pure = PurePosixPath(value)
+    if (
+        pure.as_posix() != value
+        or pure.is_absolute()
+        or "\\" in value
+        or any(part in {"", ".", ".."} for part in pure.parts)
+    ):
+        raise SourceAdoptionInstallError(f"{field} is invalid")
+    return value
+
+
+def _validate_expected_static_assets_manifest(
+    payload: bytes,
+    *,
+    descriptor: Mapping[str, Any],
+    expected_campaign_id: str,
+    expected_application: Mapping[str, str],
+    expected_tooling: Mapping[str, str],
+) -> dict[str, Any]:
+    value = _parse_canonical_json(payload, field="expected static assets manifest")
+    expected = {
+        "schema",
+        "status",
+        "campaign_id",
+        "application",
+        "tooling",
+        "static_root",
+        "files",
+        "files_sha256",
+    }
+    if (
+        set(value) != expected
+        or value.get("schema") != EXPECTED_STATIC_ASSETS_SCHEMA
+        or value.get("status") != "prepared"
+        or value.get("campaign_id") != expected_campaign_id
+        or value.get("static_root") != RUNTIME_STATIC_ASSET_RELATIVE
+    ):
+        raise SourceAdoptionInstallError("expected static assets manifest is unsupported")
+    if descriptor["application"]["release_sha"] != expected_application.get("release_sha"):
+        raise SourceAdoptionInstallError("expected static assets manifest release binding is invalid")
+    application = value.get("application")
+    required_application = {
+        "release_sha": descriptor["application"]["release_sha"],
+        "release_tree": descriptor["application"]["git_tree"],
+        "expected_alembic_revision": expected_application["expected_alembic_revision"],
+    }
+    if not isinstance(application, Mapping) or dict(application) != required_application:
+        raise SourceAdoptionInstallError("expected static assets manifest application binding is invalid")
+    tooling = _require_tooling(value.get("tooling"), field="expected static assets manifest tooling")
+    if tooling != dict(expected_tooling):
+        raise SourceAdoptionInstallError("expected static assets manifest tooling binding is invalid")
+    raw_files = value.get("files")
+    if not isinstance(raw_files, list) or not raw_files or len(raw_files) > MAX_CANONICAL_RELEASE_FILES:
+        raise SourceAdoptionInstallError("expected static assets manifest files are invalid")
+    files: list[dict[str, Any]] = []
+    prior = ""
+    for item in raw_files:
+        if not isinstance(item, Mapping) or set(item) != {"path", "sha256", "bytes"}:
+            raise SourceAdoptionInstallError("expected static assets manifest file is invalid")
+        path = _require_expected_static_asset_path(item.get("path"), field="expected static asset path")
+        digest = _require_sha256(item.get("sha256"), field="expected static asset sha256")
+        size = item.get("bytes")
+        if (
+            isinstance(size, bool)
+            or not isinstance(size, int)
+            or not 0 <= size <= MAX_STATIC_ASSET_FILE_BYTES
+            or prior and path <= prior
+        ):
+            raise SourceAdoptionInstallError("expected static assets manifest file is invalid")
+        prior = path
+        files.append({"path": path, "sha256": digest, "bytes": size})
+    if value.get("files_sha256") != sha256_bytes(canonical_json_bytes(files)):
+        raise SourceAdoptionInstallError("expected static assets manifest file hash is invalid")
+    return {"application": required_application, "tooling": tooling, "files": files}
+
+
 def _validate_contract(payload: bytes) -> dict[str, Any]:
     contract = _parse_canonical_json(payload, field="source-adoption contract")
     expected = {
@@ -852,6 +938,13 @@ def verify_package_inputs(
     contract = _validate_contract(contract_raw)
     descriptor_raw = members[CANONICAL_RELEASE_TREE_MEMBER]
     descriptor = _validate_canonical_release_tree_descriptor(descriptor_raw)
+    _validate_expected_static_assets_manifest(
+        members[EXPECTED_STATIC_ASSETS_MEMBER],
+        descriptor=descriptor,
+        expected_campaign_id=expected_campaign_id,
+        expected_application=preparation["application"],
+        expected_tooling=preparation["tooling"],
+    )
     if sha256_bytes(contract_raw) != manifest["contract_sha256"] or sha256_bytes(descriptor_raw) != contract["canonical_release_tree_sha256"]:
         raise SourceAdoptionInstallError("source-adoption descriptor or contract binding is invalid")
     if (
@@ -1168,7 +1261,14 @@ def verify_installed_source_adoption(receipt_path: Path) -> dict[str, Any]:
     descriptor = candidate / CANONICAL_RELEASE_TREE_MEMBER
     if sha256_file(descriptor)[0] != descriptor_sha:
         raise SourceAdoptionInstallError("source-adoption canonical descriptor hash changed")
-    _validate_canonical_release_tree_descriptor(descriptor.read_bytes())
+    normalized_descriptor = _validate_canonical_release_tree_descriptor(descriptor.read_bytes())
+    _validate_expected_static_assets_manifest(
+        (candidate / EXPECTED_STATIC_ASSETS_MEMBER).read_bytes(),
+        descriptor=normalized_descriptor,
+        expected_campaign_id=campaign_id,
+        expected_application=application,
+        expected_tooling=tooling,
+    )
     if sha256_bytes(raw) != sha256_file(receipt_path)[0]:  # pragma: no cover - defensive read consistency.
         raise SourceAdoptionInstallError("source-adoption install receipt changed while reading")
     return {

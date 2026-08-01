@@ -7,6 +7,8 @@ import hashlib
 import json
 
 from core import telegram_gateway
+from core.db import require_external_effect_execution_authorization
+from core.external_effect_execution_gate import EXTERNAL_EFFECT_SCOPE_TELEGRAM_OTP_DELIVERY
 from core.registration_contracts import (
     TelegramOTPDeliveryCommand,
     TelegramOTPDeliveryOutcome,
@@ -53,6 +55,12 @@ async def deliver_telegram_otp_once(
             otp_request_id=command.otp_request_id,
             outcome=TelegramOTPDeliveryOutcome.INVALID,
         )
+    # Refuse before claiming the one-shot Redis receipt.  A new Writer term
+    # may not consume an old OTP into a Telegram provider attempt until its
+    # own no-resend authorization is present.
+    require_external_effect_execution_authorization(
+        EXTERNAL_EFFECT_SCOPE_TELEGRAM_OTP_DELIVERY
+    )
     receipt_ttl = max(1, min(300, int((expires_at - now).total_seconds()) + 60))
     receipt_key = _receipt_key(command)
     command_hash = _command_hash(command)
@@ -80,6 +88,9 @@ async def deliver_telegram_otp_once(
         )
 
     text = f"🔐 کد ورود شما: `{command.otp_code}`\n\nاین کد تا ۲ دقیقه معتبر است."
+    require_external_effect_execution_authorization(
+        EXTERNAL_EFFECT_SCOPE_TELEGRAM_OTP_DELIVERY
+    )
     try:
         result = await telegram_gateway.send_message(
             command.telegram_id,

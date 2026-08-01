@@ -20,7 +20,8 @@ from api.routers import customers
 from core.config import settings
 from core.deployment_surface import allowed_cors_origins
 from core.redis import init_redis, close_redis, get_redis_client
-from core.db import AsyncSessionLocal, init_db
+from core.application_writer_term import ApplicationWriterTermError
+from core.db import AsyncSessionLocal, init_db, require_application_writer_term
 from core.events import setup_event_listeners
 from core.server_routing import SERVER_FOREIGN, normalize_server
 from core.background_job_authority import (
@@ -336,6 +337,24 @@ def _start_background_leader_task(redis_client) -> asyncio.Task:
     return asyncio.create_task(_run_background_leader(redis_client))
 
 
+def _require_background_jobs_disabled_for_writer_term() -> None:
+    """Reject an unsafe mixed runtime before any startup side effects.
+
+    The legacy background leader includes external delivery and autonomous
+    mutation loops that do not yet have their own Writer Witness boundary.
+    A term-enforced application therefore must explicitly run without it;
+    future term-aware workers need a separate lifecycle and proof model.
+    """
+
+    if (
+        settings.application_writer_term_enforced
+        and settings.background_jobs_enabled
+    ):
+        raise RuntimeError(
+            "BACKGROUND_JOBS_ENABLED must be false when APPLICATION_WRITER_TERM_ENFORCED is true"
+        )
+
+
 def _is_mandatory_channel_membership_race(exc: IntegrityError) -> bool:
     message = str(exc).lower()
     return (
@@ -353,8 +372,10 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("🚀 Starting up...")
     validate_otp_delivery_runtime_settings(settings)
+    _require_background_jobs_disabled_for_writer_term()
     if settings.invitation_contract_v2_enabled:
         public_webapp_url_for_links()
+    require_application_writer_term()
     await init_db()
     redis_client = await init_redis()
     setup_event_listeners()
@@ -472,6 +493,30 @@ async def enforce_production_test_isolation(request: Request, call_next):
         status_code=503,
         headers={"Cache-Control": "no-store"},
     )
+
+
+# FastAPI installs the last decorator middleware outermost, so this check
+# blocks every HTTP path, including /api/sync, before the production-isolation
+# and route layers. Compose env/mount wiring remains deliberately out of scope.
+@app.middleware("http")
+async def enforce_application_writer_term(request: Request, call_next):
+    try:
+        require_application_writer_term()
+    except ApplicationWriterTermError:
+        logger.warning(
+            "Blocked HTTP request because the local writer term is unavailable",
+            extra={
+                "event": "application_writer_term.http_blocked",
+                "path": request.url.path,
+                "client_host": request.client.host if request.client else None,
+            },
+        )
+        return JSONResponse(
+            {"detail": "Service temporarily unavailable"},
+            status_code=503,
+            headers={"Cache-Control": "no-store"},
+        )
+    return await call_next(request)
 
 # -------------------------------------------------------
 # 🛣️ API Routers

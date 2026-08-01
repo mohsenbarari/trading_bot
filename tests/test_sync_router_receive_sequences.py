@@ -41,6 +41,7 @@ class SyncRouterReceiveSequencesTests(unittest.IsolatedAsyncioTestCase):
         async with db.begin_nested() as nested:
             self.assertIsNone(nested)
 
+    @unittest.skip("legacy direct FI<->IR HTTP receiver is permanently retired")
     async def test_receive_sync_data_repairs_sequences_for_synced_tables(self):
         db = FakeDB()
         items = [
@@ -78,6 +79,7 @@ class SyncRouterReceiveSequencesTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("chat_members_id_seq" in stmt for stmt in statements))
         self.assertTrue(any("offers_id_seq" in stmt for stmt in statements))
 
+    @unittest.skip("legacy direct FI<->IR HTTP receiver is permanently retired")
     async def test_receive_sync_data_survives_sequence_repair_failures(self):
         class SequenceFailDB(FakeDB):
             async def execute(self, stmt, *args, **kwargs):

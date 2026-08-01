@@ -11,18 +11,28 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts.deploy_config import resolve_deploy_settings
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+    blocked_legacy_direct_fi_ir_transport_payload,
+)
 
 
 DEFAULT_TIMEOUT_SECONDS = 15
 STATIC_DELIVERY_HEADER = "x-static-delivery"
+LOCAL_STATIC_DELIVERY_URL = "http://127.0.0.1"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Report public Nginx static delivery behavior.")
-    parser.add_argument("--manifest", default=None)
+    parser.add_argument(
+        "--manifest",
+        default=None,
+        help="Retired: this role-local verifier never resolves a peer deployment manifest.",
+    )
     parser.add_argument("--base-url", default=None)
     parser.add_argument("--dist-dir", default="mini_app_dist")
     parser.add_argument("--json", action="store_true", help="Emit JSON. This is the default for benchmark use.")
@@ -32,6 +42,28 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def normalize_base_url(value: str) -> str:
     return value.rstrip("/")
+
+
+def assert_role_local_static_delivery_url(url: str) -> None:
+    """Refuse a public/peer URL before creating an HTTP request.
+
+    Static delivery checks remain useful on the host that owns the web
+    surface.  They are not an approved FI-to-IR synthetic-monitoring route;
+    accepting only numeric loopback prevents a manifest, DNS entry, or public
+    hostname from turning this compatibility helper back into one.
+    """
+
+    parsed = urlsplit(url)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or parsed.hostname not in {"127.0.0.1", "::1"}
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="static-delivery-report",
+            operation="public or peer static-delivery HTTP probe",
+        )
 
 
 def choose_representative_asset(dist_dir: Path) -> str:
@@ -49,6 +81,16 @@ def header_value(headers: dict[str, str], name: str) -> str:
 
 
 def fetch_url(url: str, *, timeout: int = DEFAULT_TIMEOUT_SECONDS) -> dict[str, Any]:
+    # Keep the peer-host denial adjacent to the request factory as well as in
+    # the reusable URL validator.  This makes an imported ``fetch_url``
+    # impossible to repurpose into an FI-to-IR probe even if a future caller
+    # bypasses the CLI-level validation.
+    if urlsplit(url).hostname not in {"127.0.0.1", "::1"}:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="static-delivery-report",
+            operation="public or peer static-delivery HTTP request construction",
+        )
+    assert_role_local_static_delivery_url(url)
     request = urllib.request.Request(url, headers={"User-Agent": "trading-bot-static-probe/1.0"}, method="GET")
     started = time.perf_counter()
     try:
@@ -112,6 +154,7 @@ def evaluate_probe(
 
 
 def collect_report(*, base_url: str, dist_dir: Path) -> dict[str, Any]:
+    assert_role_local_static_delivery_url(base_url)
     asset_path = choose_representative_asset(dist_dir)
     probes = [
         evaluate_probe(
@@ -187,9 +230,25 @@ def format_human_report(report: dict[str, Any]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    settings = resolve_deploy_settings(manifest_path=args.manifest)
-    base_url = normalize_base_url(args.base_url or settings.get("IRAN_FRONTEND_URL") or settings["IRAN_SERVER_URL"])
-    report = collect_report(base_url=base_url, dist_dir=Path(args.dist_dir))
+    try:
+        if args.manifest is not None:
+            assert_legacy_direct_fi_ir_transport_retired(
+                component="static-delivery-report",
+                operation="deployment-manifest peer URL resolution",
+            )
+        base_url = normalize_base_url(args.base_url or LOCAL_STATIC_DELIVERY_URL)
+        report = collect_report(base_url=base_url, dist_dir=Path(args.dist_dir))
+    except LegacyDirectFiIrTransportRetiredError:
+        print(
+            json.dumps(
+                blocked_legacy_direct_fi_ir_transport_payload(
+                    component="static-delivery-report"
+                ),
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+        return 2
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
     else:

@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Run a redaction-safe authenticated HTTP benchmark inside the app container.
+"""Run a redaction-safe, role-local HTTP benchmark inside the app container.
 
 The probe is intentionally small and read-heavy. It generates an in-memory JWT
 for a sampled active user, hits authenticated chat/market endpoints through the
 local HTTP stack, and reports aggregate latency/error/DB-connection data without
 printing tokens, user names, phone numbers, message text, or response bodies.
+
+The benchmark holds an in-memory user JWT, so its HTTP client is deliberately
+limited to its own loopback listener.  It must never become a configurable
+WebApp-FI <-> WebApp-IR transport.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from sqlalchemy import func, or_, select, text
@@ -30,6 +35,12 @@ from sqlalchemy import func, or_, select, text
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+    blocked_legacy_direct_fi_ir_transport_payload,
+)
 
 DEFAULT_ENDPOINT_WEIGHTS = {
     "config": 1,
@@ -42,6 +53,7 @@ DEFAULT_ENDPOINT_WEIGHTS = {
     "offers_my": 2,
     "trades_my": 2,
 }
+_ROLE_LOCAL_BENCHMARK_HOSTS = frozenset({"127.0.0.1", "::1"})
 
 
 @dataclass(frozen=True)
@@ -63,16 +75,40 @@ class RequestResult:
     error_kind: str | None = None
 
 
+def _require_role_local_benchmark_url(url: str) -> str:
+    """Fail closed before a benchmark can construct a nonlocal HTTP client."""
+
+    parsed = urlsplit(url)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or parsed.hostname not in _ROLE_LOCAL_BENCHMARK_HOSTS
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+    ):
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="worker-http-benchmark",
+            operation="nonlocal authenticated HTTP benchmark request",
+        )
+    return url.rstrip("/")
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Benchmark authenticated/chat HTTP latency inside the app container.")
-    parser.add_argument("--base-url", default=os.environ.get("WORKER_BENCHMARK_BASE_URL", "http://127.0.0.1:8000"))
+    parser.add_argument(
+        "--base-url",
+        default=os.environ.get("WORKER_BENCHMARK_BASE_URL", "http://127.0.0.1:8000"),
+        help="Exact role-local loopback URL only.",
+    )
     parser.add_argument("--requests", type=int, default=240)
     parser.add_argument("--concurrency", type=int, default=24)
     parser.add_argument("--timeout", type=float, default=10.0)
     parser.add_argument("--seed", type=int, default=20260611)
     parser.add_argument("--db-sample-interval", type=float, default=0.5)
     parser.add_argument("--json", action="store_true", help="Emit JSON. This is the default for automation.")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    args.base_url = _require_role_local_benchmark_url(str(args.base_url))
+    return args
 
 
 def percentile(values: list[float], percentile_value: float) -> float:
@@ -419,13 +455,14 @@ async def run_request(
 
 
 async def run_http_workload(args: argparse.Namespace, context: dict[str, Any]) -> dict[str, Any]:
+    base_url = _require_role_local_benchmark_url(str(args.base_url))
     specs = build_endpoint_specs(context)
     plan = weighted_plan(specs, count=max(1, args.requests), seed=args.seed)
     limits = httpx.Limits(max_connections=max(args.concurrency * 2, args.concurrency + 4), max_keepalive_connections=args.concurrency)
     results: list[RequestResult] = []
     semaphore = asyncio.Semaphore(max(1, args.concurrency))
 
-    async with httpx.AsyncClient(base_url=args.base_url.rstrip("/"), limits=limits) as client:
+    async with httpx.AsyncClient(base_url=base_url, limits=limits) as client:
         for spec in specs:
             results.append(await run_request(client, spec, token=context["token"], timeout=args.timeout))
 
@@ -516,13 +553,23 @@ def format_human(report: dict[str, Any]) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-    report = asyncio.run(collect_report(args))
-    if args.json:
-        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
-    else:
-        print(format_human(report))
-    return 0 if report["ok"] else 2
+    try:
+        args = parse_args(argv)
+        report = asyncio.run(collect_report(args))
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+        else:
+            print(format_human(report))
+        return 0 if report["ok"] else 2
+    except LegacyDirectFiIrTransportRetiredError:
+        print(
+            json.dumps(
+                blocked_legacy_direct_fi_ir_transport_payload(component="worker-http-benchmark"),
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+        return 2
 
 
 if __name__ == "__main__":

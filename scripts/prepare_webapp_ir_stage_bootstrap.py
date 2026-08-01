@@ -38,19 +38,21 @@ from urllib.parse import urlparse
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_SCHEMA = "gold-trade-wa-ir-stage-bootstrap-package-v1"
 RECEIPT_SCHEMA = "gold-trade-wa-ir-stage-bootstrap-preparation-v1"
-CONSUMER_CONFIG_SCHEMA = "gold-trade-wa-ir-artifact-stage-config-v3"
+CONSUMER_CONFIG_SCHEMA = "gold-trade-wa-ir-artifact-stage-config-v4"
 MAX_CONTROL_FILE_BYTES = 2 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 8 * 1024 * 1024
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 SITE_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
+CAMPAIGN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$")
+AGE_RECIPIENT_RE = re.compile(r"^age1[ac-hj-np-z02-9]{20,128}$")
 BUCKET_RE = re.compile(r"^[a-z0-9][a-z0-9.-]{2,62}$")
 PREFIX_COMPONENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._=-]{0,127}$")
 
 WA_IR_BOOTSTRAP_SOURCE_SITE = "webapp_fi"
 WA_IR_BOOTSTRAP_DESTINATION_SITE = "webapp_ir"
-WA_IR_BOOTSTRAP_AGE_RECIPIENT = "age1t9xuwava6480yfrqzkcq086pk4f8x082hmu4s5z2d2gykxm5s9qsq0c26t"
-WA_IR_BOOTSTRAP_IDENTITY_FILE = "/etc/trading-bot-three-site/wa-ir/artifact-stage-2c08.agekey"
+WA_IR_CAMPAIGN_IDENTITY_ROOT = "/etc/trading-bot-three-site/campaigns"
+WA_IR_BOOTSTRAP_IDENTITY_SUFFIX = "webapp-ir/bootstrap.agekey"
 
 PACKAGE_ARCHIVE_NAME = "wa-ir-artifact-stage-consumer.tar"
 PACKAGE_MANIFEST_MEMBER = "bootstrap-package.json"
@@ -75,6 +77,23 @@ PACKAGE_FILES = (*PAYLOAD_FILES, PACKAGE_MANIFEST_MEMBER)
 
 class BootstrapPreparationError(RuntimeError):
     """The detached bootstrap package cannot be proven safe."""
+
+
+def wa_ir_bootstrap_identity_file(campaign_id: object) -> str:
+    """Return the only campaign-scoped WA-IR identity path accepted here.
+
+    The final artifact stage deliberately reuses the fresh campaign identity
+    already required for the WA-IR static receiver.  This avoids a second key
+    while refusing the legacy, non-campaign 2c08 identity path.
+    """
+
+    if not isinstance(campaign_id, str) or not CAMPAIGN_ID_RE.fullmatch(campaign_id):
+        raise BootstrapPreparationError("campaign ID is invalid for the WA-IR bootstrap age identity")
+    path = PurePosixPath(WA_IR_CAMPAIGN_IDENTITY_ROOT) / campaign_id / WA_IR_BOOTSTRAP_IDENTITY_SUFFIX
+    value = path.as_posix()
+    if not path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+        raise BootstrapPreparationError("campaign WA-IR bootstrap age identity path is invalid")
+    return value
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -278,12 +297,14 @@ def _validate_consumer_config(payload: bytes) -> dict[str, Any]:
         raise BootstrapPreparationError("consumer config must be a JSON object")
     expected = {
         "schema",
+        "campaign_id",
         "endpoint",
         "region",
         "bucket",
         "prefix",
         "age_binary",
         "age_identity_file",
+        "age_recipient",
         "workspace",
         "source_site",
         "source_signing_public_key_base64",
@@ -328,11 +349,17 @@ def _validate_consumer_config(payload: bytes) -> dict[str, Any]:
         path = _require_string(value.get(field), "consumer config " + field)
         if not path.startswith("/"):
             raise BootstrapPreparationError("consumer config " + field + " must be absolute")
+    campaign_id = _require_string(value.get("campaign_id"), "consumer config campaign_id", maximum=128)
+    if not CAMPAIGN_ID_RE.fullmatch(campaign_id):
+        raise BootstrapPreparationError("consumer config campaign_id is invalid")
     site = _require_string(value.get("source_site"), "consumer config source_site", maximum=64)
     if site != WA_IR_BOOTSTRAP_SOURCE_SITE or not SITE_RE.fullmatch(site):
         raise BootstrapPreparationError("consumer config must pin source_site to webapp_fi")
-    if value.get("age_identity_file") != WA_IR_BOOTSTRAP_IDENTITY_FILE:
-        raise BootstrapPreparationError("consumer config must pin the WA-IR bootstrap age identity path")
+    if value.get("age_identity_file") != wa_ir_bootstrap_identity_file(campaign_id):
+        raise BootstrapPreparationError("consumer config must pin the campaign WA-IR bootstrap age identity path")
+    age_recipient = _require_string(value.get("age_recipient"), "consumer config age_recipient", maximum=256)
+    if not AGE_RECIPIENT_RE.fullmatch(age_recipient):
+        raise BootstrapPreparationError("consumer config age_recipient is invalid")
     encoded_key = _require_string(
         value.get("source_signing_public_key_base64"),
         "consumer config source_signing_public_key_base64",

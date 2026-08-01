@@ -53,8 +53,13 @@ class WebappIrPromotedNginx2c08Tests(unittest.TestCase):
 
     def test_direct_sync_is_fenced_before_the_generic_api_route(self) -> None:
         direct_sync = location_body(self.text, "= /api/sync/receive")
-        self.assertIn("return 404;", direct_sync)
+        self.assertIn("return 410;", direct_sync)
         self.assertNotIn("proxy_pass", direct_sync)
+        self.assertIn("THREE_SITE_LEGACY_INTERNAL_INGRESS_FENCED", self.text)
+        internal_index = self.text.index("location ~ ^/api/(sync|sessions/internal")
+        public_api_index = self.text.index("location /api/ {")
+        self.assertLess(internal_index, public_api_index)
+        self.assertIn("return 410;", self.text[internal_index:public_api_index])
         self.assertNotIn("sync_worker", self.text)
         self.assertNotIn("__FOREIGN_PUBLIC_IP__", self.text)
 

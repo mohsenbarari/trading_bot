@@ -26,6 +26,11 @@ from scripts.capture_production_baseline import (
     utc_stamp,
 )
 from scripts.deploy_config import resolve_deploy_settings
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+    blocked_legacy_direct_fi_ir_transport_payload,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -175,6 +180,10 @@ class Runner:
         if role == "foreign":
             command = f"cd {shlex.quote(str(REPO_ROOT))} && " + compose_probe_script("docker-compose.yml", body)
             return ["bash", "-lc", command]
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="stage-p8-frontend-ux-benchmark",
+            operation="Iran SSH fixture/control command construction",
+        )
         command = f"cd {quote_remote(self.settings['IRAN_PROJECT_DIR'])} && " + compose_probe_script("docker-compose.iran.yml", body)
         return remote_args(self.settings, command)
 
@@ -297,6 +306,10 @@ def sync_health_is_clean(payload: dict[str, Any]) -> bool:
 
 
 def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="stage-p8-frontend-ux-benchmark",
+        operation="legacy two-site fixture benchmark",
+    )
     stamp = args.timestamp or utc_stamp()
     artifact_root = Path(args.artifact_root)
     run_dir = artifact_root / stamp
@@ -438,6 +451,17 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="stage-p8-frontend-ux-benchmark",
+            operation="legacy two-site fixture benchmark CLI",
+        )
+    except LegacyDirectFiIrTransportRetiredError:
+        print(json.dumps(blocked_legacy_direct_fi_ir_transport_payload(
+            component="stage-p8-frontend-ux-benchmark"
+        ), ensure_ascii=False, sort_keys=True))
+        return 2
+
     args = parse_args(argv)
     payload = run_benchmark(args)
     if args.json:

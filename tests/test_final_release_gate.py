@@ -1,5 +1,7 @@
 import tempfile
 import unittest
+import io
+import json
 from pathlib import Path
 from unittest import mock
 
@@ -82,6 +84,15 @@ make[1]: Leaving directory '/repo'
                 parsed = gate.parse_sync_health_from_command({"stdout_path": "sync.stdout.log"})
 
         self.assertEqual(parsed["status"], "passed")
+
+    def test_legacy_two_site_final_gate_is_blocked_before_manifest_or_commands(self) -> None:
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            result = gate.main(["--manifest", "/tmp/missing-legacy-gate.env", "--json"])
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(result, 2)
+        self.assertEqual(payload["status"], "blocked_legacy_direct_fi_ir_transport_retired")
+        self.assertEqual(payload["component"], "final-release-gate")
 
 
 if __name__ == "__main__":

@@ -20,6 +20,20 @@ from .session import (
     SingleSessionRecoveryAdminTarget,
     SingleSessionRecoveryStatus,
 )
+from .promotion_auth_epoch import PromotionAuthEpoch, PromotionAuthEpochOperation
+from .operational_writer_admission import (
+    OperationalWriterAdmissionCommit,
+    OperationalWriterAdmissionHead,
+)
+from .physical_wal_v2_witness_roundtrip_strict_writer import (
+    PhysicalWalV2WitnessRoundtripStrictWriterCommit,
+)
+from .physical_wal_v2_witness_roundtrip_strict_writer_bound import (
+    PhysicalWalV2WitnessRoundtripStrictWriterBoundCommit,
+)
+from .physical_wal_v2_witness_roundtrip_attestation_consumption import (
+    PhysicalWalV2WitnessRoundtripAttestationConsumption,
+)
 from .commodity import Commodity, CommodityAlias
 from .notification import Notification
 from .push_subscription import PushSubscription
@@ -80,6 +94,25 @@ from .upload_session import (
 from .change_log import ChangeLog
 from .sync_block import SyncBlock
 from .sync_apply_watermark import SyncApplyWatermark
+from .object_delta import (
+    ObjectDeltaImportReceipt,
+    ObjectDeltaOutboxEntry,
+    ObjectDeltaReceiverCursor,
+    ObjectDeltaSourceCutover,
+    ObjectDeltaStream,
+)
+from .object_delta_source_batch import (
+    ObjectDeltaOutboundAckCursor,
+    ObjectDeltaSourceBatchLedger,
+)
+from .object_delta_source_publication_attempt import (
+    ObjectDeltaSourcePublicationAttempt,
+    ObjectDeltaSourcePublicationAttestation,
+    ObjectDeltaSourcePublicationLedgerBinding,
+    ObjectDeltaSourcePublicationReceipt,
+    ObjectDeltaSourcePublicationSeal,
+)
+from .object_delta_receiver_delivery import ObjectDeltaReceiverDeliveryNonceReceipt
 
 __all__ = [
     # User & Auth
@@ -105,6 +138,13 @@ __all__ = [
     "SingleSessionRecoveryRequest",
     "SingleSessionRecoveryAdminTarget",
     "SingleSessionRecoveryStatus",
+    "PromotionAuthEpoch",
+    "PromotionAuthEpochOperation",
+    "OperationalWriterAdmissionHead",
+    "OperationalWriterAdmissionCommit",
+    "PhysicalWalV2WitnessRoundtripStrictWriterCommit",
+    "PhysicalWalV2WitnessRoundtripStrictWriterBoundCommit",
+    "PhysicalWalV2WitnessRoundtripAttestationConsumption",
     "UserBlock",
     # Commodity
     "Commodity",
@@ -171,4 +211,17 @@ __all__ = [
     "ChangeLog",
     "SyncBlock",
     "SyncApplyWatermark",
+    "ObjectDeltaStream",
+    "ObjectDeltaSourceCutover",
+    "ObjectDeltaOutboxEntry",
+    "ObjectDeltaReceiverCursor",
+    "ObjectDeltaImportReceipt",
+    "ObjectDeltaSourceBatchLedger",
+    "ObjectDeltaOutboundAckCursor",
+    "ObjectDeltaSourcePublicationAttempt",
+    "ObjectDeltaSourcePublicationSeal",
+    "ObjectDeltaSourcePublicationReceipt",
+    "ObjectDeltaSourcePublicationAttestation",
+    "ObjectDeltaSourcePublicationLedgerBinding",
+    "ObjectDeltaReceiverDeliveryNonceReceipt",
 ]

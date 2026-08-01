@@ -12,7 +12,13 @@ import hashlib
 import hmac
 import time
 from jose import JWTError, jwt
-from core.db import get_db
+from core.db import get_db, require_external_effect_execution_authorization
+from core.services.promotion_session_invalidation_service import (
+    PromotionAccessTokenEpochError,
+    PromotionSessionInvalidationError,
+    enforce_access_token_auth_epoch,
+)
+from core.external_effect_execution_gate import EXTERNAL_EFFECT_SCOPE_SMS_PROVIDER_DELIVERY
 from models.user import User, UserRole
 from models.customer_relation import CustomerTier
 from models.invitation import Invitation, InvitationKind
@@ -1075,7 +1081,10 @@ async def refresh_access_token(
         
         # Validate session exists and is active
         session = await get_session_by_refresh_token(db, req.refresh_token)
-        if not session:
+        # The lookup is already constrained to active rows, but preserve this
+        # explicit second check so a mocked/repository implementation cannot
+        # turn a promotion-invalidated refresh session back into an access JWT.
+        if not session or getattr(session, "is_active", True) is not True:
             raise HTTPException(status_code=401, detail="نشست منقضی شده یا نامعتبر است. لطفاً دوباره وارد شوید.")
             
         # Revoke if the overall 30-day validity has passed
@@ -1187,6 +1196,10 @@ def _generate_otp_code() -> str:
 
 
 async def _deliver_stage6_sms(redis, *, state) -> SMSDeliveryOutcome:
+    # Refuse before consuming the OTP state into a durable SMS provider claim.
+    require_external_effect_execution_authorization(
+        EXTERNAL_EFFECT_SCOPE_SMS_PROVIDER_DELIVERY
+    )
     claim = await claim_sms_delivery(redis, state=state, require_due=False)
     if claim is None:
         refreshed = await load_otp_delivery_state(
@@ -1980,9 +1993,20 @@ async def setup_admin_password(
             token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm]
         )
         token_data = payload.get("sub")
-        if token_data is None: raise JWTError()
+        if token_data is None or payload.get("type") != "access":
+            raise JWTError()
     except (JWTError, ValidationError):
         raise HTTPException(status_code=401, detail="Invalid token")
+
+    try:
+        await enforce_access_token_auth_epoch(db, payload)
+    except PromotionAccessTokenEpochError:
+        raise HTTPException(status_code=401, detail="Session has been revoked") from None
+    except PromotionSessionInvalidationError:
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication cutover state is unavailable",
+        ) from None
         
     user_id = int(token_data)
     user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()

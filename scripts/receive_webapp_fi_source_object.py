@@ -512,15 +512,22 @@ def prepare_receive(
         lambda: transport._validate_controller_config(controller_config),
         message="controller source transport configuration is invalid",
     )
+    try:
+        campaign = binding.load_campaign_binding(Path(campaign_binding_path))
+    except binding.CampaignBindingError as exc:
+        raise SourceObjectReceiveError("canonical campaign binding is invalid") from exc
+    controller_config = _raise_transport_error(
+        lambda: transport.require_controller_config_for_campaign(
+            controller_config=controller_config,
+            campaign_id=campaign.campaign_id,
+        ),
+        message="controller source transport config does not bind the canonical campaign",
+    )
     data_root = _require_controller_receive_data_root()
     if candidate_state == "new":
         _require_writable_controller_receive_staging_volume(data_root)
     policy = controller_config.policy
     policy_sha256 = policy_binding_sha256(policy)
-    try:
-        campaign = binding.load_campaign_binding(Path(campaign_binding_path))
-    except binding.CampaignBindingError as exc:
-        raise SourceObjectReceiveError("canonical campaign binding is invalid") from exc
     verified_identity = _raise_identity_error(
         lambda: identity_bootstrap.load_verified_identity(campaign_binding_path=Path(campaign_binding_path)),
         message="controller source receive identity or receipt is invalid",

@@ -1,4 +1,5 @@
 import unittest
+import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -7,6 +8,7 @@ from starlette.responses import FileResponse
 
 from api.routers.chat import get_chat_file, get_stickers, upload_chat_media
 from core.enums import ChatType
+from core.services.promotion_session_invalidation_service import PromotionAccessTokenEpochError
 
 
 class FakeUploadFile:
@@ -76,6 +78,17 @@ def make_deleted_user(user_id: int):
 
 
 class ChatRouterMediaEndpointTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # The endpoint's separate query-token path must use the same durable
+        # auth epoch as bearer access.  Existing media authorization tests
+        # exercise file policy, so keep that independent DB read mocked here.
+        patcher = patch(
+            "api.routers.chat.enforce_access_token_auth_epoch",
+            new=AsyncMock(return_value=None),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     async def test_get_stickers_returns_expected_catalog(self):
         packs = await get_stickers()
 
@@ -240,6 +253,38 @@ class ChatRouterMediaEndpointTests(unittest.IsolatedAsyncioTestCase):
                 await get_chat_file("file-1", db=db, token="refresh-token")
 
         self.assertEqual(exc_info.exception.status_code, 401)
+
+    async def test_get_chat_file_applies_promotion_epoch_and_session_revocation(self):
+        with patch(
+            "api.routers.chat.jwt.decode",
+            return_value={"sub": "5", "type": "access", "iat": 2_000_000_000},
+        ), patch(
+            "api.routers.chat.enforce_access_token_auth_epoch",
+            new=AsyncMock(side_effect=PromotionAccessTokenEpochError("old token")),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await get_chat_file("file-1", db=FakeDB(), token="old")
+        self.assertEqual(exc_info.exception.status_code, 401)
+        self.assertEqual(exc_info.exception.detail, "Session has been revoked")
+
+        revoked_session = "12345678-1234-4234-9234-123456789abc"
+        db = FakeDB(
+            get_map={
+                5: make_active_user(5),
+                uuid.UUID(revoked_session): SimpleNamespace(
+                    is_active=False,
+                    user_id=5,
+                ),
+            }
+        )
+        with patch(
+            "api.routers.chat.jwt.decode",
+            return_value={"sub": "5", "type": "access", "sid": revoked_session},
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await get_chat_file("file-1", db=db, token="revoked")
+        self.assertEqual(exc_info.exception.status_code, 401)
+        self.assertEqual(exc_info.exception.detail, "Session has been revoked")
 
     async def test_upload_chat_media_surfaces_helper_validation_errors(self):
         current_user = SimpleNamespace(id=5)

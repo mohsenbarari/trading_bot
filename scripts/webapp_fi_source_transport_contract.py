@@ -25,7 +25,11 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 
 TRANSPORT_SCHEMA = "gold-trade-webapp-fi-source-transport-v1"
+# ``CONFIG_SCHEMA`` is retained for the URL-free FI exchange policy projection.
+# The controller's on-disk config has a distinct, stricter v2 shape; sharing a
+# schema label would let a v1 exchange policy masquerade as a controller config.
 CONFIG_SCHEMA = "gold-trade-webapp-fi-source-transport-config-v1"
+CONTROLLER_CONFIG_SCHEMA = "gold-trade-webapp-fi-source-transport-config-v2"
 OBJECT_ENCRYPTION = "age-v1"
 OBJECT_LAYOUT_VERSION = "v1"
 STATIC_MODE = "static"
@@ -36,10 +40,33 @@ STATIC_OBJECT_KIND = "static"
 STATIC_PROVENANCE_OBJECT_KIND = "static-provenance"
 RAW_APP_IMAGE_OBJECT_KIND = "raw-app-image"
 SOURCE_EVIDENCE_OBJECT_KIND = "source-evidence"
-MAXIMUM_PLAINTEXT_BYTES = 20 * 1024 * 1024 * 1024
+# The source image bundle can legitimately contain the four production images
+# and must therefore be admitted up to the raw-image transport limit.  The
+# controller config cannot lower or raise this value; it is a code pin.
+MAXIMUM_PLAINTEXT_BYTES = 100 * 1024 * 1024 * 1024
 MAXIMUM_CIPHERTEXT_OVERHEAD_BYTES = 1024 * 1024
 MINIMUM_PRESIGNED_URL_SECONDS = 1
 MAXIMUM_PRESIGNED_URL_SECONDS = 900
+FIXED_AGE_BINARY = "/usr/bin/age"
+SOURCE_TRANSPORT_WORKSPACE_ROOT = Path("/srv/trading-bot-three-site-staging-data/webapp-fi-source")
+
+# This is the complete controller-only configuration projection.  Runtime
+# policy fields that can be derived safely are deliberately not accepted from
+# disk, so a stale configuration cannot redirect a workspace, executable,
+# region, or size limit.
+CONTROLLER_CONFIG_FIELDS = frozenset(
+    {
+        "schema",
+        "endpoint",
+        "bucket",
+        "prefix",
+        "credentials_file",
+        "controller_age_recipient",
+        "webapp_fi_age_recipient",
+        "webapp_ir_age_recipient",
+        "presign_expires_seconds",
+    }
+)
 
 CAMPAIGN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$")
 SITE_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
@@ -54,6 +81,9 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 VERSION_ID_RE = re.compile(r"^[A-Za-z0-9._~+/=-]{1,1024}$")
 AMZ_DATE_RE = re.compile(r"^[0-9]{8}T[0-9]{6}Z$")
 SIGV4_SIGNATURE_RE = re.compile(r"^[0-9a-f]{64}$")
+ARVAN_S3_ENDPOINT_RE = re.compile(
+    r"^https://s3\.([a-z0-9][a-z0-9-]{0,62})\.arvanstorage\.ir/?$"
+)
 
 # These are intentionally exact rather than minimum sets.  A source sender
 # cannot add a provider-side encryption header, omit the create-only
@@ -227,31 +257,44 @@ def _validate_prefix(value: object) -> str:
     return prefix
 
 
-def _validate_endpoint(endpoint: object, region: object) -> tuple[str, str]:
+def derive_region_from_endpoint(endpoint: object) -> tuple[str, str]:
+    """Return the canonical HTTPS origin and its only permitted Arvan region.
+
+    The endpoint is an operator-provided controller config value.  Treating a
+    separate region value as authoritative would let those two values drift,
+    which in turn could produce a signed request for a different S3 target.
+    A single exact endpoint grammar keeps both derived values deterministic.
+    """
+
     endpoint_text = _require_string(endpoint, field="endpoint")
+    match = ARVAN_S3_ENDPOINT_RE.fullmatch(endpoint_text)
+    if match is None:
+        raise SourceTransportError("endpoint must be the canonical HTTPS Arvan S3 endpoint")
+    region = match.group(1)
+    return f"https://s3.{region}.arvanstorage.ir", region
+
+
+def _validate_endpoint(endpoint: object, region: object) -> tuple[str, str]:
+    endpoint_text, derived_region = derive_region_from_endpoint(endpoint)
     region_text = _require_string(region, field="region")
-    try:
-        parsed = urlsplit(endpoint_text)
-        port = parsed.port
-    except ValueError as exc:
-        raise SourceTransportError("endpoint must be the HTTPS Arvan S3 endpoint for the configured region") from exc
-    expected_host = f"s3.{region_text}.arvanstorage.ir"
-    if (
-        parsed.scheme != "https"
-        or parsed.hostname != expected_host
-        or parsed.path not in {"", "/"}
-        or parsed.query
-        or parsed.fragment
-        or parsed.username is not None
-        or parsed.password is not None
-        or port is not None
-    ):
-        raise SourceTransportError("endpoint must be the HTTPS Arvan S3 endpoint for the configured region")
+    if region_text != derived_region:
+        raise SourceTransportError("region must be derived exactly from the Arvan S3 endpoint")
     return endpoint_text.rstrip("/"), region_text
 
 
 def _require_age_recipient(value: object, *, field: str) -> str:
     return _require_id(value, field=field, pattern=AGE_RECIPIENT_RE)
+
+
+def source_transport_workspace_for_campaign(campaign_id: object) -> Path:
+    """Return the fixed, host-local source workspace for one valid campaign.
+
+    This is intentionally a pure path derivation.  A caller creates the
+    directory only when it performs an operation that needs a workspace.
+    """
+
+    campaign = _require_id(campaign_id, field="campaign_id", pattern=CAMPAIGN_RE)
+    return SOURCE_TRANSPORT_WORKSPACE_ROOT / campaign
 
 
 def validate_policy(config: SourceTransportPolicy) -> SourceTransportPolicy:

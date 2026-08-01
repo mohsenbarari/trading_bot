@@ -11,6 +11,11 @@ import time
 from core.audit_logger import audit_log
 from core.background_job_authority import JOB_OTP_SMS_FALLBACK, assert_background_job_authority
 from core.config import settings
+from core.db import require_external_effect_execution_authorization
+from core.external_effect_execution_gate import (
+    EXTERNAL_EFFECT_SCOPE_SMS_PROVIDER_DELIVERY,
+    ExternalEffectExecutionGateError,
+)
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.metrics import observe_otp_fallback_delay, record_otp_event
 from core.redis import get_redis_client
@@ -86,12 +91,21 @@ async def run_otp_sms_fallback_cycle(*, limit: int = _BATCH_LIMIT) -> OTPFallbac
             try:
                 if state_error is not None:
                     raise state_error
+                # Do not consume a pending fallback into a provider-attempt
+                # claim until the term-scoped no-resend receipt is current.
+                require_external_effect_execution_authorization(
+                    EXTERNAL_EFFECT_SCOPE_SMS_PROVIDER_DELIVERY
+                )
                 claim = await claim_sms_delivery(
                     redis,
                     state=state,
                     require_due=True,
                 )
             except asyncio.CancelledError:
+                raise
+            except ExternalEffectExecutionGateError:
+                # A term/no-resend failure is not malformed OTP state and must
+                # not isolate or mutate the pending request.
                 raise
             except (KeyError, TypeError, ValueError, UnicodeError, RuntimeError) as exc:
                 try:

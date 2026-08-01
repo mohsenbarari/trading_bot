@@ -18,12 +18,18 @@ from jose import jwt, JWTError
 
 from core.db import AsyncSessionLocal, get_db
 from core.config import settings
+from core.services.promotion_session_invalidation_service import (
+    PromotionAccessTokenEpochError,
+    PromotionSessionInvalidationError,
+    enforce_access_token_auth_epoch,
+)
 from models.chat import Chat
 from models.chat_member import ChatMember
 from models.message import Message
 from models.upload_session import UploadSession, UploadSessionStatus, UploadRoomKind
 from models.user import User
 from models.chat_file import ChatFile
+from models.session import UserSession
 from api.deps import get_current_user, verify_super_admin
 from api.routers.chat_schemas import (
     ChannelBulkMemberAddRequest,
@@ -2231,10 +2237,21 @@ async def upload_chat_media(
                 await close_result
 
 
-def _decode_chat_file_token_user_id(token: str) -> int:
+def _decode_chat_file_access_token(token: str) -> tuple[int, dict[str, object]]:
+    """Decode a file-download access JWT without bypassing promotion epochs.
+
+    The public file endpoint cannot use the normal bearer dependency because
+    its token is deliberately query-bound for media clients.  It therefore
+    retains the verified payload so the async loader can apply the same
+    durable auth-cutover rule as ordinary HTTP/WebSocket access.
+    """
+
     try:
         payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
     except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    if not isinstance(payload, dict):
         raise HTTPException(status_code=401, detail="Invalid token")
 
     token_type = payload.get("type")
@@ -2243,13 +2260,25 @@ def _decode_chat_file_token_user_id(token: str) -> int:
 
     token_subject = payload.get("sub")
     try:
-        return int(token_subject)
+        return int(token_subject), payload
     except (TypeError, ValueError):
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
+def _decode_chat_file_token_user_id(token: str) -> int:
+    """Compatibility projection for callers that only require the subject."""
+
+    return _decode_chat_file_access_token(token)[0]
+
+
 async def _load_chat_file_requester(db: AsyncSession, token: str) -> User:
-    requester_lookup_id = _decode_chat_file_token_user_id(token)
+    requester_lookup_id, payload = _decode_chat_file_access_token(token)
+    try:
+        await enforce_access_token_auth_epoch(db, payload)
+    except PromotionAccessTokenEpochError:
+        raise HTTPException(status_code=401, detail="Session has been revoked") from None
+    except PromotionSessionInvalidationError:
+        raise HTTPException(status_code=503, detail="Authentication cutover state is unavailable") from None
 
     requester = await db.get(User, requester_lookup_id)
     if requester is None:
@@ -2260,6 +2289,26 @@ async def _load_chat_file_requester(db: AsyncSession, token: str) -> User:
         raise HTTPException(status_code=401, detail="Invalid token")
     if requester.is_deleted or is_user_global_web_locked(requester):
         raise HTTPException(status_code=403, detail="حساب کاربری غیرفعال شده است")
+
+    # A session-bound URL token must not keep accessing private files after a
+    # logout or promotion invalidation merely because it is not passed through
+    # the standard bearer dependency.  Fresh sessionless access JWTs remain
+    # governed by the durable epoch policy above.
+    session_id = payload.get("sid")
+    if session_id is not None:
+        if not isinstance(session_id, str):
+            raise HTTPException(status_code=401, detail="Session has been revoked")
+        try:
+            session_uuid = uuid.UUID(session_id)
+        except ValueError:
+            raise HTTPException(status_code=401, detail="Session has been revoked") from None
+        active_session = await db.get(UserSession, session_uuid)
+        if (
+            active_session is None
+            or getattr(active_session, "is_active", None) is not True
+            or getattr(active_session, "user_id", None) != requester.id
+        ):
+            raise HTTPException(status_code=401, detail="Session has been revoked")
     return requester
 
 

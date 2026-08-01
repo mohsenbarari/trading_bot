@@ -13,7 +13,14 @@ from core.metrics import (
     record_sync_watermark_decision,
 )
 from core.redis import get_redis_client
-from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, default_peer_server_url, normalize_server, peer_server_url_for
+from core.server_routing import (
+    SERVER_FOREIGN,
+    SERVER_IRAN,
+    current_server,
+    default_peer_server_url,
+    normalize_server,
+    peer_server_url_for,
+)
 from core.sync_authority import IRAN_AUTHORITATIVE_SYNC_TABLES
 from core.sync_field_policy import sanitize_sync_payload
 from core.registration_sync_policy import (
@@ -3508,7 +3515,37 @@ def _sync_watermark_error_detail(context: SyncWatermarkContext, decision: SyncWa
     }
 
 
-@router.post("/receive")
+RETIRED_LEGACY_DIRECT_SYNC_HTTP_DETAIL = (
+    "Legacy direct FI-IR sync HTTP endpoint is permanently retired; "
+    "use the version-bound Object-delta receiver"
+)
+
+
+def _reject_retired_legacy_direct_sync_transport() -> None:
+    """Permanently deny the superseded FI<->IR HTTP data protocol.
+
+    This is intentionally independent of deployment settings.  There is no
+    compatible mode in the three-site architecture in which either legacy
+    endpoint may open a direct peer data path.  The supported replacement is
+    an explicit, Object-version-bound in-process delta receiver—not this HTTP
+    compatibility surface.
+    """
+
+    raise HTTPException(
+        status_code=410,
+        detail=RETIRED_LEGACY_DIRECT_SYNC_HTTP_DETAIL,
+    )
+
+
+# This router-level dependency is deliberately before the handler parameter
+# dependencies.  In FastAPI that means every deployment rejects the retired
+# direct protocol before it can create an AsyncSession or validate a legacy
+# peer request.  The in-body call below is a second, direct-call defence for
+# code/tests that invoke the handler without FastAPI's resolver.
+@router.post(
+    "/receive",
+    dependencies=[Depends(_reject_retired_legacy_direct_sync_transport)],
+)
 async def receive_sync_data(
     items: list[dict], 
     request: Request,
@@ -3516,6 +3553,7 @@ async def receive_sync_data(
     _ = Depends(verify_signature)
 ):
     """Receive sync data from other server"""
+    _reject_retired_legacy_direct_sync_transport()
     logger.info(
         "Received sync batch",
         extra={
@@ -4186,7 +4224,14 @@ async def receive_sync_data(
         raise HTTPException(status_code=500, detail="Sync batch processing failed")
 
 
-@router.post("/resync")
+# As above, keep the permanent fail-closed fence outside the handler parameter
+# dependency graph.  A legacy resync request must not resolve a peer URL,
+# query ChangeLog, or create an outbound HTTP client merely because a caller
+# reaches this retired endpoint.
+@router.post(
+    "/resync",
+    dependencies=[Depends(_reject_retired_legacy_direct_sync_transport)],
+)
 async def resync_from_changelog(
     request: Request,
     db: AsyncSession = Depends(get_db),
@@ -4199,6 +4244,7 @@ async def resync_from_changelog(
     Requires Dev API Key (X-Dev-Api-Key header).
     Optional: ?table_filter=users&limit=200
     """
+    _reject_retired_legacy_direct_sync_transport()
     _require_dev_key(request)
 
     target_url = peer_server_url_for(target_server) if target_server else default_peer_server_url()

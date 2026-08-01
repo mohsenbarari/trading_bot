@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import json
 from pathlib import Path
@@ -66,8 +67,14 @@ class StaticTransportReceiptFinalizerTests(unittest.TestCase):
         self.controller_config = finalizer.receiver.transport.ControllerS3Config(
             policy=self.policy,
             credentials_file=self.fixture.credentials,
+            campaign_id=self.fixture.campaign_id,
         )
         patches = (
+            mock.patch.object(
+                finalizer.receiver.transport.contract,
+                "SOURCE_TRANSPORT_WORKSPACE_ROOT",
+                self.fixture.workspace_root,
+            ),
             mock.patch.object(
                 finalizer.receiver,
                 "CONTROLLER_SOURCE_RECEIVE_ROOT",
@@ -210,6 +217,35 @@ class StaticTransportReceiptFinalizerTests(unittest.TestCase):
             plan = self._prepare(report_path)
         self.assertEqual("static", plan.receipt["object_kind"])
         create_client.assert_not_called()
+
+    def test_other_campaign_config_is_rejected_without_creating_a_static_receipt(self) -> None:
+        report_path, _report, _plaintext, _ciphertext = self.fixture._write_report(
+            object_id="static-finalizer-cross-campaign"
+        )
+        other_campaign = "source-receiver-finalizer-other-20260730"
+        other_workspace = finalizer.receiver.transport.contract.source_transport_workspace_for_campaign(
+            other_campaign
+        )
+        other_workspace.mkdir(mode=0o700)
+        other_config = finalizer.receiver.transport.ControllerS3Config(
+            policy=dataclasses.replace(self.policy, workspace=other_workspace),
+            credentials_file=self.fixture.credentials,
+            campaign_id=other_campaign,
+        )
+        with (
+            mock.patch.object(finalizer.receiver.transport, "build_publish_receipt") as blocked_receipt,
+            self.assertRaisesRegex(
+                finalizer.StaticTransportReceiptFinalizationError,
+                "canonical campaign binding, FI upload report, or controller receive identity is invalid",
+            ),
+        ):
+            finalizer.prepare_static_transport_receipt(
+                controller_config=other_config,
+                campaign_binding_path=self.fixture.binding,
+                upload_report_path=report_path,
+            )
+        blocked_receipt.assert_not_called()
+        self.assertEqual([], list(self.fixture.data_root.iterdir()))
 
     def test_renderer_accepts_contract_valid_opaque_x_amz_object_id(self) -> None:
         report_path, _report, _plaintext, _ciphertext, _received = self._receive_static(

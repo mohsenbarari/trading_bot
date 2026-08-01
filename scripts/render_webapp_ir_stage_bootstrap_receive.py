@@ -30,25 +30,22 @@ import stat
 import sys
 import tarfile
 from typing import Any, Mapping, Sequence
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import quote, unquote_to_bytes, urlsplit
 
 
-REMOTE_HOST = "root@95.38.164.29"
+REMOTE_HOSTNAME = "95.38.164.29"
+REMOTE_HOST = "root@" + REMOTE_HOSTNAME
 SSH_OPTIONS = ("-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes")
 BOOTSTRAP_PUBLISH_RECEIPT_SCHEMA = "gold-trade-wa-ir-artifact-stage-bootstrap-publish-receipt-v1"
 PREPARATION_RECEIPT_SCHEMA = "gold-trade-wa-ir-stage-bootstrap-preparation-v1"
 PACKAGE_MANIFEST_SCHEMA = "gold-trade-wa-ir-stage-bootstrap-package-v1"
-CONSUMER_CONFIG_SCHEMA = "gold-trade-wa-ir-artifact-stage-config-v3"
+CONSUMER_CONFIG_SCHEMA = "gold-trade-wa-ir-artifact-stage-config-v4"
 RECEIVE_RECEIPT_SCHEMA = "gold-trade-wa-ir-stage-bootstrap-receipt-v1"
 TRANSPORT_SCHEMA = "gold-trade-wa-ir-artifact-stage-v1"
 OBJECT_ENCRYPTION = "age-v1"
 
-# This is pinned by the b3368af4 bootstrap preparer/publisher pair.  The
-# publish receipt does not carry recipient metadata, so successful decryption
-# with this exact root-only identity plus the independently verified package
-# bindings is the receiver-side proof.  It is not a pre-decryption recipient
-# metadata claim.
-WA_IR_BOOTSTRAP_IDENTITY_FILE = "/etc/trading-bot-three-site/wa-ir/artifact-stage-2c08.agekey"
+WA_IR_CAMPAIGN_IDENTITY_ROOT = "/etc/trading-bot-three-site/campaigns"
+WA_IR_BOOTSTRAP_IDENTITY_SUFFIX = "webapp-ir/bootstrap.agekey"
 PACKAGE_ARCHIVE_NAME = "wa-ir-artifact-stage-consumer.tar"
 PACKAGE_MANIFEST_MEMBER = "bootstrap-package.json"
 PREPARATION_RECEIPT_NAME = "bootstrap-preparation-receipt.json"
@@ -68,16 +65,57 @@ MAX_CONTROL_FILE_BYTES = 2 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 8 * 1024 * 1024
 MAX_CIPHERTEXT_BYTES = MAX_ARCHIVE_BYTES + 2 * 1024 * 1024
 MAX_URL_BYTES = 8192
+MINIMUM_PRESIGN_EXPIRES_SECONDS = 60
+MAXIMUM_PRESIGN_EXPIRES_SECONDS = 900
+MAX_KNOWN_HOSTS_BYTES = 256 * 1024
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+CAMPAIGN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$")
+AGE_RECIPIENT_RE = re.compile(r"^age1[ac-hj-np-z02-9]{20,128}$")
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 BUNDLE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 BUCKET_RE = re.compile(r"^[a-z0-9][a-z0-9.-]{2,62}$")
 PREFIX_COMPONENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._=-]{0,127}$")
 INSTALLER_PATH_RE = re.compile(r"^/[A-Za-z0-9._/-]+$")
+SIGV4_TIMESTAMP_RE = re.compile(r"^[0-9]{8}T[0-9]{6}Z$")
+SIGV4_SIGNATURE_RE = re.compile(r"^[0-9a-f]{64}$")
+SIGV4_ACCESS_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+SIGV4_REGION_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+ARVAN_S3_HOST_RE = re.compile(r"^s3\.([a-z0-9][a-z0-9-]{0,62})\.arvanstorage\.ir$")
+SIGV4_REQUIRED_QUERY_NAMES = frozenset(
+    {
+        "versionId",
+        "X-Amz-Algorithm",
+        "X-Amz-Credential",
+        "X-Amz-Date",
+        "X-Amz-Expires",
+        "X-Amz-SignedHeaders",
+        "X-Amz-Signature",
+    }
+)
+SIGV4_OPTIONAL_QUERY_NAMES = frozenset({"X-Amz-Security-Token"})
 
 
 class BootstrapReceiveRenderError(RuntimeError):
     """The controller-side bootstrap evidence cannot be rendered safely."""
+
+
+class _SafeArgumentParser(argparse.ArgumentParser):
+    """Avoid reflecting transient argv values to direct CLI stderr."""
+
+    def error(self, _message: str) -> None:
+        raise BootstrapReceiveRenderError("invalid command-line input")
+
+
+def wa_ir_bootstrap_identity_file(campaign_id: object) -> str:
+    """Return the shared fresh campaign identity for WA-IR static and staging."""
+
+    if not isinstance(campaign_id, str) or not CAMPAIGN_ID_RE.fullmatch(campaign_id):
+        raise BootstrapReceiveRenderError("campaign ID is invalid for the WA-IR bootstrap age identity")
+    path = PurePosixPath(WA_IR_CAMPAIGN_IDENTITY_ROOT) / campaign_id / WA_IR_BOOTSTRAP_IDENTITY_SUFFIX
+    value = path.as_posix()
+    if not path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+        raise BootstrapReceiveRenderError("campaign WA-IR bootstrap age identity path is invalid")
+    return value
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -130,7 +168,13 @@ def _require_installer_compatible_path(value: object, *, field: str) -> str:
     return path
 
 
-def _read_root_only_file(path: Path, *, field: str, maximum_bytes: int = MAX_CONTROL_FILE_BYTES) -> bytes:
+def _read_root_only_file(
+    path: Path,
+    *,
+    field: str,
+    maximum_bytes: int = MAX_CONTROL_FILE_BYTES,
+    private: bool = True,
+) -> bytes:
     if not path.is_absolute():
         raise BootstrapReceiveRenderError(f"{field} path must be absolute")
     try:
@@ -152,7 +196,7 @@ def _read_root_only_file(path: Path, *, field: str, maximum_bytes: int = MAX_CON
             or before.st_uid != 0
             or before.st_nlink != 1
             or not 1 <= before.st_size <= maximum_bytes
-            or before.st_mode & 0o077
+            or before.st_mode & (0o077 if private else 0o022)
             or before.st_dev != before_lstat.st_dev
             or before.st_ino != before_lstat.st_ino
         ):
@@ -173,6 +217,63 @@ def _read_root_only_file(path: Path, *, field: str, maximum_bytes: int = MAX_CON
         return result
     finally:
         os.close(descriptor)
+
+
+def _require_pinned_known_hosts(path: Path) -> Path:
+    """Require a root-owned explicit pin for the fixed WA-IR SSH host.
+
+    A host-wide known-hosts database must never influence this control path.
+    The pin is public but must be immutable to non-root users.
+    """
+
+    payload = _read_root_only_file(
+        Path(path),
+        field="pinned WA-IR SSH known_hosts",
+        maximum_bytes=MAX_KNOWN_HOSTS_BYTES,
+        private=False,
+    )
+    try:
+        text = payload.decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise BootstrapReceiveRenderError("pinned WA-IR SSH known_hosts is not ASCII") from exc
+    expected_hosts = {REMOTE_HOSTNAME, f"[{REMOTE_HOSTNAME}]:22"}
+    has_exact_key = False
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        fields = line.split()
+        if len(fields) < 3 or fields[0].startswith("@"):
+            continue
+        hosts, key_type, encoded_key = fields[:3]
+        if (
+            expected_hosts.intersection(hosts.split(","))
+            and (key_type.startswith("ssh-") or key_type.startswith("ecdsa-"))
+            and re.fullmatch(r"[A-Za-z0-9+/=]{16,16384}", encoded_key)
+        ):
+            has_exact_key = True
+            break
+    if not has_exact_key:
+        raise BootstrapReceiveRenderError("pinned WA-IR SSH known_hosts lacks the exact WA-IR host key")
+    return Path(path)
+
+
+def _render_pinned_ssh(*, known_hosts: Path, remote_arguments: Sequence[str]) -> str:
+    if not remote_arguments or any(not isinstance(item, str) or not item for item in remote_arguments):
+        raise BootstrapReceiveRenderError("WA-IR SSH remote command is invalid")
+    pin = _require_pinned_known_hosts(known_hosts)
+    return shlex.join(
+        [
+            "ssh",
+            *SSH_OPTIONS,
+            "-o",
+            "UserKnownHostsFile=" + str(pin),
+            "-o",
+            "GlobalKnownHostsFile=/dev/null",
+            REMOTE_HOST,
+            shlex.join(list(remote_arguments)),
+        ]
+    )
 
 
 def _read_publish_receipt_stdin() -> bytes:
@@ -315,7 +416,8 @@ def _validate_preparation_receipt(value: object) -> dict[str, Any]:
 def _validate_consumer_config(payload: bytes) -> dict[str, Any]:
     value = _parse_json(payload, field="consumer config", canonical=False)
     expected = {
-        "schema", "endpoint", "region", "bucket", "prefix", "age_binary", "age_identity_file", "workspace",
+        "schema", "campaign_id", "endpoint", "region", "bucket", "prefix", "age_binary", "age_identity_file",
+        "age_recipient", "workspace",
         "source_site", "source_signing_public_key_base64", "webapp_fi_source_attestation_public_key_base64",
         "webapp_fi_controller_authorization_public_key_base64", "maximum_artifact_bytes",
     }
@@ -323,7 +425,7 @@ def _validate_consumer_config(payload: bytes) -> dict[str, Any]:
         raise BootstrapReceiveRenderError("consumer config schema is unsupported")
     endpoint = _require_text(value.get("endpoint"), field="consumer config endpoint")
     region = _require_text(value.get("region"), field="consumer config region", maximum=128)
-    parsed = urlparse(endpoint)
+    parsed = urlsplit(endpoint)
     try:
         has_port = parsed.port is not None
     except ValueError as exc:
@@ -341,8 +443,14 @@ def _validate_consumer_config(payload: bytes) -> dict[str, Any]:
         raise BootstrapReceiveRenderError("consumer config prefix is invalid")
     if value.get("age_binary") != "/usr/bin/age":
         raise BootstrapReceiveRenderError("consumer config must pin /usr/bin/age")
-    if value.get("age_identity_file") != WA_IR_BOOTSTRAP_IDENTITY_FILE:
-        raise BootstrapReceiveRenderError("consumer config must pin the WA-IR bootstrap identity path")
+    campaign_id = _require_text(value.get("campaign_id"), field="consumer config campaign_id", maximum=128)
+    if not CAMPAIGN_ID_RE.fullmatch(campaign_id):
+        raise BootstrapReceiveRenderError("consumer config campaign_id is invalid")
+    if value.get("age_identity_file") != wa_ir_bootstrap_identity_file(campaign_id):
+        raise BootstrapReceiveRenderError("consumer config must pin the campaign WA-IR bootstrap age identity path")
+    age_recipient = _require_text(value.get("age_recipient"), field="consumer config age_recipient", maximum=256)
+    if not AGE_RECIPIENT_RE.fullmatch(age_recipient):
+        raise BootstrapReceiveRenderError("consumer config age_recipient is invalid")
     _require_absolute_path(value.get("workspace"), field="consumer config workspace")
     if value.get("source_site") != "webapp_fi":
         raise BootstrapReceiveRenderError("consumer config must pin source_site to webapp_fi")
@@ -379,7 +487,15 @@ def _validate_consumer_config(payload: bytes) -> dict[str, Any]:
     maximum = value.get("maximum_artifact_bytes")
     if isinstance(maximum, bool) or not isinstance(maximum, int) or not 1 <= maximum <= 100 * 1024 * 1024 * 1024:
         raise BootstrapReceiveRenderError("consumer config maximum_artifact_bytes is invalid")
-    return {"endpoint": endpoint, "region": region, "bucket": bucket, "prefix": prefix}
+    return {
+        "campaign_id": campaign_id,
+        "endpoint": endpoint,
+        "region": region,
+        "bucket": bucket,
+        "prefix": prefix,
+        "age_identity_file": str(value["age_identity_file"]),
+        "age_recipient": age_recipient,
+    }
 
 
 def _read_bootstrap_archive_members(payload: bytes) -> dict[str, bytes]:
@@ -493,34 +609,129 @@ def _expected_bootstrap_object_key(*, prefix: str, control_commit: str, bootstra
     )
 
 
+def _require_version_id(value: object, *, field: str) -> str:
+    version_id = _require_text(value, field=field, maximum=1024)
+    if version_id == "null":
+        raise BootstrapReceiveRenderError(f"{field} is invalid")
+    return version_id
+
+
+def _parse_canonical_arvan_endpoint(endpoint: str) -> tuple[str, str]:
+    try:
+        parsed = urlsplit(endpoint)
+        has_port = parsed.port is not None
+    except ValueError as exc:
+        raise BootstrapReceiveRenderError("presigned URL endpoint is invalid") from exc
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.netloc != parsed.hostname
+        or has_port
+        or parsed.path not in ("", "/")
+        or parsed.query
+        or parsed.fragment
+        or parsed.username
+        or parsed.password
+    ):
+        raise BootstrapReceiveRenderError("presigned URL endpoint is not canonical")
+    match = ARVAN_S3_HOST_RE.fullmatch(parsed.hostname)
+    if match is None:
+        raise BootstrapReceiveRenderError("presigned URL endpoint is not an Arvan S3 endpoint")
+    return parsed.hostname, match.group(1)
+
+
+def _decode_canonical_query_component(value: str, *, field: str) -> str:
+    if not value or "+" in value or re.search(r"%(?![0-9A-F]{2})", value):
+        raise BootstrapReceiveRenderError(f"presigned URL {field} is not canonical")
+    try:
+        decoded = unquote_to_bytes(value).decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise BootstrapReceiveRenderError(f"presigned URL {field} is not ASCII") from exc
+    if quote(decoded, safe="-_.~") != value:
+        raise BootstrapReceiveRenderError(f"presigned URL {field} is not canonical")
+    return decoded
+
+
+def _parse_canonical_sigv4_query(query_text: str, *, endpoint_region: str) -> dict[str, str]:
+    if not query_text:
+        raise BootstrapReceiveRenderError("presigned URL query is missing")
+    query: dict[str, str] = {}
+    for raw_pair in query_text.split("&"):
+        if not raw_pair or "=" not in raw_pair:
+            raise BootstrapReceiveRenderError("presigned URL query is malformed")
+        raw_name, raw_value = raw_pair.split("=", 1)
+        name = _decode_canonical_query_component(raw_name, field="query name")
+        value = _decode_canonical_query_component(raw_value, field=f"query value {name or 'unknown'}")
+        if name in query:
+            raise BootstrapReceiveRenderError("presigned URL query contains duplicate names")
+        query[name] = value
+    if not SIGV4_REQUIRED_QUERY_NAMES.issubset(query) or set(query) - (
+        SIGV4_REQUIRED_QUERY_NAMES | SIGV4_OPTIONAL_QUERY_NAMES
+    ):
+        raise BootstrapReceiveRenderError("presigned URL query contains unsupported fields")
+    if query["X-Amz-Algorithm"] != "AWS4-HMAC-SHA256":
+        raise BootstrapReceiveRenderError("presigned URL must use AWS SigV4")
+    timestamp = query["X-Amz-Date"]
+    if not SIGV4_TIMESTAMP_RE.fullmatch(timestamp):
+        raise BootstrapReceiveRenderError("presigned URL X-Amz-Date is invalid")
+    try:
+        dt.datetime.strptime(timestamp, "%Y%m%dT%H%M%SZ")
+    except ValueError as exc:
+        raise BootstrapReceiveRenderError("presigned URL X-Amz-Date is invalid") from exc
+    expires = query["X-Amz-Expires"]
+    if not re.fullmatch(r"[1-9][0-9]{0,3}", expires):
+        raise BootstrapReceiveRenderError("presigned URL X-Amz-Expires is invalid")
+    if not MINIMUM_PRESIGN_EXPIRES_SECONDS <= int(expires, 10) <= MAXIMUM_PRESIGN_EXPIRES_SECONDS:
+        raise BootstrapReceiveRenderError("presigned URL expiry is outside the permitted range")
+    if query["X-Amz-SignedHeaders"] != "host":
+        raise BootstrapReceiveRenderError("presigned URL X-Amz-SignedHeaders is unsupported")
+    if not SIGV4_SIGNATURE_RE.fullmatch(query["X-Amz-Signature"]):
+        raise BootstrapReceiveRenderError("presigned URL X-Amz-Signature is invalid")
+    credential_parts = query["X-Amz-Credential"].split("/")
+    if (
+        len(credential_parts) != 5
+        or not SIGV4_ACCESS_KEY_RE.fullmatch(credential_parts[0])
+        or credential_parts[1] != timestamp[:8]
+        or not SIGV4_REGION_RE.fullmatch(credential_parts[2])
+        or credential_parts[2] != endpoint_region
+        or credential_parts[3] != "s3"
+        or credential_parts[4] != "aws4_request"
+    ):
+        raise BootstrapReceiveRenderError("presigned URL X-Amz-Credential scope is invalid")
+    token = query.get("X-Amz-Security-Token")
+    if token is not None and (
+        not token
+        or len(token) > 4096
+        or any(ord(character) < 0x21 or ord(character) == 0x7F for character in token)
+    ):
+        raise BootstrapReceiveRenderError("presigned URL security token is invalid")
+    return query
+
+
 def _validate_presigned_url(value: object, *, endpoint: str, bucket: str, object_key: str, version_id: str) -> str:
     url = _require_text(value, field="presigned URL", maximum=MAX_URL_BYTES)
-    if any(character.isspace() for character in url):
+    if any(ord(character) < 0x21 or ord(character) == 0x7F for character in url):
         raise BootstrapReceiveRenderError("presigned URL contains whitespace")
-    parsed = urlparse(url)
-    endpoint_parsed = urlparse(endpoint)
     try:
+        url.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise BootstrapReceiveRenderError("presigned URL must be ASCII") from exc
+    expected_version_id = _require_version_id(version_id, field="presigned URL VersionId")
+    expected_host, endpoint_region = _parse_canonical_arvan_endpoint(endpoint)
+    try:
+        parsed = urlsplit(url)
         has_port = parsed.port is not None
     except ValueError as exc:
         raise BootstrapReceiveRenderError("presigned URL is invalid") from exc
     expected_path = "/" + quote(bucket, safe="") + "/" + quote(object_key, safe="/")
     if (
-        parsed.scheme != "https" or parsed.hostname != endpoint_parsed.hostname or has_port or parsed.username or parsed.password
+        parsed.scheme != "https" or parsed.hostname != expected_host or parsed.netloc != expected_host or has_port or parsed.username or parsed.password
         or parsed.fragment or parsed.path != expected_path
     ):
         raise BootstrapReceiveRenderError("presigned URL is not bound to the configured Object Storage endpoint")
-    try:
-        query = parse_qs(parsed.query, keep_blank_values=True, strict_parsing=True)
-    except ValueError as exc:
-        raise BootstrapReceiveRenderError("presigned URL query is invalid") from exc
-    if query.get("versionId") != [version_id]:
+    query = _parse_canonical_sigv4_query(parsed.query, endpoint_region=endpoint_region)
+    if query.get("versionId") != expected_version_id:
         raise BootstrapReceiveRenderError("presigned URL must bind exactly one matching VersionId")
-    sigv4_fields = ("X-Amz-Algorithm", "X-Amz-Credential", "X-Amz-Signature")
-    sigv2_fields = ("AWSAccessKeyId", "Signature", "Expires")
-    sigv4 = all(query.get(name) is not None and len(query[name]) == 1 and bool(query[name][0]) for name in sigv4_fields)
-    sigv2 = all(query.get(name) is not None and len(query[name]) == 1 and bool(query[name][0]) for name in sigv2_fields)
-    if sigv4 == sigv2:
-        raise BootstrapReceiveRenderError("presigned URL must contain exactly one supported signed-request envelope")
     return url
 
 
@@ -571,7 +782,7 @@ def _validate_publish_receipt(value: object, *, preparation_raw_sha256: str, man
     )
     if bootstrap.get("object_key") != expected_key:
         raise BootstrapReceiveRenderError("bootstrap publish receipt object_key is not in the immutable bootstrap namespace")
-    version_id = _require_text(bootstrap.get("version_id"), field="bootstrap publish receipt version_id", maximum=1024)
+    version_id = _require_version_id(bootstrap.get("version_id"), field="bootstrap publish receipt version_id")
     cipher_sha = _require_sha256(bootstrap.get("ciphertext_sha256"), field="bootstrap publish receipt ciphertext_sha256")
     cipher_bytes = _require_positive_size(bootstrap.get("ciphertext_bytes"), field="bootstrap publish receipt ciphertext_bytes", maximum=MAX_CIPHERTEXT_BYTES)
     plain_sha = _require_sha256(bootstrap.get("plaintext_sha256"), field="bootstrap publish receipt plaintext_sha256")
@@ -610,7 +821,7 @@ def _build_remote_config(*, bootstrap_root: str, package: Mapping[str, Any], pre
     if preparation["archive"]["sha256"] != published["plaintext_sha256"] or preparation["archive"]["bytes"] != published["plaintext_bytes"]:
         raise BootstrapReceiveRenderError("bootstrap archive plaintext bindings disagree")
     return {
-        "schema": "gold-trade-wa-ir-stage-bootstrap-receive-config-v1",
+        "schema": "gold-trade-wa-ir-stage-bootstrap-receive-config-v2",
         "source_site": "webapp_fi",
         "destination_site": "webapp_ir",
         "endpoint": consumer["endpoint"],
@@ -618,7 +829,9 @@ def _build_remote_config(*, bootstrap_root: str, package: Mapping[str, Any], pre
         "bucket": consumer["bucket"],
         "prefix": consumer["prefix"],
         "bootstrap_root": bootstrap_root,
-        "age_identity_file": WA_IR_BOOTSTRAP_IDENTITY_FILE,
+        "campaign_id": consumer["campaign_id"],
+        "age_identity_file": consumer["age_identity_file"],
+        "age_recipient": consumer["age_recipient"],
         "control_commit": published["control_commit"],
         "control_tree": published["control_tree"],
         "bootstrap_id": published["bootstrap_id"],
@@ -649,10 +862,14 @@ import stat
 import subprocess
 import sys
 import tarfile
-from urllib.parse import parse_qs, quote, urlparse
+import urllib.error
+import urllib.request
+from urllib.parse import quote, unquote_to_bytes, urlsplit
 
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+CAMPAIGN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$")
+AGE_RECIPIENT_RE = re.compile(r"^age1[ac-hj-np-z02-9]{20,128}$")
 BUNDLE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 BUCKET_RE = re.compile(r"^[a-z0-9][a-z0-9.-]{2,62}$")
 PREFIX_COMPONENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._=-]{0,127}$")
@@ -660,10 +877,24 @@ MAX_ARCHIVE_BYTES = 8 * 1024 * 1024
 MAX_CIPHERTEXT_BYTES = MAX_ARCHIVE_BYTES + 2 * 1024 * 1024
 MAX_MEMBER_BYTES = 2 * 1024 * 1024
 MAX_URL_BYTES = 8192
+MINIMUM_PRESIGN_EXPIRES_SECONDS = 60
+MAXIMUM_PRESIGN_EXPIRES_SECONDS = 900
 PACKAGE_MANIFEST_MEMBER = "bootstrap-package.json"
 RECEIPT_NAME = "bootstrap-receipt.json"
 TRANSPORT_SCHEMA = "gold-trade-wa-ir-artifact-stage-v1"
 OBJECT_ENCRYPTION = "age-v1"
+CAMPAIGN_IDENTITY_ROOT = "/etc/trading-bot-three-site/campaigns"
+BOOTSTRAP_IDENTITY_SUFFIX = "webapp-ir/bootstrap.agekey"
+SIGV4_TIMESTAMP_RE = re.compile(r"^[0-9]{8}T[0-9]{6}Z$")
+SIGV4_SIGNATURE_RE = re.compile(r"^[0-9a-f]{64}$")
+SIGV4_ACCESS_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+SIGV4_REGION_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+ARVAN_S3_HOST_RE = re.compile(r"^s3\.([a-z0-9][a-z0-9-]{0,62})\.arvanstorage\.ir$")
+SIGV4_REQUIRED_QUERY_NAMES = frozenset((
+    "versionId", "X-Amz-Algorithm", "X-Amz-Credential", "X-Amz-Date", "X-Amz-Expires",
+    "X-Amz-SignedHeaders", "X-Amz-Signature",
+))
+SIGV4_OPTIONAL_QUERY_NAMES = frozenset(("X-Amz-Security-Token",))
 
 class ReceiveError(RuntimeError):
     pass
@@ -773,32 +1004,104 @@ def require_root_private_directory(value):
         raise ReceiveError("bootstrap root is unsafe")
     return path
 
+def require_version_id(value):
+    version_id = require_text(value, 1024)
+    if version_id == "null":
+        raise ReceiveError("invalid VersionId")
+    return version_id
+
+def parse_canonical_arvan_endpoint(endpoint):
+    try:
+        parsed = urlsplit(endpoint)
+        has_port = parsed.port is not None
+    except ValueError as exc:
+        raise ReceiveError("invalid URL endpoint") from exc
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.netloc != parsed.hostname or has_port
+            or parsed.path not in ("", "/") or parsed.query or parsed.fragment
+            or parsed.username or parsed.password):
+        raise ReceiveError("URL endpoint binding")
+    match = ARVAN_S3_HOST_RE.fullmatch(parsed.hostname)
+    if match is None:
+        raise ReceiveError("URL endpoint binding")
+    return parsed.hostname, match.group(1)
+
+def decode_canonical_query_component(value, field):
+    if not value or "+" in value or re.search(r"%(?![0-9A-F]{2})", value):
+        raise ReceiveError("URL query is not canonical")
+    try:
+        decoded = unquote_to_bytes(value).decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise ReceiveError("URL query is not ASCII") from exc
+    if quote(decoded, safe="-_.~") != value:
+        raise ReceiveError("URL query is not canonical")
+    return decoded
+
+def parse_canonical_sigv4_query(query_text, endpoint_region):
+    if not query_text:
+        raise ReceiveError("URL query is missing")
+    query = {}
+    for raw_pair in query_text.split("&"):
+        if not raw_pair or "=" not in raw_pair:
+            raise ReceiveError("invalid URL query")
+        raw_name, raw_value = raw_pair.split("=", 1)
+        name = decode_canonical_query_component(raw_name, "name")
+        value = decode_canonical_query_component(raw_value, "value")
+        if name in query:
+            raise ReceiveError("URL query has duplicate names")
+        query[name] = value
+    if not SIGV4_REQUIRED_QUERY_NAMES.issubset(query) or set(query) - (SIGV4_REQUIRED_QUERY_NAMES | SIGV4_OPTIONAL_QUERY_NAMES):
+        raise ReceiveError("URL query has unsupported fields")
+    if query["X-Amz-Algorithm"] != "AWS4-HMAC-SHA256":
+        raise ReceiveError("URL must use AWS SigV4")
+    timestamp = query["X-Amz-Date"]
+    if not SIGV4_TIMESTAMP_RE.fullmatch(timestamp):
+        raise ReceiveError("invalid X-Amz-Date")
+    try:
+        dt.datetime.strptime(timestamp, "%Y%m%dT%H%M%SZ")
+    except ValueError as exc:
+        raise ReceiveError("invalid X-Amz-Date") from exc
+    expires = query["X-Amz-Expires"]
+    if not re.fullmatch(r"[1-9][0-9]{0,3}", expires):
+        raise ReceiveError("invalid X-Amz-Expires")
+    if not MINIMUM_PRESIGN_EXPIRES_SECONDS <= int(expires, 10) <= MAXIMUM_PRESIGN_EXPIRES_SECONDS:
+        raise ReceiveError("URL expiry binding")
+    if query["X-Amz-SignedHeaders"] != "host":
+        raise ReceiveError("URL signed headers binding")
+    if not SIGV4_SIGNATURE_RE.fullmatch(query["X-Amz-Signature"]):
+        raise ReceiveError("invalid X-Amz-Signature")
+    credential_parts = query["X-Amz-Credential"].split("/")
+    if (len(credential_parts) != 5 or not SIGV4_ACCESS_KEY_RE.fullmatch(credential_parts[0])
+            or credential_parts[1] != timestamp[:8] or not SIGV4_REGION_RE.fullmatch(credential_parts[2])
+            or credential_parts[2] != endpoint_region or credential_parts[3] != "s3"
+            or credential_parts[4] != "aws4_request"):
+        raise ReceiveError("URL credential scope binding")
+    token = query.get("X-Amz-Security-Token")
+    if token is not None and (not token or len(token) > 4096 or any(ord(character) < 0x21 or ord(character) == 0x7f for character in token)):
+        raise ReceiveError("invalid URL security token")
+    return query
+
 def validate_url(value, config):
     url = require_text(value, MAX_URL_BYTES)
-    if any(character.isspace() for character in url):
+    if any(ord(character) < 0x21 or ord(character) == 0x7f for character in url):
         raise ReceiveError("invalid URL")
-    parsed = urlparse(url)
-    endpoint = urlparse(config["endpoint"])
     try:
+        url.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise ReceiveError("invalid URL") from exc
+    expected_version_id = require_version_id(config["version_id"])
+    expected_host, endpoint_region = parse_canonical_arvan_endpoint(config["endpoint"])
+    try:
+        parsed = urlsplit(url)
         has_port = parsed.port is not None
     except ValueError as exc:
         raise ReceiveError("invalid URL") from exc
     expected_path = "/" + quote(config["bucket"], safe="") + "/" + quote(config["object_key"], safe="/")
-    if (parsed.scheme != "https" or parsed.hostname != endpoint.hostname or has_port or parsed.username or parsed.password
+    if (parsed.scheme != "https" or parsed.hostname != expected_host or parsed.netloc != expected_host or has_port or parsed.username or parsed.password
             or parsed.fragment or parsed.path != expected_path):
         raise ReceiveError("URL endpoint binding")
-    try:
-        query = parse_qs(parsed.query, keep_blank_values=True, strict_parsing=True)
-    except ValueError as exc:
-        raise ReceiveError("invalid URL query") from exc
-    if query.get("versionId") != [config["version_id"]]:
+    query = parse_canonical_sigv4_query(parsed.query, endpoint_region)
+    if query.get("versionId") != expected_version_id:
         raise ReceiveError("URL version binding")
-    sigv4_names = ("X-Amz-Algorithm", "X-Amz-Credential", "X-Amz-Signature")
-    sigv2_names = ("AWSAccessKeyId", "Signature", "Expires")
-    sigv4 = all(len(query.get(name, [])) == 1 and bool(query[name][0]) for name in sigv4_names)
-    sigv2 = all(len(query.get(name, [])) == 1 and bool(query[name][0]) for name in sigv2_names)
-    if sigv4 == sigv2:
-        raise ReceiveError("URL signature binding")
     return url
 
 def parse_header_blocks(raw):
@@ -829,23 +1132,92 @@ def parse_header_blocks(raw):
         raise ReceiveError("download response is not HTTP 200")
     return blocks[-1][1]
 
-def validate_headers(raw, config):
-    headers = parse_header_blocks(raw)
+def normalize_headers(headers):
+    result = {}
+    if not hasattr(headers, "items"):
+        raise ReceiveError("invalid response headers")
+    for raw_name, raw_value in headers.items():
+        if not isinstance(raw_name, str):
+            raise ReceiveError("invalid response headers")
+        values = raw_value if isinstance(raw_value, (list, tuple)) else (raw_value,)
+        for value in values:
+            result.setdefault(raw_name.lower(), []).append(str(value))
+    return result
+
+def validate_header_values(headers, config):
     expected = {
         "x-amz-version-id": config["version_id"],
         "x-amz-meta-transport-schema": TRANSPORT_SCHEMA,
         "x-amz-meta-encryption": OBJECT_ENCRYPTION,
         "x-amz-meta-ciphertext-sha256": config["ciphertext_sha256"],
     }
-    if "x-amz-server-side-encryption" in headers:
+    if any(name.startswith(("x-amz-server-side-encryption", "x-amz-sse", "x-amz-kms", "x-amz-bucket-key")) for name in headers):
         raise ReceiveError("provider-side encryption is disallowed")
     for name, value in expected.items():
         if headers.get(name) != [value]:
             raise ReceiveError("response metadata mismatch")
     content_length = headers.get("content-length")
     if content_length is not None:
-        if len(content_length) != 1 or not re.fullmatch(r"[0-9]+", content_length[0]) or int(content_length[0]) != config["ciphertext_bytes"]:
+        if len(content_length) != 1 or not re.fullmatch(r"[1-9][0-9]*", content_length[0]) or int(content_length[0]) != config["ciphertext_bytes"]:
             raise ReceiveError("response length mismatch")
+
+def validate_headers(raw, config):
+    validate_header_values(parse_header_blocks(raw), config)
+
+class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+def open_presigned_request(request, timeout):
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirectHandler()).open(request, timeout=timeout)
+
+def download_exact_ciphertext(url, config, output_path):
+    request = urllib.request.Request(
+        url,
+        headers={"Accept": "application/octet-stream", "User-Agent": "gold-trade-wa-ir-bootstrap/2"},
+        method="GET",
+    )
+    response = None
+    try:
+        response = open_presigned_request(request, 60)
+    except (OSError, urllib.error.URLError, urllib.error.HTTPError) as exc:
+        raise ReceiveError("download failed") from exc
+    try:
+        status = response.getcode() if hasattr(response, "getcode") else getattr(response, "status", None)
+        if status != 200 or (hasattr(response, "geturl") and response.geturl() != url):
+            raise ReceiveError("download response binding")
+        validate_header_values(normalize_headers(response.headers), config)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(output_path, flags, 0o600)
+        digest = hashlib.sha256()
+        total = 0
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                while True:
+                    remaining = config["ciphertext_bytes"] - total
+                    chunk = response.read(min(65536, max(1, remaining + 1)))
+                    if not chunk:
+                        break
+                    if not isinstance(chunk, bytes) or len(chunk) > remaining:
+                        raise ReceiveError("ciphertext size limit")
+                    handle.write(chunk)
+                    digest.update(chunk)
+                    total += len(chunk)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except BaseException:
+            output_path.unlink(missing_ok=True)
+            raise
+        if total != config["ciphertext_bytes"] or digest.hexdigest() != config["ciphertext_sha256"]:
+            output_path.unlink(missing_ok=True)
+            raise ReceiveError("ciphertext binding")
+    except BaseException:
+        output_path.unlink(missing_ok=True)
+        raise
+    finally:
+        close = getattr(response, "close", None)
+        if callable(close):
+            close()
 
 def parse_manifest(payload, config):
     try:
@@ -991,7 +1363,7 @@ def build_receipt(config, candidate, received_at=None):
 
 def receive(config, url):
     validate_url(url, config)
-    for executable in ("/usr/bin/curl", "/usr/bin/age", "/usr/bin/python3", "/usr/bin/tar"):
+    for executable in ("/usr/bin/age", "/usr/bin/python3", "/usr/bin/tar"):
         require_trusted_executable(executable)
     identity = require_root_private_file(config["age_identity_file"])
     root = require_root_private_directory(config["bootstrap_root"])
@@ -1006,18 +1378,7 @@ def receive(config, url):
             raise ReceiveError("candidate creation")
         ciphertext = candidate / ".ciphertext"
         plaintext = candidate / ".plaintext"
-        result = subprocess.run(
-            ["/usr/bin/curl", "--disable", "--silent", "--show-error", "--fail", "--globoff", "--noproxy", "*",
-             "--proto", "=https", "--proto-redir", "=https", "--max-redirs", "0", "--connect-timeout", "20",
-             "--max-time", "120", "--dump-header", "-", "--output", str(ciphertext), "--", url],
-            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False,
-        )
-        if result.returncode != 0:
-            raise ReceiveError("download failed")
-        validate_headers(result.stdout, config)
-        cipher_sha, cipher_bytes = sha256_file(ciphertext, MAX_CIPHERTEXT_BYTES)
-        if cipher_sha != config["ciphertext_sha256"] or cipher_bytes != config["ciphertext_bytes"]:
-            raise ReceiveError("ciphertext binding")
+        download_exact_ciphertext(url, config, ciphertext)
         result = subprocess.run(
             ["/usr/bin/age", "--decrypt", "--identity", str(identity), "--output", str(plaintext), str(ciphertext)],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
@@ -1053,21 +1414,28 @@ def load_config(value):
     except Exception as exc:
         raise ReceiveError("receiver configuration invalid") from exc
     expected = {
-        "schema", "source_site", "destination_site", "endpoint", "region", "bucket", "prefix", "bootstrap_root", "age_identity_file",
+        "schema", "source_site", "destination_site", "campaign_id", "endpoint", "region", "bucket", "prefix", "bootstrap_root",
+        "age_identity_file", "age_recipient",
         "control_commit", "control_tree", "bootstrap_id", "object_key", "version_id", "ciphertext_sha256",
         "ciphertext_bytes", "plaintext_sha256", "plaintext_bytes", "manifest_sha256", "preparation_receipt_sha256",
         "consumer_config_sha256", "files",
     }
-    if not isinstance(config, dict) or set(config) != expected or config.get("schema") != "gold-trade-wa-ir-stage-bootstrap-receive-config-v1":
+    if not isinstance(config, dict) or set(config) != expected or config.get("schema") != "gold-trade-wa-ir-stage-bootstrap-receive-config-v2":
         raise ReceiveError("receiver configuration invalid")
     if config.get("source_site") != "webapp_fi" or config.get("destination_site") != "webapp_ir":
         raise ReceiveError("receiver configuration invalid")
-    for key in ("endpoint", "region", "bucket", "prefix", "bootstrap_root", "age_identity_file", "control_commit", "control_tree", "bootstrap_id", "object_key", "version_id"):
+    for key in ("campaign_id", "endpoint", "region", "bucket", "prefix", "bootstrap_root", "age_identity_file", "age_recipient", "control_commit", "control_tree", "bootstrap_id", "object_key"):
         require_text(config.get(key))
-    if config["age_identity_file"] != "/etc/trading-bot-three-site/wa-ir/artifact-stage-2c08.agekey":
+    config["version_id"] = require_version_id(config.get("version_id"))
+    if not CAMPAIGN_ID_RE.fullmatch(config["campaign_id"]):
+        raise ReceiveError("receiver campaign binding")
+    expected_identity = (PurePosixPath(CAMPAIGN_IDENTITY_ROOT) / config["campaign_id"] / BOOTSTRAP_IDENTITY_SUFFIX).as_posix()
+    if config["age_identity_file"] != expected_identity:
         raise ReceiveError("receiver identity binding")
+    if not AGE_RECIPIENT_RE.fullmatch(config["age_recipient"]):
+        raise ReceiveError("receiver recipient binding")
     require_absolute_path(config["bootstrap_root"])
-    parsed_endpoint = urlparse(config["endpoint"])
+    parsed_endpoint = urlsplit(config["endpoint"])
     try:
         endpoint_has_port = parsed_endpoint.port is not None
     except ValueError as exc:
@@ -1141,6 +1509,7 @@ def render_receive_command(
     bootstrap_package_directory: Path,
     preparation_receipt: Path,
     bootstrap_root: str,
+    wa_ir_known_hosts: Path,
 ) -> str:
     """Validate local inputs and return one SSH control command without executing it."""
 
@@ -1176,15 +1545,15 @@ def render_receive_command(
     config_b64 = base64.b64encode(_canonical_json_bytes(remote_config)).decode("ascii")
     # `remote` is one SSH argument.  Its independently quoted argv keeps a
     # signed URL (including hostile shell metacharacters) only as final argv.
-    remote = shlex.join([
+    remote_arguments = [
         "/usr/bin/python3", "-I", "-B", "-c", REMOTE_LAUNCHER, program_b64, config_b64, "--",
         published["presigned_url"],
-    ])
-    return shlex.join(["ssh", *SSH_OPTIONS, REMOTE_HOST, remote])
+    ]
+    return _render_pinned_ssh(known_hosts=Path(wa_ir_known_hosts), remote_arguments=remote_arguments)
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = _SafeArgumentParser(description=__doc__)
     publish_receipt = parser.add_mutually_exclusive_group(required=True)
     publish_receipt.add_argument("--publish-receipt", type=Path)
     publish_receipt.add_argument(
@@ -1195,24 +1564,25 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--bootstrap-package-directory", required=True, type=Path)
     parser.add_argument("--preparation-receipt", required=True, type=Path)
     parser.add_argument("--bootstrap-root", required=True)
+    parser.add_argument("--wa-ir-known-hosts", required=True, type=Path)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    arguments = _parser().parse_args(argv)
     try:
-        publish_receipt_bytes = _read_publish_receipt_stdin() if arguments.publish_receipt_stdin else None
-        print(
-            render_receive_command(
-                publish_receipt=arguments.publish_receipt,
-                publish_receipt_bytes=publish_receipt_bytes,
-                bootstrap_package_directory=arguments.bootstrap_package_directory,
-                preparation_receipt=arguments.preparation_receipt,
-                bootstrap_root=arguments.bootstrap_root,
-            )
+        _parser().parse_args(argv)
+        # The returned control command has a live URL as its final argument.
+        # A direct CLI cannot hand that capability to an executor without
+        # serializing it, so only the in-process renderer API is usable.
+        raise BootstrapReceiveRenderError(
+            "direct CLI rendering of the URL-bearing WA-IR bootstrap control is disabled"
         )
     except BootstrapReceiveRenderError as exc:
-        print(json.dumps({"status": "blocked", "error": str(exc), "error_class": type(exc).__name__}, sort_keys=True))
+        # Render errors must not reflect a transient URL-bearing receipt or command.
+        print(json.dumps({"status": "blocked", "error": "bootstrap receive command was not rendered", "error_class": type(exc).__name__}, sort_keys=True))
+        return 2
+    except Exception:
+        print(json.dumps({"status": "blocked", "error": "bootstrap receive command was not rendered"}, sort_keys=True))
         return 2
     return 0
 

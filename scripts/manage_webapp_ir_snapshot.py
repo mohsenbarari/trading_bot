@@ -774,6 +774,37 @@ def _response_metadata(response: Mapping[str, Any]) -> Mapping[str, Any]:
     return metadata
 
 
+def _response_has_provider_side_encryption(response: Mapping[str, Any]) -> bool:
+    """Reject every SDK-visible S3 field that asserts provider encryption.
+
+    The transport's confidentiality boundary is the destination-pinned age
+    envelope.  Checking only ``ServerSideEncryption`` misses SDK fields such
+    as SSE-C/KMS and bucket-key metadata.  Treat every such response as an
+    incompatible bucket/object configuration before accepting an upload or
+    writing a downloaded ciphertext to disk.
+    """
+
+    for raw_name in response:
+        if not isinstance(raw_name, str):
+            continue
+        normalized = re.sub(r"[^a-z0-9]", "", raw_name.lower())
+        if normalized.startswith(("serversideencryption", "sse", "kms", "bucketkey")):
+            return True
+    response_metadata = response.get("ResponseMetadata")
+    if isinstance(response_metadata, Mapping):
+        headers = response_metadata.get("HTTPHeaders")
+        if isinstance(headers, Mapping):
+            for raw_name in headers:
+                if not isinstance(raw_name, str):
+                    continue
+                normalized = raw_name.lower()
+                if normalized.startswith(
+                    ("x-amz-server-side-encryption", "x-amz-sse", "x-amz-kms", "x-amz-bucket-key")
+                ):
+                    return True
+    return False
+
+
 def write_response_body(
     response: Mapping[str, Any],
     output_path: Path,
@@ -848,7 +879,7 @@ def get_exact_object_to_file(
         raise SnapshotTransportError("object read did not identify its VersionId")
     if version_id is not None and response_version != version_id:
         raise SnapshotTransportError("object read returned a different VersionId")
-    if response.get("ServerSideEncryption"):
+    if _response_has_provider_side_encryption(response):
         raise SnapshotTransportError("provider-side object encryption is not permitted for this transport")
     if maximum_bytes is not None:
         maximum_bytes = require_nonnegative_int(maximum_bytes, "maximum object bytes", minimum=1)
@@ -921,6 +952,8 @@ def upload_immutable_object_in_workspace(
             raise SnapshotTransportError("conditional immutable object upload failed") from exc
     if not isinstance(response, Mapping):
         raise SnapshotTransportError("object upload returned a malformed response")
+    if _response_has_provider_side_encryption(response):
+        raise SnapshotTransportError("provider-side object encryption is not permitted for this transport")
     version_id = response.get("VersionId")
     if not isinstance(version_id, str) or not version_id or version_id == "null":
         raise SnapshotTransportError("versioned object upload did not return a VersionId")

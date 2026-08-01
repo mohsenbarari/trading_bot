@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import io
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from core.legacy_direct_fi_ir_transport_fence import LegacyDirectFiIrTransportRetiredError
 from scripts import capture_production_baseline as baseline
 
 
@@ -54,18 +57,28 @@ class ProductionBaselineCaptureTests(unittest.TestCase):
         self.assertFalse(parsed["clean"])
         self.assertEqual(parsed["unsynced_values"], [1])
 
-    def test_remote_args_use_accept_new_host_key_policy(self) -> None:
-        args = baseline.remote_args(
-            {
-                "IRAN_HOST": "65.109.220.59",
-                "IRAN_SSH_PORT": "37067",
-                "IRAN_SSH_USER": "root",
-            },
-            "true",
-        )
+    def test_remote_args_are_retired_before_an_iran_ssh_argv_exists(self) -> None:
+        with self.assertRaises(LegacyDirectFiIrTransportRetiredError):
+            baseline.remote_args(
+                {
+                    "IRAN_HOST": "65.109.220.59",
+                    "IRAN_SSH_PORT": "37067",
+                    "IRAN_SSH_USER": "root",
+                },
+                "true",
+            )
 
-        self.assertIn("StrictHostKeyChecking=accept-new", args)
-        self.assertNotIn("StrictHostKeyChecking=no", args)
+    def test_manifest_peer_resolution_is_blocked_before_local_command_work(self) -> None:
+        with (
+            patch.object(baseline, "run_command", side_effect=AssertionError("must not run")),
+            patch("sys.stdout", new_callable=io.StringIO) as stdout,
+        ):
+            exit_code = baseline.main(["--manifest", "/tmp/missing-peer-manifest.env"])
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(payload["status"], "blocked_legacy_direct_fi_ir_transport_retired")
+        self.assertEqual(payload["component"], "production-baseline")
 
 
 if __name__ == "__main__":

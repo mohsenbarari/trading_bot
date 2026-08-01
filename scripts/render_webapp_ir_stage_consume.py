@@ -15,12 +15,13 @@ import argparse
 import datetime as dt
 import importlib.util
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
 import shlex
+import stat
 import sys
 from typing import Any, Mapping, Sequence
-from urllib.parse import parse_qs, urlparse
 
 
 def _load_stage_primitives() -> Any:
@@ -42,11 +43,13 @@ def _load_stage_primitives() -> Any:
 stage = _load_stage_primitives()
 
 
-REMOTE_HOST = "root@95.38.164.29"
+REMOTE_HOSTNAME = "95.38.164.29"
+REMOTE_HOST = "root@" + REMOTE_HOSTNAME
 SSH_OPTIONS = ("-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes")
 SOURCE_SITE = "webapp_fi"
 DESTINATION_SITE = "webapp_ir"
-WA_IR_BOOTSTRAP_IDENTITY_FILE = "/etc/trading-bot-three-site/wa-ir/artifact-stage-2c08.agekey"
+WA_IR_CAMPAIGN_IDENTITY_ROOT = "/etc/trading-bot-three-site/campaigns"
+WA_IR_BOOTSTRAP_IDENTITY_SUFFIX = "webapp-ir/bootstrap.agekey"
 WA_IR_BOOTSTRAP_ROOT = "/srv/trading-bot-three-site-staging-data/wa-ir-bootstrap"
 WA_IR_STAGING_ROOT = "/srv/trading-bot-three-site-staging-data/wa-ir-standby/artifact-stage"
 REMOTE_CONSUMER_SCRIPT = "scripts/manage_webapp_ir_artifact_stage.py"
@@ -55,6 +58,8 @@ MAX_RECEIPT_BYTES = 2 * 1024 * 1024
 MAX_URL_BYTES = 8192
 MAX_MANIFEST_CIPHERTEXT_BYTES = 1024 * 1024
 AGE_CIPHERTEXT_MARGIN_BYTES = 1024 * 1024
+MAX_KNOWN_HOSTS_BYTES = 256 * 1024
+CAMPAIGN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$")
 RELEASE_RE = re.compile(r"^[a-f0-9]{40,64}$")
 BUNDLE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
@@ -73,6 +78,114 @@ EXPECTED_ARTIFACT_NAMES = (
 
 class NormalStageRenderError(RuntimeError):
     """The transient normal-stage request cannot be rendered safely."""
+
+
+class _SafeArgumentParser(argparse.ArgumentParser):
+    """Avoid reflecting transient argv values to direct CLI stderr."""
+
+    def error(self, _message: str) -> None:
+        raise NormalStageRenderError("invalid command-line input")
+
+
+def wa_ir_bootstrap_identity_file(campaign_id: object) -> str:
+    if not isinstance(campaign_id, str) or not CAMPAIGN_ID_RE.fullmatch(campaign_id):
+        raise NormalStageRenderError("campaign ID is invalid for the WA-IR bootstrap age identity")
+    path = PurePosixPath(WA_IR_CAMPAIGN_IDENTITY_ROOT) / campaign_id / WA_IR_BOOTSTRAP_IDENTITY_SUFFIX
+    value = path.as_posix()
+    if not path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+        raise NormalStageRenderError("campaign WA-IR bootstrap age identity path is invalid")
+    return value
+
+
+def _read_root_controlled_file(path: Path, *, field: str, maximum_bytes: int) -> bytes:
+    if not path.is_absolute():
+        raise NormalStageRenderError(f"{field} path must be absolute")
+    try:
+        before_lstat = path.lstat()
+        resolved = path.resolve(strict=True)
+    except OSError as exc:
+        raise NormalStageRenderError(f"cannot inspect {field}") from exc
+    if resolved != path or stat.S_ISLNK(before_lstat.st_mode) or not stat.S_ISREG(before_lstat.st_mode):
+        raise NormalStageRenderError(f"{field} must be one canonical regular file")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise NormalStageRenderError(f"cannot securely open {field}") from exc
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != 0
+            or before.st_nlink != 1
+            or not 1 <= before.st_size <= maximum_bytes
+            or before.st_mode & 0o022
+            or before.st_dev != before_lstat.st_dev
+            or before.st_ino != before_lstat.st_ino
+        ):
+            raise NormalStageRenderError(f"{field} has unsafe ownership, mode, or size")
+        chunks: list[bytes] = []
+        remaining = before.st_size + 1
+        while remaining:
+            chunk = os.read(descriptor, min(65536, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        result = b"".join(chunks)
+        after = os.fstat(descriptor)
+        identity = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns")
+        if len(result) != before.st_size or any(getattr(before, name) != getattr(after, name) for name in identity):
+            raise NormalStageRenderError(f"{field} changed while being read")
+        return result
+    finally:
+        os.close(descriptor)
+
+
+def _require_pinned_known_hosts(path: Path) -> Path:
+    payload = _read_root_controlled_file(
+        Path(path),
+        field="pinned WA-IR SSH known_hosts",
+        maximum_bytes=MAX_KNOWN_HOSTS_BYTES,
+    )
+    try:
+        text = payload.decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise NormalStageRenderError("pinned WA-IR SSH known_hosts is not ASCII") from exc
+    expected_hosts = {REMOTE_HOSTNAME, f"[{REMOTE_HOSTNAME}]:22"}
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        fields = line.split()
+        if len(fields) < 3 or fields[0].startswith("@"):
+            continue
+        hosts, key_type, encoded_key = fields[:3]
+        if (
+            expected_hosts.intersection(hosts.split(","))
+            and (key_type.startswith("ssh-") or key_type.startswith("ecdsa-"))
+            and re.fullmatch(r"[A-Za-z0-9+/=]{16,16384}", encoded_key)
+        ):
+            return Path(path)
+    raise NormalStageRenderError("pinned WA-IR SSH known_hosts lacks the exact WA-IR host key")
+
+
+def _render_pinned_ssh(*, known_hosts: Path, remote_arguments: Sequence[str]) -> str:
+    if not remote_arguments or any(not isinstance(item, str) or not item for item in remote_arguments):
+        raise NormalStageRenderError("WA-IR SSH remote command is invalid")
+    pin = _require_pinned_known_hosts(known_hosts)
+    return shlex.join(
+        [
+            "ssh",
+            *SSH_OPTIONS,
+            "-o",
+            "UserKnownHostsFile=" + str(pin),
+            "-o",
+            "GlobalKnownHostsFile=/dev/null",
+            REMOTE_HOST,
+            shlex.join(list(remote_arguments)),
+        ]
+    )
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -144,6 +257,13 @@ def _require_positive_size(value: object, *, field: str, maximum: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= maximum:
         raise NormalStageRenderError(f"{field} is invalid")
     return value
+
+
+def _require_version_id(value: object, *, field: str) -> str:
+    try:
+        return stage.require_version_id(value, field)
+    except stage.ArtifactStageError as exc:
+        raise NormalStageRenderError(f"{field} is invalid") from exc
 
 
 def _require_remote_path(value: object, *, field: str) -> str:
@@ -228,10 +348,9 @@ def _validate_artifact(
             maximum=maximum_artifact_bytes,
         ),
         "object_key": expected_key,
-        "version_id": _require_text(
+        "version_id": _require_version_id(
             artifact.get("version_id"),
             field=f"normal stage publish receipt {name} version_id",
-            maximum=1024,
         ),
         "ciphertext_sha256": _require_sha256(
             artifact.get("ciphertext_sha256"),
@@ -253,8 +372,12 @@ def _load_consumer_config(path: Path) -> Any:
         raise NormalStageRenderError("normal stage consumer config is unsafe") from exc
     if config.source_site != SOURCE_SITE:
         raise NormalStageRenderError("normal stage consumer config source site is invalid")
-    if str(config.age_identity_file) != WA_IR_BOOTSTRAP_IDENTITY_FILE:
-        raise NormalStageRenderError("normal stage consumer config does not pin the WA-IR bootstrap identity")
+    if not CAMPAIGN_ID_RE.fullmatch(config.campaign_id):
+        raise NormalStageRenderError("normal stage consumer config campaign_id is invalid")
+    if str(config.age_identity_file) != wa_ir_bootstrap_identity_file(config.campaign_id):
+        raise NormalStageRenderError("normal stage consumer config does not pin the campaign WA-IR bootstrap identity")
+    if not stage.snapshot.AGE_RECIPIENT_RE.fullmatch(config.age_recipient):
+        raise NormalStageRenderError("normal stage consumer config age_recipient is invalid")
     return config
 
 
@@ -276,15 +399,8 @@ def _validate_manifest_url(
             object_key=object_key,
             version_id=version_id,
         )
-        query = parse_qs(urlparse(url).query, keep_blank_values=True, strict_parsing=True)
     except (ValueError, stage.ArtifactStageError) as exc:
         raise NormalStageRenderError("normal stage manifest URL is not safely bound") from exc
-    sigv4_fields = ("X-Amz-Algorithm", "X-Amz-Credential", "X-Amz-Signature")
-    sigv2_fields = ("AWSAccessKeyId", "Signature", "Expires")
-    sigv4 = all(len(query.get(name, [])) == 1 and bool(query[name][0]) for name in sigv4_fields)
-    sigv2 = all(len(query.get(name, [])) == 1 and bool(query[name][0]) for name in sigv2_fields)
-    if sigv4 == sigv2:
-        raise NormalStageRenderError("normal stage manifest URL must contain exactly one signed-request envelope")
     return url
 
 
@@ -345,10 +461,9 @@ def _validate_publish_receipt(
     manifest_key = base + "/manifest.json.age"
     if manifest.get("object_key") != manifest_key:
         raise NormalStageRenderError("normal stage manifest is outside its immutable namespace")
-    manifest_version_id = _require_text(
+    manifest_version_id = _require_version_id(
         manifest.get("version_id"),
         field="normal stage manifest version_id",
-        maximum=1024,
     )
     manifest_sha256 = _require_sha256(
         manifest.get("ciphertext_sha256"),
@@ -398,6 +513,7 @@ def render_consume_command(
     *,
     publish_receipt_bytes: bytes,
     consumer_config: Path,
+    wa_ir_known_hosts: Path,
     bootstrap_candidate: str,
     staging_root: str,
     expected_release_sha: str,
@@ -442,12 +558,11 @@ def render_consume_command(
         manifest["presigned_url"],
     ]
     # The URL is deliberately the final remote argv item, not a configuration file or shell fragment.
-    remote = shlex.join(remote_argv)
-    return shlex.join(["ssh", *SSH_OPTIONS, REMOTE_HOST, remote])
+    return _render_pinned_ssh(known_hosts=Path(wa_ir_known_hosts), remote_arguments=remote_argv)
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = _SafeArgumentParser(description=__doc__)
     parser.add_argument(
         "--publish-receipt-stdin",
         action="store_true",
@@ -455,6 +570,7 @@ def _parser() -> argparse.ArgumentParser:
         help="read one just-published normal stage receipt from stdin without creating a file",
     )
     parser.add_argument("--consumer-config", required=True, type=Path)
+    parser.add_argument("--wa-ir-known-hosts", required=True, type=Path)
     parser.add_argument("--bootstrap-candidate", required=True)
     parser.add_argument("--staging-root", required=True)
     parser.add_argument("--expected-release-sha", required=True)
@@ -462,19 +578,19 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
     try:
-        print(
-            render_consume_command(
-                publish_receipt_bytes=_read_publish_receipt_stdin(),
-                consumer_config=args.consumer_config,
-                bootstrap_candidate=args.bootstrap_candidate,
-                staging_root=args.staging_root,
-                expected_release_sha=args.expected_release_sha,
-            )
+        _parser().parse_args(argv)
+        # The returned control command has a live URL as its final argument.
+        # A direct CLI cannot hand that capability to an executor without
+        # serializing it, so only the in-process renderer API is usable.
+        raise NormalStageRenderError(
+            "direct CLI rendering of the URL-bearing WA-IR normal-stage control is disabled"
         )
     except NormalStageRenderError as exc:
-        print(json.dumps({"status": "blocked", "error": str(exc), "error_class": type(exc).__name__}, sort_keys=True))
+        print(json.dumps({"status": "blocked", "error": "normal stage command was not rendered", "error_class": type(exc).__name__}, sort_keys=True))
+        return 2
+    except Exception:
+        print(json.dumps({"status": "blocked", "error": "normal stage command was not rendered"}, sort_keys=True))
         return 2
     return 0
 

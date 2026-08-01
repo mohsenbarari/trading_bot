@@ -1,9 +1,8 @@
-# src/infrastructure/database/__init__.py
-from .connection import init_database, get_async_session, get_session, Base
+"""Retired legacy database namespace.
 
-__all__ = [
-    "init_database",
-    "get_async_session",
-    "get_session",
-    "Base",
-]
+The historical connection factory is intentionally not re-exported here.
+Application code must use ``core.db``; importing this namespace must never
+make an alternate engine or session factory available.
+"""
+
+__all__: tuple[str, ...] = ()

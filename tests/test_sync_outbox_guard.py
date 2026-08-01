@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from core import sync_outbox_guard
 from core.sync_outbox_guard import (
+    SYNC_OUTBOX_CHANGE_LOG_IDS_KEY,
     SYNC_OUTBOX_PENDING_KEY,
     SYNC_OUTBOX_WAKEUP_NEEDED_KEY,
     SyncOutboxBypassError,
@@ -119,6 +120,72 @@ class SyncOutboxGuardTests(unittest.TestCase):
 
         self.assertNotIn(SYNC_OUTBOX_PENDING_KEY, session.info)
         self.assertEqual(session.info[SYNC_OUTBOX_WAKEUP_NEEDED_KEY], 1)
+
+    def test_verified_sync_outbox_hands_exact_change_log_ids_to_the_default_off_delta_bridge(self):
+        offer = FakeOffer(809)
+        connection = FakeConnection()
+        session = FakeSession(new=[offer], connection=connection)
+        flush_context = object()
+
+        collect_pending_sync_writes(session, flush_context, None)
+        mark_sync_outbox_recorded(
+            connection,
+            "offers",
+            "INSERT",
+            offer.id,
+            {"id": offer.id},
+            change_log_id=901,
+        )
+        with patch(
+            "core.object_delta_outbox_runtime.allocate_verified_object_delta_outbox_entries"
+        ) as bridge:
+            verify_pending_sync_outbox(session, flush_context)
+
+        bridge.assert_called_once_with(
+            connection,
+            change_log_ids=(901,),
+            expected_count=1,
+        )
+        self.assertEqual({}, connection.info[SYNC_OUTBOX_CHANGE_LOG_IDS_KEY])
+
+    def test_delta_bridge_excludes_no_sync_change_log_rows_from_the_same_flush(self):
+        offer = FakeOffer(810)
+        connection = FakeConnection()
+        session = FakeSession(new=[offer], connection=connection)
+        flush_context = object()
+
+        collect_pending_sync_writes(session, flush_context, None)
+        mark_sync_outbox_recorded(
+            connection,
+            "offers",
+            "INSERT",
+            offer.id,
+            {"id": offer.id},
+            change_log_id=902,
+        )
+        # A listener may record an unrelated local ChangeLog row in this
+        # flush. It remains part of the historical wake-up count, but must
+        # never become an Object-delta source item.
+        mark_sync_outbox_recorded(
+            connection,
+            "messages",
+            "UPDATE",
+            77,
+            {"id": 77},
+            change_log_id=903,
+        )
+
+        with patch(
+            "core.object_delta_outbox_runtime.allocate_verified_object_delta_outbox_entries"
+        ) as bridge:
+            verify_pending_sync_outbox(session, flush_context)
+
+        bridge.assert_called_once_with(
+            connection,
+            change_log_ids=(902,),
+            expected_count=1,
+        )
+        self.assertEqual(session.info[SYNC_OUTBOX_WAKEUP_NEEDED_KEY], 2)
 
     def test_non_dict_recorded_counts_are_not_mutated_during_cleanup(self):
         offer = FakeOffer(801)

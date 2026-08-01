@@ -153,6 +153,7 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
         publish_mock.assert_awaited_once()
         self.assertEqual(publish_mock.await_args.args[1]["remaining_quantity"], 0)
 
+    @unittest.skip("legacy direct FI<->IR HTTP receiver is permanently retired")
     async def test_receive_sync_data_publishes_new_foreign_offer(self):
         offer = make_offer()
         db = FakeDB([FakeOfferExecuteResult(offer)])
@@ -187,6 +188,7 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(offer.channel_message_id, 555)
         self.assertEqual(result, {"status": "success", "processed": 1})
 
+    @unittest.skip("legacy direct FI<->IR HTTP receiver is permanently retired")
     async def test_receive_sync_data_skips_already_published_or_none_message_id(self):
         items = [{"table": "offers", "operation": "INSERT", "id": 7, "data": {"price": 11}}]
 
@@ -231,6 +233,7 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(offer.channel_message_id)
         self.assertEqual(result, {"status": "success", "processed": 1})
 
+    @unittest.skip("legacy direct FI<->IR HTTP receiver is permanently retired")
     async def test_receive_sync_data_skips_foreign_active_publish_when_recovery_gate_enabled(self):
         offer = make_offer()
         db = FakeDB([FakeOfferExecuteResult(offer)])
@@ -256,6 +259,7 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(offer.channel_message_id)
         self.assertEqual(result, {"status": "success", "processed": 1})
 
+    @unittest.skip("legacy direct FI<->IR HTTP receiver is permanently retired")
     async def test_receive_sync_data_skips_iran_realtime_created_publish_when_recovery_gate_enabled(self):
         db = FakeDB()
         items = [{"table": "offers", "operation": "INSERT", "id": 7, "data": {"price": 11}}]
@@ -277,6 +281,7 @@ class SyncRouterReceiveOfferPublishTests(unittest.IsolatedAsyncioTestCase):
         realtime_publish_mock.assert_not_awaited()
         self.assertEqual(result, {"status": "success", "processed": 1})
 
+    @unittest.skip("legacy direct FI<->IR HTTP receiver is permanently retired")
     async def test_receive_sync_data_replays_terminal_foreign_offer_once(self):
         terminal_offer = make_terminal_offer()
         db = FakeDB([FakeOfferExecuteResult(terminal_offer), FakeOfferExecuteResult(terminal_offer)])

@@ -17,6 +17,11 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+    blocked_legacy_direct_fi_ir_transport_payload,
+)
 from scripts.capture_production_baseline import DEFAULT_ARTIFACT_ROOT, display_path, remote_args, utc_iso, utc_stamp
 from scripts.deploy_config import resolve_deploy_settings
 from scripts.run_production_backup import DEFAULT_BACKUP_DIR, HostTarget, target_for_role
@@ -148,7 +153,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--timestamp", default=None)
     parser.add_argument("--artifact-root", default=str(DEFAULT_ARTIFACT_ROOT))
     parser.add_argument("--backup-dir", default=DEFAULT_BACKUP_DIR)
-    parser.add_argument("--roles", choices=("foreign", "iran", "both"), default="both")
+    parser.add_argument(
+        "--roles",
+        choices=("foreign", "iran", "both"),
+        default="foreign",
+        help="Only host-local foreign reporting remains here; WA-IR evidence is role-local.",
+    )
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--report-out", default=None)
     parser.add_argument("--fail-on", choices=("never", "warning", "critical"), default="critical")
@@ -157,6 +167,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def run_shell(target: HostTarget, settings: dict[str, str], shell: str, *, timeout: int = 60) -> dict[str, Any]:
     if target.remote:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="production-alerts",
+            operation="Iran SSH alert probe command construction",
+        )
         command = f"cd {shlex.quote(target.project_dir)} && {shell}"
         args = remote_args(settings, command)
         cwd = None
@@ -642,6 +656,17 @@ def selected_roles(value: str) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.roles != "foreign":
+        try:
+            assert_legacy_direct_fi_ir_transport_retired(
+                component="production-alerts",
+                operation="Iran or dual-host alert collection",
+            )
+        except LegacyDirectFiIrTransportRetiredError:
+            print(json.dumps(blocked_legacy_direct_fi_ir_transport_payload(
+                component="production-alerts",
+            ), ensure_ascii=False, sort_keys=True))
+            return 2
     settings = resolve_deploy_settings(manifest_path=args.manifest)
     stamp = args.timestamp or utc_stamp()
     artifact_dir = Path(args.artifact_root) / stamp / "production-alerts"

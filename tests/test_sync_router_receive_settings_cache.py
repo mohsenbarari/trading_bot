@@ -38,6 +38,7 @@ class SyncRouterReceiveSettingsCacheTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(AssertionError, "rollback should not be called"):
             await db.rollback()
 
+    @unittest.skip("legacy direct FI<->IR HTTP receiver is permanently retired")
     async def test_receive_sync_data_refreshes_trading_settings_cache(self):
         db = FakeDB()
         items = [{"table": "trading_settings", "operation": "INSERT", "id": 1, "data": {"key": "x", "value": "1"}}]
@@ -50,6 +51,7 @@ class SyncRouterReceiveSettingsCacheTests(unittest.IsolatedAsyncioTestCase):
         refresh_mock.assert_awaited_once()
         self.assertEqual(result, {"status": "success", "processed": 1})
 
+    @unittest.skip("legacy direct FI<->IR HTTP receiver is permanently retired")
     async def test_receive_sync_data_tolerates_trading_settings_cache_refresh_failure(self):
         db = FakeDB()
         items = [{"table": "trading_settings", "operation": "INSERT", "id": 1, "data": {"key": "x", "value": "1"}}]

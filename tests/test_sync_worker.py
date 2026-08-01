@@ -9,7 +9,8 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 
-from core import sync_worker
+from core import server_routing, sync_worker
+from core.legacy_direct_fi_ir_transport_fence import LegacyDirectFiIrTransportRetiredError
 from core.sync_protocol import build_sync_protocol_metadata
 
 
@@ -96,7 +97,7 @@ class FakeDBSession:
 
 
 class SendSyncItemTests(unittest.IsolatedAsyncioTestCase):
-    async def test_send_sync_item_posts_expected_signed_payload(self):
+    async def test_send_sync_item_rejects_before_constructing_direct_peer_request(self):
         fake_response = object()
         client = AsyncMock()
         client.post.return_value = fake_response
@@ -104,31 +105,15 @@ class SendSyncItemTests(unittest.IsolatedAsyncioTestCase):
         timestamp = 1700000000
 
         with patch("core.sync_worker.time.time", return_value=timestamp):
-            response = await sync_worker.send_sync_item(
-                client,
-                item,
-                "https://peer.example",
-                "secret-key",
-            )
+            with self.assertRaises(LegacyDirectFiIrTransportRetiredError):
+                await sync_worker.send_sync_item(
+                    client,
+                    item,
+                    "https://peer.example",
+                    "secret-key",
+                )
 
-        self.assertIs(response, fake_response)
-        client.post.assert_awaited_once()
-        _, kwargs = client.post.await_args
-        self.assertEqual(kwargs["content"], json.dumps([item], sort_keys=True))
-        self.assertEqual(kwargs["timeout"], 10.0)
-        self.assertEqual(
-            kwargs["headers"],
-            {
-                "Content-Type": "application/json",
-                "X-API-Key": "secret-key",
-                "X-Timestamp": str(timestamp),
-                "X-Signature": hmac.new(
-                    b"secret-key",
-                    f"{timestamp}:{json.dumps([item], sort_keys=True)}".encode(),
-                    hashlib.sha256,
-                ).hexdigest(),
-            },
-        )
+        client.post.assert_not_awaited()
 
 
 class PeerResponsePolicyTests(unittest.TestCase):
@@ -605,6 +590,7 @@ class ChangeLogDrainTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(fake_session.statements), 1)
 
 
+@unittest.skip("legacy direct FI<->IR sync worker is permanently retired")
 class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
     async def _run_main_once(
         self,
@@ -692,6 +678,23 @@ class SyncWorkerMainTests(unittest.IsolatedAsyncioTestCase):
             [("sync:retry", json.loads(payload))],
         )
         sleep_mock.assert_awaited_once_with(30)
+
+    async def test_main_exits_before_any_direct_sync_transport_when_single_writer_enabled(self):
+        with patch("core.sync_worker.single_writer_runtime_enabled", return_value=True), patch(
+            "core.sync_worker.current_server", return_value="foreign"
+        ), patch("core.sync_worker.assert_background_job_authority") as authority, patch(
+            "core.sync_worker.redis.Redis"
+        ) as redis_constructor, patch("core.sync_worker.httpx.AsyncClient") as client_constructor, patch(
+            "core.sync_worker.default_peer_server_url"
+        ) as default_peer_url, patch("core.sync_worker.assert_runtime_sync_transport_allowed") as transport_guard:
+            result = await sync_worker.main()
+
+        self.assertIsNone(result)
+        authority.assert_not_called()
+        redis_constructor.assert_not_called()
+        client_constructor.assert_not_called()
+        default_peer_url.assert_not_called()
+        transport_guard.assert_not_called()
 
     async def test_main_uses_sync_transport_ca_bundle(self):
         with patch("core.config.settings.sync_ca_bundle", "/etc/ssl/internal-ca.pem"):

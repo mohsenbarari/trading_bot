@@ -1,0 +1,4 @@
+# Generated default-off peer map for the only local physical base-backup role.
+# The image-attested PostgreSQL peer credential is mapped by the server; the
+# Docker image digest and read-only socket mount are separately attested.
+@@LOCAL_BASE_BACKUP_PEER_MAP@@  postgres  @@LOCAL_BASE_BACKUP_REPLICATION_ROLE@@

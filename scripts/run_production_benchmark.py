@@ -20,14 +20,16 @@ from scripts.capture_production_baseline import (
     DEFAULT_ARTIFACT_ROOT,
     REMAINING_STAGES,
     display_path,
-    compose_probe_script,
-    quote_remote,
-    remote_args,
     run_command,
     utc_iso,
     utc_stamp,
 )
 from scripts.deploy_config import resolve_deploy_settings
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+    blocked_legacy_direct_fi_ir_transport_payload,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -59,8 +61,11 @@ def _python_script(script: str, *args: str) -> list[str]:
 
 
 def _iran_compose_args(settings: dict[str, str], body: str) -> list[str]:
-    command = f"cd {quote_remote(settings['IRAN_PROJECT_DIR'])} && " + compose_probe_script("docker-compose.iran.yml", body)
-    return remote_args(settings, command)
+    del settings, body
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="stage-p-production-benchmark-orchestrator",
+        operation="Iran Docker compose benchmark command construction",
+    )
 
 
 def _iran_python_script(settings: dict[str, str], script: str, *args: str) -> list[str]:
@@ -82,6 +87,10 @@ def build_tasks(
     artifact_root: Path,
     target: str,
 ) -> list[BenchmarkTask]:
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="stage-p-production-benchmark-orchestrator",
+        operation="legacy FI-to-IR benchmark command-plan construction",
+    )
     manifest_args = ["--manifest", manifest] if manifest else []
     tasks = [
         BenchmarkTask(
@@ -209,7 +218,8 @@ def build_tasks(
             command=[
                 sys.executable,
                 "scripts/report_static_delivery.py",
-                *manifest_args,
+                # The retained static verifier is role-local loopback-only;
+                # a deployment manifest must never turn it into a peer probe.
                 "--json",
             ],
             timeout_seconds=45,
@@ -566,6 +576,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="stage-p-production-benchmark-orchestrator",
+            operation="legacy FI-to-IR benchmark orchestration CLI",
+        )
+    except LegacyDirectFiIrTransportRetiredError:
+        print(json.dumps(blocked_legacy_direct_fi_ir_transport_payload(
+            component="stage-p-production-benchmark-orchestrator"
+        ), ensure_ascii=False, sort_keys=True))
+        return 2
+
     args = parse_args(argv)
     stamp = args.timestamp or utc_stamp()
     artifact_root = Path(args.artifact_root)

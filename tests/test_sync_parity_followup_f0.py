@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 from core import events, sync_worker
+from core.legacy_direct_fi_ir_transport_fence import LegacyDirectFiIrTransportRetiredError
 from core.sync_metadata import build_sync_metadata
 from core.sync_parity import build_table_parity_snapshot, compare_parity_snapshots
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
@@ -80,7 +81,7 @@ class SyncParityFollowupF0Tests(unittest.IsolatedAsyncioTestCase):
         inserted_payload = json.loads(connection.execute.call_args.args[1]["data"])
         self.assertEqual(inserted_payload, payload)
 
-    async def test_worker_uses_outbound_queue_only_as_wakeup_for_committed_change_log(self):
+    async def test_worker_legacy_transport_is_retired_before_any_outbound_queue_processing(self):
         stale_precommit_payload = json.dumps(
             {
                 "type": "db_change",
@@ -116,7 +117,7 @@ class SyncParityFollowupF0Tests(unittest.IsolatedAsyncioTestCase):
         fetch_mock = AsyncMock(return_value=committed_change)
         sleep_mock = AsyncMock()
 
-        with patch("core.sync_worker.redis.Redis", return_value=fake_redis), patch(
+        with patch("core.sync_worker.redis.Redis", return_value=fake_redis) as redis_constructor, patch(
             "core.sync_worker.settings", fake_settings
         ), patch("core.sync_worker.default_peer_server_url", return_value="https://peer.example"), patch(
             "core.sync_worker.httpx.AsyncClient", Mock(return_value=_FakeAsyncClient())
@@ -127,13 +128,13 @@ class SyncParityFollowupF0Tests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "core.sync_worker.asyncio.sleep", sleep_mock
         ):
-            with self.assertRaises(asyncio.CancelledError):
+            with self.assertRaises(LegacyDirectFiIrTransportRetiredError):
                 await sync_worker.main()
 
-        fetch_mock.assert_awaited_once()
-        send_mock.assert_awaited_once()
-        self.assertEqual(send_mock.await_args.args[1], committed_change)
-        marker_mock.assert_awaited_once_with(committed_change)
+        redis_constructor.assert_not_called()
+        fetch_mock.assert_not_awaited()
+        send_mock.assert_not_awaited()
+        marker_mock.assert_not_awaited()
         self.assertEqual(fake_redis.rpush_calls, [])
         sleep_mock.assert_not_awaited()
 

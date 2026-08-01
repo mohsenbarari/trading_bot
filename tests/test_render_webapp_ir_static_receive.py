@@ -37,6 +37,16 @@ static_installer = importlib.util.module_from_spec(INSTALL_SPEC)
 sys.modules[INSTALL_SPEC.name] = static_installer
 INSTALL_SPEC.loader.exec_module(static_installer)
 
+FIXTURE_HELPERS = ROOT / "tests" / "source_stage_fixture_helpers.py"
+FIXTURE_SPEC = importlib.util.spec_from_file_location(
+    "source_stage_fixture_helpers_for_wa_ir_static_receive_test",
+    FIXTURE_HELPERS,
+)
+assert FIXTURE_SPEC and FIXTURE_SPEC.loader
+fixtures = importlib.util.module_from_spec(FIXTURE_SPEC)
+sys.modules[FIXTURE_SPEC.name] = fixtures
+FIXTURE_SPEC.loader.exec_module(fixtures)
+
 
 CAMPAIGN = "wa-ir-static-receiver-fixture-20260730"
 RELEASE = "1" * 40
@@ -44,8 +54,8 @@ CONTROL_COMMIT = "2" * 40
 CONTROL_TREE = "3" * 40
 REVISION = "0123456789ab"
 REGION = "ir-thr-at1"
-BUCKET = "private-artifacts"
-PREFIX = "campaigns/wa-ir-static"
+BUCKET = "three-site-private"
+PREFIX = "campaign-current/artifacts"
 HOST = f"s3.{REGION}.arvanstorage.ir"
 CONTROLLER_RECIPIENT = "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
 FI_RECIPIENT = "age1rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
@@ -94,21 +104,35 @@ def write_archive(path: Path) -> bytes:
 
 
 class RenderWebappIrStaticReceiveTests(unittest.TestCase):
-    def _transport_config(self, root: Path) -> Path:
-        path = root / "controller" / "source-transport-config.json"
+    def _patch_transport_roots(self, root: Path) -> Path:
+        campaigns_root, workspace_root = fixtures.source_transport_fixture_roots(root)
+        patchers = (
+            mock.patch.object(receiver.transport, "CAMPAIGNS_ROOT", campaigns_root),
+            mock.patch.object(receiver.transport.contract, "SOURCE_TRANSPORT_WORKSPACE_ROOT", workspace_root),
+            mock.patch.object(
+                receiver.transport,
+                "TRUSTED_E53_S3_ENVIRONMENT_PATH",
+                fixtures.trusted_e53_s3_environment_path(root),
+            ),
+        )
+        for patcher in patchers:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        return campaigns_root
+
+    def _transport_config(self, root: Path, *, campaign_id: str = CAMPAIGN) -> Path:
+        campaigns_root = self._patch_transport_roots(root)
+        path = campaigns_root / campaign_id / "controller" / "source-transport.json"
+        credentials = fixtures.make_trusted_e53_s3_environment(root)
         value: dict[str, object] = {
             "schema": receiver.transport.CONFIG_SCHEMA,
             "endpoint": f"https://{HOST}",
-            "region": REGION,
             "bucket": BUCKET,
             "prefix": PREFIX,
-            "credentials_file": "/root/secure-envs/trading-bot/nontransferred-controller-s3.json",
-            "age_binary": "/usr/bin/age",
-            "workspace": str(root / "controller" / "workspace"),
+            "credentials_file": str(credentials),
             "controller_age_recipient": CONTROLLER_RECIPIENT,
             "webapp_fi_age_recipient": FI_RECIPIENT,
             "webapp_ir_age_recipient": WA_IR_RECIPIENT,
-            "maximum_plaintext_bytes": receiver.MAX_STATIC_ARCHIVE_BYTES,
             "presign_expires_seconds": 300,
         }
         return write_private(path, canonical(value))
@@ -192,10 +216,10 @@ class RenderWebappIrStaticReceiveTests(unittest.TestCase):
             "url": self._url(object_key=str(descriptor["object_key"]), version_id=str(descriptor["version_id"]), now=now),
         }
 
-    def _render(self, fixture: dict[str, object]) -> str:
+    def _render(self, fixture: dict[str, object], *, transport_config: Path | None = None) -> str:
         return receiver.render_receive_command(
             transport_publish_receipt=Path(fixture["publish"]),
-            source_transport_config=Path(fixture["transport_config"]),
+            source_transport_config=Path(fixture["transport_config"] if transport_config is None else transport_config),
             static_assets_provenance=Path(fixture["proof"]),
             pinned_controller_public_key_base64=str(fixture["pinned_key"]),
             presigned_url=str(fixture["url"]),
@@ -291,6 +315,85 @@ class RenderWebappIrStaticReceiveTests(unittest.TestCase):
                     pinned_controller_public_key_base64=str(fixture["pinned_key"]),
                     presigned_url=expired_url,
                 )
+
+    def test_renderer_rejects_cross_campaign_controller_config_before_url_validation(self) -> None:
+        now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+        with tempfile.TemporaryDirectory(prefix="wa-ir-static-render-") as temporary:
+            root = Path(temporary)
+            fixture = self._fixture(root, now=now)
+            other_config = self._transport_config(
+                root,
+                campaign_id="other-wa-ir-static-receiver-fixture-20260730",
+            )
+            with (
+                mock.patch.object(receiver, "_utc_now", return_value=now),
+                mock.patch.object(
+                    receiver,
+                    "_validate_presigned_url",
+                    side_effect=AssertionError("campaign mismatch must block before URL handling"),
+                ),
+                self.assertRaisesRegex(
+                    receiver.StaticReceiveRenderError,
+                    "does not bind the published campaign",
+                ),
+            ):
+                self._render(fixture, transport_config=other_config)
+
+    def test_direct_cli_never_reads_or_prints_the_transient_url(self) -> None:
+        url = "https://fixture.invalid/static?X-Amz-Signature=" + "a" * 64
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+
+        class UnreadableStdin:
+            @property
+            def buffer(self):
+                raise AssertionError("direct CLI must not read the URL")
+
+            def read(self, *args, **kwargs):
+                raise AssertionError("direct CLI must not read the URL")
+
+        with (
+            mock.patch.object(
+                receiver,
+                "render_receive_command",
+                side_effect=AssertionError("direct CLI must not build a command"),
+            ),
+            mock.patch.object(sys, "stdin", UnreadableStdin()),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            status = receiver.main(
+                [
+                    "--transport-publish-receipt",
+                    "/ignored/publish.json",
+                    "--source-transport-config",
+                    "/ignored/source-transport.json",
+                    "--static-assets-provenance",
+                    "/ignored/proof.json",
+                    "--pinned-controller-public-key-base64",
+                    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                    "--presigned-url-stdin",
+                ]
+            )
+        output = stdout.getvalue() + stderr.getvalue()
+        self.assertEqual(2, status)
+        self.assertIn("disabled", output)
+        self.assertNotIn(url, output)
+        self.assertNotIn("ssh ", output)
+        parsed = receiver._parser().parse_args(
+            [
+                "--transport-publish-receipt",
+                "/ignored/publish.json",
+                "--source-transport-config",
+                "/ignored/source-transport.json",
+                "--static-assets-provenance",
+                "/ignored/proof.json",
+                "--pinned-controller-public-key-base64",
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                "--presigned-url-stdin",
+            ]
+        )
+        self.assertNotIn("presigned_url", vars(parsed))
 
     def test_persisted_url_rejection_requires_an_actual_url_not_an_opaque_token(self) -> None:
         receiver._reject_persisted_url(

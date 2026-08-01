@@ -1,3 +1,12 @@
+# Retired legacy root Compose — local development only.
+#
+# The three-site target runtime is the isolated Writer-Witness Compose under
+# deploy/production.  This historical root surface must never become a
+# production writer again.  Every real service below is hidden behind the
+# explicit `legacy-local-development` profile and additionally checks the
+# non-production acknowledgement before its process can start.  The one
+# default service intentionally fails closed, so a bare `docker compose up`
+# cannot start a database, migration, app, bot, or sync worker.
 x-default-logging: &default_logging
   driver: json-file
   options:
@@ -5,16 +14,36 @@ x-default-logging: &default_logging
     max-file: "${DOCKER_LOG_MAX_FILE:-5}"
 
 services:
+  # This guard remains outside the local-development profile.  It performs no
+  # network, database, volume, or application operation; a bare Compose
+  # invocation reaches only this failing retirement boundary.
+  legacy_root_runtime_guard:
+    image: trading_bot_base
+    pull_policy: never
+    restart: "no"
+    command: sh -ec 'if [ "$${ENVIRONMENT:-}" != "development" ] || [ "$${TRADING_BOT_LEGACY_LOCAL_DEVELOPMENT_ACK:-}" != "I_UNDERSTAND_THIS_IS_LOCAL_DEVELOPMENT_ONLY" ]; then echo "ERROR docker-compose.yml is retired for three-site production; use the isolated Writer-Witness runtime, or explicitly opt into local development." >&2; exit 2; fi; echo "legacy root Compose local-development guard accepted"'
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-}
+      TRADING_BOT_LEGACY_LOCAL_DEVELOPMENT_ACK: ${TRADING_BOT_LEGACY_LOCAL_DEVELOPMENT_ACK:-}
+    logging: *default_logging
+
   app:
     image: trading_bot_base
     logging: *default_logging
     container_name: trading_bot_app
     restart: always
-    command: sh -c "exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers ${API_WORKERS:-2}"
+    profiles: ["legacy-local-development"]
+    command: sh -ec 'if [ "$${ENVIRONMENT:-}" != "development" ] || [ "$${TRADING_BOT_LEGACY_LOCAL_DEVELOPMENT_ACK:-}" != "I_UNDERSTAND_THIS_IS_LOCAL_DEVELOPMENT_ONLY" ]; then echo "ERROR legacy root app is local-development only; use the isolated Writer-Witness runtime for production." >&2; exit 2; fi; exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers ${API_WORKERS:-2}'
     environment:
       TZ: UTC
+      ENVIRONMENT: ${ENVIRONMENT:-}
+      TRADING_BOT_LEGACY_LOCAL_DEVELOPMENT_ACK: ${TRADING_BOT_LEGACY_LOCAL_DEVELOPMENT_ACK:-}
       TRADING_BOT_SERVICE: api
       TRADING_BOT_METRICS_BACKEND: ${TRADING_BOT_METRICS_BACKEND:-memory}
+      # The root Compose surface may be used for a host-local recovery.  It
+      # must never revive the superseded peer HTTP replication path.
+      SINGLE_WRITER_RUNTIME_ENABLED: "true"
+      TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"
       AUDIT_TRAIL_PATH: ${AUDIT_TRAIL_PATH:-/app/audit_trail/audit.jsonl}
       API_WORKERS: ${API_WORKERS:-2}
       DB_POOL_SIZE: ${DB_POOL_SIZE:-15}
@@ -44,9 +73,9 @@ services:
         hard: 65536
     env_file:
       - .env
-    extra_hosts:
-      - "${IRAN_PUBLIC_DOMAIN:-coin.gold-trade.ir}:${IRAN_PUBLIC_IP:-65.109.220.59}"
     depends_on:
+      legacy_root_runtime_guard:
+        condition: service_completed_successfully
       migration:
         condition: service_completed_successfully
       redis:
@@ -59,11 +88,16 @@ services:
     logging: *default_logging
     container_name: trading_bot_bot
     restart: always
-    command: python run_bot.py
+    profiles: ["legacy-local-development"]
+    command: sh -ec 'if [ "$${ENVIRONMENT:-}" != "development" ] || [ "$${TRADING_BOT_LEGACY_LOCAL_DEVELOPMENT_ACK:-}" != "I_UNDERSTAND_THIS_IS_LOCAL_DEVELOPMENT_ONLY" ]; then echo "ERROR legacy root bot is local-development only; use the isolated Writer-Witness runtime for production." >&2; exit 2; fi; exec python run_bot.py'
     environment:
       TZ: UTC
+      ENVIRONMENT: ${ENVIRONMENT:-}
+      TRADING_BOT_LEGACY_LOCAL_DEVELOPMENT_ACK: ${TRADING_BOT_LEGACY_LOCAL_DEVELOPMENT_ACK:-}
       TRADING_BOT_SERVICE: bot
       TRADING_BOT_METRICS_BACKEND: ${TRADING_BOT_METRICS_BACKEND:-memory}
+      SINGLE_WRITER_RUNTIME_ENABLED: "true"
+      TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"
       DB_POOL_SIZE: ${DB_POOL_SIZE:-15}
       DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
@@ -71,9 +105,9 @@ services:
       - .:/app
     env_file:
       - .env
-    extra_hosts:
-      - "${IRAN_PUBLIC_DOMAIN:-coin.gold-trade.ir}:${IRAN_PUBLIC_IP:-65.109.220.59}"
     depends_on:
+      legacy_root_runtime_guard:
+        condition: service_completed_successfully
       migration:
         condition: service_completed_successfully
     networks:
@@ -84,11 +118,18 @@ services:
     logging: *default_logging
     container_name: trading_bot_sync_worker
     restart: always
-    command: python -m core.sync_worker
+    profiles: ["legacy-local-development"]
+    command: sh -ec 'if [ "$${ENVIRONMENT:-}" != "development" ] || [ "$${TRADING_BOT_LEGACY_LOCAL_DEVELOPMENT_ACK:-}" != "I_UNDERSTAND_THIS_IS_LOCAL_DEVELOPMENT_ONLY" ]; then echo "ERROR legacy root sync worker is local-development only; no three-site sync worker is permitted here." >&2; exit 2; fi; exec python -m core.sync_worker'
     environment:
       TZ: UTC
+      ENVIRONMENT: ${ENVIRONMENT:-}
+      TRADING_BOT_LEGACY_LOCAL_DEVELOPMENT_ACK: ${TRADING_BOT_LEGACY_LOCAL_DEVELOPMENT_ACK:-}
       TRADING_BOT_SERVICE: sync_worker
       TRADING_BOT_METRICS_BACKEND: ${TRADING_BOT_METRICS_BACKEND:-memory}
+      # core.sync_worker exits before Redis/HTTP initialization under this
+      # flag; this protects an accidental manual ``docker compose up`` too.
+      SINGLE_WRITER_RUNTIME_ENABLED: "true"
+      TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"
       DB_POOL_SIZE: ${DB_POOL_SIZE:-15}
       DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
@@ -105,9 +146,9 @@ services:
       - ./trading_settings.json:/app/trading_settings.json
     env_file:
       - .env
-    extra_hosts:
-      - "${IRAN_PUBLIC_DOMAIN:-coin.gold-trade.ir}:${IRAN_PUBLIC_IP:-65.109.220.59}"
     depends_on:
+      legacy_root_runtime_guard:
+        condition: service_completed_successfully
       redis:
         condition: service_started
     networks:
@@ -117,13 +158,12 @@ services:
     image: trading_bot_base
     logging: *default_logging
     container_name: trading_bot_migration
-
-    command:
-      - sh
-      - -c
-      - python manage.py && python scripts/align_trade_number_sequence.py
+    profiles: ["legacy-local-development"]
+    command: sh -ec 'if [ "$${ENVIRONMENT:-}" != "development" ] || [ "$${TRADING_BOT_LEGACY_LOCAL_DEVELOPMENT_ACK:-}" != "I_UNDERSTAND_THIS_IS_LOCAL_DEVELOPMENT_ONLY" ]; then echo "ERROR legacy root migration is local-development only; schema work belongs to the reviewed three-site control plane." >&2; exit 2; fi; exec sh -ec "python manage.py && python scripts/align_trade_number_sequence.py"'
     environment:
       TZ: UTC
+      ENVIRONMENT: ${ENVIRONMENT:-}
+      TRADING_BOT_LEGACY_LOCAL_DEVELOPMENT_ACK: ${TRADING_BOT_LEGACY_LOCAL_DEVELOPMENT_ACK:-}
       DB_POOL_SIZE: ${DB_POOL_SIZE:-15}
       DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
@@ -132,6 +172,8 @@ services:
     env_file:
       - .env
     depends_on:
+      legacy_root_runtime_guard:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
     networks:
@@ -142,6 +184,7 @@ services:
     logging: *default_logging
     container_name: trading_bot_db
     restart: always
+    profiles: ["legacy-local-development"]
     command: postgres -c max_connections=500 -c timezone=UTC -c log_timezone=UTC
     environment:
       TZ: UTC
@@ -158,11 +201,15 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    depends_on:
+      legacy_root_runtime_guard:
+        condition: service_completed_successfully
 
   redis:
     image: redis:7-alpine
     logging: *default_logging
     container_name: trading_bot_redis
+    profiles: ["legacy-local-development"]
     command:
       - redis-server
       - --appendonly
@@ -178,6 +225,9 @@ services:
     volumes:
       - redis_data:/data
     restart: always
+    depends_on:
+      legacy_root_runtime_guard:
+        condition: service_completed_successfully
     networks:
       - trading_net
 
@@ -186,12 +236,16 @@ services:
     logging: *default_logging
     container_name: trading_bot_tileserver
     restart: always
+    profiles: ["legacy-local-development"]
     environment:
       TZ: UTC
     volumes:
       - ./map_data:/data
     ports:
       - "8088:8080"
+    depends_on:
+      legacy_root_runtime_guard:
+        condition: service_completed_successfully
     networks:
       - trading_net
 

@@ -14,7 +14,13 @@ from sqlalchemy.orm import aliased, selectinload
 
 from core.background_job_authority import JOB_OFFER_TELEGRAM_PUBLICATION, assert_background_job_authority
 from core.config import settings
-from core.db import AsyncSessionLocal
+from core.db import (
+    AsyncSessionLocal,
+    external_effect_execution_gate_policy,
+    require_application_writer_term,
+    require_external_effect_execution_authorization,
+)
+from core.external_effect_execution_gate import EXTERNAL_EFFECT_SCOPE_OFFER_TELEGRAM_PUBLICATION
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.services.cross_server_recovery_service import active_publication_is_gated
 from core.services.offer_publication_reconciliation_service import reconcile_offer_publications
@@ -322,10 +328,32 @@ def _is_terminal_offer(offer: Offer) -> bool:
     }
 
 
+def _require_effectful_worker_authorization() -> None:
+    """Fence each Telegram publication/reconciliation effect boundary."""
+
+    require_application_writer_term()
+    require_external_effect_execution_authorization(
+        EXTERNAL_EFFECT_SCOPE_OFFER_TELEGRAM_PUBLICATION
+    )
+
+
 async def run_offer_telegram_publication_cycle(*, limit: int | None = None) -> OfferPublicationCycleReport:
     assert_background_job_authority(JOB_OFFER_TELEGRAM_PUBLICATION)
+    _require_effectful_worker_authorization()
 
     from api.routers.offers import send_offer_to_channel_with_result
+
+    send_offer_callback = send_offer_to_channel_with_result
+    if external_effect_execution_gate_policy().enabled:
+        async def term_fenced_send_offer_to_channel(*args, **kwargs):
+            # ``reconcile_offer_publications`` can invoke this callback
+            # repeatedly in one cycle, so recheck immediately before every
+            # actual Telegram send rather than relying only on the
+            # cycle-start decision.
+            _require_effectful_worker_authorization()
+            return await send_offer_to_channel_with_result(*args, **kwargs)
+
+        send_offer_callback = term_fenced_send_offer_to_channel
 
     allow_active_publication = not await active_publication_is_gated()
     async with AsyncSessionLocal() as db:
@@ -334,7 +362,7 @@ async def run_offer_telegram_publication_cycle(*, limit: int | None = None) -> O
             server_mode="foreign",
             dry_run=False,
             limit=_worker_batch_limit(limit),
-            send_offer_to_channel=send_offer_to_channel_with_result,
+            send_offer_to_channel=send_offer_callback,
             allow_active_publication=allow_active_publication,
             telegram_send_spacing_seconds=_channel_send_spacing_seconds(),
             collect_observability=True,
@@ -587,6 +615,7 @@ def _schedule_channel_state_retry(
 async def run_offer_channel_state_cycle(*, limit: int | None = None) -> OfferChannelStateCycleReport:
     """Repair Telegram channel presentation for offers already published to the channel."""
     assert_background_job_authority(JOB_OFFER_TELEGRAM_PUBLICATION)
+    _require_effectful_worker_authorization()
     processed = 0
     applied = 0
     failed = 0
@@ -606,6 +635,7 @@ async def run_offer_channel_state_cycle(*, limit: int | None = None) -> OfferCha
             limit=_worker_batch_limit(limit),
         )
         for index, candidate in enumerate(candidates):
+            _require_effectful_worker_authorization()
             offer = candidate.offer
             if not await _try_acquire_channel_state_lock(db, offer):
                 skipped_locked += 1
@@ -619,6 +649,7 @@ async def run_offer_channel_state_cycle(*, limit: int | None = None) -> OfferCha
                 continue
             _prepare_channel_state_candidate_state(state, offer)
             processed += 1
+            _require_effectful_worker_authorization()
             result = await apply_offer_channel_state_with_result(
                 offer,
                 publication_state=state,

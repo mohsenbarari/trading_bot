@@ -141,6 +141,31 @@ class SourceTransportContractTests(unittest.TestCase):
             )
         )
 
+    def test_endpoint_region_and_campaign_workspace_are_deterministic(self) -> None:
+        endpoint, region = contract.derive_region_from_endpoint("https://s3.ir-thr-at1.arvanstorage.ir/")
+        self.assertEqual("https://s3.ir-thr-at1.arvanstorage.ir", endpoint)
+        self.assertEqual("ir-thr-at1", region)
+        self.assertEqual(
+            Path("/srv/trading-bot-three-site-staging-data/webapp-fi-source/source-transport-fixture-20260730"),
+            contract.source_transport_workspace_for_campaign("source-transport-fixture-20260730"),
+        )
+        self.assertEqual(100 * 1024 * 1024 * 1024, contract.MAXIMUM_PLAINTEXT_BYTES)
+
+        for endpoint in (
+            "http://s3.ir-thr-at1.arvanstorage.ir",
+            "https://s3.ir-thr-at1.arvanstorage.ir:443",
+            "https://s3.ir-thr-at1.arvanstorage.ir/not-an-origin",
+            "https://s3.ir-thr-at1.arvanstorage.ir?query=not-allowed",
+            "https://s3.ir-thr-at1.arvanstorage.ir.evil.example",
+        ):
+            with self.subTest(endpoint=endpoint), self.assertRaisesRegex(
+                contract.SourceTransportError, "canonical HTTPS Arvan S3 endpoint"
+            ):
+                contract.derive_region_from_endpoint(endpoint)
+
+        with self.assertRaisesRegex(contract.SourceTransportError, "derived exactly"):
+            contract.validate_policy(dataclasses.replace(self.policy, region="ir-foo-1"))
+
     def test_exact_five_direction_allowlist_and_dual_recipient_pin(self) -> None:
         self.assertEqual(5, len(contract.ALLOWED_DIRECTIONS))
         exact = contract.validate_request(self.policy, self.request())

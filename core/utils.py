@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core import telegram_gateway
+from core.external_effect_execution_gate import EXTERNAL_EFFECT_SCOPE_TELEGRAM_DIRECT_NOTIFICATION_EFFECT
 from core.enums import NotificationLevel, NotificationCategory
 from core.registration_identity import normalize_account_name, normalize_persian_numerals
 from core.redis import pool
@@ -237,6 +238,15 @@ async def send_telegram_notification(telegram_id: int, message: str) -> bool:
     if not bot_token:
         logger.warning("BOT_TOKEN not found in environment")
         return False
+
+    # This path bypasses the aiogram Bot session used by direct handlers and
+    # reaches the Telegram gateway itself, so fence it at its own concrete
+    # provider boundary.
+    from core.db import require_external_effect_execution_authorization
+
+    require_external_effect_execution_authorization(
+        EXTERNAL_EFFECT_SCOPE_TELEGRAM_DIRECT_NOTIFICATION_EFFECT
+    )
     
     try:
         result = await telegram_gateway.send_message(

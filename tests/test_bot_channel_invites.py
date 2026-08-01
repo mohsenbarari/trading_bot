@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from core.application_writer_term import ApplicationWriterTermError
 from bot.utils import channel_invites
 
 
@@ -27,6 +28,18 @@ class BotChannelInvitesTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(link, 'https://fallback.example/invite')
         exception_mock.assert_called_once_with('Failed to create channel join-request link')
+
+    async def test_create_channel_join_request_link_refuses_lost_writer_term_before_bot_call(self):
+        bot = AsyncMock()
+        with patch.object(channel_invites.settings, 'channel_id', -100123), patch(
+            'bot.utils.channel_invites._require_channel_join_request_effect_authorization',
+            side_effect=ApplicationWriterTermError('writer term expired'),
+        ) as authorize:
+            with self.assertRaisesRegex(ApplicationWriterTermError, 'expired'):
+                await channel_invites.create_channel_join_request_link(bot, user_id=777)
+
+        authorize.assert_called_once_with()
+        bot.create_chat_invite_link.assert_not_awaited()
 
     async def test_build_channel_join_request_line_handles_none_and_successful_links(self):
         with patch.object(channel_invites.settings, 'channel_invite_link', None):

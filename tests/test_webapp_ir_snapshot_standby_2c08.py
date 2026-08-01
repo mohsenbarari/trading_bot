@@ -18,6 +18,25 @@ WRITER_CONFIG_EXAMPLE = ROOT / "deploy/production/production-writer-lease-agent.
 DARK_NGINX = ROOT / "deploy/production/nginx-webapp-ir-standby-dark-https.conf.template"
 
 
+def compose_service_block(source: str, service_name: str) -> str:
+    lines = source.splitlines()
+    start: int | None = None
+    end = len(lines)
+    for index, raw_line in enumerate(lines):
+        if raw_line == f"  {service_name}:":
+            start = index
+            continue
+        if start is None or index <= start:
+            continue
+        indent = len(raw_line) - len(raw_line.lstrip(" "))
+        if indent == 0 or (indent == 2 and raw_line.strip().endswith(":")):
+            end = index
+            break
+    if start is None:
+        raise AssertionError(f"{service_name} service not found")
+    return "\n".join(lines[start:end])
+
+
 class WebappIrSnapshotStandby2c08Tests(unittest.TestCase):
     def test_snapshot_compose_is_database_only_and_network_dark(self) -> None:
         text = SNAPSHOT_COMPOSE.read_text(encoding="utf-8")
@@ -31,13 +50,34 @@ class WebappIrSnapshotStandby2c08Tests(unittest.TestCase):
 
     def test_promotion_compose_is_explicit_and_never_starts_direct_sync(self) -> None:
         text = PROMOTED_COMPOSE.read_text(encoding="utf-8")
+        app = compose_service_block(text, "app")
         self.assertEqual(text.count('profiles: ["promoted"]'), 3)
-        self.assertIn('TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"', text)
-        self.assertIn('BACKGROUND_JOBS_ENABLED: "true"', text)
-        self.assertIn("Iran-only authority matrix", text)
+        self.assertIn('TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"', app)
+        self.assertIn('SINGLE_WRITER_RUNTIME_ENABLED: "true"', app)
+        self.assertIn('APPLICATION_WRITER_TERM_ENFORCED: "true"', app)
+        self.assertIn("APPLICATION_WRITER_TERM_LOCAL_SITE: webapp_ir", app)
+        self.assertIn(
+            "APPLICATION_WRITER_TERM_LEASE_FILE: /run/trading-bot-writer-term/writer-lease.json",
+            app,
+        )
+        self.assertIn('DATABASE_SCHEMA_BOOTSTRAP_ENABLED: "false"', app)
+        self.assertIn("legacy image issue implicit create_all DDL at service startup.", app)
+        self.assertIn('APPLICATION_WRITER_TERM_SAFETY_MARGIN_SECONDS: "15"', app)
+        self.assertIn('APPLICATION_WRITER_TERM_MAX_LEASE_DURATION_SECONDS: "60"', app)
+        self.assertIn('BACKGROUND_JOBS_ENABLED: "false"', app)
+        self.assertIn("until their independent outbound and", app)
         self.assertIn("WA_IR_CANDIDATE_AUDIT_VOLUME", text)
-        self.assertIn("candidate_audit_data:/app/audit_trail", text)
-        self.assertIn("127.0.0.1:${WA_IR_APP_LOCAL_PORT:-18000}:8000", text)
+        self.assertIn("candidate_audit_data:/app/audit_trail", app)
+        self.assertIn(
+            'source: "${WA_IR_WRITER_TERM_PARENT_DIRECTORY:?root-owned Writer Witness term parent directory is required}"',
+            app,
+        )
+        self.assertIn("target: /run/trading-bot-writer-term", app)
+        self.assertIn("read_only: true", app)
+        self.assertIn("create_host_path: false", app)
+        self.assertIn("Bind the root-owned host parent, never the atomically replaced lease", app)
+        self.assertNotIn("writer-lease.json:/run/trading-bot-writer-term", app)
+        self.assertIn("127.0.0.1:${WA_IR_APP_LOCAL_PORT:-18000}:8000", app)
         self.assertNotIn("sync_worker", text)
         self.assertNotIn("migration", text)
         self.assertNotIn("build:", text)

@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Create an operational production backup on the foreign or Iran host.
+"""Create an operational host-local production backup.
 
-The script intentionally runs outside the hot path. It creates a PostgreSQL
-dump, Redis data archive, uploads archive, and audit-trail archive, then prints
-a compact JSON manifest with file sizes and hashes. Optional DB restore smoke
-uses a temporary PostgreSQL container and never touches the production DB.
+The surviving ``foreign`` role creates a PostgreSQL dump, Redis data archive,
+uploads archive, and audit-trail archive on its own host, then prints a compact
+JSON manifest with file sizes and hashes. Optional DB restore smoke uses a
+temporary PostgreSQL container and never touches the production DB.
+
+The historical Iran/both path used SSH/SCP to move database and upload
+material directly between FI and IR.  It is explicitly retired before a
+manifest, host, or command can be read.  The physical topology uses the
+dedicated private/versioned Object-Storage backup path instead.
 """
 
 from __future__ import annotations
@@ -21,8 +26,12 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts.capture_production_baseline import display_path, remote_args, utc_iso, utc_stamp
-from scripts.deploy_config import resolve_deploy_settings
+from scripts.capture_production_baseline import display_path, utc_iso, utc_stamp
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+    blocked_legacy_direct_fi_ir_transport_payload,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -46,7 +55,7 @@ class HostTarget:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Create production backup artifacts.")
     parser.add_argument("--manifest", default=None)
-    parser.add_argument("--role", choices={"foreign", "iran", "both"}, default="iran")
+    parser.add_argument("--role", choices={"foreign", "iran", "both"}, default="foreign")
     parser.add_argument("--timestamp", default=None)
     parser.add_argument("--backup-dir", default=DEFAULT_BACKUP_DIR)
     parser.add_argument("--json", action="store_true")
@@ -61,7 +70,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--pull-to",
         default=None,
-        help="Optional local directory to scp Iran backup files into after the remote backup succeeds.",
+        help="Retired legacy Iran backup retrieval option; the private Object-Storage path is required.",
     )
     return parser.parse_args(argv)
 
@@ -70,11 +79,9 @@ def target_for_role(role: str, settings: dict[str, str]) -> HostTarget:
     if role == "foreign":
         return HostTarget(role="foreign", project_dir=str(REPO_ROOT), compose_file="docker-compose.yml", remote=False)
     if role == "iran":
-        return HostTarget(
-            role="iran",
-            project_dir=settings["IRAN_PROJECT_DIR"],
-            compose_file="docker-compose.iran.yml",
-            remote=True,
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="production-backup",
+            operation="Iran SSH backup target construction",
         )
     raise ValueError(f"Unsupported role: {role}")
 
@@ -93,6 +100,11 @@ def build_backup_shell(
     include_redis: bool = True,
     restore_smoke: bool = False,
 ) -> str:
+    if target.remote:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="production-backup",
+            operation="Iran backup shell construction",
+        )
     role = shlex.quote(target.role)
     project_dir = shlex.quote(target.project_dir)
     compose_file = shlex.quote(target.compose_file)
@@ -320,6 +332,11 @@ def backup_role(
     include_redis: bool,
     restore_smoke: bool,
 ) -> dict[str, Any]:
+    if target.remote:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="production-backup",
+            operation="Iran backup command execution",
+        )
     script = build_backup_shell(
         target,
         stamp=stamp,
@@ -329,7 +346,7 @@ def backup_role(
         include_redis=include_redis,
         restore_smoke=restore_smoke,
     )
-    args = remote_args(settings, script) if target.remote else ["bash", "-lc", script]
+    args = ["bash", "-lc", script]
     started = time.perf_counter()
     result = run_command(args, timeout=3600 if restore_smoke else 1800)
     elapsed = round(time.perf_counter() - started, 3)
@@ -344,35 +361,31 @@ def backup_role(
 
 
 def pull_iran_files(settings: dict[str, str], payload: dict[str, Any], destination: Path) -> list[dict[str, str]]:
-    destination.mkdir(parents=True, exist_ok=True)
-    pulled: list[dict[str, str]] = []
-    target = f"{settings.get('IRAN_SSH_USER', 'root')}@{settings['IRAN_HOST']}"
-    for item in payload.get("files") or []:
-        remote_path = item.get("path")
-        if not remote_path:
-            continue
-        local_path = destination / Path(remote_path).name
-        args = [
-            "scp",
-            "-P",
-            settings.get("IRAN_SSH_PORT", "37067"),
-            "-o",
-            "StrictHostKeyChecking=accept-new",
-            f"{target}:{remote_path}",
-            str(local_path),
-        ]
-        result = run_command(args, timeout=1800)
-        if result.returncode != 0:
-            raise RuntimeError(f"failed to pull {remote_path}: {result.stderr.strip()}")
-        pulled.append({"remote_path": remote_path, "local_path": display_path(local_path)})
-    return pulled
+    del settings, payload, destination
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="production-backup",
+        operation="Iran SCP backup retrieval",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    settings = resolve_deploy_settings(manifest_path=args.manifest)
+    try:
+        if args.role != "foreign" or args.pull_to:
+            assert_legacy_direct_fi_ir_transport_retired(
+                component="production-backup",
+                operation="Iran or dual-host backup CLI",
+            )
+    except LegacyDirectFiIrTransportRetiredError:
+        payload = blocked_legacy_direct_fi_ir_transport_payload(component="production-backup")
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return 2
+
+    settings: dict[str, str] = {}
+    # A local backup must not require the historical Iran deployment manifest.
+    # Keep the local path independent from the peer boundary.
     stamp = args.timestamp or utc_stamp()
-    roles = ("foreign", "iran") if args.role == "both" else (args.role,)
+    roles = ("foreign",)
     results: list[dict[str, Any]] = []
     for role in roles:
         payload = backup_role(
@@ -385,8 +398,6 @@ def main(argv: list[str] | None = None) -> int:
             include_redis=not args.skip_redis,
             restore_smoke=args.restore_smoke,
         )
-        if args.pull_to and role == "iran":
-            payload["pulled_files"] = pull_iran_files(settings, payload, Path(args.pull_to))
         results.append(payload)
 
     output: dict[str, Any] = {

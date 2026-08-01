@@ -2,14 +2,19 @@ import json
 import unittest
 from types import SimpleNamespace
 
+from core.legacy_two_server_full_matrix_fence import (
+    LegacyTwoServerFullMatrixRetiredError,
+)
 from scripts.plan_production_full_matrix import (
     PlanError,
+    _forensic_build_plan,
     build_plan,
     default_prefix,
     validate_prefix,
 )
 
 
+@unittest.skip("two-server production planner is retired; V4 is the only supported path")
 class ProductionFullMatrixPlanTests(unittest.TestCase):
     def make_args(self, **overrides):
         values = {
@@ -39,7 +44,7 @@ class ProductionFullMatrixPlanTests(unittest.TestCase):
             validate_prefix("STAGE_20260624_")
 
     def test_plan_includes_isolation_and_two_sided_cleanup(self):
-        plan = build_plan(self.make_args())
+        plan = _forensic_build_plan(self.make_args())
         by_name = {stage["name"]: stage for stage in plan["stages"]}
 
         self.assertEqual(
@@ -105,12 +110,34 @@ class ProductionFullMatrixPlanTests(unittest.TestCase):
         )
 
     def test_plan_is_json_serializable_and_side_effect_free(self):
-        plan = build_plan(self.make_args())
+        plan = _forensic_build_plan(self.make_args())
 
         encoded = json.dumps(plan, ensure_ascii=False)
         self.assertIn('"mutates_production": false', encoded)
         self.assertNotIn("BOT_TOKEN", encoded)
         self.assertNotIn("895973", encoded)
+
+    def test_public_plan_api_is_retired_before_returning_direct_commands(self):
+        with self.assertRaises(LegacyTwoServerFullMatrixRetiredError):
+            build_plan(self.make_args())
+
+
+class RetiredProductionFullMatrixPlanTests(unittest.TestCase):
+    def test_public_and_forensic_plans_are_both_fenced(self):
+        args = SimpleNamespace(
+            prefix="PFM_20260624_180000_",
+            artifact_dir=None,
+            operator_account="operator",
+            reason=None,
+            users=1,
+            attempts_per_scenario=1,
+            target_rps=1.0,
+            telegram_ratio=0.0,
+            write_max_concurrency=1,
+        )
+        for call in (lambda: build_plan(args), lambda: _forensic_build_plan(args)):
+            with self.subTest(call=call), self.assertRaises(LegacyTwoServerFullMatrixRetiredError):
+                call()
 
 
 if __name__ == "__main__":

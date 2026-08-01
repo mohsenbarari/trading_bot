@@ -30,3 +30,12 @@ tmp/
 tests/
 repomix-output.xml
 docs/
+
+# Quarantined experimental P1 checkpoint work must not enter a generic image
+# build through the broad core/models/migrations COPY instructions.
+core/physical_full_matrix_v4_phase1_post_effect_strict_ack_checkpoint.py
+core/physical_full_matrix_v4_phase1_post_effect_strict_ack_same_root_admission.py
+core/physical_full_matrix_v4_phase1_post_effect_strict_ack_same_root_envelope.py
+core/physical_full_matrix_v4_phase1_same_root_coordinator_contract.py
+models/physical_full_matrix_v4_phase1_post_effect_strict_ack_checkpoint.py
+migrations/experimental/

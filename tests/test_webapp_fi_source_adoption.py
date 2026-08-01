@@ -115,6 +115,15 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
             target = self.application / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
+        (self.application / ".gitignore").write_text("mini_app_dist/\n", encoding="ascii")
+        static_sources = {
+            "mini_app_dist/index.html": b"<!doctype html><title>fixture</title>\n",
+            "mini_app_dist/assets/app.js": b"console.log('fixture');\n",
+        }
+        for relative, content in static_sources.items():
+            target = self.application / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
         self.release = _commit(self.application)
         self.transport_config, self.campaign_binding, self.initial_static_object_id = fixtures.make_initial_static_inputs(
             root=self.root,
@@ -125,6 +134,43 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
             control_commit=self.control_commit,
             control_tree=self.control_tree,
         )
+        self.expected_static_assets_manifest = fixtures.make_expected_static_assets_manifest(
+            root=self.root,
+            campaign_id=CAMPAIGN,
+            application_repository=self.application,
+            application_release_sha=self.release,
+            expected_alembic_revision=REVISION,
+            control_commit=self.control_commit,
+            control_tree=self.control_tree,
+        )
+        self.controller_campaigns_root, self.source_transport_workspace_root = fixtures.source_transport_fixture_roots(
+            self.root
+        )
+        self.controller_transport = prepare._load_controller_source_transport()
+        transport_campaigns_root = patch.object(
+            self.controller_transport, "CAMPAIGNS_ROOT", self.controller_campaigns_root
+        )
+        transport_workspace_root = patch.object(
+            self.controller_transport.contract,
+            "SOURCE_TRANSPORT_WORKSPACE_ROOT",
+            self.source_transport_workspace_root,
+        )
+        trusted_e53_environment = patch.object(
+            self.controller_transport,
+            "TRUSTED_E53_S3_ENVIRONMENT_PATH",
+            fixtures.trusted_e53_s3_environment_path(self.root),
+        )
+        transport_loader = patch.object(
+            prepare, "_load_controller_source_transport", return_value=self.controller_transport
+        )
+        transport_campaigns_root.start()
+        transport_workspace_root.start()
+        trusted_e53_environment.start()
+        transport_loader.start()
+        self.addCleanup(transport_campaigns_root.stop)
+        self.addCleanup(transport_workspace_root.stop)
+        self.addCleanup(trusted_e53_environment.stop)
+        self.addCleanup(transport_loader.stop)
         self.controller_key, self.controller_raw, self.controller_public = _key_material()
         self.controller_private = _private_file(self.root / "keys" / "controller.raw", self.controller_raw)
         self.controller_signing_authority = fixtures.campaign_bound_controller_signer(
@@ -157,6 +203,7 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         self.prepared = prepare.prepare_source_adoption_package(
             source_repository=self.control,
             application_source_repository=self.application,
+            expected_static_assets_manifest=self.expected_static_assets_manifest,
             control_commit=self.control_commit,
             application_release_sha=self.release,
             expected_alembic_revision=REVISION,
@@ -531,16 +578,21 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
 
     def test_package_binds_url_free_initial_static_upload_contract(self):
         controller_config = json.loads(self.transport_config.read_text(encoding="utf-8"))
+        controller_policy = self.controller_transport.load_controller_config(self.transport_config).policy
         with tarfile.open(self.archive, "r:") as archive:
             policy_member = archive.extractfile(prepare.INITIAL_STATIC_POLICY_MEMBER)
             request_member = archive.extractfile(prepare.INITIAL_STATIC_REQUEST_MEMBER)
+            expected_static_member = archive.extractfile(prepare.EXPECTED_STATIC_ASSETS_MEMBER)
             self.assertIsNotNone(policy_member)
             self.assertIsNotNone(request_member)
+            self.assertIsNotNone(expected_static_member)
             policy_raw = policy_member.read()
             request_raw = request_member.read()
+            expected_static_raw = expected_static_member.read()
 
         policy = json.loads(policy_raw.decode("utf-8"))
         request = json.loads(request_raw.decode("utf-8"))
+        expected_static = json.loads(expected_static_raw.decode("utf-8"))
         self.assertEqual(policy_raw, prepare.canonical_json_bytes(policy) + b"\n")
         self.assertEqual(request_raw, prepare.canonical_json_bytes(request) + b"\n")
         self.assertEqual(
@@ -548,15 +600,15 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
             {
                 "schema": prepare.INITIAL_STATIC_POLICY_SCHEMA,
                 "endpoint_host": "s3.ir-thr-at1.arvanstorage.ir",
-                "region": controller_config["region"],
-                "bucket": controller_config["bucket"],
-                "prefix": controller_config["prefix"],
-                "age_binary": "/usr/bin/age",
+                "region": controller_policy.region,
+                "bucket": controller_policy.bucket,
+                "prefix": controller_policy.prefix,
+                "age_binary": controller_policy.age_binary,
                 "workspace": prepare.INITIAL_STATIC_FI_WORKSPACE,
                 "controller_age_recipient": controller_config["controller_age_recipient"],
                 "webapp_fi_age_recipient": controller_config["webapp_fi_age_recipient"],
                 "webapp_ir_age_recipient": controller_config["webapp_ir_age_recipient"],
-                "maximum_plaintext_bytes": controller_config["maximum_plaintext_bytes"],
+                "maximum_plaintext_bytes": controller_policy.maximum_plaintext_bytes,
             },
         )
         self.assertNotIn("endpoint", policy)
@@ -582,12 +634,24 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
             },
         )
         self.assertNotIn(b"://", request_raw)
+        self.assertEqual(expected_static_raw, prepare.canonical_json_bytes(expected_static) + b"\n")
+        self.assertEqual(prepare.EXPECTED_STATIC_ASSETS_SCHEMA, expected_static["schema"])
+        self.assertEqual(CAMPAIGN, expected_static["campaign_id"])
+        self.assertEqual(self.release, expected_static["application"]["release_sha"])
+        self.assertEqual(REVISION, expected_static["application"]["expected_alembic_revision"])
+        self.assertEqual("mini_app_dist", expected_static["static_root"])
+        self.assertEqual(["assets/app.js", "index.html"], [item["path"] for item in expected_static["files"]])
+        self.assertEqual(
+            prepare.sha256_bytes(prepare.canonical_json_bytes(expected_static["files"])),
+            expected_static["files_sha256"],
+        )
 
         installed = self._install()
         candidate = Path(installed["candidate"])
         for member, expected in (
             (prepare.INITIAL_STATIC_POLICY_MEMBER, policy_raw),
             (prepare.INITIAL_STATIC_REQUEST_MEMBER, request_raw),
+            (prepare.EXPECTED_STATIC_ASSETS_MEMBER, expected_static_raw),
         ):
             installed_member = candidate / member
             self.assertEqual(installed_member.read_bytes(), expected)
@@ -603,11 +667,12 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         destination = self.root / "packages" / "binding-mismatch"
         with self.assertRaisesRegex(
             prepare.SourceAdoptionPreparationError,
-            "initial static controller binding does not match the prepared package",
+            "campaign binding does not match the prepared package",
         ):
             prepare.prepare_source_adoption_package(
                 source_repository=self.control,
                 application_source_repository=self.application,
+                expected_static_assets_manifest=self.expected_static_assets_manifest,
                 control_commit=self.control_commit,
                 application_release_sha=self.release,
                 expected_alembic_revision=REVISION,
@@ -620,6 +685,118 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         )
         self.assertFalse(destination.exists())
 
+    def test_cross_campaign_controller_config_blocks_before_source_package_preparation(self):
+        other_campaign = "source-adoption-other-20260730"
+        other_config = (
+            self.controller_campaigns_root
+            / other_campaign
+            / self.controller_transport.CONTROLLER_DIRECTORY_NAME
+            / self.controller_transport.SOURCE_TRANSPORT_CONFIG_FILENAME
+        )
+        other_config.parent.mkdir(mode=0o700, parents=True)
+        for directory in (other_config.parent.parent, other_config.parent):
+            directory.chmod(0o700)
+        shutil.copy2(self.transport_config, other_config)
+        other_config.chmod(0o600)
+
+        destination = self.root / "packages" / "cross-campaign-config"
+        with patch.object(
+            prepare,
+            "_require_control_source",
+            side_effect=AssertionError("cross-campaign config reached source-package preparation"),
+        ):
+            with self.assertRaisesRegex(
+                prepare.SourceAdoptionPreparationError,
+                "source transport controller config does not bind the campaign",
+            ):
+                prepare.prepare_source_adoption_package(
+                    source_repository=self.control,
+                    application_source_repository=self.application,
+                    expected_static_assets_manifest=self.expected_static_assets_manifest,
+                    control_commit=self.control_commit,
+                    application_release_sha=self.release,
+                    expected_alembic_revision=REVISION,
+                    source_transport_config=other_config,
+                    campaign_binding_path=self.campaign_binding,
+                    initial_static_object_id="cross-campaign-static",
+                    package_id="cross-campaign-package",
+                    destination=destination,
+                    apply=True,
+                )
+        self.assertFalse(destination.exists())
+
+    def test_package_requires_explicit_exact_release_manifest_not_ignored_output(self):
+        self.assertEqual(
+            "",
+            subprocess.check_output(
+                ["git", "-C", str(self.application), "ls-files", "--", prepare.EXPECTED_STATIC_ASSETS_ROOT],
+                text=True,
+            ),
+        )
+        descriptor = prepare.build_canonical_release_tree_descriptor(
+            application_source_repository=self.application,
+            application_release_sha=self.release,
+        )
+        self.assertFalse(
+            any(item["path"].startswith(prepare.EXPECTED_STATIC_ASSETS_ROOT + "/") for item in descriptor["files"])
+        )
+        with self.assertRaisesRegex(prepare.SourceAdoptionPreparationError, "direct controller mini_app_dist scanning is retired"):
+            prepare.build_expected_static_assets_manifest(
+                application_source_repository=self.application,
+                campaign_id=CAMPAIGN,
+                canonical_release_tree=descriptor,
+                expected_alembic_revision=REVISION,
+                control_commit=self.control_commit,
+                control_tree=self.control_tree,
+            )
+        self.assertFalse(hasattr(prepare, "_scan_expected_static_build_output"))
+        members = prepare._read_archive_members(self.archive)
+        expected_static = json.loads(members[prepare.EXPECTED_STATIC_ASSETS_MEMBER].decode("ascii"))
+        self.assertEqual(["assets/app.js", "index.html"], [item["path"] for item in expected_static["files"]])
+        self.assertEqual(
+            self.expected_static_assets_manifest.read_bytes(),
+            members[prepare.EXPECTED_STATIC_ASSETS_MEMBER],
+        )
+        self._verify_package()
+
+    def test_installer_rejects_expected_static_manifest_file_hash_mismatch(self):
+        members = prepare._read_archive_members(self.archive)
+        expected_static = json.loads(members[prepare.EXPECTED_STATIC_ASSETS_MEMBER].decode("ascii"))
+        expected_static["files"][0]["sha256"] = "0" * 64
+        descriptor = install._validate_canonical_release_tree_descriptor(
+            members[prepare.CANONICAL_RELEASE_TREE_MEMBER]
+        )
+        with self.assertRaisesRegex(
+            install.SourceAdoptionInstallError,
+            "file hash is invalid",
+        ):
+            install._validate_expected_static_assets_manifest(
+                install.canonical_json_bytes(expected_static) + b"\n",
+                descriptor=descriptor,
+                expected_campaign_id=CAMPAIGN,
+                expected_application={"release_sha": self.release, "expected_alembic_revision": REVISION},
+                expected_tooling={"control_commit": self.control_commit, "control_tree": self.control_tree},
+            )
+
+    def test_installer_rejects_expected_static_manifest_release_tree_mismatch(self):
+        members = prepare._read_archive_members(self.archive)
+        expected_static = json.loads(members[prepare.EXPECTED_STATIC_ASSETS_MEMBER].decode("ascii"))
+        expected_static["application"]["release_tree"] = "0" * 40
+        descriptor = install._validate_canonical_release_tree_descriptor(
+            members[prepare.CANONICAL_RELEASE_TREE_MEMBER]
+        )
+        with self.assertRaisesRegex(
+            install.SourceAdoptionInstallError,
+            "application binding is invalid",
+        ):
+            install._validate_expected_static_assets_manifest(
+                install.canonical_json_bytes(expected_static) + b"\n",
+                descriptor=descriptor,
+                expected_campaign_id=CAMPAIGN,
+                expected_application={"release_sha": self.release, "expected_alembic_revision": REVISION},
+                expected_tooling={"control_commit": self.control_commit, "control_tree": self.control_tree},
+            )
+
     def test_initial_static_release_tree_mismatch_blocks_before_package_candidate(self):
         binding = json.loads(self.campaign_binding.read_text(encoding="utf-8"))
         binding["application"]["release_tree"] = "0" * 40
@@ -629,11 +806,12 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         destination = self.root / "packages" / "release-tree-mismatch"
         with self.assertRaisesRegex(
             prepare.SourceAdoptionPreparationError,
-            "initial static controller binding does not match the prepared package",
+            "campaign binding does not match the prepared package",
         ):
             prepare.prepare_source_adoption_package(
                 source_repository=self.control,
                 application_source_repository=self.application,
+                expected_static_assets_manifest=self.expected_static_assets_manifest,
                 control_commit=self.control_commit,
                 application_release_sha=self.release,
                 expected_alembic_revision=REVISION,
@@ -641,6 +819,34 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
                 campaign_binding_path=self.campaign_binding,
                 initial_static_object_id="release-tree-mismatch-static",
                 package_id="release-tree-mismatch",
+                destination=destination,
+                apply=True,
+            )
+        self.assertFalse(destination.exists())
+
+    def test_exact_release_static_manifest_mismatch_blocks_before_package_candidate(self):
+        value = json.loads(self.expected_static_assets_manifest.read_text(encoding="ascii"))
+        value["application"]["release_tree"] = "0" * 40
+        _private_file(
+            self.expected_static_assets_manifest,
+            prepare.canonical_json_bytes(value) + b"\n",
+        )
+        destination = self.root / "packages" / "manifest-mismatch"
+        with self.assertRaisesRegex(
+            prepare.SourceAdoptionPreparationError,
+            "exact-release expected static assets manifest is not bound",
+        ):
+            prepare.prepare_source_adoption_package(
+                source_repository=self.control,
+                application_source_repository=self.application,
+                expected_static_assets_manifest=self.expected_static_assets_manifest,
+                control_commit=self.control_commit,
+                application_release_sha=self.release,
+                expected_alembic_revision=REVISION,
+                source_transport_config=self.transport_config,
+                campaign_binding_path=self.campaign_binding,
+                initial_static_object_id="manifest-mismatch-static",
+                package_id="manifest-mismatch",
                 destination=destination,
                 apply=True,
             )
@@ -678,6 +884,7 @@ class WebAppFiSourceAdoptionTests(unittest.TestCase):
         package_plan = prepare.prepare_source_adoption_package(
             source_repository=self.control,
             application_source_repository=self.application,
+            expected_static_assets_manifest=self.expected_static_assets_manifest,
             control_commit=self.control_commit,
             application_release_sha=self.release,
             expected_alembic_revision=REVISION,

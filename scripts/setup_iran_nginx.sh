@@ -75,6 +75,18 @@ server {
         add_header Referrer-Policy "no-referrer" always;
     }
 
+    # THREE_SITE_LEGACY_INTERNAL_INGRESS_FENCED: the target topology never
+    # accepts FI<->IR sync or home-server control through public Nginx.
+    location = /api/sync/receive {
+        access_log off;
+        return 410;
+    }
+
+    location ~ ^/api/(sync|sessions/internal|trades/internal|offers/internal|auth/internal|invitations/internal|customers/internal)(/|\$) {
+        access_log off;
+        return 410;
+    }
+
     location /api/ {
         proxy_pass http://trading_bot_api;
         proxy_set_header Host \$host;

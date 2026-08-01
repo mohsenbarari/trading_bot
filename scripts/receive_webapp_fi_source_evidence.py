@@ -310,6 +310,17 @@ def _receive_plan(
         lambda: receiver.transport._validate_controller_config(controller_config),
         message="controller source transport configuration is invalid",
     )
+    campaign = _raise_binding_error(
+        lambda: receiver.binding.load_campaign_binding(Path(campaign_binding_path)),
+        message="canonical campaign binding is invalid",
+    )
+    controller_config = _raise_transport_error(
+        lambda: receiver.transport.require_controller_config_for_campaign(
+            controller_config=controller_config,
+            campaign_id=campaign.campaign_id,
+        ),
+        message="controller source transport config does not bind the canonical campaign",
+    )
     data_root = _raise_receiver_error(
         receiver._require_controller_receive_data_root,
         message="controller source evidence receive data root is unsafe",
@@ -318,10 +329,6 @@ def _receive_plan(
     policy_sha256 = _raise_receiver_error(
         lambda: receiver.policy_binding_sha256(policy),
         message="controller source transport policy is invalid",
-    )
-    campaign = _raise_binding_error(
-        lambda: receiver.binding.load_campaign_binding(Path(campaign_binding_path)),
-        message="canonical campaign binding is invalid",
     )
     binding_payload = _read_root_private_file(
         Path(campaign_binding_path),

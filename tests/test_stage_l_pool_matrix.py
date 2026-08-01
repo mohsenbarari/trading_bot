@@ -2,8 +2,11 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import scripts.run_stage_l_pool_matrix as pool_matrix
+from core.legacy_direct_fi_ir_transport_fence import LegacyDirectFiIrTransportRetiredError
 from scripts.run_stage_l_pool_matrix import (
     apply_pool_script,
     collect_app_logs_script,
@@ -201,6 +204,33 @@ class StageLPoolMatrixTests(unittest.TestCase):
     def test_pool_matrix_emits_done_marker_for_teed_logs(self):
         source = Path(pool_matrix.__file__).read_text(encoding="utf-8")
         self.assertIn("STAGE_L_POOL_MATRIX_DONE", source)
+
+    def test_legacy_root_compose_pool_matrix_is_fenced_before_manifest_or_artifact_work(self):
+        args = SimpleNamespace(manifest="must-not-be-read.env")
+        with patch.object(
+            pool_matrix,
+            "resolve_deploy_settings",
+            side_effect=AssertionError("manifest resolution"),
+        ), patch.object(
+            pool_matrix.Path,
+            "mkdir",
+            side_effect=AssertionError("artifact write"),
+        ):
+            with self.assertRaises(LegacyDirectFiIrTransportRetiredError):
+                pool_matrix.run_matrix(args)
+
+    def test_legacy_root_compose_pool_matrix_cli_returns_stable_block(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+
+        stdout = StringIO()
+        with redirect_stdout(stdout):
+            exit_code = pool_matrix.main(["--manifest", "must-not-be-read.env", "--json"])
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(payload["status"], "blocked_legacy_direct_fi_ir_transport_retired")
+        self.assertEqual(payload["component"], "stage-l7-production-pool-matrix")
 
 
 if __name__ == "__main__":

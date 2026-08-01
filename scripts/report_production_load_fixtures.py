@@ -25,6 +25,11 @@ from scripts.capture_production_baseline import (
     utc_stamp,
 )
 from scripts.deploy_config import resolve_deploy_settings
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+    blocked_legacy_direct_fi_ir_transport_payload,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -200,6 +205,10 @@ class Runner:
         if role == "foreign":
             command = f"cd {shlex.quote(str(REPO_ROOT))} && " + compose_probe_script("docker-compose.yml", body)
             return ["bash", "-lc", command]
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="stage-l2-production-load-fixtures",
+            operation="Iran SSH fixture command construction",
+        )
         command = f"cd {quote_remote(self.settings['IRAN_PROJECT_DIR'])} && " + compose_probe_script("docker-compose.iran.yml", body)
         return remote_args(self.settings, command)
 
@@ -383,6 +392,10 @@ def sync_worker_compose_args(runner: Runner, role: str, action: str) -> list[str
     )
     if role == "foreign":
         return ["bash", "-lc", f"cd {shlex.quote(str(REPO_ROOT))} && {body}"]
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="stage-l2-production-load-fixtures",
+        operation="Iran SSH sync-worker control command construction",
+    )
     return remote_args(runner.settings, f"cd {quote_remote(runner.settings['IRAN_PROJECT_DIR'])} && {body}")
 
 
@@ -500,6 +513,10 @@ def build_prepare_args(args: argparse.Namespace, prefix: str) -> list[str]:
 
 
 def run_report(args: argparse.Namespace) -> dict[str, Any]:
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="stage-l2-production-load-fixtures",
+        operation="legacy two-site fixture/sync workload",
+    )
     stamp = args.timestamp or utc_stamp()
     prefix = args.prefix or f"loadtest_{stamp}_"
     artifact_root = Path(args.artifact_root)
@@ -675,6 +692,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="stage-l2-production-load-fixtures",
+            operation="legacy two-site fixture/sync workload CLI",
+        )
+    except LegacyDirectFiIrTransportRetiredError:
+        print(json.dumps(blocked_legacy_direct_fi_ir_transport_payload(
+            component="stage-l2-production-load-fixtures"
+        ), ensure_ascii=False, sort_keys=True))
+        return 2
+
     args = parse_args(argv)
     try:
         payload = run_report(args)

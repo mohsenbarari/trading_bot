@@ -31,6 +31,7 @@ class FakeDB:
         return _Ctx()
 
 
+@unittest.skip("legacy direct FI<->IR HTTP receiver is permanently retired")
 class SyncRouterFailClosedPolicyTests(unittest.IsolatedAsyncioTestCase):
     async def test_registration_policy_rejection_and_dropped_fields_are_reported(self):
         item = {

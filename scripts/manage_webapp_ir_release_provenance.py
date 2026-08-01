@@ -89,7 +89,7 @@ INSTALL_RECEIPT_SCHEMA = "gold-trade-wa-ir-release-provenance-install-receipt-v2
 STAGE_RECEIPT_SCHEMA = "gold-trade-wa-ir-artifact-stage-receipt-v1"
 BOOTSTRAP_RECEIPT_SCHEMA = "gold-trade-wa-ir-stage-bootstrap-receipt-v1"
 BOOTSTRAP_RECEIPT_NAME = "bootstrap-receipt.json"
-CONSUMER_CONFIG_SCHEMA = "gold-trade-wa-ir-artifact-stage-config-v3"
+CONSUMER_CONFIG_SCHEMA = "gold-trade-wa-ir-artifact-stage-config-v4"
 BOOTSTRAP_CONSUMER_CONFIG = "config/consumer.json"
 WEBAPP_FI_SOURCE_PROVENANCE_SCHEMA = "gold-trade-wa-ir-webapp-fi-source-provenance-v1"
 WEBAPP_FI_SOURCE_PROVENANCE_INPUT_SCHEMA = "gold-trade-wa-ir-webapp-fi-source-provenance-input-v1"
@@ -168,15 +168,21 @@ ARTIFACT_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 SITE_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 BUNDLE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 OBJECT_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/=-]{0,1023}$")
+CAMPAIGN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$")
+AGE_RECIPIENT_RE = re.compile(r"^age1[ac-hj-np-z02-9]{20,128}$")
+WA_IR_CAMPAIGN_IDENTITY_ROOT = PurePosixPath("/etc/trading-bot-three-site/campaigns")
+WA_IR_BOOTSTRAP_IDENTITY_SUFFIX = PurePosixPath("webapp-ir/bootstrap.agekey")
 CONSUMER_CONFIG_FIELDS = frozenset(
     {
         "schema",
+        "campaign_id",
         "endpoint",
         "region",
         "bucket",
         "prefix",
         "age_binary",
         "age_identity_file",
+        "age_recipient",
         "workspace",
         "source_site",
         "source_signing_public_key_base64",
@@ -477,6 +483,17 @@ def _decode_exact_public_key(value: object, *, field: str) -> bytes:
     return decoded
 
 
+def _campaign_bootstrap_identity_file(campaign_id: object) -> str:
+    """Return the only campaign-scoped WA-IR bootstrap identity path."""
+
+    if not isinstance(campaign_id, str) or not CAMPAIGN_ID_RE.fullmatch(campaign_id):
+        raise ReleaseProvenanceError("bootstrap received consumer campaign_id is invalid")
+    path = WA_IR_CAMPAIGN_IDENTITY_ROOT / campaign_id / WA_IR_BOOTSTRAP_IDENTITY_SUFFIX
+    if not path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+        raise ReleaseProvenanceError("bootstrap received consumer campaign identity path is invalid")
+    return path.as_posix()
+
+
 def _bootstrap_member_path(candidate: Path, name: str) -> Path:
     """Return one fixed bootstrap member only through root-private ancestors."""
 
@@ -504,7 +521,7 @@ def _load_hash_bound_bootstrap_consumer_config(
     files: Mapping[str, Any],
     expected_sha256: str,
 ) -> tuple[bytes, bytes]:
-    """Read the received v3 config only after rechecking every bootstrap member.
+    """Read the received v4 config only after rechecking every bootstrap member.
 
     The receive receipt records hashes that the constrained bootstrap receiver
     checked before extraction.  Rechecking those members here closes the gap
@@ -532,9 +549,16 @@ def _load_hash_bound_bootstrap_consumer_config(
         raise ReleaseProvenanceError("bootstrap received consumer config does not match its hash-bound receipt")
     config = _strict_json(consumer_config_raw, field="bootstrap received consumer config")
     if set(config) != CONSUMER_CONFIG_FIELDS or config.get("schema") != CONSUMER_CONFIG_SCHEMA:
-        raise ReleaseProvenanceError("bootstrap received consumer config is not the exact v3 schema")
+        raise ReleaseProvenanceError("bootstrap received consumer config is not the exact v4 schema")
     if config.get("source_site") != STAGE_SOURCE_SITE:
         raise ReleaseProvenanceError("bootstrap received consumer config is not pinned to webapp_fi")
+    campaign_id = config.get("campaign_id")
+    expected_identity = _campaign_bootstrap_identity_file(campaign_id)
+    if config.get("age_identity_file") != expected_identity:
+        raise ReleaseProvenanceError("bootstrap received consumer config is not pinned to its campaign identity")
+    age_recipient = config.get("age_recipient")
+    if not isinstance(age_recipient, str) or not AGE_RECIPIENT_RE.fullmatch(age_recipient):
+        raise ReleaseProvenanceError("bootstrap received consumer age recipient is invalid")
     # The normal stage consumer verifies its own transport settings.  This
     # control-plane verifier needs only the two separately enrolled public
     # provenance keys and validates their exact wire representation here.

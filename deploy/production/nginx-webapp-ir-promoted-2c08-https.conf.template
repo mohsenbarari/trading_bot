@@ -10,6 +10,16 @@ server {
     client_max_body_size 50M;
     access_log off;
 
+    # Promotion does not revive the legacy FI<->IR HTTP plane.  Close these
+    # paths before the catch-all HTTPS redirect.
+    location = /api/sync/receive {
+        return 410;
+    }
+
+    location ~ ^/api/(sync|sessions/internal|trades/internal|offers/internal|auth/internal|invitations/internal|customers/internal)(/|$) {
+        return 410;
+    }
+
     location / {
         return 301 https://$host$request_uri;
     }
@@ -38,11 +48,18 @@ server {
         return 404;
     }
 
-    # The promoted runtime has direct sync disabled.  Keep this legacy
-    # receiver unreachably fenced even though the generic API route follows.
+    # THREE_SITE_LEGACY_INTERNAL_INGRESS_FENCED: the promoted runtime has no
+    # FI<->IR HTTP ingress, even though the generic public API route follows.
     location = /api/sync/receive {
         access_log off;
-        return 404;
+        return 410;
+    }
+
+    # This comes before the public API route and removes every historic
+    # home-server forwarder from the externally reachable surface.
+    location ~ ^/api/(sync|sessions/internal|trades/internal|offers/internal|auth/internal|invitations/internal|customers/internal)(/|$) {
+        access_log off;
+        return 410;
     }
 
     location ~ ^/api/invitations/(lookup|validate)/ {

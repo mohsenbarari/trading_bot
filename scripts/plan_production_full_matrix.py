@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Build a side-effect-free production full-matrix command plan."""
+"""Retired historical source for the superseded two-server command planner.
+
+The command-generating implementation remains in this file only so old
+artifacts can be understood in source control.  Its CLI never emits a plan:
+the approved three-site architecture uses the V4 Witness/Object-Storage
+boundaries instead.
+"""
 
 from __future__ import annotations
 
@@ -7,9 +13,46 @@ import argparse
 import json
 import os
 import shlex
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from core.legacy_two_server_full_matrix_fence import (  # noqa: E402
+    assert_legacy_two_server_full_matrix_retired,
+    blocked_legacy_two_server_full_matrix_payload,
+)
+
+
+# The command factories below are retained only as deliberately underscored
+# forensic source. Supported imports expose a fence, never an SSH/SCP plan.
+__all__ = (
+    "PlanError",
+    "build_plan",
+    "default_prefix",
+    "main",
+    "validate_prefix",
+)
+
+
+def _retire_legacy_forensic_source(function: Any) -> Any:
+    """Make retained two-server source text uncallable from any import path."""
+
+    operation = f"forensic source {function.__name__}"
+
+    def _rejected(*args: Any, **kwargs: Any) -> Any:
+        del args, kwargs
+        assert_legacy_two_server_full_matrix_retired(
+            component="production-full-matrix-planner",
+            operation=operation,
+        )
+
+    return _rejected
 
 
 ALLOWED_PREFIXES = ("PFM_", "PRODTEST_", "FMX_")
@@ -50,19 +93,23 @@ def shell_join(parts: list[str]) -> str:
     return " ".join(shlex.quote(str(part)) for part in parts)
 
 
-def iran(command: str) -> str:
+@_retire_legacy_forensic_source
+def _forensic_iran(command: str) -> str:
     return shell_join(["ssh", "-p", IRAN_SSH_PORT, IRAN_HOST, f"cd {IRAN_PROJECT_DIR} && {command}"])
 
 
-def foreign_compose(*parts: str) -> str:
+@_retire_legacy_forensic_source
+def _forensic_foreign_compose(*parts: str) -> str:
     return shell_join(["docker", "compose", *parts])
 
 
-def iran_compose(*parts: str) -> str:
-    return iran(shell_join(["docker-compose", *parts]))
+@_retire_legacy_forensic_source
+def _forensic_iran_compose(*parts: str) -> str:
+    return _forensic_iran(shell_join(["docker-compose", *parts]))
 
 
-def cleanup_command(*, role: str, prefix: str, artifact: str, dry_run: bool) -> str:
+@_retire_legacy_forensic_source
+def _forensic_cleanup_command(*, role: str, prefix: str, artifact: str, dry_run: bool) -> str:
     args = [
         "exec",
         "-T",
@@ -85,17 +132,19 @@ def cleanup_command(*, role: str, prefix: str, artifact: str, dry_run: bool) -> 
         args.append("--allow-production-hard-delete")
     args.extend(["--artifact", artifact])
     if role == "foreign":
-        return foreign_compose(*args)
+        return _forensic_foreign_compose(*args)
     if role == "iran":
-        return iran_compose(*args)
+        return _forensic_iran_compose(*args)
     raise PlanError(f"unsupported cleanup role: {role}")
 
 
-def isolation_command(*parts: str) -> str:
-    return iran_compose("exec", "-T", "app", "python", "scripts/production_test_isolation.py", *parts)
+@_retire_legacy_forensic_source
+def _forensic_isolation_command(*parts: str) -> str:
+    return _forensic_iran_compose("exec", "-T", "app", "python", "scripts/production_test_isolation.py", *parts)
 
 
-def build_plan(args: argparse.Namespace) -> dict[str, Any]:
+@_retire_legacy_forensic_source
+def _forensic_build_plan(args: argparse.Namespace) -> dict[str, Any]:
     prefix = validate_prefix(args.prefix)
     artifact_dir = Path(args.artifact_dir or (DEFAULT_ARTIFACT_ROOT / prefix))
     reason = args.reason or f"production_full_matrix_{utc_stamp()}"
@@ -147,16 +196,16 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             {
                 "name": "production_status",
                 "commands": [
-                    foreign_compose("ps"),
-                    iran_compose("ps"),
+                    _forensic_foreign_compose("ps"),
+                    _forensic_iran_compose("ps"),
                     "curl -fsS https://coin.gold-trade.ir/api/config",
-                    isolation_command("status"),
+                    _forensic_isolation_command("status"),
                 ],
             },
             {
                 "name": "enable_isolation",
                 "commands": [
-                    isolation_command(
+                    _forensic_isolation_command(
                         "enable",
                         "--allow-account-name",
                         args.operator_account,
@@ -170,19 +219,19 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                         reason,
                         "--yes-production",
                     ),
-                    isolation_command("status"),
+                    _forensic_isolation_command("status"),
                 ],
             },
             {
                 "name": "pre_run_cleanup_dry_run",
                 "commands": [
-                    cleanup_command(
+                    _forensic_cleanup_command(
                         role="foreign",
                         prefix=prefix,
                         artifact=pre_artifact("foreign-core-cleanup-pre-dry-run"),
                         dry_run=True,
                     ),
-                    cleanup_command(
+                    _forensic_cleanup_command(
                         role="iran",
                         prefix=prefix,
                         artifact=pre_artifact("iran-core-cleanup-pre-dry-run"),
@@ -279,13 +328,13 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             {
                 "name": "post_run_cleanup_dry_run",
                 "commands": [
-                    cleanup_command(
+                    _forensic_cleanup_command(
                         role="foreign",
                         prefix=prefix,
                         artifact=pre_artifact("foreign-core-cleanup-post-dry-run"),
                         dry_run=True,
                     ),
-                    cleanup_command(
+                    _forensic_cleanup_command(
                         role="iran",
                         prefix=prefix,
                         artifact=pre_artifact("iran-core-cleanup-post-dry-run"),
@@ -296,13 +345,13 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             {
                 "name": "hard_delete_cleanup",
                 "commands": [
-                    cleanup_command(
+                    _forensic_cleanup_command(
                         role="foreign",
                         prefix=prefix,
                         artifact=pre_artifact("foreign-core-cleanup-hard-delete"),
                         dry_run=False,
                     ),
-                    cleanup_command(
+                    _forensic_cleanup_command(
                         role="iran",
                         prefix=prefix,
                         artifact=pre_artifact("iran-core-cleanup-hard-delete"),
@@ -313,24 +362,38 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
             {
                 "name": "post_delete_verification_and_unlock",
                 "commands": [
-                    cleanup_command(
+                    _forensic_cleanup_command(
                         role="foreign",
                         prefix=prefix,
                         artifact=pre_artifact("foreign-core-cleanup-post-delete-dry-run"),
                         dry_run=True,
                     ),
-                    cleanup_command(
+                    _forensic_cleanup_command(
                         role="iran",
                         prefix=prefix,
                         artifact=pre_artifact("iran-core-cleanup-post-delete-dry-run"),
                         dry_run=True,
                     ),
-                    isolation_command("disable"),
-                    isolation_command("status"),
+                    _forensic_isolation_command("disable"),
+                    _forensic_isolation_command("status"),
                 ],
             },
         ],
     }
+
+
+def _retire_legacy_public_plan_api() -> NoReturn:
+    assert_legacy_two_server_full_matrix_retired(
+        component="production-full-matrix-planner",
+        operation="two-server command-plan construction",
+    )
+
+
+def build_plan(args: argparse.Namespace) -> dict[str, Any]:
+    """Retired public boundary; it cannot return direct FI<->IR commands."""
+
+    del args
+    _retire_legacy_public_plan_api()
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -349,14 +412,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-    try:
-        plan = build_plan(args)
-    except PlanError as exc:
-        print(json.dumps({"status": "error", "message": str(exc)}, sort_keys=True))
-        return 2
-    print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))
-    return 0
+    """Fail closed instead of printing direct FI<->IR command material."""
+
+    del argv
+    print(
+        json.dumps(
+            blocked_legacy_two_server_full_matrix_payload(
+                component="production-full-matrix-planner"
+            ),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+    return 2
 
 
 if __name__ == "__main__":

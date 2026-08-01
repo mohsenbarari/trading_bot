@@ -11,6 +11,7 @@ from pathlib import Path
 import shlex
 import subprocess
 import sys
+import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -30,10 +31,14 @@ CONTROL_TREE = "d" * 40
 BOOTSTRAP_ID = "20260730T120000Z-1234567890abcdef12345678"
 BOOTSTRAP_URL = "https://example.invalid/private/bootstrap?versionId=bootstrap-v1&signature=bootstrap"
 MANIFEST_URL = "https://example.invalid/private/manifest?versionId=manifest-v1&signature=manifest"
+CAMPAIGN_ID = "wa-ir-standby-97265988-4b12-444e-abda-165573b2769f"
+AGE_RECIPIENT = "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
 
 
 def publisher_config() -> SimpleNamespace:
     return SimpleNamespace(
+        campaign_id=CAMPAIGN_ID,
+        age_recipient=AGE_RECIPIENT,
         source_site=wrapper.SOURCE_SITE,
         endpoint="https://s3.ir-thr-at1.arvanstorage.ir",
         region="ir-thr-at1",
@@ -44,13 +49,19 @@ def publisher_config() -> SimpleNamespace:
 
 def consumer_config() -> SimpleNamespace:
     return SimpleNamespace(
+        campaign_id=CAMPAIGN_ID,
+        age_recipient=AGE_RECIPIENT,
         source_site=wrapper.SOURCE_SITE,
         endpoint="https://s3.ir-thr-at1.arvanstorage.ir",
         region="ir-thr-at1",
         bucket="private-stage-bucket",
         prefix="campaign/wa-ir",
         age_binary="/usr/bin/age",
-        age_identity_file=Path("/etc/trading-bot-three-site/wa-ir/artifact-stage-2c08.agekey"),
+        age_identity_file=Path(
+            "/etc/trading-bot-three-site/campaigns/"
+            + CAMPAIGN_ID
+            + "/webapp-ir/bootstrap.agekey"
+        ),
         workspace=Path("/srv/trading-bot-three-site-staging-data/wa-ir-standby/workspace"),
         source_signing_public_key=b"p" * 32,
         webapp_fi_source_attestation_public_key=b"f" * 32,
@@ -63,12 +74,14 @@ def prepared_bootstrap_config(*, consumer: SimpleNamespace | None = None) -> dic
     consumer = consumer or consumer_config()
     return {
         "schema": wrapper.stage.CONFIG_SCHEMA,
+        "campaign_id": consumer.campaign_id,
         "endpoint": consumer.endpoint,
         "region": consumer.region,
         "bucket": consumer.bucket,
         "prefix": consumer.prefix,
         "age_binary": consumer.age_binary,
         "age_identity_file": str(consumer.age_identity_file),
+        "age_recipient": consumer.age_recipient,
         "workspace": str(consumer.workspace),
         "source_site": consumer.source_site,
         "source_signing_public_key_base64": base64.b64encode(consumer.source_signing_public_key).decode("ascii"),
@@ -179,7 +192,7 @@ def normal_inputs(*, control_sha: str = CONTROL_SHA) -> list[object]:
     ]
 
 
-def rendered_command(url: str) -> str:
+def rendered_command(url: str, *, known_hosts: Path) -> str:
     remote = "remote-control -- " + shlex.quote(url)
     return shlex.join(
         [
@@ -188,6 +201,10 @@ def rendered_command(url: str) -> str:
             "BatchMode=yes",
             "-o",
             "StrictHostKeyChecking=yes",
+            "-o",
+            "UserKnownHostsFile=" + str(known_hosts),
+            "-o",
+            "GlobalKnownHostsFile=/dev/null",
             wrapper.bootstrap_renderer.REMOTE_HOST,
             remote,
         ]
@@ -196,6 +213,14 @@ def rendered_command(url: str) -> str:
 
 class SevenObjectStageControllerTests(unittest.TestCase):
     def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory(prefix="wa-ir-seven-object-")
+        self.addCleanup(self.temporary.cleanup)
+        self.known_hosts = Path(self.temporary.name) / "wa-ir.known_hosts"
+        self.known_hosts.write_text(
+            "95.38.164.29 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEZpeHR1cmVLbm93bkhvc3RLZXkxMjM0NTY=\n",
+            encoding="ascii",
+        )
+        self.known_hosts.chmod(0o644)
         self.bootstrap_verifier = mock.Mock(return_value=prepared_bootstrap_package())
         self.bootstrap_preparer = mock.patch.object(
             wrapper,
@@ -229,6 +254,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
             "consumer_config_path": Path("/root/private/consumer.json"),
             "bootstrap_package_directory": Path("/srv/stage/bootstrap-package"),
             "bootstrap_preparation_receipt": Path("/srv/stage/bootstrap-package/bootstrap-preparation-receipt.json"),
+            "wa_ir_known_hosts": self.known_hosts,
             "artifact_specs": ["release-bundle=/prepared/release-bundle"],
             "binding_specs": ["release-bundle=release_sha=" + wrapper.EXPECTED_APPLICATION_RELEASE_SHA],
         }
@@ -271,7 +297,9 @@ class SevenObjectStageControllerTests(unittest.TestCase):
             mock.patch.object(
                 wrapper.bootstrap_renderer,
                 "render_receive_command",
-                side_effect=lambda **kwargs: events.append(("bootstrap-render", kwargs)) or rendered_command(BOOTSTRAP_URL),
+                side_effect=lambda **kwargs: events.append(("bootstrap-render", kwargs)) or rendered_command(
+                    BOOTSTRAP_URL, known_hosts=self.known_hosts
+                ),
             ),
             mock.patch.object(
                 wrapper.stage,
@@ -281,7 +309,9 @@ class SevenObjectStageControllerTests(unittest.TestCase):
             mock.patch.object(
                 wrapper.normal_renderer,
                 "render_consume_command",
-                side_effect=lambda **kwargs: events.append(("normal-render", kwargs)) or rendered_command(MANIFEST_URL),
+                side_effect=lambda **kwargs: events.append(("normal-render", kwargs)) or rendered_command(
+                    MANIFEST_URL, known_hosts=self.known_hosts
+                ),
             ),
         ):
             evidence = self._run(ssh_runner=ssh_runner)
@@ -304,6 +334,8 @@ class SevenObjectStageControllerTests(unittest.TestCase):
         normal_renderer_arguments = events[3][1]
         self.assertIn(BOOTSTRAP_URL.encode("utf-8"), bootstrap_renderer_arguments["publish_receipt_bytes"])
         self.assertIn(MANIFEST_URL.encode("utf-8"), normal_renderer_arguments["publish_receipt_bytes"])
+        self.assertEqual(self.known_hosts, bootstrap_renderer_arguments["wa_ir_known_hosts"])
+        self.assertEqual(self.known_hosts, normal_renderer_arguments["wa_ir_known_hosts"])
         self.assertEqual(
             wrapper.BOOTSTRAP_ROOT + "/received-" + CONTROL_SHA + "-" + BOOTSTRAP_ID,
             normal_renderer_arguments["bootstrap_candidate"],
@@ -342,6 +374,28 @@ class SevenObjectStageControllerTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(wrapper.SevenObjectStageError, "does not match the pinned consumer key"):
                 self._run()
+        create_client.assert_not_called()
+        publish_bootstrap.assert_not_called()
+
+    def test_recipient_mismatch_stops_before_ssh_or_object_storage(self) -> None:
+        mismatched_publisher = publisher_config()
+        mismatched_publisher.age_recipient = "age1pppppppppppppppppppppppppppppppppppppppppppppppp"
+        root, _publisher, consumer, public_key, parser, binder, preflight = self._common_patches()
+        with (
+            root,
+            mock.patch.object(wrapper.stage, "load_publisher_config", return_value=mismatched_publisher),
+            consumer,
+            public_key,
+            parser,
+            binder,
+            preflight,
+            mock.patch.object(wrapper, "_prepare_bootstrap_root") as prepare_root,
+            mock.patch.object(wrapper.stage, "create_s3_client") as create_client,
+            mock.patch.object(wrapper.stage, "publish_bootstrap_package") as publish_bootstrap,
+        ):
+            with self.assertRaisesRegex(wrapper.SevenObjectStageError, "age recipient does not match"):
+                self._run()
+        prepare_root.assert_not_called()
         create_client.assert_not_called()
         publish_bootstrap.assert_not_called()
 
@@ -444,7 +498,11 @@ class SevenObjectStageControllerTests(unittest.TestCase):
             preflight,
             mock.patch.object(wrapper.stage, "create_s3_client", return_value=object()),
             mock.patch.object(wrapper.stage, "publish_bootstrap_package", return_value=bootstrap_receipt()) as publish_bootstrap,
-            mock.patch.object(wrapper.bootstrap_renderer, "render_receive_command", return_value=rendered_command(BOOTSTRAP_URL)),
+            mock.patch.object(
+                wrapper.bootstrap_renderer,
+                "render_receive_command",
+                return_value=rendered_command(BOOTSTRAP_URL, known_hosts=self.known_hosts),
+            ),
             mock.patch.object(wrapper.stage, "publish_bundle") as publish_normal,
         ):
             runner_results = iter((0, 23))
@@ -471,7 +529,11 @@ class SevenObjectStageControllerTests(unittest.TestCase):
             preflight,
             mock.patch.object(wrapper.stage, "create_s3_client", return_value=object()),
             mock.patch.object(wrapper.stage, "publish_bootstrap_package", return_value=bootstrap_receipt()),
-            mock.patch.object(wrapper.bootstrap_renderer, "render_receive_command", return_value=rendered_command(BOOTSTRAP_URL)),
+            mock.patch.object(
+                wrapper.bootstrap_renderer,
+                "render_receive_command",
+                return_value=rendered_command(BOOTSTRAP_URL, known_hosts=self.known_hosts),
+            ),
             mock.patch.object(wrapper.stage, "publish_bundle", return_value=malformed) as publish_normal,
             mock.patch.object(wrapper.normal_renderer, "render_consume_command") as render_normal,
         ):
@@ -511,6 +573,8 @@ class SevenObjectStageControllerTests(unittest.TestCase):
                     "/srv/stage/bootstrap-package",
                     "--bootstrap-preparation-receipt",
                     "/srv/stage/bootstrap-package/bootstrap-preparation-receipt.json",
+                    "--wa-ir-known-hosts",
+                    str(self.known_hosts),
                 ]
             )
         self.assertEqual(2, result)

@@ -9,6 +9,10 @@ from typing import Any
 import httpx
 
 from core.config import settings
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+)
 from core.registration_contracts import TelegramOTPDeliveryCommand
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, peer_server_url_for
 from core.trade_forwarding import _json_body, _tls_verify_setting, sign_internal_payload
@@ -23,15 +27,34 @@ async def forward_telegram_otp_delivery(
     *,
     timeout_seconds: float | None = None,
 ) -> tuple[int, Any]:
+    # Preserve a local wrong-role result; it has no peer/data-plane effect.
+    if current_server() != SERVER_IRAN:
+        logger.warning(
+            "Telegram OTP forwarding rejected outside Iran",
+            extra={"event": "telegram_otp.forward_attempt", "source_server": current_server(), "target_server": SERVER_FOREIGN},
+        )
+        return 403, {"detail": "OTP delivery is Iran-authoritative"}
+
+    # The former Iran->FI HTTP delivery acknowledgement is retired.  SMS
+    # fallback remains local; no peer URL, OTP payload, or HMAC is produced.
+    try:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="telegram-otp-transport",
+            operation="direct peer Telegram OTP delivery command",
+        )
+    except LegacyDirectFiIrTransportRetiredError:
+        logger.warning(
+            "Telegram OTP direct transport is retired",
+            extra={"event": "telegram_otp.direct_transport_retired", "target_server": SERVER_FOREIGN},
+        )
+        return 503, {"detail": "Telegram delivery peer unavailable"}
+
     context = {
         "event": "otp.telegram_delivery_attempt",
         "source_server": current_server(),
         "target_server": SERVER_FOREIGN,
         "otp_request_id": str(command.otp_request_id),
     }
-    if current_server() != SERVER_IRAN:
-        logger.warning("Telegram OTP forwarding rejected outside Iran", extra=context)
-        return 403, {"detail": "OTP delivery is Iran-authoritative"}
     target_url = peer_server_url_for(SERVER_FOREIGN)
     if not target_url:
         logger.warning("Telegram OTP foreign peer unavailable", extra=context)

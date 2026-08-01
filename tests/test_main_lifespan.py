@@ -4,8 +4,11 @@ import importlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from fastapi import Request
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.exc import IntegrityError
 
+from core.application_writer_term import ApplicationWriterTermError
 import main
 
 
@@ -20,7 +23,110 @@ class _AsyncSessionContext:
         return False
 
 
+def _http_request(path: str = "/api/config") -> Request:
+    return Request(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": path,
+            "raw_path": path.encode("ascii"),
+            "query_string": b"",
+            "headers": [],
+            "client": ("127.0.0.1", 12345),
+            "server": ("testserver", 80),
+        }
+    )
+
+
 class MainLifespanTests(unittest.IsolatedAsyncioTestCase):
+    async def test_lifespan_disabled_writer_term_continues_to_init_db(self):
+        session = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
+        redis_client = AsyncMock()
+
+        with patch.object(main.settings, "application_writer_term_enforced", False), patch.object(
+            main.settings, "background_jobs_enabled", False
+        ), patch("main.init_db", new=AsyncMock()) as init_db_mock, patch(
+            "main.init_redis", new=AsyncMock(return_value=redis_client)
+        ), patch("main.close_redis", new=AsyncMock()), patch("main.setup_event_listeners"), patch(
+            "main.AsyncSessionLocal", return_value=_AsyncSessionContext(session)
+        ), patch("main.ensure_mandatory_channel_rollout", new=AsyncMock()):
+            async with main.lifespan(main.app):
+                pass
+
+        init_db_mock.assert_awaited_once()
+
+    async def test_lifespan_invalid_writer_term_blocks_before_init_db(self):
+        with patch(
+            "main.require_application_writer_term",
+            side_effect=ApplicationWriterTermError("writer term is expired"),
+        ), patch("main.init_db", new=AsyncMock()) as init_db_mock:
+            with self.assertRaisesRegex(ApplicationWriterTermError, "expired"):
+                async with main.lifespan(main.app):
+                    pass
+
+        init_db_mock.assert_not_awaited()
+
+    async def test_lifespan_rejects_legacy_background_jobs_with_writer_term(self):
+        with patch.object(main.settings, "application_writer_term_enforced", True), patch.object(
+            main.settings, "background_jobs_enabled", True
+        ), patch("main.require_application_writer_term") as require_term, patch(
+            "main.init_db", new=AsyncMock()
+        ) as init_db_mock:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "BACKGROUND_JOBS_ENABLED must be false",
+            ):
+                async with main.lifespan(main.app):
+                    pass
+
+        require_term.assert_not_called()
+        init_db_mock.assert_not_awaited()
+
+    async def test_writer_term_middleware_allows_downstream_when_disabled(self):
+        downstream_response = main.JSONResponse({"ok": True})
+        call_next = AsyncMock(return_value=downstream_response)
+
+        with patch.object(main.settings, "application_writer_term_enforced", False):
+            response = await main.enforce_application_writer_term(_http_request(), call_next)
+
+        self.assertIs(response, downstream_response)
+        call_next.assert_awaited_once()
+
+    async def test_writer_term_middleware_blocks_invalid_term_before_downstream(self):
+        for reason in ("writer term is missing", "writer term is expired"):
+            with self.subTest(reason=reason):
+                call_next = AsyncMock()
+                with patch(
+                    "main.require_application_writer_term",
+                    side_effect=ApplicationWriterTermError(reason),
+                ):
+                    response = await main.enforce_application_writer_term(_http_request(), call_next)
+
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(
+                    response.body,
+                    b'{"detail":"Service temporarily unavailable"}',
+                )
+                self.assertEqual(response.headers["cache-control"], "no-store")
+                call_next.assert_not_awaited()
+
+    async def test_writer_term_is_outer_http_guard_for_the_real_asgi_app(self):
+        with patch(
+            "main.require_application_writer_term",
+            side_effect=ApplicationWriterTermError("writer term is missing"),
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=main.app),
+                base_url="http://testserver",
+            ) as client:
+                response = await client.get("/api/config")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {"detail": "Service temporarily unavailable"})
+
     async def test_lifespan_validates_public_webapp_url_before_initializing_when_contract_v2_is_enabled(self):
         with patch.object(main.settings, "invitation_contract_v2_enabled", True), patch(
             "main.public_webapp_url_for_links",

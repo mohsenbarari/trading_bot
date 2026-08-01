@@ -9,7 +9,7 @@ import shlex
 import tarfile
 import tempfile
 import unittest
-from types import SimpleNamespace
+import urllib.parse
 from unittest import mock
 
 
@@ -57,21 +57,55 @@ def write_archive(path: Path, members: dict[str, bytes], *, symlink_name: str | 
     path.chmod(0o600)
 
 
+class FakeRemoteResponse:
+    def __init__(self, payload: bytes, *, url: str, headers: dict[str, str]) -> None:
+        self._payload = payload
+        self._offset = 0
+        self._url = url
+        self.headers = headers
+        self.closed = False
+
+    def read(self, size: int = -1) -> bytes:
+        if size < 0:
+            size = len(self._payload) - self._offset
+        result = self._payload[self._offset : self._offset + size]
+        self._offset += len(result)
+        return result
+
+    def getcode(self) -> int:
+        return 200
+
+    def geturl(self) -> str:
+        return self._url
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
-    def _fixture(self, root: Path, *, signature: str = "signature") -> dict[str, object]:
+    def _fixture(
+        self,
+        root: Path,
+        *,
+        signature: str = "a" * 64,
+        security_token: str | None = None,
+    ) -> dict[str, object]:
         package = root / "package"
         package.mkdir(mode=0o700, parents=True)
+        campaign_id = "wa-ir-standby-97265988-4b12-444e-abda-165573b2769f"
         control_commit = "a" * 40
         control_tree = "b" * 40
         bootstrap_id = "bootstrap-001"
         config_value: dict[str, object] = {
             "schema": receiver.CONSUMER_CONFIG_SCHEMA,
+            "campaign_id": campaign_id,
             "endpoint": "https://s3.ir-thr-at1.arvanstorage.ir",
             "region": "ir-thr-at1",
             "bucket": "three-site-private",
             "prefix": "campaign-current/artifacts",
             "age_binary": "/usr/bin/age",
-            "age_identity_file": receiver.WA_IR_BOOTSTRAP_IDENTITY_FILE,
+            "age_identity_file": receiver.wa_ir_bootstrap_identity_file(campaign_id),
+            "age_recipient": "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
             "workspace": "/srv/trading-bot-three-site-staging-data/workspace",
             "source_site": "webapp_fi",
             "source_signing_public_key_base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
@@ -121,10 +155,20 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
         object_key = receiver._expected_bootstrap_object_key(
             prefix=str(config_value["prefix"]), control_commit=control_commit, bootstrap_id=bootstrap_id
         )
+        query = [
+            ("versionId", "version-001"),
+            ("X-Amz-Algorithm", "AWS4-HMAC-SHA256"),
+            ("X-Amz-Credential", "FAKEACCESSKEY/20260730/ir-thr-at1/s3/aws4_request"),
+            ("X-Amz-Date", "20260730T120000Z"),
+            ("X-Amz-Expires", "300"),
+            ("X-Amz-SignedHeaders", "host"),
+            ("X-Amz-Signature", signature),
+        ]
+        if security_token is not None:
+            query.append(("X-Amz-Security-Token", security_token))
         url = (
-            "https://s3.ir-thr-at1.arvanstorage.ir/three-site-private/" + object_key
-            + "?versionId=version-001&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=credential"
-            + "&X-Amz-Signature=" + signature
+            "https://s3.ir-thr-at1.arvanstorage.ir/three-site-private/" + object_key + "?"
+            + urllib.parse.urlencode(query, quote_via=urllib.parse.quote, safe="-_.~")
         )
         published = {
             "schema": receiver.BOOTSTRAP_PUBLISH_RECEIPT_SCHEMA,
@@ -149,6 +193,12 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
         }
         publish_path = root / "publish.json"
         write_private(publish_path, json.dumps(published, sort_keys=True).encode("utf-8"))
+        known_hosts = root / "wa-ir.known_hosts"
+        known_hosts.write_text(
+            "95.38.164.29 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEZpeHR1cmVLbm93bkhvc3RLZXkxMjM0NTY=\n",
+            encoding="ascii",
+        )
+        known_hosts.chmod(0o644)
         return {
             "package": package,
             "preparation": preparation_path,
@@ -157,6 +207,7 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
             "published": published,
             "members": members,
             "archive": archive,
+            "known_hosts": known_hosts,
         }
 
     def _render(self, fixture: dict[str, object]) -> str:
@@ -165,14 +216,16 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
             bootstrap_package_directory=fixture["package"],
             preparation_receipt=fixture["preparation"],
             bootstrap_root="/srv/trading-bot-three-site-staging-data/wa-ir-bootstrap",
+            wa_ir_known_hosts=fixture["known_hosts"],
         )
 
     def _remote(self, command: str) -> tuple[list[str], dict[str, object], dict[str, object]]:
         outer = shlex.split(command)
         self.assertEqual(outer[:5], ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes"])
-        self.assertEqual(outer[5], receiver.REMOTE_HOST)
-        self.assertEqual(len(outer), 7)
-        inner = shlex.split(outer[6])
+        self.assertEqual(outer[5:9], ["-o", outer[6], "-o", "GlobalKnownHostsFile=/dev/null"])
+        self.assertTrue(outer[6].startswith("UserKnownHostsFile=/"))
+        self.assertEqual(outer[-2], receiver.REMOTE_HOST)
+        inner = shlex.split(outer[-1])
         self.assertEqual(inner[:5], ["/usr/bin/python3", "-I", "-B", "-c", receiver.REMOTE_LAUNCHER])
         self.assertEqual(inner[7], "--")
         program = base64.b64decode(inner[5]).decode("utf-8")
@@ -190,6 +243,21 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
             + "x-amz-meta-ciphertext-sha256: " + str(config["ciphertext_sha256"]) + "\r\n"
             + "content-length: " + str(config["ciphertext_bytes"]) + "\r\n\r\n"
         ).encode("ascii")
+
+    @staticmethod
+    def _rewrite_query(url: str, mutate: object) -> str:
+        parsed = urllib.parse.urlsplit(url)
+        pairs = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True, strict_parsing=True)
+        mutate(pairs)  # type: ignore[operator]
+        return urllib.parse.urlunsplit(
+            (
+                parsed.scheme,
+                parsed.netloc,
+                parsed.path,
+                urllib.parse.urlencode(pairs, quote_via=urllib.parse.quote, safe="-_.~"),
+                parsed.fragment,
+            )
+        )
 
     def test_valid_root_only_package_renders_one_safely_quoted_emit_only_command(self):
         with tempfile.TemporaryDirectory(prefix="wa-ir-render-") as temporary:
@@ -219,27 +287,54 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
                 bootstrap_package_directory=fixture["package"],
                 preparation_receipt=fixture["preparation"],
                 bootstrap_root="/srv/trading-bot-three-site-staging-data/wa-ir-bootstrap",
+                wa_ir_known_hosts=fixture["known_hosts"],
             )
             inner, _, _ = self._remote(command)
             self.assertEqual(inner[-1], fixture["url"])
             self.assertEqual(inner.count(fixture["url"]), 1)
 
-    def test_cli_consumes_the_just_published_receipt_from_binary_stdin(self):
+    def test_direct_cli_blocks_before_reading_the_url_bearing_receipt(self):
         with tempfile.TemporaryDirectory(prefix="wa-ir-render-") as temporary:
             fixture = self._fixture(Path(temporary))
-            fixture["publish"].unlink()
+            url = fixture["url"]
             stdin = io.TextIOWrapper(io.BytesIO(json.dumps(fixture["published"]).encode("utf-8")), encoding="utf-8")
             stdout = io.StringIO()
-            with mock.patch.object(receiver.sys, "stdin", stdin), contextlib.redirect_stdout(stdout):
+            with (
+                mock.patch.object(receiver.sys, "stdin", stdin),
+                mock.patch.object(
+                    receiver,
+                    "_read_publish_receipt_stdin",
+                    side_effect=AssertionError("direct CLI must not read the URL-bearing receipt"),
+                ),
+                mock.patch.object(
+                    receiver,
+                    "render_receive_command",
+                    side_effect=AssertionError("direct CLI must not render a disposable command"),
+                ),
+                contextlib.redirect_stdout(stdout),
+            ):
                 result = receiver.main([
                     "--publish-receipt-stdin",
                     "--bootstrap-package-directory", str(fixture["package"]),
                     "--preparation-receipt", str(fixture["preparation"]),
                     "--bootstrap-root", "/srv/trading-bot-three-site-staging-data/wa-ir-bootstrap",
+                    "--wa-ir-known-hosts", str(fixture["known_hosts"]),
                 ])
-            self.assertEqual(result, 0)
-            inner, _, _ = self._remote(stdout.getvalue().strip())
-            self.assertEqual(inner[-1], fixture["url"])
+            self.assertEqual(result, 2)
+            emitted = stdout.getvalue().strip()
+            self.assertEqual("blocked", json.loads(emitted)["status"])
+            self.assertIn("not rendered", emitted)
+            self.assertNotIn(str(url), emitted)
+            self.assertNotIn("ssh ", emitted)
+
+    def test_direct_cli_parse_rejection_does_not_reflect_a_url_to_stdout_or_stderr(self):
+        url = "https://s3.ir-thr-at1.arvanstorage.ir/private/object?X-Amz-Signature=" + "a" * 64
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            self.assertEqual(2, receiver.main(["--bootstrap-root", url]))
+        self.assertNotIn(url, stdout.getvalue())
+        self.assertNotIn(url, stderr.getvalue())
 
     def test_rejects_ambiguous_or_oversized_publish_receipt_sources(self):
         with tempfile.TemporaryDirectory(prefix="wa-ir-render-") as temporary:
@@ -248,6 +343,7 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
                 "bootstrap_package_directory": fixture["package"],
                 "preparation_receipt": fixture["preparation"],
                 "bootstrap_root": "/srv/trading-bot-three-site-staging-data/wa-ir-bootstrap",
+                "wa_ir_known_hosts": fixture["known_hosts"],
             }
             with self.assertRaisesRegex(receiver.BootstrapReceiveRenderError, "exactly one"):
                 receiver.render_receive_command(**shared)
@@ -265,7 +361,7 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
 
     def test_url_shell_metacharacters_remain_one_final_remote_argument(self):
         with tempfile.TemporaryDirectory(prefix="wa-ir-render-") as temporary:
-            fixture = self._fixture(Path(temporary), signature="x'$(id);%26safe")
+            fixture = self._fixture(Path(temporary), security_token="x'$(id);safe")
             command = self._render(fixture)
             inner, _, _ = self._remote(command)
             self.assertEqual(inner[-1], fixture["url"])
@@ -284,6 +380,7 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
                     bootstrap_package_directory=fixture["package"],
                     preparation_receipt=fixture["preparation"],
                     bootstrap_root="/srv/wa-ir+bootstrap",
+                    wa_ir_known_hosts=fixture["known_hosts"],
                 )
 
     def test_rejects_non_https_versionless_or_unbound_publish_url(self):
@@ -304,6 +401,53 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
                 with self.assertRaises(receiver.BootstrapReceiveRenderError):
                     self._render(fixture)
 
+    def test_bootstrap_url_validators_require_sigv4_scope_and_reject_literal_null_versions(self):
+        with tempfile.TemporaryDirectory(prefix="wa-ir-render-") as temporary:
+            fixture = self._fixture(Path(temporary))
+            _, namespace, config = self._remote(self._render(fixture))
+            published = fixture["published"]
+            bootstrap = published["bootstrap"]
+            valid = str(fixture["url"])
+
+            def validate_outer(url: str) -> None:
+                receiver._validate_presigned_url(
+                    url,
+                    endpoint="https://s3.ir-thr-at1.arvanstorage.ir",
+                    bucket="three-site-private",
+                    object_key=bootstrap["object_key"],
+                    version_id="version-001",
+                )
+
+            validate_outer(valid)
+            namespace["validate_url"](valid, config)
+            mutations = (
+                lambda pairs: pairs.__delitem__(next(index for index, pair in enumerate(pairs) if pair[0] == "X-Amz-Date")),
+                lambda pairs: pairs.__setitem__(next(index for index, pair in enumerate(pairs) if pair[0] == "X-Amz-Expires"), ("X-Amz-Expires", "901")),
+                lambda pairs: pairs.__setitem__(next(index for index, pair in enumerate(pairs) if pair[0] == "X-Amz-Credential"), ("X-Amz-Credential", "FAKEACCESSKEY/20260730/us-east-1/s3/aws4_request")),
+                lambda pairs: pairs.append(("unexpected", "value")),
+                lambda pairs: pairs.append(("versionId", "version-001")),
+                lambda pairs: pairs.extend((("AWSAccessKeyId", "legacy"), ("Signature", "legacy"), ("Expires", "1"))),
+            )
+            for mutate in mutations:
+                with self.subTest(mutate=mutate):
+                    mutated = self._rewrite_query(valid, mutate)
+                    with self.assertRaises(receiver.BootstrapReceiveRenderError):
+                        validate_outer(mutated)
+                    with self.assertRaises(namespace["ReceiveError"]):
+                        namespace["validate_url"](mutated, config)
+            with self.assertRaises(receiver.BootstrapReceiveRenderError):
+                receiver._validate_presigned_url(
+                    valid,
+                    endpoint="https://s3.ir-thr-at1.arvanstorage.ir",
+                    bucket="three-site-private",
+                    object_key=bootstrap["object_key"],
+                    version_id="null",
+                )
+            null_config = dict(config)
+            null_config["version_id"] = "null"
+            with self.assertRaises(namespace["ReceiveError"]):
+                namespace["validate_url"](valid, null_config)
+
     def test_rejects_publish_or_preparation_binding_mismatches(self):
         with tempfile.TemporaryDirectory(prefix="wa-ir-render-") as temporary:
             fixture = self._fixture(Path(temporary))
@@ -320,17 +464,19 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
             with self.assertRaisesRegex(receiver.BootstrapReceiveRenderError, "does not match"):
                 self._render(fixture)
 
-    def test_rejects_wrong_pinned_identity_path_and_non_private_inputs(self):
+    def test_rejects_legacy_or_cross_campaign_identity_path_and_non_private_inputs(self):
         with tempfile.TemporaryDirectory(prefix="wa-ir-render-") as temporary:
             root = Path(temporary)
             fixture = self._fixture(root)
             config_member = json.loads(fixture["members"]["config/consumer.json"])
-            config_member["age_identity_file"] = "/etc/trading-bot-three-site/wa-ir/wrong.agekey"
+            config_member["age_identity_file"] = "/etc/trading-bot-three-site/wa-ir/artifact-stage-2c08.agekey"
             # Rebuild a fully self-consistent package; the pinned identity remains the only rejection.
             fixture = self._fixture(root / "wrong")
             config_member = json.loads(fixture["members"]["config/consumer.json"])
-            config_member["age_identity_file"] = "/etc/trading-bot-three-site/wa-ir/wrong.agekey"
-            with self.assertRaises(receiver.BootstrapReceiveRenderError):
+            config_member["age_identity_file"] = receiver.wa_ir_bootstrap_identity_file(
+                "wa-ir-standby-11111111-2222-3333-4444-555555555555"
+            )
+            with self.assertRaisesRegex(receiver.BootstrapReceiveRenderError, "campaign WA-IR bootstrap age identity"):
                 receiver._validate_consumer_config(canonical(config_member))
             config_member = json.loads(fixture["members"]["config/consumer.json"])
             config_member["webapp_fi_controller_authorization_public_key_base64"] = "AQ=="
@@ -338,6 +484,17 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
                 receiver._validate_consumer_config(canonical(config_member))
             fixture["publish"].chmod(0o644)
             with self.assertRaisesRegex(receiver.BootstrapReceiveRenderError, "unsafe ownership"):
+                self._render(fixture)
+
+    def test_rejects_a_known_hosts_pin_without_the_exact_wa_ir_host(self):
+        with tempfile.TemporaryDirectory(prefix="wa-ir-render-") as temporary:
+            fixture = self._fixture(Path(temporary))
+            fixture["known_hosts"].write_text(
+                "95.38.164.30 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEZpeHR1cmVLbm93bkhvc3RLZXkxMjM0NTY=\n",
+                encoding="ascii",
+            )
+            fixture["known_hosts"].chmod(0o644)
+            with self.assertRaisesRegex(receiver.BootstrapReceiveRenderError, "known_hosts lacks the exact WA-IR host key"):
                 self._render(fixture)
 
     def test_remote_url_and_header_validation_rejects_redirects_and_mismatches(self):
@@ -358,13 +515,40 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
                 b"HTTP/1.1 302 Found\r\nLocation: https://elsewhere.invalid/\r\n\r\n",
                 valid.replace(b"x-amz-version-id: version-001", b"x-amz-version-id: other"),
                 valid.replace(b"content-length: ", b"x-amz-server-side-encryption: AES256\r\ncontent-length: "),
+                valid.replace(b"content-length: ", b"x-amz-server-side-encryption-aws-kms-key-id: key\r\ncontent-length: "),
+                valid.replace(b"content-length: ", b"x-amz-server-side-encryption-customer-algorithm: AES256\r\ncontent-length: "),
+                valid.replace(b"content-length: ", b"x-amz-kms-key-id: key\r\ncontent-length: "),
                 valid.replace(str(config["ciphertext_bytes"]).encode("ascii"), b"1", 1),
             )
             for headers in bad_headers:
                 with self.assertRaises(namespace["ReceiveError"]):
                     namespace["validate_headers"](headers, config)
 
-    def test_remote_receive_failure_preserves_its_fresh_candidate_for_inspection(self):
+    def test_remote_bootstrap_download_enforces_exact_stream_bound_and_removes_output(self):
+        with tempfile.TemporaryDirectory(prefix="wa-ir-render-") as temporary:
+            root = Path(temporary)
+            fixture = self._fixture(root)
+            _, namespace, config = self._remote(self._render(fixture))
+            config = dict(config)
+            config["ciphertext_bytes"] = 4
+            config["ciphertext_sha256"] = digest(b"abcd")
+            headers = {
+                "x-amz-version-id": str(config["version_id"]),
+                "x-amz-meta-transport-schema": receiver.TRANSPORT_SCHEMA,
+                "x-amz-meta-encryption": receiver.OBJECT_ENCRYPTION,
+                "x-amz-meta-ciphertext-sha256": str(config["ciphertext_sha256"]),
+            }
+            for payload in (b"abc", b"abcde"):
+                with self.subTest(payload=payload):
+                    output = root / ("ciphertext-" + str(len(payload)) + ".age")
+                    response = FakeRemoteResponse(payload, url=str(fixture["url"]), headers=headers)
+                    namespace["open_presigned_request"] = lambda _request, _timeout: response
+                    with self.assertRaises(namespace["ReceiveError"]):
+                        namespace["download_exact_ciphertext"](str(fixture["url"]), config, output)
+                    self.assertFalse(output.exists())
+                    self.assertTrue(response.closed)
+
+    def test_remote_receive_failure_preserves_its_fresh_candidate_and_removes_partial_ciphertext(self):
         with tempfile.TemporaryDirectory(prefix="wa-ir-render-") as temporary:
             root = Path(temporary)
             fixture = self._fixture(root)
@@ -380,22 +564,22 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
                 "received-" + str(config["control_commit"]) + "-" + str(config["bootstrap_id"])
             )
 
-            def failed_download(arguments, **_kwargs):
-                output = Path(arguments[arguments.index("--output") + 1])
+            def failed_download(_url, _config, output):
                 write_private(output, b"partial bootstrap ciphertext")
-                return SimpleNamespace(returncode=23, stdout=b"")
+                output.unlink()
+                raise namespace["ReceiveError"]("download failed")
 
             namespace["validate_url"] = lambda _url, _config: None
             namespace["require_trusted_executable"] = lambda path: path
             namespace["require_root_private_file"] = lambda _path: identity
             namespace["require_root_private_directory"] = lambda _path: bootstrap_root
-            namespace["subprocess"] = SimpleNamespace(DEVNULL=object(), PIPE=object(), run=failed_download)
+            namespace["download_exact_ciphertext"] = failed_download
 
             with self.assertRaises(namespace["ReceiveError"]):
                 namespace["receive"](config, str(fixture["url"]))
 
             self.assertTrue(candidate.is_dir())
-            self.assertEqual(b"partial bootstrap ciphertext", (candidate / ".ciphertext").read_bytes())
+            self.assertFalse((candidate / ".ciphertext").exists())
             self.assertFalse((candidate / namespace["RECEIPT_NAME"]).exists())
 
     def test_remote_archive_verifier_accepts_exact_archive_and_rejects_unsafe_members(self):

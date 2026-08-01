@@ -9,7 +9,15 @@ from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.repeat_offer import refresh_repeat_offer_menu_for_expired_offer
-from core.db import AsyncSessionLocal
+from core.db import (
+    AsyncSessionLocal,
+    require_application_writer_term,
+    require_external_effect_execution_authorization,
+)
+from core.external_effect_execution_gate import (
+    EXTERNAL_EFFECT_SCOPE_TELEGRAM_BOT_API_EFFECT,
+    ExternalEffectExecutionGateError,
+)
 from core.offer_quantity import coalesce_offer_remaining_quantity
 from core.redis import pool
 from core.services.trade_service import (
@@ -218,6 +226,9 @@ async def get_trade_suggestion_records(offer_id: int) -> list[dict]:
 
 
 async def _clear_suggestion_markup(bot: Bot, chat_id: int, message_id: int) -> None:
+    require_external_effect_execution_authorization(
+        EXTERNAL_EFFECT_SCOPE_TELEGRAM_BOT_API_EFFECT
+    )
     try:
         await bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=None)
     except Exception as exc:
@@ -273,6 +284,9 @@ async def sync_trade_suggestions_for_offer(bot: Bot, offer_id: int) -> None:
             offer_public_id=getattr(offer, "offer_public_id", None),
         )
 
+        require_external_effect_execution_authorization(
+            EXTERNAL_EFFECT_SCOPE_TELEGRAM_BOT_API_EFFECT
+        )
         try:
             await bot.edit_message_text(
                 chat_id=chat_id,
@@ -309,6 +323,7 @@ def schedule_trade_suggestion_pending_reset(bot: Bot, offer_id: int) -> None:
 
 
 async def listen_trade_suggestion_events(bot: Bot) -> None:
+    require_application_writer_term()
     redis_client = redis.Redis(connection_pool=pool)
     pubsub = redis_client.pubsub()
     channels = [
@@ -322,6 +337,7 @@ async def listen_trade_suggestion_events(bot: Bot) -> None:
 
     try:
         while True:
+            require_application_writer_term()
             message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
             if not message or message.get("type") != "message":
                 await asyncio.sleep(0.1)
@@ -342,6 +358,10 @@ async def listen_trade_suggestion_events(bot: Bot) -> None:
 
             try:
                 await sync_trade_suggestions_for_offer(bot, int(offer_id))
+            except ExternalEffectExecutionGateError:
+                # The gate belongs to the concrete Telegram edit boundary;
+                # never turn its fail-closed verdict into a listener retry.
+                raise
             except Exception as exc:
                 logger.debug(f"Trade suggestion sync failed for offer={offer_id}: {exc}")
             raw_channel = message.get("channel", "")
@@ -349,6 +369,8 @@ async def listen_trade_suggestion_events(bot: Bot) -> None:
             if channel == "events:offer:expired":
                 try:
                     await refresh_repeat_offer_menu_for_expired_offer(bot, int(offer_id))
+                except ExternalEffectExecutionGateError:
+                    raise
                 except Exception as exc:
                     logger.debug(f"Repeat-offer menu refresh failed for offer={offer_id}: {exc}")
             await asyncio.sleep(0.05)

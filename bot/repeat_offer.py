@@ -15,7 +15,11 @@ from bot.keyboards import (
     get_user_panel_keyboard,
     get_users_management_keyboard,
 )
-from core.db import AsyncSessionLocal
+from core.db import AsyncSessionLocal, require_external_effect_execution_authorization
+from core.external_effect_execution_gate import (
+    EXTERNAL_EFFECT_SCOPE_TELEGRAM_BOT_API_EFFECT,
+    ExternalEffectExecutionGateError,
+)
 from core.offer_settlement import build_offer_draft_text
 from core.server_routing import SERVER_FOREIGN
 from core.services.bot_access_policy import evaluate_bot_access
@@ -193,6 +197,9 @@ async def refresh_repeat_offer_menu_for_expired_offer(
             ),
             candidate,
         )
+        require_external_effect_execution_authorization(
+            EXTERNAL_EFFECT_SCOPE_TELEGRAM_BOT_API_EFFECT
+        )
         await bot.send_message(
             chat_id=int(telegram_id),
             text="منو با آخرین وضعیت به‌روزرسانی شد",
@@ -200,6 +207,8 @@ async def refresh_repeat_offer_menu_for_expired_offer(
         )
         _repeat_offer_refresh_sent_at[int(owner_user_id)] = now
         return True
+    except ExternalEffectExecutionGateError:
+        raise
     except Exception:
         logger.warning(
             "Failed to refresh repeat-offer keyboard after offer expiry",

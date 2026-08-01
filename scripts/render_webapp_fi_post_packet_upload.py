@@ -13,9 +13,11 @@ commands for the two permitted post-packet source objects:
 The strict enum and one identifier are the only upload-specific inputs.  The
 FI helper derives the route, controller-only recipient, policy, plaintext
 path, and prepared directory again from the installed static packet.  A PUT
-URL is accepted only from stdin for the rendering invocation and is emitted
-only as the final transient FI command argument.  Receipts and reports must
-be canonical, root-only, URL-free, and nonsecret.
+URL is accepted only by the reviewed in-process renderer API, where its
+result must remain in memory until a shell-free, output-suppressed SSH
+invocation.  Direct CLI rendering of that URL-bearing command is disabled
+before stdin is read.  Receipts and reports must be canonical, root-only,
+URL-free, and nonsecret.
 """
 
 from __future__ import annotations
@@ -61,6 +63,16 @@ FORBIDDEN_REPORT_MARKERS = (
 
 class PostPacketUploadControlError(RuntimeError):
     """A controller post-packet FI upload control is unsafe or unbound."""
+
+
+def _reject_direct_url_render(*, action: str) -> None:
+    """Fence a transient PUT credential from terminal and evidence paths."""
+
+    if action != "render-upload":  # pragma: no cover - fixed parser dispatch.
+        raise PostPacketUploadControlError("unsupported direct URL render action")
+    raise PostPacketUploadControlError(
+        "direct CLI rendering of the URL-bearing FI post-packet upload control is disabled"
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -435,6 +447,13 @@ def build_post_packet_upload_control(
     except Exception as exc:
         raise PostPacketUploadControlError("controller source transport config is invalid") from exc
     binding, binding_payload, binding_identity = _load_local_binding(Path(campaign_binding))
+    try:
+        controller_config = initial.transport.require_controller_config_for_campaign(
+            controller_config=controller_config,
+            campaign_id=binding.campaign_id,
+        )
+    except Exception as exc:
+        raise PostPacketUploadControlError("controller source transport config does not bind the canonical campaign") from exc
     role_payload, role_sha = _load_role_config(
         binding_path=Path(campaign_binding), expected_binding=binding, role_path=Path(source_role_config)
     )
@@ -594,7 +613,12 @@ def render_upload_command(
     prepared_receipt: Path,
     presigned_upload_url: str,
 ) -> str:
-    """Render one pinned FI PUT command using one transient URL only."""
+    """Render one pinned FI PUT command for a reviewed in-process executor.
+
+    The returned command contains an ephemeral credential.  It must stay only
+    in process memory and be invoked through shell-free SSH with output
+    suppressed.  The direct CLI intentionally cannot serialize this command.
+    """
 
     _read_prepared_receipt(Path(prepared_receipt), control=control)
     try:
@@ -702,7 +726,10 @@ def _parser() -> argparse.ArgumentParser:
     verify_prepared = actions.add_parser("verify-prepared", help="verify one FI prepared receipt")
     _common_arguments(verify_prepared)
     verify_prepared.add_argument("--prepared-receipt", type=Path, required=True)
-    upload = actions.add_parser("render-upload", help="render the fixed FI post-packet upload command")
+    upload = actions.add_parser(
+        "render-upload",
+        help="disabled in the direct CLI; transient upload controls require an in-process executor",
+    )
     _common_arguments(upload)
     upload.add_argument("--fi-known-hosts", type=Path, required=True)
     upload.add_argument("--prepared-receipt", type=Path, required=True)
@@ -732,21 +759,13 @@ def _print_result(value: Mapping[str, Any]) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        if args.action == "render-upload":
+            _reject_direct_url_render(action=args.action)
         control = _control_from_args(args)
         if args.action == "render-prepare":
             result: Mapping[str, Any] = {"command": render_prepare_command(control=control, fi_known_hosts=args.fi_known_hosts)}
         elif args.action == "verify-prepared":
             result = validate_prepared_receipt(control=control, prepared_receipt=args.prepared_receipt)
-        elif args.action == "render-upload":
-            url = initial._read_presigned_url_stdin()
-            result = {
-                "command": render_upload_command(
-                    control=control,
-                    fi_known_hosts=args.fi_known_hosts,
-                    prepared_receipt=args.prepared_receipt,
-                    presigned_upload_url=url,
-                )
-            }
         elif args.action == "verify-upload":
             result = validate_upload_report(
                 control=control,

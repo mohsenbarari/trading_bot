@@ -61,6 +61,11 @@ from core.config import settings
 from core.db import AsyncSessionLocal
 from core.enums import NotificationCategory, NotificationLevel, UserAccountStatus
 from core.events import setup_event_listeners
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+    blocked_legacy_direct_fi_ir_transport_payload,
+)
 from core.redis import init_redis, pool
 from core.services.accountant_relation_service import EffectiveOwnerActor
 from core.services.offer_creation_service import OfferCreationCommand, create_authoritative_offer
@@ -1770,6 +1775,13 @@ async def push_prefix_change_logs_to_peer(
     max_attempts: int = 3,
     include_synced: bool = False,
 ) -> dict[str, Any]:
+    # This was the one standalone P7 helper that could still sign and POST a
+    # prefix directly to the peer when invoked outside the retired benchmark
+    # runner.  Object Storage pull is now the only cross-site delta route.
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="trading-core-probe-worker",
+        operation="targeted prefix direct peer sync",
+    )
     from core.server_routing import default_peer_server_url
     from core.sync_worker import change_log_entry_to_sync_item
 
@@ -7303,6 +7315,10 @@ async def write_dual_role_plan_command(args: argparse.Namespace) -> int:
 
 
 async def sync_prefix_catchup_command(args: argparse.Namespace) -> int:
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="trading-core-probe-worker",
+        operation="targeted prefix direct peer sync CLI",
+    )
     prefix = args.prefix
     assert_production_full_matrix_allowed(prefix, allow_flag=bool(args.allow_production_execution))
     tables = tuple(args.table or TARGETED_SYNC_TABLES)
@@ -7905,6 +7921,19 @@ async def dispatch(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "sync-prefix-catchup":
+        try:
+            assert_legacy_direct_fi_ir_transport_retired(
+                component="trading-core-probe-worker",
+                operation="targeted prefix direct peer sync CLI",
+            )
+        except LegacyDirectFiIrTransportRetiredError:
+            print_json(
+                blocked_legacy_direct_fi_ir_transport_payload(
+                    component="trading-core-probe-worker"
+                )
+            )
+            return 2
     try:
         return asyncio.run(dispatch(args))
     except Exception as exc:

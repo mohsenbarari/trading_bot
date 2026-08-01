@@ -74,10 +74,24 @@ services:
       SERVER_MODE: iran
       RELEASE_SHA: ${RELEASE_SHA:?exact release SHA is required}
       TRADING_BOT_SERVICE: api
-      # The exact 2c08 image enforces the Iran-only authority matrix in
-      # main.py.  Enable only those local writer jobs after the fenced agent
-      # has started this promoted runtime; direct sync remains absent below.
-      BACKGROUND_JOBS_ENABLED: "true"
+      # The application-level Writer Witness gate is default-off globally.
+      # This promotion opts in only with the host-managed, root-owned lease
+      # parent mounted below; the lease agent atomically replaces its leaf.
+      SINGLE_WRITER_RUNTIME_ENABLED: "true"
+      APPLICATION_WRITER_TERM_ENFORCED: "true"
+      APPLICATION_WRITER_TERM_LOCAL_SITE: webapp_ir
+      APPLICATION_WRITER_TERM_LEASE_FILE: /run/trading-bot-writer-term/writer-lease.json
+      # Keep the in-process gate exactly aligned with the pinned 60/15/10
+      # Writer Witness policy enforced by the promotion agent.
+      APPLICATION_WRITER_TERM_SAFETY_MARGIN_SECONDS: "15"
+      APPLICATION_WRITER_TERM_MAX_LEASE_DURATION_SECONDS: "60"
+      # The restored candidate schema is an input to promotion.  Do not let
+      # the legacy image issue implicit create_all DDL at service startup.
+      DATABASE_SCHEMA_BOOTSTRAP_ENABLED: "false"
+      # Keep background jobs disabled until their independent outbound and
+      # background-side-effect term fence exists.  The application/DB gate is
+      # not a substitute for that missing boundary.
+      BACKGROUND_JOBS_ENABLED: "false"
       TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"
       AUDIT_TRAIL_PATH: /app/audit_trail/audit.jsonl
     ports:
@@ -89,6 +103,15 @@ services:
       # release.  The compose/control tooling itself comes from the separate
       # receipt-bound control release and must never be substituted here.
       - ${WA_IR_APPLICATION_RELEASE_ROOT:?immutable S3-delivered application release root is required}/trading_settings.json:/app/trading_settings.json:ro
+      # Bind the root-owned host parent, never the atomically replaced lease
+      # leaf.  This lets the app observe each fresh Writer Witness term while
+      # keeping the entire host-side term directory read-only in the app.
+      - type: bind
+        source: "${WA_IR_WRITER_TERM_PARENT_DIRECTORY:?root-owned Writer Witness term parent directory is required}"
+        target: /run/trading-bot-writer-term
+        read_only: true
+        bind:
+          create_host_path: false
     depends_on:
       db:
         condition: service_healthy

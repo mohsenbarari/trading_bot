@@ -14,9 +14,10 @@ operator-selected program, source root, or output path:
   object ID.
 
 The renderer neither opens SSH nor contacts Object Storage, Docker, or a
-service.  The remote helper verifies that the fixed runtime checkout ``HEAD``
-matches the release SHA bound here before it reads ``mini_app_dist``.  A later
-operator may capture its small URL-free JSON result and pass it to
+service.  The remote helper verifies the fixed runtime ``mini_app_dist``
+against the controller-bound manifest installed with its source-adoption
+candidate before it creates an archive.  A later operator may capture its
+small URL-free JSON result and pass it to
 ``verify-receipt`` before using the existing initial-static upload renderer.
 """
 
@@ -459,6 +460,13 @@ def validate_preparation_receipt(*, control: StaticPreparationControl, receipt: 
     )
     if file_count > static_preparer.MAX_STATIC_FILES:
         raise StaticPreparationControlError("FI static preparation file count is invalid")
+    if (
+        files_sha != control.initial_control.expected_static_files_sha256
+        or file_count != control.initial_control.expected_static_file_count
+    ):
+        raise StaticPreparationControlError(
+            "FI static preparation receipt does not match the controller-bound expected static manifest"
+        )
     archive = value.get("archive")
     if not isinstance(archive, Mapping) or set(archive) != {"name", "sha256", "bytes"}:
         raise StaticPreparationControlError("FI static preparation archive is invalid")

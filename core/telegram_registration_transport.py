@@ -9,6 +9,10 @@ from typing import Any
 import httpx
 
 from core.config import settings
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+)
 from core.registration_contracts import TelegramRegistrationCommand
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, peer_server_url_for
 from core.telegram_account_link_contracts import TelegramAccountLinkCommand
@@ -27,6 +31,29 @@ async def _post_signed_iran_command(
     event: str,
     timeout_seconds: float | None,
 ) -> tuple[int, Any]:
+    # A wrong-role caller is a local authorization failure, not a transport
+    # attempt; preserve that stable public result without inspecting a peer.
+    if current_server() != SERVER_FOREIGN:
+        logger.warning(
+            "Telegram registration command rejected outside foreign",
+            extra={"event": event, "source_server": current_server(), "target_server": SERVER_IRAN},
+        )
+        return 403, {"detail": "این فرمان فقط از سرور تلگرام قابل ارسال است"}
+
+    # There is intentionally no direct FI->IR command fallback for Telegram
+    # registration/link reconciliation in the target topology.
+    try:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="telegram-registration-transport",
+            operation="direct peer Telegram registration command",
+        )
+    except LegacyDirectFiIrTransportRetiredError:
+        logger.warning(
+            "Telegram registration direct transport is retired",
+            extra={"event": "telegram_registration.direct_transport_retired", "target_server": SERVER_IRAN},
+        )
+        return 503, {"detail": "سرور ایران در دسترس نیست"}
+
     context = {
         "event": event,
         "source_server": current_server(),
@@ -34,9 +61,6 @@ async def _post_signed_iran_command(
         "command_id": str(command_id),
         "has_idempotency_key": bool(payload.get("idempotency_key")),
     }
-    if current_server() != SERVER_FOREIGN:
-        logger.warning("Telegram registration command rejected outside foreign", extra=context)
-        return 403, {"detail": "این فرمان فقط از سرور تلگرام قابل ارسال است"}
     target_url = peer_server_url_for(SERVER_IRAN)
     if not target_url:
         logger.warning("Telegram registration Iran peer unavailable", extra=context)

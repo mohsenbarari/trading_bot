@@ -278,11 +278,9 @@ class DeploymentSurfaceGuardTests(unittest.TestCase):
         self.assertIn("SERVER_MODE: foreign", telegram_runner)
         self.assertIn('"--role", "webapp_iran"', webapp_runner)
         self.assertIn("SERVER_MODE: iran", webapp_runner)
-        self.assertIn(
-            "${STAGING_FOREIGN_PUBLIC_DOMAIN:-staging.362514.ir}:"
-            "${STAGING_FOREIGN_PUBLIC_IP:-65.109.216.187}",
-            webapp_runner,
-        )
+        self.assertIn('SINGLE_WRITER_RUNTIME_ENABLED: "true"', webapp_runner)
+        self.assertIn('TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"', webapp_runner)
+        self.assertNotIn("extra_hosts:", webapp_runner)
 
     def test_staging_bot_profile_is_foreign_only_when_enabled(self):
         repo_root = Path(__file__).resolve().parents[1]
@@ -302,6 +300,10 @@ class DeploymentSurfaceGuardTests(unittest.TestCase):
         self.assertIn("IRAN_SERVER_URL: ${STAGING_FOREIGN_IRAN_SERVER_URL", staging_bot_block)
         self.assertIn("FRONTEND_URL: ${STAGING_FOREIGN_FRONTEND_URL", staging_bot_block)
         self.assertIn("FOREIGN_SERVER_URL: ${STAGING_FOREIGN_FOREIGN_SERVER_URL", staging_bot_block)
+        self.assertIn('SINGLE_WRITER_RUNTIME_ENABLED: "true"', staging_bot_block)
+        self.assertIn('TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"', staging_bot_block)
+        self.assertIn(':-http://app:8000}', staging_bot_block)
+        self.assertNotIn("extra_hosts:", staging_bot_block)
 
     def test_staging_bot_profile_includes_internal_foreign_api(self):
         repo_root = Path(__file__).resolve().parents[1]
@@ -318,6 +320,10 @@ class DeploymentSurfaceGuardTests(unittest.TestCase):
         self.assertIn("IRAN_SERVER_URL: ${STAGING_FOREIGN_IRAN_SERVER_URL", foreign_app_block)
         self.assertIn("FRONTEND_URL: ${STAGING_FOREIGN_FRONTEND_URL", foreign_app_block)
         self.assertIn("FOREIGN_SERVER_URL: ${STAGING_FOREIGN_FOREIGN_SERVER_URL", foreign_app_block)
+        self.assertIn('SINGLE_WRITER_RUNTIME_ENABLED: "true"', foreign_app_block)
+        self.assertIn('TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"', foreign_app_block)
+        self.assertIn(':-http://app:8000}', foreign_app_block)
+        self.assertNotIn("extra_hosts:", foreign_app_block)
         self.assertIn("uvicorn main:app", str(foreign_app.get("command", "")))
         self.assertIn("ports:", foreign_app_block)
         self.assertIn('"127.0.0.1:${STAGING_FOREIGN_APP_PORT:-8121}:8000"', foreign_app_block)
@@ -325,7 +331,7 @@ class DeploymentSurfaceGuardTests(unittest.TestCase):
         self.assertIn("foreign_app:", staging_bot_block)
         self.assertIn("condition: service_healthy", staging_bot_block)
 
-    def test_staging_sync_workers_are_profile_gated_and_role_bound(self):
+    def test_staging_sync_workers_are_profile_gated_and_runtime_fenced(self):
         repo_root = Path(__file__).resolve().parents[1]
         staging_compose = repo_root / "deploy/staging/docker-compose.staging.yml"
         staging_services = active_compose_services(staging_compose)
@@ -346,16 +352,20 @@ class DeploymentSurfaceGuardTests(unittest.TestCase):
             self.assertNotIn("run_bot.py", block)
             self.assertNotIn("BOT_TOKEN:", block)
             self.assertNotIn("ports:", block)
+            self.assertIn('SINGLE_WRITER_RUNTIME_ENABLED: "true"', block)
+            self.assertIn('TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"', block)
 
         self.assertEqual(sync_worker["environment"]["SERVER_MODE"], "iran")
         self.assertEqual(foreign_sync_worker["environment"]["SERVER_MODE"], "foreign")
         self.assertIn("IRAN_SERVER_URL: ${STAGING_FOREIGN_IRAN_SERVER_URL", foreign_sync_worker_block)
         self.assertIn("FRONTEND_URL: ${STAGING_FOREIGN_FRONTEND_URL", foreign_sync_worker_block)
         self.assertIn("FOREIGN_SERVER_URL: ${STAGING_FOREIGN_FOREIGN_SERVER_URL", foreign_sync_worker_block)
+        self.assertIn(':-http://app:8000}', foreign_sync_worker_block)
+        self.assertNotIn("extra_hosts:", foreign_sync_worker_block)
         self.assertIn("app:", sync_worker_block)
         self.assertIn("foreign_app:", foreign_sync_worker_block)
 
-    def test_staging_foreign_load_runner_uses_real_iran_peer_override(self):
+    def test_staging_foreign_load_runner_uses_only_local_iran_target(self):
         repo_root = Path(__file__).resolve().parents[1]
         staging_compose = repo_root / "deploy/staging/docker-compose.staging.yml"
         telegram_runner_block = compose_service_block(staging_compose, "load_telegram_foreign")
@@ -365,6 +375,10 @@ class DeploymentSurfaceGuardTests(unittest.TestCase):
         self.assertIn("IRAN_SERVER_URL: ${STAGING_FOREIGN_IRAN_SERVER_URL", telegram_runner_block)
         self.assertIn("FRONTEND_URL: ${STAGING_FOREIGN_FRONTEND_URL", telegram_runner_block)
         self.assertIn("FOREIGN_SERVER_URL: ${STAGING_FOREIGN_FOREIGN_SERVER_URL", telegram_runner_block)
+        self.assertIn(':-http://app:8000}', telegram_runner_block)
+        self.assertIn('SINGLE_WRITER_RUNTIME_ENABLED: "true"', telegram_runner_block)
+        self.assertIn('TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"', telegram_runner_block)
+        self.assertNotIn("extra_hosts:", telegram_runner_block)
 
 
 if __name__ == "__main__":

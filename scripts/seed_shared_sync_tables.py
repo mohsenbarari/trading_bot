@@ -23,7 +23,6 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Mapping
 
-import httpx
 from sqlalchemy import select
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -31,17 +30,20 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from api.routers.sync import TABLE_ORDER, get_model_class
-from core.config import settings
 from core.db import AsyncSessionLocal
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+    blocked_legacy_direct_fi_ir_transport_payload,
+)
 from core.registration_sync_policy import (
     REGISTRATION_USER_REFERENCE_FIELDS,
     REGISTRATION_USER_REFERENCES_FIELD,
 )
-from core.server_routing import current_server, default_peer_server_url, peer_server_url_for
+from core.server_routing import current_server
 from core.sync_field_policy import sanitize_sync_payload
 from core.sync_metadata import build_sync_metadata, build_sync_public_identity
 from core.sync_protocol import build_sync_protocol_metadata
-from core.sync_transport import assert_runtime_sync_transport_allowed, runtime_sync_tls_verify_setting
 from core.sync_registry import SyncPolicy, get_sync_registry_entry
 from core.user_counter_sync import USER_SYNC_IDENTITY_FIELD, build_user_sync_identity
 
@@ -360,23 +362,11 @@ async def load_chat_sync_flags() -> dict[int, dict[str, Any]]:
 
 
 async def send_items(target_url: str, api_key: str, items: list[dict[str, Any]]) -> dict[str, Any]:
-    body = json.dumps(items, sort_keys=True, default=str)
-    assert_runtime_sync_transport_allowed()
-    async with httpx.AsyncClient(timeout=60.0, verify=runtime_sync_tls_verify_setting()) as client:
-        response = await client.post(
-            f"{target_url.rstrip('/')}/api/sync/receive",
-            content=body,
-            headers=build_signed_headers(api_key, body),
-        )
-    try:
-        payload = response.json()
-    except ValueError:
-        payload = {"status": "invalid-json", "body_sha256": hashlib.sha256(response.content).hexdigest()[:16]}
-    if response.status_code != 200 or payload.get("status") not in {"success", "ok"} or int(payload.get("errors") or 0) > 0:
-        raise RuntimeError(
-            f"Peer rejected seed batch: status_code={response.status_code} payload={json.dumps(payload, default=str)}"
-        )
-    return payload
+    del target_url, api_key, items
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="seed-shared-sync-tables",
+        operation="direct peer current-state seed HTTP delivery",
+    )
 
 
 async def seed_table(
@@ -422,15 +412,28 @@ async def seed_table(
 
 async def main_async() -> int:
     args = parse_args()
-    api_key = settings.sync_api_key
-    if not api_key:
-        print("SYNC_API_KEY is not configured", file=sys.stderr)
+    try:
+        if not args.dry_run:
+            assert_legacy_direct_fi_ir_transport_retired(
+                component="seed-shared-sync-tables",
+                operation="direct peer current-state seed CLI",
+            )
+    except LegacyDirectFiIrTransportRetiredError:
+        print(
+            json.dumps(
+                blocked_legacy_direct_fi_ir_transport_payload(
+                    component="seed-shared-sync-tables"
+                ),
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
         return 2
 
-    target_url = args.target_url or (peer_server_url_for(args.target_server) if args.target_server else default_peer_server_url())
-    if not target_url:
-        print("No target URL configured", file=sys.stderr)
-        return 2
+    # A dry run validates only local rows and stable identities.  Do not
+    # resolve a peer URL or read an API key merely to produce that evidence.
+    target_url = ""
+    api_key = ""
 
     tables = tuple(args.table or DEFAULT_TABLES)
     references = await load_seed_reference_index()

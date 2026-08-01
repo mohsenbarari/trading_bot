@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from core.legacy_direct_fi_ir_transport_fence import LegacyDirectFiIrTransportRetiredError
 from core.sync_parity import build_table_parity_snapshot
 from scripts import sync_repair_tool
 
@@ -85,6 +86,76 @@ def replay_identity_hash_for_fake_row() -> str:
 
 
 class SyncRepairToolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_replay_row_dry_run_remains_local_when_writer_mode_enabled(self):
+        args = SimpleNamespace(
+            table="offers",
+            identity='{"offer_public_id":"ofr_1"}',
+            operation="UPDATE",
+            source_server="foreign",
+            source_sequence=123,
+            apply=False,
+            confirm_write=False,
+        )
+
+        with patch(
+            "scripts.sync_repair_tool.AsyncSessionLocal", return_value=AsyncContext()
+        ), patch(
+            "scripts.sync_repair_tool.load_row_by_identity", new=AsyncMock(return_value=fake_row())
+        ), patch("scripts.sync_repair_tool._send_items") as send_items, redirect_stdout(StringIO()):
+            result = await sync_repair_tool.replay_row_command(args)
+
+        self.assertEqual(result, 0)
+        send_items.assert_not_called()
+
+    async def test_replay_row_apply_is_retired_before_database_or_network_work(self):
+        args = SimpleNamespace(
+            table="offers",
+            identity='{"offer_public_id":"ofr_1"}',
+            operation="UPDATE",
+            source_server="foreign",
+            source_sequence=123,
+            target_server=None,
+            target_url="https://peer.example",
+            sync_api_key="test-key",
+            manifest="repair-manifest.json",
+            operator_approval="apply-sync-repair:test",
+            allow_local_id_identity=False,
+            environment="staging",
+            apply=True,
+            confirm_write=True,
+        )
+
+        with patch("scripts.sync_repair_tool.AsyncSessionLocal") as session_factory, patch(
+            "scripts.sync_repair_tool._send_items"
+        ) as send_items:
+            with self.assertRaises(LegacyDirectFiIrTransportRetiredError):
+                await sync_repair_tool.replay_row_command(args)
+
+        session_factory.assert_not_called()
+        send_items.assert_not_called()
+
+    async def test_send_items_refuses_direct_peer_delivery(self):
+        with self.assertRaises(LegacyDirectFiIrTransportRetiredError):
+            sync_repair_tool._send_items("https://peer.example", "test-key", [{"id": 1}])
+
+    async def test_repair_apply_cli_is_blocked_before_identity_or_database_work(self):
+        with redirect_stdout(StringIO()) as stdout:
+            result = sync_repair_tool.main(
+                [
+                    "replay-row",
+                    "--table",
+                    "offers",
+                    "--identity",
+                    '{"offer_public_id":"ofr_1"}',
+                    "--apply",
+                ]
+            )
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(result, 2)
+        self.assertEqual(payload["status"], "blocked_legacy_direct_fi_ir_transport_retired")
+        self.assertEqual(payload["component"], "sync-repair-tool")
+
     async def test_replay_row_dry_run_does_not_send(self):
         args = SimpleNamespace(
             table="offers",
@@ -107,6 +178,7 @@ class SyncRepairToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["table"], "offers")
         send_items.assert_not_called()
 
+    @unittest.skip("legacy direct peer repair apply is retired")
     async def test_replay_row_apply_requires_confirm_and_source_sequence(self):
         base_args = dict(
             table="offers",
@@ -128,6 +200,7 @@ class SyncRepairToolTests(unittest.IsolatedAsyncioTestCase):
                 SimpleNamespace(**base_args, source_sequence=None, apply=True, confirm_write=True)
             )
 
+    @unittest.skip("legacy direct peer repair apply is retired")
     async def test_replay_row_apply_requires_manifest_and_operator_approval(self):
         base_args = dict(
             table="offers",
@@ -157,6 +230,7 @@ class SyncRepairToolTests(unittest.IsolatedAsyncioTestCase):
                     SimpleNamespace(**base_args, manifest=str(manifest_path), operator_approval=None)
                 )
 
+    @unittest.skip("legacy direct peer repair apply is retired")
     async def test_replay_row_apply_validates_manifest_before_sending(self):
         identity_hash = replay_identity_hash_for_fake_row()
         approval = f"apply-sync-repair:{identity_hash}"
@@ -200,6 +274,7 @@ class SyncRepairToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["target_url_hash"], sync_repair_tool._target_url_hash("https://peer.example"))
         send_items.assert_called_once()
 
+    @unittest.skip("legacy direct peer repair apply is retired")
     async def test_replay_row_apply_rejects_raw_local_id_identity_without_nonproduction_override(self):
         identity_hash = replay_identity_hash_for_fake_row()
         approval = f"apply-sync-repair:{identity_hash}"
@@ -237,6 +312,7 @@ class SyncRepairToolTests(unittest.IsolatedAsyncioTestCase):
 
         send_items.assert_not_called()
 
+    @unittest.skip("legacy direct peer repair apply is retired")
     async def test_replay_row_apply_rejects_raw_local_id_identity_in_production_even_with_override(self):
         identity_hash = replay_identity_hash_for_fake_row()
         approval = f"apply-sync-repair:{identity_hash}"
@@ -282,6 +358,7 @@ class SyncRepairToolTests(unittest.IsolatedAsyncioTestCase):
 
         send_items.assert_not_called()
 
+    @unittest.skip("legacy direct peer repair apply is retired")
     async def test_replay_row_apply_rejects_production_non_main_manifest(self):
         identity_hash = replay_identity_hash_for_fake_row()
         approval = f"apply-sync-repair:{identity_hash}"
@@ -326,6 +403,7 @@ class SyncRepairToolTests(unittest.IsolatedAsyncioTestCase):
 
         send_items.assert_not_called()
 
+    @unittest.skip("legacy direct peer repair apply is retired")
     async def test_replay_row_apply_rejects_cli_environment_downgrade_from_production(self):
         identity_hash = replay_identity_hash_for_fake_row()
         approval = f"apply-sync-repair:{identity_hash}"
@@ -363,6 +441,7 @@ class SyncRepairToolTests(unittest.IsolatedAsyncioTestCase):
 
         send_items.assert_not_called()
 
+    @unittest.skip("legacy direct peer repair apply is retired")
     async def test_replay_row_apply_rejects_manifest_environment_mismatch_from_runtime(self):
         identity_hash = replay_identity_hash_for_fake_row()
         approval = f"apply-sync-repair:{identity_hash}"
@@ -400,6 +479,7 @@ class SyncRepairToolTests(unittest.IsolatedAsyncioTestCase):
 
         send_items.assert_not_called()
 
+    @unittest.skip("legacy direct peer repair apply is retired")
     async def test_replay_row_apply_requires_runtime_environment_even_with_cli_environment(self):
         identity_hash = replay_identity_hash_for_fake_row()
         approval = f"apply-sync-repair:{identity_hash}"

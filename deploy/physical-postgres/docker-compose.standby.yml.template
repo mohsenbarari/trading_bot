@@ -1,0 +1,84 @@
+# Generated, default-off physical PostgreSQL WA-IR-standby scope.
+# The bootstrap and pull adapters must restore a verified physical base and
+# create recovery.signal before PostgreSQL starts.  No FI endpoint is present.
+name: physical-postgres-@@CAMPAIGN_ID@@-ir
+
+services:
+  postgres:
+    image: "@@POSTGRES_IMAGE@@"
+    pull_policy: never
+    profiles: ["physical-postgres-standby"]
+    container_name: "goldtrade_physical_postgres_ir_@@CAMPAIGN_ID@@"
+    restart: "no"
+    entrypoint:
+      - "@@STANDBY_BOOTSTRAP_BINARY@@"
+      - "--config"
+      - "@@STANDBY_BOOTSTRAP_CONFIG@@"
+      - "--"
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/trading-bot/physical-postgres/standby/postgresql.conf
+    env_file:
+      - /etc/trading-bot/physical-postgres/private/postgres-runtime.env
+    volumes:
+      - type: volume
+        source: @@STANDBY_DATA_VOLUME@@
+        target: /var/lib/postgresql/data
+      - type: volume
+        source: @@STANDBY_RESTORE_SPOOL_VOLUME@@
+        target: /var/lib/trading-bot/physical-postgres/restore-spool
+      - type: volume
+        source: @@STANDBY_RECEIVER_STATE_VOLUME@@
+        target: /var/lib/trading-bot/physical-postgres/receiver-state
+      - type: bind
+        source: /etc/trading-bot/physical-postgres/rendered/standby
+        target: /etc/trading-bot/physical-postgres/standby
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: @@STANDBY_BOOTSTRAP_DIRECTORY@@
+        target: @@STANDBY_BOOTSTRAP_DIRECTORY@@
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: @@STANDBY_PULL_DIRECTORY@@
+        target: @@STANDBY_PULL_DIRECTORY@@
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: @@STANDBY_REVERSE_WAL_SPOOL_DIRECTORY@@
+        target: @@STANDBY_REVERSE_WAL_SPOOL_DIRECTORY@@
+        read_only: true
+        bind:
+          create_host_path: false
+    networks: ["runtime"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
+    labels:
+      com.goldtrade.physical-postgres.role: "standby"
+      com.goldtrade.physical-postgres.release-sha: "@@RELEASE_SHA@@"
+      com.goldtrade.physical-postgres.base-generation: "@@BASE_GENERATION_ID@@"
+      com.goldtrade.physical-postgres.writer-term-sha256: "@@WRITER_TERM_SHA256@@"
+      com.goldtrade.physical-postgres.route-binding-sha256: "@@ROUTE_BINDING_SHA256@@"
+      com.goldtrade.physical-postgres.profile: "@@DEPLOYMENT_PROFILE@@"
+
+networks:
+  runtime:
+    external: true
+    name: "@@STANDBY_RUNTIME_NETWORK@@"
+
+volumes:
+  @@STANDBY_DATA_VOLUME@@:
+    external: true
+  @@STANDBY_RESTORE_SPOOL_VOLUME@@:
+    external: true
+  @@STANDBY_RECEIVER_STATE_VOLUME@@:
+    external: true

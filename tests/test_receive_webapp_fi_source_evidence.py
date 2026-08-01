@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import importlib.util
 import io
@@ -116,7 +117,18 @@ class SourceEvidenceReceiverTests(unittest.TestCase):
         self.control_commit = "c" * 40
         self.control_tree = "d" * 40
         self.binding = self._write_binding()
-        self.workspace = self.root / "workspace"
+        self.workspace_root = self.root / "workspaces"
+        self.workspace_root.mkdir(mode=0o700)
+        self.workspace_root.chmod(0o700)
+        self._workspace_root_patch = mock.patch.object(
+            evidence_receiver.receiver.transport.contract,
+            "SOURCE_TRANSPORT_WORKSPACE_ROOT",
+            self.workspace_root,
+        )
+        self._workspace_root_patch.start()
+        self.workspace = evidence_receiver.receiver.transport.contract.source_transport_workspace_for_campaign(
+            self.campaign_id
+        )
         self.workspace.mkdir(mode=0o700)
         self.workspace.chmod(0o700)
         self.data_root = self.root / "staging-volume"
@@ -138,6 +150,7 @@ class SourceEvidenceReceiverTests(unittest.TestCase):
         self.controller_config = evidence_receiver.receiver.transport.ControllerS3Config(
             policy=self.policy,
             credentials_file=self.credentials,
+            campaign_id=self.campaign_id,
         )
         self.test_age_keygen = self.root / "age-keygen-test-only"
         self.test_age_keygen.write_text("#!/bin/sh\nexit 0\n", encoding="ascii")
@@ -183,6 +196,7 @@ class SourceEvidenceReceiverTests(unittest.TestCase):
         self._binary_patch.stop()
         self._data_root_patch.stop()
         self._root_patch.stop()
+        self._workspace_root_patch.stop()
         self.temporary.cleanup()
 
     def _write_binding(self) -> Path:
@@ -299,6 +313,37 @@ class SourceEvidenceReceiverTests(unittest.TestCase):
                 campaign_binding_path=self.binding,
                 upload_report_path=bad_path,
             )
+
+    def test_evidence_plan_rejects_a_valid_other_campaign_config_before_identity_or_local_proofs(self) -> None:
+        report_path, _report, _plaintext, _ciphertext = self._write_report()
+        other_campaign = "source-evidence-other-20260730"
+        other_workspace = evidence_receiver.receiver.transport.contract.source_transport_workspace_for_campaign(
+            other_campaign
+        )
+        other_workspace.mkdir(mode=0o700)
+        other_workspace.chmod(0o700)
+        other_config = evidence_receiver.receiver.transport.ControllerS3Config(
+            policy=dataclasses.replace(self.policy, workspace=other_workspace),
+            credentials_file=self.credentials,
+            campaign_id=other_campaign,
+        )
+        with (
+            mock.patch.object(
+                evidence_receiver.receiver.identity_bootstrap,
+                "load_verified_identity",
+            ) as blocked_identity,
+            self.assertRaisesRegex(
+                evidence_receiver.SourceEvidenceReceiveError,
+                "config does not bind the canonical campaign",
+            ),
+        ):
+            evidence_receiver._receive_plan(
+                controller_config=other_config,
+                campaign_binding_path=self.binding,
+                upload_report_path=report_path,
+            )
+        blocked_identity.assert_not_called()
+        self.assertEqual([], list(self.data_root.iterdir()))
 
     def test_shared_capacity_margin_covers_evidence_composite_proofs(self) -> None:
         self.assertGreaterEqual(

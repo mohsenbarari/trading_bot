@@ -85,21 +85,18 @@ def commit(repository: Path) -> str:
 
 
 class RenderWebAppFiSourceBootstrapReceiveTests(unittest.TestCase):
-    def _transport_config(self, root: Path) -> Path:
-        path = root / "controller" / "source-transport-config.json"
+    def _transport_config(self, root: Path, *, campaign_id: str = CAMPAIGN_ID) -> Path:
+        path = root / "controller-campaigns" / campaign_id / "controller" / "source-transport.json"
+        credentials = fixtures.make_trusted_e53_s3_environment(root)
         value: dict[str, object] = {
             "schema": renderer.transport.CONFIG_SCHEMA,
             "endpoint": f"https://{HOST}",
-            "region": REGION,
             "bucket": BUCKET,
             "prefix": PREFIX,
-            "credentials_file": f"/root/secure-envs/trading-bot/{CONTROLLER_CREDENTIAL_MARKER}.json",
-            "age_binary": "/usr/bin/age",
-            "workspace": str(root / "controller" / "workspace"),
+            "credentials_file": str(credentials),
             "controller_age_recipient": CONTROLLER_RECIPIENT,
             "webapp_fi_age_recipient": RECIPIENT,
             "webapp_ir_age_recipient": WA_IR_RECIPIENT,
-            "maximum_plaintext_bytes": 24 * 1024 * 1024,
             "presign_expires_seconds": 300,
         }
         write_private(path, canonical(value))
@@ -124,8 +121,9 @@ class RenderWebAppFiSourceBootstrapReceiveTests(unittest.TestCase):
             ["git", "-C", str(control), "rev-parse", control_commit + "^{tree}"], text=True
         ).strip()
         (application / "main.py").write_text("print('fixture')\n", encoding="ascii")
+        (application / "mini_app_dist").mkdir(mode=0o700)
+        (application / "mini_app_dist" / "index.html").write_text("<!doctype html>fixture\n", encoding="ascii")
         application_release = commit(application)
-        transport_config = self._transport_config(root)
         _fixture_transport_config, campaign_binding, initial_static_object_id = fixtures.make_initial_static_inputs(
             root=root,
             campaign_id=CAMPAIGN_ID,
@@ -138,12 +136,45 @@ class RenderWebAppFiSourceBootstrapReceiveTests(unittest.TestCase):
             webapp_fi_recipient=RECIPIENT,
             webapp_ir_recipient=WA_IR_RECIPIENT,
         )
+        expected_static_assets_manifest = fixtures.make_expected_static_assets_manifest(
+            root=root,
+            campaign_id=CAMPAIGN_ID,
+            application_repository=application,
+            application_release_sha=application_release,
+            expected_alembic_revision=REVISION,
+            control_commit=control_commit,
+            control_tree=control_tree,
+        )
+        transport_config = self._transport_config(root)
+        campaigns_root, workspace_root = fixtures.source_transport_fixture_roots(root)
+        controller_transport = preparer._load_controller_source_transport()
+        transport_patches = (
+            mock.patch.object(controller_transport, "CAMPAIGNS_ROOT", campaigns_root),
+            mock.patch.object(controller_transport.contract, "SOURCE_TRANSPORT_WORKSPACE_ROOT", workspace_root),
+            mock.patch.object(
+                controller_transport,
+                "TRUSTED_E53_S3_ENVIRONMENT_PATH",
+                fixtures.trusted_e53_s3_environment_path(root),
+            ),
+            mock.patch.object(preparer, "_load_controller_source_transport", return_value=controller_transport),
+            mock.patch.object(renderer.transport, "CAMPAIGNS_ROOT", campaigns_root),
+            mock.patch.object(renderer.transport.contract, "SOURCE_TRANSPORT_WORKSPACE_ROOT", workspace_root),
+            mock.patch.object(
+                renderer.transport,
+                "TRUSTED_E53_S3_ENVIRONMENT_PATH",
+                fixtures.trusted_e53_s3_environment_path(root),
+            ),
+        )
+        for patcher in transport_patches:
+            patcher.start()
+            self.addCleanup(patcher.stop)
         packages = root / "packages"
         packages.mkdir(mode=0o700)
         package = packages / "source-bootstrap"
         prepared = preparer.prepare_source_adoption_package(
             source_repository=control,
             application_source_repository=application,
+            expected_static_assets_manifest=expected_static_assets_manifest,
             control_commit=control_commit,
             application_release_sha=application_release,
             expected_alembic_revision=REVISION,
@@ -216,8 +247,9 @@ class RenderWebAppFiSourceBootstrapReceiveTests(unittest.TestCase):
         date = now.strftime("%Y%m%dT%H%M%SZ")
         url = (
             f"https://{HOST}/{BUCKET}/{object_key}?versionId=version-001"
-            f"&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=credential"
-            f"&X-Amz-Date={date}&X-Amz-Expires=300&X-Amz-SignedHeaders=host&X-Amz-Signature=signature"
+            f"&X-Amz-Algorithm=AWS4-HMAC-SHA256"
+            f"&X-Amz-Credential=fixture-access%2F{date[:8]}%2F{REGION}%2Fs3%2Faws4_request"
+            f"&X-Amz-Date={date}&X-Amz-Expires=300&X-Amz-SignedHeaders=host&X-Amz-Signature={'a' * 64}"
         )
         known_hosts = root / "controller" / "fi-known_hosts"
         known_hosts.write_text(
@@ -241,10 +273,16 @@ class RenderWebAppFiSourceBootstrapReceiveTests(unittest.TestCase):
             "control_tree": control_tree,
         }
 
-    def _render(self, fixture: dict[str, object], *, url: str | None = None) -> str:
+    def _render(
+        self,
+        fixture: dict[str, object],
+        *,
+        url: str | None = None,
+        transport_config: Path | None = None,
+    ) -> str:
         return renderer.render_receive_command(
             transport_publish_receipt=fixture["publish"],
-            source_transport_config=fixture["transport_config"],
+            source_transport_config=fixture["transport_config"] if transport_config is None else transport_config,
             source_adoption_package_directory=fixture["package"],
             preparation_receipt=fixture["preparation"],
             delivery_envelope=fixture["envelope"],
@@ -412,26 +450,102 @@ class RenderWebAppFiSourceBootstrapReceiveTests(unittest.TestCase):
             ):
                 self._render(fixture)
 
-    def test_short_lived_sigv4_and_sigv2_urls_are_required(self):
+    def test_render_rejects_cross_campaign_controller_config_before_url_validation(self):
+        with tempfile.TemporaryDirectory(prefix="fi-bootstrap-render-") as temporary:
+            root = Path(temporary)
+            fixture = self._fixture(root)
+            other_config = self._transport_config(
+                root,
+                campaign_id="other-receiver-test-campaign-20260730",
+            )
+            with (
+                mock.patch.object(renderer, "_utc_now", return_value=NOW),
+                mock.patch.object(
+                    renderer,
+                    "_validate_presigned_url",
+                    side_effect=AssertionError("campaign mismatch must block before URL handling"),
+                ),
+                self.assertRaisesRegex(
+                    renderer.SourceBootstrapReceiveRenderError,
+                    "does not bind the published campaign",
+                ),
+            ):
+                self._render(fixture, transport_config=other_config)
+
+    def test_direct_cli_never_reads_or_prints_the_transient_url(self):
+        url = "https://fixture.invalid/bootstrap?X-Amz-Signature=" + "a" * 64
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(
+                renderer,
+                "_read_presigned_url_stdin",
+                side_effect=AssertionError("direct CLI must not read the URL"),
+            ),
+            mock.patch.object(
+                renderer,
+                "render_receive_command",
+                side_effect=AssertionError("direct CLI must not build a command"),
+            ),
+            mock.patch.object(sys, "stdin", io.TextIOWrapper(io.BytesIO((url + "\n").encode("ascii")))),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            status = renderer.main(
+                [
+                    "--transport-publish-receipt",
+                    "/ignored/publish.json",
+                    "--source-transport-config",
+                    "/ignored/source-transport.json",
+                    "--source-adoption-package-directory",
+                    "/ignored/package",
+                    "--preparation-receipt",
+                    "/ignored/preparation.json",
+                    "--delivery-envelope",
+                    "/ignored/delivery-envelope.json",
+                    "--pinned-controller-public-key-base64",
+                    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                    "--fi-known-hosts",
+                    "/ignored/known_hosts",
+                    "--presigned-url-stdin",
+                ]
+            )
+        output = stdout.getvalue() + stderr.getvalue()
+        self.assertEqual(2, status)
+        self.assertIn("disabled", output)
+        self.assertNotIn(url, output)
+        self.assertNotIn("ssh ", output)
+
+    def test_strict_sigv4_url_envelope_is_required(self):
         with tempfile.TemporaryDirectory(prefix="fi-bootstrap-render-") as temporary:
             fixture = self._fixture(Path(temporary))
             with mock.patch.object(renderer, "_utc_now", return_value=NOW):
                 self._render(fixture)
                 expired = str(fixture["url"]).replace("X-Amz-Date=20260730T120000Z", "X-Amz-Date=20260730T110000Z")
-                with self.assertRaisesRegex(renderer.SourceBootstrapReceiveRenderError, "expiry"):
+                with self.assertRaisesRegex(renderer.SourceBootstrapReceiveRenderError, "current and short-lived"):
                     self._render(fixture, url=expired)
                 excessive = str(fixture["url"]).replace("X-Amz-Expires=300", "X-Amz-Expires=301")
-                with self.assertRaisesRegex(renderer.SourceBootstrapReceiveRenderError, "expiry"):
+                with self.assertRaisesRegex(renderer.SourceBootstrapReceiveRenderError, "current and short-lived"):
                     self._render(fixture, url=excessive)
                 object_value = fixture["published"]["object"]
                 sigv2 = (
                     f"https://{HOST}/{BUCKET}/{object_value['object_key']}?versionId=version-001"
                     f"&AWSAccessKeyId=key&Signature=signature&Expires={int(NOW.timestamp()) + 300}"
                 )
-                self._render(fixture, url=sigv2)
-                too_long_v2 = sigv2.replace(f"Expires={int(NOW.timestamp()) + 300}", f"Expires={int(NOW.timestamp()) + 301}")
-                with self.assertRaisesRegex(renderer.SourceBootstrapReceiveRenderError, "expiry"):
-                    self._render(fixture, url=too_long_v2)
+                with self.assertRaisesRegex(renderer.SourceBootstrapReceiveRenderError, "exact immutable object"):
+                    self._render(fixture, url=sigv2)
+                duplicate = str(fixture["url"]) + "&X-Amz-Date=20260730T120000Z"
+                with self.assertRaisesRegex(renderer.SourceBootstrapReceiveRenderError, "exact immutable object"):
+                    self._render(fixture, url=duplicate)
+                extraneous = str(fixture["url"]) + "&unexpected=1"
+                with self.assertRaisesRegex(renderer.SourceBootstrapReceiveRenderError, "exact immutable object"):
+                    self._render(fixture, url=extraneous)
+                wrong_scope = str(fixture["url"]).replace(
+                    f"%2F{REGION}%2Fs3%2Faws4_request",
+                    "%2Fus-east-1%2Fs3%2Faws4_request",
+                )
+                with self.assertRaisesRegex(renderer.SourceBootstrapReceiveRenderError, "exact immutable object"):
+                    self._render(fixture, url=wrong_scope)
 
     def _make_fake_executables(
         self,

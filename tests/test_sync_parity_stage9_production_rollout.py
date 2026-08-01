@@ -39,6 +39,7 @@ def fake_git_value(branch: str):
     return inner
 
 
+@unittest.skip("legacy two-site Stage P9 rollout is retired; fence coverage lives in test_legacy_direct_fi_ir_transport_fence")
 class SyncParityStage9ProductionRolloutTests(unittest.TestCase):
     def build_args(self, artifact_dir: Path, *extra: str):
         return stage9.parse_args(

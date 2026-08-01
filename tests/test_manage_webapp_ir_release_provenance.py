@@ -427,12 +427,18 @@ class ReleaseProvenanceTests(unittest.TestCase):
         candidate.chmod(0o700)
         consumer_config = {
             "schema": MODULE.CONSUMER_CONFIG_SCHEMA,
+            "campaign_id": self.campaign_id,
             "endpoint": "https://s3.ir-thr-at1.arvanstorage.ir",
             "region": "ir-thr-at1",
             "bucket": "three-site-private",
             "prefix": "campaign-current/artifacts",
             "age_binary": "/usr/bin/age",
-            "age_identity_file": "/etc/trading-bot-three-site/wa-ir/artifact-stage-2c08.agekey",
+            "age_identity_file": (
+                "/etc/trading-bot-three-site/campaigns/"
+                + self.campaign_id
+                + "/webapp-ir/bootstrap.agekey"
+            ),
+            "age_recipient": "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
             "workspace": "/srv/trading-bot-three-site-staging-data/workspace",
             "source_site": "webapp_fi",
             "source_signing_public_key_base64": base64.b64encode(b"\x00" * 32).decode("ascii"),
@@ -875,7 +881,30 @@ class ReleaseProvenanceTests(unittest.TestCase):
         )
 
         with self.patched_contract():
-            with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "not the exact v3 schema"):
+            with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "not the exact v4 schema"):
+                MODULE.install_release_roots(
+                    stage_receipt_path=stage_receipt,
+                    bootstrap_receipt_path=bootstrap_receipt,
+                    receipt_path=self.receipt_parent / "release-roots.json",
+                )
+
+        self.assertFalse((self.application_parent / self.application_sha).exists())
+        self.assertFalse((self.control_parent / self.control_sha).exists())
+
+    def test_install_rejects_a_consumer_config_with_a_noncampaign_bootstrap_identity(self) -> None:
+        prepared = self.build()
+        stage_receipt = self.make_candidate(prepared)
+        bootstrap_receipt = self.make_bootstrap_receipt()
+        config_path = bootstrap_receipt.parent / MODULE.BOOTSTRAP_CONSUMER_CONFIG
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config["age_identity_file"] = "/etc/trading-bot-three-site/wa-ir/legacy.agekey"
+        self.rewrite_bootstrap_consumer_config(
+            bootstrap_receipt,
+            MODULE.canonical_json_bytes(config) + b"\n",
+        )
+
+        with self.patched_contract():
+            with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "campaign identity"):
                 MODULE.install_release_roots(
                     stage_receipt_path=stage_receipt,
                     bootstrap_receipt_path=bootstrap_receipt,

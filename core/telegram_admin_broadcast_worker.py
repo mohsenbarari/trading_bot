@@ -11,7 +11,14 @@ from core.background_job_authority import (
     assert_background_job_authority,
 )
 from core.config import settings
-from core.db import AsyncSessionLocal
+from core.db import (
+    AsyncSessionLocal,
+    require_application_writer_term,
+    require_external_effect_execution_authorization,
+)
+from core.external_effect_execution_gate import (
+    EXTERNAL_EFFECT_SCOPE_TELEGRAM_ADMIN_BROADCAST_DELIVERY,
+)
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.server_routing import current_server
 from core.services.telegram_admin_broadcast_delivery_service import (
@@ -60,7 +67,17 @@ def _increment_status(status_counts: dict[str, int], status: str | None) -> None
     status_counts[key] = status_counts.get(key, 0) + 1
 
 
+def _require_effectful_worker_authorization() -> None:
+    """Fence every claim/recovery boundary when external-effect gating is on."""
+
+    require_application_writer_term()
+    require_external_effect_execution_authorization(
+        EXTERNAL_EFFECT_SCOPE_TELEGRAM_ADMIN_BROADCAST_DELIVERY
+    )
+
+
 async def _recover_leases() -> int:
+    _require_effectful_worker_authorization()
     async with AsyncSessionLocal() as db:
         recovered = await recover_expired_telegram_admin_broadcast_leases(
             db,
@@ -77,12 +94,14 @@ async def run_telegram_admin_broadcast_delivery_cycle(
     limit: int | None = None,
 ) -> TelegramAdminBroadcastCycleReport:
     assert_background_job_authority(JOB_TELEGRAM_ADMIN_BROADCAST_DELIVERY)
+    _require_effectful_worker_authorization()
     status_counts: dict[str, int] = {}
     processed_count = 0
     recovered_lease_count = await _recover_leases()
     send_interval = _worker_send_interval_seconds()
 
     for _ in range(_worker_batch_limit(limit)):
+        _require_effectful_worker_authorization()
         async with AsyncSessionLocal() as db:
             result = await claim_and_deliver_next_telegram_admin_broadcast_receipt(
                 db,

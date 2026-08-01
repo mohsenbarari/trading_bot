@@ -13,11 +13,11 @@ WebApp-FI exchange operations:
   its URL-free VersionId report.
 
 It intentionally never opens SSH, creates an Object Storage client, reads
-credentials, creates a payload, or writes a receipt.  Its CLI is render and
-verify only.  An operator must separately and explicitly execute a rendered
-command after the applicable external authorization.  The transient URL is
-accepted only from stdin for the render-upload operation and is never written
-to stdout except as the final remote argument in that one shell command.
+credentials, creates a payload, or writes a receipt.  Its direct CLI exposes
+only URL-free render and verification results.  The URL-bearing upload command
+is available solely to a reviewed in-process controller executor, which must
+retain it only in memory and suppress all command output.  Direct CLI use of
+that operation fails closed before stdin is read.
 """
 
 from __future__ import annotations
@@ -67,9 +67,10 @@ EXCHANGE_SCRIPT_MEMBER = "scripts/manage_webapp_fi_source_exchange.py"
 # artifact exactly.
 STATIC_ARCHIVE_NAME = "mini_app_dist.tar"
 
-# The bootstrap receiver already creates this root-only directory.  The
-# initial package policy is required to use it, so the renderer never takes an
-# FI plaintext or output directory from an operator.
+# The bootstrap receiver creates this detached FI-owned root before it
+# installs a candidate.  The first static exchange intentionally reuses it;
+# normal campaign-derived exchange workspaces are installed only later by the
+# static-provenance control packet.
 FI_BOOTSTRAP_ROOT = Path("/srv/trading-bot-three-site-staging-data/webapp-fi-source-bootstrap")
 
 MAX_CONTROL_BYTES = 2 * 1024 * 1024
@@ -82,6 +83,24 @@ UTC_TIMESTAMP_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0
 
 class InitialStaticControlError(RuntimeError):
     """One initial static control input is not safely bound."""
+
+
+def _reject_direct_url_render(*, action: str) -> None:
+    """Fence a transient URL from terminal, shell-history, and audit paths.
+
+    Rendering the upload command to a direct CLI necessarily serializes its
+    final remote URL argument.  A separate controller process could then log
+    the command, retain it in shell history, or capture it as evidence.  Keep
+    this narrow library API for the reviewed in-process executor only; the
+    direct CLI has no safe transient hand-off and therefore must stop before
+    reading stdin.
+    """
+
+    if action != "render-upload":  # pragma: no cover - fixed parser dispatch.
+        raise InitialStaticControlError("unsupported direct URL render action")
+    raise InitialStaticControlError(
+        "direct CLI rendering of the URL-bearing FI upload control is disabled"
+    )
 
 
 def _require_root_controlled_directory_chain(path: Path, *, field: str) -> None:
@@ -184,6 +203,9 @@ class InitialStaticControl:
     fi_install_receipt_sha256: str
     prepared_directory: Path
     static_archive: Path
+    expected_static_manifest_sha256: str
+    expected_static_files_sha256: str
+    expected_static_file_count: int
 
 
 def canonical_json_bytes(value: Mapping[str, Any] | Sequence[Any]) -> bytes:
@@ -425,6 +447,16 @@ def _load_initial_package_members(
     try:
         controller_config = transport.load_controller_config(Path(source_transport_config))
         campaign_binding = transport.campaign_binding.load_campaign_binding(Path(campaign_binding_path))
+    except Exception as exc:
+        raise InitialStaticControlError("controller package, transport, or campaign binding is invalid") from exc
+    try:
+        transport.require_controller_config_for_campaign(
+            controller_config=controller_config,
+            campaign_id=campaign_binding.campaign_id,
+        )
+    except Exception as exc:
+        raise InitialStaticControlError("controller source transport config does not bind the campaign") from exc
+    try:
         prepared = preparer.verify_prepared_source_adoption_package(
             package_directory=Path(source_adoption_package_directory),
             preparation_receipt=Path(preparation_receipt),
@@ -442,6 +474,7 @@ def _load_initial_package_members(
         policy_raw = members[INITIAL_STATIC_POLICY_MEMBER]
         request_raw = members[INITIAL_STATIC_REQUEST_MEMBER]
         canonical_release_tree_raw = members[preparer.CANONICAL_RELEASE_TREE_MEMBER]
+        expected_static_assets_raw = members[preparer.EXPECTED_STATIC_ASSETS_MEMBER]
     except KeyError as exc:
         raise InitialStaticControlError("source-adoption package lacks initial static controls") from exc
     try:
@@ -453,6 +486,25 @@ def _load_initial_package_members(
         or canonical_release_tree["application"]["git_tree"] != campaign_binding.application_release_tree
     ):
         raise InitialStaticControlError("source-adoption package canonical release tree is not bound to the campaign")
+    try:
+        expected_static_assets = preparer._validate_expected_static_assets_manifest(expected_static_assets_raw)
+    except Exception as exc:
+        raise InitialStaticControlError("source-adoption package expected static assets manifest is invalid") from exc
+    if (
+        expected_static_assets["campaign_id"] != campaign_binding.campaign_id
+        or expected_static_assets["application"]
+        != {
+            "release_sha": campaign_binding.application_release_sha,
+            "release_tree": campaign_binding.application_release_tree,
+            "expected_alembic_revision": campaign_binding.expected_alembic_revision,
+        }
+        or expected_static_assets["tooling"]
+        != {
+            "control_commit": campaign_binding.control_commit,
+            "control_tree": campaign_binding.control_tree,
+        }
+    ):
+        raise InitialStaticControlError("source-adoption package expected static assets manifest is not bound to the campaign")
     try:
         policy_projection, projected_raw, _policy_sha = packet_control.source_transport_policy_from_payload(policy_raw)
     except Exception as exc:
@@ -475,6 +527,8 @@ def _load_initial_package_members(
         policy = transport.contract.validate_policy(policy)
     except Exception as exc:
         raise InitialStaticControlError("initial static package policy cannot be used by the exchange") from exc
+    if policy.workspace != FI_BOOTSTRAP_ROOT:
+        raise InitialStaticControlError("initial static package workspace is not the fixed FI bootstrap root")
     request_value = _parse_canonical_json(request_raw, field="initial static package request")
     request = _request_from_value(request_value, policy=policy, field="initial static package request")
     if (
@@ -486,8 +540,7 @@ def _load_initial_package_members(
         or policy.webapp_fi_age_recipient != controller_config.policy.webapp_fi_age_recipient
         or policy.webapp_ir_age_recipient != controller_config.policy.webapp_ir_age_recipient
         or policy.maximum_plaintext_bytes != controller_config.policy.maximum_plaintext_bytes
-        or policy.age_binary != "/usr/bin/age"
-        or policy.workspace != FI_BOOTSTRAP_ROOT
+        or policy.age_binary != controller_config.policy.age_binary
     ):
         raise InitialStaticControlError("initial static package policy differs from controller-pinned transport")
     expected_request = transport.SourceObjectRequest(
@@ -529,6 +582,11 @@ def _load_initial_package_members(
         "prepared": prepared,
         "request": request,
         "files": expected_files,
+        "expected_static_manifest_sha256": sha256_bytes(expected_static_assets_raw),
+        "expected_static_files_sha256": sha256_bytes(
+            canonical_json_bytes(expected_static_assets["files"])
+        ),
+        "expected_static_file_count": len(expected_static_assets["files"]),
     }
 
 
@@ -664,6 +722,9 @@ def build_initial_static_control(
         fi_install_receipt_sha256=install_sha,
         prepared_directory=prepared_directory,
         static_archive=static_archive,
+        expected_static_manifest_sha256=package["expected_static_manifest_sha256"],
+        expected_static_files_sha256=package["expected_static_files_sha256"],
+        expected_static_file_count=package["expected_static_file_count"],
     )
 
 
@@ -790,7 +851,13 @@ def render_upload_command(
     prepared_receipt: Path,
     presigned_upload_url: str,
 ) -> str:
-    """Render, but never execute, one exact FI create-only static PUT."""
+    """Render one exact FI create-only static PUT for an in-process executor.
+
+    The returned command contains an ephemeral credential.  It must stay in
+    the caller's process memory and be passed directly to a shell-free SSH
+    invocation with output suppressed.  The direct CLI intentionally cannot
+    expose this result.
+    """
 
     _read_prepared_receipt(Path(prepared_receipt), control=control)
     try:
@@ -894,7 +961,10 @@ def _parser() -> argparse.ArgumentParser:
     verify_prepared = actions.add_parser("verify-prepared", help="verify one URL-free FI prepared receipt")
     _base_arguments(verify_prepared)
     verify_prepared.add_argument("--prepared-receipt", required=True, type=Path)
-    upload = actions.add_parser("render-upload", help="render one pinned FI upload-prepared SSH command")
+    upload = actions.add_parser(
+        "render-upload",
+        help="disabled in the direct CLI; transient upload controls require an in-process executor",
+    )
     _base_arguments(upload)
     upload.add_argument("--fi-known-hosts", required=True, type=Path)
     upload.add_argument("--prepared-receipt", required=True, type=Path)
@@ -909,6 +979,8 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        if args.action == "render-upload":
+            _reject_direct_url_render(action=args.action)
         control = build_initial_static_control(
             source_transport_config=args.source_transport_config,
             campaign_binding=args.campaign_binding,
@@ -920,15 +992,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(render_prepare_command(control=control, fi_known_hosts=args.fi_known_hosts))
         elif args.action == "verify-prepared":
             print(json.dumps(validate_prepared_receipt(control=control, prepared_receipt=args.prepared_receipt), sort_keys=True))
-        elif args.action == "render-upload":
-            print(
-                render_upload_command(
-                    control=control,
-                    fi_known_hosts=args.fi_known_hosts,
-                    prepared_receipt=args.prepared_receipt,
-                    presigned_upload_url=_read_presigned_url_stdin(),
-                )
-            )
         elif args.action == "verify-upload":
             print(
                 json.dumps(

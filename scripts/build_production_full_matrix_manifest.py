@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Build the production full-matrix scenario manifest.
+"""Retired historical production two-server Full-Matrix manifest source.
 
-The manifest is intentionally side-effect free. It expands the code-defined
-market, delivery, actor, surface, outage, offer-type, and offer-shape axes into
-runner-consumable scenario records and keeps policy-unsupported cases visible as
-negative assertions.
+The historical construction remains only for forensic comparison.  It models
+the superseded two-server runner contract and must never be emitted by a
+supported CLI or in-process API in the Witness/Object-Storage three-site
+architecture.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import sys
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -25,6 +25,32 @@ from scripts import report_trade_notification_delivery_matrix as delivery_matrix
 from scripts import run_bot_webapp_comprehensive_load_matrix as market_matrix
 from scripts import run_trade_delivery_targeted_join_matrix as targeted_join_matrix
 from scripts.plan_production_full_matrix import default_prefix, validate_prefix
+from core.legacy_two_server_full_matrix_fence import (
+    assert_legacy_two_server_full_matrix_retired,
+    blocked_legacy_two_server_full_matrix_payload,
+)
+
+
+__all__ = (
+    "build_manifest",
+    "main",
+    "validate_manifest",
+)
+
+
+def _retire_legacy_forensic_source(function: Any) -> Any:
+    """Make retained two-server source text uncallable from any import path."""
+
+    operation = f"forensic source {function.__name__}"
+
+    def _rejected(*args: Any, **kwargs: Any) -> Any:
+        del args, kwargs
+        assert_legacy_two_server_full_matrix_retired(
+            component="production-full-matrix-manifest-builder",
+            operation=operation,
+        )
+
+    return _rejected
 
 
 SCHEMA_VERSION = "production_full_matrix_manifest_v1"
@@ -479,7 +505,8 @@ def summarize_sections(sections: dict[str, list[dict[str, Any]]]) -> dict[str, A
     }
 
 
-def build_manifest(*, prefix: str | None = None) -> dict[str, Any]:
+@_retire_legacy_forensic_source
+def _forensic_build_manifest(*, prefix: str | None = None) -> dict[str, Any]:
     normalized_prefix = validate_prefix(prefix or default_prefix())
     market_behavior = market_behavior_scenario_payloads()
     delivery_contract = delivery_contract_scenario_payloads()
@@ -577,6 +604,20 @@ def validate_manifest(manifest: dict[str, Any]) -> list[str]:
     return errors
 
 
+def _retire_legacy_public_manifest_api() -> NoReturn:
+    assert_legacy_two_server_full_matrix_retired(
+        component="production-full-matrix-manifest-builder",
+        operation="two-server manifest construction",
+    )
+
+
+def build_manifest(*, prefix: str | None = None) -> dict[str, Any]:
+    """Retired public boundary; it cannot emit a two-server runner contract."""
+
+    del prefix
+    _retire_legacy_public_manifest_api()
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prefix", default=default_prefix())
@@ -590,9 +631,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
+def _historical_two_server_main(argv: list[str] | None = None) -> int:
+    """Unreachable retained CLI source, fenced before argument parsing."""
+
+    assert_legacy_two_server_full_matrix_retired(
+        component="production-full-matrix-manifest-builder",
+        operation="historical two-server manifest emission",
+    )
     args = parse_args(argv)
-    manifest = build_manifest(prefix=args.prefix)
+    manifest = _forensic_build_manifest(prefix=args.prefix)
     errors = validate_manifest(manifest)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -613,6 +660,22 @@ def main(argv: list[str] | None = None) -> int:
             print(f"manifest check failed: {error}", file=sys.stderr)
         return 1
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Reject all legacy manifest CLI modes before writing an artifact."""
+
+    del argv
+    print(
+        json.dumps(
+            blocked_legacy_two_server_full_matrix_payload(
+                component="production-full-matrix-manifest-builder"
+            ),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+    return 2
 
 
 if __name__ == "__main__":

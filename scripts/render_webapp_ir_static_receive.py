@@ -2,16 +2,18 @@
 """Render a bounded WA-IR receiver for the source-phase static archive.
 
 The controller side verifies the generic source-transport receipt and the
-controller-signed static proof before it renders exactly one SSH control
-command.  The embedded receiver then downloads the exact immutable Object
-Storage version directly, decrypts it with the pre-existing campaign bootstrap
-identity, and writes a URL-free receipt compatible with
+controller-signed static proof before its reviewed in-process API renders one
+SSH control command.  The embedded receiver then downloads the exact immutable
+Object Storage version directly, decrypts it with the pre-existing campaign
+bootstrap identity, and writes a URL-free receipt compatible with
 ``install_webapp_ir_static_assets.py``.
 
 This helper deliberately does not install the static tree, stage a release,
 load an image, invoke Docker, change ``current``, start a service, or read S3
 credentials.  The presigned URL is a transient final argv item and is never
-placed in a receipt, candidate file, or rendered configuration.
+placed in a receipt, candidate file, or rendered configuration.  Direct CLI
+rendering is disabled so it cannot expose the URL in a process list or terminal
+output.
 """
 
 from __future__ import annotations
@@ -105,6 +107,14 @@ ALLOWED_CONTROL_BASE64_PATHS = frozenset(
 
 class StaticReceiveRenderError(RuntimeError):
     """The controller cannot safely render the WA-IR static receiver."""
+
+
+def _reject_direct_url_render() -> None:
+    """Fence the transient GET credential from CLI and shell-history paths."""
+
+    raise StaticReceiveRenderError(
+        "direct CLI rendering of the URL-bearing WA-IR static receive control is disabled"
+    )
 
 
 def _require_root_controlled_code_file(path: Path, *, field: str) -> Path:
@@ -348,12 +358,18 @@ def _require_current_presigned_url(value: str, *, now: dt.datetime) -> None:
         raise StaticReceiveRenderError("presigned download URL is not current and short-lived")
 
 
-def _load_transport_policy(path: Path) -> Any:
+def _load_transport_config(path: Path) -> Any:
     _require_root_execution()
     try:
-        return transport.load_controller_config(path).policy
+        return transport.load_controller_config(path)
     except Exception as exc:
         raise StaticReceiveRenderError("source transport controller configuration is unsafe") from exc
+
+
+def _load_transport_policy(path: Path) -> Any:
+    """Keep the URL-free policy accessor for non-render planning callers."""
+
+    return _load_transport_config(path).policy
 
 
 def _verify_generic_static_receipt(*, payload: bytes, policy: Any) -> dict[str, Any]:
@@ -1216,12 +1232,23 @@ def render_receive_command(
     """Return one SSH control command after all controller-local checks pass."""
 
     _require_fixed_receiver_root(receiver_root)
-    policy = _load_transport_policy(source_transport_config)
+    controller_config = _load_transport_config(source_transport_config)
+    policy = controller_config.policy
     transport_payload = _read_root_only_file(
         transport_publish_receipt,
         field="generic static source transport receipt",
     )
     published = _verify_generic_static_receipt(payload=transport_payload, policy=policy)
+    try:
+        controller_config = transport.require_controller_config_for_campaign(
+            controller_config=controller_config,
+            campaign_id=published["campaign_id"],
+        )
+    except Exception as exc:
+        raise StaticReceiveRenderError(
+            "source transport controller configuration does not bind the published campaign"
+        ) from exc
+    policy = controller_config.policy
     pinned_key = _require_text(
         pinned_controller_public_key_base64,
         field="pinned controller public key",
@@ -1252,12 +1279,15 @@ def render_receive_command(
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog="Direct rendering is disabled; transient receive controls require an in-process executor.",
+    )
     parser.add_argument("--transport-publish-receipt", type=Path, required=True)
     parser.add_argument("--source-transport-config", type=Path, required=True)
     parser.add_argument("--static-assets-provenance", type=Path, required=True)
     parser.add_argument("--pinned-controller-public-key-base64", required=True)
-    parser.add_argument("--presigned-url", required=True)
+    parser.add_argument("--presigned-url-stdin", action="store_true", required=True)
     parser.add_argument("--receiver-root", default=DEFAULT_RECEIVER_ROOT)
     return parser
 
@@ -1265,19 +1295,10 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        command = render_receive_command(
-            transport_publish_receipt=args.transport_publish_receipt,
-            source_transport_config=args.source_transport_config,
-            static_assets_provenance=args.static_assets_provenance,
-            pinned_controller_public_key_base64=args.pinned_controller_public_key_base64,
-            presigned_url=args.presigned_url,
-            receiver_root=args.receiver_root,
-        )
+        _reject_direct_url_render()
     except StaticReceiveRenderError as exc:
         print(json.dumps({"status": "blocked", "error": str(exc), "error_class": type(exc).__name__}, sort_keys=True))
         return 2
-    print(command)
-    return 0
 
 
 if __name__ == "__main__":

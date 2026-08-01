@@ -1,0 +1,17 @@
+# Generated default-off local authentication policy for the WA-IR standby.
+# This scaffold exposes no PostgreSQL TCP listener.  The explicit TCP and
+# replication rejects remain defence in depth if a later unsafe listener is
+# attempted.  A future reviewed reader path must replace this policy only with
+# a separately pinned and independently validated access boundary.
+
+# The PostgreSQL service account may perform local standby maintenance as
+# itself through the container-local Unix socket.
+local   all             postgres                                peer
+
+# No other local identity, replication connection, or TCP family is admitted.
+local   replication     all                                     reject
+local   all             all                                     reject
+host    replication     all             0.0.0.0/0               reject
+host    all             all             0.0.0.0/0               reject
+host    replication     all             ::0/0                    reject
+host    all             all             ::0/0                    reject

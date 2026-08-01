@@ -6,9 +6,16 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import httpx
+from fastapi import FastAPI
 from fastapi import HTTPException
+from httpx import ASGITransport
 
-from api.routers.sync import resync_from_changelog
+from api.routers import sync as sync_router
+from api.routers.sync import (
+    RETIRED_LEGACY_DIRECT_SYNC_HTTP_DETAIL,
+    resync_from_changelog,
+)
 from core.sync_protocol import build_sync_protocol_metadata
 
 
@@ -75,6 +82,7 @@ def make_entry(entry_id, **overrides):
     return SimpleNamespace(**data)
 
 
+@unittest.skip("legacy direct FI<->IR HTTP resync is permanently retired")
 class SyncRouterResyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_resync_requires_dev_key_and_sync_configuration(self):
         request = SimpleNamespace(headers={})
@@ -92,6 +100,23 @@ class SyncRouterResyncTests(unittest.IsolatedAsyncioTestCase):
                 await resync_from_changelog(request=request, db=FakeDB())
         self.assertEqual(exc_info.exception.status_code, 500)
         self.assertEqual(exc_info.exception.detail, "Sync not configured (peer server URL or SYNC_API_KEY missing)")
+
+    async def test_resync_rejects_legacy_direct_sync_before_any_query_in_single_writer_mode(self):
+        request = SimpleNamespace(headers={"X-Dev-Api-Key": "dev-key"})
+        db = FakeDB()
+
+        with patch("api.routers.sync.settings.dev_api_key", "dev-key"), patch(
+            "api.routers.sync.single_writer_runtime_enabled", return_value=True
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await resync_from_changelog(request=request, db=db)
+
+        self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertEqual(
+            exc_info.exception.detail,
+            "Legacy direct sync is disabled in single-writer runtime",
+        )
+        self.assertEqual(0, db.commits)
 
     async def test_resync_returns_early_when_no_unsynced_entries(self):
         request = SimpleNamespace(headers={"X-Dev-Api-Key": "dev-key"})
@@ -359,6 +384,56 @@ class SyncRouterResyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload[1]["data"]["management_name"], "مشتری ویژه")
         self.assertEqual(payload[1]["data"]["status"], "deleted")
         self.assertEqual(payload[1]["data"]["deleted_at"], "2026-05-21T09:00:00")
+
+
+class LegacyDirectSyncResyncRetirementTests(unittest.IsolatedAsyncioTestCase):
+    async def test_resync_permanently_rejects_before_dev_key_or_database_work(self):
+        db = FakeDB()
+        request = SimpleNamespace(headers={})
+
+        with patch("api.routers.sync._require_dev_key") as require_dev_key, patch(
+            "api.routers.sync.default_peer_server_url"
+        ) as default_peer_url, patch("api.routers.sync.peer_server_url_for") as selected_peer_url:
+            with self.assertRaises(HTTPException) as exc_info:
+                await resync_from_changelog(request=request, db=db)
+
+        self.assertEqual(410, exc_info.exception.status_code)
+        self.assertEqual(RETIRED_LEGACY_DIRECT_SYNC_HTTP_DETAIL, exc_info.exception.detail)
+        require_dev_key.assert_not_called()
+        default_peer_url.assert_not_called()
+        selected_peer_url.assert_not_called()
+        self.assertEqual(0, db.commits)
+
+    async def test_resync_route_fence_precedes_database_and_outbound_http_client(self):
+        app = FastAPI()
+        app.include_router(sync_router.router)
+        db_attempts: list[str] = []
+
+        async def should_not_create_database_session():
+            db_attempts.append("get_db")
+            raise AssertionError("permanent retirement fence must run before get_db")
+
+        app.dependency_overrides[sync_router.get_db] = should_not_create_database_session
+        transport = ASGITransport(app=app)
+
+        # The client is constructed before patching the library constructor.
+        # If the endpoint reaches its old outbound branch, its inner dynamic
+        # import will hit ``outbound_client`` instead.
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            with patch.object(sync_router, "default_peer_server_url") as default_peer_url, patch.object(
+                sync_router, "peer_server_url_for"
+            ) as selected_peer_url, patch.object(sync_router, "_require_dev_key") as require_dev_key, patch(
+                "httpx.AsyncClient"
+            ) as outbound_client:
+                response = await client.post("/resync")
+
+        self.assertEqual(410, response.status_code)
+        self.assertEqual({"detail": RETIRED_LEGACY_DIRECT_SYNC_HTTP_DETAIL}, response.json())
+        self.assertEqual([], db_attempts)
+        default_peer_url.assert_not_called()
+        selected_peer_url.assert_not_called()
+        require_dev_key.assert_not_called()
+        outbound_client.assert_not_called()
 
 
 if __name__ == "__main__":

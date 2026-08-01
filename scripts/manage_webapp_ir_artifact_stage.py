@@ -34,8 +34,10 @@ import argparse
 import base64
 import binascii
 import contextlib
+import ctypes
 import dataclasses
 import datetime as dt
+import errno
 import hashlib
 import importlib.util
 import json
@@ -48,7 +50,7 @@ import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterator, Mapping, Sequence
 
 
@@ -106,7 +108,7 @@ except ImportError:  # pragma: no cover - deployment requirements already includ
     Ed25519PublicKey = None  # type: ignore[assignment,misc]
 
 
-CONFIG_SCHEMA = "gold-trade-wa-ir-artifact-stage-config-v3"
+CONFIG_SCHEMA = "gold-trade-wa-ir-artifact-stage-config-v4"
 MANIFEST_SCHEMA = "gold-trade-wa-ir-artifact-stage-manifest-v1"
 PUBLISH_RECEIPT_SCHEMA = "gold-trade-wa-ir-artifact-stage-publish-receipt-v1"
 STAGE_RECEIPT_SCHEMA = "gold-trade-wa-ir-artifact-stage-receipt-v1"
@@ -120,8 +122,14 @@ DEFAULT_MAXIMUM_ARTIFACT_BYTES = 20 * 1024 * 1024 * 1024
 DEFAULT_PRESIGN_EXPIRES_SECONDS = 300
 MAXIMUM_MANIFEST_CIPHERTEXT_BYTES = 1024 * 1024
 DOWNLOAD_TIMEOUT_SECONDS = 60
+MAXIMUM_PRESIGNED_URL_BYTES = 8192
+MINIMUM_PRESIGN_EXPIRES_SECONDS = 60
+MAXIMUM_PRESIGN_EXPIRES_SECONDS = 900
+WA_IR_CAMPAIGN_IDENTITY_ROOT = "/etc/trading-bot-three-site/campaigns"
+WA_IR_BOOTSTRAP_IDENTITY_SUFFIX = "webapp-ir/bootstrap.agekey"
 
 SITE_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
+CAMPAIGN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$")
 RELEASE_SHA_RE = re.compile(r"^[a-f0-9]{40,64}$")
 BUNDLE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 ARTIFACT_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
@@ -129,14 +137,44 @@ BINDING_KEY_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 BUCKET_RE = re.compile(r"^[a-z0-9][a-z0-9.-]{2,62}$")
 PREFIX_COMPONENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._=-]{0,127}$")
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
+SIGV4_TIMESTAMP_RE = re.compile(r"^[0-9]{8}T[0-9]{6}Z$")
+SIGV4_SIGNATURE_RE = re.compile(r"^[0-9a-f]{64}$")
+SIGV4_ACCESS_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+SIGV4_REGION_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+ARVAN_S3_HOST_RE = re.compile(r"^s3\.([a-z0-9][a-z0-9-]{0,62})\.arvanstorage\.ir$")
+
+SIGV4_REQUIRED_QUERY_NAMES = frozenset(
+    {
+        "versionId",
+        "X-Amz-Algorithm",
+        "X-Amz-Credential",
+        "X-Amz-Date",
+        "X-Amz-Expires",
+        "X-Amz-SignedHeaders",
+        "X-Amz-Signature",
+    }
+)
+SIGV4_OPTIONAL_QUERY_NAMES = frozenset({"X-Amz-Security-Token"})
+AT_FDCWD = -100
+RENAME_NOREPLACE = 1
+CLI_SENSITIVE_TRANSPORT_RE = re.compile(r"(?:https?://|(?:^|\s)(?:ssh|scp|sftp|rsync)\s)", re.IGNORECASE)
+CLI_SENSITIVE_RESULT_KEYS = frozenset({"presigned_url", "download_url", "command", "ssh_command"})
 
 
 class ArtifactStageError(RuntimeError):
     """Raised when the immutable artifact staging contract is violated."""
 
 
+class _SafeArgumentParser(argparse.ArgumentParser):
+    """Do not reflect potentially URL-bearing argv values to direct CLI stderr."""
+
+    def error(self, _message: str) -> None:
+        raise ArtifactStageError("invalid command-line input")
+
+
 @dataclasses.dataclass(frozen=True)
 class PublisherConfig:
+    campaign_id: str
     endpoint: str
     region: str
     bucket: str
@@ -153,12 +191,14 @@ class PublisherConfig:
 
 @dataclasses.dataclass(frozen=True)
 class ConsumerConfig:
+    campaign_id: str
     endpoint: str
     region: str
     bucket: str
     prefix: str
     age_binary: str
     age_identity_file: Path
+    age_recipient: str
     workspace: Path
     source_site: str
     source_signing_public_key: bytes
@@ -187,6 +227,36 @@ class ImmutableArtifactSnapshot:
 
 def canonical_json_bytes(value: Mapping[str, Any]) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+
+
+def _cli_safe_value(value: Any) -> Any:
+    """Return direct-CLI output without transient URLs or executable commands.
+
+    Callers that need a one-shot URL-bearing receipt or control command use the
+    Python functions in memory.  The command-line interface is deliberately a
+    terminal/reporting boundary and must not become a URL transport channel.
+    """
+
+    if isinstance(value, Mapping):
+        return {
+            str(key): _cli_safe_value(item)
+            for key, item in value.items()
+            if isinstance(key, str) and key.lower() not in CLI_SENSITIVE_RESULT_KEYS
+        }
+    if isinstance(value, list):
+        return [_cli_safe_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_cli_safe_value(item) for item in value]
+    if isinstance(value, str) and CLI_SENSITIVE_TRANSPORT_RE.search(value):
+        return "[redacted transient transport detail]"
+    return value
+
+
+def _cli_blocked_payload(exc: BaseException) -> dict[str, str]:
+    message = str(exc)
+    if CLI_SENSITIVE_TRANSPORT_RE.search(message):
+        message = "operation blocked without emitting transient transport details"
+    return {"status": "blocked", "error": message, "error_class": type(exc).__name__}
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -370,7 +440,11 @@ def require_positive_int(value: object, field: str, *, maximum: int | None = Non
 
 def require_version_id(value: object, field: str) -> str:
     version_id = require_string(value, field)
-    if len(version_id) > 1024 or any(ord(character) < 0x20 or ord(character) == 0x7F for character in version_id):
+    if (
+        version_id == "null"
+        or len(version_id) > 1024
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in version_id)
+    ):
         raise ArtifactStageError(f"{field} has an unsafe format")
     return version_id
 
@@ -380,6 +454,17 @@ def require_absolute_path(value: object, field: str) -> Path:
     if not path.is_absolute():
         raise ArtifactStageError(f"{field} must be an absolute path")
     return path
+
+
+def wa_ir_bootstrap_identity_file(campaign_id: object) -> Path:
+    """Return the sole fresh campaign identity accepted by WA-IR staging."""
+
+    normalized_campaign_id = require_id(campaign_id, "campaign_id", CAMPAIGN_ID_RE)
+    path = PurePosixPath(WA_IR_CAMPAIGN_IDENTITY_ROOT) / normalized_campaign_id / WA_IR_BOOTSTRAP_IDENTITY_SUFFIX
+    value = path.as_posix()
+    if not path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+        raise ArtifactStageError("campaign WA-IR bootstrap identity path is invalid")
+    return Path(value)
 
 
 def _snapshot_error(call: Callable[[], Any]) -> Any:
@@ -446,6 +531,7 @@ def load_publisher_config(path: Path) -> PublisherConfig:
         raw,
         allowed={
             "schema",
+            "campaign_id",
             "endpoint",
             "region",
             "bucket",
@@ -462,6 +548,7 @@ def load_publisher_config(path: Path) -> PublisherConfig:
         role="publisher",
     )
     endpoint, region, bucket, prefix, age_binary, workspace, maximum_artifact_bytes = _load_common_config(raw, role="publisher")
+    campaign_id = require_id(raw.get("campaign_id"), "campaign_id", CAMPAIGN_ID_RE)
     credentials_file = require_absolute_path(raw.get("credentials_file"), "credentials_file")
     age_recipient = require_id(raw.get("age_recipient"), "age_recipient", snapshot.AGE_RECIPIENT_RE)
     source_site = require_id(raw.get("source_site"), "source_site", SITE_RE)
@@ -471,9 +558,10 @@ def load_publisher_config(path: Path) -> PublisherConfig:
         "presign_expires_seconds",
         maximum=900,
     )
-    if expires < 60:
-        raise ArtifactStageError("presign_expires_seconds must be at least 60")
+    if not MINIMUM_PRESIGN_EXPIRES_SECONDS <= expires <= MAXIMUM_PRESIGN_EXPIRES_SECONDS:
+        raise ArtifactStageError("presign_expires_seconds must be between 60 and 900")
     return PublisherConfig(
+        campaign_id=campaign_id,
         endpoint=endpoint,
         region=region,
         bucket=bucket,
@@ -495,12 +583,14 @@ def load_consumer_config(path: Path) -> ConsumerConfig:
         raw,
         allowed={
             "schema",
+            "campaign_id",
             "endpoint",
             "region",
             "bucket",
             "prefix",
             "age_binary",
             "age_identity_file",
+            "age_recipient",
             "workspace",
             "source_site",
             "source_signing_public_key_base64",
@@ -511,7 +601,11 @@ def load_consumer_config(path: Path) -> ConsumerConfig:
         role="consumer",
     )
     endpoint, region, bucket, prefix, age_binary, workspace, maximum_artifact_bytes = _load_common_config(raw, role="consumer")
+    campaign_id = require_id(raw.get("campaign_id"), "campaign_id", CAMPAIGN_ID_RE)
     identity = require_absolute_path(raw.get("age_identity_file"), "age_identity_file")
+    if identity != wa_ir_bootstrap_identity_file(campaign_id):
+        raise ArtifactStageError("age_identity_file must pin the campaign WA-IR bootstrap identity")
+    age_recipient = require_id(raw.get("age_recipient"), "age_recipient", snapshot.AGE_RECIPIENT_RE)
     source_site = require_id(raw.get("source_site"), "source_site", SITE_RE)
     source_public_key = decode_exact_base64(
         raw.get("source_signing_public_key_base64"),
@@ -529,12 +623,14 @@ def load_consumer_config(path: Path) -> ConsumerConfig:
         expected_bytes=32,
     )
     return ConsumerConfig(
+        campaign_id=campaign_id,
         endpoint=endpoint,
         region=region,
         bucket=bucket,
         prefix=prefix,
         age_binary=age_binary,
         age_identity_file=identity,
+        age_recipient=age_recipient,
         workspace=workspace,
         source_site=source_site,
         source_signing_public_key=source_public_key,
@@ -759,7 +855,22 @@ def _metadata_for_ciphertext(ciphertext_sha256: str) -> dict[str, str]:
     }
 
 
-def _write_stream_to_new_file(stream: Any, output_path: Path) -> tuple[str, int]:
+def _write_stream_to_new_file(
+    stream: Any,
+    output_path: Path,
+    *,
+    maximum_bytes: int,
+) -> tuple[str, int]:
+    """Write one response body only while it remains inside its declared bound.
+
+    The check occurs before each chunk reaches disk.  A short body is checked
+    by the caller against its exact expected size, and every failed stream
+    removes the fresh output path so it cannot later be mistaken for a valid
+    ciphertext.
+    """
+
+    if isinstance(maximum_bytes, bool) or not isinstance(maximum_bytes, int) or maximum_bytes < 1:
+        raise ArtifactStageError("download maximum bytes is invalid")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
@@ -779,15 +890,79 @@ def _write_stream_to_new_file(stream: Any, output_path: Path) -> tuple[str, int]
                     break
                 if not isinstance(chunk, bytes):
                     raise ArtifactStageError("download returned non-bytes content")
+                if len(chunk) > maximum_bytes - total:
+                    raise ArtifactStageError("download exceeds its exact ciphertext size bound")
                 handle.write(chunk)
                 digest.update(chunk)
                 total += len(chunk)
             handle.flush()
             os.fsync(handle.fileno())
-    except Exception:
+    except BaseException:
         output_path.unlink(missing_ok=True)
         raise
     return digest.hexdigest(), total
+
+
+def _response_has_provider_side_encryption(response: Mapping[str, Any]) -> bool:
+    """Reject any SDK-visible SSE, KMS, or SSE-C response field by prefix."""
+
+    for raw_name in response:
+        if not isinstance(raw_name, str):
+            continue
+        normalized = re.sub(r"[^a-z0-9]", "", raw_name.lower())
+        if normalized.startswith(("serversideencryption", "sse", "kms", "bucketkey")):
+            return True
+    response_metadata = response.get("ResponseMetadata")
+    if isinstance(response_metadata, Mapping):
+        http_headers = response_metadata.get("HTTPHeaders")
+        if isinstance(http_headers, Mapping):
+            for raw_name in http_headers:
+                if not isinstance(raw_name, str):
+                    continue
+                normalized = raw_name.lower()
+                if normalized.startswith(
+                    ("x-amz-server-side-encryption", "x-amz-sse", "x-amz-kms", "x-amz-bucket-key")
+                ):
+                    return True
+    return False
+
+
+def _iter_header_values(headers: Any) -> Iterator[tuple[str, str]]:
+    """Yield response headers preserving duplicates where the response exposes them."""
+
+    if headers is None:
+        return
+    items: Any
+    if hasattr(headers, "items"):
+        items = headers.items()
+    elif isinstance(headers, Mapping):  # pragma: no cover - Mapping normally has items.
+        items = headers.items()
+    else:
+        return
+    for raw_name, raw_value in items:
+        if not isinstance(raw_name, str):
+            continue
+        if isinstance(raw_value, (list, tuple)):
+            values = raw_value
+        else:
+            values = (raw_value,)
+        for value in values:
+            yield raw_name.lower(), str(value)
+
+
+def _header_values(headers: Any, name: str) -> list[str]:
+    target = name.lower()
+    return [value for header_name, value in _iter_header_values(headers) if header_name == target]
+
+
+def _response_headers_have_provider_side_encryption(headers: Any) -> bool:
+    return any(
+        name.startswith("x-amz-server-side-encryption")
+        or name.startswith("x-amz-sse")
+        or name.startswith("x-amz-kms")
+        or name.startswith("x-amz-bucket-key")
+        for name, _value in _iter_header_values(headers)
+    )
 
 
 def _get_response_metadata(response: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -808,6 +983,7 @@ def _verify_exact_object_readback(
     workspace: Path,
 ) -> None:
     target = workspace / ("readback-" + secrets.token_hex(12) + ".age")
+    body: Any | None = None
     try:
         try:
             response = client.get_object(Bucket=bucket, Key=key, VersionId=version_id)
@@ -817,7 +993,7 @@ def _verify_exact_object_readback(
             raise ArtifactStageError("Object Storage read-back response is malformed")
         if require_version_id(response.get("VersionId"), "Object Storage read-back VersionId") != version_id:
             raise ArtifactStageError("Object Storage read-back returned a different VersionId")
-        if response.get("ServerSideEncryption"):
+        if _response_has_provider_side_encryption(response):
             raise ArtifactStageError("provider-side Object Storage encryption is not permitted")
         metadata = _get_response_metadata(response)
         if (
@@ -829,11 +1005,14 @@ def _verify_exact_object_readback(
         body = response.get("Body")
         if body is None or not hasattr(body, "read"):
             raise ArtifactStageError("Object Storage read-back has no readable body")
-        digest, size = _write_stream_to_new_file(body, target)
+        digest, size = _write_stream_to_new_file(body, target, maximum_bytes=expected_bytes)
         if digest != expected_sha256 or size != expected_bytes:
             raise ArtifactStageError("Object Storage read-back ciphertext does not match the uploaded artifact")
     finally:
         target.unlink(missing_ok=True)
+        close = getattr(body, "close", None)
+        if callable(close):
+            close()
 
 
 def upload_immutable_encrypted_object(
@@ -860,7 +1039,7 @@ def upload_immutable_encrypted_object(
             raise ArtifactStageError("conditional immutable Object Storage upload failed") from exc
     if not isinstance(response, Mapping):
         raise ArtifactStageError("Object Storage upload returned a malformed response")
-    if response.get("ServerSideEncryption"):
+    if _response_has_provider_side_encryption(response):
         raise ArtifactStageError("provider-side Object Storage encryption is not permitted")
     version_id = require_version_id(response.get("VersionId"), "Object Storage upload VersionId")
     if version_id == "null":
@@ -965,6 +1144,105 @@ def _expected_url_path(bucket: str, object_key: str) -> str:
     return "/" + urllib.parse.quote(bucket, safe="") + "/" + urllib.parse.quote(object_key, safe="/")
 
 
+def _parse_canonical_arvan_endpoint(endpoint: str) -> tuple[str, str]:
+    """Return the exact host and region for one configured Arvan S3 endpoint."""
+
+    try:
+        parsed = urllib.parse.urlsplit(endpoint)
+        has_port = parsed.port is not None
+    except ValueError as exc:
+        raise ArtifactStageError("presigned URL endpoint is invalid") from exc
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.netloc != parsed.hostname
+        or has_port
+        or parsed.path not in ("", "/")
+        or parsed.query
+        or parsed.fragment
+        or parsed.username
+        or parsed.password
+    ):
+        raise ArtifactStageError("presigned URL endpoint is not canonical")
+    match = ARVAN_S3_HOST_RE.fullmatch(parsed.hostname)
+    if match is None:
+        raise ArtifactStageError("presigned URL endpoint is not an Arvan S3 endpoint")
+    return parsed.hostname, match.group(1)
+
+
+def _decode_canonical_query_component(value: str, *, field: str) -> str:
+    if not value or "+" in value:
+        raise ArtifactStageError(f"presigned URL {field} is not canonical")
+    if re.search(r"%(?![0-9A-F]{2})", value):
+        raise ArtifactStageError(f"presigned URL {field} is not canonical")
+    try:
+        decoded = urllib.parse.unquote_to_bytes(value).decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise ArtifactStageError(f"presigned URL {field} is not ASCII") from exc
+    if urllib.parse.quote(decoded, safe="-_.~") != value:
+        raise ArtifactStageError(f"presigned URL {field} is not canonical")
+    return decoded
+
+
+def _parse_canonical_sigv4_query(query_text: str, *, endpoint_region: str) -> dict[str, str]:
+    """Parse exactly one version-bound SigV4 GET query without permissive decoding."""
+
+    if not query_text:
+        raise ArtifactStageError("presigned URL query is missing")
+    result: dict[str, str] = {}
+    for raw_pair in query_text.split("&"):
+        if not raw_pair or "=" not in raw_pair:
+            raise ArtifactStageError("presigned URL query is malformed")
+        raw_name, raw_value = raw_pair.split("=", 1)
+        name = _decode_canonical_query_component(raw_name, field="query name")
+        value = _decode_canonical_query_component(raw_value, field=f"query value {name or 'unknown'}")
+        if name in result:
+            raise ArtifactStageError("presigned URL query contains duplicate names")
+        result[name] = value
+    if not SIGV4_REQUIRED_QUERY_NAMES.issubset(result) or set(result) - (
+        SIGV4_REQUIRED_QUERY_NAMES | SIGV4_OPTIONAL_QUERY_NAMES
+    ):
+        raise ArtifactStageError("presigned URL query contains unsupported fields")
+    if result["X-Amz-Algorithm"] != "AWS4-HMAC-SHA256":
+        raise ArtifactStageError("presigned URL must use AWS SigV4")
+    timestamp = result["X-Amz-Date"]
+    if not SIGV4_TIMESTAMP_RE.fullmatch(timestamp):
+        raise ArtifactStageError("presigned URL X-Amz-Date is invalid")
+    try:
+        dt.datetime.strptime(timestamp, "%Y%m%dT%H%M%SZ")
+    except ValueError as exc:
+        raise ArtifactStageError("presigned URL X-Amz-Date is invalid") from exc
+    expires = result["X-Amz-Expires"]
+    if not re.fullmatch(r"[1-9][0-9]{0,3}", expires):
+        raise ArtifactStageError("presigned URL X-Amz-Expires is invalid")
+    expires_seconds = int(expires, 10)
+    if not MINIMUM_PRESIGN_EXPIRES_SECONDS <= expires_seconds <= MAXIMUM_PRESIGN_EXPIRES_SECONDS:
+        raise ArtifactStageError("presigned URL expiry is outside the permitted range")
+    if result["X-Amz-SignedHeaders"] != "host":
+        raise ArtifactStageError("presigned URL X-Amz-SignedHeaders is unsupported")
+    if not SIGV4_SIGNATURE_RE.fullmatch(result["X-Amz-Signature"]):
+        raise ArtifactStageError("presigned URL X-Amz-Signature is invalid")
+    credential_parts = result["X-Amz-Credential"].split("/")
+    if (
+        len(credential_parts) != 5
+        or not SIGV4_ACCESS_KEY_RE.fullmatch(credential_parts[0])
+        or credential_parts[1] != timestamp[:8]
+        or not SIGV4_REGION_RE.fullmatch(credential_parts[2])
+        or credential_parts[2] != endpoint_region
+        or credential_parts[3] != "s3"
+        or credential_parts[4] != "aws4_request"
+    ):
+        raise ArtifactStageError("presigned URL X-Amz-Credential scope is invalid")
+    token = result.get("X-Amz-Security-Token")
+    if token is not None and (
+        not token
+        or len(token) > 4096
+        or any(ord(character) < 0x21 or ord(character) == 0x7F for character in token)
+    ):
+        raise ArtifactStageError("presigned URL security token is invalid")
+    return result
+
+
 def require_version_bound_presigned_url(
     value: object,
     *,
@@ -974,34 +1252,36 @@ def require_version_bound_presigned_url(
     version_id: str,
 ) -> str:
     url = require_string(value, "presigned URL")
-    if len(url) > 8192:
+    if (
+        len(url) > MAXIMUM_PRESIGNED_URL_BYTES
+        or any(ord(character) < 0x21 or ord(character) == 0x7F for character in url)
+    ):
         raise ArtifactStageError("presigned URL is too long")
-    parsed = urllib.parse.urlparse(url)
-    endpoint_parsed = urllib.parse.urlparse(endpoint)
+    try:
+        url.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise ArtifactStageError("presigned URL must be ASCII") from exc
+    expected_version_id = require_version_id(version_id, "presigned URL VersionId")
+    expected_host, endpoint_region = _parse_canonical_arvan_endpoint(endpoint)
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        has_port = parsed.port is not None
+    except ValueError as exc:
+        raise ArtifactStageError("presigned URL is invalid") from exc
     if (
         parsed.scheme != "https"
-        or parsed.hostname != endpoint_parsed.hostname
-        or parsed.port is not None
+        or parsed.hostname != expected_host
+        or parsed.netloc != expected_host
+        or has_port
         or parsed.username is not None
         or parsed.password is not None
         or parsed.fragment
         or parsed.path != _expected_url_path(bucket, object_key)
     ):
         raise ArtifactStageError("presigned URL is not bound to the configured private Object Storage endpoint")
-    query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True, strict_parsing=False)
-    versions = query.get("versionId")
-    if versions != [version_id]:
+    query = _parse_canonical_sigv4_query(parsed.query, endpoint_region=endpoint_region)
+    if query.get("versionId") != expected_version_id:
         raise ArtifactStageError("presigned URL must bind exactly one matching VersionId")
-    sigv4 = all(
-        len(query.get(name, [])) == 1 and bool(query[name][0])
-        for name in ("X-Amz-Algorithm", "X-Amz-Credential", "X-Amz-Signature")
-    )
-    sigv2 = all(
-        len(query.get(name, [])) == 1 and bool(query[name][0])
-        for name in ("AWSAccessKeyId", "Signature", "Expires")
-    )
-    if not sigv4 and not sigv2:
-        raise ArtifactStageError("presigned URL does not contain a supported signed-request envelope")
     return url
 
 
@@ -1236,8 +1516,6 @@ def publish_bootstrap_package(
     bootstrap = _load_bootstrap_preparation_primitives()
     if config.source_site != bootstrap.WA_IR_BOOTSTRAP_SOURCE_SITE:
         raise ArtifactStageError("bootstrap publisher source_site must be webapp_fi")
-    if config.age_recipient != bootstrap.WA_IR_BOOTSTRAP_AGE_RECIPIENT:
-        raise ArtifactStageError("bootstrap publisher age_recipient is not the fixed WA-IR recipient")
     try:
         prepared = bootstrap.verify_prepared_bootstrap_package(
             package_directory=bootstrap_package_directory,
@@ -1248,8 +1526,16 @@ def publish_bootstrap_package(
     consumer_config = prepared["consumer_config"]
     if consumer_config.get("source_site") != bootstrap.WA_IR_BOOTSTRAP_SOURCE_SITE:
         raise ArtifactStageError("bootstrap consumer config source_site must be webapp_fi")
-    if consumer_config.get("age_identity_file") != bootstrap.WA_IR_BOOTSTRAP_IDENTITY_FILE:
-        raise ArtifactStageError("bootstrap consumer config does not use the fixed WA-IR identity path")
+    if consumer_config.get("campaign_id") != config.campaign_id:
+        raise ArtifactStageError("bootstrap consumer campaign_id does not match the publisher config")
+    try:
+        expected_identity = bootstrap.wa_ir_bootstrap_identity_file(config.campaign_id)
+    except Exception as exc:  # pragma: no cover - config parsing already validates campaign_id.
+        raise ArtifactStageError("bootstrap publisher campaign_id is invalid") from exc
+    if consumer_config.get("age_identity_file") != expected_identity:
+        raise ArtifactStageError("bootstrap consumer config does not use the campaign WA-IR identity path")
+    if consumer_config.get("age_recipient") != config.age_recipient:
+        raise ArtifactStageError("bootstrap consumer age_recipient does not match the publisher config")
     if any(
         consumer_config[field] != getattr(config, field)
         for field in ("endpoint", "region", "bucket", "prefix")
@@ -1333,28 +1619,16 @@ def publish_bootstrap_package(
     }
 
 
-def _header(headers: Any, name: str) -> str | None:
-    if headers is None:
-        return None
-    if hasattr(headers, "get"):
-        value = headers.get(name)
-        if value is not None:
-            return str(value)
-    if isinstance(headers, Mapping):
-        target = name.lower()
-        for key, value in headers.items():
-            if isinstance(key, str) and key.lower() == target:
-                return str(value)
-    return None
-
-
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
         return None
 
 
 def open_presigned_request(request: urllib.request.Request, timeout: int) -> Any:
-    opener = urllib.request.build_opener(_NoRedirectHandler())
+    # A short-lived capability must go only to the bound Object Storage origin.
+    # Inheriting HTTP(S)_PROXY would hand it to an ambient proxy before TLS
+    # validation, so disable proxy discovery as well as redirects.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirectHandler())
     return opener.open(request, timeout=timeout)
 
 
@@ -1378,7 +1652,7 @@ def download_presigned_object(
     )
     if not SHA256_RE.fullmatch(expected_sha256):
         raise ArtifactStageError("expected ciphertext SHA-256 is invalid")
-    if expected_bytes < 1:
+    if isinstance(expected_bytes, bool) or not isinstance(expected_bytes, int) or expected_bytes < 1:
         raise ArtifactStageError("expected ciphertext bytes must be positive")
     request = urllib.request.Request(
         url,
@@ -1396,26 +1670,35 @@ def download_presigned_object(
         if hasattr(response, "geturl") and response.geturl() != url:
             raise ArtifactStageError("presigned Object Storage download redirected")
         headers = getattr(response, "headers", None)
-        if _header(headers, "x-amz-version-id") != version_id:
-            raise ArtifactStageError("presigned Object Storage download returned a different VersionId")
-        if _header(headers, "x-amz-server-side-encryption"):
+        if _response_headers_have_provider_side_encryption(headers):
             raise ArtifactStageError("provider-side Object Storage encryption is not permitted")
+        if _header_values(headers, "x-amz-version-id") != [version_id]:
+            raise ArtifactStageError("presigned Object Storage download returned a different VersionId")
         if (
-            _header(headers, "x-amz-meta-transport-schema") != TRANSPORT_SCHEMA
-            or _header(headers, "x-amz-meta-encryption") != OBJECT_ENCRYPTION
-            or _header(headers, "x-amz-meta-ciphertext-sha256") != expected_sha256
+            _header_values(headers, "x-amz-meta-transport-schema") != [TRANSPORT_SCHEMA]
+            or _header_values(headers, "x-amz-meta-encryption") != [OBJECT_ENCRYPTION]
+            or _header_values(headers, "x-amz-meta-ciphertext-sha256") != [expected_sha256]
         ):
             raise ArtifactStageError("presigned Object Storage metadata does not match the encrypted artifact")
-        content_length = _header(headers, "content-length")
-        if content_length is not None:
-            try:
-                if int(content_length, 10) != expected_bytes:
-                    raise ArtifactStageError("presigned Object Storage content length does not match the manifest")
-            except ValueError as exc:
-                raise ArtifactStageError("presigned Object Storage content length is invalid") from exc
-        digest, size = _write_stream_to_new_file(response, output_path)
-        if digest != expected_sha256 or size != expected_bytes:
-            raise ArtifactStageError("presigned Object Storage ciphertext does not match the manifest")
+        content_length = _header_values(headers, "content-length")
+        if content_length:
+            if (
+                len(content_length) != 1
+                or not re.fullmatch(r"[1-9][0-9]*", content_length[0])
+                or int(content_length[0], 10) != expected_bytes
+            ):
+                raise ArtifactStageError("presigned Object Storage content length does not match the manifest")
+        try:
+            digest, size = _write_stream_to_new_file(
+                response,
+                output_path,
+                maximum_bytes=expected_bytes,
+            )
+            if digest != expected_sha256 or size != expected_bytes:
+                raise ArtifactStageError("presigned Object Storage ciphertext does not match the manifest")
+        except BaseException:
+            output_path.unlink(missing_ok=True)
+            raise
     finally:
         close = getattr(response, "close", None)
         if callable(close):
@@ -1579,6 +1862,47 @@ def _candidate_directory(
     return parent / bundle_id
 
 
+def _rename_directory_no_replace(source: Path, destination: Path) -> None:
+    """Atomically promote a fresh directory without ever replacing a target.
+
+    ``os.replace`` is intentionally unsuitable here: another process can
+    create the final candidate after the preliminary existence check.  Linux
+    ``renameat2(..., RENAME_NOREPLACE)`` closes that window.  Hosts without
+    this kernel primitive fail closed rather than silently falling back to an
+    overwrite-capable rename.
+    """
+
+    if source.parent != destination.parent:
+        raise ArtifactStageError("incoming and detached staging candidate must share one parent")
+    try:
+        source_state = source.lstat()
+    except OSError as exc:
+        raise ArtifactStageError("fresh incoming detached staging directory is unavailable") from exc
+    if stat.S_ISLNK(source_state.st_mode) or not stat.S_ISDIR(source_state.st_mode):
+        raise ArtifactStageError("fresh incoming detached staging directory is unsafe")
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        renameat2 = libc.renameat2
+    except (AttributeError, OSError) as exc:
+        raise ArtifactStageError("atomic no-replace candidate promotion is unavailable") from exc
+    renameat2.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    renameat2.restype = ctypes.c_int
+    ctypes.set_errno(0)
+    result = renameat2(
+        AT_FDCWD,
+        os.fsencode(source),
+        AT_FDCWD,
+        os.fsencode(destination),
+        RENAME_NOREPLACE,
+    )
+    if result == 0:
+        return
+    error_number = ctypes.get_errno()
+    if error_number in {errno.EEXIST, errno.ENOTEMPTY}:
+        raise ArtifactStageError("refusing to overwrite an existing detached staging candidate")
+    raise ArtifactStageError("atomic no-replace candidate promotion failed") from OSError(error_number, os.strerror(error_number))
+
+
 def _manifest_from_encrypted_file(
     *,
     config: ConsumerConfig,
@@ -1728,9 +2052,7 @@ def stage_bundle(
             }
             receipt["receipt_sha256"] = sha256_bytes(canonical_json_bytes(receipt))
             write_atomic_json(incoming / "stage-receipt.json", receipt)
-            if candidate.exists() or candidate.is_symlink():
-                raise ArtifactStageError("refusing to overwrite an existing detached staging candidate")
-            os.replace(incoming, candidate)
+            _rename_directory_no_replace(incoming, candidate)
             return receipt
         except Exception:
             # Preserve the fresh root-only incoming directory for inspection.
@@ -1739,8 +2061,8 @@ def stage_bundle(
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    parser = _SafeArgumentParser(description=__doc__)
+    subparsers = parser.add_subparsers(dest="command", required=True, parser_class=_SafeArgumentParser)
 
     publish = subparsers.add_parser("publish", help="publish a new immutable encrypted artifact bundle")
     publish.add_argument("--config", required=True, type=Path)
@@ -1779,8 +2101,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = parse_args(argv)
     try:
+        args = parse_args(argv)
         if args.command == "publish":
             config = load_publisher_config(args.config)
             result = publish_bundle(
@@ -1819,9 +2141,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:  # pragma: no cover - argparse makes this unreachable.
             raise ArtifactStageError("unsupported command")
     except (ArtifactStageError, snapshot.SnapshotTransportError) as exc:
-        print(json.dumps({"status": "blocked", "error": str(exc), "error_class": type(exc).__name__}, sort_keys=True))
+        print(json.dumps(_cli_blocked_payload(exc), sort_keys=True))
         return 2
-    print(json.dumps(result, sort_keys=True))
+    except Exception:
+        print(json.dumps({"status": "blocked", "error": "operation failed without emitting transient transport details"}, sort_keys=True))
+        return 2
+    print(json.dumps(_cli_safe_value(result), sort_keys=True))
     return 0
 
 

@@ -9,6 +9,8 @@ from typing import Any
 import httpx
 
 from core.config import settings
+from core.db import require_external_effect_execution_authorization
+from core.external_effect_execution_gate import EXTERNAL_EFFECT_SCOPE_SMS_PROVIDER_DELIVERY
 from core.log_redaction import mask_mobile
 from core.utils import normalize_persian_numerals
 
@@ -19,6 +21,14 @@ class SMSDeliveryOutcome(str, Enum):
     ACCEPTED = "accepted"
     FAILED = "failed"
     AMBIGUOUS = "ambiguous"
+
+
+def _require_sms_provider_delivery_authorization() -> None:
+    """Fence the concrete SMS.ir request boundary when the P0 gate is enabled."""
+
+    require_external_effect_execution_authorization(
+        EXTERNAL_EFFECT_SCOPE_SMS_PROVIDER_DELIVERY
+    )
 
 
 def _api_url(path: str) -> str:
@@ -53,6 +63,10 @@ def _post_smsir_result(
     path: str,
     payload: dict[str, Any],
 ) -> tuple[SMSDeliveryOutcome, dict[str, Any] | None]:
+    # Keep this outside the broad provider/configuration error handling: a
+    # missing, expired, wrong-scope, or term-mismatched authorization must
+    # fail closed rather than be converted into a retryable provider result.
+    _require_sms_provider_delivery_authorization()
     try:
         response = httpx.post(
             _api_url(path),
@@ -108,6 +122,7 @@ async def _post_smsir_result_async(
     path: str,
     payload: dict[str, Any],
 ) -> tuple[SMSDeliveryOutcome, dict[str, Any] | None]:
+    _require_sms_provider_delivery_authorization()
     try:
         async with httpx.AsyncClient(timeout=settings.smsir_timeout_seconds) as client:
             response = await client.post(

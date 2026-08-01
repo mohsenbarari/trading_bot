@@ -401,8 +401,10 @@ def _load_profile(path: Path) -> dict[str, Any]:
         expected={"mode", "site", "lease_duration_seconds", "renew_interval_seconds", "safety_margin_seconds"},
         field="release profile WebApp-FI client",
     )
-    if client.get("mode") != "writer" or client.get("site") != "webapp_fi":
-        raise WitnessReleasePreparationError("release profile does not bind the WebApp-FI writer client")
+    if client.get("mode") != "fenced_fi_writer" or client.get("site") != "webapp_fi":
+        raise WitnessReleasePreparationError(
+            "release profile does not bind the fenced WebApp-FI writer client"
+        )
     for key, expected in (
         ("lease_duration_seconds", duration),
         ("renew_interval_seconds", interval),

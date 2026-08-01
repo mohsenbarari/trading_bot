@@ -12,6 +12,7 @@ TRADE_NUMBER_SEQUENCE_ALIGNER="$PROJECT_DIR/scripts/align_trade_number_sequence.
 DEFAULT_MANIFEST="$PROJECT_DIR/deploy/production/online.env"
 MANIFEST_PATH="${DEPLOY_MANIFEST:-$DEFAULT_MANIFEST}"
 COMMAND=""
+LEGACY_CROSS_SITE_TRANSPORT_REASON="FI-to-IR release, image, and data payloads require private, versioned, age-encrypted Object Storage. This legacy script has no compliant payload transport and no environment or configuration bypass is available."
 IRAN_BOOTSTRAP_APT_PACKAGES="ca-certificates curl gnupg lsb-release rsync jq pigz nginx certbot python3-certbot-nginx docker.io python3-pip python3-setuptools python3-wheel"
 IRAN_BOOTSTRAP_COMPOSE_PACKAGES="docker-compose-v2 docker-compose"
 SHARED_SYNC_TABLES_SQL="users, accountant_relations, customer_relations, telegram_link_tokens, invitations, admin_market_messages, admin_broadcast_messages, notifications, user_notification_preferences, user_blocks, commodities, commodity_aliases, trading_settings, market_schedule_overrides, market_runtime_state, offers, offer_publication_states, offer_requests, trades, trade_delivery_receipts, telegram_admin_broadcasts, telegram_admin_broadcast_receipts, telegram_notification_outbox"
@@ -38,28 +39,20 @@ Usage:
 
 Commands:
   help                 Show this help.
-  release              Run the full production flow. This is the default.
-  check-local          Validate local tooling and manifest.
-  deploy-foreign       Build and deploy the foreign server locally.
-  bootstrap-iran       Install Docker/Nginx/Certbot prerequisites on the Iran host.
-  configure-nginx      Render and install the Iran Nginx config.
-  issue-cert           Request/renew the SSL certificate on the Iran host.
-  build-release        Build frontend locally, prepare wheel cache, and build/loadable Docker artifacts.
-  sync-project         Rsync the production payload and runtime env to the Iran host.
-  ship-images          Upload the prepared Docker image bundle to the Iran host.
-  load-images          Load the uploaded Docker image bundle on the Iran host.
-  deploy-iran          Start Docker services on the Iran host without remote build/pull.
-  inspect-shared-data  Inspect Iran shared-table state and print the fresh/existing classification.
-  seed-shared-data     Apply guarded shared-table seed/reset handling for the Iran host.
-  healthcheck          Validate local and public health endpoints.
+  build-release        Build candidate artifacts locally only.
+
+Blocked legacy commands (including their formerly read-only peer probes):
+  check-local inspect-shared-data healthcheck
+
+Blocked legacy commands (before manifest parsing, SSH, rsync, scp, curl, or
+remote state changes):
+  release deploy-foreign bootstrap-iran configure-nginx issue-cert sync-project
+  ship-images load-images deploy-iran seed-shared-data
 
 Notes:
-  - The script first deploys the foreign server locally.
-  - It then asks whether Iran currently has working internet.
-  - If the answer is "yes", it runs the Iran-online flow using shipped images/artifacts.
-  - If the answer is "no", it stops after foreign deploy because the Iran-offline flow is not implemented yet.
-  - For SSH, prefer key-based auth. Password auth is supported only when sshpass is installed.
-  - Release healthcheck runs a read-only production data hygiene guard on both hosts.
+  - FI-to-IR release, image, and data payloads are retired from this script.
+  - Use the dedicated private/versioned age-encrypted Object Storage transport.
+  - This retirement fence has no environment or configuration override.
 EOF
 }
 
@@ -140,31 +133,20 @@ resolve_local_compose_cmd() {
     fi
 }
 
-detect_runtime_metadata() {
+detect_local_runtime_metadata() {
     LOCAL_HOST_ARCH="$(normalize_arch "$(uname -m)")"
     LOCAL_DPKG_ARCH="$(normalize_arch "$(dpkg --print-architecture)")"
     LOCAL_OS_CODENAME="$(. /etc/os-release && printf '%s' "${VERSION_CODENAME:-unknown}")"
     resolve_local_compose_cmd
 
-    local remote_info
-    remote_info="$(ssh_iran "set -euo pipefail
-printf '%s %s %s\n' \"\$(uname -m)\" \"\$(dpkg --print-architecture)\" \"\$(. /etc/os-release && printf '%s' \"\$VERSION_CODENAME\")\"
-if docker compose version >/dev/null 2>&1; then
-  printf 'docker compose\n'
-elif command -v docker-compose >/dev/null 2>&1; then
-  printf 'docker-compose\n'
-else
-  printf 'missing\n'
-fi")"
-
-    IRAN_HOST_ARCH="$(printf '%s\n' "$remote_info" | sed -n '1p' | awk '{print $1}')"
-    IRAN_DPKG_ARCH="$(printf '%s\n' "$remote_info" | sed -n '1p' | awk '{print $2}')"
-    IRAN_OS_CODENAME="$(printf '%s\n' "$remote_info" | sed -n '1p' | awk '{print $3}')"
-    IRAN_COMPOSE_CMD="$(printf '%s\n' "$remote_info" | sed -n '2p')"
-
-    IRAN_HOST_ARCH="$(normalize_arch "$IRAN_HOST_ARCH")"
-    IRAN_DPKG_ARCH="$(normalize_arch "$IRAN_DPKG_ARCH")"
-    [[ "$IRAN_COMPOSE_CMD" != "missing" ]] || IRAN_COMPOSE_CMD=""
+    # A local build may use explicitly declared target metadata, but it must
+    # never discover that metadata by opening a legacy FI->IR SSH session.
+    # These values affect only local artifact construction; they authorize no
+    # transfer or remote deployment.
+    IRAN_HOST_ARCH="$(normalize_arch "${IRAN_BUILD_ARCH:-$LOCAL_HOST_ARCH}")"
+    IRAN_DPKG_ARCH="$(normalize_arch "${IRAN_BUILD_DPKG_ARCH:-$IRAN_HOST_ARCH}")"
+    IRAN_OS_CODENAME="${IRAN_BUILD_OS_CODENAME:-$LOCAL_OS_CODENAME}"
+    IRAN_COMPOSE_CMD=""
     IRAN_IMAGE_PLATFORM="$(docker_platform_for_arch "$IRAN_HOST_ARCH")"
     if [[ "$LOCAL_DPKG_ARCH" != "$IRAN_DPKG_ARCH" || "$LOCAL_OS_CODENAME" != "$IRAN_OS_CODENAME" ]]; then
         IRAN_APT_BUNDLE_MODE="remote-install"
@@ -172,8 +154,8 @@ fi")"
         IRAN_APT_BUNDLE_MODE="same-arch"
     fi
 
-    log "Foreign arch=$LOCAL_HOST_ARCH dpkg=$LOCAL_DPKG_ARCH codename=${LOCAL_OS_CODENAME:-unknown} compose='$LOCAL_COMPOSE_CMD'"
-    log "Iran arch=$IRAN_HOST_ARCH dpkg=$IRAN_DPKG_ARCH codename=${IRAN_OS_CODENAME:-unknown} compose='${IRAN_COMPOSE_CMD:-missing}' apt_bundle_mode=$IRAN_APT_BUNDLE_MODE"
+    log "Foreign local arch=$LOCAL_HOST_ARCH dpkg=$LOCAL_DPKG_ARCH codename=${LOCAL_OS_CODENAME:-unknown} compose='$LOCAL_COMPOSE_CMD'"
+    log "Declared local build target arch=$IRAN_HOST_ARCH dpkg=$IRAN_DPKG_ARCH codename=${IRAN_OS_CODENAME:-unknown} apt_bundle_mode=$IRAN_APT_BUNDLE_MODE"
 }
 
 ensure_buildx_for_target() {
@@ -487,6 +469,25 @@ parse_args() {
     done
 
     [[ -n "$COMMAND" ]] || COMMAND="release"
+}
+
+assert_legacy_cross_site_transport_fenced() {
+    # This script predates the Object Storage-only Iran data plane. Keep only
+    # strictly host-local work reachable.  A peer probe is still direct FI->IR
+    # control/data even if the command itself claims to be read-only.  The
+    # guard intentionally runs before a manifest can supply host credentials,
+    # paths, or other authority to a legacy direct-transfer path.
+    case "$COMMAND" in
+        build-release)
+            return 0
+            ;;
+        release|deploy-foreign|check-local|bootstrap-iran|configure-nginx|issue-cert|sync-project|ship-images|load-images|deploy-iran|inspect-shared-data|seed-shared-data|healthcheck)
+            die "Legacy command '$COMMAND' is blocked before manifest/SSH: $LEGACY_CROSS_SITE_TRANSPORT_REASON"
+            ;;
+        *)
+            die "Legacy command '$COMMAND' is not allowlisted: $LEGACY_CROSS_SITE_TRANSPORT_REASON"
+            ;;
+    esac
 }
 
 load_manifest() {
@@ -1079,8 +1080,7 @@ check_local() {
     [[ "$(id -u)" -eq 0 ]] || die "This release script must be run as root so it can update /etc/hosts and manage Docker."
     ensure_clean_release_tree
     ensure_production_release_git_ref
-    ssh_iran "echo connected-to-\$(hostname)"
-    detect_runtime_metadata
+    detect_local_runtime_metadata
     [[ -f "$LOCAL_PROJECT_DIR/requirements.txt" ]] || die "requirements.txt missing"
     [[ -f "$LOCAL_PROJECT_DIR/docker-compose.iran.yml" ]] || die "docker-compose.iran.yml missing"
     [[ -f "$LOCAL_PROJECT_DIR/Dockerfile.iran" ]] || die "Dockerfile.iran missing"
@@ -2437,6 +2437,7 @@ main() {
         usage
         exit 0
     fi
+    assert_legacy_cross_site_transport_fenced
     ensure_manifest_file
     load_manifest
     case "$COMMAND" in

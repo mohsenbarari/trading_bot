@@ -1,9 +1,12 @@
 # core/sync_push.py
-"""
-Direct HTTP helper for narrow cross-server relay paths.
+"""Forensic source for the retired direct FI<->IR HTTP relay.
 
-Database sync must not use this helper from flush-time model events. Committed
-database changes are delivered by sync_worker from durable change_log rows.
+The three-site architecture permits neither direct peer HTTP data delivery nor
+peer-selected control from this module.  Kept implementation text is useful
+only for forensic comparison with the superseded dual-server runtime.  Every
+callable that could construct a client, request, or background delivery is
+therefore unconditionally denied before it reads a peer URL or emits a
+network side effect.
 """
 import json
 import time
@@ -15,6 +18,9 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 import httpx
 
+from core.legacy_direct_fi_ir_transport_fence import (
+    assert_legacy_direct_fi_ir_transport_retired,
+)
 from core.sync_transport import assert_runtime_sync_transport_allowed, runtime_sync_tls_verify_setting
 
 logger = logging.getLogger(__name__)
@@ -34,8 +40,20 @@ def _direct_push_disabled() -> bool:
     return os.getenv("TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _single_writer_runtime_blocks_direct_sync() -> bool:
+    """Use the routing policy instead of inferring peer authority locally."""
+
+    from core.server_routing import single_writer_runtime_enabled
+
+    return single_writer_runtime_enabled()
+
+
 def _get_client() -> httpx.Client:
     """Get or create persistent synchronous HTTP client"""
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="sync-push",
+        operation="direct peer HTTP client construction",
+    )
     global _http_client, _http_client_verify_setting
     assert_runtime_sync_transport_allowed()
     verify_setting = runtime_sync_tls_verify_setting()
@@ -132,6 +150,11 @@ def _do_push(payload: dict, target_url: str, api_key: str):
     Synchronous HTTP push — runs in thread pool.
     Caller decides whether the payload has any durable retry source.
     """
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="sync-push",
+        operation="direct peer HTTP notification delivery",
+    )
+
     try:
         timestamp = int(time.time())
         items = [payload]
@@ -173,8 +196,10 @@ def push_sync_direct(payload: dict):
     Submit a non-blocking direct HTTP relay payload.
     Do not call this from uncommitted database change listeners.
     """
-    if _direct_push_disabled():
-        return
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="sync-push",
+        operation="direct peer HTTP relay scheduling",
+    )
 
     from core.config import settings
     from core.server_routing import default_peer_server_url

@@ -446,6 +446,48 @@ class SnapshotTransportTests(unittest.TestCase):
                 encryptor=fake_encrypt,
             )
 
+    def test_transport_rejects_all_provider_side_encryption_response_fields(self) -> None:
+        class ProviderEncryptedUpload(FakeS3):
+            def put_object(self, **kwargs: Any) -> dict[str, Any]:
+                response = super().put_object(**kwargs)
+                response["SSECustomerAlgorithm"] = "AES256"
+                return response
+
+        with self.assertRaisesRegex(snapshot.SnapshotTransportError, "provider-side"):
+            snapshot.publish_snapshot(
+                ProviderEncryptedUpload(),
+                config=self.publisher_config,
+                database_dump=self.database_dump,
+                uploads_archive=self.uploads_archive,
+                audit_archive=None,
+                source_site="webapp_fi",
+                destination_site="webapp_ir",
+                generation="fi-generation-1",
+                release_sha=RELEASE_SHA,
+                alembic_revision="f2c7d8e9a0b1",
+                source_db_snapshot_started_at=snapshot.utc_iso(NOW),
+                source_capture_completed_at=snapshot.utc_iso(NOW),
+                source_db_client_mode="short_lived_read_only",
+                source_db_client_lifetime_seconds=30,
+                source_volume_capture_mode="read_only_no_mutation",
+                snapshot_id=SNAPSHOT_ID,
+                now=NOW,
+                encryptor=fake_encrypt,
+            )
+
+        published = self.publish()
+        original_get_object = self.client.get_object
+
+        def encrypted_get_object(**kwargs: Any) -> dict[str, Any]:
+            response = original_get_object(**kwargs)
+            response["SSEKMSKeyId"] = "test-key"
+            return response
+
+        with mock.patch.object(self.client, "get_object", side_effect=encrypted_get_object):
+            with self.assertRaisesRegex(snapshot.SnapshotTransportError, "provider-side"):
+                self.consume()
+        self.assertFalse((self.candidate_root / "webapp_fi").exists())
+
     def test_private_bucket_rejects_unknown_acl_grantee(self) -> None:
         class ForeignGrant(FakeS3):
             def get_bucket_acl(self, **kwargs: Any) -> dict[str, Any]:

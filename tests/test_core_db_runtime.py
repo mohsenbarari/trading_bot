@@ -46,6 +46,16 @@ class CoreDbRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         connection.run_sync.assert_awaited_once()
 
+    async def test_init_db_can_skip_implicit_schema_bootstrap(self):
+        connection = AsyncMock()
+        fake_engine = SimpleNamespace(begin=lambda: _AsyncConnectionContext(connection))
+        with patch.object(db_module, 'engine', fake_engine), patch.object(
+            db_module.settings, 'database_schema_bootstrap_enabled', False
+        ):
+            await db_module.init_db()
+
+        connection.run_sync.assert_not_awaited()
+
 
 if __name__ == '__main__':
     unittest.main()

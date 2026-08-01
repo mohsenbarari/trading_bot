@@ -10,12 +10,21 @@ from models.database import Base
 import models.user
 import models.invitation
 import models.session
+import models.promotion_auth_epoch
+import models.operational_writer_admission
+import models.physical_wal_v2_witness_roundtrip_strict_writer
+import models.physical_wal_v2_witness_roundtrip_strict_writer_bound
+import models.physical_wal_v2_witness_roundtrip_attestation_consumption
 import models.commodity
 import models.offer  # مدل لفظ
 import models.offer_publication_state
 import models.trade  # مدل معاملات
 import models.trade_delivery_receipt
 import models.sync_apply_watermark
+import models.object_delta
+import models.object_delta_source_batch
+import models.object_delta_source_publication_attempt
+import models.object_delta_receiver_delivery
 import models.market_channel_notice_receipt
 import models.message  # مدل پیام چت
 import models.conversation  # مدل مکالمات چت

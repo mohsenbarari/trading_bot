@@ -36,6 +36,20 @@ server {
         add_header Referrer-Policy "no-referrer" always;
     }
 
+    # THREE_SITE_LEGACY_INTERNAL_INGRESS_FENCED: Object-Storage pull and
+    # writer-local ingress replace every old FI<->IR internal HTTP route.
+    location = /api/sync/receive {
+        access_log off;
+        return 410;
+    }
+
+    # This regex must precede the generic public API location below. It
+    # intentionally rejects all old sync and home-server-forwarder endpoints.
+    location ~ ^/api/(sync|sessions/internal|trades/internal|offers/internal|auth/internal|invitations/internal|customers/internal)(/|$) {
+        access_log off;
+        return 410;
+    }
+
     location /api/ {
         proxy_pass http://trading_bot_api;
         proxy_set_header Host $host;

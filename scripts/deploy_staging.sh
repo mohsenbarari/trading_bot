@@ -50,23 +50,13 @@ STAGING_NGINX_SITE="${STAGING_NGINX_SITE:-trading-bot-staging}"
 STAGING_ENABLE_BOT="${STAGING_ENABLE_BOT:-0}"
 STAGING_FOREIGN_ONLY="${STAGING_FOREIGN_ONLY:-0}"
 STAGING_BOT_USERNAME="${STAGING_BOT_USERNAME:-}"
-STAGING_INTERNAL_IRAN_SERVER_URL="${STAGING_INTERNAL_IRAN_SERVER_URL:-http://app:8000}"
-STAGING_PUBLIC_FOREIGN_SYNC_URL="${STAGING_PUBLIC_FOREIGN_SYNC_URL:-https://staging.362514.ir/foreign-sync}"
-default_staging_internal_foreign_server_url() {
-    if [[ "$STAGING_ENABLE_BOT" == "1" ]]; then
-        printf 'http://foreign_app:8000\n'
-    else
-        printf '%s\n' "$STAGING_PUBLIC_FOREIGN_SYNC_URL"
-    fi
-}
-STAGING_INTERNAL_FOREIGN_SERVER_URL="${STAGING_INTERNAL_FOREIGN_SERVER_URL:-$(default_staging_internal_foreign_server_url)}"
-STAGING_FOREIGN_IRAN_SERVER_URL="${STAGING_FOREIGN_IRAN_SERVER_URL:-https://staging.gold-trade.ir}"
-STAGING_FOREIGN_FRONTEND_URL="${STAGING_FOREIGN_FRONTEND_URL:-$STAGING_FOREIGN_IRAN_SERVER_URL}"
-STAGING_FOREIGN_FOREIGN_SERVER_URL="${STAGING_FOREIGN_FOREIGN_SERVER_URL:-$STAGING_INTERNAL_FOREIGN_SERVER_URL}"
-STAGING_IRAN_PUBLIC_DOMAIN="${STAGING_IRAN_PUBLIC_DOMAIN:-staging.gold-trade.ir}"
-STAGING_IRAN_PUBLIC_IP="${STAGING_IRAN_PUBLIC_IP:-65.109.220.59}"
-STAGING_FOREIGN_PUBLIC_DOMAIN="${STAGING_FOREIGN_PUBLIC_DOMAIN:-staging.362514.ir}"
-STAGING_FOREIGN_PUBLIC_IP="${STAGING_FOREIGN_PUBLIC_IP:-65.109.216.187}"
+# The historical two-server staging topology is retired.  A local foreign-role
+# helper may still be used for bot-surface checks, but its only Iran URL is the
+# in-project Docker service; it must never resolve or pin a public WA-IR host.
+STAGING_INTERNAL_IRAN_SERVER_URL="http://app:8000"
+STAGING_FOREIGN_IRAN_SERVER_URL="http://app:8000"
+STAGING_FOREIGN_FRONTEND_URL="${STAGING_FOREIGN_FRONTEND_URL:-$STAGING_FRONTEND_URL}"
+STAGING_FOREIGN_FOREIGN_SERVER_URL="http://foreign_app:8000"
 STAGING_FOREIGN_PUBLIC_SURFACE_GUARD="${STAGING_FOREIGN_PUBLIC_SURFACE_GUARD:-$STAGING_ENABLE_BOT}"
 STAGING_ENABLE_DEV_LOGIN="${STAGING_ENABLE_DEV_LOGIN:-}"
 STAGING_WEB_PUSH_SUBJECT="${STAGING_WEB_PUSH_SUBJECT:-mailto:admin@362514.ir}"
@@ -79,8 +69,6 @@ case "$STAGING_FRONTEND_DIST_DIR" in
     *) STAGING_FRONTEND_DIST_DIR="$PROJECT_DIR/$STAGING_FRONTEND_DIST_DIR" ;;
 esac
 STAGING_FRONTEND_DIST_DIR="$(realpath -m "$STAGING_FRONTEND_DIST_DIR")"
-export STAGING_IRAN_PUBLIC_DOMAIN STAGING_IRAN_PUBLIC_IP
-export STAGING_FOREIGN_PUBLIC_DOMAIN STAGING_FOREIGN_PUBLIC_IP
 
 compose_cmd=()
 
@@ -91,6 +79,38 @@ log() {
 die() {
     printf '[staging] ERROR: %s\n' "$*" >&2
     exit 1
+}
+
+legacy_direct_staging_transport_blocked() {
+    printf '%s\n' \
+        '[staging] ERROR: legacy direct FI-to-IR staging transport is retired and blocked before configuration/network/compose; use the three-site Object Storage and Writer Witness campaign path.' >&2
+    exit 2
+}
+
+assert_legacy_direct_staging_transport_fenced() {
+    # This guard deliberately reads only explicit process environment/argv.
+    # It must run before check(), ensure_env(), getent, Docker Compose, or an
+    # environment file can restore the old foreign-to-Iran peer route.
+    if [[ "$STAGING_FOREIGN_ONLY" == "1" ]]; then
+        legacy_direct_staging_transport_blocked
+    fi
+
+    case ",${COMPOSE_PROFILES:-}," in
+        *,staging-sync,*) legacy_direct_staging_transport_blocked ;;
+    esac
+
+    local previous="" argument
+    for argument in "$@"; do
+        case "$argument" in
+            sync_worker|foreign_sync_worker|--profile=*staging-sync*)
+                legacy_direct_staging_transport_blocked
+                ;;
+        esac
+        if [[ "$previous" == "--profile" && "$argument" == "staging-sync" ]]; then
+            legacy_direct_staging_transport_blocked
+        fi
+        previous="$argument"
+    done
 }
 
 require_cmd() {
@@ -181,16 +201,6 @@ set_env_value() {
     rm -f "$tmp"
 }
 
-require_staging_peer_url() {
-    if [[ ! "$STAGING_INTERNAL_FOREIGN_SERVER_URL" =~ [^[:space:]] ]]; then
-        die "staging peer URL is empty; set STAGING_INTERNAL_FOREIGN_SERVER_URL or STAGING_PUBLIC_FOREIGN_SYNC_URL"
-    fi
-    case "$STAGING_INTERNAL_FOREIGN_SERVER_URL" in
-        http://*|https://*) ;;
-        *) die "staging peer URL must start with http:// or https://" ;;
-    esac
-}
-
 validate_staging_bot_username() {
     [[ -n "$STAGING_BOT_USERNAME" ]] || return 0
     if [[ ! "$STAGING_BOT_USERNAME" =~ ^[A-Za-z][A-Za-z0-9_]{1,28}[bB][oO][tT]$ ]]; then
@@ -262,16 +272,18 @@ EOF
 
 ensure_runtime_env_values() {
     ensure_env
-    require_staging_peer_url
     validate_staging_bot_username
     if [[ -n "$STAGING_BOT_USERNAME" ]]; then
         set_env_value BOT_USERNAME "$STAGING_BOT_USERNAME"
     fi
     set_env_value FRONTEND_URL "$STAGING_FRONTEND_URL"
     set_env_value IRAN_SERVER_URL "$STAGING_INTERNAL_IRAN_SERVER_URL"
-    set_env_value PEER_SERVER_URL "$STAGING_INTERNAL_FOREIGN_SERVER_URL"
-    set_env_value FOREIGN_SERVER_URL "$STAGING_INTERNAL_FOREIGN_SERVER_URL"
-    set_env_value GERMANY_SERVER_URL "$STAGING_INTERNAL_FOREIGN_SERVER_URL"
+    # Leave every legacy peer endpoint blank even in local staging.  The
+    # three-site data plane publishes role-local evidence through Object
+    # Storage; it never uses a direct FI<->IR HTTP channel.
+    set_env_value PEER_SERVER_URL ""
+    set_env_value FOREIGN_SERVER_URL ""
+    set_env_value GERMANY_SERVER_URL ""
     set_env_value EXTRA_CORS_ORIGINS "$STAGING_FRONTEND_URL"
     set_env_value TRUSTED_PROXY_CIDRS "$STAGING_TRUSTED_PROXY_CIDRS"
     set_env_value AUDIT_TRAIL_PATH /app/audit_trail/audit.jsonl
@@ -374,13 +386,9 @@ compose() {
     init_compose_cmd
     ensure_env
     assert_staging_frontend_dist_isolated
-    local migration_server_mode="iran"
-    if [[ "$STAGING_FOREIGN_ONLY" == "1" ]]; then
-        migration_server_mode="foreign"
-    fi
     STAGING_APP_PORT="$STAGING_APP_PORT" \
     STAGING_FOREIGN_APP_PORT="$STAGING_FOREIGN_APP_PORT" \
-    STAGING_MIGRATION_SERVER_MODE="$migration_server_mode" \
+    STAGING_MIGRATION_SERVER_MODE="iran" \
     STAGING_FRONTEND_DOCKER_DIST_DIR="$(staging_frontend_dist_relpath)" \
     STAGING_RELEASE_SHA="$(staging_release_sha)" \
     STAGING_FOREIGN_IRAN_SERVER_URL="$STAGING_FOREIGN_IRAN_SERVER_URL" \
@@ -606,18 +614,7 @@ wait_for_service_health() {
 }
 
 wait_for_app_health() {
-    if [[ "$STAGING_FOREIGN_ONLY" == "1" ]]; then
-        return
-    fi
     wait_for_service_health app "staging app"
-}
-
-start_sync_worker() {
-    if [[ "$STAGING_ENABLE_BOT" == "1" ]]; then
-        compose --profile staging-bot --profile staging-sync up -d --build sync_worker foreign_sync_worker
-        return
-    fi
-    compose up -d --build sync_worker
 }
 
 wait_for_foreign_app_health_if_enabled() {
@@ -637,7 +634,7 @@ check() {
     init_compose_cmd
     [[ -f "$COMPOSE_FILE" ]] || die "missing $COMPOSE_FILE"
     [[ -f "$NGINX_TEMPLATE" ]] || die "missing $NGINX_TEMPLATE"
-    log "domain=$STAGING_DOMAIN frontend_url=$STAGING_FRONTEND_URL ssl=$STAGING_ENABLE_SSL app_port=$STAGING_APP_PORT foreign_app_port=$STAGING_FOREIGN_APP_PORT project=$STAGING_PROJECT_NAME frontend_dist=$STAGING_FRONTEND_DIST_DIR foreign_iran_url=$STAGING_FOREIGN_IRAN_SERVER_URL foreign_public_guard=$STAGING_FOREIGN_PUBLIC_SURFACE_GUARD"
+    log "domain=$STAGING_DOMAIN frontend_url=$STAGING_FRONTEND_URL ssl=$STAGING_ENABLE_SSL app_port=$STAGING_APP_PORT foreign_app_port=$STAGING_FOREIGN_APP_PORT project=$STAGING_PROJECT_NAME frontend_dist=$STAGING_FRONTEND_DIST_DIR direct_peer_transport=retired foreign_public_guard=$STAGING_FOREIGN_PUBLIC_SURFACE_GUARD"
     getent hosts "$STAGING_DOMAIN" || true
 }
 
@@ -647,17 +644,12 @@ deploy() {
     ensure_runtime_env_values
     build_frontend
     remove_legacy_compose_stateless_containers
-    if [[ "$STAGING_ENABLE_BOT" == "1" && "$STAGING_FOREIGN_ONLY" == "1" ]]; then
-        compose --profile staging-bot --profile staging-sync up -d --build foreign_app bot foreign_sync_worker
-    elif [[ "$STAGING_ENABLE_BOT" == "1" ]]; then
+    if [[ "$STAGING_ENABLE_BOT" == "1" ]]; then
         compose --profile staging-bot up -d --build
     else
         compose up -d --build
     fi
     wait_for_app_health
-    if [[ "$STAGING_FOREIGN_ONLY" != "1" ]]; then
-        start_sync_worker
-    fi
     wait_for_foreign_app_health_if_enabled
     install_nginx
     compose ps
@@ -679,10 +671,12 @@ case "${1:-deploy}" in
         ;;
     up)
         shift
+        assert_legacy_direct_staging_transport_fenced "$@"
         ensure_runtime_env_values
         compose up -d --build "$@"
         ;;
     deploy)
+        assert_legacy_direct_staging_transport_fenced
         deploy
         ;;
     ps)

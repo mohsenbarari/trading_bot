@@ -32,6 +32,10 @@ def _load(name: str, path: Path):
 
 
 renderer = _load("render_webapp_fi_static_prepare_test", SCRIPT)
+fixtures = _load(
+    "source_stage_fixture_helpers_for_static_prepare_test",
+    ROOT / "tests" / "source_stage_fixture_helpers.py",
+)
 
 CAMPAIGN = "static-prepare-control-20260730"
 REVISION = "f2c7d8e9a0b1"
@@ -96,6 +100,8 @@ class StaticPreparationRendererTests(unittest.TestCase):
             ["git", "-C", str(self.control_repo), "rev-parse", self.control_commit + "^{tree}"], text=True
         ).strip()
         (self.application_repo / "main.py").write_text("print('fixture')\n", encoding="ascii")
+        (self.application_repo / "mini_app_dist").mkdir(mode=0o700)
+        (self.application_repo / "mini_app_dist" / "index.html").write_text("<!doctype html>fixture\n", encoding="ascii")
         self.release = _commit(self.application_repo)
         self.release_tree = subprocess.check_output(
             ["git", "-C", str(self.application_repo), "rev-parse", self.release + "^{tree}"], text=True
@@ -118,6 +124,15 @@ class StaticPreparationRendererTests(unittest.TestCase):
             source_phase / "campaign-binding.json",
             renderer.initial.transport.campaign_binding.canonical_json_bytes(binding_unsigned) + b"\n",
         )
+        self.expected_static_assets_manifest = fixtures.make_expected_static_assets_manifest(
+            root=self.root,
+            campaign_id=CAMPAIGN,
+            application_repository=self.application_repo,
+            application_release_sha=self.release,
+            expected_alembic_revision=REVISION,
+            control_commit=self.control_commit,
+            control_tree=self.control_tree,
+        )
         role_binding = renderer.role_config.binding.load_campaign_binding(self.binding)
         role_value = renderer.role_config.build_source_role_config(
             campaign_binding=role_binding,
@@ -128,23 +143,25 @@ class StaticPreparationRendererTests(unittest.TestCase):
 
         inputs = self.root / "controller-inputs"
         inputs.mkdir(mode=0o700)
-        credentials = _write_private(inputs / "credentials.json", b'{"access_key":"fixture","secret_key":"fixture"}\n')
+        credentials = fixtures.make_trusted_e53_s3_environment(self.root)
+        self.controller_campaigns_root = self.root / "controller-campaigns"
+        self.source_transport_workspace_root = self.root / "source-transport-workspaces"
+        controller_directory = self.controller_campaigns_root / CAMPAIGN / "controller"
+        controller_directory.mkdir(mode=0o700, parents=True)
+        for directory in (self.controller_campaigns_root, controller_directory.parent, controller_directory):
+            directory.chmod(0o700)
         self.transport_config = _write_private(
-            inputs / "source-transport.json",
+            controller_directory / "source-transport.json",
             _canonical(
                 {
                     "schema": renderer.initial.transport.CONFIG_SCHEMA,
                     "endpoint": "https://s3.ir-thr-at1.arvanstorage.ir",
-                    "region": "ir-thr-at1",
                     "bucket": "three-site-private",
                     "prefix": "campaign-current/artifacts",
                     "credentials_file": str(credentials),
-                    "age_binary": "/usr/bin/age",
-                    "workspace": str(inputs / "workspace"),
                     "controller_age_recipient": RECIPIENTS["controller"],
                     "webapp_fi_age_recipient": RECIPIENTS["fi"],
                     "webapp_ir_age_recipient": RECIPIENTS["ir"],
-                    "maximum_plaintext_bytes": 24 * 1024 * 1024,
                     "presign_expires_seconds": 300,
                 }
             ),
@@ -152,17 +169,49 @@ class StaticPreparationRendererTests(unittest.TestCase):
         self.initial_object_id = "initial-static-20260730"
         self.package = self.root / "packages" / "source-package"
         self.package.parent.mkdir(mode=0o700)
-        self.workspace_patch = mock.patch.object(
-            renderer.initial.preparer, "INITIAL_STATIC_FI_WORKSPACE", str(self.fi_root)
+        controller_transport = renderer.initial.preparer._load_controller_source_transport()
+        transport_patches = (
+            mock.patch.object(controller_transport, "CAMPAIGNS_ROOT", self.controller_campaigns_root),
+            mock.patch.object(
+                controller_transport.contract,
+                "SOURCE_TRANSPORT_WORKSPACE_ROOT",
+                self.source_transport_workspace_root,
+            ),
+            mock.patch.object(
+                controller_transport,
+                "TRUSTED_E53_S3_ENVIRONMENT_PATH",
+                credentials,
+            ),
+            mock.patch.object(
+                renderer.initial.preparer,
+                "_load_controller_source_transport",
+                return_value=controller_transport,
+            ),
+            mock.patch.object(renderer.initial.transport, "CAMPAIGNS_ROOT", self.controller_campaigns_root),
+            mock.patch.object(
+                renderer.initial.transport.contract,
+                "SOURCE_TRANSPORT_WORKSPACE_ROOT",
+                self.source_transport_workspace_root,
+            ),
+            mock.patch.object(renderer.initial.transport, "TRUSTED_E53_S3_ENVIRONMENT_PATH", credentials),
         )
         self.bootstrap_patch = mock.patch.object(renderer.initial, "FI_BOOTSTRAP_ROOT", self.fi_root)
-        self.workspace_patch.start()
         self.bootstrap_patch.start()
-        self.addCleanup(self.workspace_patch.stop)
+        self.fi_workspace_patch = mock.patch.object(
+            renderer.initial.preparer,
+            "INITIAL_STATIC_FI_WORKSPACE",
+            str(self.fi_root),
+        )
+        self.fi_workspace_patch.start()
+        for patcher in transport_patches:
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.addCleanup(self.bootstrap_patch.stop)
+        self.addCleanup(self.fi_workspace_patch.stop)
         renderer.initial.preparer.prepare_source_adoption_package(
             source_repository=self.control_repo,
             application_source_repository=self.application_repo,
+            expected_static_assets_manifest=self.expected_static_assets_manifest,
             control_commit=self.control_commit,
             application_release_sha=self.release,
             expected_alembic_revision=REVISION,
@@ -241,12 +290,14 @@ class StaticPreparationRendererTests(unittest.TestCase):
 
     def _receipt(self) -> Path:
         output = self.control.static_output_directory
+        files_sha = self.control.initial_control.expected_static_files_sha256
+        file_count = self.control.initial_control.expected_static_file_count
         archive = {"name": renderer.static_preparer.STATIC_ARCHIVE_NAME, "sha256": "a" * 64, "bytes": 2048}
         capacity = {
             "archive_upper_bound_bytes": 2560,
             "file_manifest_bytes": 512,
             "source_bytes": 1024,
-            "file_count": 2,
+            "file_count": file_count,
             "receipt_reserve_bytes": renderer.static_preparer.RECEIPT_RESERVE_BYTES,
             "margin_bytes": renderer.static_preparer.CAPACITY_MARGIN_BYTES,
             "required_free_bytes": 2560 + 512 + renderer.static_preparer.RECEIPT_RESERVE_BYTES + renderer.static_preparer.CAPACITY_MARGIN_BYTES,
@@ -268,8 +319,8 @@ class StaticPreparationRendererTests(unittest.TestCase):
             "static_source_root": str(Path(str(renderer.FI_RUNTIME_SOURCE_ROOT)) / "mini_app_dist"),
             "output_directory": str(output),
             "archive_name": renderer.static_preparer.STATIC_ARCHIVE_NAME,
-            "files_sha256": "b" * 64,
-            "file_count": 2,
+            "files_sha256": files_sha,
+            "file_count": file_count,
             "capacity_preflight": capacity,
             **common,
             "archive": archive,
@@ -281,8 +332,8 @@ class StaticPreparationRendererTests(unittest.TestCase):
                 "status": "verified",
                 "output_directory": str(output),
                 "archive": archive,
-                "files_sha256": "b" * 64,
-                "file_count": 2,
+                "files_sha256": files_sha,
+                "file_count": file_count,
                 "file_manifest_sha256": "c" * 64,
                 "preparation_receipt_sha256": "d" * 64,
                 **common,
@@ -331,6 +382,18 @@ class StaticPreparationRendererTests(unittest.TestCase):
         value["static_source_root"] = "https://example.invalid/mini_app_dist"
         _write_private(receipt, _canonical(value))
         with self.assertRaisesRegex(renderer.StaticPreparationControlError, "URL-free and nonsecret"):
+            renderer.validate_preparation_receipt(control=self.control, receipt=receipt)
+
+    def test_receipt_must_match_controller_bound_expected_static_manifest(self) -> None:
+        receipt = self._receipt()
+        value = json.loads(receipt.read_text(encoding="ascii"))
+        value["files_sha256"] = "0" * 64
+        value["verification"]["files_sha256"] = "0" * 64
+        _write_private(receipt, _canonical(value))
+        with self.assertRaisesRegex(
+            renderer.StaticPreparationControlError,
+            "does not match the controller-bound expected static manifest",
+        ):
             renderer.validate_preparation_receipt(control=self.control, receipt=receipt)
 
     def test_parser_has_no_execute_action(self) -> None:

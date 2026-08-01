@@ -35,6 +35,10 @@ def _load(name: str, path: Path):
 
 
 renderer = _load("render_webapp_fi_initial_static_upload_test", SCRIPT)
+fixtures = _load(
+    "source_stage_fixture_helpers_for_initial_static_upload_test",
+    ROOT / "tests" / "source_stage_fixture_helpers.py",
+)
 
 
 CAMPAIGN = "initial-static-control-20260730"
@@ -100,6 +104,8 @@ class InitialStaticRendererTests(unittest.TestCase):
             ["git", "-C", str(self.control), "rev-parse", self.control_commit + "^{tree}"], text=True
         ).strip()
         (self.application / "main.py").write_text("print('fixture')\n", encoding="ascii")
+        (self.application / "mini_app_dist").mkdir(mode=0o700)
+        (self.application / "mini_app_dist" / "index.html").write_text("<!doctype html>fixture\n", encoding="ascii")
         self.release = _commit(self.application)
         self.release_tree = subprocess.check_output(
             ["git", "-C", str(self.application), "rev-parse", self.release + "^{tree}"], text=True
@@ -122,25 +128,36 @@ class InitialStaticRendererTests(unittest.TestCase):
             source_phase / "campaign-binding.json",
             renderer.transport.campaign_binding.canonical_json_bytes(binding_unsigned) + b"\n",
         )
+        self.expected_static_assets_manifest = fixtures.make_expected_static_assets_manifest(
+            root=self.root,
+            campaign_id=CAMPAIGN,
+            application_repository=self.application,
+            application_release_sha=self.release,
+            expected_alembic_revision=REVISION,
+            control_commit=self.control_commit,
+            control_tree=self.control_tree,
+        )
         inputs = self.root / "controller-inputs"
         inputs.mkdir(mode=0o700)
-        credentials = _write_private(inputs / "credentials.json", b'{"access_key":"fixture","secret_key":"fixture"}\n')
+        credentials = fixtures.make_trusted_e53_s3_environment(self.root)
+        self.controller_campaigns_root = self.root / "controller-campaigns"
+        self.source_transport_workspace_root = self.root / "source-transport-workspaces"
+        controller_directory = self.controller_campaigns_root / CAMPAIGN / "controller"
+        controller_directory.mkdir(mode=0o700, parents=True)
+        for directory in (self.controller_campaigns_root, controller_directory.parent, controller_directory):
+            directory.chmod(0o700)
         self.config = _write_private(
-            inputs / "source-transport.json",
+            controller_directory / "source-transport.json",
             _canonical(
                 {
                     "schema": renderer.transport.CONFIG_SCHEMA,
                     "endpoint": "https://s3.ir-thr-at1.arvanstorage.ir",
-                    "region": "ir-thr-at1",
                     "bucket": "three-site-private",
                     "prefix": "campaign-current/artifacts",
                     "credentials_file": str(credentials),
-                    "age_binary": "/usr/bin/age",
-                    "workspace": str(inputs / "workspace"),
                     "controller_age_recipient": RECIPIENTS["controller"],
                     "webapp_fi_age_recipient": RECIPIENTS["fi"],
                     "webapp_ir_age_recipient": RECIPIENTS["ir"],
-                    "maximum_plaintext_bytes": 24 * 1024 * 1024,
                     "presign_expires_seconds": 300,
                 }
             ),
@@ -149,12 +166,42 @@ class InitialStaticRendererTests(unittest.TestCase):
         self.package = self.root / "packages" / "initial-package"
         self.package.parent.mkdir(mode=0o700)
         self.initial_object_id = "initial-static-20260730"
-        self.workspace_patch = mock.patch.object(renderer.preparer, "INITIAL_STATIC_FI_WORKSPACE", str(self.fi_root))
-        self.workspace_patch.start()
-        self.addCleanup(self.workspace_patch.stop)
+        controller_transport = renderer.preparer._load_controller_source_transport()
+        transport_patches = (
+            mock.patch.object(controller_transport, "CAMPAIGNS_ROOT", self.controller_campaigns_root),
+            mock.patch.object(
+                controller_transport.contract,
+                "SOURCE_TRANSPORT_WORKSPACE_ROOT",
+                self.source_transport_workspace_root,
+            ),
+            mock.patch.object(
+                controller_transport,
+                "TRUSTED_E53_S3_ENVIRONMENT_PATH",
+                credentials,
+            ),
+            mock.patch.object(renderer.preparer, "_load_controller_source_transport", return_value=controller_transport),
+            mock.patch.object(renderer.transport, "CAMPAIGNS_ROOT", self.controller_campaigns_root),
+            mock.patch.object(
+                renderer.transport.contract,
+                "SOURCE_TRANSPORT_WORKSPACE_ROOT",
+                self.source_transport_workspace_root,
+            ),
+            mock.patch.object(renderer.transport, "TRUSTED_E53_S3_ENVIRONMENT_PATH", credentials),
+        )
+        for patcher in transport_patches:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.fi_workspace_patch = mock.patch.object(
+            renderer.preparer,
+            "INITIAL_STATIC_FI_WORKSPACE",
+            str(self.fi_root),
+        )
+        self.fi_workspace_patch.start()
+        self.addCleanup(self.fi_workspace_patch.stop)
         result = renderer.preparer.prepare_source_adoption_package(
             source_repository=self.control,
             application_source_repository=self.application,
+            expected_static_assets_manifest=self.expected_static_assets_manifest,
             control_commit=self.control_commit,
             application_release_sha=self.release,
             expected_alembic_revision=REVISION,
@@ -292,6 +339,91 @@ class InitialStaticRendererTests(unittest.TestCase):
         self.assertNotIn("fixture", command.lower())
         self.assertNotIn("://", command)
 
+    def test_initial_static_policy_uses_precreated_fi_bootstrap_workspace_not_controller_workspace(self) -> None:
+        self.assertEqual(CAMPAIGN, self.control_value.controller_config.campaign_id)
+        controller_workspace = self.source_transport_workspace_root / CAMPAIGN
+        self.assertFalse(controller_workspace.exists())
+        self.assertEqual(self.fi_root, self.control_value.policy.workspace)
+        self.assertNotEqual(controller_workspace, self.control_value.policy.workspace)
+
+        members = renderer.preparer._read_archive_members(self.package / renderer.PACKAGE_ARCHIVE_NAME)
+        policy = json.loads(members[renderer.INITIAL_STATIC_POLICY_MEMBER].decode("ascii"))
+        self.assertEqual(str(self.fi_root), policy["workspace"])
+        self.assertNotEqual(str(controller_workspace), policy["workspace"])
+
+        fi_policy = _write_private(
+            self.fi_root / "initial-static-transport-policy.json",
+            renderer.canonical_json_bytes(policy) + b"\n",
+        )
+        loaded = renderer.exchange.load_policy(fi_policy)
+        self.assertEqual(self.fi_root, loaded.workspace)
+
+    def test_controller_workspace_policy_is_rejected_before_fi_install_receipt(self) -> None:
+        controller_workspace = self.source_transport_workspace_root / CAMPAIGN
+        self.assertFalse(controller_workspace.exists())
+        leaked_package = self.root / "packages" / "controller-workspace-package"
+        with mock.patch.object(
+            renderer.preparer,
+            "INITIAL_STATIC_FI_WORKSPACE",
+            str(controller_workspace),
+        ):
+            renderer.preparer.prepare_source_adoption_package(
+                source_repository=self.control,
+                application_source_repository=self.application,
+                expected_static_assets_manifest=self.expected_static_assets_manifest,
+                control_commit=self.control_commit,
+                application_release_sha=self.release,
+                expected_alembic_revision=REVISION,
+                source_transport_config=self.config,
+                campaign_binding_path=self.binding,
+                initial_static_object_id=self.initial_object_id,
+                package_id="controller-workspace-package",
+                destination=leaked_package,
+                apply=True,
+            )
+        with self.assertRaisesRegex(
+            renderer.InitialStaticControlError,
+            "workspace is not the fixed FI bootstrap root",
+        ):
+            renderer.build_initial_static_control(
+                source_transport_config=self.config,
+                campaign_binding=self.binding,
+                source_adoption_package_directory=leaked_package,
+                preparation_receipt=leaked_package / renderer.PREPARATION_RECEIPT_NAME,
+                fi_install_receipt=self.install_receipt,
+            )
+
+    def test_cross_campaign_controller_config_blocks_before_initial_static_control(self) -> None:
+        other_campaign = "initial-static-control-other-20260730"
+        other_config = (
+            self.controller_campaigns_root
+            / other_campaign
+            / renderer.transport.CONTROLLER_DIRECTORY_NAME
+            / renderer.transport.SOURCE_TRANSPORT_CONFIG_FILENAME
+        )
+        other_config.parent.mkdir(mode=0o700, parents=True)
+        for directory in (other_config.parent.parent, other_config.parent):
+            directory.chmod(0o700)
+        shutil.copy2(self.config, other_config)
+        other_config.chmod(0o600)
+
+        with mock.patch.object(
+            renderer.preparer,
+            "verify_prepared_source_adoption_package",
+            side_effect=AssertionError("cross-campaign config reached initial-static package verification"),
+        ):
+            with self.assertRaisesRegex(
+                renderer.InitialStaticControlError,
+                "controller source transport config does not bind the campaign",
+            ):
+                renderer.build_initial_static_control(
+                    source_transport_config=other_config,
+                    campaign_binding=self.binding,
+                    source_adoption_package_directory=self.package,
+                    preparation_receipt=self.preparation,
+                    fi_install_receipt=self.install_receipt,
+                )
+
     def test_package_canonical_release_tree_must_match_campaign_binding(self) -> None:
         binding = json.loads(self.binding.read_text(encoding="utf-8"))
         binding["application"]["release_tree"] = "0" * 40
@@ -384,6 +516,51 @@ class InitialStaticRendererTests(unittest.TestCase):
         report_path = _write_private(self.root / "controller-output" / "upload-tampered.json", _canonical(report))
         with self.assertRaisesRegex(renderer.InitialStaticControlError, "differs from the prepared expectation"):
             renderer.validate_upload_report(control=self.control_value, prepared_receipt=prepared, upload_report=report_path)
+
+    def test_direct_cli_upload_never_reads_or_prints_the_transient_url(self) -> None:
+        url = "https://fixture.invalid/create-only?X-Amz-Signature=" + "a" * 64
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(
+                renderer,
+                "_read_presigned_url_stdin",
+                side_effect=AssertionError("direct CLI must not read the URL"),
+            ),
+            mock.patch.object(
+                renderer,
+                "build_initial_static_control",
+                side_effect=AssertionError("direct CLI must block before control construction"),
+            ),
+            mock.patch.object(sys, "stdin", io.TextIOWrapper(io.BytesIO((url + "\n").encode("ascii")))),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            status = renderer.main(
+                [
+                    "render-upload",
+                    "--source-transport-config",
+                    "/ignored/source-transport.json",
+                    "--campaign-binding",
+                    "/ignored/campaign-binding.json",
+                    "--source-adoption-package-directory",
+                    "/ignored/package",
+                    "--preparation-receipt",
+                    "/ignored/preparation.json",
+                    "--fi-install-receipt",
+                    "/ignored/fi-install.json",
+                    "--fi-known-hosts",
+                    "/ignored/known_hosts",
+                    "--prepared-receipt",
+                    "/ignored/prepared.json",
+                    "--presigned-upload-url-stdin",
+                ]
+            )
+        output = stdout.getvalue() + stderr.getvalue()
+        self.assertEqual(2, status)
+        self.assertIn("disabled", output)
+        self.assertNotIn(url, output)
+        self.assertNotIn("ssh ", output)
 
     def test_cli_render_only_never_invokes_ssh(self) -> None:
         with (

@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
+from core.db import require_external_effect_execution_authorization
+from core.external_effect_execution_gate import EXTERNAL_EFFECT_SCOPE_SMS_PROVIDER_DELIVERY
 from core.registration_contracts import OTPDeliveryStatus
 from core.services.otp_delivery_state_service import (
     OTPDeliveryClaim,
@@ -35,6 +37,13 @@ async def execute_claimed_otp_sms_delivery(
     claim: OTPDeliveryClaim,
 ) -> OTPSMSAttemptResult:
     """Mark provider I/O before sending and finalize only the same claim generation."""
+
+    # This runs before the durable provider-attempt marker.  A disabled gate
+    # is a no-op; an enabled missing/expired receipt cannot turn a pending OTP
+    # into a claimed/retryable external-effect attempt.
+    require_external_effect_execution_authorization(
+        EXTERNAL_EFFECT_SCOPE_SMS_PROVIDER_DELIVERY
+    )
 
     try:
         provider_started = await mark_sms_provider_attempt_started(redis, claim=claim)

@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from core.application_writer_term import ApplicationWriterTermError
 from core import trade_delivery_worker as worker
 
 
@@ -76,6 +77,16 @@ class TradeDeliveryWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(report.processed_count, 0)
         self.assertEqual(report.recovered_lease_count, 0)
         self.assertEqual(report.status_counts[worker.TELEGRAM_DELIVERY_STATUS_NO_RECEIPT], 1)
+
+    async def test_cycle_refuses_before_database_access_when_writer_term_is_invalid(self):
+        with patch(
+            "core.trade_delivery_worker.require_application_writer_term",
+            side_effect=ApplicationWriterTermError("writer term is expired"),
+        ), patch("core.trade_delivery_worker.AsyncSessionLocal") as sessions:
+            with self.assertRaisesRegex(ApplicationWriterTermError, "expired"):
+                await worker.run_telegram_trade_delivery_cycle(limit=1)
+
+        sessions.assert_not_called()
 
 
 if __name__ == "__main__":

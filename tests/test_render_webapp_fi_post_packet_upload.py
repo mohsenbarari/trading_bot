@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import datetime as dt
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -77,6 +79,11 @@ class PostPacketUploadRendererTests(unittest.TestCase):
         for directory in (self.campaigns_root, self.packet_root, self.fi_root):
             directory.mkdir(mode=0o700)
             directory.chmod(0o700)
+        self.controller_campaigns_root = self.root / "controller-campaigns"
+        self.source_transport_workspace_root = self.root / "controller-workspaces"
+        for directory in (self.controller_campaigns_root, self.source_transport_workspace_root):
+            directory.mkdir(mode=0o700)
+            directory.chmod(0o700)
         campaign_directory = self.campaigns_root / CAMPAIGN
         self.source_phase = campaign_directory / "webapp-fi-source"
         self.source_phase.mkdir(mode=0o700, parents=True)
@@ -112,30 +119,37 @@ class PostPacketUploadRendererTests(unittest.TestCase):
 
         inputs = self.root / "inputs"
         inputs.mkdir(mode=0o700)
-        credentials = _write_private(inputs / "credentials.json", b'{"access_key":"fixture","secret_key":"fixture"}\n')
-        self.workspace = inputs / "workspace"
-        self.workspace.mkdir(mode=0o700)
-        self.workspace.chmod(0o700)
-        self.transport_config = _write_private(
-            inputs / "source-transport.json",
-            _canonical(
-                {
-                    "schema": renderer.initial.transport.CONFIG_SCHEMA,
-                    "endpoint": "https://s3.ir-thr-at1.arvanstorage.ir",
-                    "region": "ir-thr-at1",
-                    "bucket": "private-artifacts",
-                    "prefix": "campaigns/three-site",
-                    "credentials_file": str(credentials),
-                    "age_binary": "/usr/bin/age",
-                    "workspace": str(self.workspace),
-                    "controller_age_recipient": RECIPIENTS["controller"],
-                    "webapp_fi_age_recipient": RECIPIENTS["fi"],
-                    "webapp_ir_age_recipient": RECIPIENTS["ir"],
-                    "maximum_plaintext_bytes": 1024 * 1024,
-                    "presign_expires_seconds": 300,
-                }
+        inputs.chmod(0o700)
+        self.trusted_e53_environment = _write_private(
+            inputs / "trusted-e53-s3.env",
+            (
+                b"ARVAN_S3_ACCESS_KEY=fixture-access-key\n"
+                b"ARVAN_S3_SECRET_KEY=fixture-secret-key\n"
+                b"ARVAN_S3_ENDPOINT=https://s3.ir-thr-at1.arvanstorage.ir\n"
+                b"ARVAN_S3_REGION=ir-thr-at1\n"
+                b"WA_IR_OBJECT_STORAGE_BUCKET=private-artifacts\n"
+                b"WA_IR_OBJECT_STORAGE_PREFIX=campaigns/three-site\n"
+                b"WA_IR_AGE_RECIPIENT_FILE=/legacy/e53/wa-ir.age-recipient\n"
+                b"WA_IR_REMOTE_AGE_IDENTITY=/legacy/e53/wa-ir.age-identity\n"
             ),
         )
+        self.transport_patches = [
+            mock.patch.object(renderer.initial.transport, "CAMPAIGNS_ROOT", self.controller_campaigns_root),
+            mock.patch.object(
+                renderer.initial.transport,
+                "TRUSTED_E53_S3_ENVIRONMENT_PATH",
+                self.trusted_e53_environment,
+            ),
+            mock.patch.object(
+                renderer.initial.transport.contract,
+                "SOURCE_TRANSPORT_WORKSPACE_ROOT",
+                self.source_transport_workspace_root,
+            ),
+        ]
+        for patcher in self.transport_patches:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.transport_config = self._write_transport_config(CAMPAIGN)
         self.policy = renderer.initial.transport.load_controller_config(self.transport_config).policy
         self.packet_payload = self._packet_payload(role_value)
         packet_directory = self.packet_root / CAMPAIGN / PACKET_ID
@@ -171,6 +185,30 @@ class PostPacketUploadRendererTests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
         self.control = self._build()
+
+    def _write_transport_config(self, campaign_id: str) -> Path:
+        path = (
+            self.controller_campaigns_root
+            / campaign_id
+            / renderer.initial.transport.CONTROLLER_DIRECTORY_NAME
+            / renderer.initial.transport.SOURCE_TRANSPORT_CONFIG_FILENAME
+        )
+        return _write_private(
+            path,
+            _canonical(
+                {
+                    "schema": renderer.initial.transport.CONFIG_SCHEMA,
+                    "endpoint": "https://s3.ir-thr-at1.arvanstorage.ir",
+                    "bucket": "private-artifacts",
+                    "prefix": "campaigns/three-site",
+                    "credentials_file": str(self.trusted_e53_environment),
+                    "controller_age_recipient": RECIPIENTS["controller"],
+                    "webapp_fi_age_recipient": RECIPIENTS["fi"],
+                    "webapp_ir_age_recipient": RECIPIENTS["ir"],
+                    "presign_expires_seconds": 300,
+                }
+            ),
+        )
 
     def _certificate(self) -> dict[str, object]:
         source_object = {
@@ -250,11 +288,11 @@ class PostPacketUploadRendererTests(unittest.TestCase):
             "bucket": "private-artifacts",
             "prefix": "campaigns/three-site",
             "age_binary": "/usr/bin/age",
-            "workspace": str(self.workspace),
+            "workspace": str(self.policy.workspace),
             "controller_age_recipient": RECIPIENTS["controller"],
             "webapp_fi_age_recipient": RECIPIENTS["fi"],
             "webapp_ir_age_recipient": RECIPIENTS["ir"],
-            "maximum_plaintext_bytes": 1024 * 1024,
+            "maximum_plaintext_bytes": self.policy.maximum_plaintext_bytes,
         }
 
     def _packet_payload(self, role_value: dict[str, object]) -> bytes:
@@ -322,9 +360,15 @@ class PostPacketUploadRendererTests(unittest.TestCase):
         }
         return _canonical({**unsigned, "receipt_sha256": renderer.sha256_bytes(renderer.canonical_json_bytes(unsigned))})
 
-    def _build(self, *, artifact_kind: str = renderer.RAW_APP_IMAGE, artifact_id: str = "image-export-one"):
+    def _build(
+        self,
+        *,
+        artifact_kind: str = renderer.RAW_APP_IMAGE,
+        artifact_id: str = "image-export-one",
+        source_transport_config: Path | None = None,
+    ):
         return renderer.build_post_packet_upload_control(
-            source_transport_config=self.transport_config,
+            source_transport_config=source_transport_config or self.transport_config,
             campaign_binding=self.binding_path,
             source_role_config=self.role_path,
             fi_static_packet_install_receipt=self.fi_static_receipt,
@@ -440,6 +484,56 @@ class PostPacketUploadRendererTests(unittest.TestCase):
         self.assertTrue(result["controller_readback_required"])
         self.assertEqual("upload-version-1", result["object"]["version_id"])
 
+    def test_direct_cli_upload_never_reads_or_prints_the_transient_url(self) -> None:
+        url = "https://fixture.invalid/create-only?X-Amz-Signature=" + "a" * 64
+        stdout_bytes = io.BytesIO()
+        stdout = io.TextIOWrapper(stdout_bytes, encoding="ascii", write_through=True)
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(
+                renderer.initial,
+                "_read_presigned_url_stdin",
+                side_effect=AssertionError("direct CLI must not read the URL"),
+            ),
+            mock.patch.object(
+                renderer,
+                "_control_from_args",
+                side_effect=AssertionError("direct CLI must block before control construction"),
+            ),
+            mock.patch.object(sys, "stdin", io.TextIOWrapper(io.BytesIO((url + "\n").encode("ascii")))),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            status = renderer.main(
+                [
+                    "render-upload",
+                    "--source-transport-config",
+                    "/ignored/source-transport.json",
+                    "--campaign-binding",
+                    "/ignored/campaign-binding.json",
+                    "--source-role-config",
+                    "/ignored/source-role-config.json",
+                    "--fi-static-packet-install-receipt",
+                    "/ignored/fi-install.json",
+                    "--packet-id",
+                    "packet-one",
+                    "--artifact-kind",
+                    "raw-app-image",
+                    "--artifact-id",
+                    "artifact-one",
+                    "--fi-known-hosts",
+                    "/ignored/known_hosts",
+                    "--prepared-receipt",
+                    "/ignored/prepared.json",
+                ]
+            )
+        stdout.flush()
+        output = stdout_bytes.getvalue().decode("ascii") + stderr.getvalue()
+        self.assertEqual(2, status)
+        self.assertIn("disabled", output)
+        self.assertNotIn(url, output)
+        self.assertNotIn("ssh ", output)
+
     def test_tampered_install_receipt_or_route_blocks_before_any_render(self) -> None:
         value = json.loads(self.fi_static_receipt.read_text(encoding="ascii"))
         value["source_role_config_sha256"] = "0" * 64
@@ -451,6 +545,20 @@ class PostPacketUploadRendererTests(unittest.TestCase):
 
         with self.assertRaisesRegex(renderer.PostPacketUploadControlError, "artifact_kind"):
             self._build(artifact_kind="static")
+
+    def test_valid_other_campaign_transport_config_blocks_before_role_or_packet_composition(self) -> None:
+        other_config = self._write_transport_config("post-packet-other-20260730")
+        with (
+            mock.patch.object(renderer, "_load_role_config") as blocked_role,
+            mock.patch.object(renderer, "_load_controller_authority") as blocked_authority,
+            self.assertRaisesRegex(
+                renderer.PostPacketUploadControlError,
+                "config does not bind the canonical campaign",
+            ),
+        ):
+            self._build(source_transport_config=other_config)
+        blocked_role.assert_not_called()
+        blocked_authority.assert_not_called()
 
     def test_evidence_enum_uses_the_same_controller_only_route_and_known_hosts_are_pinned(self) -> None:
         evidence = self._build(artifact_kind=renderer.SOURCE_EVIDENCE, artifact_id="evidence-one")

@@ -10,13 +10,14 @@ from collections import OrderedDict
 import json
 import logging
 import uuid
-from typing import Any, List, Optional
+from typing import Any, List, Mapping, Optional
 
 from jose import jwt, JWTError
 
+from core.application_writer_term import ApplicationWriterTermError
 from core.redis import pool
 from core.config import settings
-from core.db import AsyncSessionLocal
+from core.db import AsyncSessionLocal, require_application_writer_term
 from core.market_presence import (
     clear_market_page_presence,
     refresh_market_page_presence,
@@ -26,6 +27,11 @@ from core.market_presence import (
 from core.metrics import record_websocket_publish_failure, set_active_websocket_connections
 from core.services.session_service import is_session_blacklisted
 from core.services.user_account_status_service import is_user_global_web_locked
+from core.services.promotion_session_invalidation_service import (
+    PromotionAccessTokenEpochError,
+    PromotionSessionInvalidationError,
+    enforce_access_token_auth_epoch,
+)
 from core.production_test_isolation import should_block_webapp_user
 from models.session import UserSession
 from models.user import User
@@ -129,6 +135,9 @@ WEBSOCKET_PUBLIC_EVENT_TYPES = (
     "market:notice_hidden",
     "market:admin_message_published",
 )
+
+WEBSOCKET_WRITER_TERM_CLOSE_CODE = 1013
+WEBSOCKET_WRITER_TERM_CLOSE_REASON = "Service temporarily unavailable"
 
 SSE_PUBLIC_EVENT_TYPES = (
     "offer:created",
@@ -283,32 +292,95 @@ async def _handle_client_message(
     return bool(visible and is_market_route(path))
 
 
-def verify_ws_token(token: str) -> Optional[tuple[int, Optional[str]]]:
-    """
-    Validate JWT token and return user_id.
-    Returns None if token is invalid.
-    """
+def _decode_ws_access_token(token: str) -> Optional[tuple[int, Optional[str], dict[str, object]]]:
+    """Verify a WebSocket access JWT and retain its claims for epoch checks."""
     try:
         payload = jwt.decode(
             token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm]
         )
+        if not isinstance(payload, dict) or payload.get("type") != "access":
+            return None
         sub = payload.get("sub")
         if sub is None:
             return None
-        return int(sub), payload.get("sid")
+        return int(sub), payload.get("sid"), payload
     except (JWTError, ValueError, Exception):
         return None
+
+
+class VerifiedWebSocketToken:
+    """Verified identity plus private claims for the async epoch recheck.
+
+    Iteration and tuple equality preserve the historical two-value public
+    helper contract for callers that only need ``(user_id, session_id)``.
+    The raw claims are intentionally consumed only by this router's verified
+    connection path.
+    """
+
+    __slots__ = ("user_id", "session_id", "payload")
+
+    def __init__(
+        self,
+        *,
+        user_id: int,
+        session_id: Optional[str],
+        payload: dict[str, object],
+    ) -> None:
+        self.user_id = user_id
+        self.session_id = session_id
+        self.payload = payload
+
+    def __iter__(self):
+        yield self.user_id
+        yield self.session_id
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, VerifiedWebSocketToken):
+            return (
+                self.user_id,
+                self.session_id,
+                self.payload,
+            ) == (
+                other.user_id,
+                other.session_id,
+                other.payload,
+            )
+        if isinstance(other, tuple):
+            return (self.user_id, self.session_id) == other
+        return NotImplemented
+
+
+def verify_ws_token(token: str) -> Optional[VerifiedWebSocketToken]:
+    """Validate an access JWT and return its user/session identity only."""
+
+    decoded = _decode_ws_access_token(token)
+    if decoded is None:
+        return None
+    user_id, session_id, payload = decoded
+    return VerifiedWebSocketToken(user_id=user_id, session_id=session_id, payload=payload)
 
 
 async def _websocket_access_denial(
     user_id: int,
     session_id: Optional[str],
+    *,
+    token_payload: Mapping[str, object] | None = None,
 ) -> tuple[int, str] | None:
     """Revalidate WebApp access for both connection setup and private delivery."""
+    term_denial = _websocket_writer_term_denial()
+    if term_denial is not None:
+        return term_denial
     if session_id and await is_session_blacklisted(session_id):
         return 4003, "Session has been revoked"
 
     async with AsyncSessionLocal() as session:
+        if token_payload is not None:
+            try:
+                await enforce_access_token_auth_epoch(session, token_payload)
+            except PromotionAccessTokenEpochError:
+                return 4003, "Session has been revoked"
+            except PromotionSessionInvalidationError:
+                return WEBSOCKET_WRITER_TERM_CLOSE_CODE, WEBSOCKET_WRITER_TERM_CLOSE_REASON
         user = await session.get(User, user_id)
         if not user or user.is_deleted or is_user_global_web_locked(user):
             return 4003, "User is inactive"
@@ -327,6 +399,21 @@ async def _websocket_access_denial(
     return None
 
 
+def _websocket_writer_term_denial() -> tuple[int, str] | None:
+    """Reject a new socket before ``accept`` when the local term is invalid."""
+    # Preserve the default-off WebSocket path without reading a lease or
+    # invoking the term validator. Non-boolean/misconfigured enabled values
+    # are delegated to the validator, which fails closed.
+    if settings.application_writer_term_enforced is False:
+        return None
+    try:
+        require_application_writer_term()
+    except ApplicationWriterTermError:
+        logging.warning("Blocked WebSocket because the local writer term is unavailable")
+        return WEBSOCKET_WRITER_TERM_CLOSE_CODE, WEBSOCKET_WRITER_TERM_CLOSE_REASON
+    return None
+
+
 # --- WebSocket Endpoint (Authenticated) ---
 @router.websocket("/ws")
 async def websocket_endpoint(
@@ -337,6 +424,11 @@ async def websocket_endpoint(
     WebSocket endpoint برای real-time updates آنی
     Requires JWT token as query parameter: /ws?token=<jwt>
     """
+    term_denial = _websocket_writer_term_denial()
+    if term_denial is not None:
+        await websocket.close(code=term_denial[0], reason=term_denial[1])
+        return
+
     # --- Authentication ---
     if not token:
         await websocket.close(code=4001, reason="Missing authentication token")
@@ -347,8 +439,9 @@ async def websocket_endpoint(
         await websocket.close(code=4003, reason="Invalid or expired token")
         return
     user_id, session_id = auth_result
+    token_payload = auth_result.payload if type(auth_result) is VerifiedWebSocketToken else None
 
-    denial = await _websocket_access_denial(user_id, session_id)
+    denial = await _websocket_access_denial(user_id, session_id, token_payload=token_payload)
     if denial is not None:
         await websocket.close(code=denial[0], reason=denial[1])
         return
@@ -360,13 +453,24 @@ async def websocket_endpoint(
     
     try:
         # شروع گوش دادن به Redis Pub/Sub در یک task جداگانه
-        redis_task = asyncio.create_task(listen_redis_events(websocket, user_id, session_id))
+        redis_task = asyncio.create_task(
+            listen_redis_events(
+                websocket,
+                user_id,
+                session_id,
+                token_payload=token_payload,
+            )
+        )
         
         # گوش دادن به پیام‌های کلاینت (برای keep-alive)
         while True:
             try:
                 data = await asyncio.wait_for(websocket.receive_text(), timeout=30)
-                denial = await _websocket_access_denial(user_id, session_id)
+                denial = await _websocket_access_denial(
+                    user_id,
+                    session_id,
+                    token_payload=token_payload,
+                )
                 if denial is not None:
                     await websocket.close(code=denial[0], reason=denial[1])
                     break
@@ -381,7 +485,11 @@ async def websocket_endpoint(
             except asyncio.TimeoutError:
                 # ارسال heartbeat
                 try:
-                    denial = await _websocket_access_denial(user_id, session_id)
+                    denial = await _websocket_access_denial(
+                        user_id,
+                        session_id,
+                        token_payload=token_payload,
+                    )
                     if denial is not None:
                         await websocket.close(code=denial[0], reason=denial[1])
                         break
@@ -402,9 +510,15 @@ async def listen_redis_events(
     websocket: WebSocket,
     user_id: int | None = None,
     session_id: str | None = None,
+    *,
+    token_payload: Mapping[str, object] | None = None,
 ):
     """گوش دادن به رویدادهای Redis و ارسال به WebSocket"""
     logging.info(f"🔴 Redis listener started for WebSocket (user_id={user_id})")
+    term_denial = _websocket_writer_term_denial()
+    if term_denial is not None:
+        await websocket.close(code=term_denial[0], reason=term_denial[1])
+        return
     try:
         async with redis.Redis(connection_pool=pool) as redis_client:
             pubsub = redis_client.pubsub()
@@ -419,6 +533,19 @@ async def listen_redis_events(
             
             while True:
                 try:
+                    term_denial = _websocket_writer_term_denial()
+                    if term_denial is not None:
+                        await websocket.close(code=term_denial[0], reason=term_denial[1])
+                        return
+                    if token_payload is not None and user_id is not None:
+                        denial = await _websocket_access_denial(
+                            int(user_id),
+                            session_id,
+                            token_payload=token_payload,
+                        )
+                        if denial is not None:
+                            await websocket.close(code=denial[0], reason=denial[1])
+                            return
                     message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
                     
                     if message and message.get("type") == "message":
@@ -437,7 +564,11 @@ async def listen_redis_events(
                         try:
                             # User-specific notifications channel has different format.
                             if channel.startswith("notifications:"):
-                                denial = await _websocket_access_denial(int(user_id), session_id)
+                                denial = await _websocket_access_denial(
+                                    int(user_id),
+                                    session_id,
+                                    token_payload=token_payload,
+                                )
                                 if denial is not None:
                                     await websocket.close(code=denial[0], reason=denial[1])
                                     break
@@ -472,8 +603,15 @@ async def listen_redis_events(
 
 
 # --- SSE Endpoint (Backup) ---
-async def event_generator(user_id: int, session_id: str | None = None):
+async def event_generator(
+    user_id: int,
+    session_id: str | None = None,
+    *,
+    token_payload: Mapping[str, object] | None = None,
+):
     """Generator برای SSE events"""
+    if _websocket_writer_term_denial() is not None:
+        return
     async with redis.Redis(connection_pool=pool) as redis_client:
         pubsub = redis_client.pubsub()
 
@@ -488,6 +626,16 @@ async def event_generator(user_id: int, session_id: str | None = None):
         
         try:
             while True:
+                if _websocket_writer_term_denial() is not None:
+                    return
+                if token_payload is not None:
+                    denial = await _websocket_access_denial(
+                        user_id,
+                        session_id,
+                        token_payload=token_payload,
+                    )
+                    if denial is not None:
+                        return
                 message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
                 
                 if message and message.get("type") == "message":
@@ -504,7 +652,11 @@ async def event_generator(user_id: int, session_id: str | None = None):
                         if not isinstance(parsed, dict):
                             raise ValueError("Realtime event payload must be an object")
                         if channel.startswith("notifications:"):
-                            denial = await _websocket_access_denial(user_id, session_id)
+                            denial = await _websocket_access_denial(
+                                user_id,
+                                session_id,
+                                token_payload=token_payload,
+                            )
                             if denial is not None:
                                 return
                             event_type = parsed.get("event", "notification")
@@ -547,9 +699,20 @@ async def sse_stream(
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    _token_subject, session_id = auth_result
+    token_subject, session_id = auth_result
+    token_payload = auth_result.payload if type(auth_result) is VerifiedWebSocketToken else None
+    if token_subject != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return StreamingResponse(
-        event_generator(current_user.id, session_id=session_id),
+        event_generator(
+            current_user.id,
+            session_id=session_id,
+            token_payload=token_payload,
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

@@ -95,6 +95,14 @@ class FakeDB:
 
 
 class ChatRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        patcher = patch(
+            'api.routers.chat.enforce_access_token_auth_epoch',
+            new=AsyncMock(return_value=None),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     async def test_upload_session_helper_paths_cover_payload_counters_and_room_lookup(self):
         session = SimpleNamespace(
             id='sess-1',

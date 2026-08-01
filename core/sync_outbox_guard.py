@@ -23,6 +23,8 @@ SYNC_OUTBOX_TOKEN_KEY = "_sync_outbox_flush_token"
 SYNC_OUTBOX_CURRENT_TOKEN_KEY = "_sync_outbox_current_token"
 SYNC_OUTBOX_RECORDED_KEY = "_sync_outbox_recorded"
 SYNC_OUTBOX_RECORDED_COUNT_KEY = "_sync_outbox_recorded_count"
+SYNC_OUTBOX_CHANGE_LOG_IDS_KEY = "_sync_outbox_change_log_ids"
+SYNC_OUTBOX_OBJECT_DELTA_COUNT_KEY = "_sync_outbox_object_delta_count"
 SYNC_OUTBOX_WAKEUP_NEEDED_KEY = "_sync_outbox_wakeup_needed"
 
 _REGISTERED = False
@@ -71,6 +73,8 @@ def mark_sync_outbox_recorded(
     operation: str,
     record_id: Any,
     data: dict[str, Any] | None = None,
+    *,
+    change_log_id: Any | None = None,
 ) -> None:
     """Mark that log_change inserted the durable row for the current flush."""
     info = getattr(connection, "info", None)
@@ -88,6 +92,18 @@ def mark_sync_outbox_recorded(
     )
     recorded_counts = info.setdefault(SYNC_OUTBOX_RECORDED_COUNT_KEY, {})
     recorded_counts[token] = _coerce_wakeup_count(recorded_counts.get(token)) + 1
+    # IDs are retained only for the sync-authoritative subset through
+    # after_flush.  This leaves historical wake-up accounting untouched even
+    # if an older listener also writes a no-sync ChangeLog row in the flush.
+    if token is not None and sync_table_requires_outbox(table_name):
+        recorded_ids = info.setdefault(SYNC_OUTBOX_CHANGE_LOG_IDS_KEY, {})
+        recorded_counts_for_delta = info.setdefault(SYNC_OUTBOX_OBJECT_DELTA_COUNT_KEY, {})
+        if isinstance(recorded_ids, dict):
+            recorded_ids.setdefault(token, []).append(change_log_id)
+        if isinstance(recorded_counts_for_delta, dict):
+            recorded_counts_for_delta[token] = _coerce_wakeup_count(
+                recorded_counts_for_delta.get(token)
+            ) + 1
 
 
 def collect_pending_sync_writes(session: Session, flush_context: Any, instances: Any) -> None:
@@ -148,6 +164,26 @@ def verify_pending_sync_outbox(session: Session, flush_context: Any) -> None:
         else {}
     )
     recorded_row_count = _coerce_wakeup_count(recorded_counts.get(token))
+    recorded_ids = (
+        connection_info.get(SYNC_OUTBOX_CHANGE_LOG_IDS_KEY, {})
+        if isinstance(connection_info, dict)
+        else {}
+    )
+    change_log_ids = (
+        tuple(recorded_ids.pop(token, []) or [])
+        if isinstance(recorded_ids, dict)
+        else ()
+    )
+    object_delta_counts = (
+        connection_info.get(SYNC_OUTBOX_OBJECT_DELTA_COUNT_KEY, {})
+        if isinstance(connection_info, dict)
+        else {}
+    )
+    object_delta_row_count = _coerce_wakeup_count(
+        object_delta_counts.pop(token, 0)
+        if isinstance(object_delta_counts, dict)
+        else 0
+    )
 
     missing: list[str] = []
     for item in pending:
@@ -175,6 +211,18 @@ def verify_pending_sync_outbox(session: Session, flush_context: Any) -> None:
             "Synced authoritative write missing mandatory change_log outbox row: "
             + ", ".join(missing)
         )
+
+    # This bridge is default-off and touches no binding, Writer Witness lease,
+    # ChangeLog row, or Object-delta table unless its dedicated runtime flag
+    # is enabled.  When enabled it runs before the outer transaction commits,
+    # so a source mutation cannot survive without an append-only outbox entry.
+    from core.object_delta_outbox_runtime import allocate_verified_object_delta_outbox_entries
+
+    allocate_verified_object_delta_outbox_entries(
+        connection,
+        change_log_ids=change_log_ids,
+        expected_count=object_delta_row_count,
+    )
 
     current_wakeup_count = _coerce_wakeup_count(
         session.info.get(SYNC_OUTBOX_WAKEUP_NEEDED_KEY)

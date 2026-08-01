@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Plan and preflight the real two-server staging full matrix.
+"""Retired historical source for the direct two-server staging runner.
 
-The runner is fail-closed. `plan` and `preflight` are non-mutating. Mutating
-scenario execution must only be added after the real two-server staging
-topology passes preflight and the command drivers are reviewed.
+The command-generating source is retained solely for forensic comparison. No
+public or underscored callable in this module may return a FI<->IR command,
+contact a peer, or execute the former staging Full-Matrix topology.
 """
 
 from __future__ import annotations
@@ -28,13 +28,60 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, NoReturn
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts import build_staging_two_server_full_matrix_manifest as manifest_builder
+from core.legacy_two_server_full_matrix_fence import (
+    assert_legacy_two_server_full_matrix_retired,
+    blocked_legacy_two_server_full_matrix_payload,
+)
+
+
+class _RetiredForensicManifestBuilder:
+    """Do not import the old two-server builder before the CLI hard fence."""
+
+    def __getattr__(self, name: str) -> Any:
+        assert_legacy_two_server_full_matrix_retired(
+            component="staging-two-server-full-matrix-runner",
+            operation=f"retired manifest builder access ({name})",
+        )
+
+
+manifest_builder = _RetiredForensicManifestBuilder()
+
+
+# All FI<->IR transport and two-server full-matrix construction lives under
+# deliberately underscored forensic names below.  Supported callers get only
+# explicit fences and cannot obtain SSH/SCP argv or an executable legacy plan.
+__all__ = (
+    "build_manifest",
+    "build_plan",
+    "main",
+    "preflight_checks",
+    "remote_shell_command",
+    "run_execute",
+    "run_preflight",
+    "scp_from_iran",
+    "scp_to_iran",
+)
+
+
+def _retire_legacy_forensic_source(function: Any) -> Any:
+    """Make retained two-server source text uncallable from any import path."""
+
+    operation = f"forensic source {function.__name__}"
+
+    def _rejected(*args: Any, **kwargs: Any) -> Any:
+        del args, kwargs
+        assert_legacy_two_server_full_matrix_retired(
+            component="staging-two-server-full-matrix-runner",
+            operation=operation,
+        )
+
+    return _rejected
 
 
 SCHEMA_VERSION = "staging_two_server_full_matrix_runner_v1"
@@ -366,7 +413,8 @@ def validate_staging_url(name: str, url: str, expected_host: str | None = None) 
     return CheckResult(name, "passed", "URL identity is staging-safe", time.perf_counter() - started, {"hostname": hostname})
 
 
-def fetch_json(url: str, *, basic_auth: tuple[str, str] | None, timeout_seconds: float = 10.0) -> tuple[int, dict[str, Any] | None, str]:
+@_retire_legacy_forensic_source
+def _forensic_fetch_json(url: str, *, basic_auth: tuple[str, str] | None, timeout_seconds: float = 10.0) -> tuple[int, dict[str, Any] | None, str]:
     request = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "staging-two-server-full-matrix/1"})
     if basic_auth:
         raw = f"{basic_auth[0]}:{basic_auth[1]}".encode("utf-8")
@@ -387,7 +435,8 @@ def fetch_json(url: str, *, basic_auth: tuple[str, str] | None, timeout_seconds:
     return status_code, payload if isinstance(payload, dict) else None, body[:8192]
 
 
-def fetch_status(
+@_retire_legacy_forensic_source
+def _forensic_fetch_status(
     url: str,
     *,
     basic_auth: tuple[str, str] | None = None,
@@ -413,7 +462,8 @@ def fetch_status(
         return 0, {}, f"{type(exc).__name__}: {exc}"
 
 
-def fetch_observability_json(
+@_retire_legacy_forensic_source
+def _forensic_fetch_observability_json(
     url: str,
     observability_key: str,
     *,
@@ -451,9 +501,10 @@ def fetch_observability_json(
     return status_code, parsed if isinstance(parsed, dict) else None, raw_body[:8192]
 
 
-def check_http_json(name: str, url: str, *, basic_auth: tuple[str, str] | None) -> CheckResult:
+@_retire_legacy_forensic_source
+def _forensic_check_http_json(name: str, url: str, *, basic_auth: tuple[str, str] | None) -> CheckResult:
     started = time.perf_counter()
-    status_code, payload, raw = fetch_json(url, basic_auth=basic_auth)
+    status_code, payload, raw = _forensic_fetch_json(url, basic_auth=basic_auth)
     elapsed = time.perf_counter() - started
     if status_code != 200 or payload is None:
         return CheckResult(
@@ -466,11 +517,12 @@ def check_http_json(name: str, url: str, *, basic_auth: tuple[str, str] | None) 
     return CheckResult(name, "passed", "HTTP JSON check passed", elapsed, {"url": url, "status_code": status_code, "payload": payload})
 
 
-def check_foreign_public_surface_guard(name: str, base_url: str, *, basic_auth: tuple[str, str] | None) -> CheckResult:
+@_retire_legacy_forensic_source
+def _forensic_check_foreign_public_surface_guard(name: str, base_url: str, *, basic_auth: tuple[str, str] | None) -> CheckResult:
     """Foreign staging must not expose the WebApp/public config surface."""
     started = time.perf_counter()
     url = base_url.rstrip("/") + "/api/config"
-    status_code, payload, raw = fetch_json(url, basic_auth=basic_auth)
+    status_code, payload, raw = _forensic_fetch_json(url, basic_auth=basic_auth)
     elapsed = time.perf_counter() - started
     if status_code == 404:
         return CheckResult(
@@ -497,9 +549,10 @@ def check_foreign_public_surface_guard(name: str, base_url: str, *, basic_auth: 
     )
 
 
-def check_internal_ingress_without_basic_auth(name: str, url: str) -> CheckResult:
+@_retire_legacy_forensic_source
+def _forensic_check_internal_ingress_without_basic_auth(name: str, url: str) -> CheckResult:
     started = time.perf_counter()
-    status_code, headers, raw = fetch_status(url, basic_auth=None, method="HEAD")
+    status_code, headers, raw = _forensic_fetch_status(url, basic_auth=None, method="HEAD")
     elapsed = time.perf_counter() - started
     authenticate_header = str(headers.get("WWW-Authenticate") or headers.get("www-authenticate") or "")
     if status_code == 401 and ("basic" in raw.lower() or "basic" in authenticate_header.lower()):
@@ -537,7 +590,8 @@ def check_internal_ingress_without_basic_auth(name: str, url: str) -> CheckResul
     )
 
 
-def check_tls(name: str, base_url: str) -> CheckResult:
+@_retire_legacy_forensic_source
+def _forensic_check_tls(name: str, base_url: str) -> CheckResult:
     started = time.perf_counter()
     hostname = host_of(base_url)
     if not hostname:
@@ -615,7 +669,8 @@ def normalized_url_host(value: Any) -> str:
     return host_of(str(value or "")).lower()
 
 
-def run_json_command(command: list[str], *, timeout_seconds: float = 10.0) -> tuple[int, dict[str, Any] | None, str, str]:
+@_retire_legacy_forensic_source
+def _forensic_run_json_command(command: list[str], *, timeout_seconds: float = 10.0) -> tuple[int, dict[str, Any] | None, str, str]:
     try:
         result = subprocess.run(command, capture_output=True, text=True, timeout=timeout_seconds, check=False)
     except Exception as exc:  # noqa: BLE001
@@ -647,7 +702,8 @@ def command_slug(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("_")[:120] or "command"
 
 
-def run_logged_command(
+@_retire_legacy_forensic_source
+def _forensic_run_logged_command(
     name: str,
     command: list[str],
     *,
@@ -700,7 +756,8 @@ def run_logged_command(
     return command_result
 
 
-def run_logged_commands_parallel(
+@_retire_legacy_forensic_source
+def _forensic_run_logged_commands_parallel(
     commands: list[tuple[str, list[str]]],
     *,
     log_dir: Path,
@@ -763,7 +820,8 @@ def require_command_success(result: CommandResult) -> None:
         raise RuntimeError(f"{result.name} failed with returncode={result.returncode}; see {result.stderr_path}")
 
 
-def local_load_runner_command(
+@_retire_legacy_forensic_source
+def _forensic_local_load_runner_command(
     service: str,
     artifact_dir: Path,
     worker_args: list[str],
@@ -805,15 +863,18 @@ def local_load_runner_command(
     ]
 
 
-def iran_ssh_command(args: argparse.Namespace, remote_command: str) -> list[str]:
+@_retire_legacy_forensic_source
+def _forensic_iran_ssh_command(args: argparse.Namespace, remote_command: str) -> list[str]:
     return ["ssh", "-p", str(getattr(args, "iran_ssh_port", DEFAULT_IRAN_SSH_PORT)), args.iran_ssh_host, remote_command]
 
 
-def remote_shell_command(args: argparse.Namespace, inner: str) -> list[str]:
-    return iran_ssh_command(args, f"cd {shlex.quote(args.iran_workdir)} && {inner}")
+@_retire_legacy_forensic_source
+def _forensic_remote_shell_command(args: argparse.Namespace, inner: str) -> list[str]:
+    return _forensic_iran_ssh_command(args, f"cd {shlex.quote(args.iran_workdir)} && {inner}")
 
 
-def remote_load_runner_command(args: argparse.Namespace, service: str, remote_artifact_dir: str, worker_args: list[str]) -> list[str]:
+@_retire_legacy_forensic_source
+def _forensic_remote_load_runner_command(args: argparse.Namespace, service: str, remote_artifact_dir: str, worker_args: list[str]) -> list[str]:
     quoted_worker = " ".join(shlex.quote(part) for part in worker_args)
     foreign_peer_url = args.foreign_base_url.rstrip("/") + "/foreign-sync"
     inner = (
@@ -839,10 +900,11 @@ def remote_load_runner_command(args: argparse.Namespace, service: str, remote_ar
         "python scripts/trading_core_probe_worker.py "
         f"{quoted_worker}"
     )
-    return remote_shell_command(args, inner)
+    return _forensic_remote_shell_command(args, inner)
 
 
-def scp_from_iran(args: argparse.Namespace, remote_path: str, local_path: Path) -> list[str]:
+@_retire_legacy_forensic_source
+def _forensic_scp_from_iran(args: argparse.Namespace, remote_path: str, local_path: Path) -> list[str]:
     return [
         "scp",
         "-P",
@@ -852,7 +914,8 @@ def scp_from_iran(args: argparse.Namespace, remote_path: str, local_path: Path) 
     ]
 
 
-def scp_to_iran(args: argparse.Namespace, local_path: Path, remote_path: str) -> list[str]:
+@_retire_legacy_forensic_source
+def _forensic_scp_to_iran(args: argparse.Namespace, local_path: Path, remote_path: str) -> list[str]:
     return [
         "scp",
         "-P",
@@ -862,7 +925,8 @@ def scp_to_iran(args: argparse.Namespace, local_path: Path, remote_path: str) ->
     ]
 
 
-def run_local_worker(
+@_retire_legacy_forensic_source
+def _forensic_run_local_worker(
     name: str,
     *,
     args: argparse.Namespace | None = None,
@@ -872,15 +936,16 @@ def run_local_worker(
     log_dir: Path,
     timeout_seconds: float = 300.0,
 ) -> CommandResult:
-    return run_logged_command(
+    return _forensic_run_logged_command(
         name,
-        local_load_runner_command(service, artifact_dir, worker_args, args=args),
+        _forensic_local_load_runner_command(service, artifact_dir, worker_args, args=args),
         log_dir=log_dir,
         timeout_seconds=timeout_seconds,
     )
 
 
-def run_remote_worker(
+@_retire_legacy_forensic_source
+def _forensic_run_remote_worker(
     name: str,
     *,
     args: argparse.Namespace,
@@ -890,15 +955,16 @@ def run_remote_worker(
     log_dir: Path,
     timeout_seconds: float = 300.0,
 ) -> CommandResult:
-    return run_logged_command(
+    return _forensic_run_logged_command(
         name,
-        remote_load_runner_command(args, service, remote_artifact_dir, worker_args),
+        _forensic_remote_load_runner_command(args, service, remote_artifact_dir, worker_args),
         log_dir=log_dir,
         timeout_seconds=timeout_seconds,
     )
 
 
-def check_container_runtime_identity(
+@_retire_legacy_forensic_source
+def _forensic_check_container_runtime_identity(
     name: str,
     *,
     server: str,
@@ -910,13 +976,13 @@ def check_container_runtime_identity(
     if server == "foreign":
         command = ["docker", "exec", args.foreign_app_container, "python", "-c", runtime_identity_python()]
     elif server == "iran":
-        command = iran_ssh_command(
+        command = _forensic_iran_ssh_command(
             args,
             f"docker exec {args.iran_app_container} python -c {json.dumps(runtime_identity_python())}",
         )
     else:
         return CheckResult(name, "failed", f"unsupported runtime identity server: {server}")
-    returncode, payload, stdout, stderr = run_json_command(command)
+    returncode, payload, stdout, stderr = _forensic_run_json_command(command)
     elapsed = time.perf_counter() - started
     if returncode != 0 or payload is None:
         return CheckResult(
@@ -963,25 +1029,27 @@ def check_container_runtime_identity(
     )
 
 
-def storage_identity_command(server: str, args: argparse.Namespace) -> list[str]:
+@_retire_legacy_forensic_source
+def _forensic_storage_identity_command(server: str, args: argparse.Namespace) -> list[str]:
     script = storage_identity_python()
     wrapper = f"import base64; exec(base64.b64decode({base64.b64encode(script.encode()).decode('ascii')!r}))"
     if server == "foreign":
         return ["docker", "exec", args.foreign_app_container, "python", "-c", wrapper]
     if server == "iran":
-        return iran_ssh_command(
+        return _forensic_iran_ssh_command(
             args,
             f"docker exec {shlex.quote(args.iran_app_container)} python -c {shlex.quote(wrapper)}",
         )
     raise ValueError(f"unsupported storage identity server: {server}")
 
 
-def check_storage_identity_separation(name: str, *, args: argparse.Namespace) -> CheckResult:
+@_retire_legacy_forensic_source
+def _forensic_check_storage_identity_separation(name: str, *, args: argparse.Namespace) -> CheckResult:
     started = time.perf_counter()
     payloads: dict[str, dict[str, Any]] = {}
     failures: list[str] = []
     for server in ("iran", "foreign"):
-        returncode, payload, stdout, stderr = run_json_command(storage_identity_command(server, args), timeout_seconds=20.0)
+        returncode, payload, stdout, stderr = _forensic_run_json_command(_forensic_storage_identity_command(server, args), timeout_seconds=20.0)
         if returncode != 0 or payload is None:
             failures.append(f"{server} storage identity command failed")
             payloads[server] = {
@@ -1020,8 +1088,9 @@ def basic_auth_from_args(args: argparse.Namespace) -> tuple[str, str] | None:
     return None
 
 
-def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
-    return manifest_builder.build_manifest(
+@_retire_legacy_forensic_source
+def _forensic_build_manifest(args: argparse.Namespace) -> dict[str, Any]:
+    return manifest_builder._forensic_build_manifest(
         prefix=args.prefix,
         stress_max_parallel=args.stress_max_parallel,
         market_attempts=args.market_attempts,
@@ -1159,8 +1228,9 @@ def publish_agent_logs(artifact_dir: Path, args: argparse.Namespace, manifest: d
         shutil.copytree(artifact_dir, target)
 
 
-def build_plan(args: argparse.Namespace) -> dict[str, Any]:
-    manifest = build_manifest(args)
+@_retire_legacy_forensic_source
+def _forensic_build_plan(args: argparse.Namespace) -> dict[str, Any]:
+    manifest = _forensic_build_manifest(args)
     validation_errors = manifest_builder.validate_manifest(manifest)
     artifact_dir = args.artifact_dir
     artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -1229,7 +1299,8 @@ def build_summary_md(summary: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def preflight_checks(args: argparse.Namespace, manifest: dict[str, Any]) -> list[CheckResult]:
+@_retire_legacy_forensic_source
+def _forensic_preflight_checks(args: argparse.Namespace, manifest: dict[str, Any]) -> list[CheckResult]:
     auth = basic_auth_from_args(args)
     checks: list[CheckResult] = []
     current_branch = run_git_value(["branch", "--show-current"])
@@ -1269,77 +1340,77 @@ def preflight_checks(args: argparse.Namespace, manifest: dict[str, Any]) -> list
         [
             validate_staging_url("iran_url_identity", args.iran_base_url, expected_host=host_of(DEFAULT_IRAN_BASE_URL)),
             validate_staging_url("foreign_url_identity", args.foreign_base_url, expected_host=host_of(DEFAULT_FOREIGN_BASE_URL)),
-            check_tls("iran_tls", args.iran_base_url),
-            check_tls("foreign_tls", args.foreign_base_url),
-            check_http_json("iran_public_config", args.iran_base_url.rstrip("/") + "/api/config", basic_auth=auth),
-            check_foreign_public_surface_guard("foreign_public_surface_guard", args.foreign_base_url, basic_auth=auth),
-            check_internal_ingress_without_basic_auth(
+            _forensic_check_tls("iran_tls", args.iran_base_url),
+            _forensic_check_tls("foreign_tls", args.foreign_base_url),
+            _forensic_check_http_json("iran_public_config", args.iran_base_url.rstrip("/") + "/api/config", basic_auth=auth),
+            _forensic_check_foreign_public_surface_guard("foreign_public_surface_guard", args.foreign_base_url, basic_auth=auth),
+            _forensic_check_internal_ingress_without_basic_auth(
                 "iran_sync_internal_ingress_without_basic_auth",
                 args.iran_base_url.rstrip("/") + "/api/sync/receive",
             ),
-            check_internal_ingress_without_basic_auth(
+            _forensic_check_internal_ingress_without_basic_auth(
                 "iran_trade_internal_ingress_without_basic_auth",
                 args.iran_base_url.rstrip("/") + "/api/trades/internal/execute",
             ),
-            check_internal_ingress_without_basic_auth(
+            _forensic_check_internal_ingress_without_basic_auth(
                 "iran_offer_expiry_internal_ingress_without_basic_auth",
                 args.iran_base_url.rstrip("/") + "/api/offers/internal/expire",
             ),
-            check_internal_ingress_without_basic_auth(
+            _forensic_check_internal_ingress_without_basic_auth(
                 "iran_session_internal_ingress_without_basic_auth",
                 args.iran_base_url.rstrip("/") + "/api/sessions/internal/authority-check",
             ),
-            check_internal_ingress_without_basic_auth(
+            _forensic_check_internal_ingress_without_basic_auth(
                 "iran_registration_internal_ingress_without_basic_auth",
                 args.iran_base_url.rstrip("/") + "/api/auth/internal/telegram-registration/reconcile",
             ),
-            check_internal_ingress_without_basic_auth(
+            _forensic_check_internal_ingress_without_basic_auth(
                 "iran_account_link_internal_ingress_without_basic_auth",
                 args.iran_base_url.rstrip("/") + "/api/auth/internal/telegram-link/complete",
             ),
-            check_internal_ingress_without_basic_auth(
+            _forensic_check_internal_ingress_without_basic_auth(
                 "iran_invitation_internal_ingress_without_basic_auth",
                 args.iran_base_url.rstrip("/") + "/api/invitations/internal/create",
             ),
-            check_internal_ingress_without_basic_auth(
+            _forensic_check_internal_ingress_without_basic_auth(
                 "iran_customer_relation_internal_ingress_without_basic_auth",
                 args.iran_base_url.rstrip("/") + "/api/customers/internal/owner-relations",
             ),
-            check_internal_ingress_without_basic_auth(
+            _forensic_check_internal_ingress_without_basic_auth(
                 "foreign_sync_internal_ingress_without_basic_auth",
                 args.foreign_base_url.rstrip("/") + "/foreign-sync/api/sync/receive",
             ),
-            check_internal_ingress_without_basic_auth(
+            _forensic_check_internal_ingress_without_basic_auth(
                 "foreign_trade_internal_ingress_without_basic_auth",
                 args.foreign_base_url.rstrip("/") + "/foreign-sync/api/trades/internal/execute",
             ),
-            check_internal_ingress_without_basic_auth(
+            _forensic_check_internal_ingress_without_basic_auth(
                 "foreign_offer_expiry_internal_ingress_without_basic_auth",
                 args.foreign_base_url.rstrip("/") + "/foreign-sync/api/offers/internal/expire",
             ),
-            check_internal_ingress_without_basic_auth(
+            _forensic_check_internal_ingress_without_basic_auth(
                 "foreign_session_internal_ingress_without_basic_auth",
                 args.foreign_base_url.rstrip("/") + "/foreign-sync/api/sessions/internal/authority-check",
             ),
-            check_internal_ingress_without_basic_auth(
+            _forensic_check_internal_ingress_without_basic_auth(
                 "foreign_telegram_otp_internal_ingress_without_basic_auth",
                 args.foreign_base_url.rstrip("/") + "/foreign-sync/api/auth/internal/telegram-otp/deliver",
             ),
-            check_container_runtime_identity(
+            _forensic_check_container_runtime_identity(
                 "iran_runtime_identity",
                 server="iran",
                 expected_server_mode="iran",
                 expected_release=expected_release,
                 args=args,
             ),
-            check_container_runtime_identity(
+            _forensic_check_container_runtime_identity(
                 "foreign_runtime_identity",
                 server="foreign",
                 expected_server_mode="foreign",
                 expected_release=expected_release,
                 args=args,
             ),
-            check_storage_identity_separation(
+            _forensic_check_storage_identity_separation(
                 "staging_storage_identity_separation",
                 args=args,
             ),
@@ -1394,7 +1465,7 @@ def check_observability_json(
     basic_auth: tuple[str, str] | None,
 ) -> CheckResult:
     started = time.perf_counter()
-    status_code, payload, body = fetch_observability_json(
+    status_code, payload, body = _forensic_fetch_observability_json(
         url,
         observability_key,
         basic_auth=basic_auth,
@@ -1480,7 +1551,8 @@ def sync_health_gate_failures(
     return failures
 
 
-def capture_sync_health(args: argparse.Namespace, *, label: str, require_fresh_parity: bool = False) -> dict[str, Any]:
+@_retire_legacy_forensic_source
+def _forensic_capture_sync_health(args: argparse.Namespace, *, label: str, require_fresh_parity: bool = False) -> dict[str, Any]:
     auth = basic_auth_from_args(args)
     payload: dict[str, Any] = {
         "schema_version": "staging_two_server_sync_health_pair_v1",
@@ -1501,7 +1573,7 @@ def capture_sync_health(args: argparse.Namespace, *, label: str, require_fresh_p
     failures = []
     gate_failures: dict[str, list[str]] = {}
     for peer, url in peer_urls.items():
-        status_code, peer_payload, raw = fetch_observability_json(
+        status_code, peer_payload, raw = _forensic_fetch_observability_json(
             url,
             args.observability_api_key,
             basic_auth=auth,
@@ -1533,7 +1605,8 @@ def capture_sync_health(args: argparse.Namespace, *, label: str, require_fresh_p
     return payload
 
 
-def capture_parity(args: argparse.Namespace, *, label: str) -> dict[str, Any]:
+@_retire_legacy_forensic_source
+def _forensic_capture_parity(args: argparse.Namespace, *, label: str) -> dict[str, Any]:
     from core.sync_parity import compare_parity_snapshots
     from core.sync_parity_observability import infer_parity_comparison_mode, summarize_parity_comparison
 
@@ -1558,7 +1631,7 @@ def capture_parity(args: argparse.Namespace, *, label: str) -> dict[str, Any]:
     expected_server_modes = {"iran": "iran", "foreign": "foreign"}
     failures = []
     for peer, url in peer_urls.items():
-        status_code, snapshot, raw = fetch_observability_json(
+        status_code, snapshot, raw = _forensic_fetch_observability_json(
             url,
             args.observability_api_key,
             basic_auth=auth,
@@ -1613,7 +1686,7 @@ def capture_parity(args: argparse.Namespace, *, label: str) -> dict[str, Any]:
             "foreign": args.foreign_base_url.rstrip("/") + "/foreign-sync/api/sync/parity/status",
         }
         for peer, record_url in record_urls.items():
-            record_status, record_payload, record_raw = fetch_observability_json(
+            record_status, record_payload, record_raw = _forensic_fetch_observability_json(
                 record_url,
                 args.observability_api_key,
                 basic_auth=auth,
@@ -1634,12 +1707,13 @@ def capture_parity(args: argparse.Namespace, *, label: str) -> dict[str, Any]:
     return payload
 
 
-def run_preflight(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
-    plan = build_plan(args)
+@_retire_legacy_forensic_source
+def _forensic_run_preflight(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    plan = _forensic_build_plan(args)
     manifest = plan["manifest"]
-    checks = preflight_checks(args, manifest)
+    checks = _forensic_preflight_checks(args, manifest)
     if args.observability_api_key:
-        parity_before = capture_parity(args, label="before")
+        parity_before = _forensic_capture_parity(args, label="before")
         checks.append(
             CheckResult(
                 "parity_before_artifact",
@@ -1650,7 +1724,7 @@ def run_preflight(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
                 payload={"artifact": str(args.artifact_dir / "parity-before.json")},
             )
         )
-        sync_health_before = capture_sync_health(args, label="before", require_fresh_parity=True)
+        sync_health_before = _forensic_capture_sync_health(args, label="before", require_fresh_parity=True)
         checks.append(
             CheckResult(
                 "sync_health_before_artifact",
@@ -1711,7 +1785,8 @@ def read_json_file(path: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {"status": "invalid_json", "path": str(path)}
 
 
-def run_cleanup_on_both_sides(
+@_retire_legacy_forensic_source
+def _forensic_run_cleanup_on_both_sides(
     *,
     args: argparse.Namespace,
     prefix: str,
@@ -1726,7 +1801,7 @@ def run_cleanup_on_both_sides(
     if dry_run:
         worker_args.append("--dry-run")
     results = [
-        run_remote_worker(
+        _forensic_run_remote_worker(
             f"{label}_iran",
             args=args,
             service="load_webapp_iran",
@@ -1735,7 +1810,7 @@ def run_cleanup_on_both_sides(
             log_dir=log_dir,
             timeout_seconds=240,
         ),
-        run_local_worker(
+        _forensic_run_local_worker(
             f"{label}_foreign",
             service="load_telegram_foreign",
             artifact_dir=local_dir,
@@ -1783,7 +1858,8 @@ def assert_cleanup_dry_run_zero(results: list[CommandResult], *, label: str) -> 
     return report
 
 
-def run_sync_catchup(
+@_retire_legacy_forensic_source
+def _forensic_run_sync_catchup(
     *,
     args: argparse.Namespace,
     prefix: str,
@@ -1792,7 +1868,7 @@ def run_sync_catchup(
     log_dir: Path,
 ) -> list[CommandResult]:
     results = [
-        run_remote_worker(
+        _forensic_run_remote_worker(
             "sync_catchup_iran_to_foreign",
             args=args,
             service="load_webapp_iran",
@@ -1808,7 +1884,7 @@ def run_sync_catchup(
             log_dir=log_dir,
             timeout_seconds=300,
         ),
-        run_local_worker(
+        _forensic_run_local_worker(
             "sync_catchup_foreign_to_iran",
             service="load_telegram_foreign",
             artifact_dir=local_dir,
@@ -1829,7 +1905,8 @@ def run_sync_catchup(
     return results
 
 
-def run_observability_snapshots(
+@_retire_legacy_forensic_source
+def _forensic_run_observability_snapshots(
     *,
     args: argparse.Namespace,
     local_dir: Path,
@@ -1838,7 +1915,7 @@ def run_observability_snapshots(
     label: str,
 ) -> list[CommandResult]:
     results = [
-        run_remote_worker(
+        _forensic_run_remote_worker(
             f"observability_iran_{label}",
             args=args,
             service="load_webapp_iran",
@@ -1847,7 +1924,7 @@ def run_observability_snapshots(
             log_dir=log_dir,
             timeout_seconds=180,
         ),
-        run_local_worker(
+        _forensic_run_local_worker(
             f"observability_foreign_{label}",
             service="load_telegram_foreign",
             artifact_dir=local_dir,
@@ -1893,7 +1970,8 @@ def assert_observability_clean(results: list[CommandResult], *, label: str) -> d
     return report
 
 
-def run_sync_catchup_until_clean(
+@_retire_legacy_forensic_source
+def _forensic_run_sync_catchup_until_clean(
     *,
     args: argparse.Namespace,
     prefix: str,
@@ -1908,7 +1986,7 @@ def run_sync_catchup_until_clean(
     for round_index in range(1, max(1, int(max_rounds)) + 1):
         command_results.extend(
             result.asdict()
-            for result in run_sync_catchup(
+            for result in _forensic_run_sync_catchup(
                 args=args,
                 prefix=prefix,
                 local_dir=local_dir,
@@ -1916,7 +1994,7 @@ def run_sync_catchup_until_clean(
                 log_dir=log_dir,
             )
         )
-        snapshots = run_observability_snapshots(
+        snapshots = _forensic_run_observability_snapshots(
             args=args,
             local_dir=local_dir,
             remote_dir=remote_dir,
@@ -2013,7 +2091,8 @@ def prepare_worker_args(scenario: dict[str, Any], prefix: str) -> list[str]:
     return worker_args
 
 
-def seed_and_converge_dual_role_users(
+@_retire_legacy_forensic_source
+def _forensic_seed_and_converge_dual_role_users(
     *,
     args: argparse.Namespace,
     scenario: Mapping[str, Any],
@@ -2023,7 +2102,7 @@ def seed_and_converge_dual_role_users(
     log_dir: Path,
 ) -> list[CommandResult]:
     results: list[CommandResult] = []
-    seed = run_remote_worker(
+    seed = _forensic_run_remote_worker(
         "seed_users_on_iran",
         args=args,
         service="load_webapp_iran",
@@ -2035,7 +2114,7 @@ def seed_and_converge_dual_role_users(
     require_command_success(seed)
     results.append(seed)
 
-    sync_users = run_remote_worker(
+    sync_users = _forensic_run_remote_worker(
         "sync_seeded_users_iran_to_foreign",
         args=args,
         service="load_webapp_iran",
@@ -2056,16 +2135,16 @@ def seed_and_converge_dual_role_users(
     require_command_success(sync_users)
     results.append(sync_users)
 
-    copy_users = run_logged_command(
+    copy_users = _forensic_run_logged_command(
         "copy_seeded_users_iran_to_foreign",
-        scp_from_iran(args, f"{remote_dir}/users.seed.json", local_dir / "users.seed.json"),
+        _forensic_scp_from_iran(args, f"{remote_dir}/users.seed.json", local_dir / "users.seed.json"),
         log_dir=log_dir,
         timeout_seconds=120,
     )
     require_command_success(copy_users)
     results.append(copy_users)
 
-    verify_users = run_local_worker(
+    verify_users = _forensic_run_local_worker(
         "verify_seeded_users_on_foreign",
         service="load_telegram_foreign",
         artifact_dir=local_dir,
@@ -2088,7 +2167,8 @@ def seed_and_converge_dual_role_users(
     return results
 
 
-def copy_prepare_artifacts_to_peer(
+@_retire_legacy_forensic_source
+def _forensic_copy_prepare_artifacts_to_peer(
     *,
     args: argparse.Namespace,
     scenario: dict[str, Any],
@@ -2100,9 +2180,9 @@ def copy_prepare_artifacts_to_peer(
     results: list[CommandResult] = []
     if offer_origin == "webapp":
         for name in ("prepare.json", "manifest.json", "telegram_foreign.plan.json", "webapp_iran.plan.json"):
-            result = run_logged_command(
+            result = _forensic_run_logged_command(
                 f"copy_iran_to_foreign_{name}",
-                scp_from_iran(args, f"{remote_dir}/{name}", local_dir / name),
+                _forensic_scp_from_iran(args, f"{remote_dir}/{name}", local_dir / name),
                 log_dir=log_dir,
                 timeout_seconds=120,
             )
@@ -2110,9 +2190,9 @@ def copy_prepare_artifacts_to_peer(
             results.append(result)
     else:
         for name in ("prepare.json", "manifest.json", "telegram_foreign.plan.json", "webapp_iran.plan.json"):
-            result = run_logged_command(
+            result = _forensic_run_logged_command(
                 f"copy_foreign_to_iran_{name}",
-                scp_to_iran(args, local_dir / name, f"{remote_dir}/{name}"),
+                _forensic_scp_to_iran(args, local_dir / name, f"{remote_dir}/{name}"),
                 log_dir=log_dir,
                 timeout_seconds=120,
             )
@@ -2121,16 +2201,17 @@ def copy_prepare_artifacts_to_peer(
     return results
 
 
-def copy_role_result_from_iran(
+@_retire_legacy_forensic_source
+def _forensic_copy_role_result_from_iran(
     *,
     args: argparse.Namespace,
     local_dir: Path,
     remote_dir: str,
     log_dir: Path,
 ) -> CommandResult:
-    result = run_logged_command(
+    result = _forensic_run_logged_command(
         "copy_webapp_role_result_from_iran",
-        scp_from_iran(args, f"{remote_dir}/webapp_iran.result.json", local_dir / "webapp_iran.result.json"),
+        _forensic_scp_from_iran(args, f"{remote_dir}/webapp_iran.result.json", local_dir / "webapp_iran.result.json"),
         log_dir=log_dir,
         timeout_seconds=120,
     )
@@ -2138,7 +2219,8 @@ def copy_role_result_from_iran(
     return result
 
 
-def rebase_role_plans_on_both_sides(
+@_retire_legacy_forensic_source
+def _forensic_rebase_role_plans_on_both_sides(
     *,
     args: argparse.Namespace,
     local_dir: Path,
@@ -2146,7 +2228,7 @@ def rebase_role_plans_on_both_sides(
     log_dir: Path,
 ) -> list[CommandResult]:
     results = [
-        run_remote_worker(
+        _forensic_run_remote_worker(
             "rebase_webapp_plan_on_iran",
             args=args,
             service="load_webapp_iran",
@@ -2161,7 +2243,7 @@ def rebase_role_plans_on_both_sides(
             log_dir=log_dir,
             timeout_seconds=180,
         ),
-        run_local_worker(
+        _forensic_run_local_worker(
             "rebase_telegram_plan_on_foreign",
             service="load_telegram_foreign",
             artifact_dir=local_dir,
@@ -2181,7 +2263,8 @@ def rebase_role_plans_on_both_sides(
     return results
 
 
-def refresh_role_plan_barriers_on_both_sides(
+@_retire_legacy_forensic_source
+def _forensic_refresh_role_plan_barriers_on_both_sides(
     *,
     args: argparse.Namespace,
     local_dir: Path,
@@ -2193,7 +2276,7 @@ def refresh_role_plan_barriers_on_both_sides(
     barrier_epoch = time.time() + barrier_delay
     barrier_arg = f"{barrier_epoch:.6f}"
     results = [
-        run_remote_worker(
+        _forensic_run_remote_worker(
             "refresh_webapp_plan_barrier_on_iran",
             args=args,
             service="load_webapp_iran",
@@ -2210,7 +2293,7 @@ def refresh_role_plan_barriers_on_both_sides(
             log_dir=log_dir,
             timeout_seconds=180,
         ),
-        run_local_worker(
+        _forensic_run_local_worker(
             "refresh_telegram_plan_barrier_on_foreign",
             service="load_telegram_foreign",
             artifact_dir=local_dir,
@@ -2239,7 +2322,7 @@ def refresh_role_plan_barriers_on_both_sides(
         ]
         if scenario["offer_origin"] == "webapp":
             results.append(
-                run_remote_worker(
+                _forensic_run_remote_worker(
                     "refresh_prepare_barrier_on_iran",
                     args=args,
                     service="load_webapp_iran",
@@ -2251,7 +2334,7 @@ def refresh_role_plan_barriers_on_both_sides(
             )
         else:
             results.append(
-                run_local_worker(
+                _forensic_run_local_worker(
                     "refresh_prepare_barrier_on_foreign",
                     service="load_telegram_foreign",
                     artifact_dir=local_dir,
@@ -2265,7 +2348,8 @@ def refresh_role_plan_barriers_on_both_sides(
     return results
 
 
-def finalize_on_home(
+@_retire_legacy_forensic_source
+def _forensic_finalize_on_home(
     *,
     args: argparse.Namespace,
     scenario: dict[str, Any],
@@ -2274,14 +2358,14 @@ def finalize_on_home(
     log_dir: Path,
 ) -> CommandResult:
     if scenario["offer_origin"] == "webapp":
-        copy_result = run_logged_command(
+        copy_result = _forensic_run_logged_command(
             "copy_merged_result_to_iran",
-            scp_to_iran(args, local_dir / "merged.result.json", f"{remote_dir}/merged.result.json"),
+            _forensic_scp_to_iran(args, local_dir / "merged.result.json", f"{remote_dir}/merged.result.json"),
             log_dir=log_dir,
             timeout_seconds=120,
         )
         require_command_success(copy_result)
-        result = run_remote_worker(
+        result = _forensic_run_remote_worker(
             "finalize_on_iran",
             args=args,
             service="load_webapp_iran",
@@ -2300,15 +2384,15 @@ def finalize_on_home(
             timeout_seconds=240,
         )
         require_command_success(result)
-        pull_final = run_logged_command(
+        pull_final = _forensic_run_logged_command(
             "copy_final_from_iran",
-            scp_from_iran(args, f"{remote_dir}/final.json", local_dir / "final.json"),
+            _forensic_scp_from_iran(args, f"{remote_dir}/final.json", local_dir / "final.json"),
             log_dir=log_dir,
             timeout_seconds=120,
         )
         require_command_success(pull_final)
         return result
-    result = run_local_worker(
+    result = _forensic_run_local_worker(
         "finalize_on_foreign",
         service="load_telegram_foreign",
         artifact_dir=local_dir,
@@ -2338,7 +2422,8 @@ def finalize_race_worker_args(scenario: Mapping[str, Any]) -> list[str]:
     return []
 
 
-def race_role_command(
+@_retire_legacy_forensic_source
+def _forensic_race_role_command(
     *,
     args: argparse.Namespace,
     scenario: Mapping[str, Any],
@@ -2367,11 +2452,12 @@ def race_role_command(
     else:
         return None
     if scenario["offer_origin"] == "webapp":
-        return name, remote_load_runner_command(args, "load_webapp_iran", remote_dir, worker_args)
-    return name, local_load_runner_command("load_telegram_foreign", local_dir, worker_args, args=args)
+        return name, _forensic_remote_load_runner_command(args, "load_webapp_iran", remote_dir, worker_args)
+    return name, _forensic_local_load_runner_command("load_telegram_foreign", local_dir, worker_args, args=args)
 
 
-def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], *, suite_dir: Path, remote_root: str) -> dict[str, Any]:
+@_retire_legacy_forensic_source
+def _forensic_execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], *, suite_dir: Path, remote_root: str) -> dict[str, Any]:
     scenario_id = scenario["id"]
     local_dir = suite_dir / scenario_id
     log_dir = local_dir / "logs"
@@ -2385,7 +2471,7 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
     try:
         command_results.extend(
             result.asdict()
-            for result in run_cleanup_on_both_sides(
+            for result in _forensic_run_cleanup_on_both_sides(
                 args=args,
                 prefix=prefix,
                 local_dir=local_dir,
@@ -2397,7 +2483,7 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
         )
         command_results.extend(
             result.asdict()
-            for result in run_cleanup_on_both_sides(
+            for result in _forensic_run_cleanup_on_both_sides(
                 args=args,
                 prefix=prefix,
                 local_dir=local_dir,
@@ -2406,7 +2492,7 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
                 label="initial_cleanup_hard_delete",
             )
         )
-        initial_zero_results = run_cleanup_on_both_sides(
+        initial_zero_results = _forensic_run_cleanup_on_both_sides(
             args=args,
             prefix=prefix,
             local_dir=local_dir,
@@ -2422,7 +2508,7 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
         )
         command_results.extend(
             result.asdict()
-            for result in run_observability_snapshots(
+            for result in _forensic_run_observability_snapshots(
                 args=args,
                 local_dir=local_dir,
                 remote_dir=remote_dir,
@@ -2432,7 +2518,7 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
         )
         command_results.extend(
             result.asdict()
-            for result in seed_and_converge_dual_role_users(
+            for result in _forensic_seed_and_converge_dual_role_users(
                 args=args,
                 scenario=scenario,
                 prefix=prefix,
@@ -2442,7 +2528,7 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
             )
         )
         if scenario["offer_origin"] == "webapp":
-            prepare = run_remote_worker(
+            prepare = _forensic_run_remote_worker(
                 "prepare_on_iran",
                 args=args,
                 service="load_webapp_iran",
@@ -2452,7 +2538,7 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
                 timeout_seconds=300,
             )
         else:
-            prepare = run_local_worker(
+            prepare = _forensic_run_local_worker(
                 "prepare_on_foreign",
                 service="load_telegram_foreign",
                 artifact_dir=local_dir,
@@ -2464,7 +2550,7 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
         command_results.append(prepare.asdict())
         command_results.extend(
             result.asdict()
-            for result in copy_prepare_artifacts_to_peer(
+            for result in _forensic_copy_prepare_artifacts_to_peer(
                 args=args,
                 scenario=scenario,
                 local_dir=local_dir,
@@ -2474,7 +2560,7 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
         )
         command_results.extend(
             result.asdict()
-            for result in run_sync_catchup(
+            for result in _forensic_run_sync_catchup(
                 args=args,
                 prefix=prefix,
                 local_dir=local_dir,
@@ -2484,7 +2570,7 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
         )
         command_results.extend(
             result.asdict()
-            for result in rebase_role_plans_on_both_sides(
+            for result in _forensic_rebase_role_plans_on_both_sides(
                 args=args,
                 local_dir=local_dir,
                 remote_dir=remote_dir,
@@ -2492,7 +2578,7 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
             )
         )
         if scenario["offer_origin"] == "webapp":
-            wait_result = run_local_worker(
+            wait_result = _forensic_run_local_worker(
                 "wait_offer_visible_on_foreign",
                 service="load_telegram_foreign",
                 artifact_dir=local_dir,
@@ -2509,7 +2595,7 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
                 timeout_seconds=120,
             )
         else:
-            wait_result = run_remote_worker(
+            wait_result = _forensic_run_remote_worker(
                 "wait_offer_visible_on_iran",
                 args=args,
                 service="load_webapp_iran",
@@ -2530,7 +2616,7 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
         command_results.append(wait_result.asdict())
         command_results.extend(
             result.asdict()
-            for result in refresh_role_plan_barriers_on_both_sides(
+            for result in _forensic_refresh_role_plan_barriers_on_both_sides(
                 args=args,
                 local_dir=local_dir,
                 remote_dir=remote_dir,
@@ -2542,7 +2628,7 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
         role_commands = [
             (
                 "run_webapp_role_on_iran",
-                remote_load_runner_command(
+                _forensic_remote_load_runner_command(
                     args,
                     "load_webapp_iran",
                     remote_dir,
@@ -2558,7 +2644,7 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
             ),
             (
                 "run_telegram_role_on_foreign",
-                local_load_runner_command(
+                _forensic_local_load_runner_command(
                     "load_telegram_foreign",
                     local_dir,
                     [
@@ -2573,7 +2659,7 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
                 ),
             ),
         ]
-        special_race_command = race_role_command(
+        special_race_command = _forensic_race_role_command(
             args=args,
             scenario=scenario,
             local_dir=local_dir,
@@ -2581,12 +2667,12 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
         )
         if special_race_command is not None:
             role_commands.append(special_race_command)
-        role_results = run_logged_commands_parallel(role_commands, log_dir=log_dir, timeout_seconds=360)
+        role_results = _forensic_run_logged_commands_parallel(role_commands, log_dir=log_dir, timeout_seconds=360)
         for result in role_results:
             require_command_success(result)
             command_results.append(result.asdict())
-        command_results.append(copy_role_result_from_iran(args=args, local_dir=local_dir, remote_dir=remote_dir, log_dir=log_dir).asdict())
-        merge_result = run_local_worker(
+        command_results.append(_forensic_copy_role_result_from_iran(args=args, local_dir=local_dir, remote_dir=remote_dir, log_dir=log_dir).asdict())
+        merge_result = _forensic_run_local_worker(
             "merge_role_results",
             service="load_telegram_foreign",
             artifact_dir=local_dir,
@@ -2603,7 +2689,7 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
         require_command_success(merge_result)
         command_results.append(merge_result.asdict())
         command_results.append(
-            finalize_on_home(
+            _forensic_finalize_on_home(
                 args=args,
                 scenario=scenario,
                 local_dir=local_dir,
@@ -2611,7 +2697,7 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
                 log_dir=log_dir,
             ).asdict()
         )
-        catchup_results, observability_clean_report = run_sync_catchup_until_clean(
+        catchup_results, observability_clean_report = _forensic_run_sync_catchup_until_clean(
             args=args,
             prefix=prefix,
             local_dir=local_dir,
@@ -2631,7 +2717,7 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
     finally:
         cleanup_results: list[CommandResult] = []
         try:
-            cleanup_results = run_cleanup_on_both_sides(
+            cleanup_results = _forensic_run_cleanup_on_both_sides(
                 args=args,
                 prefix=prefix,
                 local_dir=local_dir,
@@ -2640,7 +2726,7 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
                 label="final_cleanup_hard_delete",
             )
             command_results.extend(result.asdict() for result in cleanup_results)
-            final_zero_results = run_cleanup_on_both_sides(
+            final_zero_results = _forensic_run_cleanup_on_both_sides(
                 args=args,
                 prefix=prefix,
                 local_dir=local_dir,
@@ -2678,7 +2764,8 @@ def execute_driver_scenario(args: argparse.Namespace, scenario: dict[str, Any], 
     return scenario_result
 
 
-def run_driver_suite(args: argparse.Namespace, manifest: dict[str, Any]) -> dict[str, Any]:
+@_retire_legacy_forensic_source
+def _forensic_run_driver_suite(args: argparse.Namespace, manifest: dict[str, Any]) -> dict[str, Any]:
     suite_dir = args.artifact_dir / "driver-suite"
     suite_dir.mkdir(parents=True, exist_ok=True)
     remote_root = f"{args.iran_workdir}/tmp/full_matrix_logs/{args.run_id}"
@@ -2692,7 +2779,7 @@ def run_driver_suite(args: argparse.Namespace, manifest: dict[str, Any]) -> dict
     selected = selected[: max(1, int(args.driver_scenario_limit or len(selected)))]
     results: list[dict[str, Any]] = []
     for scenario in selected:
-        result = execute_driver_scenario(args, scenario, suite_dir=suite_dir, remote_root=remote_root)
+        result = _forensic_execute_driver_scenario(args, scenario, suite_dir=suite_dir, remote_root=remote_root)
         results.append(result)
         append_jsonl(args.artifact_dir / "driver-scenario-results.jsonl", result)
         append_jsonl(
@@ -2737,8 +2824,9 @@ def run_driver_suite(args: argparse.Namespace, manifest: dict[str, Any]) -> dict
     return payload
 
 
-def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
-    plan, preflight_exit = run_preflight(args)
+@_retire_legacy_forensic_source
+def _forensic_run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    plan, preflight_exit = _forensic_run_preflight(args)
     summary = dict(plan["summary"])
     if preflight_exit != 0:
         summary["execution"] = {"status": "blocked", "reason": "preflight_failed"}
@@ -2757,9 +2845,9 @@ def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         write_text(args.artifact_dir / "summary.md", build_summary_md(summary))
         publish_agent_logs(args.artifact_dir, args, plan["manifest"], status=summary["status"])
         return {**plan, "summary": summary}, 2
-    driver_suite = run_driver_suite(args, plan["manifest"])
-    parity_after = capture_parity(args, label="after")
-    sync_health_after = capture_sync_health(args, label="after", require_fresh_parity=True)
+    driver_suite = _forensic_run_driver_suite(args, plan["manifest"])
+    parity_after = _forensic_capture_parity(args, label="after")
+    sync_health_after = _forensic_capture_sync_health(args, label="after", require_fresh_parity=True)
     post_execution_evidence: dict[str, Any] = {
         "parity_after": parity_after,
         "sync_health_after": sync_health_after,
@@ -2808,6 +2896,69 @@ def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     return {**plan, "summary": summary, "driver_suite": driver_suite}, 0 if driver_suite["status"] == "passed" else 1
 
 
+def _retire_legacy_public_api(*, operation: str) -> NoReturn:
+    assert_legacy_two_server_full_matrix_retired(
+        component="staging-two-server-full-matrix-runner",
+        operation=operation,
+    )
+
+
+def remote_shell_command(args: argparse.Namespace, inner: str) -> list[str]:
+    """Retired public boundary; it cannot return a staging SSH command."""
+
+    del args, inner
+    _retire_legacy_public_api(operation="two-server staging SSH command construction")
+
+
+def scp_from_iran(args: argparse.Namespace, remote_path: str, local_path: Path) -> list[str]:
+    """Retired public boundary; it cannot return a staging SCP command."""
+
+    del args, remote_path, local_path
+    _retire_legacy_public_api(operation="two-server staging SCP receive construction")
+
+
+def scp_to_iran(args: argparse.Namespace, local_path: Path, remote_path: str) -> list[str]:
+    """Retired public boundary; it cannot return a staging SCP command."""
+
+    del args, local_path, remote_path
+    _retire_legacy_public_api(operation="two-server staging SCP send construction")
+
+
+def build_manifest(args: argparse.Namespace) -> dict[str, Any]:
+    """Retired public boundary; it cannot emit a staging two-server manifest."""
+
+    del args
+    _retire_legacy_public_api(operation="two-server staging manifest construction")
+
+
+def build_plan(args: argparse.Namespace) -> dict[str, Any]:
+    """Retired public boundary; it cannot emit a staging two-server plan."""
+
+    del args
+    _retire_legacy_public_api(operation="two-server staging plan construction")
+
+
+def preflight_checks(args: argparse.Namespace, manifest: dict[str, Any]) -> list[CheckResult]:
+    """Retired public boundary; it cannot contact the former staging peers."""
+
+    del args, manifest
+    _retire_legacy_public_api(operation="two-server staging preflight")
+
+
+def run_preflight(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    """Retired public boundary; it cannot contact the former staging peers."""
+
+    del args
+    _retire_legacy_public_api(operation="two-server staging preflight execution")
+
+
+def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    """Retired public boundary; it cannot execute the former staging suite."""
+
+    del args
+    _retire_legacy_public_api(operation="two-server staging execution")
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=["plan", "preflight", "execute"], default="plan")
@@ -2846,19 +2997,61 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return args
 
 
-def main(argv: list[str] | None = None) -> int:
+def _historical_two_server_main(argv: list[str] | None = None) -> int:
+    """Unreachable retained CLI source, fenced before all argument handling."""
+
+    assert_legacy_two_server_full_matrix_retired(
+        component="staging-two-server-full-matrix-runner",
+        operation="historical two-server staging plan emission",
+    )
+    raw_argv = sys.argv[1:] if argv is None else argv
+    mode = "plan"
+    for index, value in enumerate(raw_argv):
+        if value.startswith("--mode="):
+            mode = value.split("=", 1)[1]
+            break
+        if value == "--mode" and index + 1 < len(raw_argv):
+            mode = raw_argv[index + 1]
+            break
+    if mode != "plan":
+        print(
+            json.dumps(
+                blocked_legacy_two_server_full_matrix_payload(
+                    component="staging-two-server-full-matrix-runner"
+                ),
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+        return 2
     args = parse_args(argv)
     if args.mode == "plan":
-        payload = build_plan(args)
+        payload = _forensic_build_plan(args)
         print(json.dumps(payload["summary"], ensure_ascii=False, sort_keys=True))
         return 0 if payload["summary"]["status"] == "plan_ready" else 1
     if args.mode == "preflight":
-        payload, exit_code = run_preflight(args)
+        payload, exit_code = _forensic_run_preflight(args)
         print(json.dumps(payload["summary"], ensure_ascii=False, sort_keys=True))
         return exit_code
-    payload, exit_code = run_execute(args)
+    payload, exit_code = _forensic_run_execute(args)
     print(json.dumps(payload["summary"], ensure_ascii=False, sort_keys=True))
     return exit_code
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Reject every legacy staging CLI mode before producing an artifact."""
+
+    del argv
+    print(
+        json.dumps(
+            blocked_legacy_two_server_full_matrix_payload(
+                component="staging-two-server-full-matrix-runner"
+            ),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+    return 2
 
 
 if __name__ == "__main__":

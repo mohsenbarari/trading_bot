@@ -77,6 +77,12 @@ def peer_server_url_for(target_server: str) -> Optional[str]:
     if target == current_server():
         return None
 
+    # A single-writer runtime must never use the legacy HTTP peer transport.
+    # This check precedes both role-specific and legacy URL fallbacks so every
+    # cross-site target fails closed while local-target behavior remains None.
+    if single_writer_runtime_enabled():
+        return None
+
     if target == SERVER_IRAN and settings.iran_server_url:
         return settings.iran_server_url.rstrip("/")
     if target == SERVER_FOREIGN and settings.germany_server_url:
@@ -90,5 +96,17 @@ def default_peer_server_url() -> Optional[str]:
     return peer_server_url_for(peer_server_name())
 
 
+def single_writer_runtime_enabled() -> bool:
+    """Return whether this lease-controlled runtime is the sole data writer."""
+    return settings.single_writer_runtime_enabled
+
+
+def is_local_data_authority(home_server: Optional[str]) -> bool:
+    """Whether this runtime may authoritatively handle ``home_server`` data."""
+    if single_writer_runtime_enabled():
+        return True
+    return normalize_server(home_server, current_server()) == current_server()
+
+
 def is_remote_home(home_server: Optional[str]) -> bool:
-    return normalize_server(home_server, current_server()) != current_server()
+    return not is_local_data_authority(home_server)

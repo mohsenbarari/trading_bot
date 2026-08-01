@@ -2,6 +2,7 @@ import unittest
 import json
 from pathlib import Path
 
+from core.legacy_direct_fi_ir_transport_fence import LegacyDirectFiIrTransportRetiredError
 from scripts.load_fixture_worker import (
     SEQUENCE_ALIGNMENT_TABLES,
     SEQUENCE_PREPARE_SAFETY_GAP,
@@ -74,35 +75,29 @@ class LoadFixtureToolsTests(unittest.TestCase):
         self.assertEqual(sync_worker_compose_body("pause"), "stop sync_worker")
         self.assertEqual(sync_worker_compose_body("resume"), "up -d --no-deps sync_worker")
 
-    def test_sync_worker_resume_removes_stale_container_before_up(self):
+    def test_iran_sync_worker_resume_is_retired_before_remote_command_construction(self):
         runner = Runner(
             settings={"IRAN_HOST": "iran.example", "IRAN_PROJECT_DIR": "/srv/trading-bot/current"},
             logs_dir=Path("/tmp"),
         )
-        command = " ".join(sync_worker_compose_args(runner, "iran", "resume"))
+        with self.assertRaises(LegacyDirectFiIrTransportRetiredError):
+            sync_worker_compose_args(runner, "iran", "resume")
 
-        self.assertIn("rm -sf sync_worker", command)
-        self.assertIn("up -d --no-deps sync_worker", command)
-
-    def test_prepare_worker_disables_direct_sync_push(self):
+    def test_iran_prepare_worker_is_retired_before_remote_command_construction(self):
         runner = Runner(
             settings={"IRAN_HOST": "iran.example", "IRAN_PROJECT_DIR": "/srv/trading-bot/current"},
             logs_dir=Path("/tmp"),
         )
-        args = runner.worker_args("iran", "prepare", "--prefix", "loadtest_case_")
-        command = " ".join(args)
+        with self.assertRaises(LegacyDirectFiIrTransportRetiredError):
+            runner.worker_args("iran", "prepare", "--prefix", "loadtest_case_")
 
-        self.assertIn("env TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH=1", command)
-        self.assertIn("load_fixture_worker.py prepare", command)
-
-    def test_cleanup_worker_keeps_direct_sync_push_default(self):
+    def test_iran_cleanup_worker_is_retired_before_remote_command_construction(self):
         runner = Runner(
             settings={"IRAN_HOST": "iran.example", "IRAN_PROJECT_DIR": "/srv/trading-bot/current"},
             logs_dir=Path("/tmp"),
         )
-        args = runner.worker_args("iran", "cleanup", "--prefix", "loadtest_case_")
-
-        self.assertNotIn("TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH=1", " ".join(args))
+        with self.assertRaises(LegacyDirectFiIrTransportRetiredError):
+            runner.worker_args("iran", "cleanup", "--prefix", "loadtest_case_")
 
     def test_sync_queue_cleanup_matches_by_prefix_or_table_record_id(self):
         cleanup_ids = normalize_record_ids({"chat_members": [11545], "users": [10051]})

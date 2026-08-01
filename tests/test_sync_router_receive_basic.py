@@ -78,6 +78,7 @@ class TerminalOfferRealtimeDB(FakeDB):
         return FakeTerminalOfferRows(self._offers)
 
 
+@unittest.skip("legacy direct FI<->IR HTTP receiver is permanently retired")
 class SyncRouterReceiveBasicTests(unittest.IsolatedAsyncioTestCase):
     async def test_fake_db_helper_paths(self):
         db = FakeDB()

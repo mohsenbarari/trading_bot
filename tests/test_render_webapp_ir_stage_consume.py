@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import importlib.util
 import io
 import json
@@ -13,6 +14,7 @@ import sys
 import tempfile
 import unittest
 from unittest import mock
+import urllib.parse
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,15 +41,18 @@ def write_private(path: Path, payload: bytes) -> None:
 
 class NormalStageConsumeRendererTests(unittest.TestCase):
     def _consumer_config(self, root: Path) -> Path:
+        campaign_id = "wa-ir-standby-97265988-4b12-444e-abda-165573b2769f"
         path = root / "consumer.json"
         payload = {
             "schema": renderer.stage.CONFIG_SCHEMA,
+            "campaign_id": campaign_id,
             "endpoint": "https://s3.ir-thr-at1.arvanstorage.ir",
             "region": "ir-thr-at1",
             "bucket": "private-stage-bucket",
             "prefix": "campaigns/wa-ir-stage",
             "age_binary": "/usr/bin/age",
-            "age_identity_file": renderer.WA_IR_BOOTSTRAP_IDENTITY_FILE,
+            "age_identity_file": renderer.wa_ir_bootstrap_identity_file(campaign_id),
+            "age_recipient": "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
             "workspace": "/srv/trading-bot-three-site-staging-data/wa-ir-standby/workspace",
             "source_site": "webapp_fi",
             "source_signing_public_key_base64": base64.b64encode(b"p" * 32).decode("ascii"),
@@ -56,6 +61,15 @@ class NormalStageConsumeRendererTests(unittest.TestCase):
             "maximum_artifact_bytes": 20 * 1024 * 1024 * 1024,
         }
         write_private(path, json.dumps(payload, sort_keys=True).encode("utf-8"))
+        return path
+
+    def _known_hosts(self, root: Path) -> Path:
+        path = root / "wa-ir.known_hosts"
+        path.write_text(
+            "95.38.164.29 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEZpeHR1cmVLbm93bkhvc3RLZXkxMjM0NTY=\n",
+            encoding="ascii",
+        )
+        path.chmod(0o644)
         return path
 
     def _receipt(self) -> tuple[dict[str, object], str]:
@@ -75,9 +89,20 @@ class NormalStageConsumeRendererTests(unittest.TestCase):
         url = (
             "https://s3.ir-thr-at1.arvanstorage.ir/private-stage-bucket/"
             + manifest_key
-            + "?versionId="
-            + version_id
-            + "&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=example&X-Amz-Signature=signature"
+            + "?"
+            + urllib.parse.urlencode(
+                [
+                    ("versionId", version_id),
+                    ("X-Amz-Algorithm", "AWS4-HMAC-SHA256"),
+                    ("X-Amz-Credential", "FAKEACCESSKEY/20260730/ir-thr-at1/s3/aws4_request"),
+                    ("X-Amz-Date", "20260730T120000Z"),
+                    ("X-Amz-Expires", "300"),
+                    ("X-Amz-SignedHeaders", "host"),
+                    ("X-Amz-Signature", "a" * 64),
+                ],
+                quote_via=urllib.parse.quote,
+                safe="-_.~",
+            )
         )
         artifacts = []
         for name in renderer.EXPECTED_ARTIFACT_NAMES:
@@ -116,10 +141,12 @@ class NormalStageConsumeRendererTests(unittest.TestCase):
 
     def _render(self, root: Path, receipt: dict[str, object] | None = None) -> tuple[str, str]:
         config = self._consumer_config(root)
+        known_hosts = self._known_hosts(root)
         payload, url = self._receipt() if receipt is None else (receipt, str(receipt["manifest"]["presigned_url"]))  # type: ignore[index]
         command = renderer.render_consume_command(
             publish_receipt_bytes=json.dumps(payload, sort_keys=True).encode("utf-8"),
             consumer_config=config,
+            wa_ir_known_hosts=known_hosts,
             bootstrap_candidate=BOOTSTRAP_CANDIDATE,
             staging_root=renderer.WA_IR_STAGING_ROOT,
             expected_release_sha=RELEASE_SHA,
@@ -131,7 +158,11 @@ class NormalStageConsumeRendererTests(unittest.TestCase):
             command, url = self._render(Path(temporary))
             outer = shlex.split(command)
             self.assertEqual(
-                ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", renderer.REMOTE_HOST],
+                [
+                    "ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
+                    "-o", "UserKnownHostsFile=" + str(Path(temporary) / "wa-ir.known_hosts"),
+                    "-o", "GlobalKnownHostsFile=/dev/null", renderer.REMOTE_HOST,
+                ],
                 outer[:-1],
             )
             remote = shlex.split(outer[-1])
@@ -153,22 +184,37 @@ class NormalStageConsumeRendererTests(unittest.TestCase):
             receipt["manifest"]["presigned_url"] = url.replace("versionId=version-001", "versionId=other")  # type: ignore[index]
             with self.assertRaisesRegex(renderer.NormalStageRenderError, "not safely bound"):
                 self._render(Path(temporary), receipt)
+
+    def test_rejects_literal_null_version_ids_in_manifest_or_artifact_descriptors(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="wa-ir-normal-render-") as temporary:
+            receipt, _url = self._receipt()
+            receipt["manifest"] = dict(receipt["manifest"])  # type: ignore[arg-type,index]
+            receipt["manifest"]["version_id"] = "null"  # type: ignore[index]
+            with self.assertRaisesRegex(renderer.NormalStageRenderError, "version_id is invalid"):
+                self._render(Path(temporary), receipt)
+            receipt, _url = self._receipt()
+            receipt["artifacts"] = [dict(item) for item in receipt["artifacts"]]  # type: ignore[index]
+            receipt["artifacts"][0]["version_id"] = "null"  # type: ignore[index]
+            with self.assertRaisesRegex(renderer.NormalStageRenderError, "version_id is invalid"):
+                self._render(Path(temporary), receipt)
             receipt, url = self._receipt()
             receipt["manifest"] = dict(receipt["manifest"])  # type: ignore[arg-type,index]
             receipt["manifest"]["presigned_url"] = url + "&AWSAccessKeyId=legacy&Signature=legacy&Expires=1"  # type: ignore[index]
-            with self.assertRaisesRegex(renderer.NormalStageRenderError, "exactly one signed-request envelope"):
+            with self.assertRaisesRegex(renderer.NormalStageRenderError, "not safely bound"):
                 self._render(Path(temporary), receipt)
 
     def test_rejects_wrong_release_artifact_set_and_remote_paths(self) -> None:
         with tempfile.TemporaryDirectory(prefix="wa-ir-normal-render-") as temporary:
             root = Path(temporary)
             config = self._consumer_config(root)
+            known_hosts = self._known_hosts(root)
             receipt, _url = self._receipt()
             receipt["artifacts"] = receipt["artifacts"][:-1]  # type: ignore[index]
             with self.assertRaisesRegex(renderer.NormalStageRenderError, "artifact set"):
                 renderer.render_consume_command(
                     publish_receipt_bytes=json.dumps(receipt).encode("utf-8"),
                     consumer_config=config,
+                    wa_ir_known_hosts=known_hosts,
                     bootstrap_candidate=BOOTSTRAP_CANDIDATE,
                     staging_root=renderer.WA_IR_STAGING_ROOT,
                     expected_release_sha=RELEASE_SHA,
@@ -178,6 +224,7 @@ class NormalStageConsumeRendererTests(unittest.TestCase):
                 renderer.render_consume_command(
                     publish_receipt_bytes=json.dumps(receipt).encode("utf-8"),
                     consumer_config=config,
+                    wa_ir_known_hosts=known_hosts,
                     bootstrap_candidate="/tmp/untrusted-candidate",
                     staging_root=renderer.WA_IR_STAGING_ROOT,
                     expected_release_sha=RELEASE_SHA,
@@ -186,6 +233,7 @@ class NormalStageConsumeRendererTests(unittest.TestCase):
                 renderer.render_consume_command(
                     publish_receipt_bytes=json.dumps(receipt).encode("utf-8"),
                     consumer_config=config,
+                    wa_ir_known_hosts=known_hosts,
                     bootstrap_candidate=BOOTSTRAP_CANDIDATE,
                     staging_root="/srv/other",
                     expected_release_sha=RELEASE_SHA,
@@ -195,11 +243,34 @@ class NormalStageConsumeRendererTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="wa-ir-normal-render-") as temporary:
             root = Path(temporary)
             config = self._consumer_config(root)
+            known_hosts = self._known_hosts(root)
             duplicate = b'{"schema":"one","schema":"two"}'
             with self.assertRaisesRegex(renderer.NormalStageRenderError, "duplicate JSON keys"):
                 renderer.render_consume_command(
                     publish_receipt_bytes=duplicate,
                     consumer_config=config,
+                    wa_ir_known_hosts=known_hosts,
+                    bootstrap_candidate=BOOTSTRAP_CANDIDATE,
+                    staging_root=renderer.WA_IR_STAGING_ROOT,
+                    expected_release_sha=RELEASE_SHA,
+                )
+
+    def test_rejects_a_known_hosts_pin_without_the_exact_wa_ir_host(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="wa-ir-normal-render-") as temporary:
+            root = Path(temporary)
+            config = self._consumer_config(root)
+            known_hosts = self._known_hosts(root)
+            known_hosts.write_text(
+                "95.38.164.30 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEZpeHR1cmVLbm93bkhvc3RLZXkxMjM0NTY=\n",
+                encoding="ascii",
+            )
+            known_hosts.chmod(0o644)
+            receipt, _url = self._receipt()
+            with self.assertRaisesRegex(renderer.NormalStageRenderError, "known_hosts lacks the exact WA-IR host key"):
+                renderer.render_consume_command(
+                    publish_receipt_bytes=json.dumps(receipt).encode("utf-8"),
+                    consumer_config=config,
+                    wa_ir_known_hosts=known_hosts,
                     bootstrap_candidate=BOOTSTRAP_CANDIDATE,
                     staging_root=renderer.WA_IR_STAGING_ROOT,
                     expected_release_sha=RELEASE_SHA,
@@ -210,6 +281,7 @@ class NormalStageConsumeRendererTests(unittest.TestCase):
                 renderer.render_consume_command(
                     publish_receipt_bytes=json.dumps(receipt).encode("utf-8"),
                     consumer_config=config,
+                    wa_ir_known_hosts=known_hosts,
                     bootstrap_candidate=BOOTSTRAP_CANDIDATE,
                     staging_root=renderer.WA_IR_STAGING_ROOT,
                     expected_release_sha=RELEASE_SHA,
@@ -221,13 +293,61 @@ class NormalStageConsumeRendererTests(unittest.TestCase):
         with mock.patch.object(renderer.sys, "stdin", stream):
             self.assertEqual(payload, renderer._read_publish_receipt_stdin())
 
+    def test_direct_cli_blocks_before_reading_the_url_bearing_ssh_control(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="wa-ir-normal-render-") as temporary:
+            root = Path(temporary)
+            config = self._consumer_config(root)
+            known_hosts = self._known_hosts(root)
+            receipt, url = self._receipt()
+            stdin = io.TextIOWrapper(io.BytesIO(json.dumps(receipt).encode("utf-8")), encoding="utf-8")
+            stdout = io.StringIO()
+            with (
+                mock.patch.object(renderer.sys, "stdin", stdin),
+                mock.patch.object(
+                    renderer,
+                    "_read_publish_receipt_stdin",
+                    side_effect=AssertionError("direct CLI must not read the URL-bearing receipt"),
+                ),
+                mock.patch.object(
+                    renderer,
+                    "render_consume_command",
+                    side_effect=AssertionError("direct CLI must not render a disposable command"),
+                ),
+                mock.patch("sys.stdout", stdout),
+            ):
+                result = renderer.main(
+                    [
+                        "--publish-receipt-stdin",
+                        "--consumer-config", str(config),
+                        "--wa-ir-known-hosts", str(known_hosts),
+                        "--bootstrap-candidate", BOOTSTRAP_CANDIDATE,
+                        "--staging-root", renderer.WA_IR_STAGING_ROOT,
+                        "--expected-release-sha", RELEASE_SHA,
+                    ]
+            )
+            emitted = stdout.getvalue().strip()
+            self.assertEqual(result, 2)
+            self.assertEqual("blocked", json.loads(emitted)["status"])
+            self.assertIn("not rendered", emitted)
+            self.assertNotIn(url, emitted)
+            self.assertNotIn("ssh ", emitted)
+
+    def test_direct_cli_parse_rejection_does_not_reflect_a_url_to_stdout_or_stderr(self) -> None:
+        url = "https://s3.ir-thr-at1.arvanstorage.ir/private/object?X-Amz-Signature=" + "a" * 64
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            self.assertEqual(2, renderer.main(["--bootstrap-candidate", url]))
+        self.assertNotIn(url, stdout.getvalue())
+        self.assertNotIn(url, stderr.getvalue())
+
     def test_renderer_has_no_remote_execution_or_file_write_capability(self) -> None:
         source = SCRIPT.read_text(encoding="utf-8")
         for forbidden in ("subprocess", "os.system", "os.exec", "shell=True", "scp ", "rsync "):
             self.assertNotIn(forbidden, source)
         self.assertNotIn("write_text", source)
         self.assertNotIn("write_bytes", source)
-        self.assertNotIn("open(", source)
+        self.assertNotIn("with open(", source)
 
 
 if __name__ == "__main__":

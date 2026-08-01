@@ -149,7 +149,7 @@ campaign_binding = _load_exact_sibling(
 # existing callers, but it deliberately owns no second copy of routing,
 # recipient, receipt, descriptor, or presigned-URL validation semantics.
 TRANSPORT_SCHEMA = contract.TRANSPORT_SCHEMA
-CONFIG_SCHEMA = contract.CONFIG_SCHEMA
+CONFIG_SCHEMA = contract.CONTROLLER_CONFIG_SCHEMA
 OBJECT_ENCRYPTION = contract.OBJECT_ENCRYPTION
 OBJECT_LAYOUT_VERSION = contract.OBJECT_LAYOUT_VERSION
 STATIC_MODE = contract.STATIC_MODE
@@ -163,6 +163,28 @@ SOURCE_EVIDENCE_OBJECT_KIND = contract.SOURCE_EVIDENCE_OBJECT_KIND
 MAXIMUM_PLAINTEXT_BYTES = contract.MAXIMUM_PLAINTEXT_BYTES
 MAXIMUM_CIPHERTEXT_OVERHEAD_BYTES = contract.MAXIMUM_CIPHERTEXT_OVERHEAD_BYTES
 OBJECT_ID_RE = contract.OBJECT_ID_RE
+FIXED_AGE_BINARY = contract.FIXED_AGE_BINARY
+SOURCE_TRANSPORT_WORKSPACE_ROOT = contract.SOURCE_TRANSPORT_WORKSPACE_ROOT
+CONTROLLER_CONFIG_FIELDS = contract.CONTROLLER_CONFIG_FIELDS
+
+CAMPAIGNS_ROOT = Path("/etc/trading-bot-three-site/campaigns")
+CONTROLLER_DIRECTORY_NAME = "controller"
+SOURCE_TRANSPORT_CONFIG_FILENAME = "source-transport.json"
+TRUSTED_E53_S3_ENVIRONMENT_PATH = Path("/root/secure-envs/trading-bot/wa-ir-object-storage-transport.env")
+TRUSTED_E53_S3_ENV_FIELDS = frozenset(
+    {
+        "ARVAN_S3_ACCESS_KEY",
+        "ARVAN_S3_SECRET_KEY",
+        "ARVAN_S3_ENDPOINT",
+        "ARVAN_S3_REGION",
+        "WA_IR_OBJECT_STORAGE_BUCKET",
+        "WA_IR_OBJECT_STORAGE_PREFIX",
+        "WA_IR_AGE_RECIPIENT_FILE",
+        "WA_IR_REMOTE_AGE_IDENTITY",
+    }
+)
+MAX_TRUSTED_E53_S3_ENV_BYTES = 16 * 1024
+ENVIRONMENT_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
 
 
 SourceTransportError = contract.SourceTransportError
@@ -186,6 +208,20 @@ class ControllerS3Config:
     policy: SourceTransportPolicy
     credentials_file: Path
     presign_expires_seconds: int = 300
+    # This identity is derived only from the fixed controller config path.
+    # Generic in-memory callers can omit it, but any campaign-bound workflow
+    # must require it before it derives a candidate, object, or control.
+    campaign_id: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class TrustedE53S3Reference:
+    """The non-secret transport projection of the approved legacy S3 env."""
+
+    endpoint: str
+    bucket: str
+    prefix: str
+    credentials_file: Path
 
 
 @dataclasses.dataclass(frozen=True)
@@ -317,7 +353,45 @@ def _validate_controller_config(config: ControllerS3Config) -> ControllerS3Confi
     expires = _require_positive_int(config.presign_expires_seconds, field="presign_expires_seconds", maximum=900)
     if expires < 60:
         raise SourceTransportError("presign_expires_seconds must be at least 60")
-    return ControllerS3Config(policy=policy, credentials_file=credentials_file, presign_expires_seconds=expires)
+    campaign_id = (
+        None
+        if config.campaign_id is None
+        else _require_id(config.campaign_id, field="controller config campaign_id", pattern=contract.CAMPAIGN_RE)
+    )
+    return ControllerS3Config(
+        policy=policy,
+        credentials_file=credentials_file,
+        presign_expires_seconds=expires,
+        campaign_id=campaign_id,
+    )
+
+
+def _campaign_id_for_controller_config_path(config_path: Path) -> str:
+    """Require the one campaign-scoped controller config location.
+
+    The campaign ID is intentionally derived from the fixed filesystem layout
+    rather than repeated inside the config.  This keeps the config allowlist
+    small while binding the derived workspace to the same campaign directory.
+    """
+
+    root = _require_absolute_path(CAMPAIGNS_ROOT, field="controller campaigns root")
+    try:
+        relative = config_path.relative_to(root)
+    except ValueError as exc:
+        raise SourceTransportError(
+            "source transport publisher config must be installed at its fixed controller campaign path"
+        ) from exc
+    if (
+        len(relative.parts) != 3
+        or relative.parts[1] != CONTROLLER_DIRECTORY_NAME
+        or relative.parts[2] != SOURCE_TRANSPORT_CONFIG_FILENAME
+    ):
+        raise SourceTransportError("source transport publisher config must be installed at its fixed controller campaign path")
+    campaign_id = _require_id(relative.parts[0], field="campaign_id", pattern=contract.CAMPAIGN_RE)
+    expected = root / campaign_id / CONTROLLER_DIRECTORY_NAME / SOURCE_TRANSPORT_CONFIG_FILENAME
+    if config_path != expected:
+        raise SourceTransportError("source transport publisher config must be installed at its fixed controller campaign path")
+    return campaign_id
 
 
 def load_controller_config(path: Path) -> ControllerS3Config:
@@ -328,44 +402,343 @@ def load_controller_config(path: Path) -> ControllerS3Config:
         field="source transport publisher config",
         private=True,
     )
+    campaign_id = _campaign_id_for_controller_config_path(config_path)
     raw = _snapshot_error(lambda: snapshot.load_root_only_json(config_path, field="source transport publisher config"))
-    allowed = {
-        "schema",
-        "endpoint",
-        "region",
-        "bucket",
-        "prefix",
-        "credentials_file",
-        "age_binary",
-        "workspace",
-        "controller_age_recipient",
-        "webapp_fi_age_recipient",
-        "webapp_ir_age_recipient",
-        "maximum_plaintext_bytes",
-        "presign_expires_seconds",
-    }
-    if set(raw) - allowed:
-        raise SourceTransportError("source transport publisher config has unsupported fields")
+    if set(raw) != CONTROLLER_CONFIG_FIELDS:
+        raise SourceTransportError("source transport publisher config must contain exactly the supported fields")
     if raw.get("schema") != CONFIG_SCHEMA:
         raise SourceTransportError("source transport publisher config schema is unsupported")
-    return _validate_controller_config(
+    endpoint, region = contract.derive_region_from_endpoint(raw.get("endpoint"))
+    credentials_file = _require_trusted_e53_s3_environment_path(
+        Path(_require_string(raw.get("credentials_file"), field="credentials_file"))
+    )
+    trusted = load_trusted_e53_s3_environment(credentials_file)
+    loaded = _validate_controller_config(
         ControllerS3Config(
             policy=SourceTransportPolicy(
-            endpoint=raw.get("endpoint"),
-            region=raw.get("region"),
-            bucket=raw.get("bucket"),
-            prefix=raw.get("prefix"),
-            age_binary=raw.get("age_binary", "/usr/bin/age"),
-            workspace=Path(_require_string(raw.get("workspace"), field="workspace")),
-            controller_age_recipient=raw.get("controller_age_recipient"),
-            webapp_fi_age_recipient=raw.get("webapp_fi_age_recipient"),
-            webapp_ir_age_recipient=raw.get("webapp_ir_age_recipient"),
-            maximum_plaintext_bytes=raw.get("maximum_plaintext_bytes", MAXIMUM_PLAINTEXT_BYTES),
+                endpoint=endpoint,
+                region=region,
+                bucket=raw.get("bucket"),
+                prefix=raw.get("prefix"),
+                age_binary=FIXED_AGE_BINARY,
+                workspace=contract.source_transport_workspace_for_campaign(campaign_id),
+                controller_age_recipient=raw.get("controller_age_recipient"),
+                webapp_fi_age_recipient=raw.get("webapp_fi_age_recipient"),
+                webapp_ir_age_recipient=raw.get("webapp_ir_age_recipient"),
+                maximum_plaintext_bytes=MAXIMUM_PLAINTEXT_BYTES,
             ),
-            credentials_file=Path(_require_string(raw.get("credentials_file"), field="credentials_file")),
-            presign_expires_seconds=raw.get("presign_expires_seconds", 300),
+            credentials_file=credentials_file,
+            presign_expires_seconds=raw.get("presign_expires_seconds"),
+            campaign_id=campaign_id,
         )
     )
+    if (
+        loaded.policy.endpoint != trusted.endpoint
+        or loaded.policy.bucket != trusted.bucket
+        or loaded.policy.prefix != trusted.prefix
+        or loaded.credentials_file != trusted.credentials_file
+    ):
+        raise SourceTransportError("source transport publisher config does not match the trusted e53 S3 input")
+    return loaded
+
+
+def require_controller_config_for_campaign(
+    *,
+    controller_config: ControllerS3Config,
+    campaign_id: object,
+) -> ControllerS3Config:
+    """Bind a path-derived controller config to one canonical campaign.
+
+    ``load_controller_config`` derives its campaign identity from the fixed
+    controller path and its workspace from that identity.  Workflows that also
+    consume a campaign binding must call this before preparing local control
+    state so a second campaign's config cannot be combined with the binding.
+    """
+
+    config = _validate_controller_config(controller_config)
+    expected_campaign_id = _require_id(
+        campaign_id,
+        field="campaign binding campaign_id",
+        pattern=contract.CAMPAIGN_RE,
+    )
+    if config.campaign_id is None:
+        raise SourceTransportError("controller source transport config lacks a derived campaign identity")
+    if config.campaign_id != expected_campaign_id:
+        raise SourceTransportError("controller source transport config campaign does not match the campaign binding")
+    expected_workspace = contract.source_transport_workspace_for_campaign(expected_campaign_id)
+    if config.policy.workspace != expected_workspace:
+        raise SourceTransportError("controller source transport workspace is not the fixed campaign derivation")
+    return config
+
+
+def _read_root_only_bytes(path: Path, *, field: str, maximum_bytes: int) -> bytes:
+    """Read one stable root-only file without following a replacement symlink."""
+
+    safe_path = _require_root_controlled_regular_file(Path(path), field=field, private=True)
+    try:
+        before = safe_path.lstat()
+    except OSError as exc:  # pragma: no cover - the file was just admitted.
+        raise SourceTransportError(f"cannot inspect {field}") from exc
+    if not 1 <= before.st_size <= maximum_bytes:
+        raise SourceTransportError(f"{field} exceeds its configured size bound")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(str(safe_path), flags)
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_uid != 0
+            or stat.S_IMODE(opened.st_mode) & 0o077
+            or opened.st_dev != before.st_dev
+            or opened.st_ino != before.st_ino
+            or opened.st_size != before.st_size
+        ):
+            raise SourceTransportError(f"{field} changed while being opened")
+        parts: list[bytes] = []
+        total = 0
+        while True:
+            chunk = os.read(descriptor, min(4096, maximum_bytes + 1 - total))
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > maximum_bytes:
+                raise SourceTransportError(f"{field} exceeds its configured size bound")
+            parts.append(chunk)
+        after = os.fstat(descriptor)
+        if (
+            after.st_dev != opened.st_dev
+            or after.st_ino != opened.st_ino
+            or after.st_size != opened.st_size
+            or total != opened.st_size
+        ):
+            raise SourceTransportError(f"{field} changed while being read")
+        return b"".join(parts)
+    except SourceTransportError:
+        raise
+    except OSError as exc:
+        raise SourceTransportError(f"cannot read {field}") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _parse_trusted_e53_s3_environment(path: Path) -> dict[str, str]:
+    """Read the approved legacy e53 env only as a tightly bounded input.
+
+    The file contains two provider credentials plus legacy WA-IR age paths.
+    It is never shell-evaluated, never copied, and never returned from this
+    parser.  The caller exposes only the non-secret S3 projection below.
+    """
+
+    payload = _read_root_only_bytes(
+        Path(path),
+        field="trusted e53 S3 environment",
+        maximum_bytes=MAX_TRUSTED_E53_S3_ENV_BYTES,
+    )
+    try:
+        text = payload.decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise SourceTransportError("trusted e53 S3 environment must be ASCII") from exc
+    values: dict[str, str] = {}
+    for number, raw_line in enumerate(text.splitlines(), start=1):
+        if not raw_line or raw_line.startswith("#"):
+            continue
+        if raw_line != raw_line.strip() or "=" not in raw_line:
+            raise SourceTransportError(f"trusted e53 S3 environment line {number} is invalid")
+        key, value = raw_line.split("=", 1)
+        if (
+            not ENVIRONMENT_KEY_RE.fullmatch(key)
+            or not value
+            or value != value.strip()
+            or any(character in value for character in ("\x00", "\r", "\n"))
+        ):
+            raise SourceTransportError(f"trusted e53 S3 environment line {number} is invalid")
+        if key in values:
+            raise SourceTransportError("trusted e53 S3 environment contains duplicate keys")
+        values[key] = value
+    if set(values) != TRUSTED_E53_S3_ENV_FIELDS:
+        raise SourceTransportError("trusted e53 S3 environment must contain exactly the supported fields")
+    return values
+
+
+def _require_trusted_e53_s3_environment_path(path: Path) -> Path:
+    candidate = _require_absolute_path(Path(path), field="trusted e53 S3 environment")
+    expected = _require_absolute_path(TRUSTED_E53_S3_ENVIRONMENT_PATH, field="trusted e53 S3 environment")
+    if candidate != expected:
+        raise SourceTransportError("trusted e53 S3 environment path is not the approved credential input")
+    return candidate
+
+
+def load_trusted_e53_s3_environment(path: Path) -> TrustedE53S3Reference:
+    """Return only non-secret Object Storage pins from the approved e53 env."""
+
+    trusted_path = _require_trusted_e53_s3_environment_path(path)
+    values = _parse_trusted_e53_s3_environment(trusted_path)
+    endpoint, region = contract.derive_region_from_endpoint(values["ARVAN_S3_ENDPOINT"])
+    if values["ARVAN_S3_REGION"] != region:
+        raise SourceTransportError("trusted e53 S3 environment region does not match its endpoint")
+    _require_string(values["ARVAN_S3_ACCESS_KEY"], field="trusted e53 S3 access key")
+    _require_string(values["ARVAN_S3_SECRET_KEY"], field="trusted e53 S3 secret key")
+    # The WA-IR age fields are accepted only because they occur in the trusted
+    # legacy source.  They are deliberately not parsed, returned, or reused.
+    return TrustedE53S3Reference(
+        endpoint=endpoint,
+        bucket=_require_id(values["WA_IR_OBJECT_STORAGE_BUCKET"], field="bucket", pattern=contract.BUCKET_RE),
+        prefix=_validate_prefix(values["WA_IR_OBJECT_STORAGE_PREFIX"]),
+        credentials_file=trusted_path,
+    )
+
+
+def _load_trusted_e53_s3_credentials(path: Path) -> dict[str, str]:
+    """Return provider credentials solely to the in-memory boto session constructor."""
+
+    trusted_path = _require_trusted_e53_s3_environment_path(path)
+    values = _parse_trusted_e53_s3_environment(trusted_path)
+    return {
+        "access_key": _require_string(values["ARVAN_S3_ACCESS_KEY"], field="trusted e53 S3 access key"),
+        "secret_key": _require_string(values["ARVAN_S3_SECRET_KEY"], field="trusted e53 S3 secret key"),
+    }
+
+
+def _require_existing_private_directory(path: Path, *, field: str) -> Path:
+    path = _require_absolute_path(Path(path), field=field)
+    _require_root_controlled_ancestors(path.parent, field=field)
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise SourceTransportError(f"cannot inspect {field}") from exc
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != 0
+        or stat.S_IMODE(metadata.st_mode) & 0o077
+    ):
+        raise SourceTransportError(f"{field} must be a root-only directory")
+    return path
+
+
+def _create_or_require_private_child(parent: Path, *, name: str, field: str) -> Path:
+    parent = _require_existing_private_directory(parent, field=f"{field} parent")
+    if not name or Path(name).name != name or name in {".", ".."}:
+        raise SourceTransportError(f"{field} name is unsafe")
+    child = parent / name
+    try:
+        os.mkdir(child, 0o700)
+    except FileExistsError:
+        pass
+    except OSError as exc:
+        raise SourceTransportError(f"cannot create {field}") from exc
+    return _require_existing_private_directory(child, field=field)
+
+
+def _write_create_only_private_json(path: Path, value: Mapping[str, Any], *, field: str) -> None:
+    """Durably create one canonical root-only JSON file without replacement."""
+
+    parent = _require_existing_private_directory(path.parent, field=f"{field} parent")
+    if path.parent != parent or path.name != SOURCE_TRANSPORT_CONFIG_FILENAME:
+        raise SourceTransportError(f"{field} path is unsafe")
+    payload = canonical_json_bytes(value) + b"\n"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(str(path), flags, 0o600)
+        os.fchmod(descriptor, 0o600)
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:  # pragma: no cover - regular-file writes do not normally return zero.
+                raise OSError("short source transport config write")
+            view = view[written:]
+        os.fsync(descriptor)
+    except FileExistsError as exc:
+        raise SourceTransportError("refusing to overwrite a source transport publisher config") from exc
+    except OSError as exc:
+        raise SourceTransportError(f"cannot safely create {field}") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+    _require_root_controlled_regular_file(path, field=field, private=True)
+
+
+def initialize_controller_config_from_trusted_e53_environment(
+    *,
+    campaign_id: str,
+    trusted_e53_s3_environment: Path,
+    controller_age_recipient: str,
+    webapp_fi_age_recipient: str,
+    webapp_ir_age_recipient: str,
+    presign_expires_seconds: int = 300,
+) -> Path:
+    """Create the one v2 controller config from a trusted e53 S3 reference file.
+
+    This creates only a new controller campaign directory when necessary and
+    a create-only ``source-transport.json``.  Raw provider credentials are
+    read only from the approved legacy env to validate trusted input and are
+    never persisted or returned.  It has no Object Storage, SSH, Docker, or
+    service capability.
+    """
+
+    _require_root_execution()
+    campaign = _require_id(campaign_id, field="campaign_id", pattern=contract.CAMPAIGN_RE)
+    trusted = load_trusted_e53_s3_environment(Path(trusted_e53_s3_environment))
+    endpoint, region = contract.derive_region_from_endpoint(trusted.endpoint)
+    expected = _validate_controller_config(
+        ControllerS3Config(
+            policy=SourceTransportPolicy(
+                endpoint=endpoint,
+                region=region,
+                bucket=trusted.bucket,
+                prefix=trusted.prefix,
+                age_binary=FIXED_AGE_BINARY,
+                workspace=contract.source_transport_workspace_for_campaign(campaign),
+                controller_age_recipient=controller_age_recipient,
+                webapp_fi_age_recipient=webapp_fi_age_recipient,
+                webapp_ir_age_recipient=webapp_ir_age_recipient,
+                maximum_plaintext_bytes=MAXIMUM_PLAINTEXT_BYTES,
+            ),
+            credentials_file=trusted.credentials_file,
+            presign_expires_seconds=presign_expires_seconds,
+            campaign_id=campaign,
+        )
+    )
+    config_value: dict[str, Any] = {
+        "schema": CONFIG_SCHEMA,
+        "endpoint": expected.policy.endpoint,
+        "bucket": expected.policy.bucket,
+        "prefix": expected.policy.prefix,
+        "credentials_file": str(expected.credentials_file),
+        "controller_age_recipient": expected.policy.controller_age_recipient,
+        "webapp_fi_age_recipient": expected.policy.webapp_fi_age_recipient,
+        "webapp_ir_age_recipient": expected.policy.webapp_ir_age_recipient,
+        "presign_expires_seconds": expected.presign_expires_seconds,
+    }
+    if set(config_value) != CONTROLLER_CONFIG_FIELDS:  # pragma: no cover - source invariant.
+        raise SourceTransportError("source transport publisher config projection is incomplete")
+
+    campaigns_root = _require_existing_private_directory(CAMPAIGNS_ROOT, field="controller campaigns root")
+    campaign_directory = _create_or_require_private_child(
+        campaigns_root,
+        name=campaign,
+        field="controller campaign directory",
+    )
+    controller_directory = _create_or_require_private_child(
+        campaign_directory,
+        name=CONTROLLER_DIRECTORY_NAME,
+        field="controller source transport directory",
+    )
+    config_path = controller_directory / SOURCE_TRANSPORT_CONFIG_FILENAME
+    _write_create_only_private_json(
+        config_path,
+        config_value,
+        field="source transport publisher config",
+    )
+    loaded = load_controller_config(config_path)
+    if loaded != expected:
+        raise SourceTransportError("created source transport publisher config failed its fixed-path read-back")
+    return config_path
 
 
 def create_s3_client(config: ControllerS3Config) -> Any:
@@ -379,7 +752,17 @@ def create_s3_client(config: ControllerS3Config) -> Any:
         field="controller source transport credentials",
         private=True,
     )
-    credentials = _snapshot_error(lambda: snapshot.load_credentials(credentials_file))
+    if credentials_file == TRUSTED_E53_S3_ENVIRONMENT_PATH:
+        trusted = load_trusted_e53_s3_environment(credentials_file)
+        if (
+            config.policy.endpoint != trusted.endpoint
+            or config.policy.bucket != trusted.bucket
+            or config.policy.prefix != trusted.prefix
+        ):
+            raise SourceTransportError("controller source transport policy does not match the trusted e53 S3 input")
+        credentials = _load_trusted_e53_s3_credentials(credentials_file)
+    else:
+        credentials = _snapshot_error(lambda: snapshot.load_credentials(credentials_file))
     try:
         from botocore.config import Config as BotocoreConfig
 
@@ -427,11 +810,40 @@ def request_from_campaign_binding(
     mutable campaign/release/control values directly from an operator.
     """
 
-    policy = _validate_policy(config)
     try:
         binding = campaign_binding.load_campaign_binding(Path(campaign_binding_path))
     except CampaignBindingError as exc:
         raise SourceTransportError("campaign binding is invalid") from exc
+    return _request_from_loaded_campaign_binding(
+        config=config,
+        campaign=binding,
+        source_site=source_site,
+        destination_site=destination_site,
+        object_kind=object_kind,
+        object_id=object_id,
+    )
+
+
+def _request_from_loaded_campaign_binding(
+    *,
+    config: SourceTransportPolicy,
+    campaign: CampaignBinding,
+    source_site: str,
+    destination_site: str,
+    object_kind: str,
+    object_id: str,
+) -> SourceObjectRequest:
+    """Derive one request from one already-verified canonical binding.
+
+    The CLI loads the binding once, binds its controller config to that exact
+    campaign, and then calls this helper.  Keeping that one loaded binding
+    avoids a second path read between the configuration check and request
+    derivation.
+    """
+
+    policy = _validate_policy(config)
+    if not isinstance(campaign, CampaignBinding):
+        raise SourceTransportError("campaign binding has an unsupported type")
     if not all(isinstance(item, str) for item in (source_site, destination_site, object_kind, object_id)):
         raise SourceTransportError("source transport route identifiers must be strings")
     if source_site not in {"controller", "bot_fi"}:
@@ -454,10 +866,10 @@ def request_from_campaign_binding(
         except KeyError as exc:  # pragma: no cover - the allowlist is the authority.
             raise SourceTransportError("single-recipient destination_site is unsupported") from exc
     request = SourceObjectRequest(
-        campaign_id=binding.campaign_id,
-        release_sha=binding.application_release_sha,
-        control_commit=binding.control_commit,
-        control_tree=binding.control_tree,
+        campaign_id=campaign.campaign_id,
+        release_sha=campaign.application_release_sha,
+        control_commit=campaign.control_commit,
+        control_tree=campaign.control_tree,
         source_site=source_site,
         destination_site=destination_site,
         object_kind=object_kind,
@@ -1187,6 +1599,16 @@ publish = publish_controller_source_object
 def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
+    init_parser = subparsers.add_parser(
+        "init",
+        help="create one v2 controller config from the fixed trusted e53 S3 environment",
+    )
+    init_parser.add_argument("--campaign-id", required=True)
+    init_parser.add_argument("--trusted-e53-s3-environment", required=True, type=Path)
+    init_parser.add_argument("--controller-age-recipient", required=True)
+    init_parser.add_argument("--webapp-fi-age-recipient", required=True)
+    init_parser.add_argument("--webapp-ir-age-recipient", required=True)
+    init_parser.add_argument("--presign-expires-seconds", type=int, default=300)
     publish_parser = subparsers.add_parser("publish", help="publish one immutable URL-free source-phase receipt")
     publish_parser.add_argument("--config", required=True, type=Path)
     publish_parser.add_argument("--campaign-binding", required=True, type=Path)
@@ -1202,12 +1624,31 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     try:
         args = parse_arguments(argv)
+        if args.command == "init":
+            initialize_controller_config_from_trusted_e53_environment(
+                campaign_id=args.campaign_id,
+                trusted_e53_s3_environment=args.trusted_e53_s3_environment,
+                controller_age_recipient=args.controller_age_recipient,
+                webapp_fi_age_recipient=args.webapp_fi_age_recipient,
+                webapp_ir_age_recipient=args.webapp_ir_age_recipient,
+                presign_expires_seconds=args.presign_expires_seconds,
+            )
+            print(canonical_json_bytes({"status": "created", "schema": CONFIG_SCHEMA}).decode("ascii"))
+            return 0
         if args.command != "publish":  # pragma: no cover - argparse dispatch invariant.
             raise SourceTransportError("unsupported command")
         controller_config = load_controller_config(args.config)
-        request = request_from_campaign_binding(
+        try:
+            campaign = campaign_binding.load_campaign_binding(Path(args.campaign_binding))
+        except CampaignBindingError as exc:
+            raise SourceTransportError("campaign binding is invalid") from exc
+        controller_config = require_controller_config_for_campaign(
+            controller_config=controller_config,
+            campaign_id=campaign.campaign_id,
+        )
+        request = _request_from_loaded_campaign_binding(
             config=controller_config.policy,
-            campaign_binding_path=args.campaign_binding,
+            campaign=campaign,
             source_site=args.source_site,
             destination_site=args.destination_site,
             object_kind=args.object_kind,

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from scripts import sample_sync_health
+from core.legacy_direct_fi_ir_transport_fence import LegacyDirectFiIrTransportRetiredError
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,11 +44,11 @@ class SyncHealthMonitorTests(unittest.TestCase):
             )
             return (systemd_dir / "test-sync-sampler.service").read_text(encoding="utf-8")
 
-    def test_installer_keeps_cross_server_probe_for_foreign_host(self):
-        unit = self._render_monitor_unit(skip_iran="0")
+    def test_installer_rejects_retired_cross_server_probe_for_foreign_host(self):
+        with self.assertRaises(subprocess.CalledProcessError) as raised:
+            self._render_monitor_unit(skip_iran="0")
 
-        self.assertIn("scripts/sample_sync_health.py", unit)
-        self.assertNotIn("--skip-iran", unit)
+        self.assertIn("retired direct FI-to-IR SSH sampling", raised.exception.stderr)
 
     def test_installer_limits_iran_host_to_its_local_probe(self):
         unit = self._render_monitor_unit(skip_iran="1")
@@ -76,19 +77,15 @@ class SyncHealthMonitorTests(unittest.TestCase):
                 self.assertEqual(os.environ["OBSERVABILITY_API_KEY"], "existing-key")
                 self.assertEqual(os.environ["IRAN_DIR"], "/srv/app")
 
-    def test_build_iran_ssh_command_targets_remote_localhost_probe(self):
+    def test_build_iran_ssh_command_is_retired_before_command_construction(self):
         args = SimpleNamespace(
             iran_host="root@example",
             iran_dir="/srv/trading-bot",
             ssh_option=["StrictHostKeyChecking=accept-new", "ConnectTimeout=5"],
         )
 
-        command = sample_sync_health.build_iran_ssh_command(args)
-
-        self.assertEqual(command[:5], ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=5"])
-        self.assertEqual(command[5], "root@example")
-        self.assertIn("cd /srv/trading-bot", command[6])
-        self.assertIn("python3 scripts/sample_sync_health.py --skip-iran", command[6])
+        with self.assertRaises(LegacyDirectFiIrTransportRetiredError):
+            sample_sync_health.build_iran_ssh_command(args)
 
     def test_main_skip_iran_prints_local_sample(self):
         with patch.dict(os.environ, {}, clear=True), patch(

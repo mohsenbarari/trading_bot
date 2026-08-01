@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import importlib.util
 import io
 import json
@@ -311,8 +312,12 @@ class CampaignBindingTests(unittest.TestCase):
 
     def test_publish_main_loads_binding_before_creating_the_object_storage_client(self) -> None:
         controller_config = transport.ControllerS3Config(
-            policy=self.policy,
+            policy=dataclasses.replace(
+                self.policy,
+                workspace=transport.contract.source_transport_workspace_for_campaign(self.campaign_id),
+            ),
             credentials_file=self.root / "controller-s3-credentials.json",
+            campaign_id=self.campaign_id,
         )
         argv = [
             "publish",
@@ -361,8 +366,12 @@ class CampaignBindingTests(unittest.TestCase):
 
     def test_publish_main_rejects_fi_originated_route_before_creating_client(self) -> None:
         controller_config = transport.ControllerS3Config(
-            policy=self.policy,
+            policy=dataclasses.replace(
+                self.policy,
+                workspace=transport.contract.source_transport_workspace_for_campaign(self.campaign_id),
+            ),
             credentials_file=self.root / "controller-s3-credentials.json",
+            campaign_id=self.campaign_id,
         )
         argv = [
             "publish",
@@ -390,6 +399,45 @@ class CampaignBindingTests(unittest.TestCase):
         ):
             self.assertEqual(2, transport.main(argv))
         blocked_client.assert_not_called()
+
+    def test_publish_main_rejects_a_valid_other_campaign_config_before_client_creation(self) -> None:
+        other_campaign = "campaign-binding-other-20260730"
+        controller_config = transport.ControllerS3Config(
+            policy=dataclasses.replace(
+                self.policy,
+                workspace=transport.contract.source_transport_workspace_for_campaign(other_campaign),
+            ),
+            credentials_file=self.root / "controller-s3-credentials.json",
+            campaign_id=other_campaign,
+        )
+        argv = [
+            "publish",
+            "--config",
+            str(self.root / "controller-transport.json"),
+            "--campaign-binding",
+            str(self.binding_path),
+            "--source-site",
+            "bot_fi",
+            "--destination-site",
+            "webapp_fi",
+            "--object-kind",
+            transport.BOOTSTRAP_OBJECT_KIND,
+            "--object-id",
+            "bootstrap-source-fixture",
+            "--plaintext",
+            str(self.root / "plain.bin"),
+            "--receipt",
+            str(self.root / "receipt.json"),
+        ]
+        with (
+            mock.patch.object(transport, "load_controller_config", return_value=controller_config),
+            mock.patch.object(transport, "create_s3_client") as blocked_client,
+            mock.patch.object(transport, "publish_controller_source_object") as blocked_publish,
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(2, transport.main(argv))
+        blocked_client.assert_not_called()
+        blocked_publish.assert_not_called()
 
 
 if __name__ == "__main__":  # pragma: no cover

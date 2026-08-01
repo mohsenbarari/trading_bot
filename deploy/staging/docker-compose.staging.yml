@@ -23,6 +23,10 @@ services:
       ENVIRONMENT: staging
       SERVER_MODE: iran
       RELEASE_SHA: ${STAGING_RELEASE_SHA:-staging}
+      # This staging Compose may be launched directly, bypassing its helper.
+      # Pin the runtime policy so no legacy FI<->IR HTTP transport can revive.
+      SINGLE_WRITER_RUNTIME_ENABLED: "true"
+      TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"
       API_WORKERS: ${STAGING_API_WORKERS:-2}
       DB_POOL_SIZE: ${STAGING_DB_POOL_SIZE:-5}
       DB_MAX_OVERFLOW: ${STAGING_DB_MAX_OVERFLOW:-5}
@@ -68,8 +72,11 @@ services:
       ENVIRONMENT: staging
       SERVER_MODE: foreign
       RELEASE_SHA: ${STAGING_RELEASE_SHA:-staging}
-      FRONTEND_URL: ${STAGING_FOREIGN_FRONTEND_URL:-https://staging.gold-trade.ir}
-      IRAN_SERVER_URL: ${STAGING_FOREIGN_IRAN_SERVER_URL:-https://staging.gold-trade.ir}
+      SINGLE_WRITER_RUNTIME_ENABLED: "true"
+      TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"
+      FRONTEND_URL: ${STAGING_FOREIGN_FRONTEND_URL:-http://app:8000}
+      # Retired two-server staging must only reference the local Compose app.
+      IRAN_SERVER_URL: ${STAGING_FOREIGN_IRAN_SERVER_URL:-http://app:8000}
       FOREIGN_SERVER_URL: ${STAGING_FOREIGN_FOREIGN_SERVER_URL:-http://foreign_app:8000}
       GERMANY_SERVER_URL: ${STAGING_FOREIGN_FOREIGN_SERVER_URL:-http://foreign_app:8000}
       API_WORKERS: ${STAGING_FOREIGN_API_WORKERS:-1}
@@ -80,8 +87,6 @@ services:
       IRAN_OTP_DELIVERY_STATE_SECRET: ""
     env_file:
       - ../../.env.staging
-    extra_hosts:
-      - "${STAGING_IRAN_PUBLIC_DOMAIN:-staging.gold-trade.ir}:${STAGING_IRAN_PUBLIC_IP:-65.109.220.59}"
     ports:
       - "127.0.0.1:${STAGING_FOREIGN_APP_PORT:-8121}:8000"
     volumes:
@@ -119,6 +124,8 @@ services:
       ENVIRONMENT: staging
       SERVER_MODE: iran
       RELEASE_SHA: ${STAGING_RELEASE_SHA:-staging}
+      SINGLE_WRITER_RUNTIME_ENABLED: "true"
+      TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"
       DB_POOL_SIZE: ${STAGING_DB_POOL_SIZE:-5}
       DB_MAX_OVERFLOW: ${STAGING_DB_MAX_OVERFLOW:-5}
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
@@ -152,8 +159,10 @@ services:
       ENVIRONMENT: staging
       SERVER_MODE: foreign
       RELEASE_SHA: ${STAGING_RELEASE_SHA:-staging}
-      FRONTEND_URL: ${STAGING_FOREIGN_FRONTEND_URL:-https://staging.gold-trade.ir}
-      IRAN_SERVER_URL: ${STAGING_FOREIGN_IRAN_SERVER_URL:-https://staging.gold-trade.ir}
+      SINGLE_WRITER_RUNTIME_ENABLED: "true"
+      TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"
+      FRONTEND_URL: ${STAGING_FOREIGN_FRONTEND_URL:-http://app:8000}
+      IRAN_SERVER_URL: ${STAGING_FOREIGN_IRAN_SERVER_URL:-http://app:8000}
       FOREIGN_SERVER_URL: ${STAGING_FOREIGN_FOREIGN_SERVER_URL:-http://foreign_app:8000}
       GERMANY_SERVER_URL: ${STAGING_FOREIGN_FOREIGN_SERVER_URL:-http://foreign_app:8000}
       DB_POOL_SIZE: ${STAGING_DB_POOL_SIZE:-5}
@@ -163,8 +172,6 @@ services:
       IRAN_OTP_DELIVERY_STATE_SECRET: ""
     env_file:
       - ../../.env.staging
-    extra_hosts:
-      - "${STAGING_IRAN_PUBLIC_DOMAIN:-staging.gold-trade.ir}:${STAGING_IRAN_PUBLIC_IP:-65.109.220.59}"
     volumes:
       - staging_audit:/app/audit_trail
     depends_on:
@@ -189,6 +196,8 @@ services:
       TZ: UTC
       ENVIRONMENT: staging
       SERVER_MODE: ${STAGING_MIGRATION_SERVER_MODE:-iran}
+      SINGLE_WRITER_RUNTIME_ENABLED: "true"
+      TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"
       DB_POOL_SIZE: ${STAGING_DB_POOL_SIZE:-5}
       DB_MAX_OVERFLOW: ${STAGING_DB_MAX_OVERFLOW:-5}
       DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-3600}
@@ -262,8 +271,10 @@ services:
       ENVIRONMENT: staging
       SERVER_MODE: foreign
       RELEASE_SHA: ${STAGING_RELEASE_SHA:-staging}
-      FRONTEND_URL: ${STAGING_FOREIGN_FRONTEND_URL:-https://staging.gold-trade.ir}
-      IRAN_SERVER_URL: ${STAGING_FOREIGN_IRAN_SERVER_URL:-https://staging.gold-trade.ir}
+      SINGLE_WRITER_RUNTIME_ENABLED: "true"
+      TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"
+      FRONTEND_URL: ${STAGING_FOREIGN_FRONTEND_URL:-http://app:8000}
+      IRAN_SERVER_URL: ${STAGING_FOREIGN_IRAN_SERVER_URL:-http://app:8000}
       FOREIGN_SERVER_URL: ${STAGING_FOREIGN_FOREIGN_SERVER_URL:-http://foreign_app:8000}
       GERMANY_SERVER_URL: ${STAGING_FOREIGN_FOREIGN_SERVER_URL:-http://foreign_app:8000}
       DB_POOL_SIZE: ${STAGING_DB_POOL_SIZE:-5}
@@ -273,8 +284,6 @@ services:
       IRAN_OTP_DELIVERY_STATE_SECRET: ""
     env_file:
       - ../../.env.staging
-    extra_hosts:
-      - "${STAGING_IRAN_PUBLIC_DOMAIN:-staging.gold-trade.ir}:${STAGING_IRAN_PUBLIC_IP:-65.109.220.59}"
     depends_on:
       foreign_app:
         condition: service_healthy
@@ -299,8 +308,10 @@ services:
       ENVIRONMENT: staging
       SERVER_MODE: foreign
       RELEASE_SHA: ${STAGING_RELEASE_SHA:-staging}
-      FRONTEND_URL: ${STAGING_FOREIGN_FRONTEND_URL:-https://staging.gold-trade.ir}
-      IRAN_SERVER_URL: ${STAGING_FOREIGN_IRAN_SERVER_URL:-https://staging.gold-trade.ir}
+      SINGLE_WRITER_RUNTIME_ENABLED: "true"
+      TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"
+      FRONTEND_URL: ${STAGING_FOREIGN_FRONTEND_URL:-http://app:8000}
+      IRAN_SERVER_URL: ${STAGING_FOREIGN_IRAN_SERVER_URL:-http://app:8000}
       FOREIGN_SERVER_URL: ${STAGING_FOREIGN_FOREIGN_SERVER_URL:-http://foreign_app:8000}
       GERMANY_SERVER_URL: ${STAGING_FOREIGN_FOREIGN_SERVER_URL:-http://foreign_app:8000}
       BOT_TOKEN: ""
@@ -311,8 +322,6 @@ services:
       IRAN_OTP_DELIVERY_STATE_SECRET: ""
     env_file:
       - ../../.env.staging
-    extra_hosts:
-      - "${STAGING_IRAN_PUBLIC_DOMAIN:-staging.gold-trade.ir}:${STAGING_IRAN_PUBLIC_IP:-65.109.220.59}"
     depends_on:
       migration:
         condition: service_completed_successfully
@@ -335,6 +344,8 @@ services:
       ENVIRONMENT: staging
       SERVER_MODE: iran
       RELEASE_SHA: ${STAGING_RELEASE_SHA:-staging}
+      SINGLE_WRITER_RUNTIME_ENABLED: "true"
+      TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"
       BOT_TOKEN: ""
       DB_POOL_SIZE: ${STAGING_LOAD_DB_POOL_SIZE:-5}
       DB_MAX_OVERFLOW: ${STAGING_LOAD_DB_MAX_OVERFLOW:-5}
@@ -343,8 +354,6 @@ services:
       IRAN_OTP_DELIVERY_STATE_SECRET: ""
     env_file:
       - ../../.env.staging
-    extra_hosts:
-      - "${STAGING_FOREIGN_PUBLIC_DOMAIN:-staging.362514.ir}:${STAGING_FOREIGN_PUBLIC_IP:-65.109.216.187}"
     depends_on:
       app:
         condition: service_healthy

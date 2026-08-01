@@ -1,44 +1,29 @@
 {
-  "schema": "production-writer-lease-guard-preflight-v1",
-  "release_sha": "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5",
-  "release_root": "/srv/trading-bot-three-site/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5",
-  "agent_config": "/etc/trading-bot-three-site/webapp-fi-writer-lease-agent.json",
-  "preflight_config": "/etc/trading-bot-three-site/webapp-fi-writer-lease-guard-preflight.json",
-  "unit_file": "/etc/systemd/system/trading-bot-production-writer-fi-lease-guard.service",
-  "lease_file": "/var/lib/trading-bot-three-site/writer-lease.json",
-  "runtime_env_file": "/root/secure-envs/trading-bot/wa-fi-writer-runtime.env",
-  "witness_timing": {
-    "lease_duration_seconds": "REPLACE_WITH_WITNESS_DURATION_SECONDS",
-    "safety_margin_seconds": "REPLACE_WITH_WITNESS_SAFETY_MARGIN_SECONDS",
-    "renew_interval_seconds": "REPLACE_WITH_WITNESS_RENEW_INTERVAL_SECONDS"
-  },
-  "release_files": [
-    {
-      "path": "main.py",
-      "sha256": "4e32f3efda8e94751238b932555edc2f1bc232612c57eb7c05cfcc4df540fecd"
-    },
-    {
-      "path": "core/background_job_authority.py",
-      "sha256": "b7c2e04dd5b9c4301b6a3b67bbcc261992f1c6c80757105af039daf5d9369c04"
-    }
-  ],
+  "schema": "fenced-fi-writer-preflight-v1",
+  "control_release_root": "/srv/trading-bot-three-site/control-releases/REPLACE_WITH_EXACT_CONTROL_GIT_SHA",
+  "application_release_root": "/srv/trading-bot-three-site/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5",
+  "agent_config": "/etc/trading-bot-three-site/production-writer-lease-agent.webapp-fi-fenced-2c08.json",
+  "preflight_config": "/etc/trading-bot-three-site/webapp-fi-fenced-writer-preflight.json",
+  "unit_file": "/etc/systemd/system/trading-bot-production-writer-fi-fenced-lease-guard.service",
+  "lease_file": "/var/lib/trading-bot-three-site/writer-terms/writer-lease.json",
+  "runtime_env_file": "/root/secure-envs/trading-bot/wa-fi-fenced-writer-runtime.env",
+  "term_parent_directory": "/var/lib/trading-bot-three-site/writer-terms",
+  "app_local_port": 8000,
   "runtime": {
-    "compose_file": "/srv/trading-bot-three-site/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5/docker-compose.yml",
-    "compose_project": "REPLACE_WITH_SOURCE_COMPOSE_PROJECT",
+    "compose_file": "/srv/trading-bot-three-site/control-releases/REPLACE_WITH_EXACT_CONTROL_GIT_SHA/deploy/production/docker-compose.webapp-fi-writer-2c08.yml",
+    "compose_project": "trading_bot_wa_fi_writer_2c08",
     "services": [
       {
         "name": "app",
-        "container_name": "trading_bot_app",
-        "container_id": "REPLACE_WITH_64_HEX_APP_CONTAINER_ID",
+        "container_name": "trading_bot_wa_fi_writer_2c08_app",
         "image_ref": "REPLACE_WITH_REVIEWED_LOCAL_APP_IMAGE_TAG",
         "image_id": "sha256:REPLACE_WITH_64_HEX_APP_IMAGE_ID"
       },
       {
-        "name": "sync_worker",
-        "container_name": "trading_bot_sync_worker",
-        "container_id": "REPLACE_WITH_64_HEX_SYNC_WORKER_CONTAINER_ID",
-        "image_ref": "REPLACE_WITH_REVIEWED_LOCAL_SYNC_WORKER_IMAGE_TAG",
-        "image_id": "sha256:REPLACE_WITH_64_HEX_SYNC_WORKER_IMAGE_ID"
+        "name": "bot",
+        "container_name": "trading_bot_wa_fi_writer_2c08_bot",
+        "image_ref": "REPLACE_WITH_REVIEWED_LOCAL_BOT_IMAGE_TAG",
+        "image_id": "sha256:REPLACE_WITH_64_HEX_BOT_IMAGE_ID"
       }
     ]
   }

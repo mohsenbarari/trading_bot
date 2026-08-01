@@ -16,6 +16,7 @@ class CoreSecurityTests(unittest.TestCase):
         self.assertEqual(payload['sid'], 'session-1')
         self.assertEqual(payload['srv'], 'foreign')
         self.assertEqual(payload['type'], 'access')
+        self.assertIsInstance(payload['iat'], int)
         self.assertIn('exp', payload)
 
     def test_create_access_token_supports_data_and_custom_expiry(self):
@@ -37,6 +38,7 @@ class CoreSecurityTests(unittest.TestCase):
         self.assertEqual(payload['sub'], 'demo-user')
         self.assertEqual(payload['kind'], 'refresh-test')
         self.assertEqual(payload['type'], 'refresh')
+        self.assertIsInstance(payload['iat'], int)
 
     def test_password_hash_and_verify_support_truncation_and_invalid_inputs(self):
         long_password = 'x' * 100

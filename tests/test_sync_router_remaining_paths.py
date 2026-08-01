@@ -290,6 +290,7 @@ class SyncRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("hidden", rendered)
         self.assertNotIn("secret", rendered)
 
+    @unittest.skip("legacy direct FI<->IR HTTP receiver is permanently retired")
     async def test_receive_sync_data_covers_notification_failure_unknown_table_and_apply_exception(self):
         db = ReceiveDB()
         items = [
@@ -322,6 +323,7 @@ class SyncRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["errors"], 1)
         self.assertEqual(result["error_items"][0]["reason"], "apply_exception")
 
+    @unittest.skip("legacy direct FI<->IR HTTP receiver is permanently retired")
     async def test_receive_sync_data_covers_deferred_retry_error_and_exception(self):
         items = [{"table": "users", "operation": "INSERT", "id": 1, "data": {"telegram_id": 10}}]
 
@@ -345,6 +347,7 @@ class SyncRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["errors"], 1)
         self.assertEqual(result["error_items"][0]["reason"], "deferred_retry_exception")
 
+    @unittest.skip("legacy direct FI<->IR HTTP receiver is permanently retired")
     async def test_receive_sync_data_returns_generic_detail_on_commit_failure(self):
         items = [{"table": "users", "operation": "INSERT", "id": 1, "data": {"telegram_id": 10}}]
 
@@ -361,6 +364,7 @@ class SyncRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("sync.receive_batch_error", rendered)
         self.assertNotIn("publish commit failed", rendered)
 
+    @unittest.skip("legacy direct FI<->IR HTTP receiver is permanently retired")
     async def test_receive_sync_data_tolerates_cache_invalidation_failures(self):
         db = ReceiveDB()
         items = [{"table": "commodities", "operation": "INSERT", "id": 3, "data": {"name": "gold"}}]
@@ -374,6 +378,7 @@ class SyncRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, {"status": "success", "processed": 1})
 
+    @unittest.skip("legacy direct FI<->IR HTTP receiver is permanently retired")
     async def test_receive_sync_data_covers_offer_publish_import_and_runtime_failures(self):
         items = [{"table": "offers", "operation": "INSERT", "id": 7, "data": {"price": 11}}]
 
@@ -421,6 +426,7 @@ class SyncRouterRemainingPathTests(unittest.IsolatedAsyncioTestCase):
             result = await receive_sync_data(items=items, request=SimpleNamespace(), db=db, _=None)
         self.assertEqual(result, {"status": "success", "processed": 1})
 
+    @unittest.skip("legacy direct FI<->IR HTTP resync is permanently retired")
     async def test_resync_covers_table_filter_all_invalid_batches_and_non_200_response(self):
         request = SimpleNamespace(headers={"X-Dev-Api-Key": "dev-key"})
         db = ReceiveDB([FakeExecuteResult([])])

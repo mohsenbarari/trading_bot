@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Build the real two-server staging full-matrix manifest.
+"""Retired historical source for the real two-server staging manifest.
 
-This manifest is side-effect free. It reuses the broad production full-matrix
-catalog, converts it to a no-pressure staging profile, and adds explicit
-branch-change regression scenarios for `candidate/sync-parity-hardening`.
+The former staging topology has no place in the three-site architecture. Its
+construction remains private forensic source; supported API/CLI entry points
+must fail closed before emitting a legacy runner contract.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import sys
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -22,6 +22,32 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts import build_production_full_matrix_manifest as production_manifest
 from scripts.plan_production_full_matrix import default_prefix, validate_prefix
+from core.legacy_two_server_full_matrix_fence import (
+    assert_legacy_two_server_full_matrix_retired,
+    blocked_legacy_two_server_full_matrix_payload,
+)
+
+
+__all__ = (
+    "build_manifest",
+    "main",
+    "validate_manifest",
+)
+
+
+def _retire_legacy_forensic_source(function: Any) -> Any:
+    """Make retained two-server source text uncallable from any import path."""
+
+    operation = f"forensic source {function.__name__}"
+
+    def _rejected(*args: Any, **kwargs: Any) -> Any:
+        del args, kwargs
+        assert_legacy_two_server_full_matrix_retired(
+            component="staging-two-server-full-matrix-manifest-builder",
+            operation=operation,
+        )
+
+    return _rejected
 
 
 SCHEMA_VERSION = "staging_two_server_full_matrix_manifest_v1"
@@ -242,13 +268,14 @@ def summarize_sections(sections: dict[str, list[dict[str, Any]]]) -> dict[str, A
     return base
 
 
-def build_manifest(
+@_retire_legacy_forensic_source
+def _forensic_build_manifest(
     *,
     prefix: str | None = None,
     stress_max_parallel: int = DEFAULT_STRESS_MAX_PARALLEL,
     market_attempts: int = DEFAULT_MARKET_ATTEMPTS,
 ) -> dict[str, Any]:
-    production = production_manifest.build_manifest(prefix=controlled_prefix(prefix))
+    production = production_manifest._forensic_build_manifest(prefix=controlled_prefix(prefix))
     sections: dict[str, list[dict[str, Any]]] = {}
     for section, records in production["sections"].items():
         sections[section] = [
@@ -304,7 +331,7 @@ def validate_manifest(manifest: dict[str, Any]) -> list[str]:
     if manifest.get("mutates_production") is not False:
         errors.append("manifest must not mutate production")
 
-    production_like = production_manifest.build_manifest(prefix=manifest.get("prefix"))
+    production_like = production_manifest._forensic_build_manifest(prefix=manifest.get("prefix"))
     production_errors = production_manifest.validate_manifest(production_like)
     errors.extend(f"production catalog baseline: {error}" for error in production_errors)
 
@@ -329,6 +356,25 @@ def validate_manifest(manifest: dict[str, Any]) -> list[str]:
     return errors
 
 
+def _retire_legacy_public_manifest_api() -> NoReturn:
+    assert_legacy_two_server_full_matrix_retired(
+        component="staging-two-server-full-matrix-manifest-builder",
+        operation="two-server staging manifest construction",
+    )
+
+
+def build_manifest(
+    *,
+    prefix: str | None = None,
+    stress_max_parallel: int = DEFAULT_STRESS_MAX_PARALLEL,
+    market_attempts: int = DEFAULT_MARKET_ATTEMPTS,
+) -> dict[str, Any]:
+    """Retired public boundary; it cannot emit a two-server staging manifest."""
+
+    del prefix, stress_max_parallel, market_attempts
+    _retire_legacy_public_manifest_api()
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prefix", default=None)
@@ -340,9 +386,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
+def _historical_two_server_main(argv: list[str] | None = None) -> int:
+    """Unreachable retained CLI source, fenced before parsing its argv."""
+
+    assert_legacy_two_server_full_matrix_retired(
+        component="staging-two-server-full-matrix-manifest-builder",
+        operation="historical two-server staging manifest emission",
+    )
     args = parse_args(argv)
-    manifest = build_manifest(
+    manifest = _forensic_build_manifest(
         prefix=args.prefix,
         stress_max_parallel=args.stress_max_parallel,
         market_attempts=args.market_attempts,
@@ -367,6 +419,22 @@ def main(argv: list[str] | None = None) -> int:
             print(f"manifest check failed: {error}", file=sys.stderr)
         return 1
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Reject all legacy staging-manifest CLI modes before writing an artifact."""
+
+    del argv
+    print(
+        json.dumps(
+            blocked_legacy_two_server_full_matrix_payload(
+                component="staging-two-server-full-matrix-manifest-builder"
+            ),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+    return 2
 
 
 if __name__ == "__main__":

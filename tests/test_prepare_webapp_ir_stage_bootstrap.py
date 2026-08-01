@@ -19,14 +19,17 @@ SPEC.loader.exec_module(bootstrap)
 
 
 def consumer_config() -> dict[str, object]:
+    campaign_id = "wa-ir-standby-97265988-4b12-444e-abda-165573b2769f"
     return {
-        "schema": "gold-trade-wa-ir-artifact-stage-config-v3",
+        "schema": "gold-trade-wa-ir-artifact-stage-config-v4",
+        "campaign_id": campaign_id,
         "endpoint": "https://s3.ir-thr-at1.arvanstorage.ir",
         "region": "ir-thr-at1",
         "bucket": "three-site-private",
         "prefix": "campaign-current/artifacts",
         "age_binary": "/usr/bin/age",
-        "age_identity_file": bootstrap.WA_IR_BOOTSTRAP_IDENTITY_FILE,
+        "age_identity_file": bootstrap.wa_ir_bootstrap_identity_file(campaign_id),
+        "age_recipient": "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
         "workspace": "/srv/trading-bot-three-site-staging-data/workspace",
         "source_site": "webapp_fi",
         "source_signing_public_key_base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
@@ -318,20 +321,31 @@ class WebAppIrStageBootstrapTests(unittest.TestCase):
                     destination=parent / "candidate",
                 )
 
-    def test_prepare_rejects_consumer_config_with_an_unpinned_identity_path(self):
+    def test_prepare_rejects_legacy_or_cross_campaign_consumer_identity_path(self):
         with tempfile.TemporaryDirectory(prefix="wa-ir-bootstrap-identity-") as value:
             root = Path(value)
             source, commit = self._source(root)
             parent = root / "packages"
             parent.mkdir(mode=0o700)
             invalid = consumer_config()
-            invalid["age_identity_file"] = "/etc/trading-bot-three-site/wa-ir/untrusted.agekey"
-            with self.assertRaisesRegex(bootstrap.BootstrapPreparationError, "pin the WA-IR bootstrap age identity"):
+            invalid["age_identity_file"] = "/etc/trading-bot-three-site/wa-ir/artifact-stage-2c08.agekey"
+            with self.assertRaisesRegex(bootstrap.BootstrapPreparationError, "campaign WA-IR bootstrap age identity"):
                 bootstrap.prepare_bootstrap_package(
                     source_repository=source,
                     control_release_sha=commit,
                     consumer_config=self._config(root, invalid),
                     destination=parent / "candidate",
+                )
+            invalid = consumer_config()
+            invalid["age_identity_file"] = bootstrap.wa_ir_bootstrap_identity_file(
+                "wa-ir-standby-11111111-2222-3333-4444-555555555555"
+            )
+            with self.assertRaisesRegex(bootstrap.BootstrapPreparationError, "campaign WA-IR bootstrap age identity"):
+                bootstrap.prepare_bootstrap_package(
+                    source_repository=source,
+                    control_release_sha=commit,
+                    consumer_config=self._config(root, invalid),
+                    destination=parent / "candidate-cross-campaign",
                 )
 
     def test_prepare_rejects_consumer_config_with_an_invalid_controller_authorization_key(self):

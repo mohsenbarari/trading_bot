@@ -5,6 +5,8 @@
 این ماژول از pydantic-settings برای مدیریت تنظیمات استفاده می‌کند.
 تمام مقادیر از فایل .env خوانده می‌شوند.
 """
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
 
 __all__ = ["Settings", "settings"]
@@ -15,6 +17,62 @@ class Settings(BaseSettings):
     
     # Server Mode (iran vs foreign)
     server_mode: str = "foreign"
+    # When a lease-controlled runtime is the sole writer, both historical
+    # home-server labels are locally authoritative. It stays disabled until
+    # that runtime has been explicitly activated.
+    single_writer_runtime_enabled: bool = False
+    # Application-level Writer Witness term enforcement is intentionally
+    # default-off until a host-managed, root-owned lease is mounted.
+    application_writer_term_enforced: bool = False
+    application_writer_term_local_site: str | None = None
+    application_writer_term_lease_file: Path | None = None
+    application_writer_term_safety_margin_seconds: int = 5
+    application_writer_term_max_lease_duration_seconds: int = 90
+    # The canonical application-engine DML fence.  It remains default-off
+    # until one reviewed three-site writer runtime explicitly enables it
+    # together with the Writer Witness term configuration.  This flag is a
+    # local rejection gate, never an election, promotion, or lease authority.
+    application_writer_transaction_envelope_guard_enforced: bool = False
+    # A separate, short-lived root-owned receipt required before selected
+    # background workers may cause provider-visible effects after a Witness
+    # term transition.  It remains disabled until a reviewed operator-side
+    # reconciliation/no-resend decision is atomically installed.
+    external_effect_execution_gate_enforced: bool = False
+    external_effect_execution_gate_local_site: str | None = None
+    external_effect_execution_gate_authorization_file: Path | None = None
+    external_effect_execution_gate_safety_margin_seconds: int = 5
+    external_effect_execution_gate_max_authorization_duration_seconds: int = 60
+    # A short, source-side PostgreSQL advisory barrier used only by a future
+    # WebApp-FI exported-snapshot coordinator. It is independent from the
+    # Writer Witness term and remains disabled until a reviewed deployment
+    # explicitly opts in.
+    application_snapshot_write_barrier_enabled: bool = False
+    application_snapshot_write_barrier_local_site: str | None = None
+    # Object-delta source allocation remains disabled until the same
+    # lease-controlled writer runtime has a root-only release binding.
+    object_delta_source_outbox_enabled: bool = False
+    object_delta_source_binding_file: Path | None = None
+    # Pre-upload reservation is a narrower, separately reviewed source-side
+    # transition. It remains default-off even when allocation is enabled:
+    # enabling it only permits a root-bound coordinator to durably reserve an
+    # already-authorized deterministic attempt. It does not enable encryption,
+    # Object Storage I/O, or delivery.
+    object_delta_source_preupload_reservation_enabled: bool = False
+    # Receiver delivery remains a local, root-only permit projection until a
+    # separately reviewed Object-delta consumer adapter explicitly uses it.
+    object_delta_receiver_delivery_enabled: bool = False
+    object_delta_receiver_delivery_permit_file: Path | None = None
+    object_delta_receiver_delivery_local_site: str | None = None
+    # An optional in-container bot readiness marker used only by the fenced
+    # WebApp-FI writer.  Leaving it unset preserves legacy bot startup.
+    bot_writer_ready_marker_path: Path | None = None
+    bot_writer_ready_marker_max_age_seconds: int = 45
+    # Existing deployments historically create missing tables at application
+    # startup.  A lease-controlled production runtime must be able to opt out
+    # explicitly: schema management belongs to a separately verified step,
+    # never an implicit service start.
+    database_schema_bootstrap_enabled: bool = True
+    # Compose env/mount wiring is intentionally not introduced by this fence.
     peer_server_url: str | None = None
     iran_server_url: str | None = None
     germany_server_url: str | None = None

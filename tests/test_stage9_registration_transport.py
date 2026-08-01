@@ -45,6 +45,7 @@ class _Client:
 
 class Stage9TelegramRegistrationTransportTests(unittest.IsolatedAsyncioTestCase):
     async def _post(self, **overrides):
+        self.skipTest("direct FI<->IR Telegram registration wire protocol is permanently retired")
         values = {
             "path": "/api/internal/test",
             "payload": {"idempotency_key": "stage9-key", "value": 1},

@@ -27,6 +27,11 @@ from scripts.capture_production_baseline import (
     utc_stamp,
 )
 from scripts.deploy_config import resolve_deploy_settings
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+    blocked_legacy_direct_fi_ir_transport_payload,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -212,10 +217,18 @@ class Runner:
         if role == "foreign":
             command = f"cd {shlex.quote(str(REPO_ROOT))} && " + compose_probe_script("docker-compose.yml", body)
             return ["bash", "-lc", command]
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="stage-p10-deployment-restart-benchmark",
+            operation="Iran SSH command construction",
+        )
         command = f"cd {quote_remote(self.settings['IRAN_PROJECT_DIR'])} && " + compose_probe_script("docker-compose.iran.yml", body)
         return remote_args(self.settings, command)
 
     def remote_json(self, name: str, script: str, *, timeout: int = 120, check: bool = True) -> dict[str, Any]:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="stage-p10-deployment-restart-benchmark",
+            operation="Iran SSH backup/restart command execution",
+        )
         return self.run_json(name, remote_args(self.settings, script), timeout=timeout, check=check)
 
     def app_json(self, role: str, name: str, *script_args: str, timeout: int = 60) -> dict[str, Any]:
@@ -461,6 +474,10 @@ def write_summary(path: Path, payload: dict[str, Any]) -> None:
 
 
 def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="stage-p10-deployment-restart-benchmark",
+        operation="legacy two-site deployment/restart benchmark",
+    )
     stamp = args.timestamp or utc_stamp()
     artifact_root = Path(args.artifact_root)
     run_dir = artifact_root / stamp
@@ -553,6 +570,17 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="stage-p10-deployment-restart-benchmark",
+            operation="legacy two-site deployment/restart benchmark CLI",
+        )
+    except LegacyDirectFiIrTransportRetiredError:
+        print(json.dumps(blocked_legacy_direct_fi_ir_transport_payload(
+            component="stage-p10-deployment-restart-benchmark"
+        ), ensure_ascii=False, sort_keys=True))
+        return 2
+
     args = parse_args(argv)
     payload = run_benchmark(args)
     if args.json:

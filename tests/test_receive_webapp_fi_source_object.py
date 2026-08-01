@@ -135,7 +135,16 @@ class SourceObjectReceiverTests(unittest.TestCase):
         self.control_commit = "c" * 40
         self.control_tree = "d" * 40
         self.binding = self._write_binding()
-        self.workspace = self.root / "workspace"
+        self.workspace_root = self.root / "workspaces"
+        self.workspace_root.mkdir(mode=0o700)
+        self.workspace_root.chmod(0o700)
+        self._workspace_root_patch = mock.patch.object(
+            receiver.transport.contract,
+            "SOURCE_TRANSPORT_WORKSPACE_ROOT",
+            self.workspace_root,
+        )
+        self._workspace_root_patch.start()
+        self.workspace = receiver.transport.contract.source_transport_workspace_for_campaign(self.campaign_id)
         self.workspace.mkdir(mode=0o700)
         self.workspace.chmod(0o700)
         self.credentials = _private(self.root / "credentials.json", _canonical({"fixture": True}))
@@ -154,6 +163,7 @@ class SourceObjectReceiverTests(unittest.TestCase):
         self.controller_config = receiver.transport.ControllerS3Config(
             policy=self.policy,
             credentials_file=self.credentials,
+            campaign_id=self.campaign_id,
         )
         self.test_age_keygen = self.root / "age-keygen-test-only"
         self.test_age_keygen.write_text("#!/bin/sh\nexit 0\n", encoding="ascii")
@@ -189,6 +199,7 @@ class SourceObjectReceiverTests(unittest.TestCase):
         self._identity_recipient_patch.stop()
         self._identity_binary_patch.stop()
         self._identity_root_patch.stop()
+        self._workspace_root_patch.stop()
         self.temporary.cleanup()
 
     def _write_binding(self) -> Path:
@@ -410,6 +421,7 @@ class SourceObjectReceiverTests(unittest.TestCase):
         changed_config = receiver.transport.ControllerS3Config(
             policy=changed_policy,
             credentials_file=self.credentials,
+            campaign_id=self.campaign_id,
         )
         with self.assertRaisesRegex(receiver.SourceObjectReceiveError, "upload report is invalid"):
             receiver.prepare_receive(
@@ -447,6 +459,7 @@ class SourceObjectReceiverTests(unittest.TestCase):
         changed_config = receiver.transport.ControllerS3Config(
             policy=changed_policy,
             credentials_file=self.credentials,
+            campaign_id=self.campaign_id,
         )
         with self.assertRaisesRegex(receiver.SourceObjectReceiveError, "identity recipient does not match"):
             receiver.prepare_receive(
@@ -474,6 +487,32 @@ class SourceObjectReceiverTests(unittest.TestCase):
                 ),
             )
         create_client.assert_not_called()
+
+    def test_prepare_rejects_a_valid_other_campaign_config_before_identity_or_candidate_work(self) -> None:
+        report_path, _report, _plaintext, _ciphertext = self._write_report(object_id="cross-campaign-config")
+        other_campaign = "source-receiver-other-20260730"
+        other_workspace = receiver.transport.contract.source_transport_workspace_for_campaign(other_campaign)
+        other_workspace.mkdir(mode=0o700)
+        other_workspace.chmod(0o700)
+        other_config = receiver.transport.ControllerS3Config(
+            policy=dataclasses.replace(self.policy, workspace=other_workspace),
+            credentials_file=self.credentials,
+            campaign_id=other_campaign,
+        )
+        with (
+            mock.patch.object(receiver.identity_bootstrap, "load_verified_identity") as blocked_identity,
+            self.assertRaisesRegex(
+                receiver.SourceObjectReceiveError,
+                "config does not bind the canonical campaign",
+            ),
+        ):
+            receiver.prepare_receive(
+                controller_config=other_config,
+                campaign_binding_path=self.binding,
+                upload_report_path=report_path,
+            )
+        blocked_identity.assert_not_called()
+        self.assertEqual([], list(self.data_root.iterdir()))
 
     def test_prepare_requires_the_fixed_root_only_staging_data_root(self) -> None:
         report_path, _report, _plaintext, _ciphertext = self._write_report(object_id="unsafe-data-root")

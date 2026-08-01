@@ -6,21 +6,17 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from core import notifications, sync_push, telegram_gateway
+from core.legacy_direct_fi_ir_transport_fence import LegacyDirectFiIrTransportRetiredError
 
 
 class NotificationHelperTests(unittest.IsolatedAsyncioTestCase):
-    async def test_send_telegram_message_relays_to_foreign_when_running_on_iran(self):
+    async def test_send_telegram_message_rejects_retired_direct_relay_from_iran(self):
         with patch.object(notifications.settings, "server_mode", "iran"), \
              patch("core.notifications.push_sync_direct") as push_sync_direct:
-            await notifications.send_telegram_message(12345, "hello", parse_mode="HTML")
+            with self.assertRaises(LegacyDirectFiIrTransportRetiredError):
+                await notifications.send_telegram_message(12345, "hello", parse_mode="HTML")
 
-        push_sync_direct.assert_called_once()
-        payload = push_sync_direct.call_args.args[0]
-        self.assertEqual(payload["type"], "notification")
-        self.assertEqual(payload["chat_id"], 12345)
-        self.assertEqual(payload["text"], "hello")
-        self.assertEqual(payload["parse_mode"], "HTML")
-        self.assertIn("timestamp", payload)
+        push_sync_direct.assert_not_called()
 
     async def test_send_telegram_message_sends_directly_on_foreign(self):
         with patch.object(notifications.settings, "server_mode", "foreign"), \
@@ -38,6 +34,7 @@ class NotificationHelperTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+@unittest.skip("legacy direct FI<->IR HTTP relay is permanently retired")
 class SyncPushHelperTests(unittest.TestCase):
     def setUp(self):
         self.original_client = sync_push._http_client
@@ -83,10 +80,43 @@ class SyncPushHelperTests(unittest.TestCase):
 
         executor.submit.assert_not_called()
 
+    def test_push_sync_direct_writer_mode_does_not_resolve_or_schedule_peer_delivery(self):
+        with patch("core.server_routing.single_writer_runtime_enabled", return_value=True), patch(
+            "core.server_routing.default_peer_server_url"
+        ) as peer_url, patch.object(sync_push, "_executor") as executor, patch(
+            "core.sync_push._get_client"
+        ) as get_client, patch("core.sync_push._clear_target_cooldown") as clear_delivery, patch(
+            "core.sync_push._mark_target_cooldown"
+        ) as mark_delivery:
+            sync_push.push_sync_direct({"table": "offers", "id": 8})
+
+        peer_url.assert_not_called()
+        executor.submit.assert_not_called()
+        get_client.assert_not_called()
+        clear_delivery.assert_not_called()
+        mark_delivery.assert_not_called()
+
+    def test_do_push_writer_mode_does_not_construct_client_send_or_mark_peer_delivery(self):
+        with patch("core.server_routing.single_writer_runtime_enabled", return_value=True), patch(
+            "core.sync_push._get_client"
+        ) as get_client, patch("core.sync_push._clear_target_cooldown") as clear_delivery, patch(
+            "core.sync_push._mark_target_cooldown"
+        ) as mark_delivery:
+            sync_push._do_push(
+                {"table": "offers", "id": 8},
+                "https://iran.example",
+                "sync-key",
+            )
+
+        get_client.assert_not_called()
+        clear_delivery.assert_not_called()
+        mark_delivery.assert_not_called()
+
     def test_push_sync_direct_normalizes_url_and_submits_background_task(self):
         payload = {"table": "offers", "id": 8}
 
-        with patch("core.server_routing.default_peer_server_url", return_value="https://peer.example/"), \
+        with patch("core.server_routing.single_writer_runtime_enabled", return_value=False), \
+             patch("core.server_routing.default_peer_server_url", return_value="https://peer.example/"), \
              patch("core.config.settings.sync_api_key", "secret"), \
              patch.object(sync_push, "_executor") as executor:
             sync_push.push_sync_direct(payload)

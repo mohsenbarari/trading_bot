@@ -22,6 +22,11 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.capture_production_baseline import DEFAULT_ARTIFACT_ROOT, display_path, utc_stamp
 from scripts.deploy_config import resolve_deploy_settings
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+    blocked_legacy_direct_fi_ir_transport_payload,
+)
 
 
 BENCHMARK_BEGIN = "__P5_BENCHMARK_JSON_BEGIN__"
@@ -225,16 +230,11 @@ def recommend_worker_count(candidate_reports: list[dict[str, Any]]) -> dict[str,
 
 
 def ssh_base(settings: dict[str, str]) -> list[str]:
-    return [
-        "ssh",
-        "-o",
-        "StrictHostKeyChecking=accept-new",
-        "-p",
-        settings.get("IRAN_SSH_PORT", "37067"),
-        f"{settings.get('IRAN_SSH_USER', 'root')}@{settings['IRAN_HOST']}",
-        "bash",
-        "-s",
-    ]
+    del settings
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="stage-p5-worker-pool-matrix",
+        operation="Iran SSH worker-control command construction",
+    )
 
 
 def run_remote_script(settings: dict[str, str], script: str, *, timeout: int) -> RemoteResult:
@@ -395,6 +395,10 @@ def write_summary(path: Path, report: dict[str, Any]) -> None:
 
 
 def run_matrix(args: argparse.Namespace) -> dict[str, Any]:
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="stage-p5-worker-pool-matrix",
+        operation="legacy Iran worker mutation benchmark",
+    )
     settings = resolve_deploy_settings(manifest_path=args.manifest)
     workers = parse_worker_candidates(args.workers)
     stamp = args.timestamp or utc_stamp()
@@ -480,6 +484,17 @@ def run_matrix(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="stage-p5-worker-pool-matrix",
+            operation="legacy Iran worker mutation benchmark CLI",
+        )
+    except LegacyDirectFiIrTransportRetiredError:
+        print(json.dumps(blocked_legacy_direct_fi_ir_transport_payload(
+            component="stage-p5-worker-pool-matrix"
+        ), ensure_ascii=False, sort_keys=True))
+        return 2
+
     args = parse_args(argv)
     report = run_matrix(args)
     if args.json:

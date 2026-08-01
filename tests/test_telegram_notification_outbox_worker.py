@@ -3,6 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from core.application_writer_term import ApplicationWriterTermError
 from core import telegram_notification_outbox_worker as worker
 
 
@@ -142,6 +143,16 @@ class TelegramNotificationOutboxWorkerTests(unittest.IsolatedAsyncioTestCase):
         cycle_mock.assert_awaited_once()
         sleep_mock.assert_not_awaited()
         self.assertEqual(loop_errors.calls, [])
+
+    async def test_cycle_refuses_before_database_access_when_writer_term_is_invalid(self):
+        with patch(
+            "core.telegram_notification_outbox_worker.require_application_writer_term",
+            side_effect=ApplicationWriterTermError("writer term is expired"),
+        ), patch("core.telegram_notification_outbox_worker.AsyncSessionLocal") as sessions:
+            with self.assertRaisesRegex(ApplicationWriterTermError, "expired"):
+                await worker.run_telegram_notification_outbox_delivery_cycle(limit=1)
+
+        sessions.assert_not_called()
 
 
 if __name__ == "__main__":

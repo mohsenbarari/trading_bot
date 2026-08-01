@@ -11,6 +11,18 @@ server {
         root /var/www/html;
     }
 
+    # Keep the retired control plane closed consistently on the HTTP
+    # listener too; it must not be redirected into a compatibility route.
+    location = /api/sync/receive {
+        access_log off;
+        return 410;
+    }
+
+    location ~ ^/api/(sync|sessions/internal|trades/internal|offers/internal|auth/internal|invitations/internal|customers/internal)(/|$) {
+        access_log off;
+        return 410;
+    }
+
     location ~ ^/register(?:/|$) {
         access_log off;
         add_header Referrer-Policy "no-referrer" always;
@@ -48,17 +60,16 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/__SERVER_NAME__/privkey.pem;
 
     location = /api/sync/receive {
-        allow __FOREIGN_PUBLIC_IP__;
-        allow 127.0.0.1;
-        deny all;
+        # THREE_SITE_LEGACY_INTERNAL_INGRESS_FENCED: FI->IR HTTP replication
+        # is retired. The standby consumes encrypted, versioned Object Storage
+        # objects under Witness control instead.
+        access_log off;
+        return 410;
+    }
 
-        proxy_pass http://trading_bot_recovery_api;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
+    location ~ ^/api/(sync|sessions/internal|trades/internal|offers/internal|auth/internal|invitations/internal|customers/internal)(/|$) {
+        access_log off;
+        return 410;
     }
 
     location ~ ^/register(?:/|$) {

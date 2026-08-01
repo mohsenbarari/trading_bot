@@ -57,6 +57,20 @@ def assert_telegram_execution_surface(*, operation: str = "telegram") -> None:
         )
 
 
+def _require_current_writer_term_for_telegram_effect() -> None:
+    """Revalidate the local term immediately before a provider-visible call.
+
+    Import lazily so the transport boundary stays independent of application
+    engine construction.  The default-off Writer-term policy does not read a
+    lease, while an enabled FI or promoted-IR runtime refuses a delayed
+    ``BackgroundTask``/worker effect after its Witness term has changed.
+    """
+
+    from core.db import require_application_writer_term
+
+    require_application_writer_term()
+
+
 def _resolve_bot_token(bot_token: Optional[str] = None) -> Optional[str]:
     return bot_token or settings.bot_token or os.getenv("BOT_TOKEN")
 
@@ -102,6 +116,7 @@ async def post_telegram_method(
 ) -> TelegramGatewayResult:
     """Execute one Telegram Bot API method through the approved async path."""
     assert_telegram_execution_surface(operation=method)
+    _require_current_writer_term_for_telegram_effect()
 
     token = _resolve_bot_token(bot_token)
     if not token:
@@ -152,6 +167,7 @@ def post_telegram_method_sync(
 ) -> TelegramGatewayResult:
     """Execute one Telegram Bot API method through the approved sync path."""
     assert_telegram_execution_surface(operation=method)
+    _require_current_writer_term_for_telegram_effect()
 
     token = _resolve_bot_token(bot_token)
     if not token:

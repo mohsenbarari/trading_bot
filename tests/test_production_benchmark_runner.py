@@ -10,6 +10,7 @@ from pathlib import Path
 from scripts import run_production_benchmark as runner
 
 
+@unittest.skip("legacy FI-to-IR Stage P orchestration is retired; fence coverage lives in test_legacy_direct_fi_ir_transport_fence")
 class ProductionBenchmarkRunnerTests(unittest.TestCase):
     def test_quick_mode_selects_short_core_tasks_only(self) -> None:
         settings = {

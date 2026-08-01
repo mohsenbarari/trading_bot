@@ -9,6 +9,10 @@ from typing import Any
 import httpx
 
 from core.config import settings
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+)
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, peer_server_url_for
 from core.trade_forwarding import _json_body, _tls_verify_setting, sign_internal_payload
 from core.trading_observability import summarize_response_body
@@ -22,6 +26,28 @@ async def forward_standard_invitation_to_iran(
     *,
     timeout_seconds: float | None = None,
 ) -> tuple[int, Any]:
+    # A local wrong-role call remains a 403 and never reaches transport.
+    if current_server() != SERVER_FOREIGN:
+        logger.warning(
+            "Standard invitation forwarding rejected outside foreign",
+            extra={"event": "invitation.standard.forward", "source_server": current_server(), "target_server": SERVER_IRAN},
+        )
+        return 403, {"detail": "ارسال دعوت‌نامه فقط از سرور تلگرام مجاز است."}
+
+    # This historical FI->IR creation call has no safe direct replacement.
+    # Return the existing unavailable shape before peer URL/body/HMAC/httpx.
+    try:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="invitation-creation-forwarding",
+            operation="direct peer standard-invitation command",
+        )
+    except LegacyDirectFiIrTransportRetiredError:
+        logger.warning(
+            "Standard invitation direct transport is retired",
+            extra={"event": "invitation.standard.direct_transport_retired", "target_server": SERVER_IRAN},
+        )
+        return 503, {"detail": "سرور ایران برای ساخت دعوت‌نامه در دسترس نیست."}
+
     target_url = peer_server_url_for(SERVER_IRAN)
     context = {
         "event": "invitation.standard.forward",
@@ -30,9 +56,6 @@ async def forward_standard_invitation_to_iran(
         "requester_user_id": int(payload.get("requester_user_id") or 0),
         "has_idempotency_key": bool(payload.get("idempotency_key")),
     }
-    if current_server() != SERVER_FOREIGN:
-        logger.warning("Standard invitation forwarding rejected outside foreign", extra=context)
-        return 403, {"detail": "ارسال دعوت‌نامه فقط از سرور تلگرام مجاز است."}
     if not target_url:
         logger.warning("Standard invitation Iran peer unavailable", extra=context)
         return 503, {"detail": "سرور ایران برای ساخت دعوت‌نامه در دسترس نیست."}

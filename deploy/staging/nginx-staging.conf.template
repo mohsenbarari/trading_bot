@@ -69,54 +69,26 @@ server {
         proxy_set_header Connection "";
     }
 
+    # THREE_SITE_LEGACY_INTERNAL_INGRESS_FENCED: this target-oriented staging
+    # listener never exposes FI<->IR replication or home-server forwarding.
+    # Keep this before the generic public API location below.
+    location = /api/sync/receive {
+        access_log off;
+        return 410;
+    }
+
     location ~ ^/api/(sync|sessions/internal|trades/internal|offers/internal|auth/internal|invitations/internal|customers/internal)(/|$) {
-        auth_basic off;
-
-        proxy_pass http://127.0.0.1:__APP_PORT__;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
+        access_log off;
+        return 410;
     }
 
-    location = /foreign-sync/api/sync/receive {
-        auth_basic off;
-
-        proxy_pass http://127.0.0.1:__FOREIGN_APP_PORT__/api/sync/receive;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
-    }
-
-    location ~ ^/foreign-sync/api/(sync|sessions/internal|trades/internal|offers/internal|auth/internal|invitations/internal|customers/internal)(/|$) {
-        auth_basic off;
-
-        rewrite ^/foreign-sync(/.*)$ $1 break;
-        proxy_pass http://127.0.0.1:__FOREIGN_APP_PORT__;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
-    }
-
-    location = /foreign-sync/api/config {
-        auth_basic "Trading Bot Staging";
-        auth_basic_user_file __BASIC_AUTH_FILE__;
-
-        proxy_pass http://127.0.0.1:__FOREIGN_APP_PORT__/api/config;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
+    # `/foreign-sync/` was a two-server development convenience.  It is not
+    # part of any deployed role: target staging tests use role-local ports or
+    # sealed Object Storage artifacts instead.  `^~` also prevents a later
+    # regex from accidentally reopening a sub-route.
+    location ^~ /foreign-sync/ {
+        access_log off;
+        return 410;
     }
 
     location ~ ^/api/invitations/(lookup|validate)/ {

@@ -191,6 +191,59 @@ class SourceTransportTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
+    def _write_v2_controller_config(
+        self,
+        *,
+        campaign_id: str = "source-transport-fixture-20260730",
+        changes: dict[str, object] | None = None,
+        filename: str = transport.SOURCE_TRANSPORT_CONFIG_FILENAME,
+    ) -> tuple[Path, Path, Path]:
+        """Create a root-only v2 config at its one permitted test layout."""
+
+        trusted_environment = self._write_trusted_e53_s3_environment()
+        campaigns_root = self.root / "campaigns"
+        config_path = campaigns_root / campaign_id / transport.CONTROLLER_DIRECTORY_NAME / filename
+        config_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        for directory in (campaigns_root, campaigns_root / campaign_id, config_path.parent):
+            directory.chmod(0o700)
+        config: dict[str, object] = {
+            "schema": transport.CONFIG_SCHEMA,
+            "endpoint": self.policy.endpoint,
+            "bucket": self.policy.bucket,
+            "prefix": self.policy.prefix,
+            "credentials_file": str(trusted_environment),
+            "controller_age_recipient": self.policy.controller_age_recipient,
+            "webapp_fi_age_recipient": self.policy.webapp_fi_age_recipient,
+            "webapp_ir_age_recipient": self.policy.webapp_ir_age_recipient,
+            "presign_expires_seconds": 300,
+        }
+        if changes:
+            config.update(changes)
+        config_path.write_text(json.dumps(config, sort_keys=True), encoding="utf-8")
+        config_path.chmod(0o600)
+        return campaigns_root, config_path, trusted_environment
+
+    def _write_trusted_e53_s3_environment(
+        self,
+        *,
+        extra_lines: tuple[str, ...] = (),
+    ) -> Path:
+        environment = self.root / "trusted-e53-s3.env"
+        lines = (
+            "ARVAN_S3_ACCESS_KEY=fixture-access-key",
+            "ARVAN_S3_SECRET_KEY=fixture-secret-key-not-persisted",
+            "ARVAN_S3_ENDPOINT=https://s3.ir-thr-at1.arvanstorage.ir",
+            "ARVAN_S3_REGION=ir-thr-at1",
+            "WA_IR_OBJECT_STORAGE_BUCKET=private-artifacts",
+            "WA_IR_OBJECT_STORAGE_PREFIX=campaigns/three-site",
+            "WA_IR_AGE_RECIPIENT_FILE=/legacy/e53/wa-ir.age-recipient",
+            "WA_IR_REMOTE_AGE_IDENTITY=/legacy/e53/wa-ir.age-identity",
+            *extra_lines,
+        )
+        environment.write_text("\n".join(lines) + "\n", encoding="ascii")
+        environment.chmod(0o600)
+        return environment
+
     def static_request(self, recipients: tuple[str, ...] | None = None) -> Any:
         return transport.SourceObjectRequest(
             campaign_id="source-transport-fixture-20260730",
@@ -596,35 +649,212 @@ class SourceTransportTests(unittest.TestCase):
         self.assertEqual(before, len(self.client.presign_calls))
 
     def test_load_controller_config_exercises_root_controlled_config_path(self) -> None:
-        credentials = self.root / "controller-s3-credentials.json"
-        credentials.write_text('{"access_key":"fixture","secret_key":"fixture"}', encoding="utf-8")
-        credentials.chmod(0o600)
-        config_path = self.root / "controller-transport.json"
-        config_path.write_text(
-            json.dumps(
-                {
-                    "schema": transport.CONFIG_SCHEMA,
-                    "endpoint": self.policy.endpoint,
-                    "region": self.policy.region,
-                    "bucket": self.policy.bucket,
-                    "prefix": self.policy.prefix,
-                    "credentials_file": str(credentials),
-                    "age_binary": self.policy.age_binary,
-                    "workspace": str(self.policy.workspace),
-                    "controller_age_recipient": self.policy.controller_age_recipient,
-                    "webapp_fi_age_recipient": self.policy.webapp_fi_age_recipient,
-                    "webapp_ir_age_recipient": self.policy.webapp_ir_age_recipient,
-                    "maximum_plaintext_bytes": self.policy.maximum_plaintext_bytes,
-                    "presign_expires_seconds": 300,
-                },
-                sort_keys=True,
-            ),
-            encoding="utf-8",
-        )
-        config_path.chmod(0o600)
-        loaded = transport.load_controller_config(config_path)
+        campaign_id = "source-transport-fixture-20260730"
+        campaigns_root, config_path, credentials = self._write_v2_controller_config(campaign_id=campaign_id)
+        with (
+            mock.patch.object(transport, "CAMPAIGNS_ROOT", campaigns_root),
+            mock.patch.object(transport, "TRUSTED_E53_S3_ENVIRONMENT_PATH", credentials),
+        ):
+            loaded = transport.load_controller_config(config_path)
+        self.assertEqual(campaign_id, loaded.campaign_id)
         self.assertEqual(credentials, loaded.credentials_file)
-        self.assertEqual(self.policy, loaded.policy)
+        self.assertEqual(self.policy.endpoint, loaded.policy.endpoint)
+        self.assertEqual(self.policy.region, loaded.policy.region)
+        self.assertEqual(self.policy.bucket, loaded.policy.bucket)
+        self.assertEqual(self.policy.prefix, loaded.policy.prefix)
+        self.assertEqual(transport.FIXED_AGE_BINARY, loaded.policy.age_binary)
+        self.assertEqual(
+            transport.SOURCE_TRANSPORT_WORKSPACE_ROOT / campaign_id,
+            loaded.policy.workspace,
+        )
+        self.assertEqual(transport.MAXIMUM_PLAINTEXT_BYTES, loaded.policy.maximum_plaintext_bytes)
+
+    def test_campaign_bound_controller_config_requires_exact_identity_and_workspace(self) -> None:
+        campaign_id = "source-transport-fixture-20260730"
+        campaigns_root, config_path, credentials = self._write_v2_controller_config(campaign_id=campaign_id)
+        with (
+            mock.patch.object(transport, "CAMPAIGNS_ROOT", campaigns_root),
+            mock.patch.object(transport, "TRUSTED_E53_S3_ENVIRONMENT_PATH", credentials),
+        ):
+            loaded = transport.load_controller_config(config_path)
+
+        self.assertEqual(
+            loaded,
+            transport.require_controller_config_for_campaign(
+                controller_config=loaded,
+                campaign_id=campaign_id,
+            ),
+        )
+        with self.assertRaisesRegex(transport.SourceTransportError, "does not match the campaign binding"):
+            transport.require_controller_config_for_campaign(
+                controller_config=loaded,
+                campaign_id="source-transport-other-20260730",
+            )
+
+        drifted = dataclasses.replace(
+            loaded,
+            policy=dataclasses.replace(loaded.policy, workspace=self.root / "wrong-workspace"),
+        )
+        with self.assertRaisesRegex(transport.SourceTransportError, "not the fixed campaign derivation"):
+            transport.require_controller_config_for_campaign(
+                controller_config=drifted,
+                campaign_id=campaign_id,
+            )
+
+    def test_load_controller_config_rejects_every_legacy_override_field(self) -> None:
+        legacy_fields = {
+            "region": self.policy.region,
+            "age_binary": self.policy.age_binary,
+            "workspace": str(self.policy.workspace),
+            "maximum_plaintext_bytes": self.policy.maximum_plaintext_bytes,
+        }
+        for field, value in legacy_fields.items():
+            with self.subTest(field=field):
+                campaigns_root, config_path, _ = self._write_v2_controller_config(changes={field: value})
+                with mock.patch.object(transport, "CAMPAIGNS_ROOT", campaigns_root):
+                    with self.assertRaisesRegex(transport.SourceTransportError, "exactly the supported fields"):
+                        transport.load_controller_config(config_path)
+
+    def test_load_controller_config_requires_fixed_campaign_controller_path(self) -> None:
+        campaigns_root, config_path, _ = self._write_v2_controller_config(filename="other-config.json")
+        with mock.patch.object(transport, "CAMPAIGNS_ROOT", campaigns_root):
+            with self.assertRaisesRegex(transport.SourceTransportError, "fixed controller campaign path"):
+                transport.load_controller_config(config_path)
+
+    def test_load_controller_config_derives_region_only_from_canonical_endpoint(self) -> None:
+        campaigns_root, config_path, _ = self._write_v2_controller_config(
+            changes={"endpoint": "https://s3.ir-thr-at1.arvanstorage.ir.evil.example"}
+        )
+        with mock.patch.object(transport, "CAMPAIGNS_ROOT", campaigns_root):
+            with self.assertRaisesRegex(transport.SourceTransportError, "canonical HTTPS Arvan S3 endpoint"):
+                transport.load_controller_config(config_path)
+
+    def test_load_controller_config_requires_the_trusted_e53_storage_projection(self) -> None:
+        campaigns_root, config_path, trusted_environment = self._write_v2_controller_config(
+            changes={"bucket": "different-private-artifacts"}
+        )
+        with (
+            mock.patch.object(transport, "CAMPAIGNS_ROOT", campaigns_root),
+            mock.patch.object(transport, "TRUSTED_E53_S3_ENVIRONMENT_PATH", trusted_environment),
+        ):
+            with self.assertRaisesRegex(transport.SourceTransportError, "does not match the trusted e53 S3 input"):
+                transport.load_controller_config(config_path)
+
+    def test_init_creates_only_the_fixed_v2_config_without_copying_credentials(self) -> None:
+        campaign_id = "source-transport-fixture-20260730"
+        campaigns_root = self.root / "campaigns"
+        campaigns_root.mkdir(mode=0o700)
+        trusted_environment = self._write_trusted_e53_s3_environment()
+        derived_workspace_root = self.root / "derived-workspaces"
+        with (
+            mock.patch.object(transport, "CAMPAIGNS_ROOT", campaigns_root),
+            mock.patch.object(transport, "TRUSTED_E53_S3_ENVIRONMENT_PATH", trusted_environment),
+            mock.patch.object(transport.contract, "SOURCE_TRANSPORT_WORKSPACE_ROOT", derived_workspace_root),
+        ):
+            config_path = transport.initialize_controller_config_from_trusted_e53_environment(
+                campaign_id=campaign_id,
+                trusted_e53_s3_environment=trusted_environment,
+                controller_age_recipient=self.policy.controller_age_recipient,
+                webapp_fi_age_recipient=self.policy.webapp_fi_age_recipient,
+                webapp_ir_age_recipient=self.policy.webapp_ir_age_recipient,
+            )
+            loaded = transport.load_controller_config(config_path)
+        self.assertEqual(
+            campaigns_root / campaign_id / transport.CONTROLLER_DIRECTORY_NAME / transport.SOURCE_TRANSPORT_CONFIG_FILENAME,
+            config_path,
+        )
+        self.assertEqual(0o600, config_path.stat().st_mode & 0o777)
+        self.assertEqual(transport.CONTROLLER_CONFIG_FIELDS, frozenset(json.loads(config_path.read_text(encoding="utf-8"))))
+        self.assertEqual(trusted_environment, loaded.credentials_file)
+        self.assertEqual(derived_workspace_root / campaign_id, loaded.policy.workspace)
+        self.assertFalse(derived_workspace_root.exists(), "config initialization must not create a source workspace")
+        payload = config_path.read_text(encoding="utf-8")
+        self.assertNotIn("fixture-access-key", payload)
+        self.assertNotIn("fixture-secret-key-not-persisted", payload)
+        self.assertNotIn("WA_IR_AGE_RECIPIENT_FILE", payload)
+        self.assertNotIn("WA_IR_REMOTE_AGE_IDENTITY", payload)
+
+    def test_init_rejects_unreviewed_e53_environment_keys_before_creating_campaign_state(self) -> None:
+        campaigns_root = self.root / "campaigns"
+        campaigns_root.mkdir(mode=0o700)
+        trusted_environment = self._write_trusted_e53_s3_environment(
+            extra_lines=("UNREVIEWED_KEY=must-not-be-copied",)
+        )
+        campaign_id = "source-transport-fixture-20260730"
+        with (
+            mock.patch.object(transport, "CAMPAIGNS_ROOT", campaigns_root),
+            mock.patch.object(transport, "TRUSTED_E53_S3_ENVIRONMENT_PATH", trusted_environment),
+        ):
+            with self.assertRaisesRegex(transport.SourceTransportError, "exactly the supported fields"):
+                transport.initialize_controller_config_from_trusted_e53_environment(
+                    campaign_id=campaign_id,
+                    trusted_e53_s3_environment=trusted_environment,
+                    controller_age_recipient=self.policy.controller_age_recipient,
+                    webapp_fi_age_recipient=self.policy.webapp_fi_age_recipient,
+                    webapp_ir_age_recipient=self.policy.webapp_ir_age_recipient,
+                )
+        self.assertFalse((campaigns_root / campaign_id).exists())
+
+    def test_init_requires_the_fixed_approved_e53_environment_path(self) -> None:
+        campaigns_root = self.root / "campaigns"
+        campaigns_root.mkdir(mode=0o700)
+        trusted_environment = self._write_trusted_e53_s3_environment()
+        campaign_id = "source-transport-fixture-20260730"
+        with mock.patch.object(transport, "CAMPAIGNS_ROOT", campaigns_root):
+            with self.assertRaisesRegex(transport.SourceTransportError, "approved credential input"):
+                transport.initialize_controller_config_from_trusted_e53_environment(
+                    campaign_id=campaign_id,
+                    trusted_e53_s3_environment=trusted_environment,
+                    controller_age_recipient=self.policy.controller_age_recipient,
+                    webapp_fi_age_recipient=self.policy.webapp_fi_age_recipient,
+                    webapp_ir_age_recipient=self.policy.webapp_ir_age_recipient,
+                )
+        self.assertFalse((campaigns_root / campaign_id).exists())
+
+    def test_init_is_create_only_and_preserves_an_existing_config(self) -> None:
+        campaigns_root = self.root / "campaigns"
+        campaigns_root.mkdir(mode=0o700)
+        trusted_environment = self._write_trusted_e53_s3_environment()
+        arguments = {
+            "campaign_id": "source-transport-fixture-20260730",
+            "trusted_e53_s3_environment": trusted_environment,
+            "controller_age_recipient": self.policy.controller_age_recipient,
+            "webapp_fi_age_recipient": self.policy.webapp_fi_age_recipient,
+            "webapp_ir_age_recipient": self.policy.webapp_ir_age_recipient,
+        }
+        with (
+            mock.patch.object(transport, "CAMPAIGNS_ROOT", campaigns_root),
+            mock.patch.object(transport, "TRUSTED_E53_S3_ENVIRONMENT_PATH", trusted_environment),
+        ):
+            config_path = transport.initialize_controller_config_from_trusted_e53_environment(**arguments)
+            original = config_path.read_bytes()
+            with self.assertRaisesRegex(transport.SourceTransportError, "refusing to overwrite"):
+                transport.initialize_controller_config_from_trusted_e53_environment(**arguments)
+        self.assertEqual(original, config_path.read_bytes())
+
+    def test_trusted_e53_credentials_are_used_only_for_the_in_memory_s3_session(self) -> None:
+        trusted_environment = self._write_trusted_e53_s3_environment()
+        calls: list[dict[str, object]] = []
+
+        class FakeSession:
+            def __init__(self, **kwargs: object) -> None:
+                calls.append(dict(kwargs))
+
+            def client(self, *_args: object, **_kwargs: object) -> object:
+                return object()
+
+        fake_boto3 = type("FakeBoto3", (), {"session": type("SessionNamespace", (), {"Session": FakeSession})})
+        config = dataclasses.replace(self.controller_config, credentials_file=trusted_environment)
+        with (
+            mock.patch.object(transport, "TRUSTED_E53_S3_ENVIRONMENT_PATH", trusted_environment),
+            mock.patch.object(transport.snapshot, "boto3", fake_boto3),
+        ):
+            transport.create_s3_client(config)
+        self.assertEqual(1, len(calls))
+        self.assertEqual("fixture-access-key", calls[0]["aws_access_key_id"])
+        self.assertEqual("fixture-secret-key-not-persisted", calls[0]["aws_secret_access_key"])
+        self.assertNotIn("ARVAN_S3_ACCESS_KEY", calls[0])
+        self.assertNotIn("ARVAN_S3_SECRET_KEY", calls[0])
 
     def test_sibling_loader_refuses_writable_file_before_import(self) -> None:
         loader = self.root / "sibling-loader.py"

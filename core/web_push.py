@@ -13,7 +13,9 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
+from core.db import require_external_effect_execution_authorization
 from core.enums import NotificationCategory, NotificationLevel
+from core.external_effect_execution_gate import EXTERNAL_EFFECT_SCOPE_WEB_PUSH_DELIVERY
 from core.market_presence import load_market_page_user_ids
 from core.server_routing import SERVER_IRAN, current_server
 from models.notification import Notification
@@ -231,6 +233,12 @@ async def send_web_push_to_user(
     if not is_web_push_configured():
         return disabled_web_push_result()
 
+    # Gate before loading subscriptions or changing their delivery state.  It
+    # remains a no-op for the default-disabled compatibility path.
+    require_external_effect_execution_authorization(
+        EXTERNAL_EFFECT_SCOPE_WEB_PUSH_DELIVERY
+    )
+
     try:
         from core.production_test_isolation import should_suppress_web_push_for_user
 
@@ -268,6 +276,11 @@ async def send_web_push_to_user(
     vapid_claims = {"sub": settings.web_push_vapid_subject}
 
     for subscription in subscriptions:
+        # A short-lived authorization can expire while a fan-out batch is
+        # running, so validate again immediately before each provider call.
+        require_external_effect_execution_authorization(
+            EXTERNAL_EFFECT_SCOPE_WEB_PUSH_DELIVERY
+        )
         try:
             await asyncio.to_thread(
                 webpush,

@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Capture a redacted production baseline before optimization work.
-
-The script is intentionally read-only. It gathers host/runtime settings, Docker
-status, selected PostgreSQL/Redis settings, and sync-health snapshots from the
-foreign host and the Iran host.
-"""
+"""Capture role-local FI host evidence without contacting or reading WA-IR."""
 
 from __future__ import annotations
 
@@ -19,7 +14,11 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts.deploy_config import resolve_deploy_settings
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+    blocked_legacy_direct_fi_ir_transport_payload,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -221,15 +220,20 @@ def run_command(
 
 
 def remote_args(settings: dict[str, str], command: str) -> list[str]:
-    return [
-        "ssh",
-        "-o",
-        "StrictHostKeyChecking=accept-new",
-        "-p",
-        settings.get("IRAN_SSH_PORT", "37067"),
-        f"{settings.get('IRAN_SSH_USER', 'root')}@{settings['IRAN_HOST']}",
-        command,
-    ]
+    """Reject the obsolete FI-host initiated Iran SSH probe route.
+
+    The fact that the historical probes were read-only does not make their
+    peer-to-peer control/data channel compatible with the three-site model.
+    Evidence for WA-IR must instead be collected role-locally by its approved
+    evidence adapter.  Deliberately discard the inputs before refusing so an
+    accidental future change cannot turn this into a partially built argv.
+    """
+
+    del settings, command
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="production-baseline",
+        operation="Iran SSH probe command construction",
+    )
 
 
 def compose_probe_script(compose_file: str, body: str) -> str:
@@ -283,9 +287,11 @@ def local_compose_args(compose_file: str, body: str) -> list[str]:
 
 
 def remote_compose_args(settings: dict[str, str], body: str) -> list[str]:
-    project_dir = quote_remote(settings["IRAN_PROJECT_DIR"])
-    command = f"cd {project_dir} && " + compose_probe_script("docker-compose.iran.yml", body)
-    return remote_args(settings, command)
+    del settings, body
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="production-baseline",
+        operation="Iran Docker compose probe command construction",
+    )
 
 
 def extract_unsynced_values(payload: Any) -> list[int]:
@@ -343,8 +349,8 @@ def write_summary(
         "",
         "## Sync Health",
         "",
-        f"- Foreign: `{sync_summary.get('foreign', {}).get('clean', False)}`",
-        f"- Iran: `{sync_summary.get('iran', {}).get('clean', False)}`",
+        f"- WebApp-FI (local): `{sync_summary.get('foreign', {}).get('clean', False)}`",
+        "- WebApp-IR: role-local evidence only; not queried from this host.",
         "",
         "## Failed Commands",
         "",
@@ -361,30 +367,60 @@ def write_summary(
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Capture a production optimization baseline snapshot.")
-    parser.add_argument("--manifest", default=None, help="Production deployment manifest path.")
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Capture a role-local WebApp-FI baseline snapshot.")
+    parser.add_argument(
+        "--manifest",
+        default=None,
+        help="Retired: this local collector never resolves a peer deployment manifest.",
+    )
     parser.add_argument("--artifact-root", default=str(DEFAULT_ARTIFACT_ROOT), help="Directory for benchmark artifacts.")
     parser.add_argument("--timestamp", default=None, help="Stable timestamp for reproducible tests.")
-    parser.add_argument("--no-ssh", action="store_true", help="Skip Iran SSH probes.")
+    parser.add_argument(
+        "--no-ssh",
+        action="store_true",
+        default=True,
+        help="Retained compatibility flag; Iran SSH probes are permanently disabled.",
+    )
     parser.add_argument("--no-docker", action="store_true", help="Skip Docker/Compose probes.")
     parser.add_argument("--allow-dirty-sync", action="store_true", help="Exit 0 even when sync-health is not clean.")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
-def main() -> int:
-    args = parse_args()
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    try:
+        if args.manifest is not None:
+            assert_legacy_direct_fi_ir_transport_retired(
+                component="production-baseline",
+                operation="deployment-manifest peer evidence resolution",
+            )
+        if not args.no_ssh:
+            assert_legacy_direct_fi_ir_transport_retired(
+                component="production-baseline",
+                operation="Iran SSH baseline collection",
+            )
+    except LegacyDirectFiIrTransportRetiredError:
+        print(
+            json.dumps(
+                blocked_legacy_direct_fi_ir_transport_payload(component="production-baseline"),
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+        return 2
+
     stamp = args.timestamp or utc_stamp()
     artifact_dir = Path(args.artifact_root) / stamp / "baseline"
     logs_dir = artifact_dir / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
 
-    settings = resolve_deploy_settings(manifest_path=args.manifest)
     metadata: dict[str, Any] = {
         "captured_at": utc_iso(),
-        "stage": "P0",
+        "stage": "P0-role-local",
         "repo_root": str(REPO_ROOT),
-        "manifest": redact_mapping(settings),
+        "scope": "webapp_fi_host_local",
+        "webapp_ir_evidence": "not_queried_from_webapp_fi",
     }
 
     commands: list[tuple[str, list[str], int]] = [
@@ -409,47 +445,26 @@ def main() -> int:
                 ("foreign_sync_health", local_compose_args("docker-compose.yml", sync_health_probe()), 30),
             ]
         )
-    if not args.no_ssh:
-        remote_basics = (
-            ("iran_date_utc", "date -u +%Y-%m-%dT%H:%M:%SZ", 15),
-            ("iran_hostname", "hostname", 15),
-            ("iran_uname", "uname -a", 15),
-            ("iran_nproc", "nproc", 15),
-            ("iran_memory", "free -h", 15),
-            ("iran_disk_root", "df -h /", 15),
-            ("iran_lsblk", "lsblk -o NAME,SIZE,TYPE,MOUNTPOINT,ROTA,MODEL", 15),
-            ("iran_docker_ps", "docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Ports}}'", 30),
-        )
-        commands.extend((name, remote_args(settings, command), timeout) for name, command, timeout in remote_basics)
-        if not args.no_docker:
-            commands.extend(
-                [
-                    ("iran_compose_ps", remote_compose_args(settings, "ps"), 30),
-                    ("iran_app_runtime_env", remote_compose_args(settings, runtime_env_probe()), 30),
-                    ("iran_postgres_settings", remote_compose_args(settings, postgres_settings_probe()), 30),
-                    ("iran_redis_info", remote_compose_args(settings, redis_info_probe()), 30),
-                    ("iran_sync_health", remote_compose_args(settings, sync_health_probe()), 30),
-                ]
-            )
-
     results = [run_command(name=name, args=cmd, logs_dir=logs_dir, timeout=timeout) for name, cmd, timeout in commands]
     git_sha_result = next((item for item in results if item["name"] == "git_sha" and item["exit_code"] == 0), None)
     if git_sha_result:
         metadata["git_sha"] = (REPO_ROOT / git_sha_result["stdout_path"]).read_text(encoding="utf-8").strip()
 
-    sync_summary: dict[str, Any] = {"clean": False}
+    sync_summary: dict[str, Any] = {
+        "clean": False,
+        "webapp_ir_evidence": "not_queried_from_webapp_fi",
+    }
     by_name = {item["name"]: item for item in results}
-    for key, command_name in (("foreign", "foreign_sync_health"), ("iran", "iran_sync_health")):
-        item = by_name.get(command_name)
-        if not item:
-            sync_summary[key] = {"parsed": False, "clean": False, "reason": "not captured"}
-            continue
-        sync_summary[key] = parse_sync_health(REPO_ROOT / item["stdout_path"]) if item["exit_code"] == 0 else {
+    item = by_name.get("foreign_sync_health")
+    if not item:
+        sync_summary["foreign"] = {"parsed": False, "clean": False, "reason": "not captured"}
+    else:
+        sync_summary["foreign"] = parse_sync_health(REPO_ROOT / item["stdout_path"]) if item["exit_code"] == 0 else {
             "parsed": False,
             "clean": False,
             "reason": f"command failed with exit {item['exit_code']}",
         }
-    sync_summary["clean"] = bool(sync_summary.get("foreign", {}).get("clean") and sync_summary.get("iran", {}).get("clean"))
+    sync_summary["clean"] = bool(sync_summary.get("foreign", {}).get("clean"))
 
     write_json(artifact_dir / "metadata.json", metadata)
     write_json(artifact_dir / "commands.json", results)

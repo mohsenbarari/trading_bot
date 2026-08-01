@@ -1,49 +1,57 @@
 # src/infrastructure/database/connection.py
-"""اتصال به دیتابیس"""
+"""Retired legacy database factory.
 
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import declarative_base
-from typing import AsyncGenerator
+This path predates the canonical ``core.db`` engine.  It used to construct a
+second unguarded AsyncEngine and session factory, which would sit outside the
+writer-term and transaction-envelope engine hooks.  There are no source
+importers, so retaining a callable fallback would create an importlib/manual
+bypass with no legitimate runtime consumer.
 
-# این متغیرها بعداً از core.config خوانده می‌شوند
+The module remains only to fail clearly for an old import path.  It never
+imports SQLAlchemy and it can never create a database connection.  New code
+must use the canonical ``core.db`` boundary instead.
+"""
+
+from __future__ import annotations
+
+from typing import AsyncGenerator, NoReturn
+
+
+RETIRED_LEGACY_DATABASE_CONNECTION_ERROR = (
+    "src.infrastructure.database.connection is retired; use core.db"
+)
+
+# Kept as inert compatibility names only.  They must never be assigned an
+# engine, sessionmaker, or declarative base from this module again.
 DATABASE_URL = None
 engine = None
 AsyncSessionLocal = None
-Base = declarative_base()
+Base = None
 
 
-def init_database(database_url: str):
-    """راه‌اندازی اولیه دیتابیس"""
-    global DATABASE_URL, engine, AsyncSessionLocal
-    
-    DATABASE_URL = database_url
-    engine = create_async_engine(DATABASE_URL, echo=False)
-    AsyncSessionLocal = async_sessionmaker(
-        engine, 
-        class_=AsyncSession, 
-        expire_on_commit=False
-    )
+class RetiredLegacyDatabaseConnectionError(RuntimeError):
+    """Raised before the historical factory can construct any database object."""
 
 
-async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency برای FastAPI"""
-    if AsyncSessionLocal is None:
-        raise RuntimeError("Database not initialized. Call init_database() first.")
-    
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
+def _retired() -> NoReturn:
+    raise RetiredLegacyDatabaseConnectionError(RETIRED_LEGACY_DATABASE_CONNECTION_ERROR)
 
 
-async def get_session() -> AsyncSession:
-    """دریافت Session برای استفاده مستقیم (بات)"""
-    if AsyncSessionLocal is None:
-        raise RuntimeError("Database not initialized. Call init_database() first.")
-    
-    return AsyncSessionLocal()
+def init_database(_database_url: str) -> NoReturn:
+    """Fail closed; this historical factory must not be revived implicitly."""
+
+    _retired()
+
+
+async def get_async_session() -> AsyncGenerator[object, None]:
+    """Fail closed while preserving the old async-generator call shape."""
+
+    _retired()
+    if False:  # pragma: no cover - marks this as an async generator for callers.
+        yield None
+
+
+async def get_session() -> object:
+    """Fail closed; callers must migrate to ``core.db.AsyncSessionLocal``."""
+
+    _retired()

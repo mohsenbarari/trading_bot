@@ -14,13 +14,16 @@ control that WebApp-FI may receive:
 * one root-owned ``known_hosts`` pin for the fixed FI host.
 
 It neither executes SSH nor creates an Object Storage client.  The transient
-VersionId-bound GET URL is read from stdin only for ``render`` and is present
-only as the last remote argv item.  The remote wrapper writes public,
-URL-free packet-policy and receipt facts only to a temporary root-only
-directory, asks the already-installed FI helpers to receive and install the
-packet, and returns a small URL-free install receipt.  A separate local
-``verify-install`` operation validates that returned receipt; it does not
-open an FI path or execute a command.
+VersionId-bound GET URL is accepted only by the reviewed in-process controller
+API, where it is the final remote argv item and must remain in memory until a
+shell-free, output-suppressed SSH invocation.  Direct CLI rendering fails
+closed before stdin is read, because printing its command would disclose that
+credential.  The remote wrapper writes public, URL-free packet-policy and
+receipt facts only to a temporary root-only directory, asks the already-
+installed FI helpers to receive and install the packet, and returns a small
+URL-free install receipt.  A separate local ``verify-install`` operation
+validates that returned receipt; it does not open an FI path or execute a
+command.
 """
 
 from __future__ import annotations
@@ -75,6 +78,16 @@ FORBIDDEN_CONTROL_VALUE_MARKERS = ("://", "x-amz-", "age-secret-key-")
 
 class StaticProvenanceReceiveRenderError(RuntimeError):
     """The controller cannot safely render or verify this FI control."""
+
+
+def _reject_direct_url_render(*, action: str) -> None:
+    """Reject a CLI hand-off that would serialize a transient GET credential."""
+
+    if action != "render":  # pragma: no cover - fixed parser dispatch.
+        raise StaticProvenanceReceiveRenderError("unsupported direct URL render action")
+    raise StaticProvenanceReceiveRenderError(
+        "direct CLI rendering of the URL-bearing FI receive control is disabled"
+    )
 
 
 def _require_root_controlled_directory_chain(path: Path, *, field: str) -> None:
@@ -594,6 +607,15 @@ def build_static_provenance_receive_control(
     except Exception as exc:
         raise StaticProvenanceReceiveRenderError("controller source transport configuration is invalid") from exc
     try:
+        controller_config = transport.require_controller_config_for_campaign(
+            controller_config=controller_config,
+            campaign_id=binding.campaign_id,
+        )
+    except Exception as exc:
+        raise StaticProvenanceReceiveRenderError(
+            "controller source transport config does not bind the canonical campaign"
+        ) from exc
+    try:
         initial_control = initial.build_initial_static_control(
             source_transport_config=Path(source_transport_config),
             campaign_binding=Path(campaign_binding),
@@ -933,7 +955,12 @@ def render_receive_install_command(
     fi_known_hosts: Path,
     presigned_download_url: str,
 ) -> str:
-    """Render, but never execute, the one pinned FI receive/install command."""
+    """Render the pinned FI receive/install command for an in-process executor.
+
+    The returned command contains an ephemeral credential.  It must remain
+    only in caller memory until a shell-free, output-suppressed SSH invocation.
+    The direct CLI deliberately cannot serialize this result.
+    """
 
     if not isinstance(control, StaticProvenanceReceiveControl):
         raise StaticProvenanceReceiveRenderError("static-provenance receive control is unsupported")
@@ -1100,7 +1127,10 @@ def _base_arguments(parser: argparse.ArgumentParser) -> None:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     actions = parser.add_subparsers(dest="action", required=True)
-    render = actions.add_parser("render", help="render one pinned FI receive/install SSH command")
+    render = actions.add_parser(
+        "render",
+        help="disabled in the direct CLI; transient receive controls require an in-process executor",
+    )
     _base_arguments(render)
     render.add_argument("--fi-known-hosts", required=True, type=Path)
     render.add_argument("--presigned-download-url-stdin", required=True, action="store_true")
@@ -1113,6 +1143,8 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        if args.action == "render":
+            _reject_direct_url_render(action=args.action)
         control = build_static_provenance_receive_control(
             source_transport_config=args.source_transport_config,
             campaign_binding=args.campaign_binding,
@@ -1122,15 +1154,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             packet_id=args.packet_id,
             transport_publish_receipt=args.transport_publish_receipt,
         )
-        if args.action == "render":
-            print(
-                render_receive_install_command(
-                    control=control,
-                    fi_known_hosts=args.fi_known_hosts,
-                    presigned_download_url=_read_presigned_url_stdin(),
-                )
-            )
-        elif args.action == "verify-install":
+        if args.action == "verify-install":
             print(json.dumps(validate_fi_static_provenance_install_receipt(control=control, install_output=args.install_output), sort_keys=True))
         else:  # pragma: no cover - argparse dispatch invariant.
             raise StaticProvenanceReceiveRenderError("unsupported static-provenance receive action")

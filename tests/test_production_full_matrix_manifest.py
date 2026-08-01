@@ -7,6 +7,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from core.legacy_two_server_full_matrix_fence import (
+    LegacyTwoServerFullMatrixRetiredError,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = REPO_ROOT / "scripts" / "build_production_full_matrix_manifest.py"
@@ -18,9 +21,10 @@ sys.modules[spec.name] = manifest_builder
 spec.loader.exec_module(manifest_builder)
 
 
+@unittest.skip("two-server production manifest is retired; V4 is the only supported path")
 class ProductionFullMatrixManifestTests(unittest.TestCase):
     def build_manifest(self):
-        return manifest_builder.build_manifest(prefix="PFM_20260624_180000_")
+        return manifest_builder._forensic_build_manifest(prefix="PFM_20260624_180000_")
 
     def test_manifest_expands_required_sections_and_counts(self):
         manifest = self.build_manifest()
@@ -98,7 +102,10 @@ class ProductionFullMatrixManifestTests(unittest.TestCase):
         self.assertNotIn("BOT_TOKEN", encoded)
         self.assertNotIn("895973", encoded)
 
-    def test_cli_writes_manifest_artifact_without_side_effects(self):
+    def test_public_builder_and_cli_are_retired_without_writing_an_artifact(self):
+        with self.assertRaises(LegacyTwoServerFullMatrixRetiredError):
+            manifest_builder.build_manifest(prefix="PFM_20260624_180000_")
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             output = Path(tmp_dir) / "manifest.json"
             with patch("sys.stdout", new_callable=io.StringIO) as stdout:
@@ -112,15 +119,23 @@ class ProductionFullMatrixManifestTests(unittest.TestCase):
                     ]
                 )
 
-            self.assertEqual(exit_code, 0)
-            payload = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(exit_code, 2)
             stdout_payload = json.loads(stdout.getvalue())
 
-        self.assertEqual(payload["schema_version"], "production_full_matrix_manifest_v1")
-        self.assertEqual(payload["summary"]["base_trade_shape_scenarios"], 1224)
-        self.assertEqual(stdout_payload["status"], "ok")
-        self.assertEqual(stdout_payload["output"], str(output))
-        self.assertNotIn("sections", stdout_payload)
+            self.assertFalse(output.exists())
+
+        self.assertEqual(stdout_payload["status"], "blocked_legacy_two_server_full_matrix_retired")
+        self.assertEqual(stdout_payload["component"], "production-full-matrix-manifest-builder")
+
+
+class RetiredProductionFullMatrixManifestTests(unittest.TestCase):
+    def test_public_and_forensic_manifest_builders_are_both_fenced(self):
+        for call in (
+            lambda: manifest_builder.build_manifest(prefix="PFM_20260624_180000_"),
+            lambda: manifest_builder._forensic_build_manifest(prefix="PFM_20260624_180000_"),
+        ):
+            with self.subTest(call=call), self.assertRaises(LegacyTwoServerFullMatrixRetiredError):
+                call()
 
 
 if __name__ == "__main__":

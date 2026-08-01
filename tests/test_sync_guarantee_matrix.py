@@ -502,6 +502,7 @@ class SyncGuaranteeMatrixTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(before=before, after=after):
                 self.assertLess(sync.TABLE_ORDER[before], sync.TABLE_ORDER[after])
 
+    @unittest.skip("legacy direct FI<->IR HTTP receiver is permanently retired")
     async def test_receiver_reorders_full_sync_batch_before_apply(self):
         items = [
             {
@@ -538,6 +539,7 @@ class SyncGuaranteeMatrixTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {"status": "success", "processed": len(items)})
         self.assertEqual(seen_tables, sorted(seen_tables, key=lambda table: sync.TABLE_ORDER[table]))
 
+    @unittest.skip("legacy direct FI<->IR HTTP receiver is permanently retired")
     async def test_deferred_failed_and_duplicate_delivery_matrix_is_safe(self):
         items = [
             {"table": "offers", "operation": "UPDATE", "id": 30, "data": copy.deepcopy(SYNC_TABLE_FIXTURES["offers"])},

@@ -22,6 +22,19 @@ class _ResultStub:
 
 
 class ApiDepsTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        # Existing dependency tests focus on user/session behavior.  The
+        # promotion auth epoch has dedicated focused coverage below and is
+        # default-compatible while no epoch exists.
+        self._epoch_guard = patch(
+            "api.deps.enforce_access_token_auth_epoch",
+            new=AsyncMock(return_value=None),
+        )
+        self._epoch_guard.start()
+
+    def tearDown(self):
+        self._epoch_guard.stop()
+
     async def test_get_current_user_rejects_missing_subject(self):
         db = AsyncMock()
         with patch('api.deps.jwt.decode', return_value={}):
@@ -273,6 +286,17 @@ class ApiDepsTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as ctx:
                 await deps.verify_admin_or_dev_key(token='token', dev_key=None, db=db)
         self.assertEqual(ctx.exception.status_code, 403)
+
+    async def test_get_current_user_rejects_pre_cutover_access_token(self):
+        db = AsyncMock()
+        with patch("api.deps.jwt.decode", return_value={"sub": "7"}), patch(
+            "api.deps.enforce_access_token_auth_epoch",
+            new=AsyncMock(side_effect=deps.PromotionAccessTokenEpochError("old")),
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                await deps.get_current_user(db=db, token="token")
+
+        self.assertEqual(ctx.exception.status_code, 401)
 
 
 if __name__ == '__main__':

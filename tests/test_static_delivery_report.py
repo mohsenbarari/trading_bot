@@ -1,8 +1,11 @@
 import tempfile
 import unittest
+import io
+import json
 from pathlib import Path
 from unittest.mock import patch
 
+from core.legacy_direct_fi_ir_transport_fence import LegacyDirectFiIrTransportRetiredError
 from scripts import report_static_delivery as static_report
 
 
@@ -90,7 +93,10 @@ class StaticDeliveryReportTests(unittest.TestCase):
                 raise AssertionError(url)
 
             with patch("scripts.report_static_delivery.fetch_url", side_effect=fake_fetch):
-                report = static_report.collect_report(base_url="https://iran.example", dist_dir=Path(tmpdir))
+                report = static_report.collect_report(
+                    base_url="http://127.0.0.1",
+                    dist_dir=Path(tmpdir),
+                )
 
         self.assertTrue(report["ok"])
         self.assertEqual(
@@ -104,6 +110,23 @@ class StaticDeliveryReportTests(unittest.TestCase):
                 "protected_chat_media_requires_token",
             ],
         )
+
+    def test_public_or_peer_url_is_refused_before_http_request(self):
+        with patch("urllib.request.urlopen", side_effect=AssertionError("network must not run")):
+            with self.assertRaises(LegacyDirectFiIrTransportRetiredError):
+                static_report.fetch_url("https://iran.example/assets/app.js")
+
+    def test_manifest_or_remote_base_url_is_blocked_without_resolving_it(self):
+        with (
+            patch("sys.stdout", new_callable=io.StringIO) as stdout,
+            patch("urllib.request.urlopen", side_effect=AssertionError("network must not run")),
+        ):
+            exit_code = static_report.main(["--base-url", "https://iran.example", "--json"])
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(payload["status"], "blocked_legacy_direct_fi_ir_transport_retired")
+        self.assertEqual(payload["component"], "static-delivery-report")
 
 
 if __name__ == "__main__":

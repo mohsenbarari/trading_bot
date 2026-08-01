@@ -59,6 +59,8 @@ MAX_PACKAGE_MEMBER_BYTES = 8 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 24 * 1024 * 1024
 MAX_CANONICAL_RELEASE_FILES = 100_000
 MAX_VERSION_ID_BYTES = 1024
+MAX_STATIC_ASSET_FILE_BYTES = 100 * 1024 * 1024
+MAX_STATIC_ASSET_PATH_BYTES = 512
 
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 RELEASE_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -94,22 +96,25 @@ SOURCE_PAYLOAD_FILES = (
 )
 CONTRACT_MEMBER = "config/source-adoption-contract.json"
 CANONICAL_RELEASE_TREE_MEMBER = "config/canonical-release-tree.json"
+EXPECTED_STATIC_ASSETS_MEMBER = "config/expected-static-assets.json"
 INITIAL_STATIC_POLICY_MEMBER = "config/initial-static-transport-policy.json"
 INITIAL_STATIC_REQUEST_MEMBER = "config/initial-static-upload-request.json"
 INITIAL_STATIC_BOOTSTRAP_MEMBERS = (
     INITIAL_STATIC_POLICY_MEMBER,
     INITIAL_STATIC_REQUEST_MEMBER,
 )
-# Reuse the bootstrap receiver's already-created root-only directory rather
-# than silently creating another persistent FI workspace before the first
-# static upload.  The exchange helper independently requires this directory
-# to be root-only before it uses it.
+# The FI bootstrap receiver creates this root before it installs the detached
+# candidate.  The first FI static exchange must use that pre-existing FI-owned
+# root, never the controller's campaign-derived transport workspace.
 INITIAL_STATIC_FI_WORKSPACE = "/srv/trading-bot-three-site-staging-data/webapp-fi-source-bootstrap"
 INITIAL_STATIC_POLICY_SCHEMA = "gold-trade-webapp-fi-static-provenance-transport-policy-v1"
+EXPECTED_STATIC_ASSETS_SCHEMA = "gold-trade-webapp-fi-expected-static-assets-v2"
+EXPECTED_STATIC_ASSETS_ROOT = "mini_app_dist"
 PACKAGE_PAYLOAD_FILES = (
     *SOURCE_PAYLOAD_FILES,
     CONTRACT_MEMBER,
     CANONICAL_RELEASE_TREE_MEMBER,
+    EXPECTED_STATIC_ASSETS_MEMBER,
     *INITIAL_STATIC_BOOTSTRAP_MEMBERS,
 )
 PACKAGE_FILES = (*PACKAGE_PAYLOAD_FILES, PACKAGE_MANIFEST_MEMBER)
@@ -679,6 +684,218 @@ def _validate_canonical_release_tree_descriptor(payload: bytes) -> dict[str, Any
     return {"application": {"release_sha": release, "git_tree": tree}, "files": files}
 
 
+def _require_expected_static_asset_path(value: object, *, field: str) -> str:
+    if not isinstance(value, str) or not value or len(value.encode("utf-8")) > MAX_STATIC_ASSET_PATH_BYTES:
+        raise SourceAdoptionPreparationError(f"{field} is invalid")
+    if any(ord(character) < 0x20 or ord(character) > 0x7E for character in value):
+        raise SourceAdoptionPreparationError(f"{field} must be printable ASCII")
+    pure = PurePosixPath(value)
+    if (
+        pure.as_posix() != value
+        or pure.is_absolute()
+        or "\\" in value
+        or any(part in {"", ".", ".."} for part in pure.parts)
+    ):
+        raise SourceAdoptionPreparationError(f"{field} is invalid")
+    return value
+
+
+def _validate_expected_static_assets_manifest(payload: bytes) -> dict[str, Any]:
+    value = _parse_canonical_json(payload, field="expected static assets manifest")
+    expected = {
+        "schema",
+        "status",
+        "campaign_id",
+        "application",
+        "tooling",
+        "static_root",
+        "files",
+        "files_sha256",
+    }
+    if (
+        set(value) != expected
+        or value.get("schema") != EXPECTED_STATIC_ASSETS_SCHEMA
+        or value.get("status") != "prepared"
+        or value.get("static_root") != EXPECTED_STATIC_ASSETS_ROOT
+    ):
+        raise SourceAdoptionPreparationError("expected static assets manifest is unsupported")
+    campaign_id = value.get("campaign_id")
+    if not isinstance(campaign_id, str) or not CAMPAIGN_ID_RE.fullmatch(campaign_id):
+        raise SourceAdoptionPreparationError("expected static assets manifest campaign_id is invalid")
+    application_value = value.get("application")
+    if not isinstance(application_value, Mapping) or set(application_value) != {
+        "release_sha",
+        "release_tree",
+        "expected_alembic_revision",
+    }:
+        raise SourceAdoptionPreparationError("expected static assets manifest application is invalid")
+    release_sha = application_value.get("release_sha")
+    release_tree = application_value.get("release_tree")
+    revision = application_value.get("expected_alembic_revision")
+    if (
+        not isinstance(release_sha, str)
+        or not RELEASE_RE.fullmatch(release_sha)
+        or not isinstance(release_tree, str)
+        or not COMMIT_RE.fullmatch(release_tree)
+        or not isinstance(revision, str)
+        or not ALEMBIC_RE.fullmatch(revision)
+    ):
+        raise SourceAdoptionPreparationError("expected static assets manifest application is invalid")
+    tooling = _require_tooling(value.get("tooling"), field="expected static assets manifest tooling")
+    raw_files = value.get("files")
+    if not isinstance(raw_files, list) or not raw_files or len(raw_files) > MAX_CANONICAL_RELEASE_FILES:
+        raise SourceAdoptionPreparationError("expected static assets manifest files are invalid")
+    files: list[dict[str, Any]] = []
+    prior = ""
+    for item in raw_files:
+        if not isinstance(item, Mapping) or set(item) != {"path", "sha256", "bytes"}:
+            raise SourceAdoptionPreparationError("expected static assets manifest file is invalid")
+        path = _require_expected_static_asset_path(item.get("path"), field="expected static asset path")
+        digest = _require_sha256(item.get("sha256"), field="expected static asset sha256")
+        size = item.get("bytes")
+        if (
+            isinstance(size, bool)
+            or not isinstance(size, int)
+            or not 0 <= size <= MAX_STATIC_ASSET_FILE_BYTES
+            or prior and path <= prior
+        ):
+            raise SourceAdoptionPreparationError("expected static assets manifest file is invalid")
+        prior = path
+        files.append({"path": path, "sha256": digest, "bytes": size})
+    if value.get("files_sha256") != sha256_bytes(canonical_json_bytes(files)):
+        raise SourceAdoptionPreparationError("expected static assets manifest file hash is invalid")
+    return {
+        "campaign_id": campaign_id,
+        "application": {
+            "release_sha": release_sha,
+            "release_tree": release_tree,
+            "expected_alembic_revision": revision,
+        },
+        "tooling": tooling,
+        "files": files,
+    }
+
+
+def _read_controller_expected_static_assets_manifest(
+    *,
+    path: Path,
+    campaign_id: str,
+    application: Mapping[str, str],
+    tooling: Mapping[str, str],
+) -> tuple[dict[str, Any], bytes]:
+    """Read one create-only adapter output instead of ambient build output.
+
+    Source-adoption packaging may still re-check the tracked canonical release
+    tree, but it must never derive its static manifest from an ignored
+    ``mini_app_dist`` below that checkout.  The adapter output is a root-only
+    canonical file and is bound here to the same campaign/application/control
+    pins before it enters the package archive.
+    """
+
+    path = _require_absolute(Path(path), field="expected static assets manifest")
+    parent = _require_root_directory(
+        path.parent, field="expected static assets manifest parent", private=True
+    )
+    if path.parent != parent:
+        raise SourceAdoptionPreparationError("expected static assets manifest parent is not canonical")
+    try:
+        before = path.lstat()
+        resolved = path.resolve(strict=True)
+        state = resolved.lstat()
+    except OSError as exc:
+        raise SourceAdoptionPreparationError("cannot inspect expected static assets manifest") from exc
+    if (
+        resolved != path
+        or stat.S_ISLNK(before.st_mode)
+        or stat.S_ISLNK(state.st_mode)
+        or not stat.S_ISREG(state.st_mode)
+        or state.st_uid != 0
+        or stat.S_IMODE(state.st_mode) != 0o600
+        or state.st_nlink != 1
+        or not 1 <= state.st_size <= MAX_PACKAGE_MEMBER_BYTES
+    ):
+        raise SourceAdoptionPreparationError(
+            "expected static assets manifest must be one bounded root-only mode 0600 regular non-symlink file"
+        )
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise SourceAdoptionPreparationError("cannot securely open expected static assets manifest") from exc
+    try:
+        opened = os.fstat(descriptor)
+        identity = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_uid != 0
+            or stat.S_IMODE(opened.st_mode) != 0o600
+            or opened.st_nlink != 1
+            or not 1 <= opened.st_size <= MAX_PACKAGE_MEMBER_BYTES
+            or any(getattr(before, item) != getattr(opened, item) for item in identity)
+        ):
+            raise SourceAdoptionPreparationError("expected static assets manifest changed while being opened")
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = os.read(descriptor, min(64 * 1024, MAX_PACKAGE_MEMBER_BYTES + 1 - total))
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_PACKAGE_MEMBER_BYTES:
+                raise SourceAdoptionPreparationError("expected static assets manifest exceeds its size bound")
+            chunks.append(chunk)
+        after = os.fstat(descriptor)
+        if total != opened.st_size or any(getattr(after, item) != getattr(opened, item) for item in identity):
+            raise SourceAdoptionPreparationError("expected static assets manifest changed while being read")
+    except OSError as exc:
+        raise SourceAdoptionPreparationError("cannot read expected static assets manifest") from exc
+    finally:
+        os.close(descriptor)
+    payload = b"".join(chunks)
+    _reject_persisted_url(payload, field="expected static assets manifest")
+    value = _validate_expected_static_assets_manifest(payload)
+    if (
+        value["campaign_id"] != campaign_id
+        or value["application"] != dict(application)
+        or value["tooling"] != dict(tooling)
+    ):
+        raise SourceAdoptionPreparationError(
+            "exact-release expected static assets manifest is not bound to the prepared package"
+        )
+    return value, payload
+
+
+def build_expected_static_assets_manifest(
+    *,
+    application_source_repository: Path,
+    campaign_id: str,
+    canonical_release_tree: Mapping[str, Any],
+    expected_alembic_revision: str,
+    control_commit: str,
+    control_tree: str,
+) -> dict[str, Any]:
+    """Reject the retired direct scan of an ignored controller build output.
+
+    The expected manifest is now an explicit create-only result of
+    ``adapt_exact_release_frontend_static_build.py``.  Retaining this narrow
+    compatibility symbol as a fail-closed fence avoids silently restoring the
+    old ambient ``mini_app_dist`` dependency for callers that have not moved
+    to the new required manifest input.
+    """
+
+    del (
+        application_source_repository,
+        campaign_id,
+        canonical_release_tree,
+        expected_alembic_revision,
+        control_commit,
+        control_tree,
+    )
+    raise SourceAdoptionPreparationError(
+        "direct controller mini_app_dist scanning is retired; provide the exact-release expected static assets manifest"
+    )
+
+
 def _validate_contract(payload: bytes) -> dict[str, Any]:
     contract = _parse_canonical_json(payload, field="source-adoption contract")
     expected = {
@@ -1219,9 +1436,21 @@ def _initial_static_bootstrap_payloads(
     transport = _load_controller_source_transport()
     try:
         controller_config = transport.load_controller_config(Path(source_transport_config))
+    except Exception as exc:
+        raise SourceAdoptionPreparationError("initial static controller transport inputs are invalid") from exc
+    try:
         binding = transport.campaign_binding.load_campaign_binding(Path(campaign_binding_path))
     except Exception as exc:
         raise SourceAdoptionPreparationError("initial static controller transport inputs are invalid") from exc
+    try:
+        transport.require_controller_config_for_campaign(
+            controller_config=controller_config,
+            campaign_id=binding.campaign_id,
+        )
+    except Exception as exc:
+        raise SourceAdoptionPreparationError(
+            "initial static controller transport config does not bind the campaign"
+        ) from exc
     if not COMMIT_RE.fullmatch(application_release_tree):
         raise SourceAdoptionPreparationError("initial static application release tree is invalid")
     if (
@@ -1291,6 +1520,7 @@ def prepare_source_adoption_package(
     *,
     source_repository: Path,
     application_source_repository: Path,
+    expected_static_assets_manifest: Path,
     control_commit: str,
     application_release_sha: str,
     expected_alembic_revision: str,
@@ -1309,12 +1539,53 @@ def prepare_source_adoption_package(
     if not ALEMBIC_RE.fullmatch(expected_alembic_revision):
         raise SourceAdoptionPreparationError("expected_alembic_revision is invalid")
     package_id = _require_package_id(package_id, field="package_id")
+    transport = _load_controller_source_transport()
+    try:
+        controller_config = transport.load_controller_config(Path(source_transport_config))
+    except Exception as exc:
+        raise SourceAdoptionPreparationError("source transport controller config is invalid") from exc
+    try:
+        campaign_binding = transport.campaign_binding.load_campaign_binding(Path(campaign_binding_path))
+    except Exception as exc:
+        raise SourceAdoptionPreparationError("expected static assets campaign binding is invalid") from exc
+    try:
+        transport.require_controller_config_for_campaign(
+            controller_config=controller_config,
+            campaign_id=campaign_binding.campaign_id,
+        )
+    except Exception as exc:
+        raise SourceAdoptionPreparationError(
+            "source transport controller config does not bind the campaign"
+        ) from exc
     repository, control_tree = _require_control_source(source_repository, control_commit)
     canonical_release_tree = build_canonical_release_tree_descriptor(
         application_source_repository=application_source_repository,
         application_release_sha=application_release_sha,
     )
     canonical_release_tree_raw = canonical_json_bytes(canonical_release_tree) + b"\n"
+    if (
+        campaign_binding.application_release_sha != application_release_sha
+        or campaign_binding.application_release_tree != canonical_release_tree["application"]["git_tree"]
+        or campaign_binding.expected_alembic_revision != expected_alembic_revision
+        or campaign_binding.control_commit != control_commit
+        or campaign_binding.control_tree != control_tree
+    ):
+        raise SourceAdoptionPreparationError("expected static assets campaign binding does not match the prepared package")
+    expected_static_application = {
+        "release_sha": canonical_release_tree["application"]["release_sha"],
+        "release_tree": canonical_release_tree["application"]["git_tree"],
+        "expected_alembic_revision": expected_alembic_revision,
+    }
+    expected_static_tooling = {
+        "control_commit": control_commit,
+        "control_tree": control_tree,
+    }
+    _expected_static_assets, expected_static_assets_raw = _read_controller_expected_static_assets_manifest(
+        path=Path(expected_static_assets_manifest),
+        campaign_id=campaign_binding.campaign_id,
+        application=expected_static_application,
+        tooling=expected_static_tooling,
+    )
     payload_files = {
         relative: _source_file(repository, control_commit, relative)
         for relative in SOURCE_PAYLOAD_FILES
@@ -1330,6 +1601,7 @@ def prepare_source_adoption_package(
     _validate_contract(contract_raw)
     payload_files[CONTRACT_MEMBER] = contract_raw
     payload_files[CANONICAL_RELEASE_TREE_MEMBER] = canonical_release_tree_raw
+    payload_files[EXPECTED_STATIC_ASSETS_MEMBER] = expected_static_assets_raw
     payload_files.update(
         _initial_static_bootstrap_payloads(
             source_transport_config=source_transport_config,
@@ -1342,6 +1614,27 @@ def prepare_source_adoption_package(
             control_tree=control_tree,
         )
     )
+    final_release_tree = build_canonical_release_tree_descriptor(
+        application_source_repository=application_source_repository,
+        application_release_sha=application_release_sha,
+    )
+    _final_expected_static_assets, final_expected_static_assets_raw = _read_controller_expected_static_assets_manifest(
+        path=Path(expected_static_assets_manifest),
+        campaign_id=campaign_binding.campaign_id,
+        application={
+            "release_sha": final_release_tree["application"]["release_sha"],
+            "release_tree": final_release_tree["application"]["git_tree"],
+            "expected_alembic_revision": expected_alembic_revision,
+        },
+        tooling=expected_static_tooling,
+    )
+    if (
+        final_release_tree != canonical_release_tree
+        or final_expected_static_assets_raw != expected_static_assets_raw
+    ):
+        raise SourceAdoptionPreparationError(
+            "application release or exact-release expected static assets manifest changed before package creation"
+        )
     hashes = {name: sha256_bytes(payload) for name, payload in sorted(payload_files.items())}
     manifest: dict[str, Any] = {
         "schema": PACKAGE_SCHEMA,
@@ -1405,6 +1698,7 @@ def _parser() -> argparse.ArgumentParser:
     package = actions.add_parser("prepare-package")
     package.add_argument("--source-repository", type=Path, required=True)
     package.add_argument("--application-source-repository", type=Path, required=True)
+    package.add_argument("--expected-static-assets-manifest", type=Path, required=True)
     package.add_argument("--control-commit", required=True)
     package.add_argument("--application-release-sha", required=True)
     package.add_argument("--expected-alembic-revision", required=True)
@@ -1440,6 +1734,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = prepare_source_adoption_package(
                 source_repository=args.source_repository,
                 application_source_repository=args.application_source_repository,
+                expected_static_assets_manifest=args.expected_static_assets_manifest,
                 control_commit=args.control_commit,
                 application_release_sha=args.application_release_sha,
                 expected_alembic_revision=args.expected_alembic_revision,

@@ -9,6 +9,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from core.legacy_two_server_full_matrix_fence import (
+    LegacyTwoServerFullMatrixRetiredError,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = REPO_ROOT / "scripts" / "run_production_full_matrix.py"
@@ -20,6 +23,7 @@ sys.modules[spec.name] = runner
 spec.loader.exec_module(runner)
 
 
+@unittest.skip("two-server Full-Matrix planner/executor is retired; V4 is the only supported path")
 class ProductionFullMatrixRunnerTests(unittest.TestCase):
     def build_args(self, *extra: str):
         return runner.parse_args(["--prefix", "PFM_20260624_180000_", *extra])
@@ -63,7 +67,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         }
 
     def test_default_plan_selects_entire_manifest_without_mutating_production(self):
-        plan = runner.build_plan(self.build_args())
+        plan = runner._forensic_build_plan(self.build_args())
 
         self.assertEqual(plan["schema_version"], "production_full_matrix_runner_plan_v1")
         self.assertFalse(plan["mutates_production"])
@@ -113,7 +117,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
             ],
         }
 
-        result = runner.execute_scenario_plan(scenario_plan, index=1, total=1, cwd=REPO_ROOT)
+        result = runner._forensic_execute_scenario_plan(scenario_plan, index=1, total=1, cwd=REPO_ROOT)
 
         self.assertEqual(result["status"], "passed")
         self.assertEqual([group["status"] for group in result["groups"]], ["passed", "passed"])
@@ -123,31 +127,53 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
 
         self.assertEqual(output, "خطا ")
 
-    def test_execute_mode_requires_explicit_production_confirmation(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            output = Path(tmp_dir) / "blocked.json"
-            with patch.dict(os.environ, {}, clear=True), patch("sys.stdout", new_callable=io.StringIO):
-                exit_code = runner.main(
-                    [
-                        "--prefix",
-                        "PFM_20260624_180000_",
-                        "--mode",
-                        "execution-plan",
-                        "--section",
-                        "delivery_contract",
-                        "--manifest-id",
-                        "DC-TDN-001",
-                        "--require-full-driver-coverage",
-                        "--execute",
-                        "--output",
-                        str(output),
-                    ]
-                )
-            payload = json.loads(output.read_text(encoding="utf-8"))
+    def test_execute_mode_is_retired_before_parsing_or_confirmation(self):
+        with patch.dict(os.environ, {}, clear=True), patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            exit_code = runner.main(
+                [
+                    "--prefix",
+                    "PFM_20260624_180000_",
+                    "--mode",
+                    "execution-plan",
+                    "--section",
+                    "delivery_contract",
+                    "--manifest-id",
+                    "DC-TDN-001",
+                    "--require-full-driver-coverage",
+                    "--execute",
+                    "--output",
+                    "/caller-controlled/legacy-output.json",
+                ]
+            )
+        payload = json.loads(stdout.getvalue())
 
         self.assertEqual(exit_code, 2)
-        self.assertEqual(payload["status"], "blocked_execution_confirmation_missing")
-        self.assertEqual(payload["execution_plan"]["execution"]["reason"], "confirmation_missing")
+        self.assertEqual(payload["status"], "blocked_legacy_two_server_full_matrix_retired")
+        self.assertEqual(payload["component"], "production-full-matrix-runner")
+
+    def test_public_in_process_plan_apis_are_retired_before_emitting_commands(self):
+        args = self.build_args()
+
+        with self.assertRaises(LegacyTwoServerFullMatrixRetiredError):
+            runner.build_plan(args)
+        with self.assertRaises(LegacyTwoServerFullMatrixRetiredError):
+            runner.build_preflight_commands(
+                prefix="PFM_UNIT_",
+                artifact_dir=Path("/tmp/pfm-public-api-fence"),
+            )
+        with self.assertRaises(LegacyTwoServerFullMatrixRetiredError):
+            runner.build_execution_plan(
+                [],
+                prefix="PFM_UNIT_",
+                artifact_dir=Path("/tmp/pfm-public-api-fence"),
+                user_count=1,
+                hot_offer_requests=1,
+                target_rps=1.0,
+                telegram_ratio=0.0,
+            )
+
+        self.assertNotIn("copy_between_servers_command", runner.__all__)
+        self.assertFalse(hasattr(runner, "copy_between_servers_command"))
 
     def test_resume_execution_skips_campaign_wide_cleanup_preflight_when_results_exist(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -183,7 +209,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                 {runner.EXECUTION_CONFIRM_ENV: runner.EXECUTION_CONFIRM_VALUE},
                 clear=True,
             ):
-                executed_plan, exit_code = runner.execute_command_plan(plan, cwd=REPO_ROOT, resume=True)
+                executed_plan, exit_code = runner._forensic_execute_command_plan(plan, cwd=REPO_ROOT, resume=True)
 
         self.assertEqual(exit_code, 0)
         results = executed_plan["preflight"]["results"]
@@ -203,7 +229,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
             )
 
     def test_filters_supported_base_trade_shape_scenarios(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--section",
                 "production_base_trade_shape",
@@ -226,7 +252,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertTrue(all(step["policy_supported"] is True for step in plan["steps"]))
 
     def test_filters_unsupported_policy_scenarios_as_negative_evidence(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--section",
                 "production_base_trade_shape",
@@ -242,7 +268,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("no_partial_mutation_on_reject", plan["steps"][0]["assertion_refs"])
 
     def test_execution_plan_builds_unsupported_policy_probe_commands(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--mode",
                 "execution-plan",
@@ -273,7 +299,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertNotIn("--skip-initial-cleanup", rendered)
 
     def test_execution_plan_builds_market_behavior_probe_commands(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--mode",
                 "execution-plan",
@@ -309,7 +335,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH=1", rendered)
 
     def test_execution_plan_extends_timeout_for_heavy_market_behavior_families(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--mode",
                 "execution-plan",
@@ -337,7 +363,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("DB_MAX_OVERFLOW=64", command["args"])
 
     def test_execution_plan_builds_delivery_contract_catalog_commands(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--mode",
                 "execution-plan",
@@ -363,7 +389,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertTrue(all(command["mutates_production"] is False for command in scenario_plan["commands"]))
 
     def test_execution_plan_builds_targeted_join_probe_commands(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--mode",
                 "execution-plan",
@@ -391,7 +417,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("cleanup_targeted_trade_delivery_join_scenario", rendered)
 
     def test_execution_plan_builds_outage_policy_composed_commands(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--mode",
                 "execution-plan",
@@ -420,7 +446,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("TDN-002", rendered)
 
     def test_outage_policy_reuses_prior_stable_trade_correctness_component(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--mode",
                 "execution-plan",
@@ -446,7 +472,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertNotIn("run-role-plan", rendered)
 
     def test_outage_policy_reuses_duplicate_delivery_policy_component(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--mode",
                 "execution-plan",
@@ -472,10 +498,10 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertNotIn("run_trade_delivery_targeted_join_matrix.py", rendered)
 
     def test_sharding_is_deterministic_and_non_overlapping(self):
-        first = runner.build_plan(
+        first = runner._forensic_build_plan(
             self.build_args("--section", "production_base_trade_shape", "--shard-count", "2", "--shard-index", "1")
         )
-        second = runner.build_plan(
+        second = runner._forensic_build_plan(
             self.build_args("--section", "production_base_trade_shape", "--shard-count", "2", "--shard-index", "2")
         )
         first_ids = {step["manifest_id"] for step in first["steps"]}
@@ -501,11 +527,11 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
 
         payload = json.loads(stdout.getvalue())
         self.assertEqual(exit_code, 2)
-        self.assertEqual(payload["status"], "blocked_not_implemented")
-        self.assertTrue(payload["execute_requested"])
+        self.assertEqual(payload["status"], "blocked_legacy_two_server_full_matrix_retired")
+        self.assertEqual(payload["component"], "production-full-matrix-runner")
 
     def test_preflight_mode_builds_non_mutating_command_plan(self):
-        plan = runner.build_plan(self.build_args("--mode", "preflight"))
+        plan = runner._forensic_build_plan(self.build_args("--mode", "preflight"))
 
         self.assertEqual(plan["status"], "preflight_planned")
         self.assertTrue(plan["execution_contract"]["preflight_driver_implemented"])
@@ -514,7 +540,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertTrue(all(not item["mutates_production"] for item in plan["preflight"]["commands"]))
 
     def test_execution_plan_builds_two_server_dual_role_commands_for_user_stable_case(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--mode",
                 "execution-plan",
@@ -608,7 +634,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         )
 
     def test_execution_plan_builds_customer_actor_composed_commands(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--mode",
                 "execution-plan",
@@ -677,7 +703,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
             },
         ]
 
-        execution_plan = runner.build_execution_plan(
+        execution_plan = runner._forensic_build_execution_plan(
             records,
             prefix="PFM_UNIT_",
             artifact_dir=Path("/tmp/pfm-unit"),
@@ -698,7 +724,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertNotIn("run-role-plan", rendered)
 
     def test_execution_plan_summarizes_whole_manifest_driver_gaps(self):
-        plan = runner.build_plan(self.build_args("--mode", "execution-plan"))
+        plan = runner._forensic_build_plan(self.build_args("--mode", "execution-plan"))
         execution_plan = plan["execution_plan"]
         summary = execution_plan["driver_gap_summary"]
 
@@ -774,7 +800,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertTrue(payload["execution_plan"]["coverage_gate"]["passed"])
 
     def test_execution_plan_builds_negative_guard_commands_for_implemented_case(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--mode",
                 "execution-plan",
@@ -802,7 +828,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("BOT_TOKEN=", rendered)
 
     def test_execution_plan_builds_negative_guard_commands_for_market_closed_case(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--mode",
                 "execution-plan",
@@ -823,7 +849,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(scenario_plan["case_id"], "market_closed")
 
     def test_execution_plan_builds_negative_guard_commands_for_inactive_offer_owner_case(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--mode",
                 "execution-plan",
@@ -844,7 +870,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(scenario_plan["case_id"], "inactive_offer_owner")
 
     def test_execution_plan_builds_negative_guard_commands_for_tier2_offer_creation_case(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--mode",
                 "execution-plan",
@@ -865,7 +891,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(scenario_plan["case_id"], "tier2_offer_creation")
 
     def test_execution_plan_builds_negative_guard_commands_for_tier2_telegram_request_case(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--mode",
                 "execution-plan",
@@ -892,7 +918,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
             ("NBG-017", "active_commodity_limit_exceeded"),
         ):
             with self.subTest(manifest_id=manifest_id):
-                plan = runner.build_plan(
+                plan = runner._forensic_build_plan(
                     self.build_args(
                         "--mode",
                         "execution-plan",
@@ -913,7 +939,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                 self.assertEqual(scenario_plan["case_id"], case_id)
 
     def test_execution_plan_builds_negative_guard_commands_for_remote_authority_unavailable_case(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--mode",
                 "execution-plan",
@@ -939,7 +965,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
             ("NBG-020", "wrong_authoritative_server"),
         ):
             with self.subTest(manifest_id=manifest_id):
-                plan = runner.build_plan(
+                plan = runner._forensic_build_plan(
                     self.build_args(
                         "--mode",
                         "execution-plan",
@@ -960,7 +986,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                 self.assertEqual(scenario_plan["case_id"], case_id)
 
     def test_execution_plan_builds_duplicate_replay_commands_for_webapp_request_case(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--mode",
                 "execution-plan",
@@ -991,7 +1017,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("--allow-nonterminal-offer", rendered)
 
     def test_execution_plan_builds_duplicate_replay_commands_for_telegram_request_case(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--mode",
                 "execution-plan",
@@ -1019,7 +1045,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("duplicate_replay", rendered)
 
     def test_execution_plan_builds_manual_expire_trade_race_commands(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--mode",
                 "execution-plan",
@@ -1049,7 +1075,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("--manual-expiry-result", rendered)
 
     def test_execution_plan_builds_time_expire_trade_race_commands(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--mode",
                 "execution-plan",
@@ -1079,7 +1105,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("--time-expiry-result", rendered)
 
     def test_execution_plan_builds_read_during_write_commands(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--mode",
                 "execution-plan",
@@ -1111,7 +1137,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertIn("--read-during-write-result", rendered)
 
     def test_execution_plan_builds_negative_guard_commands_for_pre_ledger_case(self):
-        plan = runner.build_plan(
+        plan = runner._forensic_build_plan(
             self.build_args(
                 "--mode",
                 "execution-plan",
@@ -1131,7 +1157,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(scenario_plan["driver"], "negative_guard_webapp_iran_probe")
         self.assertEqual(scenario_plan["case_id"], "watch_role_market_action")
 
-    def test_preflight_execute_requires_separate_confirmation(self):
+    def test_preflight_execute_is_retired_before_confirmation(self):
         with patch.dict(os.environ, {}, clear=True), patch("sys.stdout", new_callable=io.StringIO) as stdout:
             exit_code = runner.main(
                 [
@@ -1145,42 +1171,31 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
 
         payload = json.loads(stdout.getvalue())
         self.assertEqual(exit_code, 2)
-        self.assertEqual(payload["status"], "blocked_preflight_confirmation_missing")
-        self.assertEqual(payload["preflight"]["status"], "blocked_confirmation_missing")
+        self.assertEqual(payload["status"], "blocked_legacy_two_server_full_matrix_retired")
+        self.assertEqual(payload["component"], "production-full-matrix-runner")
 
-    def test_preflight_execute_runs_non_mutating_commands_when_confirmed(self):
-        def fake_run(args, **_kwargs):
-            return subprocess.CompletedProcess(args=args, returncode=0, stdout="ok", stderr="")
+    def test_preflight_execute_is_retired_even_with_historical_confirmation(self):
+        with patch.dict(
+            os.environ,
+            {runner.PREFLIGHT_CONFIRM_ENV: runner.PREFLIGHT_CONFIRM_VALUE},
+            clear=True,
+        ), patch.object(runner.subprocess, "run") as run_mock, patch(
+            "sys.stdout", new_callable=io.StringIO
+        ) as stdout:
+            exit_code = runner.main(
+                [
+                    "--prefix",
+                    "PFM_20260624_180000_",
+                    "--mode",
+                    "preflight",
+                    "--execute",
+                ]
+            )
 
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            output = Path(tmp_dir) / "preflight.json"
-            with patch.dict(
-                os.environ,
-                {runner.PREFLIGHT_CONFIRM_ENV: runner.PREFLIGHT_CONFIRM_VALUE},
-                clear=True,
-            ), patch.object(runner.subprocess, "run", side_effect=fake_run) as run_mock, patch(
-                "sys.stdout", new_callable=io.StringIO
-            ) as stdout:
-                exit_code = runner.main(
-                    [
-                        "--prefix",
-                        "PFM_20260624_180000_",
-                        "--mode",
-                        "preflight",
-                        "--execute",
-                        "--output",
-                        str(output),
-                    ]
-                )
-
-            full_payload = json.loads(output.read_text(encoding="utf-8"))
-            stdout_payload = json.loads(stdout.getvalue())
-
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(stdout_payload["status"], "preflight_passed")
-        self.assertEqual(full_payload["preflight"]["status"], "preflight_passed")
-        self.assertEqual(run_mock.call_count, len(full_payload["preflight"]["commands"]))
-        self.assertTrue(all(item["status"] == "passed" for item in full_payload["preflight"]["results"]))
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(payload["status"], "blocked_legacy_two_server_full_matrix_retired")
+        run_mock.assert_not_called()
 
     def test_execution_resume_skips_previously_passed_scenarios(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1217,8 +1232,8 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                 os.environ,
                 {runner.EXECUTION_CONFIRM_ENV: runner.EXECUTION_CONFIRM_VALUE},
                 clear=True,
-            ), patch.object(runner, "command_result", side_effect=fake_command_result) as command_mock:
-                result_plan, exit_code = runner.execute_command_plan(
+            ), patch.object(runner, "_forensic_command_result", side_effect=fake_command_result) as command_mock:
+                result_plan, exit_code = runner._forensic_execute_command_plan(
                     plan,
                     cwd=REPO_ROOT,
                     resume=True,
@@ -1274,8 +1289,8 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                 os.environ,
                 {runner.EXECUTION_CONFIRM_ENV: runner.EXECUTION_CONFIRM_VALUE},
                 clear=True,
-            ), patch.object(runner, "command_result", side_effect=fake_command_result):
-                result_plan, exit_code = runner.execute_command_plan(
+            ), patch.object(runner, "_forensic_command_result", side_effect=fake_command_result):
+                result_plan, exit_code = runner._forensic_execute_command_plan(
                     plan,
                     cwd=REPO_ROOT,
                     scenario_retries=1,
@@ -1327,8 +1342,8 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
                 os.environ,
                 {runner.EXECUTION_CONFIRM_ENV: runner.EXECUTION_CONFIRM_VALUE},
                 clear=True,
-            ), patch.object(runner, "command_result", side_effect=fake_command_result) as command_mock:
-                result_plan, exit_code = runner.execute_command_plan(
+            ), patch.object(runner, "_forensic_command_result", side_effect=fake_command_result) as command_mock:
+                result_plan, exit_code = runner._forensic_execute_command_plan(
                     plan,
                     cwd=REPO_ROOT,
                     continue_on_failure=True,
@@ -1363,6 +1378,49 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(full_payload["selected_summary"]["selected_count"], 23)
         self.assertEqual(stdout_payload["selected_summary"]["selected_count"], 23)
         self.assertNotIn("steps", stdout_payload)
+
+
+class RetiredProductionFullMatrixRunnerTests(unittest.TestCase):
+    def test_public_and_forensic_imports_cannot_emit_direct_command_material(self):
+        args = runner.parse_args(["--prefix", "PFM_20260624_180000_"])
+        calls = (
+            lambda: runner.build_plan(args),
+            lambda: runner.build_preflight_commands(
+                prefix="PFM_UNIT_", artifact_dir=Path("/tmp/pfm-public-api-fence")
+            ),
+            lambda: runner.build_execution_plan(
+                [],
+                prefix="PFM_UNIT_",
+                artifact_dir=Path("/tmp/pfm-public-api-fence"),
+                user_count=1,
+                hot_offer_requests=1,
+                target_rps=1.0,
+                telegram_ratio=0.0,
+            ),
+            lambda: runner._forensic_build_plan(args),
+            lambda: runner._forensic_copy_between_servers_command(
+                "must-not-render",
+                source_server="foreign",
+                target_server="iran",
+                path="/nonexistent",
+            ),
+        )
+
+        for call in calls:
+            with self.subTest(call=call), self.assertRaises(LegacyTwoServerFullMatrixRetiredError):
+                call()
+
+        self.assertFalse(hasattr(runner, "copy_between_servers_command"))
+        self.assertFalse(hasattr(runner._forensic_copy_between_servers_command, "__wrapped__"))
+
+    def test_cli_returns_only_retired_payload(self):
+        with patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            exit_code = runner.main(["--mode", "plan", "--print-full"])
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(payload["status"], "blocked_legacy_two_server_full_matrix_retired")
+        self.assertNotIn("ssh", json.dumps(payload).lower())
 
 
 if __name__ == "__main__":

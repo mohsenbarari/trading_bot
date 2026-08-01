@@ -13,6 +13,7 @@ from api.routers.auth import (
     setup_admin_password,
 )
 from core.enums import UserAccountStatus
+from core.services.promotion_session_invalidation_service import PromotionAccessTokenEpochError
 
 
 class FakeExecuteResult:
@@ -35,6 +36,14 @@ class FakeDB:
 
 
 class AuthRouterSessionFlowTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        patcher = patch(
+            "api.routers.auth.enforce_access_token_auth_epoch",
+            new=AsyncMock(return_value=None),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     async def test_refresh_access_token_rejects_invalid_jwt_and_bad_payload(self):
         req = RefreshTokenRequest(refresh_token="bad")
 
@@ -130,6 +139,25 @@ class AuthRouterSessionFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["access_token"], "new-access")
         self.assertEqual(result["refresh_token"], "good")
 
+    async def test_refresh_access_token_refuses_an_inactive_session_even_if_repository_returns_it(self):
+        req = RefreshTokenRequest(refresh_token="good")
+        user = SimpleNamespace(id=5, is_deleted=False, home_server="foreign")
+        session = SimpleNamespace(
+            id="sess-1",
+            is_active=False,
+            expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+            home_server="foreign",
+            last_active_at=None,
+        )
+        with patch("jose.jwt.decode", return_value={"type": "refresh", "sub": 5}), patch(
+            "api.routers.auth.get_session_by_refresh_token",
+            new=AsyncMock(return_value=session),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await refresh_access_token(req, db=FakeDB([FakeExecuteResult(user)]))
+
+        self.assertEqual(exc_info.exception.status_code, 401)
+
     async def test_refresh_access_token_ignores_customer_invitation_paths(self):
         req = RefreshTokenRequest(refresh_token="good")
         payload = {"type": "refresh", "sub": 5}
@@ -187,7 +215,7 @@ class AuthRouterSessionFlowTests(unittest.IsolatedAsyncioTestCase):
 
         user = SimpleNamespace(id=5, telegram_id=None, must_change_password=False)
         db = FakeDB([FakeExecuteResult(user)])
-        with patch("jose.jwt.decode", return_value={"sub": "5"}):
+        with patch("jose.jwt.decode", return_value={"sub": "5", "type": "access"}):
             with self.assertRaises(HTTPException) as exc_info:
                 await setup_admin_password(req, db=db, token="good")
         self.assertEqual(exc_info.exception.status_code, 400)
@@ -196,7 +224,7 @@ class AuthRouterSessionFlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_setup_admin_password_handles_short_password_and_success(self):
         user = SimpleNamespace(id=5, telegram_id=None, must_change_password=True, admin_password_hash=None)
 
-        with patch("jose.jwt.decode", return_value={"sub": "5"}):
+        with patch("jose.jwt.decode", return_value={"sub": "5", "type": "access"}):
             with self.assertRaises(HTTPException) as exc_info:
                 await setup_admin_password(SetupPasswordRequest(password="123"), db=FakeDB([FakeExecuteResult(user)]), token="good")
         self.assertEqual(exc_info.exception.status_code, 400)
@@ -204,7 +232,7 @@ class AuthRouterSessionFlowTests(unittest.IsolatedAsyncioTestCase):
 
         user = SimpleNamespace(id=5, telegram_id=None, must_change_password=True, admin_password_hash=None)
         db = FakeDB([FakeExecuteResult(user)])
-        with patch("jose.jwt.decode", return_value={"sub": "5"}), patch(
+        with patch("jose.jwt.decode", return_value={"sub": "5", "type": "access"}), patch(
             "api.routers.auth.get_password_hash",
             return_value="hashed-password",
         ) as hash_mock:
@@ -215,6 +243,21 @@ class AuthRouterSessionFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(user.must_change_password)
         db.commit.assert_awaited_once()
         self.assertEqual(result, {"detail": "رمز عبور با موفقیت ثبت شد"})
+
+    async def test_setup_admin_password_rejects_refresh_and_pre_cutover_access(self):
+        req = SetupPasswordRequest(password="secret1")
+        with patch("jose.jwt.decode", return_value={"sub": "5", "type": "refresh"}):
+            with self.assertRaises(HTTPException) as exc_info:
+                await setup_admin_password(req, db=FakeDB(), token="refresh")
+        self.assertEqual(exc_info.exception.status_code, 401)
+
+        with patch("jose.jwt.decode", return_value={"sub": "5", "type": "access", "iat": 1}), patch(
+            "api.routers.auth.enforce_access_token_auth_epoch",
+            new=AsyncMock(side_effect=PromotionAccessTokenEpochError("old token")),
+        ):
+            with self.assertRaises(HTTPException) as exc_info:
+                await setup_admin_password(req, db=FakeDB(), token="old")
+        self.assertEqual(exc_info.exception.status_code, 401)
 
 
 if __name__ == "__main__":

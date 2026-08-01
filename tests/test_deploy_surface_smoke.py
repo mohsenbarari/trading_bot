@@ -400,13 +400,15 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertEqual(staging_script.count('normalize_staging_frontend_permissions'), 3)
         self.assertIn('chmod -R u=rwX,go=rX -- "$STAGING_FRONTEND_DIST_DIR"', staging_script)
         self.assertIn('STAGING_FRONTEND_DIST_DIR="${STAGING_FRONTEND_DIST_DIR:-mini_app_dist_staging}"', staging_script)
-        self.assertIn('STAGING_INTERNAL_FOREIGN_SERVER_URL', staging_script)
-        self.assertIn('STAGING_PUBLIC_FOREIGN_SYNC_URL="${STAGING_PUBLIC_FOREIGN_SYNC_URL:-https://staging.362514.ir/foreign-sync}"', staging_script)
-        self.assertIn('STAGING_FOREIGN_IRAN_SERVER_URL="${STAGING_FOREIGN_IRAN_SERVER_URL:-https://staging.gold-trade.ir}"', staging_script)
-        self.assertIn('STAGING_FOREIGN_FRONTEND_URL="${STAGING_FOREIGN_FRONTEND_URL:-$STAGING_FOREIGN_IRAN_SERVER_URL}"', staging_script)
+        self.assertIn('STAGING_INTERNAL_IRAN_SERVER_URL="http://app:8000"', staging_script)
+        self.assertIn('STAGING_FOREIGN_IRAN_SERVER_URL="http://app:8000"', staging_script)
+        self.assertIn('STAGING_FOREIGN_FRONTEND_URL="${STAGING_FOREIGN_FRONTEND_URL:-$STAGING_FRONTEND_URL}"', staging_script)
         self.assertIn('STAGING_FOREIGN_PUBLIC_SURFACE_GUARD="${STAGING_FOREIGN_PUBLIC_SURFACE_GUARD:-$STAGING_ENABLE_BOT}"', staging_script)
         self.assertIn('STAGING_FOREIGN_ONLY="${STAGING_FOREIGN_ONLY:-0}"', staging_script)
-        self.assertIn('STAGING_MIGRATION_SERVER_MODE="$migration_server_mode"', staging_script)
+        self.assertIn('legacy_direct_staging_transport_blocked', staging_script)
+        self.assertIn('assert_legacy_direct_staging_transport_fenced', staging_script)
+        self.assertIn('blocked before configuration/network/compose', staging_script)
+        self.assertIn('STAGING_MIGRATION_SERVER_MODE="iran"', staging_script)
         self.assertIn('STAGING_RELEASE_SHA_OVERRIDE', staging_script)
         self.assertIn('command -v docker-compose', staging_script)
         self.assertIn('STAGING_FOREIGN_APP_PORT="${STAGING_FOREIGN_APP_PORT:-8121}"', staging_script)
@@ -416,22 +418,14 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertIn('set_env_value BOT_USERNAME "$STAGING_BOT_USERNAME"', staging_script)
         self.assertIn('STAGING_FOREIGN_APP_PORT="$STAGING_FOREIGN_APP_PORT"', staging_script)
         self.assertIn('STAGING_FOREIGN_IRAN_SERVER_URL="$STAGING_FOREIGN_IRAN_SERVER_URL"', staging_script)
-        self.assertIn('require_staging_peer_url', staging_script)
-        self.assertIn('case "$STAGING_INTERNAL_FOREIGN_SERVER_URL" in', staging_script)
-        self.assertIn('staging peer URL must start with http:// or https://', staging_script)
         self.assertIn('staging_release_sha', staging_script)
         self.assertIn('STAGING_RELEASE_SHA="$(staging_release_sha)"', staging_script)
-        self.assertIn('set_env_value PEER_SERVER_URL "$STAGING_INTERNAL_FOREIGN_SERVER_URL"', staging_script)
-        self.assertIn('start_sync_worker', staging_script)
-        self.assertIn('compose --profile staging-bot --profile staging-sync up -d --build foreign_app bot foreign_sync_worker', staging_script)
-        self.assertIn(
-            'compose --profile staging-bot --profile staging-sync up -d --build sync_worker foreign_sync_worker',
-            staging_script,
-        )
+        self.assertIn('set_env_value PEER_SERVER_URL ""', staging_script)
+        self.assertIn('set_env_value FOREIGN_SERVER_URL ""', staging_script)
+        self.assertIn('set_env_value GERMANY_SERVER_URL ""', staging_script)
+        self.assertIn('compose --profile staging-bot up -d --build', staging_script)
         self.assertIn('SERVER_MODE: ${STAGING_MIGRATION_SERVER_MODE:-iran}', staging_compose)
         self.assertIn('python scripts/align_trade_number_sequence.py', staging_compose)
-        self.assertIn('compose up -d --build sync_worker', staging_script)
-        self.assertIn('set_env_value GERMANY_SERVER_URL "$STAGING_INTERNAL_FOREIGN_SERVER_URL"', staging_script)
         self.assertIn('set_env_value AUDIT_TRAIL_PATH /app/audit_trail/audit.jsonl', staging_script)
         self.assertIn('AUDIT_TRAIL_PATH=/app/audit_trail/audit.jsonl', staging_example)
         self.assertIn('ensure_runtime_env_values\n        compose up -d --build "$@"', staging_script)
@@ -441,24 +435,37 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         self.assertIn('__FOREIGN_PUBLIC_SURFACE_GUARD__', staging_nginx)
         self.assertIn('location = /api/config', staging_script)
         self.assertIn('return 404;', staging_script)
-        self.assertIn('location = /foreign-sync/api/config', staging_nginx)
-        self.assertIn('location = /foreign-sync/api/sync/receive', staging_nginx)
-        self.assertIn('auth_basic off;', staging_nginx)
+        self.assertIn('location = /api/sync/receive', staging_nginx)
+        self.assertIn('location ^~ /foreign-sync/', staging_nginx)
         self.assertIn(
             'offers/internal|auth/internal|invitations/internal|customers/internal',
             staging_nginx,
         )
-        self.assertIn(
-            '^/foreign-sync/api/(sync|sessions/internal|trades/internal|offers/internal|auth/internal|invitations/internal|customers/internal)',
-            staging_nginx,
-        )
-        self.assertIn('proxy_pass http://127.0.0.1:__FOREIGN_APP_PORT__/api/sync/receive;', staging_nginx)
+        foreign_sync_block = staging_nginx.split('location ^~ /foreign-sync/', 1)[1].split('}', 1)[0]
+        iran_sync_block = staging_nginx.split('location = /api/sync/receive', 1)[1].split('}', 1)[0]
+        self.assertIn('return 410;', foreign_sync_block)
+        self.assertIn('return 410;', iran_sync_block)
+        self.assertNotIn('proxy_pass', foreign_sync_block)
+        self.assertNotIn('proxy_pass', iran_sync_block)
+        self.assertNotIn('location = /foreign-sync/', staging_nginx)
+        self.assertNotIn('location ~ ^/foreign-sync/', staging_nginx)
+        self.assertNotIn('proxy_pass http://127.0.0.1:__FOREIGN_APP_PORT__', staging_nginx)
         self.assertNotIn('root __APP_ROOT__/mini_app_dist;', staging_nginx)
         self.assertIn('FRONTEND_DIST_DIR:', staging_compose)
         self.assertIn('STAGING_FRONTEND_DOCKER_DIST_DIR', staging_compose)
         self.assertIn('STAGING_FOREIGN_APP_PORT', staging_compose)
-        self.assertIn('IRAN_SERVER_URL: ${STAGING_FOREIGN_IRAN_SERVER_URL:-https://staging.gold-trade.ir}', staging_compose)
-        self.assertIn('FRONTEND_URL: ${STAGING_FOREIGN_FRONTEND_URL:-https://staging.gold-trade.ir}', staging_compose)
+        self.assertIn('IRAN_SERVER_URL: ${STAGING_FOREIGN_IRAN_SERVER_URL:-http://app:8000}', staging_compose)
+        self.assertIn('FRONTEND_URL: ${STAGING_FOREIGN_FRONTEND_URL:-http://app:8000}', staging_compose)
+        self.assertIn('SINGLE_WRITER_RUNTIME_ENABLED: "true"', staging_compose)
+        self.assertIn('TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"', staging_compose)
+        self.assertNotIn('STAGING_INTERNAL_FOREIGN_SERVER_URL', staging_script)
+        self.assertNotIn('STAGING_PUBLIC_FOREIGN_SYNC_URL', staging_script)
+        self.assertNotIn('require_staging_peer_url', staging_script)
+        self.assertNotIn('start_sync_worker', staging_script)
+        self.assertNotIn('staging.gold-trade.ir', staging_script)
+        self.assertNotIn('staging.gold-trade.ir', staging_compose)
+        self.assertNotIn('65.109.220.59', staging_compose)
+        self.assertNotIn('65.109.216.187', staging_compose)
         self.assertIn('ARG FRONTEND_DIST_DIR=mini_app_dist', dockerfile)
         self.assertIn('COPY ${FRONTEND_DIST_DIR}/ /app/mini_app_dist/', dockerfile)
         self.assertIn('mini_app_dist_staging/', gitignore)
@@ -645,45 +652,44 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
                         self.assertEqual(options.get('max-size'), '${DOCKER_LOG_MAX_SIZE:-20m}')
                         self.assertEqual(options.get('max-file'), '${DOCKER_LOG_MAX_FILE:-5}')
 
-    def test_foreign_compose_pins_current_iran_domain_inside_containers(self):
-        compose = (REPO_ROOT / 'docker-compose.yml').read_text(encoding='utf-8')
+    def test_foreign_compose_has_no_iran_peer_pin_inside_containers(self):
+        compose_path = REPO_ROOT / 'docker-compose.yml'
+        compose = compose_path.read_text(encoding='utf-8')
+        services = yaml.safe_load(compose)['services']
 
-        self.assertIn(
-            '${IRAN_PUBLIC_DOMAIN:-coin.gold-trade.ir}:${IRAN_PUBLIC_IP:-65.109.220.59}',
-            compose,
-        )
-        self.assertGreaterEqual(compose.count('extra_hosts:'), 3)
+        self.assertNotIn('IRAN_PUBLIC_DOMAIN', compose)
+        self.assertNotIn('IRAN_PUBLIC_IP', compose)
+        for service_name in ('app', 'bot', 'sync_worker'):
+            with self.subTest(service=service_name):
+                self.assertFalse(services[service_name].get('extra_hosts'))
 
-    def test_staging_foreign_compose_pins_iran_domain_inside_containers(self):
+    def test_staging_compose_has_no_public_iran_peer_pin(self):
         staging_compose_path = REPO_ROOT / 'deploy/staging/docker-compose.staging.yml'
         staging_payload = yaml.safe_load(staging_compose_path.read_text(encoding='utf-8'))
         staging_script = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(encoding='utf-8')
         services = staging_payload['services']
-        expected = '${STAGING_IRAN_PUBLIC_DOMAIN:-staging.gold-trade.ir}:${STAGING_IRAN_PUBLIC_IP:-65.109.220.59}'
+        raw_compose = staging_compose_path.read_text(encoding='utf-8')
 
-        for service_name in ('foreign_app', 'foreign_sync_worker', 'bot', 'load_telegram_foreign'):
+        for service_name, service in services.items():
             with self.subTest(service=service_name):
-                self.assertIn(expected, services[service_name].get('extra_hosts') or [])
-        for service_name in ('app', 'sync_worker', 'migration'):
-            with self.subTest(service=service_name):
-                self.assertNotIn(expected, services[service_name].get('extra_hosts') or [])
-        self.assertIn('STAGING_IRAN_PUBLIC_DOMAIN="${STAGING_IRAN_PUBLIC_DOMAIN:-staging.gold-trade.ir}"', staging_script)
-        self.assertIn('STAGING_IRAN_PUBLIC_IP="${STAGING_IRAN_PUBLIC_IP:-65.109.220.59}"', staging_script)
-        self.assertIn('export STAGING_IRAN_PUBLIC_DOMAIN STAGING_IRAN_PUBLIC_IP', staging_script)
+                self.assertFalse(service.get('extra_hosts'))
+        for forbidden in ('staging.gold-trade.ir', '65.109.220.59', '65.109.216.187'):
+            self.assertNotIn(forbidden, raw_compose)
+            self.assertNotIn(forbidden, staging_script)
+        self.assertNotIn('STAGING_IRAN_PUBLIC_DOMAIN', staging_script)
+        self.assertNotIn('STAGING_IRAN_PUBLIC_IP', staging_script)
 
-    def test_staging_iran_load_runner_pins_foreign_domain_for_cold_start_trade_forwarding(self):
+    def test_staging_iran_load_runner_has_no_foreign_peer_pin(self):
         staging_compose_path = REPO_ROOT / 'deploy/staging/docker-compose.staging.yml'
         staging_payload = yaml.safe_load(staging_compose_path.read_text(encoding='utf-8'))
         staging_script = (REPO_ROOT / 'scripts/deploy_staging.sh').read_text(encoding='utf-8')
         webapp_runner = staging_payload['services']['load_webapp_iran']
 
-        self.assertIn(
-            '${STAGING_FOREIGN_PUBLIC_DOMAIN:-staging.362514.ir}:${STAGING_FOREIGN_PUBLIC_IP:-65.109.216.187}',
-            webapp_runner.get('extra_hosts') or [],
-        )
-        self.assertIn('STAGING_FOREIGN_PUBLIC_DOMAIN="${STAGING_FOREIGN_PUBLIC_DOMAIN:-staging.362514.ir}"', staging_script)
-        self.assertIn('STAGING_FOREIGN_PUBLIC_IP="${STAGING_FOREIGN_PUBLIC_IP:-65.109.216.187}"', staging_script)
-        self.assertIn('export STAGING_FOREIGN_PUBLIC_DOMAIN STAGING_FOREIGN_PUBLIC_IP', staging_script)
+        self.assertFalse(webapp_runner.get('extra_hosts'))
+        self.assertEqual(webapp_runner['environment']['SINGLE_WRITER_RUNTIME_ENABLED'], 'true')
+        self.assertEqual(webapp_runner['environment']['TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH'], '1')
+        self.assertNotIn('STAGING_FOREIGN_PUBLIC_DOMAIN', staging_script)
+        self.assertNotIn('STAGING_FOREIGN_PUBLIC_IP', staging_script)
 
     def test_production_hosts_sync_restores_standard_permissions(self):
         release_script = (REPO_ROOT / 'scripts/production_deploy_online.sh').read_text(encoding='utf-8')

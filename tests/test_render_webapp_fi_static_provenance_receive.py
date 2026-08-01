@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import base64
+import contextlib
+import dataclasses
 import datetime as dt
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -108,11 +111,26 @@ class StaticProvenanceReceiveRendererTests(unittest.TestCase):
         self.root.chmod(0o700)
         self.fi_workspace = self.root / "fi-workspace"
         self.fi_workspace.mkdir(mode=0o700)
-        self.controller_workspace = self.root / "controller-workspace"
-        self.controller_workspace.mkdir(mode=0o700)
         self.binding = _binding()
+        self.controller_workspace_root = self.root / "controller-workspaces"
+        self.controller_workspace_root.mkdir(mode=0o700)
+        self._workspace_root_patch = mock.patch.object(
+            renderer.transport.contract,
+            "SOURCE_TRANSPORT_WORKSPACE_ROOT",
+            self.controller_workspace_root,
+        )
+        self._workspace_root_patch.start()
+        self.addCleanup(self._workspace_root_patch.stop)
+        self.controller_workspace = renderer.transport.contract.source_transport_workspace_for_campaign(
+            self.binding.campaign_id
+        )
+        self.controller_workspace.mkdir(mode=0o700)
         self.policy = _policy(self.controller_workspace)
-        self.controller_config = SimpleNamespace(policy=self.policy)
+        self.controller_config = renderer.transport.ControllerS3Config(
+            policy=self.policy,
+            credentials_file=self.root / "controller-transport-credentials",
+            campaign_id=self.binding.campaign_id,
+        )
         self.candidate = self.root / "fi-bootstrap" / ("installed-" + self.binding.control_commit + "-package-one")
         self.candidate.parent.mkdir(mode=0o700)
         self.candidate.mkdir(mode=0o700)
@@ -219,6 +237,39 @@ class StaticProvenanceReceiveRendererTests(unittest.TestCase):
         self.assertEqual(["certificate"], calls)
         load_binding.assert_called_once()
 
+    def test_build_rejects_a_valid_other_campaign_config_before_initial_control(self) -> None:
+        other_campaign = "packet-render-other-20260730"
+        other_workspace = renderer.transport.contract.source_transport_workspace_for_campaign(other_campaign)
+        other_workspace.mkdir(mode=0o700)
+        other_config = renderer.transport.ControllerS3Config(
+            policy=dataclasses.replace(self.policy, workspace=other_workspace),
+            credentials_file=self.root / "controller-transport-credentials",
+            campaign_id=other_campaign,
+        )
+        with (
+            mock.patch.object(
+                renderer,
+                "_load_canonical_controller_binding",
+                return_value=(self.binding, SimpleNamespace(), {"schema": "role"}),
+            ),
+            mock.patch.object(renderer.transport, "load_controller_config", return_value=other_config),
+            mock.patch.object(renderer.initial, "build_initial_static_control") as blocked_initial_control,
+            self.assertRaisesRegex(
+                renderer.StaticProvenanceReceiveRenderError,
+                "config does not bind the canonical campaign",
+            ),
+        ):
+            renderer.build_static_provenance_receive_control(
+                source_transport_config=self.root / "inputs" / "transport.json",
+                campaign_binding=self.root / "campaign-binding.json",
+                source_adoption_package_directory=self.root / "package",
+                preparation_receipt=self.root / "preparation.json",
+                fi_install_receipt=self.root / "fi-install.json",
+                packet_id=self.packet_id,
+                transport_publish_receipt=self.root / "inputs" / "publish.json",
+            )
+        blocked_initial_control.assert_not_called()
+
     def test_render_is_one_pinned_ssh_control_and_url_is_only_final_remote_argument(self) -> None:
         control = self._control()
         url = "https://fixture.invalid/exact"
@@ -315,6 +366,53 @@ class StaticProvenanceReceiveRendererTests(unittest.TestCase):
         with self.assertRaisesRegex(renderer.StaticProvenanceReceiveRenderError, "transient or secret"):
             renderer._parse_canonical_install_output(_canonical(output))
         self.assertIn("load_nonsecret_install_receipt", renderer.REMOTE_RECEIVER_SOURCE)
+
+    def test_direct_cli_render_never_reads_or_prints_the_transient_url(self) -> None:
+        url = "https://fixture.invalid/download?X-Amz-Signature=" + "a" * 64
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(
+                renderer,
+                "_read_presigned_url_stdin",
+                side_effect=AssertionError("direct CLI must not read the URL"),
+            ),
+            mock.patch.object(
+                renderer,
+                "build_static_provenance_receive_control",
+                side_effect=AssertionError("direct CLI must block before control construction"),
+            ),
+            mock.patch.object(sys, "stdin", io.TextIOWrapper(io.BytesIO((url + "\n").encode("ascii")))),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            status = renderer.main(
+                [
+                    "render",
+                    "--source-transport-config",
+                    "/ignored/source-transport.json",
+                    "--campaign-binding",
+                    "/ignored/campaign-binding.json",
+                    "--source-adoption-package-directory",
+                    "/ignored/package",
+                    "--preparation-receipt",
+                    "/ignored/preparation.json",
+                    "--fi-install-receipt",
+                    "/ignored/fi-install.json",
+                    "--packet-id",
+                    "packet-one",
+                    "--transport-publish-receipt",
+                    "/ignored/publish.json",
+                    "--fi-known-hosts",
+                    "/ignored/known_hosts",
+                    "--presigned-download-url-stdin",
+                ]
+            )
+        output = stdout.getvalue() + stderr.getvalue()
+        self.assertEqual(2, status)
+        self.assertIn("disabled", output)
+        self.assertNotIn(url, output)
+        self.assertNotIn("ssh ", output)
 
     def test_cli_has_render_and_verify_only(self) -> None:
         choices = renderer._parser()._subparsers._group_actions[0].choices

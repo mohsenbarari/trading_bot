@@ -1,4 +1,5 @@
 import asyncio
+import io
 import json
 import tempfile
 from pathlib import Path
@@ -6,6 +7,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+from core.legacy_direct_fi_ir_transport_fence import LegacyDirectFiIrTransportRetiredError
+from scripts import trading_core_probe_worker as trading_worker
 from scripts.trading_core_probe_worker import (
     TradingProbeError,
     assert_race_barrier_lateness,
@@ -128,6 +131,21 @@ class TradingCoreProbeWorkerTests(unittest.TestCase):
         self.assertEqual(payload["barrier_epoch"], 100.0)
         self.assertEqual(payload["time_expiry_epoch"], 100.3)
         self.assertEqual(payload["time_expiry_stale_epoch"], 100.25)
+
+    def test_targeted_prefix_direct_sync_is_retired_before_peer_settings_or_http(self) -> None:
+        with self.assertRaises(LegacyDirectFiIrTransportRetiredError):
+            asyncio.run(trading_worker.push_prefix_change_logs_to_peer("legacy-p7-"))
+
+    def test_targeted_prefix_sync_cli_returns_a_stable_block_before_work(self) -> None:
+        with patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            exit_code = trading_worker.main(
+                ["sync-prefix-catchup", "--prefix", "legacy-p7-"]
+            )
+
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(payload["status"], "blocked_legacy_direct_fi_ir_transport_retired")
+        self.assertEqual(payload["component"], "trading-core-probe-worker")
 
 
 if __name__ == "__main__":

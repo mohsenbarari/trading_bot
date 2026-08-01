@@ -13,6 +13,11 @@ from core.config import settings
 from core.db import get_db
 from core.services.accountant_relation_service import EffectiveOwnerActor, resolve_effective_owner_actor
 from core.services.user_account_status_service import is_user_global_web_locked
+from core.services.promotion_session_invalidation_service import (
+    PromotionAccessTokenEpochError,
+    PromotionSessionInvalidationError,
+    enforce_access_token_auth_epoch,
+)
 from core.request_context import set_request_context
 from models.session import UserSession
 from models.user import User, UserRole
@@ -105,6 +110,26 @@ async def get_current_user(
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # This remains backward-compatible while no durable promotion auth epoch
+    # exists.  Once a coordinator has committed one, it rejects legacy
+    # sessionless JWTs (and every other access JWT) unless their server-issued
+    # NumericDate ``iat`` is at or after the cutover.
+    try:
+        await enforce_access_token_auth_epoch(db, payload)
+    except PromotionAccessTokenEpochError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session has been revoked",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from None
+    except PromotionSessionInvalidationError:
+        # A malformed or unreadable durable cutover must not become an auth
+        # bypass.  It is an availability fault rather than a client error.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication cutover state is unavailable",
+        ) from None
 
     # Check if session has been revoked (Redis blacklist)
     if session_id:

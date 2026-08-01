@@ -16,6 +16,11 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+    blocked_legacy_direct_fi_ir_transport_payload,
+)
 from scripts.capture_production_baseline import (
     DEFAULT_ARTIFACT_ROOT,
     compose_probe_script,
@@ -146,6 +151,10 @@ class Runner:
         if role == "foreign":
             command = f"cd {shlex.quote(str(REPO_ROOT))} && " + compose_probe_script("docker-compose.yml", body)
             return ["bash", "-lc", command]
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="stage-p9-observability-readiness",
+            operation="Iran Docker compose probe command construction",
+        )
         command = f"cd {quote_remote(self.settings['IRAN_PROJECT_DIR'])} && " + compose_probe_script("docker-compose.iran.yml", body)
         return remote_args(self.settings, command)
 
@@ -157,6 +166,10 @@ class Runner:
         command = " ".join(shlex.quote(part) for part in ("python3", *script_args))
         if role == "foreign":
             return self.run_json(f"{role}_{name}", ["bash", "-lc", f"cd {shlex.quote(str(REPO_ROOT))} && {command}"], timeout=timeout, check=check)
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="stage-p9-observability-readiness",
+            operation="Iran host probe command construction",
+        )
         remote_command = f"cd {quote_remote(self.settings['IRAN_PROJECT_DIR'])} && {command}"
         return self.run_json(f"{role}_{name}", remote_args(self.settings, remote_command), timeout=timeout, check=check)
 
@@ -277,6 +290,10 @@ def write_summary(path: Path, payload: dict[str, Any]) -> None:
 
 
 def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="stage-p9-observability-readiness",
+        operation="cross-site observability readiness benchmark",
+    )
     stamp = args.timestamp or utc_stamp()
     artifact_root = Path(args.artifact_root)
     run_dir = artifact_root / stamp
@@ -432,6 +449,16 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    try:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="stage-p9-observability-readiness",
+            operation="CLI execution",
+        )
+    except LegacyDirectFiIrTransportRetiredError:
+        print(json.dumps(blocked_legacy_direct_fi_ir_transport_payload(
+            component="stage-p9-observability-readiness",
+        ), ensure_ascii=False, sort_keys=True))
+        return 2
     payload = run_benchmark(args)
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))

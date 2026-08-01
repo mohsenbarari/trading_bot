@@ -541,9 +541,10 @@ class CoreEventsTests(unittest.TestCase):
             'core.sync_push.push_sync_direct'
         ) as push_sync_direct:
             connection.execute.return_value = _FakeInsertResult(42)
-            events.log_change(connection, 'offers', 5, 'INSERT', {'id': 5})
+            change_log_id = events.log_change(connection, 'offers', 5, 'INSERT', {'id': 5})
 
         connection.execute.assert_called_once()
+        self.assertEqual(change_log_id, 42)
         get_sync_redis.assert_not_called()
         push_sync_direct.assert_not_called()
         inserted_change_log_data = json.loads(connection.execute.call_args.args[1]['data'])

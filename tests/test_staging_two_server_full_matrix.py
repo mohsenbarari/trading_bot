@@ -4,10 +4,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from core.legacy_two_server_full_matrix_fence import (
+    LegacyTwoServerFullMatrixRetiredError,
+)
 from scripts import build_staging_two_server_full_matrix_manifest as manifest_builder
 from scripts import run_staging_two_server_full_matrix as runner
 
 
+@unittest.skip("two-server staging Full-Matrix is retired; V4 is the only supported path")
 class StagingTwoServerFullMatrixTests(unittest.TestCase):
     def test_iran_ssh_defaults_match_current_host(self):
         args = runner.parse_args([])
@@ -25,20 +29,38 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         args = runner.parse_args(["--iran-ssh-host", "root@example", "--iran-ssh-port", "37067"])
 
         self.assertEqual(
-            runner.remote_shell_command(args, "echo ok"),
+            runner._forensic_remote_shell_command(args, "echo ok"),
             ["ssh", "-p", "37067", "root@example", "cd /srv/trading-bot/staging-iran && echo ok"],
         )
         self.assertEqual(
-            runner.scp_from_iran(args, "/remote/file.json", Path("/tmp/local.json")),
+            runner._forensic_scp_from_iran(args, "/remote/file.json", Path("/tmp/local.json")),
             ["scp", "-P", "37067", "root@example:/remote/file.json", "/tmp/local.json"],
         )
         self.assertEqual(
-            runner.scp_to_iran(args, Path("/tmp/local.json"), "/remote/file.json"),
+            runner._forensic_scp_to_iran(args, Path("/tmp/local.json"), "/remote/file.json"),
             ["scp", "-P", "37067", "/tmp/local.json", "root@example:/remote/file.json"],
         )
 
+    def test_public_two_server_api_boundaries_are_retired(self):
+        args = runner.parse_args(["--run-id", "S2FM-PUBLIC-FENCE"])
+
+        with self.assertRaises(LegacyTwoServerFullMatrixRetiredError):
+            runner.remote_shell_command(args, "echo should-not-render")
+        with self.assertRaises(LegacyTwoServerFullMatrixRetiredError):
+            runner.scp_from_iran(args, "/remote/should-not-render", Path("/tmp/local.json"))
+        with self.assertRaises(LegacyTwoServerFullMatrixRetiredError):
+            runner.build_plan(args)
+        with self.assertRaises(LegacyTwoServerFullMatrixRetiredError):
+            runner.preflight_checks(args, {})
+        with self.assertRaises(LegacyTwoServerFullMatrixRetiredError):
+            manifest_builder.build_manifest(prefix="FMX_STAGE_PUBLIC_FENCE_")
+
+        self.assertFalse(hasattr(runner, "iran_ssh_command"))
+        self.assertFalse(hasattr(runner, "copy_prepare_artifacts_to_peer"))
+        self.assertFalse(hasattr(runner._forensic_remote_shell_command, "__wrapped__"))
+
     def test_manifest_is_complete_controlled_and_branch_change_tagged(self):
-        manifest = manifest_builder.build_manifest(prefix="FMX_STAGE_UNIT_20260629_")
+        manifest = manifest_builder._forensic_build_manifest(prefix="FMX_STAGE_UNIT_20260629_")
         errors = manifest_builder.validate_manifest(manifest)
 
         self.assertEqual(errors, [])
@@ -69,30 +91,30 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
     def test_preflight_fails_when_release_label_is_not_current_commit(self):
         args = runner.parse_args(["--expected-release-sha", "wrong-release"])
         with patch.object(runner, "run_git_value") as git_value, patch.object(
-            runner, "check_tls", return_value=runner.CheckResult("tls", "passed", "ok")
+            runner, "_forensic_check_tls", return_value=runner.CheckResult("tls", "passed", "ok")
         ), patch.object(
-            runner, "check_http_json", return_value=runner.CheckResult("http", "passed", "ok")
+            runner, "_forensic_check_http_json", return_value=runner.CheckResult("http", "passed", "ok")
         ), patch.object(
-            runner, "check_foreign_public_surface_guard", return_value=runner.CheckResult("guard", "passed", "ok")
+            runner, "_forensic_check_foreign_public_surface_guard", return_value=runner.CheckResult("guard", "passed", "ok")
         ), patch.object(
-            runner, "check_internal_ingress_without_basic_auth", return_value=runner.CheckResult("ingress", "passed", "ok")
+            runner, "_forensic_check_internal_ingress_without_basic_auth", return_value=runner.CheckResult("ingress", "passed", "ok")
         ), patch.object(
-            runner, "check_container_runtime_identity", return_value=runner.CheckResult("runtime", "passed", "ok")
+            runner, "_forensic_check_container_runtime_identity", return_value=runner.CheckResult("runtime", "passed", "ok")
         ), patch.object(
-            runner, "check_storage_identity_separation", return_value=runner.CheckResult("storage", "passed", "ok")
+            runner, "_forensic_check_storage_identity_separation", return_value=runner.CheckResult("storage", "passed", "ok")
         ), patch.object(
-            runner, "capture_parity", return_value={"status": "passed"}
+            runner, "_forensic_capture_parity", return_value={"status": "passed"}
         ), patch.object(
-            runner, "capture_sync_health", return_value={"status": "passed"}
+            runner, "_forensic_capture_sync_health", return_value={"status": "passed"}
         ):
             git_value.side_effect = lambda command: {
                 ("branch", "--show-current"): args.expected_branch,
                 ("rev-parse", "HEAD"): "current-commit",
                 ("status", "--short", "--branch"): "",
             }.get(tuple(command), "")
-            checks = runner.preflight_checks(
+            checks = runner._forensic_preflight_checks(
                 args,
-                manifest_builder.build_manifest(prefix="FMX_STAGE_UNIT_RELEASE_BINDING_"),
+                manifest_builder._forensic_build_manifest(prefix="FMX_STAGE_UNIT_RELEASE_BINDING_"),
             )
 
         binding = next(check for check in checks if check.name == "release_commit_binding")
@@ -118,7 +140,7 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
                         str(tmp_path / "artifacts"),
                     ]
                 )
-                payload = runner.build_plan(args)
+                payload = runner._forensic_build_plan(args)
             finally:
                 runner.CLAUDE_LOG_ROOT = original_claude_root
                 runner.CHATGPT_LOG_ROOT = original_chatgpt_root
@@ -166,15 +188,15 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         args = runner.parse_args(["--iran-ssh-host", "root@example", "--iran-ssh-port", "37067"])
 
         self.assertEqual(
-            runner.remote_shell_command(args, "echo ok"),
+            runner._forensic_remote_shell_command(args, "echo ok"),
             ["ssh", "-p", "37067", "root@example", "cd /srv/trading-bot/staging-iran && echo ok"],
         )
         self.assertEqual(
-            runner.scp_from_iran(args, "/remote/file.json", Path("/tmp/local.json")),
+            runner._forensic_scp_from_iran(args, "/remote/file.json", Path("/tmp/local.json")),
             ["scp", "-P", "37067", "root@example:/remote/file.json", "/tmp/local.json"],
         )
         self.assertEqual(
-            runner.scp_to_iran(args, Path("/tmp/local.json"), "/remote/file.json"),
+            runner._forensic_scp_to_iran(args, Path("/tmp/local.json"), "/remote/file.json"),
             ["scp", "-P", "37067", "/tmp/local.json", "root@example:/remote/file.json"],
         )
 
@@ -232,7 +254,7 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
             )
 
         with tempfile.TemporaryDirectory() as tmpdir, patch(
-            "scripts.run_staging_two_server_full_matrix.fetch_observability_json",
+            "scripts.run_staging_two_server_full_matrix._forensic_fetch_observability_json",
             side_effect=fake_fetch,
         ):
             args = SimpleNamespace(
@@ -243,7 +265,7 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
                 basic_auth_user=None,
                 basic_auth_password=None,
             )
-            payload = runner.capture_sync_health(args, label="after", require_fresh_parity=True)
+            payload = runner._forensic_capture_sync_health(args, label="after", require_fresh_parity=True)
 
         self.assertEqual(payload["status"], "failed")
         self.assertIn("iran", payload["failed_peers"])
@@ -275,7 +297,7 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
             )
 
         with tempfile.TemporaryDirectory() as tmpdir, patch(
-            "scripts.run_staging_two_server_full_matrix.fetch_observability_json",
+            "scripts.run_staging_two_server_full_matrix._forensic_fetch_observability_json",
             side_effect=fake_fetch,
         ):
             args = SimpleNamespace(
@@ -286,7 +308,7 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
                 basic_auth_user=None,
                 basic_auth_password=None,
             )
-            payload = runner.capture_sync_health(args, label="after", require_fresh_parity=True)
+            payload = runner._forensic_capture_sync_health(args, label="after", require_fresh_parity=True)
 
         self.assertEqual(payload["status"], "failed")
         self.assertIn("parity_status.fresh=false", "; ".join(payload["gate_failures"]["iran"]))
@@ -314,7 +336,7 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
             )
 
         with tempfile.TemporaryDirectory() as tmpdir, patch(
-            "scripts.run_staging_two_server_full_matrix.fetch_observability_json",
+            "scripts.run_staging_two_server_full_matrix._forensic_fetch_observability_json",
             side_effect=fake_fetch,
         ):
             args = SimpleNamespace(
@@ -328,7 +350,7 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
                 parity_mode="quick",
                 parity_max_rows_per_table=5000,
             )
-            payload = runner.capture_parity(args, label="before")
+            payload = runner._forensic_capture_parity(args, label="before")
 
         self.assertEqual(payload["status"], "passed")
         self.assertEqual(payload["snapshots"]["iran"]["snapshot"]["server_mode"], "iran")
@@ -366,7 +388,7 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
             )
 
         with tempfile.TemporaryDirectory() as tmpdir, patch(
-            "scripts.run_staging_two_server_full_matrix.fetch_observability_json",
+            "scripts.run_staging_two_server_full_matrix._forensic_fetch_observability_json",
             side_effect=fake_fetch,
         ):
             args = SimpleNamespace(
@@ -380,7 +402,7 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
                 parity_mode="quick",
                 parity_max_rows_per_table=5000,
             )
-            payload = runner.capture_parity(args, label="before")
+            payload = runner._forensic_capture_parity(args, label="before")
 
         self.assertEqual(payload["status"], "failed")
         self.assertEqual(payload["failed_peers"], ["foreign"])
@@ -405,7 +427,7 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
             "os.environ",
             {runner.EXECUTION_CONFIRM_ENV: runner.EXECUTION_CONFIRM_VALUE},
         ), patch(
-            "scripts.run_staging_two_server_full_matrix.run_preflight",
+            "scripts.run_staging_two_server_full_matrix._forensic_run_preflight",
             return_value=(
                 {
                     "summary": {"status": "preflight_passed"},
@@ -414,7 +436,7 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
                 0,
             ),
         ), patch(
-            "scripts.run_staging_two_server_full_matrix.run_driver_suite",
+            "scripts.run_staging_two_server_full_matrix._forensic_run_driver_suite",
             return_value={
                 "status": "passed",
                 "scenario_total": 1,
@@ -423,16 +445,16 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
                 "manifest_total": 5611,
             },
         ), patch(
-            "scripts.run_staging_two_server_full_matrix.capture_parity",
+            "scripts.run_staging_two_server_full_matrix._forensic_capture_parity",
             side_effect=fake_capture_parity,
         ), patch(
-            "scripts.run_staging_two_server_full_matrix.capture_sync_health",
+            "scripts.run_staging_two_server_full_matrix._forensic_capture_sync_health",
             side_effect=fake_capture_sync_health,
         ), patch(
             "scripts.run_staging_two_server_full_matrix.publish_agent_logs",
         ):
             args = SimpleNamespace(artifact_dir=Path(tmpdir), run_id="S2FM-UNIT")
-            _payload, exit_code = runner.run_execute(args)
+            _payload, exit_code = runner._forensic_run_execute(args)
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(call_order, ["parity_after", "sync_health_after_True"])
@@ -459,8 +481,8 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
             iran_app_container="iran-app",
             foreign_app_container="foreign-app",
         )
-        with patch("scripts.run_staging_two_server_full_matrix.run_json_command", side_effect=fake_run_json_command):
-            result = runner.check_storage_identity_separation("storage", args=args)
+        with patch("scripts.run_staging_two_server_full_matrix._forensic_run_json_command", side_effect=fake_run_json_command):
+            result = runner._forensic_check_storage_identity_separation("storage", args=args)
 
         self.assertEqual(result.status, "failed")
         self.assertIn("database identities match", result.detail)
@@ -498,8 +520,8 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
             iran_app_container="iran-app",
             foreign_app_container="foreign-app",
         )
-        with patch("scripts.run_staging_two_server_full_matrix.run_json_command", side_effect=fake_run_json_command):
-            result = runner.check_storage_identity_separation("storage", args=args)
+        with patch("scripts.run_staging_two_server_full_matrix._forensic_run_json_command", side_effect=fake_run_json_command):
+            result = runner._forensic_check_storage_identity_separation("storage", args=args)
 
         self.assertEqual(result.status, "passed")
 
@@ -526,7 +548,7 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
             )
 
         with tempfile.TemporaryDirectory() as tmpdir, patch(
-            "scripts.run_staging_two_server_full_matrix.fetch_observability_json",
+            "scripts.run_staging_two_server_full_matrix._forensic_fetch_observability_json",
             side_effect=fake_fetch,
         ):
             args = SimpleNamespace(
@@ -540,7 +562,7 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
                 parity_max_rows_per_table=5000,
                 expected_release_sha="abc123",
             )
-            payload = runner.capture_parity(args, label="before")
+            payload = runner._forensic_capture_parity(args, label="before")
 
         self.assertEqual(payload["status"], "passed")
         self.assertIn(
@@ -591,13 +613,13 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
             "scripts.run_staging_two_server_full_matrix.time.time",
             return_value=1000.0,
         ), patch(
-            "scripts.run_staging_two_server_full_matrix.run_remote_worker",
+            "scripts.run_staging_two_server_full_matrix._forensic_run_remote_worker",
             side_effect=fake_remote_worker,
         ), patch(
-            "scripts.run_staging_two_server_full_matrix.run_local_worker",
+            "scripts.run_staging_two_server_full_matrix._forensic_run_local_worker",
             side_effect=fake_local_worker,
         ):
-            results = runner.refresh_role_plan_barriers_on_both_sides(
+            results = runner._forensic_refresh_role_plan_barriers_on_both_sides(
                 args=SimpleNamespace(),
                 local_dir=Path(tmpdir),
                 remote_dir="/remote/artifacts",
@@ -633,8 +655,8 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
                 "",
             )
 
-        with patch("scripts.run_staging_two_server_full_matrix.run_json_command", side_effect=fake_run_json_command):
-            result = runner.check_container_runtime_identity(
+        with patch("scripts.run_staging_two_server_full_matrix._forensic_run_json_command", side_effect=fake_run_json_command):
+            result = runner._forensic_check_container_runtime_identity(
                 "foreign_runtime_identity",
                 server="foreign",
                 expected_server_mode="foreign",
@@ -647,7 +669,7 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
 
     def test_local_load_runner_command_overrides_iran_route(self):
         args = SimpleNamespace(iran_base_url="https://staging.gold-trade.ir")
-        command = runner.local_load_runner_command(
+        command = runner._forensic_local_load_runner_command(
             "load_telegram_foreign",
             Path("/tmp/full-matrix-artifacts"),
             ["load-runner-ready", "--role", "telegram_foreign"],
@@ -670,7 +692,7 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
             ]
         )
 
-        command = runner.remote_load_runner_command(
+        command = runner._forensic_remote_load_runner_command(
             args,
             "load_webapp_iran",
             "/tmp/full-matrix-artifacts",
@@ -768,13 +790,13 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
             )
 
         with tempfile.TemporaryDirectory() as tmpdir, patch(
-            "scripts.run_staging_two_server_full_matrix.run_remote_worker",
+            "scripts.run_staging_two_server_full_matrix._forensic_run_remote_worker",
             side_effect=fake_remote_worker,
         ), patch(
-            "scripts.run_staging_two_server_full_matrix.run_local_worker",
+            "scripts.run_staging_two_server_full_matrix._forensic_run_local_worker",
             side_effect=fake_local_worker,
         ):
-            runner.run_sync_catchup(
+            runner._forensic_run_sync_catchup(
                 args=SimpleNamespace(),
                 prefix="FMX_STAGE_UNIT_",
                 local_dir=Path(tmpdir),
@@ -859,18 +881,18 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as directory, patch.object(
             runner,
-            "run_remote_worker",
+            "_forensic_run_remote_worker",
             side_effect=[result("seed_users_on_iran"), result("sync_seeded_users_iran_to_foreign")],
         ) as remote, patch.object(
             runner,
-            "run_logged_command",
+            "_forensic_run_logged_command",
             return_value=result("copy_seeded_users_iran_to_foreign"),
         ) as copy, patch.object(
             runner,
-            "run_local_worker",
+            "_forensic_run_local_worker",
             return_value=result("verify_seeded_users_on_foreign"),
-        ) as local, patch.object(runner, "scp_from_iran", return_value=["scp"]):
-            results = runner.seed_and_converge_dual_role_users(
+        ) as local, patch.object(runner, "_forensic_scp_from_iran", return_value=["scp"]):
+            results = runner._forensic_seed_and_converge_dual_role_users(
                 args=SimpleNamespace(),
                 scenario=scenario,
                 prefix="FMX_STAGE_UNIT_",
@@ -908,26 +930,26 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as directory, patch.object(
             runner,
-            "run_cleanup_on_both_sides",
+            "_forensic_run_cleanup_on_both_sides",
             return_value=[],
         ), patch.object(
             runner,
             "assert_cleanup_dry_run_zero",
             return_value={"status": "ok"},
-        ), patch.object(runner, "run_observability_snapshots", return_value=[]), patch.object(
+        ), patch.object(runner, "_forensic_run_observability_snapshots", return_value=[]), patch.object(
             runner,
-            "seed_and_converge_dual_role_users",
+            "_forensic_seed_and_converge_dual_role_users",
             return_value=[],
         ) as seed, patch.object(
             runner,
-            "run_remote_worker",
+            "_forensic_run_remote_worker",
             side_effect=RuntimeError("stop after seed"),
         ), patch.object(runner, "read_json_file", return_value={}), patch.object(
             runner,
             "write_json",
         ):
             args = SimpleNamespace(prefix="FMX_STAGE_UNIT_", run_id="S2FM-UNIT")
-            result = runner.execute_driver_scenario(
+            result = runner._forensic_execute_driver_scenario(
                 args,
                 scenario,
                 suite_dir=Path(directory),
@@ -951,7 +973,7 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
             }
 
         with tempfile.TemporaryDirectory() as tmpdir, patch(
-            "scripts.run_staging_two_server_full_matrix.execute_driver_scenario",
+            "scripts.run_staging_two_server_full_matrix._forensic_execute_driver_scenario",
             side_effect=fake_execute_driver_scenario,
         ):
             args = SimpleNamespace(
@@ -961,11 +983,34 @@ class StagingTwoServerFullMatrixTests(unittest.TestCase):
                 driver_scenario_id=["DRIVER-BOT-DUPLICATE-REPLAY-BUY"],
                 driver_scenario_limit=4,
             )
-            result = runner.run_driver_suite(args, {"summary": {"total_manifest_scenarios": 5611}})
+            result = runner._forensic_run_driver_suite(args, {"summary": {"total_manifest_scenarios": 5611}})
 
         self.assertEqual(calls, ["DRIVER-BOT-DUPLICATE-REPLAY-BUY"])
         self.assertEqual(result["status"], "passed")
         self.assertEqual(result["scenario_total"], 1)
+
+
+class RetiredStagingTwoServerFullMatrixTests(unittest.TestCase):
+    def test_public_and_forensic_imports_cannot_emit_or_execute_two_server_material(self):
+        args = runner.parse_args(["--run-id", "S2FM-RETIRED-FENCE"])
+        calls = (
+            lambda: runner.remote_shell_command(args, "echo must-not-render"),
+            lambda: runner.scp_from_iran(args, "/remote/must-not-render", Path("/tmp/local.json")),
+            lambda: runner.build_plan(args),
+            lambda: runner._forensic_remote_shell_command(args, "echo must-not-render"),
+            lambda: runner._forensic_scp_to_iran(args, Path("/tmp/local.json"), "/remote/must-not-render"),
+            lambda: runner._forensic_build_plan(args),
+            lambda: manifest_builder.build_manifest(prefix="FMX_STAGE_RETIRED_"),
+            lambda: manifest_builder._forensic_build_manifest(prefix="FMX_STAGE_RETIRED_"),
+        )
+
+        for call in calls:
+            with self.subTest(call=call), self.assertRaises(LegacyTwoServerFullMatrixRetiredError):
+                call()
+
+        self.assertFalse(hasattr(runner, "iran_ssh_command"))
+        self.assertFalse(hasattr(runner, "copy_prepare_artifacts_to_peer"))
+        self.assertFalse(hasattr(runner._forensic_remote_shell_command, "__wrapped__"))
 
 
 if __name__ == "__main__":

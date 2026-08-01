@@ -1,0 +1,10 @@
+{
+  "agent_release_sha": "REPLACE_WITH_THE_REVIEWED_40_HEX_RELEASE_SHA",
+  "controller_public_key": "REPLACE_WITH_ONE_COMMENT_FREE_SSH_ED25519_PUBLIC_KEY",
+  "direct_finland_to_iran": "forbidden",
+  "enabled": false,
+  "mode": "read-only",
+  "schema": "three-site-dedicated-host-preflight-receipt-agent-installation-v1",
+  "site_role": "REPLACE_WITH_bot_fi_webapp_fi_OR_witness",
+  "transport": "pinned-ssh-readonly-agent"
+}

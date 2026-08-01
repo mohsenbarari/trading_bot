@@ -12,7 +12,15 @@ from core.background_job_authority import (
     assert_background_job_authority,
 )
 from core.config import settings
-from core.db import AsyncSessionLocal
+from core.db import (
+    AsyncSessionLocal,
+    require_application_writer_term,
+    require_external_effect_execution_authorization,
+)
+from core.external_effect_execution_gate import (
+    EXTERNAL_EFFECT_SCOPE_TRADE_TELEGRAM_DELIVERY,
+    EXTERNAL_EFFECT_SCOPE_TRADE_WEBAPP_DELIVERY,
+)
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
 from core.server_routing import current_server
 from core.services.trade_delivery_receipt_service import (
@@ -66,7 +74,15 @@ def _increment_status(status_counts: dict[str, int], status: str | None) -> None
     status_counts[key] = status_counts.get(key, 0) + 1
 
 
-async def _recover_leases(destination_server: str) -> int:
+def _require_effectful_worker_authorization(scope: str) -> None:
+    """Fence recovery and delivery claims before they can reach a provider."""
+
+    require_application_writer_term()
+    require_external_effect_execution_authorization(scope)
+
+
+async def _recover_leases(destination_server: str, *, scope: str) -> int:
+    _require_effectful_worker_authorization(scope)
     async with AsyncSessionLocal() as db:
         recovered = await recover_expired_local_leases(
             db,
@@ -80,11 +96,16 @@ async def _recover_leases(destination_server: str) -> int:
 
 async def run_webapp_trade_delivery_cycle(*, limit: int | None = None) -> TradeDeliveryCycleReport:
     assert_background_job_authority(JOB_TRADE_WEBAPP_DELIVERY)
+    _require_effectful_worker_authorization(EXTERNAL_EFFECT_SCOPE_TRADE_WEBAPP_DELIVERY)
     status_counts: dict[str, int] = {}
     processed_count = 0
-    recovered_lease_count = await _recover_leases(WEBAPP_DESTINATION_SERVER)
+    recovered_lease_count = await _recover_leases(
+        WEBAPP_DESTINATION_SERVER,
+        scope=EXTERNAL_EFFECT_SCOPE_TRADE_WEBAPP_DELIVERY,
+    )
 
     for _ in range(_worker_batch_limit(limit)):
+        _require_effectful_worker_authorization(EXTERNAL_EFFECT_SCOPE_TRADE_WEBAPP_DELIVERY)
         async with AsyncSessionLocal() as db:
             result = await claim_and_deliver_next_webapp_receipt(
                 db,
@@ -107,11 +128,16 @@ async def run_webapp_trade_delivery_cycle(*, limit: int | None = None) -> TradeD
 
 async def run_telegram_trade_delivery_cycle(*, limit: int | None = None) -> TradeDeliveryCycleReport:
     assert_background_job_authority(JOB_TRADE_TELEGRAM_DELIVERY)
+    _require_effectful_worker_authorization(EXTERNAL_EFFECT_SCOPE_TRADE_TELEGRAM_DELIVERY)
     status_counts: dict[str, int] = {}
     processed_count = 0
-    recovered_lease_count = await _recover_leases(TELEGRAM_DESTINATION_SERVER)
+    recovered_lease_count = await _recover_leases(
+        TELEGRAM_DESTINATION_SERVER,
+        scope=EXTERNAL_EFFECT_SCOPE_TRADE_TELEGRAM_DELIVERY,
+    )
 
     for _ in range(_worker_batch_limit(limit)):
+        _require_effectful_worker_authorization(EXTERNAL_EFFECT_SCOPE_TRADE_TELEGRAM_DELIVERY)
         async with AsyncSessionLocal() as db:
             result = await claim_and_deliver_next_telegram_receipt(
                 db,

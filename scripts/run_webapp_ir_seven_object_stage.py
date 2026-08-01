@@ -376,14 +376,21 @@ def _serialize_transient_receipt(receipt: Mapping[str, Any]) -> bytes:
     return json.dumps(receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
 
 
-def _ssh_argv(rendered_command: str) -> list[str]:
+def _ssh_argv(rendered_command: str, *, wa_ir_known_hosts: Path) -> list[str]:
     """Turn a reviewed renderer result into argv without handing it to a shell."""
 
     try:
         argv = shlex.split(rendered_command, posix=True)
     except ValueError as exc:
         raise SevenObjectStageError("renderer returned an unusable SSH command") from exc
-    expected_prefix = ["ssh", *SSH_OPTIONS]
+    expected_prefix = [
+        "ssh",
+        *SSH_OPTIONS,
+        "-o",
+        "UserKnownHostsFile=" + str(wa_ir_known_hosts),
+        "-o",
+        "GlobalKnownHostsFile=/dev/null",
+    ]
     if len(argv) != len(expected_prefix) + 2 or argv[: len(expected_prefix)] != expected_prefix:
         raise SevenObjectStageError("renderer returned an unexpected SSH command")
     if argv[len(expected_prefix)] != bootstrap_renderer.REMOTE_HOST or not argv[-1]:
@@ -391,7 +398,7 @@ def _ssh_argv(rendered_command: str) -> list[str]:
     return argv
 
 
-def _render_bootstrap_root_prepare_command() -> str:
+def _render_bootstrap_root_prepare_command(*, wa_ir_known_hosts: Path) -> str:
     """Create the one approved WA-IR bootstrap root before any object upload.
 
     The bootstrap receiver requires this root to exist.  Refusing an existing
@@ -413,15 +420,21 @@ def _render_bootstrap_root_prepare_command() -> str:
             f"test \"$(/usr/bin/stat -c '%U:%G:%a' {path})\" = root:root:700",
         )
     )
-    remote = shlex.join(("/bin/sh", "-ec", remote_program))
-    return shlex.join(("ssh", *SSH_OPTIONS, bootstrap_renderer.REMOTE_HOST, remote))
+    return bootstrap_renderer._render_pinned_ssh(
+        known_hosts=wa_ir_known_hosts,
+        remote_arguments=("/bin/sh", "-ec", remote_program),
+    )
 
 
-def _prepare_bootstrap_root(*, ssh_runner: SshRunner) -> None:
+def _prepare_bootstrap_root(*, ssh_runner: SshRunner, wa_ir_known_hosts: Path) -> None:
     """Perform only the approved new root-only WA-IR directory operation."""
 
     try:
-        _execute_rendered_ssh(_render_bootstrap_root_prepare_command(), ssh_runner=ssh_runner)
+        _execute_rendered_ssh(
+            _render_bootstrap_root_prepare_command(wa_ir_known_hosts=wa_ir_known_hosts),
+            ssh_runner=ssh_runner,
+            wa_ir_known_hosts=wa_ir_known_hosts,
+        )
     except SevenObjectStageError:
         raise SevenObjectStageError("WA-IR bootstrap root could not be prepared before object upload") from None
 
@@ -448,11 +461,16 @@ def _require_successful_ssh(result: subprocess.CompletedProcess[Any]) -> None:
         raise SevenObjectStageError("WA-IR SSH control command failed")
 
 
-def _execute_rendered_ssh(rendered_command: str, *, ssh_runner: SshRunner) -> None:
+def _execute_rendered_ssh(
+    rendered_command: str,
+    *,
+    ssh_runner: SshRunner,
+    wa_ir_known_hosts: Path,
+) -> None:
     """Execute a reviewed render result while suppressing all transient output."""
 
     try:
-        result = ssh_runner(_ssh_argv(rendered_command))
+        result = ssh_runner(_ssh_argv(rendered_command, wa_ir_known_hosts=wa_ir_known_hosts))
     except Exception:
         raise SevenObjectStageError("WA-IR SSH control command could not be started") from None
     _require_successful_ssh(result)
@@ -529,12 +547,14 @@ def _verify_prepared_bootstrap_consumer_config(
 
     expected_values = {
         "schema": stage.CONFIG_SCHEMA,
+        "campaign_id": consumer_config.campaign_id,
         "endpoint": consumer_config.endpoint,
         "region": consumer_config.region,
         "bucket": consumer_config.bucket,
         "prefix": consumer_config.prefix,
         "age_binary": consumer_config.age_binary,
         "age_identity_file": str(consumer_config.age_identity_file),
+        "age_recipient": consumer_config.age_recipient,
         "workspace": str(consumer_config.workspace),
         "source_site": consumer_config.source_site,
         "maximum_artifact_bytes": consumer_config.maximum_artifact_bytes,
@@ -576,6 +596,28 @@ def _verify_prepared_bootstrap_consumer_config(
     except SevenObjectStageError:
         raise SevenObjectStageError("prepared bootstrap control identity is invalid") from None
     return prepared
+
+
+def _require_campaign_recipient_binding(*, publisher_config: Any, consumer_config: Any) -> None:
+    """Require the normal publisher to target the consumer's fresh WA-IR key."""
+
+    if publisher_config.campaign_id != consumer_config.campaign_id:
+        raise SevenObjectStageError("publisher and consumer campaign_id do not match")
+    try:
+        expected_identity = bootstrap_renderer.wa_ir_bootstrap_identity_file(consumer_config.campaign_id)
+    except Exception:
+        raise SevenObjectStageError("consumer campaign identity binding is invalid") from None
+    if str(consumer_config.age_identity_file) != expected_identity:
+        raise SevenObjectStageError("consumer does not use the campaign WA-IR bootstrap identity")
+    if publisher_config.age_recipient != consumer_config.age_recipient:
+        raise SevenObjectStageError("publisher age recipient does not match the campaign WA-IR consumer recipient")
+
+
+def _require_pinned_known_hosts(path: Path) -> Path:
+    try:
+        return bootstrap_renderer._require_pinned_known_hosts(Path(path))
+    except Exception:
+        raise SevenObjectStageError("WA-IR SSH known_hosts pin is invalid") from None
 
 
 def _utc_now_iso() -> str:
@@ -636,6 +678,7 @@ def run_stage(
     consumer_config_path: Path,
     bootstrap_package_directory: Path,
     bootstrap_preparation_receipt: Path,
+    wa_ir_known_hosts: Path,
     artifact_specs: Sequence[str],
     binding_specs: Sequence[str],
     ssh_runner: SshRunner = _run_ssh_silently,
@@ -669,6 +712,11 @@ def run_stage(
         or consumer_config.prefix != publisher_config.prefix
     ):
         raise SevenObjectStageError("publisher and consumer transport configurations do not match")
+    _require_campaign_recipient_binding(
+        publisher_config=publisher_config,
+        consumer_config=consumer_config,
+    )
+    pinned_known_hosts = _require_pinned_known_hosts(wa_ir_known_hosts)
     try:
         publisher_public_key = stage._publisher_public_key(publisher_config)
     except Exception:
@@ -701,7 +749,7 @@ def run_stage(
 
     # This is the only remote mutation before the seven immutable object
     # uploads.  It fails before creating an object when the host is not fresh.
-    _prepare_bootstrap_root(ssh_runner=ssh_runner)
+    _prepare_bootstrap_root(ssh_runner=ssh_runner, wa_ir_known_hosts=pinned_known_hosts)
 
     try:
         client = stage.create_s3_client(publisher_config)
@@ -721,6 +769,7 @@ def run_stage(
             bootstrap_package_directory=bootstrap_package_directory,
             preparation_receipt=bootstrap_preparation_receipt,
             bootstrap_root=BOOTSTRAP_ROOT,
+            wa_ir_known_hosts=pinned_known_hosts,
         )
     except Exception:
         raise SevenObjectStageError(
@@ -728,7 +777,11 @@ def run_stage(
             evidence=_bootstrap_only_evidence(bootstrap),
         ) from None
     try:
-        _execute_rendered_ssh(bootstrap_command, ssh_runner=ssh_runner)
+        _execute_rendered_ssh(
+            bootstrap_command,
+            ssh_runner=ssh_runner,
+            wa_ir_known_hosts=pinned_known_hosts,
+        )
         if (
             bootstrap["control_commit"] != prepared_bootstrap["control_commit"]
             or bootstrap["control_tree"] != prepared_bootstrap["control_tree"]
@@ -773,6 +826,7 @@ def run_stage(
             bootstrap_candidate=bootstrap_candidate,
             staging_root=STAGING_ROOT,
             expected_release_sha=EXPECTED_APPLICATION_RELEASE_SHA,
+            wa_ir_known_hosts=pinned_known_hosts,
         )
     except Exception:
         raise SevenObjectStageError(
@@ -780,7 +834,11 @@ def run_stage(
             evidence=_public_evidence(bootstrap=bootstrap, normal=normal),
         ) from None
     try:
-        _execute_rendered_ssh(normal_command, ssh_runner=ssh_runner)
+        _execute_rendered_ssh(
+            normal_command,
+            ssh_runner=ssh_runner,
+            wa_ir_known_hosts=pinned_known_hosts,
+        )
     except SevenObjectStageError:
         raise SevenObjectStageError(
             "normal receipt is available but the stage cannot continue",
@@ -796,6 +854,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--consumer-config", type=Path)
     parser.add_argument("--bootstrap-package-directory", type=Path)
     parser.add_argument("--bootstrap-preparation-receipt", type=Path)
+    parser.add_argument("--wa-ir-known-hosts", type=Path)
     parser.add_argument("--artifact", action="append", default=[], metavar="NAME=ABSOLUTE_PATH")
     parser.add_argument("--artifact-binding", action="append", default=[], metavar="NAME=KEY=VALUE")
     return parser
@@ -807,6 +866,7 @@ def _apply_arguments(arguments: argparse.Namespace) -> dict[str, Any]:
         "consumer_config",
         "bootstrap_package_directory",
         "bootstrap_preparation_receipt",
+        "wa_ir_known_hosts",
     )
     if any(getattr(arguments, field) is None for field in required):
         raise SevenObjectStageError("one or more required apply inputs are absent")
@@ -815,6 +875,7 @@ def _apply_arguments(arguments: argparse.Namespace) -> dict[str, Any]:
         "consumer_config_path": arguments.consumer_config,
         "bootstrap_package_directory": arguments.bootstrap_package_directory,
         "bootstrap_preparation_receipt": arguments.bootstrap_preparation_receipt,
+        "wa_ir_known_hosts": arguments.wa_ir_known_hosts,
         "artifact_specs": arguments.artifact,
         "binding_specs": arguments.artifact_binding,
     }

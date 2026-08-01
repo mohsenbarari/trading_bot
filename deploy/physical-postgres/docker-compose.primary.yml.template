@@ -1,0 +1,84 @@
+# Generated, default-off physical PostgreSQL FI-primary scope.
+# It must only be considered by a future root-only execution coordinator after
+# a fresh Witness/term, adapter, and continuity check.  Docker Compose itself
+# is never invoked by this repository scaffold.
+name: physical-postgres-@@CAMPAIGN_ID@@-fi
+
+services:
+  postgres:
+    image: "@@POSTGRES_IMAGE@@"
+    pull_policy: never
+    profiles: ["physical-postgres-primary"]
+    container_name: "goldtrade_physical_postgres_fi_@@CAMPAIGN_ID@@"
+    restart: "no"
+    entrypoint:
+      - "@@PRIMARY_GUARD_BINARY@@"
+      - "--config"
+      - "@@PRIMARY_GUARD_CONFIG@@"
+      - "--"
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/trading-bot/physical-postgres/primary/postgresql.conf
+    env_file:
+      - /etc/trading-bot/physical-postgres/private/postgres-runtime.env
+    volumes:
+      - type: volume
+        source: @@PRIMARY_DATA_VOLUME@@
+        target: /var/lib/postgresql/data
+      - type: volume
+        source: @@PRIMARY_SOCKET_VOLUME@@
+        target: /var/run/postgresql
+      - type: volume
+        source: @@PRIMARY_WAL_SPOOL_VOLUME@@
+        target: /var/lib/trading-bot/physical-postgres/wal-spool
+      - type: volume
+        source: @@PRIMARY_ADAPTER_STATE_VOLUME@@
+        target: /var/lib/trading-bot/physical-postgres/adapter-state
+      - type: bind
+        source: /etc/trading-bot/physical-postgres/rendered/primary
+        target: /etc/trading-bot/physical-postgres/primary
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: @@PRIMARY_GUARD_DIRECTORY@@
+        target: @@PRIMARY_GUARD_DIRECTORY@@
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: @@WAL_SPOOL_DIRECTORY@@
+        target: @@WAL_SPOOL_DIRECTORY@@
+        read_only: true
+        bind:
+          create_host_path: false
+    networks: ["runtime"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
+    labels:
+      com.goldtrade.physical-postgres.role: "primary"
+      com.goldtrade.physical-postgres.release-sha: "@@RELEASE_SHA@@"
+      com.goldtrade.physical-postgres.base-generation: "@@BASE_GENERATION_ID@@"
+      com.goldtrade.physical-postgres.writer-term-sha256: "@@WRITER_TERM_SHA256@@"
+      com.goldtrade.physical-postgres.route-binding-sha256: "@@ROUTE_BINDING_SHA256@@"
+      com.goldtrade.physical-postgres.profile: "@@DEPLOYMENT_PROFILE@@"
+
+networks:
+  runtime:
+    external: true
+    name: "@@PRIMARY_RUNTIME_NETWORK@@"
+
+volumes:
+  @@PRIMARY_DATA_VOLUME@@:
+    external: true
+  @@PRIMARY_SOCKET_VOLUME@@:
+    external: true
+  @@PRIMARY_WAL_SPOOL_VOLUME@@:
+    external: true
+  @@PRIMARY_ADAPTER_STATE_VOLUME@@:
+    external: true

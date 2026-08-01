@@ -2,15 +2,19 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from core.legacy_direct_fi_ir_transport_fence import LegacyDirectFiIrTransportRetiredError
 from models.trade_delivery_receipt import TradeDeliveryReceipt
 from models.offer import Offer
 from models.user import User
+from scripts import seed_shared_sync_tables
 from scripts.seed_shared_sync_tables import (
     DEFAULT_TABLES,
     SeedReferenceIndex,
     build_seed_sync_item,
     enrich_seed_payload,
+    main_async,
     row_payload,
+    send_items,
     seed_table,
 )
 
@@ -134,6 +138,47 @@ class SeedSharedSyncTablesTests(unittest.TestCase):
 
 
 class SeedSharedSyncDryRunTests(unittest.IsolatedAsyncioTestCase):
+    async def test_main_refuses_explicit_target_before_seed_or_http_when_writer_mode_enabled(self):
+        args = SimpleNamespace(dry_run=False, target_url="https://peer.example")
+
+        with patch("scripts.seed_shared_sync_tables.parse_args", return_value=args), patch(
+            "scripts.seed_shared_sync_tables.load_seed_reference_index", new=AsyncMock()
+        ) as load_references, patch(
+            "scripts.seed_shared_sync_tables.seed_table", new=AsyncMock()
+        ) as seed:
+            result = await main_async()
+
+        self.assertEqual(result, 2)
+        load_references.assert_not_awaited()
+        seed.assert_not_awaited()
+
+    async def test_send_items_refuses_direct_peer_delivery_before_constructing_http_client(self):
+        with self.assertRaises(LegacyDirectFiIrTransportRetiredError):
+            await send_items("https://peer.example", "test-key", [{"id": 1}])
+
+    async def test_main_keeps_dry_run_local_when_writer_mode_enabled(self):
+        args = SimpleNamespace(
+            dry_run=True,
+            target_url="https://peer.example",
+            target_server=None,
+            table=["offers"],
+            batch_size=100,
+        )
+
+        with patch("scripts.seed_shared_sync_tables.parse_args", return_value=args), patch(
+            "scripts.seed_shared_sync_tables.load_seed_reference_index",
+            new=AsyncMock(return_value=SimpleNamespace()),
+        ) as load_references, patch(
+            "scripts.seed_shared_sync_tables.seed_table",
+            new=AsyncMock(return_value={"rows": 0, "sent": 0}),
+        ) as seed:
+            result = await main_async()
+
+        self.assertEqual(result, 0)
+        load_references.assert_awaited_once()
+        seed.assert_awaited_once()
+        self.assertTrue(seed.await_args.kwargs["dry_run"])
+
     async def test_dry_run_validates_references_without_network_delivery(self):
         references = SeedReferenceIndex(
             commodity_names_by_id={},

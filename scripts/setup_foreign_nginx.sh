@@ -55,6 +55,18 @@ server {
         add_header Referrer-Policy "no-referrer" always;
     }
 
+    # THREE_SITE_LEGACY_INTERNAL_INGRESS_FENCED: the target topology never
+    # accepts IR<->FI sync or home-server control through public Nginx.
+    location = /api/sync/receive {
+        access_log off;
+        return 410;
+    }
+
+    location ~ ^/api/(sync|sessions/internal|trades/internal|offers/internal|auth/internal|invitations/internal|customers/internal)(/|$) {
+        access_log off;
+        return 410;
+    }
+
     location /api/ {
         proxy_pass http://trading_bot_api;
         proxy_set_header Host $host;
@@ -165,6 +177,15 @@ server {
     server_name coin.362514.ir;
     client_max_body_size 50M;
     access_log off;
+
+    location = /api/sync/receive {
+        return 410;
+    }
+
+    location ~ ^/api/(sync|sessions/internal|trades/internal|offers/internal|auth/internal|invitations/internal|customers/internal)(/|$) {
+        return 410;
+    }
+
     return 404;
 }
 EOF

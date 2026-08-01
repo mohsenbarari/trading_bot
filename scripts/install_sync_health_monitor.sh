@@ -7,11 +7,14 @@ SERVICE_NAME="${SERVICE_NAME:-trading-bot-sync-health-sampler}"
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
 SERVICE_PATH="$SYSTEMD_DIR/$SERVICE_NAME.service"
 TIMER_PATH="$SYSTEMD_DIR/$SERVICE_NAME.timer"
-SKIP_IRAN_ARG=""
+SKIP_IRAN_ARG=" --skip-iran"
 
-case "${SYNC_HEALTH_MONITOR_SKIP_IRAN:-0}" in
-  0) ;;
-  1) SKIP_IRAN_ARG=" --skip-iran" ;;
+case "${SYNC_HEALTH_MONITOR_SKIP_IRAN:-1}" in
+  1) ;;
+  0)
+    echo "SYNC_HEALTH_MONITOR_SKIP_IRAN=0 would install retired direct FI-to-IR SSH sampling; use role-local WA-IR evidence instead" >&2
+    exit 2
+    ;;
   *)
     echo "SYNC_HEALTH_MONITOR_SKIP_IRAN must be 0 or 1" >&2
     exit 2

@@ -205,6 +205,7 @@ class SyncRouterWatermarkTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(conflict_decision, SyncWatermarkDecision("conflict", "same_source_sequence_different_payload"))
 
+    @unittest.skip("legacy direct FI<->IR HTTP receiver is permanently retired")
     async def test_stale_event_is_processed_without_applying_row(self):
         db = FakeDB()
         item = sync_item(9)
@@ -218,6 +219,7 @@ class SyncRouterWatermarkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {"status": "success", "processed": 1})
         apply_item.assert_not_awaited()
 
+    @unittest.skip("legacy direct FI<->IR HTTP receiver is permanently retired")
     async def test_equal_sequence_conflict_is_reported_without_applying_row(self):
         db = FakeDB()
         item = sync_item(10)
@@ -234,6 +236,7 @@ class SyncRouterWatermarkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["error_items"][0]["reason"], "same_source_sequence_different_payload")
         apply_item.assert_not_awaited()
 
+    @unittest.skip("legacy direct FI<->IR HTTP receiver is permanently retired")
     async def test_iran_authoritative_table_rejects_foreign_source(self):
         db = FakeDB()
         data = {"key": "offer_expiry_minutes", "value": "20"}
@@ -262,6 +265,7 @@ class SyncRouterWatermarkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["error_items"][0]["reason"], "source_authority_forbidden:foreign")
         apply_item.assert_not_awaited()
 
+    @unittest.skip("legacy direct FI<->IR HTTP receiver is permanently retired")
     async def test_market_runtime_state_rejects_foreign_source_under_iran_authority(self):
         db = FakeDB()
         data = {
@@ -296,6 +300,7 @@ class SyncRouterWatermarkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["error_items"][0]["reason"], "source_authority_forbidden:foreign")
         apply_item.assert_not_awaited()
 
+    @unittest.skip("legacy direct FI<->IR HTTP receiver is permanently retired")
     async def test_deferred_item_records_watermark_only_after_retry_apply(self):
         db = FakeDB()
         item = sync_item(11)

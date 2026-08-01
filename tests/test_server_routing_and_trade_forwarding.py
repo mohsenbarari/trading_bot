@@ -6,10 +6,17 @@ from unittest.mock import patch
 
 import httpx
 
+from core.config import Settings
 from core import server_routing, trade_forwarding
 
 
 class ServerRoutingTests(unittest.TestCase):
+    def test_single_writer_runtime_setting_defaults_to_disabled(self):
+        self.assertIs(
+            Settings.model_fields["single_writer_runtime_enabled"].default,
+            False,
+        )
+
     def test_normalize_server_maps_aliases_and_defaults(self):
         self.assertEqual(server_routing.normalize_server(None), server_routing.SERVER_FOREIGN)
         self.assertEqual(server_routing.normalize_server("DE"), server_routing.SERVER_FOREIGN)
@@ -165,6 +172,22 @@ class ServerRoutingTests(unittest.TestCase):
              patch.object(server_routing.settings, "foreign_server_url", None):
             self.assertIsNone(server_routing.peer_server_url_for("foreign"))
 
+    def test_single_writer_runtime_blocks_all_cross_site_peer_urls(self):
+        for local_server, remote_server in (
+            (server_routing.SERVER_FOREIGN, server_routing.SERVER_IRAN),
+            (server_routing.SERVER_IRAN, server_routing.SERVER_FOREIGN),
+        ):
+            with self.subTest(local_server=local_server), \
+                 patch.object(server_routing.settings, "server_mode", local_server), \
+                 patch.object(server_routing.settings, "single_writer_runtime_enabled", True), \
+                 patch.object(server_routing.settings, "iran_server_url", "https://iran.example/"), \
+                 patch.object(server_routing.settings, "germany_server_url", "https://germany.example/"), \
+                 patch.object(server_routing.settings, "peer_server_url", "https://legacy-peer.example/"), \
+                 patch.object(server_routing.settings, "foreign_server_url", "https://legacy-foreign.example/"):
+                self.assertIsNone(server_routing.peer_server_url_for(local_server))
+                self.assertIsNone(server_routing.peer_server_url_for(remote_server))
+                self.assertIsNone(server_routing.default_peer_server_url())
+
     def test_default_peer_server_url_and_is_remote_home_follow_current_server(self):
         with patch.object(server_routing.settings, "server_mode", "foreign"), \
              patch.object(server_routing.settings, "iran_server_url", "https://iran.example/"):
@@ -172,6 +195,51 @@ class ServerRoutingTests(unittest.TestCase):
             self.assertFalse(server_routing.is_remote_home(None))
             self.assertFalse(server_routing.is_remote_home("germany"))
             self.assertTrue(server_routing.is_remote_home("iran"))
+
+    def test_data_authority_preserves_home_affinity_when_single_writer_runtime_is_disabled(self):
+        expected_remote_homes = {
+            server_routing.SERVER_FOREIGN: {
+                None: False,
+                "germany": False,
+                server_routing.SERVER_FOREIGN: False,
+                server_routing.SERVER_IRAN: True,
+                "unknown": False,
+            },
+            server_routing.SERVER_IRAN: {
+                None: False,
+                "iran": False,
+                server_routing.SERVER_IRAN: False,
+                server_routing.SERVER_FOREIGN: True,
+                "unknown": False,
+            },
+        }
+
+        for server_mode, expected_by_home in expected_remote_homes.items():
+            with self.subTest(server_mode=server_mode), \
+                 patch.object(server_routing.settings, "server_mode", server_mode), \
+                 patch.object(server_routing.settings, "single_writer_runtime_enabled", False):
+                self.assertFalse(server_routing.single_writer_runtime_enabled())
+                for home_server, expected_remote in expected_by_home.items():
+                    with self.subTest(home_server=home_server):
+                        self.assertEqual(
+                            server_routing.is_remote_home(home_server),
+                            expected_remote,
+                        )
+                        self.assertEqual(
+                            server_routing.is_local_data_authority(home_server),
+                            not expected_remote,
+                        )
+
+    def test_data_authority_treats_both_valid_homes_as_local_when_single_writer_runtime_is_enabled(self):
+        for server_mode in (server_routing.SERVER_FOREIGN, server_routing.SERVER_IRAN):
+            with self.subTest(server_mode=server_mode), \
+                 patch.object(server_routing.settings, "server_mode", server_mode), \
+                 patch.object(server_routing.settings, "single_writer_runtime_enabled", True):
+                self.assertTrue(server_routing.single_writer_runtime_enabled())
+                for home_server in (server_routing.SERVER_FOREIGN, server_routing.SERVER_IRAN):
+                    with self.subTest(home_server=home_server):
+                        self.assertTrue(server_routing.is_local_data_authority(home_server))
+                        self.assertFalse(server_routing.is_remote_home(home_server))
 
 
 class TradeForwardingSignatureTests(unittest.TestCase):
@@ -208,6 +276,21 @@ class ForwardTradeToHomeServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status_code, 503)
         self.assertEqual(body, {"detail": "سرور مرجع معامله در دسترس نیست."})
 
+    async def test_forward_trade_does_not_create_outbound_client_when_single_writer_blocks_peer(self):
+        with patch.object(server_routing.settings, "server_mode", "foreign"), \
+             patch.object(server_routing.settings, "single_writer_runtime_enabled", True), \
+             patch.object(server_routing.settings, "iran_server_url", "https://iran.example/"), \
+             patch("core.trade_forwarding.httpx.AsyncClient") as client_ctor:
+            status_code, body = await trade_forwarding.forward_trade_to_home_server(
+                "iran",
+                {"offer_id": 12},
+            )
+
+        self.assertEqual(status_code, 503)
+        self.assertEqual(body, {"detail": "سرور مرجع معامله در دسترس نیست."})
+        client_ctor.assert_not_called()
+
+    @unittest.skip("direct FI<->IR trade wire protocol is permanently retired")
     async def test_forward_trade_posts_signed_payload_and_returns_json(self):
         recorded: dict[str, object] = {}
 
@@ -262,6 +345,7 @@ class ForwardTradeToHomeServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(headers["X-Source-Server"], "foreign")
         self.assertEqual(headers["X-Signature"], expected_signature)
 
+    @unittest.skip("direct FI<->IR trade wire protocol is permanently retired")
     async def test_forward_trade_tls_verification_can_use_boolean_or_ca_bundle(self):
         recorded: list[dict[str, object]] = []
 
@@ -300,6 +384,7 @@ class ForwardTradeToHomeServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(recorded[0]["verify"], True)
         self.assertEqual(recorded[1]["verify"], "/etc/ssl/internal-ca.pem")
 
+    @unittest.skip("direct FI<->IR trade wire protocol is permanently retired")
     async def test_forward_trade_maps_timeout_and_request_errors(self):
         class TimeoutClient:
             def __init__(self, *args, **kwargs):
@@ -341,6 +426,7 @@ class ForwardTradeToHomeServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status_code, 503)
         self.assertIn("ارتباط با سرور مرجع معامله برقرار نشد", body["detail"])
 
+    @unittest.skip("direct FI<->IR trade wire protocol is permanently retired")
     async def test_forward_trade_returns_safe_fallback_for_invalid_json(self):
         class Response:
             status_code = 502
@@ -369,6 +455,7 @@ class ForwardTradeToHomeServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status_code, 502)
         self.assertEqual(body, {"detail": "پاسخ نامعتبر از سرور مرجع معامله"})
 
+    @unittest.skip("direct FI<->IR trade wire protocol is permanently retired")
     async def test_forward_trade_warning_logs_are_structured_and_redacted(self):
         records: list[logging.LogRecord] = []
 

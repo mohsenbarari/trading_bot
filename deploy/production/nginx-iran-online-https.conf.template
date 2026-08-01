@@ -13,6 +13,18 @@ server {
         root /var/www/html;
     }
 
+    # Retired FI<->IR routes must not be redirected from HTTP into a legacy
+    # compatibility surface; return the permanent retirement status directly.
+    location = /api/sync/receive {
+        access_log off;
+        return 410;
+    }
+
+    location ~ ^/api/(sync|sessions/internal|trades/internal|offers/internal|auth/internal|invitations/internal|customers/internal)(/|$) {
+        access_log off;
+        return 410;
+    }
+
     location / {
         return 301 https://$host$request_uri;
     }
@@ -50,6 +62,20 @@ server {
         add_header Cache-Control "no-store, max-age=0" always;
         add_header Pragma "no-cache" always;
         add_header Referrer-Policy "no-referrer" always;
+    }
+
+    # THREE_SITE_LEGACY_INTERNAL_INGRESS_FENCED: Object-Storage pull and
+    # writer-local ingress replace every old FI<->IR internal HTTP route.
+    location = /api/sync/receive {
+        access_log off;
+        return 410;
+    }
+
+    # This regex must precede the generic public API location below. It
+    # intentionally rejects all old sync and home-server-forwarder endpoints.
+    location ~ ^/api/(sync|sessions/internal|trades/internal|offers/internal|auth/internal|invitations/internal|customers/internal)(/|$) {
+        access_log off;
+        return 410;
     }
 
     location /api/ {

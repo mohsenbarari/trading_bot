@@ -31,6 +31,11 @@ from scripts.capture_production_baseline import (
     utc_stamp,
 )
 from scripts.deploy_config import resolve_deploy_settings
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+    blocked_legacy_direct_fi_ir_transport_payload,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -131,6 +136,10 @@ class Runner:
         if role == "foreign":
             command = f"cd {shlex.quote(str(REPO_ROOT))} && " + compose_probe_script("docker-compose.yml", body)
             return ["bash", "-lc", command]
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="stage-p6-cross-server-sync-benchmark",
+            operation="Iran SSH command construction",
+        )
         command = f"cd {quote_remote(self.settings['IRAN_PROJECT_DIR'])} && " + compose_probe_script("docker-compose.iran.yml", body)
         return remote_args(self.settings, command)
 
@@ -352,6 +361,10 @@ def _change_log_unsynced_attempt(runner: Runner, change_log_id: str) -> tuple[bo
 
 
 def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="stage-p6-cross-server-sync-benchmark",
+        operation="legacy bidirectional sync benchmark",
+    )
     stamp = args.timestamp or utc_stamp()
     artifact_root = Path(args.artifact_root)
     run_dir = artifact_root / stamp / "sync-p6"
@@ -492,6 +505,17 @@ def write_artifacts(run_dir: Path, summary: dict[str, Any]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="stage-p6-cross-server-sync-benchmark",
+            operation="legacy cross-site benchmark CLI",
+        )
+    except LegacyDirectFiIrTransportRetiredError:
+        print(json.dumps(blocked_legacy_direct_fi_ir_transport_payload(
+            component="stage-p6-cross-server-sync-benchmark"
+        ), ensure_ascii=False, sort_keys=True))
+        return 2
+
     args = parse_args(argv)
     try:
         summary = run_benchmark(args)

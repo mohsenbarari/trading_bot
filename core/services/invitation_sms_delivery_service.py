@@ -9,6 +9,8 @@ from datetime import timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.db import require_external_effect_execution_authorization
+from core.external_effect_execution_gate import EXTERNAL_EFFECT_SCOPE_SMS_PROVIDER_DELIVERY
 from core.registration_contracts import InvitationSMSStatus
 from core.server_routing import SERVER_IRAN, current_server
 from core.sms import SMSDeliveryOutcome
@@ -96,6 +98,12 @@ async def deliver_invitation_sms_once(
 
     if current_server() != SERVER_IRAN:
         raise RuntimeError("invitation_sms_delivery_requires_iran")
+    # Gate before loading/changing the durable delivery claim.  An enabled
+    # external-effect fence must not turn an old pending invitation into a
+    # fresh attempt until the current term's no-resend decision is installed.
+    require_external_effect_execution_authorization(
+        EXTERNAL_EFFECT_SCOPE_SMS_PROVIDER_DELIVERY
+    )
     delivery = (
         await db.execute(
             select(InvitationSMSDelivery)
@@ -129,6 +137,11 @@ async def deliver_invitation_sms_once(
     delivery.claimed_at = utc_now()
     await db.commit()
 
+    # Recheck immediately before the synchronous provider adapter runs; a
+    # receipt can expire between the durable claim and this point.
+    require_external_effect_execution_authorization(
+        EXTERNAL_EFFECT_SCOPE_SMS_PROVIDER_DELIVERY
+    )
     try:
         sender_outcome = await asyncio.to_thread(sender)
     except Exception:

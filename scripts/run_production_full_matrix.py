@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Consume the production full-matrix manifest and build an execution plan.
+"""Retired historical source for the direct two-server production runner.
 
-This runner is fail-closed by default. It can build a manifest-driven command
-plan without production writes, execute live non-mutating preflight checks, and
-execute the guarded command plan only when the explicit production confirmation
-environment variable is present.
+The command-generating source is retained solely for forensic comparison. No
+public or underscored callable in this module may return a FI<->IR command
+plan, contact a peer, or execute historical Full-Matrix work; V4 is the only
+supported path.
 """
 
 from __future__ import annotations
@@ -21,13 +21,66 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, NoReturn
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts import build_production_full_matrix_manifest as manifest_builder
+from core.legacy_two_server_full_matrix_fence import (
+    assert_legacy_two_server_full_matrix_retired,
+    blocked_legacy_two_server_full_matrix_payload,
+)
+
+
+class _RetiredForensicManifestBuilder:
+    """Delay the historical builder import until an already-denied call.
+
+    Importing the old builder used to import application DB configuration
+    before this runner could emit its retirement result.  No supported code
+    can access this proxy: each surviving forensic/public entry point fences
+    first, and a bypass attempt is denied here too.
+    """
+
+    def __getattr__(self, name: str) -> Any:
+        assert_legacy_two_server_full_matrix_retired(
+            component="production-full-matrix-runner",
+            operation=f"retired manifest builder access ({name})",
+        )
+
+
+manifest_builder = _RetiredForensicManifestBuilder()
+
+
+# Direct FI<->IR command construction is intentionally absent from this
+# module's public API.  The underscored forensic functions below preserve the
+# historical source only for review and regression tests; they are not an
+# execution interface and are excluded from the module's supported surface.
+__all__ = (
+    "CommandSpec",
+    "RunnerError",
+    "build_execution_plan",
+    "build_plan",
+    "build_preflight_commands",
+    "execute_command_plan",
+    "execute_scenario_plan",
+    "main",
+)
+
+
+def _retire_legacy_forensic_source(function: Any) -> Any:
+    """Make retained two-server source text uncallable from any import path."""
+
+    operation = f"forensic source {function.__name__}"
+
+    def _rejected(*args: Any, **kwargs: Any) -> Any:
+        del args, kwargs
+        assert_legacy_two_server_full_matrix_retired(
+            component="production-full-matrix-runner",
+            operation=operation,
+        )
+
+    return _rejected
 
 
 SCHEMA_VERSION = "production_full_matrix_runner_plan_v1"
@@ -271,7 +324,8 @@ def command_payload(command: CommandSpec) -> dict[str, Any]:
     }
 
 
-def iran_command(name: str, remote_command: str, *, timeout_seconds: int = 30) -> CommandSpec:
+@_retire_legacy_forensic_source
+def _forensic_iran_command(name: str, remote_command: str, *, timeout_seconds: int = 30) -> CommandSpec:
     return CommandSpec(
         name=name,
         args=["ssh", "-p", IRAN_SSH_PORT, IRAN_HOST, f"cd {IRAN_PROJECT_DIR} && {remote_command}"],
@@ -283,7 +337,8 @@ def shell_join(parts: Iterable[Any]) -> str:
     return " ".join(shlex.quote(str(part)) for part in parts)
 
 
-def container_python_command(
+@_retire_legacy_forensic_source
+def _forensic_container_python_command(
     name: str,
     *,
     server: str,
@@ -319,15 +374,17 @@ def container_python_command(
     raise RunnerError(f"unsupported server for container command: {server}")
 
 
-def host_mkdir_command(name: str, *, server: str, path: str) -> CommandSpec:
+@_retire_legacy_forensic_source
+def _forensic_host_mkdir_command(name: str, *, server: str, path: str) -> CommandSpec:
     if server == "foreign":
         return CommandSpec(name=name, args=["mkdir", "-p", path], timeout_seconds=30)
     if server == "iran":
-        return iran_command(name, f"mkdir -p {shlex.quote(path)}", timeout_seconds=30)
+        return _forensic_iran_command(name, f"mkdir -p {shlex.quote(path)}", timeout_seconds=30)
     raise RunnerError(f"unsupported server for mkdir command: {server}")
 
 
-def container_mkdir_command(name: str, *, server: str, path: str) -> CommandSpec:
+@_retire_legacy_forensic_source
+def _forensic_container_mkdir_command(name: str, *, server: str, path: str) -> CommandSpec:
     if server == "foreign":
         return CommandSpec(
             name=name,
@@ -344,7 +401,8 @@ def container_mkdir_command(name: str, *, server: str, path: str) -> CommandSpec
     raise RunnerError(f"unsupported server for container mkdir command: {server}")
 
 
-def copy_container_to_host_command(name: str, *, server: str, path: str) -> CommandSpec:
+@_retire_legacy_forensic_source
+def _forensic_copy_container_to_host_command(name: str, *, server: str, path: str) -> CommandSpec:
     if server == "foreign":
         return CommandSpec(
             name=name,
@@ -361,7 +419,8 @@ def copy_container_to_host_command(name: str, *, server: str, path: str) -> Comm
     raise RunnerError(f"unsupported server for container-to-host copy: {server}")
 
 
-def copy_host_to_container_command(name: str, *, server: str, path: str) -> CommandSpec:
+@_retire_legacy_forensic_source
+def _forensic_copy_host_to_container_command(name: str, *, server: str, path: str) -> CommandSpec:
     if server == "foreign":
         return CommandSpec(
             name=name,
@@ -378,12 +437,13 @@ def copy_host_to_container_command(name: str, *, server: str, path: str) -> Comm
     raise RunnerError(f"unsupported server for host-to-container copy: {server}")
 
 
-def copy_between_servers_command(name: str, *, source_server: str, target_server: str, path: str) -> CommandSpec:
+@_retire_legacy_forensic_source
+def _forensic_copy_between_servers_command(name: str, *, source_server: str, target_server: str, path: str) -> CommandSpec:
     if source_server == target_server:
         if source_server == "foreign":
             return CommandSpec(name=name, args=["test", "-f", path], timeout_seconds=30)
         if source_server == "iran":
-            return iran_command(name, f"test -f {shlex.quote(path)}", timeout_seconds=30)
+            return _forensic_iran_command(name, f"test -f {shlex.quote(path)}", timeout_seconds=30)
         raise RunnerError(f"unsupported server copy: {source_server} -> {target_server}")
     if source_server == "foreign" and target_server == "iran":
         return CommandSpec(
@@ -406,7 +466,8 @@ def safe_token(value: str) -> str:
     return "".join(ch if ch.isalnum() else "_" for ch in str(value)).strip("_") or "scenario"
 
 
-def build_preflight_commands(*, prefix: str, artifact_dir: Path) -> list[CommandSpec]:
+@_retire_legacy_forensic_source
+def _forensic_build_preflight_commands(*, prefix: str, artifact_dir: Path) -> list[CommandSpec]:
     manifest_path = artifact_dir / "production-full-matrix-manifest.preflight.json"
     run_plan_path = artifact_dir / "production-full-matrix-run-plan.preflight.json"
     quoted_prefix = shlex.quote(prefix)
@@ -446,13 +507,13 @@ def build_preflight_commands(*, prefix: str, artifact_dir: Path) -> list[Command
             timeout_seconds=60,
         ),
         CommandSpec("foreign_compose_ps", ["docker", "compose", "ps"], timeout_seconds=30),
-        iran_command("iran_compose_ps", "docker-compose ps", timeout_seconds=30),
+        _forensic_iran_command("iran_compose_ps", "docker-compose ps", timeout_seconds=30),
         CommandSpec(
             "iran_public_config",
             ["curl", "-fsS", "https://coin.gold-trade.ir/api/config"],
             timeout_seconds=20,
         ),
-        iran_command(
+        _forensic_iran_command(
             "isolation_status",
             "docker-compose exec -T app python scripts/production_test_isolation.py status",
             timeout_seconds=30,
@@ -476,7 +537,7 @@ def build_preflight_commands(*, prefix: str, artifact_dir: Path) -> list[Command
             ],
             timeout_seconds=120,
         ),
-        iran_command(
+        _forensic_iran_command(
             "iran_cleanup_dry_run",
             (
                 "docker-compose exec -T app python scripts/trading_core_probe_worker.py cleanup "
@@ -561,7 +622,8 @@ def stable_equivalent_dual_role_shape_component_key(record: dict[str, Any]) -> s
     return dual_role_shape_component_key(stable_record)
 
 
-def component_cache_gate_command(
+@_retire_legacy_forensic_source
+def _forensic_component_cache_gate_command(
     *,
     component_kind: str,
     component_key: str,
@@ -608,7 +670,7 @@ def cache_component_plan(
                 "source_manifest_id": source_manifest_id,
             },
         }
-    gate = component_cache_gate_command(
+    gate = _forensic_component_cache_gate_command(
         component_kind=component_kind,
         component_key=component_key,
         source_manifest_id=existing_source,
@@ -692,7 +754,8 @@ def driver_gap_bucket_for_reason(reason: str) -> str:
     return DRIVER_GAP_REASON_TO_BUCKET.get(str(reason), "unknown_driver_gap")
 
 
-def dual_role_scenario_commands(
+@_retire_legacy_forensic_source
+def _forensic_dual_role_scenario_commands(
     record: dict[str, Any],
     *,
     prefix: str,
@@ -810,7 +873,7 @@ def dual_role_scenario_commands(
         "BOT_TOKEN": "",
     }
     pre_role_commands = [
-        container_python_command(
+        _forensic_container_python_command(
             "cleanup_foreign_scenario_prefix_before_prepare",
             server="foreign",
             python_args=[
@@ -823,7 +886,7 @@ def dual_role_scenario_commands(
             env=production_env,
             timeout_seconds=240,
         ),
-        container_python_command(
+        _forensic_container_python_command(
             "cleanup_iran_scenario_prefix_before_prepare",
             server="iran",
             python_args=[
@@ -836,7 +899,7 @@ def dual_role_scenario_commands(
             env=production_env,
             timeout_seconds=240,
         ),
-        container_python_command(
+        _forensic_container_python_command(
             "prepare_on_offer_home_server",
             server=offer_home_server,
             python_args=prepare_args,
@@ -845,64 +908,64 @@ def dual_role_scenario_commands(
         ),
         CommandSpec("sync_health_after_prepare_foreign", ["make", "sync-health"], timeout_seconds=90),
         CommandSpec("sync_health_after_prepare_iran", ["make", "sync-health-iran"], timeout_seconds=90),
-        host_mkdir_command(
+        _forensic_host_mkdir_command(
             "ensure_foreign_artifact_dir",
             server="foreign",
             path=remote_dir,
         ),
-        host_mkdir_command(
+        _forensic_host_mkdir_command(
             "ensure_iran_artifact_dir",
             server="iran",
             path=remote_dir,
         ),
-        copy_container_to_host_command(
+        _forensic_copy_container_to_host_command(
             "publish_prepare_from_offer_home_container",
             server=offer_home_server,
             path=prepare_path,
         ),
-        copy_container_to_host_command(
+        _forensic_copy_container_to_host_command(
             "publish_telegram_role_plan_from_offer_home_container",
             server=offer_home_server,
             path=telegram_plan_path,
         ),
-        copy_container_to_host_command(
+        _forensic_copy_container_to_host_command(
             "publish_webapp_role_plan_from_offer_home_container",
             server=offer_home_server,
             path=webapp_plan_path,
         ),
-        copy_between_servers_command(
+        _forensic_copy_between_servers_command(
             "distribute_telegram_role_plan",
             source_server=offer_home_server,
             target_server="foreign",
             path=telegram_plan_path,
         ),
-        copy_between_servers_command(
+        _forensic_copy_between_servers_command(
             "distribute_webapp_role_plan",
             source_server=offer_home_server,
             target_server="iran",
             path=webapp_plan_path,
         ),
-        container_mkdir_command(
+        _forensic_container_mkdir_command(
             "ensure_foreign_container_artifact_dir",
             server="foreign",
             path=remote_dir,
         ),
-        container_mkdir_command(
+        _forensic_container_mkdir_command(
             "ensure_iran_container_artifact_dir",
             server="iran",
             path=remote_dir,
         ),
-        copy_host_to_container_command(
+        _forensic_copy_host_to_container_command(
             "install_telegram_role_plan_in_foreign_container",
             server="foreign",
             path=telegram_plan_path,
         ),
-        copy_host_to_container_command(
+        _forensic_copy_host_to_container_command(
             "install_webapp_role_plan_in_iran_container",
             server="iran",
             path=webapp_plan_path,
         ),
-        container_python_command(
+        _forensic_container_python_command(
             "sync_prefix_catchup_from_offer_home_server",
             server=offer_home_server,
             python_args=[
@@ -921,7 +984,7 @@ def dual_role_scenario_commands(
         ),
     ]
     visibility_wait_commands = [
-        container_python_command(
+        _forensic_container_python_command(
             "wait_telegram_offer_visible_on_foreign",
             server="foreign",
             python_args=[
@@ -938,7 +1001,7 @@ def dual_role_scenario_commands(
             timeout_seconds=150,
             mutates_production=False,
         ),
-        container_python_command(
+        _forensic_container_python_command(
             "wait_webapp_offer_visible_on_iran",
             server="iran",
             python_args=[
@@ -959,24 +1022,24 @@ def dual_role_scenario_commands(
     if is_read_during_write:
         pre_role_commands.extend(
             [
-                copy_between_servers_command(
+                _forensic_copy_between_servers_command(
                     "distribute_prepare_to_foreign",
                     source_server=offer_home_server,
                     target_server="foreign",
                     path=prepare_path,
                 ),
-                copy_between_servers_command(
+                _forensic_copy_between_servers_command(
                     "distribute_prepare_to_iran",
                     source_server=offer_home_server,
                     target_server="iran",
                     path=prepare_path,
                 ),
-                copy_host_to_container_command(
+                _forensic_copy_host_to_container_command(
                     "install_prepare_in_foreign_container",
                     server="foreign",
                     path=prepare_path,
                 ),
-                copy_host_to_container_command(
+                _forensic_copy_host_to_container_command(
                     "install_prepare_in_iran_container",
                     server="iran",
                     path=prepare_path,
@@ -984,7 +1047,7 @@ def dual_role_scenario_commands(
             ]
         )
     role_commands = [
-        container_python_command(
+        _forensic_container_python_command(
             "run_role_telegram_foreign",
             server="foreign",
             python_args=[
@@ -1000,7 +1063,7 @@ def dual_role_scenario_commands(
             env=production_env,
             timeout_seconds=900,
         ),
-        container_python_command(
+        _forensic_container_python_command(
             "run_role_webapp_iran",
             server="iran",
             python_args=[
@@ -1019,7 +1082,7 @@ def dual_role_scenario_commands(
     ]
     if is_manual_expire_trade_race:
         role_commands.append(
-            container_python_command(
+            _forensic_container_python_command(
                 "run_manual_expiry_race_on_offer_home_server",
                 server=offer_home_server,
                 python_args=[
@@ -1037,7 +1100,7 @@ def dual_role_scenario_commands(
         )
     if is_time_expire_trade_race:
         role_commands.append(
-            container_python_command(
+            _forensic_container_python_command(
                 "run_time_expiry_race_on_offer_home_server",
                 server=offer_home_server,
                 python_args=[
@@ -1056,7 +1119,7 @@ def dual_role_scenario_commands(
     if is_read_during_write:
         role_commands.extend(
             [
-                container_python_command(
+                _forensic_container_python_command(
                     "run_read_during_write_telegram_foreign",
                     server="foreign",
                     python_args=[
@@ -1073,7 +1136,7 @@ def dual_role_scenario_commands(
                     env=production_env,
                     timeout_seconds=180,
                 ),
-                container_python_command(
+                _forensic_container_python_command(
                     "run_read_during_write_webapp_iran",
                     server="iran",
                     python_args=[
@@ -1119,34 +1182,34 @@ def dual_role_scenario_commands(
         )
 
     post_role_commands = [
-        copy_container_to_host_command(
+        _forensic_copy_container_to_host_command(
             "publish_telegram_role_result_from_foreign_container",
             server="foreign",
             path=telegram_result_path,
         ),
-        copy_container_to_host_command(
+        _forensic_copy_container_to_host_command(
             "publish_webapp_role_result_from_iran_container",
             server="iran",
             path=webapp_result_path,
         ),
-        copy_between_servers_command(
+        _forensic_copy_between_servers_command(
             "collect_telegram_role_result",
             source_server="foreign",
             target_server=offer_home_server,
             path=telegram_result_path,
         ),
-        copy_between_servers_command(
+        _forensic_copy_between_servers_command(
             "collect_webapp_role_result",
             source_server="iran",
             target_server=offer_home_server,
             path=webapp_result_path,
         ),
-        copy_host_to_container_command(
+        _forensic_copy_host_to_container_command(
             "install_telegram_role_result_in_offer_home_container",
             server=offer_home_server,
             path=telegram_result_path,
         ),
-        copy_host_to_container_command(
+        _forensic_copy_host_to_container_command(
             "install_webapp_role_result_in_offer_home_container",
             server=offer_home_server,
             path=webapp_result_path,
@@ -1155,34 +1218,34 @@ def dual_role_scenario_commands(
     if is_read_during_write:
         post_role_commands.extend(
             [
-                copy_container_to_host_command(
+                _forensic_copy_container_to_host_command(
                     "publish_read_telegram_result_from_foreign_container",
                     server="foreign",
                     path=read_telegram_result_path,
                 ),
-                copy_container_to_host_command(
+                _forensic_copy_container_to_host_command(
                     "publish_read_webapp_result_from_iran_container",
                     server="iran",
                     path=read_webapp_result_path,
                 ),
-                copy_between_servers_command(
+                _forensic_copy_between_servers_command(
                     "collect_read_telegram_result",
                     source_server="foreign",
                     target_server=offer_home_server,
                     path=read_telegram_result_path,
                 ),
-                copy_between_servers_command(
+                _forensic_copy_between_servers_command(
                     "collect_read_webapp_result",
                     source_server="iran",
                     target_server=offer_home_server,
                     path=read_webapp_result_path,
                 ),
-                copy_host_to_container_command(
+                _forensic_copy_host_to_container_command(
                     "install_read_telegram_result_in_offer_home_container",
                     server=offer_home_server,
                     path=read_telegram_result_path,
                 ),
-                copy_host_to_container_command(
+                _forensic_copy_host_to_container_command(
                     "install_read_webapp_result_in_offer_home_container",
                     server=offer_home_server,
                     path=read_webapp_result_path,
@@ -1191,7 +1254,7 @@ def dual_role_scenario_commands(
         )
     post_role_commands.extend(
         [
-            container_python_command(
+            _forensic_container_python_command(
                 "merge_role_results_on_offer_home_server",
                 server=offer_home_server,
                 python_args=[
@@ -1204,7 +1267,7 @@ def dual_role_scenario_commands(
                 ],
                 timeout_seconds=120,
             ),
-            container_python_command(
+            _forensic_container_python_command(
                 "finalize_on_offer_home_server",
                 server=offer_home_server,
                 python_args=finalize_args,
@@ -1255,7 +1318,8 @@ def dual_role_scenario_commands(
     }
 
 
-def negative_guard_scenario_commands(
+@_retire_legacy_forensic_source
+def _forensic_negative_guard_scenario_commands(
     record: dict[str, Any],
     *,
     prefix: str,
@@ -1274,12 +1338,12 @@ def negative_guard_scenario_commands(
         "BOT_TOKEN": "",
     }
     commands = [
-        host_mkdir_command(
+        _forensic_host_mkdir_command(
             "ensure_iran_negative_guard_artifact_dir",
             server="iran",
             path=remote_dir,
         ),
-        container_python_command(
+        _forensic_container_python_command(
             "run_negative_guard_case_iran",
             server="iran",
             python_args=[
@@ -1321,7 +1385,8 @@ def negative_guard_scenario_commands(
     }
 
 
-def delivery_contract_scenario_commands(
+@_retire_legacy_forensic_source
+def _forensic_delivery_contract_scenario_commands(
     record: dict[str, Any],
     *,
     prefix: str,
@@ -1335,12 +1400,12 @@ def delivery_contract_scenario_commands(
     scenario_dir = artifact_dir / "scenarios" / safe_token(manifest_id)
     remote_dir = f"/tmp/{scenario_run_prefix}delivery-contract"
     commands = [
-        host_mkdir_command(
+        _forensic_host_mkdir_command(
             "ensure_delivery_contract_artifact_dir",
             server="foreign",
             path=remote_dir,
         ),
-        container_python_command(
+        _forensic_container_python_command(
             "assert_delivery_contract_catalog_scenario",
             server="foreign",
             python_args=[
@@ -1381,7 +1446,8 @@ def delivery_contract_scenario_commands(
     }
 
 
-def targeted_join_scenario_commands(
+@_retire_legacy_forensic_source
+def _forensic_targeted_join_scenario_commands(
     record: dict[str, Any],
     *,
     prefix: str,
@@ -1410,12 +1476,12 @@ def targeted_join_scenario_commands(
         "BOT_TOKEN": "",
     }
     commands = [
-        host_mkdir_command(
+        _forensic_host_mkdir_command(
             f"ensure_{offer_home_server}_targeted_join_artifact_dir",
             server=offer_home_server,
             path=remote_dir,
         ),
-        container_python_command(
+        _forensic_container_python_command(
             "run_targeted_trade_delivery_join_scenario",
             server=offer_home_server,
             python_args=[
@@ -1434,7 +1500,7 @@ def targeted_join_scenario_commands(
             env=production_env,
             timeout_seconds=900,
         ),
-        container_python_command(
+        _forensic_container_python_command(
             "cleanup_targeted_trade_delivery_join_scenario",
             server=offer_home_server,
             python_args=[
@@ -1483,7 +1549,8 @@ def targeted_join_scenario_commands(
     }
 
 
-def outage_policy_scenario_commands(
+@_retire_legacy_forensic_source
+def _forensic_outage_policy_scenario_commands(
     record: dict[str, Any],
     *,
     prefix: str,
@@ -1500,7 +1567,7 @@ def outage_policy_scenario_commands(
     if outage_id not in {"short_under_2m", "medium_around_60m"}:
         raise RunnerError(f"{manifest_id}: outage policy driver only supports short/medium outage ids")
     delivery_scenario_id = delivery_scenario_id_for_record(record)
-    dual_role_plan = dual_role_scenario_commands(
+    dual_role_plan = _forensic_dual_role_scenario_commands(
         record,
         prefix=prefix,
         artifact_dir=artifact_dir,
@@ -1531,7 +1598,7 @@ def outage_policy_scenario_commands(
         "policy_supported": record.get("policy_supported"),
         "unsupported_reasons": record.get("unsupported_reasons") or [],
     }
-    targeted_plan = targeted_join_scenario_commands(
+    targeted_plan = _forensic_targeted_join_scenario_commands(
         targeted_record,
         prefix=prefix,
         artifact_dir=artifact_dir,
@@ -1593,7 +1660,8 @@ def outage_policy_scenario_commands(
     }
 
 
-def customer_accountant_actor_scenario_commands(
+@_retire_legacy_forensic_source
+def _forensic_customer_accountant_actor_scenario_commands(
     record: dict[str, Any],
     *,
     prefix: str,
@@ -1632,7 +1700,7 @@ def customer_accountant_actor_scenario_commands(
         "policy_supported": True,
         "unsupported_reasons": [],
     }
-    actor_policy_plan = targeted_join_scenario_commands(
+    actor_policy_plan = _forensic_targeted_join_scenario_commands(
         actor_policy_record,
         prefix=prefix,
         artifact_dir=artifact_dir,
@@ -1645,7 +1713,7 @@ def customer_accountant_actor_scenario_commands(
         cache_sources=component_cache_sources,
         ledger_path=ledger_path,
     )
-    shape_plan = dual_role_scenario_commands(
+    shape_plan = _forensic_dual_role_scenario_commands(
         shape_record,
         prefix=prefix,
         artifact_dir=artifact_dir,
@@ -1715,7 +1783,8 @@ def customer_accountant_actor_scenario_commands(
     }
 
 
-def unsupported_policy_scenario_commands(
+@_retire_legacy_forensic_source
+def _forensic_unsupported_policy_scenario_commands(
     record: dict[str, Any],
     *,
     prefix: str,
@@ -1791,7 +1860,7 @@ def unsupported_policy_scenario_commands(
             python_args.append("--retail")
             python_args.extend(["--lot-sizes", " ".join(str(item) for item in profile["lot_sizes"])])
         probe_commands.append(
-            container_python_command(
+            _forensic_container_python_command(
                 f"run_unsupported_policy_{safe_token(reason)}",
                 server=server,
                 python_args=python_args,
@@ -1801,7 +1870,7 @@ def unsupported_policy_scenario_commands(
         )
 
     mkdir_commands = [
-        host_mkdir_command(
+        _forensic_host_mkdir_command(
             f"ensure_{server}_unsupported_policy_artifact_dir",
             server=server,
             path=remote_dir,
@@ -1842,7 +1911,8 @@ def unsupported_policy_scenario_commands(
     }
 
 
-def market_behavior_scenario_commands(
+@_retire_legacy_forensic_source
+def _forensic_market_behavior_scenario_commands(
     record: dict[str, Any],
     *,
     prefix: str,
@@ -1882,12 +1952,12 @@ def market_behavior_scenario_commands(
         "BOT_TOKEN": "",
     }
     commands = [
-        host_mkdir_command(
+        _forensic_host_mkdir_command(
             f"ensure_{server}_market_behavior_artifact_dir",
             server=server,
             path=remote_dir,
         ),
-        container_python_command(
+        _forensic_container_python_command(
             "run_market_behavior_scenario",
             server=server,
             python_args=[
@@ -1954,7 +2024,8 @@ def market_behavior_scenario_commands(
     }
 
 
-def build_execution_plan(
+@_retire_legacy_forensic_source
+def _forensic_build_execution_plan(
     records: list[dict[str, Any]],
     *,
     prefix: str,
@@ -1983,7 +2054,7 @@ def build_execution_plan(
             continue
         if record.get("section") == "market_behavior":
             scenario_plans.append(
-                market_behavior_scenario_commands(
+                _forensic_market_behavior_scenario_commands(
                     record,
                     prefix=prefix,
                     artifact_dir=artifact_dir,
@@ -1995,7 +2066,7 @@ def build_execution_plan(
             )
         elif record.get("section") == "delivery_contract":
             scenario_plans.append(
-                delivery_contract_scenario_commands(
+                _forensic_delivery_contract_scenario_commands(
                     record,
                     prefix=prefix,
                     artifact_dir=artifact_dir,
@@ -2003,7 +2074,7 @@ def build_execution_plan(
             )
         elif record.get("section") == "targeted_trade_delivery_join":
             scenario_plans.append(
-                targeted_join_scenario_commands(
+                _forensic_targeted_join_scenario_commands(
                     record,
                     prefix=prefix,
                     artifact_dir=artifact_dir,
@@ -2011,7 +2082,7 @@ def build_execution_plan(
             )
         elif record.get("section") == "negative_business_guard":
             scenario_plans.append(
-                negative_guard_scenario_commands(
+                _forensic_negative_guard_scenario_commands(
                     record,
                     prefix=prefix,
                     artifact_dir=artifact_dir,
@@ -2019,7 +2090,7 @@ def build_execution_plan(
             )
         elif record.get("section") == "production_base_trade_shape" and record.get("policy_supported") is False:
             scenario_plans.append(
-                unsupported_policy_scenario_commands(
+                _forensic_unsupported_policy_scenario_commands(
                     record,
                     prefix=prefix,
                     artifact_dir=artifact_dir,
@@ -2030,7 +2101,7 @@ def build_execution_plan(
             and record.get("actor_pair_id") != "user__user"
         ):
             scenario_plans.append(
-                customer_accountant_actor_scenario_commands(
+                _forensic_customer_accountant_actor_scenario_commands(
                     record,
                     prefix=prefix,
                     artifact_dir=artifact_dir,
@@ -2047,7 +2118,7 @@ def build_execution_plan(
             and record.get("outage_id") != "stable"
         ):
             scenario_plans.append(
-                outage_policy_scenario_commands(
+                _forensic_outage_policy_scenario_commands(
                     record,
                     prefix=prefix,
                     artifact_dir=artifact_dir,
@@ -2060,7 +2131,7 @@ def build_execution_plan(
                 )
             )
         else:
-            scenario_plan = dual_role_scenario_commands(
+            scenario_plan = _forensic_dual_role_scenario_commands(
                 record,
                 prefix=prefix,
                 artifact_dir=artifact_dir,
@@ -2128,7 +2199,8 @@ def build_execution_plan(
     }
 
 
-def run_preflight_commands(commands: list[CommandSpec], *, cwd: Path) -> list[dict[str, Any]]:
+@_retire_legacy_forensic_source
+def _forensic_run_preflight_commands(commands: list[CommandSpec], *, cwd: Path) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for command in commands:
         try:
@@ -2163,14 +2235,15 @@ def run_preflight_commands(commands: list[CommandSpec], *, cwd: Path) -> list[di
     return results
 
 
-def run_execution_preflight_commands(
+@_retire_legacy_forensic_source
+def _forensic_run_execution_preflight_commands(
     commands: list[CommandSpec],
     *,
     cwd: Path,
     resume_skip_campaign_cleanup: bool,
 ) -> list[dict[str, Any]]:
     if not resume_skip_campaign_cleanup:
-        return run_preflight_commands(commands, cwd=cwd)
+        return _forensic_run_preflight_commands(commands, cwd=cwd)
 
     results: list[dict[str, Any]] = []
     for command in commands:
@@ -2189,7 +2262,7 @@ def run_execution_preflight_commands(
                 }
             )
             continue
-        command_results = run_preflight_commands([command], cwd=cwd)
+        command_results = _forensic_run_preflight_commands([command], cwd=cwd)
         results.extend(command_results)
         if command_results and command_results[-1].get("status") == "timeout":
             break
@@ -2205,7 +2278,8 @@ def command_spec_from_payload(payload: dict[str, Any]) -> CommandSpec:
     )
 
 
-def command_result(command: CommandSpec, *, cwd: Path) -> dict[str, Any]:
+@_retire_legacy_forensic_source
+def _forensic_command_result(command: CommandSpec, *, cwd: Path) -> dict[str, Any]:
     started = time.perf_counter()
     try:
         completed = subprocess.run(
@@ -2236,7 +2310,8 @@ def command_result(command: CommandSpec, *, cwd: Path) -> dict[str, Any]:
         }
 
 
-def concurrent_command_results(commands: list[CommandSpec], *, cwd: Path) -> list[dict[str, Any]]:
+@_retire_legacy_forensic_source
+def _forensic_concurrent_command_results(commands: list[CommandSpec], *, cwd: Path) -> list[dict[str, Any]]:
     started_by_name: dict[str, float] = {}
     processes: list[tuple[CommandSpec, subprocess.Popen[str]]] = []
     for command in commands:
@@ -2401,7 +2476,8 @@ def write_campaign_ledger(
     )
 
 
-def execute_scenario_plan(
+@_retire_legacy_forensic_source
+def _forensic_execute_scenario_plan(
     scenario_plan: dict[str, Any],
     *,
     index: int,
@@ -2416,11 +2492,11 @@ def execute_scenario_plan(
         commands = [command_spec_from_payload(item) for item in (group.get("commands") or [])]
         mode = str(group.get("mode") or "sequential")
         if mode == "concurrent":
-            command_results = concurrent_command_results(commands, cwd=cwd)
+            command_results = _forensic_concurrent_command_results(commands, cwd=cwd)
         else:
             command_results = []
             for command in commands:
-                result = command_result(command, cwd=cwd)
+                result = _forensic_command_result(command, cwd=cwd)
                 command_results.append(result)
                 if result.get("status") != "passed":
                     break
@@ -2448,7 +2524,8 @@ def execute_scenario_plan(
     }
 
 
-def execute_command_plan(
+@_retire_legacy_forensic_source
+def _forensic_execute_command_plan(
     plan: dict[str, Any],
     *,
     cwd: Path,
@@ -2487,7 +2564,7 @@ def execute_command_plan(
         command_spec_from_payload(item)
         for item in (plan.get("preflight") or {}).get("commands") or []
     ]
-    preflight_results = run_execution_preflight_commands(
+    preflight_results = _forensic_run_execution_preflight_commands(
         preflight_commands,
         cwd=cwd,
         resume_skip_campaign_cleanup=resume and (results_path.exists() or ledger_path.exists()),
@@ -2576,7 +2653,7 @@ def execute_command_plan(
                 file=sys.stderr,
                 flush=True,
             )
-            result = execute_scenario_plan(
+            result = _forensic_execute_scenario_plan(
                 scenario_plan,
                 index=index,
                 total=len(scenario_plans),
@@ -2659,7 +2736,7 @@ def load_manifest(args: argparse.Namespace) -> dict[str, Any]:
     if args.manifest:
         manifest = read_json(args.manifest)
     else:
-        manifest = manifest_builder.build_manifest(prefix=args.prefix)
+        manifest = manifest_builder._forensic_build_manifest(prefix=args.prefix)
     errors = manifest_builder.validate_manifest(manifest)
     if errors:
         raise RunnerError("; ".join(errors))
@@ -2856,7 +2933,8 @@ def planned_steps(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return steps
 
 
-def build_plan(args: argparse.Namespace) -> dict[str, Any]:
+@_retire_legacy_forensic_source
+def _forensic_build_plan(args: argparse.Namespace) -> dict[str, Any]:
     manifest = load_manifest(args)
     prefix = str(manifest.get("prefix"))
     sections = set(args.section or [])
@@ -2865,7 +2943,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     steps = planned_steps(selected)
     status = "planned"
     artifact_dir = Path(args.artifact_dir or (Path("/tmp/trading-bot-production-full-matrix") / prefix))
-    preflight_commands = build_preflight_commands(prefix=prefix, artifact_dir=artifact_dir)
+    preflight_commands = _forensic_build_preflight_commands(prefix=prefix, artifact_dir=artifact_dir)
     if args.mode == "preflight":
         status = "preflight_execution_requested" if args.execute else "preflight_planned"
     elif args.mode == "execution-plan":
@@ -2874,7 +2952,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         status = "blocked_not_implemented"
     execution_plan = None
     if args.mode == "execution-plan":
-        execution_plan = build_execution_plan(
+        execution_plan = _forensic_build_execution_plan(
             selected,
             prefix=prefix,
             artifact_dir=artifact_dir,
@@ -2951,6 +3029,82 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         "execution_plan": execution_plan,
         "steps": steps,
     }
+
+
+def _retire_legacy_public_api(*, operation: str) -> NoReturn:
+    """Reject every supported in-process entry to historical command material."""
+
+    assert_legacy_two_server_full_matrix_retired(
+        component="production-full-matrix-runner",
+        operation=operation,
+    )
+
+
+def build_preflight_commands(*, prefix: str, artifact_dir: Path) -> list[CommandSpec]:
+    """Retired public boundary; it cannot expose FI<->IR command argv."""
+
+    del prefix, artifact_dir
+    _retire_legacy_public_api(operation="two-server preflight command construction")
+
+
+def build_execution_plan(
+    records: list[dict[str, Any]],
+    *,
+    prefix: str,
+    artifact_dir: Path,
+    user_count: int,
+    hot_offer_requests: int,
+    target_rps: float,
+    telegram_ratio: float,
+) -> dict[str, Any]:
+    """Retired public boundary; it cannot expose FI<->IR scenario commands."""
+
+    del records, prefix, artifact_dir, user_count, hot_offer_requests, target_rps, telegram_ratio
+    _retire_legacy_public_api(operation="two-server execution-plan construction")
+
+
+def build_plan(args: argparse.Namespace) -> dict[str, Any]:
+    """Retired public boundary; normal imports cannot obtain a legacy plan."""
+
+    del args
+    _retire_legacy_public_api(operation="two-server command-plan construction")
+
+
+def execute_scenario_plan(
+    scenario_plan: dict[str, Any],
+    *,
+    index: int,
+    total: int,
+    cwd: Path,
+) -> dict[str, Any]:
+    """Retired public boundary; normal imports cannot run historical commands."""
+
+    del scenario_plan, index, total, cwd
+    _retire_legacy_public_api(operation="two-server scenario command execution")
+
+
+def execute_command_plan(
+    plan: dict[str, Any],
+    *,
+    cwd: Path,
+    resume: bool = False,
+    continue_on_failure: bool = False,
+    scenario_retries: int = 0,
+    retry_backoff_seconds: float = 15.0,
+    retry_mode: str = "transient",
+) -> tuple[dict[str, Any], int]:
+    """Retired public boundary; normal imports cannot run historical commands."""
+
+    del (
+        plan,
+        cwd,
+        resume,
+        continue_on_failure,
+        scenario_retries,
+        retry_backoff_seconds,
+        retry_mode,
+    )
+    _retire_legacy_public_api(operation="two-server command-plan execution")
 
 
 def compact_stdout(plan: dict[str, Any], output: Path | None) -> dict[str, Any]:
@@ -3068,10 +3222,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
+def _historical_two_server_main(argv: list[str] | None = None) -> int:
+    """Retained source only; never emit a legacy two-server command plan.
+
+    The old implementation is deliberately kept below the unconditional fence
+    for forensic comparison of historical test artifacts.  In particular it
+    must not become a hidden path that prints FI<->IR SSH/SCP commands merely
+    because the caller omitted ``--execute``.
+    """
+
+    assert_legacy_two_server_full_matrix_retired(
+        component="production-full-matrix-runner",
+        operation="historical two-server command-plan emission",
+    )
     args = parse_args(argv)
     try:
-        plan = build_plan(args)
+        plan = _forensic_build_plan(args)
     except RunnerError as exc:
         print(json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False, sort_keys=True))
         return 1
@@ -3092,14 +3258,14 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 for item in plan["preflight"]["commands"]
             ]
-            results = run_preflight_commands(commands, cwd=REPO_ROOT)
+            results = _forensic_run_preflight_commands(commands, cwd=REPO_ROOT)
             failed = [item for item in results if item.get("status") != "passed"]
             plan["status"] = "preflight_failed" if failed else "preflight_passed"
             plan["preflight"]["status"] = plan["status"]
             plan["preflight"]["results"] = results
             exit_code = 1 if failed else 0
     elif args.execute and args.mode == "execution-plan":
-        plan, exit_code = execute_command_plan(
+        plan, exit_code = _forensic_execute_command_plan(
             plan,
             cwd=REPO_ROOT,
             resume=args.resume,
@@ -3118,6 +3284,22 @@ def main(argv: list[str] | None = None) -> int:
     stdout_payload = plan if args.print_full else compact_stdout(plan, args.output)
     print(json.dumps(stdout_payload, ensure_ascii=False, sort_keys=True))
     return exit_code
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Reject every legacy CLI mode before parsing or producing a command plan."""
+
+    del argv
+    print(
+        json.dumps(
+            blocked_legacy_two_server_full_matrix_payload(
+                component="production-full-matrix-runner"
+            ),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+    return 2
 
 
 if __name__ == "__main__":

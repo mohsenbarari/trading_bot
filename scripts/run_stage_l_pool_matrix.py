@@ -18,6 +18,11 @@ from scripts.capture_production_baseline import DEFAULT_ARTIFACT_ROOT, display_p
 from scripts.deploy_config import resolve_deploy_settings
 from scripts.report_production_realistic_load import parse_duration_seconds
 from scripts.run_worker_pool_matrix import run_remote_script, sh_quote
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+    blocked_legacy_direct_fi_ir_transport_payload,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -453,6 +458,15 @@ def recommend(report: dict[str, Any]) -> str:
 
 
 def run_matrix(args: argparse.Namespace) -> dict[str, Any]:
+    # This benchmark mutates the historical WA-IR root Compose app over a
+    # direct FI-initiated SSH route.  The lower-level worker-matrix helper is
+    # also fenced, but reject here before a manifest is parsed or a local
+    # artifact directory is created so callers cannot use this planner as a
+    # partial legacy-control primitive.
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="stage-l7-production-pool-matrix",
+        operation="legacy Iran root-Compose pool mutation benchmark",
+    )
     settings = resolve_deploy_settings(manifest_path=args.manifest)
     candidates = parse_candidates(args.candidates)
     worker_candidates = parse_worker_candidates(args.workers, args.api_workers)
@@ -549,6 +563,22 @@ def run_matrix(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="stage-l7-production-pool-matrix",
+            operation="legacy Iran root-Compose pool mutation benchmark CLI",
+        )
+    except LegacyDirectFiIrTransportRetiredError:
+        print(
+            json.dumps(
+                blocked_legacy_direct_fi_ir_transport_payload(
+                    component="stage-l7-production-pool-matrix"
+                ),
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+        return 2
     args = parse_args(argv)
     try:
         report = run_matrix(args)

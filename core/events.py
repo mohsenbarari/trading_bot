@@ -122,12 +122,25 @@ def _get_sync_redis():
     return _sync_redis
 
 
-def log_change(connection, table_name: str, record_id: int, operation: str, data: Dict[str, Any]):
+def log_change(
+    connection,
+    table_name: str,
+    record_id: int,
+    operation: str,
+    data: Dict[str, Any],
+) -> int | None:
     """Record a committed-outbox candidate in change_log.
 
     This function runs inside SQLAlchemy flush-time listeners. It intentionally
     does not push to Redis or direct HTTP because the enclosing transaction may
     still roll back. sync_worker is responsible for reading committed rows.
+
+    The returned ID is retained by ``sync_outbox_guard`` only until this flush
+    has been verified. Its default-off Object-delta bridge then uses that
+    exact ID after flush, still inside the same outer transaction. Do not
+    invoke the allocator from this mapper listener: it has no trusted
+    stream/term inputs. Existing listeners ignore this return value, so legacy
+    behavior remains unchanged while the bridge is disabled.
     """
     data = sanitize_sync_payload(table_name, data)
     json_data = json.dumps(data, default=str)
@@ -149,8 +162,16 @@ def log_change(connection, table_name: str, record_id: int, operation: str, data
         "ts": now,
         "hash": data_hash
     })
-    _extract_change_log_id(result)
-    mark_sync_outbox_recorded(connection, table_name, operation, record_id, data)
+    change_log_id = _extract_change_log_id(result)
+    mark_sync_outbox_recorded(
+        connection,
+        table_name,
+        operation,
+        record_id,
+        data,
+        change_log_id=change_log_id,
+    )
+    return change_log_id
 
 
 def _record_local_user_counter_event(connection, target, counter_event, source_server: str) -> None:

@@ -1,0 +1,17 @@
+# Generated default-off local authentication policy for the FI primary.
+# No ``host`` rule grants access; the explicit reject entries remain as a
+# defence-in-depth proof if a later unsafe TCP listener is attempted.
+
+# The PostgreSQL service account may perform local maintenance as itself.
+local   all             postgres                                peer
+
+# A digest-pinned helper runs as the image-attested PostgreSQL UID/GID and
+# reaches this only through the shared Unix socket.  The peer map accepts only
+# that local PostgreSQL OS user for the dedicated non-superuser backup role.
+# No password method is present.
+local   replication     @@LOCAL_BASE_BACKUP_REPLICATION_ROLE@@     peer map=@@LOCAL_BASE_BACKUP_PEER_MAP@@
+
+# Every other local identity and every TCP family is denied.
+local   all             all                                     reject
+host    all             all             0.0.0.0/0               reject
+host    all             all             ::0/0                    reject
