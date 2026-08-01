@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.application_writer_term import policy_from_settings, require_active_writer_term
 from core.config import settings
 from core.enums import NotificationCategory, NotificationLevel
 from core.market_presence import load_market_page_user_ids
@@ -30,6 +31,12 @@ logger = logging.getLogger(__name__)
 TERMINAL_PUSH_STATUS_CODES = {404, 410}
 WEB_PUSH_EXECUTION_SERVER = SERVER_IRAN
 WEB_PUSH_DISABLED_RESULT = {"total": 0, "sent": 0, "failed": 0, "disabled": 0}
+
+
+def require_web_push_writer_term() -> None:
+    """Fence a provider-visible Web Push submission when the term is enabled."""
+
+    require_active_writer_term(policy_from_settings(settings))
 
 
 def hash_endpoint(endpoint: str) -> str:
@@ -230,6 +237,10 @@ async def send_web_push_to_user(
 ) -> dict[str, int]:
     if not is_web_push_configured():
         return disabled_web_push_result()
+    # Reject before opening/claiming provider delivery state.  The same check
+    # is repeated at each egress call below to close a term-loss race during a
+    # multi-subscription fan-out.
+    require_web_push_writer_term()
 
     try:
         from core.production_test_isolation import should_suppress_web_push_for_user
@@ -268,6 +279,7 @@ async def send_web_push_to_user(
     vapid_claims = {"sub": settings.web_push_vapid_subject}
 
     for subscription in subscriptions:
+        require_web_push_writer_term()
         try:
             await asyncio.to_thread(
                 webpush,
