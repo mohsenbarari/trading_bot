@@ -38,7 +38,7 @@ from urllib.parse import urlparse
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_SCHEMA = "gold-trade-wa-ir-stage-bootstrap-package-v1"
 RECEIPT_SCHEMA = "gold-trade-wa-ir-stage-bootstrap-preparation-v1"
-CONSUMER_CONFIG_SCHEMA = "gold-trade-wa-ir-artifact-stage-config-v1"
+CONSUMER_CONFIG_SCHEMA = "gold-trade-wa-ir-artifact-stage-config-v3"
 MAX_CONTROL_FILE_BYTES = 2 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 8 * 1024 * 1024
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -284,6 +284,8 @@ def _validate_consumer_config(payload: bytes) -> dict[str, Any]:
         "workspace",
         "source_site",
         "source_signing_public_key_base64",
+        "webapp_fi_source_attestation_public_key_base64",
+        "webapp_fi_controller_authorization_public_key_base64",
         "maximum_artifact_bytes",
     }
     if set(value) != expected:
@@ -339,6 +341,30 @@ def _validate_consumer_config(payload: bytes) -> dict[str, Any]:
         raise BootstrapPreparationError("consumer config source signing key is invalid") from exc
     if len(public_key) != 32:
         raise BootstrapPreparationError("consumer config source signing key has an unsafe length")
+    fi_encoded_key = _require_string(
+        value.get("webapp_fi_source_attestation_public_key_base64"),
+        "consumer config webapp_fi_source_attestation_public_key_base64",
+        maximum=128,
+    )
+    try:
+        fi_public_key = base64.b64decode(fi_encoded_key, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise BootstrapPreparationError("consumer config FI source attestation key is invalid") from exc
+    if len(fi_public_key) != 32:
+        raise BootstrapPreparationError("consumer config FI source attestation key has an unsafe length")
+    controller_encoded_key = _require_string(
+        value.get("webapp_fi_controller_authorization_public_key_base64"),
+        "consumer config WebApp-FI controller authorization key",
+        maximum=128,
+    )
+    try:
+        controller_public_key = base64.b64decode(controller_encoded_key, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise BootstrapPreparationError("consumer config WebApp-FI controller authorization key is invalid") from exc
+    if len(controller_public_key) != 32:
+        raise BootstrapPreparationError(
+            "consumer config WebApp-FI controller authorization key has an unsafe length"
+        )
     maximum = value.get("maximum_artifact_bytes")
     if isinstance(maximum, bool) or not isinstance(maximum, int) or not 1 <= maximum <= 100 * 1024 * 1024 * 1024:
         raise BootstrapPreparationError("consumer config maximum_artifact_bytes is invalid")

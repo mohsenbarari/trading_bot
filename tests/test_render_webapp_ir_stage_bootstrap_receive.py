@@ -74,6 +74,8 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
             "workspace": "/srv/trading-bot-three-site-staging-data/workspace",
             "source_site": "webapp_fi",
             "source_signing_public_key_base64": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            "webapp_fi_source_attestation_public_key_base64": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+            "webapp_fi_controller_authorization_public_key_base64": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=",
             "maximum_artifact_bytes": 21474836480,
         }
         config_raw = canonical(config_value)
@@ -325,6 +327,10 @@ class RenderWebAppIrStageBootstrapReceiveTests(unittest.TestCase):
             config_member = json.loads(fixture["members"]["config/consumer.json"])
             config_member["age_identity_file"] = "/etc/trading-bot-three-site/wa-ir/wrong.agekey"
             with self.assertRaises(receiver.BootstrapReceiveRenderError):
+                receiver._validate_consumer_config(canonical(config_member))
+            config_member = json.loads(fixture["members"]["config/consumer.json"])
+            config_member["webapp_fi_controller_authorization_public_key_base64"] = "AQ=="
+            with self.assertRaisesRegex(receiver.BootstrapReceiveRenderError, "controller authorization"):
                 receiver._validate_consumer_config(canonical(config_member))
             fixture["publish"].chmod(0o644)
             with self.assertRaisesRegex(receiver.BootstrapReceiveRenderError, "unsafe ownership"):

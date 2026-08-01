@@ -51,6 +51,8 @@ class NormalStageConsumeRendererTests(unittest.TestCase):
             "workspace": "/srv/trading-bot-three-site-staging-data/wa-ir-standby/workspace",
             "source_site": "webapp_fi",
             "source_signing_public_key_base64": base64.b64encode(b"p" * 32).decode("ascii"),
+            "webapp_fi_source_attestation_public_key_base64": base64.b64encode(b"f" * 32).decode("ascii"),
+            "webapp_fi_controller_authorization_public_key_base64": base64.b64encode(b"c" * 32).decode("ascii"),
             "maximum_artifact_bytes": 20 * 1024 * 1024 * 1024,
         }
         write_private(path, json.dumps(payload, sort_keys=True).encode("utf-8"))

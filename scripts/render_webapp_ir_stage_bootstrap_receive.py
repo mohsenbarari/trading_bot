@@ -38,7 +38,7 @@ SSH_OPTIONS = ("-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes")
 BOOTSTRAP_PUBLISH_RECEIPT_SCHEMA = "gold-trade-wa-ir-artifact-stage-bootstrap-publish-receipt-v1"
 PREPARATION_RECEIPT_SCHEMA = "gold-trade-wa-ir-stage-bootstrap-preparation-v1"
 PACKAGE_MANIFEST_SCHEMA = "gold-trade-wa-ir-stage-bootstrap-package-v1"
-CONSUMER_CONFIG_SCHEMA = "gold-trade-wa-ir-artifact-stage-config-v1"
+CONSUMER_CONFIG_SCHEMA = "gold-trade-wa-ir-artifact-stage-config-v3"
 RECEIVE_RECEIPT_SCHEMA = "gold-trade-wa-ir-stage-bootstrap-receipt-v1"
 TRANSPORT_SCHEMA = "gold-trade-wa-ir-artifact-stage-v1"
 OBJECT_ENCRYPTION = "age-v1"
@@ -313,7 +313,8 @@ def _validate_consumer_config(payload: bytes) -> dict[str, Any]:
     value = _parse_json(payload, field="consumer config", canonical=False)
     expected = {
         "schema", "endpoint", "region", "bucket", "prefix", "age_binary", "age_identity_file", "workspace",
-        "source_site", "source_signing_public_key_base64", "maximum_artifact_bytes",
+        "source_site", "source_signing_public_key_base64", "webapp_fi_source_attestation_public_key_base64",
+        "webapp_fi_controller_authorization_public_key_base64", "maximum_artifact_bytes",
     }
     if set(value) != expected or value.get("schema") != CONSUMER_CONFIG_SCHEMA:
         raise BootstrapReceiveRenderError("consumer config schema is unsupported")
@@ -348,6 +349,30 @@ def _validate_consumer_config(payload: bytes) -> dict[str, Any]:
             raise BootstrapReceiveRenderError("consumer config public key has an unsafe length")
     except (binascii.Error, ValueError) as exc:
         raise BootstrapReceiveRenderError("consumer config public key is invalid") from exc
+    fi_encoded_key = _require_text(
+        value.get("webapp_fi_source_attestation_public_key_base64"),
+        field="consumer config FI source attestation public key",
+        maximum=128,
+    )
+    try:
+        if len(base64.b64decode(fi_encoded_key, validate=True)) != 32:
+            raise BootstrapReceiveRenderError("consumer config FI source attestation public key has an unsafe length")
+    except (binascii.Error, ValueError) as exc:
+        raise BootstrapReceiveRenderError("consumer config FI source attestation public key is invalid") from exc
+    controller_encoded_key = _require_text(
+        value.get("webapp_fi_controller_authorization_public_key_base64"),
+        field="consumer config WebApp-FI controller authorization public key",
+        maximum=128,
+    )
+    try:
+        if len(base64.b64decode(controller_encoded_key, validate=True)) != 32:
+            raise BootstrapReceiveRenderError(
+                "consumer config WebApp-FI controller authorization public key has an unsafe length"
+            )
+    except (binascii.Error, ValueError) as exc:
+        raise BootstrapReceiveRenderError(
+            "consumer config WebApp-FI controller authorization public key is invalid"
+        ) from exc
     maximum = value.get("maximum_artifact_bytes")
     if isinstance(maximum, bool) or not isinstance(maximum, int) or not 1 <= maximum <= 100 * 1024 * 1024 * 1024:
         raise BootstrapReceiveRenderError("consumer config maximum_artifact_bytes is invalid")

@@ -16,6 +16,8 @@ paths are fresh immutable release roots and a create-only root-only receipt.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 from dataclasses import dataclass
 import datetime as dt
 import hashlib
@@ -30,6 +32,15 @@ import subprocess
 import sys
 import tempfile
 from typing import Any, Mapping, Sequence
+
+try:
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+except ImportError:  # pragma: no cover - deployment requirements already include cryptography.
+    InvalidSignature = None  # type: ignore[assignment,misc]
+    serialization = None  # type: ignore[assignment]
+    Ed25519PublicKey = None  # type: ignore[assignment,misc]
 
 
 def _load_image_archive_contract() -> Any:
@@ -56,11 +67,21 @@ image_contract = _load_image_archive_contract()
 
 PREPARATION_SCHEMA = "gold-trade-wa-ir-artifact-preparation-v1"
 IMAGE_MANIFEST_SCHEMA = "gold-trade-wa-ir-image-manifest-v1"
-PROVENANCE_SCHEMA = "gold-trade-wa-ir-release-provenance-v1"
+PROVENANCE_SCHEMA = "gold-trade-wa-ir-release-provenance-v2"
+# These are independent FI source-side statements.  The release provenance
+# embeds their complete signed payloads rather than reducing them to a few
+# controller-selected claims.
+WEBAPP_FI_SOURCE_ROLE_ATTESTATION_SCHEMA = "gold-trade-webapp-fi-source-role-attestation-v1"
+WEBAPP_FI_SOURCE_ROLE_ATTESTATION_DOMAIN = b"gold-trade-webapp-fi-source-role-attestation-v1\x00"
+WEBAPP_FI_IMAGE_EXPORT_RECEIPT_SCHEMA = "gold-trade-webapp-fi-source-image-export-receipt-v1"
+WEBAPP_FI_IMAGE_EXPORT_RECEIPT_DOMAIN = b"gold-trade-webapp-fi-source-image-export-v1\x00"
+WEBAPP_FI_CONTROLLER_IMAGE_ADOPTION_RECEIPT_SCHEMA = "gold-trade-webapp-fi-controller-image-adoption-receipt-v1"
+WEBAPP_FI_SOURCE_SIGNING_ALGORITHM = "ed25519"
 INSTALL_RECEIPT_SCHEMA = "gold-trade-wa-ir-release-provenance-install-receipt-v1"
 STAGE_RECEIPT_SCHEMA = "gold-trade-wa-ir-artifact-stage-receipt-v1"
 BOOTSTRAP_RECEIPT_SCHEMA = "gold-trade-wa-ir-stage-bootstrap-receipt-v1"
 BOOTSTRAP_RECEIPT_NAME = "bootstrap-receipt.json"
+ARTIFACT_STAGE_CONSUMER_CONFIG_SCHEMA = "gold-trade-wa-ir-artifact-stage-config-v2"
 
 LEGACY_APPLICATION_RELEASE_SHA = "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5"
 APPLICATION_BUNDLE_ARTIFACT = "release-bundle"
@@ -105,6 +126,8 @@ CONTROL_DISPATCH_TARGETS: dict[str, tuple[str, tuple[str, ...]]] = {
 # but this verifier must not reinterpret a valid prepared receipt solely due to
 # a smaller parser limit.
 MAX_JSON_BYTES = 1024 * 1024
+MAX_FI_SOURCE_PROOF_BYTES = 8 * 1024 * 1024
+MAX_PROVENANCE_BYTES = (2 * MAX_FI_SOURCE_PROOF_BYTES) + MAX_JSON_BYTES
 MAX_ARTIFACT_BYTES = 100 * 1024 * 1024 * 1024
 MAX_BOOTSTRAP_ARCHIVE_BYTES = 8 * 1024 * 1024
 MAX_BOOTSTRAP_CIPHERTEXT_BYTES = MAX_BOOTSTRAP_ARCHIVE_BYTES + 2 * 1024 * 1024
@@ -117,11 +140,14 @@ IMAGE_ID_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
 # syntax.  Registry ports and mixed-case registry names are valid inputs and
 # are only carried as verified manifest data here; they are never executed.
 IMAGE_DIGEST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/:-]{0,511}@sha256:[a-f0-9]{64}$")
+IMAGE_REFERENCE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/@:-]{0,511}$")
 PATH_RE = re.compile(r"^/[A-Za-z0-9._/-]+$")
 ARTIFACT_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 SITE_RE = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 BUNDLE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-OBJECT_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/=-]{0,1023}$")
+OBJECT_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/=-]{2,1023}$")
+FI_KEY_ID_RE = re.compile(r"^ed25519-sha256:[a-f0-9]{64}$")
+FI_COMMIT_RE = re.compile(r"^[a-f0-9]{40}$")
 
 
 class ReleaseProvenanceError(RuntimeError):
@@ -158,10 +184,75 @@ class RuntimeImageContract:
 
 
 @dataclass(frozen=True)
+class WebAppFiSourceAttestation:
+    """The complete FI-signed, read-only source-role attestation."""
+
+    payload: dict[str, Any]
+    sha256: str
+    key_id: str
+    campaign_id: str
+    release_sha: str
+    release_tree: str
+    image_id: str
+    image_reference: str
+    repo_digests: tuple[str, ...]
+    canonical_release_tree_sha256: str
+
+
+@dataclass(frozen=True)
+class WebAppFiImageExportReceipt:
+    """The complete FI-signed result of exporting the attested app image."""
+
+    payload: dict[str, Any]
+    sha256: str
+    key_id: str
+    campaign_id: str
+    release_sha: str
+    release_tree: str
+    image_id: str
+    image_reference: str
+    archive_sha256: str
+    archive_bytes: int
+
+
+@dataclass(frozen=True)
+class ControllerImageAdoptionReceipt:
+    """A controller-local, URL-free receipt for the returned immutable archive."""
+
+    payload: dict[str, Any]
+    sha256: str
+    campaign_id: str
+    release_sha: str
+    release_tree: str
+    source_attestation_sha256: str
+    image_export_receipt_sha256: str
+    source_signing_key_id: str
+    image_id: str
+    image_reference: str
+    object_key: str
+    version_id: str
+    ciphertext_sha256: str
+    ciphertext_bytes: int
+    plaintext_sha256: str
+    plaintext_bytes: int
+
+
+@dataclass(frozen=True)
+class WebAppFiSourceProof:
+    """The three immutable records that bind FI source to controller adoption."""
+
+    source_role_attestation: WebAppFiSourceAttestation
+    image_export_receipt: WebAppFiImageExportReceipt
+    controller_image_adoption_receipt: ControllerImageAdoptionReceipt
+
+
+@dataclass(frozen=True)
 class Provenance:
+    campaign_id: str
     application: ReleaseIdentity
     control: ReleaseIdentity
     runtime_images: RuntimeImageContract
+    webapp_fi_source_proof: WebAppFiSourceProof
 
 
 @dataclass(frozen=True)
@@ -205,6 +296,7 @@ class BootstrapReceipt:
     path: Path
     control_commit: str
     control_tree: str
+    webapp_fi_source_attestation_public_key: bytes
 
 
 def canonical_json_bytes(value: Mapping[str, Any] | Sequence[Any]) -> bytes:
@@ -359,6 +451,748 @@ def _read_canonical_private_json(path: Path, *, field: str, maximum: int = MAX_J
     if raw != canonical_json_bytes(value) + b"\n":
         raise ReleaseProvenanceError(f"{field} must use canonical JSON")
     return value
+
+
+def _require_ed25519_backend() -> None:
+    if Ed25519PublicKey is None or InvalidSignature is None:
+        raise ReleaseProvenanceError("Ed25519 verification support is unavailable")
+
+
+def _decode_exact_base64(value: object, *, field: str, expected_bytes: int) -> bytes:
+    if not isinstance(value, str) or not value:
+        raise ReleaseProvenanceError(f"{field} is invalid")
+    try:
+        decoded = base64.b64decode(value.encode("ascii"), validate=True)
+    except (UnicodeEncodeError, binascii.Error) as exc:
+        raise ReleaseProvenanceError(f"{field} must be strict base64") from exc
+    if len(decoded) != expected_bytes:
+        raise ReleaseProvenanceError(f"{field} has an unsafe length")
+    return decoded
+
+
+def load_webapp_fi_source_attestation_public_key(path: Path) -> bytes:
+    """Read the independent, root-only FI source-attestation verification key."""
+
+    raw = _secure_read(path, field="webapp_fi_source_attestation_public_key", private=True, maximum=32)
+    if len(raw) != 32:
+        raise ReleaseProvenanceError("webapp_fi_source_attestation_public_key must contain exactly 32 raw bytes")
+    return raw
+
+
+def _require_campaign_id(value: object, *, field: str) -> str:
+    try:
+        return image_contract.require_campaign_id(value, field=field)
+    except image_contract.ImageArchiveContractError as exc:
+        raise ReleaseProvenanceError(f"{field} is invalid") from exc
+
+
+def _canonical_payload_sha256(value: Mapping[str, Any]) -> str:
+    """Match the FI create-only JSON convention, including its final newline."""
+
+    return sha256_bytes(canonical_json_bytes(value) + b"\n")
+
+
+def _reject_persisted_url(value: Mapping[str, Any], *, field: str) -> None:
+    """Neither proof nor adoption receipt may retain a presigned transport URL."""
+
+    encoded = canonical_json_bytes(value).lower()
+    if b"https://" in encoded or b"http://" in encoded or b"presigned" in encoded or b'"url"' in encoded:
+        raise ReleaseProvenanceError(f"{field} persists a forbidden URL")
+
+
+def _require_timestamp(value: object, *, field: str) -> str:
+    if not isinstance(value, str) or not value.endswith("Z"):
+        raise ReleaseProvenanceError(f"{field} is invalid")
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ReleaseProvenanceError(f"{field} is invalid") from exc
+    if parsed.tzinfo is None:
+        raise ReleaseProvenanceError(f"{field} is invalid")
+    return value
+
+
+def _require_positive_size(value: object, *, field: str, maximum: int = MAX_ARTIFACT_BYTES) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= maximum:
+        raise ReleaseProvenanceError(f"{field} is invalid")
+    return value
+
+
+def _require_version_id(value: object, *, field: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > 1024
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
+    ):
+        raise ReleaseProvenanceError(f"{field} is invalid")
+    return value
+
+
+def _require_object_key(value: object, *, field: str) -> str:
+    if not isinstance(value, str) or not OBJECT_KEY_RE.fullmatch(value):
+        raise ReleaseProvenanceError(f"{field} is invalid")
+    return value
+
+
+def _require_reference_list(
+    value: object,
+    *,
+    field: str,
+    pattern: re.Pattern[str],
+) -> tuple[str, ...]:
+    if not isinstance(value, list) or not all(isinstance(item, str) and pattern.fullmatch(item) for item in value):
+        raise ReleaseProvenanceError(f"{field} is invalid")
+    if len(set(value)) != len(value) or value != sorted(value):
+        raise ReleaseProvenanceError(f"{field} is not deterministically sorted")
+    return tuple(value)
+
+
+def _require_pinned_fi_public_key(value: object, *, field: str, public_key: bytes) -> str:
+    encoded = value
+    decoded = _decode_exact_base64(encoded, field=field, expected_bytes=32)
+    if decoded != public_key:
+        raise ReleaseProvenanceError(f"{field} does not match the pinned FI key")
+    assert isinstance(encoded, str)
+    return encoded
+
+
+def _fi_key_id(public_key: bytes) -> str:
+    return "ed25519-sha256:" + sha256_bytes(public_key)
+
+
+def _require_fi_key_id(value: object, *, field: str) -> str:
+    if not isinstance(value, str) or not FI_KEY_ID_RE.fullmatch(value):
+        raise ReleaseProvenanceError(f"{field} is invalid")
+    return value
+
+
+def _require_fi_commit(value: object, *, field: str) -> str:
+    if not isinstance(value, str) or not FI_COMMIT_RE.fullmatch(value):
+        raise ReleaseProvenanceError(f"{field} is invalid")
+    return value
+
+
+def _verify_fi_signature(
+    payload: Mapping[str, Any],
+    *,
+    field: str,
+    public_key: bytes,
+    domain: bytes,
+) -> str:
+    if len(public_key) != 32:
+        raise ReleaseProvenanceError(f"{field} public key has an unsafe length")
+    _require_pinned_fi_public_key(
+        payload.get("source_signing_public_key_base64"),
+        field=f"{field} signing public key",
+        public_key=public_key,
+    )
+    key_id = _require_fi_key_id(payload.get("source_signing_key_id"), field=f"{field} signing key ID")
+    if key_id != _fi_key_id(public_key):
+        raise ReleaseProvenanceError(f"{field} signing key does not match the pinned FI key")
+    signature = payload.get("source_signature")
+    if not isinstance(signature, Mapping):
+        raise ReleaseProvenanceError(f"{field} signature is invalid")
+    _fields(signature, expected={"algorithm", "signature_base64"}, field=f"{field} signature")
+    if signature.get("algorithm") != WEBAPP_FI_SOURCE_SIGNING_ALGORITHM:
+        raise ReleaseProvenanceError(f"{field} signature algorithm is invalid")
+    raw_signature = _decode_exact_base64(
+        signature.get("signature_base64"),
+        field=f"{field} signature",
+        expected_bytes=64,
+    )
+    _require_ed25519_backend()
+    try:
+        Ed25519PublicKey.from_public_bytes(public_key).verify(
+            raw_signature,
+            domain + canonical_json_bytes({key: item for key, item in payload.items() if key != "source_signature"}),
+        )
+    except InvalidSignature as exc:
+        raise ReleaseProvenanceError(f"{field} signature verification failed") from exc
+    except ValueError as exc:  # pragma: no cover - fixed-length key was checked above.
+        raise ReleaseProvenanceError(f"{field} public key is invalid") from exc
+    return key_id
+
+
+def _source_adoption_delivery(value: object, *, field: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ReleaseProvenanceError(f"{field} is invalid")
+    _fields(
+        value,
+        expected={
+            "object_key",
+            "version_id",
+            "ciphertext_sha256",
+            "ciphertext_bytes",
+            "plaintext_sha256",
+            "plaintext_bytes",
+            "delivery_envelope_sha256",
+            "controller_public_key_base64",
+        },
+        field=field,
+    )
+    _require_object_key(value.get("object_key"), field=f"{field} object_key")
+    _require_version_id(value.get("version_id"), field=f"{field} version_id")
+    for name in ("ciphertext_sha256", "plaintext_sha256", "delivery_envelope_sha256"):
+        _require_sha256(value.get(name), field=f"{field} {name}")
+    for name in ("ciphertext_bytes", "plaintext_bytes"):
+        _require_positive_size(value.get(name), field=f"{field} {name}", maximum=MAX_FI_SOURCE_PROOF_BYTES + MAX_BOOTSTRAP_CIPHERTEXT_BYTES)
+    _decode_exact_base64(value.get("controller_public_key_base64"), field=f"{field} controller public key", expected_bytes=32)
+    return dict(value)
+
+
+def _runtime_projection_record(
+    value: object,
+    *,
+    field: str,
+    release_sha: str,
+    release_tree: str,
+    canonical_release_tree_sha256: str,
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ReleaseProvenanceError(f"{field} is invalid")
+    _fields(
+        value,
+        expected={"runtime_source_root", "release_sha", "git_tree", "descriptor_sha256", "projections", "projection_sha256"},
+        field=field,
+    )
+    runtime_source_root = value.get("runtime_source_root")
+    if not isinstance(runtime_source_root, str) or not PATH_RE.fullmatch(runtime_source_root):
+        raise ReleaseProvenanceError(f"{field} runtime_source_root is invalid")
+    if value.get("release_sha") != release_sha or value.get("git_tree") != release_tree:
+        raise ReleaseProvenanceError(f"{field} release binding is invalid")
+    if value.get("descriptor_sha256") != canonical_release_tree_sha256:
+        raise ReleaseProvenanceError(f"{field} descriptor binding is invalid")
+    projections = value.get("projections")
+    if not isinstance(projections, Mapping) or not projections:
+        raise ReleaseProvenanceError(f"{field} projections are invalid")
+    projection_sha256 = _require_sha256(value.get("projection_sha256"), field=f"{field} projection_sha256")
+    if projection_sha256 != sha256_bytes(canonical_json_bytes(projections)):
+        raise ReleaseProvenanceError(f"{field} projection_sha256 is invalid")
+    return dict(value)
+
+
+def _static_assets_record(value: object, *, field: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ReleaseProvenanceError(f"{field} is invalid")
+    _fields(
+        value,
+        expected={"descriptor_sha256", "artifact", "files_sha256", "file_count", "source_kind"},
+        field=field,
+    )
+    _require_sha256(value.get("descriptor_sha256"), field=f"{field} descriptor_sha256")
+    _require_sha256(value.get("files_sha256"), field=f"{field} files_sha256")
+    if value.get("source_kind") != "deterministic_2c08_dist_manifest":
+        raise ReleaseProvenanceError(f"{field} source_kind is invalid")
+    if isinstance(value.get("file_count"), bool) or not isinstance(value.get("file_count"), int) or value["file_count"] < 0:
+        raise ReleaseProvenanceError(f"{field} file_count is invalid")
+    artifact = value.get("artifact")
+    if not isinstance(artifact, Mapping):
+        raise ReleaseProvenanceError(f"{field} artifact is invalid")
+    _fields(
+        artifact,
+        expected={"object_key", "version_id", "ciphertext_sha256", "ciphertext_bytes", "plaintext_sha256", "plaintext_bytes"},
+        field=f"{field} artifact",
+    )
+    _require_object_key(artifact.get("object_key"), field=f"{field} artifact object_key")
+    _require_version_id(artifact.get("version_id"), field=f"{field} artifact version_id")
+    for name in ("ciphertext_sha256", "plaintext_sha256"):
+        _require_sha256(artifact.get(name), field=f"{field} artifact {name}")
+    for name in ("ciphertext_bytes", "plaintext_bytes"):
+        _require_positive_size(artifact.get(name), field=f"{field} artifact {name}")
+    return dict(value)
+
+
+def _role_attestation(value: object, *, public_key: bytes) -> WebAppFiSourceAttestation:
+    """Verify the full FI-signed source-role proof without discarding its evidence."""
+
+    field = "webapp_fi source role attestation"
+    if not isinstance(value, Mapping):
+        raise ReleaseProvenanceError(f"{field} must be an object")
+    payload = dict(value)
+    _reject_persisted_url(payload, field=field)
+    _fields(
+        payload,
+        expected={
+            "schema",
+            "status",
+            "attested_at",
+            "campaign_id",
+            "source_site",
+            "destination_site",
+            "package_id",
+            "application",
+            "tooling",
+            "source_adoption_install_receipt_sha256",
+            "source_adoption_delivery",
+            "canonical_release_tree_sha256",
+            "application_release_tree",
+            "source_signer_enrollment",
+            "runtime_projection",
+            "static_assets_proof",
+            "containers",
+            "active_application_image",
+            "schema_observation",
+            "race_check",
+            "snapshot_transport",
+            "source_signing_public_key_base64",
+            "source_signing_key_id",
+            "source_signature",
+        },
+        field=field,
+    )
+    if (
+        payload.get("schema") != WEBAPP_FI_SOURCE_ROLE_ATTESTATION_SCHEMA
+        or payload.get("status") != "attested"
+        or payload.get("source_site") != STAGE_SOURCE_SITE
+        or payload.get("destination_site") != STAGE_DESTINATION_SITE
+    ):
+        raise ReleaseProvenanceError(f"{field} schema or site binding is invalid")
+    _require_timestamp(payload.get("attested_at"), field=f"{field} attested_at")
+    campaign_id = _require_campaign_id(payload.get("campaign_id"), field=f"{field} campaign_id")
+    package_id = payload.get("package_id")
+    if not isinstance(package_id, str) or not BUNDLE_ID_RE.fullmatch(package_id):
+        raise ReleaseProvenanceError(f"{field} package_id is invalid")
+    application = payload.get("application")
+    if not isinstance(application, Mapping):
+        raise ReleaseProvenanceError(f"{field} application is invalid")
+    _fields(application, expected={"release_sha", "expected_alembic_revision"}, field=f"{field} application")
+    release_sha = _require_fi_commit(application.get("release_sha"), field=f"{field} release_sha")
+    revision = application.get("expected_alembic_revision")
+    if not isinstance(revision, str) or not re.fullmatch(r"[a-f0-9]{12}", revision):
+        raise ReleaseProvenanceError(f"{field} expected_alembic_revision is invalid")
+    tooling = payload.get("tooling")
+    if not isinstance(tooling, Mapping):
+        raise ReleaseProvenanceError(f"{field} tooling is invalid")
+    _fields(tooling, expected={"control_commit", "control_tree"}, field=f"{field} tooling")
+    _require_fi_commit(tooling.get("control_commit"), field=f"{field} tooling control_commit")
+    _require_fi_commit(tooling.get("control_tree"), field=f"{field} tooling control_tree")
+    _require_sha256(payload.get("source_adoption_install_receipt_sha256"), field=f"{field} source adoption install receipt")
+    _source_adoption_delivery(payload.get("source_adoption_delivery"), field=f"{field} source adoption delivery")
+    canonical_release_tree_sha256 = _require_sha256(
+        payload.get("canonical_release_tree_sha256"),
+        field=f"{field} canonical_release_tree_sha256",
+    )
+    release_tree = _require_fi_commit(payload.get("application_release_tree"), field=f"{field} application_release_tree")
+    enrollment = payload.get("source_signer_enrollment")
+    if not isinstance(enrollment, Mapping):
+        raise ReleaseProvenanceError(f"{field} signer enrollment is invalid")
+    _fields(
+        enrollment,
+        expected={
+            "receipt_sha256",
+            "certificate_sha256",
+            "fi_ssh_host_public_key_sha256",
+            "controller_public_key_base64",
+            "source_signing_public_key_base64",
+        },
+        field=f"{field} signer enrollment",
+    )
+    for name in ("receipt_sha256", "certificate_sha256", "fi_ssh_host_public_key_sha256"):
+        _require_sha256(enrollment.get(name), field=f"{field} signer enrollment {name}")
+    _decode_exact_base64(enrollment.get("controller_public_key_base64"), field=f"{field} controller public key", expected_bytes=32)
+    _require_pinned_fi_public_key(
+        enrollment.get("source_signing_public_key_base64"),
+        field=f"{field} signer enrollment key",
+        public_key=public_key,
+    )
+    projection = payload.get("runtime_projection")
+    if not isinstance(projection, Mapping):
+        raise ReleaseProvenanceError(f"{field} runtime_projection is invalid")
+    _fields(projection, expected={"before", "after"}, field=f"{field} runtime_projection")
+    before_projection = _runtime_projection_record(
+        projection.get("before"),
+        field=f"{field} runtime projection before",
+        release_sha=release_sha,
+        release_tree=release_tree,
+        canonical_release_tree_sha256=canonical_release_tree_sha256,
+    )
+    after_projection = _runtime_projection_record(
+        projection.get("after"),
+        field=f"{field} runtime projection after",
+        release_sha=release_sha,
+        release_tree=release_tree,
+        canonical_release_tree_sha256=canonical_release_tree_sha256,
+    )
+    if before_projection != after_projection:
+        raise ReleaseProvenanceError(f"{field} runtime projection race proof is invalid")
+    static_assets = payload.get("static_assets_proof")
+    if not isinstance(static_assets, Mapping):
+        raise ReleaseProvenanceError(f"{field} static_assets_proof is invalid")
+    _fields(
+        static_assets,
+        expected={"before", "after", "proof_is_not_static_payload", "promotion_requires_verified_immutable_age_object"},
+        field=f"{field} static_assets_proof",
+    )
+    if (
+        static_assets.get("proof_is_not_static_payload") is not True
+        or static_assets.get("promotion_requires_verified_immutable_age_object") is not True
+    ):
+        raise ReleaseProvenanceError(f"{field} static asset policy is invalid")
+    if _static_assets_record(static_assets.get("before"), field=f"{field} static assets before") != _static_assets_record(
+        static_assets.get("after"), field=f"{field} static assets after"
+    ):
+        raise ReleaseProvenanceError(f"{field} static asset race proof is invalid")
+    containers = payload.get("containers")
+    if not isinstance(containers, Mapping) or set(containers) != {"database", "application", "sync_worker"}:
+        raise ReleaseProvenanceError(f"{field} containers are invalid")
+    active = payload.get("active_application_image")
+    if not isinstance(active, Mapping):
+        raise ReleaseProvenanceError(f"{field} active_application_image is invalid")
+    _fields(active, expected={"image_id", "image_reference", "repo_tags", "repo_digests"}, field=f"{field} active_application_image")
+    image_id = active.get("image_id")
+    image_reference = active.get("image_reference")
+    if not isinstance(image_id, str) or not IMAGE_ID_RE.fullmatch(image_id):
+        raise ReleaseProvenanceError(f"{field} active image ID is invalid")
+    if not isinstance(image_reference, str) or not IMAGE_REFERENCE_RE.fullmatch(image_reference):
+        raise ReleaseProvenanceError(f"{field} active image reference is invalid")
+    repo_tags = _require_reference_list(active.get("repo_tags"), field=f"{field} active repo_tags", pattern=IMAGE_REFERENCE_RE)
+    repo_digests = _require_reference_list(active.get("repo_digests"), field=f"{field} active repo_digests", pattern=IMAGE_DIGEST_RE)
+    if image_reference not in set(repo_tags) | set(repo_digests):
+        raise ReleaseProvenanceError(f"{field} active image reference is not recorded")
+    for name in ("application", "sync_worker"):
+        container = containers.get(name)
+        if not isinstance(container, Mapping) or container.get("image_id") != image_id or container.get("image_reference") != image_reference:
+            raise ReleaseProvenanceError(f"{field} {name} container is not bound to the active image")
+    if payload.get("schema_observation") != {
+        "observed_alembic_revision": revision,
+        "capture_role_verified_read_only": True,
+    }:
+        raise ReleaseProvenanceError(f"{field} schema observation is invalid")
+    if payload.get("race_check") != {
+        "runtime_projection_unchanged": True,
+        "static_assets_unchanged": True,
+        "application_container_unchanged": True,
+        "sync_worker_container_unchanged": True,
+        "database_container_unchanged": True,
+        "active_image_unchanged": True,
+        "schema_unchanged": True,
+    }:
+        raise ReleaseProvenanceError(f"{field} race_check is invalid")
+    if payload.get("snapshot_transport") != {
+        "payload_path": "private_versioned_object_storage_age_only",
+        "one_off_publication_only": True,
+        "direct_webapp_fi_to_webapp_ir_transfer": False,
+        "automatic_deletion": False,
+    }:
+        raise ReleaseProvenanceError(f"{field} snapshot transport is invalid")
+    key_id = _verify_fi_signature(
+        payload,
+        field=field,
+        public_key=public_key,
+        domain=WEBAPP_FI_SOURCE_ROLE_ATTESTATION_DOMAIN,
+    )
+    return WebAppFiSourceAttestation(
+        payload=payload,
+        sha256=_canonical_payload_sha256(payload),
+        key_id=key_id,
+        campaign_id=campaign_id,
+        release_sha=release_sha,
+        release_tree=release_tree,
+        image_id=image_id,
+        image_reference=image_reference,
+        repo_digests=repo_digests,
+        canonical_release_tree_sha256=canonical_release_tree_sha256,
+    )
+
+
+def _image_export_receipt(
+    value: object,
+    *,
+    public_key: bytes,
+    attestation: WebAppFiSourceAttestation,
+) -> WebAppFiImageExportReceipt:
+    field = "webapp_fi image export receipt"
+    if not isinstance(value, Mapping):
+        raise ReleaseProvenanceError(f"{field} must be an object")
+    payload = dict(value)
+    _reject_persisted_url(payload, field=field)
+    _fields(
+        payload,
+        expected={
+            "schema",
+            "status",
+            "exported_at",
+            "export_id",
+            "campaign_id",
+            "source_site",
+            "destination_site",
+            "application",
+            "application_release_tree",
+            "tooling",
+            "canonical_release_tree_sha256",
+            "source_role_attestation_sha256",
+            "image",
+            "pre_export_runtime",
+            "post_export_runtime",
+            "image_archive_does_not_prove_bind_mounted_runtime",
+            "archive_consumption",
+            "object_storage_export_required",
+            "source_signing_public_key_base64",
+            "source_signing_key_id",
+            "source_signature",
+        },
+        field=field,
+    )
+    if (
+        payload.get("schema") != WEBAPP_FI_IMAGE_EXPORT_RECEIPT_SCHEMA
+        or payload.get("status") != "exported"
+        or payload.get("source_site") != STAGE_SOURCE_SITE
+        or payload.get("destination_site") != STAGE_DESTINATION_SITE
+    ):
+        raise ReleaseProvenanceError(f"{field} schema or site binding is invalid")
+    _require_timestamp(payload.get("exported_at"), field=f"{field} exported_at")
+    export_id = payload.get("export_id")
+    if not isinstance(export_id, str) or not BUNDLE_ID_RE.fullmatch(export_id):
+        raise ReleaseProvenanceError(f"{field} export_id is invalid")
+    campaign_id = _require_campaign_id(payload.get("campaign_id"), field=f"{field} campaign_id")
+    application = payload.get("application")
+    if application != attestation.payload["application"]:
+        raise ReleaseProvenanceError(f"{field} application does not match the source role attestation")
+    tooling = payload.get("tooling")
+    if tooling != attestation.payload["tooling"]:
+        raise ReleaseProvenanceError(f"{field} tooling does not match the source role attestation")
+    if (
+        campaign_id != attestation.campaign_id
+        or payload.get("application_release_tree") != attestation.release_tree
+        or payload.get("canonical_release_tree_sha256") != attestation.canonical_release_tree_sha256
+    ):
+        raise ReleaseProvenanceError(f"{field} campaign or tree descriptor does not match the source role attestation")
+    if payload.get("source_role_attestation_sha256") != attestation.sha256:
+        raise ReleaseProvenanceError(f"{field} does not bind the source role attestation")
+    image = payload.get("image")
+    if not isinstance(image, Mapping):
+        raise ReleaseProvenanceError(f"{field} image is invalid")
+    _fields(
+        image,
+        expected={"image_id", "image_reference", "archive_sha256", "archive_bytes", "docker_manifest_sha256", "docker_config_sha256", "layer_count", "repo_tags"},
+        field=f"{field} image",
+    )
+    image_id = image.get("image_id")
+    image_reference = image.get("image_reference")
+    if image_id != attestation.image_id or image_reference != attestation.image_reference:
+        raise ReleaseProvenanceError(f"{field} image does not match the source role attestation")
+    archive_sha256 = _require_sha256(image.get("archive_sha256"), field=f"{field} image archive_sha256")
+    archive_bytes = _require_positive_size(image.get("archive_bytes"), field=f"{field} image archive_bytes")
+    _require_sha256(image.get("docker_manifest_sha256"), field=f"{field} image docker_manifest_sha256")
+    _require_sha256(image.get("docker_config_sha256"), field=f"{field} image docker_config_sha256")
+    if isinstance(image.get("layer_count"), bool) or not isinstance(image.get("layer_count"), int) or image["layer_count"] < 1:
+        raise ReleaseProvenanceError(f"{field} image layer_count is invalid")
+    _require_reference_list(image.get("repo_tags"), field=f"{field} image repo_tags", pattern=IMAGE_REFERENCE_RE)
+    for name in ("pre_export_runtime", "post_export_runtime"):
+        runtime = payload.get(name)
+        if not isinstance(runtime, Mapping):
+            raise ReleaseProvenanceError(f"{field} {name} is invalid")
+        _fields(runtime, expected={"application", "sync_worker", "active_image"}, field=f"{field} {name}")
+        if (
+            runtime.get("application") != attestation.payload["containers"]["application"]
+            or runtime.get("sync_worker") != attestation.payload["containers"]["sync_worker"]
+            or runtime.get("active_image") != attestation.payload["active_application_image"]
+        ):
+            raise ReleaseProvenanceError(f"{field} {name} does not match the source role attestation")
+    if payload.get("image_archive_does_not_prove_bind_mounted_runtime") is not True:
+        raise ReleaseProvenanceError(f"{field} mounted-runtime limitation is missing")
+    if payload.get("archive_consumption") != {
+        "docker_load_prohibited": True,
+        "fi_local_archive_verification_before_age_encryption": True,
+        "controller_read_back_verification_after_age_encryption": True,
+        "raw_repo_tags_are_not_authorization": True,
+    }:
+        raise ReleaseProvenanceError(f"{field} archive consumption policy is invalid")
+    if payload.get("object_storage_export_required") != {
+        "transport": "private_versioned_age_only",
+        "create_only": True,
+        "read_back_same_version_id": True,
+        "direct_webapp_fi_to_webapp_ir_transfer": False,
+    }:
+        raise ReleaseProvenanceError(f"{field} object storage transport policy is invalid")
+    key_id = _verify_fi_signature(
+        payload,
+        field=field,
+        public_key=public_key,
+        domain=WEBAPP_FI_IMAGE_EXPORT_RECEIPT_DOMAIN,
+    )
+    if key_id != attestation.key_id:
+        raise ReleaseProvenanceError(f"{field} signing key does not match the source role attestation")
+    return WebAppFiImageExportReceipt(
+        payload=payload,
+        sha256=_canonical_payload_sha256(payload),
+        key_id=key_id,
+        campaign_id=campaign_id,
+        release_sha=attestation.release_sha,
+        release_tree=attestation.release_tree,
+        image_id=attestation.image_id,
+        image_reference=attestation.image_reference,
+        archive_sha256=archive_sha256,
+        archive_bytes=archive_bytes,
+    )
+
+
+def _controller_image_adoption_receipt(
+    value: object,
+    *,
+    attestation: WebAppFiSourceAttestation,
+    image_export: WebAppFiImageExportReceipt,
+) -> ControllerImageAdoptionReceipt:
+    """Validate only controller-local, URL-free evidence for the return object."""
+
+    field = "webapp_fi controller image adoption receipt"
+    if not isinstance(value, Mapping):
+        raise ReleaseProvenanceError(f"{field} must be an object")
+    payload = dict(value)
+    _reject_persisted_url(payload, field=field)
+    _fields(
+        payload,
+        expected={
+            "schema",
+            "status",
+            "adopted_at",
+            "campaign_id",
+            "source_site",
+            "destination_site",
+            "application",
+            "source_role_attestation_sha256",
+            "image_export_receipt_sha256",
+            "source_signing_key_id",
+            "image",
+            "object",
+            "read_back_verified",
+            "decrypted_verified",
+        },
+        field=field,
+    )
+    if (
+        payload.get("schema") != WEBAPP_FI_CONTROLLER_IMAGE_ADOPTION_RECEIPT_SCHEMA
+        or payload.get("status") != "adopted"
+        or payload.get("source_site") != STAGE_SOURCE_SITE
+        or payload.get("destination_site") != STAGE_DESTINATION_SITE
+    ):
+        raise ReleaseProvenanceError(f"{field} schema or site binding is invalid")
+    _require_timestamp(payload.get("adopted_at"), field=f"{field} adopted_at")
+    campaign_id = _require_campaign_id(payload.get("campaign_id"), field=f"{field} campaign_id")
+    application = payload.get("application")
+    if not isinstance(application, Mapping):
+        raise ReleaseProvenanceError(f"{field} application is invalid")
+    _fields(application, expected={"release_sha", "release_tree"}, field=f"{field} application")
+    release_sha = _require_fi_commit(application.get("release_sha"), field=f"{field} release_sha")
+    release_tree = _require_fi_commit(application.get("release_tree"), field=f"{field} release_tree")
+    source_attestation_sha256 = _require_sha256(
+        payload.get("source_role_attestation_sha256"), field=f"{field} source_role_attestation_sha256"
+    )
+    image_export_receipt_sha256 = _require_sha256(
+        payload.get("image_export_receipt_sha256"), field=f"{field} image_export_receipt_sha256"
+    )
+    source_signing_key_id = _require_fi_key_id(payload.get("source_signing_key_id"), field=f"{field} source_signing_key_id")
+    image = payload.get("image")
+    if not isinstance(image, Mapping):
+        raise ReleaseProvenanceError(f"{field} image is invalid")
+    _fields(image, expected={"image_id", "image_reference"}, field=f"{field} image")
+    image_id = image.get("image_id")
+    image_reference = image.get("image_reference")
+    if not isinstance(image_id, str) or not IMAGE_ID_RE.fullmatch(image_id) or not isinstance(image_reference, str) or not IMAGE_REFERENCE_RE.fullmatch(image_reference):
+        raise ReleaseProvenanceError(f"{field} image is invalid")
+    object_value = payload.get("object")
+    if not isinstance(object_value, Mapping):
+        raise ReleaseProvenanceError(f"{field} object is invalid")
+    _fields(
+        object_value,
+        expected={"object_key", "version_id", "ciphertext_sha256", "ciphertext_bytes", "plaintext_sha256", "plaintext_bytes"},
+        field=f"{field} object",
+    )
+    object_key = _require_object_key(object_value.get("object_key"), field=f"{field} object_key")
+    version_id = _require_version_id(object_value.get("version_id"), field=f"{field} version_id")
+    ciphertext_sha256 = _require_sha256(object_value.get("ciphertext_sha256"), field=f"{field} ciphertext_sha256")
+    ciphertext_bytes = _require_positive_size(object_value.get("ciphertext_bytes"), field=f"{field} ciphertext_bytes")
+    plaintext_sha256 = _require_sha256(object_value.get("plaintext_sha256"), field=f"{field} plaintext_sha256")
+    plaintext_bytes = _require_positive_size(object_value.get("plaintext_bytes"), field=f"{field} plaintext_bytes")
+    if payload.get("read_back_verified") is not True or payload.get("decrypted_verified") is not True:
+        raise ReleaseProvenanceError(f"{field} read-back or decrypt verification is missing")
+    if (
+        campaign_id != attestation.campaign_id
+        or release_sha != attestation.release_sha
+        or release_tree != attestation.release_tree
+        or source_attestation_sha256 != attestation.sha256
+        or image_export_receipt_sha256 != image_export.sha256
+        or source_signing_key_id != attestation.key_id
+        or image_id != attestation.image_id
+        or image_reference != attestation.image_reference
+        or plaintext_sha256 != image_export.archive_sha256
+        or plaintext_bytes != image_export.archive_bytes
+    ):
+        raise ReleaseProvenanceError(f"{field} does not cross-bind the FI source proof")
+    return ControllerImageAdoptionReceipt(
+        payload=payload,
+        sha256=_canonical_payload_sha256(payload),
+        campaign_id=campaign_id,
+        release_sha=release_sha,
+        release_tree=release_tree,
+        source_attestation_sha256=source_attestation_sha256,
+        image_export_receipt_sha256=image_export_receipt_sha256,
+        source_signing_key_id=source_signing_key_id,
+        image_id=image_id,
+        image_reference=image_reference,
+        object_key=object_key,
+        version_id=version_id,
+        ciphertext_sha256=ciphertext_sha256,
+        ciphertext_bytes=ciphertext_bytes,
+        plaintext_sha256=plaintext_sha256,
+        plaintext_bytes=plaintext_bytes,
+    )
+
+
+def _source_proof(value: object, *, public_key: bytes) -> WebAppFiSourceProof:
+    if not isinstance(value, Mapping):
+        raise ReleaseProvenanceError("webapp_fi_source_proof must be an object")
+    _fields(
+        value,
+        expected={"source_role_attestation", "image_export_receipt", "controller_image_adoption_receipt"},
+        field="webapp_fi_source_proof",
+    )
+    attestation = _role_attestation(value.get("source_role_attestation"), public_key=public_key)
+    image_export = _image_export_receipt(
+        value.get("image_export_receipt"),
+        public_key=public_key,
+        attestation=attestation,
+    )
+    adoption = _controller_image_adoption_receipt(
+        value.get("controller_image_adoption_receipt"),
+        attestation=attestation,
+        image_export=image_export,
+    )
+    return WebAppFiSourceProof(
+        source_role_attestation=attestation,
+        image_export_receipt=image_export,
+        controller_image_adoption_receipt=adoption,
+    )
+
+
+def load_webapp_fi_source_proof(
+    *,
+    source_role_attestation: Path,
+    image_export_receipt: Path,
+    controller_image_adoption_receipt: Path,
+    public_key: bytes,
+) -> WebAppFiSourceProof:
+    return _source_proof(
+        {
+            "source_role_attestation": _read_canonical_private_json(
+                source_role_attestation,
+                field="webapp_fi source role attestation",
+                maximum=MAX_FI_SOURCE_PROOF_BYTES,
+            ),
+            "image_export_receipt": _read_canonical_private_json(
+                image_export_receipt,
+                field="webapp_fi image export receipt",
+                maximum=MAX_FI_SOURCE_PROOF_BYTES,
+            ),
+            "controller_image_adoption_receipt": _read_canonical_private_json(
+                controller_image_adoption_receipt,
+                field="webapp_fi controller image adoption receipt",
+                maximum=MAX_JSON_BYTES,
+            ),
+        },
+        public_key=public_key,
+    )
 
 
 def _fields(value: Mapping[str, Any], *, expected: set[str], field: str) -> None:
@@ -726,11 +1560,13 @@ def _preparation_receipt(path: Path) -> Preparation:
     )
 
 
-def _release_root(value: object, *, parent: Path, sha: str, field: str, must_absent: bool) -> Path:
+def _release_root(value: object, *, parent: Path, sha: str, field: str, must_absent: bool | None) -> Path:
     path = _safe_path(value, field=field)
-    _require_directory(parent, field=f"{field} parent", private=False)
     if path.parent != parent or path.name != sha:
         raise ReleaseProvenanceError(f"{field} must be the exact immutable root for its Git SHA")
+    if must_absent is None:
+        return path
+    _require_directory(parent, field=f"{field} parent", private=False)
     if must_absent:
         if path.exists() or path.is_symlink():
             raise ReleaseProvenanceError(f"{field} must not already exist before installation")
@@ -739,7 +1575,7 @@ def _release_root(value: object, *, parent: Path, sha: str, field: str, must_abs
     return path
 
 
-def _identity(value: object, *, role: str, artifact: str, parent: Path, must_absent: bool) -> ReleaseIdentity:
+def _identity(value: object, *, role: str, artifact: str, parent: Path, must_absent: bool | None) -> ReleaseIdentity:
     if not isinstance(value, Mapping):
         raise ReleaseProvenanceError(f"{role} provenance must be an object")
     _fields(
@@ -801,9 +1637,34 @@ def _runtime_contract(value: object) -> RuntimeImageContract:
     )
 
 
-def load_provenance(path: Path, *, must_absent: bool) -> Provenance:
-    value = _read_private_json(path, field="release provenance")
-    _fields(value, expected={"schema", "application", "control", "runtime_images"}, field="release provenance")
+def _source_proof_app_repo_digest(proof: WebAppFiSourceProof) -> str | None:
+    """Retain the existing single-digest runtime contract without hiding aliases."""
+
+    digests = proof.source_role_attestation.repo_digests
+    if len(digests) > 1:
+        raise ReleaseProvenanceError("FI source proof has more than one active application repo digest")
+    return digests[0] if digests else None
+
+
+def load_provenance(
+    path: Path,
+    *,
+    must_absent: bool | None,
+    webapp_fi_source_attestation_public_key: bytes,
+) -> Provenance:
+    value = _read_private_json(path, field="release provenance", maximum=MAX_PROVENANCE_BYTES)
+    _fields(
+        value,
+        expected={
+            "schema",
+            "campaign_id",
+            "application",
+            "control",
+            "runtime_images",
+            "webapp_fi_source_proof",
+        },
+        field="release provenance",
+    )
     if value.get("schema") != PROVENANCE_SCHEMA:
         raise ReleaseProvenanceError("release provenance schema is unsupported")
     application = _identity(
@@ -822,7 +1683,28 @@ def load_provenance(path: Path, *, must_absent: bool) -> Provenance:
     )
     if application.release_sha != LEGACY_APPLICATION_RELEASE_SHA or application.release_sha == control.release_sha:
         raise ReleaseProvenanceError("application/control release identities are invalid")
-    return Provenance(application=application, control=control, runtime_images=_runtime_contract(value.get("runtime_images")))
+    campaign_id = _require_campaign_id(value.get("campaign_id"), field="release provenance campaign_id")
+    runtime_images = _runtime_contract(value.get("runtime_images"))
+    source_proof = _source_proof(
+        value.get("webapp_fi_source_proof"),
+        public_key=webapp_fi_source_attestation_public_key,
+    )
+    attestation = source_proof.source_role_attestation
+    if (
+        attestation.campaign_id != campaign_id
+        or attestation.release_sha != application.release_sha
+        or attestation.release_tree != application.tree_sha
+        or attestation.image_id != runtime_images.app_image_id
+        or _source_proof_app_repo_digest(source_proof) != runtime_images.app_repo_digest
+    ):
+        raise ReleaseProvenanceError("webapp_fi_source_proof does not bind the release provenance")
+    return Provenance(
+        campaign_id=campaign_id,
+        application=application,
+        control=control,
+        runtime_images=runtime_images,
+        webapp_fi_source_proof=source_proof,
+    )
 
 
 def _stage_artifact(value: object, *, candidate: Path) -> Artifact:
@@ -860,6 +1742,55 @@ def _stage_artifact(value: object, *, candidate: Path) -> Artifact:
     if not isinstance(value.get("object_key"), str) or not value["object_key"] or not isinstance(value.get("version_id"), str) or not value["version_id"]:
         raise ReleaseProvenanceError(f"staged {name} object identity is invalid")
     return Artifact(name=name, path=path, sha256=digest, bytes=bytes_value, bindings=_bindings(value.get("bindings"), field=f"staged {name} bindings"))
+
+
+def _bootstrap_source_attestation_public_key(
+    *,
+    candidate_directory: Path,
+    files: Mapping[str, str],
+) -> bytes:
+    """Load the FI signer pin from the hash-bound bootstrap consumer config."""
+
+    config_directory = candidate_directory / "config"
+    _require_directory(config_directory, field="bootstrap consumer config directory", private=True)
+    config_path = config_directory / "consumer.json"
+    raw = _secure_read(
+        config_path,
+        field="bootstrap consumer config",
+        private=True,
+        maximum=MAX_JSON_BYTES,
+    )
+    if sha256_bytes(raw) != files["config/consumer.json"]:
+        raise ReleaseProvenanceError("bootstrap consumer config hash does not match its receipt")
+    config = _strict_json(raw, field="bootstrap consumer config")
+    _fields(
+        config,
+        expected={
+            "schema",
+            "endpoint",
+            "region",
+            "bucket",
+            "prefix",
+            "age_binary",
+            "age_identity_file",
+            "workspace",
+            "source_site",
+            "source_signing_public_key_base64",
+            "webapp_fi_source_attestation_public_key_base64",
+            "maximum_artifact_bytes",
+        },
+        field="bootstrap consumer config",
+    )
+    if (
+        config.get("schema") != ARTIFACT_STAGE_CONSUMER_CONFIG_SCHEMA
+        or config.get("source_site") != STAGE_SOURCE_SITE
+    ):
+        raise ReleaseProvenanceError("bootstrap consumer config source-attestation contract is invalid")
+    return _decode_exact_base64(
+        config.get("webapp_fi_source_attestation_public_key_base64"),
+        field="bootstrap consumer config webapp_fi_source_attestation_public_key_base64",
+        expected_bytes=32,
+    )
 
 
 def load_bootstrap_receive_receipt(path: Path) -> BootstrapReceipt:
@@ -974,7 +1905,15 @@ def load_bootstrap_receive_receipt(path: Path) -> BootstrapReceipt:
         raise ReleaseProvenanceError("bootstrap receive receipt bootstrap plaintext_bytes is invalid")
     if isinstance(ciphertext_bytes, bool) or not isinstance(ciphertext_bytes, int) or not 1 <= ciphertext_bytes <= MAX_BOOTSTRAP_CIPHERTEXT_BYTES:
         raise ReleaseProvenanceError("bootstrap receive receipt bootstrap ciphertext_bytes is invalid")
-    return BootstrapReceipt(path=path, control_commit=control_commit, control_tree=control_tree)
+    return BootstrapReceipt(
+        path=path,
+        control_commit=control_commit,
+        control_tree=control_tree,
+        webapp_fi_source_attestation_public_key=_bootstrap_source_attestation_public_key(
+            candidate_directory=candidate_directory,
+            files=files,
+        ),
+    )
 
 
 def load_stage_receipt(path: Path) -> StageReceipt:
@@ -1039,7 +1978,12 @@ def _validate_staged_image_manifest(path: Path, provenance: Provenance) -> None:
         expected={"schema", "status", "campaign_id", "release_sha", "archive", "image_set_sha256", "images"},
         field="staged image manifest",
     )
-    if value.get("schema") != IMAGE_MANIFEST_SCHEMA or value.get("status") != "prepared" or value.get("release_sha") != provenance.application.release_sha:
+    if (
+        value.get("schema") != IMAGE_MANIFEST_SCHEMA
+        or value.get("status") != "prepared"
+        or value.get("release_sha") != provenance.application.release_sha
+        or value.get("campaign_id") != provenance.campaign_id
+    ):
         raise ReleaseProvenanceError("staged image manifest schema or release is invalid")
     images = _image_values(value.get("images"), field="staged image manifest images")
     _validate_isolated_archive_tags(
@@ -1075,10 +2019,9 @@ def _validate_staged_image_manifest(path: Path, provenance: Provenance) -> None:
         raise ReleaseProvenanceError("staged image manifest does not contain the pinned application image")
 
 
-def verify_staged_provenance(stage_receipt_path: Path) -> tuple[StageReceipt, Provenance]:
-    receipt = load_stage_receipt(stage_receipt_path)
-    if receipt.source_site != STAGE_SOURCE_SITE or receipt.destination_site != STAGE_DESTINATION_SITE:
-        raise ReleaseProvenanceError("artifact stage is not the fixed webapp_fi to webapp_ir transfer")
+def _verify_artifact_contract(artifacts: Mapping[str, Artifact], provenance: Provenance) -> None:
+    """Verify the five normal artifacts against independently verified provenance."""
+
     expected_names = {
         APPLICATION_BUNDLE_ARTIFACT,
         IMAGE_BUNDLE_ARTIFACT,
@@ -1086,12 +2029,9 @@ def verify_staged_provenance(stage_receipt_path: Path) -> tuple[StageReceipt, Pr
         CONTROL_BUNDLE_ARTIFACT,
         PROVENANCE_ARTIFACT,
     }
-    if set(receipt.artifacts) != expected_names:
+    if set(artifacts) != expected_names:
         raise ReleaseProvenanceError("staged candidate must contain exactly the prepared application and control artifacts")
-    provenance = load_provenance(receipt.artifacts[PROVENANCE_ARTIFACT].path, must_absent=True)
-    if receipt.release_sha != provenance.application.release_sha:
-        raise ReleaseProvenanceError("artifact stage namespace is not pinned to the application release")
-    app_bundle = receipt.artifacts[APPLICATION_BUNDLE_ARTIFACT]
+    app_bundle = artifacts[APPLICATION_BUNDLE_ARTIFACT]
     if app_bundle.sha256 != provenance.application.bundle_sha256:
         raise ReleaseProvenanceError("staged application bundle does not match release provenance")
     _exact_bindings(
@@ -1103,7 +2043,7 @@ def verify_staged_provenance(stage_receipt_path: Path) -> tuple[StageReceipt, Pr
             "release_sha": provenance.application.release_sha,
         },
     )
-    control_bundle = receipt.artifacts[CONTROL_BUNDLE_ARTIFACT]
+    control_bundle = artifacts[CONTROL_BUNDLE_ARTIFACT]
     if control_bundle.sha256 != provenance.control.bundle_sha256:
         raise ReleaseProvenanceError("staged control bundle does not match release provenance")
     _exact_bindings(
@@ -1116,8 +2056,8 @@ def verify_staged_provenance(stage_receipt_path: Path) -> tuple[StageReceipt, Pr
             "release_sha": provenance.application.release_sha,
         },
     )
-    image_bundle = receipt.artifacts[IMAGE_BUNDLE_ARTIFACT]
-    manifest = receipt.artifacts[IMAGE_MANIFEST_ARTIFACT]
+    image_bundle = artifacts[IMAGE_BUNDLE_ARTIFACT]
+    manifest = artifacts[IMAGE_MANIFEST_ARTIFACT]
     _exact_bindings(
         image_bundle,
         {
@@ -1137,20 +2077,94 @@ def verify_staged_provenance(stage_receipt_path: Path) -> tuple[StageReceipt, Pr
             "release_sha": provenance.application.release_sha,
         },
     )
+    proof = provenance.webapp_fi_source_proof
+    attestation = proof.source_role_attestation
+    image_export = proof.image_export_receipt
+    adoption = proof.controller_image_adoption_receipt
     _exact_bindings(
-        receipt.artifacts[PROVENANCE_ARTIFACT],
+        artifacts[PROVENANCE_ARTIFACT],
         {
             "application_bundle_sha256": provenance.application.bundle_sha256,
             "application_release_sha": provenance.application.release_sha,
-            "artifact_sha256": receipt.artifacts[PROVENANCE_ARTIFACT].sha256,
+            "artifact_sha256": artifacts[PROVENANCE_ARTIFACT].sha256,
+            "campaign_id": provenance.campaign_id,
             "control_bundle_sha256": provenance.control.bundle_sha256,
             "control_release_sha": provenance.control.release_sha,
             "image_manifest_sha256": provenance.runtime_images.image_manifest_sha256,
+            "webapp_fi_adoption_receipt_sha256": adoption.sha256,
+            "webapp_fi_attestation_key_id": attestation.key_id,
+            "webapp_fi_attestation_sha256": attestation.sha256,
+            "webapp_fi_image_export_sha256": image_export.sha256,
+            "webapp_fi_source_archive_sha256": adoption.plaintext_sha256,
+            "webapp_fi_source_archive_version_id": adoption.version_id,
+            "webapp_fi_source_image_id": adoption.image_id,
         },
     )
     if image_bundle.sha256 != provenance.runtime_images.image_bundle_sha256 or manifest.sha256 != provenance.runtime_images.image_manifest_sha256:
         raise ReleaseProvenanceError("staged image artifacts do not match release provenance")
     _validate_staged_image_manifest(manifest.path, provenance)
+
+
+def verify_publishable_artifacts(
+    *,
+    artifact_paths: Mapping[str, Path],
+    artifact_bindings: Mapping[str, Mapping[str, str]],
+    expected_release_sha: str,
+    webapp_fi_source_attestation_public_key: bytes,
+) -> Provenance:
+    """Fail closed on controller inputs before the seven-object mutation begins."""
+
+    expected_release_sha = _require_sha(expected_release_sha, field="expected application release_sha")
+    expected_names = {
+        APPLICATION_BUNDLE_ARTIFACT,
+        IMAGE_BUNDLE_ARTIFACT,
+        IMAGE_MANIFEST_ARTIFACT,
+        CONTROL_BUNDLE_ARTIFACT,
+        PROVENANCE_ARTIFACT,
+    }
+    if set(artifact_paths) != expected_names or set(artifact_bindings) != expected_names:
+        raise ReleaseProvenanceError("publishable artifacts must contain exactly the five normal artifact inputs")
+    artifacts: dict[str, Artifact] = {}
+    for name in sorted(expected_names):
+        path = artifact_paths[name]
+        if not isinstance(path, Path):
+            raise ReleaseProvenanceError("publishable artifact path is invalid")
+        _require_file(path, field=f"publishable {name}", private=True, maximum=MAX_ARTIFACT_BYTES)
+        digest, bytes_value = sha256_file(path)
+        artifacts[name] = Artifact(
+            name=name,
+            path=path,
+            sha256=digest,
+            bytes=bytes_value,
+            bindings=_bindings(artifact_bindings[name], field=f"publishable {name} bindings"),
+        )
+    provenance = load_provenance(
+        artifacts[PROVENANCE_ARTIFACT].path,
+        must_absent=None,
+        webapp_fi_source_attestation_public_key=webapp_fi_source_attestation_public_key,
+    )
+    if provenance.application.release_sha != expected_release_sha:
+        raise ReleaseProvenanceError("publishable artifacts are not for the expected application release")
+    _verify_artifact_contract(artifacts, provenance)
+    return provenance
+
+
+def verify_staged_provenance(
+    stage_receipt_path: Path,
+    *,
+    webapp_fi_source_attestation_public_key: bytes,
+) -> tuple[StageReceipt, Provenance]:
+    receipt = load_stage_receipt(stage_receipt_path)
+    if receipt.source_site != STAGE_SOURCE_SITE or receipt.destination_site != STAGE_DESTINATION_SITE:
+        raise ReleaseProvenanceError("artifact stage is not the fixed webapp_fi to webapp_ir transfer")
+    provenance = load_provenance(
+        receipt.artifacts[PROVENANCE_ARTIFACT].path,
+        must_absent=True,
+        webapp_fi_source_attestation_public_key=webapp_fi_source_attestation_public_key,
+    )
+    if receipt.release_sha != provenance.application.release_sha:
+        raise ReleaseProvenanceError("artifact stage namespace is not pinned to the application release")
+    _verify_artifact_contract(receipt.artifacts, provenance)
     return receipt, provenance
 
 
@@ -1313,35 +2327,49 @@ def build_control_artifacts(
     control_repository: Path,
     control_release_sha: str,
     output_directory: Path,
-    app_image_id: str,
-    app_repo_digest: str | None = None,
+    webapp_fi_source_role_attestation: Path,
+    webapp_fi_image_export_receipt: Path,
+    webapp_fi_controller_image_adoption_receipt: Path,
+    webapp_fi_source_attestation_public_key_file: Path,
 ) -> dict[str, Any]:
     """Create only control/provenance artifacts tied to a prepared app receipt."""
 
     preparation = _preparation_receipt(application_preparation_receipt)
+    source_proof = load_webapp_fi_source_proof(
+        source_role_attestation=webapp_fi_source_role_attestation,
+        image_export_receipt=webapp_fi_image_export_receipt,
+        controller_image_adoption_receipt=webapp_fi_controller_image_adoption_receipt,
+        public_key=load_webapp_fi_source_attestation_public_key(
+            webapp_fi_source_attestation_public_key_file
+        ),
+    )
+    attestation = source_proof.source_role_attestation
+    image_export = source_proof.image_export_receipt
+    adoption = source_proof.controller_image_adoption_receipt
+    if (
+        attestation.campaign_id != preparation.campaign_id
+        or attestation.release_sha != preparation.release_sha
+        or attestation.release_tree != preparation.release_tree
+    ):
+        raise ReleaseProvenanceError("webapp_fi_source_proof does not bind the prepared application release")
     control_sha, control_tree = _inspect_commit(control_repository, control_release_sha)
     if control_sha == preparation.release_sha:
         raise ReleaseProvenanceError("application and control commits must be distinct")
-    if not IMAGE_ID_RE.fullmatch(app_image_id):
-        raise ReleaseProvenanceError("pinned application image identity is invalid")
-    if app_repo_digest is not None and (
-        not isinstance(app_repo_digest, str) or not IMAGE_DIGEST_RE.fullmatch(app_repo_digest)
-    ):
-        raise ReleaseProvenanceError("pinned application image identity is invalid")
-    selected = [item for item in preparation.images if item["image_id"] == app_image_id]
+    selected = [item for item in preparation.images if item["image_id"] == attestation.image_id]
     if len(selected) != 1:
-        raise ReleaseProvenanceError("pinned application image is absent from the prepared image manifest")
+        raise ReleaseProvenanceError("FI source-proof application image is absent from the prepared image manifest")
+    app_repo_digest = _source_proof_app_repo_digest(source_proof)
     if app_repo_digest is None:
         if selected[0]["repo_digests"]:
-            raise ReleaseProvenanceError("pinned application image has a repo digest that must be bound")
+            raise ReleaseProvenanceError("FI source-proof application image has an unbound repo digest")
     elif app_repo_digest not in selected[0]["repo_digests"]:
-        raise ReleaseProvenanceError("pinned application image is absent from the prepared image manifest")
+        raise ReleaseProvenanceError("FI source-proof application image repo digest is absent from the prepared image manifest")
     output = _safe_path(str(output_directory), field="output_directory")
     _require_directory(output.parent, field="output_directory parent", private=True)
     if output.exists() or output.is_symlink():
         raise ReleaseProvenanceError("output_directory must be a new immutable directory")
     runtime = RuntimeImageContract(
-        app_image_id=app_image_id,
+        app_image_id=attestation.image_id,
         app_repo_digest=app_repo_digest,
         image_bundle_sha256=preparation.artifacts[IMAGE_BUNDLE_ARTIFACT].sha256,
         image_manifest_sha256=preparation.artifacts[IMAGE_MANIFEST_ARTIFACT].sha256,
@@ -1367,6 +2395,7 @@ def build_control_artifacts(
         runtime_images["app_repo_digest"] = runtime.app_repo_digest
     provenance_payload: dict[str, Any] = {
         "schema": PROVENANCE_SCHEMA,
+        "campaign_id": preparation.campaign_id,
         "application": {
             "release_sha": preparation.release_sha,
             "tree_sha": preparation.release_tree,
@@ -1382,6 +2411,11 @@ def build_control_artifacts(
             "release_root": str(CONTROL_RELEASE_PARENT / control_sha),
         },
         "runtime_images": runtime_images,
+        "webapp_fi_source_proof": {
+            "source_role_attestation": attestation.payload,
+            "image_export_receipt": image_export.payload,
+            "controller_image_adoption_receipt": adoption.payload,
+        },
     }
     _create_only_json(output / PROVENANCE_ARTIFACT, provenance_payload)
     provenance_sha256, provenance_bytes = sha256_file(output / PROVENANCE_ARTIFACT)
@@ -1411,9 +2445,17 @@ def build_control_artifacts(
                 "application_bundle_sha256": preparation.artifacts[APPLICATION_BUNDLE_ARTIFACT].sha256,
                 "application_release_sha": preparation.release_sha,
                 "artifact_sha256": provenance_sha256,
+                "campaign_id": preparation.campaign_id,
                 "control_bundle_sha256": control_sha256,
                 "control_release_sha": control_sha,
                 "image_manifest_sha256": runtime.image_manifest_sha256,
+                "webapp_fi_adoption_receipt_sha256": adoption.sha256,
+                "webapp_fi_attestation_key_id": attestation.key_id,
+                "webapp_fi_attestation_sha256": attestation.sha256,
+                "webapp_fi_image_export_sha256": image_export.sha256,
+                "webapp_fi_source_archive_sha256": adoption.plaintext_sha256,
+                "webapp_fi_source_archive_version_id": adoption.version_id,
+                "webapp_fi_source_image_id": adoption.image_id,
             },
         ),
     }
@@ -1425,6 +2467,18 @@ def build_control_artifacts(
         "application": provenance_payload["application"],
         "control": provenance_payload["control"],
         "runtime_images": provenance_payload["runtime_images"],
+        "webapp_fi_source_proof": {
+            "campaign_id": attestation.campaign_id,
+            "key_id": attestation.key_id,
+            "source_role_attestation_sha256": attestation.sha256,
+            "image_export_receipt_sha256": image_export.sha256,
+            "controller_image_adoption_receipt_sha256": adoption.sha256,
+            "image_id": attestation.image_id,
+            "image_reference": attestation.image_reference,
+            "archive_object_key": adoption.object_key,
+            "archive_version_id": adoption.version_id,
+            "image_archive_sha256": adoption.plaintext_sha256,
+        },
         "stage_publish": {
             "artifact": [name + "=" + str(artifact_specs[name].path) for name in sorted(artifact_specs)],
             "artifact_binding": [
@@ -1641,7 +2695,10 @@ def install_release_roots(
     now: dt.datetime | None = None,
 ) -> dict[str, Any]:
     bootstrap = load_bootstrap_receive_receipt(bootstrap_receipt_path)
-    stage, provenance = verify_staged_provenance(stage_receipt_path)
+    stage, provenance = verify_staged_provenance(
+        stage_receipt_path,
+        webapp_fi_source_attestation_public_key=bootstrap.webapp_fi_source_attestation_public_key,
+    )
     if (
         bootstrap.control_commit != provenance.control.release_sha
         or bootstrap.control_tree != provenance.control.tree_sha
@@ -1939,8 +2996,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     build.add_argument("--control-repository", type=Path, required=True)
     build.add_argument("--control-release-sha", required=True)
     build.add_argument("--output-directory", type=Path, required=True)
-    build.add_argument("--app-image-id", required=True)
-    build.add_argument("--app-repo-digest", required=False)
+    build.add_argument("--webapp-fi-source-role-attestation", type=Path, required=True)
+    build.add_argument("--webapp-fi-image-export-receipt", type=Path, required=True)
+    build.add_argument("--webapp-fi-controller-image-adoption-receipt", type=Path, required=True)
+    build.add_argument("--webapp-fi-source-attestation-public-key-file", type=Path, required=True)
     install = commands.add_parser("install", help="install fresh application/control roots from one verified stage candidate")
     install.add_argument("--stage-receipt", type=Path, required=True)
     install.add_argument("--bootstrap-receipt", type=Path, required=True)
@@ -1969,8 +3028,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 control_repository=args.control_repository,
                 control_release_sha=args.control_release_sha,
                 output_directory=args.output_directory,
-                app_image_id=args.app_image_id,
-                app_repo_digest=args.app_repo_digest,
+                webapp_fi_source_role_attestation=args.webapp_fi_source_role_attestation,
+                webapp_fi_image_export_receipt=args.webapp_fi_image_export_receipt,
+                webapp_fi_controller_image_adoption_receipt=args.webapp_fi_controller_image_adoption_receipt,
+                webapp_fi_source_attestation_public_key_file=args.webapp_fi_source_attestation_public_key_file,
             )
         elif args.command == "install":
             result = install_release_roots(

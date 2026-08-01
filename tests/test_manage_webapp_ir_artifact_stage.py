@@ -234,6 +234,7 @@ class ArtifactStageTests(unittest.TestCase):
             encoding=serialization.Encoding.Raw,
             format=serialization.PublicFormat.Raw,
         )
+        self.controller_authorization_public_key = b"c" * 32
         self.publisher_config = stage.PublisherConfig(
             endpoint="https://s3.ir-thr-at1.arvanstorage.ir",
             region="ir-thr-at1",
@@ -258,6 +259,8 @@ class ArtifactStageTests(unittest.TestCase):
             workspace=self.workspace,
             source_site="webapp_fi",
             source_signing_public_key=self.public_key,
+            webapp_fi_source_attestation_public_key=self.public_key,
+            webapp_fi_controller_authorization_public_key=self.controller_authorization_public_key,
             maximum_artifact_bytes=1024 * 1024,
         )
         self.client = FakeS3()
@@ -328,6 +331,10 @@ class ArtifactStageTests(unittest.TestCase):
             "source_site": bootstrap.WA_IR_BOOTSTRAP_SOURCE_SITE,
             "source_signing_public_key_base64": base64.b64encode(
                 source_signing_public_key or self.public_key
+            ).decode("ascii"),
+            "webapp_fi_source_attestation_public_key_base64": base64.b64encode(self.public_key).decode("ascii"),
+            "webapp_fi_controller_authorization_public_key_base64": base64.b64encode(
+                self.controller_authorization_public_key
             ).decode("ascii"),
             "maximum_artifact_bytes": 1024 * 1024,
         }
@@ -676,6 +683,29 @@ class ArtifactStageTests(unittest.TestCase):
         config_path.chmod(0o600)
 
         with self.assertRaisesRegex(stage.ArtifactStageError, "unsupported fields"):
+            stage.load_consumer_config(config_path)
+
+    def test_consumer_config_requires_an_exact_controller_authorization_key(self) -> None:
+        config_path = self.root / "consumer-controller-key.json"
+        payload = {
+            "schema": stage.CONFIG_SCHEMA,
+            "endpoint": self.consumer_config.endpoint,
+            "region": self.consumer_config.region,
+            "bucket": self.consumer_config.bucket,
+            "prefix": self.consumer_config.prefix,
+            "age_binary": self.consumer_config.age_binary,
+            "age_identity_file": str(self.identity),
+            "workspace": str(self.workspace),
+            "source_site": self.consumer_config.source_site,
+            "source_signing_public_key_base64": base64.b64encode(self.public_key).decode("ascii"),
+            "webapp_fi_source_attestation_public_key_base64": base64.b64encode(self.public_key).decode("ascii"),
+            "webapp_fi_controller_authorization_public_key_base64": base64.b64encode(b"x" * 31).decode("ascii"),
+            "maximum_artifact_bytes": self.consumer_config.maximum_artifact_bytes,
+        }
+        config_path.write_text(json.dumps(payload), encoding="utf-8")
+        config_path.chmod(0o600)
+
+        with self.assertRaisesRegex(stage.ArtifactStageError, "webapp_fi_controller_authorization_public_key_base64"):
             stage.load_consumer_config(config_path)
 
     def test_artifact_binding_parser_binds_non_secret_image_metadata(self) -> None:

@@ -54,6 +54,7 @@ def _load_sibling_module(name: str) -> Any:
 
 
 stage = _load_sibling_module("manage_webapp_ir_artifact_stage")
+provenance = _load_sibling_module("manage_webapp_ir_release_provenance")
 bootstrap_renderer = _load_sibling_module("render_webapp_ir_stage_bootstrap_receive")
 normal_renderer = _load_sibling_module("render_webapp_ir_stage_consume")
 
@@ -544,6 +545,18 @@ def run_stage(
         artifact_specs=artifact_specs,
         binding_specs=binding_specs,
     )
+    try:
+        provenance.verify_publishable_artifacts(
+            artifact_paths={item.name: item.path for item in artifacts},
+            artifact_bindings={item.name: item.bindings for item in artifacts},
+            expected_release_sha=EXPECTED_APPLICATION_RELEASE_SHA,
+            webapp_fi_source_attestation_public_key=consumer_config.webapp_fi_source_attestation_public_key,
+        )
+    except Exception:
+        # This must happen before the fresh WA-IR directory or any Object
+        # Storage version is created.  The stage is not evidence for a
+        # controller-local provenance failure.
+        raise SevenObjectStageError("normal artifact provenance inputs are invalid") from None
 
     # This is the only remote mutation before the seven immutable object
     # uploads.  It fails before creating an object when the host is not fresh.

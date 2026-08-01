@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import importlib.util
 import json
@@ -14,6 +15,9 @@ import sys
 import tempfile
 import unittest
 from unittest import mock
+
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -111,6 +115,14 @@ class ReleaseProvenanceTests(unittest.TestCase):
         self.app_image_id = "sha256:" + "a" * 64
         self.app_repo_digest = "trading_bot_base_iran@sha256:" + "b" * 64
         self.campaign_id = "current-2c08-standby-campaign"
+        self.fi_attestation_private_key = Ed25519PrivateKey.generate()
+        self.fi_attestation_public_key = self.fi_attestation_private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        self.fi_attestation_public_key_path = self.root / "fi-attestation-public.key"
+        write_private(self.fi_attestation_public_key_path, self.fi_attestation_public_key)
+        self._attestation_serial = 0
 
     def patched_contract(self):
         return mock.patch.multiple(
@@ -266,16 +278,334 @@ class ReleaseProvenanceTests(unittest.TestCase):
         write_private(receipt_path, MODULE.canonical_json_bytes(receipt) + b"\n")
         return receipt_path
 
+    def make_source_proof(
+        self,
+        *,
+        image_id: str | None = None,
+        repo_digest: str | None | object = ...,
+        release_sha: str | None = None,
+        release_tree: str | None = None,
+    ) -> tuple[Path, Path, Path]:
+        """Make the exact rich FI proof consumed by provenance v2."""
+
+        self._attestation_serial += 1
+        serial = self._attestation_serial
+        selected_image_id = image_id or self.app_image_id
+        selected_repo_digest = self.app_repo_digest if repo_digest is ... else repo_digest
+        selected_release = release_sha or self.application_sha
+        selected_tree = release_tree or self.application_tree
+        image_reference = "trading_bot_base_iran:rollback-2c08"
+        public_key_base64 = base64.b64encode(self.fi_attestation_public_key).decode("ascii")
+        controller_key_base64 = base64.b64encode(b"c" * 32).decode("ascii")
+        key_id = "ed25519-sha256:" + hashlib.sha256(self.fi_attestation_public_key).hexdigest()
+        archive_sha256 = "e" * 64
+        archive_bytes = 123
+        descriptor_sha256 = "d" * 64
+        projection_relatives = (
+            "api",
+            "bot",
+            "core",
+            "src",
+            "models",
+            "migrations",
+            "scripts",
+            "main.py",
+            "schemas.py",
+            "trading_settings.json",
+        )
+        projections = {
+            relative: [
+                {
+                    "path": relative if "." in relative else relative + "/fixture.py",
+                    "sha256": hashlib.sha256(relative.encode("ascii")).hexdigest(),
+                    "bytes": 1,
+                    "mode": "100644",
+                }
+            ]
+            for relative in projection_relatives
+        }
+        projection = {
+            "runtime_source_root": "/srv/trading-bot/current",
+            "release_sha": selected_release,
+            "git_tree": selected_tree,
+            "descriptor_sha256": descriptor_sha256,
+            "projections": projections,
+            "projection_sha256": hashlib.sha256(MODULE.canonical_json_bytes(projections)).hexdigest(),
+        }
+        static_record = {
+            "descriptor_sha256": "7" * 64,
+            "artifact": {
+                "object_key": "campaign/source/static-assets.age",
+                "version_id": "static-version-1",
+                "ciphertext_sha256": "8" * 64,
+                "ciphertext_bytes": 101,
+                "plaintext_sha256": "9" * 64,
+                "plaintext_bytes": 99,
+            },
+            "files_sha256": "a" * 64,
+            "file_count": 1,
+            "source_kind": "deterministic_2c08_dist_manifest",
+        }
+        def projection_mounts(*, include_static_assets: bool) -> list[dict[str, object]]:
+            relatives = list(projection_relatives)
+            if include_static_assets:
+                relatives.append("mini_app_dist")
+            return sorted(
+                [
+                    {
+                        "type": "bind",
+                        "source": "/srv/trading-bot/current/" + relative,
+                        "destination": "/app/" + relative,
+                        "read_only": True,
+                    }
+                    for relative in relatives
+                ],
+                key=lambda item: (str(item["destination"]), str(item["type"]), str(item["source"])),
+            )
+
+        def container(*, name: str, image_id: str, image_ref: str, mounts: list[dict[str, object]]) -> dict[str, object]:
+            return {
+                "name": name,
+                "container_id": hashlib.sha256(name.encode("ascii")).hexdigest(),
+                "image_id": image_id,
+                "image_reference": image_ref,
+                "mounts": mounts,
+            }
+
+        application_container = container(
+            name="webapp-fi-app",
+            image_id=selected_image_id,
+            image_ref=image_reference,
+            mounts=projection_mounts(include_static_assets=True),
+        )
+        sync_container = container(
+            name="webapp-fi-sync",
+            image_id=selected_image_id,
+            image_ref=image_reference,
+            mounts=projection_mounts(include_static_assets=False),
+        )
+        active_image = {
+            "image_id": selected_image_id,
+            "image_reference": image_reference,
+            "repo_tags": [image_reference],
+            "repo_digests": [] if selected_repo_digest is None else [selected_repo_digest],
+        }
+        role_unsigned: dict[str, object] = {
+            "schema": MODULE.WEBAPP_FI_SOURCE_ROLE_ATTESTATION_SCHEMA,
+            "status": "attested",
+            "attested_at": "2026-07-30T12:00:00Z",
+            "campaign_id": self.campaign_id,
+            "source_site": "webapp_fi",
+            "destination_site": "webapp_ir",
+            "package_id": f"source-package-{serial}",
+            "application": {
+                "release_sha": selected_release,
+                "expected_alembic_revision": "a1b2c3d4e5f6",
+            },
+            "tooling": {"control_commit": self.control_sha, "control_tree": self.control_tree},
+            "source_adoption_install_receipt_sha256": "1" * 64,
+            "source_adoption_delivery": {
+                "object_key": "campaign/source/adoption.age",
+                "version_id": "source-adoption-version-1",
+                "ciphertext_sha256": "2" * 64,
+                "ciphertext_bytes": 102,
+                "plaintext_sha256": "3" * 64,
+                "plaintext_bytes": 100,
+                "delivery_envelope_sha256": "4" * 64,
+                "controller_public_key_base64": controller_key_base64,
+            },
+            "canonical_release_tree_sha256": descriptor_sha256,
+            "application_release_tree": selected_tree,
+            "source_signer_enrollment": {
+                "receipt_sha256": "5" * 64,
+                "certificate_sha256": "6" * 64,
+                "fi_ssh_host_public_key_sha256": "7" * 64,
+                "controller_public_key_base64": controller_key_base64,
+                "source_signing_public_key_base64": public_key_base64,
+            },
+            "runtime_projection": {"before": projection, "after": dict(projection)},
+            "static_assets_proof": {
+                "before": static_record,
+                "after": dict(static_record),
+                "proof_is_not_static_payload": True,
+                "promotion_requires_verified_immutable_age_object": True,
+            },
+            "containers": {
+                "database": container(
+                    name="webapp-fi-db",
+                    image_id="sha256:" + "0" * 64,
+                    image_ref="postgres:16",
+                    mounts=[],
+                ),
+                "application": application_container,
+                "sync_worker": sync_container,
+            },
+            "active_application_image": active_image,
+            "schema_observation": {"observed_alembic_revision": "a1b2c3d4e5f6", "capture_role_verified_read_only": True},
+            "race_check": {
+                "runtime_projection_unchanged": True,
+                "static_assets_unchanged": True,
+                "application_container_unchanged": True,
+                "sync_worker_container_unchanged": True,
+                "database_container_unchanged": True,
+                "active_image_unchanged": True,
+                "schema_unchanged": True,
+            },
+            "snapshot_transport": {
+                "payload_path": "private_versioned_object_storage_age_only",
+                "one_off_publication_only": True,
+                "direct_webapp_fi_to_webapp_ir_transfer": False,
+                "automatic_deletion": False,
+            },
+            "source_signing_public_key_base64": public_key_base64,
+            "source_signing_key_id": key_id,
+        }
+        role_signature = self.fi_attestation_private_key.sign(
+            MODULE.WEBAPP_FI_SOURCE_ROLE_ATTESTATION_DOMAIN + MODULE.canonical_json_bytes(role_unsigned)
+        )
+        role = {
+            **role_unsigned,
+            "source_signature": {
+                "algorithm": MODULE.WEBAPP_FI_SOURCE_SIGNING_ALGORITHM,
+                "signature_base64": base64.b64encode(role_signature).decode("ascii"),
+            },
+        }
+        role_path = self.root / f"fi-source-role-attestation-{serial}.json"
+        write_private(role_path, MODULE.canonical_json_bytes(role) + b"\n")
+        role_sha256 = hashlib.sha256(role_path.read_bytes()).hexdigest()
+        export_unsigned: dict[str, object] = {
+            "schema": MODULE.WEBAPP_FI_IMAGE_EXPORT_RECEIPT_SCHEMA,
+            "status": "exported",
+            "exported_at": "2026-07-30T12:00:01Z",
+            "export_id": f"image-export-{serial}",
+            "campaign_id": self.campaign_id,
+            "source_site": "webapp_fi",
+            "destination_site": "webapp_ir",
+            "application": role_unsigned["application"],
+            "application_release_tree": selected_tree,
+            "tooling": role_unsigned["tooling"],
+            "canonical_release_tree_sha256": descriptor_sha256,
+            "source_role_attestation_sha256": role_sha256,
+            "image": {
+                "image_id": selected_image_id,
+                "image_reference": image_reference,
+                "archive_sha256": archive_sha256,
+                "archive_bytes": archive_bytes,
+                "docker_manifest_sha256": "b" * 64,
+                "docker_config_sha256": selected_image_id.removeprefix("sha256:"),
+                "layer_count": 1,
+                "repo_tags": [image_reference],
+            },
+            "pre_export_runtime": {
+                "application": application_container,
+                "sync_worker": sync_container,
+                "active_image": active_image,
+            },
+            "post_export_runtime": {
+                "application": application_container,
+                "sync_worker": sync_container,
+                "active_image": active_image,
+            },
+            "image_archive_does_not_prove_bind_mounted_runtime": True,
+            "archive_consumption": {
+                "docker_load_prohibited": True,
+                "fi_local_archive_verification_before_age_encryption": True,
+                "controller_read_back_verification_after_age_encryption": True,
+                "raw_repo_tags_are_not_authorization": True,
+            },
+            "object_storage_export_required": {
+                "transport": "private_versioned_age_only",
+                "create_only": True,
+                "read_back_same_version_id": True,
+                "direct_webapp_fi_to_webapp_ir_transfer": False,
+            },
+            "source_signing_public_key_base64": public_key_base64,
+            "source_signing_key_id": key_id,
+        }
+        export_signature = self.fi_attestation_private_key.sign(
+            MODULE.WEBAPP_FI_IMAGE_EXPORT_RECEIPT_DOMAIN + MODULE.canonical_json_bytes(export_unsigned)
+        )
+        image_export = {
+            **export_unsigned,
+            "source_signature": {
+                "algorithm": MODULE.WEBAPP_FI_SOURCE_SIGNING_ALGORITHM,
+                "signature_base64": base64.b64encode(export_signature).decode("ascii"),
+            },
+        }
+        export_path = self.root / f"fi-image-export-receipt-{serial}.json"
+        write_private(export_path, MODULE.canonical_json_bytes(image_export) + b"\n")
+        export_sha256 = hashlib.sha256(export_path.read_bytes()).hexdigest()
+        adoption = {
+            "schema": MODULE.WEBAPP_FI_CONTROLLER_IMAGE_ADOPTION_RECEIPT_SCHEMA,
+            "status": "adopted",
+            "adopted_at": "2026-07-30T12:00:02Z",
+            "campaign_id": self.campaign_id,
+            "source_site": "webapp_fi",
+            "destination_site": "webapp_ir",
+            "application": {"release_sha": selected_release, "release_tree": selected_tree},
+            "source_role_attestation_sha256": role_sha256,
+            "image_export_receipt_sha256": export_sha256,
+            "source_signing_key_id": key_id,
+            "image": {"image_id": selected_image_id, "image_reference": image_reference},
+            "object": {
+                "object_key": "campaign/returned/image-export.age",
+                "version_id": f"returned-image-version-{serial}",
+                "ciphertext_sha256": "c" * 64,
+                "ciphertext_bytes": 145,
+                "plaintext_sha256": archive_sha256,
+                "plaintext_bytes": archive_bytes,
+            },
+            "read_back_verified": True,
+            "decrypted_verified": True,
+        }
+        adoption_path = self.root / f"fi-controller-image-adoption-{serial}.json"
+        write_private(adoption_path, MODULE.canonical_json_bytes(adoption) + b"\n")
+        return role_path, export_path, adoption_path
+
+    def source_proof_arguments(self, **kwargs: object) -> dict[str, Path]:
+        role, image_export, adoption = self.make_source_proof(**kwargs)
+        return {
+            "webapp_fi_source_role_attestation": role,
+            "webapp_fi_image_export_receipt": image_export,
+            "webapp_fi_controller_image_adoption_receipt": adoption,
+            "webapp_fi_source_attestation_public_key_file": self.fi_attestation_public_key_path,
+        }
+
+    def resign_fi_record(self, path: Path, *, domain: bytes, mutate) -> None:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload.pop("source_signature")
+        mutate(payload)
+        signature = self.fi_attestation_private_key.sign(
+            domain + MODULE.canonical_json_bytes(payload)
+        )
+        payload["source_signature"] = {
+            "algorithm": MODULE.WEBAPP_FI_SOURCE_SIGNING_ALGORITHM,
+            "signature_base64": base64.b64encode(signature).decode("ascii"),
+        }
+        write_private(path, MODULE.canonical_json_bytes(payload) + b"\n")
+
+    def build_with_source_proof(
+        self,
+        *,
+        preparation: Path,
+        output_directory: Path,
+        source_proof: dict[str, Path],
+    ) -> dict:
+        return MODULE.build_control_artifacts(
+            application_preparation_receipt=preparation,
+            control_repository=self.control_repository,
+            control_release_sha=self.control_sha,
+            output_directory=output_directory,
+            **source_proof,
+        )
+
     def build(self) -> dict:
         preparation = self.make_application_preparation()
         with self.patched_contract():
-            return MODULE.build_control_artifacts(
-                application_preparation_receipt=preparation,
-                control_repository=self.control_repository,
-                control_release_sha=self.control_sha,
+            return self.build_with_source_proof(
+                preparation=preparation,
                 output_directory=self.output_parent / "control-bound",
-                app_image_id=self.app_image_id,
-                app_repo_digest=self.app_repo_digest,
+                source_proof=self.source_proof_arguments(),
             )
 
     @staticmethod
@@ -367,6 +697,28 @@ class ReleaseProvenanceTests(unittest.TestCase):
         candidate = self.root / f"received-{receipt_control_commit}-{bootstrap_id}"
         candidate.mkdir(mode=0o700)
         candidate.chmod(0o700)
+        config_directory = candidate / "config"
+        config_directory.mkdir(mode=0o700)
+        config_directory.chmod(0o700)
+        consumer_config = {
+            "schema": MODULE.ARTIFACT_STAGE_CONSUMER_CONFIG_SCHEMA,
+            "endpoint": "https://s3.ir-thr-at1.arvanstorage.ir",
+            "region": "ir-thr-at1",
+            "bucket": "three-site-private",
+            "prefix": "campaign-current/artifacts",
+            "age_binary": "/usr/bin/age",
+            "age_identity_file": "/etc/trading-bot-three-site/wa-ir/artifact-stage-2c08.agekey",
+            "workspace": "/srv/trading-bot-three-site-staging-data/workspace",
+            "source_site": "webapp_fi",
+            "source_signing_public_key_base64": base64.b64encode(b"p" * 32).decode("ascii"),
+            "webapp_fi_source_attestation_public_key_base64": base64.b64encode(
+                self.fi_attestation_public_key
+            ).decode("ascii"),
+            "maximum_artifact_bytes": 1024 * 1024,
+        }
+        consumer_config_raw = json.dumps(consumer_config, sort_keys=True).encode("utf-8")
+        write_private(config_directory / "consumer.json", consumer_config_raw)
+        consumer_config_sha256 = hashlib.sha256(consumer_config_raw).hexdigest()
         payload = {
             "schema": MODULE.BOOTSTRAP_RECEIPT_SCHEMA,
             "status": "received",
@@ -383,7 +735,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
                 "scripts/manage_webapp_ir_release_provenance.py": "c" * 64,
                 "core/standby_snapshot_capacity.py": "d" * 64,
                 "scripts/webapp_ir_image_archive_contract.py": "e" * 64,
-                "config/consumer.json": "f" * 64,
+                "config/consumer.json": consumer_config_sha256,
             },
             "bootstrap": {
                 "object_key": "campaign/bootstrap/v1/webapp_fi/webapp_ir/stage-consumer-bootstrap.tar.age",
@@ -393,7 +745,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
                 "plaintext_sha256": "0" * 64,
                 "plaintext_bytes": 1024,
                 "package_manifest_sha256": "1" * 64,
-                "consumer_config_sha256": "f" * 64,
+                "consumer_config_sha256": consumer_config_sha256,
                 "preparation_receipt_sha256": "3" * 64,
             },
         }
@@ -459,7 +811,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
                 control_repository=self.control_repository,
                 control_release_sha=self.control_sha,
                 output_directory=self.output_parent / "control-no-repo-digest",
-                app_image_id=self.app_image_id,
+                **self.source_proof_arguments(repo_digest=None),
             )
         self.assertEqual(prepared["runtime_images"]["app_image_id"], self.app_image_id)
         self.assertNotIn("app_repo_digest", prepared["runtime_images"])
@@ -488,7 +840,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
                     control_repository=self.control_repository,
                     control_release_sha=self.control_sha,
                     output_directory=output,
-                    app_image_id="sha256:" + "c" * 64,
+                    **self.source_proof_arguments(image_id="sha256:" + "c" * 64, repo_digest=None),
                 )
         self.assertFalse(output.exists())
 
@@ -496,17 +848,99 @@ class ReleaseProvenanceTests(unittest.TestCase):
         preparation = self.make_application_preparation()
         output = self.output_parent / "missing-app-repo-digest"
         with self.patched_contract():
-            with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "repo digest that must be bound"):
+            with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "unbound repo digest"):
                 MODULE.build_control_artifacts(
                     application_preparation_receipt=preparation,
                     control_repository=self.control_repository,
                     control_release_sha=self.control_sha,
                     output_directory=output,
-                    app_image_id=self.app_image_id,
+                    **self.source_proof_arguments(repo_digest=None),
                 )
         self.assertFalse(output.exists())
 
-    def test_build_parser_allows_an_absent_app_repo_digest(self) -> None:
+    def test_build_embeds_the_complete_signed_fi_proof_and_controller_adoption_receipt(self) -> None:
+        prepared = self.build()
+        provenance_path = dict(
+            item.split("=", 1)
+            for item in prepared["stage_publish"]["artifact"]
+        )[MODULE.PROVENANCE_ARTIFACT]
+        provenance = json.loads(Path(provenance_path).read_text(encoding="utf-8"))
+        proof = provenance["webapp_fi_source_proof"]
+        self.assertEqual(
+            set(proof),
+            {
+                "source_role_attestation",
+                "image_export_receipt",
+                "controller_image_adoption_receipt",
+            },
+        )
+        self.assertEqual(
+            proof["source_role_attestation"]["application_release_tree"],
+            self.application_tree,
+        )
+        self.assertEqual(
+            proof["image_export_receipt"]["application_release_tree"],
+            self.application_tree,
+        )
+        self.assertTrue(proof["controller_image_adoption_receipt"]["read_back_verified"])
+        self.assertTrue(proof["controller_image_adoption_receipt"]["decrypted_verified"])
+
+    def test_build_rejects_a_tampered_fi_role_signature_before_creating_output(self) -> None:
+        preparation = self.make_application_preparation()
+        source_proof = self.source_proof_arguments()
+        role = source_proof["webapp_fi_source_role_attestation"]
+        payload = json.loads(role.read_text(encoding="utf-8"))
+        payload["source_signature"]["signature_base64"] = base64.b64encode(b"x" * 64).decode("ascii")
+        write_private(role, MODULE.canonical_json_bytes(payload) + b"\n")
+        output = self.output_parent / "tampered-fi-signature"
+
+        with self.patched_contract():
+            with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "signature verification failed"):
+                self.build_with_source_proof(
+                    preparation=preparation,
+                    output_directory=output,
+                    source_proof=source_proof,
+                )
+        self.assertFalse(output.exists())
+
+    def test_build_rejects_a_validly_signed_export_with_the_wrong_attestation_hash(self) -> None:
+        preparation = self.make_application_preparation()
+        source_proof = self.source_proof_arguments()
+        self.resign_fi_record(
+            source_proof["webapp_fi_image_export_receipt"],
+            domain=MODULE.WEBAPP_FI_IMAGE_EXPORT_RECEIPT_DOMAIN,
+            mutate=lambda payload: payload.__setitem__("source_role_attestation_sha256", "0" * 64),
+        )
+        output = self.output_parent / "wrong-export-attestation-hash"
+
+        with self.patched_contract():
+            with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "does not bind the source role attestation"):
+                self.build_with_source_proof(
+                    preparation=preparation,
+                    output_directory=output,
+                    source_proof=source_proof,
+                )
+        self.assertFalse(output.exists())
+
+    def test_build_rejects_a_controller_adoption_receipt_that_persists_a_url(self) -> None:
+        preparation = self.make_application_preparation()
+        source_proof = self.source_proof_arguments()
+        adoption = source_proof["webapp_fi_controller_image_adoption_receipt"]
+        payload = json.loads(adoption.read_text(encoding="utf-8"))
+        payload["object"]["version_id"] = "https://example.invalid/presigned-object"
+        write_private(adoption, MODULE.canonical_json_bytes(payload) + b"\n")
+        output = self.output_parent / "adoption-url"
+
+        with self.patched_contract():
+            with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "persists a forbidden URL"):
+                self.build_with_source_proof(
+                    preparation=preparation,
+                    output_directory=output,
+                    source_proof=source_proof,
+                )
+        self.assertFalse(output.exists())
+
+    def test_build_parser_requires_the_independent_fi_source_proof_inputs(self) -> None:
         parsed = MODULE.parse_args(
             [
                 "build-control",
@@ -518,11 +952,29 @@ class ReleaseProvenanceTests(unittest.TestCase):
                 self.control_sha,
                 "--output-directory",
                 "/root/output",
-                "--app-image-id",
-                self.app_image_id,
+                "--webapp-fi-source-role-attestation",
+                "/root/fi-source-role-attestation.json",
+                "--webapp-fi-image-export-receipt",
+                "/root/fi-image-export-receipt.json",
+                "--webapp-fi-controller-image-adoption-receipt",
+                "/root/fi-controller-image-adoption.json",
+                "--webapp-fi-source-attestation-public-key-file",
+                "/root/fi-attestation.key",
             ]
         )
-        self.assertIsNone(parsed.app_repo_digest)
+        self.assertEqual(
+            parsed.webapp_fi_source_role_attestation,
+            Path("/root/fi-source-role-attestation.json"),
+        )
+        self.assertEqual(parsed.webapp_fi_image_export_receipt, Path("/root/fi-image-export-receipt.json"))
+        self.assertEqual(
+            parsed.webapp_fi_controller_image_adoption_receipt,
+            Path("/root/fi-controller-image-adoption.json"),
+        )
+        self.assertEqual(
+            parsed.webapp_fi_source_attestation_public_key_file,
+            Path("/root/fi-attestation.key"),
+        )
 
     def test_runtime_contract_rejects_a_null_repo_digest_field(self) -> None:
         with self.assertRaisesRegex(MODULE.ReleaseProvenanceError, "runtime app_repo_digest is invalid"):
@@ -744,8 +1196,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
                     control_repository=non_repository,
                     control_release_sha=self.control_sha,
                     output_directory=output,
-                    app_image_id=self.app_image_id,
-                    app_repo_digest=self.app_repo_digest,
+                    **self.source_proof_arguments(),
                 )
 
         self.assertFalse(output.exists())
@@ -764,8 +1215,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
                     control_repository=self.control_repository,
                     control_release_sha=self.control_sha,
                     output_directory=output,
-                    app_image_id=self.app_image_id,
-                    app_repo_digest=self.app_repo_digest,
+                    **self.source_proof_arguments(),
                 )
         self.assertTrue((output / MODULE.CONTROL_BUNDLE_ARTIFACT).is_file())
         self.assertFalse((output / MODULE.PROVENANCE_ARTIFACT).exists())

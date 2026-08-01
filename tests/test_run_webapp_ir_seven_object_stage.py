@@ -49,6 +49,7 @@ def consumer_config() -> SimpleNamespace:
         bucket="private-stage-bucket",
         prefix="campaign/wa-ir",
         source_signing_public_key=b"p" * 32,
+        webapp_fi_source_attestation_public_key=b"f" * 32,
     )
 
 
@@ -166,6 +167,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
             mock.patch.object(wrapper.stage, "_publisher_public_key", return_value=b"p" * 32),
             mock.patch.object(wrapper.stage, "parse_artifact_specifications", return_value=artifacts),
             mock.patch.object(wrapper.stage, "apply_artifact_bindings", side_effect=lambda parsed, _bindings: parsed),
+            mock.patch.object(wrapper.provenance, "verify_publishable_artifacts", return_value=SimpleNamespace()),
         )
 
     def _run(self, **overrides: object) -> dict[str, object]:
@@ -198,7 +200,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
             runner_arguments.append(list(arguments))
             return subprocess.CompletedProcess(list(arguments), 0)
 
-        root, publisher, consumer, public_key, parser, binder = self._common_patches()
+        root, publisher, consumer, public_key, parser, binder, preflight = self._common_patches()
         with (
             root,
             publisher,
@@ -206,6 +208,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
             public_key,
             parser,
             binder,
+            preflight,
             mock.patch.object(wrapper.stage, "create_s3_client", return_value=object()) as create_client,
             mock.patch.object(
                 wrapper.stage,
@@ -254,7 +257,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
         )
 
     def test_invalid_normal_input_stops_before_client_or_bootstrap_publish(self) -> None:
-        root, publisher, consumer, public_key, parser, binder = self._common_patches(parsed=normal_inputs()[:-1])
+        root, publisher, consumer, public_key, parser, binder, preflight = self._common_patches(parsed=normal_inputs()[:-1])
         with (
             root,
             publisher,
@@ -262,6 +265,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
             public_key,
             parser,
             binder,
+            preflight,
             mock.patch.object(wrapper.stage, "create_s3_client") as create_client,
             mock.patch.object(wrapper.stage, "publish_bootstrap_package") as publish_bootstrap,
         ):
@@ -298,7 +302,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
         load_publisher.assert_not_called()
 
     def test_bootstrap_root_prepare_failure_stops_before_client_or_object_publish(self) -> None:
-        root, publisher, consumer, public_key, parser, binder = self._common_patches()
+        root, publisher, consumer, public_key, parser, binder, preflight = self._common_patches()
         with (
             root,
             publisher,
@@ -306,6 +310,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
             public_key,
             parser,
             binder,
+            preflight,
             mock.patch.object(wrapper.stage, "create_s3_client") as create_client,
             mock.patch.object(wrapper.stage, "publish_bootstrap_package") as publish_bootstrap,
         ):
@@ -315,7 +320,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
         publish_bootstrap.assert_not_called()
 
     def test_failed_bootstrap_ssh_stops_without_normal_publish_or_retry(self) -> None:
-        root, publisher, consumer, public_key, parser, binder = self._common_patches()
+        root, publisher, consumer, public_key, parser, binder, preflight = self._common_patches()
         with (
             root,
             publisher,
@@ -323,6 +328,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
             public_key,
             parser,
             binder,
+            preflight,
             mock.patch.object(wrapper.stage, "create_s3_client", return_value=object()),
             mock.patch.object(wrapper.stage, "publish_bootstrap_package", return_value=bootstrap_receipt()) as publish_bootstrap,
             mock.patch.object(wrapper.bootstrap_renderer, "render_receive_command", return_value=rendered_command(BOOTSTRAP_URL)),
@@ -341,7 +347,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
     def test_malformed_normal_receipt_stops_before_normal_ssh_and_does_not_retry(self) -> None:
         calls: list[list[str]] = []
         malformed = normal_receipt(names=wrapper.EXPECTED_NORMAL_ARTIFACTS[:-1])
-        root, publisher, consumer, public_key, parser, binder = self._common_patches()
+        root, publisher, consumer, public_key, parser, binder, preflight = self._common_patches()
         with (
             root,
             publisher,
@@ -349,6 +355,7 @@ class SevenObjectStageControllerTests(unittest.TestCase):
             public_key,
             parser,
             binder,
+            preflight,
             mock.patch.object(wrapper.stage, "create_s3_client", return_value=object()),
             mock.patch.object(wrapper.stage, "publish_bootstrap_package", return_value=bootstrap_receipt()),
             mock.patch.object(wrapper.bootstrap_renderer, "render_receive_command", return_value=rendered_command(BOOTSTRAP_URL)),
