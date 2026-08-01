@@ -5,6 +5,8 @@
 این ماژول از pydantic-settings برای مدیریت تنظیمات استفاده می‌کند.
 تمام مقادیر از فایل .env خوانده می‌شوند.
 """
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
 
 __all__ = ["Settings", "settings"]
@@ -15,6 +17,23 @@ class Settings(BaseSettings):
     
     # Server Mode (iran vs foreign)
     server_mode: str = "foreign"
+    # A Writer Witness-protected release must opt in explicitly.  These values
+    # are default-off so existing legacy/standby processes retain their current
+    # behaviour until an immutable fenced release supplies every invariant.
+    single_writer_runtime_enabled: bool = False
+    application_writer_term_enforced: bool = False
+    application_writer_term_local_site: str | None = None
+    application_writer_term_lease_file: Path | None = None
+    application_writer_term_safety_margin_seconds: int = 5
+    application_writer_term_max_lease_duration_seconds: int = 90
+    # Historical services call ``create_all`` during startup.  A writer-term
+    # runtime must set this false so schema changes are an independent,
+    # reviewed operation rather than an incidental service start.
+    database_schema_bootstrap_enabled: bool = True
+    # A term-bound bot writes this private, container-local marker only after
+    # a successful long-poll response.  It is optional outside the fenced bot.
+    bot_writer_ready_marker_path: Path | None = None
+    bot_writer_ready_marker_max_age_seconds: int = 45
     peer_server_url: str | None = None
     iran_server_url: str | None = None
     germany_server_url: str | None = None

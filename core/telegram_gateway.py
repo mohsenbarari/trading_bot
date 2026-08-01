@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 import httpx
 
+from core.application_writer_term import policy_from_settings, require_active_writer_term
 from core.config import settings
 from core.server_routing import SERVER_FOREIGN, current_server
 
@@ -61,6 +62,19 @@ def _resolve_bot_token(bot_token: Optional[str] = None) -> Optional[str]:
     return bot_token or settings.bot_token or os.getenv("BOT_TOKEN")
 
 
+def require_telegram_gateway_writer_term() -> None:
+    """Fence a provider-visible Telegram request in a term-enabled runtime.
+
+    Bot background workers use this HTTP gateway directly rather than the
+    aiogram polling client's session.  Keeping this check at their shared
+    egress boundary closes the race between the bot watchdog ticks and a
+    worker's next provider call.  The legacy/default path remains no-op and
+    does not open a term file.
+    """
+
+    require_active_writer_term(policy_from_settings(settings))
+
+
 def _response_json(response: Any) -> Optional[dict[str, Any]]:
     try:
         parsed = response.json()
@@ -101,6 +115,7 @@ async def post_telegram_method(
     idempotency_key: Optional[str] = None,
 ) -> TelegramGatewayResult:
     """Execute one Telegram Bot API method through the approved async path."""
+    require_telegram_gateway_writer_term()
     assert_telegram_execution_surface(operation=method)
 
     token = _resolve_bot_token(bot_token)
@@ -151,6 +166,7 @@ def post_telegram_method_sync(
     idempotency_key: Optional[str] = None,
 ) -> TelegramGatewayResult:
     """Execute one Telegram Bot API method through the approved sync path."""
+    require_telegram_gateway_writer_term()
     assert_telegram_execution_surface(operation=method)
 
     token = _resolve_bot_token(bot_token)

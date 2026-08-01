@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 
+from core.application_writer_term import policy_from_settings, require_active_writer_term
 from core.config import settings
 from core.log_redaction import mask_mobile
 from core.utils import normalize_persian_numerals
@@ -19,6 +20,12 @@ class SMSDeliveryOutcome(str, Enum):
     ACCEPTED = "accepted"
     FAILED = "failed"
     AMBIGUOUS = "ambiguous"
+
+
+def require_sms_writer_term() -> None:
+    """Fence a provider-visible SMS submission in an enabled writer runtime."""
+
+    require_active_writer_term(policy_from_settings(settings))
 
 
 def _api_url(path: str) -> str:
@@ -53,6 +60,9 @@ def _post_smsir_result(
     path: str,
     payload: dict[str, Any],
 ) -> tuple[SMSDeliveryOutcome, dict[str, Any] | None]:
+    # Keep this outside the exception-to-outcome conversion: a lost Writer
+    # Witness term is a control-plane refusal, not an ambiguous provider send.
+    require_sms_writer_term()
     try:
         response = httpx.post(
             _api_url(path),
@@ -108,6 +118,7 @@ async def _post_smsir_result_async(
     path: str,
     payload: dict[str, Any],
 ) -> tuple[SMSDeliveryOutcome, dict[str, Any] | None]:
+    require_sms_writer_term()
     try:
         async with httpx.AsyncClient(timeout=settings.smsir_timeout_seconds) as client:
             response = await client.post(
