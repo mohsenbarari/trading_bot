@@ -37,6 +37,18 @@ class EmergencyStandaloneTests(unittest.TestCase):
         failures = VERIFY.verify_nginx(ROOT / "deploy/emergency-ir/nginx.standalone.conf.template")
         self.assertEqual(failures, [])
 
+    def test_nginx_verifier_requires_a_certificate_for_the_default_tls_vhost(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            candidate = Path(directory) / "nginx.conf"
+            source = (ROOT / "deploy/emergency-ir/nginx.standalone.conf.template").read_text(
+                encoding="utf-8"
+            )
+            candidate.write_text(source.replace("    ssl_certificate /etc/trading-bot-emergency/acme/config/live/emergency-coin-gold-trade-ir/fullchain.pem;\n", "", 1), encoding="utf-8")
+            self.assertIn(
+                "both TLS virtual hosts must load the pinned emergency certificate",
+                VERIFY.verify_nginx(candidate),
+            )
+
     def test_renderer_generates_independent_credentials_and_rejects_staging_image(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
