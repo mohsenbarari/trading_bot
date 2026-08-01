@@ -49,6 +49,7 @@ class OfferExpiryForwardingTests(unittest.IsolatedAsyncioTestCase):
         status_code=200,
         json_error=False,
     ):
+        self.skipTest("direct FI<->IR offer-expiry wire protocol is permanently retired")
         def response_json():
             if json_error:
                 raise ValueError("invalid JSON")

@@ -6,21 +6,17 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from core import notifications, sync_push, telegram_gateway
+from core.legacy_direct_fi_ir_transport_fence import LegacyDirectFiIrTransportRetiredError
 
 
 class NotificationHelperTests(unittest.IsolatedAsyncioTestCase):
-    async def test_send_telegram_message_relays_to_foreign_when_running_on_iran(self):
+    async def test_send_telegram_message_rejects_retired_direct_relay_from_iran(self):
         with patch.object(notifications.settings, "server_mode", "iran"), \
              patch("core.notifications.push_sync_direct") as push_sync_direct:
-            await notifications.send_telegram_message(12345, "hello", parse_mode="HTML")
+            with self.assertRaises(LegacyDirectFiIrTransportRetiredError):
+                await notifications.send_telegram_message(12345, "hello", parse_mode="HTML")
 
-        push_sync_direct.assert_called_once()
-        payload = push_sync_direct.call_args.args[0]
-        self.assertEqual(payload["type"], "notification")
-        self.assertEqual(payload["chat_id"], 12345)
-        self.assertEqual(payload["text"], "hello")
-        self.assertEqual(payload["parse_mode"], "HTML")
-        self.assertIn("timestamp", payload)
+        push_sync_direct.assert_not_called()
 
     async def test_send_telegram_message_sends_directly_on_foreign(self):
         with patch.object(notifications.settings, "server_mode", "foreign"), \
@@ -38,6 +34,7 @@ class NotificationHelperTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+@unittest.skip("legacy direct FI<->IR HTTP relay is permanently retired")
 class SyncPushHelperTests(unittest.TestCase):
     def setUp(self):
         self.original_client = sync_push._http_client

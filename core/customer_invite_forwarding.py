@@ -9,6 +9,10 @@ from typing import Any, Tuple
 import httpx
 
 from core.config import settings
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+)
 from core.log_redaction import mask_mobile
 from core.server_routing import SERVER_IRAN, current_server, peer_server_url_for
 from core.trade_forwarding import _json_body, _tls_verify_setting, sign_internal_payload
@@ -37,6 +41,23 @@ async def forward_customer_invite_to_iran(
     *,
     timeout_seconds: float | None = None,
 ) -> Tuple[int, Any]:
+    # Customer relation mutations need a witnessed/Object-Storage command
+    # protocol before they can cross sites.  Do not create the old HTTP body.
+    try:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="customer-invite-forwarding",
+            operation="direct FI-to-IR customer-invite command",
+        )
+    except LegacyDirectFiIrTransportRetiredError:
+        logger.warning(
+            "Customer invite direct transport is retired",
+            extra={
+                "event": "customer_invite.forward.direct_transport_retired",
+                "target_server": SERVER_IRAN,
+            },
+        )
+        return 503, {"detail": "سرور ایران برای دعوت مشتری در دسترس نیست."}
+
     target_url = peer_server_url_for(SERVER_IRAN)
     log_context = _safe_log_context(payload)
     if not target_url:
