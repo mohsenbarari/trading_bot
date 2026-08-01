@@ -19,6 +19,11 @@ Release-0/Full-Matrix promotion path.
 - `WEBAPP_INITDATA_BOT_TOKEN` is a narrowly scoped Telegram WebApp HMAC
   validation credential, not `BOT_TOKEN`.  It is used only by the explicit
   Emergency image and never starts a bot process.
+- Run the Object Storage publisher only from its clean, attested checkout as
+  `python3 -I -B /absolute/path/publish_emergency_ir_object_storage.py ...`.
+  It refuses a non-isolated interpreter, any dirty/untracked checkout state,
+  or a `scripts/__init__.py` that could execute before bootstrap provenance is
+  established.  Do not use `python -m` for this privileged publisher.
 
 ## Auth and snapshot contract
 
