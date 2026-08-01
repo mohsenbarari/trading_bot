@@ -35,6 +35,9 @@ LOW_DATE_COMMODITIES = {
     "ربع تاریخ پایین",
 }
 REGIMES = {"RANGE", "UP", "DOWN", "SHOCK", "UNKNOWN"}
+USD_HERAT_ANCHOR_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
+USD_HERAT_FRESH_SECONDS = 60
+USDT_TREND_DEADBAND_RELATIVE = 0.001
 
 
 def parse_time(value: datetime | str) -> datetime:
@@ -84,6 +87,13 @@ class MarketPoint:
     source: str
     uncertainty_relative: float
     reason: str | None = None
+    anchor_value: float | None = None
+    anchor_event_utc: str | None = None
+    reference_anchor_value: float | None = None
+    reference_current_value: float | None = None
+    reference_raw_return: float | None = None
+    reference_applied_return: float | None = None
+    reference_trend: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -350,6 +360,98 @@ def _usdt_point(
     )
 
 
+def _bridge_stale_herat_with_usdt(
+    connection: sqlite3.Connection,
+    *,
+    herat: MarketPoint,
+    as_of: datetime,
+    fresh_age_seconds: int,
+) -> MarketPoint:
+    """Move a stale Herat anchor by USDT trend without price substitution."""
+    if herat.status != "OBSERVED" or herat.value is None:
+        return herat
+    age = float(herat.age_seconds or 0.0)
+    if age <= fresh_age_seconds:
+        return herat
+    if not herat.last_event_utc:
+        return no_point(
+            "USD_HERAT_ANCHOR",
+            "STALE_HERAT_ANCHOR_TIME_MISSING",
+        )
+    anchor_at = parse_time(herat.last_event_utc)
+    anchor_usdt = _usdt_point(
+        connection,
+        as_of=anchor_at,
+        maximum_age_seconds=900,
+    )
+    current_usdt = _usdt_point(connection, as_of=as_of)
+    if anchor_usdt.value is None or current_usdt.value is None:
+        return MarketPoint(
+            status="NO_DATA",
+            value=None,
+            lower=None,
+            upper=None,
+            sample_count=0,
+            last_event_utc=herat.last_event_utc,
+            age_seconds=age,
+            source="USD_HERAT_ANCHOR",
+            uncertainty_relative=0.0,
+            reason=(
+                "STALE_HERAT_WITHOUT_COMPARABLE_USDT;"
+                "DIRECT_USDT_PRICE_SUBSTITUTION_FORBIDDEN"
+            ),
+            anchor_value=herat.value,
+            anchor_event_utc=herat.last_event_utc,
+        )
+    raw_return = float(current_usdt.value) / float(anchor_usdt.value) - 1.0
+    if raw_return > USDT_TREND_DEADBAND_RELATIVE:
+        trend = "UP"
+        applied_return = raw_return
+    elif raw_return < -USDT_TREND_DEADBAND_RELATIVE:
+        trend = "DOWN"
+        applied_return = raw_return
+    else:
+        trend = "NEUTRAL"
+        applied_return = 0.0
+    multiplier = 1.0 + applied_return
+    age_uncertainty = min(
+        0.02,
+        age / USD_HERAT_ANCHOR_MAX_AGE_SECONDS * 0.02,
+    )
+    return MarketPoint(
+        status="BRIDGED",
+        value=float(herat.value) * multiplier,
+        lower=(
+            float(herat.lower) * multiplier
+            if herat.lower is not None
+            else float(herat.value) * multiplier
+        ),
+        upper=(
+            float(herat.upper) * multiplier
+            if herat.upper is not None
+            else float(herat.value) * multiplier
+        ),
+        sample_count=herat.sample_count,
+        last_event_utc=herat.last_event_utc,
+        age_seconds=age,
+        source=f"USD_HERAT_ANCHOR_USDT_{trend}_TREND",
+        uncertainty_relative=min(
+            0.05,
+            herat.uncertainty_relative
+            + anchor_usdt.uncertainty_relative
+            + current_usdt.uncertainty_relative
+            + age_uncertainty,
+        ),
+        anchor_value=float(herat.value),
+        anchor_event_utc=herat.last_event_utc,
+        reference_anchor_value=float(anchor_usdt.value),
+        reference_current_value=float(current_usdt.value),
+        reference_raw_return=raw_return,
+        reference_applied_return=applied_return,
+        reference_trend=trend,
+    )
+
+
 def read_market_context(
     market_db: Path,
     *,
@@ -416,10 +518,7 @@ def read_market_context(
                 ),
                 trade_forms=("PHYSICAL",),
                 settlement_terms=("TODAY", "UNKNOWN"),
-                maximum_age_seconds=max(
-                    1_800,
-                    maximum_primary_age_seconds,
-                ),
+                maximum_age_seconds=USD_HERAT_ANCHOR_MAX_AGE_SECONDS,
             )
             ime_melted = _external_point(
                 connection,
@@ -461,10 +560,7 @@ def read_market_context(
                 instrument="USD_HERAT",
                 market_labels=("دلار هرات فردایی کاغذی",),
                 trade_forms=("PAPER",),
-                maximum_age_seconds=max(
-                    1_800,
-                    maximum_primary_age_seconds,
-                ),
+                maximum_age_seconds=USD_HERAT_ANCHOR_MAX_AGE_SECONDS,
             )
             ime_melted = no_point(
                 "IME_GOLD_BAR",
@@ -475,20 +571,15 @@ def read_market_context(
                 "CASH_EXCHANGE_REFERENCE_NOT_DIRECT_TOMORROW_INPUT",
             )
 
-        usdt = _usdt_point(connection, as_of=observed_at)
-        if usd.status == "NO_DATA" and usdt.status == "OBSERVED":
-            usd = MarketPoint(
-                **(
-                    usdt.to_dict()
-                    | {
-                        "source": "USDT_IRT_PROXY",
-                        "uncertainty_relative": min(
-                            0.03,
-                            usdt.uncertainty_relative + 0.003,
-                        ),
-                    }
-                )
-            )
+        usd = _bridge_stale_herat_with_usdt(
+            connection,
+            herat=usd,
+            as_of=observed_at,
+            fresh_age_seconds=min(
+                USD_HERAT_FRESH_SECONDS,
+                maximum_primary_age_seconds,
+            ),
+        )
         xauusd = _market_point(
             connection,
             as_of=observed_at,

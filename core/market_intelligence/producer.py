@@ -36,6 +36,9 @@ PRODUCER_VERSION = "COIN_SNAPSHOT_PRODUCER_V1"
 PRICE_MULTIPLIER = 1_000
 WINDOW_SECONDS = 60
 NO_DATA_TOKEN = "<NO_DATA_THIS_MINUTE>"
+USD_HERAT_ANCHOR_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
+USDT_ANCHOR_WINDOW_SECONDS = 180
+USDT_TREND_DEADBAND_RELATIVE = 0.001
 GROUP_MIN_CONFIDENCE = 0.80
 FLOW_WINDOW_SECONDS = 600
 FLOW_HALF_LIFE_SECONDS = 180
@@ -450,6 +453,129 @@ def select_usdt_average(
     return value
 
 
+def select_latest_usd_anchor(
+    connection: sqlite3.Connection,
+    settlement: str,
+    end: datetime,
+    *,
+    maximum_age_seconds: int = USD_HERAT_ANCHOR_MAX_AGE_SECONDS,
+) -> dict[str, Any]:
+    """Return the latest real Herat market anchor for one settlement.
+
+    This deliberately never returns a USDT price.  A short robust window around
+    the last Herat event is used so a lone bid/ask does not become the anchor.
+    """
+    config = SETTLEMENT_CONFIG[settlement]
+    start = end - timedelta(seconds=maximum_age_seconds)
+    candidates: list[tuple[datetime, int, sqlite3.Row, str, str]] = []
+    for candidate_index, (settlement_term, trade_form) in enumerate(
+        config["usd_candidates"]
+    ):
+        row = connection.execute(
+            """
+            SELECT id, event_time_utc, price_num, event_type
+            FROM price_events
+            WHERE instrument = 'USD_HERAT'
+              AND settlement_term = ?
+              AND trade_form = ?
+              AND event_type IN ('TRADE', 'OFFER')
+              AND event_time_utc > ? AND event_time_utc <= ?
+              AND price_num IS NOT NULL AND price_num > 0
+            ORDER BY event_time_utc DESC, id DESC
+            LIMIT 1
+            """,
+            (
+                str(settlement_term),
+                str(trade_form),
+                iso_utc(start),
+                iso_utc(end),
+            ),
+        ).fetchone()
+        if row is not None:
+            candidates.append(
+                (
+                    parse_datetime(str(row["event_time_utc"])),
+                    candidate_index,
+                    row,
+                    str(settlement_term),
+                    str(trade_form),
+                )
+            )
+    if not candidates:
+        return {
+            "status": "NO_DATA",
+            "average_price": None,
+            "minimum_price": None,
+            "maximum_price": None,
+            "sample_count": 0,
+            "first_event_utc": None,
+            "last_event_utc": None,
+            "selection": "NO_HERAT_ANCHOR",
+        }
+    anchor_at, candidate_index, latest, settlement_term, trade_form = max(
+        candidates,
+        key=lambda item: (item[0], -item[1], int(item[2]["id"])),
+    )
+    robust_start = anchor_at - timedelta(seconds=WINDOW_SECONDS)
+    summary = connection.execute(
+        """
+        SELECT AVG(price_num) AS average_price,
+               MIN(price_num) AS minimum_price,
+               MAX(price_num) AS maximum_price,
+               COUNT(*) AS sample_count,
+               MIN(event_time_utc) AS first_event_utc,
+               MAX(event_time_utc) AS last_event_utc
+        FROM price_events
+        WHERE instrument = 'USD_HERAT'
+          AND settlement_term = ?
+          AND trade_form = ?
+          AND event_type IN ('TRADE', 'OFFER')
+          AND event_time_utc > ? AND event_time_utc <= ?
+          AND price_num IS NOT NULL AND price_num > 0
+        """,
+        (
+            settlement_term,
+            trade_form,
+            iso_utc(robust_start),
+            iso_utc(anchor_at),
+        ),
+    ).fetchone()
+    count = int(summary["sample_count"] or 0)
+    if count <= 0:
+        price = float(latest["price_num"])
+        first_event = str(latest["event_time_utc"])
+        last_event = first_event
+        minimum = price
+        maximum = price
+        count = 1
+    else:
+        price = float(summary["average_price"])
+        first_event = str(summary["first_event_utc"])
+        last_event = str(summary["last_event_utc"])
+        minimum = float(summary["minimum_price"])
+        maximum = float(summary["maximum_price"])
+    return {
+        "status": "OBSERVED",
+        "llm_value": price,
+        "average_price": price,
+        "minimum_price": minimum,
+        "maximum_price": maximum,
+        "sample_count": count,
+        "first_event_utc": first_event,
+        "last_event_utc": last_event,
+        "anchor_event_utc": iso_utc(anchor_at),
+        "anchor_age_seconds": max(0.0, (end - anchor_at).total_seconds()),
+        "anchor_latest_event_type": str(latest["event_type"]),
+        "selected_settlement_term": settlement_term,
+        "selected_trade_form": trade_form,
+        "selection": (
+            "LATEST_HERAT_ANCHOR"
+            if candidate_index == 0
+            else "LATEST_HERAT_ANCHOR_SETTLEMENT_FALLBACK"
+        ),
+    }
+
+
 def select_effective_usd_average(
     connection: sqlite3.Connection,
     settlement: str,
@@ -461,16 +587,82 @@ def select_effective_usd_average(
     if usd["status"] == "OBSERVED":
         usd["price_source"] = "USD_HERAT"
         usd["is_usdt_proxy"] = False
+        usd["is_estimated"] = False
         return usd
-    usdt = select_usdt_average(connection, end, seconds=seconds)
-    if usdt["status"] == "OBSERVED":
-        usdt["selection"] = "USDT_IRT_PROXY_FALLBACK"
-        usdt["price_source"] = "USDT_IRT"
-        usdt["is_usdt_proxy"] = True
-        return usdt
-    usd["price_source"] = None
-    usd["is_usdt_proxy"] = False
-    return usd
+    anchor = select_latest_usd_anchor(connection, settlement, end)
+    if anchor["status"] != "OBSERVED":
+        usd["selection"] = "NO_HERAT_ANCHOR"
+        usd["price_source"] = None
+        usd["fallback_rejected"] = "DIRECT_USDT_PRICE_SUBSTITUTION_FORBIDDEN"
+        usd["is_usdt_proxy"] = False
+        usd["is_estimated"] = False
+        return usd
+
+    anchor_at = parse_datetime(str(anchor["anchor_event_utc"]))
+    anchor_usdt = select_usdt_average(
+        connection,
+        anchor_at,
+        seconds=USDT_ANCHOR_WINDOW_SECONDS,
+    )
+    current_usdt = select_usdt_average(
+        connection,
+        end,
+        seconds=USDT_ANCHOR_WINDOW_SECONDS,
+    )
+    if (
+        anchor_usdt["status"] != "OBSERVED"
+        or current_usdt["status"] != "OBSERVED"
+    ):
+        usd["selection"] = "HERAT_ANCHOR_WITHOUT_COMPARABLE_USDT"
+        usd["price_source"] = None
+        usd["fallback_rejected"] = "DIRECT_USDT_PRICE_SUBSTITUTION_FORBIDDEN"
+        usd["herat_anchor"] = anchor
+        usd["is_usdt_proxy"] = False
+        usd["is_estimated"] = False
+        return usd
+
+    anchor_usdt_price = float(anchor_usdt["average_price"])
+    current_usdt_price = float(current_usdt["average_price"])
+    raw_return = current_usdt_price / anchor_usdt_price - 1.0
+    if raw_return > USDT_TREND_DEADBAND_RELATIVE:
+        trend = "UP"
+        applied_return = raw_return
+    elif raw_return < -USDT_TREND_DEADBAND_RELATIVE:
+        trend = "DOWN"
+        applied_return = raw_return
+    else:
+        trend = "NEUTRAL"
+        applied_return = 0.0
+    multiplier = 1.0 + applied_return
+    estimated = float(anchor["average_price"]) * multiplier
+    return {
+        "status": "ESTIMATED",
+        "llm_value": estimated,
+        "average_price": estimated,
+        "minimum_price": float(anchor["minimum_price"]) * multiplier,
+        "maximum_price": float(anchor["maximum_price"]) * multiplier,
+        "sample_count": int(anchor["sample_count"]),
+        "first_event_utc": anchor["first_event_utc"],
+        "last_event_utc": anchor["last_event_utc"],
+        "selection": f"HERAT_ANCHOR_USDT_{trend}_TREND",
+        "price_source": "USD_HERAT_ESTIMATED_FROM_USDT_TREND",
+        "is_usdt_proxy": False,
+        "is_estimated": True,
+        "anchor_price": float(anchor["average_price"]),
+        "anchor_event_utc": anchor["anchor_event_utc"],
+        "anchor_age_seconds": anchor["anchor_age_seconds"],
+        "anchor_selected_settlement_term": anchor[
+            "selected_settlement_term"
+        ],
+        "anchor_selected_trade_form": anchor["selected_trade_form"],
+        "usdt_anchor_price": anchor_usdt_price,
+        "usdt_current_price": current_usdt_price,
+        "usdt_raw_return": raw_return,
+        "usdt_trend_deadband_relative": USDT_TREND_DEADBAND_RELATIVE,
+        "usdt_trend_window_seconds": USDT_ANCHOR_WINDOW_SECONDS,
+        "usdt_trend": trend,
+        "usdt_applied_return": applied_return,
+    }
 
 
 def select_melted_average(

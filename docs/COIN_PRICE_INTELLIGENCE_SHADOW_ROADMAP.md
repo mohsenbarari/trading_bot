@@ -117,6 +117,26 @@ Normalized source consumers must preserve the same two-axis contract:
   settlement. Consumers must not discard that series or silently replace it
   with USDT merely because the independent settlement field is absent.
 
+Herat continuity has a separate, auditable contract. USDT is never a numeric
+substitute for a missing Herat quote. A Herat observation inside the live
+60-second window is used directly. Otherwise, the latest settlement-compatible
+real Herat quote (at most seven days old) remains the price anchor. The model
+compares a smoothed USDT reference at that anchor time with the current
+smoothed USDT reference and applies the relative return to the Herat anchor
+only when its magnitude exceeds the initial 0.10% noise deadband:
+
+```text
+usdt_return = current_usdt / anchor_time_usdt - 1
+estimated_herat = anchor_herat * (1 + applied_usdt_return)
+```
+
+An upward return moves the estimate upward, a downward return moves it
+downward, and a return inside the deadband leaves the Herat anchor unchanged.
+The resulting point is explicitly `ESTIMATED`/`BRIDGED` and carries anchor
+time, anchor age, both USDT references, raw return, applied return, and trend.
+If either the Herat anchor or a comparable USDT reference is unavailable, the
+result is `NO_DATA`; returning the USDT price under a Herat label is forbidden.
+
 Collector execution is idempotent and restart-safe. The ounce source is
 compacted to its newest quote per minute; melted-gold and dollar order flow is
 not averaged away. Adding the source to the repository does not authorize
