@@ -81,6 +81,18 @@ class BuildEmergencyIrReceiverBundleTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--signing-public-key", result.stdout)
 
+    def test_builder_entrypoint_is_directly_invocable_from_the_repository_root(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(MODULE_PATH), "--help"],
+            cwd=REPO_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--signing-public-key", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

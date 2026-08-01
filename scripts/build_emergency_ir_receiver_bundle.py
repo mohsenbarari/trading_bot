@@ -18,13 +18,22 @@ import json
 import os
 from pathlib import Path
 import stat
+import sys
 import tarfile
 from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+# This tool is deliberately supported as ``python3 scripts/...py`` as well as
+# ``python3 -m scripts...``.  The former puts ``scripts/`` rather than the
+# repository root on sys.path, so establish the bounded local import root
+# before loading the manifest verifier.  The bootstrap never relies on a
+# caller-provided PYTHONPATH.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from scripts import emergency_ir_object_storage_manifest as manifest
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 MAX_MEMBER_BYTES = 1024 * 1024
 MAX_BUNDLE_BYTES = 4 * 1024 * 1024
 BUNDLE_MEMBERS = (
