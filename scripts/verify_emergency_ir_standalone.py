@@ -135,6 +135,18 @@ def verify_nginx(path: Path) -> list[str]:
     for prefix in BLOCKED_NGINX_PREFIXES:
         if f"location ^~ {prefix} {{ return 404; }}" not in text:
             failures.append(f"nginx does not block {prefix}")
+    certificate = (
+        "/etc/trading-bot-emergency/acme/config/live/"
+        "emergency-coin-gold-trade-ir/fullchain.pem"
+    )
+    key = (
+        "/etc/trading-bot-emergency/acme/config/live/"
+        "emergency-coin-gold-trade-ir/privkey.pem"
+    )
+    if text.count(f"ssl_certificate {certificate};") != 2:
+        failures.append("both TLS virtual hosts must load the pinned emergency certificate")
+    if text.count(f"ssl_certificate_key {key};") != 2:
+        failures.append("both TLS virtual hosts must load the pinned emergency certificate key")
     return failures
 
 

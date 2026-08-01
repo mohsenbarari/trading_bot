@@ -10,6 +10,9 @@ server {
 server {
     listen 443 ssl default_server;
     server_name _;
+    ssl_certificate /etc/trading-bot-emergency/acme/config/live/emergency-coin-gold-trade-ir/fullchain.pem;
+    ssl_certificate_key /etc/trading-bot-emergency/acme/config/live/emergency-coin-gold-trade-ir/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
     ssl_reject_handshake on;
 }
 
