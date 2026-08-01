@@ -19,6 +19,7 @@ x-runtime-env: &runtime_env
 x-api-environment: &api_environment
   TZ: UTC
   TRADING_BOT_SERVICE: emergency_ir_api
+  EMERGENCY_IR_STANDALONE: "true"
   BACKGROUND_JOBS_ENABLED: "false"
   WEB_PUSH_ENABLED: "false"
   TELEGRAM_DIRECT_REGISTRATION_ENABLED: "false"

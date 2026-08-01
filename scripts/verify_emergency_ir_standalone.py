@@ -17,6 +17,7 @@ EXPECTED = {
     "EMERGENCY_APP_PORT": "18000",
     "EMERGENCY_TRADING_SETTINGS_FILE": "/srv/trading-bot-emergency/current/trading_settings.json",
     "SERVER_MODE": "iran",
+    "EMERGENCY_IR_STANDALONE": "true",
     "BACKGROUND_JOBS_ENABLED": "false",
     "TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH": "true",
     "WEB_PUSH_ENABLED": "false",
@@ -30,14 +31,14 @@ EXPECTED = {
 }
 REQUIRED = frozenset({
     *EXPECTED,
-    "SOURCE_RELEASE_SHA", "RELEASE_SHA", "EMERGENCY_APP_IMAGE",
+    "SOURCE_RELEASE_SHA", "EMERGENCY_PATCH_SHA", "RELEASE_SHA", "EMERGENCY_APP_IMAGE",
     "EMERGENCY_POSTGRES_IMAGE", "EMERGENCY_REDIS_IMAGE", "POSTGRES_USER",
     "POSTGRES_DB", "POSTGRES_PASSWORD", "DATABASE_URL", "SYNC_DATABASE_URL",
-    "REDIS_URL", "JWT_SECRET_KEY", "DEV_API_KEY", "BOT_TOKEN", "FRONTEND_URL",
+    "REDIS_URL", "JWT_SECRET_KEY", "DEV_API_KEY", "WEBAPP_INITDATA_BOT_TOKEN", "FRONTEND_URL",
     "PUBLIC_WEBAPP_URL",
 })
 FORBIDDEN = frozenset({
-    "BOT_USERNAME", "SYNC_API_KEY", "PEER_SERVER_URL",
+    "BOT_TOKEN", "BOT_USERNAME", "SYNC_API_KEY", "PEER_SERVER_URL",
     "IRAN_SERVER_URL", "GERMANY_SERVER_URL", "FOREIGN_SERVER_URL",
     "SMSIR_API_KEY", "SMSIR_LINE_NUMBER", "WEB_PUSH_VAPID_PRIVATE_KEY",
     "WEB_PUSH_VAPID_PUBLIC_KEY", "WRITER_WITNESS_CLIENT_SECRET",
@@ -89,10 +90,13 @@ def verify_values(values: dict[str, str]) -> list[str]:
     if forbidden:
         failures.append("forbidden runtime keys: " + ",".join(forbidden))
     source_sha = values.get("SOURCE_RELEASE_SHA", "")
-    if not SHA_RE.fullmatch(source_sha) or values.get("RELEASE_SHA") != source_sha:
-        failures.append("SOURCE_RELEASE_SHA and RELEASE_SHA must be the same exact lowercase SHA")
-    if values.get("EMERGENCY_APP_IMAGE") != f"trading_bot_emergency_ir_app:{source_sha}":
-        failures.append("application image must match the attested source release")
+    patch_sha = values.get("EMERGENCY_PATCH_SHA", "")
+    if not SHA_RE.fullmatch(source_sha):
+        failures.append("SOURCE_RELEASE_SHA must be one exact lowercase SHA")
+    if not SHA_RE.fullmatch(patch_sha) or values.get("RELEASE_SHA") != patch_sha:
+        failures.append("EMERGENCY_PATCH_SHA and RELEASE_SHA must be the same exact lowercase SHA")
+    if values.get("EMERGENCY_APP_IMAGE") != f"trading_bot_emergency_ir_app:{patch_sha}":
+        failures.append("application image must match the attested Emergency patch")
     if not values.get("EMERGENCY_POSTGRES_IMAGE", "").startswith("trading_bot_emergency_ir_postgres:"):
         failures.append("PostgreSQL image must be in the emergency namespace")
     if not values.get("EMERGENCY_REDIS_IMAGE", "").startswith("trading_bot_emergency_ir_redis:"):
@@ -105,9 +109,9 @@ def verify_values(values: dict[str, str]) -> list[str]:
         failures.append("SYNC_DATABASE_URL must target only the emergency DB service")
     if values.get("REDIS_URL") != "redis://redis:6379/0":
         failures.append("REDIS_URL must target only the emergency Redis service")
-    bot_token = values.get("BOT_TOKEN", "")
-    if any(ord(character) < 33 or ord(character) > 126 for character in bot_token):
-        failures.append("BOT_TOKEN must be a one-line local WebApp validation token")
+    initdata_token = values.get("WEBAPP_INITDATA_BOT_TOKEN", "")
+    if any(ord(character) < 33 or ord(character) > 126 for character in initdata_token):
+        failures.append("WEBAPP_INITDATA_BOT_TOKEN must be one-line")
     return failures
 
 
@@ -118,7 +122,8 @@ def verify_compose(path: Path) -> list[str]:
         "name: trading-bot-emergency-ir", "172.29.250.0/28", "127.0.0.1:${EMERGENCY_APP_PORT:-18000}:8000",
         "trading-bot-emergency-ir-postgres", "trading-bot-emergency-ir-redis",
         "trading-bot-emergency-ir-uploads", "trading-bot-emergency-ir-audit",
-        "internal: true", "--forwarded-allow-ips 127.0.0.1,172.29.250.1",
+        "internal: true", "EMERGENCY_IR_STANDALONE: \"true\"",
+        "--forwarded-allow-ips 127.0.0.1,172.29.250.1",
     ):
         if required not in text:
             failures.append(f"compose is missing required isolation contract: {required}")
@@ -157,17 +162,36 @@ def verify_nginx(path: Path) -> list[str]:
     return failures
 
 
+def verify_session_reset(path: Path) -> list[str]:
+    text = path.read_text(encoding="utf-8")
+    normalized = text.lower()
+    failures: list[str] = []
+    for required in (
+        "begin;", "update user_sessions", "set is_active = false",
+        "update session_login_requests", "set status = 'expired'",
+        "update single_session_recovery_requests", "set status = 'cancelled'",
+        "commit;",
+    ):
+        if required not in normalized:
+            failures.append(f"session reset is missing required isolated-state control: {required}")
+    if "delete " in normalized or "update users" in normalized:
+        failures.append("session reset must not delete or modify users")
+    return failures
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env", required=True)
     parser.add_argument("--compose", required=True)
     parser.add_argument("--nginx", required=True)
+    parser.add_argument("--session-reset", required=True)
     args = parser.parse_args()
     try:
         values = parse_env(Path(args.env))
         failures = verify_values(values)
         failures.extend(verify_compose(Path(args.compose)))
         failures.extend(verify_nginx(Path(args.nginx)))
+        failures.extend(verify_session_reset(Path(args.session_reset)))
     except Exception as exc:
         failures = [str(exc)]
     if failures:
