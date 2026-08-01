@@ -9,6 +9,10 @@ from typing import Any
 import httpx
 
 from core.config import settings
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+)
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, peer_server_url_for
 from core.trade_forwarding import _json_body, _tls_verify_setting, sign_internal_payload
 from core.trading_observability import summarize_response_body
@@ -22,7 +26,6 @@ async def forward_standard_invitation_to_iran(
     *,
     timeout_seconds: float | None = None,
 ) -> tuple[int, Any]:
-    target_url = peer_server_url_for(SERVER_IRAN)
     context = {
         "event": "invitation.standard.forward",
         "source_server": current_server(),
@@ -33,6 +36,25 @@ async def forward_standard_invitation_to_iran(
     if current_server() != SERVER_FOREIGN:
         logger.warning("Standard invitation forwarding rejected outside foreign", extra=context)
         return 403, {"detail": "ارسال دعوت‌نامه فقط از سرور تلگرام مجاز است."}
+
+    # This historical FI->IR creation call has no safe direct replacement.
+    # Return the stable unavailable shape before peer URL/body/HMAC/httpx.
+    try:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="invitation-creation-forwarding",
+            operation="direct FI-to-IR standard-invitation command",
+        )
+    except LegacyDirectFiIrTransportRetiredError:
+        logger.warning(
+            "Standard invitation direct transport is retired",
+            extra={
+                "event": "invitation.standard.direct_transport_retired",
+                "target_server": SERVER_IRAN,
+            },
+        )
+        return 503, {"detail": "سرور ایران برای ساخت دعوت‌نامه در دسترس نیست."}
+
+    target_url = peer_server_url_for(SERVER_IRAN)
     if not target_url:
         logger.warning("Standard invitation Iran peer unavailable", extra=context)
         return 503, {"detail": "سرور ایران برای ساخت دعوت‌نامه در دسترس نیست."}

@@ -208,6 +208,7 @@ class ForwardTradeToHomeServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status_code, 503)
         self.assertEqual(body, {"detail": "سرور مرجع معامله در دسترس نیست."})
 
+    @unittest.skip("direct FI<->IR trade wire protocol is permanently retired")
     async def test_forward_trade_posts_signed_payload_and_returns_json(self):
         recorded: dict[str, object] = {}
 
@@ -262,6 +263,7 @@ class ForwardTradeToHomeServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(headers["X-Source-Server"], "foreign")
         self.assertEqual(headers["X-Signature"], expected_signature)
 
+    @unittest.skip("direct FI<->IR trade wire protocol is permanently retired")
     async def test_forward_trade_tls_verification_can_use_boolean_or_ca_bundle(self):
         recorded: list[dict[str, object]] = []
 
@@ -300,6 +302,7 @@ class ForwardTradeToHomeServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(recorded[0]["verify"], True)
         self.assertEqual(recorded[1]["verify"], "/etc/ssl/internal-ca.pem")
 
+    @unittest.skip("direct FI<->IR trade wire protocol is permanently retired")
     async def test_forward_trade_maps_timeout_and_request_errors(self):
         class TimeoutClient:
             def __init__(self, *args, **kwargs):
@@ -341,6 +344,7 @@ class ForwardTradeToHomeServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status_code, 503)
         self.assertIn("ارتباط با سرور مرجع معامله برقرار نشد", body["detail"])
 
+    @unittest.skip("direct FI<->IR trade wire protocol is permanently retired")
     async def test_forward_trade_returns_safe_fallback_for_invalid_json(self):
         class Response:
             status_code = 502
@@ -369,6 +373,7 @@ class ForwardTradeToHomeServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status_code, 502)
         self.assertEqual(body, {"detail": "پاسخ نامعتبر از سرور مرجع معامله"})
 
+    @unittest.skip("direct FI<->IR trade wire protocol is permanently retired")
     async def test_forward_trade_warning_logs_are_structured_and_redacted(self):
         records: list[logging.LogRecord] = []
 

@@ -41,6 +41,7 @@ class CustomerInviteContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(first_key.startswith("customer-invite:"))
         self.assertNotIn("09123456789", first_key)
 
+    @unittest.skip("direct FI-to-IR customer-invite health gate is permanently retired")
     async def test_sync_gate_reads_iran_health_direction_and_local_foreign_queues(self):
         redis_client = SimpleNamespace(llen=AsyncMock(side_effect=[0, 0]))
         iran_health = {
@@ -63,6 +64,7 @@ class CustomerInviteContractTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(result.ready)
 
+    @unittest.skip("direct FI-to-IR customer-invite health gate is permanently retired")
     async def test_sync_gate_blocks_iran_required_table_backlog(self):
         redis_client = SimpleNamespace(llen=AsyncMock(side_effect=[0, 0]))
         iran_health = {
@@ -86,6 +88,7 @@ class CustomerInviteContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.ready)
         self.assertEqual(result.reason, "iran_sync_dirty")
 
+    @unittest.skip("direct FI-to-IR customer-invite health gate is permanently retired")
     async def test_sync_gate_uses_temporary_redis_client_when_singleton_is_uninitialized(self):
         temporary_client = SimpleNamespace(llen=AsyncMock(side_effect=[0, 0]), aclose=AsyncMock())
         iran_health = {

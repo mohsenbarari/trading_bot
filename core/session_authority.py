@@ -19,6 +19,10 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+)
 from core.server_routing import current_server, normalize_server, peer_server_url_for
 from core.services.session_service import deactivate_session, get_active_sessions, promote_next_primary
 from core.sync_transport import assert_runtime_sync_transport_allowed, runtime_sync_tls_verify_setting
@@ -89,6 +93,23 @@ async def inspect_local_session_authority(db: AsyncSession, user) -> dict[str, A
 
 async def fetch_remote_session_authority(target_server: str, user_id: int) -> tuple[int, dict[str, Any]]:
     """Ask a remote home server whether a user has active sessions."""
+    # Session transfer has no approved direct FI<->IR command transport.
+    # Deny before URL/payload/HMAC/client construction.
+    try:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="session-authority",
+            operation="direct FI-to-IR or IR-to-FI session-authority query",
+        )
+    except LegacyDirectFiIrTransportRetiredError:
+        logger.warning(
+            "Remote session authority transport is retired",
+            extra={
+                "event": "session.authority.direct_transport_retired",
+                "target_server": normalize_server(target_server, default=""),
+            },
+        )
+        return 503, {"detail": SESSION_AUTHORITY_UNAVAILABLE_MESSAGE}
+
     target_url = peer_server_url_for(target_server)
     if not target_url:
         return 503, {"detail": SESSION_AUTHORITY_UNAVAILABLE_MESSAGE}
