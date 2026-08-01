@@ -35,6 +35,62 @@ the Telegram path covers only Telegram-linked accounts.  Do not claim a
 web-only/SMS account is ready until a separate, reviewed domestic-SMS plan has
 been installed and tested.
 
+## Optional local SMS OTP profile (off by default)
+
+`docker-compose.sms-otp.yml` is a separate opt-in overlay; it is never loaded
+by the normal standalone command.  Its services all use the `sms-otp` Compose
+profile, so merely combining the files without `--profile sms-otp` starts no
+Emergency service.  The default rendered runtime has
+`EMERGENCY_AUTH_PROFILE=telegram-only` and contains no SMS.ir credential.
+
+The SMS profile uses the existing Stage-6 one-code state machine in direct-SMS
+mode: `TELEGRAM_LOGIN_OTP_ENABLED=true` is the legacy switch that enables that
+state machine, while `OTP_SMS_AUTO_FALLBACK_ENABLED=false` prevents every
+Telegram delivery, peer request, and background fallback path.  Telegram
+WebApp initData validation remains available for the existing Telegram login
+path; no `BOT_TOKEN` or bot process is introduced.
+
+Only the `sms-egress` container has an external Docker network.  The API has
+only its normal internal network plus a private relay bridge, and is pinned to
+`http://sms-egress:8080` with ambient proxy handling disabled.  The relay
+configuration is baked into its separately attested image, does TLS/SNI
+verification for `api.sms.ir`, and exposes exactly one operation: `POST
+/v1/send/verify`.  It is not a generic HTTP proxy and must never receive a
+host configuration bind mount or published port.
+
+The profile requires a fresh, encrypted transfer of the SMS.ir API key and an
+attested relay image through the same private Object Storage flow as the rest
+of the Emergency package.  WA-IR must not pull either image or package from a
+registry during activation.  The renderer accepts the WebApp validation token
+and SMS.ir API key only as one JSON stdin payload, never as command-line
+arguments, and writes them only to the root-owned runtime environment:
+
+```text
+{"webapp_initdata_token":"...","smsir_api_key":"..."}
+```
+
+Use `--enable-sms-otp --sms-otp-secrets-stdin`, plus the exact SMS template ID
+and relay image tag matching the Emergency patch.  Before starting anything,
+run `verify_emergency_ir_standalone.py --profile sms-otp` with the base
+Compose file, the SMS overlay, `sms-egress.nginx.conf`, and
+`nginx.sms-otp.rate-limit.conf`; then verify the relay image with
+`verify_emergency_ir_sms_egress_image.py`.  Start it only with both Compose
+files and `--profile sms-otp`.
+
+For ingress, install `nginx.sms-otp.rate-limit.conf` in Nginx's `http {}`
+scope and use `nginx.sms-otp.conf.template` in place of—not in addition to—
+the default standalone vhost.  Only the three OTP endpoints get the dedicated
+per-source-IP limit; every sync, peer, registration, internal, and metrics
+route remains blocked.  The app also retains its normal per-mobile and
+per-verification controls.
+
+This is intentionally not a promise that `api.sms.ir` will be reachable after
+an Iran connectivity incident.  Before selecting this profile, perform the
+approved local relay/provider delivery preflight from WA-IR and record its
+result.  If that preflight cannot reach the provider, leave the default
+Telegram-only profile active rather than bypassing the fixed relay or enabling
+a generic proxy.
+
 ## Transfer and activation order
 
 1. Transfer every artifact through the private, versioned Arvan Object Storage

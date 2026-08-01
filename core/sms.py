@@ -37,6 +37,20 @@ def _smsir_headers() -> dict[str, str]:
     }
 
 
+def _smsir_async_client_kwargs() -> dict[str, Any]:
+    """Return narrowly scoped transport settings for SMS.ir.
+
+    Normal deployments retain httpx's existing environment behaviour.  The
+    Emergency IR SMS profile points at an internal fixed-upstream relay and
+    must not inherit ambient proxy settings for other destinations.
+    """
+
+    kwargs: dict[str, Any] = {"timeout": settings.smsir_timeout_seconds}
+    if not bool(getattr(settings, "smsir_trust_env", True)):
+        kwargs["trust_env"] = False
+    return kwargs
+
+
 def _normalize_mobile(mobile: str) -> str:
     value = normalize_persian_numerals(str(mobile or "")).strip()
     if value.startswith("+98"):
@@ -116,7 +130,7 @@ async def _post_smsir_result_async(
 
     assert_epoch_bound_effect_execution(provider="smsir")
     try:
-        async with httpx.AsyncClient(timeout=settings.smsir_timeout_seconds) as client:
+        async with httpx.AsyncClient(**_smsir_async_client_kwargs()) as client:
             response = await client.post(
                 _api_url(path),
                 headers=_smsir_headers(),

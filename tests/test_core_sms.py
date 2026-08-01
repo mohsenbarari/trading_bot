@@ -378,6 +378,18 @@ class CoreSmsAsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(outcome, expected)
             self.assertIsNone(data)
 
+    async def test_async_sms_can_disable_ambient_proxy_environment_for_internal_relay(self):
+        response = smsir_response(
+            payload={"status": 1, "message": "ok", "data": {"messageId": 1}}
+        )
+        client = self._Client(response)
+        with patch.object(sms.settings, "smsir_api_key", "api-key"), patch.object(
+            sms.settings, "smsir_trust_env", False
+        ), patch("core.sms.httpx.AsyncClient", return_value=client) as client_factory:
+            outcome, _ = await sms._post_smsir_result_async("v1/send/verify", {})
+        self.assertEqual(outcome, sms.SMSDeliveryOutcome.ACCEPTED)
+        client_factory.assert_called_once_with(timeout=10.0, trust_env=False)
+
     async def test_async_otp_rejects_invalid_missing_and_unverifiable_acceptance(self):
         for template_id in ("invalid", None):
             with self.subTest(template_id=template_id), patch.object(
