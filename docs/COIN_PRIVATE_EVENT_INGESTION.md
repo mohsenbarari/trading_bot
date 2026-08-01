@@ -48,7 +48,12 @@ the outer archive but cannot enter staging.
    updates raw plus text staging idempotently.
 3. Group messages pass rules extraction, relevance filtering, conservative
    adjudication, field extraction, context validation, and exact reply-ID trade
-   linking.
+   linking. Commodity price validation is causal and always runs, even when a
+   commodity name is explicit. Unnamed offers may be resolved only from a
+   compatible reply parent or decisive strictly-prior local price anchors from
+   the same settlement/trade form. Explicit names are never silently rewritten;
+   a strong name/price conflict, or an unresolved overlapping unnamed price,
+   abstains before offer or linked-trade promotion.
 4. Accepted group data is projected without private Telegram identifiers. A
    candidate copy is quality-annotated before the atomic data-only promotion
    job may replace the active conversation dataset.

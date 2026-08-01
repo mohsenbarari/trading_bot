@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Validate shadow offer fields against nearby same-market offer anchors.
 
-This is an evidence layer, not a price predictor and not a promotion step.  It
-uses only high-confidence parsed offers as local anchors.  Price bands infer the
-coin family; where Imam and Bahar overlap, the product rule (unnamed full coin
-means Imam) remains authoritative.
+This is an evidence layer, not a price predictor and not a promotion step.
+Commodity names and unnamed price inferences have already passed the causal
+price-context abstention gate before they can become anchors here.
 """
 from __future__ import annotations
 import json
@@ -14,7 +13,7 @@ from scripts.coin_intelligence_private_ingest.runtime_paths import PIPELINE_ROOT
 COMPONENT = PIPE / 'offer_field_staging.sqlite3'
 STAGE = PIPE / 'text_staging.sqlite3'
 OUT = PIPE / 'offer_context_validation.sqlite3'
-VERSION = 'offer-context-validation-shadow-v1.0'
+VERSION = 'offer-context-validation-shadow-v1.1-market-context'
 WINDOW_SECONDS = 90 * 60
 
 SCHEMA = '''
@@ -51,6 +50,12 @@ def median(values: list[int]) -> int:
     return values[n // 2] if n % 2 else round((values[n//2-1] + values[n//2]) / 2)
 
 def basis(offer: dict) -> str:
+    if offer.get('commodity_method') == 'reply_parent_explicit':
+        return 'REPLY_PARENT_EXPLICIT'
+    if offer.get('commodity_method') == 'reply_parent_context':
+        return 'REPLY_PARENT_CONTEXT'
+    if offer.get('commodity_method') == 'local_market_price_anchor':
+        return 'STRICTLY_PRIOR_LOCAL_MARKET_PRICE'
     if offer.get('commodity_method') == 'explicit':
         return 'EXPLICIT_TEXT'
     if offer.get('commodity') == 'امام':

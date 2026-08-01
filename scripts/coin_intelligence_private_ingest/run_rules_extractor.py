@@ -7,12 +7,48 @@ from __future__ import annotations
 import json, sqlite3
 from datetime import datetime, timezone
 
+from core.market_intelligence.group_commodity_context import resolve_offer_commodity
 from core.market_intelligence.group_offer_parser import enrich_records
 from core.market_intelligence.group_trade_parser import classify_signal, EXTRACTOR_VERSION
 from scripts.coin_intelligence_private_ingest.runtime_paths import PIPELINE_ROOT
 
 DB=PIPELINE_ROOT/'text_staging.sqlite3'
 NOW=lambda: datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00','Z')
+
+
+def event_epoch(value, day=None):
+ try:
+  raw=str(value or '')
+  if 'T' in raw:return datetime.fromisoformat(raw.replace('Z','+00:00')).timestamp()
+  if ':' in raw and day:return datetime.fromisoformat(f'{day}T{raw}+00:00').timestamp()
+ except ValueError:return None
+ return None
+
+
+def apply_contextual_resolution(connection):
+ rows=connection.execute("""SELECT source_key,message_id,telegram_datetime,telegram_day,
+  reply_message_id,extracted_json FROM text_candidates
+  WHERE source_key IN ('account2_group1','account2_group2') AND extracted_json IS NOT NULL
+  ORDER BY COALESCE(telegram_datetime,''),source_key,message_id""").fetchall()
+ prior=[]; by_message={}; changed=0
+ for row in rows:
+  try: payload=json.loads(row['extracted_json'] or '{}')
+  except json.JSONDecodeError: continue
+  offers=payload.get('offers') or []; when=event_epoch(row['telegram_datetime'],row['telegram_day'])
+  if when is None: continue
+  parent=by_message.get((row['source_key'],str(row['reply_message_id'] or '')),[])
+  resolved=[resolve_offer_commodity(item,as_of_epoch=when,parent_offers=parent,prior_offers=prior) for item in offers]
+  if resolved != offers:
+   payload['offers']=resolved
+   confidence=max((float(item.get('confidence') or 0) for item in resolved),default=0.0)
+   connection.execute("UPDATE text_candidates SET extracted_json=?,extraction_confidence=?,updated_at_utc=? WHERE source_key=? AND message_id=?",(json.dumps(payload,ensure_ascii=False,separators=(',',':')),confidence,NOW(),row['source_key'],row['message_id']))
+   changed+=1
+  by_message[(row['source_key'],str(row['message_id']))]=[dict(item) for item in resolved]
+  for item in resolved:
+   if item.get('price') is not None:prior.append({**dict(item),'event_epoch':when})
+ connection.commit(); return changed
+
+
 def main():
  c=sqlite3.connect(DB); c.row_factory=sqlite3.Row
  rows=c.execute("SELECT * FROM text_candidates WHERE source_key IN ('account2_group1','account2_group2') AND extraction_status='PENDING' ORDER BY source_key,COALESCE(telegram_datetime,''),message_id").fetchall()
@@ -39,5 +75,6 @@ def main():
    c.execute("UPDATE text_candidates SET extraction_status=?,extractor_version=?,extracted_json=?,extraction_confidence=?,updated_at_utc=? WHERE source_key=? AND message_id=?",('RULES_CANDIDATE',EXTRACTOR_VERSION,json.dumps(payload,ensure_ascii=False,separators=(',',':')),confidence,NOW(),r['source_key'],r['message_id']))
    count[kind]=count.get(kind,0)+1
   c.commit()
- print(json.dumps({'processed':len(rows),'by_kind':count,'extractor_version':EXTRACTOR_VERSION},ensure_ascii=False))
+ context_resolved=apply_contextual_resolution(c)
+ print(json.dumps({'processed':len(rows),'context_resolved':context_resolved,'by_kind':count,'extractor_version':EXTRACTOR_VERSION},ensure_ascii=False))
 if __name__=='__main__': main()

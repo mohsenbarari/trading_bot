@@ -16,6 +16,11 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 
+from core.market_intelligence.group_commodity_context import (
+    commodity_context_requires_abstention,
+    is_strong_contextual_resolution,
+    resolve_offer_commodity,
+)
 from core.market_intelligence.group_offer_parser import (
     extract_single_offer,
     normalize_text,
@@ -27,7 +32,7 @@ from scripts.coin_intelligence_private_ingest.runtime_paths import PIPELINE_ROOT
 STAGE = PIPE / 'text_staging.sqlite3'
 FILTER = PIPE / 'group_filter.sqlite3'
 OUT = PIPE / 'offer_field_staging.sqlite3'
-VERSION = 'group-offer-fields-shadow-v2.1-settlement'
+VERSION = 'group-offer-fields-shadow-v2.2-market-context'
 GROUP_NUMBER = {'account2_group1': 1, 'account2_group2': 2}
 
 SCHEMA = '''
@@ -186,27 +191,41 @@ def comparable_fields(items: list[dict]) -> list[tuple]:
     ]
 
 
+def event_epoch(value: str | None, day: str | None = None) -> float | None:
+    raw = str(value or '')
+    try:
+        if 'T' in raw:
+            return datetime.fromisoformat(raw.replace('Z', '+00:00')).timestamp()
+        if ':' in raw and day:
+            return datetime.fromisoformat(f'{day}T{raw}+00:00').timestamp()
+    except ValueError:
+        return None
+    return None
+
+
 def main() -> None:
     stage = sqlite3.connect(STAGE); stage.row_factory = sqlite3.Row
     filt = sqlite3.connect(FILTER); filt.row_factory = sqlite3.Row
     out = sqlite3.connect(OUT); out.executescript(SCHEMA)
     rows = stage.execute("""
-      SELECT t.source_key,t.message_id,t.text,t.extracted_json,f.decision
+      SELECT t.source_key,t.message_id,t.telegram_datetime,t.telegram_day,
+             t.reply_message_id,t.text,t.extracted_json,f.decision
       FROM text_candidates t JOIN filterdb.filter_decisions f
         ON f.source_key=t.source_key AND f.message_id=t.message_id
       WHERE t.source_key IN ('account2_group1','account2_group2')
         AND f.decision LIKE 'KEEP%'
-      ORDER BY t.source_key,COALESCE(t.telegram_datetime,''),t.message_id
+      ORDER BY COALESCE(t.telegram_datetime,''),t.source_key,t.message_id
     """).fetchall() if False else None
     # SQLite attachments are connection-local; use the filter DB as the driver.
     filt.execute('ATTACH DATABASE ? AS stage', (str(STAGE),))
     rows = filt.execute("""
-      SELECT t.source_key,t.message_id,t.text,t.extracted_json,f.decision
+      SELECT t.source_key,t.message_id,t.telegram_datetime,t.telegram_day,
+             t.reply_message_id,t.text,t.extracted_json,f.decision
       FROM filter_decisions f JOIN stage.text_candidates t
         ON f.source_key=t.source_key AND f.message_id=t.message_id
       WHERE t.source_key IN ('account2_group1','account2_group2')
         AND f.decision LIKE 'KEEP%'
-      ORDER BY t.source_key,COALESCE(t.telegram_datetime,''),t.message_id
+      ORDER BY COALESCE(t.telegram_datetime,''),t.source_key,t.message_id
     """).fetchall()
     unparsed_keys = {
         (r['source_key'], r['message_id'])
@@ -219,6 +238,8 @@ def main() -> None:
     out.execute('DELETE FROM offer_component_review_queue')
     out.execute('DELETE FROM offer_component_ignored')
     summary = {'messages': 0, 'offers': 0, 'accepted': 0, 'review': 0, 'ignored': 0, 'by_group': {1: 0, 2: 0}}
+    prior_offers: list[dict] = []
+    offers_by_message: dict[tuple[str, str], list[dict]] = {}
     for row in rows:
         try:
             legacy_payload = json.loads(row['extracted_json'] or '{}')
@@ -243,11 +264,36 @@ def main() -> None:
         if not offers:
             legacy = legacy_payload.get('offers') or []
             offers = legacy
+        when = event_epoch(row['telegram_datetime'], row['telegram_day'])
+        parent_key = (row['source_key'], str(row['reply_message_id'] or ''))
+        parent_offers = offers_by_message.get(parent_key, [])
+        if offers and when is not None:
+            offers = [
+                resolve_offer_commodity(
+                    item,
+                    as_of_epoch=when,
+                    parent_offers=parent_offers,
+                    prior_offers=prior_offers,
+                )
+                for item in offers
+            ]
+        if any(commodity_context_requires_abstention(item) for item in offers):
+            statuses = {
+                str(item.get('commodity_validation_status') or '')
+                for item in offers
+                if commodity_context_requires_abstention(item)
+            }
+            reasons.extend(sorted(statuses))
         legacy = legacy_payload.get('offers') or []
         # The legacy output is not a gold label, but conflicting structured
         # fields are unsafe weak labels.  Retain both through the source text
         # and force a review rather than silently choosing the newer parser.
-        if legacy and offers and comparable_fields(legacy) != comparable_fields(offers):
+        if (
+            legacy
+            and offers
+            and comparable_fields(legacy) != comparable_fields(offers)
+            and not all(is_strong_contextual_resolution(item) for item in offers)
+        ):
             reasons.append('LEGACY_FIELD_DISAGREEMENT')
         if not offers:
             out.execute('INSERT INTO offer_component_ignored VALUES(?,?,?,?,?,?)',
@@ -266,6 +312,18 @@ def main() -> None:
                          json.dumps(payload,ensure_ascii=False,separators=(',',':')),status,
                          float(item.get('confidence') or 0),VERSION,NOW()))
             summary['offers'] += 1; summary['by_group'][GROUP_NUMBER[row['source_key']]] += 1
+        if status == 'SHADOW_ACCEPTED':
+            offers_by_message[(row['source_key'], str(row['message_id']))] = [dict(item) for item in offers]
+        provisional_context = all(
+            str(item.get('commodity_method') or '') == 'price_inference'
+            and str(item.get('commodity_validation_status') or '') == 'AMBIGUOUS_PRICE_CONTEXT'
+            for item in offers
+        )
+        if (status == 'SHADOW_ACCEPTED' or provisional_context) and when is not None:
+            for item in offers:
+                if item.get('price') is None:
+                    continue
+                prior_offers.append({**dict(item), 'event_epoch': when})
         for reason in reasons:
             out.execute('INSERT OR REPLACE INTO offer_component_review_queue VALUES(?,?,?,?,?,?,?)',
                         (row['source_key'],row['message_id'],reason,row['text'],
