@@ -193,9 +193,15 @@ class FakeS3:
 
 
 class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
-    def bootstrap_provenance(self, public_key: Path, *, revision: str = "a" * 40) -> publisher.BootstrapProvenance:
+    def bootstrap_provenance(
+        self, public_key: Path, *, revision: str | None = None
+    ) -> publisher.BootstrapProvenance:
+        revision = revision or subprocess.check_output(
+            ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"], text=True
+        ).strip()
         bundle_sha256, bundle_bytes = publisher.receiver_bundle.bundle_digest(
             signing_public_key=public_key,
+            source_revision=revision,
         )
         return publisher.BootstrapProvenance(
             publisher_source_revision=revision,
