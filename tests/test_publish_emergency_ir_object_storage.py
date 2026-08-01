@@ -282,7 +282,6 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             signing_private_key=private,
             signing_public_key=public,
             credentials=credentials,
-            repo=REPO_ROOT,
             receiver_bundle_output=outputs.receiver_bundle,
             sealed_manifest_output=outputs.sealed_manifest,
             url_map_output=outputs.url_map,
@@ -315,7 +314,9 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
                 result["required_confirmation"],
                 publisher.confirmation_phrase(
                     plan,
-                    signer_key_id=publisher._load_public_key_id(public),
+                    bootstrap_provenance=publisher._bootstrap_provenance(
+                        signing_public_key_path=public
+                    ),
                     ttl_seconds=300,
                 ),
             )
@@ -354,7 +355,9 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             client = FakeS3()
             confirmation = publisher.confirmation_phrase(
                 plan,
-                signer_key_id=publisher._load_public_key_id(public),
+                bootstrap_provenance=publisher._bootstrap_provenance(
+                    signing_public_key_path=public
+                ),
                 ttl_seconds=300,
             )
             result = publisher.execute(
@@ -404,7 +407,22 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             self.assertEqual(descriptor["expires_in_seconds"], 300)
             self.assertEqual(
                 set(descriptor),
-                {"schema", "campaign_id", "expires_in_seconds", "receiver_bundle", "manifest", "url_map"},
+                {
+                    "schema",
+                    "campaign_id",
+                    "expires_in_seconds",
+                    "bootstrap_provenance",
+                    "receiver_bundle",
+                    "manifest",
+                    "url_map",
+                },
+            )
+            self.assertEqual(
+                descriptor["bootstrap_provenance"],
+                publisher._bootstrap_provenance(signing_public_key_path=public).as_manifest(),
+            )
+            self.assertEqual(
+                receive_plan["bootstrap_provenance"], descriptor["bootstrap_provenance"]
             )
 
     def test_bucket_must_be_private_and_versioned_before_any_upload(self) -> None:
@@ -420,11 +438,13 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
                     with self.assertRaisesRegex(publisher.EmergencyPublisherError, "bucket"):
                         publisher.publish(
                             client=client,
-                            plan=plan,
-                            signing_private_key_path=private,
-                            signing_public_key_path=public,
-                            repo=REPO_ROOT,
-                            outputs=self.outputs(output_root),
+                        plan=plan,
+                        signing_private_key_path=private,
+                        signing_public_key_path=public,
+                        bootstrap_provenance=publisher._bootstrap_provenance(
+                            signing_public_key_path=public
+                        ),
+                        outputs=self.outputs(output_root),
                             ttl_seconds=300,
                         )
                     self.assertEqual(client.put_calls, [])
@@ -501,7 +521,9 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
                     plan=plan,
                     signing_private_key_path=private,
                     signing_public_key_path=public,
-                    repo=REPO_ROOT,
+                    bootstrap_provenance=publisher._bootstrap_provenance(
+                        signing_public_key_path=public
+                    ),
                     outputs=outputs,
                     ttl_seconds=300,
                 )

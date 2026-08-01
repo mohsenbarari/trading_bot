@@ -29,6 +29,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import subprocess
 import sys
 from typing import Any, BinaryIO, Callable, Mapping
 from urllib.parse import parse_qs, quote, urlsplit
@@ -117,6 +118,18 @@ TLS_CA_OVERRIDE_ENVIRONMENT_KEYS = (
     "requests_ca_bundle",
     "curl_ca_bundle",
 )
+# The fetched receiver bundle executes on WA-IR as root.  It must therefore be
+# rendered only from these exact tracked source files in this publisher's own
+# repository; a caller never gets to choose another checkout.
+PUBLISHER_SOURCE_PATHS = (
+    "scripts/publish_emergency_ir_object_storage.py",
+    "scripts/build_emergency_ir_receiver_bundle.py",
+    "scripts/emergency_ir_object_storage_manifest.py",
+    "scripts/emergency_ir_object_storage_receiver.py",
+    "scripts/run_emergency_ir_object_storage_receive.py",
+    "deploy/emergency-ir/run_object_storage_receiver.py",
+    "scripts/emergency_ir_standalone_activate.py",
+)
 
 
 class EmergencyPublisherError(RuntimeError):
@@ -188,6 +201,25 @@ class PublishOutputs:
     sealed_manifest: Path
     url_map: Path
     descriptor: Path
+
+
+@dataclasses.dataclass(frozen=True)
+class BootstrapProvenance:
+    """The signed, human-confirmed identity of the executable receiver bundle."""
+
+    publisher_source_revision: str
+    receiver_bundle_sha256: str
+    receiver_bundle_bytes: int
+    signer_key_id: str
+
+    def as_manifest(self) -> dict[str, Any]:
+        return {
+            "schema": manifest.BOOTSTRAP_PROVENANCE_SCHEMA,
+            "publisher_source_revision": self.publisher_source_revision,
+            "receiver_bundle_sha256": self.receiver_bundle_sha256,
+            "receiver_bundle_bytes": self.receiver_bundle_bytes,
+            "signer_key_id": self.signer_key_id,
+        }
 
 
 def _fail(message: str) -> None:
@@ -324,8 +356,109 @@ def _parse_descriptor(value: object, *, expected_kind: str) -> ArtifactDescripto
     )
 
 
-def _unsigned_manifest(plan: PublishPlan, *, version_ids: Mapping[str, str]) -> dict[str, Any]:
-    """Build the exact unsigned v1 manifest from a validated publish plan."""
+def _run_publisher_git(*arguments: str) -> str:
+    """Run the local Git primitive with caller-controlled Git state removed."""
+
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("GIT_")
+    }
+    environment.update(
+        {
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "LC_ALL": "C",
+            "LANG": "C",
+            "PATH": os.defpath,
+        }
+    )
+    try:
+        completed = subprocess.run(
+            ["/usr/bin/git", "-C", str(REPO_ROOT), *arguments],
+            text=True,
+            capture_output=True,
+            check=False,
+            env=environment,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise EmergencyPublisherError("publisher source provenance cannot be inspected") from exc
+    if completed.returncode != 0:
+        _fail("publisher source provenance cannot be inspected")
+    return completed.stdout
+
+
+def _fixed_publisher_source_revision() -> str:
+    """Return a clean, tracked revision for every bootstrap code input."""
+
+    tracked = tuple(line for line in _run_publisher_git(
+        "ls-files", "--error-unmatch", "--", *PUBLISHER_SOURCE_PATHS
+    ).splitlines() if line)
+    if len(tracked) != len(PUBLISHER_SOURCE_PATHS) or set(tracked) != set(PUBLISHER_SOURCE_PATHS):
+        _fail("publisher bootstrap source paths are not exactly tracked")
+    changed = _run_publisher_git(
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+        "--",
+        *PUBLISHER_SOURCE_PATHS,
+    )
+    if changed:
+        _fail("publisher bootstrap source is not clean at its fixed revision")
+    revision = _run_publisher_git("rev-parse", "--verify", "HEAD^{commit}").strip()
+    if manifest.GIT_REVISION_RE.fullmatch(revision) is None:
+        _fail("publisher source revision is unsafe")
+    return revision
+
+
+def _bootstrap_provenance(*, signing_public_key_path: Path) -> BootstrapProvenance:
+    """Preflight the fixed source and deterministic bundle without writing it."""
+
+    source_revision = _fixed_publisher_source_revision()
+    signer_key_id = _load_public_key_id(signing_public_key_path)
+    try:
+        bundle_sha256, bundle_bytes = receiver_bundle.bundle_digest(
+            signing_public_key=signing_public_key_path,
+        )
+    except receiver_bundle.ReceiverBundleError as exc:
+        raise EmergencyPublisherError("pinned-key receiver bootstrap bundle cannot be preflighted") from exc
+    provenance = BootstrapProvenance(
+        publisher_source_revision=source_revision,
+        receiver_bundle_sha256=bundle_sha256,
+        receiver_bundle_bytes=bundle_bytes,
+        signer_key_id=signer_key_id,
+    )
+    try:
+        normalized = manifest.validate_bootstrap_provenance(provenance.as_manifest())
+    except manifest.EmergencyManifestError as exc:
+        raise EmergencyPublisherError("receiver bootstrap provenance is invalid") from exc
+    return BootstrapProvenance(
+        publisher_source_revision=str(normalized["publisher_source_revision"]),
+        receiver_bundle_sha256=str(normalized["receiver_bundle_sha256"]),
+        receiver_bundle_bytes=int(normalized["receiver_bundle_bytes"]),
+        signer_key_id=str(normalized["signer_key_id"]),
+    )
+
+
+def _placeholder_bootstrap_provenance() -> BootstrapProvenance:
+    """Supply a structural placeholder while validating a plan before dry-run."""
+
+    return BootstrapProvenance(
+        publisher_source_revision="0" * 40,
+        receiver_bundle_sha256="0" * 64,
+        receiver_bundle_bytes=1,
+        signer_key_id="ed25519-sha256:" + "0" * 64,
+    )
+
+
+def _unsigned_manifest(
+    plan: PublishPlan,
+    *,
+    version_ids: Mapping[str, str],
+    bootstrap_provenance: BootstrapProvenance,
+) -> dict[str, Any]:
+    """Build the exact unsigned v2 manifest from a validated publish plan."""
 
     if set(version_ids) != set(manifest.ARTIFACT_ORDER):
         _fail("immutable VersionIds must cover exactly the fixed artifact set")
@@ -363,6 +496,7 @@ def _unsigned_manifest(plan: PublishPlan, *, version_ids: Mapping[str, str]) -> 
         "prefix": plan.prefix,
         "created_at": plan.created_at,
         "destination_age_recipient_key_id": plan.destination_age_recipient_key_id,
+        "bootstrap_provenance": bootstrap_provenance.as_manifest(),
         "artifacts": artifacts,
     }
 
@@ -398,6 +532,7 @@ def load_publish_plan(path: Path) -> PublishPlan:
             _unsigned_manifest(
                 provisional,
                 version_ids={kind: f"planned-version-{index + 1}" for index, kind in enumerate(manifest.ARTIFACT_ORDER)},
+                bootstrap_provenance=_placeholder_bootstrap_provenance(),
             )
         )
     except manifest.EmergencyManifestError as exc:
@@ -412,7 +547,12 @@ def load_publish_plan(path: Path) -> PublishPlan:
     )
 
 
-def _plan_identity(plan: PublishPlan, *, signer_key_id: str, ttl_seconds: int) -> str:
+def _plan_identity(
+    plan: PublishPlan,
+    *,
+    bootstrap_provenance: BootstrapProvenance,
+    ttl_seconds: int,
+) -> str:
     """Return a non-secret digest binding the required human confirmation."""
 
     value = {
@@ -422,7 +562,7 @@ def _plan_identity(plan: PublishPlan, *, signer_key_id: str, ttl_seconds: int) -
         "prefix": plan.prefix,
         "created_at": plan.created_at,
         "destination_age_recipient_key_id": plan.destination_age_recipient_key_id,
-        "signer_key_id": signer_key_id,
+        "bootstrap_provenance": bootstrap_provenance.as_manifest(),
         "presigned_ttl_seconds": ttl_seconds,
         "artifacts": [
             {
@@ -438,8 +578,16 @@ def _plan_identity(plan: PublishPlan, *, signer_key_id: str, ttl_seconds: int) -
     return hashlib.sha256(manifest.canonical_json_bytes(value)).hexdigest()
 
 
-def confirmation_phrase(plan: PublishPlan, *, signer_key_id: str, ttl_seconds: int) -> str:
-    return f"publish-emergency-ir:{plan.campaign_id}:{_plan_identity(plan, signer_key_id=signer_key_id, ttl_seconds=ttl_seconds)}"
+def confirmation_phrase(
+    plan: PublishPlan,
+    *,
+    bootstrap_provenance: BootstrapProvenance,
+    ttl_seconds: int,
+) -> str:
+    return (
+        f"publish-emergency-ir:{plan.campaign_id}:"
+        f"{_plan_identity(plan, bootstrap_provenance=bootstrap_provenance, ttl_seconds=ttl_seconds)}"
+    )
 
 
 def _verify_local_ciphertext(descriptor: ArtifactDescriptor) -> VerifiedLocalArtifact:
@@ -943,6 +1091,7 @@ def _build_url_map(
 def _build_bootstrap_descriptor(
     *,
     plan: PublishPlan,
+    bootstrap_provenance: BootstrapProvenance,
     ttl_seconds: int,
     client: Any,
     receiver_bundle_object: UploadedObject,
@@ -973,6 +1122,7 @@ def _build_bootstrap_descriptor(
         "schema": receiver_bootstrap.SCHEMA,
         "campaign_id": plan.campaign_id,
         "expires_in_seconds": ttl_seconds,
+        "bootstrap_provenance": bootstrap_provenance.as_manifest(),
         **entries,
     }
     return manifest.canonical_json_bytes(payload)
@@ -997,7 +1147,7 @@ def publish(
     plan: PublishPlan,
     signing_private_key_path: Path,
     signing_public_key_path: Path,
-    repo: Path,
+    bootstrap_provenance: BootstrapProvenance,
     outputs: PublishOutputs,
     ttl_seconds: int,
 ) -> dict[str, Any]:
@@ -1013,6 +1163,10 @@ def publish(
         raise EmergencyPublisherError("Emergency signing keys are unavailable or unsafe") from exc
     if manifest.signer_key_id(private_key.public_key()) != manifest.signer_key_id(public_key):
         _fail("Emergency signing private/public keys do not form the pinned keypair")
+    if manifest.signer_key_id(public_key) != bootstrap_provenance.signer_key_id:
+        _fail("receiver bootstrap provenance signer does not match the pinned signing key")
+    if _bootstrap_provenance(signing_public_key_path=signing_public_key_path) != bootstrap_provenance:
+        _fail("receiver bootstrap provenance changed after confirmation")
     verified_artifacts = tuple(_verify_local_ciphertext(item) for item in plan.artifacts)
     bucket_owner_id = _require_private_versioned_bucket(client, bucket=plan.bucket)
 
@@ -1028,7 +1182,8 @@ def publish(
 
     try:
         receiver_bundle.build_bundle(
-            repo=repo.resolve(), signing_public_key=signing_public_key_path, output=outputs.receiver_bundle
+            signing_public_key=signing_public_key_path,
+            output=outputs.receiver_bundle,
         )
     except receiver_bundle.ReceiverBundleError as exc:
         raise EmergencyPublisherError("pinned-key receiver bootstrap bundle cannot be built") from exc
@@ -1037,6 +1192,12 @@ def publish(
         label="receiver bootstrap bundle",
         maximum_bytes=MAX_CONTROL_ARTIFACT_BYTES,
     )
+    if (
+        bundle_hash != bootstrap_provenance.receiver_bundle_sha256
+        or bundle_bytes != bootstrap_provenance.receiver_bundle_bytes
+        or _fixed_publisher_source_revision() != bootstrap_provenance.publisher_source_revision
+    ):
+        _fail("receiver bootstrap bundle changed after provenance preflight")
     bundle_object = _upload_and_readback(
         client,
         bucket=plan.bucket,
@@ -1067,7 +1228,9 @@ def publish(
         )
 
     unsigned = _unsigned_manifest(
-        plan, version_ids={kind: uploaded_artifacts[kind].version_id for kind in manifest.ARTIFACT_ORDER}
+        plan,
+        version_ids={kind: uploaded_artifacts[kind].version_id for kind in manifest.ARTIFACT_ORDER},
+        bootstrap_provenance=bootstrap_provenance,
     )
     try:
         signed = manifest.sign_manifest(unsigned, private_key=private_key)
@@ -1120,6 +1283,7 @@ def publish(
 
     descriptor_payload = _build_bootstrap_descriptor(
         plan=plan,
+        bootstrap_provenance=bootstrap_provenance,
         ttl_seconds=ttl_seconds,
         client=client,
         receiver_bundle_object=bundle_object,
@@ -1225,9 +1389,12 @@ def execute(
     plan = load_publish_plan(args.plan)
     if not receiver.MIN_PRESIGNED_TTL_SECONDS <= args.ttl_seconds <= receiver.MAX_PRESIGNED_TTL_SECONDS:
         _fail("presigned URL TTL is outside the Emergency receiver bound")
-    signer_key_id = _load_public_key_id(args.signing_public_key)
+    # There is intentionally no caller-selectable source tree.  This checks
+    # the publisher's fixed checkout before dry-run output is shown, and binds
+    # the exact deterministic receiver bundle to the human confirmation.
+    bootstrap_provenance = _bootstrap_provenance(signing_public_key_path=args.signing_public_key)
     expected_confirmation = confirmation_phrase(
-        plan, signer_key_id=signer_key_id, ttl_seconds=args.ttl_seconds
+        plan, bootstrap_provenance=bootstrap_provenance, ttl_seconds=args.ttl_seconds
     )
     if not args.apply:
         return {
@@ -1236,6 +1403,7 @@ def execute(
             "artifact_count": len(plan.artifacts),
             "payload_transport": "private-arvan-object-storage-only",
             "required_confirmation": expected_confirmation,
+            "bootstrap_provenance": bootstrap_provenance.as_manifest(),
         }
     if args.confirm != expected_confirmation:
         _fail("Emergency Object Storage publish confirmation mismatch")
@@ -1253,7 +1421,7 @@ def execute(
         plan=plan,
         signing_private_key_path=args.signing_private_key,
         signing_public_key_path=args.signing_public_key,
-        repo=args.repo,
+        bootstrap_provenance=bootstrap_provenance,
         outputs=outputs,
         ttl_seconds=args.ttl_seconds,
     )
@@ -1265,7 +1433,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--signing-private-key", type=Path, required=True)
     parser.add_argument("--signing-public-key", type=Path, required=True)
     parser.add_argument("--credentials", type=Path)
-    parser.add_argument("--repo", type=Path, default=REPO_ROOT)
     parser.add_argument("--receiver-bundle-output", type=Path, required=True)
     parser.add_argument("--sealed-manifest-output", type=Path, required=True)
     parser.add_argument("--url-map-output", type=Path, required=True)
