@@ -42,6 +42,9 @@ class BuildEmergencyIrReleasePackageTests(unittest.TestCase):
                 self.assertIn(
                     f"{package.PACKAGE_ROOT}/deploy/emergency-ir/docker-compose.standalone.yml", members
                 )
+                self.assertIn(
+                    f"{package.PACKAGE_ROOT}/scripts/verify_emergency_ir_sms_egress_image.py", members
+                )
                 self.assertNotIn(f"{package.PACKAGE_ROOT}/app/main.py", members)
                 release = json.loads(archive.extractfile(f"{package.PACKAGE_ROOT}/RELEASE.json").read())
                 self.assertEqual(release["emergency_patch_sha"], self.head())
@@ -71,6 +74,32 @@ class BuildEmergencyIrReleasePackageTests(unittest.TestCase):
                     emergency_patch_sha=self.head(),
                     output=output,
                 )
+
+    def test_uses_head_blobs_not_an_uncommitted_worktree_file(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-package-repo-") as raw:
+            repository = Path(raw) / "repo"
+            (repository / "deploy/emergency-ir").mkdir(parents=True)
+            tracked = repository / "deploy/emergency-ir/docker-compose.standalone.yml"
+            tracked.write_text("committed-content\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(repository)], check=True)
+            subprocess.run(["git", "-C", str(repository), "config", "user.email", "test@example.invalid"], check=True)
+            subprocess.run(["git", "-C", str(repository), "config", "user.name", "Emergency Test"], check=True)
+            subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(repository), "commit", "-qm", "fixture"], check=True)
+            head = subprocess.check_output(["git", "-C", str(repository), "rev-parse", "HEAD"], text=True).strip()
+            tracked.write_text("uncommitted-content\n", encoding="utf-8")
+            output = Path(raw) / "package.tar.gz"
+            package.build_package(
+                repo=repository,
+                source_release_sha="2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5",
+                emergency_patch_sha=head,
+                output=output,
+            )
+            with tarfile.open(output, "r:gz") as archive:
+                payload = archive.extractfile(
+                    f"{package.PACKAGE_ROOT}/deploy/emergency-ir/docker-compose.standalone.yml"
+                ).read().decode("utf-8")
+            self.assertEqual(payload, "committed-content\n")
 
 
 if __name__ == "__main__":

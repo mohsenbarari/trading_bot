@@ -19,15 +19,8 @@ import re
 import shlex
 import stat
 import subprocess
-import sys
-from typing import Any
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from core.secure_file_io import read_secure_text
-from scripts.wa_ir_object_storage_preflight_agent import _validate_object_storage_url
+from typing import Any, Mapping
+from urllib.parse import urlsplit
 
 
 SCHEMA = "gold-trade-emergency-ir-object-storage-bootstrap-v1"
@@ -40,10 +33,73 @@ MAX_RECEIVER_BUNDLE_BYTES = 4 * 1024 * 1024
 MAX_SEALED_MANIFEST_BYTES = 128 * 1024
 MAX_URL_MAP_BYTES = 64 * 1024
 REMOTE_ROOT = "/run/trading-bot-emergency-bootstrap"
+ARVAN_OBJECT_STORAGE_HOST = "s3.ir-thr-at1.arvanstorage.ir"
 
 
 class EmergencyBootstrapError(RuntimeError):
     pass
+
+
+def _validate_object_storage_url(url: str, *, label: str) -> None:
+    """Accept only HTTPS URLs for Arvan's fixed Object Storage data plane."""
+
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except ValueError as exc:
+        raise EmergencyBootstrapError(f"{label} URL is malformed") from exc
+    hostname = (parsed.hostname or "").lower().rstrip(".")
+    if (
+        parsed.scheme != "https"
+        or not (hostname == ARVAN_OBJECT_STORAGE_HOST or hostname.endswith("." + ARVAN_OBJECT_STORAGE_HOST))
+        or port not in {None, 443}
+        or parsed.username is not None
+        or parsed.password is not None
+        or not parsed.path.startswith("/")
+        or parsed.path == "/"
+        or parsed.fragment
+    ):
+        raise EmergencyBootstrapError(f"{label} URL is not an approved Arvan Object Storage URL")
+
+
+def _read_private_descriptor(path: Path) -> str:
+    """Read the one bounded root-only descriptor without a three-site helper."""
+
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != os.geteuid()
+            or before.st_nlink != 1
+            or stat.S_IMODE(before.st_mode) != 0o600
+            or not 1 <= before.st_size <= MAX_DESCRIPTOR_BYTES
+        ):
+            raise EmergencyBootstrapError("Emergency bootstrap descriptor must be one root-only 0600 regular file")
+        payload = bytearray()
+        while len(payload) <= MAX_DESCRIPTOR_BYTES:
+            chunk = os.read(descriptor, min(65536, MAX_DESCRIPTOR_BYTES + 1 - len(payload)))
+            if not chunk:
+                break
+            payload.extend(chunk)
+        after = os.fstat(descriptor)
+        fields = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink", "st_size")
+        if len(payload) != before.st_size or len(payload) > MAX_DESCRIPTOR_BYTES or any(
+            getattr(before, field) != getattr(after, field) for field in fields
+        ):
+            raise EmergencyBootstrapError("Emergency bootstrap descriptor changed while being read")
+        return bytes(payload).decode("utf-8")
+    except EmergencyBootstrapError:
+        raise
+    except (OSError, UnicodeDecodeError) as exc:
+        raise EmergencyBootstrapError("Emergency bootstrap descriptor is unavailable or invalid") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
 
 
 # This small program is passed as a command, never as a release payload.  It
@@ -132,10 +188,7 @@ def _artifact(value: object, *, label: str, maximum_bytes: int) -> dict[str, Any
     url = value.get("url")
     if not isinstance(url, str) or not url or len(url.encode("utf-8")) > 16 * 1024:
         raise EmergencyBootstrapError(f"{label} URL is invalid")
-    try:
-        _validate_object_storage_url(url, label=label)
-    except Exception as exc:
-        raise EmergencyBootstrapError(f"{label} URL is not an approved Arvan Object Storage URL") from exc
+    _validate_object_storage_url(url, label=label)
     if not isinstance(value.get("sha256"), str) or SHA256_RE.fullmatch(value["sha256"]) is None:
         raise EmergencyBootstrapError(f"{label} SHA-256 is invalid")
     size = value.get("bytes")
@@ -156,10 +209,7 @@ def load_descriptor(path: Path) -> dict[str, Any]:
             or not 1 <= state.st_size <= MAX_DESCRIPTOR_BYTES
         ):
             raise EmergencyBootstrapError("Emergency bootstrap descriptor must be one root-only 0600 regular file")
-        payload = json.loads(
-            read_secure_text(path, label="Emergency bootstrap descriptor", max_size=MAX_DESCRIPTOR_BYTES),
-            object_pairs_hook=_strict_object,
-        )
+        payload = json.loads(_read_private_descriptor(path), object_pairs_hook=_strict_object)
     except EmergencyBootstrapError:
         raise
     except Exception as exc:

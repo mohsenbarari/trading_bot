@@ -75,6 +75,8 @@ class RunEmergencyIrObjectStorageReceiveTests(unittest.TestCase):
         source = MODULE_PATH.read_text(encoding="utf-8")
         self.assertIn("payload_transport", source)
         self.assertIn("ssh_payload_transfer", source)
+        self.assertNotIn("core.secure_file_io", source)
+        self.assertNotIn("wa_ir_object_storage_preflight_agent", source)
         self.assertNotIn("scp", source)
         self.assertNotIn("rsync", source)
 

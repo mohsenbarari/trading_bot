@@ -33,6 +33,7 @@ PACKAGE_PATHS = (
     "scripts/run_emergency_ir_object_storage_receive.py",
     "scripts/render_emergency_ir_standalone_env.py",
     "scripts/verify_emergency_ir_image_provenance.py",
+    "scripts/verify_emergency_ir_sms_egress_image.py",
     "scripts/verify_emergency_ir_standalone.py",
 )
 MAX_FILE_BYTES = 4 * 1024 * 1024
@@ -45,7 +46,7 @@ class EmergencyPackageError(RuntimeError):
 
 def _tracked_files(repo: Path) -> list[str]:
     result = subprocess.run(
-        ["git", "-C", str(repo), "ls-files", "-z", "--", *PACKAGE_PATHS],
+        ["git", "-C", str(repo), "ls-tree", "-r", "-z", "--name-only", "HEAD", "--", *PACKAGE_PATHS],
         check=False,
         capture_output=True,
         timeout=30,
@@ -65,42 +66,18 @@ def _tracked_files(repo: Path) -> list[str]:
     return files
 
 
-def _read_file(path: Path, *, label: str) -> bytes:
-    try:
-        before = path.lstat()
-    except OSError as exc:
-        raise EmergencyPackageError(f"{label} cannot be inspected") from exc
-    if (
-        stat.S_ISLNK(before.st_mode)
-        or not stat.S_ISREG(before.st_mode)
-        or before.st_uid != os.geteuid()
-        or before.st_nlink != 1
-        or stat.S_IMODE(before.st_mode) & 0o022
-        or not 1 <= before.st_size <= MAX_FILE_BYTES
-    ):
-        raise EmergencyPackageError(f"{label} is not one bounded owner-controlled regular file")
-    descriptor: int | None = None
-    try:
-        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0))
-        opened = os.fstat(descriptor)
-        payload = bytearray()
-        while len(payload) <= MAX_FILE_BYTES:
-            chunk = os.read(descriptor, min(65536, MAX_FILE_BYTES + 1 - len(payload)))
-            if not chunk:
-                break
-            payload.extend(chunk)
-        after = os.fstat(descriptor)
-        fields = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink", "st_size")
-        if len(payload) != opened.st_size or len(payload) > MAX_FILE_BYTES or any(
-            getattr(opened, field) != getattr(after, field) for field in fields
-        ):
-            raise EmergencyPackageError(f"{label} changed while being read")
-        return bytes(payload)
-    except OSError as exc:
-        raise EmergencyPackageError(f"{label} cannot be read") from exc
-    finally:
-        if descriptor is not None:
-            os.close(descriptor)
+def _read_head_blob(repo: Path, relative: str) -> bytes:
+    """Read exactly the committed blob, never a mutable worktree pathname."""
+
+    result = subprocess.run(
+        ["git", "-C", str(repo), "show", f"HEAD:{relative}"],
+        check=False,
+        capture_output=True,
+        timeout=30,
+    )
+    if result.returncode != 0 or not 1 <= len(result.stdout) <= MAX_FILE_BYTES:
+        raise EmergencyPackageError(f"Emergency package HEAD blob is unavailable or invalid: {relative}")
+    return bytes(result.stdout)
 
 
 def _write_create_only(path: Path, payload: bytes) -> None:
@@ -151,7 +128,7 @@ def build_package(
     )
     if head.returncode != 0 or head.stdout.strip() != emergency_patch_sha:
         raise EmergencyPackageError("Emergency patch SHA is not the package worktree HEAD")
-    entries = [(relative, _read_file(repo / relative, label=f"Emergency package {relative}")) for relative in _tracked_files(repo)]
+    entries = [(relative, _read_head_blob(repo, relative)) for relative in _tracked_files(repo)]
     release = {
         "schema": "gold-trade-emergency-ir-release-package-v1",
         "source_release_sha": source_release_sha,
