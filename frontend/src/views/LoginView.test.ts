@@ -15,6 +15,7 @@ const originalNavigatorCredentials = navigator.credentials
 const originalNavigatorStandalone = (window.navigator as any).standalone
 const originalNavigatorUserAgent = window.navigator.userAgent
 const originalWindowLocation = window.location
+const originalTelegram = (window as any).Telegram
 
 vi.mock('vue-router', () => ({
   useRoute: () => routeMock,
@@ -80,6 +81,7 @@ describe('LoginView.vue', () => {
       dispatchEvent: vi.fn(),
     }) as any
     ;(window as any).deferredPrompt = null
+    Reflect.deleteProperty(window as any, 'Telegram')
   })
 
   afterEach(() => {
@@ -88,6 +90,11 @@ describe('LoginView.vue', () => {
     vi.unstubAllEnvs()
     window.matchMedia = originalMatchMedia
     ;(window as any).deferredPrompt = originalDeferredPrompt ?? null
+    if (typeof originalTelegram === 'undefined') {
+      Reflect.deleteProperty(window as any, 'Telegram')
+    } else {
+      ;(window as any).Telegram = originalTelegram
+    }
 
     if (typeof originalOTPCredential === 'undefined') {
       Reflect.deleteProperty(window as any, 'OTPCredential')
@@ -129,6 +136,49 @@ describe('LoginView.vue', () => {
     expect(wrapper.text()).toContain('00:30')
     wrapper.unmount()
   }, 10000)
+
+  it('uses Telegram WebApp initData for an automatic emergency login and preserves OTP as fallback', async () => {
+    const ready = vi.fn()
+    const expand = vi.fn()
+    ;(window as any).Telegram = {
+      WebApp: {
+        initData: 'signed-init-data',
+        ready,
+        expand,
+      },
+    }
+    apiFetchMock.mockImplementation((url: string, options?: RequestInit) => {
+      if (url === '/api/auth/webapp-login') {
+        return Promise.resolve(makeJsonResponse({
+          access_token: 'telegram-access-token',
+          refresh_token: 'telegram-refresh-token',
+        }) as any)
+      }
+      if (url === '/api/auth/me') {
+        return Promise.resolve(makeJsonResponse({ id: 1, role: 'مدیر ارشد' }) as any)
+      }
+      return fetch(url, options) as any
+    })
+
+    const LoginView = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginView)
+    await flushPromises()
+    await flushPromises()
+
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      '/api/auth/webapp-login',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(JSON.parse((apiFetchMock.mock.calls[0]?.[1] as RequestInit).body as string)).toEqual({
+      init_data: 'signed-init-data',
+    })
+    expect(ready).toHaveBeenCalledTimes(1)
+    expect(expand).toHaveBeenCalledTimes(1)
+    expect(localStorage.getItem('auth_token')).toBe('telegram-access-token')
+    expect(routerPushMock).toHaveBeenCalledWith('/')
+    expect(wrapper.find('input[type="tel"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
 
   it('switches to waiting approval when verify-otp requires session approval', async () => {
     const fetchMock = vi.mocked(fetch)

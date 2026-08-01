@@ -10,6 +10,11 @@ import { AppButton, AppFormField, AppInput, AppPage, AppSectionCard, AppStatusBa
 const router = useRouter()
 const route = useRoute()
 const completedRegistrationNotice = computed(() => route.query.registration === 'complete')
+type TelegramWebAppBridge = {
+  initData?: string
+  ready?: () => void
+  expand?: () => void
+}
 type LoginStep =
   | 'mobile'
   | 'otp'
@@ -42,6 +47,7 @@ const initialUserAgent = typeof window !== 'undefined' ? window.navigator.userAg
 const step = ref<LoginStep>('mobile')
 const loading = ref(false)
 const error = ref('')
+const telegramWebAppLoginState = ref<'idle' | 'attempting' | 'fallback'>('idle')
 const isStandalone = ref(false)
 const supportsNativeInstallPrompt = ref(isLikelyBeforeInstallPromptBrowser(initialUserAgent))
 const showManualInstallGuide = ref(isIOSUserAgent(initialUserAgent))
@@ -101,6 +107,47 @@ async function completeAuthenticatedLogin(data: { access_token: string; refresh_
   setupExpiryTimer()
   clearBackStack()
   router.push('/')
+}
+
+function telegramWebAppInitData(): string | null {
+  const bridge = (window as Window & { Telegram?: { WebApp?: TelegramWebAppBridge } })
+    .Telegram?.WebApp
+  if (!bridge || typeof bridge.initData !== 'string' || !bridge.initData.trim()) {
+    return null
+  }
+  try {
+    bridge.ready?.()
+    bridge.expand?.()
+  } catch {
+    // The authenticated request below remains the authority; bridge UI calls
+    // are best-effort and must not block the normal OTP fallback.
+  }
+  return bridge.initData
+}
+
+async function tryTelegramWebAppLogin() {
+  const initData = telegramWebAppInitData()
+  if (!initData) return
+
+  telegramWebAppLoginState.value = 'attempting'
+  loading.value = true
+  error.value = ''
+  try {
+    const res = await apiFetch('/api/auth/webapp-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ init_data: initData }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || !data?.access_token) {
+      throw new Error('ورود امن از تلگرام در دسترس نیست')
+    }
+    await completeAuthenticatedLogin(data)
+  } catch {
+    telegramWebAppLoginState.value = 'fallback'
+  } finally {
+    loading.value = false
+  }
 }
 
 function syncCountdown() {
@@ -851,6 +898,8 @@ onMounted(() => {
   installButtonDelayTimer = window.setTimeout(() => {
     isInstallButtonDelayElapsed.value = true
   }, 4000)
+
+  void tryTelegramWebAppLogin()
 })
 
 watch(() => form.code, (newVal) => {
@@ -943,6 +992,14 @@ function goBackToMobile() {
             <div v-if="completedRegistrationNotice" class="login-note-card" role="status">
               <p class="login-note-title">ثبت‌نام قبلاً تکمیل شده است</p>
               <p>برای ورود به وب‌اپ، کد تایید دریافت کنید.</p>
+            </div>
+            <div v-if="telegramWebAppLoginState === 'attempting'" class="login-note-card" role="status">
+              <p class="login-note-title">در حال ورود امن با تلگرام</p>
+              <p>هویت شما فقط در همین دستگاه بررسی می‌شود.</p>
+            </div>
+            <div v-else-if="telegramWebAppLoginState === 'fallback'" class="login-note-card" role="status">
+              <p class="login-note-title">ورود خودکار تلگرام در دسترس نیست</p>
+              <p>می‌توانید از مسیر ورود با شماره همراه ادامه دهید.</p>
             </div>
             <AppFormField label="شماره موبایل">
               <template #default="{ id }">
