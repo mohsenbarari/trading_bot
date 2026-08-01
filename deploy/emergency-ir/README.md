@@ -168,6 +168,7 @@ Docker resource.
 
 Keep the existing Nginx default-site backup and do not delete any Docker
 volume.  To withdraw Emergency ingress, restore the Nginx symlink/configuration
-from that backup, test it, reload Nginx, and remove only the two Emergency UFW
-rules after confirming the intended alternate ingress.  Preserve the Emergency
-volumes and release directory for forensic/manual recovery.
+from that backup, test it, reload Nginx, and remove only the one bounded
+Emergency UFW multiport rule after confirming the intended alternate ingress.
+Preserve the Emergency volumes and release directory for forensic/manual
+recovery.

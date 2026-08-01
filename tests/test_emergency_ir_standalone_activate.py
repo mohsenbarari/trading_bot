@@ -4,8 +4,10 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import stat
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -45,6 +47,53 @@ def add_member(archive: tarfile.TarFile, name: str, payload: bytes, *, kind: byt
 def root_file(path: Path, payload: bytes) -> None:
     path.write_bytes(payload)
     path.chmod(0o600)
+
+
+def nginx_paths(root: Path) -> tuple[ACTIVATE.ActivationPaths, Path]:
+    nginx_root = root / "nginx"
+    available = nginx_root / "sites-available" / "trading-bot-emergency-ir"
+    enabled_root = nginx_root / "sites-enabled"
+    enabled_root.mkdir(parents=True)
+    original = root / "original-default.conf"
+    root_file(original, b"server { return 444; }\n")
+    default = enabled_root / "default"
+    os.symlink(str(original), default)
+    return (
+        ACTIVATE.ActivationPaths(
+            emergency_root=root / "emergency",
+            inbox_root=root / "emergency" / "inbox",
+            bootstrap_root=root / "bootstrap",
+            activation_root=root / "emergency" / "activation",
+            releases_root=root / "emergency" / "releases",
+            current_link=root / "emergency" / "current",
+            age_identity=root / "age-identity.txt",
+            runtime_env=root / "runtime.env",
+            nginx_available=available,
+            nginx_enabled=enabled_root / "trading-bot-emergency-ir",
+            nginx_default=default,
+            nginx_backup_root=root / "emergency" / "nginx-backups",
+            nginx_sms_rate_limit=nginx_root / "conf.d" / "trading-bot-emergency-ir-sms-rate-limit.conf",
+            sms_preflight_receipt=root / "sms-preflight.json",
+        ),
+        original,
+    )
+
+
+def nginx_package(root: Path) -> Path:
+    package_root = root / "package"
+    source = package_root / "deploy" / "emergency-ir" / "nginx.standalone.conf.template"
+    source.parent.mkdir(parents=True)
+    root_file(
+        source,
+        b"server_name coin.gold-trade.ir;\n"
+        b"proxy_pass http://127.0.0.1:18000;\n"
+        b"ssl_certificate /tmp/only-a-test.pem;\n",
+    )
+    return package_root
+
+
+def completed(command: object, returncode: int = 0) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.CompletedProcess(command, returncode, stdout=b"", stderr=b"")
 
 
 def package_files() -> dict[str, bytes]:
@@ -210,6 +259,96 @@ class EmergencyIrStandaloneActivationTests(unittest.TestCase):
             "activate-emergency-ir:20260801T220000Z-emergency-ir-01:" + "d" * 64 + ":telegram-only:prepare",
         )
         self.assertIn("volume deletion", plan["never"])
+
+    def test_reload_failure_restores_default_preserves_emergency_link_and_skips_ufw(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-nginx-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            paths, original = nginx_paths(root)
+            package_root = nginx_package(root)
+            campaign = ACTIVATE.VerifiedCampaign(
+                campaign_id="20260801T220000Z-emergency-ir-01",
+                manifest_sha256="d" * 64,
+                plan={},
+                artifacts={},
+            )
+            calls: list[list[str]] = []
+            reload_count = 0
+
+            def runner(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+                nonlocal reload_count
+                calls.append(list(command))
+                if command == [ACTIVATE.SYSTEMCTL_BINARY, "reload", "nginx"]:
+                    reload_count += 1
+                    return completed(command, 1 if reload_count == 1 else 0)
+                return completed(command)
+
+            with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "previous default site was restored"):
+                ACTIVATE._prearm_nginx(
+                    paths=paths,
+                    campaign=campaign,
+                    package_root=package_root,
+                    profile="telegram-only",
+                    runner=runner,
+                )
+
+            failed = paths.nginx_backup_root / f"emergency-site.failed-{campaign.campaign_id}"
+            self.assertTrue(paths.nginx_default.is_symlink())
+            self.assertEqual(os.readlink(paths.nginx_default), str(original))
+            self.assertTrue(failed.is_symlink())
+            self.assertEqual(os.readlink(failed), str(paths.nginx_available))
+            self.assertFalse(paths.nginx_enabled.exists() or paths.nginx_enabled.is_symlink())
+            self.assertFalse(any(call and call[0] == ACTIVATE.UFW_BINARY for call in calls))
+            self.assertEqual(calls.count([ACTIVATE.NGINX_BINARY, "-t"]), 2)
+            self.assertEqual(calls.count([ACTIVATE.SYSTEMCTL_BINARY, "reload", "nginx"]), 2)
+
+    def test_ufw_uses_one_atomic_multiport_rule_and_rolls_back_on_failure(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-nginx-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            paths, original = nginx_paths(root)
+            package_root = nginx_package(root)
+            campaign = ACTIVATE.VerifiedCampaign(
+                campaign_id="20260801T220000Z-emergency-ir-01",
+                manifest_sha256="d" * 64,
+                plan={},
+                artifacts={},
+            )
+            calls: list[list[str]] = []
+
+            def runner(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+                calls.append(list(command))
+                return completed(command, 1 if command and command[0] == ACTIVATE.UFW_BINARY else 0)
+
+            with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "UFW rule could not be added"):
+                ACTIVATE._prearm_nginx(
+                    paths=paths,
+                    campaign=campaign,
+                    package_root=package_root,
+                    profile="telegram-only",
+                    runner=runner,
+                )
+
+            expected_ufw = [
+                ACTIVATE.UFW_BINARY,
+                "allow",
+                "proto",
+                "tcp",
+                "from",
+                "any",
+                "to",
+                "any",
+                "port",
+                "80,443",
+                "comment",
+                "trading-bot-emergency-ir",
+            ]
+            self.assertEqual([call for call in calls if call and call[0] == ACTIVATE.UFW_BINARY], [expected_ufw])
+            failed = paths.nginx_backup_root / f"emergency-site.failed-{campaign.campaign_id}"
+            self.assertTrue(paths.nginx_default.is_symlink())
+            self.assertEqual(os.readlink(paths.nginx_default), str(original))
+            self.assertTrue(failed.is_symlink())
+            self.assertEqual(os.readlink(failed), str(paths.nginx_available))
 
 
 if __name__ == "__main__":
