@@ -35,6 +35,7 @@ from scripts import run_emergency_ir_object_storage_receive as receiver_bootstra
 
 CAMPAIGN_ID = "20260801T213000Z-emergency-ir-publish"
 RECIPIENT_KEY_ID = "age-recipient-sha256:" + "b" * 64
+EMERGENCY_PATCH_SHA = "a" * 40
 
 
 class FakeClientError(RuntimeError):
@@ -263,6 +264,7 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             "created_at": datetime(2026, 8, 1, 21, 30, tzinfo=timezone.utc)
             .isoformat()
             .replace("+00:00", "Z"),
+            "emergency_patch_sha": EMERGENCY_PATCH_SHA,
             "destination_age_recipient_key_id": RECIPIENT_KEY_ID,
             "artifacts": descriptors,
         }
@@ -485,6 +487,32 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             factory.assert_not_called()
             self.assertFalse(any(path.exists() for path in dataclasses.astuple(outputs)))
 
+    def test_plan_patch_must_match_clean_publisher_provenance_before_client_construction(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            plan_path, _plan = self.write_plan(root)
+            private, public = self.write_keypair(root)
+            outputs = self.outputs(root)
+            factory = Mock(side_effect=AssertionError("stale artifact plan must not construct a client"))
+            stale = self.bootstrap_provenance(public, revision="b" * 40)
+            with patch.object(publisher, "_bootstrap_provenance", return_value=stale):
+                with self.assertRaisesRegex(publisher.EmergencyPublisherError, "patch does not match"):
+                    publisher.execute(
+                        self.arguments(
+                            plan=plan_path,
+                            private=private,
+                            public=public,
+                            outputs=outputs,
+                            apply=True,
+                            confirm="not-used",
+                            credentials=root / "credentials.json",
+                        ),
+                        client_factory=factory,
+                    )
+            factory.assert_not_called()
+            self.assertFalse(any(path.exists() for path in dataclasses.astuple(outputs)))
+
     def test_publisher_cli_rejects_a_caller_selected_repository(self) -> None:
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr):
@@ -624,6 +652,7 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             private, public = self.write_keypair(root)
             client = FakeS3(foreign_bucket_grant=True)
             provenance = publisher._bootstrap_provenance(signing_public_key_path=public)
+            plan = dataclasses.replace(plan, emergency_patch_sha=provenance.publisher_source_revision)
             with self.assertRaisesRegex(publisher.EmergencyPublisherError, "ACL"):
                 publisher.publish(
                     client=client,
@@ -644,6 +673,7 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             private, public = self.write_keypair(root)
             client = FakeS3(foreign_object_grant=True)
             provenance = publisher._bootstrap_provenance(signing_public_key_path=public)
+            plan = dataclasses.replace(plan, emergency_patch_sha=provenance.publisher_source_revision)
             with self.assertRaisesRegex(publisher.EmergencyPublisherError, "ACL"):
                 publisher.publish(
                     client=client,
@@ -666,6 +696,7 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             existing_key = publisher._control_key(plan, "receiver_bundle")
             client.objects[(plan.bucket, existing_key)] = [("old-version", b"prior")]
             provenance = publisher._bootstrap_provenance(signing_public_key_path=public)
+            plan = dataclasses.replace(plan, emergency_patch_sha=provenance.publisher_source_revision)
             with self.assertRaisesRegex(publisher.EmergencyPublisherError, "existing Emergency campaign object version"):
                 publisher.publish(
                     client=client,

@@ -200,7 +200,7 @@ from scripts import emergency_ir_object_storage_receiver as receiver
 from scripts import run_emergency_ir_object_storage_receive as receiver_bootstrap
 
 
-PUBLISH_PLAN_SCHEMA = "gold-trade-emergency-ir-object-storage-publish-plan-v1"
+PUBLISH_PLAN_SCHEMA = "gold-trade-emergency-ir-object-storage-publish-plan-v2"
 PUBLISH_PLAN_FIELDS = frozenset(
     {
         "schema",
@@ -208,6 +208,7 @@ PUBLISH_PLAN_FIELDS = frozenset(
         "bucket",
         "prefix",
         "created_at",
+        "emergency_patch_sha",
         "destination_age_recipient_key_id",
         "artifacts",
     }
@@ -311,6 +312,7 @@ class PublishPlan:
     bucket: str
     prefix: str
     created_at: str
+    emergency_patch_sha: str
     destination_age_recipient_key_id: str
     artifacts: tuple[ArtifactDescriptor, ...]
 
@@ -594,6 +596,7 @@ def load_publish_plan(path: Path) -> PublishPlan:
         bucket=str(raw.get("bucket")),
         prefix=str(raw.get("prefix")),
         created_at=str(raw.get("created_at")),
+        emergency_patch_sha=str(raw.get("emergency_patch_sha")),
         destination_age_recipient_key_id=str(raw.get("destination_age_recipient_key_id")),
         artifacts=descriptors,
     )
@@ -610,11 +613,14 @@ def load_publish_plan(path: Path) -> PublishPlan:
         )
     except manifest.EmergencyManifestError as exc:
         raise EmergencyPublisherError("Emergency publish plan does not satisfy the sealed manifest contract") from exc
+    if GIT_REVISION_RE.fullmatch(provisional.emergency_patch_sha) is None:
+        _fail("Emergency publish plan emergency_patch_sha is invalid")
     return PublishPlan(
         campaign_id=str(normalized["campaign_id"]),
         bucket=str(normalized["bucket"]),
         prefix=str(normalized["prefix"]),
         created_at=str(normalized["created_at"]),
+        emergency_patch_sha=provisional.emergency_patch_sha,
         destination_age_recipient_key_id=str(normalized["destination_age_recipient_key_id"]),
         artifacts=descriptors,
     )
@@ -634,6 +640,7 @@ def _plan_identity(
         "bucket": plan.bucket,
         "prefix": plan.prefix,
         "created_at": plan.created_at,
+        "emergency_patch_sha": plan.emergency_patch_sha,
         "destination_age_recipient_key_id": plan.destination_age_recipient_key_id,
         "bootstrap_provenance": bootstrap_provenance.as_manifest(),
         "presigned_ttl_seconds": ttl_seconds,
@@ -1214,6 +1221,23 @@ def _check_outputs(outputs: PublishOutputs) -> None:
         _ensure_safe_output(path, label=label)
 
 
+def _require_plan_matches_bootstrap_provenance(
+    plan: PublishPlan,
+    *,
+    bootstrap_provenance: BootstrapProvenance,
+) -> None:
+    """Bind the sealed application/package release to this clean publisher.
+
+    The signed manifest already carries ``publisher_source_revision`` for the
+    receiver bootstrap.  A publish plan must carry the same revision from the
+    plaintext release package, otherwise an old (or substituted) app/package
+    pair could be signed and uploaded by a newer trusted publisher.
+    """
+
+    if plan.emergency_patch_sha != bootstrap_provenance.publisher_source_revision:
+        _fail("Emergency publish plan patch does not match the pinned publisher revision")
+
+
 def publish(
     *,
     client: Any,
@@ -1228,6 +1252,7 @@ def publish(
 
     if not receiver.MIN_PRESIGNED_TTL_SECONDS <= ttl_seconds <= receiver.MAX_PRESIGNED_TTL_SECONDS:
         _fail("presigned URL TTL is outside the Emergency receiver bound")
+    _require_plan_matches_bootstrap_provenance(plan, bootstrap_provenance=bootstrap_provenance)
     _check_outputs(outputs)
     try:
         private_key = manifest.load_private_key(signing_private_key_path)
@@ -1466,6 +1491,7 @@ def execute(
     # the publisher's fixed checkout before dry-run output is shown, and binds
     # the exact deterministic receiver bundle to the human confirmation.
     bootstrap_provenance = _bootstrap_provenance(signing_public_key_path=args.signing_public_key)
+    _require_plan_matches_bootstrap_provenance(plan, bootstrap_provenance=bootstrap_provenance)
     expected_confirmation = confirmation_phrase(
         plan, bootstrap_provenance=bootstrap_provenance, ttl_seconds=args.ttl_seconds
     )
