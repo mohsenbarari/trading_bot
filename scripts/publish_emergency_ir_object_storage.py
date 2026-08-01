@@ -17,28 +17,180 @@ root-only descriptor consumed by ``run_emergency_ir_object_storage_receive``.
 No network operation is reachable without both ``--apply`` and the exact
 ``--confirm`` phrase printed by the prior dry run.  Standard output never
 contains presigned URLs or credentials.
+
+Operational invocation is deliberately limited to the direct isolated form
+``python3 -I -B /absolute/path/publish_emergency_ir_object_storage.py ...``.
+The CLI rejects a non-isolated interpreter before parsing a campaign.
 """
 
 from __future__ import annotations
 
-import argparse
-import dataclasses
-import hashlib
-import json
 import os
 from pathlib import Path
 import re
 import stat
 import subprocess
 import sys
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+# The fetched receiver bundle executes on WA-IR as root.  It must therefore be
+# rendered only from these exact tracked source files in this publisher's own
+# repository; a caller never gets to choose another checkout.
+PUBLISHER_SOURCE_PATHS = (
+    "scripts/publish_emergency_ir_object_storage.py",
+    "scripts/build_emergency_ir_receiver_bundle.py",
+    "scripts/emergency_ir_object_storage_manifest.py",
+    "scripts/emergency_ir_object_storage_receiver.py",
+    "scripts/run_emergency_ir_object_storage_receive.py",
+    "deploy/emergency-ir/run_object_storage_receiver.py",
+    "scripts/emergency_ir_standalone_activate.py",
+)
+GIT_REVISION_RE = re.compile(r"^(?:[a-f0-9]{40}|[a-f0-9]{64})$", re.ASCII)
+
+
+class EmergencyPublisherError(RuntimeError):
+    """A publish precondition or immutable transfer verification failed."""
+
+
+def _fail(message: str) -> None:
+    raise EmergencyPublisherError(message)
+
+
+def _publisher_git_environment() -> dict[str, str]:
+    """Return a deterministic environment for the pre-import Git boundary."""
+
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("GIT_")
+    }
+    environment.update(
+        {
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "LC_ALL": "C",
+            "LANG": "C",
+            "PATH": os.defpath,
+        }
+    )
+    return environment
+
+
+def _run_publisher_git(*arguments: str) -> str:
+    """Run a local Git primitive with ambient Git state scrubbed."""
+
+    try:
+        completed = subprocess.run(
+            [
+                "/usr/bin/git",
+                "-c",
+                "core.fsmonitor=false",
+                "-c",
+                "core.untrackedCache=false",
+                "-c",
+                "core.preloadIndex=false",
+                "-c",
+                f"core.worktree={REPO_ROOT}",
+                "-C",
+                str(REPO_ROOT),
+                *arguments,
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+            env=_publisher_git_environment(),
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise EmergencyPublisherError("publisher source provenance cannot be inspected") from exc
+    if completed.returncode != 0:
+        _fail("publisher source provenance cannot be inspected")
+    return completed.stdout
+
+
+def _assert_preimport_scripts_surface(*, repo_root: Path = REPO_ROOT) -> None:
+    """Reject a package initializer that could execute before provenance checks.
+
+    ``scripts`` is intentionally an implicit namespace package in this
+    bootstrap.  An untracked ``scripts/__init__.py`` would otherwise execute
+    merely by evaluating a later ``from scripts import ...`` statement, before
+    Git can establish the clean checkout identity.
+    """
+
+    scripts_root = repo_root / "scripts"
+    try:
+        directory = scripts_root.lstat()
+    except OSError as exc:
+        raise EmergencyPublisherError("publisher scripts directory cannot be inspected") from exc
+    if (
+        stat.S_ISLNK(directory.st_mode)
+        or not stat.S_ISDIR(directory.st_mode)
+        or stat.S_IMODE(directory.st_mode) & 0o022
+    ):
+        _fail("publisher scripts directory is not a safe import surface")
+    initializer = scripts_root / "__init__.py"
+    try:
+        initializer.lstat()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise EmergencyPublisherError("publisher scripts package initializer cannot be inspected") from exc
+    _fail("publisher source contains an unsupported scripts package initializer")
+
+
+def _fixed_publisher_source_revision() -> str:
+    """Return the current revision only after the entire checkout is clean."""
+
+    observed_root = Path(_run_publisher_git("rev-parse", "--show-toplevel").strip())
+    try:
+        if observed_root.resolve() != REPO_ROOT:
+            _fail("publisher Git worktree differs from the executing checkout")
+    except OSError as exc:
+        raise EmergencyPublisherError("publisher Git worktree cannot be resolved") from exc
+    tracked = tuple(line for line in _run_publisher_git(
+        "ls-files", "--error-unmatch", "--", *PUBLISHER_SOURCE_PATHS
+    ).splitlines() if line)
+    if len(tracked) != len(PUBLISHER_SOURCE_PATHS) or set(tracked) != set(PUBLISHER_SOURCE_PATHS):
+        _fail("publisher bootstrap source paths are not exactly tracked")
+    changed = _run_publisher_git("status", "--porcelain=v1", "--untracked-files=all", "--")
+    if changed:
+        _fail("publisher checkout is not clean at its fixed revision")
+    revision = _run_publisher_git("rev-parse", "--verify", "HEAD^{commit}").strip()
+    if GIT_REVISION_RE.fullmatch(revision) is None:
+        _fail("publisher source revision is unsafe")
+    return revision
+
+
+def _require_isolated_cli() -> None:
+    """Require the direct, isolated interpreter contract for real CLI work."""
+
+    if not sys.flags.isolated or not sys.flags.dont_write_bytecode:
+        _fail("Emergency publisher CLI must be invoked as: python3 -I -B <absolute-script-path> ...")
+
+
+# This guard must run before every import from ``scripts``.  The actual
+# revision is deliberately derived only after both its filesystem and Git
+# boundaries have been validated.
+_assert_preimport_scripts_surface()
+if __name__ == "__main__":
+    try:
+        _require_isolated_cli()
+    except EmergencyPublisherError as exc:
+        sys.stderr.write(f"blocked: {exc}\n")
+        raise SystemExit(2) from exc
+_fixed_publisher_source_revision()
+
+
+import argparse
+import dataclasses
+import hashlib
+import json
 from typing import Any, BinaryIO, Callable, Mapping
 from urllib.parse import parse_qs, quote, urlsplit
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-# The guarded CLI is supported as a direct script invocation in operational
-# runbooks.  In that form Python puts ``scripts/`` (not the repository root)
-# on sys.path, so establish only this local immutable source root before
-# importing the sealed helper modules.  No caller-provided PYTHONPATH is used.
+# The guarded CLI is a direct, isolated script invocation.  It adds only this
+# fixed checked-out root, after the pre-import source checks above, so bundled
+# helper imports cannot inherit a caller-provided ``PYTHONPATH``.
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -118,24 +270,6 @@ TLS_CA_OVERRIDE_ENVIRONMENT_KEYS = (
     "requests_ca_bundle",
     "curl_ca_bundle",
 )
-# The fetched receiver bundle executes on WA-IR as root.  It must therefore be
-# rendered only from these exact tracked source files in this publisher's own
-# repository; a caller never gets to choose another checkout.
-PUBLISHER_SOURCE_PATHS = (
-    "scripts/publish_emergency_ir_object_storage.py",
-    "scripts/build_emergency_ir_receiver_bundle.py",
-    "scripts/emergency_ir_object_storage_manifest.py",
-    "scripts/emergency_ir_object_storage_receiver.py",
-    "scripts/run_emergency_ir_object_storage_receive.py",
-    "deploy/emergency-ir/run_object_storage_receiver.py",
-    "scripts/emergency_ir_standalone_activate.py",
-)
-
-
-class EmergencyPublisherError(RuntimeError):
-    """A publish precondition or immutable transfer verification failed."""
-
-
 @dataclasses.dataclass(frozen=True)
 class FileStamp:
     """Stable identity for a locally inspected regular file."""
@@ -220,11 +354,6 @@ class BootstrapProvenance:
             "receiver_bundle_bytes": self.receiver_bundle_bytes,
             "signer_key_id": self.signer_key_id,
         }
-
-
-def _fail(message: str) -> None:
-    raise EmergencyPublisherError(message)
-
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
@@ -354,62 +483,6 @@ def _parse_descriptor(value: object, *, expected_kind: str) -> ArtifactDescripto
         ciphertext_sha256=ciphertext_sha256,
         ciphertext_bytes=ciphertext_bytes,
     )
-
-
-def _run_publisher_git(*arguments: str) -> str:
-    """Run the local Git primitive with caller-controlled Git state removed."""
-
-    environment = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith("GIT_")
-    }
-    environment.update(
-        {
-            "GIT_CONFIG_NOSYSTEM": "1",
-            "GIT_CONFIG_GLOBAL": os.devnull,
-            "LC_ALL": "C",
-            "LANG": "C",
-            "PATH": os.defpath,
-        }
-    )
-    try:
-        completed = subprocess.run(
-            ["/usr/bin/git", "-C", str(REPO_ROOT), *arguments],
-            text=True,
-            capture_output=True,
-            check=False,
-            env=environment,
-            timeout=15,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise EmergencyPublisherError("publisher source provenance cannot be inspected") from exc
-    if completed.returncode != 0:
-        _fail("publisher source provenance cannot be inspected")
-    return completed.stdout
-
-
-def _fixed_publisher_source_revision() -> str:
-    """Return a clean, tracked revision for every bootstrap code input."""
-
-    tracked = tuple(line for line in _run_publisher_git(
-        "ls-files", "--error-unmatch", "--", *PUBLISHER_SOURCE_PATHS
-    ).splitlines() if line)
-    if len(tracked) != len(PUBLISHER_SOURCE_PATHS) or set(tracked) != set(PUBLISHER_SOURCE_PATHS):
-        _fail("publisher bootstrap source paths are not exactly tracked")
-    changed = _run_publisher_git(
-        "status",
-        "--porcelain=v1",
-        "--untracked-files=all",
-        "--",
-        *PUBLISHER_SOURCE_PATHS,
-    )
-    if changed:
-        _fail("publisher bootstrap source is not clean at its fixed revision")
-    revision = _run_publisher_git("rev-parse", "--verify", "HEAD^{commit}").strip()
-    if manifest.GIT_REVISION_RE.fullmatch(revision) is None:
-        _fail("publisher source revision is unsafe")
-    return revision
 
 
 def _bootstrap_provenance(*, signing_public_key_path: Path) -> BootstrapProvenance:
@@ -1444,8 +1517,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
     try:
+        _require_isolated_cli()
+        args = parse_args(argv)
         result = execute(args)
     except EmergencyPublisherError as exc:
         print(json.dumps({"status": "blocked", "error": str(exc), "error_class": type(exc).__name__}, sort_keys=True))

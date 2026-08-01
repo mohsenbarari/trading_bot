@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from urllib.parse import urlencode
 
@@ -352,6 +353,53 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             self.assertEqual(provenance.receiver_bundle_sha256, digest)
             self.assertEqual(provenance.receiver_bundle_bytes, size)
 
+    def test_preimport_guard_rejects_an_untracked_scripts_initializer(self) -> None:
+        """A package initializer would execute before a later ``from scripts`` import."""
+
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-import-surface-") as raw:
+            root = Path(raw)
+            scripts = root / "scripts"
+            scripts.mkdir(mode=0o700)
+            initializer = scripts / "__init__.py"
+            initializer.write_text("raise RuntimeError('must never import')\n", encoding="utf-8")
+            initializer.chmod(0o600)
+            with self.assertRaisesRegex(publisher.EmergencyPublisherError, "package initializer"):
+                publisher._assert_preimport_scripts_surface(repo_root=root)
+
+    def test_source_revision_rejects_any_checkout_change_before_returning_identity(self) -> None:
+        """The full status call must not be narrowed to bootstrap file pathspecs."""
+
+        calls: list[tuple[str, ...]] = []
+
+        def fake_git(*arguments: str) -> str:
+            calls.append(arguments)
+            if arguments == ("rev-parse", "--show-toplevel"):
+                return f"{REPO_ROOT}\n"
+            if arguments[:2] == ("ls-files", "--error-unmatch"):
+                return "\n".join(publisher.PUBLISHER_SOURCE_PATHS) + "\n"
+            if arguments == ("status", "--porcelain=v1", "--untracked-files=all", "--"):
+                return "?? scripts/__init__.py\n"
+            self.fail(f"unexpected Git invocation: {arguments!r}")
+
+        with patch.object(publisher, "_run_publisher_git", side_effect=fake_git):
+            with self.assertRaisesRegex(publisher.EmergencyPublisherError, "checkout is not clean"):
+                publisher._fixed_publisher_source_revision()
+        self.assertIn(("status", "--porcelain=v1", "--untracked-files=all", "--"), calls)
+
+    def test_git_boundary_scrubs_ambient_state_and_pins_the_worktree(self) -> None:
+        completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with (
+            patch.dict(os.environ, {"GIT_DIR": "/tmp/attacker", "GIT_WORK_TREE": "/tmp/attacker"}, clear=False),
+            patch.object(publisher.subprocess, "run", return_value=completed) as run,
+        ):
+            publisher._run_publisher_git("status", "--porcelain=v1", "--")
+        arguments = run.call_args.args[0]
+        environment = run.call_args.kwargs["env"]
+        self.assertNotIn("GIT_DIR", environment)
+        self.assertNotIn("GIT_WORK_TREE", environment)
+        self.assertIn("core.fsmonitor=false", arguments)
+        self.assertIn(f"core.worktree={publisher.REPO_ROOT}", arguments)
+
     def test_publish_rejects_a_different_provenance_signer_before_upload(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:
             root = Path(raw)
@@ -575,13 +623,14 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             _plan_path, plan = self.write_plan(root)
             private, public = self.write_keypair(root)
             client = FakeS3(foreign_bucket_grant=True)
+            provenance = publisher._bootstrap_provenance(signing_public_key_path=public)
             with self.assertRaisesRegex(publisher.EmergencyPublisherError, "ACL"):
                 publisher.publish(
                     client=client,
                     plan=plan,
                     signing_private_key_path=private,
                     signing_public_key_path=public,
-                    repo=REPO_ROOT,
+                    bootstrap_provenance=provenance,
                     outputs=self.outputs(root),
                     ttl_seconds=300,
                 )
@@ -594,13 +643,14 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             _plan_path, plan = self.write_plan(root)
             private, public = self.write_keypair(root)
             client = FakeS3(foreign_object_grant=True)
+            provenance = publisher._bootstrap_provenance(signing_public_key_path=public)
             with self.assertRaisesRegex(publisher.EmergencyPublisherError, "ACL"):
                 publisher.publish(
                     client=client,
                     plan=plan,
                     signing_private_key_path=private,
                     signing_public_key_path=public,
-                    repo=REPO_ROOT,
+                    bootstrap_provenance=provenance,
                     outputs=self.outputs(root),
                     ttl_seconds=300,
                 )
@@ -615,13 +665,14 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             client = FakeS3()
             existing_key = publisher._control_key(plan, "receiver_bundle")
             client.objects[(plan.bucket, existing_key)] = [("old-version", b"prior")]
+            provenance = publisher._bootstrap_provenance(signing_public_key_path=public)
             with self.assertRaisesRegex(publisher.EmergencyPublisherError, "existing Emergency campaign object version"):
                 publisher.publish(
                     client=client,
                     plan=plan,
                     signing_private_key_path=private,
                     signing_public_key_path=public,
-                    repo=REPO_ROOT,
+                    bootstrap_provenance=provenance,
                     outputs=self.outputs(root),
                     ttl_seconds=300,
                 )
@@ -656,8 +707,8 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             self.assertTrue(outputs.receiver_bundle.exists())
             self.assertFalse(outputs.sealed_manifest.exists())
 
-    def test_publisher_entrypoint_is_directly_invocable_from_the_repository_root(self) -> None:
-        result = subprocess.run(
+    def test_publisher_cli_requires_the_isolated_direct_script_contract(self) -> None:
+        plain = subprocess.run(
             [
                 sys.executable,
                 str(REPO_ROOT / "scripts" / "publish_emergency_ir_object_storage.py"),
@@ -669,9 +720,26 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             text=True,
             timeout=30,
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("--apply", result.stdout)
-        self.assertNotIn("--repo", result.stdout)
+        self.assertEqual(plain.returncode, 2)
+        self.assertIn("-I -B", plain.stderr)
+
+        isolated = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-B",
+                str(REPO_ROOT / "scripts" / "publish_emergency_ir_object_storage.py"),
+                "--help",
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(isolated.returncode, 0, isolated.stderr)
+        self.assertIn("--apply", isolated.stdout)
+        self.assertNotIn("--repo", isolated.stdout)
 
     def test_client_rejects_proxy_environment_before_reading_credentials(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:
