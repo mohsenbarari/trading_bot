@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import importlib.util
+import io
 import json
+import os
 from pathlib import Path
 import stat
+import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -140,7 +146,118 @@ class RunEmergencyIrObjectStorageReceiveTests(unittest.TestCase):
         compile(runner.REMOTE_BOOTSTRAP, "<emergency-bootstrap>", "exec")
         self.assertIn("def existing(target,digest,size):", runner.REMOTE_BOOTSTRAP)
         self.assertIn("def bundle_ready(target):", runner.REMOTE_BOOTSTRAP)
+        self.assertIn("scripts/emergency_ir_standalone_activate.py", runner.REMOTE_BOOTSTRAP)
+        self.assertIn("def bundled_key_id(path):", runner.REMOTE_BOOTSTRAP)
+        self.assertIn(
+            "receiver bundle signing public key does not match descriptor",
+            runner.REMOTE_BOOTSTRAP,
+        )
+        self.assertIn('("receiver-"+bundle_hash)', runner.REMOTE_BOOTSTRAP)
+        self.assertNotIn('bundle_hash[:16]', runner.REMOTE_BOOTSTRAP)
         self.assertIn("already-received", (Path(__file__).resolve().parents[1] / "scripts" / "emergency_ir_object_storage_receiver.py").read_text(encoding="utf-8"))
+
+    @unittest.skipUnless(os.geteuid() == 0, "raw Emergency bootstrap is intentionally root-only")
+    def test_raw_bootstrap_rejects_a_bundle_with_the_wrong_pinned_public_key_before_execution(self) -> None:
+        """A hash-valid archive cannot swap the public key used by the receiver."""
+
+        def root_controlled_directory(path: Path) -> bool:
+            current = Path("/")
+            for component in path.resolve().parts[1:]:
+                current /= component
+                try:
+                    state = current.lstat()
+                except OSError:
+                    return False
+                if (
+                    state.st_uid != 0
+                    or not stat.S_ISDIR(state.st_mode)
+                    or stat.S_ISLNK(state.st_mode)
+                    or stat.S_IMODE(state.st_mode) & 0o022
+                ):
+                    return False
+            return True
+
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-raw-source-") as raw:
+            source = Path(raw)
+            source.chmod(0o700)
+            runtime_directory: tempfile.TemporaryDirectory[str] | None = None
+            for candidate in (Path("/run"), MODULE_PATH.parents[1]):
+                if not root_controlled_directory(candidate):
+                    continue
+                try:
+                    runtime_directory = tempfile.TemporaryDirectory(
+                        prefix="emergency-ir-raw-runtime-", dir=candidate
+                    )
+                except OSError:
+                    continue
+                break
+            if runtime_directory is None:
+                self.skipTest("the root-owned /run test namespace is unavailable")
+            with runtime_directory as runtime_raw:
+                runtime = Path(runtime_raw)
+                marker = runtime / "receiver-was-executed"
+                expected_key = b"x" * 32
+                bundled_key = b"y" * 32
+                members = {
+                    "run_receiver.py": (
+                        "from pathlib import Path\n"
+                        f"Path({json.dumps(str(marker))}).write_text('unexpected', encoding='utf-8')\n"
+                    ).encode("utf-8"),
+                    "signing-public.key": base64.b64encode(bundled_key) + b"\n",
+                    "scripts/emergency_ir_object_storage_manifest.py": b"placeholder-manifest\n",
+                    "scripts/emergency_ir_object_storage_receiver.py": b"placeholder-receiver\n",
+                    "scripts/emergency_ir_standalone_activate.py": b"placeholder-activator\n",
+                }
+                bundle = source / "receiver.tar.gz"
+                with tarfile.open(bundle, "w:gz") as archive:
+                    for name, payload in members.items():
+                        entry = tarfile.TarInfo(name)
+                        entry.size = len(payload)
+                        entry.mode = 0o600
+                        archive.addfile(entry, io.BytesIO(payload))
+                sealed_manifest = source / "sealed-manifest.json"
+                sealed_manifest.write_bytes(b"sealed-manifest")
+                url_map = source / "presigned-urls.json"
+                url_map.write_bytes(b"url-map")
+                for path in (bundle, sealed_manifest, url_map):
+                    path.chmod(0o600)
+
+                def args_for(path: Path) -> tuple[str, str, str]:
+                    payload = path.read_bytes()
+                    return path.as_uri(), hashlib.sha256(payload).hexdigest(), str(len(payload))
+
+                bundle_url, bundle_hash, bundle_bytes = args_for(bundle)
+                manifest_url, manifest_hash, manifest_bytes = args_for(sealed_manifest)
+                url_map_url, url_map_hash, url_map_bytes = args_for(url_map)
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-c",
+                        runner.REMOTE_BOOTSTRAP,
+                        str(runtime),
+                        "20260801T210000Z-emergency-ir-03",
+                        bundle_url,
+                        bundle_hash,
+                        bundle_bytes,
+                        manifest_url,
+                        manifest_hash,
+                        manifest_bytes,
+                        url_map_url,
+                        url_map_hash,
+                        url_map_bytes,
+                        "a" * 40,
+                        bundle_hash,
+                        bundle_bytes,
+                        "ed25519-sha256:" + hashlib.sha256(expected_key).hexdigest(),
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                self.assertNotEqual(completed.returncode, 0)
+                self.assertIn("signing public key does not match descriptor", completed.stderr)
+                self.assertFalse(marker.exists())
 
 
 if __name__ == "__main__":

@@ -228,7 +228,7 @@ if re.fullmatch(r"[a-f0-9]{64}",bundle_provenance_hash) is None or not 1<=bundle
 if re.fullmatch(r"ed25519-sha256:[a-f0-9]{64}",expected_signer_key_id) is None: fail("bootstrap signer key identity is invalid")
 if bundle_hash!=bundle_provenance_hash or bundle_bytes!=bundle_provenance_bytes: fail("receiver bundle differs from descriptor provenance")
 campaign_root=root/campaign; secure_dir(campaign_root)
-bundle=campaign_root/"receiver.tar.gz"; sealed=campaign_root/"sealed-manifest.json"; urlmap=campaign_root/"presigned-urls.json"; receiver=campaign_root/("receiver-"+bundle_hash[:16])
+bundle=campaign_root/"receiver.tar.gz"; sealed=campaign_root/"sealed-manifest.json"; urlmap=campaign_root/"presigned-urls.json"; receiver=campaign_root/("receiver-"+bundle_hash)
 fetch(bundle_url,bundle_hash,bundle_bytes,bundle); fetch(manifest_url,manifest_hash,manifest_bytes,sealed); fetch(urlmap_url,urlmap_hash,urlmap_bytes,urlmap); extract_bundle(bundle,receiver)
 if bundled_key_id(receiver/"signing-public.key")!=expected_signer_key_id: fail("receiver bundle signing public key does not match descriptor")
 result=subprocess.run(["/usr/bin/python3","-I","-B",str(receiver/"run_receiver.py"),"--manifest",str(sealed),"--signing-public-key",str(receiver/"signing-public.key"),"--url-map",str(urlmap),"--expected-publisher-source-revision",source_revision,"--expected-receiver-bundle-sha256",bundle_provenance_hash,"--expected-receiver-bundle-bytes",str(bundle_provenance_bytes),"--expected-signer-key-id",expected_signer_key_id],capture_output=True,text=True,timeout=7200)

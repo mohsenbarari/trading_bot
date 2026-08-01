@@ -590,6 +590,44 @@ def confirmation_phrase(
     )
 
 
+def _confirmation_scope(
+    plan: PublishPlan,
+    *,
+    bootstrap_provenance: BootstrapProvenance,
+    ttl_seconds: int,
+) -> dict[str, Any]:
+    """Return the non-secret facts covered by the dry-run confirmation.
+
+    The dry-run must be useful to a human approver without printing local
+    ciphertext paths, credentials, short-lived URLs, or plaintext.  The
+    confirmation phrase itself covers this same metadata plus its canonical
+    digest, so a later apply cannot silently substitute the executable bundle
+    or one of the sealed artifacts.
+    """
+
+    return {
+        "source_site": manifest.SOURCE_SITE,
+        "destination_site": manifest.DESTINATION_SITE,
+        "campaign_id": plan.campaign_id,
+        "bucket": plan.bucket,
+        "prefix": plan.prefix,
+        "created_at": plan.created_at,
+        "presigned_ttl_seconds": ttl_seconds,
+        "destination_age_recipient_key_id": plan.destination_age_recipient_key_id,
+        "bootstrap": bootstrap_provenance.as_manifest(),
+        "artifacts": [
+            {
+                "kind": item.kind,
+                "plaintext_sha256": item.plaintext_sha256,
+                "plaintext_bytes": item.plaintext_bytes,
+                "ciphertext_sha256": item.ciphertext_sha256,
+                "ciphertext_bytes": item.ciphertext_bytes,
+            }
+            for item in plan.artifacts
+        ],
+    }
+
+
 def _verify_local_ciphertext(descriptor: ArtifactDescriptor) -> VerifiedLocalArtifact:
     """Check hash, exact size and age header before any external request."""
 
@@ -1404,6 +1442,11 @@ def execute(
             "payload_transport": "private-arvan-object-storage-only",
             "required_confirmation": expected_confirmation,
             "bootstrap_provenance": bootstrap_provenance.as_manifest(),
+            "confirmation_scope": _confirmation_scope(
+                plan,
+                bootstrap_provenance=bootstrap_provenance,
+                ttl_seconds=args.ttl_seconds,
+            ),
         }
     if args.confirm != expected_confirmation:
         _fail("Emergency Object Storage publish confirmation mismatch")

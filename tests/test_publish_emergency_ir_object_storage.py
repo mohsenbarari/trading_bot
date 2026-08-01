@@ -333,6 +333,15 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
                 ),
             )
             self.assertEqual(result["bootstrap_provenance"], provenance.as_manifest())
+            scope = result["confirmation_scope"]
+            self.assertEqual(scope["campaign_id"], CAMPAIGN_ID)
+            self.assertEqual(scope["destination_age_recipient_key_id"], RECIPIENT_KEY_ID)
+            self.assertEqual(scope["bootstrap"], provenance.as_manifest())
+            self.assertEqual(
+                [item["ciphertext_sha256"] for item in scope["artifacts"]],
+                [item.ciphertext_sha256 for item in plan.artifacts],
+            )
+            self.assertNotIn("ciphertext_path", json.dumps(scope))
 
     def test_preflight_pins_checkout_revision_and_exact_bundle_digest(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:
@@ -351,6 +360,10 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             self.assertEqual(provenance.publisher_source_revision, revision)
             self.assertEqual(provenance.receiver_bundle_sha256, digest)
             self.assertEqual(provenance.receiver_bundle_bytes, size)
+            self.assertIn(
+                "scripts/emergency_ir_standalone_activate.py",
+                publisher.PUBLISHER_SOURCE_PATHS,
+            )
 
     def test_publish_rejects_a_different_provenance_signer_before_upload(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:
