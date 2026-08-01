@@ -137,6 +137,21 @@ time, anchor age, both USDT references, raw return, applied return, and trend.
 If either the Herat anchor or a comparable USDT reference is unavailable, the
 result is `NO_DATA`; returning the USDT price under a Herat label is forbidden.
 
+Cash Herat has an additional settlement-time contract and must not use the
+generic USDT bridge directly. When a fresh cash quote is absent, the last real
+cash quote is paired with the tomorrow Herat quote at the same anchor time.
+The current tomorrow quote is then the primary movement driver. Historical
+paired observations support an asymmetric initial response: cash receives
+`0.90` of an upward tomorrow move and `1.05` of a downward move. A move inside
+the 0.10% deadband does not move the cash anchor. Outside banking availability,
+the cash/tomorrow basis widens by an initial 150 toman per closed hour, capped
+at 1,500 toman. The default observed schedule is 08:00–17:00 Tehran from
+Saturday through Wednesday, 08:00–12:00 on Thursday, and closed on Friday.
+All schedule and coefficient values are explicit policy constants pending
+later walk-forward calibration. The output records the cash anchor, tomorrow
+anchor/current values, direction, beta, banking state, closed hours, time
+widening, and cash/tomorrow basis before and after adjustment.
+
 Collector execution is idempotent and restart-safe. The ounce source is
 compacted to its newest quote per minute; melted-gold and dollar order flow is
 not averaged away. Adding the source to the repository does not authorize

@@ -39,6 +39,14 @@ NO_DATA_TOKEN = "<NO_DATA_THIS_MINUTE>"
 USD_HERAT_ANCHOR_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 USDT_ANCHOR_WINDOW_SECONDS = 180
 USDT_TREND_DEADBAND_RELATIVE = 0.001
+CASH_UP_MOVE_BETA = 0.90
+CASH_DOWN_MOVE_BETA = 1.05
+CASH_CLOSED_WIDENING_TOMAN_PER_HOUR = 150.0
+CASH_CLOSED_WIDENING_MAX_TOMAN = 1_500.0
+TEHRAN_TIMEZONE = timezone(timedelta(hours=3, minutes=30))
+BANKING_START_MINUTE = 8 * 60
+BANKING_CLOSE_MINUTE = 17 * 60
+THURSDAY_BANKING_CLOSE_MINUTE = 12 * 60
 GROUP_MIN_CONFIDENCE = 0.80
 FLOW_WINDOW_SECONDS = 600
 FLOW_HALF_LIFE_SECONDS = 180
@@ -576,7 +584,7 @@ def select_latest_usd_anchor(
     }
 
 
-def select_effective_usd_average(
+def _select_anchor_usdt_trend_average(
     connection: sqlite3.Connection,
     settlement: str,
     end: datetime,
@@ -663,6 +671,251 @@ def select_effective_usd_average(
         "usdt_trend": trend,
         "usdt_applied_return": applied_return,
     }
+
+
+def _cash_banking_state(
+    end: datetime,
+    *,
+    anchor_at: datetime,
+) -> dict[str, Any]:
+    local = end.astimezone(TEHRAN_TIMEZONE)
+    minute = local.hour * 60 + local.minute
+    weekday = local.weekday()
+    close_minute = (
+        THURSDAY_BANKING_CLOSE_MINUTE
+        if weekday == 3
+        else BANKING_CLOSE_MINUTE
+    )
+    if weekday != 4 and BANKING_START_MINUTE <= minute < close_minute:
+        return {
+            "state": "BANKING_OPEN",
+            "closed_hours": 0.0,
+            "reference_close_utc": None,
+        }
+
+    reference_close: datetime | None = None
+    for days_back in range(8):
+        candidate_date = local.date() - timedelta(days=days_back)
+        candidate_weekday = candidate_date.weekday()
+        if candidate_weekday == 4:
+            continue
+        candidate_close_minute = (
+            THURSDAY_BANKING_CLOSE_MINUTE
+            if candidate_weekday == 3
+            else BANKING_CLOSE_MINUTE
+        )
+        candidate = datetime(
+            candidate_date.year,
+            candidate_date.month,
+            candidate_date.day,
+            candidate_close_minute // 60,
+            candidate_close_minute % 60,
+            tzinfo=TEHRAN_TIMEZONE,
+        )
+        if candidate <= local:
+            reference_close = candidate
+            break
+    if reference_close is None:
+        return {
+            "state": "BANKING_CLOSED_UNKNOWN_BOUNDARY",
+            "closed_hours": 0.0,
+            "reference_close_utc": None,
+        }
+    elapsed_since_close = max(
+        0.0,
+        (local - reference_close).total_seconds() / 3600.0,
+    )
+    elapsed_since_anchor = max(
+        0.0,
+        (end - anchor_at).total_seconds() / 3600.0,
+    )
+    closed_hours = min(elapsed_since_close, elapsed_since_anchor, 10.0)
+    state = (
+        "FRIDAY_OR_HOLIDAY_CLOSED"
+        if weekday == 4
+        else (
+            "BEFORE_BANKING_OPEN"
+            if minute < BANKING_START_MINUTE
+            else "AFTER_BANKING_CLOSE"
+        )
+    )
+    return {
+        "state": state,
+        "closed_hours": closed_hours,
+        "reference_close_utc": iso_utc(
+            reference_close.astimezone(timezone.utc)
+        ),
+    }
+
+
+def _select_cash_usd_average(
+    connection: sqlite3.Connection,
+    end: datetime,
+    *,
+    seconds: int,
+) -> dict[str, Any]:
+    fresh = select_usd_average(connection, "CASH", end, seconds=seconds)
+    if fresh["status"] == "OBSERVED":
+        fresh["price_source"] = "USD_HERAT"
+        fresh["is_usdt_proxy"] = False
+        fresh["is_estimated"] = False
+        fresh["banking_session_state"] = _cash_banking_state(
+            end,
+            anchor_at=end,
+        )["state"]
+        return fresh
+
+    cash_anchor = select_latest_usd_anchor(connection, "CASH", end)
+    if cash_anchor["status"] != "OBSERVED":
+        fresh["selection"] = "NO_CASH_HERAT_ANCHOR"
+        fresh["price_source"] = None
+        fresh["fallback_rejected"] = "DIRECT_USDT_PRICE_SUBSTITUTION_FORBIDDEN"
+        fresh["is_usdt_proxy"] = False
+        fresh["is_estimated"] = False
+        return fresh
+
+    anchor_at = parse_datetime(str(cash_anchor["anchor_event_utc"]))
+    tomorrow_at_anchor = _select_anchor_usdt_trend_average(
+        connection,
+        "TOMORROW",
+        anchor_at,
+        seconds=USDT_ANCHOR_WINDOW_SECONDS,
+    )
+    tomorrow_now = _select_anchor_usdt_trend_average(
+        connection,
+        "TOMORROW",
+        end,
+        seconds=seconds,
+    )
+
+    driver_source = "USD_HERAT_TOMORROW"
+    if (
+        tomorrow_at_anchor.get("average_price") is not None
+        and tomorrow_now.get("average_price") is not None
+    ):
+        driver_anchor = float(tomorrow_at_anchor["average_price"])
+        driver_current = float(tomorrow_now["average_price"])
+    else:
+        secondary = _select_anchor_usdt_trend_average(
+            connection,
+            "CASH",
+            end,
+            seconds=seconds,
+        )
+        if secondary.get("average_price") is None or not secondary.get(
+            "is_estimated"
+        ):
+            fresh["selection"] = "CASH_ANCHOR_WITHOUT_MARKET_MOVEMENT_DRIVER"
+            fresh["price_source"] = None
+            fresh["fallback_rejected"] = (
+                "DIRECT_USDT_PRICE_SUBSTITUTION_FORBIDDEN"
+            )
+            fresh["cash_anchor"] = cash_anchor
+            fresh["is_usdt_proxy"] = False
+            fresh["is_estimated"] = False
+            return fresh
+        driver_source = "USDT_TREND_SECONDARY"
+        driver_anchor = float(cash_anchor["average_price"])
+        driver_current = driver_anchor * (
+            1.0 + float(secondary.get("usdt_applied_return") or 0.0)
+        )
+
+    driver_delta = driver_current - driver_anchor
+    driver_relative = driver_delta / driver_anchor
+    if driver_relative > USDT_TREND_DEADBAND_RELATIVE:
+        direction = "UP"
+        beta = CASH_UP_MOVE_BETA
+    elif driver_relative < -USDT_TREND_DEADBAND_RELATIVE:
+        direction = "DOWN"
+        beta = CASH_DOWN_MOVE_BETA
+    else:
+        direction = "NEUTRAL"
+        beta = 0.0
+    movement_adjustment = beta * driver_delta
+    banking = _cash_banking_state(end, anchor_at=anchor_at)
+    time_widening = min(
+        CASH_CLOSED_WIDENING_MAX_TOMAN,
+        float(banking["closed_hours"])
+        * CASH_CLOSED_WIDENING_TOMAN_PER_HOUR,
+    )
+    estimated = (
+        float(cash_anchor["average_price"])
+        + movement_adjustment
+        - time_widening
+    )
+    anchor_basis = (
+        float(cash_anchor["average_price"]) - driver_anchor
+        if driver_source == "USD_HERAT_TOMORROW"
+        else None
+    )
+    current_basis = (
+        estimated - driver_current
+        if driver_source == "USD_HERAT_TOMORROW"
+        else None
+    )
+    return {
+        "status": "ESTIMATED",
+        "llm_value": estimated,
+        "average_price": estimated,
+        "minimum_price": (
+            float(cash_anchor["minimum_price"])
+            + movement_adjustment
+            - time_widening
+        ),
+        "maximum_price": (
+            float(cash_anchor["maximum_price"])
+            + movement_adjustment
+            - time_widening
+        ),
+        "sample_count": int(cash_anchor["sample_count"]),
+        "first_event_utc": cash_anchor["first_event_utc"],
+        "last_event_utc": cash_anchor["last_event_utc"],
+        "selection": (
+            f"CASH_HERAT_ANCHOR_{driver_source}_{direction}_"
+            "ASYMMETRIC_BANKING_TIME"
+        ),
+        "price_source": "USD_HERAT_CASH_TIME_AND_TOMORROW_BASIS_ESTIMATE",
+        "is_usdt_proxy": False,
+        "is_estimated": True,
+        "anchor_price": float(cash_anchor["average_price"]),
+        "anchor_event_utc": cash_anchor["anchor_event_utc"],
+        "anchor_age_seconds": cash_anchor["anchor_age_seconds"],
+        "market_movement_driver": driver_source,
+        "market_driver_anchor_price": driver_anchor,
+        "market_driver_current_price": driver_current,
+        "market_driver_delta": driver_delta,
+        "market_driver_relative_change": driver_relative,
+        "market_direction": direction,
+        "cash_direction_beta": beta,
+        "cash_market_movement_adjustment_toman": movement_adjustment,
+        "banking_session_state": banking["state"],
+        "banking_reference_close_utc": banking["reference_close_utc"],
+        "cash_closed_hours": banking["closed_hours"],
+        "cash_time_widening_toman": time_widening,
+        "cash_tomorrow_basis_at_anchor": anchor_basis,
+        "cash_tomorrow_basis_estimated_current": current_basis,
+    }
+
+
+def select_effective_usd_average(
+    connection: sqlite3.Connection,
+    settlement: str,
+    end: datetime,
+    *,
+    seconds: int = WINDOW_SECONDS,
+) -> dict[str, Any]:
+    if settlement == "CASH":
+        return _select_cash_usd_average(
+            connection,
+            end,
+            seconds=seconds,
+        )
+    return _select_anchor_usdt_trend_average(
+        connection,
+        settlement,
+        end,
+        seconds=seconds,
+    )
 
 
 def select_melted_average(

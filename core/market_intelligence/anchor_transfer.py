@@ -38,6 +38,14 @@ REGIMES = {"RANGE", "UP", "DOWN", "SHOCK", "UNKNOWN"}
 USD_HERAT_ANCHOR_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 USD_HERAT_FRESH_SECONDS = 60
 USDT_TREND_DEADBAND_RELATIVE = 0.001
+CASH_UP_MOVE_BETA = 0.90
+CASH_DOWN_MOVE_BETA = 1.05
+CASH_CLOSED_WIDENING_TOMAN_PER_HOUR = 150.0
+CASH_CLOSED_WIDENING_MAX_TOMAN = 1_500.0
+TEHRAN_TIMEZONE = timezone(timedelta(hours=3, minutes=30))
+BANKING_START_MINUTE = 8 * 60
+BANKING_CLOSE_MINUTE = 17 * 60
+THURSDAY_BANKING_CLOSE_MINUTE = 12 * 60
 
 
 def parse_time(value: datetime | str) -> datetime:
@@ -94,6 +102,15 @@ class MarketPoint:
     reference_raw_return: float | None = None
     reference_applied_return: float | None = None
     reference_trend: str | None = None
+    market_movement_driver: str | None = None
+    market_driver_anchor_value: float | None = None
+    market_driver_current_value: float | None = None
+    cash_direction_beta: float | None = None
+    banking_session_state: str | None = None
+    cash_closed_hours: float | None = None
+    cash_time_widening_toman: float | None = None
+    cash_tomorrow_basis_at_anchor: float | None = None
+    cash_tomorrow_basis_estimated_current: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -452,6 +469,216 @@ def _bridge_stale_herat_with_usdt(
     )
 
 
+def _cash_banking_state(
+    as_of: datetime,
+    *,
+    anchor_at: datetime,
+) -> tuple[str, float]:
+    local = as_of.astimezone(TEHRAN_TIMEZONE)
+    minute = local.hour * 60 + local.minute
+    weekday = local.weekday()
+    close_minute = (
+        THURSDAY_BANKING_CLOSE_MINUTE
+        if weekday == 3
+        else BANKING_CLOSE_MINUTE
+    )
+    if weekday != 4 and BANKING_START_MINUTE <= minute < close_minute:
+        return "BANKING_OPEN", 0.0
+
+    reference_close: datetime | None = None
+    for days_back in range(8):
+        candidate_date = local.date() - timedelta(days=days_back)
+        candidate_weekday = candidate_date.weekday()
+        if candidate_weekday == 4:
+            continue
+        candidate_close_minute = (
+            THURSDAY_BANKING_CLOSE_MINUTE
+            if candidate_weekday == 3
+            else BANKING_CLOSE_MINUTE
+        )
+        candidate = datetime(
+            candidate_date.year,
+            candidate_date.month,
+            candidate_date.day,
+            candidate_close_minute // 60,
+            candidate_close_minute % 60,
+            tzinfo=TEHRAN_TIMEZONE,
+        )
+        if candidate <= local:
+            reference_close = candidate
+            break
+    if reference_close is None:
+        return "BANKING_CLOSED_UNKNOWN_BOUNDARY", 0.0
+    elapsed_since_close = max(
+        0.0,
+        (local - reference_close).total_seconds() / 3600.0,
+    )
+    elapsed_since_anchor = max(
+        0.0,
+        (as_of - anchor_at).total_seconds() / 3600.0,
+    )
+    closed_hours = min(elapsed_since_close, elapsed_since_anchor, 10.0)
+    state = (
+        "FRIDAY_OR_HOLIDAY_CLOSED"
+        if weekday == 4
+        else (
+            "BEFORE_BANKING_OPEN"
+            if minute < BANKING_START_MINUTE
+            else "AFTER_BANKING_CLOSE"
+        )
+    )
+    return state, closed_hours
+
+
+def _bridge_stale_cash_herat_with_tomorrow(
+    connection: sqlite3.Connection,
+    *,
+    cash: MarketPoint,
+    as_of: datetime,
+) -> MarketPoint:
+    if cash.status != "OBSERVED" or cash.value is None:
+        return cash
+    age = float(cash.age_seconds or 0.0)
+    if age <= USD_HERAT_FRESH_SECONDS:
+        return cash
+    if not cash.last_event_utc:
+        return no_point(
+            "USD_HERAT_CASH_ANCHOR",
+            "STALE_CASH_HERAT_ANCHOR_TIME_MISSING",
+        )
+    anchor_at = parse_time(cash.last_event_utc)
+    tomorrow_labels = ("دلار هرات فردایی کاغذی",)
+    tomorrow_at_anchor = _market_point(
+        connection,
+        as_of=anchor_at,
+        instrument="USD_HERAT",
+        market_labels=tomorrow_labels,
+        trade_forms=("PAPER",),
+        settlement_terms=("TOMORROW",),
+        maximum_age_seconds=USD_HERAT_ANCHOR_MAX_AGE_SECONDS,
+    )
+    tomorrow_at_anchor = _bridge_stale_herat_with_usdt(
+        connection,
+        herat=tomorrow_at_anchor,
+        as_of=anchor_at,
+        fresh_age_seconds=USD_HERAT_FRESH_SECONDS,
+    )
+    tomorrow_now = _market_point(
+        connection,
+        as_of=as_of,
+        instrument="USD_HERAT",
+        market_labels=tomorrow_labels,
+        trade_forms=("PAPER",),
+        settlement_terms=("TOMORROW",),
+        maximum_age_seconds=USD_HERAT_ANCHOR_MAX_AGE_SECONDS,
+    )
+    tomorrow_now = _bridge_stale_herat_with_usdt(
+        connection,
+        herat=tomorrow_now,
+        as_of=as_of,
+        fresh_age_seconds=USD_HERAT_FRESH_SECONDS,
+    )
+
+    if tomorrow_at_anchor.value is not None and tomorrow_now.value is not None:
+        driver = "USD_HERAT_TOMORROW"
+        driver_anchor = float(tomorrow_at_anchor.value)
+        driver_current = float(tomorrow_now.value)
+        driver_uncertainty = (
+            tomorrow_at_anchor.uncertainty_relative
+            + tomorrow_now.uncertainty_relative
+        )
+    else:
+        secondary = _bridge_stale_herat_with_usdt(
+            connection,
+            herat=cash,
+            as_of=as_of,
+            fresh_age_seconds=USD_HERAT_FRESH_SECONDS,
+        )
+        if secondary.status != "BRIDGED":
+            return secondary
+        driver = "USDT_TREND_SECONDARY"
+        driver_anchor = float(cash.value)
+        driver_current = driver_anchor * (
+            1.0 + float(secondary.reference_applied_return or 0.0)
+        )
+        driver_uncertainty = secondary.uncertainty_relative
+
+    driver_delta = driver_current - driver_anchor
+    driver_relative = driver_delta / driver_anchor
+    if driver_relative > USDT_TREND_DEADBAND_RELATIVE:
+        direction = "UP"
+        beta = CASH_UP_MOVE_BETA
+    elif driver_relative < -USDT_TREND_DEADBAND_RELATIVE:
+        direction = "DOWN"
+        beta = CASH_DOWN_MOVE_BETA
+    else:
+        direction = "NEUTRAL"
+        beta = 0.0
+    movement_adjustment = beta * driver_delta
+    banking_state, closed_hours = _cash_banking_state(
+        as_of,
+        anchor_at=anchor_at,
+    )
+    time_widening = min(
+        CASH_CLOSED_WIDENING_MAX_TOMAN,
+        closed_hours * CASH_CLOSED_WIDENING_TOMAN_PER_HOUR,
+    )
+    estimated = float(cash.value) + movement_adjustment - time_widening
+    anchor_basis = (
+        float(cash.value) - driver_anchor
+        if driver == "USD_HERAT_TOMORROW"
+        else None
+    )
+    current_basis = (
+        estimated - driver_current
+        if driver == "USD_HERAT_TOMORROW"
+        else None
+    )
+    return MarketPoint(
+        status="BRIDGED",
+        value=estimated,
+        lower=(
+            float(cash.lower) + movement_adjustment - time_widening
+            if cash.lower is not None
+            else estimated
+        ),
+        upper=(
+            float(cash.upper) + movement_adjustment - time_widening
+            if cash.upper is not None
+            else estimated
+        ),
+        sample_count=cash.sample_count,
+        last_event_utc=cash.last_event_utc,
+        age_seconds=age,
+        source=(
+            f"USD_HERAT_CASH_ANCHOR_{driver}_{direction}_"
+            "ASYMMETRIC_BANKING_TIME"
+        ),
+        uncertainty_relative=min(
+            0.06,
+            cash.uncertainty_relative
+            + driver_uncertainty
+            + time_widening / max(estimated, 1.0),
+        ),
+        anchor_value=float(cash.value),
+        anchor_event_utc=cash.last_event_utc,
+        reference_raw_return=driver_relative,
+        reference_applied_return=(
+            movement_adjustment / float(cash.value)
+        ),
+        reference_trend=direction,
+        market_movement_driver=driver,
+        market_driver_anchor_value=driver_anchor,
+        market_driver_current_value=driver_current,
+        cash_direction_beta=beta,
+        banking_session_state=banking_state,
+        cash_closed_hours=closed_hours,
+        cash_time_widening_toman=time_widening,
+        cash_tomorrow_basis_at_anchor=anchor_basis,
+        cash_tomorrow_basis_estimated_current=current_basis,
+    )
+
+
 def read_market_context(
     market_db: Path,
     *,
@@ -571,15 +798,22 @@ def read_market_context(
                 "CASH_EXCHANGE_REFERENCE_NOT_DIRECT_TOMORROW_INPUT",
             )
 
-        usd = _bridge_stale_herat_with_usdt(
-            connection,
-            herat=usd,
-            as_of=observed_at,
-            fresh_age_seconds=min(
-                USD_HERAT_FRESH_SECONDS,
-                maximum_primary_age_seconds,
-            ),
-        )
+        if settlement == "CASH":
+            usd = _bridge_stale_cash_herat_with_tomorrow(
+                connection,
+                cash=usd,
+                as_of=observed_at,
+            )
+        else:
+            usd = _bridge_stale_herat_with_usdt(
+                connection,
+                herat=usd,
+                as_of=observed_at,
+                fresh_age_seconds=min(
+                    USD_HERAT_FRESH_SECONDS,
+                    maximum_primary_age_seconds,
+                ),
+            )
         xauusd = _market_point(
             connection,
             as_of=observed_at,
