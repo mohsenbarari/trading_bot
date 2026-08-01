@@ -28,6 +28,9 @@ SHA_RE = re.compile(r"^[0-9a-f]{40}$", re.ASCII)
 PACKAGE_ROOT = "emergency-ir-standalone"
 PACKAGE_PATHS = (
     "deploy/emergency-ir",
+    # The packaged activator imports ``scripts`` as a regular local package.
+    # Keep its package marker in the same immutable release tar.
+    "scripts/__init__.py",
     "scripts/emergency_ir_object_storage_manifest.py",
     "scripts/emergency_ir_object_storage_receiver.py",
     "scripts/emergency_ir_standalone_activate.py",

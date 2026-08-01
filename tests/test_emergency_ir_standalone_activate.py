@@ -104,12 +104,21 @@ def package_files() -> dict[str, bytes]:
         "scripts/render_emergency_ir_standalone_env.py": b"# renderer\n",
         "scripts/verify_emergency_ir_standalone.py": b"# verifier\n",
         "scripts/verify_emergency_ir_image_provenance.py": b"# provenance\n",
+        "scripts/__init__.py": b"# regular package marker\n",
         "scripts/emergency_ir_standalone_activate.py": b"# activation\n",
     }
 
 
-def write_package(path: Path, *, symlink_member: bool = False, wrong_hash: bool = False) -> None:
+def write_package(
+    path: Path,
+    *,
+    symlink_member: bool = False,
+    wrong_hash: bool = False,
+    omit_package_marker: bool = False,
+) -> None:
     files = package_files()
+    if omit_package_marker:
+        files.pop("scripts/__init__.py")
     release = {
         "schema": ACTIVATE.PACKAGE_RELEASE_SCHEMA,
         "source_release_sha": SOURCE_SHA,
@@ -204,6 +213,15 @@ class EmergencyIrStandaloneActivationTests(unittest.TestCase):
                 write_package(package, **kwargs)
                 with self.subTest(name=name), self.assertRaises(ACTIVATE.EmergencyActivationError):
                     ACTIVATE.extract_and_verify_package(package_tar=package, releases_root=root / name)
+
+    def test_package_rejects_missing_scripts_package_marker(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-activation-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            package = root / "missing-package-marker.tar.gz"
+            write_package(package, omit_package_marker=True)
+            with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "mandatory Emergency activation control"):
+                ACTIVATE.extract_and_verify_package(package_tar=package, releases_root=root / "releases")
 
     def test_settings_tar_accepts_only_profile_exact_members_without_persisting_secret(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-activation-") as raw:

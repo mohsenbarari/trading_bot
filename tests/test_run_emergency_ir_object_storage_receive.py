@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import base64
 import hashlib
 import importlib.util
@@ -8,6 +9,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 import sys
@@ -19,11 +21,16 @@ from unittest.mock import patch
 
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "run_emergency_ir_object_storage_receive.py"
+REPO_ROOT = MODULE_PATH.parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 SPEC = importlib.util.spec_from_file_location("run_emergency_ir_object_storage_receive", MODULE_PATH)
 assert SPEC and SPEC.loader
 runner = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = runner
 SPEC.loader.exec_module(runner)
+
+from scripts import build_emergency_ir_receiver_bundle as receiver_bundle
 
 
 def artifact(name: str, size: int) -> dict[str, object]:
@@ -154,6 +161,14 @@ class RunEmergencyIrObjectStorageReceiveTests(unittest.TestCase):
         )
         self.assertIn('("receiver-"+bundle_hash)', runner.REMOTE_BOOTSTRAP)
         self.assertNotIn('bundle_hash[:16]', runner.REMOTE_BOOTSTRAP)
+        raw_allowed = [
+            ast.literal_eval(value)
+            for value in re.findall(r"(?m)^ allowed=(\{[^\n]+\})$", runner.REMOTE_BOOTSTRAP)
+        ]
+        expected_allowed = {target for _source, target in receiver_bundle.BUNDLE_MEMBERS} | {
+            "signing-public.key"
+        }
+        self.assertEqual(raw_allowed, [expected_allowed, expected_allowed])
         self.assertIn("already-received", (Path(__file__).resolve().parents[1] / "scripts" / "emergency_ir_object_storage_receiver.py").read_text(encoding="utf-8"))
 
     @unittest.skipUnless(os.geteuid() == 0, "raw Emergency bootstrap is intentionally root-only")
@@ -204,6 +219,7 @@ class RunEmergencyIrObjectStorageReceiveTests(unittest.TestCase):
                         f"Path({json.dumps(str(marker))}).write_text('unexpected', encoding='utf-8')\n"
                     ).encode("utf-8"),
                     "signing-public.key": base64.b64encode(bundled_key) + b"\n",
+                    "scripts/__init__.py": b"# regular pinned package\n",
                     "scripts/emergency_ir_object_storage_manifest.py": b"placeholder-manifest\n",
                     "scripts/emergency_ir_object_storage_receiver.py": b"placeholder-receiver\n",
                     "scripts/emergency_ir_standalone_activate.py": b"placeholder-activator\n",

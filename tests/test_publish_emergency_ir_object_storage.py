@@ -364,6 +364,55 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
                 "scripts/emergency_ir_standalone_activate.py",
                 publisher.PUBLISHER_SOURCE_PATHS,
             )
+            self.assertIn("scripts/__init__.py", publisher.PUBLISHER_SOURCE_PATHS)
+
+    def test_preflight_rejects_a_skip_worktree_bootstrap_source_substitution(self) -> None:
+        """A clean-looking Git status must not falsify executable provenance."""
+
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-source-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            repository = root / "repository"
+            source = repository / "scripts" / "trusted.py"
+            source.parent.mkdir(parents=True)
+            source.write_text("committed source\n", encoding="utf-8")
+            source.chmod(0o600)
+            subprocess.run(["git", "init", "-q", str(repository)], check=True)
+            subprocess.run(["git", "-C", str(repository), "config", "user.email", "test@example.invalid"], check=True)
+            subprocess.run(["git", "-C", str(repository), "config", "user.name", "Emergency Test"], check=True)
+            subprocess.run(["git", "-C", str(repository), "add", "scripts/trusted.py"], check=True)
+            subprocess.run(["git", "-C", str(repository), "commit", "-qm", "fixture"], check=True)
+            subprocess.run(
+                ["git", "-C", str(repository), "update-index", "--skip-worktree", "scripts/trusted.py"],
+                check=True,
+            )
+            source.write_text("substituted source\n", encoding="utf-8")
+            source.chmod(0o600)
+            status = subprocess.run(
+                ["git", "-C", str(repository), "status", "--porcelain=v1", "--", "scripts/trusted.py"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(status.stdout, "")
+            with (
+                patch.object(publisher, "REPO_ROOT", repository),
+                patch.object(publisher, "PUBLISHER_SOURCE_PATHS", ("scripts/trusted.py",)),
+            ):
+                with self.assertRaisesRegex(publisher.EmergencyPublisherError, "differs from its fixed revision"):
+                    publisher._fixed_publisher_source_revision()
+
+    def test_preflight_uses_one_captured_revision_for_every_head_blob(self) -> None:
+        revision = "a" * 40
+        head_blob = Mock(return_value=b"trusted source\n")
+        with (
+            patch.object(publisher, "PUBLISHER_SOURCE_PATHS", ("scripts/trusted.py",)),
+            patch.object(publisher, "_run_publisher_git", side_effect=("scripts/trusted.py\n", revision + "\n")),
+            patch.object(publisher, "_publisher_head_blob", head_blob),
+            patch.object(publisher, "_read_owner_regular", return_value=b"trusted source\n"),
+        ):
+            self.assertEqual(publisher._fixed_publisher_source_revision(), revision)
+        head_blob.assert_called_once_with(revision=revision, relative="scripts/trusted.py")
 
     def test_publish_rejects_a_different_provenance_signer_before_upload(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:
@@ -418,7 +467,7 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             factory.assert_not_called()
             self.assertFalse(any(path.exists() for path in dataclasses.astuple(outputs)))
 
-    def test_same_confirmation_rejects_substituted_receiver_bundle_provenance(self) -> None:
+    def test_same_confirmation_rejects_any_substituted_bootstrap_provenance_fact(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:
             root = Path(raw)
             root.chmod(0o700)
@@ -426,29 +475,43 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             private, public = self.write_keypair(root)
             outputs = self.outputs(root)
             original = self.bootstrap_provenance(public)
-            substituted = dataclasses.replace(original, receiver_bundle_sha256="f" * 64)
             confirmation = publisher.confirmation_phrase(
                 plan,
                 bootstrap_provenance=original,
                 ttl_seconds=300,
             )
-            factory = Mock(side_effect=AssertionError("provenance mismatch must precede client construction"))
-            with patch.object(publisher, "_bootstrap_provenance", return_value=substituted):
-                with self.assertRaisesRegex(publisher.EmergencyPublisherError, "confirmation"):
-                    publisher.execute(
-                        self.arguments(
-                            plan=plan_path,
-                            private=private,
-                            public=public,
-                            outputs=outputs,
-                            apply=True,
-                            confirm=confirmation,
-                            credentials=root / "credentials.json",
+            for label, replacement in (
+                ("publisher revision", {"publisher_source_revision": "c" * 40}),
+                ("receiver bundle", {"receiver_bundle_sha256": "f" * 64}),
+                ("signer key", {"signer_key_id": "ed25519-sha256:" + "f" * 64}),
+            ):
+                with self.subTest(field=label):
+                    substituted = dataclasses.replace(original, **replacement)
+                    self.assertNotEqual(
+                        publisher.confirmation_phrase(
+                            plan,
+                            bootstrap_provenance=substituted,
+                            ttl_seconds=300,
                         ),
-                        client_factory=factory,
+                        confirmation,
                     )
-            factory.assert_not_called()
-            self.assertFalse(any(path.exists() for path in dataclasses.astuple(outputs)))
+                    factory = Mock(side_effect=AssertionError("provenance mismatch must precede client construction"))
+                    with patch.object(publisher, "_bootstrap_provenance", return_value=substituted):
+                        with self.assertRaisesRegex(publisher.EmergencyPublisherError, "confirmation"):
+                            publisher.execute(
+                                self.arguments(
+                                    plan=plan_path,
+                                    private=private,
+                                    public=public,
+                                    outputs=outputs,
+                                    apply=True,
+                                    confirm=confirmation,
+                                    credentials=root / "credentials.json",
+                                ),
+                                client_factory=factory,
+                            )
+                    factory.assert_not_called()
+                    self.assertFalse(any(path.exists() for path in dataclasses.astuple(outputs)))
 
     def test_publisher_cli_rejects_a_caller_selected_repository(self) -> None:
         stderr = io.StringIO()
@@ -686,6 +749,8 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
         result = subprocess.run(
             [
                 sys.executable,
+                "-I",
+                "-B",
                 str(REPO_ROOT / "scripts" / "publish_emergency_ir_object_storage.py"),
                 "--help",
             ],
@@ -698,6 +763,59 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--apply", result.stdout)
         self.assertNotIn("--repo", result.stdout)
+
+    def test_publisher_rejects_any_interpreter_without_both_required_flags_before_plan_or_key_io(self) -> None:
+        common = [
+            str(REPO_ROOT / "scripts" / "publish_emergency_ir_object_storage.py"),
+            "--plan", "/nonexistent/plan.json",
+            "--signing-private-key", "/nonexistent/private.key",
+            "--signing-public-key", "/nonexistent/public.key",
+            "--receiver-bundle-output", "/nonexistent/receiver.tar.gz",
+            "--sealed-manifest-output", "/nonexistent/manifest.json",
+            "--url-map-output", "/nonexistent/urls.json",
+            "--descriptor-output", "/nonexistent/descriptor.json",
+        ]
+        for label, interpreter_flags in (("nonisolated", ()), ("bytecode enabled", ("-I",))):
+            with self.subTest(mode=label):
+                result = subprocess.run(
+                    [sys.executable, *interpreter_flags, *common],
+                    cwd=REPO_ROOT,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                self.assertEqual(result.returncode, 2)
+                self.assertIn("must be launched with python3 -I -B", result.stdout)
+
+    def test_local_scripts_package_wins_over_an_ambient_regular_package(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-import-") as raw:
+            root = Path(raw)
+            evil_scripts = root / "evil" / "scripts"
+            evil_scripts.mkdir(parents=True, mode=0o700)
+            (evil_scripts / "__init__.py").write_text("# hostile package\n", encoding="utf-8")
+            (evil_scripts / "build_emergency_ir_receiver_bundle.py").write_text(
+                "raise RuntimeError('ambient scripts package imported')\n",
+                encoding="utf-8",
+            )
+            launcher = (
+                "import os,runpy,sys;"
+                f"repo={str(REPO_ROOT)!r};evil={str(root / 'evil')!r};"
+                "os.chdir('/');"
+                "sys.path[:]=[evil,repo,*[item for item in sys.path if item not in {'',evil,repo}]];"
+                f"sys.argv={[str(REPO_ROOT / 'scripts' / 'publish_emergency_ir_object_storage.py'), '--help']!r};"
+                f"runpy.run_path({str(REPO_ROOT / 'scripts' / 'publish_emergency_ir_object_storage.py')!r},run_name='__main__')"
+            )
+            result = subprocess.run(
+                [sys.executable, "-S", "-c", launcher],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--apply", result.stdout)
+        self.assertNotIn("ambient scripts package imported", result.stderr)
 
     def test_client_rejects_proxy_environment_before_reading_credentials(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:

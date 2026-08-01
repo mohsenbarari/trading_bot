@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -38,9 +39,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # The guarded CLI is supported as a direct script invocation in operational
 # runbooks.  In that form Python puts ``scripts/`` (not the repository root)
 # on sys.path, so establish only this local immutable source root before
-# importing the sealed helper modules.  No caller-provided PYTHONPATH is used.
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+# importing the sealed helper modules.  Move it to index zero even if it was
+# already appended by the caller: ``scripts`` is a regular local package and
+# must never resolve to an ambient PYTHONPATH package.
+_REPO_ROOT_TEXT = str(REPO_ROOT)
+sys.path[:] = [entry for entry in sys.path if entry != _REPO_ROOT_TEXT]
+sys.path.insert(0, _REPO_ROOT_TEXT)
 
 from scripts import build_emergency_ir_receiver_bundle as receiver_bundle
 from scripts import emergency_ir_object_storage_manifest as manifest
@@ -73,6 +77,7 @@ ARTIFACT_DESCRIPTOR_FIELDS = frozenset(
 MAX_PUBLISH_PLAN_BYTES = 128 * 1024
 MAX_CREDENTIALS_BYTES = 8 * 1024
 MAX_CONTROL_ARTIFACT_BYTES = 4 * 1024 * 1024
+MAX_BOOTSTRAP_SOURCE_BYTES = 4 * 1024 * 1024
 HASH_CHUNK_BYTES = 1024 * 1024
 AGE_HEADER = b"age-encryption.org/v1\n"
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$", re.ASCII)
@@ -122,6 +127,7 @@ TLS_CA_OVERRIDE_ENVIRONMENT_KEYS = (
 # rendered only from these exact tracked source files in this publisher's own
 # repository; a caller never gets to choose another checkout.
 PUBLISHER_SOURCE_PATHS = (
+    "scripts/__init__.py",
     "scripts/publish_emergency_ir_object_storage.py",
     "scripts/build_emergency_ir_receiver_bundle.py",
     "scripts/emergency_ir_object_storage_manifest.py",
@@ -356,8 +362,8 @@ def _parse_descriptor(value: object, *, expected_kind: str) -> ArtifactDescripto
     )
 
 
-def _run_publisher_git(*arguments: str) -> str:
-    """Run the local Git primitive with caller-controlled Git state removed."""
+def _publisher_git_environment() -> dict[str, str]:
+    """Return a deterministic Git environment for local source checks."""
 
     environment = {
         key: value
@@ -373,13 +379,19 @@ def _run_publisher_git(*arguments: str) -> str:
             "PATH": os.defpath,
         }
     )
+    return environment
+
+
+def _run_publisher_git(*arguments: str) -> str:
+    """Run the local Git primitive with caller-controlled Git state removed."""
+
     try:
         completed = subprocess.run(
             ["/usr/bin/git", "-C", str(REPO_ROOT), *arguments],
             text=True,
             capture_output=True,
             check=False,
-            env=environment,
+            env=_publisher_git_environment(),
             timeout=15,
         )
     except (OSError, subprocess.SubprocessError) as exc:
@@ -389,26 +401,52 @@ def _run_publisher_git(*arguments: str) -> str:
     return completed.stdout
 
 
+def _publisher_head_blob(*, revision: str, relative: str) -> bytes:
+    """Read one exact HEAD blob without consulting index/worktree state."""
+
+    try:
+        completed = subprocess.run(
+            ["/usr/bin/git", "-C", str(REPO_ROOT), "show", f"{revision}:{relative}"],
+            capture_output=True,
+            check=False,
+            env=_publisher_git_environment(),
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise EmergencyPublisherError("publisher source provenance cannot be inspected") from exc
+    if completed.returncode != 0 or not 1 <= len(completed.stdout) <= MAX_BOOTSTRAP_SOURCE_BYTES:
+        _fail("publisher bootstrap source blob is unavailable at its fixed revision")
+    return bytes(completed.stdout)
+
+
 def _fixed_publisher_source_revision() -> str:
-    """Return a clean, tracked revision for every bootstrap code input."""
+    """Return a revision only when each executing bootstrap source equals HEAD.
+
+    ``git status`` alone is insufficient here: a local checkout can mark a
+    changed path ``skip-worktree`` and make status appear clean.  Compare the
+    exact root-owned bytes which the bundle builder will read with each
+    committed HEAD blob instead.  This makes the recorded revision an honest
+    identity of the executable bootstrap source.
+    """
 
     tracked = tuple(line for line in _run_publisher_git(
         "ls-files", "--error-unmatch", "--", *PUBLISHER_SOURCE_PATHS
     ).splitlines() if line)
     if len(tracked) != len(PUBLISHER_SOURCE_PATHS) or set(tracked) != set(PUBLISHER_SOURCE_PATHS):
         _fail("publisher bootstrap source paths are not exactly tracked")
-    changed = _run_publisher_git(
-        "status",
-        "--porcelain=v1",
-        "--untracked-files=all",
-        "--",
-        *PUBLISHER_SOURCE_PATHS,
-    )
-    if changed:
-        _fail("publisher bootstrap source is not clean at its fixed revision")
     revision = _run_publisher_git("rev-parse", "--verify", "HEAD^{commit}").strip()
     if manifest.GIT_REVISION_RE.fullmatch(revision) is None:
         _fail("publisher source revision is unsafe")
+    for relative in PUBLISHER_SOURCE_PATHS:
+        expected = _publisher_head_blob(revision=revision, relative=relative)
+        actual = _read_owner_regular(
+            REPO_ROOT / relative,
+            label=f"publisher bootstrap source {relative}",
+            maximum_bytes=MAX_BOOTSTRAP_SOURCE_BYTES,
+            require_private=False,
+        )
+        if not hmac.compare_digest(actual, expected):
+            _fail("publisher bootstrap source differs from its fixed revision")
     return revision
 
 
@@ -420,6 +458,7 @@ def _bootstrap_provenance(*, signing_public_key_path: Path) -> BootstrapProvenan
     try:
         bundle_sha256, bundle_bytes = receiver_bundle.bundle_digest(
             signing_public_key=signing_public_key_path,
+            source_revision=source_revision,
         )
     except receiver_bundle.ReceiverBundleError as exc:
         raise EmergencyPublisherError("pinned-key receiver bootstrap bundle cannot be preflighted") from exc
@@ -1222,6 +1261,7 @@ def publish(
         receiver_bundle.build_bundle(
             signing_public_key=signing_public_key_path,
             output=outputs.receiver_bundle,
+            source_revision=bootstrap_provenance.publisher_source_revision,
         )
     except receiver_bundle.ReceiverBundleError as exc:
         raise EmergencyPublisherError("pinned-key receiver bootstrap bundle cannot be built") from exc
@@ -1489,6 +1529,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
+        if not sys.flags.isolated or not sys.dont_write_bytecode:
+            raise EmergencyPublisherError(
+                "Emergency Object Storage publisher must be launched with python3 -I -B"
+            )
         result = execute(args)
     except EmergencyPublisherError as exc:
         print(json.dumps({"status": "blocked", "error": str(exc), "error_class": type(exc).__name__}, sort_keys=True))

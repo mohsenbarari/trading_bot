@@ -40,8 +40,9 @@ from urllib.request import ProxyHandler, Request, build_opener
 # below sys.path.  The installed package uses the same layout.  Do not rely on
 # the caller's current directory for a security boundary.
 MODULE_ROOT = Path(__file__).resolve().parents[1]
-if str(MODULE_ROOT) not in sys.path:
-    sys.path.insert(0, str(MODULE_ROOT))
+_MODULE_ROOT_TEXT = str(MODULE_ROOT)
+sys.path[:] = [entry for entry in sys.path if entry != _MODULE_ROOT_TEXT]
+sys.path.insert(0, _MODULE_ROOT_TEXT)
 
 from scripts import emergency_ir_object_storage_manifest as manifest  # noqa: E402
 
@@ -691,6 +692,7 @@ def _release_file_specs(release: Mapping[str, Any]) -> list[dict[str, Any]]:
         "scripts/render_emergency_ir_standalone_env.py",
         "scripts/verify_emergency_ir_standalone.py",
         "scripts/verify_emergency_ir_image_provenance.py",
+        "scripts/__init__.py",
         "scripts/emergency_ir_standalone_activate.py",
     }
     if not required.issubset(seen):

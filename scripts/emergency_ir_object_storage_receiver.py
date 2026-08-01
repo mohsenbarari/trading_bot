@@ -33,6 +33,11 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlsplit
 from urllib.request import HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
 
+MODULE_ROOT = Path(__file__).resolve().parents[1]
+_MODULE_ROOT_TEXT = str(MODULE_ROOT)
+sys.path[:] = [entry for entry in sys.path if entry != _MODULE_ROOT_TEXT]
+sys.path.insert(0, _MODULE_ROOT_TEXT)
+
 from scripts import emergency_ir_object_storage_manifest as manifest
 
 

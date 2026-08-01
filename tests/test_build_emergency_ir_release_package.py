@@ -48,9 +48,28 @@ class BuildEmergencyIrReleasePackageTests(unittest.TestCase):
                 self.assertIn(
                     f"{package.PACKAGE_ROOT}/scripts/emergency_ir_standalone_activate.py", members
                 )
+                self.assertIn(f"{package.PACKAGE_ROOT}/scripts/__init__.py", members)
                 self.assertNotIn(f"{package.PACKAGE_ROOT}/app/main.py", members)
                 release = json.loads(archive.extractfile(f"{package.PACKAGE_ROOT}/RELEASE.json").read())
                 self.assertEqual(release["emergency_patch_sha"], self.head())
+                extracted = directory / "extracted"
+                archive.extractall(extracted)
+            activation = subprocess.run(
+                [
+                    sys.executable,
+                    "-I",
+                    "-B",
+                    str(extracted / package.PACKAGE_ROOT / "scripts/emergency_ir_standalone_activate.py"),
+                    "--help",
+                ],
+                cwd=extracted / package.PACKAGE_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(activation.returncode, 0, activation.stderr)
+            self.assertIn("--stage", activation.stdout)
 
     def test_refuses_non_head_identity_and_existing_output(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-package-") as raw:

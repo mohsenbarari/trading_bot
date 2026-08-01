@@ -17,7 +17,9 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import stat
+import subprocess
 import sys
 import tarfile
 from typing import Any
@@ -26,18 +28,22 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # This tool is deliberately supported as ``python3 scripts/...py`` as well as
 # ``python3 -m scripts...``.  The former puts ``scripts/`` rather than the
 # repository root on sys.path, so establish the bounded local import root
-# before loading the manifest verifier.  The bootstrap never relies on a
-# caller-provided PYTHONPATH.
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+# before loading the manifest verifier.  Put the fixed root first even if a
+# caller appended it already; an ambient PYTHONPATH must never supply a
+# different ``scripts`` package to this bundle builder.
+_REPO_ROOT_TEXT = str(REPO_ROOT)
+sys.path[:] = [entry for entry in sys.path if entry != _REPO_ROOT_TEXT]
+sys.path.insert(0, _REPO_ROOT_TEXT)
 
 from scripts import emergency_ir_object_storage_manifest as manifest
 
 
 MAX_MEMBER_BYTES = 1024 * 1024
 MAX_BUNDLE_BYTES = 4 * 1024 * 1024
+GIT_REVISION_RE = re.compile(r"^[0-9a-f]{40}$", re.ASCII)
 BUNDLE_MEMBERS = (
     ("deploy/emergency-ir/run_object_storage_receiver.py", "run_receiver.py"),
+    ("scripts/__init__.py", "scripts/__init__.py"),
     ("scripts/emergency_ir_object_storage_manifest.py", "scripts/emergency_ir_object_storage_manifest.py"),
     ("scripts/emergency_ir_object_storage_receiver.py", "scripts/emergency_ir_object_storage_receiver.py"),
     # The activator remains in the pinned bootstrap bundle so package tar
@@ -49,6 +55,58 @@ BUNDLE_MEMBERS = (
 
 class ReceiverBundleError(RuntimeError):
     pass
+
+
+def _git_environment() -> dict[str, str]:
+    """Run source lookups without caller-selected Git configuration/state."""
+
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    environment.update(
+        {
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "LC_ALL": "C",
+            "LANG": "C",
+            "PATH": os.defpath,
+        }
+    )
+    return environment
+
+
+def _fixed_source_revision() -> str:
+    try:
+        completed = subprocess.run(
+            ["/usr/bin/git", "-C", str(REPO_ROOT), "rev-parse", "--verify", "HEAD^{commit}"],
+            text=True,
+            capture_output=True,
+            check=False,
+            env=_git_environment(),
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ReceiverBundleError("receiver bundle source revision cannot be inspected") from exc
+    revision = completed.stdout.strip()
+    if completed.returncode != 0 or GIT_REVISION_RE.fullmatch(revision) is None:
+        raise ReceiverBundleError("receiver bundle source revision is unsafe")
+    return revision
+
+
+def _head_blob(*, source_revision: str, relative: str) -> bytes:
+    """Read exact immutable source bytes from the captured commit."""
+
+    try:
+        completed = subprocess.run(
+            ["/usr/bin/git", "-C", str(REPO_ROOT), "show", f"{source_revision}:{relative}"],
+            capture_output=True,
+            check=False,
+            env=_git_environment(),
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ReceiverBundleError("receiver bundle source cannot be inspected") from exc
+    if completed.returncode != 0 or not 1 <= len(completed.stdout) <= MAX_MEMBER_BYTES:
+        raise ReceiverBundleError(f"receiver bundle source is unavailable at its fixed revision: {relative}")
+    return bytes(completed.stdout)
 
 
 def _read_regular(path: Path, *, label: str, maximum_bytes: int) -> bytes:
@@ -127,7 +185,7 @@ def _write_create_only(path: Path, payload: bytes) -> None:
             os.close(descriptor)
 
 
-def render_bundle(*, signing_public_key: Path) -> bytes:
+def render_bundle(*, signing_public_key: Path, source_revision: str | None = None) -> bytes:
     """Return the deterministic receiver bundle bytes without writing an output.
 
     The publisher uses this in its no-network planning phase to bind the
@@ -140,15 +198,14 @@ def render_bundle(*, signing_public_key: Path) -> bytes:
         manifest.load_public_key(signing_public_key)
     except Exception as exc:
         raise ReceiverBundleError("Emergency signing public key is unavailable or invalid") from exc
+    revision = source_revision if source_revision is not None else _fixed_source_revision()
+    if GIT_REVISION_RE.fullmatch(revision) is None:
+        raise ReceiverBundleError("receiver bundle source revision is unsafe")
+    # The publisher records this exact revision in the signed provenance.
+    # Never reread mutable worktree paths here: a concurrent checkout cannot
+    # make a bundle with one commit's bytes and another commit's identity.
     files: list[tuple[str, bytes]] = [
-        (
-            target,
-            _read_regular(
-                REPO_ROOT / source,
-                label=f"receiver bundle {source}",
-                maximum_bytes=MAX_MEMBER_BYTES,
-            ),
-        )
+        (target, _head_blob(source_revision=revision, relative=source))
         for source, target in BUNDLE_MEMBERS
     ]
     files.append(("signing-public.key", _read_regular(signing_public_key, label="Emergency signing public key", maximum_bytes=1024)))
@@ -171,17 +228,21 @@ def render_bundle(*, signing_public_key: Path) -> bytes:
     return payload
 
 
-def bundle_digest(*, signing_public_key: Path) -> tuple[str, int]:
+def bundle_digest(
+    *, signing_public_key: Path, source_revision: str | None = None
+) -> tuple[str, int]:
     """Return the exact digest/size of the bundle that would be created."""
 
-    payload = render_bundle(signing_public_key=signing_public_key)
+    payload = render_bundle(signing_public_key=signing_public_key, source_revision=source_revision)
     return hashlib.sha256(payload).hexdigest(), len(payload)
 
 
-def build_bundle(*, signing_public_key: Path, output: Path) -> tuple[str, int]:
+def build_bundle(
+    *, signing_public_key: Path, output: Path, source_revision: str | None = None
+) -> tuple[str, int]:
     """Build one deterministic gzip tar and return its ciphertext-free digest."""
 
-    payload = render_bundle(signing_public_key=signing_public_key)
+    payload = render_bundle(signing_public_key=signing_public_key, source_revision=source_revision)
     _write_create_only(output, payload)
     return hashlib.sha256(payload).hexdigest(), len(payload)
 
@@ -192,6 +253,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
+        if not sys.flags.isolated or not sys.dont_write_bytecode:
+            raise ReceiverBundleError(
+                "Emergency receiver bundle builder must be launched with python3 -I -B"
+            )
         digest, size = build_bundle(
             signing_public_key=args.signing_public_key, output=args.output
         )
