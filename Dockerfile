@@ -1,4 +1,14 @@
 FROM python:3.11-slim-bullseye
+# These provenance inputs are deliberately optional for ordinary local/CI
+# builds.  A Release-0 Fenced-FI candidate, however, must supply all three:
+# preflight refuses images whose labels do not exactly bind its signed source
+# capability evidence.
+ARG TERM_FENCED_RELEASE_SHA
+ARG TERM_FENCED_RELEASE_TREE_SHA
+ARG TERM_FENCED_APPLICATION_EVIDENCE_SHA256
+LABEL org.opencontainers.image.revision="${TERM_FENCED_RELEASE_SHA}" \
+      org.goldtrade.source-tree="${TERM_FENCED_RELEASE_TREE_SHA}" \
+      org.goldtrade.term-fence-evidence-sha256="${TERM_FENCED_APPLICATION_EVIDENCE_SHA256}"
 RUN apt-get -o Acquire::Retries=5 update \
     && apt-get -o Acquire::Retries=5 install -y --no-install-recommends libpq-dev build-essential libmagic1 \
     && rm -rf /var/lib/apt/lists/*

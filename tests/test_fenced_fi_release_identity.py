@@ -27,8 +27,14 @@ class FencedFiReleaseIdentityTests(TestCase):
     def _signed_document(self, value: dict[str, object]) -> bytes:
         unsigned = dict(value)
         unsigned.pop("signature_base64", None)
+        schema = unsigned.get("schema")
+        domain = (
+            b"gold-trade-wa-fi-fenced-release-identity-v2\x00"
+            if schema == subject.FENCED_FI_RELEASE_IDENTITY_SCHEMA
+            else b"gold-trade-wa-fi-fenced-release-identity-v1\x00"
+        )
         signature = self.private.sign(
-            b"gold-trade-wa-fi-fenced-release-identity-v1\x00"
+            domain
             + subject.canonical_fenced_fi_release_identity_json_bytes(unsigned)
         )
         signed = dict(unsigned)
@@ -46,6 +52,7 @@ class FencedFiReleaseIdentityTests(TestCase):
             "control_release_root": "/srv/trading-bot-three-site/control/" + "c" * 40,
             "compose_relative_path": "deploy/production/docker-compose.webapp-fi-writer-release-v1.yml",
             "compose_sha256": "e" * 64,
+            "term_fenced_application_evidence_sha256": "9" * 64,
             "services": {
                 "app": {"image_repo_digest": "registry.invalid/app@sha256:" + "f" * 64, "image_id": "sha256:" + "1" * 64},
                 "bot": {"image_repo_digest": "registry.invalid/bot@sha256:" + "2" * 64, "image_id": "sha256:" + "3" * 64},
@@ -59,12 +66,15 @@ class FencedFiReleaseIdentityTests(TestCase):
         value = subject.verify_fenced_fi_release_identity(self._document(), authority=self.authority)
         self.assertEqual("a" * 40, value.release_sha)
         self.assertEqual("registry.invalid/app@sha256:" + "f" * 64, value.app_image_repo_digest)
+        self.assertEqual(subject.FENCED_FI_RELEASE_IDENTITY_SCHEMA, value.schema)
+        self.assertEqual("9" * 64, value.term_fenced_application_evidence_sha256)
         self.assertFalse(value.writer_authorized)
         self.assertFalse(value.promotion_authorized)
         self.assertFalse(value.execution_authorized)
         self.assertFalse(value.full_matrix_authorized)
         self.assertFalse(value.full_matrix_executed)
         self.assertIs(value, subject.require_verified_fenced_fi_release_identity(value))
+        self.assertIs(value, subject.require_term_fenced_fi_release_candidate(value))
 
     def test_verified_identity_copy_and_mutation_are_rejected(self) -> None:
         value = subject.verify_fenced_fi_release_identity(self._document(), authority=self.authority)
@@ -114,6 +124,7 @@ class FencedFiReleaseIdentityTests(TestCase):
             "control_release_root": "/srv/trading-bot-three-site/control/" + "c" * 40,
             "compose_relative_path": "deploy/production/docker-compose.webapp-fi-writer-release-v1.yml",
             "compose_sha256": "e" * 64,
+            "term_fenced_application_evidence_sha256": "9" * 64,
             "services": {
                 "app": {"image_repo_digest": "registry.invalid/app@sha256:" + "f" * 64, "image_id": "sha256:" + "1" * 64},
                 "bot": {"image_repo_digest": "registry.invalid/bot@sha256:" + "2" * 64, "image_id": "sha256:" + "3" * 64},
@@ -124,7 +135,7 @@ class FencedFiReleaseIdentityTests(TestCase):
         forged = dict(unsigned)
         forged["signature_base64"] = base64.b64encode(
             other_private.sign(
-                b"gold-trade-wa-fi-fenced-release-identity-v1\x00"
+                b"gold-trade-wa-fi-fenced-release-identity-v2\x00"
                 + subject.canonical_fenced_fi_release_identity_json_bytes(unsigned)
             )
         ).decode("ascii")
@@ -143,6 +154,7 @@ class FencedFiReleaseIdentityTests(TestCase):
             "control_release_tree_sha": "d" * 40,
             "control_release_root": "/srv/trading-bot-three-site/control/" + "c" * 40,
             "compose_relative_path": "deploy/production/docker-compose.webapp-fi-writer-release-v1.yml",
+            "term_fenced_application_evidence_sha256": "9" * 64,
             "services": {
                 "app": {"image_repo_digest": "registry.invalid/app@sha256:" + "f" * 64, "image_id": "sha256:" + "1" * 64},
                 "bot": {"image_repo_digest": "registry.invalid/bot@sha256:" + "2" * 64, "image_id": "sha256:" + "3" * 64},
@@ -177,6 +189,31 @@ class FencedFiReleaseIdentityTests(TestCase):
     def test_deep_json_is_a_typed_refusal_not_a_recursion_traceback(self) -> None:
         document = b'{"schema":' + (b"[" * 1200) + b"0" + (b"]" * 1200) + b"}"
         with self.assertRaisesRegex(
-            subject.FencedFiReleaseIdentityError, "DOCUMENT_INVALID|FIELDS_INVALID"
+            subject.FencedFiReleaseIdentityError, "DOCUMENT_INVALID|FIELDS_INVALID|SCHEMA_INVALID"
         ):
             subject.verify_fenced_fi_release_identity(document, authority=self.authority)
+
+    def test_legacy_v1_remains_read_only_parseable_but_cannot_be_a_candidate(self) -> None:
+        legacy = {
+            "schema": subject.FENCED_FI_RELEASE_IDENTITY_LEGACY_SCHEMA,
+            "release_sha": "a" * 40,
+            "release_tree_sha": "b" * 40,
+            "application_release_root": "/srv/releases/" + "a" * 40,
+            "control_release_sha": "c" * 40,
+            "control_release_tree_sha": "d" * 40,
+            "control_release_root": "/srv/control/" + "c" * 40,
+            "compose_relative_path": "deploy/production/docker-compose.webapp-fi-writer-release-v1.yml",
+            "compose_sha256": "e" * 64,
+            "services": {
+                "app": {"image_repo_digest": "registry.invalid/app@sha256:" + "f" * 64, "image_id": "sha256:" + "1" * 64},
+                "bot": {"image_repo_digest": "registry.invalid/bot@sha256:" + "2" * 64, "image_id": "sha256:" + "3" * 64},
+            },
+            "signer_key_id": self.authority.key_id,
+        }
+        parsed = subject.verify_fenced_fi_release_identity(
+            self._signed_document(legacy), authority=self.authority
+        )
+        self.assertEqual(subject.FENCED_FI_RELEASE_IDENTITY_LEGACY_SCHEMA, parsed.schema)
+        self.assertIsNone(parsed.term_fenced_application_evidence_sha256)
+        with self.assertRaisesRegex(subject.FencedFiReleaseIdentityError, "TERM_FENCED_CANDIDATE_REQUIRED"):
+            subject.require_term_fenced_fi_release_candidate(parsed)

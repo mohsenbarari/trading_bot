@@ -35,6 +35,7 @@ class FencedFiReleaseIdentityRuntimeBindingTests(TestCase):
             "control_release_root": "/srv/control/" + "c" * 40,
             "compose_relative_path": "deploy/production/docker-compose.webapp-fi-writer-release-v1.yml",
             "compose_sha256": "e" * 64,
+            "term_fenced_application_evidence_sha256": "9" * 64,
             "services": {
                 "app": {
                     "image_repo_digest": "registry.invalid/app@sha256:" + "f" * 64,
@@ -48,7 +49,7 @@ class FencedFiReleaseIdentityRuntimeBindingTests(TestCase):
             "signer_key_id": authority.key_id,
         }
         signature = private.sign(
-            b"gold-trade-wa-fi-fenced-release-identity-v1\x00"
+            b"gold-trade-wa-fi-fenced-release-identity-v2\x00"
             + identity_subject.canonical_fenced_fi_release_identity_json_bytes(unsigned)
         )
         signed = dict(unsigned)
@@ -65,6 +66,9 @@ class FencedFiReleaseIdentityRuntimeBindingTests(TestCase):
             app_image_id=self.identity.app_image_id,
             bot_image_repo_digest=self.identity.bot_image_repo_digest,
             bot_image_id=self.identity.bot_image_id,
+            term_fenced_application_evidence_sha256=(
+                self.identity.term_fenced_application_evidence_sha256
+            ),
         )
 
     def test_exact_observations_bind_but_grant_no_authority(self) -> None:
@@ -93,6 +97,7 @@ class FencedFiReleaseIdentityRuntimeBindingTests(TestCase):
             ("app_image_id", "sha256:" + "a" * 64, "APP_IMAGE_ID_MISMATCH"),
             ("bot_image_repo_digest", "registry.invalid/bot@sha256:" + "a" * 64, "BOT_REPO_DIGEST_MISMATCH"),
             ("bot_image_id", "sha256:" + "a" * 64, "BOT_IMAGE_ID_MISMATCH"),
+            ("term_fenced_application_evidence_sha256", "0" * 64, "TERM_FENCED_EVIDENCE_MISMATCH"),
         )
         for field_name, changed, code in cases:
             with self.subTest(field_name=field_name):
@@ -143,6 +148,9 @@ class FencedFiReleaseIdentityRuntimeBindingTests(TestCase):
             app_image_id=binding.app_image_id,
             bot_image_repo_digest=binding.bot_image_repo_digest,
             bot_image_id=binding.bot_image_id,
+            term_fenced_application_evidence_sha256=(
+                binding.term_fenced_application_evidence_sha256
+            ),
         )
         for value in (forged,):
             with self.assertRaisesRegex(

@@ -275,10 +275,12 @@ class WriterGuardPreflightTests(unittest.TestCase):
                 encoding="utf-8"
             )
         )
-        self.assertEqual(payload["schema"], "fenced-fi-writer-preflight-v1")
+        self.assertEqual(payload["schema"], "fenced-fi-writer-preflight-v2")
         self.assertEqual(
-            payload["application_release_root"].rsplit("/", 1)[-1], RELEASE_SHA
+            payload["application_release_root"].rsplit("/", 1)[-1],
+            "REPLACE_WITH_NEW_TERM_FENCED_APPLICATION_GIT_SHA",
         )
+        self.assertIn("term_fenced_application_evidence", payload)
         self.assertIn("REPLACE_WITH_64_HEX", payload["runtime"]["services"][0]["image_id"])
         self.assertIn("REPLACE_WITH_REVIEWED", payload["runtime"]["services"][0]["image_ref"])
         self.assertIn(

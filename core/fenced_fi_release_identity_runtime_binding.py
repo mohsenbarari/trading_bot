@@ -62,6 +62,7 @@ class FencedFiReleaseIdentityRuntimeObservations:
     app_image_id: str
     bot_image_repo_digest: str
     bot_image_id: str
+    term_fenced_application_evidence_sha256: str
 
 
 @dataclass(frozen=True, eq=False)
@@ -80,6 +81,7 @@ class FencedFiReleaseIdentityRuntimeBinding:
     app_image_id: str
     bot_image_repo_digest: str
     bot_image_id: str
+    term_fenced_application_evidence_sha256: str
     writer_authorized: bool = False
     promotion_authorized: bool = False
     deployment_authorized: bool = False
@@ -107,7 +109,7 @@ _STATES: WeakKeyDictionary[
 
 def _identity_value(value: object) -> _identity.FencedFiReleaseIdentity:
     try:
-        value = _identity.require_verified_fenced_fi_release_identity(value)
+        value = _identity.require_term_fenced_fi_release_candidate(value)
     except _identity.FencedFiReleaseIdentityError as exc:
         _fail("FENCED_FI_RELEASE_IDENTITY_RUNTIME_BINDING_IDENTITY_INVALID")
     # The upstream verifier already validates every individual representation.
@@ -140,6 +142,9 @@ def _binding_material(
         "app_image_id": observations.app_image_id,
         "bot_image_repo_digest": observations.bot_image_repo_digest,
         "bot_image_id": observations.bot_image_id,
+        "term_fenced_application_evidence_sha256": (
+            observations.term_fenced_application_evidence_sha256
+        ),
     }
 
 
@@ -155,6 +160,7 @@ def _observations(value: object) -> FencedFiReleaseIdentityRuntimeObservations:
         "app_image_id",
         "bot_image_repo_digest",
         "bot_image_id",
+        "term_fenced_application_evidence_sha256",
     ):
         if type(getattr(value, field_name)) is not str:
             _fail("FENCED_FI_RELEASE_IDENTITY_RUNTIME_BINDING_OBSERVATIONS_INVALID")
@@ -219,6 +225,11 @@ def bind_fenced_fi_release_identity_runtime(
         verified.bot_image_id,
         code="FENCED_FI_RELEASE_IDENTITY_RUNTIME_BINDING_BOT_IMAGE_ID_MISMATCH",
     )
+    _equal(
+        observed.term_fenced_application_evidence_sha256,
+        verified.term_fenced_application_evidence_sha256,
+        code="FENCED_FI_RELEASE_IDENTITY_RUNTIME_BINDING_TERM_FENCED_EVIDENCE_MISMATCH",
+    )
     binding_material = _binding_material(verified, observed)
     binding = FencedFiReleaseIdentityRuntimeBinding(
         schema=FENCED_FI_RELEASE_IDENTITY_RUNTIME_BINDING_SCHEMA,
@@ -235,6 +246,9 @@ def bind_fenced_fi_release_identity_runtime(
         app_image_id=observed.app_image_id,
         bot_image_repo_digest=observed.bot_image_repo_digest,
         bot_image_id=observed.bot_image_id,
+        term_fenced_application_evidence_sha256=(
+            observed.term_fenced_application_evidence_sha256
+        ),
     )
     object.__setattr__(binding, "_capability", _CAPABILITY)
     _STATES[binding] = (verified, observed)
@@ -262,7 +276,7 @@ def require_bound_fenced_fi_release_identity_runtime(
         _fail("FENCED_FI_RELEASE_IDENTITY_RUNTIME_BINDING_INVALID")
     identity, observations = _STATES[value]
     try:
-        verified = _identity.require_verified_fenced_fi_release_identity(identity)
+        verified = _identity.require_term_fenced_fi_release_candidate(identity)
     except _identity.FencedFiReleaseIdentityError:
         _fail("FENCED_FI_RELEASE_IDENTITY_RUNTIME_BINDING_INVALID")
     expected = _binding_material(verified, observations)
@@ -276,6 +290,8 @@ def require_bound_fenced_fi_release_identity_runtime(
         or value.app_image_id != expected["app_image_id"]
         or value.bot_image_repo_digest != expected["bot_image_repo_digest"]
         or value.bot_image_id != expected["bot_image_id"]
+        or value.term_fenced_application_evidence_sha256
+        != expected["term_fenced_application_evidence_sha256"]
         or value.binding_sha256
         != hashlib.sha256(
             _identity.canonical_fenced_fi_release_identity_json_bytes(expected)

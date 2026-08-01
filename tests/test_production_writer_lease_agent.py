@@ -22,7 +22,23 @@ from scripts import production_writer_lease_agent as agent
 
 
 RELEASE_SHA = "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5"
+FENCED_RELEASE_SHA = "f" * 40
+FENCED_RELEASE_TREE_SHA = "e" * 40
+FENCED_EVIDENCE_SHA256 = "d" * 64
 APP_IMAGE_ID = "sha256:" + "c" * 64
+
+
+def _fenced_candidate(config: agent.AgentConfig) -> agent.FencedFiTermFencedRuntimeClaim:
+    if config.runtime.env_file is None:
+        raise AssertionError("fenced fixture lacks a runtime environment")
+    return agent.FencedFiTermFencedRuntimeClaim(
+        release_sha=FENCED_RELEASE_SHA,
+        release_tree_sha=FENCED_RELEASE_TREE_SHA,
+        term_fenced_application_evidence_sha256=FENCED_EVIDENCE_SHA256,
+        application_release_root=config.runtime.env_file.parent / "releases" / FENCED_RELEASE_SHA,
+        app_image_ref="trading-bot:term-fenced-v2",
+        bot_image_ref="trading-bot:term-fenced-v2",
+    )
 
 
 def _write_private(path: Path, value: str) -> None:
@@ -202,11 +218,13 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
         promotion_env = directory / "promotion.env"
         config_path = directory / "agent.json"
         provenance_receipt = directory / "release-provenance.json"
-        application_root = directory / "releases" / RELEASE_SHA
-        _write_private(secret, "s" * 32)
-        _write_private(public_key, base64.b64encode(b"p" * 32).decode("ascii"))
         is_ir_writer = mode == "writer" and site == "webapp_ir"
         is_fenced_fi_writer = mode == "fenced_fi_writer" and site == "webapp_fi"
+        application_root = directory / "releases" / (
+            FENCED_RELEASE_SHA if is_fenced_fi_writer else RELEASE_SHA
+        )
+        _write_private(secret, "s" * 32)
+        _write_private(public_key, base64.b64encode(b"p" * 32).decode("ascii"))
         if is_ir_writer:
             application_root.mkdir(parents=True)
             application_root.chmod(0o755)
@@ -240,9 +258,9 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                 fenced_env,
                 "\n".join(
                     (
-                        f"RELEASE_SHA={RELEASE_SHA}",
-                        "WA_FI_WRITER_APP_IMAGE=trading-bot:2c08",
-                        "WA_FI_WRITER_BOT_IMAGE=trading-bot:2c08",
+                        f"RELEASE_SHA={FENCED_RELEASE_SHA}",
+                        "WA_FI_WRITER_APP_IMAGE=trading-bot:term-fenced-v2",
+                        "WA_FI_WRITER_BOT_IMAGE=trading-bot:term-fenced-v2",
                         f"WA_FI_WRITER_RUNTIME_ENV_FILE={fenced_env}",
                         f"WA_FI_WRITER_APPLICATION_RELEASE_ROOT={application_root}",
                         f"WA_FI_WRITER_TERM_PARENT_DIRECTORY={directory / 'writer-terms'}",
@@ -443,7 +461,11 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             config = self._config(Path(raw), site="webapp_fi", mode="fenced_fi_writer")
             with mock.patch.object(agent, "_run_runtime_command", return_value="") as run:
-                agent._compose(config, action="start")
+                agent._compose(
+                    config,
+                    action="start",
+                    fenced_candidate=_fenced_candidate(config),
+                )
 
             command = run.call_args.args[0]
             self.assertEqual(
@@ -573,8 +595,13 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
             config.lease_file.parent.mkdir(mode=0o700, exist_ok=True)
             proof = _proof(site="webapp_fi", epoch=7)
             refreshed_proof = _proof(site="webapp_fi", epoch=7)
+            candidate = _fenced_candidate(config)
             with (
-                mock.patch.object(agent, "_run_fenced_fi_cutover_preflight") as preflight,
+                mock.patch.object(
+                    agent,
+                    "_run_fenced_fi_cutover_preflight",
+                    return_value=candidate,
+                ) as preflight,
                 mock.patch.object(agent, "_run_fenced_fi_guard_start_preflight") as guard_preflight,
                 mock.patch.object(agent, "_assert_fenced_fi_legacy_scope_is_stopped") as legacy,
                 mock.patch.object(agent, "_assert_fenced_fi_runtime_scope_is_absent") as clean_scope,
@@ -611,8 +638,16 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                 proof=proof,
                 operation_id="93877f06-2671-4d78-b1f8-2c79bf759755",
             )
-            start.assert_called_once_with(config, fenced_start_proof=refreshed_proof)
-            receipt.assert_called_once_with(config, proof=refreshed_proof)
+            start.assert_called_once_with(
+                config,
+                fenced_start_proof=refreshed_proof,
+                fenced_candidate=candidate,
+            )
+            receipt.assert_called_once_with(
+                config,
+                proof=refreshed_proof,
+                candidate=candidate,
+            )
             self.assertEqual(result["runtime_receipt_sha256"], "d" * 64)
 
     def test_fenced_fi_cutover_renews_after_a_slow_post_acquire_preflight_before_start(self):
@@ -631,12 +666,13 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
             stale_proof["issued_at"] = (datetime.now(timezone.utc) - timedelta(seconds=61)).isoformat()
             stale_proof["expires_at"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
             refreshed_proof = _proof(site="webapp_fi", epoch=7)
+            candidate = _fenced_candidate(config)
             events: list[str] = []
             with (
                 mock.patch.object(
                     agent,
                     "_run_fenced_fi_cutover_preflight",
-                    side_effect=lambda _config: events.append("preflight"),
+                    side_effect=lambda _config: (events.append("preflight"), candidate)[1],
                 ),
                 mock.patch.object(
                     agent,
@@ -696,7 +732,11 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                     "guard-start",
                 ],
             )
-            start.assert_called_once_with(config, fenced_start_proof=refreshed_proof)
+            start.assert_called_once_with(
+                config,
+                fenced_start_proof=refreshed_proof,
+                fenced_candidate=candidate,
+            )
 
     def test_fenced_fi_start_refuses_a_term_without_the_pre_start_dispatch_budget(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -724,7 +764,11 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                     agent.ProductionWriterLeaseAgentError,
                     "pre-start dispatch safety budget",
                 ):
-                    agent._start_scoped_runtime(config, fenced_start_proof=proof)
+                    agent._start_scoped_runtime(
+                        config,
+                        fenced_start_proof=proof,
+                        fenced_candidate=_fenced_candidate(config),
+                    )
 
             compose.assert_not_called()
             stop.assert_called_once_with(config)
@@ -801,12 +845,13 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
             config = self._config(Path(raw), site="webapp_fi", mode="fenced_fi_writer")
             config.lease_file.parent.mkdir(mode=0o700, exist_ok=True)
             proof = _proof(site="webapp_fi", epoch=7)
+            candidate = _fenced_candidate(config)
             with (
                 mock.patch.object(
                     agent,
                     "_run_fenced_fi_cutover_preflight",
                     side_effect=[
-                        None,
+                        candidate,
                         agent.ProductionWriterLeaseAgentError(
                             "runtime environment hash changed"
                         ),
@@ -844,8 +889,13 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
             config.lease_file.parent.mkdir(mode=0o700, exist_ok=True)
             proof = _proof(site="webapp_fi", epoch=7)
             refreshed_proof = _proof(site="webapp_fi", epoch=7)
+            candidate = _fenced_candidate(config)
             with (
-                mock.patch.object(agent, "_run_fenced_fi_cutover_preflight"),
+                mock.patch.object(
+                    agent,
+                    "_run_fenced_fi_cutover_preflight",
+                    return_value=candidate,
+                ),
                 mock.patch.object(agent, "_assert_fenced_fi_legacy_scope_is_stopped"),
                 mock.patch.object(agent, "_assert_fenced_fi_runtime_scope_is_absent"),
                 mock.patch.object(agent, "_acquire_proof", return_value=proof),
@@ -879,7 +929,11 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                         operation_id="93877f06-2671-4d78-b1f8-2c79bf759755",
                     )
 
-            start.assert_called_once_with(config, fenced_start_proof=refreshed_proof)
+            start.assert_called_once_with(
+                config,
+                fenced_start_proof=refreshed_proof,
+                fenced_candidate=candidate,
+            )
             stop.assert_called_once_with(config)
             drain.assert_called_once_with(
                 config,
@@ -989,7 +1043,7 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
             app = {
                 "container_id": "a" * 64,
                 "container_name": agent.WA_FI_FENCED_CONTAINER_NAMES["app"],
-                "image": "trading-bot:2c08",
+                "image": "trading-bot:term-fenced-v2",
                 "image_id": "sha256:" + "a" * 64,
                 "labels_sha256": "b" * 64,
                 "restart_policy": "no",
@@ -997,7 +1051,7 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
             bot = {
                 "container_id": "c" * 64,
                 "container_name": agent.WA_FI_FENCED_CONTAINER_NAMES["bot"],
-                "image": "trading-bot:2c08",
+                "image": "trading-bot:term-fenced-v2",
                 "image_id": "sha256:" + "c" * 64,
                 "labels_sha256": "d" * 64,
                 "restart_policy": "no",
@@ -1010,11 +1064,18 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                 receipt_path, receipt_sha256 = agent._write_fenced_fi_runtime_receipt(
                     config,
                     proof=_proof(site="webapp_fi", epoch=8),
+                    candidate=_fenced_candidate(config),
                 )
 
             payload = json.loads(receipt_path.read_text(encoding="utf-8"))
             self.assertEqual(payload["schema"], agent.WA_FI_FENCED_RUNTIME_RECEIPT_SCHEMA)
             self.assertEqual(payload["writer_epoch"], 8)
+            self.assertEqual(payload["release_sha"], FENCED_RELEASE_SHA)
+            self.assertEqual(payload["release_tree_sha"], FENCED_RELEASE_TREE_SHA)
+            self.assertEqual(
+                payload["term_fenced_application_evidence_sha256"],
+                FENCED_EVIDENCE_SHA256,
+            )
             self.assertEqual(payload["containers"], {"app": app, "bot": bot})
             self.assertEqual(payload["runtime_receipt_sha256"], receipt_sha256)
             self.assertEqual(oct(receipt_path.stat().st_mode & 0o777), "0o600")

@@ -77,6 +77,11 @@ WA_IR_PROMOTION_HEALTH_TIMEOUT_SECONDS = 20
 WA_IR_PROMOTION_HEALTH_POLL_SECONDS = 2
 WA_IR_PROMOTION_LOCK_TIMEOUT_SECONDS = 30
 WA_IR_APPLICATION_RELEASE_SHA = "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5"
+# This SHA is the historical FI application tree.  It remains a hard block:
+# the same Compose project may stage only a *new* signed v2 candidate whose
+# source-capability evidence, image labels, and Git tree have passed the
+# independent preflight.  Never make this a configurable compatibility value.
+WA_FI_LEGACY_APPLICATION_RELEASE_SHA = WA_IR_APPLICATION_RELEASE_SHA
 WA_IR_PROMOTED_COMPOSE_FILE = (
     REPO_ROOT / "deploy/production/docker-compose.webapp-ir-promoted-2c08.yml"
 ).resolve()
@@ -99,12 +104,14 @@ WA_FI_FENCED_APP_LOCAL_PORT = 18001
 WA_FI_FENCED_WRITER_COMPOSE_FILE = (
     REPO_ROOT / "deploy/production/docker-compose.webapp-fi-writer-2c08.yml"
 ).resolve()
-WA_FI_FENCED_RUNTIME_RECEIPT_SCHEMA = "fenced-fi-writer-runtime-receipt-v1"
+WA_FI_FENCED_RUNTIME_RECEIPT_SCHEMA = "fenced-fi-writer-runtime-receipt-v2"
 WA_FI_FENCED_RUNTIME_RECEIPT_NAME = "fenced-fi-runtime-receipt.json"
 WA_FI_FENCED_RUNTIME_RECEIPT_FIELDS = frozenset(
     {
         "schema",
         "release_sha",
+        "release_tree_sha",
+        "term_fenced_application_evidence_sha256",
         "compose_project",
         "profile",
         "writer_epoch",
@@ -185,6 +192,25 @@ class RuntimeConfig:
     env_file: Path | None
     selection_env_file: Path | None
     services: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class FencedFiTermFencedRuntimeClaim:
+    """Non-authorizing v2 claim returned by the independent preflight.
+
+    This value is process-local and deliberately only carries equality inputs
+    needed to re-check mutable Compose interpolation immediately before
+    ``compose up``.  The signed descriptor, evidence and image labels are
+    verified by the independent preflight; this class cannot replace any of
+    those verifications or grant a Writer Witness term.
+    """
+
+    release_sha: str
+    release_tree_sha: str
+    term_fenced_application_evidence_sha256: str
+    application_release_root: Path
+    app_image_ref: str
+    bot_image_ref: str
 
 
 @dataclass(frozen=True)
@@ -488,7 +514,11 @@ def _verify_ir_selection_environment(config: AgentConfig) -> None:
         raise ProductionWriterLeaseAgentError("WA-IR runtime selection environment is not an exact generated selector")
 
 
-def _verify_fenced_fi_runtime_environment(config: AgentConfig) -> dict[str, str]:
+def _verify_fenced_fi_runtime_environment(
+    config: AgentConfig,
+    *,
+    candidate: FencedFiTermFencedRuntimeClaim | None = None,
+) -> dict[str, str]:
     """Reject a mutable FI compose input before Docker can interpret it.
 
     This mode has no release-provenance receipt yet, but it still must not
@@ -532,8 +562,13 @@ def _verify_fenced_fi_runtime_environment(config: AgentConfig) -> dict[str, str]
         values[key] = value
     if set(values) != required:
         raise ProductionWriterLeaseAgentError("fenced WebApp-FI runtime environment is incomplete")
-    if values["RELEASE_SHA"] != WA_IR_APPLICATION_RELEASE_SHA:
-        raise ProductionWriterLeaseAgentError("fenced WebApp-FI runtime release SHA is not the fixed legacy 2c08 release")
+    release_sha = values["RELEASE_SHA"]
+    if not re.fullmatch(r"[0-9a-f]{40}", release_sha):
+        raise ProductionWriterLeaseAgentError("fenced WebApp-FI runtime release SHA is invalid")
+    if release_sha == WA_FI_LEGACY_APPLICATION_RELEASE_SHA:
+        raise ProductionWriterLeaseAgentError(
+            "fixed 2c08 application release is permanently blocked from fenced WebApp-FI startup"
+        )
     if values["WA_FI_WRITER_RUNTIME_ENV_FILE"] != str(config.runtime.env_file):
         raise ProductionWriterLeaseAgentError("fenced WebApp-FI runtime environment self-reference is invalid")
     for field in ("WA_FI_WRITER_APP_IMAGE", "WA_FI_WRITER_BOT_IMAGE"):
@@ -543,8 +578,10 @@ def _verify_fenced_fi_runtime_environment(config: AgentConfig) -> dict[str, str]
         values["WA_FI_WRITER_APPLICATION_RELEASE_ROOT"],
         label="fenced WebApp-FI application release root",
     )
-    if release_root.name != WA_IR_APPLICATION_RELEASE_SHA:
-        raise ProductionWriterLeaseAgentError("fenced WebApp-FI application release root is not the fixed legacy 2c08 release")
+    if release_root.name != release_sha:
+        raise ProductionWriterLeaseAgentError(
+            "fenced WebApp-FI application release root does not match the runtime release SHA"
+        )
     term_parent_directory = _absolute(
         values["WA_FI_WRITER_TERM_PARENT_DIRECTORY"],
         label="fenced WebApp-FI writer term parent directory",
@@ -581,6 +618,15 @@ def _verify_fenced_fi_runtime_environment(config: AgentConfig) -> dict[str, str]
     ):
         raise ProductionWriterLeaseAgentError(
             "fenced WebApp-FI application term timing does not match the Witness timing"
+        )
+    if candidate is not None and (
+        release_sha != candidate.release_sha
+        or release_root != candidate.application_release_root
+        or values["WA_FI_WRITER_APP_IMAGE"] != candidate.app_image_ref
+        or values["WA_FI_WRITER_BOT_IMAGE"] != candidate.bot_image_ref
+    ):
+        raise ProductionWriterLeaseAgentError(
+            "fenced WebApp-FI runtime environment no longer matches the preflighted term-fenced candidate"
         )
     return values
 
@@ -1418,6 +1464,7 @@ def _compose_prefix(
     *,
     verify_configured_app_image: bool = True,
     verify_fenced_fi_start_inputs: bool = True,
+    fenced_candidate: FencedFiTermFencedRuntimeClaim | None = None,
 ) -> list[str]:
     command = ["/usr/bin/docker", "compose"]
     if config.mode == "writer" and config.site == "webapp_ir":
@@ -1444,7 +1491,11 @@ def _compose_prefix(
         # to stop the fixed app/bot names after this mutable input is missing
         # or malformed.
         if verify_fenced_fi_start_inputs:
-            _verify_fenced_fi_runtime_environment(config)
+            if fenced_candidate is None:
+                raise ProductionWriterLeaseAgentError(
+                    "fenced WebApp-FI startup requires a fresh term-fenced preflight claim"
+                )
+            _verify_fenced_fi_runtime_environment(config, candidate=fenced_candidate)
         command.extend(
             [
                 "--project-name",
@@ -1463,14 +1514,28 @@ def _compose_prefix(
 
 def _compose_capture(config: AgentConfig, *, arguments: list[str], label: str, timeout: int = 30) -> str:
     return _run_runtime_command(
-        [*_compose_prefix(config), *arguments],
+        [
+            *_compose_prefix(
+                config,
+                # Read-only `compose ps` calls do not create a runtime.  They
+                # must remain available to capture/verify a post-start receipt
+                # but cannot be used to bypass the start-only candidate gate.
+                verify_fenced_fi_start_inputs=False,
+            ),
+            *arguments,
+        ],
         label=label,
         timeout=timeout,
         capture_stdout=True,
     )
 
 
-def _compose(config: AgentConfig, *, action: str) -> None:
+def _compose(
+    config: AgentConfig,
+    *,
+    action: str,
+    fenced_candidate: FencedFiTermFencedRuntimeClaim | None = None,
+) -> None:
     if action not in {"start", "stop"}:
         raise ProductionWriterLeaseAgentError("managed runtime action is invalid")
     is_fenced_fi = _is_fenced_fi_writer(config)
@@ -1481,6 +1546,7 @@ def _compose(config: AgentConfig, *, action: str) -> None:
         config,
         verify_configured_app_image=action == "start",
         verify_fenced_fi_start_inputs=action == "start",
+        fenced_candidate=fenced_candidate,
     )
     is_ir_promotion = config.mode == "writer" and config.site == "webapp_ir"
     if action == "start":
@@ -1979,6 +2045,7 @@ def _write_fenced_fi_runtime_receipt(
     config: AgentConfig,
     *,
     proof: Mapping[str, Any],
+    candidate: FencedFiTermFencedRuntimeClaim,
 ) -> tuple[Path, str]:
     """Persist a root-only post-health binding for the guard-start preflight.
 
@@ -1994,7 +2061,7 @@ def _write_fenced_fi_runtime_receipt(
     lease_id = proof.get("lease_id")
     if type(writer_epoch) is not int or writer_epoch < 1 or not isinstance(lease_id, str) or not lease_id:
         raise ProductionWriterLeaseAgentError("fenced WebApp-FI cutover proof is invalid for runtime receipt")
-    inputs = _verify_fenced_fi_runtime_environment(config)
+    inputs = _verify_fenced_fi_runtime_environment(config, candidate=candidate)
     containers = {
         "app": _capture_fenced_fi_runtime_container(
             config,
@@ -2009,7 +2076,11 @@ def _write_fenced_fi_runtime_receipt(
     }
     payload: dict[str, Any] = {
         "schema": WA_FI_FENCED_RUNTIME_RECEIPT_SCHEMA,
-        "release_sha": WA_IR_APPLICATION_RELEASE_SHA,
+        "release_sha": candidate.release_sha,
+        "release_tree_sha": candidate.release_tree_sha,
+        "term_fenced_application_evidence_sha256": (
+            candidate.term_fenced_application_evidence_sha256
+        ),
         "compose_project": WA_FI_FENCED_WRITER_PROJECT_NAME,
         "profile": WA_FI_FENCED_WRITER_PROFILE,
         "writer_epoch": writer_epoch,
@@ -2183,6 +2254,7 @@ def _start_scoped_runtime(
     config: AgentConfig,
     *,
     fenced_start_proof: Mapping[str, Any] | None = None,
+    fenced_candidate: FencedFiTermFencedRuntimeClaim | None = None,
 ) -> None:
     try:
         if _is_fenced_fi_writer(config):
@@ -2194,12 +2266,16 @@ def _start_scoped_runtime(
                 raise ProductionWriterLeaseAgentError(
                     "fenced WebApp-FI start requires a just-renewed Writer Witness proof"
                 )
+            if fenced_candidate is None:
+                raise ProductionWriterLeaseAgentError(
+                    "fenced WebApp-FI start requires a fresh term-fenced candidate claim"
+                )
             _assert_fenced_fi_start_term_is_fresh(config, proof=fenced_start_proof)
-        elif fenced_start_proof is not None:
+        elif fenced_start_proof is not None or fenced_candidate is not None:
             raise ProductionWriterLeaseAgentError(
-                "only the fenced WebApp-FI runtime may receive a fenced start proof"
+                "only the fenced WebApp-FI runtime may receive a fenced start proof and candidate claim"
             )
-        _compose(config, action="start")
+        _compose(config, action="start", fenced_candidate=fenced_candidate)
         _wait_for_ir_app_health(config)
         _wait_for_fenced_fi_app_health(config)
         _wait_for_fenced_fi_bot_health(config)
@@ -2282,7 +2358,82 @@ def _best_effort_drain_failed_fenced_fi_cutover(
         _emit_event("failed_fenced_fi_cutover_drain_failed", writer_epoch=epoch)
 
 
-def _run_fenced_fi_preflight(config: AgentConfig, *, phase: str) -> None:
+def _term_fenced_candidate_claim_from_preflight(
+    result: Mapping[str, Any],
+    *,
+    phase: str,
+) -> FencedFiTermFencedRuntimeClaim:
+    """Validate the non-authorizing equality claim emitted by preflight."""
+
+    required = {
+        "status",
+        "schema",
+        "phase",
+        "services",
+        "release_sha",
+        "release_tree_sha",
+        "term_fenced_application_evidence_sha256",
+        "application_release_root",
+        "app_image_ref",
+        "bot_image_ref",
+    }
+    if (
+        not isinstance(result, Mapping)
+        or set(result) != required
+        or result.get("status") != "ready"
+        or result.get("schema") != "fenced-fi-writer-preflight-v2"
+        or result.get("phase") != phase
+        or result.get("services") != ["app", "bot"]
+    ):
+        raise ProductionWriterLeaseAgentError(
+            "fenced WebApp-FI identity preflight returned an invalid v2 candidate claim"
+        )
+    release_sha = result.get("release_sha")
+    release_tree_sha = result.get("release_tree_sha")
+    evidence_sha256 = result.get("term_fenced_application_evidence_sha256")
+    if (
+        type(release_sha) is not str
+        or not re.fullmatch(r"[0-9a-f]{40}", release_sha)
+        or release_sha == WA_FI_LEGACY_APPLICATION_RELEASE_SHA
+        or type(release_tree_sha) is not str
+        or not re.fullmatch(r"[0-9a-f]{40}", release_tree_sha)
+        or type(evidence_sha256) is not str
+        or SHA256_RE.fullmatch(evidence_sha256) is None
+    ):
+        raise ProductionWriterLeaseAgentError(
+            "fenced WebApp-FI identity preflight returned an invalid term-fenced source claim"
+        )
+    application_release_root = _absolute(
+        result.get("application_release_root"),
+        label="preflighted fenced WebApp-FI application release root",
+    )
+    if application_release_root.name != release_sha:
+        raise ProductionWriterLeaseAgentError(
+            "fenced WebApp-FI identity preflight release root does not match its source SHA"
+        )
+    images: dict[str, str] = {}
+    for field in ("app_image_ref", "bot_image_ref"):
+        value = result.get(field)
+        if type(value) is not str or DOCKER_IMAGE_REFERENCE_RE.fullmatch(value) is None:
+            raise ProductionWriterLeaseAgentError(
+                "fenced WebApp-FI identity preflight returned an invalid image reference"
+            )
+        images[field] = value
+    return FencedFiTermFencedRuntimeClaim(
+        release_sha=release_sha,
+        release_tree_sha=release_tree_sha,
+        term_fenced_application_evidence_sha256=evidence_sha256,
+        application_release_root=application_release_root,
+        app_image_ref=images["app_image_ref"],
+        bot_image_ref=images["bot_image_ref"],
+    )
+
+
+def _run_fenced_fi_preflight(
+    config: AgentConfig,
+    *,
+    phase: str,
+) -> FencedFiTermFencedRuntimeClaim:
     """Run the independent FI identity gate at one fixed lifecycle boundary.
 
     The preflight imports this module to validate the exact lease-agent
@@ -2310,26 +2461,23 @@ def _run_fenced_fi_preflight(config: AgentConfig, *, phase: str) -> None:
         raise ProductionWriterLeaseAgentError(
             f"fenced WebApp-FI identity preflight refused {phase}"
         ) from exc
-    if (
-        not isinstance(result, Mapping)
-        or result.get("status") != "ready"
-        or result.get("phase") != phase
-    ):
-        raise ProductionWriterLeaseAgentError(
-            "fenced WebApp-FI identity preflight returned an invalid result"
-        )
+    return _term_fenced_candidate_claim_from_preflight(result, phase=phase)
 
 
-def _run_fenced_fi_cutover_preflight(config: AgentConfig) -> None:
+def _run_fenced_fi_cutover_preflight(
+    config: AgentConfig,
+) -> FencedFiTermFencedRuntimeClaim:
     """Require static signed identity admission before FI acquires a term."""
 
-    _run_fenced_fi_preflight(config, phase="cutover-pre")
+    return _run_fenced_fi_preflight(config, phase="cutover-pre")
 
 
-def _run_fenced_fi_guard_start_preflight(config: AgentConfig) -> None:
+def _run_fenced_fi_guard_start_preflight(
+    config: AgentConfig,
+) -> FencedFiTermFencedRuntimeClaim:
     """Require post-health identity admission before any FI renewal loop."""
 
-    _run_fenced_fi_preflight(config, phase="guard-start")
+    return _run_fenced_fi_preflight(config, phase="guard-start")
 
 
 def _refresh_fenced_fi_cutover_proof(
@@ -2390,7 +2538,7 @@ def cutover_fenced_fi_and_start(config: AgentConfig, *, operation_id: str) -> di
     with _fenced_fi_cutover_deployment_lock(config, nonblocking=False) as acquired:
         if not acquired:  # Defensive: blocking mode never yields False.
             raise ProductionWriterLeaseAgentError("fenced WebApp-FI cutover/deployment lock is busy")
-        _run_fenced_fi_cutover_preflight(config)
+        initial_candidate = _run_fenced_fi_cutover_preflight(config)
         _assert_fenced_fi_legacy_scope_is_stopped()
         # Do not mutate the sole Witness term just to discover that a stopped
         # fenced container would be reused.  The same condition is checked
@@ -2406,7 +2554,11 @@ def cutover_fenced_fi_and_start(config: AgentConfig, *, operation_id: str) -> di
             # Re-run the static gate after term acquisition so a replacement
             # between the first admission and `compose up` cannot reach the
             # app or bot under a fresh Writer Witness term.
-            _run_fenced_fi_cutover_preflight(config)
+            candidate = _run_fenced_fi_cutover_preflight(config)
+            if candidate != initial_candidate:
+                raise ProductionWriterLeaseAgentError(
+                    "fenced WebApp-FI candidate changed between the initial and final preflight"
+                )
             # Static validation can legitimately take longer than a 60-second
             # term.  Reissue the exact acquired term only after it completes,
             # then make the last local lease check inside `_start_scoped_runtime`
@@ -2416,10 +2568,15 @@ def cutover_fenced_fi_and_start(config: AgentConfig, *, operation_id: str) -> di
                 proof=proof,
                 operation_id=operation,
             )
-            _start_scoped_runtime(config, fenced_start_proof=proof)
+            _start_scoped_runtime(
+                config,
+                fenced_start_proof=proof,
+                fenced_candidate=candidate,
+            )
             runtime_receipt_path, runtime_receipt_sha256 = _write_fenced_fi_runtime_receipt(
                 config,
                 proof=proof,
+                candidate=candidate,
             )
             # Do not report even a staged result until the post-health receipt
             # and live containers pass the same guard-start gate systemd will

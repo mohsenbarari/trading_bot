@@ -23,16 +23,32 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 __all__ = (
     "canonical_fenced_fi_release_identity_json_bytes",
     "FENCED_FI_RELEASE_IDENTITY_SCHEMA",
+    "FENCED_FI_RELEASE_IDENTITY_LEGACY_SCHEMA",
     "FencedFiReleaseIdentity",
     "FencedFiReleaseIdentityAuthority",
     "FencedFiReleaseIdentityError",
+    "require_term_fenced_fi_release_candidate",
     "require_verified_fenced_fi_release_identity",
     "verify_fenced_fi_release_identity",
 )
 
 
-FENCED_FI_RELEASE_IDENTITY_SCHEMA: Final = "gold-trade-wa-fi-fenced-release-identity-v1"
-_SIGNING_DOMAIN: Final = b"gold-trade-wa-fi-fenced-release-identity-v1\x00"
+# v1 deliberately remains parseable for read-only inventory/audit tooling, but
+# it can never be admitted by the writer preflight.  A term-fenced candidate
+# must use v2: its signature binds the source-capability evidence digest in
+# addition to the immutable source tree and image identities.
+FENCED_FI_RELEASE_IDENTITY_SCHEMA: Final = "gold-trade-wa-fi-fenced-release-identity-v2"
+FENCED_FI_RELEASE_IDENTITY_LEGACY_SCHEMA: Final = (
+    "gold-trade-wa-fi-fenced-release-identity-v1"
+)
+_SIGNING_DOMAINS: Final = {
+    FENCED_FI_RELEASE_IDENTITY_LEGACY_SCHEMA: (
+        b"gold-trade-wa-fi-fenced-release-identity-v1\x00"
+    ),
+    FENCED_FI_RELEASE_IDENTITY_SCHEMA: (
+        b"gold-trade-wa-fi-fenced-release-identity-v2\x00"
+    ),
+}
 _SHA_RE: Final = re.compile(r"^[0-9a-f]{40}$", re.ASCII)
 _SHA256_RE: Final = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
 _IMAGE_ID_RE: Final = re.compile(r"^sha256:[0-9a-f]{64}$", re.ASCII)
@@ -45,7 +61,7 @@ _RELATIVE_COMPOSE_RE: Final = re.compile(
     r"^deploy/production/docker-compose\.webapp-fi-writer-[A-Za-z0-9._-]+\.yml$",
     re.ASCII,
 )
-_DOCUMENT_FIELDS: Final = frozenset(
+_BASE_DOCUMENT_FIELDS: Final = frozenset(
     {
         "schema",
         "release_sha",
@@ -60,6 +76,10 @@ _DOCUMENT_FIELDS: Final = frozenset(
         "signer_key_id",
         "signature_base64",
     }
+)
+_LEGACY_DOCUMENT_FIELDS: Final = _BASE_DOCUMENT_FIELDS
+_TERM_FENCED_DOCUMENT_FIELDS: Final = _BASE_DOCUMENT_FIELDS | frozenset(
+    {"term_fenced_application_evidence_sha256"}
 )
 _VERIFIED_IDENTITY_CAPABILITY: Final = object()
 _VERIFIED_IDENTITY_STATES: WeakKeyDictionary["FencedFiReleaseIdentity", tuple[object, ...]] = WeakKeyDictionary()
@@ -114,6 +134,7 @@ class FencedFiReleaseIdentityAuthority:
 class FencedFiReleaseIdentity:
     """Verified immutable identity; it never authorizes a writer or a phase."""
 
+    schema: str
     release_sha: str
     release_tree_sha: str
     application_release_root: str
@@ -127,6 +148,7 @@ class FencedFiReleaseIdentity:
     bot_image_repo_digest: str
     bot_image_id: str
     signer_key_id: str
+    term_fenced_application_evidence_sha256: str | None
     identity_sha256: str
     writer_authorized: bool = False
     promotion_authorized: bool = False
@@ -212,6 +234,21 @@ def _service(value: object, *, name: str) -> tuple[str, str]:
     return digest, image_id
 
 
+def _document_fields_for_schema(schema: object) -> frozenset[str]:
+    if schema == FENCED_FI_RELEASE_IDENTITY_LEGACY_SCHEMA:
+        return _LEGACY_DOCUMENT_FIELDS
+    if schema == FENCED_FI_RELEASE_IDENTITY_SCHEMA:
+        return _TERM_FENCED_DOCUMENT_FIELDS
+    _fail("FENCED_FI_RELEASE_IDENTITY_SCHEMA_INVALID")
+
+
+def _signature_domain_for_schema(schema: str) -> bytes:
+    try:
+        return _SIGNING_DOMAINS[schema]
+    except KeyError:  # Defensive: the schema was already closed above.
+        _fail("FENCED_FI_RELEASE_IDENTITY_SCHEMA_INVALID")
+
+
 def require_verified_fenced_fi_release_identity(value: object) -> FencedFiReleaseIdentity:
     """Accept only an identity minted by this verifier in this process."""
 
@@ -228,15 +265,35 @@ def require_verified_fenced_fi_release_identity(value: object) -> FencedFiReleas
         _fail("FENCED_FI_RELEASE_IDENTITY_UNVERIFIED")
     expected = _VERIFIED_IDENTITY_STATES[value]
     actual = (
-        value.release_sha, value.release_tree_sha, value.application_release_root,
+        value.schema, value.release_sha, value.release_tree_sha, value.application_release_root,
         value.control_release_sha, value.control_release_tree_sha, value.control_release_root,
         value.compose_relative_path, value.compose_sha256, value.app_image_repo_digest,
         value.app_image_id, value.bot_image_repo_digest, value.bot_image_id,
-        value.signer_key_id, value.identity_sha256,
+        value.signer_key_id, value.term_fenced_application_evidence_sha256,
+        value.identity_sha256,
     )
     if actual != expected:
         _fail("FENCED_FI_RELEASE_IDENTITY_UNVERIFIED")
     return value
+
+
+def require_term_fenced_fi_release_candidate(value: object) -> FencedFiReleaseIdentity:
+    """Require the v2 signed identity required for an executable FI candidate.
+
+    This is intentionally stricter than the generic verifier: a historically
+    valid v1 descriptor has no source-capability evidence binding and is
+    therefore evidence only.  It cannot be upgraded by a local config or an
+    image label.
+    """
+
+    verified = require_verified_fenced_fi_release_identity(value)
+    if (
+        verified.schema != FENCED_FI_RELEASE_IDENTITY_SCHEMA
+        or type(verified.term_fenced_application_evidence_sha256) is not str
+        or _SHA256_RE.fullmatch(verified.term_fenced_application_evidence_sha256) is None
+    ):
+        _fail("FENCED_FI_RELEASE_IDENTITY_TERM_FENCED_CANDIDATE_REQUIRED")
+    return verified
 
 
 def verify_fenced_fi_release_identity(
@@ -259,7 +316,11 @@ def verify_fenced_fi_release_identity(
         raise
     except (UnicodeDecodeError, TypeError, ValueError, json.JSONDecodeError, RecursionError):
         _fail("FENCED_FI_RELEASE_IDENTITY_DOCUMENT_INVALID")
-    if not isinstance(parsed, dict) or set(parsed) != _DOCUMENT_FIELDS:
+    if not isinstance(parsed, dict):
+        _fail("FENCED_FI_RELEASE_IDENTITY_FIELDS_INVALID")
+    schema = parsed.get("schema")
+    fields = _document_fields_for_schema(schema)
+    if set(parsed) != fields:
         _fail("FENCED_FI_RELEASE_IDENTITY_FIELDS_INVALID")
     try:
         canonical_document = canonical_fenced_fi_release_identity_json_bytes(parsed)
@@ -267,8 +328,6 @@ def verify_fenced_fi_release_identity(
         _fail("FENCED_FI_RELEASE_IDENTITY_DOCUMENT_INVALID")
     if canonical_document != document:
         _fail("FENCED_FI_RELEASE_IDENTITY_CANONICAL_REQUIRED")
-    if parsed.get("schema") != FENCED_FI_RELEASE_IDENTITY_SCHEMA:
-        _fail("FENCED_FI_RELEASE_IDENTITY_SCHEMA_INVALID")
     release_sha = _sha(parsed.get("release_sha"), code="FENCED_FI_RELEASE_IDENTITY_RELEASE_INVALID")
     release_tree_sha = _sha(parsed.get("release_tree_sha"), code="FENCED_FI_RELEASE_IDENTITY_TREE_INVALID")
     control_sha = _sha(parsed.get("control_release_sha"), code="FENCED_FI_RELEASE_IDENTITY_CONTROL_INVALID")
@@ -279,6 +338,14 @@ def verify_fenced_fi_release_identity(
     if type(compose_path) is not str or _RELATIVE_COMPOSE_RE.fullmatch(compose_path) is None:
         _fail("FENCED_FI_RELEASE_IDENTITY_COMPOSE_PATH_INVALID")
     compose_sha = _sha256(parsed.get("compose_sha256"), code="FENCED_FI_RELEASE_IDENTITY_COMPOSE_INVALID")
+    term_fenced_evidence_sha256: str | None
+    if schema == FENCED_FI_RELEASE_IDENTITY_SCHEMA:
+        term_fenced_evidence_sha256 = _sha256(
+            parsed.get("term_fenced_application_evidence_sha256"),
+            code="FENCED_FI_RELEASE_IDENTITY_TERM_FENCED_EVIDENCE_INVALID",
+        )
+    else:
+        term_fenced_evidence_sha256 = None
     services = parsed.get("services")
     if not isinstance(services, Mapping) or set(services) != _SERVICE_NAMES:
         _fail("FENCED_FI_RELEASE_IDENTITY_SERVICE_SET_INVALID")
@@ -300,7 +367,7 @@ def verify_fenced_fi_release_identity(
     del unsigned["signature_base64"]
     try:
         signed_payload = (
-            _SIGNING_DOMAIN
+            _signature_domain_for_schema(schema)
             + canonical_fenced_fi_release_identity_json_bytes(unsigned)
         )
         Ed25519PublicKey.from_public_bytes(pinned.public_key).verify(
@@ -310,6 +377,7 @@ def verify_fenced_fi_release_identity(
     except (InvalidSignature, TypeError, ValueError, RecursionError):
         _fail("FENCED_FI_RELEASE_IDENTITY_SIGNATURE_INVALID")
     identity = FencedFiReleaseIdentity(
+        schema=schema,
         release_sha=release_sha,
         release_tree_sha=release_tree_sha,
         application_release_root=app_root,
@@ -323,14 +391,16 @@ def verify_fenced_fi_release_identity(
         bot_image_repo_digest=bot_digest,
         bot_image_id=bot_id,
         signer_key_id=signer_key_id,
+        term_fenced_application_evidence_sha256=term_fenced_evidence_sha256,
         identity_sha256=hashlib.sha256(document).hexdigest(),
     )
     object.__setattr__(identity, "_verification_capability", _VERIFIED_IDENTITY_CAPABILITY)
     _VERIFIED_IDENTITY_STATES[identity] = (
-        identity.release_sha, identity.release_tree_sha, identity.application_release_root,
+        identity.schema, identity.release_sha, identity.release_tree_sha, identity.application_release_root,
         identity.control_release_sha, identity.control_release_tree_sha, identity.control_release_root,
         identity.compose_relative_path, identity.compose_sha256, identity.app_image_repo_digest,
         identity.app_image_id, identity.bot_image_repo_digest, identity.bot_image_id,
-        identity.signer_key_id, identity.identity_sha256,
+        identity.signer_key_id, identity.term_fenced_application_evidence_sha256,
+        identity.identity_sha256,
     )
     return identity
