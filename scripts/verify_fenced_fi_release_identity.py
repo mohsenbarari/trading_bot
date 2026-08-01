@@ -123,12 +123,16 @@ def verify(
     )
     return {
         "status": "verified-non-authorizing",
+        "schema": identity.schema,
         "identity_sha256": identity.identity_sha256,
         "release_sha": identity.release_sha,
         "release_tree_sha": identity.release_tree_sha,
         "control_release_sha": identity.control_release_sha,
         "control_release_tree_sha": identity.control_release_tree_sha,
         "compose_relative_path": identity.compose_relative_path,
+        "term_fenced_application_evidence_sha256": (
+            identity.term_fenced_application_evidence_sha256
+        ),
         "writer_authorized": False,
         "promotion_authorized": False,
         "execution_authorized": False,

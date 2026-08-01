@@ -15,7 +15,7 @@ from scripts import preflight_fenced_fi_writer as preflight
 from scripts import render_fenced_fi_writer_lease_guard_unit as renderer
 
 
-RELEASE_SHA = "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5"
+RELEASE_SHA = "f" * 40
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -76,6 +76,9 @@ class RenderFencedFiWriterLeaseGuardUnitTests(unittest.TestCase):
                 ),
                 "expected_identity_sha256": "a" * 64,
             },
+            "term_fenced_application_evidence": str(
+                self.root / "etc" / "term-fenced-application-evidence.json"
+            ),
             "runtime_resources": {
                 "network_name": "trading_bot_fi_runtime",
                 "uploads_volume": "trading_bot_fi_uploads",
@@ -91,14 +94,14 @@ class RenderFencedFiWriterLeaseGuardUnitTests(unittest.TestCase):
                     {
                         "name": "app",
                         "container_name": "trading_bot_wa_fi_writer_2c08_app",
-                        "image_ref": "trading-bot-app:2c08",
+                        "image_ref": "trading-bot-app:term-fenced-v2",
                         "image_repo_digest": "registry.example.invalid/trading-bot-app@sha256:" + "b" * 64,
                         "image_id": "sha256:" + "b" * 64,
                     },
                     {
                         "name": "bot",
                         "container_name": "trading_bot_wa_fi_writer_2c08_bot",
-                        "image_ref": "trading-bot-bot:2c08",
+                        "image_ref": "trading-bot-bot:term-fenced-v2",
                         "image_repo_digest": "registry.example.invalid/trading-bot-bot@sha256:" + "c" * 64,
                         "image_id": "sha256:" + "c" * 64,
                     },

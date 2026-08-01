@@ -28,7 +28,7 @@ class VerifyFencedFiReleaseIdentityTests(TestCase):
         authority = directory / "authority.pub"
         _write_private(authority, base64.b64encode(public) + b"\n")
         unsigned: dict[str, object] = {
-            "schema": "gold-trade-wa-fi-fenced-release-identity-v1",
+            "schema": "gold-trade-wa-fi-fenced-release-identity-v2",
             "release_sha": "a" * 40,
             "release_tree_sha": "b" * 40,
             "application_release_root": "/srv/releases/" + "a" * 40,
@@ -37,6 +37,7 @@ class VerifyFencedFiReleaseIdentityTests(TestCase):
             "control_release_root": "/srv/control/" + "c" * 40,
             "compose_relative_path": "deploy/production/docker-compose.webapp-fi-writer-release-v1.yml",
             "compose_sha256": "e" * 64,
+            "term_fenced_application_evidence_sha256": "9" * 64,
             "services": {
                 "app": {"image_repo_digest": "registry.invalid/app@sha256:" + "f" * 64, "image_id": "sha256:" + "1" * 64},
                 "bot": {"image_repo_digest": "registry.invalid/bot@sha256:" + "2" * 64, "image_id": "sha256:" + "3" * 64},
@@ -44,7 +45,7 @@ class VerifyFencedFiReleaseIdentityTests(TestCase):
             "signer_key_id": "ed25519-sha256:" + hashlib.sha256(public).hexdigest(),
         }
         signature = private.sign(
-            b"gold-trade-wa-fi-fenced-release-identity-v1\x00"
+            b"gold-trade-wa-fi-fenced-release-identity-v2\x00"
             + canonical_fenced_fi_release_identity_json_bytes(unsigned)
         )
         document = dict(unsigned)

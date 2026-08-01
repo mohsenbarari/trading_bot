@@ -1,7 +1,7 @@
 {
-  "schema": "fenced-fi-writer-preflight-v1",
+  "schema": "fenced-fi-writer-preflight-v2",
   "control_release_root": "/srv/trading-bot-three-site/control-releases/REPLACE_WITH_EXACT_CONTROL_GIT_SHA",
-  "application_release_root": "/srv/trading-bot-three-site/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5",
+  "application_release_root": "/srv/trading-bot-three-site/releases/REPLACE_WITH_NEW_TERM_FENCED_APPLICATION_GIT_SHA",
   "agent_config": "/etc/trading-bot-three-site/production-writer-lease-agent.webapp-fi-fenced-2c08.json",
   "preflight_config": "/etc/trading-bot-three-site/webapp-fi-fenced-writer-preflight.json",
   "unit_file": "/etc/systemd/system/trading-bot-production-writer-fi-fenced-lease-guard.service",
@@ -15,6 +15,7 @@
     "authority_public_key": "/etc/trading-bot-three-site/webapp-fi-fenced-release-identity-authority.pub",
     "expected_identity_sha256": "REPLACE_WITH_64_HEX_SIGNED_IDENTITY_SHA256"
   },
+  "term_fenced_application_evidence": "/etc/trading-bot-three-site/webapp-fi-term-fenced-application-evidence.json",
   "runtime_resources": {
     "network_name": "REPLACE_WITH_REVIEWED_PREEXISTING_RUNTIME_NETWORK",
     "uploads_volume": "REPLACE_WITH_REVIEWED_PREEXISTING_UPLOADS_VOLUME",

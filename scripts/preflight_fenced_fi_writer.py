@@ -28,11 +28,18 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.production_writer_lease import load_production_writer_lease
+from core import fenced_fi_release_identity as release_identity_contract
+from core import term_fenced_application_capability as application_capability
 from scripts import production_writer_lease_agent as lease_agent
 from scripts import verify_fenced_fi_release_identity as release_identity_verifier
+from scripts import verify_term_fenced_application_source as application_source_verifier
 
 
-PREFLIGHT_SCHEMA = "fenced-fi-writer-preflight-v1"
+# v1 names the historical 2c08 runtime and deliberately has no term-fenced
+# evidence input.  It is never an executable candidate.  v2 is closed: a
+# signed v2 release identity and a separately verified source evidence file
+# are both required before Compose or Docker is even inspected.
+PREFLIGHT_SCHEMA = "fenced-fi-writer-preflight-v2"
 MAX_FILE_BYTES = 256 * 1024
 MAX_COMPOSE_BYTES = 4 * 1024 * 1024
 MAX_CONTAINER_BYTES = 512 * 1024
@@ -108,6 +115,13 @@ class FencedFiReleaseIdentityInputs:
 
 
 @dataclass(frozen=True)
+class FencedFiTermFencedEvidenceInputs:
+    """Root-only source-capability evidence bound by the signed v2 identity."""
+
+    path: Path
+
+
+@dataclass(frozen=True)
 class FencedFiRuntimeResources:
     """Root-reviewed physical Docker resources for the isolated FI scope.
 
@@ -135,6 +149,7 @@ class FencedFiWriterPreflightConfig:
     term_parent_directory: Path
     app_local_port: int
     release_identity: FencedFiReleaseIdentityInputs
+    term_fenced_application_evidence: FencedFiTermFencedEvidenceInputs
     runtime_resources: FencedFiRuntimeResources
     compose_file: Path
     compose_project: str
@@ -257,6 +272,7 @@ def _load_config(path: Path) -> FencedFiWriterPreflightConfig:
         "term_parent_directory",
         "app_local_port",
         "release_identity",
+        "term_fenced_application_evidence",
         "runtime_resources",
         "runtime",
     }
@@ -266,10 +282,6 @@ def _load_config(path: Path) -> FencedFiWriterPreflightConfig:
     application_release_root = _absolute(
         raw.get("application_release_root"), label="application release root"
     )
-    if application_release_root.name != lease_agent.WA_IR_APPLICATION_RELEASE_SHA:
-        raise FencedFiWriterPreflightError(
-            "application release root is not the fixed legacy 2c08 release"
-        )
     agent_config = _absolute(raw.get("agent_config"), label="fenced writer agent config")
     preflight_config = _absolute(raw.get("preflight_config"), label="preflight config path")
     if preflight_config != safe_path:
@@ -328,6 +340,10 @@ def _load_config(path: Path) -> FencedFiWriterPreflightConfig:
     ).lower()
     if SHA256_RE.fullmatch(expected_identity_sha256) is None:
         raise FencedFiWriterPreflightError("fenced FI expected release identity hash is invalid")
+    evidence_path = _absolute(
+        raw.get("term_fenced_application_evidence"),
+        label="term-fenced application evidence",
+    )
 
     resources_raw = raw.get("runtime_resources")
     if not isinstance(resources_raw, dict) or set(resources_raw) != {
@@ -429,6 +445,9 @@ def _load_config(path: Path) -> FencedFiWriterPreflightConfig:
             authority_path=identity_authority,
             expected_identity_sha256=expected_identity_sha256,
         ),
+        term_fenced_application_evidence=FencedFiTermFencedEvidenceInputs(
+            path=evidence_path,
+        ),
         runtime_resources=FencedFiRuntimeResources(
             network_name=resources["network_name"],
             uploads_volume=resources["uploads_volume"],
@@ -464,12 +483,12 @@ def _validate_release_layout(config: FencedFiWriterPreflightConfig) -> None:
 
 
 def _validate_release_identity(config: FencedFiWriterPreflightConfig) -> Any:
-    """Bind local fixed inputs to one independently signed Release-0 identity.
+    """Bind local inputs to one independently signed v2 candidate identity.
 
-    A fixed 2c08 path or a local Docker tag alone is not an immutable release
-    identity.  The descriptor is signed by a root-pinned authority and then
-    compared to the exact control/application roots, compose bytes, image
-    repository digests, and image IDs which this preflight will admit.
+    A local Docker tag, source SHA, or evidence file alone is not an immutable
+    release identity.  The v2 descriptor is signed by a root-pinned authority
+    and later compared to the exact control/application roots, Compose bytes,
+    source evidence, image repository digests, image IDs, and OCI labels.
     """
 
     try:
@@ -482,14 +501,21 @@ def _validate_release_identity(config: FencedFiWriterPreflightConfig) -> Any:
         raise FencedFiWriterPreflightError(
             "fenced FI signed release identity is not ready"
         ) from exc
+    try:
+        identity = release_identity_contract.require_term_fenced_fi_release_candidate(
+            identity
+        )
+    except release_identity_contract.FencedFiReleaseIdentityError as exc:
+        raise FencedFiWriterPreflightError(
+            "fenced FI signed release identity is not a term-fenced v2 candidate"
+        ) from exc
     if (
-        identity.release_sha != lease_agent.WA_IR_APPLICATION_RELEASE_SHA
-        or identity.application_release_root != str(config.application_release_root)
+        identity.application_release_root != str(config.application_release_root)
         or identity.control_release_root != str(config.control_release_root)
         or identity.compose_relative_path != str(FENCED_COMPOSE_RELATIVE_PATH)
     ):
         raise FencedFiWriterPreflightError(
-            "fenced FI signed release identity does not bind the fixed 2c08 runtime"
+            "fenced FI signed release identity does not bind the reviewed candidate runtime"
         )
     compose_bytes = _secure_read(
         config.compose_file,
@@ -511,6 +537,63 @@ def _validate_release_identity(config: FencedFiWriterPreflightConfig) -> Any:
                 f"{service.name} static image binding does not match the signed release identity"
             )
     return identity
+
+
+def _validate_term_fenced_application_evidence(
+    config: FencedFiWriterPreflightConfig,
+    identity: Any,
+) -> application_capability.TermFencedApplicationCapability:
+    """Bind signed v2 identity to semantic evidence for the exact Git tree.
+
+    The source verifier reads immutable Git blobs rather than worktree files.
+    Consequently, a same-named directory, a patched Dockerfile, or a label
+    copied from another release cannot turn an unreviewed source tree into a
+    candidate.  This remains non-authorizing evidence; the Witness term is
+    still checked independently by the app and bot at runtime.
+    """
+
+    expected_evidence_sha256 = getattr(
+        identity, "term_fenced_application_evidence_sha256", None
+    )
+    if (
+        type(expected_evidence_sha256) is not str
+        or SHA256_RE.fullmatch(expected_evidence_sha256) is None
+    ):
+        raise FencedFiWriterPreflightError(
+            "fenced FI signed release identity lacks a valid term-fenced evidence binding"
+        )
+    try:
+        document = _secure_read(
+            config.term_fenced_application_evidence.path,
+            label="term-fenced application evidence",
+            private=True,
+            max_size=application_source_verifier.MAX_EVIDENCE_BYTES,
+        )
+        evidence = application_capability.verify_term_fenced_application_capability(
+            document
+        )
+        source_tree = application_source_verifier.load_clean_source_tree(
+            config.application_release_root,
+            expected_release_sha=identity.release_sha,
+            expected_release_tree_sha=identity.release_tree_sha,
+        )
+        application_source_verifier.verify_evidence_for_source(source_tree, document)
+    except (
+        application_capability.TermFencedApplicationCapabilityError,
+        application_source_verifier.TermFencedApplicationSourceError,
+    ) as exc:
+        raise FencedFiWriterPreflightError(
+            "term-fenced application source evidence is not valid for the signed candidate"
+        ) from exc
+    if (
+        evidence.evidence_sha256 != expected_evidence_sha256
+        or evidence.release_sha != identity.release_sha
+        or evidence.release_tree_sha != identity.release_tree_sha
+    ):
+        raise FencedFiWriterPreflightError(
+            "term-fenced application evidence does not match the signed candidate identity"
+        )
+    return evidence
 
 
 def _validate_checked_out_release_tree(
@@ -682,6 +765,7 @@ def _validate_agent_config(config: FencedFiWriterPreflightConfig) -> lease_agent
 def _validate_runtime_environment_binding(
     config: FencedFiWriterPreflightConfig,
     agent_config: lease_agent.AgentConfig,
+    identity: Any,
 ) -> None:
     """Bind every Compose-affecting FI environment input before Docker reads it.
 
@@ -689,7 +773,7 @@ def _validate_runtime_environment_binding(
     the root-only preflight config records only its reviewed SHA-256.  The
     small set of values that selects a release root, image, term, network, or
     writable volume is additionally compared field-for-field.  This prevents
-    a same-basename 2c08 directory or arbitrary Docker resource from being
+    a same-basename legacy directory or arbitrary Docker resource from being
     substituted through the environment file.
     """
 
@@ -712,7 +796,7 @@ def _validate_runtime_environment_binding(
         ) from exc
     static_by_name = {service.name: service for service in config.services}
     expected = {
-        "RELEASE_SHA": lease_agent.WA_IR_APPLICATION_RELEASE_SHA,
+        "RELEASE_SHA": identity.release_sha,
         "WA_FI_WRITER_APP_IMAGE": static_by_name["app"].image_ref,
         "WA_FI_WRITER_BOT_IMAGE": static_by_name["bot"].image_ref,
         "WA_FI_WRITER_RUNTIME_ENV_FILE": str(config.runtime_env_file),
@@ -874,10 +958,10 @@ def _service_uses_only_runtime_network(rendered: Mapping[str, Any], *, label: st
     return isinstance(networks, Mapping) and set(networks) == {"runtime"}
 
 
-def _expected_service_environment(service: str) -> dict[str, str]:
+def _expected_service_environment(service: str, *, release_sha: str) -> dict[str, str]:
     expected = {
         "SERVER_MODE": "foreign",
-        "RELEASE_SHA": lease_agent.WA_IR_APPLICATION_RELEASE_SHA,
+        "RELEASE_SHA": release_sha,
         "SINGLE_WRITER_RUNTIME_ENABLED": "true",
         "APPLICATION_WRITER_TERM_ENFORCED": "true",
         "APPLICATION_WRITER_TERM_LOCAL_SITE": "webapp_fi",
@@ -897,6 +981,8 @@ def _validate_rendered_service(
     rendered: Any,
     expectation: StaticServiceExpectation,
     config: FencedFiWriterPreflightConfig,
+    *,
+    evidence: application_capability.TermFencedApplicationCapability,
 ) -> None:
     if not isinstance(rendered, Mapping):
         raise FencedFiWriterPreflightError(
@@ -914,7 +1000,13 @@ def _validate_rendered_service(
             f"{expectation.name} rendered Compose identity is not the fixed fenced runtime"
         )
     environment = _environment_map(rendered.get("environment"), label=expectation.name)
-    if any(environment.get(key) != value for key, value in _expected_service_environment(expectation.name).items()):
+    if any(
+        environment.get(key) != value
+        for key, value in _expected_service_environment(
+            expectation.name,
+            release_sha=evidence.release_sha,
+        ).items()
+    ):
         raise FencedFiWriterPreflightError(
             f"{expectation.name} rendered Compose term environment is not pinned"
         )
@@ -968,7 +1060,11 @@ def _validate_rendered_service(
         raise FencedFiWriterPreflightError("bot rendered Compose runtime must not expose a port")
 
 
-def _validate_rendered_runtime(config: FencedFiWriterPreflightConfig) -> None:
+def _validate_rendered_runtime(
+    config: FencedFiWriterPreflightConfig,
+    *,
+    evidence: application_capability.TermFencedApplicationCapability,
+) -> None:
     payload = _compose_config(config)
     services = payload["services"]
     if set(services) != set(FENCED_SERVICES):
@@ -1004,10 +1100,20 @@ def _validate_rendered_runtime(config: FencedFiWriterPreflightConfig) -> None:
                 "rendered Compose writable volume does not match the reviewed resource"
             )
     for expectation in config.services:
-        _validate_rendered_service(services.get(expectation.name), expectation, config)
+        _validate_rendered_service(
+            services.get(expectation.name),
+            expectation,
+            config,
+            evidence=evidence,
+        )
 
 
-def _inspect_image(config: FencedFiWriterPreflightConfig, expectation: StaticServiceExpectation) -> None:
+def _inspect_image(
+    config: FencedFiWriterPreflightConfig,
+    expectation: StaticServiceExpectation,
+    *,
+    evidence: application_capability.TermFencedApplicationCapability,
+) -> None:
     image_id = _run_read_only(
         ["/usr/bin/docker", "image", "inspect", "--format", "{{.Id}}", expectation.image_ref],
         label=f"{expectation.name} image",
@@ -1045,6 +1151,34 @@ def _inspect_image(config: FencedFiWriterPreflightConfig, expectation: StaticSer
         raise FencedFiWriterPreflightError(
             f"{expectation.name} immutable image repository digest does not match its pinned identity"
         )
+    raw_labels = _run_read_only(
+        [
+            "/usr/bin/docker",
+            "image",
+            "inspect",
+            "--format",
+            "{{json .Config.Labels}}",
+            expectation.image_ref,
+        ],
+        label=f"{expectation.name} image term-fenced labels",
+        cwd=config.control_release_root,
+        max_output=64 * 1024,
+    )
+    try:
+        labels = json.loads(raw_labels, object_pairs_hook=_strict_object)
+    except Exception as exc:
+        raise FencedFiWriterPreflightError(
+            f"{expectation.name} image term-fenced labels are invalid"
+        ) from exc
+    try:
+        application_capability.verify_term_fenced_image_labels(
+            labels,
+            evidence=evidence,
+        )
+    except application_capability.TermFencedApplicationCapabilityError as exc:
+        raise FencedFiWriterPreflightError(
+            f"{expectation.name} image labels do not bind the signed term-fenced source evidence"
+        ) from exc
 
 
 def _container_environment(value: Any, *, label: str) -> dict[str, str]:
@@ -1059,7 +1193,12 @@ def _container_environment(value: Any, *, label: str) -> dict[str, str]:
     return result
 
 
-def _inspect_container(config: FencedFiWriterPreflightConfig, expectation: RuntimeServiceExpectation) -> None:
+def _inspect_container(
+    config: FencedFiWriterPreflightConfig,
+    expectation: RuntimeServiceExpectation,
+    *,
+    evidence: application_capability.TermFencedApplicationCapability,
+) -> None:
     raw = _run_read_only(
         [
             "/usr/bin/docker",
@@ -1114,8 +1253,23 @@ def _inspect_container(config: FencedFiWriterPreflightConfig, expectation: Runti
         raise FencedFiWriterPreflightError(
             f"{expectation.name} container labels do not match the root-only runtime receipt"
         )
+    try:
+        application_capability.verify_term_fenced_image_labels(
+            labels,
+            evidence=evidence,
+        )
+    except application_capability.TermFencedApplicationCapabilityError as exc:
+        raise FencedFiWriterPreflightError(
+            f"{expectation.name} container labels do not bind the signed term-fenced source evidence"
+        ) from exc
     environment = _container_environment(config_payload.get("Env"), label=expectation.name)
-    if any(environment.get(key) != value for key, value in _expected_service_environment(expectation.name).items()):
+    if any(
+        environment.get(key) != value
+        for key, value in _expected_service_environment(
+            expectation.name,
+            release_sha=evidence.release_sha,
+        ).items()
+    ):
         raise FencedFiWriterPreflightError(
             f"{expectation.name} container term environment does not match the pinned runtime"
         )
@@ -1134,22 +1288,28 @@ def _inspect_container(config: FencedFiWriterPreflightConfig, expectation: Runti
         raise FencedFiWriterPreflightError("bot container must not expose a port")
 
 
-def _validate_static_image_bindings(config: FencedFiWriterPreflightConfig) -> None:
-    _validate_rendered_runtime(config)
+def _validate_static_image_bindings(
+    config: FencedFiWriterPreflightConfig,
+    *,
+    evidence: application_capability.TermFencedApplicationCapability,
+) -> None:
+    _validate_rendered_runtime(config, evidence=evidence)
     for expectation in config.services:
-        _inspect_image(config, expectation)
+        _inspect_image(config, expectation, evidence=evidence)
 
 
 def _validate_runtime_identity(
     config: FencedFiWriterPreflightConfig,
     runtime_services: Sequence[RuntimeServiceExpectation],
+    *,
+    evidence: application_capability.TermFencedApplicationCapability,
 ) -> None:
     if tuple(service.name for service in runtime_services) != FENCED_SERVICES:
         raise FencedFiWriterPreflightError(
             "fenced FI runtime receipt service scope is not exactly app and bot"
         )
     for expectation in runtime_services:
-        _inspect_container(config, expectation)
+        _inspect_container(config, expectation, evidence=evidence)
 
 
 def _validate_legacy_scope_is_disabled() -> None:
@@ -1187,6 +1347,8 @@ def _validate_live_local_lease(
 
 def _validate_runtime_receipt(
     config: FencedFiWriterPreflightConfig,
+    *,
+    identity: Any,
 ) -> tuple[RuntimeServiceExpectation, ...]:
     """Require the post-health receipt before the guard is allowed to renew.
 
@@ -1206,7 +1368,10 @@ def _validate_runtime_receipt(
         raise FencedFiWriterPreflightError("fenced FI runtime receipt schema is invalid")
     if (
         value.get("schema") != lease_agent.WA_FI_FENCED_RUNTIME_RECEIPT_SCHEMA
-        or value.get("release_sha") != lease_agent.WA_IR_APPLICATION_RELEASE_SHA
+        or value.get("release_sha") != identity.release_sha
+        or value.get("release_tree_sha") != identity.release_tree_sha
+        or value.get("term_fenced_application_evidence_sha256")
+        != identity.term_fenced_application_evidence_sha256
         or value.get("compose_project") != config.compose_project
         or value.get("profile") != lease_agent.WA_FI_FENCED_WRITER_PROFILE
     ):
@@ -1275,12 +1440,13 @@ def run(*, config_path: Path, phase: str) -> dict[str, Any]:
     config = _load_config(config_path)
     _validate_release_layout(config)
     identity = _validate_release_identity(config)
-    _validate_release_trees(config, identity)
     _reject_unfenced_legacy_application_release(identity)
+    _validate_release_trees(config, identity)
+    evidence = _validate_term_fenced_application_evidence(config, identity)
     _validate_installed_unit(config)
     agent_config = _validate_agent_config(config)
-    _validate_runtime_environment_binding(config, agent_config)
-    _validate_static_image_bindings(config)
+    _validate_runtime_environment_binding(config, agent_config, identity)
+    _validate_static_image_bindings(config, evidence=evidence)
     _validate_legacy_scope_is_disabled()
     if phase == "cutover-pre":
         _validate_fenced_runtime_scope_is_absent()
@@ -1290,8 +1456,8 @@ def run(*, config_path: Path, phase: str) -> dict[str, Any]:
     # live container identities and the cutover receipt.
     if phase == "guard-start":
         _validate_live_local_lease(config, agent_config)
-        runtime_services = _validate_runtime_receipt(config)
-        _validate_runtime_identity(config, runtime_services)
+        runtime_services = _validate_runtime_receipt(config, identity=identity)
+        _validate_runtime_identity(config, runtime_services, evidence=evidence)
         # Docker inspection can take long enough to consume a short term.
         # Re-read the same root-only lease as the final guard-start operation;
         # otherwise a term that was safe before inspection could be handed to
@@ -1302,6 +1468,15 @@ def run(*, config_path: Path, phase: str) -> dict[str, Any]:
         "schema": PREFLIGHT_SCHEMA,
         "phase": phase,
         "services": [service.name for service in config.services],
+        # This is equality evidence only.  It is passed back to the lease
+        # agent so it can re-check mutable Compose interpolation immediately
+        # before its one allowed `compose up`; it grants no writer authority.
+        "release_sha": identity.release_sha,
+        "release_tree_sha": identity.release_tree_sha,
+        "term_fenced_application_evidence_sha256": evidence.evidence_sha256,
+        "application_release_root": str(config.application_release_root),
+        "app_image_ref": config.services[0].image_ref,
+        "bot_image_ref": config.services[1].image_ref,
     }
 
 
