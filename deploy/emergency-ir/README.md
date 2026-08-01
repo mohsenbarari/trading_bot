@@ -105,12 +105,14 @@ a generic proxy.
    `archive` target, then create a root-only, non-symlink pinned certificate
    and private-key pair under `/etc/trading-bot-emergency/standalone/tls/`.
    Nginx consumes only that pinned pair, never Certbot's mutable live links.
-5. Only after all local checks pass, recoverably replace the Nginx default
+5. Before switching ingress, create an immutable local prearm-intent journal.
+   Only after all local checks pass, recoverably replace the Nginx default
    symlink, enable/start or reload Nginx as needed, and make a direct local
    CA-validated TLS/SNI request for `coin.gold-trade.ir`. The probe requires
    `/api/config` to return 200 and `/api/sync` to remain 404; it also rechecks
-   protected three-site listeners on 8213/8443. Only then does it add the one
-   bounded UFW TCP multiport rule for 80,443.
+   protected three-site listeners on 8213/8443. Only then does it preserve an
+   already-owned exact UFW rule or add the one bounded TCP multiport rule for
+   80,443.
 6. Only then is a DNS A-record switch to `95.38.164.29` the sole cutover
    action.
 
@@ -169,18 +171,31 @@ Certbot's normal `live` symlinks only as a local source whose resolved
 root-owned archive target remains inside the exact Emergency archive directory.
 It verifies the leaf/key pairing, exact DNS SAN, and a seven-day validity
 margin before creating fixed pinned TLS files and a campaign receipt. The
-ingress stage moves the existing default Nginx *symlink* to a root-only backup
-and restores it by rename on candidate-test, lifecycle, TLS-probe,
-staging-health, UFW, or local-command failure. If Nginx began
-disabled/inactive, a failed prearm stops/disables only the service action it
-attempted, returning it to that prior lifecycle. It never deletes the prior
-configuration, a Docker resource, or a UFW rule.
+ingress stage creates a root-only `prearm-intent` journal before it moves the
+existing default Nginx *symlink* to a root-only backup. Candidate-test,
+lifecycle, TLS-probe, staging-health, and failures before a possible UFW
+mutation restore that default by rename. If Nginx began disabled/inactive, a
+failed prearm stops/disables only the service action it attempted, returning
+it to that prior lifecycle.
+
+After the UFW arm point, the tool never guesses that a failed command had no
+side effect and never deletes a rule. It preserves the journaled candidate and
+requires a later invocation of the same confirmed `prearm` stage to perform
+only exact read-only verification: pinned TLS, rendered-config digest,
+Nginx link/backup layout, enabled/active lifecycle, direct TLS/SNI routes,
+protected staging listeners, and the exact active UFW rule. Only if all of
+those checks match may it create the `prearm-armed` and final `prearmed`
+receipts; otherwise it fails without repeating a Nginx or UFW mutation. An
+already-present exact owned UFW rule is recorded as such and not added,
+changed, or deleted; an unowned overlapping 80/443 rule blocks prearm for
+manual review. The activator never deletes the prior configuration, a Docker
+resource, or a UFW rule.
 
 ## Rollback
 
 Keep the existing Nginx default-site backup and do not delete any Docker
-volume.  To withdraw Emergency ingress, restore the Nginx symlink/configuration
-from that backup, test it, reload Nginx, and remove only the one bounded
-Emergency UFW multiport rule after confirming the intended alternate ingress.
-Preserve the Emergency volumes and release directory for forensic/manual
-recovery.
+volume. To withdraw Emergency ingress, restore the Nginx symlink/configuration
+from that backup and test/reload it only through an audited manual procedure.
+Do not remove an existing UFW rule merely because it has the Emergency port
+shape: consult the immutable prearm journal first. Preserve the Emergency
+volumes, release directory, and journals for forensic/manual recovery.

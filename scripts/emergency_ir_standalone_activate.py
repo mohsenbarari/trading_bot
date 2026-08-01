@@ -70,6 +70,18 @@ MAX_CERTIFICATE_BYTES = 1024 * 1024
 DISK_HEADROOM_BYTES = 256 * 1024 * 1024
 CERTIFICATE_MIN_REMAINING = timedelta(days=7)
 EMERGENCY_DOMAIN = "coin.gold-trade.ir"
+PREARM_INTENT_STAGE = "prearm-intent"
+PREARM_ARMED_STAGE = "prearm-armed"
+PREARM_JOURNAL_SCHEMA = "gold-trade-emergency-ir-prearm-journal-v1"
+PREARM_ARMED_SCHEMA = "gold-trade-emergency-ir-prearm-armed-v1"
+UFW_RULE_COMMENT = "trading-bot-emergency-ir"
+UFW_RULE_COMMAND_TEXT = "allow proto tcp from any to any port 80,443 comment trading-bot-emergency-ir"
+UFW_SHOW_ADDED_OWNED_RULE = "ufw allow 80,443/tcp comment 'trading-bot-emergency-ir'"
+UFW_SHOW_ADDED_PORT_RULE_RE = re.compile(r"^ufw allow 80,443/tcp(?: comment '[^']*')?$")
+UFW_STATUS_OWNED_RULE_RE = re.compile(
+    r"^\[\s*\d+\]\s+80,443/tcp(?:(?P<v6>\s+\(v6\))\s+ALLOW IN\s+Anywhere\s+\(v6\)|\s+ALLOW IN\s+Anywhere)"
+    r"\s+#\s+trading-bot-emergency-ir$"
+)
 
 AGE_BINARY = "/usr/bin/age"
 AGE_KEYGEN_BINARY = "/usr/bin/age-keygen"
@@ -155,6 +167,12 @@ class NginxLifecycle:
 class NginxLifecycleChanges:
     enable_attempted: bool = False
     start_attempted: bool = False
+
+
+@dataclasses.dataclass(frozen=True)
+class UfwRuleState:
+    rule_present: bool
+    ipv6_rule_present: bool
 
 
 def _fail(message: str) -> None:
@@ -577,6 +595,7 @@ def _write_receipt(paths: ActivationPaths, campaign: VerifiedCampaign, *, stage:
 
 
 def _read_receipt(paths: ActivationPaths, campaign: VerifiedCampaign, *, stage: str) -> dict[str, Any]:
+    _secure_directory(_activation_campaign_root(paths, campaign.campaign_id), create=False)
     payload = _read_root_regular(
         _receipt_path(paths, campaign.campaign_id, stage),
         label=f"Emergency {stage} receipt",
@@ -1588,6 +1607,93 @@ def _result_text(result: Any) -> str:
     return str(raw).strip()
 
 
+def _path_exists_or_symlink(path: Path) -> bool:
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise EmergencyActivationError("Emergency path cannot be inspected") from exc
+    return True
+
+
+def _root_owned_symlink_target(path: Path, *, label: str) -> str:
+    _secure_directory(path.parent, create=False)
+    try:
+        item = path.lstat()
+        target = os.readlink(path)
+    except OSError as exc:
+        raise EmergencyActivationError(f"{label} cannot be inspected") from exc
+    if not stat.S_ISLNK(item.st_mode) or item.st_uid != 0 or item.st_nlink != 1 or not target or "\x00" in target:
+        _fail(f"{label} must be one root-owned symlink")
+    return target
+
+
+def _require_absent(path: Path, *, label: str) -> None:
+    if _path_exists_or_symlink(path):
+        _fail(f"{label} must be absent")
+
+
+def _ufw_query(
+    arguments: Sequence[str], *, runner: Callable[..., Any] = subprocess.run
+) -> str:
+    environment = dict(os.environ)
+    environment.update({"LANG": "C", "LANGUAGE": "C", "LC_ALL": "C"})
+    try:
+        result = runner(
+            [UFW_BINARY, *arguments],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=environment,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise EmergencyActivationError("Emergency UFW state cannot be inspected") from exc
+    if getattr(result, "returncode", 1) != 0:
+        _fail("Emergency UFW state cannot be inspected")
+    return _result_text(result)
+
+
+def _capture_ufw_rule_state(*, runner: Callable[..., Any] = subprocess.run) -> UfwRuleState:
+    """Read the exact UFW-managed ingress rule without mutating the firewall."""
+
+    status_lines = [line.strip() for line in _ufw_query(("status", "numbered"), runner=runner).splitlines() if line.strip()]
+    if not status_lines or status_lines[0] != "Status: active":
+        _fail("Emergency UFW must be active before ingress can be armed")
+    status_owned = [line for line in status_lines[1:] if UFW_RULE_COMMENT in line]
+    ipv4_matches = 0
+    ipv6_matches = 0
+    for line in status_owned:
+        matched = UFW_STATUS_OWNED_RULE_RE.fullmatch(line)
+        if matched is None:
+            _fail("Emergency UFW rule has an unrecognized running form")
+        if matched.group("v6") is None:
+            ipv4_matches += 1
+        else:
+            ipv6_matches += 1
+    if ipv4_matches > 1 or ipv6_matches > 1:
+        _fail("Emergency UFW rule is duplicated")
+
+    added_lines = [line.strip() for line in _ufw_query(("show", "added"), runner=runner).splitlines() if line.strip()]
+    if not added_lines or added_lines[0] != "Added user rules (see 'ufw status' for running firewall):":
+        _fail("Emergency UFW added-rule state is unrecognized")
+    added_owned = [line for line in added_lines[1:] if UFW_RULE_COMMENT in line]
+    if any(line != UFW_SHOW_ADDED_OWNED_RULE for line in added_owned) or len(added_owned) > 1:
+        _fail("Emergency UFW stored rule has an unrecognized form")
+    conflicting_port_rules = [
+        line
+        for line in added_lines[1:]
+        if UFW_SHOW_ADDED_PORT_RULE_RE.fullmatch(line) is not None and line != UFW_SHOW_ADDED_OWNED_RULE
+    ]
+    if conflicting_port_rules:
+        _fail("Emergency UFW already has an unowned overlapping 80/443 rule")
+    rule_present = ipv4_matches == 1
+    if (len(added_owned) == 1) != rule_present:
+        _fail("Emergency UFW running and stored rule state disagree")
+    return UfwRuleState(rule_present=rule_present, ipv6_rule_present=ipv6_matches == 1)
+
+
 def _capture_nginx_lifecycle(*, runner: Callable[..., Any] = subprocess.run) -> NginxLifecycle:
     try:
         enabled = runner(
@@ -1728,6 +1834,210 @@ def _local_tls_probe() -> None:
         raise EmergencyActivationError("Emergency local TLS ingress probe failed") from exc
 
 
+def _prearm_recovery_paths(paths: ActivationPaths, campaign: VerifiedCampaign) -> tuple[Path, Path]:
+    return (
+        paths.nginx_backup_root / f"default.before-{campaign.campaign_id}",
+        paths.nginx_backup_root / f"emergency-site.failed-{campaign.campaign_id}",
+    )
+
+
+def _journal_lifecycle(value: Any, *, label: str) -> NginxLifecycle:
+    if not isinstance(value, dict) or set(value) != {"enabled", "active"}:
+        _fail(f"{label} is malformed")
+    if type(value["enabled"]) is not bool or type(value["active"]) is not bool:
+        _fail(f"{label} is malformed")
+    return NginxLifecycle(enabled=value["enabled"], active=value["active"])
+
+
+def _prearm_intent_payload(
+    *,
+    paths: ActivationPaths,
+    campaign: VerifiedCampaign,
+    profile: str,
+    lifecycle: NginxLifecycle,
+    ufw_state: UfwRuleState,
+    backup: Path,
+    failed: Path,
+) -> dict[str, Any]:
+    nginx_sha256, _ = _hash_root_regular(
+        paths.nginx_available,
+        label="Emergency rendered Nginx configuration",
+        maximum_bytes=MAX_JSON_BYTES,
+    )
+    return {
+        "schema": PREARM_JOURNAL_SCHEMA,
+        "profile": profile,
+        "nginx_available_path": str(paths.nginx_available),
+        "nginx_available_sha256": nginx_sha256,
+        "nginx_enabled_path": str(paths.nginx_enabled),
+        "nginx_enabled_target": str(paths.nginx_available),
+        "nginx_default_path": str(paths.nginx_default),
+        "nginx_default_backup_path": str(backup),
+        "nginx_default_target": _root_owned_symlink_target(
+            paths.nginx_default, label="existing Nginx default site"
+        ),
+        "nginx_failed_path": str(failed),
+        "initial_lifecycle": dataclasses.asdict(lifecycle),
+        "expected_lifecycle": {"enabled": True, "active": True},
+        "ufw_rule_present_before": ufw_state.rule_present,
+    }
+
+
+def _read_prearm_intent(
+    *, paths: ActivationPaths, campaign: VerifiedCampaign, profile: str
+) -> dict[str, Any]:
+    payload = _read_receipt(paths, campaign, stage=PREARM_INTENT_STAGE)
+    backup, failed = _prearm_recovery_paths(paths, campaign)
+    expected_paths = {
+        "nginx_available_path": str(paths.nginx_available),
+        "nginx_enabled_path": str(paths.nginx_enabled),
+        "nginx_enabled_target": str(paths.nginx_available),
+        "nginx_default_path": str(paths.nginx_default),
+        "nginx_default_backup_path": str(backup),
+        "nginx_failed_path": str(failed),
+    }
+    required = {
+        "schema",
+        "profile",
+        "nginx_available_path",
+        "nginx_available_sha256",
+        "nginx_enabled_path",
+        "nginx_enabled_target",
+        "nginx_default_path",
+        "nginx_default_backup_path",
+        "nginx_default_target",
+        "nginx_failed_path",
+        "initial_lifecycle",
+        "expected_lifecycle",
+        "ufw_rule_present_before",
+    }
+    if set(payload) != required or payload.get("schema") != PREARM_JOURNAL_SCHEMA or payload.get("profile") != profile:
+        _fail("Emergency prearm transaction journal is malformed")
+    if any(payload.get(key) != value for key, value in expected_paths.items()):
+        _fail("Emergency prearm transaction journal is not bound to this ingress layout")
+    if not isinstance(payload.get("nginx_default_target"), str) or not payload["nginx_default_target"] or "\x00" in payload["nginx_default_target"]:
+        _fail("Emergency prearm transaction journal has an invalid default-site target")
+    if not isinstance(payload.get("nginx_available_sha256"), str) or SHA256_RE.fullmatch(payload["nginx_available_sha256"]) is None:
+        _fail("Emergency prearm transaction journal has an invalid Nginx digest")
+    _journal_lifecycle(payload.get("initial_lifecycle"), label="Emergency prearm initial lifecycle")
+    expected_lifecycle = _journal_lifecycle(payload.get("expected_lifecycle"), label="Emergency prearm expected lifecycle")
+    if expected_lifecycle != NginxLifecycle(enabled=True, active=True):
+        _fail("Emergency prearm transaction journal has an invalid final lifecycle")
+    if type(payload.get("ufw_rule_present_before")) is not bool:
+        _fail("Emergency prearm transaction journal has an invalid UFW pre-state")
+    return payload
+
+
+def _prearm_action(lifecycle: NginxLifecycle) -> str:
+    if lifecycle.active:
+        return "reloaded"
+    if lifecycle.enabled:
+        return "started"
+    return "enabled-and-started"
+
+
+def _prearmed_payload(
+    *,
+    profile: str,
+    intent: Mapping[str, Any],
+    final_lifecycle: NginxLifecycle,
+    final_ufw: UfwRuleState,
+) -> dict[str, Any]:
+    initial_lifecycle = _journal_lifecycle(intent["initial_lifecycle"], label="Emergency prearm initial lifecycle")
+    if final_lifecycle != NginxLifecycle(enabled=True, active=True) or not final_ufw.rule_present:
+        _fail("Emergency final ingress state cannot be recorded")
+    rule_present_before = intent["ufw_rule_present_before"]
+    if type(rule_present_before) is not bool:
+        _fail("Emergency prearm transaction journal has an invalid UFW pre-state")
+    return {
+        "profile": profile,
+        "nginx": "prearmed",
+        "nginx_lifecycle": {
+            "before": dataclasses.asdict(initial_lifecycle),
+            "after": dataclasses.asdict(final_lifecycle),
+            "action": _prearm_action(initial_lifecycle),
+        },
+        "ufw": {
+            "command": UFW_RULE_COMMAND_TEXT,
+            "action": "already-present" if rule_present_before else "added",
+            "rule_present_before": rule_present_before,
+            "ipv6_rule_present_final": final_ufw.ipv6_rule_present,
+        },
+        "transaction": {
+            "intent_stage": PREARM_INTENT_STAGE,
+            "armed_stage": PREARM_ARMED_STAGE,
+        },
+    }
+
+
+def _prearm_intent_sha256(intent: Mapping[str, Any]) -> str:
+    return hashlib.sha256(_canonical_json(intent)).hexdigest()
+
+
+def _prearm_armed_payload(*, intent: Mapping[str, Any], prearmed_payload: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "schema": PREARM_ARMED_SCHEMA,
+        "intent_sha256": _prearm_intent_sha256(intent),
+        "prearmed_payload": dict(prearmed_payload),
+    }
+
+
+def _read_prearm_armed(
+    *, paths: ActivationPaths, campaign: VerifiedCampaign, intent: Mapping[str, Any]
+) -> dict[str, Any]:
+    payload = _read_receipt(paths, campaign, stage=PREARM_ARMED_STAGE)
+    if (
+        set(payload) != {"schema", "intent_sha256", "prearmed_payload"}
+        or payload.get("schema") != PREARM_ARMED_SCHEMA
+        or payload.get("intent_sha256") != _prearm_intent_sha256(intent)
+        or not isinstance(payload.get("prearmed_payload"), dict)
+    ):
+        _fail("Emergency armed ingress journal is malformed")
+    return dict(payload["prearmed_payload"])
+
+
+def _verify_prearm_final_state(
+    *,
+    paths: ActivationPaths,
+    campaign: VerifiedCampaign,
+    intent: Mapping[str, Any],
+    profile: str,
+    runner: Callable[..., Any],
+    tls_probe: Callable[[], None],
+    staging_listener: Callable[[int], None],
+) -> tuple[NginxLifecycle, UfwRuleState]:
+    """Verify a pending transaction without changing Nginx, UFW, or Docker."""
+
+    current_intent = _read_prearm_intent(paths=paths, campaign=campaign, profile=profile)
+    if current_intent != dict(intent):
+        _fail("Emergency prearm transaction journal changed during recovery")
+    _secure_directory(paths.nginx_available.parent, create=False)
+    actual_nginx_sha256, _ = _hash_root_regular(
+        paths.nginx_available,
+        label="Emergency rendered Nginx configuration",
+        maximum_bytes=MAX_JSON_BYTES,
+    )
+    if actual_nginx_sha256 != intent["nginx_available_sha256"]:
+        _fail("Emergency final ingress state has a different Nginx configuration")
+    if _root_owned_symlink_target(paths.nginx_enabled, label="Emergency enabled Nginx site") != intent["nginx_enabled_target"]:
+        _fail("Emergency final ingress state has a different enabled Nginx site")
+    backup = Path(str(intent["nginx_default_backup_path"]))
+    if _root_owned_symlink_target(backup, label="Emergency Nginx default-site backup") != intent["nginx_default_target"]:
+        _fail("Emergency final ingress state has a different default-site backup")
+    _require_absent(paths.nginx_default, label="Emergency final Nginx default-site path")
+    _require_absent(Path(str(intent["nginx_failed_path"])), label="Emergency failed Nginx recovery path")
+    lifecycle = _capture_nginx_lifecycle(runner=runner)
+    if lifecycle != NginxLifecycle(enabled=True, active=True):
+        _fail("Emergency final ingress state does not have Nginx enabled and active")
+    tls_probe()
+    staging_listener(8213)
+    staging_listener(8443)
+    ufw_state = _capture_ufw_rule_state(runner=runner)
+    if not ufw_state.rule_present:
+        _fail("Emergency final ingress state does not have the bounded UFW rule")
+    return lifecycle, ufw_state
+
+
 def _prearm_nginx(
     *,
     paths: ActivationPaths,
@@ -1735,9 +2045,13 @@ def _prearm_nginx(
     package_root: Path,
     profile: str,
     runner: Callable[..., Any] = subprocess.run,
-    tls_probe: Callable[[], None] = _local_tls_probe,
-    staging_listener: Callable[[int], None] = _check_staging_listener,
+    tls_probe: Callable[[], None] | None = None,
+    staging_listener: Callable[[int], None] | None = None,
 ) -> dict[str, Any]:
+    if tls_probe is None:
+        tls_probe = _local_tls_probe
+    if staging_listener is None:
+        staging_listener = _check_staging_listener
     fullchain_path, private_key_path = _require_pinned_tls(paths=paths, campaign=campaign, profile=profile)
     rendered = _render_nginx_configuration(
         package_root=package_root,
@@ -1753,18 +2067,26 @@ def _prearm_nginx(
             maximum_bytes=MAX_JSON_BYTES,
         )
     _secure_directory(paths.nginx_backup_root, create=True)
-    backup = paths.nginx_backup_root / f"default.before-{campaign.campaign_id}"
-    failed = paths.nginx_backup_root / f"emergency-site.failed-{campaign.campaign_id}"
+    backup, failed = _prearm_recovery_paths(paths, campaign)
     for candidate in (paths.nginx_enabled, backup, failed):
-        if candidate.exists() or candidate.is_symlink():
+        if _path_exists_or_symlink(candidate):
             _fail("refusing to overwrite an existing Nginx Emergency recovery path")
-    try:
-        default = paths.nginx_default.lstat()
-    except OSError as exc:
-        raise EmergencyActivationError("existing Nginx default site cannot be inspected") from exc
-    if not stat.S_ISLNK(default.st_mode) or default.st_uid != 0:
-        _fail("existing Nginx default site must be a root-owned symlink for recoverable prearm")
+    _root_owned_symlink_target(paths.nginx_default, label="existing Nginx default site")
     lifecycle = _capture_nginx_lifecycle(runner=runner)
+    ufw_before = _capture_ufw_rule_state(runner=runner)
+    intent = _prearm_intent_payload(
+        paths=paths,
+        campaign=campaign,
+        profile=profile,
+        lifecycle=lifecycle,
+        ufw_state=ufw_before,
+        backup=backup,
+        failed=failed,
+    )
+    # This durable intent is written before the site switch.  Its presence
+    # deliberately prevents a later invocation from repeating host mutation:
+    # recovery may only prove the final state and register its receipt.
+    _write_receipt(paths, campaign, stage=PREARM_INTENT_STAGE, payload=intent)
     changes = NginxLifecycleChanges()
     default_moved = False
     try:
@@ -1786,35 +2108,13 @@ def _prearm_nginx(
             _fail("Emergency Nginx candidate configuration test failed")
         action = _activate_candidate_nginx(lifecycle=lifecycle, changes=changes, runner=runner)
         final_lifecycle = _capture_nginx_lifecycle(runner=runner)
-        if not final_lifecycle.enabled or not final_lifecycle.active:
+        if final_lifecycle != NginxLifecycle(enabled=True, active=True):
             _fail("Emergency Nginx did not reach the enabled and active lifecycle state")
+        if action != _prearm_action(lifecycle):
+            _fail("Emergency Nginx lifecycle action does not match the transaction journal")
         tls_probe()
         staging_listener(8213)
         staging_listener(8443)
-        # Firewall mutation is deliberately last: all local TLS/API, blocked
-        # sync, and protected-Staging checks must be green before TCP 80/443
-        # becomes reachable.  Nothing after a successful allow can throw.
-        allowed = runner(
-            [
-                UFW_BINARY,
-                "allow",
-                "proto",
-                "tcp",
-                "from",
-                "any",
-                "to",
-                "any",
-                "port",
-                "80,443",
-                "comment",
-                "trading-bot-emergency-ir",
-            ],
-            check=False,
-            capture_output=True,
-            timeout=60,
-        )
-        if getattr(allowed, "returncode", 1) != 0:
-            _fail("bounded Emergency UFW rule could not be added")
     except (EmergencyActivationError, OSError, subprocess.SubprocessError) as exc:
         _restore_default_nginx_after_failed_prearm(
             paths=paths,
@@ -1829,11 +2129,131 @@ def _prearm_nginx(
         else:
             message = "Emergency Nginx prearm command could not run"
         raise EmergencyActivationError(f"{message}; the previous default site was restored") from exc
-    return {
-        "before": dataclasses.asdict(lifecycle),
-        "after": dataclasses.asdict(final_lifecycle),
-        "action": action,
-    }
+    # Point of no rollback: a UFW command can have a successful side effect
+    # even when its caller later gets an exception or an inconclusive status.
+    # The immutable intent now makes a retry verification-only, so preserve
+    # the already-probed candidate rather than restoring Nginx while leaving
+    # an unknown 80/443 firewall outcome behind.
+    try:
+        if not ufw_before.rule_present:
+            allowed = runner(
+                [
+                    UFW_BINARY,
+                    "allow",
+                    "proto",
+                    "tcp",
+                    "from",
+                    "any",
+                    "to",
+                    "any",
+                    "port",
+                    "80,443",
+                    "comment",
+                    UFW_RULE_COMMENT,
+                ],
+                check=False,
+                capture_output=True,
+                timeout=60,
+            )
+            if getattr(allowed, "returncode", 1) != 0:
+                _fail("bounded Emergency UFW rule outcome could not be confirmed")
+        final_ufw = _capture_ufw_rule_state(runner=runner)
+        if not final_ufw.rule_present:
+            _fail("bounded Emergency UFW rule is not present after ingress arm")
+    except (EmergencyActivationError, OSError, subprocess.SubprocessError) as exc:
+        if isinstance(exc, EmergencyActivationError):
+            message = str(exc)
+        else:
+            message = "Emergency UFW command outcome could not be confirmed"
+        raise EmergencyActivationError(
+            f"{message}; Emergency ingress remains journaled for verification-only recovery"
+        ) from exc
+    prearmed_payload = _prearmed_payload(
+        profile=profile,
+        intent=intent,
+        final_lifecycle=final_lifecycle,
+        final_ufw=final_ufw,
+    )
+    try:
+        _write_receipt(
+            paths,
+            campaign,
+            stage=PREARM_ARMED_STAGE,
+            payload=_prearm_armed_payload(intent=intent, prearmed_payload=prearmed_payload),
+        )
+        _write_receipt(paths, campaign, stage="prearmed", payload=prearmed_payload)
+    except EmergencyActivationError as exc:
+        # The exact final ingress state was observed.  Do not roll it back or
+        # delete its UFW rule merely because forensic receipt storage failed:
+        # a retry is restricted to read-only verification plus receipt repair.
+        raise EmergencyActivationError(
+            "Emergency ingress is armed but its final receipt could not be registered; "
+            "rerun the same confirmed prearm stage for verification-only recovery"
+        ) from exc
+    return prearmed_payload
+
+
+def _recover_prearm_receipt(
+    *,
+    paths: ActivationPaths,
+    campaign: VerifiedCampaign,
+    profile: str,
+    runner: Callable[..., Any] = subprocess.run,
+) -> dict[str, Any]:
+    """Recover only a missing final receipt after exact read-only verification."""
+
+    _require_prepare(paths, campaign, profile=profile)
+    _read_receipt(paths, campaign, stage="api-ready")
+    if profile == "sms-otp":
+        _require_sms_preflight(paths, campaign)
+    _require_pinned_tls(paths=paths, campaign=campaign, profile=profile)
+    intent = _read_prearm_intent(paths=paths, campaign=campaign, profile=profile)
+    final_lifecycle, final_ufw = _verify_prearm_final_state(
+        paths=paths,
+        campaign=campaign,
+        intent=intent,
+        profile=profile,
+        runner=runner,
+        tls_probe=_local_tls_probe,
+        staging_listener=_check_staging_listener,
+    )
+    expected_prearmed = _prearmed_payload(
+        profile=profile,
+        intent=intent,
+        final_lifecycle=final_lifecycle,
+        final_ufw=final_ufw,
+    )
+    armed_path = _receipt_path(paths, campaign.campaign_id, PREARM_ARMED_STAGE)
+    if _path_exists_or_symlink(armed_path):
+        recorded_prearmed = _read_prearm_armed(paths=paths, campaign=campaign, intent=intent)
+        if recorded_prearmed != expected_prearmed:
+            _fail("Emergency armed ingress journal disagrees with the verified final state")
+    else:
+        try:
+            _write_receipt(
+                paths,
+                campaign,
+                stage=PREARM_ARMED_STAGE,
+                payload=_prearm_armed_payload(intent=intent, prearmed_payload=expected_prearmed),
+            )
+        except EmergencyActivationError as exc:
+            raise EmergencyActivationError(
+                "Emergency ingress remains journaled but its armed receipt could not be registered"
+            ) from exc
+
+    final_path = _receipt_path(paths, campaign.campaign_id, "prearmed")
+    if _path_exists_or_symlink(final_path):
+        recorded_prearmed = _read_receipt(paths, campaign, stage="prearmed")
+        if recorded_prearmed != expected_prearmed:
+            _fail("Emergency prearm receipt disagrees with the verified final state")
+        return recorded_prearmed
+    try:
+        _write_receipt(paths, campaign, stage="prearmed", payload=expected_prearmed)
+    except EmergencyActivationError as exc:
+        raise EmergencyActivationError(
+            "Emergency ingress remains armed but its final receipt could not be recovered"
+        ) from exc
+    return expected_prearmed
 
 
 def prearm(
@@ -1843,7 +2263,9 @@ def prearm(
     profile: str,
     runner: Callable[..., Any] = subprocess.run,
 ) -> dict[str, Any]:
-    if _receipt_path(paths, campaign.campaign_id, "prearmed").exists():
+    if _path_exists_or_symlink(_receipt_path(paths, campaign.campaign_id, PREARM_INTENT_STAGE)):
+        return _recover_prearm_receipt(paths=paths, campaign=campaign, profile=profile, runner=runner)
+    if _path_exists_or_symlink(_receipt_path(paths, campaign.campaign_id, "prearmed")):
         _fail("Emergency prearm receipt already exists; refusing to overwrite prior ingress state")
     prepared = _require_prepare(paths, campaign, profile=profile)
     _read_receipt(paths, campaign, stage="api-ready")
@@ -1851,21 +2273,13 @@ def prearm(
         _require_sms_preflight(paths, campaign)
     _check_staging_listener(8213)
     _check_staging_listener(8443)
-    lifecycle = _prearm_nginx(
+    return _prearm_nginx(
         paths=paths,
         campaign=campaign,
         package_root=Path(str(prepared["package_root"])),
         profile=profile,
         runner=runner,
     )
-    payload = {
-        "profile": profile,
-        "nginx": "prearmed",
-        "ufw_rule_added": "allow proto tcp from any to any port 80,443 comment trading-bot-emergency-ir",
-        "nginx_lifecycle": lifecycle,
-    }
-    _write_receipt(paths, campaign, stage="prearmed", payload=payload)
-    return payload
 
 
 def execute(

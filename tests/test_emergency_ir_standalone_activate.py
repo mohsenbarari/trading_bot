@@ -345,9 +345,18 @@ class EmergencyIrStandaloneActivationTests(unittest.TestCase):
         enabled: bool,
         active: bool,
         fail_action: str | None = None,
+        ufw_rule_present: bool = False,
+        ufw_ipv6_rule_present: bool = False,
+        ufw_conflicting_rule: bool = False,
     ) -> object:
         action_counts: dict[str, int] = {}
-        state = {"enabled": enabled, "active": active}
+        state = {
+            "enabled": enabled,
+            "active": active,
+            "ufw_rule_present": ufw_rule_present,
+            "ufw_ipv6_rule_present": ufw_ipv6_rule_present,
+            "ufw_conflicting_rule": ufw_conflicting_rule,
+        }
 
         def runner(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[object]:
             call = list(command)
@@ -377,11 +386,47 @@ class EmergencyIrStandaloneActivationTests(unittest.TestCase):
                     state["active"] = True
                 elif action == "stop":
                     state["active"] = False
-            if call[:1] == [ACTIVATE.UFW_BINARY] and fail_action == "ufw":
-                return completed(call, 1)
+            if call == [ACTIVATE.UFW_BINARY, "status", "numbered"]:
+                if fail_action == "ufw-status-after-allow" and state["ufw_rule_present"]:
+                    raise OSError("synthetic post-UFW status failure")
+                lines = ["Status: active"]
+                if state["ufw_rule_present"]:
+                    lines.append(
+                        "[ 1] 80,443/tcp                ALLOW IN    Anywhere                   # trading-bot-emergency-ir"
+                    )
+                if state["ufw_ipv6_rule_present"]:
+                    lines.append(
+                        "[ 2] 80,443/tcp (v6)           ALLOW IN    Anywhere (v6)              # trading-bot-emergency-ir"
+                    )
+                return completed(call, stdout="\n".join(lines) + "\n")
+            if call == [ACTIVATE.UFW_BINARY, "show", "added"]:
+                lines = ["Added user rules (see 'ufw status' for running firewall):"]
+                if state["ufw_rule_present"]:
+                    lines.append(ACTIVATE.UFW_SHOW_ADDED_OWNED_RULE)
+                if state["ufw_conflicting_rule"]:
+                    lines.append("ufw allow 80,443/tcp comment 'another-owner'")
+                else:
+                    if not state["ufw_rule_present"]:
+                        lines.append("(None)")
+                return completed(call, stdout="\n".join(lines) + "\n")
+            if call[:1] == [ACTIVATE.UFW_BINARY] and len(call) > 1 and call[1] == "allow":
+                if fail_action == "ufw":
+                    return completed(call, 1)
+                state["ufw_rule_present"] = True
             return completed(call)
 
         return runner
+
+    def _ufw_allow_events(self, events: list[object]) -> list[tuple[object, ...]]:
+        return [
+            event
+            for event in events
+            if isinstance(event, tuple)
+            and len(event) > 2
+            and event[0] == "command"
+            and event[1] == ACTIVATE.UFW_BINARY
+            and event[2] == "allow"
+        ]
 
     def _assert_default_restored(
         self, *, paths: ACTIVATE.ActivationPaths, original: Path, campaign: ACTIVATE.VerifiedCampaign
@@ -576,7 +621,7 @@ class EmergencyIrStandaloneActivationTests(unittest.TestCase):
             self.assertFalse((paths.nginx_backup_root / f"default.before-{campaign.campaign_id}").exists())
             self.assertFalse(paths.nginx_enabled.exists() or paths.nginx_enabled.is_symlink())
             self.assertNotIn("tls", events)
-            self.assertFalse(any(isinstance(event, tuple) and event[1] == ACTIVATE.UFW_BINARY for event in events))
+            self.assertEqual(self._ufw_allow_events(events), [])
 
     def test_reload_failure_restores_default_preserves_emergency_link_and_skips_ufw(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-nginx-") as raw:
@@ -596,7 +641,7 @@ class EmergencyIrStandaloneActivationTests(unittest.TestCase):
                 )
             self._assert_default_restored(paths=paths, original=original, campaign=campaign)
             self.assertNotIn("tls", events)
-            self.assertFalse(any(isinstance(event, tuple) and event[1] == ACTIVATE.UFW_BINARY for event in events))
+            self.assertEqual(self._ufw_allow_events(events), [])
 
     def test_inactive_nginx_is_enabled_started_probed_and_opened_last(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-nginx-") as raw:
@@ -613,17 +658,26 @@ class EmergencyIrStandaloneActivationTests(unittest.TestCase):
                 tls_probe=lambda: events.append("tls"),
                 staging_listener=lambda port: events.append(("staging", port)),
             )
-            self.assertEqual(result["before"], {"enabled": False, "active": False})
-            self.assertEqual(result["after"], {"enabled": True, "active": True})
-            self.assertEqual(result["action"], "enabled-and-started")
+            self.assertEqual(result["nginx_lifecycle"]["before"], {"enabled": False, "active": False})
+            self.assertEqual(result["nginx_lifecycle"]["after"], {"enabled": True, "active": True})
+            self.assertEqual(result["nginx_lifecycle"]["action"], "enabled-and-started")
             command_events = [event for event in events if isinstance(event, tuple) and event[0] == "command"]
             self.assertIn(("command", ACTIVATE.SYSTEMCTL_BINARY, "enable", "nginx"), command_events)
             self.assertIn(("command", ACTIVATE.SYSTEMCTL_BINARY, "start", "nginx"), command_events)
-            ufw_index = next(index for index, event in enumerate(events) if isinstance(event, tuple) and event[1] == ACTIVATE.UFW_BINARY)
+            ufw_index = next(
+                index
+                for index, event in enumerate(events)
+                if isinstance(event, tuple) and len(event) > 2 and event[1] == ACTIVATE.UFW_BINARY and event[2] == "allow"
+            )
             self.assertLess(events.index("tls"), ufw_index)
             self.assertLess(events.index(("staging", 8213)), ufw_index)
             self.assertLess(events.index(("staging", 8443)), ufw_index)
-            self.assertEqual(events[-1][1], ACTIVATE.UFW_BINARY)
+            later_mutations = [
+                event
+                for event in command_events[command_events.index(events[ufw_index]) + 1 :]
+                if event[1] != ACTIVATE.UFW_BINARY
+            ]
+            self.assertEqual(later_mutations, [])
 
     def test_inactive_nginx_start_failure_restores_original_disabled_inactive_lifecycle(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-nginx-") as raw:
@@ -645,7 +699,7 @@ class EmergencyIrStandaloneActivationTests(unittest.TestCase):
             command_events = [event for event in events if isinstance(event, tuple) and event[0] == "command"]
             self.assertIn(("command", ACTIVATE.SYSTEMCTL_BINARY, "stop", "nginx"), command_events)
             self.assertIn(("command", ACTIVATE.SYSTEMCTL_BINARY, "disable", "nginx"), command_events)
-            self.assertFalse(any(isinstance(event, tuple) and event[1] == ACTIVATE.UFW_BINARY for event in events))
+            self.assertEqual(self._ufw_allow_events(events), [])
 
     def test_tls_probe_failure_rolls_back_before_any_ufw_mutation(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-nginx-") as raw:
@@ -669,16 +723,16 @@ class EmergencyIrStandaloneActivationTests(unittest.TestCase):
                     staging_listener=lambda port: events.append(("staging", port)),
                 )
             self._assert_default_restored(paths=paths, original=original, campaign=campaign)
-            self.assertFalse(any(isinstance(event, tuple) and event[1] == ACTIVATE.UFW_BINARY for event in events))
+            self.assertEqual(self._ufw_allow_events(events), [])
 
-    def test_ufw_failure_restores_default_only_after_local_probes(self) -> None:
+    def test_ufw_outcome_failure_preserves_journaled_candidate_after_local_probes(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-nginx-") as raw:
             root = Path(raw)
             root.chmod(0o700)
-            paths, original = nginx_paths(root)
+            paths, _ = nginx_paths(root)
             campaign = self._campaign()
             events: list[object] = []
-            with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "bounded Emergency UFW rule"):
+            with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "verification-only recovery"):
                 self._prearm(
                     paths=paths,
                     campaign=campaign,
@@ -687,11 +741,365 @@ class EmergencyIrStandaloneActivationTests(unittest.TestCase):
                     tls_probe=lambda: events.append("tls"),
                     staging_listener=lambda port: events.append(("staging", port)),
                 )
-            self._assert_default_restored(paths=paths, original=original, campaign=campaign)
-            ufw_index = next(index for index, event in enumerate(events) if isinstance(event, tuple) and event[1] == ACTIVATE.UFW_BINARY)
+            self.assertTrue(paths.nginx_enabled.is_symlink())
+            self.assertFalse(paths.nginx_default.exists() or paths.nginx_default.is_symlink())
+            self.assertFalse(
+                (paths.nginx_backup_root / f"emergency-site.failed-{campaign.campaign_id}").exists()
+            )
+            self.assertTrue(ACTIVATE._receipt_path(paths, campaign.campaign_id, ACTIVATE.PREARM_INTENT_STAGE).is_file())
+            ufw_index = next(
+                index
+                for index, event in enumerate(events)
+                if isinstance(event, tuple) and len(event) > 2 and event[1] == ACTIVATE.UFW_BINARY and event[2] == "allow"
+            )
             self.assertLess(events.index("tls"), ufw_index)
             self.assertLess(events.index(("staging", 8213)), ufw_index)
             self.assertLess(events.index(("staging", 8443)), ufw_index)
+
+    def test_post_ufw_inspection_error_preserves_candidate_for_verification_only_recovery(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-nginx-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            paths, _ = nginx_paths(root)
+            campaign = self._campaign()
+            package_root = nginx_package(root)
+            events: list[object] = []
+            with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "verification-only recovery"):
+                self._prearm(
+                    paths=paths,
+                    campaign=campaign,
+                    package_root=package_root,
+                    runner=self._runner(
+                        events,
+                        enabled=True,
+                        active=True,
+                        fail_action="ufw-status-after-allow",
+                    ),
+                    tls_probe=lambda: events.append("tls"),
+                    staging_listener=lambda port: events.append(("staging", port)),
+                )
+            self.assertTrue(paths.nginx_enabled.is_symlink())
+            self.assertFalse(paths.nginx_default.exists() or paths.nginx_default.is_symlink())
+            self.assertFalse(
+                (paths.nginx_backup_root / f"emergency-site.failed-{campaign.campaign_id}").exists()
+            )
+            self.assertTrue(ACTIVATE._receipt_path(paths, campaign.campaign_id, ACTIVATE.PREARM_INTENT_STAGE).is_file())
+            self.assertFalse(ACTIVATE._receipt_path(paths, campaign.campaign_id, "prearmed").exists())
+            self.assertEqual(len(self._ufw_allow_events(events)), 1)
+            allow_event = self._ufw_allow_events(events)[0]
+            command_events = [event for event in events if isinstance(event, tuple) and event[0] == "command"]
+            later_systemctl_actions = [
+                event
+                for event in command_events[command_events.index(allow_event) + 1 :]
+                if event[1] == ACTIVATE.SYSTEMCTL_BINARY and event[2] in {"enable", "disable", "start", "stop", "reload"}
+            ]
+            self.assertEqual(later_systemctl_actions, [])
+
+            recovery_events: list[object] = []
+            recovery_runner = self._runner(
+                recovery_events,
+                enabled=True,
+                active=True,
+                ufw_rule_present=True,
+            )
+            original_read = ACTIVATE._read_receipt
+
+            def read_receipt(
+                paths_arg: ACTIVATE.ActivationPaths,
+                campaign_arg: ACTIVATE.VerifiedCampaign,
+                *,
+                stage: str,
+            ) -> dict[str, object]:
+                if stage == "api-ready":
+                    return {}
+                return original_read(paths_arg, campaign_arg, stage=stage)
+
+            with patch.object(ACTIVATE, "_require_prepare", return_value={"package_root": str(package_root)}), patch.object(
+                ACTIVATE,
+                "_require_pinned_tls",
+                return_value=(paths.tls_pinned_fullchain, paths.tls_pinned_privkey),
+            ), patch.object(ACTIVATE, "_read_receipt", side_effect=read_receipt), patch.object(
+                ACTIVATE, "_local_tls_probe", side_effect=lambda: recovery_events.append("tls")
+            ), patch.object(
+                ACTIVATE, "_check_staging_listener", side_effect=lambda port: recovery_events.append(("staging", port))
+            ):
+                recovered = ACTIVATE._recover_prearm_receipt(
+                    paths=paths,
+                    campaign=campaign,
+                    profile="telegram-only",
+                    runner=recovery_runner,
+                )
+            self.assertEqual(recovered["ufw"]["action"], "added")
+            self.assertTrue(ACTIVATE._receipt_path(paths, campaign.campaign_id, "prearmed").is_file())
+            self.assertEqual(self._ufw_allow_events(recovery_events), [])
+            self.assertFalse(
+                any(
+                    isinstance(event, tuple)
+                    and len(event) > 2
+                    and event[0] == "command"
+                    and event[1] == ACTIVATE.SYSTEMCTL_BINARY
+                    and event[2] in {"enable", "disable", "start", "stop", "reload"}
+                    for event in recovery_events
+                )
+            )
+
+    def test_preexisting_owned_ufw_rule_is_journaled_without_another_firewall_mutation(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-nginx-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            paths, _ = nginx_paths(root)
+            campaign = self._campaign()
+            events: list[object] = []
+            result = self._prearm(
+                paths=paths,
+                campaign=campaign,
+                package_root=nginx_package(root),
+                runner=self._runner(
+                    events,
+                    enabled=True,
+                    active=True,
+                    ufw_rule_present=True,
+                    ufw_ipv6_rule_present=True,
+                ),
+                tls_probe=lambda: events.append("tls"),
+                staging_listener=lambda port: events.append(("staging", port)),
+            )
+            self.assertEqual(result["ufw"]["action"], "already-present")
+            self.assertTrue(result["ufw"]["rule_present_before"])
+            self.assertTrue(result["ufw"]["ipv6_rule_present_final"])
+            self.assertEqual(self._ufw_allow_events(events), [])
+            self.assertFalse(
+                any(
+                    isinstance(event, tuple)
+                    and len(event) > 2
+                    and event[0] == "command"
+                    and event[1] == ACTIVATE.UFW_BINARY
+                    and event[2] == "delete"
+                    for event in events
+                )
+            )
+            intent = ACTIVATE._read_receipt(paths, campaign, stage=ACTIVATE.PREARM_INTENT_STAGE)
+            self.assertTrue(intent["ufw_rule_present_before"])
+
+    def test_unowned_overlapping_ufw_rule_blocks_before_ingress_switch_or_mutation(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-nginx-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            paths, original = nginx_paths(root)
+            campaign = self._campaign()
+            events: list[object] = []
+            with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "unowned overlapping"):
+                self._prearm(
+                    paths=paths,
+                    campaign=campaign,
+                    package_root=nginx_package(root),
+                    runner=self._runner(
+                        events,
+                        enabled=True,
+                        active=True,
+                        ufw_conflicting_rule=True,
+                    ),
+                    tls_probe=lambda: events.append("tls"),
+                    staging_listener=lambda port: events.append(("staging", port)),
+                )
+            self.assertTrue(paths.nginx_default.is_symlink())
+            self.assertEqual(os.readlink(paths.nginx_default), str(original))
+            self.assertFalse(paths.nginx_enabled.exists() or paths.nginx_enabled.is_symlink())
+            self.assertFalse(ACTIVATE._receipt_path(paths, campaign.campaign_id, ACTIVATE.PREARM_INTENT_STAGE).exists())
+            self.assertEqual(self._ufw_allow_events(events), [])
+            self.assertFalse(
+                any(
+                    isinstance(event, tuple)
+                    and len(event) > 2
+                    and event[0] == "command"
+                    and event[1] == ACTIVATE.SYSTEMCTL_BINARY
+                    and event[2] in {"enable", "disable", "start", "stop", "reload"}
+                    for event in events
+                )
+            )
+
+    def test_final_receipt_failure_recovery_is_verification_only_and_blocks_wrong_final_state(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-nginx-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            paths, _ = nginx_paths(root)
+            campaign = self._campaign()
+            package_root = nginx_package(root)
+            events: list[object] = []
+            runner = self._runner(events, enabled=True, active=True)
+            original_read = ACTIVATE._read_receipt
+            original_write = ACTIVATE._write_receipt
+
+            def read_receipt(
+                paths_arg: ACTIVATE.ActivationPaths,
+                campaign_arg: ACTIVATE.VerifiedCampaign,
+                *,
+                stage: str,
+            ) -> dict[str, object]:
+                if stage == "api-ready":
+                    return {}
+                return original_read(paths_arg, campaign_arg, stage=stage)
+
+            def fail_final_receipt(
+                paths_arg: ACTIVATE.ActivationPaths,
+                campaign_arg: ACTIVATE.VerifiedCampaign,
+                *,
+                stage: str,
+                payload: dict[str, object],
+            ) -> None:
+                if stage == "prearmed":
+                    raise ACTIVATE.EmergencyActivationError("synthetic final receipt failure")
+                original_write(paths_arg, campaign_arg, stage=stage, payload=payload)
+
+            with patch.object(ACTIVATE, "_require_prepare", return_value={"package_root": str(package_root)}), patch.object(
+                ACTIVATE,
+                "_require_pinned_tls",
+                return_value=(paths.tls_pinned_fullchain, paths.tls_pinned_privkey),
+            ), patch.object(ACTIVATE, "_read_receipt", side_effect=read_receipt), patch.object(
+                ACTIVATE, "_local_tls_probe", side_effect=lambda: events.append("tls")
+            ), patch.object(
+                ACTIVATE, "_check_staging_listener", side_effect=lambda port: events.append(("staging", port))
+            ), patch.object(ACTIVATE, "_write_receipt", side_effect=fail_final_receipt), self.assertRaisesRegex(
+                ACTIVATE.EmergencyActivationError, "final receipt could not be registered"
+            ):
+                ACTIVATE.prearm(campaign=campaign, paths=paths, profile="telegram-only", runner=runner)
+
+            self.assertTrue(paths.nginx_enabled.is_symlink())
+            self.assertFalse(paths.nginx_default.exists() or paths.nginx_default.is_symlink())
+            self.assertTrue(ACTIVATE._receipt_path(paths, campaign.campaign_id, ACTIVATE.PREARM_INTENT_STAGE).is_file())
+            self.assertTrue(ACTIVATE._receipt_path(paths, campaign.campaign_id, ACTIVATE.PREARM_ARMED_STAGE).is_file())
+            self.assertFalse(ACTIVATE._receipt_path(paths, campaign.campaign_id, "prearmed").exists())
+            self.assertEqual(len(self._ufw_allow_events(events)), 1)
+
+            wrong_events: list[object] = []
+            wrong_runner = self._runner(wrong_events, enabled=True, active=True, ufw_rule_present=False)
+            with patch.object(ACTIVATE, "_require_prepare", return_value={"package_root": str(package_root)}), patch.object(
+                ACTIVATE,
+                "_require_pinned_tls",
+                return_value=(paths.tls_pinned_fullchain, paths.tls_pinned_privkey),
+            ), patch.object(ACTIVATE, "_read_receipt", side_effect=read_receipt), patch.object(
+                ACTIVATE, "_local_tls_probe", side_effect=lambda: wrong_events.append("tls")
+            ), patch.object(
+                ACTIVATE, "_check_staging_listener", side_effect=lambda port: wrong_events.append(("staging", port))
+            ), self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "does not have the bounded UFW rule"):
+                ACTIVATE.prearm(campaign=campaign, paths=paths, profile="telegram-only", runner=wrong_runner)
+            self.assertEqual(self._ufw_allow_events(wrong_events), [])
+            self.assertFalse(
+                any(
+                    isinstance(event, tuple)
+                    and len(event) > 2
+                    and event[0] == "command"
+                    and event[1] == ACTIVATE.SYSTEMCTL_BINARY
+                    and event[2] in {"enable", "disable", "start", "stop", "reload"}
+                    for event in wrong_events
+                )
+            )
+
+            events.clear()
+            with patch.object(ACTIVATE, "_require_prepare", return_value={"package_root": str(package_root)}), patch.object(
+                ACTIVATE,
+                "_require_pinned_tls",
+                return_value=(paths.tls_pinned_fullchain, paths.tls_pinned_privkey),
+            ), patch.object(ACTIVATE, "_read_receipt", side_effect=read_receipt), patch.object(
+                ACTIVATE, "_local_tls_probe", side_effect=lambda: events.append("tls")
+            ), patch.object(
+                ACTIVATE, "_check_staging_listener", side_effect=lambda port: events.append(("staging", port))
+            ):
+                recovered = ACTIVATE.prearm(campaign=campaign, paths=paths, profile="telegram-only", runner=runner)
+            self.assertEqual(recovered["ufw"]["action"], "added")
+            self.assertTrue(ACTIVATE._receipt_path(paths, campaign.campaign_id, "prearmed").is_file())
+            self.assertEqual(self._ufw_allow_events(events), [])
+            self.assertFalse(
+                any(
+                    isinstance(event, tuple)
+                    and len(event) > 2
+                    and event[0] == "command"
+                    and event[1] in {ACTIVATE.NGINX_BINARY, ACTIVATE.SYSTEMCTL_BINARY}
+                    and (
+                        event[1] == ACTIVATE.NGINX_BINARY
+                        or event[2] in {"enable", "disable", "start", "stop", "reload"}
+                    )
+                    for event in events
+                )
+            )
+
+    def test_partial_final_receipt_fails_closed_without_rearming_or_deleting_ufw(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-nginx-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            paths, _ = nginx_paths(root)
+            campaign = self._campaign()
+            package_root = nginx_package(root)
+            events: list[object] = []
+            original_write = ACTIVATE._write_receipt
+
+            def partial_final_receipt(
+                paths_arg: ACTIVATE.ActivationPaths,
+                campaign_arg: ACTIVATE.VerifiedCampaign,
+                *,
+                stage: str,
+                payload: dict[str, object],
+            ) -> None:
+                if stage == "prearmed":
+                    root_file(ACTIVATE._receipt_path(paths_arg, campaign_arg.campaign_id, stage), b"{")
+                    raise ACTIVATE.EmergencyActivationError("synthetic partial final receipt")
+                original_write(paths_arg, campaign_arg, stage=stage, payload=payload)
+
+            with patch.object(
+                ACTIVATE,
+                "_require_pinned_tls",
+                return_value=(paths.tls_pinned_fullchain, paths.tls_pinned_privkey),
+            ), patch.object(ACTIVATE, "_write_receipt", side_effect=partial_final_receipt), self.assertRaisesRegex(
+                ACTIVATE.EmergencyActivationError, "final receipt could not be registered"
+            ):
+                self._prearm(
+                    paths=paths,
+                    campaign=campaign,
+                    package_root=package_root,
+                    runner=self._runner(events, enabled=True, active=True),
+                    tls_probe=lambda: events.append("tls"),
+                    staging_listener=lambda port: events.append(("staging", port)),
+                )
+
+            recovery_events: list[object] = []
+            original_read = ACTIVATE._read_receipt
+
+            def read_receipt(
+                paths_arg: ACTIVATE.ActivationPaths,
+                campaign_arg: ACTIVATE.VerifiedCampaign,
+                *,
+                stage: str,
+            ) -> dict[str, object]:
+                if stage == "api-ready":
+                    return {}
+                return original_read(paths_arg, campaign_arg, stage=stage)
+
+            with patch.object(ACTIVATE, "_require_prepare", return_value={"package_root": str(package_root)}), patch.object(
+                ACTIVATE,
+                "_require_pinned_tls",
+                return_value=(paths.tls_pinned_fullchain, paths.tls_pinned_privkey),
+            ), patch.object(ACTIVATE, "_read_receipt", side_effect=read_receipt), patch.object(
+                ACTIVATE, "_local_tls_probe", side_effect=lambda: recovery_events.append("tls")
+            ), patch.object(
+                ACTIVATE, "_check_staging_listener", side_effect=lambda port: recovery_events.append(("staging", port))
+            ), self.assertRaises(ACTIVATE.EmergencyActivationError):
+                ACTIVATE._recover_prearm_receipt(
+                    paths=paths,
+                    campaign=campaign,
+                    profile="telegram-only",
+                    runner=self._runner(recovery_events, enabled=True, active=True, ufw_rule_present=True),
+                )
+            self.assertEqual(self._ufw_allow_events(recovery_events), [])
+            self.assertFalse(
+                any(
+                    isinstance(event, tuple)
+                    and len(event) > 2
+                    and event[0] == "command"
+                    and event[1] == ACTIVATE.SYSTEMCTL_BINARY
+                    and event[2] in {"enable", "disable", "start", "stop", "reload"}
+                    for event in recovery_events
+                )
+            )
 
     def test_runner_exception_during_candidate_test_restores_default_and_never_opens_ufw(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-nginx-") as raw:
@@ -718,7 +1126,7 @@ class EmergencyIrStandaloneActivationTests(unittest.TestCase):
                 )
             self._assert_default_restored(paths=paths, original=original, campaign=campaign)
             self.assertNotIn("tls", events)
-            self.assertFalse(any(isinstance(event, tuple) and event[1] == ACTIVATE.UFW_BINARY for event in events))
+            self.assertEqual(self._ufw_allow_events(events), [])
 
     def test_subprocess_error_during_candidate_test_restores_default_and_never_opens_ufw(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-nginx-") as raw:
@@ -745,7 +1153,7 @@ class EmergencyIrStandaloneActivationTests(unittest.TestCase):
                 )
             self._assert_default_restored(paths=paths, original=original, campaign=campaign)
             self.assertNotIn("tls", events)
-            self.assertFalse(any(isinstance(event, tuple) and event[1] == ACTIVATE.UFW_BINARY for event in events))
+            self.assertEqual(self._ufw_allow_events(events), [])
 
 
 if __name__ == "__main__":
