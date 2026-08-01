@@ -33,13 +33,20 @@ import sys
 from typing import Any, BinaryIO, Callable, Mapping
 from urllib.parse import parse_qs, quote, urlsplit
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+# The guarded CLI is supported as a direct script invocation in operational
+# runbooks.  In that form Python puts ``scripts/`` (not the repository root)
+# on sys.path, so establish only this local immutable source root before
+# importing the sealed helper modules.  No caller-provided PYTHONPATH is used.
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from scripts import build_emergency_ir_receiver_bundle as receiver_bundle
 from scripts import emergency_ir_object_storage_manifest as manifest
 from scripts import emergency_ir_object_storage_receiver as receiver
 from scripts import run_emergency_ir_object_storage_receive as receiver_bootstrap
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 PUBLISH_PLAN_SCHEMA = "gold-trade-emergency-ir-object-storage-publish-plan-v1"
 PUBLISH_PLAN_FIELDS = frozenset(
     {

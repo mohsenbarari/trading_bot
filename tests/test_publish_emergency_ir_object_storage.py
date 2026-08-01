@@ -9,6 +9,7 @@ import io
 import json
 from pathlib import Path
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -385,6 +386,22 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
                 )
             self.assertTrue(outputs.receiver_bundle.exists())
             self.assertFalse(outputs.sealed_manifest.exists())
+
+    def test_publisher_entrypoint_is_directly_invocable_from_the_repository_root(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(REPO_ROOT / "scripts" / "publish_emergency_ir_object_storage.py"),
+                "--help",
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--apply", result.stdout)
 
 
 if __name__ == "__main__":
