@@ -570,6 +570,41 @@ def load_public_key(path: Path) -> Ed25519PublicKey:
         raise EmergencyManifestError("public key file is invalid") from exc
 
 
+def generate_keypair(*, private_path: Path, public_path: Path) -> str:
+    """Create one local raw Ed25519 keypair without printing secret material.
+
+    The caller chooses two existing root-/owner-controlled parent directories.
+    Both outputs are create-only, so this helper cannot replace a controller
+    trust anchor accidentally.  The public file is intentionally also 0600:
+    receiver provisioning may make a separate root-owned copy through the
+    sealed Object Storage bootstrap rather than widening access here.
+    """
+
+    if private_path == public_path:
+        _fail("private and public key output paths must differ")
+    if private_path.exists() or public_path.exists():
+        _fail("refusing to overwrite an existing signing key output")
+    if Ed25519PrivateKey is None or serialization is None:
+        _fail("cryptography Ed25519 support is unavailable")
+    private_key = Ed25519PrivateKey.generate()
+    private_payload = base64.b64encode(
+        private_key.private_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PrivateFormat.Raw,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+    ) + b"\n"
+    public_payload = base64.b64encode(_public_key_bytes(private_key.public_key())) + b"\n"
+    _write_create_only(private_path, private_payload)
+    try:
+        _write_create_only(public_path, public_payload)
+    except Exception:
+        # Keep the first create-only output for forensic inspection rather than
+        # deleting a key material file after an interrupted bootstrap.
+        raise
+    return signer_key_id(private_key.public_key())
+
+
 def _read_json_file(path: Path, *, require_canonical: bool) -> dict[str, Any]:
     payload = _read_stable_regular_file(
         path,
@@ -630,13 +665,28 @@ def _main(arguments: list[str]) -> int:
     build.add_argument("--signing-private-key", required=True, type=Path)
     build.add_argument("--output", required=True, type=Path)
 
+    keypair = subparsers.add_parser("generate-keypair", help="create a local Ed25519 manifest signing keypair")
+    keypair.add_argument("--private-key", required=True, type=Path)
+    keypair.add_argument("--public-key", required=True, type=Path)
+
     verify = subparsers.add_parser("verify", help="verify a sealed manifest and print a receive plan")
     verify.add_argument("--manifest", required=True, type=Path)
     verify.add_argument("--signing-public-key", required=True, type=Path)
 
     parsed = parser.parse_args(arguments)
     try:
-        if parsed.command == "build":
+        if parsed.command == "generate-keypair":
+            signer_id = generate_keypair(
+                private_path=parsed.private_key,
+                public_path=parsed.public_key,
+            )
+            result = {
+                "status": "keypair-created-local-only",
+                "private_key": str(parsed.private_key),
+                "public_key": str(parsed.public_key),
+                "signer_key_id": signer_id,
+            }
+        elif parsed.command == "build":
             signed = sign_manifest(
                 _read_json_file(parsed.spec, require_canonical=False),
                 private_key=load_private_key(parsed.signing_private_key),
