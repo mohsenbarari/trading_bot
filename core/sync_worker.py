@@ -13,6 +13,7 @@ from sqlalchemy import case, exists, or_, select, update
 from sqlalchemy.orm import aliased
 from core.config import settings
 from core.job_logging import RepeatedErrorLogger, duration_ms_since, job_context
+from core.legacy_direct_fi_ir_transport_fence import assert_legacy_direct_fi_ir_transport_retired
 from core.logging_config import configure_logging
 from core.metrics import record_sync_terminal_policy_rejection
 from core.server_routing import current_server, default_peer_server_url
@@ -445,6 +446,10 @@ async def requeue_if_needed(
 
 async def send_sync_item(client: httpx.AsyncClient, item: dict, target_url: str, api_key: str):
     """Send item to target server with security headers"""
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="sync-worker",
+        operation="direct FI-to-IR or IR-to-FI sync item delivery",
+    )
     timestamp = int(time.time())
     # Prepare payload as list (batch of 1)
     payload = [item]
@@ -472,6 +477,10 @@ async def send_sync_item(client: httpx.AsyncClient, item: dict, target_url: str,
     return response
 
 async def main():
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="sync-worker",
+        operation="direct FI-to-IR or IR-to-FI worker startup",
+    )
     assert_background_job_authority(JOB_SYNC_WORKER)
     logger.info("🚀 Starting Sync Worker...")
     

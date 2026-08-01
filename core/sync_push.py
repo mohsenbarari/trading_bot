@@ -1,20 +1,21 @@
 # core/sync_push.py
-"""
-Direct HTTP helper for narrow cross-server relay paths.
+"""Retired legacy direct FI<->IR HTTP relay helpers.
 
-Database sync must not use this helper from flush-time model events. Committed
-database changes are delivered by sync_worker from durable change_log rows.
+The names remain temporarily for compatibility, but every route factory fails
+closed before building a peer URL, HMAC, client, or background task. Approved
+cross-site transfer is a version-bound Object Storage pull under Witness
+authority, never this direct HTTP mechanism.
 """
 import json
 import time
 import hmac
 import hashlib
 import logging
-import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 import httpx
 
+from core.legacy_direct_fi_ir_transport_fence import assert_legacy_direct_fi_ir_transport_retired
 from core.sync_transport import assert_runtime_sync_transport_allowed, runtime_sync_tls_verify_setting
 
 logger = logging.getLogger(__name__)
@@ -30,12 +31,12 @@ _cooldown_lock = threading.Lock()
 _target_cooldowns: dict[str, float] = {}
 
 
-def _direct_push_disabled() -> bool:
-    return os.getenv("TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH", "").strip().lower() in {"1", "true", "yes", "on"}
-
-
 def _get_client() -> httpx.Client:
     """Get or create persistent synchronous HTTP client"""
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="sync-push",
+        operation="direct FI-to-IR or IR-to-FI HTTP client construction",
+    )
     global _http_client, _http_client_verify_setting
     assert_runtime_sync_transport_allowed()
     verify_setting = runtime_sync_tls_verify_setting()
@@ -132,6 +133,10 @@ def _do_push(payload: dict, target_url: str, api_key: str):
     Synchronous HTTP push — runs in thread pool.
     Caller decides whether the payload has any durable retry source.
     """
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="sync-push",
+        operation="direct FI-to-IR or IR-to-FI sync payload push",
+    )
     try:
         timestamp = int(time.time())
         items = [payload]
@@ -173,8 +178,10 @@ def push_sync_direct(payload: dict):
     Submit a non-blocking direct HTTP relay payload.
     Do not call this from uncommitted database change listeners.
     """
-    if _direct_push_disabled():
-        return
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="sync-push",
+        operation="direct FI-to-IR or IR-to-FI sync relay submission",
+    )
 
     from core.config import settings
     from core.server_routing import default_peer_server_url

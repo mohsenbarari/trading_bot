@@ -6,23 +6,27 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 from core import connectivity
+from core.legacy_direct_fi_ir_transport_fence import LegacyDirectFiIrTransportRetiredError
 
 
 class CoreConnectivityTests(unittest.IsolatedAsyncioTestCase):
-    async def test_check_connectivity_uses_foreign_url_for_iran(self):
-        client = AsyncMock()
-        client.get = AsyncMock(return_value=SimpleNamespace(status_code=200))
-        context_manager = AsyncMock()
-        context_manager.__aenter__.return_value = client
-        context_manager.__aexit__.return_value = False
+    def test_iran_connectivity_target_rejects_legacy_peer_resolution(self):
+        with patch.object(connectivity.settings, 'foreign_server_url', None), patch.object(
+            connectivity.settings, 'peer_server_url', 'https://legacy-peer.example/'
+        ), patch.object(connectivity.settings, 'germany_server_url', 'https://germany.example/'):
+            with self.assertRaises(LegacyDirectFiIrTransportRetiredError):
+                connectivity._iran_connectivity_target_url()
 
+    async def test_check_connectivity_does_not_probe_foreign_peer_on_iran(self):
         with patch.object(connectivity.settings, 'server_mode', 'iran'), patch.object(
             connectivity.settings, 'foreign_server_url', 'https://foreign.example'
-        ), patch('core.connectivity.httpx.AsyncClient', return_value=context_manager):
+        ), patch.object(connectivity.settings, 'peer_server_url', 'https://legacy-peer.example'), patch(
+            'core.connectivity.httpx.AsyncClient'
+        ) as client_ctor:
             result = await connectivity.check_connectivity()
 
-        self.assertTrue(result)
-        client.get.assert_awaited_once_with('https://foreign.example')
+        self.assertFalse(result)
+        client_ctor.assert_not_called()
 
     async def test_check_connectivity_never_falls_back_to_telegram_on_iran_without_peer_url(self):
         with patch.object(connectivity.settings, 'server_mode', 'iran'), patch.object(
@@ -34,7 +38,7 @@ class CoreConnectivityTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(result)
         client_ctor.assert_not_called()
-        logger.warning.assert_called_once()
+        logger.info.assert_called_once()
 
     async def test_check_connectivity_returns_false_on_timeout(self):
         client = AsyncMock()

@@ -345,6 +345,7 @@ class Stage3CanonicalInvitationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, expected)
         create_mock.assert_awaited_once()
 
+    @unittest.skip("direct FI-to-IR invitation creation wire protocol is permanently retired")
     async def test_forwarder_reuses_existing_signed_transport_and_rejects_wrong_server(self):
         payload = {
             "requester_identity": {
@@ -380,6 +381,7 @@ class Stage3CanonicalInvitationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[0][2]["X-Signature"], "signed")
         self.assertNotIn("mobile_number", calls[0][2])
 
+    @unittest.skip("direct FI-to-IR invitation creation wire protocol is permanently retired")
     async def test_forwarder_classifies_peer_timeout_transport_and_invalid_json(self):
         payload = {"requester_user_id": 7, "idempotency_key": "key"}
         with override_current_server(SERVER_FOREIGN), patch(

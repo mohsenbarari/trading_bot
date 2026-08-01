@@ -1,15 +1,19 @@
 # core/connectivity.py
 """Global Internet Connectivity Monitor.
 
-Iran never probes Telegram directly. On Iran, this monitor checks the configured
-foreign peer reachability and stores the result in Redis key
-``connectivity:global``.
+Iran never probes Telegram directly.  Its former direct peer reachability
+probe is retired under the three-site architecture, so Iran records that peer
+state as unavailable without resolving or contacting WA-FI.
 """
 import asyncio
 import logging
 import httpx
 from core.background_job_authority import JOB_CONNECTIVITY_MONITOR, check_background_job_authority
 from core.config import settings
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+)
 from bot.utils.redis_helpers import get_redis
 
 logger = logging.getLogger(__name__)
@@ -20,31 +24,29 @@ TELEGRAM_API_URL = "https://api.telegram.org"
 
 
 def _iran_connectivity_target_url() -> str | None:
-    for value in (
-        getattr(settings, "foreign_server_url", None),
-        getattr(settings, "peer_server_url", None),
-        getattr(settings, "germany_server_url", None),
-    ):
-        target = str(value or "").strip().rstrip("/")
-        if target:
-            return target
-    return None
+    """Refuse the superseded Iran-to-FI peer reachability probe."""
+
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="connectivity-monitor",
+        operation="direct IR-to-FI peer HTTP probe target resolution",
+    )
 
 async def check_connectivity():
     """
     Check internet connectivity.
     - Foreign Server: may ping Telegram API directly.
-    - Iran Server: only pings the foreign peer and never falls back to Telegram.
+    - Iran Server: never opens the retired direct FI<->IR peer probe.
     """
     try:
         # Determine target based on server mode
         if settings.server_mode == "iran":
-            target_url = _iran_connectivity_target_url()
-            if not target_url:
-                logger.warning(
-                    "Iran connectivity monitor has no foreign peer URL; marking disconnected",
+            try:
+                _iran_connectivity_target_url()
+            except LegacyDirectFiIrTransportRetiredError:
+                logger.info(
+                    "Iran direct FI<->IR peer probe is retired; marking peer connectivity unavailable",
                     extra={
-                        "event": "connectivity.iran_peer_url_missing",
+                        "event": "connectivity.iran_direct_peer_probe_retired",
                         "server_mode": settings.server_mode,
                     },
                 )

@@ -3508,7 +3508,29 @@ def _sync_watermark_error_detail(context: SyncWatermarkContext, decision: SyncWa
     }
 
 
-@router.post("/receive")
+RETIRED_LEGACY_DIRECT_SYNC_HTTP_DETAIL = (
+    "Legacy direct FI-to-IR and IR-to-FI sync HTTP endpoints are permanently "
+    "retired; use a version-bound Object Storage delta receiver under "
+    "Witness-mediated writer authority"
+)
+
+
+def _reject_retired_legacy_direct_sync_transport() -> None:
+    """Deny the superseded direct FI<->IR HTTP data protocol.
+
+    FastAPI runs this route dependency before the handler dependencies, so a
+    legacy request cannot create a database session or validate a peer
+    signature. The supported replacement is an explicit, version-bound Object
+    Storage receiver; this compatibility HTTP surface is never approved.
+    """
+
+    raise HTTPException(status_code=410, detail=RETIRED_LEGACY_DIRECT_SYNC_HTTP_DETAIL)
+
+
+@router.post(
+    "/receive",
+    dependencies=[Depends(_reject_retired_legacy_direct_sync_transport)],
+)
 async def receive_sync_data(
     items: list[dict], 
     request: Request,
@@ -4186,7 +4208,10 @@ async def receive_sync_data(
         raise HTTPException(status_code=500, detail="Sync batch processing failed")
 
 
-@router.post("/resync")
+@router.post(
+    "/resync",
+    dependencies=[Depends(_reject_retired_legacy_direct_sync_transport)],
+)
 async def resync_from_changelog(
     request: Request,
     db: AsyncSession = Depends(get_db),

@@ -14,6 +14,10 @@ from redis.asyncio import Redis
 
 from core.config import settings
 from core.invitation_creation_contracts import InvitationRequesterIdentity
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+)
 from core.log_redaction import mask_mobile
 from core.redis import get_redis_client, pool
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, current_server, peer_server_url_for
@@ -110,6 +114,8 @@ def _safe_gate_message(reason: str) -> str:
         return "ارتباط با سرور ایران برای دعوت مشتری تنظیم نشده است."
     if reason == "missing_observability_key":
         return "وضعیت همگام‌سازی برای دعوت مشتری قابل بررسی نیست."
+    if reason == "legacy_direct_transport_retired":
+        return "مسیر مستقیم بین فنلاند و ایران بازنشسته شده است؛ دعوت مشتری تا استقرار مسیر امن جدید در دسترس نیست."
     if reason == "iran_health_unreachable":
         return "ارتباط با سرور ایران برقرار نیست. کمی بعد دوباره تلاش کنید."
     if reason in {"iran_sync_dirty", "foreign_queue_dirty", "redis_unavailable"}:
@@ -162,6 +168,16 @@ async def _foreign_local_sync_queues_clean() -> bool:
 
 
 async def _fetch_iran_sync_health() -> tuple[dict[str, Any] | None, str | None]:
+    # This former FI->IR health request influenced a business mutation.  It
+    # is not an approved Object-Storage pull, so deny before URL/key/client.
+    try:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="customer-invite-sync-gate",
+            operation="direct FI-to-IR peer sync-health query",
+        )
+    except LegacyDirectFiIrTransportRetiredError:
+        return None, "legacy_direct_transport_retired"
+
     target_url = peer_server_url_for(SERVER_IRAN)
     if not target_url:
         return None, "missing_peer_url"
@@ -211,6 +227,17 @@ async def check_customer_invite_sync_ready(
 ) -> CustomerInviteSyncGateResult:
     if current_server() != SERVER_FOREIGN:
         return CustomerInviteSyncGateResult(False, "not_foreign", _safe_gate_message("not_foreign"))
+
+    # The public gate must be deterministic: local queue polling cannot make
+    # a retired direct FI->IR health check safe.
+    try:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="customer-invite-sync-gate",
+            operation="customer-invite direct FI-to-IR sync readiness check",
+        )
+    except LegacyDirectFiIrTransportRetiredError:
+        reason = "legacy_direct_transport_retired"
+        return CustomerInviteSyncGateResult(False, reason, _safe_gate_message(reason))
 
     deadline = time.monotonic() + max(wait_seconds, 0.0)
     last_reason = "unknown"

@@ -11,6 +11,10 @@ from typing import Any, Tuple
 import httpx
 
 from core.config import settings
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+)
 from core.server_routing import current_server, normalize_server, peer_server_url_for
 from core.trading_observability import log_trading_event, summarize_response_body
 
@@ -73,6 +77,23 @@ async def forward_trade_to_home_server(
     *,
     timeout_seconds: float | None = None,
 ) -> Tuple[int, Any]:
+    # The normal and promoted reverse data paths are Object-Storage pulls.
+    # A stale release must not resolve a peer or sign a business command.
+    try:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="trade-forwarding",
+            operation="direct FI-to-IR or IR-to-FI trade command",
+        )
+    except LegacyDirectFiIrTransportRetiredError:
+        logger.warning(
+            "trade_forward.direct_transport_retired",
+            extra={
+                "event": "trade_forward.direct_transport_retired",
+                "target_server": normalize_server(target_server, default=""),
+            },
+        )
+        return 503, {"detail": "سرور مرجع معامله در دسترس نیست."}
+
     target_url = peer_server_url_for(target_server)
     source_server = current_server()
     log_context = _safe_forward_log_context(target_server, payload)
