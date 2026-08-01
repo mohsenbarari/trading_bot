@@ -361,6 +361,27 @@ def _write_create_only(path: Path, payload: bytes, *, mode: int = 0o600) -> None
         os.close(descriptor)
 
 
+def _fsync_directory(path: Path) -> None:
+    """Persist a newly-created immutable receipt name before host mutation."""
+
+    _secure_directory(path, create=False)
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        os.fsync(descriptor)
+    except OSError as exc:
+        raise EmergencyActivationError("Emergency receipt directory cannot be synchronized") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
 def _copy_create_only(source: Path, destination: Path, *, maximum_bytes: int) -> None:
     payload = _read_root_regular(source, label="Emergency package member", maximum_bytes=maximum_bytes)
     _write_create_only(destination, payload)
@@ -591,7 +612,11 @@ def _write_receipt(paths: ActivationPaths, campaign: VerifiedCampaign, *, stage:
         "stage": stage,
         "payload": dict(payload),
     }
-    _write_create_only(_receipt_path(paths, campaign.campaign_id, stage), _canonical_json(result))
+    receipt_path = _receipt_path(paths, campaign.campaign_id, stage)
+    _write_create_only(receipt_path, _canonical_json(result))
+    # fsyncing the file preserves its bytes; fsyncing the containing directory
+    # makes the immutable receipt name durable before a subsequent host action.
+    _fsync_directory(receipt_path.parent)
 
 
 def _read_receipt(paths: ActivationPaths, campaign: VerifiedCampaign, *, stage: str) -> dict[str, Any]:

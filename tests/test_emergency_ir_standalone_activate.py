@@ -725,6 +725,46 @@ class EmergencyIrStandaloneActivationTests(unittest.TestCase):
             self._assert_default_restored(paths=paths, original=original, campaign=campaign)
             self.assertEqual(self._ufw_allow_events(events), [])
 
+    def test_intent_directory_sync_failure_aborts_before_any_ingress_switch(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-nginx-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            paths, original = nginx_paths(root)
+            campaign = self._campaign()
+            events: list[object] = []
+            with patch.object(
+                ACTIVATE,
+                "_fsync_directory",
+                side_effect=ACTIVATE.EmergencyActivationError("synthetic intent directory sync failure"),
+            ), self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "synthetic intent directory sync failure"):
+                self._prearm(
+                    paths=paths,
+                    campaign=campaign,
+                    package_root=nginx_package(root),
+                    runner=self._runner(events, enabled=True, active=True),
+                    tls_probe=lambda: events.append("tls"),
+                    staging_listener=lambda port: events.append(("staging", port)),
+                )
+            self.assertTrue(paths.nginx_default.is_symlink())
+            self.assertEqual(os.readlink(paths.nginx_default), str(original))
+            self.assertFalse(paths.nginx_enabled.exists() or paths.nginx_enabled.is_symlink())
+            self.assertEqual(self._ufw_allow_events(events), [])
+            self.assertFalse(
+                any(
+                    isinstance(event, tuple)
+                    and len(event) > 2
+                    and event[0] == "command"
+                    and (
+                        event[1] == ACTIVATE.NGINX_BINARY
+                        or (
+                            event[1] == ACTIVATE.SYSTEMCTL_BINARY
+                            and event[2] in {"enable", "disable", "start", "stop", "reload"}
+                        )
+                    )
+                    for event in events
+                )
+            )
+
     def test_ufw_outcome_failure_preserves_journaled_candidate_after_local_probes(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-nginx-") as raw:
             root = Path(raw)
