@@ -429,6 +429,13 @@ and are not a production/staging activation. Deferred items 7–11
 bootstrap repair) are enumerated in
 [`COIN_PRICE_INTELLIGENCE_SHADOW_V2.md`](COIN_PRICE_INTELLIGENCE_SHADOW_V2.md).
 
+A later source-only slice versions the private JSON event listener and the
+group/gold normalization pipeline while leaving activation and scheduling
+unapproved. See
+[`COIN_PRIVATE_EVENT_INGESTION.md`](COIN_PRIVATE_EVENT_INGESTION.md). This does
+not change the phase-1 exclusion of public live market collectors or authorize
+the deferred three-site data plane.
+
 ## Activation gates
 
 1. Shadow metrics demonstrate precision separately for each commodity,

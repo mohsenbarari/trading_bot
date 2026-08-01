@@ -367,6 +367,16 @@ items are explicitly deferred:
     This slice validates the two Shadow migrations from their declared parent
     but intentionally does not alter that historic migration.
 
+## Repository-owned private event ingestion (later source-only slice)
+
+The branch now also owns the disabled source for the private three-stream JSON
+listener and its group/gold staging pipeline. This closes the source-control
+gap for the operational prototype without committing private channel IDs,
+messages, SQLite databases, Telegram sessions, credentials, trained artifacts,
+logs, or schedules. It does not activate the listener or promote any Shadow
+component. The runtime and final-data contracts are documented in
+[`COIN_PRIVATE_EVENT_INGESTION.md`](COIN_PRIVATE_EVENT_INGESTION.md).
+
 ## Next implementation slices
 
 1. admin-only comparison/review surface;
