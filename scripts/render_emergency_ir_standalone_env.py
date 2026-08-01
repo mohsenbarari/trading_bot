@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Render a fresh root-only runtime environment for Emergency IR Standalone.
 
-This intentionally generates new local credentials on WA-IR.  It never copies
-production application, bot, sync, witness, SMS, or web-push credentials.
+This intentionally generates new local credentials on WA-IR.  The only copied
+credential is a narrowly scoped Telegram WebApp initData validation token; it
+never becomes BOT_TOKEN and cannot start a bot.  The runtime never copies sync,
+witness, SMS, or web-push credentials.
 """
 
 from __future__ import annotations
@@ -41,12 +43,20 @@ def _validate_output(path: Path) -> None:
         raise EmergencyEnvError("output path must be absolute")
 
 
-def _validate_release(release_sha: str, app_image: str, postgres_image: str, redis_image: str) -> None:
-    if not SHA_RE.fullmatch(release_sha):
-        raise EmergencyEnvError("release SHA must be exactly 40 lowercase hex characters")
+def _validate_release(
+    source_release_sha: str,
+    emergency_patch_sha: str,
+    app_image: str,
+    postgres_image: str,
+    redis_image: str,
+) -> None:
+    if not SHA_RE.fullmatch(source_release_sha):
+        raise EmergencyEnvError("source release SHA must be exactly 40 lowercase hex characters")
+    if not SHA_RE.fullmatch(emergency_patch_sha):
+        raise EmergencyEnvError("Emergency patch SHA must be exactly 40 lowercase hex characters")
     match = APP_IMAGE_RE.fullmatch(app_image)
-    if match is None or match.group(1) != release_sha:
-        raise EmergencyEnvError("app image must be the Emergency image tagged by the exact release SHA")
+    if match is None or match.group(1) != emergency_patch_sha:
+        raise EmergencyEnvError("app image must be tagged by the exact Emergency patch SHA")
     if not BASE_IMAGE_RE.fullmatch(postgres_image):
         raise EmergencyEnvError("PostgreSQL image must use the emergency namespace")
     if not BASE_IMAGE_RE.fullmatch(redis_image):
@@ -55,7 +65,7 @@ def _validate_release(release_sha: str, app_image: str, postgres_image: str, red
         raise EmergencyEnvError("staging/three-site image names are forbidden")
 
 
-def _validate_webapp_bot_token(raw_value: str) -> str:
+def _validate_webapp_initdata_token(raw_value: str) -> str:
     """Accept the token only for local Telegram WebApp HMAC verification.
 
     This runtime never starts a bot process and its Docker network has no
@@ -120,16 +130,19 @@ def _secure_atomic_write(path: Path, payload: bytes) -> None:
 def render(
     *,
     output: Path,
-    release_sha: str,
+    source_release_sha: str,
+    emergency_patch_sha: str,
     app_image: str,
     postgres_image: str,
     redis_image: str,
-    webapp_bot_token: str,
+    webapp_initdata_token: str,
 ) -> None:
     _require_root()
     _validate_output(output)
-    _validate_release(release_sha, app_image, postgres_image, redis_image)
-    webapp_bot_token = _validate_webapp_bot_token(webapp_bot_token)
+    _validate_release(
+        source_release_sha, emergency_patch_sha, app_image, postgres_image, redis_image
+    )
+    webapp_initdata_token = _validate_webapp_initdata_token(webapp_initdata_token)
     password = secrets.token_urlsafe(48)
     jwt_secret = secrets.token_urlsafe(64)
     values = {
@@ -137,8 +150,9 @@ def render(
         "EMERGENCY_RUNTIME_ENV_FILE": str(RUNTIME_PATH),
         "EMERGENCY_APP_PORT": "18000",
         "EMERGENCY_TRADING_SETTINGS_FILE": str(SETTINGS_PATH),
-        "SOURCE_RELEASE_SHA": release_sha,
-        "RELEASE_SHA": release_sha,
+        "SOURCE_RELEASE_SHA": source_release_sha,
+        "EMERGENCY_PATCH_SHA": emergency_patch_sha,
+        "RELEASE_SHA": emergency_patch_sha,
         "EMERGENCY_APP_IMAGE": app_image,
         "EMERGENCY_POSTGRES_IMAGE": postgres_image,
         "EMERGENCY_REDIS_IMAGE": redis_image,
@@ -146,6 +160,7 @@ def render(
         "PGTZ": "UTC",
         "SERVER_MODE": "iran",
         "ENVIRONMENT": "emergency-ir-standalone",
+        "EMERGENCY_IR_STANDALONE": "true",
         "FRONTEND_URL": f"https://{DOMAIN}",
         "PUBLIC_WEBAPP_URL": f"https://{DOMAIN}",
         "POSTGRES_USER": "emergency_webapp",
@@ -159,7 +174,7 @@ def render(
         "DEV_API_KEY": secrets.token_urlsafe(32),
         # This is used only by /api/auth/webapp-login for Telegram initData
         # HMAC verification.  No bot service is present in this Compose file.
-        "BOT_TOKEN": webapp_bot_token,
+        "WEBAPP_INITDATA_BOT_TOKEN": webapp_initdata_token,
         "OBSERVABILITY_TELEGRAM_USER_HASH_SALT": secrets.token_urlsafe(32),
         "TRUSTED_PROXY_CIDRS": f"127.0.0.1/32,{NETWORK_GATEWAY}/32,::1/128",
         "BACKGROUND_JOBS_ENABLED": "false",
@@ -194,7 +209,7 @@ def render(
         "LOG_LEVEL": "INFO",
     }
     forbidden = {
-        "SYNC_API_KEY", "PEER_SERVER_URL", "IRAN_SERVER_URL",
+        "BOT_TOKEN", "SYNC_API_KEY", "PEER_SERVER_URL", "IRAN_SERVER_URL",
         "GERMANY_SERVER_URL", "FOREIGN_SERVER_URL", "SMSIR_API_KEY",
         "WEB_PUSH_VAPID_PRIVATE_KEY", "WRITER_WITNESS_CLIENT_SECRET",
     }
@@ -211,12 +226,13 @@ def render(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True)
-    parser.add_argument("--release-sha", required=True)
+    parser.add_argument("--source-release-sha", required=True)
+    parser.add_argument("--emergency-patch-sha", required=True)
     parser.add_argument("--app-image", required=True)
     parser.add_argument("--postgres-image", required=True)
     parser.add_argument("--redis-image", required=True)
     parser.add_argument(
-        "--webapp-bot-token-stdin",
+        "--webapp-initdata-token-stdin",
         action="store_true",
         required=True,
         help="read the Telegram WebApp HMAC token from stdin without persisting it separately",
@@ -226,16 +242,17 @@ def main() -> int:
     if len(raw_token) > 1024:
         raise EmergencyEnvError("Telegram WebApp validation token is invalid")
     try:
-        webapp_bot_token = raw_token.decode("ascii")
+        webapp_initdata_token = raw_token.decode("ascii")
     except UnicodeDecodeError as exc:
         raise EmergencyEnvError("Telegram WebApp validation token is invalid") from exc
     render(
         output=Path(args.output),
-        release_sha=args.release_sha,
+        source_release_sha=args.source_release_sha,
+        emergency_patch_sha=args.emergency_patch_sha,
         app_image=args.app_image,
         postgres_image=args.postgres_image,
         redis_image=args.redis_image,
-        webapp_bot_token=webapp_bot_token,
+        webapp_initdata_token=webapp_initdata_token,
     )
     print("Emergency IR standalone runtime env rendered; values suppressed")
     return 0
