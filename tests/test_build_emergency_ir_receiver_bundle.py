@@ -81,6 +81,23 @@ class BuildEmergencyIrReceiverBundleTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--signing-public-key", result.stdout)
 
+    def test_activator_runs_with_isolated_python_from_the_pinned_bundle_layout(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-B",
+                str(REPO_ROOT / "scripts/emergency_ir_standalone_activate.py"),
+                "--help",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--stage", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

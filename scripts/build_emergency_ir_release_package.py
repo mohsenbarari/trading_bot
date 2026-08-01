@@ -30,6 +30,7 @@ PACKAGE_PATHS = (
     "deploy/emergency-ir",
     "scripts/emergency_ir_object_storage_manifest.py",
     "scripts/emergency_ir_object_storage_receiver.py",
+    "scripts/emergency_ir_standalone_activate.py",
     "scripts/run_emergency_ir_object_storage_receive.py",
     "scripts/render_emergency_ir_standalone_env.py",
     "scripts/verify_emergency_ir_image_provenance.py",

@@ -145,7 +145,7 @@ def fetch(url,digest,size,target):
   except FileNotFoundError: pass
   raise
 def extract_bundle(bundle,target):
- allowed={"run_receiver.py","signing-public.key","scripts/emergency_ir_object_storage_manifest.py","scripts/emergency_ir_object_storage_receiver.py"}
+ allowed={"run_receiver.py","signing-public.key","scripts/emergency_ir_object_storage_manifest.py","scripts/emergency_ir_object_storage_receiver.py","scripts/emergency_ir_standalone_activate.py"}
  secure_dir(target)
  with tarfile.open(bundle,"r:gz") as archive:
   members=archive.getmembers()
