@@ -71,6 +71,9 @@ def _observation_from_row(row: Mapping[str, Any], cutoff: datetime) -> dict | No
 
     outcome_at = row.get("outcome_occurred_at_utc")
     outcome_price = _finite_positive(row.get("outcome_price"))
+    baseline_project_price = _finite_positive(
+        row.get("primary_center_project_price")
+    )
     outcome_is_prior = (
         isinstance(outcome_at, datetime)
         and _utc(outcome_at) < cutoff
@@ -107,6 +110,10 @@ def _observation_from_row(row: Mapping[str, Any], cutoff: datetime) -> dict | No
         "observed_at_utc": observed_at,
         "settlement": str(row.get("settlement") or "").upper(),
         "price_project": price,
+        # This is the strictly-prior primary prediction recorded with the
+        # observation.  It lets a residual calibrator learn only prediction
+        # error, never a target price directly.
+        "baseline_project_price": baseline_project_price,
         "bubble_ratio": bubble_ratio,
         "source_weight": base_weight * (quality_weight or 1.0),
         "source_kind": source_kind,
@@ -236,6 +243,9 @@ async def load_feature_context_v2(
                 CoinIntelligenceShadowRun.as_of_utc,
                 CoinIntelligenceShadowRun.training_eligible,
                 CoinIntelligenceShadowPrediction.settlement,
+                CoinIntelligenceShadowPrediction.center_project_price.label(
+                    "primary_center_project_price"
+                ),
                 CoinIntelligenceShadowPrediction.diagnostics,
                 CoinIntelligenceShadowFeatureSnapshot.features,
                 CoinIntelligenceShadowOutcome.actual_project_price,
@@ -289,6 +299,7 @@ async def load_feature_context_v2(
                 "run_as_of_utc": value.as_of_utc,
                 "training_eligible": value.training_eligible,
                 "settlement": value.settlement,
+                "primary_center_project_price": value.primary_center_project_price,
                 "offer_price": diagnostics.get(
                     "observed_offer_price_project"
                 ),

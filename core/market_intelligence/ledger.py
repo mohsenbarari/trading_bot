@@ -308,6 +308,8 @@ async def persist_rate_prediction(
             candidate_name = "LOW_DATE_PHYSICAL_V2"
         elif method.startswith("CASH_TOMORROW_BASIS_"):
             candidate_name = "CASH_TOMORROW_BASIS_V2"
+        elif method.startswith("ONLINE_BAYESIAN_RESIDUAL_V1"):
+            candidate_name = "ONLINE_BAYESIAN_RESIDUAL_V1"
         else:
             candidate_name = str(
                 candidate.bundle_version or "UNNAMED_CANDIDATE"

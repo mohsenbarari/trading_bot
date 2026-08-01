@@ -79,6 +79,18 @@ def _history(
         accepted.append(
             {
                 "observed_at_utc": observed_at.isoformat(),
+                "price_project": (
+                    int(round(float(item["price_project"])))
+                    if _finite(item.get("price_project"))
+                    and float(item["price_project"]) > 0
+                    else None
+                ),
+                "baseline_project_price": (
+                    int(round(float(item["baseline_project_price"])))
+                    if _finite(item.get("baseline_project_price"))
+                    and float(item["baseline_project_price"]) > 0
+                    else None
+                ),
                 "bubble_ratio": bubble_ratio,
                 "source_weight": source_weight,
                 "source_kind": str(

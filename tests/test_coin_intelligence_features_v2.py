@@ -108,6 +108,27 @@ class FeatureSnapshotV2Tests(unittest.TestCase):
 
         self.assertEqual(snapshot["settlement_basis"]["status"], "NO_DATA")
 
+    def test_history_can_retain_compact_prior_baseline_for_residuals(self) -> None:
+        snapshot = build_feature_snapshot_v2(
+            _evidence(),
+            as_of_utc=NOW,
+            same_market_history=[
+                {
+                    "observed_at_utc": (NOW - timedelta(minutes=1)).isoformat(),
+                    "bubble_ratio": 0.08,
+                    "source_weight": 1.5,
+                    "source_kind": "CONFIRMED_TRADE",
+                    "label_status": "REVIEWED",
+                    "training_eligible": True,
+                    "price_project": 185_600,
+                    "baseline_project_price": 185_000,
+                }
+            ],
+        )
+        history = snapshot["same_market_history"][0]
+        self.assertEqual(history["price_project"], 185_600)
+        self.assertEqual(history["baseline_project_price"], 185_000)
+
 
 class RegimeV2Tests(unittest.TestCase):
     def test_underlying_agreement_produces_continuous_up_state(self) -> None:

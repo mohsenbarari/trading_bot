@@ -120,6 +120,7 @@ class CoinIntelligenceShadowSettingsTests(unittest.TestCase):
             "coin_intelligence_shadow_quality_gate_enabled",
             "coin_intelligence_shadow_low_date_v2_enabled",
             "coin_intelligence_shadow_basis_v2_enabled",
+            "coin_intelligence_shadow_online_residual_v1_enabled",
             "coin_intelligence_shadow_durable_worker_enabled",
             "coin_intelligence_shadow_gemma_parser_enabled",
         ):
@@ -168,8 +169,10 @@ class CoinIntelligenceShadowSettingsTests(unittest.TestCase):
             coin_intelligence_shadow_quality_gate_enabled=True,
             coin_intelligence_shadow_low_date_v2_enabled=True,
             coin_intelligence_shadow_basis_v2_enabled=True,
+            coin_intelligence_shadow_online_residual_v1_enabled=True,
         )
         self.assertTrue(enabled.coin_intelligence_shadow_numeric_v2_enabled)
+        self.assertTrue(enabled.coin_intelligence_shadow_online_residual_v1_enabled)
 
 
 if __name__ == "__main__":

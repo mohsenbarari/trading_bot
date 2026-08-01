@@ -388,6 +388,9 @@ async def _process_project_offer(
         shadow_subject_fingerprint,
     )
     from core.market_intelligence.low_date_v2 import evaluate_low_date_v2
+    from core.market_intelligence.online_residual_v1 import (
+        evaluate_online_residual_v1,
+    )
     from core.market_intelligence.quality import evaluate_offer_quality
     from models.commodity import Commodity
     from models.offer import Offer, OfferStatus, OfferType
@@ -523,6 +526,10 @@ async def _process_project_offer(
     if settings.coin_intelligence_shadow_basis_v2_enabled:
         candidates.append(
             evaluate_basis_v2(prediction, as_of_utc=requested_at)
+        )
+    if settings.coin_intelligence_shadow_online_residual_v1_enabled:
+        candidates.append(
+            evaluate_online_residual_v1(prediction, as_of_utc=requested_at)
         )
     await persist_rate_prediction(
         prediction,

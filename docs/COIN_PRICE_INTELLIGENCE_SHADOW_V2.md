@@ -173,6 +173,40 @@ Two additional independently gated candidates are recorded:
   only without a fresh same-market anchor, and requires five strictly-prior
   paired basis observations. It never blindly relabels cash as tomorrow.
 
+### Residual calibration and research challengers
+
+`ONLINE_BAYESIAN_RESIDUAL_V1_SHADOW_20260801` is a third independent
+candidate. It leaves the structural primary intact and estimates only the
+strictly-prior residual of a reviewed/trusted confirmed trade against the
+primary prediction recorded at that trade's own cutoff. It excludes offers,
+unreviewed labels, quality-zero labels, target/same-time/future rows, malformed
+baselines, and residuals beyond the structural quarantine bound. The posterior
+is shrunk toward zero with an explicit effective-sample prior and decays over
+time. It requires enough reviewed evidence, caps the centre adjustment, and
+uses a union with the primary interval, so it can never narrow the primary
+range. It is disabled by default and has no write-back path.
+
+Two offline research tools share a privacy-minimized, reviewed-only export:
+
+- CatBoost learns a residual, not a direct coin price. Its fit/calibration/test
+  split is chronological and timestamp-purged; calibration determines a
+  conformal residual radius and the untouched test reports MAPE and coverage.
+- PySR is an optional equation-discovery tool. It uses a small, unit-bounded
+  numeric feature set and writes equations only to a research report. It
+  cannot activate an equation, change a coefficient, or become an estimator.
+
+Both tools require explicit `--acknowledge-shadow-only`, external output
+paths, reviewed labels, and later owner review. They are deliberately not
+scheduled from the application. A candidate must still pass the per-market
+walk-forward, coverage, data-sufficiency, resource and rollback gates before
+any separately approved promotion.
+
+The exporter must run in the approved application/Docker network because its
+database hostname is intentionally not exposed to arbitrary host processes.
+PySR additionally needs a separately provisioned Julia-capable research worker
+on the dedicated model volume; it is not a dependency of the application image
+and must not be installed ad hoc on a constrained system disk.
+
 ### Gemma parser candidate
 
 Gemma is a local, independently gated second opinion after every successful
@@ -240,6 +274,7 @@ COIN_INTELLIGENCE_SHADOW_FEATURE_V2_ENABLED=false
 COIN_INTELLIGENCE_SHADOW_QUALITY_GATE_ENABLED=false
 COIN_INTELLIGENCE_SHADOW_LOW_DATE_V2_ENABLED=false
 COIN_INTELLIGENCE_SHADOW_BASIS_V2_ENABLED=false
+COIN_INTELLIGENCE_SHADOW_ONLINE_RESIDUAL_V1_ENABLED=false
 COIN_INTELLIGENCE_SHADOW_DURABLE_WORKER_ENABLED=false
 COIN_INTELLIGENCE_SHADOW_GEMMA_PARSER_ENABLED=false
 ```

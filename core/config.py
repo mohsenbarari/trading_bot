@@ -141,6 +141,9 @@ class Settings(BaseSettings):
     coin_intelligence_shadow_quality_gate_enabled: bool = False
     coin_intelligence_shadow_low_date_v2_enabled: bool = False
     coin_intelligence_shadow_basis_v2_enabled: bool = False
+    # A strictly-prior reviewed-trade residual calibrator.  It is a separate
+    # non-authoritative candidate; it never updates a model artifact in place.
+    coin_intelligence_shadow_online_residual_v1_enabled: bool = False
     coin_intelligence_shadow_durable_worker_enabled: bool = False
     coin_intelligence_shadow_gemma_parser_enabled: bool = False
     coin_intelligence_shadow_timeout_seconds: float = 1.0
@@ -356,6 +359,7 @@ class Settings(BaseSettings):
             or self.coin_intelligence_shadow_quality_gate_enabled
             or self.coin_intelligence_shadow_low_date_v2_enabled
             or self.coin_intelligence_shadow_basis_v2_enabled
+            or self.coin_intelligence_shadow_online_residual_v1_enabled
             or self.coin_intelligence_shadow_durable_worker_enabled
             or self.coin_intelligence_shadow_gemma_parser_enabled
         ) and not self.coin_intelligence_shadow_enabled:
@@ -402,6 +406,10 @@ class Settings(BaseSettings):
             (
                 self.coin_intelligence_shadow_basis_v2_enabled,
                 "coin_intelligence_shadow_basis_v2_requires_feature_v2",
+            ),
+            (
+                self.coin_intelligence_shadow_online_residual_v1_enabled,
+                "coin_intelligence_shadow_online_residual_v1_requires_feature_v2",
             ),
         ):
             if enabled and not self.coin_intelligence_shadow_feature_v2_enabled:

@@ -564,3 +564,19 @@ numerical challengers train on a slower cadence and always remain candidates
 until all activation gates above pass. Previous and daily known-good data
 backups permit rollback without accumulating a backup for every incoming
 message.
+
+## Residual-learning research path — 2026-08-01
+
+The next numerical layer is intentionally residual-first: the deterministic
+anchor/intrinsic/basis model remains the baseline, while a candidate learns
+only the error observed later on reviewed confirmed trades. The online Bayesian
+candidate is strictly prior, time-decayed, shrunk toward zero, bounded, and
+cannot narrow the primary range. It has no model-write or promotion path.
+
+CatBoost and PySR are offline challengers built from the same minimized,
+reviewed-only export. CatBoost predicts residuals and calibrates its interval on
+a separate chronological window. PySR can propose interpretable equations but
+is research-only. No weekly or nightly process may alter active coefficients;
+it may only create a versioned candidate report. Promotion remains an explicit
+per-market decision after untouched walk-forward evidence, adequate coverage,
+and an owner review.
