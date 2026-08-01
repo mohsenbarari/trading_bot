@@ -11,6 +11,7 @@ IRAN_PROJECT_DIR="${IRAN_PROJECT_DIR:-}"
 IRAN_API_URL="${IRAN_API_URL:-http://127.0.0.1:8000}"
 SYNC_LIMIT="${SYNC_LIMIT:-200}"
 SYNC_MAX_ROUNDS="${SYNC_MAX_ROUNDS:-20}"
+LEGACY_CROSS_SITE_TRANSPORT_REASON="FI-to-IR release, image, and data payloads require private, versioned, age-encrypted Object Storage. This legacy recovery script uses direct cross-server HTTP sync and no environment or configuration bypass is available."
 TABLES=(
     users
     accountant_relations
@@ -33,6 +34,25 @@ TABLES=(
     telegram_admin_broadcasts
     telegram_admin_broadcast_receipts
 )
+
+usage() {
+    cat <<'EOF'
+Usage:
+  scripts/recover_cross_server_sync.sh
+
+This legacy direct cross-server recovery path is retired. It cannot be used
+for FI-to-IR data recovery; use the dedicated private/versioned age-encrypted
+Object Storage delta transport instead.
+EOF
+}
+
+assert_legacy_cross_site_transport_fenced() {
+    # This script's only operational purpose is bidirectional direct HTTP
+    # replication. Fail before it reads configuration, starts a worker, or
+    # contacts either API. There is intentionally no environment override.
+    echo "ERROR: Legacy cross-server recovery is blocked before configuration/network: $LEGACY_CROSS_SITE_TRANSPORT_REASON" >&2
+    exit 1
+}
 
 load_shared_deploy_surface() {
     if [[ -f "$DEPLOY_CONFIG_SCRIPT" ]]; then
@@ -208,6 +228,14 @@ drain_direction() {
 }
 
 main() {
+    case "${1:-}" in
+        -h|--help|help)
+            usage
+            return 0
+            ;;
+    esac
+
+    assert_legacy_cross_site_transport_fenced
     load_shared_deploy_surface
     ensure_local_env
 

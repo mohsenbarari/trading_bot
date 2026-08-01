@@ -3,6 +3,12 @@
 
 set -Eeuo pipefail
 
+# This host-mutating staging provisioner is retired.  Keep the source only for
+# historical audit; never inspect a device, mount, or contact systemd from an
+# input-controlled invocation.
+printf '%s\n' '{"status":"blocked_legacy_three_site_staging_runtime_retired","component":"staging-host-boundary","error":"legacy three-site staging runtime is retired"}'
+exit 2
+
 readonly DATA_ROOT=/srv/trading-bot-three-site-staging-data
 readonly SLICE_NAME=trading-bot-three-site-staging.slice
 

@@ -24,6 +24,11 @@ from core.writer_witness_client import (
     drain_local_writer_lease_once,
     writer_witness_client_from_settings,
 )
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
 
 
 def confirmation_phrase(operation_id: str, request_id: str, epoch: int) -> str:
@@ -31,6 +36,7 @@ def confirmation_phrase(operation_id: str, request_id: str, epoch: int) -> str:
 
 
 async def run(args: argparse.Namespace) -> dict:
+    assert_retired(component="staging-writer-lease-drain", operation="run")
     try:
         operation_id = str(UUID(args.operation_id))
         request_id = str(UUID(args.request_id))
@@ -78,6 +84,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")
     args = parser.parse_args(argv)
+    try:
+        assert_retired(component="staging-writer-lease-drain", operation="CLI")
+    except LegacyThreeSiteStagingRuntimeRetiredError:
+        print(json.dumps(blocked_payload(component="staging-writer-lease-drain"), sort_keys=True))
+        return 2
     try:
         result = asyncio.run(run(args))
     except Exception as exc:

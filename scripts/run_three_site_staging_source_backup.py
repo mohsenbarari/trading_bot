@@ -28,6 +28,11 @@ from scripts.verify_three_site_staging_inventory import (
     load_inventory,
     verify_approved_inventory,
 )
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
 
 
 DOCKER = "/usr/bin/docker"
@@ -58,6 +63,7 @@ def confirmation_phrase(campaign_id: str, source_role: str, target_release_sha: 
 
 
 def _run(arguments: list[str], *, timeout: int = 30) -> str:
+    assert_retired(component="source-backup", operation="command execution")
     try:
         result = subprocess.run(
             arguments,
@@ -105,6 +111,7 @@ def _secure_env(path: Path) -> dict[str, str]:
 
 
 def _prepare_output(path: Path, *, repo: Path) -> None:
+    assert_retired(component="source-backup", operation="output directory preparation")
     resolved = path.resolve()
     try:
         resolved.relative_to(repo.resolve())
@@ -123,6 +130,7 @@ def _prepare_output(path: Path, *, repo: Path) -> None:
 
 
 def _stream_to_file(arguments: list[str], target: Path, *, timeout: int) -> None:
+    assert_retired(component="source-backup", operation="artifact streaming")
     descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         with os.fdopen(descriptor, "wb") as output:
@@ -399,6 +407,7 @@ def _psql(
     database: str,
     sql: str,
 ) -> str:
+    assert_retired(component="source-backup", operation="database query")
     return _run(
         [
             *docker_prefix, "exec", "-T", service,
@@ -410,6 +419,7 @@ def _psql(
 
 
 def _scratch_psql(container: str, sql: str) -> str:
+    assert_retired(component="source-backup", operation="restore-drill database query")
     return _run(
         [
             DOCKER, "exec", container, "psql", "-v", "ON_ERROR_STOP=1",
@@ -427,6 +437,7 @@ def _wait_for_scratch_database(container: str, *, attempts: int = 30) -> None:
     the first ``pg_restore``.  A successful query against the exact restore
     database is the readiness condition required by the restore drill.
     """
+    assert_retired(component="source-backup", operation="restore-drill readiness probe")
     for _attempt in range(attempts):
         ready = subprocess.run(
             [DOCKER, "exec", container, "pg_isready", "-U", "restore", "-d", "restore"],
@@ -488,6 +499,7 @@ def _database_fingerprint(query) -> tuple[str, int, int]:  # noqa: ANN001
 
 
 def _restore_drill(dump_path: Path, *, container: str) -> dict[str, object]:
+    assert_retired(component="source-backup", operation="restore drill")
     _run(
         [
             DOCKER, "run", "-d", "--name", container,
@@ -560,6 +572,7 @@ def build_plan(args: argparse.Namespace, inventory_result: dict[str, object]) ->
 
 
 def execute(args: argparse.Namespace, inventory_result: dict[str, object]) -> dict[str, object]:
+    assert_retired(component="source-backup", operation="execute")
     repo = args.repo.resolve()
     expected_compose = (repo / "deploy/staging/docker-compose.staging.yml").resolve()
     if args.compose.resolve() != expected_compose:
@@ -718,6 +731,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")
     args = parser.parse_args(argv)
+    try:
+        assert_retired(component="source-backup", operation="CLI")
+    except LegacyThreeSiteStagingRuntimeRetiredError:
+        print(json.dumps(blocked_payload(component="source-backup"), sort_keys=True))
+        return 2
     try:
         if not SHA_RE.fullmatch(args.expected_source_release_sha) or not SHA_RE.fullmatch(
             args.target_release_sha

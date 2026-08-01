@@ -35,6 +35,11 @@ from scripts.verify_three_site_staging_inventory import (
     load_inventory,
     verify_approved_inventory,
 )
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
 
 
 ROLE_APP_SERVICE = {"bot_fi": "foreign_app", "webapp_fi": "app"}
@@ -50,6 +55,7 @@ class SourceFreezeError(RuntimeError):
 
 
 def _run(arguments: list[str], *, timeout: int = 30) -> str:
+    assert_retired(component="source-freeze", operation="command execution")
     try:
         result = subprocess.run(
             arguments,
@@ -85,6 +91,7 @@ def _compose(args: argparse.Namespace) -> list[str]:
 
 def _secure_bundle_directory(path: Path) -> Path:
     """Create/verify the owner-only durable rollback artifact directory."""
+    assert_retired(component="source-freeze", operation="rollback bundle directory preparation")
     if path.exists() and path.is_symlink():
         raise SourceFreezeError("rollback bundle directory cannot be a symlink")
     resolved = path.resolve()
@@ -112,6 +119,7 @@ def _capture_legacy_restore_bundle(
     target_release_sha: str,
 ) -> dict[str, object]:
     """Pin resolved legacy Compose bytes and every running container image ID."""
+    assert_retired(component="source-freeze", operation="rollback bundle capture")
     bundle_dir = _secure_bundle_directory(args.rollback_bundle_dir)
     compose_bytes = (_run([*prefix, "config", "--format", "yaml"]) + "\n").encode()
     compose_hash = hashlib.sha256(compose_bytes).hexdigest()
@@ -175,6 +183,7 @@ def build_plan(
 
 
 def _validate_static(args: argparse.Namespace, inventory_result: dict[str, object]):
+    assert_retired(component="source-freeze", operation="runtime validation")
     repo = args.repo.resolve()
     expected_compose = (repo / "deploy/staging/docker-compose.staging.yml").resolve()
     if args.compose.resolve() != expected_compose:
@@ -204,6 +213,7 @@ def execute(
     *,
     inventory_result: dict[str, object],
 ) -> dict[str, object]:
+    assert_retired(component="source-freeze", operation="execute")
     repo, env, prefix, services, user, database = _validate_static(args, inventory_result)
     required_confirmation = confirmation_phrase(
         str(inventory_result["campaign_id"]), args.source_role, str(inventory_result["release_sha"])
@@ -335,6 +345,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")
     args = parser.parse_args(argv)
+    try:
+        assert_retired(component="source-freeze", operation="CLI")
+    except LegacyThreeSiteStagingRuntimeRetiredError:
+        print(json.dumps(blocked_payload(component="source-freeze"), sort_keys=True))
+        return 2
     try:
         args.source_role = list(dict.fromkeys(args.source_role))
         args.expected_source_release_sha = _role_mapping(args.expected_source_release_sha)

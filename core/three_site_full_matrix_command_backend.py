@@ -24,6 +24,7 @@ from core.three_site_execution_safety import (
     SHARED_HOST_SAFE,
 )
 from core.three_site_full_matrix_runner import CampaignIdentity, FullMatrixRunnerError
+from scripts.legacy_three_site_staging_runtime_fence import assert_retired
 
 
 CONFIG_SCHEMA = "three-site-staging-full-matrix-command-backend-v2"
@@ -61,6 +62,7 @@ class CommandFullMatrixBackend:
         execution_class: str,
         release_sha: str,
     ) -> None:
+        assert_retired(component="staging-full-matrix-command-backend", operation="constructor")
         if execution_class not in EXECUTION_CLASSES:
             raise FullMatrixRunnerError("Full Matrix execution class is invalid")
         catalog = scenarios_for_execution_class(execution_class)
@@ -292,6 +294,7 @@ class CommandFullMatrixBackend:
         attempt: int | None = None,
         failed: bool | None = None,
     ) -> dict[str, Any]:
+        assert_retired(component="staging-full-matrix-command-backend", operation="driver invocation")
         timeout_name = operation
         if operation == "scenario":
             timeout_name = (
@@ -380,6 +383,7 @@ class CommandFullMatrixBackend:
     async def preflight(
         self, identity: CampaignIdentity, *, operation_id: str
     ) -> dict[str, Any]:
+        assert_retired(component="staging-full-matrix-command-backend", operation="preflight")
         return await self._invoke(
             identity, operation="preflight", operation_id=operation_id
         )
@@ -394,6 +398,7 @@ class CommandFullMatrixBackend:
         attempt: int,
         operation_id: str,
     ) -> dict[str, Any]:
+        assert_retired(component="staging-full-matrix-command-backend", operation="interrupted recovery")
         return await self._invoke(
             identity, operation="recovery", operation_id=operation_id, phase=phase,
             scenario_id=scenario_id, iteration=iteration, attempt=attempt,
@@ -409,6 +414,7 @@ class CommandFullMatrixBackend:
         attempt: int,
         operation_id: str,
     ) -> dict[str, Any]:
+        assert_retired(component="staging-full-matrix-command-backend", operation="scenario execution")
         catalog = scenarios_for_execution_class(identity.execution_class)
         if phase not in catalog or scenario_id not in catalog[phase]:
             raise FullMatrixRunnerError("Full Matrix requested an unknown scenario")
@@ -426,6 +432,7 @@ class CommandFullMatrixBackend:
         failed: bool,
         operation_id: str,
     ) -> dict[str, Any]:
+        assert_retired(component="staging-full-matrix-command-backend", operation="phase cleanup")
         return await self._invoke(
             identity, operation="cleanup", operation_id=operation_id, phase=phase,
             iteration=iteration, failed=failed,
@@ -434,6 +441,7 @@ class CommandFullMatrixBackend:
     async def finalize(
         self, identity: CampaignIdentity, *, operation_id: str
     ) -> dict[str, Any]:
+        assert_retired(component="staging-full-matrix-command-backend", operation="finalize")
         return await self._invoke(
             identity, operation="finalize", operation_id=operation_id
         )

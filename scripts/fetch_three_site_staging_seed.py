@@ -29,6 +29,11 @@ from scripts.render_three_site_staging_role_compose import _atomic_write
 from scripts.run_three_site_staging_source_backup import verify_tar_artifact
 from scripts.verify_three_site_staging_inventory import load_inventory
 from scripts.verify_three_site_staging_migration_plan import TARGET_SEED_MAP, verify_migration_plan
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
 
 
 TARGET_ROLES = tuple(TARGET_SEED_MAP)
@@ -55,6 +60,7 @@ def _fetch_one(
     identity_path: Path,
     output: Path,
 ) -> dict[str, Any]:
+    assert_retired(component="seed-fetch", operation="Object Storage seed retrieval")
     encrypted = output.parent / f".{output.name}.ciphertext"
     response = client.get_object(
         Bucket=bucket,
@@ -134,6 +140,7 @@ def execute(
     inventory: dict[str, Any],
     seed_manifests: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
+    assert_retired(component="seed-fetch", operation="execute")
     expected_confirmation = confirmation_phrase(
         verified_plan["campaign_id"], args.target_role, verified_plan["plan_sha256"]
     )
@@ -230,6 +237,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")
     args = parser.parse_args(argv)
+    try:
+        assert_retired(component="seed-fetch", operation="CLI")
+    except LegacyThreeSiteStagingRuntimeRetiredError:
+        print(json.dumps(blocked_payload(component="seed-fetch"), sort_keys=True))
+        return 2
     try:
         inventory = load_inventory(args.inventory)
         backups = _mapping(

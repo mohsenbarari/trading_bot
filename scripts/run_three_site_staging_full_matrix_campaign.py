@@ -22,6 +22,11 @@ from core.three_site_full_matrix_campaign import (
 )
 from core.three_site_full_matrix_command_backend import CommandFullMatrixBackend
 from core.three_site_full_matrix_runner import run_full_matrix_campaign
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
 
 
 CONFIRM_ENV = "THREE_SITE_STAGING_FULL_MATRIX_CONFIRM"
@@ -56,6 +61,7 @@ def _phase_evidence(campaign: dict, artifact_root: Path) -> list[dict]:
 
 
 async def _execute(args: argparse.Namespace) -> dict:
+    assert_retired(component="staging-full-matrix-campaign", operation="execute")
     if os.environ.get(CONFIRM_ENV) != CONFIRM_VALUE:
         raise RuntimeError(
             f"live staging execution requires {CONFIRM_ENV}={CONFIRM_VALUE}"
@@ -111,6 +117,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bound-artifact", action="append", default=[])
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
+    if args.action == "execute":
+        try:
+            assert_retired(component="staging-full-matrix-campaign", operation="CLI execute")
+        except LegacyThreeSiteStagingRuntimeRetiredError:
+            print(json.dumps(blocked_payload(component="staging-full-matrix-campaign"), sort_keys=True))
+            return 2
     try:
         if args.action == "execute":
             if args.backend_config is None:

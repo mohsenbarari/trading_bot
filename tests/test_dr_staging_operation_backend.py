@@ -20,6 +20,9 @@ from core.dr_staging_operation_backend import (
 )
 from core.writer_witness_auth import WitnessClientCredential
 from core.writer_witness_client import WriterWitnessClientConfig
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+)
 from tests.test_three_site_staging_signed_inventory import _inventory, _signed_documents
 
 
@@ -98,6 +101,15 @@ def _plan(**overrides):  # noqa: ANN202
 
 
 class StagingOperationBackendTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # Retain historical parsing/state-machine coverage under an explicit
+        # test seam. Production paths are asserted fail-closed below.
+        self._retirement_patch = patch(
+            "core.dr_staging_operation_backend.assert_retired", return_value=None
+        )
+        self._retirement_patch.start()
+        self.addCleanup(self._retirement_patch.stop)
+
     def test_preflight_binds_fresh_classification_and_local_credentials(self):
         backend = StagingTypedOperationBackend(_config())
         plan = _plan()
@@ -383,6 +395,49 @@ class StagingOperationBackendTests(unittest.TestCase):
         self.assertEqual(result["source_active_connections"], 0)
         self.assertEqual(result["target_active_connections"], 0)
         self.assertFalse(result["witness_lease_live"])
+
+class StagingOperationBackendRetirementTests(unittest.IsolatedAsyncioTestCase):
+    async def test_config_load_and_constructor_stop_before_secure_reads(self):
+        with (
+            patch("core.dr_staging_operation_backend._secure_json") as secure_json,
+            patch("core.dr_staging_operation_backend.verify_approved_inventory") as verify,
+        ):
+            with self.assertRaises(LegacyThreeSiteStagingRuntimeRetiredError):
+                load_staging_backend_config(
+                    Path("/forged/backend.json"),
+                    inventory={},
+                    inventory_approval={},
+                    inventory_approval_policy={},
+                )
+        secure_json.assert_not_called()
+        verify.assert_not_called()
+
+        with (
+            patch("core.dr_staging_operation_backend.load_token") as load_token,
+            patch("core.dr_staging_operation_backend.read_secure_text") as secure_read,
+        ):
+            with self.assertRaises(LegacyThreeSiteStagingRuntimeRetiredError):
+                StagingTypedOperationBackend(_config())
+        load_token.assert_not_called()
+        secure_read.assert_not_called()
+
+    async def test_direct_effect_helpers_stop_before_ssh_or_provider_calls(self):
+        backend = object.__new__(StagingTypedOperationBackend)
+        host = _host("webapp_fi", "10.30.0.2")
+        with (
+            patch("core.dr_staging_operation_backend.subprocess.run") as process,
+            patch("core.dr_staging_operation_backend.load_token") as load_token,
+            patch("core.dr_staging_operation_backend.inspect_or_switch") as switch,
+        ):
+            with self.assertRaises(LegacyThreeSiteStagingRuntimeRetiredError):
+                backend._ssh_raw(host, ["/forged/command"])
+            with self.assertRaises(LegacyThreeSiteStagingRuntimeRetiredError):
+                backend.preflight(_plan())
+            with self.assertRaises(LegacyThreeSiteStagingRuntimeRetiredError):
+                await backend.route_switched(_plan())
+        process.assert_not_called()
+        load_token.assert_not_called()
+        switch.assert_not_called()
 
 
 if __name__ == "__main__":

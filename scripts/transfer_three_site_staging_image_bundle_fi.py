@@ -36,6 +36,11 @@ from scripts.verify_three_site_staging_role_bundle import (
     _verify_bundle_source,
     verify_role_bundle,
 )
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
 
 
 SCHEMA = "three-site-staging-fi-image-transfer-v1"
@@ -205,6 +210,7 @@ def _run(
     timeout: int,
     stdin: bytes | None = None,
 ) -> bytes:
+    assert_retired(component="finland-image-transfer", operation="command execution")
     try:
         result = subprocess.run(
             arguments,
@@ -252,6 +258,7 @@ def _ssh(
     arguments: list[str],
     timeout: int,
 ) -> bytes:
+    assert_retired(component="finland-image-transfer", operation="SSH transport")
     remote = " ".join(shlex.quote(value) for value in arguments)
     return _run(
         [*_ssh_base(identity=identity, host=host, user=user), remote],
@@ -286,6 +293,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")
     args = parser.parse_args(argv)
+    try:
+        assert_retired(component="finland-image-transfer", operation="CLI")
+    except LegacyThreeSiteStagingRuntimeRetiredError:
+        print(json.dumps(blocked_payload(component="finland-image-transfer"), sort_keys=True))
+        return 2
     try:
         if args.output_inventory.exists() or args.output_evidence.exists():
             raise FinlandImageTransferError("direct-transfer output already exists")

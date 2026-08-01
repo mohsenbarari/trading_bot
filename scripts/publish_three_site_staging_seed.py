@@ -33,6 +33,11 @@ from scripts.verify_three_site_staging_inventory import (
     load_inventory,
     verify_approved_inventory,
 )
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+    assert_retired,
+    blocked_payload,
+)
 
 
 ARVAN_ENDPOINT = "https://s3.ir-thr-at1.arvanstorage.ir"
@@ -95,6 +100,7 @@ def _age_material(recipient_path: Path, identity_path: Path) -> tuple[str, str]:
 
 
 def _client(*, access_key: str, secret_key: str):  # noqa: ANN001
+    assert_retired(component="seed-publication", operation="Object Storage client creation")
     if boto3 is None:
         raise SeedPublicationError("boto3 is required for Object Storage seed transfer")
     return boto3.client(
@@ -107,6 +113,7 @@ def _client(*, access_key: str, secret_key: str):  # noqa: ANN001
 
 
 def _prepare_output(path: Path, *, repo: Path) -> None:
+    assert_retired(component="seed-publication", operation="output directory preparation")
     resolved = path.resolve()
     try:
         resolved.relative_to(repo.resolve())
@@ -125,6 +132,7 @@ def _prepare_output(path: Path, *, repo: Path) -> None:
 
 
 def _run_age(arguments: list[str], *, timeout: int = 1800) -> None:
+    assert_retired(component="seed-publication", operation="age command execution")
     if not Path(AGE).is_file():
         raise SeedPublicationError("age executable is not installed at /usr/bin/age")
     try:
@@ -144,6 +152,7 @@ def _run_age(arguments: list[str], *, timeout: int = 1800) -> None:
 
 
 def _streaming_hash(stream, target: Path) -> tuple[str, int]:  # noqa: ANN001
+    assert_retired(component="seed-publication", operation="ciphertext write")
     descriptor = os.open(
         target,
         os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0),
@@ -181,6 +190,7 @@ def _publish_one(
     identity_path: Path,
     temporary_root: Path,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    assert_retired(component="seed-publication", operation="Object Storage publication")
     source = Path(str(artifact["path"]))
     plaintext_hash, plaintext_size = sha256_secure_file(
         source,
@@ -284,6 +294,7 @@ def execute(
     inventory_result: dict[str, Any],
     backup: dict[str, Any],
 ) -> dict[str, Any]:
+    assert_retired(component="seed-publication", operation="execute")
     backup_hash = hashlib.sha256(_canonical_bytes(backup)).hexdigest()
     expected_confirmation = confirmation_phrase(
         inventory_result["campaign_id"], args.source_role, backup_hash
@@ -378,6 +389,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")
     args = parser.parse_args(argv)
+    try:
+        assert_retired(component="seed-publication", operation="CLI")
+    except LegacyThreeSiteStagingRuntimeRetiredError:
+        print(json.dumps(blocked_payload(component="seed-publication"), sort_keys=True))
+        return 2
     try:
         inventory = load_inventory(args.inventory)
         inventory_result = verify_approved_inventory(

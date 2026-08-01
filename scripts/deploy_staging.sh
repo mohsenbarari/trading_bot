@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# The legacy two-server staging deployment surface is retired.  This guard is
+# deliberately before project discovery and action dispatch so direct calls
+# cannot reach Docker, Nginx, HTTP, or staging environment writers.
+printf '%s\n' '{"status":"blocked_legacy_three_site_staging_runtime_retired","component":"legacy-staging-deploy","error":"legacy staging deployment is retired"}'
+exit 2
+
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="$PROJECT_DIR/deploy/staging/docker-compose.staging.yml"
 NGINX_TEMPLATE="$PROJECT_DIR/deploy/staging/nginx-staging.conf.template"

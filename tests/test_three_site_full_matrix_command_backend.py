@@ -23,9 +23,32 @@ from scripts.run_three_site_staging_full_matrix_campaign import (
     CONFIRM_VALUE,
     _execute,
 )
+from scripts.legacy_three_site_staging_runtime_fence import (
+    LegacyThreeSiteStagingRuntimeRetiredError,
+)
 
 
 class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        # Exercise retained historical parser/driver semantics through an
+        # explicit test seam. Enforcement is tested in the separate class.
+        self._retirement_patches = [
+            patch(
+                "core.three_site_full_matrix_command_backend.assert_retired",
+                return_value=None,
+            ),
+            patch(
+                "scripts.run_three_site_staging_full_matrix_campaign.assert_retired",
+                return_value=None,
+            ),
+        ]
+        for retirement_patch in self._retirement_patches:
+            retirement_patch.start()
+
+    async def asyncTearDown(self) -> None:
+        for retirement_patch in reversed(self._retirement_patches):
+            retirement_patch.stop()
+
     def _fixture(self):  # noqa: ANN202
         stack = tempfile.TemporaryDirectory()
         root = Path(stack.name)
@@ -321,6 +344,40 @@ class CommandFullMatrixBackendTests(unittest.IsolatedAsyncioTestCase):
             with patch.dict(os.environ, {CONFIRM_ENV: CONFIRM_VALUE}, clear=True):
                 with self.assertRaisesRegex(RuntimeError, "campaign-bound"):
                     await _execute(args)
+
+class CommandFullMatrixBackendRetirementTests(unittest.IsolatedAsyncioTestCase):
+    async def test_constructor_stops_before_driver_or_runtime_open(self):
+        with (
+            patch("core.three_site_full_matrix_command_backend.os.open") as open_file,
+            patch(
+                "core.three_site_full_matrix_command_backend.asyncio.create_subprocess_exec"
+            ) as create_process,
+        ):
+            with self.assertRaises(LegacyThreeSiteStagingRuntimeRetiredError):
+                CommandFullMatrixBackend(
+                    config={},
+                    repo_root=Path("/forged/repository"),
+                    artifact_root=Path("/forged/artifacts"),
+                    campaign_id="forged",
+                    gate_group_id="forged",
+                    execution_class=SHARED_HOST_SAFE,
+                    release_sha="a" * 40,
+                )
+        open_file.assert_not_called()
+        create_process.assert_not_called()
+
+    async def test_direct_execution_calls_stop_before_driver_process(self):
+        backend = object.__new__(CommandFullMatrixBackend)
+        with patch(
+            "core.three_site_full_matrix_command_backend.asyncio.create_subprocess_exec"
+        ) as create_process:
+            with self.assertRaises(LegacyThreeSiteStagingRuntimeRetiredError):
+                await backend.preflight(SimpleNamespace(), operation_id="forged")
+            with self.assertRaises(LegacyThreeSiteStagingRuntimeRetiredError):
+                await backend._invoke(
+                    SimpleNamespace(), operation="scenario", operation_id="forged"
+                )
+        create_process.assert_not_called()
 
 
 if __name__ == "__main__":

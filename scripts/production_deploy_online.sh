@@ -13,6 +13,7 @@ DEFAULT_MANIFEST="$PROJECT_DIR/deploy/production/online.env"
 MANIFEST_PATH="${DEPLOY_MANIFEST:-$DEFAULT_MANIFEST}"
 COMMAND=""
 WA_IR_OBJECT_STORAGE_ONLY_HOST="95.38.164.29"
+LEGACY_CROSS_SITE_TRANSPORT_REASON="FI-to-IR release, image, and data payloads require private, versioned, age-encrypted Object Storage. This legacy script has no compliant payload transport and no environment or configuration bypass is available."
 IRAN_BOOTSTRAP_APT_PACKAGES="ca-certificates curl gnupg lsb-release rsync jq pigz nginx certbot python3-certbot-nginx docker.io python3-pip python3-setuptools python3-wheel"
 IRAN_BOOTSTRAP_COMPOSE_PACKAGES="docker-compose-v2 docker-compose"
 SHARED_SYNC_TABLES_SQL="users, accountant_relations, customer_relations, telegram_link_tokens, invitations, admin_market_messages, admin_broadcast_messages, notifications, user_notification_preferences, user_blocks, commodities, commodity_aliases, trading_settings, market_schedule_overrides, market_runtime_state, offers, offer_publication_states, offer_requests, trades, trade_delivery_receipts, telegram_admin_broadcasts, telegram_admin_broadcast_receipts, telegram_notification_outbox"
@@ -39,28 +40,21 @@ Usage:
 
 Commands:
   help                 Show this help.
-  release              Run the full production flow. This is the default.
-  check-local          Validate local tooling and manifest.
-  deploy-foreign       Build and deploy the foreign server locally.
-  bootstrap-iran       Install Docker/Nginx/Certbot prerequisites on the Iran host.
-  configure-nginx      Render and install the Iran Nginx config.
-  issue-cert           Request/renew the SSL certificate on the Iran host.
-  build-release        Build frontend locally, prepare wheel cache, and build/loadable Docker artifacts.
-  sync-project         Rsync the production payload and runtime env to the Iran host.
-  ship-images          Upload the prepared Docker image bundle to the Iran host.
-  load-images          Load the uploaded Docker image bundle on the Iran host.
-  deploy-iran          Start Docker services on the Iran host without remote build/pull.
-  inspect-shared-data  Inspect Iran shared-table state and print the fresh/existing classification.
-  seed-shared-data     Apply guarded shared-table seed/reset handling for the Iran host.
-  healthcheck          Validate local and public health endpoints.
+  check-local          Validate local tooling and read-only remote metadata.
+  deploy-foreign       Build and deploy the foreign server locally only.
+  build-release        Build candidate artifacts locally only.
+  inspect-shared-data  Read Iran shared-table classification only.
+  healthcheck          Run read-only local and public health checks.
+
+Blocked legacy commands (before manifest parsing, SSH, rsync, scp, curl, or
+remote state changes):
+  release bootstrap-iran configure-nginx issue-cert sync-project ship-images
+  load-images deploy-iran seed-shared-data
 
 Notes:
-  - The script first deploys the foreign server locally.
-  - It then asks whether Iran currently has working internet.
-  - If the answer is "yes", it runs the Iran-online flow using shipped images/artifacts.
-  - If the answer is "no", it stops after foreign deploy because the Iran-offline flow is not implemented yet.
-  - For SSH, prefer key-based auth. Password auth is supported only when sshpass is installed.
-  - Release healthcheck runs a read-only production data hygiene guard on both hosts.
+  - FI-to-IR release, image, and data payloads are retired from this script.
+  - Use the dedicated private/versioned age-encrypted Object Storage transport.
+  - This retirement fence has no environment or configuration override.
 EOF
 }
 
@@ -488,6 +482,24 @@ parse_args() {
     done
 
     [[ -n "$COMMAND" ]] || COMMAND="release"
+}
+
+assert_legacy_cross_site_transport_fenced() {
+    # This script predates the Object Storage-only Iran data plane. Keep only
+    # foreign-local work and semantic read-only diagnostics reachable. The
+    # guard intentionally runs before a manifest can supply host credentials,
+    # paths, or other authority to a legacy direct-transfer path.
+    case "$COMMAND" in
+        check-local|deploy-foreign|build-release|inspect-shared-data|healthcheck)
+            return 0
+            ;;
+        release|bootstrap-iran|configure-nginx|issue-cert|sync-project|ship-images|load-images|deploy-iran|seed-shared-data)
+            die "Legacy command '$COMMAND' is blocked before manifest/SSH: $LEGACY_CROSS_SITE_TRANSPORT_REASON"
+            ;;
+        *)
+            die "Legacy command '$COMMAND' is not allowlisted: $LEGACY_CROSS_SITE_TRANSPORT_REASON"
+            ;;
+    esac
 }
 
 load_manifest() {
@@ -2486,6 +2498,7 @@ main() {
         usage
         exit 0
     fi
+    assert_legacy_cross_site_transport_fenced
     ensure_manifest_file
     load_manifest
     case "$COMMAND" in
