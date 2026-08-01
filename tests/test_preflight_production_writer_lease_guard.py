@@ -202,36 +202,23 @@ class WriterGuardPreflightTests(unittest.TestCase):
             ),
         ]
 
-    def test_stage_validates_exact_runtime_using_only_read_only_docker_commands(self) -> None:
+    def test_legacy_fi_guard_is_retired_before_any_runtime_inspection(self) -> None:
         self.assertFalse(self.lease_file.exists())
-        results = self._runtime_results()
-        with mock.patch.object(preflight.subprocess, "run", side_effect=results) as run:
-            result = preflight.run(config_path=self.preflight_config, phase="stage")
+        with mock.patch.object(preflight.subprocess, "run") as run:
+            with self.assertRaisesRegex(preflight.WriterGuardPreflightError, "retired"):
+                preflight.run(config_path=self.preflight_config, phase="stage")
+        run.assert_not_called()
 
-        self.assertEqual(result["status"], "ready")
-        self.assertEqual(result["services"], ["app", "sync_worker"])
-        commands = [call.args[0] for call in run.call_args_list]
-        self.assertEqual(len(commands), 5)
-        self.assertEqual(commands[0][0:2], ["/usr/bin/docker", "compose"])
-        self.assertIn("config", commands[0])
-        self.assertIn("--format", commands[0])
-        self.assertIn("json", commands[0])
-        self.assertEqual(commands[1][0:3], ["/usr/bin/docker", "image", "inspect"])
-        self.assertEqual(commands[2][0:3], ["/usr/bin/docker", "container", "inspect"])
-        prohibited = {"up", "start", "stop", "restart", "rm", "pull", "build", "kill", "exec"}
-        self.assertFalse(any(prohibited.intersection(command) for command in commands))
-
-    def test_stage_rejects_a_compose_restart_policy_before_container_inspection(self) -> None:
+    def test_legacy_fi_guard_cannot_be_revived_by_a_compose_variant(self) -> None:
         with mock.patch.object(
             preflight.subprocess,
             "run",
             return_value=_completed(self._compose_payload(app_restart="always")),
         ) as run:
-            with self.assertRaisesRegex(preflight.WriterGuardPreflightError, "resurrect"):
+            with self.assertRaisesRegex(preflight.WriterGuardPreflightError, "retired"):
                 preflight.run(config_path=self.preflight_config, phase="stage")
 
-        self.assertEqual(run.call_count, 1)
-        self.assertIn("config", run.call_args.args[0])
+        run.assert_not_called()
 
     def test_stage_rejects_an_installed_unit_that_differs_from_the_pinned_template(self) -> None:
         self.unit_file.write_bytes(self.unit_file.read_bytes() + b"# unauthorized change\n")
@@ -240,13 +227,13 @@ class WriterGuardPreflightTests(unittest.TestCase):
                 preflight.run(config_path=self.preflight_config, phase="stage")
         run.assert_not_called()
 
-    def test_stage_rejects_agent_timing_that_differs_from_the_intended_witness_policy(self) -> None:
+    def test_legacy_fi_guard_remains_retired_when_its_timing_is_changed(self) -> None:
         payload = json.loads(self.agent_config.read_text(encoding="utf-8"))
         payload["witness"]["lease_duration_seconds"] = 180
         payload["witness"]["renew_interval_seconds"] = 30
         _write(self.agent_config, json.dumps(payload), mode=0o600)
         with mock.patch.object(preflight.subprocess, "run") as run:
-            with self.assertRaisesRegex(preflight.WriterGuardPreflightError, "intended Witness timing"):
+            with self.assertRaisesRegex(preflight.WriterGuardPreflightError, "retired"):
                 preflight.run(config_path=self.preflight_config, phase="stage")
         run.assert_not_called()
 
@@ -266,7 +253,7 @@ class WriterGuardPreflightTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
 
-    def test_guard_start_requires_a_live_local_lease_after_runtime_admission(self) -> None:
+    def test_legacy_fi_guard_remains_retired_even_with_a_local_lease(self) -> None:
         stale = {
             "schema": "production-writer-lease-v1",
             "holder_site": "webapp_fi",
@@ -279,7 +266,7 @@ class WriterGuardPreflightTests(unittest.TestCase):
         }
         _write(self.lease_file, json.dumps(stale), mode=0o600)
         with mock.patch.object(preflight.subprocess, "run", side_effect=self._runtime_results()):
-            with self.assertRaisesRegex(preflight.WriterGuardPreflightError, "stale"):
+            with self.assertRaisesRegex(preflight.WriterGuardPreflightError, "retired"):
                 preflight.run(config_path=self.preflight_config, phase="guard-start")
 
     def test_examples_require_reviewed_container_and_image_identity_without_secret_values(self) -> None:
@@ -288,10 +275,21 @@ class WriterGuardPreflightTests(unittest.TestCase):
                 encoding="utf-8"
             )
         )
-        self.assertEqual(payload["release_sha"], RELEASE_SHA)
+        self.assertEqual(payload["schema"], "fenced-fi-writer-preflight-v1")
+        self.assertEqual(
+            payload["application_release_root"].rsplit("/", 1)[-1], RELEASE_SHA
+        )
         self.assertIn("REPLACE_WITH_64_HEX", payload["runtime"]["services"][0]["image_id"])
         self.assertIn("REPLACE_WITH_REVIEWED", payload["runtime"]["services"][0]["image_ref"])
-        self.assertIn("REPLACE_WITH_WITNESS", payload["witness_timing"]["lease_duration_seconds"])
+        self.assertIn(
+            "REPLACE_WITH_64_HEX",
+            payload["release_identity"]["expected_identity_sha256"],
+        )
+        self.assertIn("REPLACE_WITH_64_HEX", payload["runtime_env_sha256"])
+        self.assertIn("REPLACE_WITH_REVIEWED", payload["runtime_resources"]["network_name"])
+        self.assertIn(
+            "@sha256:", payload["runtime"]["services"][0]["image_repo_digest"]
+        )
         self.assertNotIn("secret", json.dumps(payload).lower())
 
 

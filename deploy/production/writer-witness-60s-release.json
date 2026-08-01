@@ -14,7 +14,7 @@
     "auth_max_age_seconds": 15
   },
   "webapp_fi_client": {
-    "mode": "writer",
+    "mode": "fenced_fi_writer",
     "site": "webapp_fi",
     "lease_duration_seconds": 60,
     "renew_interval_seconds": 10,

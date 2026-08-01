@@ -20,14 +20,15 @@ SPEC.loader.exec_module(release_package)
 def agent_config(*, duration: int = 60) -> dict[str, object]:
     return {
         "schema": "production-writer-lease-agent-v1",
-        "mode": "writer",
+        "mode": "fenced_fi_writer",
         "site": "webapp_fi",
-        "lease_file": "/var/lib/trading-bot-three-site/writer-lease.json",
+        "lease_file": "/var/lib/trading-bot-three-site/writer-terms/writer-lease.json",
+        "fenced_preflight_config": "/etc/trading-bot-three-site/webapp-fi-fenced-writer-preflight.json",
         "runtime": {
-            "compose_file": "/srv/trading-bot/current/docker-compose.yml",
-            "env_file": "/root/secure-envs/trading-bot/webapp-fi.env",
+            "compose_file": "/srv/trading-bot-three-site/control-releases/example/deploy/production/docker-compose.webapp-fi-writer-2c08.yml",
+            "env_file": "/root/secure-envs/trading-bot/wa-fi-fenced-writer-runtime.env",
             "selection_env_file": None,
-            "services": ["app", "sync_worker"],
+            "services": ["app", "bot"],
         },
         "witness": {
             "url": "https://witness.example.invalid",

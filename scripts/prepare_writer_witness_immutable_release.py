@@ -401,8 +401,10 @@ def _load_profile(path: Path) -> dict[str, Any]:
         expected={"mode", "site", "lease_duration_seconds", "renew_interval_seconds", "safety_margin_seconds"},
         field="release profile WebApp-FI client",
     )
-    if client.get("mode") != "writer" or client.get("site") != "webapp_fi":
-        raise WitnessReleasePreparationError("release profile does not bind the WebApp-FI writer client")
+    if client.get("mode") != "fenced_fi_writer" or client.get("site") != "webapp_fi":
+        raise WitnessReleasePreparationError(
+            "release profile does not bind the fenced WebApp-FI writer client"
+        )
     for key, expected in (
         ("lease_duration_seconds", duration),
         ("renew_interval_seconds", interval),
@@ -779,7 +781,15 @@ def verify_webapp_fi_client_timing(
     )
     _require_exact_fields(
         config,
-        expected={"schema", "mode", "site", "lease_file", "runtime", "witness"},
+        expected={
+            "schema",
+            "mode",
+            "site",
+            "lease_file",
+            "fenced_preflight_config",
+            "runtime",
+            "witness",
+        },
         field="WebApp-FI writer lease-agent config",
     )
     client = profile["webapp_fi_client"]
@@ -789,6 +799,11 @@ def verify_webapp_fi_client_timing(
         or config.get("site") != client["site"]
     ):
         raise WitnessReleasePreparationError("WebApp-FI lease-agent identity is incompatible")
+    preflight_path = config.get("fenced_preflight_config")
+    if not isinstance(preflight_path, str) or not preflight_path.startswith("/"):
+        raise WitnessReleasePreparationError(
+            "WebApp-FI fenced identity preflight config is invalid"
+        )
     witness = config.get("witness")
     if not isinstance(witness, dict):
         raise WitnessReleasePreparationError("WebApp-FI lease-agent Witness section is invalid")
