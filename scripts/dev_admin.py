@@ -17,11 +17,9 @@ import asyncio
 import getpass
 import json
 import sys
-import time
 from pathlib import Path
 from typing import Iterable
 
-import httpx
 from sqlalchemy import delete, func, or_, select
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -30,7 +28,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.db import AsyncSessionLocal, init_db
 from core.enums import UserAccountStatus
-from core.config import settings
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+)
 from core.security import get_password_hash
 from core.services.chat_room_service import (
     ensure_mandatory_channel_membership,
@@ -41,9 +42,7 @@ from core.services.session_reset_service import (
     redis_delete_keys,
     reset_user_session_state,
 )
-from core.server_routing import current_server, normalize_server, peer_server_url_for
-from core.sync_transport import assert_runtime_sync_transport_allowed, runtime_sync_tls_verify_setting
-from core.trade_forwarding import sign_internal_payload
+from core.server_routing import current_server, normalize_server
 from models.session import (
     SessionLoginRequest,
     SingleSessionRecoveryRequest,
@@ -466,51 +465,21 @@ async def set_max_sessions(args) -> None:
         print_user(user)
 
 
-def _json_body(payload: dict) -> str:
-    return json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
-
-
 async def forward_remote_session_reset(user: User, target_server: str) -> tuple[int, dict]:
-    target_url = peer_server_url_for(target_server)
-    if not target_url:
-        return 503, {"detail": "Home server URL is not configured."}
-
-    payload = {
-        "user_id": int(user.id),
-        "mobile_number": user.mobile_number,
-        "source_server": current_server(),
-    }
-    body = _json_body(payload)
-    timestamp = int(time.time())
-    headers = {
-        "Content-Type": "application/json",
-        "X-API-Key": settings.sync_api_key or "",
-        "X-Timestamp": str(timestamp),
-        "X-Signature": sign_internal_payload(body, timestamp),
-        "X-Source-Server": current_server(),
-    }
-
     try:
-        assert_runtime_sync_transport_allowed()
-        async with httpx.AsyncClient(
-            timeout=settings.trade_forward_timeout_seconds,
-            verify=runtime_sync_tls_verify_setting(),
-        ) as client:
-            response = await client.post(
-                f"{target_url}/api/sessions/internal/reset-user-sessions",
-                content=body,
-                headers=headers,
-            )
-    except httpx.TimeoutException:
-        return 504, {"detail": "Timed out while contacting the home server."}
-    except httpx.RequestError:
-        return 503, {"detail": "Could not connect to the home server."}
+        # The two-site version signed and POSTed this command to its peer.
+        # The three-site architecture must deny that route before it reads a
+        # user object, resolves a peer, or constructs a network client.
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="dev-admin",
+            operation="direct peer session-reset forwarding",
+        )
+    except LegacyDirectFiIrTransportRetiredError:
+        return 503, {"detail": "Legacy direct peer session reset is retired."}
 
-    try:
-        body_data = response.json()
-    except ValueError:
-        body_data = {"detail": response.text or "Invalid home server response"}
-    return response.status_code, body_data if isinstance(body_data, dict) else {"detail": body_data}
+    # Keep the shape explicit if the assertion implementation ever changes.
+    del user, target_server
+    return 503, {"detail": "Legacy direct peer session reset is retired."}
 
 
 async def reset_sessions(args) -> None:

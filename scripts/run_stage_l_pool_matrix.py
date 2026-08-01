@@ -16,6 +16,9 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.capture_production_baseline import DEFAULT_ARTIFACT_ROOT, display_path, utc_iso, utc_stamp
 from scripts.deploy_config import resolve_deploy_settings
+from core.legacy_two_server_full_matrix_fence import (
+    blocked_legacy_two_server_full_matrix_payload,
+)
 from scripts.report_production_realistic_load import parse_duration_seconds
 from scripts.run_worker_pool_matrix import run_remote_script, sh_quote
 
@@ -549,24 +552,17 @@ def run_matrix(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-    try:
-        report = run_matrix(args)
-    except Exception as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        print(f"STAGE_L_POOL_MATRIX_DONE status=failed error={type(exc).__name__}", file=sys.stderr)
-        return 1
+    del argv
     print(
-        f"STAGE_L_POOL_MATRIX_DONE status={'passed' if report.get('ok') else 'failed'} "
-        f"artifact={report.get('artifact_dir')} restored={report.get('restored')}",
-        file=sys.stderr,
+        json.dumps(
+            blocked_legacy_two_server_full_matrix_payload(
+                component="iran-two-server-db-pool-matrix"
+            ),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
     )
-    if args.json:
-        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
-    else:
-        print(f"Stage L7.1 pool matrix: {report['artifact_dir']}")
-        print(report["recommendation"])
-    return 0 if report.get("ok") else 2
+    return 2
 
 
 if __name__ == "__main__":

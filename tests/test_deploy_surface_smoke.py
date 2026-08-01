@@ -645,14 +645,13 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
                         self.assertEqual(options.get('max-size'), '${DOCKER_LOG_MAX_SIZE:-20m}')
                         self.assertEqual(options.get('max-file'), '${DOCKER_LOG_MAX_FILE:-5}')
 
-    def test_foreign_compose_pins_current_iran_domain_inside_containers(self):
+    def test_retired_foreign_root_compose_has_no_direct_iran_peer_mapping(self):
         compose = (REPO_ROOT / 'docker-compose.yml').read_text(encoding='utf-8')
 
-        self.assertIn(
-            '${IRAN_PUBLIC_DOMAIN:-coin.gold-trade.ir}:${IRAN_PUBLIC_IP:-65.109.220.59}',
-            compose,
-        )
-        self.assertGreaterEqual(compose.count('extra_hosts:'), 3)
+        self.assertNotIn('${IRAN_PUBLIC_DOMAIN:-coin.gold-trade.ir}:${IRAN_PUBLIC_IP:-65.109.220.59}', compose)
+        self.assertNotIn('extra_hosts:', compose)
+        self.assertIn('legacy_root_runtime_guard:', compose)
+        self.assertIn('profiles: ["legacy-local-development"]', compose)
 
     def test_staging_foreign_compose_pins_iran_domain_inside_containers(self):
         staging_compose_path = REPO_ROOT / 'deploy/staging/docker-compose.staging.yml'

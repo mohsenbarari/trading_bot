@@ -12,7 +12,6 @@ import argparse
 import asyncio
 import contextvars
 import hashlib
-import hmac
 import json
 import math
 import os
@@ -33,7 +32,6 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Update
 from fastapi import BackgroundTasks, HTTPException
 from starlette.responses import JSONResponse
-import httpx
 from sqlalchemy import case, delete, false, func, or_, select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 from sqlalchemy.orm.exc import StaleDataError
@@ -61,6 +59,10 @@ from core.config import settings
 from core.db import AsyncSessionLocal
 from core.enums import NotificationCategory, NotificationLevel, UserAccountStatus
 from core.events import setup_event_listeners
+from core.legacy_direct_fi_ir_transport_fence import (
+    assert_legacy_direct_fi_ir_transport_retired,
+    blocked_legacy_direct_fi_ir_transport_payload,
+)
 from core.redis import init_redis, pool
 from core.services.accountant_relation_service import EffectiveOwnerActor
 from core.services.offer_creation_service import OfferCreationCommand, create_authoritative_offer
@@ -1706,17 +1708,6 @@ def _targeted_sync_batches(entries: list[ChangeLog], *, batch_size: int) -> list
     return [entries[index : index + normalized_batch_size] for index in range(0, len(entries), normalized_batch_size)]
 
 
-def _signed_sync_headers(api_key: str, body: str) -> dict[str, str]:
-    timestamp = str(int(time.time()))
-    signature = hmac.new(api_key.encode(), f"{timestamp}:{body}".encode(), hashlib.sha256).hexdigest()
-    return {
-        "Content-Type": "application/json",
-        "X-API-Key": api_key,
-        "X-Timestamp": timestamp,
-        "X-Signature": signature,
-    }
-
-
 def _peer_sync_response_is_success(response_payload: Mapping[str, Any], expected_count: int) -> bool:
     status = response_payload.get("status")
     errors = int(response_payload.get("errors") or 0)
@@ -1770,88 +1761,15 @@ async def push_prefix_change_logs_to_peer(
     max_attempts: int = 3,
     include_synced: bool = False,
 ) -> dict[str, Any]:
-    from core.server_routing import default_peer_server_url
-    from core.sync_worker import change_log_entry_to_sync_item
-
-    target_url = (default_peer_server_url() or "").rstrip("/")
-    api_key = getattr(settings, "sync_api_key", None)
-    if not target_url or not api_key:
-        raise TradingProbeError("targeted prefix sync requires peer URL and sync API key")
-
-    entries = await collect_targeted_prefix_change_logs(prefix, tables=tables, include_synced=include_synced)
-    report: dict[str, Any] = {
-        "status": "ok",
-        "prefix": prefix,
-        "server_mode": settings.server_mode,
-        "target_url_configured": bool(target_url),
-        "tables": list(tables),
-        "include_synced": bool(include_synced),
-        "entry_count": len(entries),
-        "processed": 0,
-        "batches": [],
-    }
-    if not entries:
-        return report
-
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        for batch_index, batch in enumerate(_targeted_sync_batches(entries, batch_size=batch_size), start=1):
-            batch_report: dict[str, Any] | None = None
-            for attempt in range(1, max(1, int(max_attempts)) + 1):
-                items = []
-                for entry in batch:
-                    item = change_log_entry_to_sync_item(entry)
-                    items.append(item)
-
-                body = json.dumps(items, sort_keys=True, default=str)
-                response = await client.post(
-                    f"{target_url}/api/sync/receive",
-                    content=body,
-                    headers=_signed_sync_headers(api_key, body),
-                )
-                try:
-                    response_payload = response.json()
-                except ValueError:
-                    response_payload = {
-                        "status": "invalid-json",
-                        "body_sha256": hashlib.sha256(response.content).hexdigest()[:16],
-                    }
-
-                batch_report = {
-                    "batch_index": batch_index,
-                    "attempt": attempt,
-                    "entry_count": len(batch),
-                    "status_code": response.status_code,
-                    "response": response_payload,
-                    "table_counts": dict(Counter(str(entry.table_name) for entry in batch)),
-                }
-                report["batches"].append(batch_report)
-
-                if response.status_code == 200 and _peer_sync_response_is_success(response_payload, len(batch)):
-                    break
-                if attempt < max(1, int(max_attempts)):
-                    await asyncio.sleep(0.5 * attempt)
-            else:
-                report["status"] = "failed"
-                report["failed_batch"] = batch_report
-                raise TradingProbeError(f"targeted prefix sync failed: {json.dumps(batch_report, default=str)}")
-
-            async with AsyncSessionLocal() as db:
-                ids = [int(entry.id) for entry in batch]
-                mark_result = await db.execute(
-                    text(
-                        """
-                        UPDATE change_log
-                        SET synced = true, verified = true
-                        WHERE id = ANY(:ids)
-                        """
-                    ),
-                    {"ids": ids},
-                )
-                await db.commit()
-                batch_report["marked_change_logs"] = int(mark_result.rowcount or 0)
-            report["processed"] += len(batch)
-
-    return report
+    # The old Full Matrix manually POSTed selected rows to the peer and then
+    # marked them delivered. That bypasses the replacement's versioned
+    # Object-Storage delta receiver and Witness writer term, so reject it
+    # before reading local rows, resolving a peer, or using a sync credential.
+    del prefix, batch_size, tables, max_attempts, include_synced
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="trading-core-probe-worker",
+        operation="targeted direct peer change-log catchup",
+    )
 
 
 async def lock_cleanup_users(db: Any, user_ids: list[int]) -> None:
@@ -7905,6 +7823,13 @@ async def dispatch(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "sync-prefix-catchup":
+        print_json(
+            blocked_legacy_direct_fi_ir_transport_payload(
+                component="trading-core-probe-worker"
+            )
+        )
+        return 2
     try:
         return asyncio.run(dispatch(args))
     except Exception as exc:

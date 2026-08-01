@@ -9,8 +9,6 @@ import json
 import os
 import subprocess
 import sys
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -20,13 +18,16 @@ if str(REPO_ROOT) not in sys.path:
 
 from core.config import settings
 from core.db import AsyncSessionLocal
-from core.server_routing import default_peer_server_url, peer_server_url_for
+from core.legacy_direct_fi_ir_transport_fence import (
+    LegacyDirectFiIrTransportRetiredError,
+    assert_legacy_direct_fi_ir_transport_retired,
+    blocked_legacy_direct_fi_ir_transport_payload,
+)
 from core.sync_repair import (
     REPAIR_TOOL_SCHEMA_VERSION,
     REPLAY_IDENTITY_FIELDS_BY_TABLE,
     build_current_state_replay_item,
     build_repair_plan,
-    build_signed_headers,
     build_watermark_repair_payload,
     load_row_by_identity,
     summarize_replay_item,
@@ -52,12 +53,11 @@ def _parse_identity(raw: str) -> dict[str, Any]:
 
 
 def _target_url(args: argparse.Namespace) -> str:
-    target = args.target_url or (
-        peer_server_url_for(args.target_server) if getattr(args, "target_server", None) else default_peer_server_url()
+    del args
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="sync-repair-tool",
+        operation="direct peer repair target resolution",
     )
-    if not target:
-        raise ValueError("target URL is required for apply; pass --target-url or configure peer URL")
-    return str(target).rstrip("/")
 
 
 def _target_url_hash(target_url: str) -> str:
@@ -206,28 +206,11 @@ def _validate_replay_apply_manifest(
 
 
 def _send_items(target_url: str, api_key: str, items: list[dict[str, Any]]) -> dict[str, Any]:
-    body = json.dumps(items, sort_keys=True, default=str, separators=(",", ":"))
-    request = urllib.request.Request(
-        f"{target_url}/api/sync/receive",
-        data=body.encode("utf-8"),
-        headers=build_signed_headers(api_key, body),
-        method="POST",
+    del target_url, api_key, items
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="sync-repair-tool",
+        operation="direct peer repair HTTP delivery",
     )
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            response_body = response.read()
-            status_code = response.getcode()
-    except urllib.error.HTTPError as exc:
-        response_body = exc.read()
-        status_code = exc.code
-
-    try:
-        payload = json.loads(response_body.decode("utf-8"))
-    except Exception:
-        payload = {"status": "invalid-json", "response_size_bytes": len(response_body)}
-    if status_code != 200:
-        raise RuntimeError(f"peer returned HTTP {status_code}: {json.dumps(payload, sort_keys=True, default=str)}")
-    return payload
 
 
 def plan_command(args: argparse.Namespace) -> int:
@@ -265,6 +248,11 @@ def plan_command(args: argparse.Namespace) -> int:
 
 
 async def replay_row_command(args: argparse.Namespace) -> int:
+    if args.apply:
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="sync-repair-tool",
+            operation="direct peer repair apply CLI",
+        )
     identity = _parse_identity(args.identity)
     source_sequence = args.source_sequence
     if args.apply and not args.confirm_write:
@@ -329,7 +317,7 @@ def watermark_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Dry-run-first sync parity repair and replay tool.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -368,11 +356,28 @@ def parse_args() -> argparse.Namespace:
     watermark.add_argument("--operation", required=True)
     watermark.add_argument("--record-id")
 
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
-def main() -> int:
-    args = parse_args()
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    if args.command == "replay-row" and args.apply:
+        try:
+            assert_legacy_direct_fi_ir_transport_retired(
+                component="sync-repair-tool",
+                operation="direct peer repair apply CLI",
+            )
+        except LegacyDirectFiIrTransportRetiredError:
+            print(
+                json.dumps(
+                    blocked_legacy_direct_fi_ir_transport_payload(
+                        component="sync-repair-tool"
+                    ),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            )
+            return 2
     if args.command == "plan":
         return plan_command(args)
     if args.command == "replay-row":

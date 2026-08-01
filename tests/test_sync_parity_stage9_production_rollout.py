@@ -255,28 +255,14 @@ class SyncParityStage9ProductionRolloutTests(unittest.TestCase):
         self.assertEqual(executed["status"], "passed")
         self.assertEqual(seen, [command["name"] for command in plan["local_release_gates"]["commands"]])
 
-    def test_main_writes_plan_without_touching_production(self):
-        with tempfile.TemporaryDirectory() as tmp_dir, patch.object(
-            stage9, "resolve_deploy_settings", return_value=FAKE_SETTINGS
-        ), patch.object(stage9, "run_git_value", side_effect=fake_git_value("candidate/sync-parity-hardening")):
-            output = Path(tmp_dir) / "plan.json"
-            with patch("sys.stdout", new_callable=io.StringIO):
-                exit_code = stage9.main(
-                    [
-                        "--stamp",
-                        "20260627T190000Z",
-                        "--artifact-dir",
-                        tmp_dir,
-                        "--output",
-                        str(output),
-                    ]
-                )
-            payload = json.loads(output.read_text(encoding="utf-8"))
+    def test_main_is_retired_before_reading_settings_or_touching_production(self):
+        with patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            exit_code = stage9.main(["--stamp", "20260627T190000Z"])
 
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(payload["mode"], "plan")
-        self.assertEqual(payload["status"], "planned")
-        self.assertEqual(payload["branch_gate"]["actual_branch"], "candidate/sync-parity-hardening")
+        self.assertEqual(exit_code, 2)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["status"], "blocked_legacy_two_server_full_matrix_retired")
+        self.assertEqual(payload["component"], "sync-parity-stage9-two-server-rollout")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,9 @@
 import json
 import tempfile
 import unittest
+from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 import scripts.run_stage_l_pool_matrix as pool_matrix
 from scripts.run_stage_l_pool_matrix import (
@@ -198,9 +200,14 @@ class StageLPoolMatrixTests(unittest.TestCase):
         self.assertIn("Stage L7 remains blocked", recommendation)
         self.assertIn("official L7 gates", recommendation)
 
-    def test_pool_matrix_emits_done_marker_for_teed_logs(self):
-        source = Path(pool_matrix.__file__).read_text(encoding="utf-8")
-        self.assertIn("STAGE_L_POOL_MATRIX_DONE", source)
+    def test_pool_matrix_cli_is_retired(self):
+        with patch("sys.stdout", new_callable=StringIO) as stdout:
+            exit_code = pool_matrix.main([])
+
+        self.assertEqual(exit_code, 2)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["status"], "blocked_legacy_two_server_full_matrix_retired")
+        self.assertEqual(payload["component"], "iran-two-server-db-pool-matrix")
 
 
 if __name__ == "__main__":

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import shlex
 import subprocess
 import sys
@@ -21,8 +20,12 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts.capture_production_baseline import display_path, remote_args, utc_iso, utc_stamp
+from scripts.capture_production_baseline import utc_iso, utc_stamp
 from scripts.deploy_config import resolve_deploy_settings
+from core.legacy_direct_fi_ir_transport_fence import (
+    assert_legacy_direct_fi_ir_transport_retired,
+    blocked_legacy_direct_fi_ir_transport_payload,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -61,7 +64,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--pull-to",
         default=None,
-        help="Optional local directory to scp Iran backup files into after the remote backup succeeds.",
+        help="Retired: Iran backup artifacts must use the reviewed Object-Storage receiver.",
     )
     return parser.parse_args(argv)
 
@@ -320,6 +323,14 @@ def backup_role(
     include_redis: bool,
     restore_smoke: bool,
 ) -> dict[str, Any]:
+    if target.remote:
+        # The former Iran path created archives through direct SSH. A backup
+        # carries production data, so it must use the reviewed private,
+        # versioned Object-Storage workflow rather than a FI<->IR channel.
+        assert_legacy_direct_fi_ir_transport_retired(
+            component="production-backup",
+            operation="direct SSH Iran backup creation",
+        )
     script = build_backup_shell(
         target,
         stamp=stamp,
@@ -329,7 +340,9 @@ def backup_role(
         include_redis=include_redis,
         restore_smoke=restore_smoke,
     )
-    args = remote_args(settings, script) if target.remote else ["bash", "-lc", script]
+    # A remote target cannot reach this line: the fence above is NoReturn.
+    # Local WA-FL backup remains local and never opens an FI<->IR channel.
+    args = ["bash", "-lc", script]
     started = time.perf_counter()
     result = run_command(args, timeout=3600 if restore_smoke else 1800)
     elapsed = round(time.perf_counter() - started, 3)
@@ -344,32 +357,26 @@ def backup_role(
 
 
 def pull_iran_files(settings: dict[str, str], payload: dict[str, Any], destination: Path) -> list[dict[str, str]]:
-    destination.mkdir(parents=True, exist_ok=True)
-    pulled: list[dict[str, str]] = []
-    target = f"{settings.get('IRAN_SSH_USER', 'root')}@{settings['IRAN_HOST']}"
-    for item in payload.get("files") or []:
-        remote_path = item.get("path")
-        if not remote_path:
-            continue
-        local_path = destination / Path(remote_path).name
-        args = [
-            "scp",
-            "-P",
-            settings.get("IRAN_SSH_PORT", "37067"),
-            "-o",
-            "StrictHostKeyChecking=accept-new",
-            f"{target}:{remote_path}",
-            str(local_path),
-        ]
-        result = run_command(args, timeout=1800)
-        if result.returncode != 0:
-            raise RuntimeError(f"failed to pull {remote_path}: {result.stderr.strip()}")
-        pulled.append({"remote_path": remote_path, "local_path": display_path(local_path)})
-    return pulled
+    del settings, payload, destination
+    assert_legacy_direct_fi_ir_transport_retired(
+        component="production-backup",
+        operation="direct SCP Iran backup retrieval",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.role in {"iran", "both"} or args.pull_to:
+        print(
+            json.dumps(
+                blocked_legacy_direct_fi_ir_transport_payload(
+                    component="production-backup"
+                ),
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+        return 2
     settings = resolve_deploy_settings(manifest_path=args.manifest)
     stamp = args.timestamp or utc_stamp()
     roles = ("foreign", "iran") if args.role == "both" else (args.role,)
@@ -385,8 +392,6 @@ def main(argv: list[str] | None = None) -> int:
             include_redis=not args.skip_redis,
             restore_smoke=args.restore_smoke,
         )
-        if args.pull_to and role == "iran":
-            payload["pulled_files"] = pull_iran_files(settings, payload, Path(args.pull_to))
         results.append(payload)
 
     output: dict[str, Any] = {

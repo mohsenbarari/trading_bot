@@ -94,7 +94,35 @@ load_shared_deploy_surface() {
     : "${IRAN_PROJECT_DIR:?IRAN_PROJECT_DIR is required. Define it in DEPLOY_MANIFEST or environment.}"
 }
 
-load_shared_deploy_surface
+# This entrypoint used direct rsync/SSH, root Compose, migration, and
+# sync-worker control across FI and IR. It is retained only as a forensic
+# compatibility boundary. The new three-site release controller must own the
+# Object-Storage pull and Witness-mediated writer lifecycle instead.
+#
+# Deliberately do this before loading DEPLOY_MANIFEST or evaluating any
+# deployment configuration: no environment flag, manifest value, or command
+# target can turn this historical entrypoint back into a transport path.
+assert_legacy_two_site_deploy_retired() {
+    local requested_target="${1:-all}"
+    case "$requested_target" in
+        -h|--help|help)
+            cat <<'EOF'
+Legacy two-site deployment is retired.
+
+This script cannot deploy, build-and-activate, migrate, start a sync worker,
+or contact WA-IR. Use the reviewed three-site release controller with private,
+versioned Object Storage pull and Witness-mediated single-writer control.
+EOF
+            exit 0
+            ;;
+        *)
+            echo "ERROR: legacy two-site deploy '$requested_target' is blocked before configuration, Docker, or peer network access; direct FI-to-IR and IR-to-FI transport is retired. Use the private, versioned Object Storage pull path and witnessed single-writer control." >&2
+            exit 2
+            ;;
+    esac
+}
+
+assert_legacy_two_site_deploy_retired "${1:-all}"
 
 # ==========================================
 # Helper Functions
