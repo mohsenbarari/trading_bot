@@ -588,16 +588,18 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             _plan_path, plan = self.write_plan(root)
             private, public = self.write_keypair(root)
             client = FakeS3(foreign_bucket_grant=True)
-            with self.assertRaisesRegex(publisher.EmergencyPublisherError, "ACL"):
-                publisher.publish(
-                    client=client,
-                    plan=plan,
-                    signing_private_key_path=private,
-                    signing_public_key_path=public,
-                    repo=REPO_ROOT,
-                    outputs=self.outputs(root),
-                    ttl_seconds=300,
-                )
+            provenance = self.bootstrap_provenance(public)
+            with patch.object(publisher, "_bootstrap_provenance", return_value=provenance):
+                with self.assertRaisesRegex(publisher.EmergencyPublisherError, "ACL"):
+                    publisher.publish(
+                        client=client,
+                        plan=plan,
+                        signing_private_key_path=private,
+                        signing_public_key_path=public,
+                        bootstrap_provenance=provenance,
+                        outputs=self.outputs(root),
+                        ttl_seconds=300,
+                    )
             self.assertEqual(client.put_calls, [])
 
     def test_object_acl_must_remain_owner_only_after_upload(self) -> None:
@@ -607,16 +609,25 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             _plan_path, plan = self.write_plan(root)
             private, public = self.write_keypair(root)
             client = FakeS3(foreign_object_grant=True)
-            with self.assertRaisesRegex(publisher.EmergencyPublisherError, "ACL"):
-                publisher.publish(
-                    client=client,
-                    plan=plan,
-                    signing_private_key_path=private,
-                    signing_public_key_path=public,
-                    repo=REPO_ROOT,
-                    outputs=self.outputs(root),
-                    ttl_seconds=300,
-                )
+            provenance = self.bootstrap_provenance(public)
+            with (
+                patch.object(publisher, "_bootstrap_provenance", return_value=provenance),
+                patch.object(
+                    publisher,
+                    "_fixed_publisher_source_revision",
+                    return_value=provenance.publisher_source_revision,
+                ),
+            ):
+                with self.assertRaisesRegex(publisher.EmergencyPublisherError, "ACL"):
+                    publisher.publish(
+                        client=client,
+                        plan=plan,
+                        signing_private_key_path=private,
+                        signing_public_key_path=public,
+                        bootstrap_provenance=provenance,
+                        outputs=self.outputs(root),
+                        ttl_seconds=300,
+                    )
             self.assertEqual(len(client.put_calls), 1)
 
     def test_existing_object_version_blocks_campaign_before_any_upload(self) -> None:
@@ -628,16 +639,18 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
             client = FakeS3()
             existing_key = publisher._control_key(plan, "receiver_bundle")
             client.objects[(plan.bucket, existing_key)] = [("old-version", b"prior")]
-            with self.assertRaisesRegex(publisher.EmergencyPublisherError, "existing Emergency campaign object version"):
-                publisher.publish(
-                    client=client,
-                    plan=plan,
-                    signing_private_key_path=private,
-                    signing_public_key_path=public,
-                    repo=REPO_ROOT,
-                    outputs=self.outputs(root),
-                    ttl_seconds=300,
-                )
+            provenance = self.bootstrap_provenance(public)
+            with patch.object(publisher, "_bootstrap_provenance", return_value=provenance):
+                with self.assertRaisesRegex(publisher.EmergencyPublisherError, "existing Emergency campaign object version"):
+                    publisher.publish(
+                        client=client,
+                        plan=plan,
+                        signing_private_key_path=private,
+                        signing_public_key_path=public,
+                        bootstrap_provenance=provenance,
+                        outputs=self.outputs(root),
+                        ttl_seconds=300,
+                    )
             self.assertEqual(client.put_calls, [])
 
     def test_corrupt_immutable_readback_blocks_before_manifest_is_written(self) -> None:
