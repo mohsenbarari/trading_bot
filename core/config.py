@@ -11,6 +11,10 @@ __all__ = ["Settings", "settings"]
 
 class Settings(BaseSettings):
     bot_token: str | None = None
+    # Narrower than BOT_TOKEN: used exclusively by the isolated Emergency IR
+    # WebApp login endpoint to validate Telegram initData locally.  It must
+    # never enable a bot process or outbound Telegram capability.
+    webapp_initdata_bot_token: str | None = None
     bot_username: str | None = None
     
     # Server Mode (iran vs foreign)

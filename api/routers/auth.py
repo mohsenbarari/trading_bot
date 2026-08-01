@@ -1867,7 +1867,12 @@ async def webapp_login(
     """
     init_data = login_data.init_data
     
-    if not settings.bot_token:
+    webapp_initdata_token = (
+        settings.webapp_initdata_bot_token
+        if settings.emergency_ir_standalone
+        else settings.bot_token
+    )
+    if not webapp_initdata_token:
         raise HTTPException(status_code=500, detail="Bot token not configured")
 
     # Parse and validate init_data
@@ -1881,7 +1886,9 @@ async def webapp_login(
         data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(parsed_data.items()))
         
         # Calculate HMAC
-        secret_key = hmac.new(b"WebAppData", settings.bot_token.encode(), hashlib.sha256).digest()
+        secret_key = hmac.new(
+            b"WebAppData", webapp_initdata_token.encode(), hashlib.sha256
+        ).digest()
         calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
         
         if calculated_hash != hash_val:

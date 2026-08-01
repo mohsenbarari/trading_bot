@@ -227,6 +227,16 @@ class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "Authentication failed")
 
+    async def test_webapp_login_emergency_requires_the_narrow_initdata_token(self):
+        request = make_request(headers={"user-agent": "Telegram"}, host="10.0.0.8")
+        with patch.object(auth.settings, "bot_token", "ordinary-bot-token"), patch.object(
+            auth.settings, "webapp_initdata_bot_token", None
+        ), patch.object(auth.settings, "emergency_ir_standalone", True):
+            with self.assertRaises(HTTPException) as exc_info:
+                await webapp_login(WebAppLogin(init_data="x"), raw_request=request, db=FakeDB())
+        self.assertEqual(exc_info.exception.status_code, 500)
+        self.assertEqual(exc_info.exception.detail, "Bot token not configured")
+
     async def test_webapp_login_returns_auth_failed_for_unknown_or_deleted_user(self):
         request = make_request(headers={"user-agent": "Telegram"}, host="10.0.0.8")
         init_data = build_webapp_init_data("bot-token", {"id": 123})
@@ -320,8 +330,9 @@ class AuthRouterSpecialLoginTests(unittest.IsolatedAsyncioTestCase):
         init_data = build_webapp_init_data("bot-token", {"id": 123})
         user = SimpleNamespace(id=7, telegram_id=123, is_deleted=False, home_server="iran")
 
-        with patch.object(auth.settings, "bot_token", "bot-token"), patch.object(
-            auth.settings, "emergency_ir_standalone", True
+        with patch.object(auth.settings, "bot_token", None), patch.object(
+            auth.settings, "webapp_initdata_bot_token", "bot-token"
+        ), patch.object(auth.settings, "emergency_ir_standalone", True
         ), patch(
             "api.routers.auth.create_refresh_token", return_value="refresh-token"
         ), patch(
