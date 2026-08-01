@@ -1,0 +1,135 @@
+# Fenced WebApp-FI writer runtime for the legacy production release 2c08.
+#
+# This is intentionally separate from docker-compose.yml.  It never creates a
+# database, Redis, sync worker, schema-update service, network, or volume.
+# Every service is profile-gated and may be started only by the fixed-project
+# lease-agent mode after a controlled cutover has stopped the legacy scope.
+#
+# This file is a control-plane contract, not evidence that the historical
+# 2c08 images implement it.  Those images do not consume the Writer Witness
+# term or schema-bootstrap environment variables below and must never be
+# started through this project.  A future immutable application release must
+# implement the early process-level term/schema gate before this Compose file
+# becomes an executable candidate.
+
+x-default-logging: &default_logging
+  driver: json-file
+  options:
+    max-size: ${DOCKER_LOG_MAX_SIZE:-20m}
+    max-file: ${DOCKER_LOG_MAX_FILE:-5}
+
+services:
+  app:
+    image: ${WA_FI_WRITER_APP_IMAGE:?exact preloaded 2c08 app image is required}
+    pull_policy: never
+    profiles: ["fenced-fi-writer"]
+    container_name: trading_bot_wa_fi_writer_2c08_app
+    restart: "no"
+    command: >-
+      sh -ec 'exec uvicorn main:app --host 0.0.0.0 --port 8000
+      --workers ${API_WORKERS:-4}'
+    env_file:
+      - ${WA_FI_WRITER_RUNTIME_ENV_FILE:?root-only fenced writer env is required}
+    environment:
+      TZ: UTC
+      SERVER_MODE: foreign
+      RELEASE_SHA: ${RELEASE_SHA:?exact release SHA is required}
+      TRADING_BOT_SERVICE: api
+      SINGLE_WRITER_RUNTIME_ENABLED: "true"
+      APPLICATION_WRITER_TERM_ENFORCED: "true"
+      APPLICATION_WRITER_TERM_LOCAL_SITE: webapp_fi
+      APPLICATION_WRITER_TERM_LEASE_FILE: /run/trading-bot-writer-term/writer-lease.json
+      APPLICATION_WRITER_TERM_SAFETY_MARGIN_SECONDS: ${APPLICATION_WRITER_TERM_SAFETY_MARGIN_SECONDS:?exact Writer Witness safety margin is required}
+      APPLICATION_WRITER_TERM_MAX_LEASE_DURATION_SECONDS: ${APPLICATION_WRITER_TERM_MAX_LEASE_DURATION_SECONDS:?exact Writer Witness lease duration is required}
+      DATABASE_SCHEMA_BOOTSTRAP_ENABLED: "false"
+      # The legacy background leader has no independent dynamic term fence.
+      BACKGROUND_JOBS_ENABLED: "false"
+      TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"
+      AUDIT_TRAIL_PATH: /app/audit_trail/audit.jsonl
+    ports:
+      - "127.0.0.1:${WA_FI_WRITER_APP_LOCAL_PORT:?explicit loopback app port is required}:8000"
+    volumes:
+      - writer_uploads_data:/app/uploads
+      - writer_audit_data:/app/audit_trail
+      - ${WA_FI_WRITER_APPLICATION_RELEASE_ROOT:?immutable application release root is required}/trading_settings.json:/app/trading_settings.json:ro
+      # Mount the root-owned parent, never the atomically replaced lease leaf.
+      - type: bind
+        source: "${WA_FI_WRITER_TERM_PARENT_DIRECTORY:?root-owned Writer Witness term parent directory is required}"
+        target: /run/trading-bot-writer-term
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import sys, urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/config', timeout=5).read(); sys.exit(0)\"",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 8
+      start_period: 5s
+    networks: ["runtime"]
+    logging: *default_logging
+
+  bot:
+    image: ${WA_FI_WRITER_BOT_IMAGE:?exact preloaded 2c08 bot image is required}
+    pull_policy: never
+    profiles: ["fenced-fi-writer"]
+    container_name: trading_bot_wa_fi_writer_2c08_bot
+    restart: "no"
+    command: python run_bot.py
+    env_file:
+      - ${WA_FI_WRITER_RUNTIME_ENV_FILE:?root-only fenced writer env is required}
+    environment:
+      TZ: UTC
+      SERVER_MODE: foreign
+      RELEASE_SHA: ${RELEASE_SHA:?exact release SHA is required}
+      TRADING_BOT_SERVICE: bot
+      SINGLE_WRITER_RUNTIME_ENABLED: "true"
+      APPLICATION_WRITER_TERM_ENFORCED: "true"
+      APPLICATION_WRITER_TERM_LOCAL_SITE: webapp_fi
+      APPLICATION_WRITER_TERM_LEASE_FILE: /run/trading-bot-writer-term/writer-lease.json
+      APPLICATION_WRITER_TERM_SAFETY_MARGIN_SECONDS: ${APPLICATION_WRITER_TERM_SAFETY_MARGIN_SECONDS:?exact Writer Witness safety margin is required}
+      APPLICATION_WRITER_TERM_MAX_LEASE_DURATION_SECONDS: ${APPLICATION_WRITER_TERM_MAX_LEASE_DURATION_SECONDS:?exact Writer Witness lease duration is required}
+      DATABASE_SCHEMA_BOOTSTRAP_ENABLED: "false"
+      TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH: "1"
+      BOT_WRITER_READY_MARKER_PATH: /run/trading-bot-bot-readiness/ready
+    volumes:
+      - ${WA_FI_WRITER_APPLICATION_RELEASE_ROOT:?immutable application release root is required}/trading_settings.json:/app/trading_settings.json:ro
+      # The image must include the dynamic bot Writer Witness middleware and
+      # watchdog.  This root-owned parent is their sole term input.
+      - type: bind
+        source: "${WA_FI_WRITER_TERM_PARENT_DIRECTORY:?root-owned Writer Witness term parent directory is required}"
+        target: /run/trading-bot-writer-term
+        read_only: true
+        bind:
+          create_host_path: false
+    # Container-local, root-only marker directory.  It never survives a bot
+    # container replacement and is not shared with the host or another role.
+    tmpfs:
+      - /run/trading-bot-bot-readiness:mode=0700,uid=0,gid=0
+    healthcheck:
+      # The helper verifies a fresh marker whose term still matches the
+      # mounted Writer Witness lease.  A stale file from a prior bot process
+      # cannot make this container healthy.
+      test: ["CMD-SHELL", "python -m bot.writer_readiness --healthcheck"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+      start_period: 5s
+    networks: ["runtime"]
+    logging: *default_logging
+
+networks:
+  runtime:
+    external: true
+    name: ${WA_FI_WRITER_RUNTIME_NETWORK_NAME:?pre-existing runtime network is required}
+
+volumes:
+  writer_uploads_data:
+    external: true
+    name: ${WA_FI_WRITER_UPLOADS_VOLUME:?pre-existing uploads volume is required}
+  writer_audit_data:
+    external: true
+    name: ${WA_FI_WRITER_AUDIT_VOLUME:?pre-existing audit volume is required}

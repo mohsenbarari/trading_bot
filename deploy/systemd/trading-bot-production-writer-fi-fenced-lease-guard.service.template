@@ -1,0 +1,36 @@
+[Unit]
+Description=GoldTrade fenced WebApp-FI Writer Witness lease guard (release 2c08)
+Requires=docker.service
+After=network-online.target docker.service
+Wants=network-online.target
+# Never let the fenced guard coexist with the legacy FI guard.  The shared
+# deployment lock is an additional runtime check, not a replacement for this
+# systemd-level exclusion.
+Conflicts=trading-bot-production-writer-fi-lease-guard.service
+ConditionPathExists=__WA_FI_CONTROL_RELEASE_ROOT__/scripts/preflight_fenced_fi_writer.py
+
+[Service]
+Type=simple
+User=root
+# systemd does not expand EnvironmentFile values in WorkingDirectory.  The
+# renderer substitutes these closed paths before installation, so this unit
+# never imports the fenced runtime EnvironmentFile (which can contain secrets).
+WorkingDirectory=/
+UMask=0077
+# The guard itself performs guard-start admission before it renews a term. Do
+# not put that check in ExecStartPre: if it blocks there, systemd never starts
+# the guard process and the guard cannot emergency-stop the fixed app/bot
+# scope. The agent's fenced mode invokes the same preflight then fences both
+# containers on failure.
+ExecStart=/usr/bin/python3 -I __WA_FI_CONTROL_RELEASE_ROOT__/scripts/production_writer_lease_agent.py --config __WA_FI_FENCED_AGENT_CONFIG__ guard
+Restart=always
+RestartSec=2s
+TimeoutStopSec=10s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/var/lib/trading-bot-three-site
+
+[Install]
+WantedBy=multi-user.target

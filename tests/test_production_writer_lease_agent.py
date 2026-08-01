@@ -206,6 +206,7 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
         _write_private(secret, "s" * 32)
         _write_private(public_key, base64.b64encode(b"p" * 32).decode("ascii"))
         is_ir_writer = mode == "writer" and site == "webapp_ir"
+        is_fenced_fi_writer = mode == "fenced_fi_writer" and site == "webapp_fi"
         if is_ir_writer:
             application_root.mkdir(parents=True)
             application_root.chmod(0o755)
@@ -231,17 +232,61 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                 )
             ),
         )
-        default_lease_duration = 60 if is_ir_writer else 180
+        fenced_env = directory / "fenced-fi.env"
+        if is_fenced_fi_writer:
+            application_root.mkdir(parents=True, exist_ok=True)
+            application_root.chmod(0o755)
+            _write_private(
+                fenced_env,
+                "\n".join(
+                    (
+                        f"RELEASE_SHA={RELEASE_SHA}",
+                        "WA_FI_WRITER_APP_IMAGE=trading-bot:2c08",
+                        "WA_FI_WRITER_BOT_IMAGE=trading-bot:2c08",
+                        f"WA_FI_WRITER_RUNTIME_ENV_FILE={fenced_env}",
+                        f"WA_FI_WRITER_APPLICATION_RELEASE_ROOT={application_root}",
+                        f"WA_FI_WRITER_TERM_PARENT_DIRECTORY={directory / 'writer-terms'}",
+                        "WA_FI_WRITER_RUNTIME_NETWORK_NAME=trading_bot_fi_runtime",
+                        "WA_FI_WRITER_UPLOADS_VOLUME=trading_bot_fi_uploads",
+                        "WA_FI_WRITER_AUDIT_VOLUME=trading_bot_fi_audit",
+                        "WA_FI_WRITER_APP_LOCAL_PORT=18001",
+                        "APPLICATION_WRITER_TERM_SAFETY_MARGIN_SECONDS=15",
+                        "APPLICATION_WRITER_TERM_MAX_LEASE_DURATION_SECONDS=60",
+                        "",
+                    )
+                ),
+            )
+        default_lease_duration = 60 if (is_ir_writer or is_fenced_fi_writer) else 180
         default_safety_margin = 15
-        default_renew_interval = 10 if is_ir_writer else 30
+        default_renew_interval = 10 if (is_ir_writer or is_fenced_fi_writer) else 30
         config = {
             "schema": agent.AGENT_SCHEMA,
             "mode": mode,
             "site": site,
-            "lease_file": str(directory / "writer-lease.json") if mode == "writer" else None,
+            "lease_file": (
+                str(
+                    directory / "writer-terms" / "writer-lease.json"
+                    if is_fenced_fi_writer
+                    else directory / "writer-lease.json"
+                )
+                if mode in {"writer", "fenced_fi_writer"}
+                else None
+            ),
             "runtime": {
-                "compose_file": str(agent.WA_IR_PROMOTED_COMPOSE_FILE) if is_ir_writer else str(directory / "isolated-compose.yml"),
-                "env_file": str(promotion_env) if is_ir_writer else None,
+                "compose_file": (
+                    str(agent.WA_IR_PROMOTED_COMPOSE_FILE)
+                    if is_ir_writer
+                    else (
+                        str(agent.WA_FI_FENCED_WRITER_COMPOSE_FILE)
+                        if is_fenced_fi_writer
+                        else str(directory / "isolated-compose.yml")
+                    )
+                ),
+                "env_file": (
+                    str(promotion_env)
+                    if is_ir_writer
+                    else str(fenced_env) if is_fenced_fi_writer else None
+                ),
                 "selection_env_file": (
                     str(directory / "selected-candidate.env")
                     if is_ir_writer
@@ -250,7 +295,7 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                 "services": services if services is not None else (
                     (["db", "redis", "app"] if is_ir_writer else ["app", "sync_worker"])
                     if mode == "writer"
-                    else ["bot", "sync_worker"]
+                    else ["app", "bot"] if is_fenced_fi_writer else ["bot", "sync_worker"]
                 ),
             },
             "witness": {
@@ -283,6 +328,10 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                 "application_release_sha": RELEASE_SHA,
                 "application_release_root": str(application_root),
             }
+        if is_fenced_fi_writer:
+            config["fenced_preflight_config"] = str(
+                directory / "webapp-fi-fenced-writer-preflight.json"
+            )
         _write_private(config_path, json.dumps(config))
         return agent._load_config(config_path)
 
@@ -350,10 +399,664 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
         )
         return config, receipt_path, active_snapshot_path, proof_path, receipt
 
-    def test_config_requires_exactly_app_and_sync_worker(self):
+    def test_generic_webapp_fi_writer_is_rejected_before_runtime_selection(self):
         with tempfile.TemporaryDirectory() as raw:
-            with self.assertRaisesRegex(agent.ProductionWriterLeaseAgentError, "unsupported|WebApp-FI writer"):
-                self._config(Path(raw), site="webapp_fi", services=["app"])
+            with self.assertRaisesRegex(agent.ProductionWriterLeaseAgentError, "generic WebApp-FI writer mode is retired"):
+                self._config(Path(raw), site="webapp_fi", mode="writer", services=["app", "sync_worker"])
+
+    def test_fenced_fi_config_requires_the_pinned_compose_and_exact_app_bot_scope(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            with self.assertRaisesRegex(
+                agent.ProductionWriterLeaseAgentError,
+                "fenced WebApp-FI writer must manage only app and bot",
+            ):
+                self._config(
+                    directory,
+                    site="webapp_fi",
+                    mode="fenced_fi_writer",
+                    services=["app", "sync_worker"],
+                )
+
+            self._config(directory, site="webapp_fi", mode="fenced_fi_writer")
+            config_path = directory / "agent.json"
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+            del payload["fenced_preflight_config"]
+            _write_private(config_path, json.dumps(payload))
+            with self.assertRaisesRegex(
+                agent.ProductionWriterLeaseAgentError,
+                "config schema is invalid",
+            ):
+                agent._load_config(config_path)
+
+            self._config(directory, site="webapp_fi", mode="fenced_fi_writer")
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+            payload["runtime"]["compose_file"] = str(directory / "arbitrary-compose.yml")
+            _write_private(config_path, json.dumps(payload))
+            with self.assertRaisesRegex(
+                agent.ProductionWriterLeaseAgentError,
+                "pinned isolated writer compose file",
+            ):
+                agent._load_config(config_path)
+
+    def test_fenced_fi_compose_uses_fixed_project_profile_and_no_pull_or_build(self):
+        with tempfile.TemporaryDirectory() as raw:
+            config = self._config(Path(raw), site="webapp_fi", mode="fenced_fi_writer")
+            with mock.patch.object(agent, "_run_runtime_command", return_value="") as run:
+                agent._compose(config, action="start")
+
+            command = run.call_args.args[0]
+            self.assertEqual(
+                command[:8],
+                [
+                    "/usr/bin/docker",
+                    "compose",
+                    "--project-name",
+                    agent.WA_FI_FENCED_WRITER_PROJECT_NAME,
+                    "--profile",
+                    agent.WA_FI_FENCED_WRITER_PROFILE,
+                    "-f",
+                    str(agent.WA_FI_FENCED_WRITER_COMPOSE_FILE),
+                ],
+            )
+            self.assertEqual(
+                command[-9:],
+                [
+                    "up",
+                    "-d",
+                    "--no-deps",
+                    "--no-recreate",
+                    "--no-build",
+                    "--pull",
+                    "never",
+                    "app",
+                    "bot",
+                ],
+            )
+
+    def test_fenced_fi_emergency_stop_bypasses_mutable_compose_env(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            config = self._config(directory, site="webapp_fi", mode="fenced_fi_writer")
+            _write_private(config.runtime.env_file, "RELEASE_SHA=broken\n")
+            with mock.patch.object(agent, "_run_runtime_command", return_value="") as run:
+                agent._compose(config, action="stop")
+
+        self.assertEqual(
+            [
+                call.args[0]
+                for call in run.call_args_list
+            ],
+            [
+                [
+                    "/usr/bin/docker", "container", "stop", "--time", "15",
+                    agent.WA_FI_FENCED_CONTAINER_NAMES["app"],
+                ],
+                [
+                    "/usr/bin/docker", "container", "stop", "--time", "15",
+                    agent.WA_FI_FENCED_CONTAINER_NAMES["bot"],
+                ],
+            ],
+        )
+
+    def test_fenced_fi_emergency_stop_attempts_both_and_refuses_false_success(self):
+        with tempfile.TemporaryDirectory() as raw:
+            config = self._config(Path(raw), site="webapp_fi", mode="fenced_fi_writer")
+            with mock.patch.object(
+                agent,
+                "_run_runtime_command",
+                side_effect=[agent.ProductionWriterLeaseAgentError("app failed"), ""],
+            ) as run:
+                with self.assertRaisesRegex(
+                    agent.ProductionWriterLeaseAgentError, "not confirmed for: app"
+                ):
+                    agent._compose(config, action="stop")
+
+        self.assertEqual(2, run.call_count)
+        self.assertEqual(
+            agent.WA_FI_FENCED_CONTAINER_NAMES["bot"], run.call_args_list[1].args[0][-1]
+        )
+
+    def test_fenced_fi_config_rejects_application_term_timing_not_bound_to_witness(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            self._config(directory, site="webapp_fi", mode="fenced_fi_writer")
+            environment = directory / "fenced-fi.env"
+            _write_private(
+                environment,
+                environment.read_text(encoding="utf-8").replace(
+                    "APPLICATION_WRITER_TERM_SAFETY_MARGIN_SECONDS=15",
+                    "APPLICATION_WRITER_TERM_SAFETY_MARGIN_SECONDS=5",
+                ),
+            )
+            with self.assertRaisesRegex(
+                agent.ProductionWriterLeaseAgentError,
+                "application term timing does not match",
+            ):
+                agent._load_config(directory / "agent.json")
+
+    def test_fenced_fi_config_rejects_a_lease_outside_the_mounted_term_parent(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            self._config(directory, site="webapp_fi", mode="fenced_fi_writer")
+            config_path = directory / "agent.json"
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+            payload["lease_file"] = str(directory / "writer-lease.json")
+            _write_private(config_path, json.dumps(payload))
+            with self.assertRaisesRegex(
+                agent.ProductionWriterLeaseAgentError,
+                "lease file must be the writer-lease leaf",
+            ):
+                agent._load_config(config_path)
+
+    def test_fenced_fi_config_requires_the_legacy_nginx_loopback_port(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            self._config(directory, site="webapp_fi", mode="fenced_fi_writer")
+            environment = directory / "fenced-fi.env"
+            _write_private(
+                environment,
+                environment.read_text(encoding="utf-8").replace(
+                    "WA_FI_WRITER_APP_LOCAL_PORT=18001",
+                    "WA_FI_WRITER_APP_LOCAL_PORT=8000",
+                ),
+            )
+            with self.assertRaisesRegex(
+                agent.ProductionWriterLeaseAgentError,
+                "isolated staged listener",
+            ):
+                agent._load_config(directory / "agent.json")
+
+    def test_fenced_fi_cutover_checks_legacy_scope_before_acquiring_or_starting(self):
+        with tempfile.TemporaryDirectory() as raw:
+            config = self._config(Path(raw), site="webapp_fi", mode="fenced_fi_writer")
+            config.lease_file.parent.mkdir(mode=0o700, exist_ok=True)
+            proof = _proof(site="webapp_fi", epoch=7)
+            refreshed_proof = _proof(site="webapp_fi", epoch=7)
+            with (
+                mock.patch.object(agent, "_run_fenced_fi_cutover_preflight") as preflight,
+                mock.patch.object(agent, "_run_fenced_fi_guard_start_preflight") as guard_preflight,
+                mock.patch.object(agent, "_assert_fenced_fi_legacy_scope_is_stopped") as legacy,
+                mock.patch.object(agent, "_assert_fenced_fi_runtime_scope_is_absent") as clean_scope,
+                mock.patch.object(agent, "_acquire_proof", return_value=proof) as acquire,
+                mock.patch.object(
+                    agent,
+                    "_refresh_fenced_fi_cutover_proof",
+                    return_value=refreshed_proof,
+                ) as refresh,
+                mock.patch.object(agent, "_start_scoped_runtime") as start,
+                mock.patch.object(
+                    agent,
+                    "_write_fenced_fi_runtime_receipt",
+                    return_value=(config.lease_file.parent / "fenced-fi-runtime-receipt.json", "d" * 64),
+                ) as receipt,
+            ):
+                result = agent.cutover_fenced_fi_and_start(
+                    config,
+                    operation_id="93877f06-2671-4d78-b1f8-2c79bf759755",
+                )
+
+            self.assertEqual(result["action"], "cutover-fenced-fi")
+            self.assertEqual(result["status"], "staged")
+            self.assertFalse(result["routing_authorized"])
+            self.assertEqual(preflight.call_count, 2)
+            preflight.assert_has_calls([mock.call(config), mock.call(config)])
+            guard_preflight.assert_called_once_with(config)
+            legacy.assert_called_once_with()
+            clean_scope.assert_called_once_with()
+            acquire.assert_called_once()
+            self.assertEqual(acquire.call_args.kwargs["purpose"], "fenced WebApp-FI controlled cutover")
+            refresh.assert_called_once_with(
+                config,
+                proof=proof,
+                operation_id="93877f06-2671-4d78-b1f8-2c79bf759755",
+            )
+            start.assert_called_once_with(config, fenced_start_proof=refreshed_proof)
+            receipt.assert_called_once_with(config, proof=refreshed_proof)
+            self.assertEqual(result["runtime_receipt_sha256"], "d" * 64)
+
+    def test_fenced_fi_cutover_renews_after_a_slow_post_acquire_preflight_before_start(self):
+        """A term consumed by the second static preflight cannot reach Compose.
+
+        The first proof models a 60-second term that became stale while the
+        post-acquire identity/tree/image checks ran.  The only proof passed to
+        the start boundary and receipt must be the exact conditional renewal
+        performed after that work.
+        """
+
+        with tempfile.TemporaryDirectory() as raw:
+            config = self._config(Path(raw), site="webapp_fi", mode="fenced_fi_writer")
+            config.lease_file.parent.mkdir(mode=0o700, exist_ok=True)
+            stale_proof = _proof(site="webapp_fi", epoch=7)
+            stale_proof["issued_at"] = (datetime.now(timezone.utc) - timedelta(seconds=61)).isoformat()
+            stale_proof["expires_at"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+            refreshed_proof = _proof(site="webapp_fi", epoch=7)
+            events: list[str] = []
+            with (
+                mock.patch.object(
+                    agent,
+                    "_run_fenced_fi_cutover_preflight",
+                    side_effect=lambda _config: events.append("preflight"),
+                ),
+                mock.patch.object(
+                    agent,
+                    "_assert_fenced_fi_legacy_scope_is_stopped",
+                    side_effect=lambda: events.append("legacy"),
+                ),
+                mock.patch.object(
+                    agent,
+                    "_assert_fenced_fi_runtime_scope_is_absent",
+                    side_effect=lambda: events.append("clean-scope"),
+                ),
+                mock.patch.object(
+                    agent,
+                    "_acquire_proof",
+                    side_effect=lambda *_args, **_kwargs: (events.append("acquire"), stale_proof)[1],
+                ),
+                mock.patch.object(
+                    agent,
+                    "_refresh_fenced_fi_cutover_proof",
+                    side_effect=lambda *_args, **_kwargs: (events.append("renew"), refreshed_proof)[1],
+                ),
+                mock.patch.object(
+                    agent,
+                    "_start_scoped_runtime",
+                    side_effect=lambda *_args, **_kwargs: events.append("start"),
+                ) as start,
+                mock.patch.object(
+                    agent,
+                    "_write_fenced_fi_runtime_receipt",
+                    side_effect=lambda *_args, **_kwargs: (
+                        events.append("receipt"),
+                        (config.lease_file.parent / "fenced-fi-runtime-receipt.json", "d" * 64),
+                    )[1],
+                ),
+                mock.patch.object(
+                    agent,
+                    "_run_fenced_fi_guard_start_preflight",
+                    side_effect=lambda _config: events.append("guard-start"),
+                ),
+            ):
+                agent.cutover_fenced_fi_and_start(
+                    config,
+                    operation_id="93877f06-2671-4d78-b1f8-2c79bf759755",
+                )
+
+            self.assertEqual(
+                events,
+                [
+                    "preflight",
+                    "legacy",
+                    "clean-scope",
+                    "acquire",
+                    "preflight",
+                    "renew",
+                    "start",
+                    "receipt",
+                    "guard-start",
+                ],
+            )
+            start.assert_called_once_with(config, fenced_start_proof=refreshed_proof)
+
+    def test_fenced_fi_start_refuses_a_term_without_the_pre_start_dispatch_budget(self):
+        with tempfile.TemporaryDirectory() as raw:
+            config = self._config(Path(raw), site="webapp_fi", mode="fenced_fi_writer")
+            proof = _proof(site="webapp_fi", epoch=7)
+            now = datetime.now(timezone.utc)
+            proof["issued_at"] = (now - timedelta(seconds=40)).isoformat()
+            proof["expires_at"] = (
+                now
+                + timedelta(
+                    seconds=(
+                        config.witness.safety_margin_seconds
+                        + agent.WA_FI_FENCED_WRITER_START_DISPATCH_MARGIN_SECONDS
+                    )
+                )
+            ).isoformat()
+            agent._write_lease(config.lease_file, proof=proof)
+            with (
+                mock.patch.object(agent, "_assert_fenced_fi_legacy_scope_is_stopped"),
+                mock.patch.object(agent, "_assert_fenced_fi_runtime_scope_is_absent"),
+                mock.patch.object(agent, "_compose") as compose,
+                mock.patch.object(agent, "_best_effort_stop") as stop,
+            ):
+                with self.assertRaisesRegex(
+                    agent.ProductionWriterLeaseAgentError,
+                    "pre-start dispatch safety budget",
+                ):
+                    agent._start_scoped_runtime(config, fenced_start_proof=proof)
+
+            compose.assert_not_called()
+            stop.assert_called_once_with(config)
+
+    def test_fenced_fi_pre_start_renewal_is_conditional_on_the_acquired_term(self):
+        with tempfile.TemporaryDirectory() as raw:
+            config = self._config(Path(raw), site="webapp_fi", mode="fenced_fi_writer")
+            acquired = _proof(site="webapp_fi", epoch=7)
+            refreshed = _proof(site="webapp_fi", epoch=7)
+            operation_id = "93877f06-2671-4d78-b1f8-2c79bf759755"
+            with (
+                mock.patch.object(
+                    agent,
+                    "_transition",
+                    return_value={"proof": refreshed},
+                ) as transition,
+                mock.patch.object(agent, "_validate_proof", return_value=refreshed) as validate,
+            ):
+                result = agent._refresh_fenced_fi_cutover_proof(
+                    config,
+                    proof=acquired,
+                    operation_id=operation_id,
+                )
+
+            self.assertEqual(result, refreshed)
+            transition.assert_called_once_with(
+                config.witness,
+                action="renew",
+                expected_epoch=7,
+                expected_lease_id="lease-7",
+                request_id=agent._request_id(operation_id, "fenced-fi-cutover-prestart-renew"),
+                reason=f"production fenced WebApp-FI pre-start renewal {operation_id}",
+            )
+            validate.assert_called_once_with(
+                refreshed,
+                config=config.witness,
+                expected_epoch=7,
+            )
+            lease = load_production_writer_lease(config.lease_file)
+            self.assertEqual(lease.writer_epoch, 7)
+            self.assertEqual(lease.lease_id, "lease-7")
+
+    def test_fenced_fi_cutover_refuses_before_lease_acquisition_when_identity_preflight_blocks(self):
+        with tempfile.TemporaryDirectory() as raw:
+            config = self._config(Path(raw), site="webapp_fi", mode="fenced_fi_writer")
+            config.lease_file.parent.mkdir(mode=0o700, exist_ok=True)
+            with (
+                mock.patch.object(
+                    agent,
+                    "_run_fenced_fi_cutover_preflight",
+                    side_effect=agent.ProductionWriterLeaseAgentError(
+                        "fenced WebApp-FI identity preflight refused cutover"
+                    ),
+                ),
+                mock.patch.object(agent, "_assert_fenced_fi_legacy_scope_is_stopped") as legacy,
+                mock.patch.object(agent, "_acquire_proof") as acquire,
+                mock.patch.object(agent, "_start_scoped_runtime") as start,
+            ):
+                with self.assertRaisesRegex(
+                    agent.ProductionWriterLeaseAgentError,
+                    "identity preflight refused cutover",
+                ):
+                    agent.cutover_fenced_fi_and_start(
+                        config,
+                        operation_id="93877f06-2671-4d78-b1f8-2c79bf759755",
+                    )
+
+            legacy.assert_not_called()
+            acquire.assert_not_called()
+            start.assert_not_called()
+
+    def test_fenced_fi_cutover_rechecks_static_identity_after_term_before_start(self):
+        with tempfile.TemporaryDirectory() as raw:
+            config = self._config(Path(raw), site="webapp_fi", mode="fenced_fi_writer")
+            config.lease_file.parent.mkdir(mode=0o700, exist_ok=True)
+            proof = _proof(site="webapp_fi", epoch=7)
+            with (
+                mock.patch.object(
+                    agent,
+                    "_run_fenced_fi_cutover_preflight",
+                    side_effect=[
+                        None,
+                        agent.ProductionWriterLeaseAgentError(
+                            "runtime environment hash changed"
+                        ),
+                    ],
+                ) as preflight,
+                mock.patch.object(agent, "_assert_fenced_fi_legacy_scope_is_stopped"),
+                mock.patch.object(agent, "_assert_fenced_fi_runtime_scope_is_absent"),
+                mock.patch.object(agent, "_acquire_proof", return_value=proof) as acquire,
+                mock.patch.object(agent, "_start_scoped_runtime") as start,
+                mock.patch.object(agent, "_best_effort_stop") as stop,
+                mock.patch.object(agent, "_best_effort_drain_failed_fenced_fi_cutover") as drain,
+            ):
+                with self.assertRaisesRegex(
+                    agent.ProductionWriterLeaseAgentError,
+                    "runtime environment hash changed",
+                ):
+                    agent.cutover_fenced_fi_and_start(
+                        config,
+                        operation_id="93877f06-2671-4d78-b1f8-2c79bf759755",
+                    )
+
+            self.assertEqual(preflight.call_count, 2)
+            acquire.assert_called_once()
+            start.assert_not_called()
+            stop.assert_called_once_with(config)
+            drain.assert_called_once_with(
+                config,
+                proof=proof,
+                operation_id="93877f06-2671-4d78-b1f8-2c79bf759755",
+            )
+
+    def test_fenced_fi_cutover_never_reports_staged_when_guard_start_blocks(self):
+        with tempfile.TemporaryDirectory() as raw:
+            config = self._config(Path(raw), site="webapp_fi", mode="fenced_fi_writer")
+            config.lease_file.parent.mkdir(mode=0o700, exist_ok=True)
+            proof = _proof(site="webapp_fi", epoch=7)
+            refreshed_proof = _proof(site="webapp_fi", epoch=7)
+            with (
+                mock.patch.object(agent, "_run_fenced_fi_cutover_preflight"),
+                mock.patch.object(agent, "_assert_fenced_fi_legacy_scope_is_stopped"),
+                mock.patch.object(agent, "_assert_fenced_fi_runtime_scope_is_absent"),
+                mock.patch.object(agent, "_acquire_proof", return_value=proof),
+                mock.patch.object(
+                    agent,
+                    "_refresh_fenced_fi_cutover_proof",
+                    return_value=refreshed_proof,
+                ),
+                mock.patch.object(agent, "_start_scoped_runtime") as start,
+                mock.patch.object(
+                    agent,
+                    "_write_fenced_fi_runtime_receipt",
+                    return_value=(config.lease_file.parent / "fenced-fi-runtime-receipt.json", "d" * 64),
+                ),
+                mock.patch.object(
+                    agent,
+                    "_run_fenced_fi_guard_start_preflight",
+                    side_effect=agent.ProductionWriterLeaseAgentError(
+                        "fenced runtime receipt does not match the local lease"
+                    ),
+                ),
+                mock.patch.object(agent, "_best_effort_stop") as stop,
+                mock.patch.object(agent, "_best_effort_drain_failed_fenced_fi_cutover") as drain,
+            ):
+                with self.assertRaisesRegex(
+                    agent.ProductionWriterLeaseAgentError,
+                    "runtime receipt does not match",
+                ):
+                    agent.cutover_fenced_fi_and_start(
+                        config,
+                        operation_id="93877f06-2671-4d78-b1f8-2c79bf759755",
+                    )
+
+            start.assert_called_once_with(config, fenced_start_proof=refreshed_proof)
+            stop.assert_called_once_with(config)
+            drain.assert_called_once_with(
+                config,
+                proof=refreshed_proof,
+                operation_id="93877f06-2671-4d78-b1f8-2c79bf759755",
+            )
+
+    def test_fenced_fi_rejects_an_exited_legacy_container_with_restart_enabled(self):
+        with mock.patch.object(
+            agent,
+            "_run_runtime_command",
+            side_effect=["a" * 12, "/trading_bot_app|exited|always"],
+        ):
+            with self.assertRaisesRegex(
+                agent.ProductionWriterLeaseAgentError,
+                "restart disabled",
+            ):
+                agent._assert_fenced_fi_legacy_scope_is_stopped()
+
+    def test_fenced_fi_rejects_a_running_legacy_compose_migration_one_off(self):
+        with mock.patch.object(
+            agent,
+            "_run_runtime_command",
+            side_effect=[
+                "",
+                "",
+                "",
+                "",
+                "a" * 12,
+                "running|legacy_project|migration|True",
+            ],
+        ):
+            with self.assertRaisesRegex(
+                agent.ProductionWriterLeaseAgentError,
+                "one-off service is active",
+            ):
+                agent._assert_fenced_fi_legacy_scope_is_stopped()
+
+    def test_fenced_fi_rejects_an_active_legacy_deployment_process(self):
+        with mock.patch.object(
+            agent,
+            "_run_runtime_command",
+            side_effect=["", "", "", "", "", " 4242 bash ./deploy.sh foreign\n"],
+        ):
+            with self.assertRaisesRegex(
+                agent.ProductionWriterLeaseAgentError,
+                "active legacy WebApp-FI deployment process",
+            ):
+                agent._assert_fenced_fi_legacy_scope_is_stopped()
+
+    def test_fenced_fi_cutover_refuses_to_reuse_a_stopped_fenced_container(self):
+        with mock.patch.object(
+            agent,
+            "_run_runtime_command",
+            return_value="a" * 12,
+        ):
+            with self.assertRaisesRegex(
+                agent.ProductionWriterLeaseAgentError,
+                "container already exists; explicit reviewed cleanup",
+            ):
+                agent._assert_fenced_fi_runtime_scope_is_absent()
+
+    def test_fenced_fi_direct_renew_command_is_not_an_authority_bypass(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            self._config(directory, site="webapp_fi", mode="fenced_fi_writer")
+            args = agent.build_parser().parse_args(
+                ["--config", str(directory / "agent.json"), "renew"]
+            )
+            with mock.patch.object(agent, "renew_once") as renew:
+                with self.assertRaisesRegex(
+                    agent.ProductionWriterLeaseAgentError,
+                    "accepts only its explicit controlled cutover",
+                ):
+                    agent.run(args)
+            renew.assert_not_called()
+
+    def test_fenced_fi_guard_refuses_before_renewal_when_guard_start_blocks(self):
+        with tempfile.TemporaryDirectory() as raw:
+            config = self._config(Path(raw), site="webapp_fi", mode="fenced_fi_writer")
+            agent._write_lease(config.lease_file, proof=_proof(site="webapp_fi", epoch=3))
+            with (
+                mock.patch.object(
+                    agent,
+                    "_run_fenced_fi_guard_start_preflight",
+                    side_effect=agent.ProductionWriterLeaseAgentError(
+                        "fenced FI runtime identity no longer matches"
+                    ),
+                ) as preflight,
+                mock.patch.object(agent, "renew_once") as renew,
+                mock.patch.object(agent, "_compose") as compose,
+            ):
+                with self.assertRaisesRegex(
+                    agent.ProductionWriterLeaseAgentError,
+                    "identity no longer matches",
+                ):
+                    agent.guard(config, once=True)
+
+            preflight.assert_called_once_with(config)
+            renew.assert_not_called()
+            compose.assert_called_once_with(config, action="stop")
+
+    def test_fenced_fi_writes_a_post_health_runtime_receipt_bound_to_the_new_term(self):
+        with tempfile.TemporaryDirectory() as raw:
+            config = self._config(Path(raw), site="webapp_fi", mode="fenced_fi_writer")
+            config.lease_file.parent.mkdir(mode=0o700, exist_ok=True)
+            app = {
+                "container_id": "a" * 64,
+                "container_name": agent.WA_FI_FENCED_CONTAINER_NAMES["app"],
+                "image": "trading-bot:2c08",
+                "image_id": "sha256:" + "a" * 64,
+                "labels_sha256": "b" * 64,
+                "restart_policy": "no",
+            }
+            bot = {
+                "container_id": "c" * 64,
+                "container_name": agent.WA_FI_FENCED_CONTAINER_NAMES["bot"],
+                "image": "trading-bot:2c08",
+                "image_id": "sha256:" + "c" * 64,
+                "labels_sha256": "d" * 64,
+                "restart_policy": "no",
+            }
+            with mock.patch.object(
+                agent,
+                "_capture_fenced_fi_runtime_container",
+                side_effect=[app, bot],
+            ):
+                receipt_path, receipt_sha256 = agent._write_fenced_fi_runtime_receipt(
+                    config,
+                    proof=_proof(site="webapp_fi", epoch=8),
+                )
+
+            payload = json.loads(receipt_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["schema"], agent.WA_FI_FENCED_RUNTIME_RECEIPT_SCHEMA)
+            self.assertEqual(payload["writer_epoch"], 8)
+            self.assertEqual(payload["containers"], {"app": app, "bot": bot})
+            self.assertEqual(payload["runtime_receipt_sha256"], receipt_sha256)
+            self.assertEqual(oct(receipt_path.stat().st_mode & 0o777), "0o600")
+
+    def test_fenced_fi_guard_rechecks_legacy_scope_after_renewal(self):
+        with tempfile.TemporaryDirectory() as raw:
+            config = self._config(Path(raw), site="webapp_fi", mode="fenced_fi_writer")
+            agent._write_lease(config.lease_file, proof=_proof(site="webapp_fi", epoch=3))
+            with (
+                mock.patch.object(agent, "_run_fenced_fi_guard_start_preflight") as guard_preflight,
+                mock.patch.object(
+                    agent,
+                    "_assert_fenced_fi_legacy_scope_is_stopped",
+                    side_effect=[None, agent.ProductionWriterLeaseAgentError("legacy restart race")],
+                ) as legacy,
+                mock.patch.object(
+                    agent,
+                    "renew_once",
+                    return_value={"status": "renewed", "site": "webapp_fi"},
+                ) as renew,
+                mock.patch.object(agent, "_compose") as compose,
+            ):
+                with self.assertRaisesRegex(agent.ProductionWriterLeaseAgentError, "restart race"):
+                    agent.guard(config, once=True)
+
+            self.assertEqual(legacy.call_count, 2)
+            guard_preflight.assert_called_once_with(config)
+            renew.assert_called_once_with(config)
+            compose.assert_called_once_with(config, action="stop")
+
+    def test_fenced_fi_bot_must_be_authenticated_healthy_before_cutover_reports_success(self):
+        with tempfile.TemporaryDirectory() as raw:
+            config = self._config(Path(raw), site="webapp_fi", mode="fenced_fi_writer")
+            with (
+                mock.patch.object(agent, "_compose_capture", return_value="a" * 12),
+                mock.patch.object(agent, "_run_runtime_command", return_value="exited|unhealthy"),
+            ):
+                with self.assertRaisesRegex(
+                    agent.ProductionWriterLeaseAgentError,
+                    "bot did not become authenticated and healthy",
+                ):
+                    agent._wait_for_fenced_fi_bot_health(config)
 
     def test_ir_config_requires_pinned_emergency_lease_timing(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -510,47 +1213,22 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
             capture_stdout=True,
         )
 
-    def test_bootstrap_writes_lease_and_starts_only_scoped_services(self):
+    def test_generic_fi_bootstrap_cannot_reactivate_legacy_sync_worker(self):
         with tempfile.TemporaryDirectory() as raw:
             directory = Path(raw)
-            config = self._config(directory, site="webapp_fi")
-            status = {
-                "state": {
-                    "holder_site": None,
-                    "writer_epoch": 0,
-                    "lease_id": None,
-                    "lease_status": "vacant",
-                    "issued_at": None,
-                    "expires_at": None,
-                    "transition_id": "transition-bootstrap",
-                }
-            }
-            proof = _proof(site="webapp_fi", epoch=1)
-            completed = mock.Mock(returncode=0)
-            with (
-                mock.patch.object(agent, "_status", return_value=status),
-                mock.patch.object(agent, "_transition", return_value={"proof": proof}),
-                mock.patch.object(agent, "_validate_proof", return_value=proof),
-                mock.patch.object(agent.subprocess, "run", return_value=completed) as run,
-            ):
-                result = agent.bootstrap_fi_and_start(
-                    config, operation_id="8d7fa0a2-1b5f-4eb8-94fd-4ccba61f422e"
-                )
+            with mock.patch.object(agent, "_run_runtime_command") as runtime:
+                with self.assertRaisesRegex(agent.ProductionWriterLeaseAgentError, "generic WebApp-FI writer mode is retired"):
+                    self._config(directory, site="webapp_fi", mode="writer")
 
-            command = run.call_args.args[0]
-            self.assertEqual(
-                command[-6:],
-                ["up", "-d", "--no-deps", "--no-recreate", "app", "sync_worker"],
-            )
-            self.assertNotIn("db", command)
-            self.assertEqual(result["writer_epoch"], 1)
-            self.assertEqual(load_production_writer_lease(config.lease_file).holder_site, "webapp_fi")
+            runtime.assert_not_called()
 
     def test_guard_keeps_scoped_services_running_for_transient_renew_failure(self):
         with tempfile.TemporaryDirectory() as raw:
-            config = self._config(Path(raw), site="webapp_fi")
+            config = self._config(Path(raw), site="webapp_fi", mode="fenced_fi_writer")
             agent._write_lease(config.lease_file, proof=_proof(site="webapp_fi", epoch=3))
             with (
+                mock.patch.object(agent, "_run_fenced_fi_guard_start_preflight") as guard_preflight,
+                mock.patch.object(agent, "_assert_fenced_fi_legacy_scope_is_stopped"),
                 mock.patch.object(
                     agent,
                     "renew_once",
@@ -561,6 +1239,7 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
                 result = agent.guard(config, once=True)
 
             self.assertEqual(result["status"], "renewal_degraded")
+            guard_preflight.assert_called_once_with(config)
             compose.assert_not_called()
 
     def test_promotion_recovery_renews_own_live_term_after_ambiguous_acquire(self):
@@ -625,16 +1304,21 @@ class ProductionWriterLeaseAgentTests(unittest.TestCase):
 
     def test_guard_stops_only_scoped_runtime_when_lease_is_unsafe(self):
         with tempfile.TemporaryDirectory() as raw:
-            config = self._config(Path(raw), site="webapp_fi")
+            config = self._config(Path(raw), site="webapp_fi", mode="fenced_fi_writer")
             now = datetime.now(timezone.utc)
             stale = _proof(site="webapp_fi", epoch=3)
             stale["issued_at"] = (now - timedelta(seconds=60)).isoformat()
             stale["expires_at"] = (now + timedelta(seconds=5)).isoformat()
             agent._write_lease(config.lease_file, proof=stale)
-            with mock.patch.object(agent, "_compose") as compose:
+            with (
+                mock.patch.object(agent, "_run_fenced_fi_guard_start_preflight") as guard_preflight,
+                mock.patch.object(agent, "_assert_fenced_fi_legacy_scope_is_stopped"),
+                mock.patch.object(agent, "_compose") as compose,
+            ):
                 with self.assertRaisesRegex(agent.ProductionWriterLeaseAgentError, "unsafe"):
                     agent.guard(config, once=True)
 
+            guard_preflight.assert_called_once_with(config)
             compose.assert_called_once_with(config, action="stop")
 
     def test_bot_fi_observer_never_renews_and_requires_active_fi_term(self):
