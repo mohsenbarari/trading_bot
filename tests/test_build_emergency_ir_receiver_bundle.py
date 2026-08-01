@@ -4,6 +4,7 @@ import base64
 import importlib.util
 from pathlib import Path
 import stat
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -62,6 +63,23 @@ class BuildEmergencyIrReceiverBundleTests(unittest.TestCase):
             bundle.build_bundle(repo=REPO_ROOT, signing_public_key=public_key, output=output)
             with self.assertRaisesRegex(bundle.ReceiverBundleError, "overwrite"):
                 bundle.build_bundle(repo=REPO_ROOT, signing_public_key=public_key, output=output)
+
+    def test_entrypoint_runs_with_the_same_isolated_python_flag_as_wa_ir_bootstrap(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-B",
+                str(REPO_ROOT / "deploy/emergency-ir/run_object_storage_receiver.py"),
+                "--help",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--signing-public-key", result.stdout)
 
 
 if __name__ == "__main__":
