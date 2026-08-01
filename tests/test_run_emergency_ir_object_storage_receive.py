@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 from pathlib import Path
@@ -7,6 +8,8 @@ import stat
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "run_emergency_ir_object_storage_receive.py"
@@ -57,6 +60,7 @@ class RunEmergencyIrObjectStorageReceiveTests(unittest.TestCase):
             payload = runner.load_descriptor(descriptor_path)
             self.assertEqual(payload["campaign_id"], "20260801T210000Z-emergency-ir-03")
             self.assertIn("receive-emergency-ir:20260801T210000Z-emergency-ir-03:", runner.confirmation_phrase(payload))
+            self.assertTrue(runner.confirmation_phrase(payload).endswith(":" + "a" * 64))
             command = runner.remote_command(payload)
             self.assertIn("sudo -n -- /usr/bin/python3", command)
             self.assertIn("trading-bot-emergency-bootstrap", command)
@@ -86,6 +90,42 @@ class RunEmergencyIrObjectStorageReceiveTests(unittest.TestCase):
             secure.chmod(0o600)
             with self.assertRaisesRegex(runner.EmergencyBootstrapError, "differs from its provenance"):
                 runner.load_descriptor(secure)
+
+    def test_execute_rejects_a_remote_success_for_a_different_manifest(self) -> None:
+        """The controller must bind the remote receipt to its descriptor hash."""
+
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-bootstrap-") as raw:
+            directory = Path(raw)
+            directory.chmod(0o700)
+            descriptor = self.write_descriptor(directory, self.descriptor())
+            identity = directory / "id_ed25519"
+            identity.write_text("not-a-real-key\n", encoding="ascii")
+            identity.chmod(0o600)
+            args = argparse.Namespace(
+                host=runner.WA_IR_HOST,
+                port=22,
+                user=runner.WA_IR_USER,
+                identity=identity,
+                descriptor=descriptor,
+                apply=True,
+                confirm=runner.confirmation_phrase(runner.load_descriptor(descriptor)),
+            )
+            completed = SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(
+                    {
+                        "status": "received-non-authorizing",
+                        "campaign_id": self.descriptor()["campaign_id"],
+                        "manifest_sha256": "f" * 64,
+                        "artifacts": [],
+                    }
+                ),
+                stderr="",
+            )
+            with patch.object(runner.subprocess, "run", return_value=completed) as remote:
+                with self.assertRaisesRegex(runner.EmergencyBootstrapError, "pinned success"):
+                    runner.execute(args)
+            remote.assert_called_once()
 
     def test_remote_bootstrap_never_carries_a_payload_file_over_ssh(self) -> None:
         source = MODULE_PATH.read_text(encoding="utf-8")

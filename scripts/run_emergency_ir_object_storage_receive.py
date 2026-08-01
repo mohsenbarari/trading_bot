@@ -405,7 +405,11 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         result = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
         raise EmergencyBootstrapError("Emergency Object Storage receive returned non-JSON output") from exc
-    if result.get("status") != "received-non-authorizing" or result.get("campaign_id") != payload["campaign_id"]:
+    if (
+        result.get("status") != "received-non-authorizing"
+        or result.get("campaign_id") != payload["campaign_id"]
+        or result.get("manifest_sha256") != payload["manifest"]["sha256"]
+    ):
         raise EmergencyBootstrapError("Emergency Object Storage receive did not return the pinned success state")
     return {
         "status": "verified-received-non-authorizing",
