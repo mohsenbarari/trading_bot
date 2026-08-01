@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import io
+import json
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -20,6 +23,8 @@ from core import (
     trade_forwarding,
 )
 from core.server_routing import SERVER_FOREIGN, SERVER_IRAN, override_current_server
+from core.legacy_direct_fi_ir_transport_fence import LegacyDirectFiIrTransportRetiredError
+from scripts import dev_admin, seed_shared_sync_tables, sync_repair_tool
 
 
 def forbidden_call(*_args, **_kwargs):
@@ -119,6 +124,43 @@ class LegacyDirectPeerTransportApiContractTests(unittest.IsolatedAsyncioTestCase
         self.assertFalse(gate.ready)
         self.assertEqual(gate.reason, "legacy_direct_transport_retired")
         self.assertIn("بازنشسته", gate.message or "")
+
+    async def test_ops_cli_direct_session_and_seed_paths_stop_before_user_or_http(self) -> None:
+        class UnreadableUser:
+            def __getattr__(self, _name):
+                raise AssertionError("retired session-reset route read user data")
+
+        status, payload = await dev_admin.forward_remote_session_reset(UnreadableUser(), "iran")
+        self.assertEqual(status, 503)
+        self.assertEqual(payload, {"detail": "Legacy direct peer session reset is retired."})
+
+        with self.assertRaises(LegacyDirectFiIrTransportRetiredError):
+            await seed_shared_sync_tables.send_items(
+                "https://peer.invalid", "must-not-be-read", [{"id": 1}]
+            )
+
+    def test_sync_repair_apply_cli_stops_before_database_or_peer_resolution(self) -> None:
+        with self.assertRaises(LegacyDirectFiIrTransportRetiredError):
+            sync_repair_tool._target_url(SimpleNamespace(target_url="https://peer.invalid"))
+        with self.assertRaises(LegacyDirectFiIrTransportRetiredError):
+            sync_repair_tool._send_items("https://peer.invalid", "must-not-be-read", [{"id": 1}])
+
+        with patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            exit_code = sync_repair_tool.main(
+                [
+                    "replay-row",
+                    "--table",
+                    "offers",
+                    "--identity",
+                    '{"offer_public_id":"ofr_test"}',
+                    "--apply",
+                ]
+            )
+
+        self.assertEqual(exit_code, 2)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["status"], "blocked_legacy_direct_fi_ir_transport_retired")
+        self.assertEqual(payload["component"], "sync-repair-tool")
 
 
 if __name__ == "__main__":

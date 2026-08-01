@@ -1,4 +1,5 @@
 import json
+import io
 import pathlib
 import tempfile
 import unittest
@@ -7,6 +8,7 @@ import unittest.mock
 from scripts.report_production_recoverability import evaluate_backup, parse_json_output as parse_report_json_output
 from scripts import run_production_backup
 from scripts.run_production_backup import HostTarget, build_backup_shell, parse_json_from_stdout
+from core.legacy_direct_fi_ir_transport_fence import LegacyDirectFiIrTransportRetiredError
 
 
 class ProductionRecoverabilityToolsTests(unittest.TestCase):
@@ -34,23 +36,12 @@ class ProductionRecoverabilityToolsTests(unittest.TestCase):
         payload = parse_json_from_stdout("noise\n{\"status\":\"old\"}\nmore\n{\"status\":\"ok\",\"x\":1}\n")
         self.assertEqual(payload, {"status": "ok", "x": 1})
 
-    def test_pull_iran_files_uses_accept_new_host_key_policy(self):
-        seen_args = []
-
-        def fake_run(args, timeout):
-            seen_args.append(args)
-
-            class Result:
-                returncode = 0
-                stderr = ""
-
-            return Result()
-
+    def test_pull_iran_files_is_retired_before_scp_or_local_writes(self):
         payload = {"files": [{"path": "/srv/trading-bot/backups/iran-db-test.sql.gz"}]}
-        with tempfile.TemporaryDirectory() as tmp_dir, unittest.mock.patch.object(
-            run_production_backup, "run_command", side_effect=fake_run
+        with tempfile.TemporaryDirectory() as tmp_dir, self.assertRaises(
+            LegacyDirectFiIrTransportRetiredError
         ):
-            pulled = run_production_backup.pull_iran_files(
+            run_production_backup.pull_iran_files(
                 {
                     "IRAN_HOST": "65.109.220.59",
                     "IRAN_SSH_PORT": "37067",
@@ -60,9 +51,18 @@ class ProductionRecoverabilityToolsTests(unittest.TestCase):
                 pathlib.Path(tmp_dir),
             )
 
-        self.assertEqual(pulled[0]["remote_path"], "/srv/trading-bot/backups/iran-db-test.sql.gz")
-        self.assertIn("StrictHostKeyChecking=accept-new", seen_args[0])
-        self.assertNotIn("StrictHostKeyChecking=no", seen_args[0])
+    def test_iran_backup_cli_is_retired_before_settings_or_remote_work(self):
+        with unittest.mock.patch.object(
+            run_production_backup,
+            "resolve_deploy_settings",
+            side_effect=AssertionError("retired CLI read deployment settings"),
+        ), unittest.mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            exit_code = run_production_backup.main(["--role", "iran", "--json"])
+
+        self.assertEqual(exit_code, 2)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["status"], "blocked_legacy_direct_fi_ir_transport_retired")
+        self.assertEqual(payload["component"], "production-backup")
 
     def test_report_json_parser_accepts_pretty_json(self):
         payload = parse_report_json_output(json.dumps({"status": "ok", "items": [1, 2]}, indent=2))

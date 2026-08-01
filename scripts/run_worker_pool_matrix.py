@@ -22,6 +22,9 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts.capture_production_baseline import DEFAULT_ARTIFACT_ROOT, display_path, utc_stamp
 from scripts.deploy_config import resolve_deploy_settings
+from core.legacy_two_server_full_matrix_fence import (
+    blocked_legacy_two_server_full_matrix_payload,
+)
 
 
 BENCHMARK_BEGIN = "__P5_BENCHMARK_JSON_BEGIN__"
@@ -480,14 +483,17 @@ def run_matrix(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-    report = run_matrix(args)
-    if args.json:
-        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
-    else:
-        print(f"Stage P5 worker matrix: {display_path(Path(report['artifact_dir']))}")
-        print(f"Recommendation: {report['recommendation']['recommended_workers']} ({report['recommendation']['decision']})")
-    return 0 if report["ok"] else 2
+    del argv
+    print(
+        json.dumps(
+            blocked_legacy_two_server_full_matrix_payload(
+                component="iran-two-server-worker-pool-matrix"
+            ),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+    return 2
 
 
 if __name__ == "__main__":

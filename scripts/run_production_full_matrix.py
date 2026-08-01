@@ -28,6 +28,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts import build_production_full_matrix_manifest as manifest_builder
+from core.legacy_two_server_full_matrix_fence import (
+    blocked_legacy_two_server_full_matrix_payload,
+)
 
 
 SCHEMA_VERSION = "production_full_matrix_runner_plan_v1"
@@ -3069,55 +3072,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-    try:
-        plan = build_plan(args)
-    except RunnerError as exc:
-        print(json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False, sort_keys=True))
-        return 1
-
-    exit_code = 0
-    if args.execute and args.mode == "preflight":
-        if os.environ.get(PREFLIGHT_CONFIRM_ENV) != PREFLIGHT_CONFIRM_VALUE:
-            plan["status"] = "blocked_preflight_confirmation_missing"
-            plan["preflight"]["status"] = "blocked_confirmation_missing"
-            exit_code = 2
-        else:
-            commands = [
-                CommandSpec(
-                    name=item["name"],
-                    args=list(item["args"]),
-                    timeout_seconds=int(item["timeout_seconds"]),
-                    mutates_production=bool(item["mutates_production"]),
-                )
-                for item in plan["preflight"]["commands"]
-            ]
-            results = run_preflight_commands(commands, cwd=REPO_ROOT)
-            failed = [item for item in results if item.get("status") != "passed"]
-            plan["status"] = "preflight_failed" if failed else "preflight_passed"
-            plan["preflight"]["status"] = plan["status"]
-            plan["preflight"]["results"] = results
-            exit_code = 1 if failed else 0
-    elif args.execute and args.mode == "execution-plan":
-        plan, exit_code = execute_command_plan(
-            plan,
-            cwd=REPO_ROOT,
-            resume=args.resume,
-            continue_on_failure=args.continue_on_failure,
-            scenario_retries=args.scenario_retries,
-            retry_backoff_seconds=args.retry_backoff_seconds,
-            retry_mode=args.retry_mode,
+    del argv
+    print(
+        json.dumps(
+            blocked_legacy_two_server_full_matrix_payload(
+                component="production-two-server-full-matrix-runner"
+            ),
+            ensure_ascii=False,
+            sort_keys=True,
         )
-    elif args.execute:
-        exit_code = 2
-    if args.mode == "execution-plan" and args.require_full_driver_coverage and plan["status"] == "blocked_driver_gaps":
-        exit_code = 2
-
-    if args.output:
-        write_json(args.output, plan)
-    stdout_payload = plan if args.print_full else compact_stdout(plan, args.output)
-    print(json.dumps(stdout_payload, ensure_ascii=False, sort_keys=True))
-    return exit_code
+    )
+    return 2
 
 
 if __name__ == "__main__":

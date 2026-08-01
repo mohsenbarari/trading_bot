@@ -2,7 +2,6 @@ import importlib.util
 import io
 import json
 import os
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -23,6 +22,16 @@ spec.loader.exec_module(runner)
 class ProductionFullMatrixRunnerTests(unittest.TestCase):
     def build_args(self, *extra: str):
         return runner.parse_args(["--prefix", "PFM_20260624_180000_", *extra])
+
+    def assert_legacy_cli_blocked(self, *argv: str) -> dict[str, object]:
+        with patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            exit_code = runner.main(list(argv))
+
+        self.assertEqual(exit_code, 2)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["status"], "blocked_legacy_two_server_full_matrix_retired")
+        self.assertEqual(payload["component"], "production-two-server-full-matrix-runner")
+        return payload
 
     def build_execution_test_plan(self, artifact_dir: Path, scenario_plans: list[dict[str, object]]):
         return {
@@ -124,30 +133,9 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(output, "خطا ")
 
     def test_execute_mode_requires_explicit_production_confirmation(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            output = Path(tmp_dir) / "blocked.json"
-            with patch.dict(os.environ, {}, clear=True), patch("sys.stdout", new_callable=io.StringIO):
-                exit_code = runner.main(
-                    [
-                        "--prefix",
-                        "PFM_20260624_180000_",
-                        "--mode",
-                        "execution-plan",
-                        "--section",
-                        "delivery_contract",
-                        "--manifest-id",
-                        "DC-TDN-001",
-                        "--require-full-driver-coverage",
-                        "--execute",
-                        "--output",
-                        str(output),
-                    ]
-                )
-            payload = json.loads(output.read_text(encoding="utf-8"))
-
-        self.assertEqual(exit_code, 2)
-        self.assertEqual(payload["status"], "blocked_execution_confirmation_missing")
-        self.assertEqual(payload["execution_plan"]["execution"]["reason"], "confirmation_missing")
+        self.assert_legacy_cli_blocked(
+            "--mode", "execution-plan", "--section", "delivery_contract", "--execute"
+        )
 
     def test_resume_execution_skips_campaign_wide_cleanup_preflight_when_results_exist(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -486,23 +474,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertFalse(first_ids.intersection(second_ids))
 
     def test_execute_flag_fails_closed(self):
-        with patch("sys.stdout", new_callable=io.StringIO) as stdout:
-            exit_code = runner.main(
-                [
-                    "--prefix",
-                    "PFM_20260624_180000_",
-                    "--section",
-                    "production_base_trade_shape",
-                    "--max-scenarios",
-                    "1",
-                    "--execute",
-                ]
-            )
-
-        payload = json.loads(stdout.getvalue())
-        self.assertEqual(exit_code, 2)
-        self.assertEqual(payload["status"], "blocked_not_implemented")
-        self.assertTrue(payload["execute_requested"])
+        self.assert_legacy_cli_blocked("--section", "production_base_trade_shape", "--execute")
 
     def test_preflight_mode_builds_non_mutating_command_plan(self):
         plan = runner.build_plan(self.build_args("--mode", "preflight"))
@@ -717,61 +689,12 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         )
 
     def test_execution_plan_full_coverage_gate_passes_for_whole_manifest(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            output = Path(tmp_dir) / "execution-plan.json"
-            with patch("sys.stdout", new_callable=io.StringIO) as stdout:
-                exit_code = runner.main(
-                    [
-                        "--prefix",
-                        "PFM_20260624_180000_",
-                        "--mode",
-                        "execution-plan",
-                        "--require-full-driver-coverage",
-                        "--output",
-                        str(output),
-                    ]
-                )
-
-            full_payload = json.loads(output.read_text(encoding="utf-8"))
-            stdout_payload = json.loads(stdout.getvalue())
-
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(stdout_payload["status"], "execution_plan_built")
-        self.assertEqual(full_payload["status"], "execution_plan_built")
-        self.assertTrue(full_payload["execution_plan"]["coverage_gate"]["passed"])
-        self.assertEqual(full_payload["execution_plan"]["driver_gap_count"], 0)
+        self.assert_legacy_cli_blocked("--mode", "execution-plan", "--require-full-driver-coverage")
 
     def test_execution_plan_full_coverage_gate_passes_for_filtered_executable_scope(self):
-        with patch("sys.stdout", new_callable=io.StringIO) as stdout:
-            exit_code = runner.main(
-                [
-                    "--prefix",
-                    "PFM_20260624_180000_",
-                    "--mode",
-                    "execution-plan",
-                    "--section",
-                    "production_base_trade_shape",
-                    "--policy",
-                    "supported",
-                    "--actor-pair-id",
-                    "user__user",
-                    "--outage-id",
-                    "stable",
-                    "--surface-pair",
-                    "webapp_offer__telegram_request",
-                    "--offer-type",
-                    "sell",
-                    "--shape",
-                    "retail_two_lot",
-                    "--require-full-driver-coverage",
-                ]
-            )
-
-        payload = json.loads(stdout.getvalue())
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(payload["status"], "execution_plan_built")
-        self.assertEqual(payload["execution_plan"]["driver_gap_count"], 0)
-        self.assertTrue(payload["execution_plan"]["coverage_gate"]["passed"])
+        self.assert_legacy_cli_blocked(
+            "--mode", "execution-plan", "--section", "production_base_trade_shape"
+        )
 
     def test_execution_plan_builds_negative_guard_commands_for_implemented_case(self):
         plan = runner.build_plan(
@@ -1132,55 +1055,15 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(scenario_plan["case_id"], "watch_role_market_action")
 
     def test_preflight_execute_requires_separate_confirmation(self):
-        with patch.dict(os.environ, {}, clear=True), patch("sys.stdout", new_callable=io.StringIO) as stdout:
-            exit_code = runner.main(
-                [
-                    "--prefix",
-                    "PFM_20260624_180000_",
-                    "--mode",
-                    "preflight",
-                    "--execute",
-                ]
-            )
-
-        payload = json.loads(stdout.getvalue())
-        self.assertEqual(exit_code, 2)
-        self.assertEqual(payload["status"], "blocked_preflight_confirmation_missing")
-        self.assertEqual(payload["preflight"]["status"], "blocked_confirmation_missing")
+        self.assert_legacy_cli_blocked("--mode", "preflight", "--execute")
 
     def test_preflight_execute_runs_non_mutating_commands_when_confirmed(self):
-        def fake_run(args, **_kwargs):
-            return subprocess.CompletedProcess(args=args, returncode=0, stdout="ok", stderr="")
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            output = Path(tmp_dir) / "preflight.json"
-            with patch.dict(
-                os.environ,
-                {runner.PREFLIGHT_CONFIRM_ENV: runner.PREFLIGHT_CONFIRM_VALUE},
-                clear=True,
-            ), patch.object(runner.subprocess, "run", side_effect=fake_run) as run_mock, patch(
-                "sys.stdout", new_callable=io.StringIO
-            ) as stdout:
-                exit_code = runner.main(
-                    [
-                        "--prefix",
-                        "PFM_20260624_180000_",
-                        "--mode",
-                        "preflight",
-                        "--execute",
-                        "--output",
-                        str(output),
-                    ]
-                )
-
-            full_payload = json.loads(output.read_text(encoding="utf-8"))
-            stdout_payload = json.loads(stdout.getvalue())
-
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(stdout_payload["status"], "preflight_passed")
-        self.assertEqual(full_payload["preflight"]["status"], "preflight_passed")
-        self.assertEqual(run_mock.call_count, len(full_payload["preflight"]["commands"]))
-        self.assertTrue(all(item["status"] == "passed" for item in full_payload["preflight"]["results"]))
+        with patch.dict(
+            os.environ,
+            {runner.PREFLIGHT_CONFIRM_ENV: runner.PREFLIGHT_CONFIRM_VALUE},
+            clear=True,
+        ):
+            self.assert_legacy_cli_blocked("--mode", "preflight", "--execute")
 
     def test_execution_resume_skips_previously_passed_scenarios(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -1342,27 +1225,7 @@ class ProductionFullMatrixRunnerTests(unittest.TestCase):
         self.assertEqual(execution["failed_manifest_ids"], ["UNIT-FAIL"])
 
     def test_cli_writes_output_and_prints_compact_summary(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            output = Path(tmp_dir) / "run-plan.json"
-            with patch("sys.stdout", new_callable=io.StringIO) as stdout:
-                exit_code = runner.main(
-                    [
-                        "--prefix",
-                        "PFM_20260624_180000_",
-                        "--section",
-                        "negative_business_guard",
-                        "--output",
-                        str(output),
-                    ]
-                )
-
-            self.assertEqual(exit_code, 0)
-            full_payload = json.loads(output.read_text(encoding="utf-8"))
-            stdout_payload = json.loads(stdout.getvalue())
-
-        self.assertEqual(full_payload["selected_summary"]["selected_count"], 23)
-        self.assertEqual(stdout_payload["selected_summary"]["selected_count"], 23)
-        self.assertNotIn("steps", stdout_payload)
+        self.assert_legacy_cli_blocked("--section", "negative_business_guard")
 
 
 if __name__ == "__main__":

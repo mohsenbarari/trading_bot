@@ -35,6 +35,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts import build_staging_two_server_full_matrix_manifest as manifest_builder
+from core.legacy_two_server_full_matrix_fence import (
+    blocked_legacy_two_server_full_matrix_payload,
+)
 
 
 SCHEMA_VERSION = "staging_two_server_full_matrix_runner_v1"
@@ -2847,18 +2850,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-    if args.mode == "plan":
-        payload = build_plan(args)
-        print(json.dumps(payload["summary"], ensure_ascii=False, sort_keys=True))
-        return 0 if payload["summary"]["status"] == "plan_ready" else 1
-    if args.mode == "preflight":
-        payload, exit_code = run_preflight(args)
-        print(json.dumps(payload["summary"], ensure_ascii=False, sort_keys=True))
-        return exit_code
-    payload, exit_code = run_execute(args)
-    print(json.dumps(payload["summary"], ensure_ascii=False, sort_keys=True))
-    return exit_code
+    del argv
+    # Block before argument parsing: even the old "plan"/"preflight" modes
+    # encode direct two-site host/control assumptions and must not look like a
+    # valid three-site Full Matrix campaign.
+    print(
+        json.dumps(
+            blocked_legacy_two_server_full_matrix_payload(
+                component="staging-two-server-full-matrix-runner"
+            ),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+    return 2
 
 
 if __name__ == "__main__":

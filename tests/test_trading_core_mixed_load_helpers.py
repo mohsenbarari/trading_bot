@@ -1,4 +1,5 @@
 import asyncio
+import io
 import inspect
 import json
 import tempfile
@@ -655,6 +656,15 @@ class TradingCoreMixedLoadHelperTests(unittest.TestCase):
         self.assertFalse(worker._peer_sync_response_is_success({"status": "partial", "processed": 3, "errors": 0}, 3))
         self.assertFalse(worker._peer_sync_response_is_success({"status": "success", "processed": 2, "errors": 0}, 3))
         self.assertFalse(worker._peer_sync_response_is_success({"status": "success", "processed": 3, "errors": 1}, 3))
+
+    def test_sync_prefix_catchup_cli_is_retired_before_local_or_peer_work(self):
+        with patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            exit_code = worker.main(["sync-prefix-catchup", "--prefix", "PFM_UNIT_"])
+
+        self.assertEqual(exit_code, 2)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["status"], "blocked_legacy_direct_fi_ir_transport_retired")
+        self.assertEqual(payload["component"], "trading-core-probe-worker")
 
     def test_cleanup_redis_for_user_ids_removes_exact_expire_rate_key(self):
         class FakeRedis:

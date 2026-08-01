@@ -25,6 +25,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.deploy_config import resolve_deploy_settings
+from core.legacy_two_server_full_matrix_fence import (
+    blocked_legacy_two_server_full_matrix_payload,
+)
 from core.sync_transport import sync_transport_security_status_from_values
 from core.sync_parity_observability import strict_alert_gate_from_parity_summary, summarize_parity_comparison
 
@@ -787,15 +790,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-    args.artifact_dir.mkdir(parents=True, exist_ok=True)
-    plan = build_plan(args)
-    exit_code = 0
-    if args.mode != "plan":
-        plan, exit_code = execute_plan(plan, args)
-    write_json(args.output, plan)
-    print(json.dumps(plan, ensure_ascii=False, sort_keys=True))
-    return exit_code
+    del argv
+    print(
+        json.dumps(
+            blocked_legacy_two_server_full_matrix_payload(
+                component="sync-parity-stage9-two-server-rollout"
+            ),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+    return 2
 
 
 if __name__ == "__main__":

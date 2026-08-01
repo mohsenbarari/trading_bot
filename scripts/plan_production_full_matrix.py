@@ -7,9 +7,18 @@ import argparse
 import json
 import os
 import shlex
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from core.legacy_two_server_full_matrix_fence import (
+    blocked_legacy_two_server_full_matrix_payload,
+)
 
 
 ALLOWED_PREFIXES = ("PFM_", "PRODTEST_", "FMX_")
@@ -349,14 +358,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-    try:
-        plan = build_plan(args)
-    except PlanError as exc:
-        print(json.dumps({"status": "error", "message": str(exc)}, sort_keys=True))
-        return 2
-    print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))
-    return 0
+    del argv
+    print(
+        json.dumps(
+            blocked_legacy_two_server_full_matrix_payload(
+                component="production-two-server-full-matrix-planner"
+            ),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+    return 2
 
 
 if __name__ == "__main__":

@@ -208,6 +208,24 @@ drain_direction() {
 }
 
 main() {
+    if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "help" ]]; then
+        cat <<'EOF'
+The legacy direct cross-server recovery path is retired.
+
+It cannot start sync workers, contact a peer, or invoke /api/sync/resync.
+Use the reviewed three-site recovery controller with private, versioned Object
+Storage pull and Witness-mediated single-writer control.
+EOF
+        return 0
+    fi
+
+    # This is intentionally before configuration/environment reads. The old
+    # recovery route started workers and directly pushed in both FI<->IR
+    # directions, which is incompatible with the three-site data plane.
+    echo "ERROR: legacy direct cross-server recovery is blocked before configuration, Docker, or peer network access; private, versioned Object Storage pull and witnessed single-writer control are required, with no environment or configuration bypass." >&2
+    return 2
+
+    # Historical implementation retained below for forensic comparison only.
     load_shared_deploy_surface
     ensure_local_env
 
