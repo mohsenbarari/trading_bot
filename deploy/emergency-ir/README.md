@@ -101,13 +101,18 @@ a generic proxy.
    Verify ciphertext and plaintext hashes after download/decryption.
 3. Load images, render a fresh root-only runtime environment locally, restore
    the snapshot, run the session-reset SQL, migrate, and verify API health.
-4. Only after all local checks pass, install the Nginx configuration.  Move the
-   pre-existing Nginx default site to a recoverable backup; never delete it.
-   Test Nginx, then open UFW TCP 80/443.
-5. Confirm the exact certificate/domain with `--resolve`, the blocked sync and
-   OTP routes, and that existing three-site containers on 8213/8443 remain
-   healthy.  Only then is a DNS A-record switch to `95.38.164.29` the sole
-   cutover action.
+4. Verify the local Certbot `live` symlink only through its root-controlled
+   `archive` target, then create a root-only, non-symlink pinned certificate
+   and private-key pair under `/etc/trading-bot-emergency/standalone/tls/`.
+   Nginx consumes only that pinned pair, never Certbot's mutable live links.
+5. Only after all local checks pass, recoverably replace the Nginx default
+   symlink, enable/start or reload Nginx as needed, and make a direct local
+   CA-validated TLS/SNI request for `coin.gold-trade.ir`. The probe requires
+   `/api/config` to return 200 and `/api/sync` to remain 404; it also rechecks
+   protected three-site listeners on 8213/8443. Only then does it add the one
+   bounded UFW TCP multiport rule for 80,443.
+6. Only then is a DNS A-record switch to `95.38.164.29` the sole cutover
+   action.
 
 The DNS-01 certificate currently expires on 2026-10-30.  Renewal needs a
 manual DNS challenge before that date; it is not an automatic renewal setup.
@@ -126,8 +131,8 @@ python3 -I -B /run/trading-bot-emergency-bootstrap/<campaign>/receiver/scripts/e
 
 The result contains a distinct confirmation phrase for each stage.  Copy the
 phrase for exactly one stage into `--confirm`, together with `--apply` and
-`--stage prepare`, then repeat in order for `images`, `database`, `api`, and
-finally `prearm`.  The activator re-checks the pinned manifest/public key,
+`--stage prepare`, then repeat in order for `images`, `database`, `api`,
+`tls`, and finally `prearm`.  The activator re-checks the pinned manifest/public key,
 age recipient identity, ciphertext hash/size, and plaintext hash/size before
 it decrypts or uses an artifact.  It uses create-only files and receipts, so a
 failed attempt is intentionally not retried by overwriting state.
@@ -159,10 +164,17 @@ provenance labels, isolated image namespace, expected image count, regular
 layers, and no pre-existing target tags.  The database stage refuses an
 existing Emergency volume/network/container, starts only DB and Redis,
 restores the custom dump, runs session reset, then runs migration.  It never
-uses a broad `compose up` before this sequence.  The ingress stage moves the
-existing default Nginx *symlink* to a root-only backup and restores it by
-rename if `nginx -t` fails; it never deletes the prior configuration or a
-Docker resource.
+uses a broad `compose up` before this sequence. The `tls` stage accepts
+Certbot's normal `live` symlinks only as a local source whose resolved
+root-owned archive target remains inside the exact Emergency archive directory.
+It verifies the leaf/key pairing, exact DNS SAN, and a seven-day validity
+margin before creating fixed pinned TLS files and a campaign receipt. The
+ingress stage moves the existing default Nginx *symlink* to a root-only backup
+and restores it by rename on candidate-test, lifecycle, TLS-probe,
+staging-health, UFW, or local-command failure. If Nginx began
+disabled/inactive, a failed prearm stops/disables only the service action it
+attempted, returning it to that prior lifecycle. It never deletes the prior
+configuration, a Docker resource, or a UFW rule.
 
 ## Rollback
 

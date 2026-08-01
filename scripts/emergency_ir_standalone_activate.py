@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+from datetime import datetime, timedelta, timezone
+import hmac
 import hashlib
 import json
 import os
@@ -26,6 +28,7 @@ from pathlib import Path, PurePosixPath
 import re
 import shutil
 import socket
+import ssl
 import stat
 import subprocess
 import sys
@@ -63,7 +66,10 @@ MAX_SECRET_BYTES = 4096
 MAX_SNAPSHOT_BYTES = 100 * 1024 * 1024 * 1024
 MAX_IMAGE_BYTES = 100 * 1024 * 1024 * 1024
 MAX_JSON_BYTES = 1024 * 1024
+MAX_CERTIFICATE_BYTES = 1024 * 1024
 DISK_HEADROOM_BYTES = 256 * 1024 * 1024
+CERTIFICATE_MIN_REMAINING = timedelta(days=7)
+EMERGENCY_DOMAIN = "coin.gold-trade.ir"
 
 AGE_BINARY = "/usr/bin/age"
 AGE_KEYGEN_BINARY = "/usr/bin/age-keygen"
@@ -95,6 +101,17 @@ class ActivationPaths:
     nginx_backup_root: Path = Path("/etc/trading-bot-emergency/standalone/nginx-backups")
     nginx_sms_rate_limit: Path = Path("/etc/nginx/conf.d/trading-bot-emergency-ir-sms-rate-limit.conf")
     sms_preflight_receipt: Path = Path("/etc/trading-bot-emergency/standalone/sms-provider-preflight.json")
+    tls_source_fullchain: Path = Path(
+        "/etc/trading-bot-emergency/acme/config/live/emergency-coin-gold-trade-ir/fullchain.pem"
+    )
+    tls_source_privkey: Path = Path(
+        "/etc/trading-bot-emergency/acme/config/live/emergency-coin-gold-trade-ir/privkey.pem"
+    )
+    tls_source_archive_root: Path = Path(
+        "/etc/trading-bot-emergency/acme/config/archive/emergency-coin-gold-trade-ir"
+    )
+    tls_pinned_fullchain: Path = Path("/etc/trading-bot-emergency/standalone/tls/fullchain.pem")
+    tls_pinned_privkey: Path = Path("/etc/trading-bot-emergency/standalone/tls/privkey.pem")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -126,6 +143,18 @@ class SettingsBundle:
     smsir_api_key: str | None = None
     smsir_otp_template_id: str | None = None
     smsir_otp_template_parameter: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class NginxLifecycle:
+    enabled: bool
+    active: bool
+
+
+@dataclasses.dataclass
+class NginxLifecycleChanges:
+    enable_attempted: bool = False
+    start_attempted: bool = False
 
 
 def _fail(message: str) -> None:
@@ -469,7 +498,7 @@ def verify_campaign(
 
 
 def confirmation_phrase(campaign: VerifiedCampaign, *, stage: str, profile: str) -> str:
-    if stage not in {"prepare", "images", "database", "api", "prearm"}:
+    if stage not in {"prepare", "images", "database", "api", "tls", "prearm"}:
         _fail("activation stage is invalid")
     if profile not in {"telegram-only", "sms-otp"}:
         _fail("activation profile is invalid")
@@ -505,6 +534,11 @@ def activation_plan(campaign: VerifiedCampaign, *, profile: str) -> dict[str, An
                 "stage": "api",
                 "does": "start only the isolated API and require local health",
                 "confirm": confirmation_phrase(campaign, stage="api", profile=profile),
+            },
+            {
+                "stage": "tls",
+                "does": "verify the local certbot source and create a root-only pinned certificate/key receipt",
+                "confirm": confirmation_phrase(campaign, stage="tls", profile=profile),
             },
             {
                 "stage": "prearm",
@@ -1341,7 +1375,189 @@ def _check_staging_listener(port: int) -> None:
         raise EmergencyActivationError("protected three-site staging listener is not healthy") from exc
 
 
-def _nginx_static_contract(package_root: Path, *, profile: str) -> Path:
+def _pinned_tls_paths(paths: ActivationPaths) -> tuple[Path, Path]:
+    return paths.tls_pinned_fullchain, paths.tls_pinned_privkey
+
+
+def _read_certbot_tls_source(
+    *,
+    source: Path,
+    archive_root: Path,
+    label: str,
+    private: bool,
+) -> bytes:
+    """Read a certbot ``live`` terminal symlink only through its trusted archive.
+
+    Certbot's live leaf is normally a symlink.  It is a source only: the
+    Nginx contract below uses a create-only regular-file snapshot instead.
+    """
+
+    _secure_directory(source.parent, create=False)
+    _secure_directory(archive_root, create=False)
+    try:
+        before = source.lstat()
+    except OSError as exc:
+        raise EmergencyActivationError(f"{label} source cannot be inspected") from exc
+    if stat.S_ISLNK(before.st_mode):
+        if before.st_uid != 0 or before.st_nlink != 1:
+            _fail(f"{label} source symlink is not root-controlled")
+        try:
+            target = source.resolve(strict=True)
+        except OSError as exc:
+            raise EmergencyActivationError(f"{label} source symlink cannot be resolved") from exc
+        if not target.is_relative_to(archive_root):
+            _fail(f"{label} source symlink escapes the trusted certbot archive")
+        _secure_directory(target.parent, create=False)
+        payload = _read_root_regular(
+            target, label=f"{label} archive target", maximum_bytes=MAX_CERTIFICATE_BYTES, private=private
+        )
+        try:
+            after = source.lstat()
+            resolved_after = source.resolve(strict=True)
+        except OSError as exc:
+            raise EmergencyActivationError(f"{label} source changed while being read") from exc
+        fields = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink", "st_size", "st_mtime_ns")
+        if any(getattr(before, field) != getattr(after, field) for field in fields) or resolved_after != target:
+            _fail(f"{label} source changed while being read")
+        return payload
+    return _read_root_regular(source, label=label, maximum_bytes=MAX_CERTIFICATE_BYTES, private=private)
+
+
+def _validate_tls_material(*, fullchain: bytes, private_key: bytes) -> None:
+    """Check one local certificate/key pair without contacting any network."""
+
+    try:
+        from cryptography import x509
+        from cryptography.hazmat.primitives import serialization
+    except ImportError as exc:  # pragma: no cover - manifest already requires cryptography in production.
+        raise EmergencyActivationError("local X.509 verification dependency is unavailable") from exc
+    try:
+        certificates = x509.load_pem_x509_certificates(fullchain)
+        if not certificates:
+            _fail("pinned Emergency certificate chain is empty")
+        leaf = certificates[0]
+        key = serialization.load_pem_private_key(private_key, password=None)
+        san = leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+        names = tuple(san.get_values_for_type(x509.DNSName))
+        if names != (EMERGENCY_DOMAIN,):
+            _fail("Emergency certificate SAN is not exactly the configured domain")
+        not_before = leaf.not_valid_before
+        not_after = leaf.not_valid_after
+        if not_before.tzinfo is None:
+            not_before = not_before.replace(tzinfo=timezone.utc)
+        if not_after.tzinfo is None:
+            not_after = not_after.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        if not_before > now:
+            _fail("Emergency certificate is not valid yet")
+        if not_after <= now + CERTIFICATE_MIN_REMAINING:
+            _fail("Emergency certificate does not meet the minimum remaining validity")
+        certificate_public = leaf.public_key().public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+        private_public = key.public_key().public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+    except EmergencyActivationError:
+        raise
+    except Exception as exc:
+        raise EmergencyActivationError("Emergency certificate/key material is invalid") from exc
+    if not hmac.compare_digest(certificate_public, private_public):
+        _fail("Emergency certificate private key does not match the leaf certificate")
+
+
+def _pin_tls_file(*, destination: Path, payload: bytes, label: str) -> None:
+    """Create one immutable TLS snapshot file, or reuse an identical one."""
+
+    try:
+        destination.lstat()
+    except FileNotFoundError:
+        _write_create_only(destination, payload)
+        return
+    except OSError as exc:
+        raise EmergencyActivationError(f"{label} snapshot cannot be inspected") from exc
+    existing = _read_root_regular(
+        destination, label=f"{label} snapshot", maximum_bytes=MAX_CERTIFICATE_BYTES
+    )
+    if not hmac.compare_digest(existing, payload):
+        _fail(f"{label} snapshot already exists with different content")
+
+
+def _validate_pinned_tls(*, paths: ActivationPaths) -> tuple[Path, Path]:
+    fullchain_path, private_key_path = _pinned_tls_paths(paths)
+    fullchain = _read_root_regular(
+        fullchain_path, label="pinned Emergency certificate", maximum_bytes=MAX_CERTIFICATE_BYTES
+    )
+    private_key = _read_root_regular(
+        private_key_path, label="pinned Emergency certificate private key", maximum_bytes=MAX_CERTIFICATE_BYTES
+    )
+    _validate_tls_material(fullchain=fullchain, private_key=private_key)
+    return fullchain_path, private_key_path
+
+
+def pin_tls(
+    *,
+    campaign: VerifiedCampaign,
+    paths: ActivationPaths,
+    profile: str,
+    runner: Callable[..., Any] = subprocess.run,
+) -> dict[str, Any]:
+    """Snapshot the checked local certbot pair to root-only regular files."""
+
+    del runner
+    if _receipt_path(paths, campaign.campaign_id, "tls-pinned").exists():
+        _fail("Emergency TLS receipt already exists; refusing to overwrite a prior TLS pin")
+    _require_prepare(paths, campaign, profile=profile)
+    _read_receipt(paths, campaign, stage="api-ready")
+    fullchain = _read_certbot_tls_source(
+        source=paths.tls_source_fullchain,
+        archive_root=paths.tls_source_archive_root,
+        label="Emergency certificate",
+        private=False,
+    )
+    private_key = _read_certbot_tls_source(
+        source=paths.tls_source_privkey,
+        archive_root=paths.tls_source_archive_root,
+        label="Emergency certificate private key",
+        private=True,
+    )
+    _validate_tls_material(fullchain=fullchain, private_key=private_key)
+    fullchain_path, private_key_path = _pinned_tls_paths(paths)
+    _secure_directory(fullchain_path.parent, create=True)
+    _pin_tls_file(destination=fullchain_path, payload=fullchain, label="Emergency certificate")
+    _pin_tls_file(destination=private_key_path, payload=private_key, label="Emergency certificate private key")
+    _validate_pinned_tls(paths=paths)
+    payload = {
+        "profile": profile,
+        "domain": EMERGENCY_DOMAIN,
+        "fullchain_path": str(fullchain_path),
+        "private_key_path": str(private_key_path),
+        "minimum_remaining_seconds": int(CERTIFICATE_MIN_REMAINING.total_seconds()),
+    }
+    _write_receipt(paths, campaign, stage="tls-pinned", payload=payload)
+    return payload
+
+
+def _require_pinned_tls(
+    *, paths: ActivationPaths, campaign: VerifiedCampaign, profile: str
+) -> tuple[Path, Path]:
+    payload = _read_receipt(paths, campaign, stage="tls-pinned")
+    fullchain_path, private_key_path = _pinned_tls_paths(paths)
+    expected = {
+        "profile": profile,
+        "domain": EMERGENCY_DOMAIN,
+        "fullchain_path": str(fullchain_path),
+        "private_key_path": str(private_key_path),
+        "minimum_remaining_seconds": int(CERTIFICATE_MIN_REMAINING.total_seconds()),
+    }
+    if payload != expected:
+        _fail("Emergency TLS receipt is not bound to the pinned certificate contract")
+    return _validate_pinned_tls(paths=paths)
+
+
+def _render_nginx_configuration(
+    *, package_root: Path, profile: str, fullchain_path: Path, private_key_path: Path
+) -> bytes:
     if profile == "sms-otp":
         candidate = package_root / "deploy/emergency-ir/nginx.sms-otp.conf.template"
         rate = package_root / "deploy/emergency-ir/nginx.sms-otp.rate-limit.conf"
@@ -1349,10 +1565,82 @@ def _nginx_static_contract(package_root: Path, *, profile: str) -> Path:
     else:
         candidate = package_root / "deploy/emergency-ir/nginx.standalone.conf.template"
     payload = _read_root_regular(candidate, label="Emergency Nginx configuration", maximum_bytes=MAX_JSON_BYTES)
-    required = (b"server_name coin.gold-trade.ir", b"proxy_pass http://127.0.0.1:18000", b"ssl_certificate ")
-    if any(value not in payload for value in required):
-        _fail("Emergency Nginx configuration does not satisfy the static ingress contract")
-    return candidate
+    fullchain_token = b"__EMERGENCY_TLS_FULLCHAIN__"
+    private_key_token = b"__EMERGENCY_TLS_PRIVATE_KEY__"
+    required = (b"server_name coin.gold-trade.ir", b"proxy_pass http://127.0.0.1:18000", fullchain_token, private_key_token)
+    if any(value not in payload for value in required) or payload.count(fullchain_token) != 2 or payload.count(private_key_token) != 2:
+        _fail("Emergency Nginx configuration does not satisfy the pinned TLS ingress contract")
+    rendered = payload.replace(fullchain_token, str(fullchain_path).encode("ascii")).replace(
+        private_key_token, str(private_key_path).encode("ascii")
+    )
+    if fullchain_token in rendered or private_key_token in rendered:
+        _fail("Emergency Nginx TLS configuration was not fully rendered")
+    return rendered
+
+
+def _result_text(result: Any) -> str:
+    raw = getattr(result, "stdout", "")
+    if isinstance(raw, bytes):
+        try:
+            return raw.decode("utf-8").strip()
+        except UnicodeDecodeError:
+            return ""
+    return str(raw).strip()
+
+
+def _capture_nginx_lifecycle(*, runner: Callable[..., Any] = subprocess.run) -> NginxLifecycle:
+    try:
+        enabled = runner(
+            [SYSTEMCTL_BINARY, "is-enabled", "nginx"], check=False, capture_output=True, text=True, timeout=60
+        )
+        active = runner(
+            [SYSTEMCTL_BINARY, "is-active", "nginx"], check=False, capture_output=True, text=True, timeout=60
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise EmergencyActivationError("Nginx lifecycle cannot be inspected") from exc
+    enabled_text = _result_text(enabled)
+    active_text = _result_text(active)
+    if enabled_text == "enabled" and getattr(enabled, "returncode", 1) == 0:
+        is_enabled = True
+    elif enabled_text == "disabled" and getattr(enabled, "returncode", 0) != 0:
+        is_enabled = False
+    else:
+        _fail("Nginx enabled lifecycle state is unsupported")
+    if active_text == "active" and getattr(active, "returncode", 1) == 0:
+        is_active = True
+    elif active_text == "inactive" and getattr(active, "returncode", 0) != 0:
+        is_active = False
+    else:
+        _fail("Nginx active lifecycle state is unsupported")
+    return NginxLifecycle(enabled=is_enabled, active=is_active)
+
+
+def _systemctl_action(
+    action: str, *, runner: Callable[..., Any] = subprocess.run
+) -> Any:
+    try:
+        return runner(
+            [SYSTEMCTL_BINARY, action, "nginx"], check=False, capture_output=True, text=True, timeout=60
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise EmergencyActivationError(f"Nginx {action} command could not run") from exc
+
+
+def _activate_candidate_nginx(
+    *, lifecycle: NginxLifecycle, changes: NginxLifecycleChanges, runner: Callable[..., Any]
+) -> str:
+    if not lifecycle.enabled:
+        changes.enable_attempted = True
+        if getattr(_systemctl_action("enable", runner=runner), "returncode", 1) != 0:
+            _fail("Emergency Nginx configuration tested but could not be enabled for reboot")
+    if lifecycle.active:
+        if getattr(_systemctl_action("reload", runner=runner), "returncode", 1) != 0:
+            _fail("Emergency Nginx configuration tested but could not be reloaded")
+        return "reloaded"
+    changes.start_attempted = True
+    if getattr(_systemctl_action("start", runner=runner), "returncode", 1) != 0:
+        _fail("Emergency Nginx configuration tested but could not be started")
+    return "enabled-and-started" if not lifecycle.enabled else "started"
 
 
 def _restore_default_nginx_after_failed_prearm(
@@ -1360,16 +1648,15 @@ def _restore_default_nginx_after_failed_prearm(
     paths: ActivationPaths,
     backup: Path,
     failed: Path,
+    lifecycle: NginxLifecycle,
+    changes: NginxLifecycleChanges,
     runner: Callable[..., Any] = subprocess.run,
 ) -> None:
-    """Preserve the failed Emergency link and restore the original default.
+    """Restore both Nginx configuration and the lifecycle captured prearm.
 
-    This is deliberately rename-only: a failed prearm must leave both the
-    original default site and the failed Emergency candidate available for
-    forensic review, without deleting either configuration.  The same helper
-    covers a failed syntax test, a failed reload, and a failed bounded UFW
-    change so none of those paths can leave a later daemon reload pointing at
-    the Emergency site.
+    Every config change is a rename.  A prearm that enabled/started Nginx from
+    an inactive state reverses only the lifecycle actions it attempted; it
+    never deletes an unrelated service, rule, container, or volume.
     """
 
     try:
@@ -1377,12 +1664,68 @@ def _restore_default_nginx_after_failed_prearm(
         os.rename(backup, paths.nginx_default)
     except OSError as exc:
         raise EmergencyActivationError("Nginx prearm failed and the default site could not be restored") from exc
-    restored_test = runner([NGINX_BINARY, "-t"], check=False, capture_output=True, timeout=60)
-    if getattr(restored_test, "returncode", 1) != 0:
-        _fail("Nginx prearm failed; the default site was restored but its configuration test failed")
-    restored_reload = runner([SYSTEMCTL_BINARY, "reload", "nginx"], check=False, capture_output=True, timeout=60)
-    if getattr(restored_reload, "returncode", 1) != 0:
-        _fail("Nginx prearm failed; the default site was restored but could not be reloaded")
+    failures: list[str] = []
+
+    def restore_action(action: str, failure: str) -> None:
+        try:
+            result = _systemctl_action(action, runner=runner)
+        except EmergencyActivationError:
+            failures.append(failure)
+            return
+        if getattr(result, "returncode", 1) != 0:
+            failures.append(failure)
+
+    if not lifecycle.active and changes.start_attempted:
+        restore_action("stop", "could not return Nginx to its prior inactive state")
+    try:
+        restored_test = runner([NGINX_BINARY, "-t"], check=False, capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        failures.append("the restored default configuration test could not run")
+    else:
+        if getattr(restored_test, "returncode", 1) != 0:
+            failures.append("the restored default configuration test failed")
+    if lifecycle.active:
+        restore_action("reload", "the restored default site could not be reloaded")
+    if changes.enable_attempted:
+        restore_action("disable", "Nginx could not be returned to its prior disabled state")
+    if failures:
+        _fail("Nginx prearm failed; the default site was restored but " + "; ".join(failures))
+
+
+def _local_tls_probe() -> None:
+    """Use direct localhost TLS/SNI only; DNS and outbound proxy are absent."""
+
+    context = ssl.create_default_context()
+
+    def request_status(path: str) -> int:
+        with socket.create_connection(("127.0.0.1", 443), timeout=10) as raw:
+            with context.wrap_socket(raw, server_hostname=EMERGENCY_DOMAIN) as connection:
+                connection.sendall(
+                    (
+                        f"GET {path} HTTP/1.1\r\nHost: {EMERGENCY_DOMAIN}\r\n"
+                        "Connection: close\r\nAccept: application/json\r\n\r\n"
+                    ).encode("ascii")
+                )
+                response = bytearray()
+                while b"\r\n" not in response and len(response) < 16 * 1024:
+                    chunk = connection.recv(4096)
+                    if not chunk:
+                        break
+                    response.extend(chunk)
+        first_line = bytes(response).split(b"\r\n", 1)[0].split()
+        if len(first_line) < 2 or first_line[0] != b"HTTP/1.1" or not first_line[1].isdigit():
+            _fail("Emergency local TLS ingress probe returned an invalid HTTP response")
+        return int(first_line[1])
+
+    try:
+        if request_status("/api/config") != 200:
+            _fail("Emergency local TLS ingress probe did not reach the API health endpoint")
+        if request_status("/api/sync") != 404:
+            _fail("Emergency local TLS ingress probe did not block the sync route")
+    except EmergencyActivationError:
+        raise
+    except (OSError, ssl.SSLError) as exc:
+        raise EmergencyActivationError("Emergency local TLS ingress probe failed") from exc
 
 
 def _prearm_nginx(
@@ -1392,9 +1735,17 @@ def _prearm_nginx(
     package_root: Path,
     profile: str,
     runner: Callable[..., Any] = subprocess.run,
-) -> None:
-    source = _nginx_static_contract(package_root, profile=profile)
-    _copy_create_only(source, paths.nginx_available, maximum_bytes=MAX_JSON_BYTES)
+    tls_probe: Callable[[], None] = _local_tls_probe,
+    staging_listener: Callable[[int], None] = _check_staging_listener,
+) -> dict[str, Any]:
+    fullchain_path, private_key_path = _require_pinned_tls(paths=paths, campaign=campaign, profile=profile)
+    rendered = _render_nginx_configuration(
+        package_root=package_root,
+        profile=profile,
+        fullchain_path=fullchain_path,
+        private_key_path=private_key_path,
+    )
+    _write_create_only(paths.nginx_available, rendered)
     if profile == "sms-otp":
         _copy_create_only(
             package_root / "deploy/emergency-ir/nginx.sms-otp.rate-limit.conf",
@@ -1413,49 +1764,76 @@ def _prearm_nginx(
         raise EmergencyActivationError("existing Nginx default site cannot be inspected") from exc
     if not stat.S_ISLNK(default.st_mode) or default.st_uid != 0:
         _fail("existing Nginx default site must be a root-owned symlink for recoverable prearm")
+    lifecycle = _capture_nginx_lifecycle(runner=runner)
+    changes = NginxLifecycleChanges()
+    default_moved = False
     try:
         os.rename(paths.nginx_default, backup)
+        default_moved = True
         os.symlink(str(paths.nginx_available), paths.nginx_enabled)
     except OSError as exc:
+        if default_moved:
+            try:
+                os.rename(backup, paths.nginx_default)
+            except OSError as restore_exc:
+                raise EmergencyActivationError(
+                    "recoverable Nginx prearm could not create the Emergency site and the default site could not be restored"
+                ) from restore_exc
         raise EmergencyActivationError("recoverable Nginx prearm cannot move the default site") from exc
-    tested = runner([NGINX_BINARY, "-t"], check=False, capture_output=True, timeout=60)
-    if getattr(tested, "returncode", 1) != 0:
-        _restore_default_nginx_after_failed_prearm(
-            paths=paths, backup=backup, failed=failed, runner=runner
+    try:
+        tested = runner([NGINX_BINARY, "-t"], check=False, capture_output=True, timeout=60)
+        if getattr(tested, "returncode", 1) != 0:
+            _fail("Emergency Nginx candidate configuration test failed")
+        action = _activate_candidate_nginx(lifecycle=lifecycle, changes=changes, runner=runner)
+        final_lifecycle = _capture_nginx_lifecycle(runner=runner)
+        if not final_lifecycle.enabled or not final_lifecycle.active:
+            _fail("Emergency Nginx did not reach the enabled and active lifecycle state")
+        tls_probe()
+        staging_listener(8213)
+        staging_listener(8443)
+        # Firewall mutation is deliberately last: all local TLS/API, blocked
+        # sync, and protected-Staging checks must be green before TCP 80/443
+        # becomes reachable.  Nothing after a successful allow can throw.
+        allowed = runner(
+            [
+                UFW_BINARY,
+                "allow",
+                "proto",
+                "tcp",
+                "from",
+                "any",
+                "to",
+                "any",
+                "port",
+                "80,443",
+                "comment",
+                "trading-bot-emergency-ir",
+            ],
+            check=False,
+            capture_output=True,
+            timeout=60,
         )
-        _fail("Nginx test failed; the previous default site was restored")
-    reloaded = runner([SYSTEMCTL_BINARY, "reload", "nginx"], check=False, capture_output=True, timeout=60)
-    if getattr(reloaded, "returncode", 1) != 0:
+        if getattr(allowed, "returncode", 1) != 0:
+            _fail("bounded Emergency UFW rule could not be added")
+    except (EmergencyActivationError, OSError, subprocess.SubprocessError) as exc:
         _restore_default_nginx_after_failed_prearm(
-            paths=paths, backup=backup, failed=failed, runner=runner
+            paths=paths,
+            backup=backup,
+            failed=failed,
+            lifecycle=lifecycle,
+            changes=changes,
+            runner=runner,
         )
-        _fail("Nginx configuration could not be reloaded; the previous default site was restored")
-    # A single UFW transaction avoids an 80-only partial success.  If it
-    # fails, restore Nginx rather than leaving a future reload/cutover armed.
-    allowed = runner(
-        [
-            UFW_BINARY,
-            "allow",
-            "proto",
-            "tcp",
-            "from",
-            "any",
-            "to",
-            "any",
-            "port",
-            "80,443",
-            "comment",
-            "trading-bot-emergency-ir",
-        ],
-        check=False,
-        capture_output=True,
-        timeout=60,
-    )
-    if getattr(allowed, "returncode", 1) != 0:
-        _restore_default_nginx_after_failed_prearm(
-            paths=paths, backup=backup, failed=failed, runner=runner
-        )
-        _fail("bounded Emergency UFW rule could not be added; the previous default site was restored")
+        if isinstance(exc, EmergencyActivationError):
+            message = str(exc)
+        else:
+            message = "Emergency Nginx prearm command could not run"
+        raise EmergencyActivationError(f"{message}; the previous default site was restored") from exc
+    return {
+        "before": dataclasses.asdict(lifecycle),
+        "after": dataclasses.asdict(final_lifecycle),
+        "action": action,
+    }
 
 
 def prearm(
@@ -1473,7 +1851,7 @@ def prearm(
         _require_sms_preflight(paths, campaign)
     _check_staging_listener(8213)
     _check_staging_listener(8443)
-    _prearm_nginx(
+    lifecycle = _prearm_nginx(
         paths=paths,
         campaign=campaign,
         package_root=Path(str(prepared["package_root"])),
@@ -1484,6 +1862,7 @@ def prearm(
         "profile": profile,
         "nginx": "prearmed",
         "ufw_rule_added": "allow proto tcp from any to any port 80,443 comment trading-bot-emergency-ir",
+        "nginx_lifecycle": lifecycle,
     }
     _write_receipt(paths, campaign, stage="prearmed", payload=payload)
     return payload
@@ -1512,6 +1891,7 @@ def execute(
         "images": load_images,
         "database": database,
         "api": api,
+        "tls": pin_tls,
         "prearm": prearm,
     }
     payload = handlers[stage](campaign=campaign, paths=paths, profile=profile, runner=runner)
@@ -1529,7 +1909,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--campaign", required=True)
     parser.add_argument("--profile", choices=("telegram-only", "sms-otp"), default="telegram-only")
-    parser.add_argument("--stage", choices=("prepare", "images", "database", "api", "prearm"))
+    parser.add_argument("--stage", choices=("prepare", "images", "database", "api", "tls", "prearm"))
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")
     return parser.parse_args(argv)

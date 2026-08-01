@@ -10,8 +10,8 @@ server {
 server {
     listen 443 ssl default_server;
     server_name _;
-    ssl_certificate /etc/trading-bot-emergency/acme/config/live/emergency-coin-gold-trade-ir/fullchain.pem;
-    ssl_certificate_key /etc/trading-bot-emergency/acme/config/live/emergency-coin-gold-trade-ir/privkey.pem;
+    ssl_certificate __EMERGENCY_TLS_FULLCHAIN__;
+    ssl_certificate_key __EMERGENCY_TLS_PRIVATE_KEY__;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_reject_handshake on;
 }
@@ -29,8 +29,8 @@ server {
     client_max_body_size 50m;
     server_tokens off;
 
-    ssl_certificate /etc/trading-bot-emergency/acme/config/live/emergency-coin-gold-trade-ir/fullchain.pem;
-    ssl_certificate_key /etc/trading-bot-emergency/acme/config/live/emergency-coin-gold-trade-ir/privkey.pem;
+    ssl_certificate __EMERGENCY_TLS_FULLCHAIN__;
+    ssl_certificate_key __EMERGENCY_TLS_PRIVATE_KEY__;
     ssl_protocols TLSv1.2 TLSv1.3;
 
     add_header X-Content-Type-Options "nosniff" always;
