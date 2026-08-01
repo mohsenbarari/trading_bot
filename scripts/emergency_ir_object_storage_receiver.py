@@ -162,17 +162,24 @@ def _validate_presigned_url(*, url: str, plan: Mapping[str, Any], artifact: Mapp
     except ValueError as exc:
         raise EmergencyReceiverError("Object Storage URL is malformed") from exc
     endpoint = urlsplit(str(plan["endpoint"]))
+    approved_hosts = {
+        endpoint.hostname,
+        f"{plan['bucket']}.{endpoint.hostname}",
+    }
     if (
         parsed.scheme != "https"
         or parsed.username is not None
         or parsed.password is not None
-        or parsed.hostname != endpoint.hostname
+        or parsed.hostname not in approved_hosts
         or parsed.port is not None
         or parsed.fragment
     ):
         _fail("Object Storage URL endpoint is not allowlisted")
-    expected_path = "/" + quote(str(plan["bucket"]), safe="") + "/" + quote(
-        str(artifact["object_key"]), safe="/"
+    object_path = quote(str(artifact["object_key"]), safe="/")
+    expected_path = (
+        "/" + quote(str(plan["bucket"]), safe="") + "/" + object_path
+        if parsed.hostname == endpoint.hostname
+        else "/" + object_path
     )
     if parsed.path != expected_path:
         _fail("Object Storage URL does not select the manifest object")

@@ -133,6 +133,11 @@ class EmergencyIrObjectStorageReceiverTests(unittest.TestCase):
         artifact = self.plan["artifacts"][0]
         valid = presigned_url(bucket=self.plan["bucket"], artifact=artifact)
         receiver._validate_presigned_url(url=valid, plan=self.plan, artifact=artifact)
+        virtual_hosted = valid.replace(
+            f"{manifest.APPROVED_ARVAN_ENDPOINT}/{self.plan['bucket']}/",
+            f"https://{self.plan['bucket']}.s3.ir-thr-at1.arvanstorage.ir/",
+        )
+        receiver._validate_presigned_url(url=virtual_hosted, plan=self.plan, artifact=artifact)
 
         for bad in (
             valid.replace("s3.ir-thr-at1.arvanstorage.ir", "example.invalid"),
