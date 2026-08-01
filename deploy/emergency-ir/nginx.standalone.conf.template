@@ -48,6 +48,13 @@ server {
     location ^~ /api/auth/internal/telegram-registration { return 404; }
     location ^~ /api/auth/internal/telegram-link { return 404; }
     location ^~ /api/auth/internal/telegram-otp { return 404; }
+    location ^~ /api/auth/request-otp { return 404; }
+    location ^~ /api/auth/resend-otp-sms { return 404; }
+    location ^~ /api/auth/verify-otp { return 404; }
+    location ^~ /api/auth/register-otp-request { return 404; }
+    location ^~ /api/auth/register-otp-verify { return 404; }
+    location ^~ /api/auth/register-complete { return 404; }
+    location ^~ /api/auth/telegram-link-token { return 404; }
     location = /metrics { return 404; }
 
     location /api/realtime/ws {

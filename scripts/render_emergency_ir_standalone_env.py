@@ -12,6 +12,7 @@ import os
 import re
 import secrets
 import stat
+import sys
 from pathlib import Path
 
 
@@ -52,6 +53,22 @@ def _validate_release(release_sha: str, app_image: str, postgres_image: str, red
         raise EmergencyEnvError("Redis image must use the emergency namespace")
     if "staging" in app_image.lower() or "three_site" in app_image.lower():
         raise EmergencyEnvError("staging/three-site image names are forbidden")
+
+
+def _validate_webapp_bot_token(raw_value: str) -> str:
+    """Accept the token only for local Telegram WebApp HMAC verification.
+
+    This runtime never starts a bot process and its Docker network has no
+    external egress.  The token is nevertheless required for the production
+    WebApp login endpoint to validate Telegram ``initData`` locally.
+    """
+
+    value = raw_value.strip()
+    if not value or len(value) > 1024:
+        raise EmergencyEnvError("Telegram WebApp validation token is invalid")
+    if any(ord(character) < 33 or ord(character) > 126 for character in value):
+        raise EmergencyEnvError("Telegram WebApp validation token is invalid")
+    return value
 
 
 def _secure_atomic_write(path: Path, payload: bytes) -> None:
@@ -100,10 +117,19 @@ def _secure_atomic_write(path: Path, payload: bytes) -> None:
         os.close(directory_fd)
 
 
-def render(*, output: Path, release_sha: str, app_image: str, postgres_image: str, redis_image: str) -> None:
+def render(
+    *,
+    output: Path,
+    release_sha: str,
+    app_image: str,
+    postgres_image: str,
+    redis_image: str,
+    webapp_bot_token: str,
+) -> None:
     _require_root()
     _validate_output(output)
     _validate_release(release_sha, app_image, postgres_image, redis_image)
+    webapp_bot_token = _validate_webapp_bot_token(webapp_bot_token)
     password = secrets.token_urlsafe(48)
     jwt_secret = secrets.token_urlsafe(64)
     values = {
@@ -131,9 +157,13 @@ def render(*, output: Path, release_sha: str, app_image: str, postgres_image: st
         "REDIS_HOST": "redis",
         "JWT_SECRET_KEY": jwt_secret,
         "DEV_API_KEY": secrets.token_urlsafe(32),
+        # This is used only by /api/auth/webapp-login for Telegram initData
+        # HMAC verification.  No bot service is present in this Compose file.
+        "BOT_TOKEN": webapp_bot_token,
         "OBSERVABILITY_TELEGRAM_USER_HASH_SALT": secrets.token_urlsafe(32),
         "TRUSTED_PROXY_CIDRS": f"127.0.0.1/32,{NETWORK_GATEWAY}/32,::1/128",
         "BACKGROUND_JOBS_ENABLED": "false",
+        "TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH": "true",
         "WEB_PUSH_ENABLED": "false",
         "TELEGRAM_DIRECT_REGISTRATION_ENABLED": "false",
         "TELEGRAM_REGISTRATION_RECONCILIATION_ENABLED": "false",
@@ -164,7 +194,7 @@ def render(*, output: Path, release_sha: str, app_image: str, postgres_image: st
         "LOG_LEVEL": "INFO",
     }
     forbidden = {
-        "BOT_TOKEN", "SYNC_API_KEY", "PEER_SERVER_URL", "IRAN_SERVER_URL",
+        "SYNC_API_KEY", "PEER_SERVER_URL", "IRAN_SERVER_URL",
         "GERMANY_SERVER_URL", "FOREIGN_SERVER_URL", "SMSIR_API_KEY",
         "WEB_PUSH_VAPID_PRIVATE_KEY", "WRITER_WITNESS_CLIENT_SECRET",
     }
@@ -185,13 +215,27 @@ def main() -> int:
     parser.add_argument("--app-image", required=True)
     parser.add_argument("--postgres-image", required=True)
     parser.add_argument("--redis-image", required=True)
+    parser.add_argument(
+        "--webapp-bot-token-stdin",
+        action="store_true",
+        required=True,
+        help="read the Telegram WebApp HMAC token from stdin without persisting it separately",
+    )
     args = parser.parse_args()
+    raw_token = sys.stdin.buffer.read(1025)
+    if len(raw_token) > 1024:
+        raise EmergencyEnvError("Telegram WebApp validation token is invalid")
+    try:
+        webapp_bot_token = raw_token.decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise EmergencyEnvError("Telegram WebApp validation token is invalid") from exc
     render(
         output=Path(args.output),
         release_sha=args.release_sha,
         app_image=args.app_image,
         postgres_image=args.postgres_image,
         redis_image=args.redis_image,
+        webapp_bot_token=webapp_bot_token,
     )
     print("Emergency IR standalone runtime env rendered; values suppressed")
     return 0

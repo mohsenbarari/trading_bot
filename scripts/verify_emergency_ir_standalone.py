@@ -18,6 +18,7 @@ EXPECTED = {
     "EMERGENCY_TRADING_SETTINGS_FILE": "/srv/trading-bot-emergency/current/trading_settings.json",
     "SERVER_MODE": "iran",
     "BACKGROUND_JOBS_ENABLED": "false",
+    "TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH": "true",
     "WEB_PUSH_ENABLED": "false",
     "TELEGRAM_DIRECT_REGISTRATION_ENABLED": "false",
     "TELEGRAM_REGISTRATION_RECONCILIATION_ENABLED": "false",
@@ -32,11 +33,11 @@ REQUIRED = frozenset({
     "SOURCE_RELEASE_SHA", "RELEASE_SHA", "EMERGENCY_APP_IMAGE",
     "EMERGENCY_POSTGRES_IMAGE", "EMERGENCY_REDIS_IMAGE", "POSTGRES_USER",
     "POSTGRES_DB", "POSTGRES_PASSWORD", "DATABASE_URL", "SYNC_DATABASE_URL",
-    "REDIS_URL", "JWT_SECRET_KEY", "DEV_API_KEY", "FRONTEND_URL",
+    "REDIS_URL", "JWT_SECRET_KEY", "DEV_API_KEY", "BOT_TOKEN", "FRONTEND_URL",
     "PUBLIC_WEBAPP_URL",
 })
 FORBIDDEN = frozenset({
-    "BOT_TOKEN", "BOT_USERNAME", "SYNC_API_KEY", "PEER_SERVER_URL",
+    "BOT_USERNAME", "SYNC_API_KEY", "PEER_SERVER_URL",
     "IRAN_SERVER_URL", "GERMANY_SERVER_URL", "FOREIGN_SERVER_URL",
     "SMSIR_API_KEY", "SMSIR_LINE_NUMBER", "WEB_PUSH_VAPID_PRIVATE_KEY",
     "WEB_PUSH_VAPID_PUBLIC_KEY", "WRITER_WITNESS_CLIENT_SECRET",
@@ -47,6 +48,9 @@ BLOCKED_NGINX_PREFIXES = (
     "/api/trades/internal", "/api/offers/internal", "/api/invitations/internal",
     "/api/auth/internal/telegram-registration", "/api/auth/internal/telegram-link",
     "/api/auth/internal/telegram-otp",
+    "/api/auth/request-otp", "/api/auth/resend-otp-sms", "/api/auth/verify-otp",
+    "/api/auth/register-otp-request", "/api/auth/register-otp-verify",
+    "/api/auth/register-complete", "/api/auth/telegram-link-token",
 )
 
 
@@ -101,6 +105,9 @@ def verify_values(values: dict[str, str]) -> list[str]:
         failures.append("SYNC_DATABASE_URL must target only the emergency DB service")
     if values.get("REDIS_URL") != "redis://redis:6379/0":
         failures.append("REDIS_URL must target only the emergency Redis service")
+    bot_token = values.get("BOT_TOKEN", "")
+    if any(ord(character) < 33 or ord(character) > 126 for character in bot_token):
+        failures.append("BOT_TOKEN must be a one-line local WebApp validation token")
     return failures
 
 
