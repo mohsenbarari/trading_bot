@@ -918,6 +918,46 @@ detach، rebuild یا resize نمی‌شود. چهار IP canonical و تمام 
 Confirmationهای هم‌معنی ادغام می‌شوند، ولی fencing و ownership هرگز bypass
 نمی‌شوند.
 
+#### checkpoint اجرای Stage 4 — freeze، backup و seed transfer — 2026-08-02
+
+- مالک G3 را برای release دقیق
+  `0e63a7ec1b08bef29ea199041215298a021b56ef` پذیرفت و Stage 4 را مجاز کرد؛
+  branch `stage/three-site-staging-04-deploy` از همان نقطه ساخته شد.
+- sourceهای legacy از قبل freeze بودند. به‌جای start کردن application برای عبور
+  از gate، ابزار fail-closed re-attestation اضافه شد. Bot-FI فقط `db,redis` با
+  PostgreSQL system ID `7660955632928653346` و fingerprint
+  `8f0cfc5edd66a74505f345764636055ddce26c42e945a8b8c447b4c3d85b40b2`
+  باقی ماند؛ WebApp-FI نیز فقط `db,redis` با system ID
+  `7660954509197713442` و fingerprint
+  `aeb56dada8d2208adc7a0c5ff3c1a5a84338a6dc7bf6d0740b0a628e4b081b2d`
+  باقی ماند. هیچ application start/stop/recreate نشد و Redis restore نشد.
+- backup نهایی PostgreSQL/uploads/audit و restore drill مستقل برای هر دو source
+  قبول شد. canonical manifest SHA-256ها به‌ترتیب Bot-FI و WebApp-FI برابر
+  `48951978f6a5f9fd563681da0a9ef12a1a93e59ba884e4810fb573b50da0e7c8`
+  و `2c6aabf8bb79235e81c931031a1273f4ae9899277da2f5fdcec78acb72ee51f9`
+  هستند. تلاش اول Bot-FI پیش از هر application mutation روی pull/build ناخواسته
+  image fail-closed شد؛ ابزار به read-only volume mount، شبکه `none` و image ID
+  موجود و immutable اصلاح شد و اجرای v2 قبول شد. artifact ناقص برای audit حفظ شد.
+- evidenceهای WebApp-FI از کانال SSH با host key pin‌شده به BOT-FL تجمیع شدند.
+  age identity تازه و owner-only مخصوص campaign ساخته شد. هر دو seed در باکت
+  خصوصی staging و فقط زیر prefix campaign منتشر، exact VersionId خوانده، hash
+  ciphertext بررسی و سپس decrypt/readback شد. seed manifest SHA-256های canonical
+  Bot-FI و WebApp-FI برابر
+  `f97212ca45f5bb9a39269a4b1b237080970ebfbedaaa9b8fe19b97e3ac278e31`
+  و `5cf01dd9566811235d22e68e31dd8e8f26198d37e7a595102d76eb54248239b2`
+  هستند.
+- migration plan کوتاه‌عمر با mapping رسمی `bot_fi<-bot_fi`،
+  `webapp_fi<-webapp_fi`، `webapp_ir<-webapp_fi` و Witness خالی ساخته شد.
+  canonical plan SHA-256 برابر
+  `4df634c6a12fba713ca0d7958e54ca0bd7aa5e5e5a6bc50fa1a5474232b722a3`
+  و subject SHA-256 روی دیسک برابر
+  `8272da8c680f534b3a8c7874e23a97f88c76405d0886ec10fed8114d2dbd0752`
+  است. G3/مجوز شروع Stage 4 تکرار نمی‌شود؛ receipt دقیق `approve_migration`
+  فقط guard رمزنگاری‌شده‌ی همان plan برای شروع restore/activation است و برای هر
+  role یا confirmation دوباره token ساخته نخواهد شد.
+- Production touched: `no`. هیچ VPS/volume ساخته، حذف، detach، rebuild، resize یا
+  format نشد؛ هیچ production project، bucket، route یا domain تغییر نکرد.
+
 ### Exit gate — G4 Staging Published
 
 - هر چهار role exact release SHA را گزارش می‌کنند؛
