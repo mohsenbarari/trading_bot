@@ -556,6 +556,35 @@ revert اتمیک commit ناموفق روی همان branch؛ ساخت branch �
 تا پایان این بخش هیچ package install، firewall edit، mount، container start یا
 DNS mutation انجام نمی‌شود.
 
+#### checkpoint بخش A — 2026-08-02
+
+- Status: `COMPLETE_WITH_BLOCKERS`
+- Audit commit: `7effce5bf808885b186c20f14f030180f2a1c681`
+- Evidence:
+  `docs/THREE_SITE_STAGE3_HOST_READINESS_AUDIT.json` با SHA-256 برابر
+  `28950ff335fce269fc5e9886eb878a9c1a52ba74be9e9dc04266611e9b934514`.
+- Bot-FI به‌درستی مستقیماً از میزبان محلی ممیزی شد؛ SSH فقط برای سه میزبان
+  دیگر استفاده شد.
+- Bot-FI، WebApp-FI و WebApp-IR هر کدام mount مستقل staging، UUID متمایز،
+  ظرفیت بیش از حداقل و cgroup aggregate فعال دارند. Witness فقط دیسک root
+  production را دارد؛ Docker/Compose، mount staging و cgroup محدود روی آن
+  موجود نیست.
+- release هدف `0e63a7ec1b08bef29ea199041215298a021b56ef` هنوز روی هیچ مقصدی نصب نشده
+  است. پروژه‌های فعال سه‌سایته با releaseهای قدیمی `3138d0c2...` و
+  `771c957b...` متعلق به تلاش‌های پیشین‌اند و source truth این Stage نیستند.
+- Witness production به‌صورت native systemd روی release
+  `4c171289eb62bd82822a6821e0cd474c10f88bab` فعال است؛ این سرویس در ممیزی
+  تغییر نکرد.
+- bucket staging قدیمی private بودن را با سطح دسترسی فعلی اثبات نکرد؛
+  versioning فعال است ولی bucket encryption configuration، lifecycle و
+  public-access-block configuration وجود ندارند. prefix تازه release هدف و
+  تست encrypted upload/download هنوز ساخته نشده‌اند.
+- یک credential-like runtime value در خروجی موقت probe اولیه تشخیص داده شد،
+  در evidence track نشده و باید پیش از Stage 4 rotate شود. هیچ secret در
+  roadmap یا evidence commit نشده است.
+- Production touched: `no`؛ فقط commandهای read-only شامل host/Docker/systemd
+  inspection و S3 HEAD/GET configuration اجرا شدند.
+
 ### بخش B — آماده‌سازی isolation با authorization مرحله
 
 1. ساخت یک inventory planned و سپس measured برای چهار role.
@@ -587,17 +616,32 @@ DNS mutation انجام نمی‌شود.
 
 ### گزارش پایان Stage 3
 
-- Status: `NOT_STARTED`
+- Status: `IN_PROGRESS — SECTION_A_COMPLETE / SECTION_B_BLOCKED`
 - Branch: `stage/three-site-staging-03-host-readiness`
-- Base SHA / implementation commits: `pending`
-- Tested release SHA: `pending`
-- Host inventory summary: `pending`
-- Commands/tests and results: `pending`
-- Evidence paths and SHA-256: `pending`
+- Base SHA / implementation commits:
+  `aab3558aebf6a25454a4d1f532e516b75dcbddde / 7effce5bf808885b186c20f14f030180f2a1c681`
+- Tested release SHA: `0e63a7ec1b08bef29ea199041215298a021b56ef`
+- Host inventory summary:
+  `چهار role و IP canonical تأیید شدند؛ سه role دارای mount/cgroup مستقل و
+  Witness فاقد هر دو است؛ releaseهای runtime مقصد با release هدف match نیستند.`
+- Commands/tests and results:
+  `چهار ممیزی read-only host/runtime/storage/network/NTP؛ سه route probe از راه
+  SSH و Bot-FI مستقیم؛ S3 HEAD/versioning/encryption/lifecycle/public-access
+  GET؛ JSON evidence validation = PASS. هیچ mutation test اجرا نشد.`
+- Evidence paths and SHA-256:
+  `docs/THREE_SITE_STAGE3_HOST_READINESS_AUDIT.json =
+  28950ff335fce269fc5e9886eb878a9c1a52ba74be9e9dc04266611e9b934514`
 - Production touched: `no`
-- Deviations / open risks: `pending`
-- Rollback verified: `pending`
-- Decision / next stage: `pending / no`
+- Deviations / open risks:
+  `Witness به یک block-device مستقل حداقل 8 GiB، Docker/Compose و cgroup محدود
+  نیاز دارد؛ bucket policyهای مفقود باید پیش از استفاده اصلاح شوند؛ credential
+  مشاهده‌شده در خروجی موقت باید rotate شود؛ پروژه‌ها/volumeهای قدیمی حذف
+  نمی‌شوند و برای campaign تازه reuse نمی‌شوند؛ یک volume-set قدیمی Bot-FI
+  روی دیسک production دیده شد و خارج از cleanup مستقل دست‌نخورده می‌ماند.`
+- Rollback verified: `no؛ backup/restore drill و rollback dry-run campaign هدف هنوز اجرا نشده‌اند.`
+- Decision / next stage:
+  `G3_NOT_PASSED / no؛ ادامه بخش B پس از تأمین disk مستقل Witness و مجوز یکپارچه
+  عملیات تغییردهنده برای release دقیق هدف.`
 
 ---
 
