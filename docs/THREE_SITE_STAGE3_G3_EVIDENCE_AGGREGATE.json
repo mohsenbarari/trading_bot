@@ -1,0 +1,88 @@
+{
+  "schema": "three-site-stage3-g3-evidence-aggregate-v1",
+  "status": "G3_PENDING_OBJECT_STORAGE_CREDENTIAL_ROTATION_AND_OWNER_STAGE4_AUTHORIZATION",
+  "generated_at": "2026-08-02T19:25:26Z",
+  "campaign_id": "fd34231d-f52e-498a-aab4-438c99d88fc5",
+  "deployment_id": "stage3-0e63a7ec-fd34231d",
+  "release_sha": "0e63a7ec1b08bef29ea199041215298a021b56ef",
+  "branch": "stage/three-site-staging-03-host-readiness",
+  "production_touched": false,
+  "inventory": {
+    "stage": "provisioned",
+    "inventory_file_sha256": "a44a795ad2753caa38357deda26f5269ba14082fd1d969587b1fd7b9b1408c25",
+    "approval_file_sha256": "b77716a8cf5ca73fa1d56e7f17a0b69bd4614af4ae564bf74561f5bb2957697b",
+    "approval_id": "ca33ed40-efbb-4790-8a6d-9e563900c098",
+    "approval_expires_at": "2026-08-03T18:41:52.026833Z",
+    "repeat_inventory_approval_required": false,
+    "postgres_system_ids": {
+      "bot-fi": "7669505181206511650",
+      "webapp-fi": "7669505201946177569",
+      "webapp-ir": "7669505221491204130",
+      "witness": "7669505191035326497"
+    }
+  },
+  "post_restore_host_attestation_sha256": {
+    "bot-fi": "6ad96e721f4df943db25282059e8649d89cf793dcf98cc33b84d3138acd56207",
+    "webapp-fi": "b92b6b0ef50f5625853e5012815bcbbd346efbeade9b6d88b1a8378a5a70d625",
+    "webapp-ir": "d699df4d67fb17a3fbef0b305a7d6f3a35500b61e67fdf9694a9b5ab5aa3b63b",
+    "witness": "9f18f8344618dc6371311b00b8032d6d1bc77acaac69d1e73cbbf3ef8bfa6764"
+  },
+  "artifact_sha256": {
+    "three-site-stage3-0e63a7ec.bundle": "73caa081c49e7d94e74444c7eb7a9cf7d4ff469f05cd5e4a3ae2337f719b2ec6",
+    "trading-bot-postgres-boottime-0e63a7ec.tar.zst": "d87f651ab5bfa10610e7ccd4adb4943b5148acbe16f7cf30e8ee8683df189a4b",
+    "trading-bot-three-site-app-0e63a7ec.tar.zst": "6cdc644851727ae514de46eb7d9e5a4c964b63d0613a180fe3a3db5e1067f427",
+    "trading-bot-three-site-third-party-0e63a7ec.tar.zst": "38c24ec2bd684908c5e9c21ddac487e1bdf5916f5ceb1f04fdb1efcb228eb62d"
+  },
+  "image_content_identities": {
+    "application": "sha256:416940ab12fa0cab2830ae8adeaca64577c73fdcd78fe1c079be80065d2ba777",
+    "postgres": "sha256:cb30a8eb3ca5784b169c60e562969a8bd5855c077fdf4c5e3149adc22c67bf5c",
+    "nginx": "sha256:3ddc4ff26b5b6010dfd217cd820f75e695f7cdd431eaa420db97248246c598fd",
+    "redis": "sha256:c568f089d73a127ece12f5bc33f431271b5d38abc21f443463e6fdf830ef07cd",
+    "storage_driver_independent": true,
+    "role_inventory_file_sha256": {
+      "bot-fi": "5ea4ff73d416d51c366ff65c6fdda3efae53f440da03c2fbb8c9da76d757bd97",
+      "webapp-fi": "e9a29796420e32299f73924597523098fa52331ffd3ca9f86b0fda0d3056cd0f",
+      "webapp-ir": "7986ac7d29d8bc4773737c04f6f7df9f21afb13295bd4b807acbf375c6d5c4ac",
+      "witness": "9cfe448b838ab912d63fdc1174e973d3d2b729dc6b729da6b8306f050897c37a"
+    }
+  },
+  "webapp_ir_encrypted_transfer_evidence_sha256": {
+    "git_bundle": "374c656fd59761a8dbf0e0c739f14e3f4da83d098e9131f19a1677af936122ac",
+    "postgres_image": "13e259ef2e8806b503645bf17cb4dd0b0bc84d6d361cd0927944f6997ba20ed6",
+    "application_image": "910e5712bd0af790c79f115eea07a364818b4d04f67f215e91254ed6366cdaa8",
+    "third_party_images": "854f3a709b6b3f651d99994c56977188eb0a2484b2428b1bda382c98786b4dec"
+  },
+  "restore_drills": {
+    "status": "verified_on_all_four_roles",
+    "scratch_databases_removed": true,
+    "database_restarted": false,
+    "application_started": false,
+    "evidence_file_sha256": {
+      "bot-fi": "d4cd529b12cc905147d0875c871bbfe0f1c8b1df4222704fa12e8a4c2b14a67c",
+      "webapp-fi": "5f91737b899c625082954139c5ca71cd7c47b959f6adeaea9a4b1883490348c7",
+      "webapp-ir": "ff0d3fef31ac3868ac863334afbe69c4979a983dbea8f7085be750507fd7b3ab",
+      "witness": "e0ac00e4496a12000ea7cca2400bfb1d974b49f97e50e66a1bec1e4e3e0ebca0"
+    }
+  },
+  "object_storage": {
+    "readiness_evidence_sha256": "d803fd9e914fa5cd517f3888ec8394e247492176e497754cfa99cc8a8b307d1e",
+    "private_versioned_lifecycle_encrypted_readback": true,
+    "credential_rotated_for_this_campaign": false
+  },
+  "dns_tls": {
+    "routing_change_applied": false,
+    "staging_gold_trade_ir_tls_valid_until": "2026-10-20T02:45:34Z",
+    "staging_362514_ir_tls_valid_until": "2026-09-14T10:55:57Z",
+    "internal_role_tls_material_prepared": true,
+    "production_domain_changed": false
+  },
+  "rollback": {
+    "plan": "docs/THREE_SITE_STAGE3_ROLLBACK_PLAN.json",
+    "config_dry_run_passed_on_all_roles": true,
+    "volume_or_data_cleanup_authorized": false
+  },
+  "open_requirements": [
+    "rotate the reused Arvan Object Storage credential and rebuild role material fingerprints",
+    "owner reviews this aggregate and explicitly authorizes Stage 4 for the exact release SHA"
+  ]
+}

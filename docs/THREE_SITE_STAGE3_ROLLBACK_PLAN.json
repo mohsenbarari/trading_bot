@@ -1,0 +1,78 @@
+{
+  "schema": "three-site-stage3-rollback-command-plan-v1",
+  "status": "DRY_RUN_VERIFIED_NOT_EXECUTED",
+  "campaign_id": "fd34231d-f52e-498a-aab4-438c99d88fc5",
+  "release_sha": "0e63a7ec1b08bef29ea199041215298a021b56ef",
+  "production_touched": false,
+  "invariants": [
+    "never use docker compose down --volumes",
+    "never delete, detach, rebuild, resize or format a VPS or provider volume",
+    "never prune Docker images, volumes or networks",
+    "preserve every campaign database backup and mutable volume until M2 acceptance",
+    "do not change coin.gold-trade.ir or any production origin",
+    "stop new application services before considering a database stop"
+  ],
+  "role_boundaries": {
+    "bot-fi": {
+      "host_ip": "130.185.121.98",
+      "project": "trading-bot-three-site-stage3-0e63a7ec-fd34231d-bot-fi",
+      "database_service": "bot_fi_db",
+      "currently_running": ["bot_fi_db"]
+    },
+    "webapp-fi": {
+      "host_ip": "194.5.206.69",
+      "project": "trading-bot-three-site-stage3-0e63a7ec-fd34231d-webapp-fi",
+      "database_service": "webapp_fi_db",
+      "currently_running": ["webapp_fi_db"]
+    },
+    "webapp-ir": {
+      "host_ip": "188.213.198.115",
+      "project": "trading-bot-three-site-stage3-0e63a7ec-fd34231d-webapp-ir",
+      "database_service": "webapp_ir_db",
+      "currently_running": ["webapp_ir_db"]
+    },
+    "witness": {
+      "host_ip": "130.185.121.152",
+      "project": "trading-bot-three-site-stage3-0e63a7ec-fd34231d-witness",
+      "database_service": "witness_db",
+      "currently_running": ["witness_db"]
+    }
+  },
+  "command_plan": [
+    {
+      "order": 1,
+      "purpose": "capture current service and image state",
+      "command_template": "docker compose -f /etc/trading-bot-three-site/stage3-0e63a7ec-fd34231d/roles/<role>.compose.yml --env-file /etc/trading-bot-three-site/stage3-0e63a7ec-fd34231d/roles/<role>.env ps"
+    },
+    {
+      "order": 2,
+      "purpose": "stop only newly started non-database services in reverse activation order",
+      "command_template": "docker compose -f <role-compose> --env-file <role-env> stop --timeout 30 <explicit-non-database-service-list>"
+    },
+    {
+      "order": 3,
+      "purpose": "hold the campaign database and all volumes for diagnosis or resume",
+      "command_template": "docker compose -f <role-compose> --env-file <role-env> ps --status running --services",
+      "expected_after_application_rollback": "only the role database service remains running"
+    },
+    {
+      "order": 4,
+      "purpose": "full campaign abort only after separate explicit authorization",
+      "command_template": "docker compose -f <role-compose> --env-file <role-env> stop --timeout 30 <database-service>",
+      "forbidden_without_separate_authorization": [
+        "docker compose down --volumes",
+        "docker volume rm",
+        "provider volume detach/delete",
+        "filesystem unmount/format"
+      ]
+    }
+  ],
+  "dry_run": {
+    "compose_config_quiet": "passed_on_all_four_role_bundles",
+    "service_resolution": "passed_on_all_four_role_bundles",
+    "post_restore_host_attestation": "passed_on_all_four_hosts",
+    "application_services_started": false,
+    "rollback_commands_executed": false,
+    "legacy_source_overwritten": false
+  }
+}

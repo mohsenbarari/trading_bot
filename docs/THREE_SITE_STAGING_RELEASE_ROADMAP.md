@@ -649,8 +649,11 @@ detach، rebuild یا resize نمی‌شود. چهار IP canonical و تمام 
 10. DNS/TLS مخصوص staging آماده می‌شود؛ production domain و route تغییر نمی‌کند.
 11. dedicated staging Telegram token آماده می‌شود؛ در نبود آن Bot عمومی خاموش
     می‌ماند و این موضوع G3 را بلاک نمی‌کند.
-12. source staging موجود freeze، backup و در PostgreSQL scratch مستقل restore-drill
-    می‌شود؛ سپس rollback manifest و command plan همان source dry-run می‌شوند.
+12. از آنجا که source staging قدیمی روی BOT-FL کنار workloadهای production فعال
+    است، در Stage 3 هیچ freeze یا stop روی آن انجام نمی‌شود. backup/restore drill
+    روی هر چهار PostgreSQL مستقل همین کمپین و database scratch موقت اجرا می‌شود؛
+    freeze نهایی source و ثبت restore bundle آن فقط در ابتدای Stage 4 و پس از مجوز
+    deploy انجام خواهد شد. rollback command plan کمپین در همین Stage dry-run می‌شود.
 13. operations session محدود به release نگهداری و receiptهای لازم از همان session
     صادر می‌شوند؛ برای زیرگام‌های هم‌معنی gate انسانی تکراری ساخته نمی‌شود.
 
@@ -724,6 +727,44 @@ detach، rebuild یا resize نمی‌شود. چهار IP canonical و تمام 
 - Production touched: `no`؛ هیچ production bucket/domain/host یا server/volume
   lifecycle API تغییر نکرد.
 
+#### checkpoint بخش B — provision، artifact و restore drill — 2026-08-02
+
+- گام ۸ کامل شد. تنها چهار PostgreSQL کمپین تازه start شدند؛ هیچ Redis، API، Bot،
+  migration، worker یا Witness API شروع نشد. system identifierها به‌ترتیب
+  `7669505181206511650`، `7669505201946177569`، `7669505221491204130` و
+  `7669505191035326497` هستند؛ هر چهار مقدار متمایز و خارج از denylist production
+  هستند. provisioned inventory و approval با شناسه
+  `ca33ed40-efbb-4790-8a6d-9e563900c098` روی هر چهار میزبان نصب و verifier رسمی در
+  حالت `provisioned` قبول شد. این دومین و آخرین approval inventory بود و تکرار
+  نمی‌شود.
+- گام ۹ کامل شد. Git bundle و imageهای exact release بدون build مقصد منتقل شدند.
+  hash archiveهای Git، PostgreSQL، app و dependency به‌ترتیب `73caa081...b2ec6`،
+  `d87f651a...9a4b`، `6cdc6448...f427` و `38c24ec2...b62d` است. انتقال WebApp-IR
+  از Object Storage خصوصی/versioned و با age encryption انجام شد؛ URL موقت persist
+  نشد و relay payload cache نداشت. verifier image inventory v2 تفاوت طبیعی Docker
+  legacy/containerd ID را با canonical config/rootfs حل کرد و content identityهای
+  app/PostgreSQL/nginx/Redis روی roleهای لازم برابر شدند.
+- گام ۱۰ از نظر readiness کامل است و routing همچنان hold است. TLS معتبر فعلی
+  `staging.gold-trade.ir` تا `2026-10-20` و `staging.362514.ir` تا `2026-09-14`
+  اعتبار دارد؛ certificateهای private roleها نیز تازه ساخته و نصب شده‌اند. چون
+  application هنوز start نشده، هیچ DNS/origin تغییر نکرد و این تغییر به Stage 4
+  تعلق دارد.
+- گام ۱۱ مطابق policy بسته است: Bot عمومی با synthetic disabled values خاموش
+  می‌ماند؛ نبود Telegram token اختصاصی G3 را بلاک نمی‌کند.
+- گام ۱۲ در دامنه مجاز کامل شد. چهار dump مستقل در scratch databaseهای موقت restore
+  شدند؛ fingerprint منطقی schema/data قبل و بعد برابر، scratchها حذف و host
+  attestation پس از drill دوباره قبول شد. freeze source قدیمی به ابتدای Stage 4
+  منتقل شد، زیرا آن source روی BOT-FL با production هم‌میزبان است و مجوز فعلی
+  اجازه stop آن را نمی‌دهد. rollback plan بدون اجرای stop و بدون حذف داده dry-run
+  شد.
+- aggregate بدون secret در `docs/THREE_SITE_STAGE3_G3_EVIDENCE_AGGREGATE.json` و
+  command plan در `docs/THREE_SITE_STAGE3_ROLLBACK_PLAN.json` ثبت شده است. تنها
+  blocker فنی G3 چرخش credential تکراری Object Storage است؛ blocker تصمیمی نیز
+  اجازه صریح مالک برای Stage 4 پس از مرور aggregate است.
+- cleanup: cache ناقص relay و partial/نسخه‌های موقت bootstrap روی WebApp-IR امن
+  پاک شدند؛ archiveهای نهایی و backupها تا acceptance حفظ می‌شوند.
+- Production touched: `no`.
+
 ### Exit gate — G3 Hosts Isolated
 
 - چهار host attestation تازه و aggregate معتبر است؛
@@ -741,16 +782,18 @@ detach، rebuild یا resize نمی‌شود. چهار IP canonical و تمام 
 
 ### گزارش پایان Stage 3
 
-- Status: `IN_PROGRESS — HOST_AND_OBJECT_STORAGE_BOUNDARIES_ATTESTED / APPROVAL_AND_CREDENTIAL_ROTATION_PENDING`
+- Status: `IN_PROGRESS — G3_PENDING_OBJECT_STORAGE_CREDENTIAL_ROTATION_AND_OWNER_STAGE4_AUTHORIZATION`
 - Branch: `stage/three-site-staging-03-host-readiness`
 - Base SHA / implementation commits:
   `aab3558aebf6a25454a4d1f532e516b75dcbddde /
   7effce5bf808885b186c20f14f030180f2a1c681, 8dcbba1e, bf5c6e98, 9fc10979,
-  34102db5, 67e5ed17`
+  34102db5, 67e5ed17, 75e3836c, 41546339, da2a45f8, 7f7d8aee,
+  55fdab64, 9693a875, 57392f15, 679bfdec, 59023838, 2331b2d2`
 - Tested release SHA: `0e63a7ec1b08bef29ea199041215298a021b56ef`
 - Host inventory summary:
-  `چهار VPS disposable قابل‌دسترسی و بدون container هستند؛ Docker/NTP/mount/
-  cgroup هر چهار role attestation و identifierهایشان متمایز است. WebApp-IR از
+  `چهار VPS disposable قابل‌دسترسی و هر کدام فقط دارای PostgreSQL سالم کمپین
+  هستند؛ Docker/NTP/mount/cgroup هر چهار role attestation و identifierهایشان
+  متمایز است. WebApp-IR از
   relay تستی داخل ایران با key-only SSH کنترل می‌شود. مرز Object Storage خصوصی،
   versioned و دارای lifecycle است و encrypted versioned readback قبول شد. دو VPS
   production ایران و چهار مقصد canonical از mutation خارج‌اند.`
@@ -759,28 +802,33 @@ detach، rebuild یا resize نمی‌شود. چهار IP canonical و تمام 
   تستی؛ VNC/SSH host-key و SSH policy؛ lsblk/findmnt/wipefs --no-act؛ Docker/NTP/
   cgroup؛ دو security-group rule محدود تستی؛ structural inventory verifier =
   PASS؛ S3 private/versioning/lifecycle و provider-compatibility diagnostics؛
-  AES-256-GCM upload/readback = PASS؛ ۱۲ unittest مرتبط = PASS. lifecycle منابع
-  پنل و application start = صفر.`
+  AES-256-GCM upload/readback = PASS؛ image inventory چهار role = PASS؛ چهار
+  backup/restore scratch drill و attestation پس از آن = PASS؛ unittestهای ابزارهای
+  جدید = PASS. lifecycle منابع پنل و application start = صفر.`
 - Evidence paths and SHA-256:
-  `docs/THREE_SITE_STAGE3_HOST_READINESS_AUDIT.json =
+  docs/THREE_SITE_STAGE3_HOST_READINESS_AUDIT.json =
   28950ff335fce269fc5e9886eb878a9c1a52ba74be9e9dc04266611e9b934514؛
   docs/THREE_SITE_STAGE3_ARVAN_TEST_INVENTORY.json =
   42da3635a67e089ab5c0469dce5f84139da53b70238cb6b1a0df8254d3fdae0b؛
-  owner-only planned inventory =
-  cfd9095bf961690ad96aa4f5849ec7c5c2276775fdd4c2502d1b074351d089d0؛
+  owner-only provisioned inventory =
+  a44a795ad2753caa38357deda26f5269ba14082fd1d969587b1fd7b9b1408c25؛
   owner-only Object Storage readiness =
-  d803fd9e914fa5cd517f3888ec8394e247492176e497754cfa99cc8a8b307d1e`
+  d803fd9e914fa5cd517f3888ec8394e247492176e497754cfa99cc8a8b307d1e؛
+  aggregate = docs/THREE_SITE_STAGE3_G3_EVIDENCE_AGGREGATE.json / SHA-256
+  `633cd192b387328c6445e5f1aba8c068eec1d1060c4d4d1d567bed28ff7c2c88`؛
+  rollback plan = docs/THREE_SITE_STAGE3_ROLLBACK_PLAN.json / SHA-256
+  `05a648cc70431c55dbcc862f999e78d6bf753463d359b29310206bfe468acc02`
 - Production touched: `no`
 - Deviations / open risks:
   `ingress بین‌المللی مستقیم WebApp-IR هنوز timeout است و control از relay ایران
-  عبور می‌کند؛ formal approval planned inventory صادر نشده؛ credential فعلی در
-  کمپین‌های قدیمی staging تکرار شده و باید پیش از Stage 4 rotate شود؛ SSE پیش‌فرض
+  عبور می‌کند؛ credential فعلی در کمپین‌های قدیمی staging تکرار شده و باید پیش از
+  Stage 4 rotate شود؛ SSE پیش‌فرض
   و strict PAB به‌علت رفتار ناسازگار provider قابل استفاده نیستند و client-side
   encryption اجباری است؛ هیچ منبع پنل بدون اجازه مالک ساخته یا حذف نمی‌شود.`
-- Rollback verified: `no؛ backup/restore drill و rollback dry-run campaign هدف هنوز اجرا نشده‌اند.`
+- Rollback verified: `yes برای boundary پیش از deploy؛ چهار restore drill و command-plan dry-run قبول شدند. freeze/restore bundle source قدیمی طبق مرز production در ابتدای Stage 4 انجام می‌شود.`
 - Decision / next stage:
-  `G3_NOT_PASSED / no؛ ادامه بخش B روی topology disposable موجود مجاز است؛ شروع
-  Stage 4 تا عبور G3 و اجازه صریح مالک مجاز نیست.`
+  `G3_NOT_PASSED / no؛ فقط چرخش credential Object Storage و سپس مرور/اجازه صریح
+  مالک باقی است. شروع Stage 4 پیش از هر دو ممنوع است.`
 
 ---
 
