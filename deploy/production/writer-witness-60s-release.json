@@ -1,6 +1,6 @@
 {
-  "schema": "gold-trade-writer-witness-release-profile-v3",
-  "release_id": "writer-witness-a0d8fa5a3b696ecfee3c0e787ea0791d035b1f32-60s-paired-v3",
+  "schema": "gold-trade-writer-witness-release-profile-v4",
+  "release_id": "writer-witness-a0d8fa5a3b696ecfee3c0e787ea0791d035b1f32-60s-paired-v4",
   "source_commit": "a0d8fa5a3b696ecfee3c0e787ea0791d035b1f32",
   "source_runtime_profile_sha256": "38f6b661bac775ac911dc5f48d98c660edc047d9079ddea835b179864de270ef",
   "source_release_manifest_sha256": "e99de3ec1de9179791754d4cadcbd85ea581e3ac118c620404baf91efc9dcbc0",
@@ -16,9 +16,10 @@
     "auth_max_age_seconds": 15
   },
   "client_credential_rotation": {
-    "schema": "gold-trade-writer-witness-credential-rotation-policy-v1",
+    "schema": "gold-trade-writer-witness-credential-rotation-policy-v2",
     "require_exact_current_credential": true,
-    "maximum_attestation_age_seconds": 60
+    "maximum_attestation_age_seconds": 60,
+    "maximum_policy_ttl_seconds": 86400
   },
   "webapp_fi_client": {
     "mode": "fenced_fi_writer",

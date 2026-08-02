@@ -28,14 +28,14 @@ if str(REPOSITORY_ROOT) not in sys.path:
 
 from scripts import attest_writer_witness_client as client_attestation  # noqa: E402
 from scripts import prepare_writer_witness_immutable_release as control  # noqa: E402
+from scripts import writer_witness_rotation_lifecycle as lifecycle  # noqa: E402
 
 
-PAIRED_ATTESTATION_SCHEMA = "gold-trade-writer-witness-paired-live-attestation-v2"
+PAIRED_ATTESTATION_SCHEMA = "gold-trade-writer-witness-paired-live-attestation-v3"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-POLICY_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{1,127}$")
+POLICY_ID_RE = lifecycle.POLICY_ID_RE
 GENERATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-ROTATION_POLICY_FILENAME = "writer-witness-credential-rotation-policy.json"
-DEFAULT_ROTATION_POLICY_PATH = Path("/etc/trading-bot-three-site") / ROTATION_POLICY_FILENAME
+DEFAULT_ROTATION_STATE_DIRECTORY = lifecycle.DEFAULT_STATE_DIRECTORY
 RECEIPT_FIELDS = {
     "schema",
     "status",
@@ -127,29 +127,25 @@ def _normalise_time(value: datetime, *, field: str) -> datetime:
 
 
 def _load_rotation_policy(
-    path: Path,
+    raw: bytes,
     *,
     profile: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Load one root-controlled exact-current credential/trust allowlist.
+    """Validate exact immutable policy bytes selected by the lifecycle.
 
-    The policy deliberately carries only public hashes.  It is a separate
-    root-only, write-once-at-rotation control artifact because the actual
-    HMAC key ids and freshly provisioned Witness trust material cannot be
-    baked into the source release before provisioning.
+    This function intentionally does not open a caller-selected policy path.
+    The lifecycle resolves the committed current selector first, then supplies
+    the hash-bound immutable bytes observed through its secure root-only read.
     """
 
     try:
-        raw = control._read_controlled_file(
-            path,
-            field="Writer Witness credential rotation policy",
-            root_only=True,
+        payload = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=client_attestation._strict_object,
         )
-        payload = json.loads(raw.decode("utf-8"), object_pairs_hook=client_attestation._strict_object)
     except (
         UnicodeDecodeError,
         json.JSONDecodeError,
-        control.WitnessReleasePreparationError,
         client_attestation.WriterWitnessClientAttestationError,
     ) as exc:
         raise WriterWitnessPairAttestationError(
@@ -159,6 +155,8 @@ def _load_rotation_policy(
         "schema",
         "policy_id",
         "issued_at",
+        "not_before",
+        "not_after",
         "profile",
         "witness_trust",
         "clients",
@@ -166,15 +164,14 @@ def _load_rotation_policy(
         raise WriterWitnessPairAttestationError(
             "Writer Witness credential rotation policy schema is invalid"
         )
-    if payload.get("schema") != control.CREDENTIAL_ROTATION_POLICY_SCHEMA:
+    if (
+        payload.get("schema") != control.CREDENTIAL_ROTATION_POLICY_SCHEMA
+        or payload.get("schema") != lifecycle.POLICY_SCHEMA
+    ):
         raise WriterWitnessPairAttestationError(
             "Writer Witness credential rotation policy schema is unsupported"
         )
-    # The companion helper emits these canonical bytes.  This makes the
-    # privileged ceremony reproducible and blocks accidental hand-edited
-    # variants; it does not change the explicit trust boundary that root on
-    # the control host can replace any root-owned control artifact.
-    if raw != control._canonical_json_bytes(payload) + b"\n":
+    if raw != control._canonical_json_bytes(payload) + bytes((10,)):
         raise WriterWitnessPairAttestationError(
             "Writer Witness credential rotation policy is not canonical"
         )
@@ -183,6 +180,26 @@ def _load_rotation_policy(
         payload.get("issued_at"),
         field="Writer Witness credential rotation policy issue time",
     )
+    not_before = _parse_time(
+        payload.get("not_before"),
+        field="Writer Witness credential rotation policy not_before",
+    )
+    not_after = _parse_time(
+        payload.get("not_after"),
+        field="Writer Witness credential rotation policy not_after",
+    )
+    maximum_policy_ttl_seconds = profile["client_credential_rotation"][
+        "maximum_policy_ttl_seconds"
+    ]
+    if (
+        not_before != issued_at
+        or not_after <= not_before
+        or not_after - issued_at
+        > timedelta(seconds=maximum_policy_ttl_seconds)
+    ):
+        raise WriterWitnessPairAttestationError(
+            "Writer Witness credential rotation policy TTL is invalid"
+        )
     profile_binding = payload.get("profile")
     if not isinstance(profile_binding, dict) or set(profile_binding) != {
         "release_id",
@@ -229,8 +246,6 @@ def _load_rotation_policy(
             "site",
             "key_id_sha256",
             "generation",
-            "not_before",
-            "not_after",
         }:
             raise WriterWitnessPairAttestationError(
                 f"Writer Witness credential rotation {site} allowlist entry is invalid"
@@ -248,28 +263,15 @@ def _load_rotation_policy(
                 "Writer Witness credential rotation clients must use distinct identities"
             )
         seen_key_hashes.add(key_hash)
-        generation = _require_generation(client.get("generation"), site=site)
-        not_before = _parse_time(
-            client.get("not_before"),
-            field=f"Writer Witness credential rotation {site} not_before",
-        )
-        not_after = _parse_time(
-            client.get("not_after"),
-            field=f"Writer Witness credential rotation {site} not_after",
-        )
-        if not_before < issued_at or not_before >= not_after or issued_at > not_after:
-            raise WriterWitnessPairAttestationError(
-                f"Writer Witness credential rotation {site} validity window is invalid"
-            )
         parsed_clients[site] = {
             "key_id_sha256": key_hash,
-            "generation": generation,
-            "not_before": not_before,
-            "not_after": not_after,
+            "generation": _require_generation(client.get("generation"), site=site),
         }
     return {
         "policy_id": policy_id,
         "issued_at": issued_at,
+        "not_before": not_before,
+        "not_after": not_after,
         "sha256": hashlib.sha256(raw).hexdigest(),
         "witness_trust": dict(witness_trust),
         "clients": parsed_clients,
@@ -389,8 +391,8 @@ def _validate_one(
     label = "WebApp-FI" if site == "webapp_fi" else "WebApp-IR"
     allowed_client = rotation_policy["clients"][site]
     if (
-        verification_time < allowed_client["not_before"]
-        or verification_time >= allowed_client["not_after"]
+        verification_time < rotation_policy["not_before"]
+        or verification_time >= rotation_policy["not_after"]
     ):
         raise WriterWitnessPairAttestationError(
             f"{label} exact-current credential rotation policy is not active"
@@ -417,7 +419,7 @@ def _validate_one(
     return {
         **verified,
         "credential_generation": allowed_client["generation"],
-        "credential_not_after": allowed_client["not_after"],
+        "credential_not_after": rotation_policy["not_after"],
     }
 
 
@@ -444,13 +446,13 @@ def verify_paired_attestations(
     *,
     webapp_fi_attestation_path: Path,
     webapp_ir_attestation_path: Path,
-    _rotation_policy_path_for_test: Path | None = None,
+    _rotation_state_directory_for_test: Path | None = None,
     _profile_path_for_test: Path | None = None,
     _verification_time_for_test: datetime | None = None,
 ) -> dict[str, Any]:
     """Return a non-secret pair result only when both receipts are exact/fresh.
 
-    Production callers cannot select a profile, policy path, max-age, or
+    Production callers cannot select a profile, state path, max-age, or
     verification clock.  The underscored substitutions exist solely for the
     unit-test API; the command-line entry point always uses the trusted,
     fixed paths and the local UTC clock.
@@ -462,10 +464,23 @@ def verify_paired_attestations(
         _verification_time_for_test or datetime.now(timezone.utc),
         field="paired attestation verification time",
     )
-    rotation_policy = _load_rotation_policy(
-        _rotation_policy_path_for_test or DEFAULT_ROTATION_POLICY_PATH,
-        profile=profile,
-    )
+    try:
+        selected = lifecycle.resolve_current_policy(
+            profile_sha256=_profile_sha256(profile),
+            state_directory=_rotation_state_directory_for_test,
+        )
+    except lifecycle.WriterWitnessRotationLifecycleError as exc:
+        raise WriterWitnessPairAttestationError(
+            "Writer Witness credential rotation lifecycle is invalid"
+        ) from exc
+    rotation_policy = _load_rotation_policy(selected.policy_raw, profile=profile)
+    if (
+        rotation_policy["policy_id"] != selected.policy_id
+        or rotation_policy["sha256"] != selected.policy_sha256
+    ):
+        raise WriterWitnessPairAttestationError(
+            "Writer Witness current selector does not bind its exact policy"
+        )
     if now < rotation_policy["issued_at"]:
         raise WriterWitnessPairAttestationError(
             "Writer Witness credential rotation policy issue time is in the future"
@@ -513,6 +528,11 @@ def verify_paired_attestations(
             "policy_id": rotation_policy["policy_id"],
             "sha256": rotation_policy["sha256"],
             "issued_at": rotation_policy["issued_at"].isoformat(),
+            "not_before": rotation_policy["not_before"].isoformat(),
+            "not_after": rotation_policy["not_after"].isoformat(),
+            "sequence": selected.sequence,
+            "selector_sha256": selected.selector_sha256,
+            "activation_sha256": selected.activation_sha256,
         },
         "clients": {
             "webapp_fi": {
@@ -536,41 +556,6 @@ def verify_paired_attestations(
         },
         "compatible": True,
     }
-
-
-def _require_create_only_policy_destination(path: Path) -> Path:
-    """Return one root-private canonical destination that does not yet exist.
-
-    The production path is fixed by the caller of this helper.  Test-only
-    callers can supply a different root-private directory, but not a different
-    filename.  A credential rotation must use a separately reviewed control
-    transaction; this helper never replaces a policy in place.
-    """
-
-    if not path.is_absolute() or path.name != ROTATION_POLICY_FILENAME:
-        raise WriterWitnessPairAttestationError(
-            "Writer Witness credential rotation policy destination is invalid"
-        )
-    try:
-        parent = control._require_root_owned_directory(
-            path.parent,
-            field="Writer Witness credential rotation policy destination parent",
-            private=True,
-        )
-    except control.WitnessReleasePreparationError as exc:
-        raise WriterWitnessPairAttestationError(
-            "Writer Witness credential rotation policy destination is unsafe"
-        ) from exc
-    destination = parent / path.name
-    if destination != path:
-        raise WriterWitnessPairAttestationError(
-            "Writer Witness credential rotation policy destination is not canonical"
-        )
-    if destination.exists() or destination.is_symlink():
-        raise WriterWitnessPairAttestationError(
-            "Writer Witness credential rotation policy already exists; replacement is forbidden"
-        )
-    return destination
 
 
 def _validated_pair_for_policy_creation(
@@ -621,17 +606,16 @@ def create_rotation_policy(
     webapp_fi_generation: str,
     webapp_ir_generation: str,
     not_after: datetime,
-    _output_path_for_test: Path | None = None,
+    _rotation_state_directory_for_test: Path | None = None,
     _profile_path_for_test: Path | None = None,
     _verification_time_for_test: datetime | None = None,
 ) -> dict[str, Any]:
-    """Create exactly one canonical current-credential policy from a valid pair.
+    """Create and atomically activate one versioned policy from a valid pair.
 
-    This is the privileged policy-creation ceremony, not an activation step.
-    It derives endpoint, CA, Witness-public-key, and caller-key-id hashes from
-    two signature-verified fresh receipts; no HMAC secret or Witness URL is an
-    input or output.  It uses O_EXCL through the shared control writer, so an
-    existing policy cannot be overwritten or silently replaced.
+    Both source receipts are revalidated before any state artifact is written.
+    The resulting policy, selector, and activation record are immutable. The
+    only mutable file is an atomically replaced current-selector pointer whose
+    exact contents are attested by the append-only activation ledger.
     """
 
     _require_root_execution()
@@ -650,13 +634,17 @@ def create_rotation_policy(
     maximum_age_seconds = profile["client_credential_rotation"][
         "maximum_attestation_age_seconds"
     ]
+    maximum_policy_ttl_seconds = profile["client_credential_rotation"][
+        "maximum_policy_ttl_seconds"
+    ]
     if not_after <= now + timedelta(seconds=maximum_age_seconds):
         raise WriterWitnessPairAttestationError(
             "Writer Witness credential rotation policy not_after is too soon"
         )
-    destination = _require_create_only_policy_destination(
-        _output_path_for_test or DEFAULT_ROTATION_POLICY_PATH
-    )
+    if not_after - now > timedelta(seconds=maximum_policy_ttl_seconds):
+        raise WriterWitnessPairAttestationError(
+            "Writer Witness credential rotation policy TTL exceeds the trusted profile ceiling"
+        )
     fi, ir = _validated_pair_for_policy_creation(
         webapp_fi_attestation_path=webapp_fi_attestation_path,
         webapp_ir_attestation_path=webapp_ir_attestation_path,
@@ -667,6 +655,8 @@ def create_rotation_policy(
         "schema": control.CREDENTIAL_ROTATION_POLICY_SCHEMA,
         "policy_id": policy_id,
         "issued_at": now.isoformat(),
+        "not_before": now.isoformat(),
+        "not_after": not_after.isoformat(),
         "profile": {
             "release_id": profile["release_id"],
             "source_commit": profile["source_commit"],
@@ -684,40 +674,43 @@ def create_rotation_policy(
                 "site": "webapp_fi",
                 "key_id_sha256": fi["caller_key_id_sha256"],
                 "generation": fi_generation,
-                "not_before": now.isoformat(),
-                "not_after": not_after.isoformat(),
             },
             "webapp_ir": {
                 "site": "webapp_ir",
                 "key_id_sha256": ir["caller_key_id_sha256"],
                 "generation": ir_generation,
-                "not_before": now.isoformat(),
-                "not_after": not_after.isoformat(),
             },
         },
     }
-    raw = control._canonical_json_bytes(payload) + b"\n"
-    try:
-        control._write_new_file(destination, raw, mode=0o600)
-    except control.WitnessReleasePreparationError as exc:
-        raise WriterWitnessPairAttestationError(
-            "cannot create Writer Witness credential rotation policy"
-        ) from exc
-    # Re-open the just-created artifact through the verifier's hardened read
-    # path.  On any failure the artifact remains as forensic evidence and is
-    # intentionally not reused or overwritten by this helper.
-    loaded = _load_rotation_policy(destination, profile=profile)
+    raw = control._canonical_json_bytes(payload) + bytes((10,))
+    loaded = _load_rotation_policy(raw, profile=profile)
     if loaded["sha256"] != hashlib.sha256(raw).hexdigest():
         raise WriterWitnessPairAttestationError(
-            "Writer Witness credential rotation policy changed after creation"
+            "Writer Witness credential rotation policy serialization is invalid"
         )
+    try:
+        selected = lifecycle.install_policy_and_activate(
+            policy_id=policy_id,
+            policy_raw=raw,
+            policy_profile_sha256=_profile_sha256(profile),
+            issued_at=now.isoformat(),
+            state_directory=_rotation_state_directory_for_test,
+        )
+    except lifecycle.WriterWitnessRotationLifecycleError as exc:
+        raise WriterWitnessPairAttestationError(
+            "cannot create and activate Writer Witness credential rotation policy"
+        ) from exc
     return {
         "schema": control.CREDENTIAL_ROTATION_POLICY_SCHEMA,
-        "status": "created",
+        "status": "activated",
         "policy_id": loaded["policy_id"],
         "policy_sha256": loaded["sha256"],
         "issued_at": loaded["issued_at"].isoformat(),
+        "not_before": loaded["not_before"].isoformat(),
         "not_after": not_after.isoformat(),
+        "rotation_sequence": selected.sequence,
+        "selector_sha256": selected.selector_sha256,
+        "activation_sha256": selected.activation_sha256,
         "release_id": profile["release_id"],
         "source_commit": profile["source_commit"],
         "witness_endpoint_sha256": loaded["witness_trust"]["witness_endpoint_sha256"],
