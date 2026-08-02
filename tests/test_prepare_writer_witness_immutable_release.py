@@ -44,6 +44,37 @@ def agent_config(*, duration: int = 60) -> dict[str, object]:
     }
 
 
+def ir_agent_config(*, duration: int = 60) -> dict[str, object]:
+    return {
+        "schema": "production-writer-lease-agent-v1",
+        "mode": "writer",
+        "site": "webapp_ir",
+        "lease_file": "/var/lib/trading-bot-three-site/writer-terms/writer-lease.json",
+        "release_provenance": {
+            "receipt": "/var/lib/trading-bot-three-site/release-provenance/example.json",
+            "application_release_sha": "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5",
+            "application_release_root": "/srv/trading-bot-three-site/releases/2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5",
+        },
+        "runtime": {
+            "compose_file": "/srv/trading-bot-three-site/control-releases/example/deploy/production/docker-compose.webapp-ir-promoted-2c08.yml",
+            "env_file": "/root/secure-envs/trading-bot/wa-ir-promotion.env",
+            "selection_env_file": "/var/lib/trading-bot-three-site/selected-wa-ir-candidate.env",
+            "services": ["db", "redis", "app"],
+        },
+        "witness": {
+            "url": "https://witness.example.invalid",
+            "key_id": "webapp-ir-key",
+            "secret_file": "/root/secure-envs/trading-bot/webapp-ir-witness.secret",
+            "public_key_file": "/root/secure-envs/trading-bot/witness-public.key",
+            "ca_bundle": "/root/secure-envs/trading-bot/witness-ca.pem",
+            "timeout_seconds": 3,
+            "lease_duration_seconds": duration,
+            "safety_margin_seconds": 15,
+            "renew_interval_seconds": 10,
+        },
+    }
+
+
 class WriterWitnessImmutableReleaseTests(unittest.TestCase):
     def test_normal_worktree_git_pointer_resolves_to_a_root_controlled_git_directory(self):
         git_directory = release_package._resolve_worktree_git_directory(ROOT)
@@ -116,6 +147,10 @@ class WriterWitnessImmutableReleaseTests(unittest.TestCase):
             manifest = json.loads((destination / "release-package.json").read_text())
             self.assertEqual(manifest["schema"], release_package.PACKAGE_SCHEMA)
             self.assertEqual(manifest["source"]["commit"], release_package.PINNED_SOURCE_COMMIT)
+            self.assertEqual(
+                manifest["source"]["release_manifest_sha256"],
+                "e99de3ec1de9179791754d4cadcbd85ea581e3ac118c620404baf91efc9dcbc0",
+            )
             archive = destination / manifest["source"]["archive"]["name"]
             self.assertEqual(
                 hashlib.sha256(archive.read_bytes()).hexdigest(),
@@ -206,9 +241,18 @@ class WriterWitnessImmutableReleaseTests(unittest.TestCase):
     def test_profile_requires_the_pinned_60_second_contract(self):
         profile = release_package._load_profile(release_package.DEFAULT_PROFILE_PATH)
         self.assertEqual(profile["source_commit"], release_package.PINNED_SOURCE_COMMIT)
+        self.assertEqual(
+            profile["source_runtime_profile_sha256"],
+            "38f6b661bac775ac911dc5f48d98c660edc047d9079ddea835b179864de270ef",
+        )
+        self.assertEqual(
+            profile["source_release_manifest_sha256"],
+            "e99de3ec1de9179791754d4cadcbd85ea581e3ac118c620404baf91efc9dcbc0",
+        )
         self.assertEqual(profile["witness"]["lease_duration_seconds"], 60)
         self.assertTrue(profile["witness"]["enforce_configured_lease_duration"])
         self.assertEqual(profile["webapp_fi_client"]["renew_interval_seconds"], 10)
+        self.assertEqual(profile["webapp_ir_client"]["renew_interval_seconds"], 10)
 
     def test_webapp_fi_timing_attestation_never_emits_secret_fields(self):
         with tempfile.TemporaryDirectory(prefix="writer-witness-fi-timing-") as value:
@@ -238,6 +282,43 @@ class WriterWitnessImmutableReleaseTests(unittest.TestCase):
             ):
                 release_package.verify_webapp_fi_client_timing(
                     agent_config_path=config_path,
+                )
+
+    def test_paired_client_timing_attestation_requires_fi_and_ir_60_10_15(self):
+        with tempfile.TemporaryDirectory(prefix="writer-witness-paired-timing-") as value:
+            root = Path(value)
+            fi_path = root / "fi-agent.json"
+            ir_path = root / "ir-agent.json"
+            fi_path.write_text(json.dumps(agent_config()), encoding="utf-8")
+            ir_path.write_text(json.dumps(ir_agent_config()), encoding="utf-8")
+            fi_path.chmod(0o600)
+            ir_path.chmod(0o600)
+
+            attestation = release_package.verify_paired_webapp_client_timing(
+                webapp_fi_agent_config_path=fi_path,
+                webapp_ir_agent_config_path=ir_path,
+            )
+
+            encoded = json.dumps(attestation, sort_keys=True)
+            self.assertTrue(attestation["compatible"])
+            self.assertEqual(attestation["clients"]["webapp_fi"]["mode"], "fenced_fi_writer")
+            self.assertEqual(attestation["clients"]["webapp_ir"]["mode"], "writer")
+            self.assertEqual(
+                attestation["clients"]["webapp_ir"]["timing"]["renew_interval_seconds"],
+                10,
+            )
+            self.assertNotIn("secret", encoded.lower())
+            self.assertNotIn("key_id", encoded)
+
+            ir_path.write_text(json.dumps(ir_agent_config(duration=180)), encoding="utf-8")
+            ir_path.chmod(0o600)
+            with self.assertRaisesRegex(
+                release_package.WitnessReleasePreparationError,
+                "WebApp-IR timing is incompatible",
+            ):
+                release_package.verify_paired_webapp_client_timing(
+                    webapp_fi_agent_config_path=fi_path,
+                    webapp_ir_agent_config_path=ir_path,
                 )
 
 

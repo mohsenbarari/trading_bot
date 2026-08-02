@@ -1,7 +1,9 @@
 {
-  "schema": "gold-trade-writer-witness-release-profile-v1",
-  "release_id": "writer-witness-be6067c0c61a8eabea3241448c8adc32257ce631-60s",
-  "source_commit": "be6067c0c61a8eabea3241448c8adc32257ce631",
+  "schema": "gold-trade-writer-witness-release-profile-v2",
+  "release_id": "writer-witness-a0d8fa5a3b696ecfee3c0e787ea0791d035b1f32-60s",
+  "source_commit": "a0d8fa5a3b696ecfee3c0e787ea0791d035b1f32",
+  "source_runtime_profile_sha256": "38f6b661bac775ac911dc5f48d98c660edc047d9079ddea835b179864de270ef",
+  "source_release_manifest_sha256": "e99de3ec1de9179791754d4cadcbd85ea581e3ac118c620404baf91efc9dcbc0",
   "witness": {
     "logical_authority": "webapp",
     "physical_site": "witness",
@@ -16,6 +18,13 @@
   "webapp_fi_client": {
     "mode": "fenced_fi_writer",
     "site": "webapp_fi",
+    "lease_duration_seconds": 60,
+    "renew_interval_seconds": 10,
+    "safety_margin_seconds": 15
+  },
+  "webapp_ir_client": {
+    "mode": "writer",
+    "site": "webapp_ir",
     "lease_duration_seconds": 60,
     "renew_interval_seconds": 10,
     "safety_margin_seconds": 15

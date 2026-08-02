@@ -24,10 +24,11 @@ from typing import Any, Mapping, Sequence
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-PINNED_SOURCE_COMMIT = "be6067c0c61a8eabea3241448c8adc32257ce631"
-PROFILE_SCHEMA = "gold-trade-writer-witness-release-profile-v1"
+PINNED_SOURCE_COMMIT = "a0d8fa5a3b696ecfee3c0e787ea0791d035b1f32"
+PROFILE_SCHEMA = "gold-trade-writer-witness-release-profile-v2"
 PACKAGE_SCHEMA = "gold-trade-writer-witness-release-package-v1"
 TIMING_ATTESTATION_SCHEMA = "gold-trade-writer-witness-client-timing-attestation-v1"
+PAIRED_TIMING_ATTESTATION_SCHEMA = "gold-trade-writer-witness-paired-client-timing-attestation-v1"
 AGENT_CONFIG_SCHEMA = "production-writer-lease-agent-v1"
 SOURCE_ARCHIVE_PREFIX = "writer-witness-source"
 MAX_CONTROL_FILE_BYTES = 1024 * 1024
@@ -35,6 +36,7 @@ MAX_AGENT_CONFIG_BYTES = 1024 * 1024
 MAX_SOURCE_ARCHIVE_BYTES = 512 * 1024 * 1024
 MAX_GIT_POINTER_BYTES = 16 * 1024
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 RELEASE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$")
 
 DEFAULT_PROFILE_PATH = (
@@ -50,7 +52,10 @@ DEFAULT_RUNTIME_TEMPLATE_PATH = (
 REQUIRED_SOURCE_PATHS = (
     "writer_witness_app.py",
     "tests/test_writer_witness_service.py",
+    "tests/test_render_writer_witness_credentials.py",
     "scripts/build_writer_witness_release.sh",
+    "scripts/provision_writer_witness_host.sh",
+    "scripts/render_writer_witness_credentials.py",
     "scripts/verify_writer_witness_release.py",
     "deploy/production/writer-witness-runtime.env.example",
     "deploy/writer-witness/001_initial.sql",
@@ -59,6 +64,8 @@ REQUIRED_SOURCE_PATHS = (
     "deploy/writer-witness/python-runtime.json",
     "deploy/writer-witness/requirements.lock",
     "deploy/writer-witness/wheelhouse.sha256",
+    "deploy/writer-witness/writer-witness-runtime-profile.json",
+    "deploy/writer-witness/nginx.conf.template",
     "deploy/writer-witness/writer-witness.service",
     "core/runtime_sites.py",
     "core/writer_witness_auth.py",
@@ -324,7 +331,16 @@ def _load_profile(path: Path) -> dict[str, Any]:
     )
     _require_exact_fields(
         payload,
-        expected={"schema", "release_id", "source_commit", "witness", "webapp_fi_client"},
+        expected={
+            "schema",
+            "release_id",
+            "source_commit",
+            "source_runtime_profile_sha256",
+            "source_release_manifest_sha256",
+            "witness",
+            "webapp_fi_client",
+            "webapp_ir_client",
+        },
         field="release profile",
     )
     if payload.get("schema") != PROFILE_SCHEMA:
@@ -334,6 +350,16 @@ def _load_profile(path: Path) -> dict[str, Any]:
         raise WitnessReleasePreparationError("release profile release_id is invalid")
     if payload.get("source_commit") != PINNED_SOURCE_COMMIT:
         raise WitnessReleasePreparationError("release profile does not pin the approved Witness source")
+    source_runtime_profile_sha256 = payload.get("source_runtime_profile_sha256")
+    if not isinstance(source_runtime_profile_sha256, str) or not SHA256_RE.fullmatch(
+        source_runtime_profile_sha256
+    ):
+        raise WitnessReleasePreparationError("release profile source runtime profile hash is invalid")
+    source_release_manifest_sha256 = payload.get("source_release_manifest_sha256")
+    if not isinstance(source_release_manifest_sha256, str) or not SHA256_RE.fullmatch(
+        source_release_manifest_sha256
+    ):
+        raise WitnessReleasePreparationError("release profile source release manifest hash is invalid")
     witness = payload.get("witness")
     if not isinstance(witness, dict):
         raise WitnessReleasePreparationError("release profile witness settings are invalid")
@@ -393,25 +419,40 @@ def _load_profile(path: Path) -> dict[str, Any]:
         raise WitnessReleasePreparationError("release profile does not use the approved 60/10/15 timing")
     if auth_age <= skew:
         raise WitnessReleasePreparationError("release profile authentication window is unsafe")
-    client = payload.get("webapp_fi_client")
-    if not isinstance(client, dict):
-        raise WitnessReleasePreparationError("release profile WebApp-FI client settings are invalid")
-    _require_exact_fields(
-        client,
-        expected={"mode", "site", "lease_duration_seconds", "renew_interval_seconds", "safety_margin_seconds"},
-        field="release profile WebApp-FI client",
-    )
-    if client.get("mode") != "fenced_fi_writer" or client.get("site") != "webapp_fi":
-        raise WitnessReleasePreparationError(
-            "release profile does not bind the fenced WebApp-FI writer client"
-        )
-    for key, expected in (
-        ("lease_duration_seconds", duration),
-        ("renew_interval_seconds", interval),
-        ("safety_margin_seconds", margin),
+    for client_name, expected_mode, expected_site in (
+        ("webapp_fi_client", "fenced_fi_writer", "webapp_fi"),
+        ("webapp_ir_client", "writer", "webapp_ir"),
     ):
-        if client.get(key) != expected:
-            raise WitnessReleasePreparationError("release profile client timing differs from Witness timing")
+        client = payload.get(client_name)
+        label = "WebApp-FI" if expected_site == "webapp_fi" else "WebApp-IR"
+        if not isinstance(client, dict):
+            raise WitnessReleasePreparationError(
+                f"release profile {label} client settings are invalid"
+            )
+        _require_exact_fields(
+            client,
+            expected={
+                "mode",
+                "site",
+                "lease_duration_seconds",
+                "renew_interval_seconds",
+                "safety_margin_seconds",
+            },
+            field=f"release profile {label} client",
+        )
+        if client.get("mode") != expected_mode or client.get("site") != expected_site:
+            raise WitnessReleasePreparationError(
+                f"release profile does not bind the required {label} lease client"
+            )
+        for key, expected in (
+            ("lease_duration_seconds", duration),
+            ("renew_interval_seconds", interval),
+            ("safety_margin_seconds", margin),
+        ):
+            if client.get(key) != expected:
+                raise WitnessReleasePreparationError(
+                    "release profile client timing differs from Witness timing"
+                )
     return payload
 
 
@@ -526,7 +567,11 @@ def _require_source_repository(path: Path) -> tuple[Path, str]:
     return repository, tree
 
 
-def _source_file_hashes(repository: Path) -> dict[str, str]:
+def _source_file_hashes(
+    repository: Path,
+    *,
+    profile: Mapping[str, Any],
+) -> dict[str, str]:
     result: dict[str, str] = {}
     for relative in REQUIRED_SOURCE_PATHS:
         if PurePosixPath(relative).as_posix() != relative or relative.startswith("/") or ".." in PurePosixPath(relative).parts:
@@ -541,9 +586,58 @@ def _source_file_hashes(repository: Path) -> dict[str, str]:
         b"writer_witness_lease_duration_mismatch",
         b"ACTION_ACQUIRE",
         b"ACTION_RENEW",
+        b"caller_site",
+        b"caller_key_id_sha256",
+        b'"contract_version": 2',
     )
     if not all(fragment in app_source for fragment in required_fragments):
         raise WitnessReleasePreparationError("approved Witness source lacks duration-enforcement code")
+    runtime_profile_path = "deploy/writer-witness/writer-witness-runtime-profile.json"
+    runtime_profile = _run_git(
+        repository,
+        ["show", f"{PINNED_SOURCE_COMMIT}:{runtime_profile_path}"],
+    ).stdout
+    if _sha256_bytes(runtime_profile) != profile["source_runtime_profile_sha256"]:
+        raise WitnessReleasePreparationError(
+            "approved Witness source runtime profile does not match the control profile"
+        )
+    source_profile = _load_json_bytes(
+        runtime_profile,
+        field="approved Witness source runtime profile",
+    )
+    witness = profile["witness"]
+    expected_source_profile = {
+        "schema": "gold-trade-writer-witness-runtime-profile-v1",
+        "logical_authority": witness["logical_authority"],
+        "physical_site": witness["physical_site"],
+        "authoritative_site": witness["authoritative_site"],
+        "lease_duration_seconds": witness["lease_duration_seconds"],
+        "enforce_configured_lease_duration": witness["enforce_configured_lease_duration"],
+        "renew_interval_seconds": witness["renew_interval_seconds"],
+        "safety_margin_seconds": witness["safety_margin_seconds"],
+        "max_clock_skew_seconds": witness["max_clock_skew_seconds"],
+        "auth_max_age_seconds": witness["auth_max_age_seconds"],
+    }
+    if source_profile != expected_source_profile:
+        raise WitnessReleasePreparationError(
+            "approved Witness source runtime profile fields do not match the control profile"
+        )
+    renderer_source = _run_git(
+        repository,
+        ["show", f"{PINNED_SOURCE_COMMIT}:scripts/render_writer_witness_credentials.py"],
+    ).stdout
+    provisioner_source = _run_git(
+        repository,
+        ["show", f"{PINNED_SOURCE_COMMIT}:scripts/provision_writer_witness_host.sh"],
+    ).stdout
+    if (
+        b"WRITER_WITNESS_ENFORCE_CONFIGURED_LEASE_DURATION=true" not in renderer_source
+        or b"WRITER_WITNESS_RUNTIME_PROFILE_SHA256" not in renderer_source
+        or b"--mode verify-runtime-profile" not in provisioner_source
+    ):
+        raise WitnessReleasePreparationError(
+            "approved Witness source lacks candidate profile-binding verification"
+        )
     return result
 
 
@@ -717,7 +811,7 @@ def prepare_release_package(
         root_only=False,
     )
     repository, source_tree = _require_source_repository(source_repository)
-    source_hashes = _source_file_hashes(repository)
+    source_hashes = _source_file_hashes(repository, profile=profile)
     package = _require_new_directory(destination)
     source_archive_name = f"writer-witness-source-{PINNED_SOURCE_COMMIT}.tar"
     source_archive = package / source_archive_name
@@ -733,6 +827,7 @@ def prepare_release_package(
         "source": {
             "commit": PINNED_SOURCE_COMMIT,
             "tree": source_tree,
+            "release_manifest_sha256": profile["source_release_manifest_sha256"],
             "archive": {
                 "name": source_archive_name,
                 "sha256": archive_sha256,
@@ -756,6 +851,7 @@ def prepare_release_package(
         "release_id": profile["release_id"],
         "source_commit": PINNED_SOURCE_COMMIT,
         "source_tree": source_tree,
+        "source_release_manifest_sha256": profile["source_release_manifest_sha256"],
         "source_archive_sha256": archive_sha256,
         "source_archive_bytes": archive_bytes,
         "profile_sha256": manifest["profile"]["sha256"],
@@ -763,50 +859,102 @@ def prepare_release_package(
     }
 
 
-def verify_webapp_fi_client_timing(
+def _require_absolute_config_path(value: object, *, field: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not value.startswith("/")
+        or "\x00" in value
+        or ".." in PurePosixPath(value).parts
+    ):
+        raise WitnessReleasePreparationError(f"{field} is invalid")
+    return value
+
+
+def _verify_webapp_client_timing(
     *,
     agent_config_path: Path,
-    profile_path: Path = DEFAULT_PROFILE_PATH,
+    profile: Mapping[str, Any],
+    client_name: str,
 ) -> dict[str, Any]:
-    """Emit a non-secret attestation for an existing root-only FI agent config."""
+    """Verify one local agent config without opening its secret material.
 
-    profile = _load_profile(profile_path)
+    This is deliberately static.  The separate client-attestation helper is
+    responsible for the live TLS handshake and HMAC-authenticated Witness
+    query using this site's own secret; this control helper never reads it.
+    """
+
+    if client_name not in {"webapp_fi_client", "webapp_ir_client"}:
+        raise WitnessReleasePreparationError("requested WebApp client is unsupported")
+    client = profile[client_name]
+    site = client["site"]
+    label = "WebApp-FI" if site == "webapp_fi" else "WebApp-IR"
     config = _load_json_bytes(
         _read_controlled_file(
             agent_config_path,
-            field="WebApp-FI writer lease-agent config",
+            field=f"{label} writer lease-agent config",
             root_only=True,
         ),
-        field="WebApp-FI writer lease-agent config",
+        field=f"{label} writer lease-agent config",
+    )
+    base_fields = {"schema", "mode", "site", "lease_file", "runtime", "witness"}
+    expected_config_fields = base_fields | (
+        {"fenced_preflight_config"} if site == "webapp_fi" else {"release_provenance"}
     )
     _require_exact_fields(
         config,
-        expected={
-            "schema",
-            "mode",
-            "site",
-            "lease_file",
-            "fenced_preflight_config",
-            "runtime",
-            "witness",
-        },
-        field="WebApp-FI writer lease-agent config",
+        expected=expected_config_fields,
+        field=f"{label} writer lease-agent config",
     )
-    client = profile["webapp_fi_client"]
     if (
         config.get("schema") != AGENT_CONFIG_SCHEMA
         or config.get("mode") != client["mode"]
-        or config.get("site") != client["site"]
+        or config.get("site") != site
     ):
-        raise WitnessReleasePreparationError("WebApp-FI lease-agent identity is incompatible")
-    preflight_path = config.get("fenced_preflight_config")
-    if not isinstance(preflight_path, str) or not preflight_path.startswith("/"):
-        raise WitnessReleasePreparationError(
-            "WebApp-FI fenced identity preflight config is invalid"
+        raise WitnessReleasePreparationError(f"{label} lease-agent identity is incompatible")
+    _require_absolute_config_path(config.get("lease_file"), field=f"{label} lease file")
+    runtime = config.get("runtime")
+    if not isinstance(runtime, dict):
+        raise WitnessReleasePreparationError(f"{label} managed runtime is invalid")
+    _require_exact_fields(
+        runtime,
+        expected={"compose_file", "env_file", "selection_env_file", "services"},
+        field=f"{label} managed runtime",
+    )
+    _require_absolute_config_path(runtime.get("compose_file"), field=f"{label} compose file")
+    _require_absolute_config_path(runtime.get("env_file"), field=f"{label} runtime environment")
+    if site == "webapp_fi":
+        if runtime.get("selection_env_file") is not None:
+            raise WitnessReleasePreparationError("WebApp-FI fenced client must not select a standby candidate")
+        _require_absolute_config_path(
+            config.get("fenced_preflight_config"),
+            field="WebApp-FI fenced identity preflight config",
         )
+    else:
+        _require_absolute_config_path(
+            runtime.get("selection_env_file"),
+            field="WebApp-IR selected candidate environment",
+        )
+        provenance = config.get("release_provenance")
+        if not isinstance(provenance, dict):
+            raise WitnessReleasePreparationError("WebApp-IR release provenance is invalid")
+        _require_exact_fields(
+            provenance,
+            expected={"receipt", "application_release_sha", "application_release_root"},
+            field="WebApp-IR release provenance",
+        )
+        _require_absolute_config_path(provenance.get("receipt"), field="WebApp-IR provenance receipt")
+        _require_absolute_config_path(
+            provenance.get("application_release_root"),
+            field="WebApp-IR application release root",
+        )
+        if not isinstance(provenance.get("application_release_sha"), str) or not COMMIT_RE.fullmatch(
+            provenance["application_release_sha"]
+        ):
+            raise WitnessReleasePreparationError("WebApp-IR application release identity is invalid")
+
     witness = config.get("witness")
     if not isinstance(witness, dict):
-        raise WitnessReleasePreparationError("WebApp-FI lease-agent Witness section is invalid")
+        raise WitnessReleasePreparationError(f"{label} lease-agent Witness section is invalid")
     _require_exact_fields(
         witness,
         expected={
@@ -820,28 +968,81 @@ def verify_webapp_fi_client_timing(
             "safety_margin_seconds",
             "renew_interval_seconds",
         },
-        field="WebApp-FI lease-agent Witness section",
+        field=f"{label} lease-agent Witness section",
     )
+    for field in ("secret_file", "public_key_file", "ca_bundle"):
+        _require_absolute_config_path(witness.get(field), field=f"{label} Witness {field}")
+    if not isinstance(witness.get("url"), str) or not witness["url"].startswith("https://"):
+        raise WitnessReleasePreparationError(f"{label} Witness URL is invalid")
     timeout = witness.get("timeout_seconds")
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0.1 <= float(timeout) <= 10:
-        raise WitnessReleasePreparationError("WebApp-FI Witness timeout is invalid")
+        raise WitnessReleasePreparationError(f"{label} Witness timeout is invalid")
     timing: dict[str, int] = {}
     for key in ("lease_duration_seconds", "renew_interval_seconds", "safety_margin_seconds"):
         value = witness.get(key)
         if isinstance(value, bool) or not isinstance(value, int):
-            raise WitnessReleasePreparationError(f"WebApp-FI Witness {key} is invalid")
+            raise WitnessReleasePreparationError(f"{label} Witness {key} is invalid")
         if value != client[key]:
             raise WitnessReleasePreparationError(
-                "WebApp-FI timing is incompatible with the 60-second Witness release"
+                f"{label} timing is incompatible with the 60-second Witness release"
             )
         timing[key] = value
     return {
         "schema": TIMING_ATTESTATION_SCHEMA,
         "release_id": profile["release_id"],
         "source_commit": profile["source_commit"],
-        "site": client["site"],
+        "source_runtime_profile_sha256": profile["source_runtime_profile_sha256"],
+        "source_release_manifest_sha256": profile["source_release_manifest_sha256"],
+        "site": site,
         "mode": client["mode"],
         "timing": timing,
+        "compatible": True,
+    }
+
+
+def verify_webapp_fi_client_timing(
+    *,
+    agent_config_path: Path,
+    profile_path: Path = DEFAULT_PROFILE_PATH,
+) -> dict[str, Any]:
+    """Backward-compatible static attestation for the fenced FI client."""
+
+    return _verify_webapp_client_timing(
+        agent_config_path=agent_config_path,
+        profile=_load_profile(profile_path),
+        client_name="webapp_fi_client",
+    )
+
+
+def verify_paired_webapp_client_timing(
+    *,
+    webapp_fi_agent_config_path: Path,
+    webapp_ir_agent_config_path: Path,
+    profile_path: Path = DEFAULT_PROFILE_PATH,
+) -> dict[str, Any]:
+    """Prove both local agents are statically compatible before live probing."""
+
+    profile = _load_profile(profile_path)
+    fi = _verify_webapp_client_timing(
+        agent_config_path=webapp_fi_agent_config_path,
+        profile=profile,
+        client_name="webapp_fi_client",
+    )
+    ir = _verify_webapp_client_timing(
+        agent_config_path=webapp_ir_agent_config_path,
+        profile=profile,
+        client_name="webapp_ir_client",
+    )
+    return {
+        "schema": PAIRED_TIMING_ATTESTATION_SCHEMA,
+        "release_id": profile["release_id"],
+        "source_commit": profile["source_commit"],
+        "source_runtime_profile_sha256": profile["source_runtime_profile_sha256"],
+        "source_release_manifest_sha256": profile["source_release_manifest_sha256"],
+        "clients": {
+            "webapp_fi": {key: fi[key] for key in ("mode", "timing")},
+            "webapp_ir": {key: ir[key] for key in ("mode", "timing")},
+        },
         "compatible": True,
     }
 
@@ -864,6 +1065,14 @@ def _parser() -> argparse.ArgumentParser:
     verify.add_argument("--webapp-fi-agent-config", type=Path, required=True)
     verify.add_argument("--profile", type=Path, default=DEFAULT_PROFILE_PATH)
     verify.add_argument("--output", type=Path)
+    paired = commands.add_parser(
+        "verify-paired-client-timing",
+        help="attest root-only WebApp-FI and WebApp-IR timing together",
+    )
+    paired.add_argument("--webapp-fi-agent-config", type=Path, required=True)
+    paired.add_argument("--webapp-ir-agent-config", type=Path, required=True)
+    paired.add_argument("--profile", type=Path, default=DEFAULT_PROFILE_PATH)
+    paired.add_argument("--output", type=Path)
     return parser
 
 
@@ -877,9 +1086,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 profile_path=arguments.profile,
                 runtime_template_path=arguments.runtime_template,
             )
-        else:
+        elif arguments.command == "verify-client-timing":
             result = verify_webapp_fi_client_timing(
                 agent_config_path=arguments.webapp_fi_agent_config,
+                profile_path=arguments.profile,
+            )
+            if arguments.output is not None:
+                _write_optional_attestation(arguments.output, result)
+        else:
+            result = verify_paired_webapp_client_timing(
+                webapp_fi_agent_config_path=arguments.webapp_fi_agent_config,
+                webapp_ir_agent_config_path=arguments.webapp_ir_agent_config,
                 profile_path=arguments.profile,
             )
             if arguments.output is not None:
