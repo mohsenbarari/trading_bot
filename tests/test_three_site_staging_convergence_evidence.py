@@ -181,12 +181,23 @@ class ThreeSiteConvergenceEvidenceTests(unittest.TestCase):
 
     def test_iran_export_descriptor_is_short_lived_and_campaign_bound(self):
         class Client:
-            def generate_presigned_url(self, operation, *, Params, ExpiresIn, HttpMethod):
-                self.operation = operation
-                self.params = Params
+            def generate_presigned_post(
+                self, bucket, key, *, Fields, Conditions, ExpiresIn,
+            ):
+                self.bucket = bucket
+                self.key = key
+                self.fields = Fields
+                self.conditions = Conditions
                 self.ttl = ExpiresIn
-                self.method = HttpMethod
-                return "https://s3.ir-thr-at1.arvanstorage.ir/private/snapshot?signature=temporary"
+                return {
+                    "url": "https://s3.ir-thr-at1.arvanstorage.ir/private",
+                    "fields": {
+                        "Content-Type": "application/json",
+                        "key": key,
+                        "policy": "temporary-policy",
+                        "x-amz-signature": "temporary-signature",
+                    },
+                }
 
         client = Client()
         config = {
@@ -202,10 +213,15 @@ class ThreeSiteConvergenceEvidenceTests(unittest.TestCase):
             release_sha=RELEASE_SHA,
             plan_sha256=PLAN_SHA,
         )
-        self.assertEqual(client.operation, "put_object")
-        self.assertEqual(client.method, "PUT")
+        self.assertEqual(client.bucket, "staging-private")
+        self.assertEqual(client.key, "x/y.json")
+        self.assertEqual(client.fields, {"Content-Type": "application/json"})
+        self.assertEqual(client.conditions, [{"Content-Type": "application/json"}])
         self.assertEqual(client.ttl, 300)
-        self.assertEqual(upload["method"], "PUT")
+        self.assertEqual(upload["method"], "POST")
+        self.assertEqual(upload["headers"], {})
+        self.assertEqual(upload["expected_status"], [200, 201])
+        self.assertEqual(upload["form_fields"]["key"], "x/y.json")
         with self.assertRaises(ConvergenceExportError):
             _descriptor(
                 encoded,
