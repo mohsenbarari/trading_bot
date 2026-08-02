@@ -170,9 +170,16 @@ class PackageIdentity:
 
 @dataclasses.dataclass(frozen=True)
 class ImageEntry:
+    """An image identity sealed by the verified archive before Docker load.
+
+    ``sealed_config_id`` is the archive config blob/name identity.  Docker may
+    normalize an OCI archive when importing it, so it is deliberately *not*
+    treated as the daemon's post-load ``.Id``.
+    """
+
     kind: str
     tag: str
-    config_id: str
+    sealed_config_id: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1130,7 +1137,7 @@ def inspect_image_bundle(
                         _fail("SMS relay image provenance is invalid")
                 seen_tags.add(tag)
                 seen_kinds.add(kind)
-                entries.append(ImageEntry(kind=kind, tag=tag, config_id="sha256:" + config_id))
+                entries.append(ImageEntry(kind=kind, tag=tag, sealed_config_id="sha256:" + config_id))
     except (tarfile.TarError, OSError) as exc:
         raise EmergencyActivationError("decrypted Docker image archive is invalid") from exc
     expected_kinds = {"app", "postgres", "redis"} | ({"sms-egress"} if profile == "sms-otp" else set())
@@ -1228,6 +1235,48 @@ def _docker_result(command: Sequence[str], *, runner: Callable[..., Any] = subpr
     return result
 
 
+def _validate_loaded_image(
+    *,
+    item: ImageEntry,
+    payload: Any,
+    source_sha: str,
+    patch_sha: str,
+) -> str:
+    """Validate the stable daemon facts that remain after OCI import.
+
+    The encrypted archive, its signed digest, each allowed tag, each config,
+    and every OCI layer source are verified *before* ``docker load``.  Docker
+    29 may normalize an OCI config while loading it, changing ``.Id`` even
+    though it has imported the verified image.  The unique tag was required
+    to be absent before the load; afterwards it must resolve to a real daemon
+    image and the application configuration must still retain its sealed
+    provenance.  This intentionally avoids equating Docker's normalized ID
+    with the archive config blob identity.
+    """
+
+    if not isinstance(payload, dict):
+        _fail("loaded Docker image inspection is invalid")
+    image_id = payload.get("Id")
+    if not isinstance(image_id, str) or re.fullmatch(r"sha256:[a-f0-9]{64}", image_id) is None:
+        _fail("loaded Docker image inspection is invalid")
+    tags = payload.get("RepoTags")
+    if not isinstance(tags, list) or item.tag not in tags or any(
+        not isinstance(tag, str) or "staging" in tag.lower() or "three_site" in tag.lower()
+        for tag in tags
+    ):
+        _fail("loaded Docker image tags differ from the Emergency image plan")
+    config = payload.get("Config")
+    if not isinstance(config, dict):
+        _fail("loaded Docker image runtime configuration is invalid")
+    if item.kind == "app":
+        _validate_app_image_config(config, source_sha=source_sha, patch_sha=patch_sha, tag=item.tag)
+    elif item.kind == "sms-egress":
+        labels = config.get("Labels")
+        if not isinstance(labels, dict) or labels.get("org.opencontainers.image.revision") != patch_sha:
+            _fail("loaded SMS relay image provenance is invalid")
+    return image_id
+
+
 def load_images(
     *,
     campaign: VerifiedCampaign,
@@ -1235,7 +1284,7 @@ def load_images(
     profile: str,
     runner: Callable[..., Any] = subprocess.run,
 ) -> dict[str, Any]:
-    """Load only pristine allowlisted tags, then recheck the loaded IDs."""
+    """Load only pristine allowlisted tags, then recheck stable daemon facts."""
 
     if _receipt_path(paths, campaign.campaign_id, "images-loaded").exists():
         _fail("Emergency image receipt already exists; refusing to overwrite a prior image load")
@@ -1246,6 +1295,14 @@ def load_images(
     entries = [ImageEntry(**item) for item in raw_entries if isinstance(item, dict)]
     if len(entries) != len(raw_entries):
         _fail("prepared image plan is invalid")
+    source_sha = prepared.get("source_release_sha")
+    patch_sha = prepared.get("emergency_patch_sha")
+    if (
+        source_sha != SOURCE_RELEASE_SHA
+        or not isinstance(patch_sha, str)
+        or SHA_RE.fullmatch(patch_sha) is None
+    ):
+        _fail("prepared image provenance is invalid")
     for item in entries:
         result = runner(
             [DOCKER_BINARY, "image", "inspect", item.tag], check=False, capture_output=True, text=True, timeout=30
@@ -1265,14 +1322,13 @@ def load_images(
             payload = json.loads(bytes(getattr(result, "stdout", b"")).decode("utf-8") if isinstance(getattr(result, "stdout", b""), bytes) else str(getattr(result, "stdout", "")).strip())
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
             raise EmergencyActivationError("loaded Docker image inspection is invalid") from exc
-        if not isinstance(payload, dict) or payload.get("Id") != item.config_id:
-            _fail("loaded Docker image ID differs from the sealed image archive")
-        tags = payload.get("RepoTags")
-        if not isinstance(tags, list) or item.tag not in tags or any(
-            not isinstance(tag, str) or "staging" in tag.lower() or "three_site" in tag.lower() for tag in tags
-        ):
-            _fail("loaded Docker image tags differ from the Emergency image plan")
-        observed.append(dataclasses.asdict(item))
+        docker_image_id = _validate_loaded_image(
+            item=item,
+            payload=payload,
+            source_sha=source_sha,
+            patch_sha=patch_sha,
+        )
+        observed.append({**dataclasses.asdict(item), "docker_image_id": docker_image_id})
     payload = {"profile": profile, "images": observed}
     _write_receipt(paths, campaign, stage="images-loaded", payload=payload)
     return payload
