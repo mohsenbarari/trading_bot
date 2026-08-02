@@ -375,24 +375,40 @@ approval gate مستقل نیستند.
 
 ### گزارش پایان Stage 1
 
-- Status: `IN_PROGRESS`
+- Status: `COMPLETED_ACCEPTED`
 - Branch: `stage/three-site-staging-01-baseline`
 - Base SHA: `198c2d65a4edb11f51d5b92b9fc0fca747cb97da`
-- Implementation commits: `pending`
-- Deployed/tested release SHA: `ندارد`
+- Implementation commits:
+  - `0dba3fea615c2016dfe5495bb94af03f4c52d1ba` — inventory و تصمیم lineageها؛
+  - `72e2956ef2c16fa0bbaca766061c8ec01ed4f1dc` — الزام Witness relay trust key صریح؛
+  - `11ca6503a4845650447f2c64fb7710027c8b6b3b` — محدود کردن reusable session به relay صریح؛
+  - `e1ec7036235756f223e05270ebd0134e373ea58f` — کمینه‌سازی scope پیش‌فرض staging؛
+  - `2348dba2a58adf94e9aab5b5d376ed21ae66dfe0` — اتصال receipt به session scope؛
+  - `e5fc5b483778281ab4050d718da706eddf53b66a` — trust key مقید به backend در failover؛
+  - `03613052add09c6c624885596639405cc084db69` — همسان‌سازی تست با presigned POST؛
+  - `2da32750f85a1283aade34c5f83fc328562c3255` — Queue-disabled baseline.
+- Deployed/tested release SHA:
+  `2da32750f85a1283aade34c5f83fc328562c3255؛ فقط local tested و deploy نشده است.`
 - Changes delivered:
-  `backup کامل refs، ۹ safety tag، candidate تمیز و lineage decision inventory؛ code changes هنوز pending است.`
+  `backup کامل refs و ۹ safety tag؛ candidate محدود به پنج hardening approval، اصلاح تست presigned POST و Queue-disabled baseline؛ lineageهای production، emergency، Full Matrix بزرگ و coin-price وارد candidate نشدند.`
 - Commands/tests executed:
-  `git bundle create --all؛ sha256sum؛ git bundle verify؛ branch/tag ancestry و diff inventory`
-- Passed / failed / skipped: `pending`
+  `git bundle create/list-heads/verify و sha256sum؛ تست‌های approval، convergence، Queue، هسته و discovery سه‌سایتی؛ python3 -m alembic heads؛ tests.test_migration_smoke؛ make deployment-surface-guard؛ make three-site-topology-contract-check؛ git diff --check و forbidden-path audit.`
+- Passed / failed / skipped:
+  `approval 27/0/0؛ convergence 6/0/0؛ Queue 12/0/0؛ core 94/0/0؛ سه‌سایتی 167/0/24 از مجموع 191؛ migration smoke 15/0/0؛ هر دو guard موفق.`
 - External evidence paths and SHA-256:
   `/root/trading-bot/git-backups/trading-bot-pre-stage1-20260802.bundle` —
   `c923a93285984f4dcfd9027b15f5e6497f6e4fbd64fb42f8451107789c96ade3`
 - Production touched: `no`
-- Deviations / open risks: `pending`
-- Rollback verified: `pending`
-- Decision: `pending`
-- Next stage authorized: `no`
+- Deviations from roadmap:
+  `ندارد؛ docs/* در .gitignore است و دو سند roadmap با git add -f آگاهانه track شدند.`
+- Open risks:
+  `۲۴ تست PostgreSQL fencing بدون scratch database URL اجرا نشدند و باید در Stage 2 اجرا شوند؛ upload واقعی Arvan و هویت artifact/Compose نیز طبق Stage 2 و 3 هنوز اثبات نشده‌اند.`
+- Rollback verified:
+  `yes؛ bundle با complete history و checksum ثابت verify شد، ۹ lineage حیاتی از bundle قابل enumerate هستند و بازگشت candidate به Base SHA هیچ runtime/data mutation را نیاز ندارد.`
+- Decision:
+  `ACCEPTED؛ تمام شروط G1 Candidate Coherent عبور کردند.`
+- Next stage authorized:
+  `no؛ شروع Stage 2 نیازمند دستور صریح مالک پس از مرور این closure است.`
 
 ---
 

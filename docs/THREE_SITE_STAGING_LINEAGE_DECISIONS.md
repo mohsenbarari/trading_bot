@@ -155,7 +155,25 @@ G1 باید با `git diff --name-status main..candidate/three-site-staging` ا�
 - Backup: `PASSED`
 - Candidate isolation: `PASSED`
 - Branch-level inventory: `COMPLETED`
-- Five approval hardenings: `PENDING_APPLY_AND_TEST`
-- Convergence POST test alignment: `PENDING`
-- Queue disabled baseline: `PENDING`
-- G1 decision: `PENDING`
+- Five approval hardenings: `APPLIED_AND_TESTED`
+- Convergence POST test alignment: `APPLIED_AND_TESTED`
+- Queue disabled baseline: `APPLIED_AND_TESTED`
+- G1 decision: `ACCEPTED`
+
+### 7.1 منشأ و commit مقصد تغییرات پذیرفته‌شده
+
+| Source | Candidate commit | نتیجه |
+|---|---|---|
+| `8af0c02556a50206af41642554a59e6dca1db5e9` | `72e2956ef2c16fa0bbaca766061c8ec01ed4f1dc` | `ADOPTED` |
+| `b03c682f45c1e0ecf83dd13b0d3106754ec82c66` | `11ca6503a4845650447f2c64fb7710027c8b6b3b` | `ADOPTED` |
+| `0f6b687803f5ee5b31bee943652928b50399b9e5` | `e1ec7036235756f223e05270ebd0134e373ea58f` | `ADOPTED` |
+| `da72f60a39c2d060f36aec50b1ba8e7ab0eb33a1` | `2348dba2a58adf94e9aab5b5d376ed21ae66dfe0` | `ADOPTED` |
+| `0f79f63f853be46d19048502cbc909ebc37a2437` | `e5fc5b483778281ab4050d718da706eddf53b66a` | `ADOPTED` |
+| contract واقعی presigned POST در main | `03613052add09c6c624885596639405cc084db69` | `REIMPLEMENTED_TEST` |
+| Queue-disabled staging baseline | `2da32750f85a1283aade34c5f83fc328562c3255` | `REIMPLEMENTED_BASELINE` |
+
+تمام cherry-pickها بدون conflict انجام شدند. تست‌های approval relay شامل ۲۷ تست،
+تست convergence شامل ۶ تست و تست‌های Queue baseline شامل ۱۲ تست بودند و همگی
+موفق شدند. مجموعه هسته ۹۴ تست و discovery سه‌سایتی ۱۹۱ تست نیز بدون failure
+عبور کردند؛ در discovery تعداد ۲۴ تست وابسته به PostgreSQL واقعی، مطابق مرز
+Stage 1، skip شد.
