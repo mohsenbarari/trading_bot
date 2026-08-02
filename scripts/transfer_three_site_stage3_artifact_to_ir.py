@@ -58,7 +58,7 @@ url,cipher_hash,cipher_size,plain_hash,plain_size,destination,identity=sys.argv[
 cipher_size=int(cipher_size); plain_size=int(plain_size); target=pathlib.Path(destination)
 parsed=urllib.parse.urlsplit(url)
 if parsed.scheme!='https' or parsed.hostname!='s3.ir-thr-at1.arvanstorage.ir' or parsed.username or parsed.password or parsed.fragment: raise RuntimeError('artifact URL is outside approved Object Storage')
-if not re.fullmatch(r'/tmp/stage3-[0-9a-f]{8}-[0-9a-f]{8}-transfer/(three-site-stage3-[0-9a-f]{8}\.bundle|trading-bot-postgres-boottime-[0-9a-f]{8}\.tar\.zst|trading-bot-three-site-app-[0-9a-f]{8}\.tar\.zst)',destination): raise RuntimeError('artifact destination is outside approved transfer root')
+if not re.fullmatch(r'/tmp/stage3-[0-9a-f]{8}-[0-9a-f]{8}-transfer/(three-site-stage3-[0-9a-f]{8}\.bundle|trading-bot-postgres-boottime-[0-9a-f]{8}\.tar\.zst|trading-bot-three-site-app-[0-9a-f]{8}\.tar\.zst|trading-bot-three-site-third-party-[0-9a-f]{8}\.tar\.zst)',destination): raise RuntimeError('artifact destination is outside approved transfer root')
 if identity!='/root/secure-envs/trading-bot/stage3-fd34231d-age-identity.txt': raise RuntimeError('artifact identity path drifted')
 meta=pathlib.Path(identity).lstat()
 if not stat.S_ISREG(meta.st_mode) or meta.st_uid!=0 or stat.S_IMODE(meta.st_mode)!=0o600 or meta.st_nlink!=1: raise RuntimeError('artifact age identity is unsafe')
@@ -111,6 +111,7 @@ def artifact_spec(source: Path, *, release_sha: str, campaign_id: str) -> tuple[
         f"three-site-stage3-{release_short}.bundle",
         f"trading-bot-postgres-boottime-{release_short}.tar.zst",
         f"trading-bot-three-site-app-{release_short}.tar.zst",
+        f"trading-bot-three-site-third-party-{release_short}.tar.zst",
     }
     if source.name not in allowed:
         raise Stage3ArtifactTransferError("Stage 3 artifact filename is outside the allowlist")
