@@ -125,12 +125,16 @@ def audit(client, *, bucket: str, lifecycle_rule: dict[str, Any]) -> dict[str, A
         lambda: client.get_public_access_block(Bucket=bucket),
         missing_codes={"NoSuchPublicAccessBlockConfiguration"},
     ).get("PublicAccessBlockConfiguration", {})
+    policy_status = client.get_bucket_policy_status(Bucket=bucket).get("PolicyStatus") or {}
     rules = lifecycle.get("Rules") or []
     return {
         "bucket_exists": True,
         "versioning_enabled": versioning.get("Status") == "Enabled",
         "private_acl": _acl_is_private(acl),
+        "bucket_policy_public": policy_status.get("IsPublic") is True,
+        "server_default_encryption_configured": bool(encryption),
         "default_encryption_aes256": _encryption_is_aes256(encryption),
+        "public_access_block_configured": bool(public_access_block),
         "strict_public_access_block": _public_access_block_is_strict(public_access_block),
         "campaign_lifecycle_exact": _matching_rule(rules, lifecycle_rule),
         "lifecycle_rule_count": len(rules),
@@ -193,7 +197,6 @@ def _encrypted_roundtrip(client, *, bucket: str, prefix: str, campaign_id: str) 
         ContentLength=len(ciphertext),
         ContentType="application/octet-stream",
         Metadata=metadata,
-        ServerSideEncryption="AES256",
     )
     head = client.head_object(Bucket=bucket, Key=object_key)
     version_id = str(head.get("VersionId") or response.get("VersionId") or "")
@@ -201,7 +204,6 @@ def _encrypted_roundtrip(client, *, bucket: str, prefix: str, campaign_id: str) 
         not version_id
         or int(head.get("ContentLength") or -1) != len(ciphertext)
         or head.get("Metadata") != metadata
-        or head.get("ServerSideEncryption") != "AES256"
     ):
         raise Stage3ObjectStorageError("encrypted probe lacks exact versioned metadata")
     remote = client.get_object(Bucket=bucket, Key=object_key, VersionId=version_id)
@@ -221,7 +223,7 @@ def _encrypted_roundtrip(client, *, bucket: str, prefix: str, campaign_id: str) 
         "plaintext_bytes": len(plaintext),
         "ciphertext_bytes": len(ciphertext),
         "client_side_encryption": "AES-256-GCM",
-        "server_side_encryption": "AES256",
+        "server_side_encryption": head.get("ServerSideEncryption"),
         "ephemeral_key_persisted": False,
         "readback_verified": True,
     }
@@ -245,6 +247,18 @@ def execute(args: argparse.Namespace, *, client=None) -> dict[str, Any]:  # noqa
         raise Stage3ObjectStorageError("staging bucket versioning is not enabled")
     if not before["private_acl"]:
         raise Stage3ObjectStorageError("staging bucket ACL is public")
+    if before["bucket_policy_public"]:
+        raise Stage3ObjectStorageError("staging bucket policy is public")
+    if (
+        before["server_default_encryption_configured"]
+        and not before["default_encryption_aes256"]
+    ):
+        raise Stage3ObjectStorageError("unexpected server-side encryption configuration")
+    if (
+        before["public_access_block_configured"]
+        and not before["strict_public_access_block"]
+    ):
+        raise Stage3ObjectStorageError("unexpected public-access-block configuration")
     if not args.apply:
         return {
             "status": "planned",
@@ -254,10 +268,10 @@ def execute(args: argparse.Namespace, *, client=None) -> dict[str, Any]:  # noqa
             "before": before,
             "required_confirmation": expected_confirmation,
             "mutating_operations": [
-                "put_bucket_encryption:AES256",
-                "put_public_access_block:all-true",
+                "remove_incompatible_default_sse_configuration_if_present",
+                "remove_incompatible_public_access_block_configuration_if_present",
                 f"put_lifecycle_rule:{expected_rule['ID']}",
-                "put_encrypted_readback_probe",
+                "put_client-side-AES-256-GCM-readback-probe",
             ],
             "bucket_or_object_delete": False,
         }
@@ -271,23 +285,10 @@ def execute(args: argparse.Namespace, *, client=None) -> dict[str, Any]:  # noqa
     if stat.S_IMODE(output_dir.stat().st_mode) != 0o700:
         raise Stage3ObjectStorageError("evidence output directory must be mode 0700")
 
-    client.put_bucket_encryption(
-        Bucket=bucket,
-        ServerSideEncryptionConfiguration={
-            "Rules": [
-                {"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}
-            ]
-        },
-    )
-    client.put_public_access_block(
-        Bucket=bucket,
-        PublicAccessBlockConfiguration={
-            "BlockPublicAcls": True,
-            "IgnorePublicAcls": True,
-            "BlockPublicPolicy": True,
-            "RestrictPublicBuckets": True,
-        },
-    )
+    if before["server_default_encryption_configured"]:
+        client.delete_bucket_encryption(Bucket=bucket)
+    if before["public_access_block_configured"]:
+        client.delete_public_access_block(Bucket=bucket)
     client.put_bucket_lifecycle_configuration(
         Bucket=bucket,
         LifecycleConfiguration={"Rules": rules},
@@ -296,11 +297,14 @@ def execute(args: argparse.Namespace, *, client=None) -> dict[str, Any]:  # noqa
     required = (
         "versioning_enabled",
         "private_acl",
-        "default_encryption_aes256",
-        "strict_public_access_block",
         "campaign_lifecycle_exact",
     )
-    if not all(after[name] for name in required):
+    if (
+        not all(after[name] for name in required)
+        or after["bucket_policy_public"]
+        or after["server_default_encryption_configured"]
+        or after["public_access_block_configured"]
+    ):
         raise Stage3ObjectStorageError("post-change Object Storage controls are incomplete")
     probe = _encrypted_roundtrip(
         client, bucket=bucket, prefix=prefix, campaign_id=campaign_id
@@ -308,7 +312,7 @@ def execute(args: argparse.Namespace, *, client=None) -> dict[str, Any]:  # noqa
     evidence = {
         "schema": "three-site-stage3-object-storage-readiness-v1",
         "captured_at_utc": datetime.now(timezone.utc).isoformat(),
-        "status": "hardened-and-encrypted-readback-verified",
+        "status": "private-versioned-lifecycle-client-encrypted-readback-verified",
         "bucket": bucket,
         "prefix": prefix,
         "campaign_id": campaign_id,
@@ -319,6 +323,13 @@ def execute(args: argparse.Namespace, *, client=None) -> dict[str, Any]:  # noqa
             "expiration_days": 45,
             "noncurrent_version_expiration_days": 14,
             "abort_incomplete_multipart_days": 1,
+        },
+        "provider_compatibility": {
+            "provider": "Arvan Object Storage",
+            "default_sse_put_compatible": False,
+            "strict_public_access_block_put_compatible": False,
+            "required_payload_encryption": "client-side AES-256-GCM",
+            "private_boundary": "private ACL plus non-public bucket policy",
         },
         "probe": probe,
         "bucket_created": False,
