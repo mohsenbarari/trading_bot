@@ -1,6 +1,6 @@
 # نقشه راه اجرایی انتشار معماری سه‌سایته روی Staging
 
-وضعیت سند: `Stage 0 / تدوین تکمیل‌شده؛ در انتظار پذیرش مالک`
+وضعیت سند: `Stage 0 / پذیرفته‌شده؛ Stage 1 مجاز به شروع`
 
 دامنه: انتشار و ارزیابی معماری `Bot-FI + WebApp-FI + WebApp-IR + Witness`
 روی منابع کاملاً مجزای staging. این سند مجوز انتشار production یا تغییر دامنه
@@ -284,7 +284,7 @@ approval gate مستقل نیستند.
 
 ### گزارش پایان Stage 0
 
-- Status: `COMPLETED_PENDING_OWNER_ACCEPTANCE`
+- Status: `COMPLETED_ACCEPTED`
 - Branch: `roadmap/three-site-staging-release`
 - Base SHA: `9105264000f51b480eb88f1f80845fd7608bd6b2`
 - Implementation commits:
@@ -311,14 +311,14 @@ approval gate مستقل نیستند.
 - Deviations:
   `docs/*` در `.gitignore` است؛ فایل roadmap با `git add -f` عمداً tracked شد.
 - Open risks:
-  - owner هنوز scope و gateهای roadmap را تأیید نکرده است؛
   - خطای فعلی suite سه‌سایته و ۲۴ تست PostgreSQL skip‌شده در Stage 1/2 باز است؛
   - backup tag فعلی همه refها را حفظ نمی‌کند؛
   - runtime واقعی چهار میزبان هنوز read-only audit نشده است.
 - Rollback verified:
   `yes؛ Stage 0 فقط یک فایل مستند روی branch مستقل از main افزوده و هیچ runtime یا data mutation ندارد.`
-- Decision: `READY_FOR_OWNER_ACCEPTANCE`
-- Next stage authorized: `no؛ پس از پذیرش صریح G0 توسط مالک`
+- Decision:
+  `ACCEPTED؛ مالک در 2026-08-02 شروع دقیق Stage بعدی طبق roadmap را صریحاً مجاز کرد.`
+- Next stage authorized: `yes؛ Stage 1 فقط در دامنه Git و candidate محلی`
 
 ---
 
