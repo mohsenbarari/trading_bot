@@ -83,8 +83,8 @@ def execute(
     )
     if args.confirm != expected:
         raise DirectSeedError("direct seed confirmation mismatch")
-    if HOST_KEY_RE.fullmatch(args.source_host_key_sha256) is None:
-        raise DirectSeedError("direct seed source host-key fingerprint is malformed")
+    if HOST_KEY_RE.fullmatch(args.destination_host_key_sha256) is None:
+        raise DirectSeedError("direct seed destination host-key fingerprint is malformed")
     if ROUTE_RE.fullmatch(args.transport_route) is None:
         raise DirectSeedError("direct seed transport route is malformed")
     artifacts = _artifact_mapping(args.artifact)
@@ -162,7 +162,7 @@ def execute(
         "source_role": args.target_role,
         "transport": "ssh-host-key-pinned",
         "transport_route": args.transport_route,
-        "source_host_key_sha256": args.source_host_key_sha256,
+        "destination_host_key_sha256": args.destination_host_key_sha256,
         "verified_at": now,
         "artifacts": transfers,
     }
@@ -206,7 +206,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed-manifest", action="append", required=True)
     parser.add_argument("--artifact", action="append", required=True)
     parser.add_argument("--transport-route", required=True)
-    parser.add_argument("--source-host-key-sha256", required=True)
+    parser.add_argument("--destination-host-key-sha256", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")

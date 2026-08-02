@@ -63,7 +63,7 @@ class StageThreeSiteStagingSeedDirectTests(unittest.TestCase):
                 confirm=confirmation_phrase(
                     "11111111-1111-4111-8111-111111111111", "bot_fi", "a" * 64
                 ),
-                source_host_key_sha256="SHA256:" + "A" * 43,
+                destination_host_key_sha256="SHA256:" + "A" * 43,
                 transport_route="bot-fl-controller-to-bot-fi",
                 artifact=[f"{kind}={path}" for kind, path in sources.items()],
                 output_dir=output,
