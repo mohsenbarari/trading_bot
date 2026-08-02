@@ -5,7 +5,7 @@ Date: 2026-06-17
 This document captures the target operating policy for the Telegram bot, Iran WebApp, and
 cross-server sync. It is the working basis for the next design Q&A rounds.
 
-Last updated: 2026-06-19
+Last updated: 2026-08-02
 
 Implementation baseline acceptance: on 2026-06-18, the owner accepted section 16
 (`Second-pass audit findings before implementation`) and section 17
@@ -213,6 +213,33 @@ Policy note: item 5 and item 6 create an explicit exception. "All tables" means 
 tables except the messenger-owned data set. The confirmed messenger-owned set includes at least
 `messages`, `conversations`, `chat_files`, `upload_batches`, `upload_sessions`, `chats`, and
 `chat_members`.
+
+## Project Change-Control Invariant
+
+Effective 2026-08-02, this rule is non-negotiable for the Emergency IR Standalone,
+the three-site continuity architecture, and every supporting change in this repository.
+
+1. Start a change unit only in a dedicated clean worktree. Before editing, verify the active
+   branch, HEAD, and `git status --short`.
+2. A change unit contains only one coherent implementation change with its directly related tests
+   and documentation. Never mix in an experiment, generated output, unrelated repair, or inherited
+   dirty file.
+3. Before committing, run the relevant tests and `git diff --check`, inspect the changed-file list
+   and diff for scope, provenance, and secret material, then stage explicit paths only. `git add .`
+   is prohibited for this work.
+4. Commit the reviewed unit with an intent-specific message, then re-run `git status --short`.
+   It must be empty before another change unit, artifact build, publication, activation, cutover,
+   deployment, or infrastructure action begins.
+5. A failed test, ambiguous diff, dirty inherited worktree, or provenance mismatch blocks the next
+   unit. Preserve evidence and resolve or explicitly quarantine it; do not accumulate unrelated
+   edits to fix it later.
+6. Existing dirty worktrees are user-owned forensic material until provenance is established. They
+   must not be reset, restored, stashed, deleted, staged, committed, or merged into a release path
+   merely to obtain a clean status.
+7. Any separate trust domain or review boundary requires a separate clean worktree and branch. No
+   artifact publication, activation, cutover, or destructive action may run from a dirty worktree.
+8. Every agent reports exact changed files, tests, commit SHA, and final `git status --short`; the
+   coordinating agent independently verifies the clean status before dispatching the next unit.
 
 ## Branch And Environment Enforcement
 
