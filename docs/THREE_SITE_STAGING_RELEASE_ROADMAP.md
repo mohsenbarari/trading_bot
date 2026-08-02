@@ -587,17 +587,44 @@ DNS mutation انجام نمی‌شود.
 
 ### بخش B — آماده‌سازی isolation با authorization مرحله
 
-1. ساخت یک inventory planned و سپس measured برای چهار role.
-2. اختصاص disk/mount مستقل staging و cgroup aggregate محدود.
-3. تثبیت Compose project، volume prefix، network، port و evidence root مستقل.
-4. ساخت credentialهای staging-only و اثبات عدم برابری با production.
-5. ساخت bucket/prefix versioned خصوصی staging و تست upload/download encrypted.
-6. ساخت DNS/TLS مخصوص staging؛ production domain تغییر نمی‌کند.
-7. آماده‌سازی dedicated staging Telegram bot/token یا ادامه بدون Bot عمومی.
-8. گرفتن backup از source staging موجود و اجرای restore drill مستقل.
-9. آماده‌سازی rollback manifest برای بازگرداندن source staging قبلی.
-10. ایجاد یک staging operations session محدود به release روی Witness؛ receiptها
-    از همان session صادر می‌شوند و TOTP برای هر زیرمرحله تکرار نمی‌شود.
+ترتیب زیر پس از checkpoint بخش A و براساس واقعیت میزبان‌ها جایگزین ترتیب اولیه
+می‌شود. علت این اصلاح آن است که inventory planned به Docker daemon ID و filesystem
+UUID دقیق نیاز دارد، درحالی‌که Witness فعلی هنوز Docker و block-device staging
+ندارد؛ حدس‌زدن این شناسه‌ها ممنوع است.
+
+1. مالک یک block-device خالی حداقل 10 GiB به Witness متصل می‌کند؛ agent فقط با
+   `lsblk/blkid/findmnt` اثبات می‌کند device جدید، root و دارای داده نیست.
+2. یک authorization یکپارچه و release-bound برای کل بخش B صادر می‌شود. تنها
+   format همان device دقیق، تغییر DNS و عملیات bucket confirmation مستقل خود را
+   حفظ می‌کنند؛ برای read-only probeها یا زیرگام‌های هم‌معنی gate تکراری ساخته
+   نمی‌شود.
+3. bootstrap حداقلی Witness انجام می‌شود: Docker/Compose نصب، device خالی با UUID
+   از پیش ثبت‌شده format، mount مستقل و cgroup aggregate محدود فعال می‌شود. سرویس
+   production Witness، route، listener و PostgreSQL فعلی تغییر نمی‌کنند و هیچ
+   application container در این گام start نمی‌شود.
+4. daemon ID و mount UUID واقعی Witness همراه سه مرز موجود دوباره اندازه‌گیری و
+   inventory planned تازه با campaign/deployment/Compose namespace یکتا ساخته و
+   approve می‌شود.
+5. project، volume prefix، network، port و evidence root مستقل چهار role render و
+   fresh-preflight می‌شوند؛ نام‌ها یا volumeهای campaignهای قدیمی reuse نمی‌شوند.
+6. credentialهای staging-only ساخته/rotate و با fingerprint اثبات می‌شوند که با
+   production برابر نیستند. credential-like value دیده‌شده در probe نیز در همین
+   گام rotate می‌شود.
+7. bucket اختصاصی staging موجود فقط پس از اثبات private ACL/policy، versioning و
+   lifecycle قابل reuse است؛ prefix تازه ساخته و encrypted upload/download با
+   VersionId و hash اجرا می‌شود. production bucket هرگز query تغییردهنده نمی‌گیرد.
+8. فقط PostgreSQLهای campaign تازه برای provision/measure start می‌شوند؛ چهار
+   system identifier متمایز ثبت، inventory measured ساخته و دوباره approve می‌شود.
+9. source و imageهای exact release به مقصدها منتقل و hash آنها بدون start کردن
+   application roleها attestation می‌شود.
+10. DNS/TLS مخصوص staging آماده می‌شود؛ production domain و route تغییر نمی‌کند.
+11. dedicated staging Telegram token آماده می‌شود؛ در نبود آن Bot عمومی خاموش
+    می‌ماند و این موضوع G3 را بلاک نمی‌کند.
+12. source staging موجود freeze، backup و در PostgreSQL scratch مستقل restore-drill
+    می‌شود؛ سپس rollback manifest و command plan بازگردانی همان source dry-run
+    می‌شوند.
+13. operations session محدود به release روی Witness نگهداری می‌شود و receiptهای
+    لازم از همان session صادر می‌شوند؛ password/TOTP برای هر زیرگام تکرار نمی‌شود.
 
 ### Exit gate — G3 Hosts Isolated
 
