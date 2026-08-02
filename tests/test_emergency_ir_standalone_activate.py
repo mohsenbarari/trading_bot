@@ -158,7 +158,13 @@ def write_settings(path: Path, *, profile: str = "telegram-only", extra: bool = 
     path.chmod(0o600)
 
 
-def write_image_bundle(path: Path, *, bad_app_labels: bool = False) -> None:
+def write_image_bundle(
+    path: Path,
+    *,
+    bad_app_labels: bool = False,
+    oci_layout: bool = False,
+    bad_oci_layer_source: bool = False,
+) -> None:
     labels = {
         "org.opencontainers.image.revision": PATCH_SHA,
         "org.goldtrade.emergency.base-revision": SOURCE_SHA,
@@ -174,11 +180,35 @@ def write_image_bundle(path: Path, *, bad_app_labels: bool = False) -> None:
     ]
     manifest_rows: list[dict[str, object]] = []
     with tarfile.open(path, "w:") as archive:
-        for identity, tag, config in rows:
-            layer = f"{identity}/layer.tar"
-            add_member(archive, layer, b"one-layer")
-            add_member(archive, f"{identity}.json", json.dumps({"config": config}).encode("utf-8"))
-            manifest_rows.append({"Config": f"{identity}.json", "RepoTags": [tag], "Layers": [layer]})
+        for index, (identity, tag, config) in enumerate(rows):
+            config_payload = json.dumps({"config": config}).encode("utf-8")
+            if not oci_layout:
+                layer = f"{identity}/layer.tar"
+                add_member(archive, layer, b"one-layer")
+                add_member(archive, f"{identity}.json", config_payload)
+                manifest_rows.append({"Config": f"{identity}.json", "RepoTags": [tag], "Layers": [layer]})
+                continue
+            layer_payload = f"one-layer-{index}".encode("ascii")
+            layer_digest = hashlib.sha256(layer_payload).hexdigest()
+            config_digest = hashlib.sha256(config_payload).hexdigest()
+            layer = f"blobs/sha256/{layer_digest}"
+            add_member(archive, layer, layer_payload)
+            add_member(archive, f"blobs/sha256/{config_digest}", config_payload)
+            source_size = len(layer_payload) + 1 if bad_oci_layer_source and index == 0 else len(layer_payload)
+            manifest_rows.append(
+                {
+                    "Config": f"blobs/sha256/{config_digest}",
+                    "RepoTags": [tag],
+                    "Layers": [layer],
+                    "LayerSources": {
+                        f"sha256:{layer_digest}": {
+                            "mediaType": "application/vnd.oci.image.layer.v1.tar",
+                            "size": source_size,
+                            "digest": f"sha256:{layer_digest}",
+                        }
+                    },
+                }
+            )
         add_member(archive, "manifest.json", json.dumps(manifest_rows).encode("utf-8"))
     path.chmod(0o600)
 
@@ -268,6 +298,25 @@ class EmergencyIrStandaloneActivationTests(unittest.TestCase):
             bad = root / "bad-images.tar"
             write_image_bundle(bad, bad_app_labels=True)
             with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "provenance"):
+                ACTIVATE.inspect_image_bundle(
+                    image_tar=bad, source_sha=SOURCE_SHA, patch_sha=PATCH_SHA, profile="telegram-only"
+                )
+
+    def test_image_archive_accepts_current_docker_oci_layout_and_binds_layer_sources(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-activation-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            image = root / "oci-images.tar"
+            write_image_bundle(image, oci_layout=True)
+            entries = ACTIVATE.inspect_image_bundle(
+                image_tar=image, source_sha=SOURCE_SHA, patch_sha=PATCH_SHA, profile="telegram-only"
+            )
+            self.assertEqual({entry.kind for entry in entries}, {"app", "postgres", "redis"})
+            self.assertTrue(all(entry.config_id.startswith("sha256:") for entry in entries))
+
+            bad = root / "bad-oci-images.tar"
+            write_image_bundle(bad, oci_layout=True, bad_oci_layer_source=True)
+            with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "LayerSources descriptor"):
                 ACTIVATE.inspect_image_bundle(
                     image_tar=bad, source_sha=SOURCE_SHA, patch_sha=PATCH_SHA, profile="telegram-only"
                 )
