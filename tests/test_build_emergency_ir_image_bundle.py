@@ -25,6 +25,8 @@ SPEC.loader.exec_module(BUILD)
 
 PATCH_SHA = "a" * 40
 APP_TAG = f"trading_bot_emergency_ir_app:{PATCH_SHA}"
+POSTGRES_TAG = BUILD.expected_postgres_image(PATCH_SHA)
+REDIS_TAG = BUILD.expected_redis_image(PATCH_SHA)
 IMAGE_IDS = {
     APP_TAG: "sha256:" + "1" * 64,
     BUILD.POSTGRES_SOURCE_IMAGE: "sha256:" + "2" * 64,
@@ -125,12 +127,12 @@ def expected_entries() -> list[BUILD.activator.ImageEntry]:
         BUILD.activator.ImageEntry(kind="app", tag=APP_TAG, config_id=IMAGE_IDS[APP_TAG]),
         BUILD.activator.ImageEntry(
             kind="postgres",
-            tag=BUILD.POSTGRES_EMERGENCY_IMAGE,
+            tag=POSTGRES_TAG,
             config_id=IMAGE_IDS[BUILD.POSTGRES_SOURCE_IMAGE],
         ),
         BUILD.activator.ImageEntry(
             kind="redis",
-            tag=BUILD.REDIS_EMERGENCY_IMAGE,
+            tag=REDIS_TAG,
             config_id=IMAGE_IDS[BUILD.REDIS_SOURCE_IMAGE],
         ),
     ]
@@ -184,14 +186,14 @@ class EmergencyImageBundleTests(unittest.TestCase):
             self.assertTrue(expected_labels.issubset(set(build_command)))
             self.assertEqual(
                 [
-                    [BUILD.DOCKER_BINARY, "image", "tag", BUILD.POSTGRES_SOURCE_IMAGE, BUILD.POSTGRES_EMERGENCY_IMAGE],
-                    [BUILD.DOCKER_BINARY, "image", "tag", BUILD.REDIS_SOURCE_IMAGE, BUILD.REDIS_EMERGENCY_IMAGE],
+                    [BUILD.DOCKER_BINARY, "image", "tag", BUILD.POSTGRES_SOURCE_IMAGE, POSTGRES_TAG],
+                    [BUILD.DOCKER_BINARY, "image", "tag", BUILD.REDIS_SOURCE_IMAGE, REDIS_TAG],
                 ],
                 [command for command in runner.commands if command[1:3] == ["image", "tag"]],
             )
             save_command = next(command for command in runner.commands if command[1] == "save")
             self.assertEqual(
-                [BUILD.DOCKER_BINARY, "save", APP_TAG, BUILD.POSTGRES_EMERGENCY_IMAGE, BUILD.REDIS_EMERGENCY_IMAGE],
+                [BUILD.DOCKER_BINARY, "save", APP_TAG, POSTGRES_TAG, REDIS_TAG],
                 save_command,
             )
             self.assertFalse(any(command[1] == "load" for command in runner.commands))
@@ -255,7 +257,7 @@ class EmergencyImageBundleTests(unittest.TestCase):
                 )
             self.assertFalse(runner.commands)
 
-            runner = LocalDockerRunner(repo=repo, existing={BUILD.POSTGRES_EMERGENCY_IMAGE})
+            runner = LocalDockerRunner(repo=repo, existing={POSTGRES_TAG})
             with mock.patch.object(BUILD.os, "geteuid", return_value=0), self.assertRaisesRegex(
                 BUILD.EmergencyImageBundleError, "overwrite existing Emergency target tag"
             ):
@@ -264,13 +266,55 @@ class EmergencyImageBundleTests(unittest.TestCase):
                 )
             self.assertFalse(any(command[1] == "build" for command in runner.commands if command[0] == BUILD.DOCKER_BINARY))
 
+    def test_dependency_tags_are_patch_bound_and_legacy_tags_do_not_block_a_fresh_build(self) -> None:
+        other_patch = "b" * 40
+        self.assertEqual(
+            f"trading_bot_emergency_ir_postgres:15-alpine-{PATCH_SHA}",
+            POSTGRES_TAG,
+        )
+        self.assertEqual(
+            f"trading_bot_emergency_ir_redis:7-alpine-{PATCH_SHA}",
+            REDIS_TAG,
+        )
+        self.assertNotEqual(POSTGRES_TAG, BUILD.expected_postgres_image(other_patch))
+        self.assertNotEqual(REDIS_TAG, BUILD.expected_redis_image(other_patch))
+
+        with tempfile.TemporaryDirectory(prefix="emergency-image-bundle-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            repo = self._repo(root)
+            runner = LocalDockerRunner(
+                repo=repo,
+                existing={
+                    "trading_bot_emergency_ir_postgres:15-alpine",
+                    "trading_bot_emergency_ir_redis:7-alpine",
+                },
+            )
+            with mock.patch.object(BUILD.os, "geteuid", return_value=0), mock.patch.object(
+                BUILD.activator, "inspect_image_bundle", return_value=expected_entries()
+            ):
+                BUILD.build_emergency_ir_image_bundle(
+                    repo=repo,
+                    emergency_patch_sha=PATCH_SHA,
+                    output=root / "fresh.tar",
+                    runner=runner,
+                )
+
+            self.assertEqual(
+                [
+                    [BUILD.DOCKER_BINARY, "image", "tag", BUILD.POSTGRES_SOURCE_IMAGE, POSTGRES_TAG],
+                    [BUILD.DOCKER_BINARY, "image", "tag", BUILD.REDIS_SOURCE_IMAGE, REDIS_TAG],
+                ],
+                [command for command in runner.commands if command[1:3] == ["image", "tag"]],
+            )
+
     def test_docker_inspect_error_is_not_treated_as_an_absent_target_tag(self) -> None:
         def denied(_command: list[str], **_kwargs: object) -> SimpleNamespace:
             return completed(returncode=1, stderr="permission denied while connecting to the Docker daemon")
 
         with self.assertRaisesRegex(BUILD.EmergencyImageBundleError, "failed"):
             BUILD._image_id(
-                BUILD.POSTGRES_EMERGENCY_IMAGE,
+                POSTGRES_TAG,
                 label="target probe",
                 runner=denied,
                 allow_missing=True,

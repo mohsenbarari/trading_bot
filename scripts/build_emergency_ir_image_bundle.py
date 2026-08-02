@@ -45,8 +45,10 @@ SOURCE_RELEASE_SHA = activator.SOURCE_RELEASE_SHA
 APP_IMAGE_REPOSITORY = "trading_bot_emergency_ir_app"
 POSTGRES_SOURCE_IMAGE = "postgres:15-alpine"
 REDIS_SOURCE_IMAGE = "redis:7-alpine"
-POSTGRES_EMERGENCY_IMAGE = "trading_bot_emergency_ir_postgres:15-alpine"
-REDIS_EMERGENCY_IMAGE = "trading_bot_emergency_ir_redis:7-alpine"
+POSTGRES_EMERGENCY_REPOSITORY = "trading_bot_emergency_ir_postgres"
+REDIS_EMERGENCY_REPOSITORY = "trading_bot_emergency_ir_redis"
+POSTGRES_EMERGENCY_BASE_TAG = "15-alpine"
+REDIS_EMERGENCY_BASE_TAG = "7-alpine"
 IMAGE_ID_RE = re.compile(r"^sha256:[a-f0-9]{64}$", re.ASCII)
 SHA_RE = re.compile(r"^[a-f0-9]{40}$", re.ASCII)
 
@@ -75,6 +77,39 @@ def expected_app_image(emergency_patch_sha: str) -> str:
     if SHA_RE.fullmatch(emergency_patch_sha) is None:
         _fail("Emergency patch SHA is invalid")
     return f"{APP_IMAGE_REPOSITORY}:{emergency_patch_sha}"
+
+
+def _expected_dependency_image(
+    *, repository: str, base_tag: str, emergency_patch_sha: str
+) -> str:
+    """Return one patch-bound, create-only tag for a bundled base image.
+
+    A dependency tag must not be shared by separate Emergency campaigns: the
+    builder intentionally refuses to overwrite a pre-existing target tag.  A
+    full patch SHA makes the target deterministic for its immutable source,
+    while keeping a failed or prior campaign as Docker evidence instead of
+    mutating it.
+    """
+
+    if SHA_RE.fullmatch(emergency_patch_sha) is None:
+        _fail("Emergency patch SHA is invalid")
+    return f"{repository}:{base_tag}-{emergency_patch_sha}"
+
+
+def expected_postgres_image(emergency_patch_sha: str) -> str:
+    return _expected_dependency_image(
+        repository=POSTGRES_EMERGENCY_REPOSITORY,
+        base_tag=POSTGRES_EMERGENCY_BASE_TAG,
+        emergency_patch_sha=emergency_patch_sha,
+    )
+
+
+def expected_redis_image(emergency_patch_sha: str) -> str:
+    return _expected_dependency_image(
+        repository=REDIS_EMERGENCY_REPOSITORY,
+        base_tag=REDIS_EMERGENCY_BASE_TAG,
+        emergency_patch_sha=emergency_patch_sha,
+    )
 
 
 def _tool_environment() -> dict[str, str]:
@@ -439,7 +474,9 @@ def build_emergency_ir_image_bundle(
         runner=runner,
     )
     app_image = expected_app_image(emergency_patch_sha)
-    tags = (app_image, POSTGRES_EMERGENCY_IMAGE, REDIS_EMERGENCY_IMAGE)
+    postgres_image = expected_postgres_image(emergency_patch_sha)
+    redis_image = expected_redis_image(emergency_patch_sha)
+    tags = (app_image, postgres_image, redis_image)
     for tag in tags:
         _require_absent_tag(tag, runner=runner)
 
@@ -485,33 +522,33 @@ def build_emergency_ir_image_bundle(
         runner=runner,
     )
     _docker_success(
-        (DOCKER_BINARY, "image", "tag", POSTGRES_SOURCE_IMAGE, POSTGRES_EMERGENCY_IMAGE),
+        (DOCKER_BINARY, "image", "tag", POSTGRES_SOURCE_IMAGE, postgres_image),
         label="Emergency PostgreSQL image tag",
         runner=runner,
         timeout=30,
     )
     _docker_success(
-        (DOCKER_BINARY, "image", "tag", REDIS_SOURCE_IMAGE, REDIS_EMERGENCY_IMAGE),
+        (DOCKER_BINARY, "image", "tag", REDIS_SOURCE_IMAGE, redis_image),
         label="Emergency Redis image tag",
         runner=runner,
         timeout=30,
     )
     if _image_id(
-        POSTGRES_EMERGENCY_IMAGE,
+        postgres_image,
         label="Emergency PostgreSQL tagged image inspection",
         runner=runner,
     ) != postgres_id:
         _fail("Emergency PostgreSQL tag does not bind the expected source image")
     if _image_id(
-        REDIS_EMERGENCY_IMAGE,
+        redis_image,
         label="Emergency Redis tagged image inspection",
         runner=runner,
     ) != redis_id:
         _fail("Emergency Redis tag does not bind the expected source image")
     expected_ids = {
         app_image: app_id,
-        POSTGRES_EMERGENCY_IMAGE: postgres_id,
-        REDIS_EMERGENCY_IMAGE: redis_id,
+        postgres_image: postgres_id,
+        redis_image: redis_id,
     }
     digest, size, entries = _save_validated_archive(
         output=output,
