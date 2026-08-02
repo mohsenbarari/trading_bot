@@ -1027,24 +1027,42 @@ def _require_owner_only_acl(
 
 
 def _require_private_versioned_bucket(client: Any, *, bucket: str) -> str:
-    """Fail closed unless all bucket privacy and versioning controls are visible."""
+    """Fail closed unless the dedicated bucket's required controls are visible.
+
+    Arvan Object Storage does not expose S3 Public Access Block configuration
+    for every bucket.  Its documented absence response is accepted only when
+    the remaining independent controls still prove this is a private,
+    versioned, owner-only bucket with no bucket policy.
+    """
 
     try:
         versioning = client.get_bucket_versioning(Bucket=bucket)
         if not isinstance(versioning, Mapping) or versioning.get("Status") != "Enabled":
             _fail("Arvan bucket versioning must be Enabled")
-        public_access = client.get_public_access_block(Bucket=bucket)
-        configuration = public_access.get("PublicAccessBlockConfiguration") if isinstance(public_access, Mapping) else None
-        required = {
-            "BlockPublicAcls": True,
-            "IgnorePublicAcls": True,
-            "BlockPublicPolicy": True,
-            "RestrictPublicBuckets": True,
-        }
-        if not isinstance(configuration, Mapping) or any(
-            configuration.get(key) is not expected for key, expected in required.items()
-        ):
-            _fail("Arvan bucket public-access block must be fully enabled")
+        try:
+            public_access = client.get_public_access_block(Bucket=bucket)
+        except Exception as exc:
+            # Arvan returns this exact S3 error when Public Access Block is not
+            # available.  Do not treat other access, transport, or API errors
+            # as evidence that the bucket is private.
+            if _s3_error_code(exc) != "NoSuchPublicAccessBlockConfiguration":
+                raise
+        else:
+            configuration = (
+                public_access.get("PublicAccessBlockConfiguration")
+                if isinstance(public_access, Mapping)
+                else None
+            )
+            required = {
+                "BlockPublicAcls": True,
+                "IgnorePublicAcls": True,
+                "BlockPublicPolicy": True,
+                "RestrictPublicBuckets": True,
+            }
+            if not isinstance(configuration, Mapping) or any(
+                configuration.get(key) is not expected for key, expected in required.items()
+            ):
+                _fail("Arvan bucket public-access block must be fully enabled")
         try:
             client.get_bucket_policy(Bucket=bucket)
         except Exception as exc:  # No policy is safe; every other unknown response is not.

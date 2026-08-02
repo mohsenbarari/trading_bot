@@ -57,6 +57,7 @@ class FakeS3:
         foreign_bucket_grant: bool = False,
         foreign_object_grant: bool = False,
         has_bucket_policy: bool = False,
+        public_access_block_error_code: str | None = None,
     ) -> None:
         self.versioning = versioning
         self.private = private
@@ -64,18 +65,25 @@ class FakeS3:
         self.foreign_bucket_grant = foreign_bucket_grant
         self.foreign_object_grant = foreign_object_grant
         self.has_bucket_policy = has_bucket_policy
+        self.public_access_block_error_code = public_access_block_error_code
         self.objects: dict[tuple[str, str], list[tuple[str, bytes]]] = {}
         self.put_calls: list[tuple[str, str]] = []
         self.put_kwargs: list[dict[str, object]] = []
         self.get_calls: list[tuple[str, str, str]] = []
         self.head_calls: list[tuple[str, str, str | None]] = []
         self.object_acl_calls: list[tuple[str, str, str]] = []
+        self.public_access_block_calls = 0
+        self.bucket_policy_calls = 0
+        self.bucket_acl_calls = 0
         self._sequence = 0
 
     def get_bucket_versioning(self, *, Bucket: str) -> dict[str, str]:
         return {"Status": "Enabled" if self.versioning else "Suspended"}
 
     def get_public_access_block(self, *, Bucket: str) -> dict[str, object]:
+        self.public_access_block_calls += 1
+        if self.public_access_block_error_code is not None:
+            raise FakeClientError(self.public_access_block_error_code)
         enabled = self.private
         return {
             "PublicAccessBlockConfiguration": {
@@ -87,6 +95,7 @@ class FakeS3:
         }
 
     def get_bucket_policy(self, *, Bucket: str) -> dict[str, object]:
+        self.bucket_policy_calls += 1
         if not self.has_bucket_policy:
             raise FakeClientError("NoSuchBucketPolicy")
         return {"Policy": "{\\\"Statement\\\":[]}"}
@@ -118,6 +127,7 @@ class FakeS3:
         return {"Owner": {"ID": self.OWNER_ID}, "Grants": grants}
 
     def get_bucket_acl(self, *, Bucket: str) -> dict[str, object]:
+        self.bucket_acl_calls += 1
         return self._acl(foreign_grant=self.foreign_bucket_grant)
 
     def _select(self, bucket: str, key: str, version_id: str | None) -> tuple[str, bytes]:
@@ -719,6 +729,75 @@ class PublishEmergencyIrObjectStorageTests(unittest.TestCase):
                                 ttl_seconds=300,
                             )
                     self.assertEqual(client.put_calls, [])
+
+    def test_arvan_missing_public_access_block_uses_remaining_strict_controls(self) -> None:
+        """Arvan's exact capability-absence response is safe only with all fallbacks."""
+
+        client = FakeS3(
+            public_access_block_error_code="NoSuchPublicAccessBlockConfiguration"
+        )
+        owner_id = publisher._require_private_versioned_bucket(
+            client, bucket="dedicated-emergency-bucket"
+        )
+        self.assertEqual(owner_id, FakeS3.OWNER_ID)
+        self.assertEqual(client.public_access_block_calls, 1)
+        self.assertEqual(client.bucket_policy_calls, 1)
+        self.assertEqual(client.bucket_acl_calls, 1)
+
+    def test_other_public_access_block_errors_fail_closed(self) -> None:
+        for error_code in (
+            "AccessDenied",
+            "NoSuchPublicAccessBlockConfiguration ",
+        ):
+            with self.subTest(error_code=error_code):
+                client = FakeS3(public_access_block_error_code=error_code)
+                with self.assertRaisesRegex(
+                    publisher.EmergencyPublisherError, "privacy/versioning"
+                ):
+                    publisher._require_private_versioned_bucket(
+                        client, bucket="dedicated-emergency-bucket"
+                    )
+                self.assertEqual(client.bucket_policy_calls, 0)
+                self.assertEqual(client.bucket_acl_calls, 0)
+
+    def test_missing_public_access_block_does_not_bypass_policy_or_acl_checks(self) -> None:
+        cases = (
+            (
+                "bucket-policy",
+                FakeS3(
+                    public_access_block_error_code="NoSuchPublicAccessBlockConfiguration",
+                    has_bucket_policy=True,
+                ),
+                "bucket policy",
+                0,
+            ),
+            (
+                "foreign-owner-acl",
+                FakeS3(
+                    public_access_block_error_code="NoSuchPublicAccessBlockConfiguration",
+                    foreign_bucket_grant=True,
+                ),
+                "ACL",
+                1,
+            ),
+            (
+                "public-acl",
+                FakeS3(
+                    public_access_block_error_code="NoSuchPublicAccessBlockConfiguration",
+                    private=False,
+                ),
+                "ACL",
+                1,
+            ),
+        )
+        for label, client, error, expected_acl_calls in cases:
+            with self.subTest(control=label):
+                with self.assertRaisesRegex(publisher.EmergencyPublisherError, error):
+                    publisher._require_private_versioned_bucket(
+                        client, bucket="dedicated-emergency-bucket"
+                    )
+                self.assertEqual(client.bucket_policy_calls, 1)
+                self.assertEqual(client.bucket_acl_calls, expected_acl_calls)
 
     def test_bucket_rejects_nonpublic_foreign_acl_grant_before_any_upload(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-publisher-") as raw:
