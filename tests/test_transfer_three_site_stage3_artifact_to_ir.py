@@ -5,6 +5,7 @@ from scripts.transfer_three_site_stage3_artifact_to_ir import (
     Stage3ArtifactTransferError,
     artifact_spec,
     confirmation_phrase,
+    require_transfer_inventory_stage,
 )
 
 
@@ -67,6 +68,21 @@ class Stage3ArtifactTransferTests(unittest.TestCase):
             confirmation_phrase(self.campaign, "webapp-ir", digest),
             f"transfer-stage3-artifact:{self.campaign}:webapp-ir:{digest}",
         )
+
+    def test_latest_approved_inventory_stage_is_reusable_for_transfer(self):
+        self.assertEqual(
+            require_transfer_inventory_stage({"inventory_stage": "planned"}),
+            "planned",
+        )
+        self.assertEqual(
+            require_transfer_inventory_stage({"inventory_stage": "provisioned"}),
+            "provisioned",
+        )
+        for stage in ("", "draft", "production"):
+            with self.subTest(stage=stage), self.assertRaises(
+                Stage3ArtifactTransferError
+            ):
+                require_transfer_inventory_stage({"inventory_stage": stage})
 
 
 if __name__ == "__main__":

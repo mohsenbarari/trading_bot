@@ -147,6 +147,15 @@ def confirmation_phrase(campaign_id: str, role: str, digest: str) -> str:
     return f"transfer-stage3-artifact:{campaign_id}:{role}:{digest}"
 
 
+def require_transfer_inventory_stage(approved: dict[str, Any]) -> str:
+    stage = str(approved.get("inventory_stage", ""))
+    if stage not in {"planned", "provisioned"}:
+        raise Stage3ArtifactTransferError(
+            "artifact transfer requires an approved planned or provisioned inventory"
+        )
+    return stage
+
+
 def _ssh_receive(
     *,
     host: str,
@@ -208,8 +217,7 @@ def execute(args: argparse.Namespace) -> dict[str, Any]:
         approval_policy=load_inventory(args.approval_policy),
         host_destructive=True,
     )
-    if approved["inventory_stage"] != "planned":
-        raise Stage3ArtifactTransferError("artifact transfer requires approved planned inventory")
+    require_transfer_inventory_stage(approved)
     role = next(item for item in inventory["roles"] if item["role"] == "webapp_ir")
     host = str(role["host_ip"])
     if host in PRODUCTION_IPS or host != args.host:
