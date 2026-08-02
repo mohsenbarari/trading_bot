@@ -55,6 +55,7 @@ POLICY_SCHEMA = "gold-trade-writer-witness-credential-rotation-policy-v2"
 SELECTOR_SCHEMA = "gold-trade-writer-witness-credential-rotation-selector-v1"
 ACTIVATION_SCHEMA = "gold-trade-writer-witness-credential-rotation-activation-v1"
 CURRENT_SELECTOR_SCHEMA = "gold-trade-writer-witness-credential-rotation-current-v1"
+LEDGER_IDENTITY_SCHEMA = "gold-trade-writer-witness-credential-rotation-ledger-identity-v1"
 
 MAXIMUM_STATE_FILE_BYTES = 128 * 1024
 MAXIMUM_ACTIVATIONS = 4096
@@ -92,6 +93,9 @@ class CurrentPolicySnapshot:
     activation_filename: str
     activation_sha256: str
     sequence: int
+    profile_sha256: str
+    ledger_sha256: str
+    ledger_entries: int
 
 
 def canonical_json_bytes(value: Mapping[str, Any]) -> bytes:
@@ -105,6 +109,33 @@ def canonical_json_bytes(value: Mapping[str, Any]) -> bytes:
 
 def sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+def _ledger_identity(
+    activations: list[tuple[str, bytes, dict[str, Any]]],
+) -> tuple[str, int]:
+    """Return a deterministic identity for the fully verified ledger chain.
+
+    Each entry hash already commits to its selector, policy, prior activation
+    hash, and profile.  Recording the ordered sequence/name/hash list makes
+    the ledger identity explicit for another immutable control document rather
+    than relying on a caller to infer it only from the final head hash.
+    """
+
+    entries: list[dict[str, Any]] = []
+    for name, raw, payload in activations:
+        entries.append(
+            {
+                "sequence": payload["sequence"],
+                "activation_filename": name,
+                "activation_sha256": sha256_bytes(raw),
+            }
+        )
+    value: dict[str, Any] = {
+        "schema": LEDGER_IDENTITY_SCHEMA,
+        "entries": entries,
+    }
+    return sha256_bytes(canonical_json_bytes(value)), len(entries)
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -863,6 +894,7 @@ def _resolve_current_locked(
         raise WriterWitnessRotationLifecycleError(
             "Writer Witness credential rotation has no committed current policy"
         )
+    ledger_sha256, ledger_entries = _ledger_identity(activations)
     latest_name, latest_raw, latest = activations[-1]
     latest_sha = sha256_bytes(latest_raw)
     current_entry = _read_optional_current(paths)
@@ -899,6 +931,9 @@ def _resolve_current_locked(
         activation_filename=latest_name,
         activation_sha256=latest_sha,
         sequence=latest["sequence"],
+        profile_sha256=profile_sha256,
+        ledger_sha256=ledger_sha256,
+        ledger_entries=ledger_entries,
     )
 
 

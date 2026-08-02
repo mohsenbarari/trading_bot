@@ -514,6 +514,14 @@ class WriterWitnessPairedClientAttestationTests(unittest.TestCase):
             self.assertEqual(old.policy_path.stat().st_mode & 0o777, 0o400)
             paths = lifecycle._state_paths(state, create=False)
             self.assertEqual(len(list(paths.policies.iterdir())), 2)
+            current = lifecycle.resolve_current_policy(
+                profile_sha256=pair_attestation._profile_sha256(PROFILE),
+                state_directory=state,
+            )
+            self.assertEqual(current.ledger_entries, 2)
+            self.assertEqual(current.sequence, 2)
+            self.assertNotEqual(current.ledger_sha256, old.ledger_sha256)
+            self.assertRegex(current.ledger_sha256, r"^[0-9a-f]{64}$")
             with self.assertRaisesRegex(
                 pair_attestation.WriterWitnessPairAttestationError,
                 "caller credential identity does not match",
