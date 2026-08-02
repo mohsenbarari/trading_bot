@@ -14,9 +14,11 @@ from sqlalchemy.engine import make_url
 
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 DATABASE_ENV = "WRITER_FENCING_TEST_DATABASE_URL"
 DATABASE_PREFIX = "stage4_registration_writerfence_"
-EXPECTED_TESTS = 6
+EXPECTED_TESTS = 7
 
 
 def guarded_url() -> str:

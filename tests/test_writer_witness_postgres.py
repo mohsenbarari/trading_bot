@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from core.writer_witness_contract import validate_witness_lease_proof
 from core.writer_witness_control import (
     ACTION_ACQUIRE,
+    ACTION_DRAIN,
+    ACTION_RENEW,
     WriterWitnessCampaignExpiredError,
     WriterWitnessError,
     load_witness_snapshot,
@@ -245,6 +247,77 @@ class WriterWitnessPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(durable.writer_epoch, 3)
         self.assertEqual(durable.lease_id, previous_lease_id)
         self.assertEqual(receipt_count, 3)
+
+    async def test_real_postgres_acquire_renew_drain_and_expiry_handoff(self):
+        async with self.sessions() as session:
+            acquired = await transition_witness_state(
+                session,
+                action=ACTION_ACQUIRE,
+                requester_site="webapp_fi",
+                expected_epoch=0,
+                expected_lease_id=None,
+                request_id="postgres-lifecycle-acquire",
+                operator="integration@example",
+                reason="stage2 lifecycle acquisition",
+                private_key_base64=self.private_key,
+                now=NOW,
+            )
+            await session.commit()
+
+        async with self.sessions() as session:
+            renewed = await transition_witness_state(
+                session,
+                action=ACTION_RENEW,
+                requester_site="webapp_fi",
+                expected_epoch=1,
+                expected_lease_id=acquired.state.lease_id,
+                request_id="postgres-lifecycle-renew",
+                operator="integration@example",
+                reason="stage2 lifecycle renewal",
+                private_key_base64=self.private_key,
+                now=NOW + timedelta(seconds=30),
+            )
+            await session.commit()
+
+        async with self.sessions() as session:
+            drained = await transition_witness_state(
+                session,
+                action=ACTION_DRAIN,
+                requester_site="webapp_fi",
+                expected_epoch=1,
+                expected_lease_id=acquired.state.lease_id,
+                request_id="postgres-lifecycle-drain",
+                operator="integration@example",
+                reason="stage2 lifecycle drain",
+                private_key_base64=None,
+                now=NOW + timedelta(seconds=40),
+            )
+            await session.commit()
+
+        async with self.sessions() as session:
+            handed_off = await transition_witness_state(
+                session,
+                action=ACTION_ACQUIRE,
+                requester_site="webapp_ir",
+                expected_epoch=1,
+                expected_lease_id=acquired.state.lease_id,
+                request_id="postgres-lifecycle-expiry-handoff",
+                operator="integration@example",
+                reason="stage2 lifecycle expiry handoff",
+                private_key_base64=self.private_key,
+                now=NOW + timedelta(seconds=211),
+            )
+            await session.commit()
+            durable = await load_witness_snapshot(session)
+
+        self.assertEqual(renewed.state.writer_epoch, 1)
+        self.assertEqual(renewed.state.lease_id, acquired.state.lease_id)
+        self.assertEqual(drained.state.lease_status, "draining")
+        self.assertIsNone(drained.proof)
+        self.assertEqual(handed_off.state.holder_site, "webapp_ir")
+        self.assertEqual(handed_off.state.writer_epoch, 2)
+        self.assertNotEqual(handed_off.state.lease_id, acquired.state.lease_id)
+        self.assertEqual(durable, handed_off.state)
 
     async def test_campaign_expiry_is_rechecked_after_waiting_for_writer_row_lock(self):
         async with self.sessions() as blocker, self.sessions() as contender, self.sessions() as observer:
