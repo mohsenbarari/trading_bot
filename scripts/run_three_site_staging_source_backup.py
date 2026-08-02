@@ -37,6 +37,8 @@ ROLE_APP_SERVICE = {"bot_fi": "foreign_app", "webapp_fi": "app"}
 ROLE_PROFILE = {"bot_fi": "staging-bot", "webapp_fi": None}
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 IDENT_RE = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
+IMAGE_ID_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+VOLUME_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,254}$")
 SAFE_ENV = {
     "PATH": "/usr/bin:/bin",
     "HOME": "/nonexistent",
@@ -163,6 +165,66 @@ def _canonical_hash(value: object) -> str:
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+def _archive_volume_from_compose(
+    raw_config: str, *, service: str, target: str
+) -> tuple[str, str]:
+    try:
+        config = json.loads(raw_config)
+    except json.JSONDecodeError as exc:
+        raise StagingBackupError("resolved Compose JSON is unreadable") from exc
+    services = config.get("services") if isinstance(config, dict) else None
+    volumes = config.get("volumes") if isinstance(config, dict) else None
+    service_config = services.get(service) if isinstance(services, dict) else None
+    mounts = service_config.get("volumes") if isinstance(service_config, dict) else None
+    matching = [
+        mount for mount in mounts or []
+        if isinstance(mount, dict)
+        and mount.get("type") == "volume"
+        and mount.get("target") == target
+    ]
+    if len(matching) != 1:
+        raise StagingBackupError(f"legacy source has no unique volume for {target}")
+    logical_name = matching[0].get("source")
+    definition = volumes.get(logical_name) if isinstance(volumes, dict) else None
+    actual_name = definition.get("name") if isinstance(definition, dict) else None
+    if (
+        not isinstance(logical_name, str)
+        or not isinstance(actual_name, str)
+        or VOLUME_NAME_RE.fullmatch(actual_name) is None
+    ):
+        raise StagingBackupError(f"resolved legacy volume identity is invalid for {target}")
+    return logical_name, actual_name
+
+
+def _verify_archive_volume(
+    *, volume_name: str, logical_name: str, project_name: str
+) -> None:
+    try:
+        labels = json.loads(
+            _run([DOCKER, "volume", "inspect", "--format", "{{json .Labels}}", volume_name])
+        )
+    except json.JSONDecodeError as exc:
+        raise StagingBackupError("legacy source volume labels are unreadable") from exc
+    if (
+        not isinstance(labels, dict)
+        or labels.get("com.docker.compose.project") != project_name
+        or labels.get("com.docker.compose.volume") != logical_name
+    ):
+        raise StagingBackupError("legacy source volume ownership labels differ")
+
+
+def _volume_archive_command(*, image_id: str, volume_name: str, kind: str) -> list[str]:
+    if IMAGE_ID_RE.fullmatch(image_id) is None or VOLUME_NAME_RE.fullmatch(volume_name) is None:
+        raise StagingBackupError("immutable archive image or source volume identity is invalid")
+    return [
+        DOCKER, "run", "--rm", "--network", "none", "--read-only",
+        "--label", "trading-bot.three-site-staging.source-backup=true",
+        "--label", f"trading-bot.three-site-staging.artifact={kind}",
+        "--mount", f"type=volume,src={volume_name},dst=/source,readonly",
+        "--entrypoint", "tar", image_id, "-C", "/source", "-czf", "-", ".",
+    ]
 
 
 def _load_freeze_evidence(
@@ -487,13 +549,15 @@ def _database_fingerprint(query) -> tuple[str, int, int]:  # noqa: ANN001
     return digest, total_rows, len(tables)
 
 
-def _restore_drill(dump_path: Path, *, container: str) -> dict[str, object]:
+def _restore_drill(
+    dump_path: Path, *, container: str, image: str = POSTGRES_IMAGE
+) -> dict[str, object]:
     _run(
         [
             DOCKER, "run", "-d", "--name", container,
             "--label", "trading-bot.three-site-staging.restore-drill=true",
             "-e", "POSTGRES_USER=restore", "-e", "POSTGRES_DB=restore",
-            "-e", "POSTGRES_HOST_AUTH_METHOD=trust", POSTGRES_IMAGE,
+            "-e", "POSTGRES_HOST_AUTH_METHOD=trust", image,
         ],
         timeout=60,
     )
@@ -616,13 +680,27 @@ def execute(args: argparse.Namespace, inventory_result: dict[str, object]) -> di
         dump,
         timeout=900,
     )
-    for target, directory in ((uploads, "/app/uploads"), (audit, "/app/audit_trail")):
+    raw_compose = _run([*prefix, "config", "--format", "json"])
+    db_container = _run([*prefix, "ps", "--status", "running", "-q", "db"])
+    archive_image = _run([DOCKER, "inspect", "--format", "{{.Image}}", db_container])
+    if IMAGE_ID_RE.fullmatch(archive_image) is None:
+        raise StagingBackupError("running source database image is not immutable")
+    for target, directory, kind in (
+        (uploads, "/app/uploads", "uploads"),
+        (audit, "/app/audit_trail", "audit"),
+    ):
+        logical_name, volume_name = _archive_volume_from_compose(
+            raw_compose, service=app_service, target=directory
+        )
+        _verify_archive_volume(
+            volume_name=volume_name,
+            logical_name=logical_name,
+            project_name=args.project_name,
+        )
         _stream_to_file(
-            [
-                *prefix, "run", "--rm", "--no-deps", "-T",
-                "--entrypoint", "tar", app_service,
-                "-C", directory, "-czf", "-", ".",
-            ],
+            _volume_archive_command(
+                image_id=archive_image, volume_name=volume_name, kind=kind
+            ),
             target,
             timeout=900,
         )
@@ -640,7 +718,7 @@ def execute(args: argparse.Namespace, inventory_result: dict[str, object]) -> di
     )
     if existing.returncode == 0:
         raise StagingBackupError("restore-drill container name is already occupied")
-    restore = _restore_drill(dump, container=scratch)
+    restore = _restore_drill(dump, container=scratch, image=archive_image)
     if restore["restored_alembic_revision"] != source_revision:
         raise StagingBackupError("restore drill schema revision differs from source backup")
     if restore["scratch_postgres_system_id"] == source_system_id:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 import tarfile
 import tempfile
@@ -11,7 +12,9 @@ from unittest.mock import patch
 
 from scripts.run_three_site_staging_source_backup import (
     StagingBackupError,
+    _archive_volume_from_compose,
     _compose_base,
+    _volume_archive_command,
     _wait_for_scratch_database,
     build_plan,
     confirmation_phrase,
@@ -21,6 +24,40 @@ from scripts.run_three_site_staging_source_backup import (
 
 
 class ThreeSiteStagingSourceBackupTests(unittest.TestCase):
+    def test_archive_reads_exact_compose_volume_without_app_image_or_network(self):
+        raw = json.dumps(
+            {
+                "services": {
+                    "foreign_app": {
+                        "volumes": [
+                            {
+                                "type": "volume",
+                                "source": "staging_uploads",
+                                "target": "/app/uploads",
+                            }
+                        ]
+                    }
+                },
+                "volumes": {
+                    "staging_uploads": {"name": "trading_bot_staging_staging_uploads"}
+                },
+            }
+        )
+        logical, actual = _archive_volume_from_compose(
+            raw, service="foreign_app", target="/app/uploads"
+        )
+        self.assertEqual(logical, "staging_uploads")
+        command = _volume_archive_command(
+            image_id="sha256:" + "1" * 64,
+            volume_name=actual,
+            kind="uploads",
+        )
+        self.assertEqual(command[:3], ["/usr/bin/docker", "run", "--rm"])
+        self.assertIn("none", command)
+        self.assertIn("--read-only", command)
+        self.assertNotIn("foreign_app", command)
+        self.assertFalse(any(value in {"pull", "build"} for value in command))
+
     def test_restore_drill_waits_for_exact_database_not_socket_readiness(self):
         socket_ready = SimpleNamespace(returncode=0)
         database_missing = SimpleNamespace(returncode=2, stdout="")
