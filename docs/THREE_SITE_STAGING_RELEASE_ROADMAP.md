@@ -597,21 +597,23 @@ DNS mutation انجام نمی‌شود.
   `WebApp-IR=188.213.198.115` و `Witness=130.185.121.152`. انتخاب آن‌ها هیچ
   تغییری در IPهای canonical production داخل `core/three_site_topology.py`
   ایجاد نمی‌کند؛ نگاشت staging فقط در inventory/runtime bundle ثبت می‌شود.
-- VPS پنجم `185.231.182.6` یک Witness انتقالی قدیمی است و به‌دلیل رد شدن کلید
-  SSH فعلی، در topology انتخاب نشد و دست‌نخورده ماند.
+- VPS پنجم `185.231.182.6` یک Witness انتقالی قدیمی است و در topology چهار role
+  انتخاب نشد. probe اولیه Ed25519 رد شد؛ در بخش B کلید RSA موجود و معتبر آن
+  پیدا شد و فقط به‌عنوان relay کنترل داخل region ایران استفاده شد.
 - Bot-FI، WebApp-FI و Witness تستی Ubuntu 24.04، Docker `29.1.3`، Compose
   `2.40.3`، NTP synchronized، بدون container و دارای volume مستقل 50 GiB
   هستند. هر سه volume از قبل ext4 و روی
   `/srv/trading-bot-three-site-staging-data` mount شده‌اند؛ UUID، daemon ID و
   machine-id hash آن‌ها متمایز است.
-- WebApp-IR تستی در API فعال و volume 50 GiB آن attached است، ولی bootstrap
-  guest قبلی کامل نشده و TCP/22 با وجود security-group صحیح پاسخ نمی‌دهد.
-  recovery فقط از console out-of-band همان VPS انجام می‌شود؛ server/volume
-  create، delete، rebuild یا detach مجاز نیست.
+- WebApp-IR تستی در API فعال و volume 50 GiB آن attached بود، ولی TCP/22 از مسیر
+  بین‌المللی با وجود security-group صحیح پاسخ نمی‌داد. این وضعیت به‌عنوان blocker
+  بخش A ثبت و recovery کنسول out-of-band به بخش B منتقل شد؛ server/volume create،
+  delete، rebuild یا detach مجاز نیست.
 - Evidence:
   `docs/THREE_SITE_STAGE3_ARVAN_TEST_INVENTORY.json`؛ hash آن پس از commit این
   checkpoint برابر
-  `628ee07212eb2718207b9c9c20ca75fbe25070cf18ec127f360149f35642b8b6` است.
+  `81d5730098364b307fe1e85e0d9032e22cc914bd37e38ea022608539877ae440` است؛
+  فایل در checkpoint بخش B تکمیل شده و این hash نسخه جاری است.
 - Production touched: `no`؛ inventory پنل و host probeها read-only بودند.
 
 ### بخش B — آماده‌سازی isolation با authorization مرحله
@@ -652,6 +654,38 @@ detach، rebuild یا resize نمی‌شود. چهار IP canonical و تمام 
 13. operations session محدود به release نگهداری و receiptهای لازم از همان session
     صادر می‌شوند؛ برای زیرگام‌های هم‌معنی gate انسانی تکراری ساخته نمی‌شود.
 
+#### checkpoint بخش B — recovery کنترل، boundary و planned inventory — 2026-08-02
+
+- گام‌های ۱ تا ۵ کامل شدند. هیچ VPS/volume ساخته، حذف، detach، rebuild، resize یا
+  format نشد و هیچ application container start نشد.
+- کنسول out-of-band ثابت کرد WebApp-IR از قبل کاملاً bootstrap شده است: SSH
+  active/key-only، password login خاموش، authorized-key fingerprint برابر کلید
+  BOT-FL، Docker/NTP سالم، volume مستقل mount و cgroup فعال است. marker ناقصِ
+  گزارش اولیه ناشی از بررسی نام فایل اشتباه بود.
+- ingress مستقیم بین‌المللی به WebApp-IR همچنان timeout می‌شود. دو rule محدود
+  `/32` روی security group تستی اضافه شد: مسیر Bot-FI تستی persist شد ولی در
+  data plane timeout ماند؛ مسیر `185.231.182.6/32` داخل region ایران باز شد.
+  host key مقصد از کنسول و relay با fingerprint
+  `SHA256:P+Smj2GAf5y7WpKXh9nQQfN1ewuSQ/8q5sY/+gAxO70` match و key-only SSH از
+  relay قبول شد. هیچ rule یا firewall production تغییر نکرد.
+- هر چهار role بدون container و با machine ID، Docker daemon ID، filesystem UUID
+  و boundary متمایز attestation شدند. mountها 50 GiB، `ext4` و دارای
+  `nosuid,nodev,noexec` هستند؛ فضای آزاد هرکدام بیش از 52.5 GB است. cgroupهای
+  200%/5 GiB، 150%/3 GiB، 200%/4 GiB و 100%/2 GiB مطابق roleها فعال‌اند.
+- planned inventory با campaign
+  `fd34231d-f52e-498a-aab4-438c99d88fc5` و deployment
+  `stage3-0e63a7ec-fd34231d` در مسیر owner-only
+  `/root/secure-envs/trading-bot/three-site-staging-0e63a7ec-fd34231d/planned-inventory.json`
+  با mode `0600` نصب شد. verifier رسمی در حالت `dedicated-host-destructive`
+  قبول و SHA-256 آن
+  `cfd9095bf961690ad96aa4f5849ec7c5c2276775fdd4c2502d1b074351d089d0` است.
+  approval رسمی exact-subject هنوز صادر نشده؛ بنابراین provision دیتابیس و
+  data movement شروع نشده‌اند.
+- ابزار idempotent rule با commitهای `bf5c6e98` و `9fc10979` ثبت شد؛ endpoint
+  lifecycle یا delete ندارد و production overlap را fail-closed رد می‌کند.
+- Production touched: `no`؛ read-only identifier probeهای production فقط denylist
+  inventory را تازه کردند.
+
 ### Exit gate — G3 Hosts Isolated
 
 - چهار host attestation تازه و aggregate معتبر است؛
@@ -669,31 +703,35 @@ detach، rebuild یا resize نمی‌شود. چهار IP canonical و تمام 
 
 ### گزارش پایان Stage 3
 
-- Status: `IN_PROGRESS — TEST_TOPOLOGY_SELECTED / WEBAPP_IR_CONSOLE_RECOVERY_PENDING`
+- Status: `IN_PROGRESS — HOST_BOUNDARIES_ATTESTED / PLANNED_INVENTORY_APPROVAL_PENDING`
 - Branch: `stage/three-site-staging-03-host-readiness`
 - Base SHA / implementation commits:
-  `aab3558aebf6a25454a4d1f532e516b75dcbddde / 7effce5bf808885b186c20f14f030180f2a1c681`
+  `aab3558aebf6a25454a4d1f532e516b75dcbddde /
+  7effce5bf808885b186c20f14f030180f2a1c681, 8dcbba1e, bf5c6e98, 9fc10979`
 - Tested release SHA: `0e63a7ec1b08bef29ea199041215298a021b56ef`
 - Host inventory summary:
-  `چهار VPS disposable برای roleهای staging انتخاب شدند؛ سه میزبان کاملاً
-  قابل‌دسترسی، بدون container و دارای Docker/NTP/mount مستقل هستند؛ WebApp-IR
-  تستی active و دارای volume attached است ولی guest آن از console نیاز به recovery
-  دارد. دو VPS production ایران و چهار مقصد canonical از mutation خارج‌اند.`
+  `چهار VPS disposable قابل‌دسترسی و بدون container هستند؛ Docker/NTP/mount/
+  cgroup هر چهار role attestation و identifierهایشان متمایز است. WebApp-IR از
+  relay تستی داخل ایران با key-only SSH کنترل می‌شود. دو VPS production ایران و
+  چهار مقصد canonical از mutation خارج‌اند.`
 - Commands/tests and results:
-  `چهار ممیزی read-only canonical؛ inventory هفت VPS پنل فقط با GET؛ SSH audit
-  سه VPS تستی؛ provider identity/volume/security-group WebApp-IR؛ lsblk/findmnt/
-  wipefs --no-act و Docker/NTP probe؛ S3 configuration GET. هیچ mutation اجرا نشد.`
+  `چهار ممیزی read-only canonical؛ inventory هفت VPS پنل؛ attestation چهار VPS
+  تستی؛ VNC/SSH host-key و SSH policy؛ lsblk/findmnt/wipefs --no-act؛ Docker/NTP/
+  cgroup؛ دو security-group rule محدود تستی؛ structural inventory verifier =
+  PASS؛ S3 configuration GET. lifecycle منابع و application start = صفر.`
 - Evidence paths and SHA-256:
   `docs/THREE_SITE_STAGE3_HOST_READINESS_AUDIT.json =
   28950ff335fce269fc5e9886eb878a9c1a52ba74be9e9dc04266611e9b934514؛
   docs/THREE_SITE_STAGE3_ARVAN_TEST_INVENTORY.json =
-  628ee07212eb2718207b9c9c20ca75fbe25070cf18ec127f360149f35642b8b6`
+  81d5730098364b307fe1e85e0d9032e22cc914bd37e38ea022608539877ae440؛
+  owner-only planned inventory =
+  cfd9095bf961690ad96aa4f5849ec7c5c2276775fdd4c2502d1b074351d089d0`
 - Production touched: `no`
 - Deviations / open risks:
-  `TCP/22 روی WebApp-IR تستی درون guest پاسخ نمی‌دهد و recovery کنسول باید پیش
-  از attestation نهایی کامل شود؛ bucket policyهای مفقود باید پیش از استفاده
-  اصلاح شوند؛ credential مشاهده‌شده در خروجی موقت باید rotate شود؛ namespaceهای
-  قدیمی reuse نمی‌شوند؛ هیچ منبع پنل بدون اجازه مالک ساخته یا حذف نمی‌شود.`
+  `ingress بین‌المللی مستقیم WebApp-IR هنوز timeout است و control از relay ایران
+  عبور می‌کند؛ formal approval planned inventory صادر نشده؛ bucket policyهای
+  مفقود باید پیش از استفاده اصلاح شوند؛ credential مشاهده‌شده در خروجی موقت باید
+  rotate شود؛ هیچ منبع پنل بدون اجازه مالک ساخته یا حذف نمی‌شود.`
 - Rollback verified: `no؛ backup/restore drill و rollback dry-run campaign هدف هنوز اجرا نشده‌اند.`
 - Decision / next stage:
   `G3_NOT_PASSED / no؛ ادامه بخش B روی topology disposable موجود مجاز است؛ شروع
