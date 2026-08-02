@@ -36,6 +36,13 @@ class FencedFiReleaseIdentityRuntimeBindingTests(TestCase):
             "compose_relative_path": "deploy/production/docker-compose.webapp-fi-writer-release-v1.yml",
             "compose_sha256": "e" * 64,
             "term_fenced_application_evidence_sha256": "9" * 64,
+            "fenced_fi_build_input": {
+                "build_input_manifest_sha256": "4" * 64,
+                "mini_app_dist_manifest_sha256": "5" * 64,
+                "mini_app_dist_files_sha256": "6" * 64,
+                "mini_app_dist_file_count": 17,
+                "mini_app_dist_total_bytes": 4096,
+            },
             "services": {
                 "app": {
                     "image_repo_digest": "registry.invalid/app@sha256:" + "f" * 64,
@@ -49,7 +56,7 @@ class FencedFiReleaseIdentityRuntimeBindingTests(TestCase):
             "signer_key_id": authority.key_id,
         }
         signature = private.sign(
-            b"gold-trade-wa-fi-fenced-release-identity-v2\x00"
+            b"gold-trade-wa-fi-fenced-release-identity-v3\x00"
             + identity_subject.canonical_fenced_fi_release_identity_json_bytes(unsigned)
         )
         signed = dict(unsigned)
@@ -69,6 +76,17 @@ class FencedFiReleaseIdentityRuntimeBindingTests(TestCase):
             term_fenced_application_evidence_sha256=(
                 self.identity.term_fenced_application_evidence_sha256
             ),
+            fenced_fi_build_input_manifest_sha256=(
+                self.identity.static_build_input.build_input_manifest_sha256
+            ),
+            mini_app_dist_manifest_sha256=(
+                self.identity.static_build_input.mini_app_dist_manifest_sha256
+            ),
+            mini_app_dist_files_sha256=(
+                self.identity.static_build_input.mini_app_dist_files_sha256
+            ),
+            mini_app_dist_file_count=self.identity.static_build_input.mini_app_dist_file_count,
+            mini_app_dist_total_bytes=self.identity.static_build_input.mini_app_dist_total_bytes,
         )
 
     def test_exact_observations_bind_but_grant_no_authority(self) -> None:
@@ -98,6 +116,11 @@ class FencedFiReleaseIdentityRuntimeBindingTests(TestCase):
             ("bot_image_repo_digest", "registry.invalid/bot@sha256:" + "a" * 64, "BOT_REPO_DIGEST_MISMATCH"),
             ("bot_image_id", "sha256:" + "a" * 64, "BOT_IMAGE_ID_MISMATCH"),
             ("term_fenced_application_evidence_sha256", "0" * 64, "TERM_FENCED_EVIDENCE_MISMATCH"),
+            ("fenced_fi_build_input_manifest_sha256", "0" * 64, "STATIC_BUILD_INPUT_MISMATCH"),
+            ("mini_app_dist_manifest_sha256", "0" * 64, "STATIC_MANIFEST_MISMATCH"),
+            ("mini_app_dist_files_sha256", "0" * 64, "STATIC_FILES_MISMATCH"),
+            ("mini_app_dist_file_count", 18, "STATIC_FILE_COUNT_MISMATCH"),
+            ("mini_app_dist_total_bytes", 4097, "STATIC_TOTAL_BYTES_MISMATCH"),
         )
         for field_name, changed, code in cases:
             with self.subTest(field_name=field_name):
@@ -151,6 +174,13 @@ class FencedFiReleaseIdentityRuntimeBindingTests(TestCase):
             term_fenced_application_evidence_sha256=(
                 binding.term_fenced_application_evidence_sha256
             ),
+            fenced_fi_build_input_manifest_sha256=(
+                binding.fenced_fi_build_input_manifest_sha256
+            ),
+            mini_app_dist_manifest_sha256=binding.mini_app_dist_manifest_sha256,
+            mini_app_dist_files_sha256=binding.mini_app_dist_files_sha256,
+            mini_app_dist_file_count=binding.mini_app_dist_file_count,
+            mini_app_dist_total_bytes=binding.mini_app_dist_total_bytes,
         )
         for value in (forged,):
             with self.assertRaisesRegex(

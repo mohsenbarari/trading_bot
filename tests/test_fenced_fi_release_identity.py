@@ -28,11 +28,18 @@ class FencedFiReleaseIdentityTests(TestCase):
         unsigned = dict(value)
         unsigned.pop("signature_base64", None)
         schema = unsigned.get("schema")
-        domain = (
-            b"gold-trade-wa-fi-fenced-release-identity-v2\x00"
-            if schema == subject.FENCED_FI_RELEASE_IDENTITY_SCHEMA
-            else b"gold-trade-wa-fi-fenced-release-identity-v1\x00"
-        )
+        domains = {
+            subject.FENCED_FI_RELEASE_IDENTITY_SCHEMA: (
+                b"gold-trade-wa-fi-fenced-release-identity-v3\x00"
+            ),
+            subject.FENCED_FI_RELEASE_IDENTITY_TERM_FENCED_LEGACY_SCHEMA: (
+                b"gold-trade-wa-fi-fenced-release-identity-v2\x00"
+            ),
+            subject.FENCED_FI_RELEASE_IDENTITY_LEGACY_SCHEMA: (
+                b"gold-trade-wa-fi-fenced-release-identity-v1\x00"
+            ),
+        }
+        domain = domains[schema]
         signature = self.private.sign(
             domain
             + subject.canonical_fenced_fi_release_identity_json_bytes(unsigned)
@@ -53,6 +60,13 @@ class FencedFiReleaseIdentityTests(TestCase):
             "compose_relative_path": "deploy/production/docker-compose.webapp-fi-writer-release-v1.yml",
             "compose_sha256": "e" * 64,
             "term_fenced_application_evidence_sha256": "9" * 64,
+            "fenced_fi_build_input": {
+                "build_input_manifest_sha256": "4" * 64,
+                "mini_app_dist_manifest_sha256": "5" * 64,
+                "mini_app_dist_files_sha256": "6" * 64,
+                "mini_app_dist_file_count": 17,
+                "mini_app_dist_total_bytes": 4096,
+            },
             "services": {
                 "app": {"image_repo_digest": "registry.invalid/app@sha256:" + "f" * 64, "image_id": "sha256:" + "1" * 64},
                 "bot": {"image_repo_digest": "registry.invalid/bot@sha256:" + "2" * 64, "image_id": "sha256:" + "3" * 64},
@@ -68,6 +82,11 @@ class FencedFiReleaseIdentityTests(TestCase):
         self.assertEqual("registry.invalid/app@sha256:" + "f" * 64, value.app_image_repo_digest)
         self.assertEqual(subject.FENCED_FI_RELEASE_IDENTITY_SCHEMA, value.schema)
         self.assertEqual("9" * 64, value.term_fenced_application_evidence_sha256)
+        self.assertEqual("4" * 64, value.static_build_input.build_input_manifest_sha256)
+        self.assertEqual("5" * 64, value.static_build_input.mini_app_dist_manifest_sha256)
+        self.assertEqual("6" * 64, value.static_build_input.mini_app_dist_files_sha256)
+        self.assertEqual(17, value.static_build_input.mini_app_dist_file_count)
+        self.assertEqual(4096, value.static_build_input.mini_app_dist_total_bytes)
         self.assertFalse(value.writer_authorized)
         self.assertFalse(value.promotion_authorized)
         self.assertFalse(value.execution_authorized)
@@ -125,6 +144,13 @@ class FencedFiReleaseIdentityTests(TestCase):
             "compose_relative_path": "deploy/production/docker-compose.webapp-fi-writer-release-v1.yml",
             "compose_sha256": "e" * 64,
             "term_fenced_application_evidence_sha256": "9" * 64,
+            "fenced_fi_build_input": {
+                "build_input_manifest_sha256": "4" * 64,
+                "mini_app_dist_manifest_sha256": "5" * 64,
+                "mini_app_dist_files_sha256": "6" * 64,
+                "mini_app_dist_file_count": 17,
+                "mini_app_dist_total_bytes": 4096,
+            },
             "services": {
                 "app": {"image_repo_digest": "registry.invalid/app@sha256:" + "f" * 64, "image_id": "sha256:" + "1" * 64},
                 "bot": {"image_repo_digest": "registry.invalid/bot@sha256:" + "2" * 64, "image_id": "sha256:" + "3" * 64},
@@ -135,7 +161,7 @@ class FencedFiReleaseIdentityTests(TestCase):
         forged = dict(unsigned)
         forged["signature_base64"] = base64.b64encode(
             other_private.sign(
-                b"gold-trade-wa-fi-fenced-release-identity-v2\x00"
+                b"gold-trade-wa-fi-fenced-release-identity-v3\x00"
                 + subject.canonical_fenced_fi_release_identity_json_bytes(unsigned)
             )
         ).decode("ascii")
@@ -217,3 +243,59 @@ class FencedFiReleaseIdentityTests(TestCase):
         self.assertIsNone(parsed.term_fenced_application_evidence_sha256)
         with self.assertRaisesRegex(subject.FencedFiReleaseIdentityError, "TERM_FENCED_CANDIDATE_REQUIRED"):
             subject.require_term_fenced_fi_release_candidate(parsed)
+
+    def test_legacy_v2_remains_read_only_parseable_but_cannot_be_a_candidate(self) -> None:
+        legacy = {
+            "schema": subject.FENCED_FI_RELEASE_IDENTITY_TERM_FENCED_LEGACY_SCHEMA,
+            "release_sha": "a" * 40,
+            "release_tree_sha": "b" * 40,
+            "application_release_root": "/srv/releases/" + "a" * 40,
+            "control_release_sha": "c" * 40,
+            "control_release_tree_sha": "d" * 40,
+            "control_release_root": "/srv/control/" + "c" * 40,
+            "compose_relative_path": "deploy/production/docker-compose.webapp-fi-writer-release-v1.yml",
+            "compose_sha256": "e" * 64,
+            "term_fenced_application_evidence_sha256": "9" * 64,
+            "services": {
+                "app": {"image_repo_digest": "registry.invalid/app@sha256:" + "f" * 64, "image_id": "sha256:" + "1" * 64},
+                "bot": {"image_repo_digest": "registry.invalid/bot@sha256:" + "2" * 64, "image_id": "sha256:" + "3" * 64},
+            },
+            "signer_key_id": self.authority.key_id,
+        }
+        parsed = subject.verify_fenced_fi_release_identity(
+            self._signed_document(legacy), authority=self.authority
+        )
+        self.assertEqual(subject.FENCED_FI_RELEASE_IDENTITY_TERM_FENCED_LEGACY_SCHEMA, parsed.schema)
+        self.assertEqual("9" * 64, parsed.term_fenced_application_evidence_sha256)
+        self.assertIsNone(parsed.static_build_input)
+        with self.assertRaisesRegex(subject.FencedFiReleaseIdentityError, "TERM_FENCED_CANDIDATE_REQUIRED"):
+            subject.require_term_fenced_fi_release_candidate(parsed)
+
+    def test_static_build_input_and_required_image_labels_are_closed(self) -> None:
+        identity = subject.verify_fenced_fi_release_identity(
+            self._document(), authority=self.authority
+        )
+        labels = subject.expected_fenced_fi_static_image_labels(identity.static_build_input)
+        subject.verify_fenced_fi_static_image_labels(
+            labels,
+            value=identity.static_build_input,
+        )
+        labels["org.goldtrade.mini-app-dist-total-bytes"] = "4097"
+        with self.assertRaisesRegex(subject.FencedFiReleaseIdentityError, "STATIC_IMAGE_LABELS_INVALID"):
+            subject.verify_fenced_fi_static_image_labels(
+                labels,
+                value=identity.static_build_input,
+            )
+        with self.assertRaisesRegex(subject.FencedFiReleaseIdentityError, "STATIC_BUILD_INPUT_INVALID"):
+            subject.verify_fenced_fi_release_identity(
+                self._document(
+                    fenced_fi_build_input={
+                        "build_input_manifest_sha256": "4" * 64,
+                        "mini_app_dist_manifest_sha256": "5" * 64,
+                        "mini_app_dist_files_sha256": "6" * 64,
+                        "mini_app_dist_file_count": True,
+                        "mini_app_dist_total_bytes": 4096,
+                    }
+                ),
+                authority=self.authority,
+            )

@@ -23,21 +23,30 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 __all__ = (
     "canonical_fenced_fi_release_identity_json_bytes",
     "FENCED_FI_RELEASE_IDENTITY_SCHEMA",
+    "FENCED_FI_RELEASE_IDENTITY_TERM_FENCED_LEGACY_SCHEMA",
     "FENCED_FI_RELEASE_IDENTITY_LEGACY_SCHEMA",
     "FencedFiReleaseIdentity",
     "FencedFiReleaseIdentityAuthority",
     "FencedFiReleaseIdentityError",
+    "FencedFiStaticBuildInput",
+    "expected_fenced_fi_static_image_labels",
+    "fenced_fi_static_build_input_from_mapping",
     "require_term_fenced_fi_release_candidate",
     "require_verified_fenced_fi_release_identity",
+    "verify_fenced_fi_static_image_labels",
     "verify_fenced_fi_release_identity",
 )
 
 
-# v1 deliberately remains parseable for read-only inventory/audit tooling, but
-# it can never be admitted by the writer preflight.  A term-fenced candidate
-# must use v2: its signature binds the source-capability evidence digest in
-# addition to the immutable source tree and image identities.
-FENCED_FI_RELEASE_IDENTITY_SCHEMA: Final = "gold-trade-wa-fi-fenced-release-identity-v2"
+# v1 and v2 deliberately remain parseable for read-only inventory/audit
+# tooling, but neither can be admitted by the writer preflight.  A Release-0
+# candidate must use v3: its signature binds the source-capability evidence,
+# the sealed build-input document and the verified static file-set identity in
+# addition to immutable source/control trees and image identities.
+FENCED_FI_RELEASE_IDENTITY_SCHEMA: Final = "gold-trade-wa-fi-fenced-release-identity-v3"
+FENCED_FI_RELEASE_IDENTITY_TERM_FENCED_LEGACY_SCHEMA: Final = (
+    "gold-trade-wa-fi-fenced-release-identity-v2"
+)
 FENCED_FI_RELEASE_IDENTITY_LEGACY_SCHEMA: Final = (
     "gold-trade-wa-fi-fenced-release-identity-v1"
 )
@@ -45,8 +54,11 @@ _SIGNING_DOMAINS: Final = {
     FENCED_FI_RELEASE_IDENTITY_LEGACY_SCHEMA: (
         b"gold-trade-wa-fi-fenced-release-identity-v1\x00"
     ),
-    FENCED_FI_RELEASE_IDENTITY_SCHEMA: (
+    FENCED_FI_RELEASE_IDENTITY_TERM_FENCED_LEGACY_SCHEMA: (
         b"gold-trade-wa-fi-fenced-release-identity-v2\x00"
+    ),
+    FENCED_FI_RELEASE_IDENTITY_SCHEMA: (
+        b"gold-trade-wa-fi-fenced-release-identity-v3\x00"
     ),
 }
 _SHA_RE: Final = re.compile(r"^[0-9a-f]{40}$", re.ASCII)
@@ -78,13 +90,34 @@ _BASE_DOCUMENT_FIELDS: Final = frozenset(
     }
 )
 _LEGACY_DOCUMENT_FIELDS: Final = _BASE_DOCUMENT_FIELDS
-_TERM_FENCED_DOCUMENT_FIELDS: Final = _BASE_DOCUMENT_FIELDS | frozenset(
+_TERM_FENCED_LEGACY_DOCUMENT_FIELDS: Final = _BASE_DOCUMENT_FIELDS | frozenset(
     {"term_fenced_application_evidence_sha256"}
+)
+_STATIC_BUILD_INPUT_FIELDS: Final = frozenset(
+    {
+        "build_input_manifest_sha256",
+        "mini_app_dist_manifest_sha256",
+        "mini_app_dist_files_sha256",
+        "mini_app_dist_file_count",
+        "mini_app_dist_total_bytes",
+    }
+)
+_STATIC_BOUND_DOCUMENT_FIELDS: Final = _TERM_FENCED_LEGACY_DOCUMENT_FIELDS | frozenset(
+    {"fenced_fi_build_input"}
 )
 _VERIFIED_IDENTITY_CAPABILITY: Final = object()
 _VERIFIED_IDENTITY_STATES: WeakKeyDictionary["FencedFiReleaseIdentity", tuple[object, ...]] = WeakKeyDictionary()
 _SERVICE_FIELDS: Final = frozenset({"image_repo_digest", "image_id"})
 _SERVICE_NAMES: Final = frozenset({"app", "bot"})
+_MAX_STATIC_FILES: Final = 100_000
+_MAX_STATIC_TOTAL_BYTES: Final = 200 * 1024 * 1024
+_STATIC_IMAGE_LABELS: Final = {
+    "build_input_manifest_sha256": "org.goldtrade.fenced-fi-build-input-sha256",
+    "mini_app_dist_manifest_sha256": "org.goldtrade.mini-app-dist-manifest-sha256",
+    "mini_app_dist_files_sha256": "org.goldtrade.mini-app-dist-files-sha256",
+    "mini_app_dist_file_count": "org.goldtrade.mini-app-dist-file-count",
+    "mini_app_dist_total_bytes": "org.goldtrade.mini-app-dist-total-bytes",
+}
 
 
 class FencedFiReleaseIdentityError(ValueError):
@@ -130,6 +163,33 @@ class FencedFiReleaseIdentityAuthority:
     key_id: str = ""
 
 
+@dataclass(frozen=True)
+class FencedFiStaticBuildInput:
+    """The sealed static input required by a v3 Fenced-FI candidate.
+
+    This is intentionally a compact identity rather than a path to mutable
+    static files.  The build-input digest binds the root-only non-authorizing
+    receipt, while the remaining fields bind the exact verified static
+    manifest/file set which must later be copied into the controlled image
+    context.
+    """
+
+    build_input_manifest_sha256: str
+    mini_app_dist_manifest_sha256: str
+    mini_app_dist_files_sha256: str
+    mini_app_dist_file_count: int
+    mini_app_dist_total_bytes: int
+
+    def as_mapping(self) -> dict[str, object]:
+        return {
+            "build_input_manifest_sha256": self.build_input_manifest_sha256,
+            "mini_app_dist_manifest_sha256": self.mini_app_dist_manifest_sha256,
+            "mini_app_dist_files_sha256": self.mini_app_dist_files_sha256,
+            "mini_app_dist_file_count": self.mini_app_dist_file_count,
+            "mini_app_dist_total_bytes": self.mini_app_dist_total_bytes,
+        }
+
+
 @dataclass(frozen=True, eq=False)
 class FencedFiReleaseIdentity:
     """Verified immutable identity; it never authorizes a writer or a phase."""
@@ -149,6 +209,7 @@ class FencedFiReleaseIdentity:
     bot_image_id: str
     signer_key_id: str
     term_fenced_application_evidence_sha256: str | None
+    static_build_input: FencedFiStaticBuildInput | None
     identity_sha256: str
     writer_authorized: bool = False
     promotion_authorized: bool = False
@@ -196,6 +257,90 @@ def _sha256(value: object, *, code: str) -> str:
     return value
 
 
+def _static_build_input(value: object) -> FencedFiStaticBuildInput:
+    if not isinstance(value, Mapping) or set(value) != _STATIC_BUILD_INPUT_FIELDS:
+        _fail("FENCED_FI_RELEASE_IDENTITY_STATIC_BUILD_INPUT_INVALID")
+    build_input_manifest_sha256 = _sha256(
+        value.get("build_input_manifest_sha256"),
+        code="FENCED_FI_RELEASE_IDENTITY_STATIC_BUILD_INPUT_INVALID",
+    )
+    mini_app_dist_manifest_sha256 = _sha256(
+        value.get("mini_app_dist_manifest_sha256"),
+        code="FENCED_FI_RELEASE_IDENTITY_STATIC_BUILD_INPUT_INVALID",
+    )
+    mini_app_dist_files_sha256 = _sha256(
+        value.get("mini_app_dist_files_sha256"),
+        code="FENCED_FI_RELEASE_IDENTITY_STATIC_BUILD_INPUT_INVALID",
+    )
+    file_count = value.get("mini_app_dist_file_count")
+    total_bytes = value.get("mini_app_dist_total_bytes")
+    if (
+        isinstance(file_count, bool)
+        or not isinstance(file_count, int)
+        or not 1 <= file_count <= _MAX_STATIC_FILES
+        or isinstance(total_bytes, bool)
+        or not isinstance(total_bytes, int)
+        or not 1 <= total_bytes <= _MAX_STATIC_TOTAL_BYTES
+    ):
+        _fail("FENCED_FI_RELEASE_IDENTITY_STATIC_BUILD_INPUT_INVALID")
+    return FencedFiStaticBuildInput(
+        build_input_manifest_sha256=build_input_manifest_sha256,
+        mini_app_dist_manifest_sha256=mini_app_dist_manifest_sha256,
+        mini_app_dist_files_sha256=mini_app_dist_files_sha256,
+        mini_app_dist_file_count=file_count,
+        mini_app_dist_total_bytes=total_bytes,
+    )
+
+
+def fenced_fi_static_build_input_from_mapping(value: object) -> FencedFiStaticBuildInput:
+    """Validate the closed static-build-input representation used by v3."""
+
+    return _static_build_input(value)
+
+
+def expected_fenced_fi_static_image_labels(
+    value: FencedFiStaticBuildInput,
+) -> dict[str, str]:
+    """Render the five mandatory OCI labels for a static-bound image."""
+
+    if type(value) is not FencedFiStaticBuildInput:
+        _fail("FENCED_FI_RELEASE_IDENTITY_STATIC_BUILD_INPUT_INVALID")
+    verified = _static_build_input(value.as_mapping())
+    return {
+        _STATIC_IMAGE_LABELS["build_input_manifest_sha256"]: (
+            verified.build_input_manifest_sha256
+        ),
+        _STATIC_IMAGE_LABELS["mini_app_dist_manifest_sha256"]: (
+            verified.mini_app_dist_manifest_sha256
+        ),
+        _STATIC_IMAGE_LABELS["mini_app_dist_files_sha256"]: (
+            verified.mini_app_dist_files_sha256
+        ),
+        _STATIC_IMAGE_LABELS["mini_app_dist_file_count"]: str(
+            verified.mini_app_dist_file_count
+        ),
+        _STATIC_IMAGE_LABELS["mini_app_dist_total_bytes"]: str(
+            verified.mini_app_dist_total_bytes
+        ),
+    }
+
+
+def verify_fenced_fi_static_image_labels(
+    labels: object,
+    *,
+    value: FencedFiStaticBuildInput,
+) -> None:
+    """Require image labels to equal one signed static-build-input identity."""
+
+    if not isinstance(labels, Mapping) or not all(
+        isinstance(key, str) and isinstance(item, str) for key, item in labels.items()
+    ):
+        _fail("FENCED_FI_RELEASE_IDENTITY_STATIC_IMAGE_LABELS_INVALID")
+    expected = expected_fenced_fi_static_image_labels(value)
+    if any(labels.get(key) != item for key, item in expected.items()):
+        _fail("FENCED_FI_RELEASE_IDENTITY_STATIC_IMAGE_LABELS_INVALID")
+
+
 def _absolute_release_root(value: object, *, release_sha: str, code: str) -> str:
     if type(value) is not str or _PATH_RE.fullmatch(value) is None:
         _fail(code)
@@ -237,8 +382,10 @@ def _service(value: object, *, name: str) -> tuple[str, str]:
 def _document_fields_for_schema(schema: object) -> frozenset[str]:
     if schema == FENCED_FI_RELEASE_IDENTITY_LEGACY_SCHEMA:
         return _LEGACY_DOCUMENT_FIELDS
+    if schema == FENCED_FI_RELEASE_IDENTITY_TERM_FENCED_LEGACY_SCHEMA:
+        return _TERM_FENCED_LEGACY_DOCUMENT_FIELDS
     if schema == FENCED_FI_RELEASE_IDENTITY_SCHEMA:
-        return _TERM_FENCED_DOCUMENT_FIELDS
+        return _STATIC_BOUND_DOCUMENT_FIELDS
     _fail("FENCED_FI_RELEASE_IDENTITY_SCHEMA_INVALID")
 
 
@@ -270,6 +417,7 @@ def require_verified_fenced_fi_release_identity(value: object) -> FencedFiReleas
         value.compose_relative_path, value.compose_sha256, value.app_image_repo_digest,
         value.app_image_id, value.bot_image_repo_digest, value.bot_image_id,
         value.signer_key_id, value.term_fenced_application_evidence_sha256,
+        value.static_build_input,
         value.identity_sha256,
     )
     if actual != expected:
@@ -278,12 +426,12 @@ def require_verified_fenced_fi_release_identity(value: object) -> FencedFiReleas
 
 
 def require_term_fenced_fi_release_candidate(value: object) -> FencedFiReleaseIdentity:
-    """Require the v2 signed identity required for an executable FI candidate.
+    """Require the v3 signed identity required for an executable FI candidate.
 
-    This is intentionally stricter than the generic verifier: a historically
-    valid v1 descriptor has no source-capability evidence binding and is
-    therefore evidence only.  It cannot be upgraded by a local config or an
-    image label.
+    This is intentionally stricter than the generic verifier: historically
+    valid v1/v2 descriptors lack the sealed static build-input binding and
+    are evidence only.  They cannot be upgraded by a local config, a static
+    manifest next to the descriptor, or an image label.
     """
 
     verified = require_verified_fenced_fi_release_identity(value)
@@ -291,6 +439,7 @@ def require_term_fenced_fi_release_candidate(value: object) -> FencedFiReleaseId
         verified.schema != FENCED_FI_RELEASE_IDENTITY_SCHEMA
         or type(verified.term_fenced_application_evidence_sha256) is not str
         or _SHA256_RE.fullmatch(verified.term_fenced_application_evidence_sha256) is None
+        or type(verified.static_build_input) is not FencedFiStaticBuildInput
     ):
         _fail("FENCED_FI_RELEASE_IDENTITY_TERM_FENCED_CANDIDATE_REQUIRED")
     return verified
@@ -339,13 +488,21 @@ def verify_fenced_fi_release_identity(
         _fail("FENCED_FI_RELEASE_IDENTITY_COMPOSE_PATH_INVALID")
     compose_sha = _sha256(parsed.get("compose_sha256"), code="FENCED_FI_RELEASE_IDENTITY_COMPOSE_INVALID")
     term_fenced_evidence_sha256: str | None
-    if schema == FENCED_FI_RELEASE_IDENTITY_SCHEMA:
+    if schema in {
+        FENCED_FI_RELEASE_IDENTITY_TERM_FENCED_LEGACY_SCHEMA,
+        FENCED_FI_RELEASE_IDENTITY_SCHEMA,
+    }:
         term_fenced_evidence_sha256 = _sha256(
             parsed.get("term_fenced_application_evidence_sha256"),
             code="FENCED_FI_RELEASE_IDENTITY_TERM_FENCED_EVIDENCE_INVALID",
         )
     else:
         term_fenced_evidence_sha256 = None
+    static_build_input = (
+        _static_build_input(parsed.get("fenced_fi_build_input"))
+        if schema == FENCED_FI_RELEASE_IDENTITY_SCHEMA
+        else None
+    )
     services = parsed.get("services")
     if not isinstance(services, Mapping) or set(services) != _SERVICE_NAMES:
         _fail("FENCED_FI_RELEASE_IDENTITY_SERVICE_SET_INVALID")
@@ -392,6 +549,7 @@ def verify_fenced_fi_release_identity(
         bot_image_id=bot_id,
         signer_key_id=signer_key_id,
         term_fenced_application_evidence_sha256=term_fenced_evidence_sha256,
+        static_build_input=static_build_input,
         identity_sha256=hashlib.sha256(document).hexdigest(),
     )
     object.__setattr__(identity, "_verification_capability", _VERIFIED_IDENTITY_CAPABILITY)
@@ -401,6 +559,7 @@ def verify_fenced_fi_release_identity(
         identity.compose_relative_path, identity.compose_sha256, identity.app_image_repo_digest,
         identity.app_image_id, identity.bot_image_repo_digest, identity.bot_image_id,
         identity.signer_key_id, identity.term_fenced_application_evidence_sha256,
+        identity.static_build_input,
         identity.identity_sha256,
     )
     return identity

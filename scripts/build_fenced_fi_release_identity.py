@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build one local, signed WA-FI fenced-release v2 identity descriptor.
+"""Build one local, signed WA-FI fenced-release v3 identity descriptor.
 
 This is deliberately a *local* descriptor-construction boundary.  It never
 contacts a peer, Object Storage, a registry, or the Writer Witness; it never
@@ -40,10 +40,12 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey 
 
 from core import fenced_fi_release_identity as identity_contract  # noqa: E402
 from core import term_fenced_application_capability as application_capability  # noqa: E402
+from scripts import prepare_fenced_fi_candidate_build_inputs as candidate_inputs  # noqa: E402
 from scripts import verify_term_fenced_application_source as source_verifier  # noqa: E402
 
 
 MAX_SMALL_FILE_BYTES = 64 * 1024
+MAX_BUILD_INPUT_MANIFEST_BYTES = candidate_inputs.MAX_MANIFEST_BYTES
 MAX_COMPOSE_BYTES = 4 * 1024 * 1024
 MAX_DOCKER_INSPECT_BYTES = 256 * 1024
 SHA1_RE = re.compile(r"^[0-9a-f]{40}$", re.ASCII)
@@ -65,7 +67,7 @@ FENCED_COMPOSE_RELATIVE_PATH = Path(
 LEGACY_UNFENCED_APPLICATION_RELEASE_SHA = (
     "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5"
 )
-SIGNING_DOMAIN = b"gold-trade-wa-fi-fenced-release-identity-v2\x00"
+SIGNING_DOMAIN = b"gold-trade-wa-fi-fenced-release-identity-v3\x00"
 SAFE_GIT_ENV = {
     "PATH": "/usr/bin:/bin",
     "LANG": "C.UTF-8",
@@ -122,6 +124,7 @@ class BuiltFencedFiReleaseIdentity:
     control: ControlRelease
     app: LocalImageIdentity
     bot: LocalImageIdentity
+    static_build_input: identity_contract.FencedFiStaticBuildInput
     signer_key_id: str
 
 
@@ -536,6 +539,89 @@ def _load_source_release(
     )
 
 
+def _load_static_build_input(
+    *,
+    fenced_fi_build_input: Path,
+    mini_app_dist_manifest: Path,
+    source: SourceRelease,
+) -> identity_contract.FencedFiStaticBuildInput:
+    """Load two sealed non-authorizing receipts and bind them to one source.
+
+    The candidate-input controller has already checked the static tree twice
+    before sealing its create-only build-input receipt.  This descriptor
+    builder does not reopen that mutable tree or invoke Docker; it instead
+    validates the exact build-input and static-manifest bytes handed to it,
+    then signs their stable identities.  A later controlled context builder
+    must still prove the selected files are the bytes copied into an image.
+    """
+
+    build_input_document = _secure_read(
+        _absolute_path(
+            fenced_fi_build_input,
+            label="FENCED_FI_BUILD_INPUT",
+        ),
+        label="FENCED_FI_BUILD_INPUT",
+        maximum_bytes=MAX_BUILD_INPUT_MANIFEST_BYTES,
+        private=True,
+    )
+    static_manifest_document = _secure_read(
+        _absolute_path(
+            mini_app_dist_manifest,
+            label="MINI_APP_DIST_MANIFEST",
+        ),
+        label="MINI_APP_DIST_MANIFEST",
+        maximum_bytes=MAX_BUILD_INPUT_MANIFEST_BYTES,
+        private=True,
+    )
+    try:
+        build_input = candidate_inputs.verify_fenced_fi_candidate_build_input_document(
+            build_input_document
+        )
+        static_manifest = candidate_inputs.verify_mini_app_dist_manifest_document(
+            static_manifest_document
+        )
+    except candidate_inputs.FencedFiCandidateBuildInputError as exc:
+        raise BuildFencedFiReleaseIdentityError(
+            "FENCED_FI_RELEASE_DESCRIPTOR_STATIC_BUILD_INPUT_INVALID"
+        ) from exc
+    application = build_input.get("application")
+    static = build_input.get("mini_app_dist")
+    if not isinstance(application, Mapping) or not isinstance(static, Mapping):
+        _fail("FENCED_FI_RELEASE_DESCRIPTOR_STATIC_BUILD_INPUT_INVALID")
+    if (
+        application.get("source_root") != str(source.root)
+        or application.get("release_sha") != source.release_sha
+        or application.get("release_tree_sha") != source.release_tree_sha
+        or build_input.get("term_fenced_application_evidence_sha256")
+        != source.evidence_sha256
+    ):
+        _fail("FENCED_FI_RELEASE_DESCRIPTOR_STATIC_BUILD_INPUT_SOURCE_MISMATCH")
+    if (
+        static.get("root") != str(static_manifest.root)
+        or static.get("manifest_sha256") != static_manifest.manifest_sha256
+        or static.get("files_sha256") != static_manifest.files_sha256
+        or static.get("file_count") != static_manifest.file_count
+        or static.get("total_bytes") != static_manifest.total_bytes
+    ):
+        _fail("FENCED_FI_RELEASE_DESCRIPTOR_STATIC_MANIFEST_MISMATCH")
+    try:
+        return identity_contract.fenced_fi_static_build_input_from_mapping(
+            {
+                "build_input_manifest_sha256": hashlib.sha256(
+                    build_input_document
+                ).hexdigest(),
+                "mini_app_dist_manifest_sha256": static_manifest.manifest_sha256,
+                "mini_app_dist_files_sha256": static_manifest.files_sha256,
+                "mini_app_dist_file_count": static_manifest.file_count,
+                "mini_app_dist_total_bytes": static_manifest.total_bytes,
+            }
+        )
+    except identity_contract.FencedFiReleaseIdentityError as exc:
+        raise BuildFencedFiReleaseIdentityError(
+            "FENCED_FI_RELEASE_DESCRIPTOR_STATIC_BUILD_INPUT_INVALID"
+        ) from exc
+
+
 def _load_control_release(root: Path) -> ControlRelease:
     root = _require_root_controlled_directory(root, label="CONTROL_RELEASE_ROOT")
     before_sha, before_tree = _require_clean_git_tree(root, label="CONTROL_RELEASE")
@@ -626,6 +712,7 @@ def _inspect_local_image(
     image_ref: str,
     expected_repo_digest: str,
     evidence_document: bytes,
+    static_build_input: identity_contract.FencedFiStaticBuildInput,
 ) -> LocalImageIdentity:
     image_ref = _require_image_ref(image_ref, service=service)
     expected_repo_digest = _require_repo_digest(expected_repo_digest, service=service)
@@ -668,6 +755,15 @@ def _inspect_local_image(
         raise BuildFencedFiReleaseIdentityError(
             f"FENCED_FI_RELEASE_DESCRIPTOR_{service}_IMAGE_LABEL_MISMATCH"
         ) from exc
+    try:
+        identity_contract.verify_fenced_fi_static_image_labels(
+            labels,
+            value=static_build_input,
+        )
+    except identity_contract.FencedFiReleaseIdentityError as exc:
+        raise BuildFencedFiReleaseIdentityError(
+            f"FENCED_FI_RELEASE_DESCRIPTOR_{service}_STATIC_IMAGE_LABEL_MISMATCH"
+        ) from exc
     return LocalImageIdentity(
         service=service,
         image_ref=image_ref,
@@ -685,6 +781,13 @@ def _same_control(left: ControlRelease, right: ControlRelease) -> bool:
 
 
 def _same_image(left: LocalImageIdentity, right: LocalImageIdentity) -> bool:
+    return left == right
+
+
+def _same_static_build_input(
+    left: identity_contract.FencedFiStaticBuildInput,
+    right: identity_contract.FencedFiStaticBuildInput,
+) -> bool:
     return left == right
 
 
@@ -706,6 +809,8 @@ def build_fenced_fi_release_identity(
     application_release_root: Path,
     control_release_root: Path,
     term_fenced_application_evidence: Path,
+    fenced_fi_build_input: Path,
+    mini_app_dist_manifest: Path,
     app_image: str,
     app_repo_digest: str,
     bot_image: str,
@@ -713,11 +818,12 @@ def build_fenced_fi_release_identity(
     signing_private_key: Path,
     authority_public_key: Path,
 ) -> BuiltFencedFiReleaseIdentity:
-    """Collect two stable local attestations and sign one v2 descriptor.
+    """Collect two stable local attestations and sign one v3 descriptor.
 
     Inputs are collected twice.  A changed Git tree, evidence file, local
-    image ID, selected RepoDigest, or term-fence label is a fail-closed error;
-    a descriptor is never built from a mixed observation.
+    image ID, selected RepoDigest, term-fence label, build-input receipt, or
+    static manifest is a fail-closed error; a descriptor is never built from
+    a mixed observation.
     """
 
     _require_root()
@@ -738,18 +844,25 @@ def build_fenced_fi_release_identity(
         evidence_document=evidence_document,
     )
     _reject_legacy_unfenced_application_release(first_source)
+    first_static_build_input = _load_static_build_input(
+        fenced_fi_build_input=fenced_fi_build_input,
+        mini_app_dist_manifest=mini_app_dist_manifest,
+        source=first_source,
+    )
     first_control = _load_control_release(control_release_root)
     first_app = _inspect_local_image(
         service="APP",
         image_ref=app_image,
         expected_repo_digest=app_repo_digest,
         evidence_document=evidence_document,
+        static_build_input=first_static_build_input,
     )
     first_bot = _inspect_local_image(
         service="BOT",
         image_ref=bot_image,
         expected_repo_digest=bot_repo_digest,
         evidence_document=evidence_document,
+        static_build_input=first_static_build_input,
     )
 
     final_evidence_document = _secure_read(
@@ -765,18 +878,25 @@ def build_fenced_fi_release_identity(
         evidence_document=final_evidence_document,
     )
     _reject_legacy_unfenced_application_release(final_source)
+    final_static_build_input = _load_static_build_input(
+        fenced_fi_build_input=fenced_fi_build_input,
+        mini_app_dist_manifest=mini_app_dist_manifest,
+        source=final_source,
+    )
     final_control = _load_control_release(control_release_root)
     final_app = _inspect_local_image(
         service="APP",
         image_ref=app_image,
         expected_repo_digest=app_repo_digest,
         evidence_document=final_evidence_document,
+        static_build_input=final_static_build_input,
     )
     final_bot = _inspect_local_image(
         service="BOT",
         image_ref=bot_image,
         expected_repo_digest=bot_repo_digest,
         evidence_document=final_evidence_document,
+        static_build_input=final_static_build_input,
     )
     if not _same_source(first_source, final_source):
         _fail("FENCED_FI_RELEASE_DESCRIPTOR_APPLICATION_RELEASE_CHANGED")
@@ -784,6 +904,8 @@ def build_fenced_fi_release_identity(
         _fail("FENCED_FI_RELEASE_DESCRIPTOR_CONTROL_RELEASE_CHANGED")
     if not _same_image(first_app, final_app) or not _same_image(first_bot, final_bot):
         _fail("FENCED_FI_RELEASE_DESCRIPTOR_LOCAL_IMAGE_CHANGED")
+    if not _same_static_build_input(first_static_build_input, final_static_build_input):
+        _fail("FENCED_FI_RELEASE_DESCRIPTOR_STATIC_BUILD_INPUT_CHANGED")
 
     # Check the signing authority again after the local candidate facts have
     # settled.  A key rotation during construction is a fail-closed event;
@@ -804,6 +926,7 @@ def build_fenced_fi_release_identity(
         "compose_relative_path": str(FENCED_COMPOSE_RELATIVE_PATH),
         "compose_sha256": final_control.compose_sha256,
         "term_fenced_application_evidence_sha256": final_source.evidence_sha256,
+        "fenced_fi_build_input": final_static_build_input.as_mapping(),
         "services": {
             "app": {
                 "image_repo_digest": final_app.image_repo_digest,
@@ -842,6 +965,7 @@ def build_fenced_fi_release_identity(
         control=final_control,
         app=final_app,
         bot=final_bot,
+        static_build_input=final_static_build_input,
         signer_key_id=authority.key_id,
     )
 
@@ -950,6 +1074,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--application-release-root", required=True, type=Path)
     parser.add_argument("--control-release-root", required=True, type=Path)
     parser.add_argument("--term-fenced-application-evidence", required=True, type=Path)
+    parser.add_argument("--fenced-fi-build-input", required=True, type=Path)
+    parser.add_argument("--mini-app-dist-manifest", required=True, type=Path)
     parser.add_argument("--app-image", required=True)
     parser.add_argument("--app-repo-digest", required=True)
     parser.add_argument("--bot-image", required=True)
@@ -967,6 +1093,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             application_release_root=arguments.application_release_root,
             control_release_root=arguments.control_release_root,
             term_fenced_application_evidence=arguments.term_fenced_application_evidence,
+            fenced_fi_build_input=arguments.fenced_fi_build_input,
+            mini_app_dist_manifest=arguments.mini_app_dist_manifest,
             app_image=arguments.app_image,
             app_repo_digest=arguments.app_repo_digest,
             bot_image=arguments.bot_image,
@@ -999,6 +1127,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "control_release_tree_sha": built.control.release_tree_sha,
                 "compose_sha256": built.control.compose_sha256,
                 "term_fenced_application_evidence_sha256": built.source.evidence_sha256,
+                "fenced_fi_build_input": built.static_build_input.as_mapping(),
                 "app_image_repo_digest": built.app.image_repo_digest,
                 "app_image_id": built.app.image_id,
                 "bot_image_repo_digest": built.bot.image_repo_digest,

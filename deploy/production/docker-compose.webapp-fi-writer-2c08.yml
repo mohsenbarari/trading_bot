@@ -1,5 +1,5 @@
-# Fenced WebApp-FI writer runtime used only by a new signed v2 term-fenced
-# candidate.  Its historical filename does not grant compatibility to 2c08:
+# Fenced WebApp-FI writer runtime used only by a new signed v3 static-bound
+# term-fenced candidate.  Its historical filename does not grant compatibility to 2c08:
 # the lease agent and preflight reject that SHA before Compose can start.
 #
 # This is intentionally separate from docker-compose.yml.  It never creates a
@@ -7,11 +7,11 @@
 # Every service is profile-gated and may be started only by the fixed-project
 # lease-agent mode after a controlled cutover has stopped the legacy scope.
 #
-# This file is a control-plane contract.  A signed v2 identity, verified
-# source-capability evidence and matching OCI image labels are required before
-# it becomes an executable candidate.  Historical 2c08 images do not consume
-# the Writer Witness term or schema-bootstrap variables below and are
-# permanently blocked from this project.
+# This file is a control-plane contract.  A signed v3 identity, verified
+# source-capability evidence, sealed static build input, and matching OCI image
+# labels are required before it becomes an executable candidate.  Historical
+# 2c08 images do not consume the Writer Witness term or schema-bootstrap
+# variables below and are permanently blocked from this project.
 
 x-default-logging: &default_logging
   driver: json-file

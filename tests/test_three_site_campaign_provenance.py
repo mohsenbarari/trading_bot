@@ -144,6 +144,13 @@ class CampaignProvenanceFixture:
             ),
             "compose_sha256": _sha("compose"),
             "term_fenced_application_evidence_sha256": _sha("term-fenced-evidence"),
+            "fenced_fi_build_input": {
+                "build_input_manifest_sha256": _sha("sealed-build-input"),
+                "mini_app_dist_manifest_sha256": _sha("mini-app-dist-manifest"),
+                "mini_app_dist_files_sha256": _sha("mini-app-dist-files"),
+                "mini_app_dist_file_count": 17,
+                "mini_app_dist_total_bytes": 4096,
+            },
             "services": {
                 "app": {
                     "image_repo_digest": (
@@ -161,7 +168,7 @@ class CampaignProvenanceFixture:
             "signer_key_id": "ed25519-sha256:" + hashlib.sha256(self.authority_public).hexdigest(),
         }
         signature = self.authority_private.sign(
-            b"gold-trade-wa-fi-fenced-release-identity-v2\x00"
+            b"gold-trade-wa-fi-fenced-release-identity-v3\x00"
             + identity.canonical_fenced_fi_release_identity_json_bytes(unsigned)
         )
         return identity.canonical_fenced_fi_release_identity_json_bytes(
@@ -342,6 +349,55 @@ class ThreeSiteCampaignProvenanceTests(unittest.TestCase):
             serialization.PrivateFormat.Raw,
             serialization.NoEncryption(),
         ), encoded)
+
+    def test_legacy_v2_campaign_pin_remains_read_only_loadable(self) -> None:
+        """A v2 audit pin cannot become a v3 creation input, but stays legible."""
+
+        self.fixture.create()
+        document = (
+            self.fixture.provenance_root
+            / subject.CAMPAIGNS_DIRECTORY_NAME
+            / self.fixture.campaign_id
+            / subject.PROVENANCE_FILENAME
+        )
+        value = json.loads(document.read_bytes())
+        value["candidate"]["schema"] = (
+            identity.FENCED_FI_RELEASE_IDENTITY_TERM_FENCED_LEGACY_SCHEMA
+        )
+        unsigned = dict(value)
+        del unsigned["provenance_sha256"]
+        value["provenance_sha256"] = hashlib.sha256(
+            subject._canonical_json_bytes(unsigned)
+        ).hexdigest()
+        _write(document, subject._canonical_json_bytes(value) + NL, mode=0o400)
+
+        loaded = subject.load_three_site_campaign_provenance(
+            campaign_id=self.fixture.campaign_id,
+            _provenance_root_for_test=self.fixture.provenance_root,
+        )
+
+        self.assertEqual(
+            identity.FENCED_FI_RELEASE_IDENTITY_TERM_FENCED_LEGACY_SCHEMA,
+            loaded["candidate"]["schema"],
+        )
+        self.assertIs(loaded["writer_authorized"], False)
+        self.assertIs(loaded["full_matrix_executed"], False)
+
+        value["candidate"]["schema"] = {"unhashable": True}
+        unsigned = dict(value)
+        del unsigned["provenance_sha256"]
+        value["provenance_sha256"] = hashlib.sha256(
+            subject._canonical_json_bytes(unsigned)
+        ).hexdigest()
+        _write(document, subject._canonical_json_bytes(value) + NL, mode=0o400)
+        with self.assertRaisesRegex(
+            subject.ThreeSiteCampaignProvenanceError,
+            "CANDIDATE_INVALID",
+        ):
+            subject.load_three_site_campaign_provenance(
+                campaign_id=self.fixture.campaign_id,
+                _provenance_root_for_test=self.fixture.provenance_root,
+            )
 
     def test_rejects_missing_legacy_mismatched_control_and_expired_witness_before_claims(
         self,

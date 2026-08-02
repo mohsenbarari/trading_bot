@@ -78,9 +78,10 @@ WA_IR_PROMOTION_HEALTH_POLL_SECONDS = 2
 WA_IR_PROMOTION_LOCK_TIMEOUT_SECONDS = 30
 WA_IR_APPLICATION_RELEASE_SHA = "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5"
 # This SHA is the historical FI application tree.  It remains a hard block:
-# the same Compose project may stage only a *new* signed v2 candidate whose
-# source-capability evidence, image labels, and Git tree have passed the
-# independent preflight.  Never make this a configurable compatibility value.
+# the same Compose project may stage only a *new* signed v3 candidate whose
+# source-capability evidence, sealed static build input, image labels, and Git
+# tree have passed the independent preflight.  Never make this a configurable
+# compatibility value.
 WA_FI_LEGACY_APPLICATION_RELEASE_SHA = WA_IR_APPLICATION_RELEASE_SHA
 WA_IR_PROMOTED_COMPOSE_FILE = (
     REPO_ROOT / "deploy/production/docker-compose.webapp-ir-promoted-2c08.yml"
@@ -2386,7 +2387,7 @@ def _term_fenced_candidate_claim_from_preflight(
         or result.get("services") != ["app", "bot"]
     ):
         raise ProductionWriterLeaseAgentError(
-            "fenced WebApp-FI identity preflight returned an invalid v2 candidate claim"
+            "fenced WebApp-FI identity preflight returned an invalid static-bound candidate claim"
         )
     release_sha = result.get("release_sha")
     release_tree_sha = result.get("release_tree_sha")

@@ -63,6 +63,11 @@ class FencedFiReleaseIdentityRuntimeObservations:
     bot_image_repo_digest: str
     bot_image_id: str
     term_fenced_application_evidence_sha256: str
+    fenced_fi_build_input_manifest_sha256: str
+    mini_app_dist_manifest_sha256: str
+    mini_app_dist_files_sha256: str
+    mini_app_dist_file_count: int
+    mini_app_dist_total_bytes: int
 
 
 @dataclass(frozen=True, eq=False)
@@ -82,6 +87,11 @@ class FencedFiReleaseIdentityRuntimeBinding:
     bot_image_repo_digest: str
     bot_image_id: str
     term_fenced_application_evidence_sha256: str
+    fenced_fi_build_input_manifest_sha256: str
+    mini_app_dist_manifest_sha256: str
+    mini_app_dist_files_sha256: str
+    mini_app_dist_file_count: int
+    mini_app_dist_total_bytes: int
     writer_authorized: bool = False
     promotion_authorized: bool = False
     deployment_authorized: bool = False
@@ -145,6 +155,13 @@ def _binding_material(
         "term_fenced_application_evidence_sha256": (
             observations.term_fenced_application_evidence_sha256
         ),
+        "fenced_fi_build_input_manifest_sha256": (
+            observations.fenced_fi_build_input_manifest_sha256
+        ),
+        "mini_app_dist_manifest_sha256": observations.mini_app_dist_manifest_sha256,
+        "mini_app_dist_files_sha256": observations.mini_app_dist_files_sha256,
+        "mini_app_dist_file_count": str(observations.mini_app_dist_file_count),
+        "mini_app_dist_total_bytes": str(observations.mini_app_dist_total_bytes),
     }
 
 
@@ -161,8 +178,15 @@ def _observations(value: object) -> FencedFiReleaseIdentityRuntimeObservations:
         "bot_image_repo_digest",
         "bot_image_id",
         "term_fenced_application_evidence_sha256",
+        "fenced_fi_build_input_manifest_sha256",
+        "mini_app_dist_manifest_sha256",
+        "mini_app_dist_files_sha256",
     ):
         if type(getattr(value, field_name)) is not str:
+            _fail("FENCED_FI_RELEASE_IDENTITY_RUNTIME_BINDING_OBSERVATIONS_INVALID")
+    for field_name in ("mini_app_dist_file_count", "mini_app_dist_total_bytes"):
+        observed = getattr(value, field_name)
+        if isinstance(observed, bool) or not isinstance(observed, int) or observed < 1:
             _fail("FENCED_FI_RELEASE_IDENTITY_RUNTIME_BINDING_OBSERVATIONS_INVALID")
     return value
 
@@ -230,6 +254,28 @@ def bind_fenced_fi_release_identity_runtime(
         verified.term_fenced_application_evidence_sha256,
         code="FENCED_FI_RELEASE_IDENTITY_RUNTIME_BINDING_TERM_FENCED_EVIDENCE_MISMATCH",
     )
+    static = verified.static_build_input
+    if static is None:  # Defensive: upstream candidate gate already rejects this.
+        _fail("FENCED_FI_RELEASE_IDENTITY_RUNTIME_BINDING_IDENTITY_INVALID")
+    _equal(
+        observed.fenced_fi_build_input_manifest_sha256,
+        static.build_input_manifest_sha256,
+        code="FENCED_FI_RELEASE_IDENTITY_RUNTIME_BINDING_STATIC_BUILD_INPUT_MISMATCH",
+    )
+    _equal(
+        observed.mini_app_dist_manifest_sha256,
+        static.mini_app_dist_manifest_sha256,
+        code="FENCED_FI_RELEASE_IDENTITY_RUNTIME_BINDING_STATIC_MANIFEST_MISMATCH",
+    )
+    _equal(
+        observed.mini_app_dist_files_sha256,
+        static.mini_app_dist_files_sha256,
+        code="FENCED_FI_RELEASE_IDENTITY_RUNTIME_BINDING_STATIC_FILES_MISMATCH",
+    )
+    if observed.mini_app_dist_file_count != static.mini_app_dist_file_count:
+        _fail("FENCED_FI_RELEASE_IDENTITY_RUNTIME_BINDING_STATIC_FILE_COUNT_MISMATCH")
+    if observed.mini_app_dist_total_bytes != static.mini_app_dist_total_bytes:
+        _fail("FENCED_FI_RELEASE_IDENTITY_RUNTIME_BINDING_STATIC_TOTAL_BYTES_MISMATCH")
     binding_material = _binding_material(verified, observed)
     binding = FencedFiReleaseIdentityRuntimeBinding(
         schema=FENCED_FI_RELEASE_IDENTITY_RUNTIME_BINDING_SCHEMA,
@@ -249,6 +295,13 @@ def bind_fenced_fi_release_identity_runtime(
         term_fenced_application_evidence_sha256=(
             observed.term_fenced_application_evidence_sha256
         ),
+        fenced_fi_build_input_manifest_sha256=(
+            observed.fenced_fi_build_input_manifest_sha256
+        ),
+        mini_app_dist_manifest_sha256=observed.mini_app_dist_manifest_sha256,
+        mini_app_dist_files_sha256=observed.mini_app_dist_files_sha256,
+        mini_app_dist_file_count=observed.mini_app_dist_file_count,
+        mini_app_dist_total_bytes=observed.mini_app_dist_total_bytes,
     )
     object.__setattr__(binding, "_capability", _CAPABILITY)
     _STATES[binding] = (verified, observed)
@@ -292,6 +345,16 @@ def require_bound_fenced_fi_release_identity_runtime(
         or value.bot_image_id != expected["bot_image_id"]
         or value.term_fenced_application_evidence_sha256
         != expected["term_fenced_application_evidence_sha256"]
+        or value.fenced_fi_build_input_manifest_sha256
+        != expected["fenced_fi_build_input_manifest_sha256"]
+        or value.mini_app_dist_manifest_sha256
+        != expected["mini_app_dist_manifest_sha256"]
+        or value.mini_app_dist_files_sha256
+        != expected["mini_app_dist_files_sha256"]
+        or str(value.mini_app_dist_file_count)
+        != expected["mini_app_dist_file_count"]
+        or str(value.mini_app_dist_total_bytes)
+        != expected["mini_app_dist_total_bytes"]
         or value.binding_sha256
         != hashlib.sha256(
             _identity.canonical_fenced_fi_release_identity_json_bytes(expected)

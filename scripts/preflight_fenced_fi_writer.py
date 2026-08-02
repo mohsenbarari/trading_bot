@@ -36,9 +36,10 @@ from scripts import verify_term_fenced_application_source as application_source_
 
 
 # v1 names the historical 2c08 runtime and deliberately has no term-fenced
-# evidence input.  It is never an executable candidate.  v2 is closed: a
-# signed v2 release identity and a separately verified source evidence file
-# are both required before Compose or Docker is even inspected.
+# evidence input.  It is never an executable candidate.  The signed v3
+# release identity binds source evidence and sealed static build inputs; it
+# and a separately verified source evidence file are both required before
+# Compose or Docker is even inspected.
 PREFLIGHT_SCHEMA = "fenced-fi-writer-preflight-v2"
 MAX_FILE_BYTES = 256 * 1024
 MAX_COMPOSE_BYTES = 4 * 1024 * 1024
@@ -116,7 +117,7 @@ class FencedFiReleaseIdentityInputs:
 
 @dataclass(frozen=True)
 class FencedFiTermFencedEvidenceInputs:
-    """Root-only source-capability evidence bound by the signed v2 identity."""
+    """Root-only source-capability evidence bound by the signed v3 identity."""
 
     path: Path
 
@@ -483,12 +484,13 @@ def _validate_release_layout(config: FencedFiWriterPreflightConfig) -> None:
 
 
 def _validate_release_identity(config: FencedFiWriterPreflightConfig) -> Any:
-    """Bind local inputs to one independently signed v2 candidate identity.
+    """Bind local inputs to one independently signed v3 candidate identity.
 
     A local Docker tag, source SHA, or evidence file alone is not an immutable
-    release identity.  The v2 descriptor is signed by a root-pinned authority
+    release identity.  The v3 descriptor is signed by a root-pinned authority
     and later compared to the exact control/application roots, Compose bytes,
-    source evidence, image repository digests, image IDs, and OCI labels.
+    source evidence, sealed static build input, image repository digests,
+    image IDs, and OCI labels.
     """
 
     try:
@@ -507,7 +509,7 @@ def _validate_release_identity(config: FencedFiWriterPreflightConfig) -> Any:
         )
     except release_identity_contract.FencedFiReleaseIdentityError as exc:
         raise FencedFiWriterPreflightError(
-            "fenced FI signed release identity is not a term-fenced v2 candidate"
+            "fenced FI signed release identity is not a static-bound term-fenced v3 candidate"
         ) from exc
     if (
         identity.application_release_root != str(config.application_release_root)
@@ -543,7 +545,7 @@ def _validate_term_fenced_application_evidence(
     config: FencedFiWriterPreflightConfig,
     identity: Any,
 ) -> application_capability.TermFencedApplicationCapability:
-    """Bind signed v2 identity to semantic evidence for the exact Git tree.
+    """Bind signed v3 identity to semantic evidence for the exact Git tree.
 
     The source verifier reads immutable Git blobs rather than worktree files.
     Consequently, a same-named directory, a patched Dockerfile, or a label
@@ -1113,6 +1115,7 @@ def _inspect_image(
     expectation: StaticServiceExpectation,
     *,
     evidence: application_capability.TermFencedApplicationCapability,
+    static_build_input: release_identity_contract.FencedFiStaticBuildInput,
 ) -> None:
     image_id = _run_read_only(
         ["/usr/bin/docker", "image", "inspect", "--format", "{{.Id}}", expectation.image_ref],
@@ -1160,7 +1163,7 @@ def _inspect_image(
             "{{json .Config.Labels}}",
             expectation.image_ref,
         ],
-        label=f"{expectation.name} image term-fenced labels",
+        label=f"{expectation.name} image signed labels",
         cwd=config.control_release_root,
         max_output=64 * 1024,
     )
@@ -1168,7 +1171,7 @@ def _inspect_image(
         labels = json.loads(raw_labels, object_pairs_hook=_strict_object)
     except Exception as exc:
         raise FencedFiWriterPreflightError(
-            f"{expectation.name} image term-fenced labels are invalid"
+            f"{expectation.name} image signed labels are invalid"
         ) from exc
     try:
         application_capability.verify_term_fenced_image_labels(
@@ -1178,6 +1181,15 @@ def _inspect_image(
     except application_capability.TermFencedApplicationCapabilityError as exc:
         raise FencedFiWriterPreflightError(
             f"{expectation.name} image labels do not bind the signed term-fenced source evidence"
+        ) from exc
+    try:
+        release_identity_contract.verify_fenced_fi_static_image_labels(
+            labels,
+            value=static_build_input,
+        )
+    except release_identity_contract.FencedFiReleaseIdentityError as exc:
+        raise FencedFiWriterPreflightError(
+            f"{expectation.name} image labels do not bind the signed static build input"
         ) from exc
 
 
@@ -1292,10 +1304,21 @@ def _validate_static_image_bindings(
     config: FencedFiWriterPreflightConfig,
     *,
     evidence: application_capability.TermFencedApplicationCapability,
+    identity: Any,
 ) -> None:
+    static_build_input = getattr(identity, "static_build_input", None)
+    if type(static_build_input) is not release_identity_contract.FencedFiStaticBuildInput:
+        raise FencedFiWriterPreflightError(
+            "fenced FI signed release identity lacks a static build-input binding"
+        )
     _validate_rendered_runtime(config, evidence=evidence)
     for expectation in config.services:
-        _inspect_image(config, expectation, evidence=evidence)
+        _inspect_image(
+            config,
+            expectation,
+            evidence=evidence,
+            static_build_input=static_build_input,
+        )
 
 
 def _validate_runtime_identity(
@@ -1446,7 +1469,7 @@ def run(*, config_path: Path, phase: str) -> dict[str, Any]:
     _validate_installed_unit(config)
     agent_config = _validate_agent_config(config)
     _validate_runtime_environment_binding(config, agent_config, identity)
-    _validate_static_image_bindings(config, evidence=evidence)
+    _validate_static_image_bindings(config, evidence=evidence, identity=identity)
     _validate_legacy_scope_is_disabled()
     if phase == "cutover-pre":
         _validate_fenced_runtime_scope_is_absent()
