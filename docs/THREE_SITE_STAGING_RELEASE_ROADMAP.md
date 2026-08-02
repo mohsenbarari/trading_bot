@@ -1,6 +1,6 @@
 # نقشه راه اجرایی انتشار معماری سه‌سایته روی Staging
 
-وضعیت سند: `Stage 0 / پذیرفته‌شده؛ Stage 1 مجاز به شروع`
+وضعیت سند: `Stage 2 / پذیرفته‌شده؛ Stage 3 / در حال اجرا`
 
 دامنه: انتشار و ارزیابی معماری `Bot-FI + WebApp-FI + WebApp-IR + Witness`
 روی منابع کاملاً مجزای staging. این سند مجوز انتشار production یا تغییر دامنه
@@ -136,10 +136,12 @@ roadmap جداگانه پیش‌تولید انجام می‌شوند.
 برای کل مسیر فقط این تصمیم‌های انسانی مستقل باقی می‌مانند:
 
 1. پذیرش scope و Stage 0؛
-2. اجازه شروع mutation میزبان‌های staging در Stage 3B و deploy همان release در
-   Stage 4؛
-3. اجازه اجرای failover/failback برنامه‌ریزی‌شده Stage 5؛
-4. تصمیم مستقل Queue-v1 در Stage 6، فقط اگر activation انتخاب شود.
+2. اجازه شروع mutation روی پنج VPS تستی موجود در Stage 3B؛ این اجازه در
+   `2026-08-02` صادر شد، اما ساخت یا حذف VPS/volume و هر mutation روی دو VPS
+   production ایران را شامل نمی‌شود؛
+3. اجازه deploy همان release در Stage 4؛
+4. اجازه اجرای failover/failback برنامه‌ریزی‌شده Stage 5؛
+5. تصمیم مستقل Queue-v1 در Stage 6، فقط اگر activation انتخاب شود.
 
 receiptهای فنی inventory، migration و journal که از یک staging session مشتق
 می‌شوند، evidence و authorization binding هستند؛ prompt یا gate انسانی جدید
@@ -585,46 +587,70 @@ DNS mutation انجام نمی‌شود.
 - Production touched: `no`؛ فقط commandهای read-only شامل host/Docker/systemd
   inspection و S3 HEAD/GET configuration اجرا شدند.
 
+#### checkpoint تکمیلی — inventory پنل و انتخاب topology تستی — 2026-08-02
+
+- پنل Arvan با credential زیرساخت owner-only و فقط از مسیرهای `GET` ممیزی شد:
+  دقیقاً ۷ VPS فعال وجود دارد. `95.38.164.29` و `37.152.191.11` طبق اعلام مالک
+  production هستند و از تمام mutationهای این Stage خارج شدند.
+- چهار VPS disposable موجود به‌عنوان topology واقعی Stage 3 انتخاب شدند:
+  `Bot-FI=130.185.121.98`، `WebApp-FI=194.5.206.69`،
+  `WebApp-IR=188.213.198.115` و `Witness=130.185.121.152`. انتخاب آن‌ها هیچ
+  تغییری در IPهای canonical production داخل `core/three_site_topology.py`
+  ایجاد نمی‌کند؛ نگاشت staging فقط در inventory/runtime bundle ثبت می‌شود.
+- VPS پنجم `185.231.182.6` یک Witness انتقالی قدیمی است و به‌دلیل رد شدن کلید
+  SSH فعلی، در topology انتخاب نشد و دست‌نخورده ماند.
+- Bot-FI، WebApp-FI و Witness تستی Ubuntu 24.04، Docker `29.1.3`، Compose
+  `2.40.3`، NTP synchronized، بدون container و دارای volume مستقل 50 GiB
+  هستند. هر سه volume از قبل ext4 و روی
+  `/srv/trading-bot-three-site-staging-data` mount شده‌اند؛ UUID، daemon ID و
+  machine-id hash آن‌ها متمایز است.
+- WebApp-IR تستی در API فعال و volume 50 GiB آن attached است، ولی bootstrap
+  guest قبلی کامل نشده و TCP/22 با وجود security-group صحیح پاسخ نمی‌دهد.
+  recovery فقط از console out-of-band همان VPS انجام می‌شود؛ server/volume
+  create، delete، rebuild یا detach مجاز نیست.
+- Evidence:
+  `docs/THREE_SITE_STAGE3_ARVAN_TEST_INVENTORY.json`؛ hash آن پس از commit این
+  checkpoint برابر
+  `628ee07212eb2718207b9c9c20ca75fbe25070cf18ec127f360149f35642b8b6` است.
+- Production touched: `no`؛ inventory پنل و host probeها read-only بودند.
+
 ### بخش B — آماده‌سازی isolation با authorization مرحله
 
-ترتیب زیر پس از checkpoint بخش A و براساس واقعیت میزبان‌ها جایگزین ترتیب اولیه
-می‌شود. علت این اصلاح آن است که inventory planned به Docker daemon ID و filesystem
-UUID دقیق نیاز دارد، درحالی‌که Witness فعلی هنوز Docker و block-device staging
-ندارد؛ حدس‌زدن این شناسه‌ها ممنوع است.
+ترتیب زیر با authorization یکپارچه مالک برای استفاده از پنج VPS تستی موجود اجرا
+می‌شود. lifecycle منابع پنل خارج از اختیار است: هیچ VPS یا volume ساخته، حذف،
+detach، rebuild یا resize نمی‌شود. چهار IP canonical و تمام workloadهای production
+نیز خارج از mutation هستند.
 
-1. مالک یک block-device خالی حداقل 10 GiB به Witness متصل می‌کند؛ agent فقط با
-   `lsblk/blkid/findmnt` اثبات می‌کند device جدید، root و دارای داده نیست.
-2. یک authorization یکپارچه و release-bound برای کل بخش B صادر می‌شود. تنها
-   format همان device دقیق، تغییر DNS و عملیات bucket confirmation مستقل خود را
-   حفظ می‌کنند؛ برای read-only probeها یا زیرگام‌های هم‌معنی gate تکراری ساخته
-   نمی‌شود.
-3. bootstrap حداقلی Witness انجام می‌شود: Docker/Compose نصب، device خالی با UUID
-   از پیش ثبت‌شده format، mount مستقل و cgroup aggregate محدود فعال می‌شود. سرویس
-   production Witness، route، listener و PostgreSQL فعلی تغییر نمی‌کنند و هیچ
-   application container در این گام start نمی‌شود.
-4. daemon ID و mount UUID واقعی Witness همراه سه مرز موجود دوباره اندازه‌گیری و
-   inventory planned تازه با campaign/deployment/Compose namespace یکتا ساخته و
-   approve می‌شود.
-5. project، volume prefix، network، port و evidence root مستقل چهار role render و
-   fresh-preflight می‌شوند؛ نام‌ها یا volumeهای campaignهای قدیمی reuse نمی‌شوند.
+1. inventory پنل، دو IP production و چهار server/volume ID انتخابی pin و evidence
+   می‌شوند؛ نگاشت roleهای staging بدون تغییر topology production ثبت می‌شود.
+2. guest VPS تستی WebApp-IR از console out-of-band بازیابی می‌شود: provider
+   identity پیش از اتصال دوباره match، host key از چند vantage مقایسه، کلید کنترل
+   نصب و password login خاموش می‌شود. boot disk rebuild نمی‌شود.
+3. attestation کامل چهار میزبان دوباره جمع می‌شود: hostname و machine-id hash،
+   Docker daemon ID، NTP، listener/firewall، `/dev/vdb` provider serial، UUID،
+   mount و ظرفیت. volume موجود format یا پاک نمی‌شود.
+4. mountهای staging با ownership/mode و persistence صحیح و cgroup aggregate محدود
+   می‌شوند؛ containerهای application هنوز start نمی‌شوند.
+5. inventory planned واحد با campaign/deployment/Compose namespace، project،
+   volume prefix، network، port و evidence root یکتا ساخته و verify می‌شود؛ هیچ
+   namespace یا volume متعلق به production/تلاش قدیمی reuse نمی‌شود.
 6. credentialهای staging-only ساخته/rotate و با fingerprint اثبات می‌شوند که با
-   production برابر نیستند. credential-like value دیده‌شده در probe نیز در همین
-   گام rotate می‌شود.
-7. bucket اختصاصی staging موجود فقط پس از اثبات private ACL/policy، versioning و
-   lifecycle قابل reuse است؛ prefix تازه ساخته و encrypted upload/download با
-   VersionId و hash اجرا می‌شود. production bucket هرگز query تغییردهنده نمی‌گیرد.
+   production برابر نیستند. credential-like value دیده‌شده در probe اولیه نیز
+   قبل از Stage 4 rotate می‌شود.
+7. bucket اختصاصی staging فقط پس از اثبات private ACL/policy، versioning و lifecycle
+   قابل reuse است؛ prefix تازه و encrypted upload/download دارای VersionId/hash
+   اجرا می‌شود. production bucket هرگز query تغییردهنده نمی‌گیرد.
 8. فقط PostgreSQLهای campaign تازه برای provision/measure start می‌شوند؛ چهار
-   system identifier متمایز ثبت، inventory measured ساخته و دوباره approve می‌شود.
-9. source و imageهای exact release به مقصدها منتقل و hash آنها بدون start کردن
+   system identifier متمایز ثبت و inventory measured دوباره verify می‌شود.
+9. source و imageهای exact release به مقصدها منتقل و hash آن‌ها بدون start کردن
    application roleها attestation می‌شود.
 10. DNS/TLS مخصوص staging آماده می‌شود؛ production domain و route تغییر نمی‌کند.
 11. dedicated staging Telegram token آماده می‌شود؛ در نبود آن Bot عمومی خاموش
     می‌ماند و این موضوع G3 را بلاک نمی‌کند.
 12. source staging موجود freeze، backup و در PostgreSQL scratch مستقل restore-drill
-    می‌شود؛ سپس rollback manifest و command plan بازگردانی همان source dry-run
-    می‌شوند.
-13. operations session محدود به release روی Witness نگهداری می‌شود و receiptهای
-    لازم از همان session صادر می‌شوند؛ password/TOTP برای هر زیرگام تکرار نمی‌شود.
+    می‌شود؛ سپس rollback manifest و command plan همان source dry-run می‌شوند.
+13. operations session محدود به release نگهداری و receiptهای لازم از همان session
+    صادر می‌شوند؛ برای زیرگام‌های هم‌معنی gate انسانی تکراری ساخته نمی‌شود.
 
 ### Exit gate — G3 Hosts Isolated
 
@@ -643,32 +669,35 @@ UUID دقیق نیاز دارد، درحالی‌که Witness فعلی هنوز 
 
 ### گزارش پایان Stage 3
 
-- Status: `IN_PROGRESS — SECTION_A_COMPLETE / SECTION_B_BLOCKED`
+- Status: `IN_PROGRESS — TEST_TOPOLOGY_SELECTED / WEBAPP_IR_CONSOLE_RECOVERY_PENDING`
 - Branch: `stage/three-site-staging-03-host-readiness`
 - Base SHA / implementation commits:
   `aab3558aebf6a25454a4d1f532e516b75dcbddde / 7effce5bf808885b186c20f14f030180f2a1c681`
 - Tested release SHA: `0e63a7ec1b08bef29ea199041215298a021b56ef`
 - Host inventory summary:
-  `چهار role و IP canonical تأیید شدند؛ سه role دارای mount/cgroup مستقل و
-  Witness فاقد هر دو است؛ releaseهای runtime مقصد با release هدف match نیستند.`
+  `چهار VPS disposable برای roleهای staging انتخاب شدند؛ سه میزبان کاملاً
+  قابل‌دسترسی، بدون container و دارای Docker/NTP/mount مستقل هستند؛ WebApp-IR
+  تستی active و دارای volume attached است ولی guest آن از console نیاز به recovery
+  دارد. دو VPS production ایران و چهار مقصد canonical از mutation خارج‌اند.`
 - Commands/tests and results:
-  `چهار ممیزی read-only host/runtime/storage/network/NTP؛ سه route probe از راه
-  SSH و Bot-FI مستقیم؛ S3 HEAD/versioning/encryption/lifecycle/public-access
-  GET؛ JSON evidence validation = PASS. هیچ mutation test اجرا نشد.`
+  `چهار ممیزی read-only canonical؛ inventory هفت VPS پنل فقط با GET؛ SSH audit
+  سه VPS تستی؛ provider identity/volume/security-group WebApp-IR؛ lsblk/findmnt/
+  wipefs --no-act و Docker/NTP probe؛ S3 configuration GET. هیچ mutation اجرا نشد.`
 - Evidence paths and SHA-256:
   `docs/THREE_SITE_STAGE3_HOST_READINESS_AUDIT.json =
-  28950ff335fce269fc5e9886eb878a9c1a52ba74be9e9dc04266611e9b934514`
+  28950ff335fce269fc5e9886eb878a9c1a52ba74be9e9dc04266611e9b934514؛
+  docs/THREE_SITE_STAGE3_ARVAN_TEST_INVENTORY.json =
+  628ee07212eb2718207b9c9c20ca75fbe25070cf18ec127f360149f35642b8b6`
 - Production touched: `no`
 - Deviations / open risks:
-  `Witness به یک block-device مستقل حداقل 8 GiB، Docker/Compose و cgroup محدود
-  نیاز دارد؛ bucket policyهای مفقود باید پیش از استفاده اصلاح شوند؛ credential
-  مشاهده‌شده در خروجی موقت باید rotate شود؛ پروژه‌ها/volumeهای قدیمی حذف
-  نمی‌شوند و برای campaign تازه reuse نمی‌شوند؛ یک volume-set قدیمی Bot-FI
-  روی دیسک production دیده شد و خارج از cleanup مستقل دست‌نخورده می‌ماند.`
+  `TCP/22 روی WebApp-IR تستی درون guest پاسخ نمی‌دهد و recovery کنسول باید پیش
+  از attestation نهایی کامل شود؛ bucket policyهای مفقود باید پیش از استفاده
+  اصلاح شوند؛ credential مشاهده‌شده در خروجی موقت باید rotate شود؛ namespaceهای
+  قدیمی reuse نمی‌شوند؛ هیچ منبع پنل بدون اجازه مالک ساخته یا حذف نمی‌شود.`
 - Rollback verified: `no؛ backup/restore drill و rollback dry-run campaign هدف هنوز اجرا نشده‌اند.`
 - Decision / next stage:
-  `G3_NOT_PASSED / no؛ ادامه بخش B پس از تأمین disk مستقل Witness و مجوز یکپارچه
-  عملیات تغییردهنده برای release دقیق هدف.`
+  `G3_NOT_PASSED / no؛ ادامه بخش B روی topology disposable موجود مجاز است؛ شروع
+  Stage 4 تا عبور G3 و اجازه صریح مالک مجاز نیست.`
 
 ---
 

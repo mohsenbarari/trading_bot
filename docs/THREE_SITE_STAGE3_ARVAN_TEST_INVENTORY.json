@@ -1,0 +1,202 @@
+{
+  "schema": "three-site-stage3-arvan-test-inventory-v1",
+  "generated_at": "2026-08-02T16:42:34Z",
+  "branch": "stage/three-site-staging-03-host-readiness",
+  "release_sha": "0e63a7ec1b08bef29ea199041215298a021b56ef",
+  "authorization": {
+    "received_on": "2026-08-02",
+    "allowed": [
+      "read Arvan panel inventory",
+      "use the five existing non-production VPS instances for testing",
+      "continue Stage 3 on the existing test resources"
+    ],
+    "forbidden_without_new_owner_approval": [
+      "create VPS",
+      "delete VPS",
+      "create volume",
+      "delete volume",
+      "detach volume",
+      "rebuild or resize a selected VPS",
+      "mutate a production host"
+    ]
+  },
+  "provider_inventory": {
+    "source": "Arvan ECC API GET only",
+    "active_server_count": 7,
+    "regions": {
+      "eu-west1-a": 3,
+      "ir-thr-fr1": 4
+    },
+    "production_arvan": [
+      {
+        "server_id": "4a377387-c052-4aba-8bda-0c756b9b0cfb",
+        "public_ipv4": "95.38.164.29",
+        "region": "ir-thr-fr1",
+        "status": "ACTIVE"
+      },
+      {
+        "server_id": "d7504323-bbb5-4ebd-b456-97c8ee651e8b",
+        "public_ipv4": "37.152.191.11",
+        "region": "ir-thr-fr1",
+        "status": "ACTIVE"
+      }
+    ],
+    "non_production": [
+      {
+        "server_id": "b42750eb-1efb-4595-87b6-4f61606422f1",
+        "name": "three-site-matrix-destructive-20260726-bot-fi",
+        "public_ipv4": "130.185.121.98",
+        "region": "eu-west1-a",
+        "status": "ACTIVE"
+      },
+      {
+        "server_id": "fcaeba99-622f-4dfc-8116-2c44bf2ef3ce",
+        "name": "three-site-matrix-destructive-20260726-webapp-fi",
+        "public_ipv4": "194.5.206.69",
+        "region": "eu-west1-a",
+        "status": "ACTIVE"
+      },
+      {
+        "server_id": "1dca4b24-6aba-4d11-b430-c8c7dcce2b8a",
+        "name": "three-site-matrix-destructive-20260726-webapp-ir",
+        "public_ipv4": "188.213.198.115",
+        "region": "ir-thr-fr1",
+        "status": "ACTIVE"
+      },
+      {
+        "server_id": "3d883b04-0299-4894-8517-9fa7982586a9",
+        "name": "three-site-matrix-destructive-20260726-witness",
+        "public_ipv4": "130.185.121.152",
+        "region": "eu-west1-a",
+        "status": "ACTIVE"
+      },
+      {
+        "server_id": "eb00fba1-437e-4852-9c29-154e5ecaef85",
+        "public_ipv4": "185.231.182.6",
+        "region": "ir-thr-fr1",
+        "status": "ACTIVE",
+        "selection": "excluded transitional witness; current controller key rejected"
+      }
+    ]
+  },
+  "mutation_denylist": [
+    {
+      "role": "bot_fi_canonical",
+      "public_ipv4": "65.109.216.187"
+    },
+    {
+      "role": "webapp_fi_canonical",
+      "public_ipv4": "65.109.220.59"
+    },
+    {
+      "role": "webapp_ir_production",
+      "public_ipv4": "95.38.164.29"
+    },
+    {
+      "role": "witness_production",
+      "public_ipv4": "37.152.191.11"
+    }
+  ],
+  "selected_staging_topology": {
+    "bot_fi": {
+      "server_id": "b42750eb-1efb-4595-87b6-4f61606422f1",
+      "public_ipv4": "130.185.121.98",
+      "region": "eu-west1-a",
+      "cpu_count": 4,
+      "memory_gib": 8,
+      "docker_daemon_id": "42ba31c7-30cc-43e1-bc95-ffcd0c08532b",
+      "machine_id_sha256": "53386015a589aa65d00b6fa597004a6eaa7206ce8d7791d08f839950c66cbaf3",
+      "docker_version": "29.1.3",
+      "compose_version": "2.40.3",
+      "ntp_synchronized": true,
+      "running_or_stopped_container_count": 0,
+      "data_volume": {
+        "provider_volume_id": "34daee38-d51c-418c-9296-19e10e165226",
+        "size_gib": 50,
+        "device": "/dev/vdb",
+        "filesystem": "ext4",
+        "filesystem_uuid": "fedcc732-7c83-4e06-954f-ee5ee3c995d2",
+        "mount": "/srv/trading-bot-three-site-staging-data"
+      },
+      "attestation": "read_only_passed"
+    },
+    "webapp_fi": {
+      "server_id": "fcaeba99-622f-4dfc-8116-2c44bf2ef3ce",
+      "public_ipv4": "194.5.206.69",
+      "region": "eu-west1-a",
+      "cpu_count": 4,
+      "memory_gib": 8,
+      "docker_daemon_id": "1ed1ef0c-29b5-4915-bf55-cf44a214c53f",
+      "machine_id_sha256": "f060e79af5e388593f90247f4e848afbcc8b20e6b4dd92dead9a11093f0c724b",
+      "docker_version": "29.1.3",
+      "compose_version": "2.40.3",
+      "ntp_synchronized": true,
+      "running_or_stopped_container_count": 0,
+      "data_volume": {
+        "provider_volume_id": "5be38329-9953-41ea-ba26-4ea07a5ab314",
+        "size_gib": 50,
+        "device": "/dev/vdb",
+        "filesystem": "ext4",
+        "filesystem_uuid": "1ffbb269-3dbe-44fd-8075-0883659ed2cc",
+        "mount": "/srv/trading-bot-three-site-staging-data"
+      },
+      "attestation": "read_only_passed"
+    },
+    "webapp_ir": {
+      "server_id": "1dca4b24-6aba-4d11-b430-c8c7dcce2b8a",
+      "public_ipv4": "188.213.198.115",
+      "region": "ir-thr-fr1",
+      "cpu_count": 4,
+      "memory_gib": 8,
+      "running_or_stopped_container_count": null,
+      "data_volume": {
+        "provider_volume_id": "dfc29166-a067-490d-93ab-549fbf09f937",
+        "size_gib": 50,
+        "device": "/dev/vdb",
+        "provider_status": "in-use",
+        "filesystem_uuid": null,
+        "mount": null
+      },
+      "security_group": {
+        "id": "50dd5d86-7e82-489f-b3b9-de3024d96367",
+        "ssh_source": "65.109.216.187/32",
+        "ssh_port": 22
+      },
+      "attestation": "pending_out_of_band_console_recovery",
+      "blocker": "TCP/22 times out although the provider security group is correct"
+    },
+    "witness": {
+      "server_id": "3d883b04-0299-4894-8517-9fa7982586a9",
+      "public_ipv4": "130.185.121.152",
+      "region": "eu-west1-a",
+      "cpu_count": 2,
+      "memory_gib": 2,
+      "docker_daemon_id": "d6dd9a57-73f0-419d-a681-660beee5c600",
+      "machine_id_sha256": "7c6e4795a9e532dfed402bb98c8c9c818439ffe18e64e51ac469257db6356b70",
+      "docker_version": "29.1.3",
+      "compose_version": "2.40.3",
+      "ntp_synchronized": true,
+      "running_or_stopped_container_count": 0,
+      "data_volume": {
+        "provider_volume_id": "d42a664c-9b7f-4666-ac5b-f9cd0a5e8301",
+        "size_gib": 50,
+        "device": "/dev/vdb",
+        "filesystem": "ext4",
+        "filesystem_uuid": "d38a37ad-94c2-43c2-a9b7-175b9be8c22b",
+        "mount": "/srv/trading-bot-three-site-staging-data"
+      },
+      "attestation": "read_only_passed"
+    }
+  },
+  "invariants": {
+    "provider_server_count_matches_owner_statement": true,
+    "production_arvan_identity_matches_owner_statement": true,
+    "selected_server_ids_are_non_production": true,
+    "selected_volume_ids_are_dedicated": true,
+    "production_topology_code_changed": false,
+    "server_or_volume_lifecycle_action_executed": false,
+    "production_touched": false,
+    "secrets_in_evidence": false
+  },
+  "decision": "TEST_TOPOLOGY_SELECTED_G3_IN_PROGRESS"
+}
