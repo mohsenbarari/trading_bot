@@ -13,7 +13,7 @@ import tarfile
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -184,6 +184,132 @@ def write_image_bundle(path: Path, *, bad_app_labels: bool = False) -> None:
 
 
 class EmergencyIrStandaloneActivationTests(unittest.TestCase):
+    def test_staging_listener_uses_only_the_fixed_endpoint_for_each_required_port(self) -> None:
+        cases = (
+            (8213, ("127.0.0.1", 8213)),
+            (8443, ("95.38.164.29", 8443)),
+        )
+        for port, expected_endpoint in cases:
+            connection = MagicMock()
+            connection.__enter__.return_value = connection
+            connection.getpeername.return_value = expected_endpoint
+            connection.getsockname.return_value = (expected_endpoint[0], 49152)
+            with self.subTest(port=port), patch.object(
+                ACTIVATE.socket, "socket", return_value=connection
+            ) as create_socket, patch.object(
+                ACTIVATE.socket, "create_connection"
+            ) as generic_connection, patch.object(
+                ACTIVATE, "_require_ipv4_nonlocal_bind_disabled"
+            ) as nonlocal_bind_gate:
+                ACTIVATE._check_staging_listener(port)
+            create_socket.assert_called_once_with(ACTIVATE.socket.AF_INET, ACTIVATE.socket.SOCK_STREAM)
+            generic_connection.assert_not_called()
+            if port == 8443:
+                nonlocal_bind_gate.assert_called_once_with()
+            else:
+                nonlocal_bind_gate.assert_not_called()
+            connection.setsockopt.assert_called_once_with(
+                ACTIVATE.socket.SOL_SOCKET, ACTIVATE.socket.SO_DONTROUTE, 1
+            )
+            connection.settimeout.assert_called_once_with(3)
+            connection.bind.assert_called_once_with((expected_endpoint[0], 0))
+            connection.connect.assert_called_once_with(expected_endpoint)
+            connection.getpeername.assert_called_once_with()
+            connection.getsockname.assert_called_once_with()
+
+    def test_staging_listener_rejects_any_unapproved_port_without_network_access(self) -> None:
+        for port in (80, 443, 8212, 8214, 8442, 8444, 65535):
+            with self.subTest(port=port), patch.object(ACTIVATE.socket, "socket") as create_socket:
+                with self.assertRaisesRegex(
+                    ACTIVATE.EmergencyActivationError,
+                    "staging listener port is not permitted",
+                ):
+                    ACTIVATE._check_staging_listener(port)
+            create_socket.assert_not_called()
+
+    def test_public_staging_listener_fails_before_socket_when_nonlocal_bind_is_enabled(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-nonlocal-bind-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            sysctl_root = root / "proc" / "sys" / "net" / "ipv4"
+            sysctl_root.mkdir(mode=0o700, parents=True)
+            disabled_sysctl = sysctl_root / "ip_nonlocal_bind"
+            root_file(disabled_sysctl, b"0\n")
+            with patch.object(ACTIVATE, "IPV4_NONLOCAL_BIND_PATH", disabled_sysctl):
+                ACTIVATE._require_ipv4_nonlocal_bind_disabled()
+
+            enabled_sysctl = sysctl_root / "ip_nonlocal_bind-enabled"
+            root_file(enabled_sysctl, b"1\n")
+            with patch.object(ACTIVATE, "IPV4_NONLOCAL_BIND_PATH", enabled_sysctl), patch.object(
+                ACTIVATE.socket, "socket"
+            ) as create_socket:
+                with self.assertRaisesRegex(
+                    ACTIVATE.EmergencyActivationError,
+                    "IPv4 nonlocal bind must be disabled",
+                ):
+                    ACTIVATE._check_staging_listener(8443)
+            create_socket.assert_not_called()
+
+    def test_public_staging_listener_rejects_unsafe_kernel_control_forms_before_socket(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-nonlocal-bind-invalid-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            sysctl_root = root / "proc" / "sys" / "net" / "ipv4"
+            sysctl_root.mkdir(mode=0o700, parents=True)
+            target = sysctl_root / "target"
+            root_file(target, b"0\n")
+            cases = (
+                ("malformed", b"false\n", 0o600, "must be disabled"),
+                ("oversized", b"0\n" + b"x" * ACTIVATE.MAX_KERNEL_TOGGLE_BYTES, 0o600, "is oversized"),
+                ("writable", b"0\n", 0o622, "is not root-controlled"),
+            )
+            for name, payload, mode, message in cases:
+                candidate = sysctl_root / name
+                root_file(candidate, payload)
+                candidate.chmod(mode)
+                with self.subTest(name=name), patch.object(
+                    ACTIVATE, "IPV4_NONLOCAL_BIND_PATH", candidate
+                ), patch.object(ACTIVATE.socket, "socket") as create_socket:
+                    with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, message):
+                        ACTIVATE._check_staging_listener(8443)
+                create_socket.assert_not_called()
+
+            symlink = sysctl_root / "symlink"
+            os.symlink(target, symlink)
+            with patch.object(ACTIVATE, "IPV4_NONLOCAL_BIND_PATH", symlink), patch.object(
+                ACTIVATE.socket, "socket"
+            ) as create_socket:
+                with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "is not root-controlled"):
+                    ACTIVATE._check_staging_listener(8443)
+            create_socket.assert_not_called()
+
+    def test_staging_listener_rejects_peer_or_local_endpoint_drift(self) -> None:
+        expected_endpoint = ("95.38.164.29", 8443)
+        for peer, local, message in (
+            (("127.0.0.1", 8443), (expected_endpoint[0], 49152), "peer endpoint did not remain pinned"),
+            (expected_endpoint, ("127.0.0.1", 49152), "local endpoint did not remain pinned"),
+            (expected_endpoint, (expected_endpoint[0], 0), "local endpoint did not remain pinned"),
+        ):
+            connection = MagicMock()
+            connection.__enter__.return_value = connection
+            connection.getpeername.return_value = peer
+            connection.getsockname.return_value = local
+            with self.subTest(peer=peer, local=local), patch.object(
+                ACTIVATE.socket, "socket", return_value=connection
+            ), patch.object(ACTIVATE, "_require_ipv4_nonlocal_bind_disabled"):
+                with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, message):
+                    ACTIVATE._check_staging_listener(8443)
+
+    def test_staging_listener_socket_setup_failures_are_fail_closed(self) -> None:
+        connection = MagicMock()
+        connection.__enter__.return_value = connection
+        connection.setsockopt.side_effect = OSError("denied")
+        with patch.object(ACTIVATE.socket, "socket", return_value=connection):
+            with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "listener is not healthy"):
+                ACTIVATE._check_staging_listener(8213)
+        connection.bind.assert_not_called()
+        connection.connect.assert_not_called()
+
     def test_prepare_requires_aggregate_plaintext_disk_budget_before_decrypt(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-activation-") as raw:
             root = Path(raw)

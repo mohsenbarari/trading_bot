@@ -102,7 +102,19 @@ MAX_SECRET_BYTES = 4096
 MAX_SNAPSHOT_BYTES = 100 * 1024 * 1024 * 1024
 MAX_IMAGE_BYTES = 100 * 1024 * 1024 * 1024
 MAX_JSON_BYTES = 1024 * 1024
+MAX_KERNEL_TOGGLE_BYTES = 16
 DISK_HEADROOM_BYTES = 256 * 1024 * 1024
+
+# The two protected staging listeners have distinct network scopes.  The API
+# listener is intentionally loopback-only; the TLS staging listener is bound
+# to WA-IR's public self address so it cannot be mistaken for an arbitrary
+# local service during prearm.
+EMERGENCY_WA_IR_PUBLIC_IPV4 = "95.38.164.29"
+IPV4_NONLOCAL_BIND_PATH = Path("/proc/sys/net/ipv4/ip_nonlocal_bind")
+STAGING_LOOPBACK_PORT = 8213
+STAGING_PUBLIC_PORT = 8443
+STAGING_LOOPBACK_ENDPOINT = ("127.0.0.1", STAGING_LOOPBACK_PORT)
+STAGING_PUBLIC_ENDPOINT = (EMERGENCY_WA_IR_PUBLIC_IPV4, STAGING_PUBLIC_PORT)
 
 AGE_BINARY = "/usr/bin/age"
 AGE_KEYGEN_BINARY = "/usr/bin/age-keygen"
@@ -1404,12 +1416,80 @@ def _require_sms_preflight(paths: ActivationPaths, campaign: VerifiedCampaign) -
         _fail("SMS provider preflight receipt is not an explicit pass for this campaign")
 
 
-def _check_staging_listener(port: int) -> None:
+def _require_ipv4_nonlocal_bind_disabled() -> None:
+    """Fail closed unless the kernel forbids binding a non-local IPv4 source."""
+
+    path = IPV4_NONLOCAL_BIND_PATH
+    _secure_directory(path.parent, create=False)
+    descriptor: int | None = None
     try:
-        with socket.create_connection(("127.0.0.1", port), timeout=3):
-            return
+        before = path.lstat()
+        if (
+            stat.S_ISLNK(before.st_mode)
+            or not stat.S_ISREG(before.st_mode)
+            or before.st_uid != 0
+            or before.st_nlink != 1
+            or stat.S_IMODE(before.st_mode) & 0o022
+        ):
+            _fail("IPv4 nonlocal-bind kernel control is not root-controlled")
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        opened = os.fstat(descriptor)
+        fields = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink")
+        if any(getattr(before, field) != getattr(opened, field) for field in fields):
+            _fail("IPv4 nonlocal-bind kernel control changed while being opened")
+        payload = bytearray()
+        while len(payload) <= MAX_KERNEL_TOGGLE_BYTES:
+            chunk = os.read(descriptor, MAX_KERNEL_TOGGLE_BYTES + 1 - len(payload))
+            if not chunk:
+                break
+            payload.extend(chunk)
+        after = os.fstat(descriptor)
+        if len(payload) > MAX_KERNEL_TOGGLE_BYTES:
+            _fail("IPv4 nonlocal-bind kernel control is oversized")
+        if any(getattr(opened, field) != getattr(after, field) for field in fields):
+            _fail("IPv4 nonlocal-bind kernel control changed while being read")
+    except OSError as exc:
+        raise EmergencyActivationError("IPv4 nonlocal-bind kernel control cannot be read") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+    if bytes(payload) != b"0\n":
+        _fail("IPv4 nonlocal bind must be disabled before public staging listener probe")
+
+
+def _check_staging_listener(port: int) -> None:
+    if port == STAGING_LOOPBACK_PORT:
+        endpoint = STAGING_LOOPBACK_ENDPOINT
+    elif port == STAGING_PUBLIC_PORT:
+        _require_ipv4_nonlocal_bind_disabled()
+        endpoint = STAGING_PUBLIC_ENDPOINT
+    else:
+        _fail("protected three-site staging listener port is not permitted")
+    try:
+        # Avoid the resolver convenience API: this must be a direct IPv4
+        # self-probe and must not route toward another host.
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
+            connection.setsockopt(socket.SOL_SOCKET, socket.SO_DONTROUTE, 1)
+            connection.settimeout(3)
+            connection.bind((endpoint[0], 0))
+            connection.connect(endpoint)
+            peer = connection.getpeername()
+            local = connection.getsockname()
     except OSError as exc:
         raise EmergencyActivationError("protected three-site staging listener is not healthy") from exc
+    if peer != endpoint:
+        _fail("protected three-site staging listener peer endpoint did not remain pinned")
+    if (
+        not isinstance(local, tuple)
+        or len(local) != 2
+        or local[0] != endpoint[0]
+        or not isinstance(local[1], int)
+        or not 1 <= local[1] <= 65535
+    ):
+        _fail("protected three-site staging listener local endpoint did not remain pinned")
 
 
 def _nginx_static_contract(package_root: Path, *, profile: str) -> Path:
