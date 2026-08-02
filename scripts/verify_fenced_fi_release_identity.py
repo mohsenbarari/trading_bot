@@ -133,6 +133,11 @@ def verify(
         "term_fenced_application_evidence_sha256": (
             identity.term_fenced_application_evidence_sha256
         ),
+        "fenced_fi_build_input": (
+            identity.static_build_input.as_mapping()
+            if identity.static_build_input is not None
+            else None
+        ),
         "writer_authorized": False,
         "promotion_authorized": False,
         "execution_authorized": False,

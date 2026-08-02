@@ -121,6 +121,12 @@ _CANDIDATE_FIELDS = frozenset(
         "services",
     }
 )
+_READ_ONLY_CANDIDATE_SCHEMAS = frozenset(
+    {
+        candidate_identity.FENCED_FI_RELEASE_IDENTITY_SCHEMA,
+        candidate_identity.FENCED_FI_RELEASE_IDENTITY_TERM_FENCED_LEGACY_SCHEMA,
+    }
+)
 _SERVICE_FIELDS = frozenset({"image_repo_digest", "image_id"})
 _WITNESS_FIELDS = frozenset(
     {
@@ -764,7 +770,14 @@ def _validate_provenance_value(value: object) -> dict[str, Any]:
     candidate = value.get("candidate")
     if not isinstance(candidate, Mapping) or set(candidate) != _CANDIDATE_FIELDS:
         _fail("THREE_SITE_CAMPAIGN_PROVENANCE_CANDIDATE_INVALID")
-    if candidate.get("schema") != candidate_identity.FENCED_FI_RELEASE_IDENTITY_SCHEMA:
+    candidate_schema = candidate.get("schema")
+    # Existing campaign pins are audit-only records.  Their v2 candidates
+    # remain readable, but only `create_three_site_campaign_provenance()` can
+    # admit a new one and it invokes the stricter v3 candidate gate above.
+    if (
+        type(candidate_schema) is not str
+        or candidate_schema not in _READ_ONLY_CANDIDATE_SCHEMAS
+    ):
         _fail("THREE_SITE_CAMPAIGN_PROVENANCE_CANDIDATE_INVALID")
     release_sha = _require_sha1(
         candidate.get("application_release_sha"), label="CANDIDATE_RELEASE_SHA"
@@ -775,7 +788,7 @@ def _validate_provenance_value(value: object) -> dict[str, Any]:
         "identity_sha256": _require_sha256(
             candidate.get("identity_sha256"), label="CANDIDATE_IDENTITY_SHA256"
         ),
-        "schema": candidate_identity.FENCED_FI_RELEASE_IDENTITY_SCHEMA,
+        "schema": candidate_schema,
         "application_release_sha": release_sha,
         "application_release_tree_sha": _require_sha1(
             candidate.get("application_release_tree_sha"), label="CANDIDATE_RELEASE_TREE_SHA"

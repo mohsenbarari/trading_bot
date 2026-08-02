@@ -10,6 +10,7 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
+from core import fenced_fi_release_identity as identity_contract
 from core import term_fenced_application_capability as application_capability
 from scripts import preflight_fenced_fi_writer as preflight
 from scripts import production_writer_lease_agent as lease_agent
@@ -28,6 +29,15 @@ DOCKERFILE = ROOT / "Dockerfile"
 CANDIDATE_SHA = "a" * 40
 CANDIDATE_TREE_SHA = "b" * 40
 EVIDENCE_SHA256 = "c" * 64
+STATIC_BUILD_INPUT = identity_contract.fenced_fi_static_build_input_from_mapping(
+    {
+        "build_input_manifest_sha256": "1" * 64,
+        "mini_app_dist_manifest_sha256": "2" * 64,
+        "mini_app_dist_files_sha256": "3" * 64,
+        "mini_app_dist_file_count": 17,
+        "mini_app_dist_total_bytes": 4096,
+    }
+)
 
 
 def source_evidence_document(*, release_sha: str = CANDIDATE_SHA, tree_sha: str = CANDIDATE_TREE_SHA) -> bytes:
@@ -50,6 +60,10 @@ def source_evidence_document(*, release_sha: str = CANDIDATE_SHA, tree_sha: str 
             "full_matrix_executed": False,
         }
     )
+
+
+def static_image_labels() -> dict[str, str]:
+    return identity_contract.expected_fenced_fi_static_image_labels(STATIC_BUILD_INPUT)
 
 
 def compose_service_block(source: str, service_name: str) -> str:
@@ -238,15 +252,25 @@ class WebappFiFencedWriter2c08Tests(unittest.TestCase):
         self.assertEqual(preflight.PREFLIGHT_SCHEMA, preflight_example["schema"])
         self.assertIn("term_fenced_application_evidence", preflight_example)
 
-    def test_candidate_image_build_contract_emits_source_capability_labels(self) -> None:
+    def test_candidate_image_build_contract_emits_source_and_static_capability_labels(self) -> None:
         dockerfile = DOCKERFILE.read_text(encoding="utf-8")
         for token in (
             "ARG TERM_FENCED_RELEASE_SHA",
             "ARG TERM_FENCED_RELEASE_TREE_SHA",
             "ARG TERM_FENCED_APPLICATION_EVIDENCE_SHA256",
+            "ARG FENCED_FI_BUILD_INPUT_MANIFEST_SHA256",
+            "ARG MINI_APP_DIST_MANIFEST_SHA256",
+            "ARG MINI_APP_DIST_FILES_SHA256",
+            "ARG MINI_APP_DIST_FILE_COUNT",
+            "ARG MINI_APP_DIST_TOTAL_BYTES",
             "org.opencontainers.image.revision",
             application_capability.TERM_FENCED_IMAGE_LABEL_SOURCE_TREE,
             application_capability.TERM_FENCED_IMAGE_LABEL_EVIDENCE_SHA256,
+            "org.goldtrade.fenced-fi-build-input-sha256",
+            "org.goldtrade.mini-app-dist-manifest-sha256",
+            "org.goldtrade.mini-app-dist-files-sha256",
+            "org.goldtrade.mini-app-dist-file-count",
+            "org.goldtrade.mini-app-dist-total-bytes",
         ):
             self.assertIn(token, dockerfile)
 
@@ -415,7 +439,11 @@ class WebappFiFencedWriter2c08Tests(unittest.TestCase):
         application_gate.assert_called_once_with(signed_identity)
         source_evidence.assert_called_once_with(config, signed_identity)
         environment.assert_called_once_with(config, agent_config, signed_identity)
-        static_bindings.assert_called_once_with(config, evidence=evidence)
+        static_bindings.assert_called_once_with(
+            config,
+            evidence=evidence,
+            identity=signed_identity,
+        )
         clean_scope.assert_called_once_with()
         runtime_receipt_check.assert_not_called()
         runtime_identity.assert_not_called()
@@ -589,13 +617,14 @@ class WebappFiFencedWriter2c08Tests(unittest.TestCase):
         ):
             preflight._validate_rendered_runtime(config, evidence=evidence)
 
-    def test_signed_v2_identity_binds_candidate_roots_compose_and_images(self) -> None:
+    def test_signed_v3_identity_binds_candidate_roots_compose_images_and_static_input(self) -> None:
         config = static_config()
         compose_bytes = b"services: {}\n"
         identity = SimpleNamespace(
             release_sha=CANDIDATE_SHA,
             release_tree_sha=CANDIDATE_TREE_SHA,
             term_fenced_application_evidence_sha256=EVIDENCE_SHA256,
+            static_build_input=STATIC_BUILD_INPUT,
             application_release_root=str(config.application_release_root),
             control_release_root=str(config.control_release_root),
             compose_relative_path=str(preflight.FENCED_COMPOSE_RELATIVE_PATH),
@@ -652,7 +681,7 @@ class WebappFiFencedWriter2c08Tests(unittest.TestCase):
             ),
         ), self.assertRaisesRegex(
             preflight.FencedFiWriterPreflightError,
-            "not a term-fenced v2 candidate",
+            "not a static-bound term-fenced v3 candidate",
         ):
             preflight._validate_release_identity(config)
 
@@ -776,7 +805,45 @@ class WebappFiFencedWriter2c08Tests(unittest.TestCase):
                 "image labels do not bind the signed term-fenced source evidence",
             ),
         ):
-            preflight._inspect_image(config, expectation, evidence=evidence)
+            preflight._inspect_image(
+                config,
+                expectation,
+                evidence=evidence,
+                static_build_input=STATIC_BUILD_INPUT,
+            )
+
+    def test_static_build_input_label_mismatch_blocks_the_signed_candidate(self) -> None:
+        config = static_config()
+        expectation = config.services[0]
+        evidence = application_capability.verify_term_fenced_application_capability(
+            source_evidence_document()
+        )
+        labels = {
+            **application_capability.expected_term_fenced_image_labels(evidence),
+            **static_image_labels(),
+        }
+        labels["org.goldtrade.mini-app-dist-files-sha256"] = "0" * 64
+        with (
+            mock.patch.object(
+                preflight,
+                "_run_read_only",
+                side_effect=[
+                    expectation.image_id,
+                    json.dumps([expectation.image_repo_digest]),
+                    json.dumps(labels),
+                ],
+            ),
+            self.assertRaisesRegex(
+                preflight.FencedFiWriterPreflightError,
+                "image labels do not bind the signed static build input",
+            ),
+        ):
+            preflight._inspect_image(
+                config,
+                expectation,
+                evidence=evidence,
+                static_build_input=STATIC_BUILD_INPUT,
+            )
 
     def test_signed_identity_requires_clean_matching_application_and_control_git_trees(self) -> None:
         config = static_config()
@@ -824,12 +891,17 @@ class WebappFiFencedWriter2c08Tests(unittest.TestCase):
                 side_effect=[
                     expectation.image_id,
                     json.dumps([expectation.image_repo_digest]),
-                    json.dumps({}),
+                    json.dumps(static_image_labels()),
                 ],
             ),
             mock.patch.object(preflight.application_capability, "verify_term_fenced_image_labels"),
         ):
-            preflight._inspect_image(config, expectation, evidence=evidence)
+            preflight._inspect_image(
+                config,
+                expectation,
+                evidence=evidence,
+                static_build_input=STATIC_BUILD_INPUT,
+            )
 
         with mock.patch.object(
             preflight,
@@ -839,7 +911,12 @@ class WebappFiFencedWriter2c08Tests(unittest.TestCase):
             preflight.FencedFiWriterPreflightError,
             "repository digest does not match",
         ):
-            preflight._inspect_image(config, expectation, evidence=evidence)
+            preflight._inspect_image(
+                config,
+                expectation,
+                evidence=evidence,
+                static_build_input=STATIC_BUILD_INPUT,
+            )
 
     def test_guard_receipt_binds_runtime_ids_to_static_image_bindings(self) -> None:
         config = static_config()

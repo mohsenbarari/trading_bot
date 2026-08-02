@@ -744,6 +744,17 @@ def _parse_static_manifest(document: bytes) -> StaticManifest:
     )
 
 
+def verify_mini_app_dist_manifest_document(document: bytes) -> StaticManifest:
+    """Validate one sealed static manifest without opening its source tree.
+
+    The Release-0 identity builder uses this narrow parser to bind the exact
+    manifest receipt it was handed.  It deliberately does not turn that
+    receipt into a Docker build, deployment, or writer authorization.
+    """
+
+    return _parse_static_manifest(document)
+
+
 def create_mini_app_dist_manifest(
     *,
     mini_app_dist_root: Path,
@@ -1161,6 +1172,14 @@ def _verify_build_input_document(document: bytes) -> dict[str, object]:
         if value.get(name) is not False:
             _fail("FENCED_FI_BUILD_INPUT_MANIFEST_AUTHORIZATION_FORBIDDEN")
     return value
+
+
+def verify_fenced_fi_candidate_build_input_document(
+    document: bytes,
+) -> dict[str, object]:
+    """Validate the closed non-authorizing Fenced-FI build-input receipt."""
+
+    return _verify_build_input_document(document)
 
 
 def bind_fenced_fi_candidate_build_inputs(

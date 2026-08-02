@@ -1,9 +1,10 @@
-"""Focused local-only tests for the Release-0 v2 descriptor builder."""
+"""Focused local-only tests for the Release-0 v3 descriptor builder."""
 
 from __future__ import annotations
 
 import base64
 import hashlib
+import json
 from pathlib import Path
 import stat
 import subprocess
@@ -16,6 +17,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from core import fenced_fi_release_identity as identity_contract
 from core import term_fenced_application_capability as application_capability
 from scripts import build_fenced_fi_release_identity as subject
+from scripts import prepare_fenced_fi_candidate_build_inputs as candidate_inputs
 from scripts import verify_term_fenced_application_source as source_verifier
 
 
@@ -68,6 +70,27 @@ class DescriptorBuilderFixture:
             source_verifier.build_evidence(source_tree),
             mode=0o600,
         )
+        self.static_root = self.directory / "static" / "mini_app_dist"
+        self.static_root.mkdir(parents=True, mode=0o755)
+        _write(self.static_root / "index.html", b"<!doctype html><title>gold</title>\n")
+        _write(self.static_root / "assets" / "app.js", b"console.log('gold');\n")
+        self.static_outputs = self.directory / "static-outputs"
+        self.static_outputs.mkdir(mode=0o700)
+        self.build_inputs = self.directory / "build-inputs"
+        self.build_inputs.mkdir(mode=0o700)
+        self.static_manifest = self.static_outputs / "mini-app-dist.json"
+        self.fenced_fi_build_input = self.build_inputs / "fenced-fi-build-input.json"
+        candidate_inputs.create_mini_app_dist_manifest(
+            mini_app_dist_root=self.static_root,
+            output=self.static_manifest,
+        )
+        candidate_inputs.bind_fenced_fi_candidate_build_inputs(
+            application_release_root=self.source_root,
+            term_fenced_application_evidence=self.evidence_path,
+            mini_app_dist_root=self.static_root,
+            mini_app_dist_manifest=self.static_manifest,
+            output=self.fenced_fi_build_input,
+        )
         self.private = Ed25519PrivateKey.generate()
         self.private_path = self.inputs / "release-identity.key"
         _write(
@@ -97,6 +120,8 @@ class DescriptorBuilderFixture:
                     ["/usr/bin/git", "show", f"HEAD:{relative}"], cwd=REPO_ROOT
                 ),
             )
+        for relative in ("Dockerfile", ".dockerignore"):
+            _write(work / relative, (REPO_ROOT / relative).read_bytes())
         sha = _commit(work, "term fenced application source")
         root = self.directory / "application" / sha
         root.parent.mkdir()
@@ -128,7 +153,18 @@ class DescriptorBuilderFixture:
         evidence = application_capability.verify_term_fenced_application_capability(
             self.evidence_path.read_bytes()
         )
-        return application_capability.expected_term_fenced_image_labels(evidence)
+        build_input = subject._load_static_build_input(
+            fenced_fi_build_input=self.fenced_fi_build_input,
+            mini_app_dist_manifest=self.static_manifest,
+            source=subject._load_source_release(
+                self.source_root,
+                evidence_document=self.evidence_path.read_bytes(),
+            ),
+        )
+        return {
+            **application_capability.expected_term_fenced_image_labels(evidence),
+            **identity_contract.expected_fenced_fi_static_image_labels(build_input),
+        }
 
     def image_metadata(self, reference: str) -> dict[str, object]:
         if reference == APP_IMAGE:
@@ -150,6 +186,8 @@ class DescriptorBuilderFixture:
             application_release_root=self.source_root,
             control_release_root=self.control_root,
             term_fenced_application_evidence=self.evidence_path,
+            fenced_fi_build_input=self.fenced_fi_build_input,
+            mini_app_dist_manifest=self.static_manifest,
             app_image=APP_IMAGE,
             app_repo_digest=APP_DIGEST,
             bot_image=BOT_IMAGE,
@@ -209,7 +247,7 @@ class BuildFencedFiReleaseIdentityTests(TestCase):
                 rejected_code="TEST_REJECTED",
             )
 
-    def test_builds_canonical_signed_v2_descriptor_from_local_facts(self) -> None:
+    def test_builds_canonical_signed_v3_descriptor_from_local_facts(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             fixture = DescriptorBuilderFixture(Path(raw))
             with mock.patch.object(
@@ -247,6 +285,32 @@ class BuildFencedFiReleaseIdentityTests(TestCase):
             self.assertEqual(
                 hashlib.sha256(fixture.evidence_path.read_bytes()).hexdigest(),
                 verified.term_fenced_application_evidence_sha256,
+            )
+            build_input = candidate_inputs.verify_fenced_fi_candidate_build_input_document(
+                fixture.fenced_fi_build_input.read_bytes()
+            )
+            static_manifest = candidate_inputs.verify_mini_app_dist_manifest_document(
+                fixture.static_manifest.read_bytes()
+            )
+            self.assertEqual(
+                hashlib.sha256(fixture.fenced_fi_build_input.read_bytes()).hexdigest(),
+                verified.static_build_input.build_input_manifest_sha256,
+            )
+            self.assertEqual(
+                static_manifest.manifest_sha256,
+                verified.static_build_input.mini_app_dist_manifest_sha256,
+            )
+            self.assertEqual(
+                build_input["mini_app_dist"]["files_sha256"],
+                verified.static_build_input.mini_app_dist_files_sha256,
+            )
+            self.assertEqual(
+                build_input["mini_app_dist"]["file_count"],
+                verified.static_build_input.mini_app_dist_file_count,
+            )
+            self.assertEqual(
+                build_input["mini_app_dist"]["total_bytes"],
+                verified.static_build_input.mini_app_dist_total_bytes,
             )
             self.assertEqual(0o600, stat.S_IMODE(fixture.output.stat().st_mode))
             self.assertFalse(fixture.output.read_bytes().endswith(b"\n"))
@@ -306,6 +370,50 @@ class BuildFencedFiReleaseIdentityTests(TestCase):
                     "BOT_IMAGE_LABEL_MISMATCH",
                 ):
                     fixture.build()
+
+    def test_refuses_image_without_matching_static_build_input_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = DescriptorBuilderFixture(Path(raw))
+            wrong = fixture.image_metadata(APP_IMAGE)
+            labels = dict(wrong["Config"]["Labels"])
+            labels["org.goldtrade.mini-app-dist-files-sha256"] = "0" * 64
+            wrong["Config"] = {"Labels": labels}
+
+            def inspected(reference: str) -> dict[str, object]:
+                return wrong if reference == APP_IMAGE else fixture.image_metadata(reference)
+
+            with mock.patch.object(subject, "_run_docker_image_inspect", side_effect=inspected):
+                with self.assertRaisesRegex(
+                    subject.BuildFencedFiReleaseIdentityError,
+                    "APP_STATIC_IMAGE_LABEL_MISMATCH",
+                ):
+                    fixture.build()
+
+    def test_refuses_build_input_for_another_source_before_docker_inspection(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = DescriptorBuilderFixture(Path(raw))
+            document = candidate_inputs.verify_fenced_fi_candidate_build_input_document(
+                fixture.fenced_fi_build_input.read_bytes()
+            )
+            document["application"]["source_root"] = "/srv/other/" + "a" * 40
+            fixture.fenced_fi_build_input.write_bytes(
+                json.dumps(
+                    document,
+                    ensure_ascii=True,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("ascii")
+            )
+            fixture.fenced_fi_build_input.chmod(0o600)
+            with (
+                mock.patch.object(subject, "_run_docker_image_inspect") as image,
+                self.assertRaisesRegex(
+                    subject.BuildFencedFiReleaseIdentityError,
+                    "STATIC_BUILD_INPUT_SOURCE_MISMATCH",
+                ),
+            ):
+                fixture.build()
+            image.assert_not_called()
 
     def test_hard_blocks_legacy_2c08_before_control_or_image_inspection(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

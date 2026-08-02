@@ -6,9 +6,19 @@ FROM python:3.11-slim-bullseye
 ARG TERM_FENCED_RELEASE_SHA
 ARG TERM_FENCED_RELEASE_TREE_SHA
 ARG TERM_FENCED_APPLICATION_EVIDENCE_SHA256
+ARG FENCED_FI_BUILD_INPUT_MANIFEST_SHA256
+ARG MINI_APP_DIST_MANIFEST_SHA256
+ARG MINI_APP_DIST_FILES_SHA256
+ARG MINI_APP_DIST_FILE_COUNT
+ARG MINI_APP_DIST_TOTAL_BYTES
 LABEL org.opencontainers.image.revision="${TERM_FENCED_RELEASE_SHA}" \
       org.goldtrade.source-tree="${TERM_FENCED_RELEASE_TREE_SHA}" \
-      org.goldtrade.term-fence-evidence-sha256="${TERM_FENCED_APPLICATION_EVIDENCE_SHA256}"
+      org.goldtrade.term-fence-evidence-sha256="${TERM_FENCED_APPLICATION_EVIDENCE_SHA256}" \
+      org.goldtrade.fenced-fi-build-input-sha256="${FENCED_FI_BUILD_INPUT_MANIFEST_SHA256}" \
+      org.goldtrade.mini-app-dist-manifest-sha256="${MINI_APP_DIST_MANIFEST_SHA256}" \
+      org.goldtrade.mini-app-dist-files-sha256="${MINI_APP_DIST_FILES_SHA256}" \
+      org.goldtrade.mini-app-dist-file-count="${MINI_APP_DIST_FILE_COUNT}" \
+      org.goldtrade.mini-app-dist-total-bytes="${MINI_APP_DIST_TOTAL_BYTES}"
 RUN apt-get -o Acquire::Retries=5 update \
     && apt-get -o Acquire::Retries=5 install -y --no-install-recommends libpq-dev build-essential libmagic1 \
     && rm -rf /var/lib/apt/lists/*
