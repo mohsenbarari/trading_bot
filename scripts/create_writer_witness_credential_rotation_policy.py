@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Create the fixed, root-only Writer Witness current-credential policy.
+"""Create and activate one immutable Writer Witness credential policy.
 
 This is a deliberately small privileged ceremony.  It consumes two fresh
 non-secret client receipts, verifies their signed Witness contracts, and
-creates exactly one canonical policy at the fixed control-host path.  It does
-not read an HMAC secret, contact the Witness, or activate any service.
+creates a versioned policy, immutable selector, and immutable activation record
+before atomically advancing the root-controlled current selector. It does not
+read an HMAC secret, contact the Witness, or activate any service.
 """
 
 from __future__ import annotations

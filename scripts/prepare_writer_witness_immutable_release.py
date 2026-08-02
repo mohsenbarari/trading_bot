@@ -25,8 +25,8 @@ from typing import Any, Mapping, Sequence
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 PINNED_SOURCE_COMMIT = "a0d8fa5a3b696ecfee3c0e787ea0791d035b1f32"
-PROFILE_SCHEMA = "gold-trade-writer-witness-release-profile-v3"
-CREDENTIAL_ROTATION_POLICY_SCHEMA = "gold-trade-writer-witness-credential-rotation-policy-v1"
+PROFILE_SCHEMA = "gold-trade-writer-witness-release-profile-v4"
+CREDENTIAL_ROTATION_POLICY_SCHEMA = "gold-trade-writer-witness-credential-rotation-policy-v2"
 PACKAGE_SCHEMA = "gold-trade-writer-witness-release-package-v1"
 TIMING_ATTESTATION_SCHEMA = "gold-trade-writer-witness-client-timing-attestation-v1"
 PAIRED_TIMING_ATTESTATION_SCHEMA = "gold-trade-writer-witness-paired-client-timing-attestation-v1"
@@ -430,6 +430,7 @@ def _load_profile(path: Path) -> dict[str, Any]:
             "schema",
             "require_exact_current_credential",
             "maximum_attestation_age_seconds",
+            "maximum_policy_ttl_seconds",
         },
         field="release profile credential rotation policy",
     )
@@ -443,6 +444,13 @@ def _load_profile(path: Path) -> dict[str, Any]:
             maximum=60,
         )
         != 60
+        or _require_int(
+            credential_rotation.get("maximum_policy_ttl_seconds"),
+            field="release profile credential rotation maximum policy TTL",
+            minimum=3600,
+            maximum=7 * 24 * 60 * 60,
+        )
+        != 24 * 60 * 60
     ):
         raise WitnessReleasePreparationError(
             "release profile credential rotation policy is not the approved exact-current contract"

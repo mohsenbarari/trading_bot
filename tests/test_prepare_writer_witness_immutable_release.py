@@ -260,8 +260,27 @@ class WriterWitnessImmutableReleaseTests(unittest.TestCase):
             profile["client_credential_rotation"]["maximum_attestation_age_seconds"],
             60,
         )
+        self.assertEqual(
+            profile["client_credential_rotation"]["maximum_policy_ttl_seconds"],
+            24 * 60 * 60,
+        )
         self.assertEqual(profile["webapp_fi_client"]["renew_interval_seconds"], 10)
         self.assertEqual(profile["webapp_ir_client"]["renew_interval_seconds"], 10)
+
+    def test_profile_rejects_a_policy_ttl_above_the_24_hour_bound(self):
+        profile = release_package._load_profile(release_package.DEFAULT_PROFILE_PATH)
+        profile["client_credential_rotation"]["maximum_policy_ttl_seconds"] = (
+            24 * 60 * 60 + 1
+        )
+        with tempfile.TemporaryDirectory(prefix="writer-witness-profile-ttl-") as value:
+            path = Path(value) / "profile.json"
+            path.write_bytes(release_package._canonical_json_bytes(profile))
+            path.chmod(0o600)
+            with self.assertRaisesRegex(
+                release_package.WitnessReleasePreparationError,
+                "credential rotation policy is not the approved exact-current contract",
+            ):
+                release_package._load_profile(path)
 
     def test_webapp_fi_timing_attestation_never_emits_secret_fields(self):
         with tempfile.TemporaryDirectory(prefix="writer-witness-fi-timing-") as value:
