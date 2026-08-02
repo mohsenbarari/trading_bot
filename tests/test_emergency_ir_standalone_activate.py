@@ -214,6 +214,29 @@ def write_image_bundle(
 
 
 class EmergencyIrStandaloneActivationTests(unittest.TestCase):
+    def test_campaign_bootstrap_paths_use_the_canonical_receiver_directory(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-activation-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            paths = ACTIVATE.ActivationPaths(bootstrap_root=root / "bootstrap")
+
+            manifest_path, public_key_path = ACTIVATE._campaign_bootstrap_paths(
+                paths,
+                "20260801T220000Z-emergency-ir-01",
+            )
+
+            self.assertEqual(
+                manifest_path,
+                paths.bootstrap_root / "20260801T220000Z-emergency-ir-01" / "sealed-manifest.json",
+            )
+            self.assertEqual(
+                public_key_path,
+                paths.bootstrap_root
+                / "20260801T220000Z-emergency-ir-01"
+                / "receiver"
+                / "signing-public.key",
+            )
+
     def test_prepare_requires_aggregate_plaintext_disk_budget_before_decrypt(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-activation-") as raw:
             root = Path(raw)
