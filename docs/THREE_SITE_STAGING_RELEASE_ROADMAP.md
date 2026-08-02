@@ -482,18 +482,48 @@ revert اتمیک commit ناموفق روی همان branch؛ ساخت branch �
 
 ### گزارش پایان Stage 2
 
-- Status: `NOT_STARTED`
+- Status: `COMPLETED — G2 ACCEPTED`
 - Branch: `stage/three-site-staging-02-validation`
-- Base SHA / implementation commits: `pending`
-- Deployed/tested release SHA: `pending`
-- Changes delivered: `pending`
-- Commands/tests executed: `pending`
-- Passed / failed / skipped: `pending`
-- Evidence paths and SHA-256: `pending`
+- Base SHA / implementation commits:
+  `425891169999cc379ac6b8d273b54983f4c88dba / 27c9404d9f6c3df2b0c2a7dd28aa798c6bbbb36d, 0e63a7ec1b08bef29ea199041215298a021b56ef`
+- Deployed/tested release SHA:
+  `0e63a7ec1b08bef29ea199041215298a021b56ef`؛ deploy روی remote انجام نشد و
+  منظور از tested، نرم‌افزار، migration، Compose و imageهای local همین SHA است.
+- Changes delivered:
+  `تست projection با قرارداد canonical destination و مرز Receiver/Projector همسو شد؛
+  smoke واقعی acquire/renew/drain/expiry/handoff به Witness PostgreSQL افزوده شد؛
+  runner مستقیم gate رسمی Witness مسیر import صحیح و شمار دقیق ۷ تست را دارد؛
+  validation manifest کامل Stage 2 ثبت شد.`
+- Commands/tests executed:
+  `unittest هسته؛ discovery تمام test_three_site*.py؛ تمام الگوهای DR/Writer با
+  runtime identity تفکیک‌شده؛ gate واقعی Witness/commit-fence؛ migration smoke؛
+  guarded upgrade از zero و clone؛ compile بدون pyc؛ topology و deployment-surface
+  guard؛ secret-boundary؛ render دوبل چهار role؛ docker compose config؛ build و
+  inspect دو image یکتا.`
+- Passed / failed / skipped:
+  `هسته 94/94؛ three-site 191/191 شامل ۲۴ PostgreSQL؛ الگوهای DR/Writer 343/343؛
+  migration smoke 15/15؛ Witness/commit-fence 7/7. در تمام مجموعه‌های mandatory:
+  failed=0 و unauthorized skipped=0. شمارها بین gateها هم‌پوشانی دارند و جمع آنها
+  به‌عنوان unique test count گزارش نمی‌شود.`
+- Evidence paths and SHA-256:
+  `docs/THREE_SITE_STAGE2_VALIDATION_MANIFEST.json =
+  ff6c8ebeafa9a8e6489890e4b083b32b9ba7c9397e535ec7d36e545d54c3a1c8؛
+  /tmp/three-site-stage2-final-a-0e63a7ec و
+  /tmp/three-site-stage2-final-b-0e63a7ec صرفاً convenience copy هستند و hashهای
+  canonical آنها داخل manifest track شده است.`
 - Production touched: `no`
-- Deviations / open risks: `pending`
-- Rollback verified: `pending`
-- Decision / next stage: `pending / no`
+- Deviations / open risks:
+  `PostgreSQL خام به‌دلیل نبود extension الزامی trading_bot_boottime کنار گذاشته و
+  image canonical مخزن استفاده شد. یک build ترکیبی با پیام status مالک قطع شد؛
+  PostgreSQL کامل مانده بود و app از همان BuildKit cache تکمیل و هر دو مستقل inspect
+  شدند. attestation واقعی runtime میزبان Witness، secretهای واقعی، upload artifact،
+  host isolation و rollback میزبان عمداً متعلق به Stage 3 هستند.`
+- Rollback verified:
+  `yes؛ تغییرات نرم‌افزاری دو commit اتمیک و قابل revert هستند؛ هیچ remote mutation
+  وجود ندارد؛ کانتینر و DBهای disposable با label اختصاصی حذف شدند؛ imageهای release
+  فقط local و با tag دقیق SHA باقی ماندند.`
+- Decision / next stage:
+  `ACCEPTED / no؛ G2 عبور کرد، اما شروع Stage 3 تا دستور صریح مالک مجاز نیست.`
 
 ---
 

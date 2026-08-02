@@ -1,0 +1,252 @@
+{
+  "schema": "three-site-stage2-validation-manifest-v1",
+  "generated_at": "2026-08-02T15:23:42Z",
+  "branch": "stage/three-site-staging-02-validation",
+  "base_sha": "425891169999cc379ac6b8d273b54983f4c88dba",
+  "release_sha": "0e63a7ec1b08bef29ea199041215298a021b56ef",
+  "implementation_commits": [
+    "27c9404d9f6c3df2b0c2a7dd28aa798c6bbbb36d",
+    "0e63a7ec1b08bef29ea199041215298a021b56ef"
+  ],
+  "production_touched": false,
+  "remote_server_mutations": [],
+  "secrets_recorded": false,
+  "mandatory_checks": [
+    {
+      "id": "core-94",
+      "command": "python3 -m unittest tests/test_webapp_writer_control.py tests/test_writer_fencing.py tests/test_writer_witness.py tests/test_writer_witness_client.py tests/test_writer_witness_service.py tests/test_dr_event_protocol.py tests/test_dr_sync_auth.py tests/test_dr_receiver_readiness.py tests/test_dr_blob_crypto.py tests/test_dr_failover_orchestrator.py tests/test_dr_staging_operation_backend.py",
+      "duration_seconds": 11.675,
+      "exit_code": 0,
+      "tests_run": 94,
+      "failed": 0,
+      "skipped": 0,
+      "status": "passed"
+    },
+    {
+      "id": "three-site-discovery",
+      "command": "python3 -m unittest tests/test_three_site*.py (with all eight WebApp-FI scratch role URLs)",
+      "duration_seconds": 70.027,
+      "exit_code": 0,
+      "tests_run": 191,
+      "postgresql_tests_run": 24,
+      "failed": 0,
+      "skipped": 0,
+      "status": "passed"
+    },
+    {
+      "id": "dr-writer-webapp-writer-patterns",
+      "command": "All test_dr_*.py, test_writer*.py and test_webapp_writer*.py modules, split by required runtime identity",
+      "duration_seconds": 583.05,
+      "exit_code": 0,
+      "tests_run": 343,
+      "failed": 0,
+      "skipped": 0,
+      "subruns": [
+        {
+          "scope": "26 non-PostgreSQL modules; Witness release manifest derivation-only on this non-Witness host",
+          "duration_seconds": 445.407,
+          "tests_run": 324,
+          "exit_code": 0
+        },
+        {
+          "scope": "WebApp-FI replay nonce retention using owner/receiver/projector roles",
+          "duration_seconds": 0.441,
+          "tests_run": 2,
+          "exit_code": 0
+        },
+        {
+          "scope": "Bot-FI projection transaction using independent receiver and projector roles",
+          "duration_seconds": 10.632,
+          "tests_run": 1,
+          "exit_code": 0
+        },
+        {
+          "scope": "DR stream contract migration on guarded UUID databases",
+          "duration_seconds": 124.57,
+          "tests_run": 9,
+          "exit_code": 0
+        },
+        {
+          "scope": "Official real-PostgreSQL Witness and commit-fence gate",
+          "duration_seconds": 3.0,
+          "tests_run": 7,
+          "exit_code": 0
+        }
+      ],
+      "status": "passed"
+    },
+    {
+      "id": "migration-smoke",
+      "command": "python3 -m unittest tests.test_migration_smoke",
+      "duration_seconds": 1.48,
+      "exit_code": 0,
+      "tests_run": 15,
+      "failed": 0,
+      "skipped": 0,
+      "status": "passed"
+    },
+    {
+      "id": "migration-empty-and-clone",
+      "command": "scripts/run_guarded_scratch_alembic.py upgrade head on stage4_registration_empty_0e63a7ec, clone it after inserting a marker, then upgrade head on stage4_registration_clone_0e63a7ec",
+      "exit_code": 0,
+      "empty_database_start_revision": "zero",
+      "head": "b986c7d8e0f1",
+      "postgres_extension": "trading_bot_boottime:1.0",
+      "clone_marker": "stage2-current-sha-clone-proof",
+      "scratch_system_identifier": "7669438444176396323",
+      "result_sha256": "ac0a1bbe257be2fc1cebb40f725780aba47c141a1fc3bbf6f6e77880e8c65791",
+      "status": "passed"
+    },
+    {
+      "id": "tracked-python-compile",
+      "command": "git ls-files -z '*.py' | Python compile(source, path, 'exec')",
+      "duration_seconds": 8.8,
+      "exit_code": 0,
+      "files_compiled": 1439,
+      "pyc_written": 0,
+      "status": "passed"
+    },
+    {
+      "id": "topology-contract",
+      "command": "python3 scripts/verify_three_site_topology_contract.py --json",
+      "exit_code": 0,
+      "normal_writer_site": "webapp_fi",
+      "witness_site": "witness",
+      "status": "passed"
+    },
+    {
+      "id": "deployment-surface",
+      "command": "make deployment-surface-guard; verify_three_site_staging_secret_boundaries.py; compare production-sensitive manifest values and legacy volume names against nine staging bundle files",
+      "exit_code": 0,
+      "sensitive_values_compared_without_disclosure": 18,
+      "matched_production_values": 0,
+      "matched_legacy_production_volumes": 0,
+      "services_checked": 45,
+      "managed_networks_checked": 11,
+      "status": "passed"
+    },
+    {
+      "id": "local-witness-and-two-webapp-databases",
+      "command": "Official PostgreSQL Witness gate plus read-only identity/head comparison for WebApp-FI and WebApp-IR scratch databases",
+      "exit_code": 0,
+      "witness_lifecycle": [
+        "acquire",
+        "renew",
+        "drain",
+        "expiry",
+        "handoff"
+      ],
+      "database_identities": [
+        "stage4_registration_webapp_stage2|b986c7d8e0f1|7669438444176396323|webapp_fi",
+        "stage4_registration_webapp_ir_stage2|b986c7d8e0f1|7669438444176396323|webapp_ir"
+      ],
+      "result_sha256": "3cdff8bef025e898468be661e71934a872a6f4d63fb3e7917237116316dae043",
+      "status": "passed"
+    }
+  ],
+  "compose": {
+    "canonical_source_sha256": "1ccf8d049d6e11129be0f910d21a925e80d6d9e265ea02dfff4f5e71cb3e4da5",
+    "dummy_environment_source_sha256": "6ad8c38c76f3c01151c1fcf7e17c6b27d4e45b8c3124e2fe072e7813b6678c71",
+    "normalized_config_sha256": {
+      "canonical": "88eab83d03424978cc7f6f1f7ccb112c75b83f5094e42332fe36951e1bee06ce",
+      "bot-fi": "0fb90fdf38b247f1070bca657d1e175698147b36078c22909faa32cbd3012f58",
+      "webapp-fi": "23d83152f3b26803454f5a662fee22836abd2be852838f9daf4af48995390bff",
+      "webapp-ir": "31dbdc92a2c113b737089d7d4b3ddd31fb1d24bddb12e02457ca481897a1ed71",
+      "witness": "66a9fd14bf6c60b2f652441d40bf6675082b3ededc61530d7bc0903bf6b4ad28"
+    },
+    "roles": {
+      "bot-fi": {
+        "compose_sha256": "3076621ac260a143412ab6d8fb0e2ec88f0e4fdfe0d0803ea08ce9239248fd95",
+        "environment_sha256": "dd825f44548020dcf1a4fe94314f7531ae4108a395c7b94fe49cb7a01fad8a89"
+      },
+      "webapp-fi": {
+        "compose_sha256": "48fa18033be70cf08129a737d39306967d8d2bd25b396a6bce1bc0f359b8bdd1",
+        "environment_sha256": "d6fce10e2c448ed08fc1cdaf113ec9860bde53e602607a8e95b6e3b02c56e3c3"
+      },
+      "webapp-ir": {
+        "compose_sha256": "ad2837258d99b696c52813e1fb487c0c18dbde7baef676a7b110c2a04e1e724f",
+        "environment_sha256": "69cb9bbe76a09ff1300fbbfcc2223763ea43440cc8d936ac915eea2bbbca398f"
+      },
+      "witness": {
+        "compose_sha256": "cac06c4ca64449e3b6e128bb9e8759ddcffe8a5ea1cb023f8387e246e513672d",
+        "environment_sha256": "3227a81092aac99cecde3f2ccdee460fe73d2ad40671c8ba77184739400be0aa"
+      }
+    },
+    "independent_render_count": 2,
+    "byte_comparisons": 8,
+    "byte_comparison_failures": 0,
+    "dummy_secrets_only": true,
+    "status": "passed"
+  },
+  "images": [
+    {
+      "reference": "trading_bot_three_site_staging:0e63a7ec1b08bef29ea199041215298a021b56ef",
+      "image_id": "sha256:71aac59e324f324529b92701bb551b2ebab91772dafb85dbb16330360de3832a",
+      "content_identity": "sha256:416940ab12fa0cab2830ae8adeaca64577c73fdcd78fe1c079be80065d2ba777",
+      "release_label": "0e63a7ec1b08bef29ea199041215298a021b56ef"
+    },
+    {
+      "reference": "trading_bot_postgres_boottime:15-0e63a7ec1b08bef29ea199041215298a021b56ef",
+      "image_id": "sha256:d40d850c6017ab4729467ec2856919ebd7e96c1e01b18aa6db9e5d72210d1087",
+      "content_identity": "sha256:cb30a8eb3ca5784b169c60e562969a8bd5855c077fdf4c5e3149adc22c67bf5c",
+      "release_label": "0e63a7ec1b08bef29ea199041215298a021b56ef"
+    }
+  ],
+  "cross_role_image_identity": {
+    "roles": [
+      "bot-fi",
+      "webapp-fi",
+      "webapp-ir",
+      "witness"
+    ],
+    "local_release_references_are_exactly_shared": true,
+    "content_identity_mismatches": 0,
+    "status": "passed"
+  },
+  "diagnostic_attempts_resolved_before_final_gate": [
+    {
+      "finding": "Stock postgres:15-alpine lacks the repository-required trading_bot_boottime extension",
+      "resolution": "Built and used deploy/postgres-boottime/Dockerfile for the disposable validation cluster"
+    },
+    {
+      "finding": "One combined DR/Writer process mixed WebApp-FI and Bot-FI runtime identities",
+      "resolution": "Split PostgreSQL modules by physical role; final aggregate is 343/343 with zero skips"
+    },
+    {
+      "finding": "Projection transaction test used the projector to ingest remote events and omitted webapp_ir from the canonical destination set",
+      "resolution": "Commit 27c9404d assigns ingestion to the receiver and validates both required destinations"
+    },
+    {
+      "finding": "Direct execution of the official Witness PostgreSQL runner could not import repository tests",
+      "resolution": "Commit 0e63a7ec adds repository root to sys.path and raises the exact expected count to seven"
+    },
+    {
+      "finding": "The first combined image build command was interrupted by the user's status message after the PostgreSQL artifact completed",
+      "resolution": "Resumed the same BuildKit cache and completed the application artifact; both final images were inspected independently"
+    }
+  ],
+  "scratch_boundary": {
+    "container_name": "three-site-stage2-pg-42589116",
+    "required_label": "trading-bot.scope=three-site-stage2-validation",
+    "published_endpoint": "127.0.0.1:1026",
+    "storage": "tmpfs",
+    "cleanup_completed": true,
+    "remaining_containers_with_required_label": 0,
+    "recoverability": "Disposable test data intentionally removed; release images retained"
+  },
+  "evidence_paths": [
+    "/tmp/three-site-stage2-final-a-0e63a7ec",
+    "/tmp/three-site-stage2-final-b-0e63a7ec",
+    "docs/THREE_SITE_STAGE2_VALIDATION_MANIFEST.json"
+  ],
+  "evidence_path_note": "The two /tmp render trees are convenience copies. Their canonical SHA-256 values are persisted in this tracked manifest.",
+  "gate_g2": {
+    "mandatory_suites_passed_without_unauthorized_skip": true,
+    "empty_and_clone_migrations_reached_head": true,
+    "four_role_bundles_deterministic": true,
+    "cross_role_image_content_identity_verified": true,
+    "manifest_bound_to_exact_release_sha": true,
+    "server_mutation_count": 0,
+    "decision": "ACCEPTED"
+  }
+}
