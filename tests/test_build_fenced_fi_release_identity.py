@@ -251,6 +251,27 @@ class BuildFencedFiReleaseIdentityTests(TestCase):
             self.assertEqual(0o600, stat.S_IMODE(fixture.output.stat().st_mode))
             self.assertFalse(fixture.output.read_bytes().endswith(b"\n"))
 
+    def test_builder_uses_its_bounded_git_loader_before_pure_evidence_verification(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = DescriptorBuilderFixture(Path(raw))
+            with (
+                mock.patch.object(
+                    subject,
+                    "_run_docker_image_inspect",
+                    side_effect=fixture.image_metadata,
+                ),
+                mock.patch.object(
+                    subject.source_verifier,
+                    "load_clean_source_tree",
+                    side_effect=AssertionError("unbounded shared Git loader must not be used"),
+                ),
+            ):
+                built = fixture.build()
+            self.assertEqual(
+                _run("-C", str(fixture.source_root), "rev-parse", "HEAD"),
+                built.source.release_sha,
+            )
+
     def test_refuses_selected_digest_not_present_in_local_docker_inspection(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             fixture = DescriptorBuilderFixture(Path(raw))

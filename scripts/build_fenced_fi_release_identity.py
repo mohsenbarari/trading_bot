@@ -454,20 +454,61 @@ def _load_signer(path: Path, *, expected_public_key: bytes) -> Ed25519PrivateKey
     return signer
 
 
+def _load_clean_application_source_tree(root: Path) -> source_verifier.SourceTree:
+    """Read capability inputs from bounded immutable Git blobs only.
+
+    The shared source verifier exposes the semantic AST/evidence check.  Its
+    generic Git loader predates this builder's streaming-cap requirement, so
+    this local wrapper performs the same clean-tree/blob admission through
+    :func:`_run_git` before passing a closed ``SourceTree`` to that verifier.
+    """
+
+    release_sha, release_tree_sha = _require_clean_git_tree(
+        root,
+        label="APPLICATION_RELEASE",
+    )
+    blobs: dict[str, bytes] = {}
+    for relative in sorted(application_capability.TERM_FENCED_APPLICATION_CAPABILITY_FILES):
+        blob = _run_git(
+            root,
+            "show",
+            f"HEAD:{relative}",
+            maximum_bytes=source_verifier.MAX_SOURCE_FILE_BYTES,
+        )
+        if not blob:
+            _fail("FENCED_FI_RELEASE_DESCRIPTOR_APPLICATION_RELEASE_SOURCE_FILE_INVALID")
+        blobs[relative] = blob
+    final_sha, final_tree_sha = _require_clean_git_tree(
+        root,
+        label="APPLICATION_RELEASE",
+    )
+    if (release_sha, release_tree_sha) != (final_sha, final_tree_sha):
+        _fail("FENCED_FI_RELEASE_DESCRIPTOR_APPLICATION_RELEASE_CHANGED")
+    return source_verifier.SourceTree(
+        root=root,
+        release_sha=release_sha,
+        release_tree_sha=release_tree_sha,
+        blobs=blobs,
+    )
+
+
 def _load_source_release(
     root: Path,
     *,
     evidence_document: bytes,
 ) -> SourceRelease:
     root = _require_root_controlled_directory(root, label="APPLICATION_RELEASE_ROOT")
-    # The source verifier deliberately consumes Git blobs rather than mutable
-    # worktree files.  It also rejects any dirty or untracked checkout.
+    # The semantic source verifier deliberately consumes Git blobs rather
+    # than mutable worktree files.  The wrapper also streams every Git output
+    # under an explicit cap before semantic validation runs.
     try:
-        tree = source_verifier.load_clean_source_tree(root)
+        tree = _load_clean_application_source_tree(root)
         evidence = application_capability.verify_term_fenced_application_capability(
             evidence_document
         )
         source_verifier.verify_evidence_for_source(tree, evidence_document)
+    except BuildFencedFiReleaseIdentityError:
+        raise
     except (
         source_verifier.TermFencedApplicationSourceError,
         application_capability.TermFencedApplicationCapabilityError,
