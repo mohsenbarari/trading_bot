@@ -1,7 +1,7 @@
 {
   "schema": "three-site-stage3-arvan-test-inventory-v1",
   "generated_at": "2026-08-02T16:42:34Z",
-  "updated_at": "2026-08-02T17:18:00Z",
+  "updated_at": "2026-08-02T17:45:07Z",
   "branch": "stage/three-site-staging-03-host-readiness",
   "release_sha": "0e63a7ec1b08bef29ea199041215298a021b56ef",
   "authorization": {
@@ -270,7 +270,57 @@
     "mode": "0600",
     "sha256": "cfd9095bf961690ad96aa4f5849ec7c5c2276775fdd4c2502d1b074351d089d0",
     "structural_verification": "passed",
-    "formal_approval": "pending"
+    "formal_approval": "pending",
+    "approval_subject": {
+      "status": "ready",
+      "owner_only_path": "/root/secure-envs/trading-bot/three-site-staging-0e63a7ec-fd34231d/planned-inventory-approval-subject.json",
+      "mode": "0600",
+      "sha256": "507ea62f12ee82aa9742c72756af79b9266650dafba272f424f5c92305dea0a2",
+      "canonical_artifact_sha256": "4f787ec755264adb6cab93ae98b270d6f98b673002d9029b721625a1c55ae5a6",
+      "action": "approve_inventory",
+      "environment": "staging"
+    }
+  },
+  "object_storage_readiness": {
+    "status": "private-versioned-lifecycle-client-encrypted-readback-verified",
+    "provider": "Arvan Object Storage",
+    "bucket": "gold-trade-staging-three-site-dr",
+    "prefix": "staging/fd34231d-f52e-498a-aab4-438c99d88fc5/",
+    "credential_access_key_sha256": "285b32f788d99dfde46ff733fda1027d5851f56efb12b09a075002473868b6de",
+    "credential_state": "legacy owner credential is write-capable but is duplicated across prior staging campaigns; rotation remains required before Stage 4",
+    "controls": {
+      "private_acl": true,
+      "bucket_policy_public": false,
+      "versioning": "Enabled",
+      "campaign_lifecycle_exact": true,
+      "lifecycle_expiration_days": 45,
+      "lifecycle_noncurrent_expiration_days": 14,
+      "lifecycle_abort_incomplete_multipart_days": 1,
+      "default_server_side_encryption": "disabled because the Arvan backend rejects PutObject with InvalidArgument when enabled",
+      "strict_public_access_block": "disabled because the Arvan backend rejects private PutObject with AccessDenied when enabled",
+      "required_payload_encryption": "client-side AES-256-GCM"
+    },
+    "provider_compatibility_probe": {
+      "strict_public_access_block_with_default_sse_disabled": "AccessDenied",
+      "relaxed_public_access_block_with_default_sse_enabled": "InvalidArgument",
+      "relaxed_public_access_block_with_default_sse_disabled": "versioned upload passed",
+      "controls_restored_after_diagnostics": true
+    },
+    "encrypted_readback_probe": {
+      "client_side_encryption": "AES-256-GCM",
+      "plaintext_bytes": 4096,
+      "ciphertext_bytes": 4124,
+      "ciphertext_sha256": "df44b4ab9ddaf284a4509b9b388fdab94ee8d7889c4b4f1a5d2bd199a9fff009",
+      "version_id": "pleFwLJZnR.ch9ZX6Pw1DSd6K4734Gg",
+      "readback_verified": true,
+      "ephemeral_key_persisted": false
+    },
+    "owner_only_evidence_path": "/root/secure-envs/trading-bot/three-site-staging-0e63a7ec-fd34231d/object-storage-readiness-v3/object-storage-readiness.json",
+    "owner_only_evidence_mode": "0600",
+    "owner_only_evidence_sha256": "d803fd9e914fa5cd517f3888ec8394e247492176e497754cfa99cc8a8b307d1e",
+    "bucket_created": false,
+    "bucket_or_object_deleted": false,
+    "secrets_persisted_in_evidence": false
   },
   "invariants": {
     "provider_server_count_matches_owner_statement": true,
@@ -281,8 +331,11 @@
     "server_or_volume_lifecycle_action_executed": false,
     "four_host_boundaries_distinct_and_attested": true,
     "planned_inventory_structurally_verified": true,
+    "object_storage_private_versioned_lifecycle_verified": true,
+    "object_storage_client_encrypted_versioned_readback_verified": true,
+    "staging_object_storage_credential_rotated": false,
     "production_touched": false,
     "secrets_in_evidence": false
   },
-  "decision": "HOST_BOUNDARIES_ATTESTED_PLANNED_INVENTORY_PENDING_APPROVAL_G3_IN_PROGRESS"
+  "decision": "HOST_AND_OBJECT_STORAGE_BOUNDARIES_ATTESTED_APPROVAL_AND_CREDENTIAL_ROTATION_PENDING_G3_IN_PROGRESS"
 }

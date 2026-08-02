@@ -686,6 +686,44 @@ detach، rebuild یا resize نمی‌شود. چهار IP canonical و تمام 
 - Production touched: `no`؛ read-only identifier probeهای production فقط denylist
   inventory را تازه کردند.
 
+#### checkpoint بخش B — Object Storage و subject تأیید — 2026-08-02
+
+- گام ۷ کامل شد. باکت موجود `gold-trade-staging-three-site-dr` ساخته یا حذف نشد؛
+  ACL خصوصی، policy غیرعمومی، versioning فعال و lifecycle دقیقاً محدود به prefix
+  کمپین `staging/fd34231d-f52e-498a-aab4-438c99d88fc5/` اثبات شدند. retention
+  جاری ۴۵ روز، noncurrent retention چهارده روز و abort multipart یک روز است.
+- backend واقعی Arvan با دو کنترل AWS-style سازگار نبود: با default SSE فعال،
+  `PutObject` حتی در حالت PAB آزاد `InvalidArgument` داد؛ با SSE خاموش و PAB
+  سخت‌گیر نیز `AccessDenied` داد. diagnostic با restoration اجباری اجرا شد و
+  حذف نهایی آن دو configuration فقط پس از تطبیق دقیق محتوایی انجام گرفت. مرز
+  خصوصی با ACL خصوصی و policy غیرعمومی حفظ شد و رمزنگاری payload به‌صورت اجباری
+  client-side `AES-256-GCM` باقی ماند.
+- probe نهایی ۴۰۹۶ بایت plaintext را فقط در حافظه رمز کرد، ۴۱۲۴ بایت ciphertext
+  را versioned upload/readback کرد و hash و decrypt را پذیرفت. VersionId برابر
+  `pleFwLJZnR.ch9ZX6Pw1DSd6K4734Gg` و ciphertext SHA-256 برابر
+  `df44b4ab9ddaf284a4509b9b388fdab94ee8d7889c4b4f1a5d2bd199a9fff009`
+  است؛ کلید موقت persist نشد.
+- evidence owner-only در
+  `/root/secure-envs/trading-bot/three-site-staging-0e63a7ec-fd34231d/object-storage-readiness-v3/object-storage-readiness.json`
+  با mode `0600` و SHA-256 برابر
+  `d803fd9e914fa5cd517f3888ec8394e247492176e497754cfa99cc8a8b307d1e`
+  ثبت شد. ابزار و تست‌های guard با commitهای `34102db5` و `67e5ed17` ثبت شدند؛
+  ۱۲ تست Object Storage مرتبط قبول شدند.
+- گام ۶ هنوز کامل نیست. همه‌ی credentialهای owner-only موجود پس از normalize
+  همان fingerprint `285b32f...868b6de` را دارند و rotation واقعی رخ نداده است.
+  API key زیرساخت برای ECC معتبر است، اما endpoint رسمی Storage به Bearer JWT
+  نشست پنل نیاز دارد؛ بنابراین ساخت temp user یا refresh secret بدون نشست معتبر
+  پنل اجرا نشد. این مورد باید پیش از Stage 4 بسته شود، ولی صحت گام ۷ را نقض نمی‌کند.
+- subject دقیق planned inventory آماده است: مسیر owner-only
+  `/root/secure-envs/trading-bot/three-site-staging-0e63a7ec-fd34231d/planned-inventory-approval-subject.json`،
+  mode `0600`، SHA-256 برابر
+  `507ea62f12ee82aa9742c72756af79b9266650dafba272f424f5c92305dea0a2` و
+  canonical artifact hash برابر
+  `4f787ec755264adb6cab93ae98b270d6f98b673002d9029b721625a1c55ae5a6`.
+  صدور approval به passphrase/TOTP در TTY مورد اعتماد نیاز دارد و bypass نشده است.
+- Production touched: `no`؛ هیچ production bucket/domain/host یا server/volume
+  lifecycle API تغییر نکرد.
+
 ### Exit gate — G3 Hosts Isolated
 
 - چهار host attestation تازه و aggregate معتبر است؛
@@ -703,35 +741,42 @@ detach، rebuild یا resize نمی‌شود. چهار IP canonical و تمام 
 
 ### گزارش پایان Stage 3
 
-- Status: `IN_PROGRESS — HOST_BOUNDARIES_ATTESTED / PLANNED_INVENTORY_APPROVAL_PENDING`
+- Status: `IN_PROGRESS — HOST_AND_OBJECT_STORAGE_BOUNDARIES_ATTESTED / APPROVAL_AND_CREDENTIAL_ROTATION_PENDING`
 - Branch: `stage/three-site-staging-03-host-readiness`
 - Base SHA / implementation commits:
   `aab3558aebf6a25454a4d1f532e516b75dcbddde /
-  7effce5bf808885b186c20f14f030180f2a1c681, 8dcbba1e, bf5c6e98, 9fc10979`
+  7effce5bf808885b186c20f14f030180f2a1c681, 8dcbba1e, bf5c6e98, 9fc10979,
+  34102db5, 67e5ed17`
 - Tested release SHA: `0e63a7ec1b08bef29ea199041215298a021b56ef`
 - Host inventory summary:
   `چهار VPS disposable قابل‌دسترسی و بدون container هستند؛ Docker/NTP/mount/
   cgroup هر چهار role attestation و identifierهایشان متمایز است. WebApp-IR از
-  relay تستی داخل ایران با key-only SSH کنترل می‌شود. دو VPS production ایران و
-  چهار مقصد canonical از mutation خارج‌اند.`
+  relay تستی داخل ایران با key-only SSH کنترل می‌شود. مرز Object Storage خصوصی،
+  versioned و دارای lifecycle است و encrypted versioned readback قبول شد. دو VPS
+  production ایران و چهار مقصد canonical از mutation خارج‌اند.`
 - Commands/tests and results:
   `چهار ممیزی read-only canonical؛ inventory هفت VPS پنل؛ attestation چهار VPS
   تستی؛ VNC/SSH host-key و SSH policy؛ lsblk/findmnt/wipefs --no-act؛ Docker/NTP/
   cgroup؛ دو security-group rule محدود تستی؛ structural inventory verifier =
-  PASS؛ S3 configuration GET. lifecycle منابع و application start = صفر.`
+  PASS؛ S3 private/versioning/lifecycle و provider-compatibility diagnostics؛
+  AES-256-GCM upload/readback = PASS؛ ۱۲ unittest مرتبط = PASS. lifecycle منابع
+  پنل و application start = صفر.`
 - Evidence paths and SHA-256:
   `docs/THREE_SITE_STAGE3_HOST_READINESS_AUDIT.json =
   28950ff335fce269fc5e9886eb878a9c1a52ba74be9e9dc04266611e9b934514؛
   docs/THREE_SITE_STAGE3_ARVAN_TEST_INVENTORY.json =
-  81d5730098364b307fe1e85e0d9032e22cc914bd37e38ea022608539877ae440؛
+  42da3635a67e089ab5c0469dce5f84139da53b70238cb6b1a0df8254d3fdae0b؛
   owner-only planned inventory =
-  cfd9095bf961690ad96aa4f5849ec7c5c2276775fdd4c2502d1b074351d089d0`
+  cfd9095bf961690ad96aa4f5849ec7c5c2276775fdd4c2502d1b074351d089d0؛
+  owner-only Object Storage readiness =
+  d803fd9e914fa5cd517f3888ec8394e247492176e497754cfa99cc8a8b307d1e`
 - Production touched: `no`
 - Deviations / open risks:
   `ingress بین‌المللی مستقیم WebApp-IR هنوز timeout است و control از relay ایران
-  عبور می‌کند؛ formal approval planned inventory صادر نشده؛ bucket policyهای
-  مفقود باید پیش از استفاده اصلاح شوند؛ credential مشاهده‌شده در خروجی موقت باید
-  rotate شود؛ هیچ منبع پنل بدون اجازه مالک ساخته یا حذف نمی‌شود.`
+  عبور می‌کند؛ formal approval planned inventory صادر نشده؛ credential فعلی در
+  کمپین‌های قدیمی staging تکرار شده و باید پیش از Stage 4 rotate شود؛ SSE پیش‌فرض
+  و strict PAB به‌علت رفتار ناسازگار provider قابل استفاده نیستند و client-side
+  encryption اجباری است؛ هیچ منبع پنل بدون اجازه مالک ساخته یا حذف نمی‌شود.`
 - Rollback verified: `no؛ backup/restore drill و rollback dry-run campaign هدف هنوز اجرا نشده‌اند.`
 - Decision / next stage:
   `G3_NOT_PASSED / no؛ ادامه بخش B روی topology disposable موجود مجاز است؛ شروع
