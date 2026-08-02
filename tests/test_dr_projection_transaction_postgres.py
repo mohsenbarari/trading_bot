@@ -21,14 +21,16 @@ from core.dr_event_protocol import (
 
 @unittest.skipUnless(
     os.environ.get("DR_PROJECTION_TX_TEST_OWNER_URL")
-    and os.environ.get("DR_PROJECTION_TX_TEST_PROJECTION_URL"),
-    "scratch DR projection transaction URLs are not configured",
+    and os.environ.get("DR_PROJECTION_TX_TEST_PROJECTION_URL")
+    and os.environ.get("DR_PROJECTION_TX_TEST_RECEIVER_URL"),
+    "scratch DR projection transaction role URLs are not configured",
 )
 class DrProjectionTransactionPostgresTests(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.owner = create_engine(os.environ["DR_PROJECTION_TX_TEST_OWNER_URL"])
         cls.projection = create_engine(os.environ["DR_PROJECTION_TX_TEST_PROJECTION_URL"])
+        cls.receiver = create_engine(os.environ["DR_PROJECTION_TX_TEST_RECEIVER_URL"])
         with cls.owner.connect() as connection:
             database_name = str(connection.scalar(text("SELECT current_database()")))
             if not database_name.startswith("stage4_registration_"):
@@ -38,6 +40,7 @@ class DrProjectionTransactionPostgresTests(unittest.IsolatedAsyncioTestCase):
     def tearDownClass(cls) -> None:
         cls.owner.dispose()
         cls.projection.dispose()
+        cls.receiver.dispose()
 
     def _envelopes(self, *, epoch: int, first_id: int, second_id: int):
         transaction_id = str(uuid4())
@@ -70,23 +73,31 @@ class DrProjectionTransactionPostgresTests(unittest.IsolatedAsyncioTestCase):
                     "transaction_size": 2,
                     "transaction_hash": "0" * 64,
                     "destination_streams": {
-                        "bot_fi": {
+                        destination: {
                             "sequence": position,
                             "transaction_id": transaction_id,
                             "transaction_position": position,
                             "transaction_size": 2,
                             "transaction_hash": "0" * 64,
                         }
+                        for destination in ("bot_fi", "webapp_ir")
                     },
                 }
             )
         global_hash = transaction_hash_from_envelopes(envelopes)
-        destination_hash = destination_transaction_hash(
-            envelopes, destination_site="bot_fi"
-        )
+        destination_hashes = {
+            destination: destination_transaction_hash(
+                envelopes,
+                destination_site=destination,
+            )
+            for destination in ("bot_fi", "webapp_ir")
+        }
         for envelope in envelopes:
             envelope["transaction_hash"] = global_hash
-            envelope["destination_streams"]["bot_fi"]["transaction_hash"] = destination_hash
+            for destination in ("bot_fi", "webapp_ir"):
+                envelope["destination_streams"][destination]["transaction_hash"] = (
+                    destination_hashes[destination]
+                )
         return [validate_envelope(envelope) for envelope in envelopes]
 
     async def test_incomplete_group_is_invisible_then_both_members_apply_in_one_commit(self) -> None:
@@ -97,9 +108,12 @@ class DrProjectionTransactionPostgresTests(unittest.IsolatedAsyncioTestCase):
         first_id = 700_000_000 + uuid4().int % 10_000_000
         second_id = 710_000_000 + uuid4().int % 10_000_000
         validated = self._envelopes(epoch=epoch, first_id=first_id, second_id=second_id)
-        with self.projection.begin() as connection:
+        with self.receiver.begin() as connection:
             connection.execute(
                 text("SELECT set_config('trading_bot.mutation_capability', 'projection', true)")
+            )
+            connection.execute(
+                text("SELECT set_config('trading_bot.projection_scope', 'receiver', true)")
             )
             # Keep this scratch test repeatable after an interrupted prior run.
             connection.execute(
@@ -187,9 +201,12 @@ class DrProjectionTransactionPostgresTests(unittest.IsolatedAsyncioTestCase):
                 )
             self.assertEqual(count, 0)
 
-            with self.projection.begin() as connection:
+            with self.receiver.begin() as connection:
                 connection.execute(
                     text("SELECT set_config('trading_bot.mutation_capability', 'projection', true)")
+                )
+                connection.execute(
+                    text("SELECT set_config('trading_bot.projection_scope', 'receiver', true)")
                 )
                 connection.execute(
                     text(
