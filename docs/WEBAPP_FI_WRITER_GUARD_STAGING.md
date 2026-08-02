@@ -66,6 +66,118 @@ warning: preflight rejects the pinned image before a Witness term is acquired.
 The release procedure must record the resulting image ID and repository digest
 in the signed v2 descriptor; the Docker labels never replace those pins.
 
+## Candidate Construction Gate
+
+This repository contains the local construction/verification pieces, but it
+does **not** contain a built app/bot candidate, a private-registry digest, or
+a signing key.  Treat those as intentional external inputs.  In particular,
+the checked Git tree does not include generated `mini_app_dist`; a release
+build context must contain its separately reviewed frontend output before
+Docker is invoked.
+
+### Clean Source + Static-Asset Input Binding
+
+Never copy `mini_app_dist` into the immutable application checkout.  A fresh
+checkout must remain Git-clean **including ignored/untracked build debris**;
+putting the generated assets there makes the candidate fail closed.  On the
+controlled build host, let the approved frontend build produce a root-owned
+`mini_app_dist` directory outside both the application checkout and the
+private manifest-output directories.  The directory may contain only regular,
+root-owned, non-executable static files and directories: symlinks, writable
+entries, `node_modules`, dotfiles, secret-like filenames, and high-confidence
+private-key/credential literals are refused.
+
+Before an image build, create two separate root-only, create-only manifests.
+The first records ordered asset paths, SHA-256 values, and byte sizes; it does
+not copy asset contents.  The second binds that static snapshot to the exact
+non-`2c08` application commit/tree, the canonical term-fenced source evidence,
+and the Git-matching `Dockerfile`/`.dockerignore` hashes.  Neither manifest is
+a writer permit, promotion approval, deployment approval, Docker action, or
+network action.
+
+```bash
+# Each output directory is root:root 0700 and empty.  Keep them distinct.
+python3 /srv/trading-bot-three-site/releases/<application-sha>/scripts/prepare_fenced_fi_candidate_build_inputs.py snapshot-static \
+  --mini-app-dist-root /srv/trading-bot-three-site/generated/<application-sha>/mini_app_dist \
+  --output /root/secure-release-inputs/static-manifests/<application-sha>.mini-app-dist.json
+
+python3 /srv/trading-bot-three-site/releases/<application-sha>/scripts/prepare_fenced_fi_candidate_build_inputs.py bind \
+  --application-release-root /srv/trading-bot-three-site/releases/<application-sha> \
+  --term-fenced-application-evidence /root/secure-release-inputs/webapp-fi-term-fenced-application-evidence.json \
+  --mini-app-dist-root /srv/trading-bot-three-site/generated/<application-sha>/mini_app_dist \
+  --mini-app-dist-manifest /root/secure-release-inputs/static-manifests/<application-sha>.mini-app-dist.json \
+  --output /root/secure-release-inputs/build-input-manifests/<application-sha>.candidate-build-inputs.json
+```
+
+The bind step scans source and static inputs twice and refuses a swap, source
+pollution, static mutation, a `2c08` release, symlink, unsafe owner/mode, or a
+Dockerfile/Dockerignore byte mismatch.  It creates no build context itself.
+The later controlled context assembler must use this manifest to verify a
+separate root-owned build context containing the immutable source files plus
+the manifest-matching `mini_app_dist`; it must not alter the source checkout.
+If any input changes, start again with new output paths—these manifests are
+create-only and must never be overwritten.
+
+On a controlled build host, first stage clean immutable application and
+control checkouts in directories named by their exact commits.  The following
+local-only evidence step must succeed before an image build is considered:
+
+```bash
+python3 /srv/trading-bot-three-site/releases/<application-sha>/scripts/verify_term_fenced_application_source.py build \
+  --source-root /srv/trading-bot-three-site/releases/<application-sha> \
+  --expected-release-sha <application-sha> \
+  --expected-release-tree-sha <application-tree-sha> \
+  --output /root/secure-release-inputs/webapp-fi-term-fenced-application-evidence.json
+```
+
+Use the resulting SHA-256 and the three values emitted by `image-labels` as
+the exact build arguments for both candidate image tags.  A representative
+local build command is:
+
+```bash
+docker build --no-cache --pull=false \
+  --file /srv/trading-bot-three-site/candidate-contexts/<application-sha>/Dockerfile \
+  --build-arg TERM_FENCED_RELEASE_SHA=<application-sha> \
+  --build-arg TERM_FENCED_RELEASE_TREE_SHA=<application-tree-sha> \
+  --build-arg TERM_FENCED_APPLICATION_EVIDENCE_SHA256=<evidence-sha256> \
+  --tag <reviewed-local-app-tag> \
+  /srv/trading-bot-three-site/candidate-contexts/<application-sha>
+```
+
+`candidate-contexts/<application-sha>` above is a later externally controlled
+assembly output, not the application checkout and not evidence that a build is
+safe by itself.  Its source/Dockerfile/static bytes must first be checked
+against the two manifests above.
+
+Build/tag the bot candidate under its own reviewed local tag with the same
+three values.  This command alone cannot satisfy Release-0: an image built
+only locally has no `RepoDigests` entry.  A separately approved private
+registry publication and local re-adoption must provide the immutable
+`repository@sha256:...` value for each app/bot tag.  Do not substitute a tag,
+an image ID, a registry URL, or a manually copied label for that digest.
+
+Only after both local images show the expected digest and labels, construct
+the create-only signed descriptor (the tool only performs bounded local image
+inspection; it never builds, pulls, or starts Docker):
+
+```bash
+python3 /srv/trading-bot-three-site/control-releases/<control-sha>/scripts/build_fenced_fi_release_identity.py \
+  --application-release-root /srv/trading-bot-three-site/releases/<application-sha> \
+  --control-release-root /srv/trading-bot-three-site/control-releases/<control-sha> \
+  --term-fenced-application-evidence /root/secure-release-inputs/webapp-fi-term-fenced-application-evidence.json \
+  --app-image <reviewed-local-app-tag> \
+  --app-repo-digest <app-repository@sha256:...> \
+  --bot-image <reviewed-local-bot-tag> \
+  --bot-repo-digest <bot-repository@sha256:...> \
+  --signing-private-key /root/secure-release-inputs/webapp-fi-release-identity.key \
+  --authority-public-key /root/secure-release-inputs/webapp-fi-release-identity-authority.pub \
+  --output /root/secure-release-inputs/webapp-fi-fenced-release-identity.json
+```
+
+The descriptor builder and later host preflight both hard-refuse the legacy
+`2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5` release.  No command above starts
+Compose, obtains a Witness term, changes routing, or authorizes a writer.
+
 After controlled start, the guard-start phase additionally requires the
 post-health runtime receipt, live local Witness lease, and inspected app/bot
 container identities.  It does not authorize a second writer, a promotion, or
