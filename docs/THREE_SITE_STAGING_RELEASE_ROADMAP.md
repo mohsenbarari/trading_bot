@@ -375,15 +375,19 @@ approval gate مستقل نیستند.
 
 ### گزارش پایان Stage 1
 
-- Status: `NOT_STARTED`
+- Status: `IN_PROGRESS`
 - Branch: `stage/three-site-staging-01-baseline`
-- Base SHA: `pending`
+- Base SHA: `198c2d65a4edb11f51d5b92b9fc0fca747cb97da`
 - Implementation commits: `pending`
 - Deployed/tested release SHA: `ندارد`
-- Changes delivered: `pending`
-- Commands/tests executed: `pending`
+- Changes delivered:
+  `backup کامل refs، ۹ safety tag، candidate تمیز و lineage decision inventory؛ code changes هنوز pending است.`
+- Commands/tests executed:
+  `git bundle create --all؛ sha256sum؛ git bundle verify؛ branch/tag ancestry و diff inventory`
 - Passed / failed / skipped: `pending`
-- External evidence paths and SHA-256: `pending`
+- External evidence paths and SHA-256:
+  `/root/trading-bot/git-backups/trading-bot-pre-stage1-20260802.bundle` —
+  `c923a93285984f4dcfd9027b15f5e6497f6e4fbd64fb42f8451107789c96ade3`
 - Production touched: `no`
 - Deviations / open risks: `pending`
 - Rollback verified: `pending`
