@@ -1426,11 +1426,87 @@ def _nginx_static_contract(package_root: Path, *, profile: str) -> Path:
     return candidate
 
 
+def _nginx_was_active_before_prearm(*, runner: Callable[..., Any] = subprocess.run) -> bool:
+    """Return the exact prearm service state before changing host Nginx.
+
+    ``systemctl reload`` cannot activate an inactive unit.  More importantly,
+    an Emergency prearm that starts an inactive host must be able to return it
+    to that same inactive state if a later local step fails.  Only the two
+    unambiguous ``is-active --quiet`` outcomes are accepted: active (0) and
+    inactive (3).  A missing, failed, or otherwise indeterminate unit is not
+    safe to change.
+    """
+
+    result = runner(
+        [SYSTEMCTL_BINARY, "is-active", "--quiet", "nginx"],
+        check=False,
+        capture_output=True,
+        timeout=60,
+    )
+    returncode = getattr(result, "returncode", 1)
+    if returncode == 0:
+        return True
+    if returncode == 3:
+        return False
+    _fail("Nginx service activity cannot be determined before Emergency prearm")
+
+
+def _reload_or_start_nginx(*, runner: Callable[..., Any] = subprocess.run) -> None:
+    """Apply a tested Nginx configuration, including on an inactive host."""
+
+    result = runner(
+        [SYSTEMCTL_BINARY, "reload-or-restart", "nginx"],
+        check=False,
+        capture_output=True,
+        timeout=60,
+    )
+    if getattr(result, "returncode", 1) != 0:
+        _fail("Nginx configuration could not be reloaded or started")
+
+
+def _restore_nginx_service_state_after_failed_prearm(
+    *,
+    nginx_was_active: bool,
+    nginx_service_may_have_changed: bool,
+    runner: Callable[..., Any] = subprocess.run,
+) -> None:
+    """Return the daemon to its recorded prearm state after config recovery."""
+
+    if nginx_was_active:
+        try:
+            _reload_or_start_nginx(runner=runner)
+        except EmergencyActivationError as exc:
+            raise EmergencyActivationError(
+                "Nginx prearm failed; the default site was restored but its active service state could not be restored"
+            ) from exc
+        return
+    if not nginx_service_may_have_changed:
+        return
+    stopped = runner(
+        [SYSTEMCTL_BINARY, "stop", "nginx"],
+        check=False,
+        capture_output=True,
+        timeout=60,
+    )
+    if getattr(stopped, "returncode", 1) != 0:
+        _fail("Nginx prearm failed; the default site was restored but inactive Nginx could not be stopped")
+    state = runner(
+        [SYSTEMCTL_BINARY, "is-active", "--quiet", "nginx"],
+        check=False,
+        capture_output=True,
+        timeout=60,
+    )
+    if getattr(state, "returncode", 1) != 3:
+        _fail("Nginx prearm failed; the default site was restored but Nginx did not return to inactive")
+
+
 def _restore_default_nginx_after_failed_prearm(
     *,
     paths: ActivationPaths,
     backup: Path,
     failed: Path,
+    nginx_was_active: bool,
+    nginx_service_may_have_changed: bool,
     runner: Callable[..., Any] = subprocess.run,
 ) -> None:
     """Preserve the failed Emergency link and restore the original default.
@@ -1438,9 +1514,10 @@ def _restore_default_nginx_after_failed_prearm(
     This is deliberately rename-only: a failed prearm must leave both the
     original default site and the failed Emergency candidate available for
     forensic review, without deleting either configuration.  The same helper
-    covers a failed syntax test, a failed reload, and a failed bounded UFW
-    change so none of those paths can leave a later daemon reload pointing at
-    the Emergency site.
+    covers a failed syntax test, a failed daemon apply, and a failed bounded
+    UFW change so none of those paths can leave a later daemon reload pointing
+    at the Emergency site.  It also returns the Nginx service to its exact
+    prior active/inactive state.
     """
 
     try:
@@ -1451,9 +1528,11 @@ def _restore_default_nginx_after_failed_prearm(
     restored_test = runner([NGINX_BINARY, "-t"], check=False, capture_output=True, timeout=60)
     if getattr(restored_test, "returncode", 1) != 0:
         _fail("Nginx prearm failed; the default site was restored but its configuration test failed")
-    restored_reload = runner([SYSTEMCTL_BINARY, "reload", "nginx"], check=False, capture_output=True, timeout=60)
-    if getattr(restored_reload, "returncode", 1) != 0:
-        _fail("Nginx prearm failed; the default site was restored but could not be reloaded")
+    _restore_nginx_service_state_after_failed_prearm(
+        nginx_was_active=nginx_was_active,
+        nginx_service_may_have_changed=nginx_service_may_have_changed,
+        runner=runner,
+    )
 
 
 def _prearm_nginx(
@@ -1465,6 +1544,7 @@ def _prearm_nginx(
     runner: Callable[..., Any] = subprocess.run,
 ) -> None:
     source = _nginx_static_contract(package_root, profile=profile)
+    nginx_was_active = _nginx_was_active_before_prearm(runner=runner)
     _copy_create_only(source, paths.nginx_available, maximum_bytes=MAX_JSON_BYTES)
     if profile == "sms-otp":
         _copy_create_only(
@@ -1492,15 +1572,26 @@ def _prearm_nginx(
     tested = runner([NGINX_BINARY, "-t"], check=False, capture_output=True, timeout=60)
     if getattr(tested, "returncode", 1) != 0:
         _restore_default_nginx_after_failed_prearm(
-            paths=paths, backup=backup, failed=failed, runner=runner
+            paths=paths,
+            backup=backup,
+            failed=failed,
+            nginx_was_active=nginx_was_active,
+            nginx_service_may_have_changed=False,
+            runner=runner,
         )
         _fail("Nginx test failed; the previous default site was restored")
-    reloaded = runner([SYSTEMCTL_BINARY, "reload", "nginx"], check=False, capture_output=True, timeout=60)
-    if getattr(reloaded, "returncode", 1) != 0:
+    try:
+        _reload_or_start_nginx(runner=runner)
+    except EmergencyActivationError:
         _restore_default_nginx_after_failed_prearm(
-            paths=paths, backup=backup, failed=failed, runner=runner
+            paths=paths,
+            backup=backup,
+            failed=failed,
+            nginx_was_active=nginx_was_active,
+            nginx_service_may_have_changed=True,
+            runner=runner,
         )
-        _fail("Nginx configuration could not be reloaded; the previous default site was restored")
+        _fail("Nginx configuration could not be reloaded or started; the previous default site was restored")
     # A single UFW transaction avoids an 80-only partial success.  If it
     # fails, restore Nginx rather than leaving a future reload/cutover armed.
     allowed = runner(
@@ -1524,7 +1615,12 @@ def _prearm_nginx(
     )
     if getattr(allowed, "returncode", 1) != 0:
         _restore_default_nginx_after_failed_prearm(
-            paths=paths, backup=backup, failed=failed, runner=runner
+            paths=paths,
+            backup=backup,
+            failed=failed,
+            nginx_was_active=nginx_was_active,
+            nginx_service_may_have_changed=True,
+            runner=runner,
         )
         _fail("bounded Emergency UFW rule could not be added; the previous default site was restored")
 

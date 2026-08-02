@@ -288,7 +288,7 @@ class EmergencyIrStandaloneActivationTests(unittest.TestCase):
         )
         self.assertIn("volume deletion", plan["never"])
 
-    def test_reload_failure_restores_default_preserves_emergency_link_and_skips_ufw(self) -> None:
+    def test_reload_or_restart_failure_restores_default_preserves_emergency_link_and_skips_ufw(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-nginx-") as raw:
             root = Path(raw)
             root.chmod(0o700)
@@ -301,14 +301,14 @@ class EmergencyIrStandaloneActivationTests(unittest.TestCase):
                 artifacts={},
             )
             calls: list[list[str]] = []
-            reload_count = 0
+            reload_or_restart_count = 0
 
             def runner(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
-                nonlocal reload_count
+                nonlocal reload_or_restart_count
                 calls.append(list(command))
-                if command == [ACTIVATE.SYSTEMCTL_BINARY, "reload", "nginx"]:
-                    reload_count += 1
-                    return completed(command, 1 if reload_count == 1 else 0)
+                if command == [ACTIVATE.SYSTEMCTL_BINARY, "reload-or-restart", "nginx"]:
+                    reload_or_restart_count += 1
+                    return completed(command, 1 if reload_or_restart_count == 1 else 0)
                 return completed(command)
 
             with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "previous default site was restored"):
@@ -328,7 +328,128 @@ class EmergencyIrStandaloneActivationTests(unittest.TestCase):
             self.assertFalse(paths.nginx_enabled.exists() or paths.nginx_enabled.is_symlink())
             self.assertFalse(any(call and call[0] == ACTIVATE.UFW_BINARY for call in calls))
             self.assertEqual(calls.count([ACTIVATE.NGINX_BINARY, "-t"]), 2)
-            self.assertEqual(calls.count([ACTIVATE.SYSTEMCTL_BINARY, "reload", "nginx"]), 2)
+            self.assertEqual(calls.count([ACTIVATE.SYSTEMCTL_BINARY, "reload-or-restart", "nginx"]), 2)
+
+    def test_inactive_nginx_starts_via_reload_or_restart_only_after_test(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-nginx-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            paths, _original = nginx_paths(root)
+            package_root = nginx_package(root)
+            campaign = ACTIVATE.VerifiedCampaign(
+                campaign_id="20260801T220000Z-emergency-ir-01",
+                manifest_sha256="d" * 64,
+                plan={},
+                artifacts={},
+            )
+            calls: list[list[str]] = []
+
+            def runner(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+                calls.append(list(command))
+                if command == [ACTIVATE.SYSTEMCTL_BINARY, "is-active", "--quiet", "nginx"]:
+                    return completed(command, 3)
+                return completed(command)
+
+            ACTIVATE._prearm_nginx(
+                paths=paths,
+                campaign=campaign,
+                package_root=package_root,
+                profile="telegram-only",
+                runner=runner,
+            )
+
+            tested_at = calls.index([ACTIVATE.NGINX_BINARY, "-t"])
+            started_at = calls.index([ACTIVATE.SYSTEMCTL_BINARY, "reload-or-restart", "nginx"])
+            firewall_at = next(index for index, call in enumerate(calls) if call and call[0] == ACTIVATE.UFW_BINARY)
+            self.assertLess(tested_at, started_at)
+            self.assertLess(started_at, firewall_at)
+            self.assertEqual(calls.count([ACTIVATE.SYSTEMCTL_BINARY, "reload-or-restart", "nginx"]), 1)
+            self.assertNotIn([ACTIVATE.SYSTEMCTL_BINARY, "reload", "nginx"], calls)
+            self.assertNotIn([ACTIVATE.SYSTEMCTL_BINARY, "start", "nginx"], calls)
+
+    def test_inactive_nginx_rollback_stops_and_verifies_prior_state(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-nginx-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            paths, original = nginx_paths(root)
+            package_root = nginx_package(root)
+            campaign = ACTIVATE.VerifiedCampaign(
+                campaign_id="20260801T220000Z-emergency-ir-01",
+                manifest_sha256="d" * 64,
+                plan={},
+                artifacts={},
+            )
+            calls: list[list[str]] = []
+
+            def runner(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+                calls.append(list(command))
+                if command == [ACTIVATE.SYSTEMCTL_BINARY, "is-active", "--quiet", "nginx"]:
+                    return completed(command, 3)
+                if command and command[0] == ACTIVATE.UFW_BINARY:
+                    return completed(command, 1)
+                return completed(command)
+
+            with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "UFW rule could not be added"):
+                ACTIVATE._prearm_nginx(
+                    paths=paths,
+                    campaign=campaign,
+                    package_root=package_root,
+                    profile="telegram-only",
+                    runner=runner,
+                )
+
+            failed = paths.nginx_backup_root / f"emergency-site.failed-{campaign.campaign_id}"
+            self.assertTrue(paths.nginx_default.is_symlink())
+            self.assertEqual(os.readlink(paths.nginx_default), str(original))
+            self.assertTrue(failed.is_symlink())
+            self.assertEqual(os.readlink(failed), str(paths.nginx_available))
+            self.assertFalse(paths.nginx_enabled.exists() or paths.nginx_enabled.is_symlink())
+            self.assertEqual(calls.count([ACTIVATE.SYSTEMCTL_BINARY, "reload-or-restart", "nginx"]), 1)
+            self.assertEqual(calls.count([ACTIVATE.SYSTEMCTL_BINARY, "stop", "nginx"]), 1)
+            self.assertEqual(calls.count([ACTIVATE.SYSTEMCTL_BINARY, "is-active", "--quiet", "nginx"]), 2)
+            restored_test_at = [index for index, call in enumerate(calls) if call == [ACTIVATE.NGINX_BINARY, "-t"]][-1]
+            stopped_at = calls.index([ACTIVATE.SYSTEMCTL_BINARY, "stop", "nginx"])
+            self.assertLess(restored_test_at, stopped_at)
+
+    def test_inactive_nginx_failed_start_stops_before_reporting_rollback(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-nginx-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            paths, original = nginx_paths(root)
+            package_root = nginx_package(root)
+            campaign = ACTIVATE.VerifiedCampaign(
+                campaign_id="20260801T220000Z-emergency-ir-01",
+                manifest_sha256="d" * 64,
+                plan={},
+                artifacts={},
+            )
+            calls: list[list[str]] = []
+
+            def runner(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+                calls.append(list(command))
+                if command == [ACTIVATE.SYSTEMCTL_BINARY, "is-active", "--quiet", "nginx"]:
+                    return completed(command, 3)
+                if command == [ACTIVATE.SYSTEMCTL_BINARY, "reload-or-restart", "nginx"]:
+                    return completed(command, 1)
+                return completed(command)
+
+            with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "previous default site was restored"):
+                ACTIVATE._prearm_nginx(
+                    paths=paths,
+                    campaign=campaign,
+                    package_root=package_root,
+                    profile="telegram-only",
+                    runner=runner,
+                )
+
+            failed = paths.nginx_backup_root / f"emergency-site.failed-{campaign.campaign_id}"
+            self.assertTrue(paths.nginx_default.is_symlink())
+            self.assertEqual(os.readlink(paths.nginx_default), str(original))
+            self.assertTrue(failed.is_symlink())
+            self.assertFalse(any(call and call[0] == ACTIVATE.UFW_BINARY for call in calls))
+            self.assertEqual(calls.count([ACTIVATE.SYSTEMCTL_BINARY, "reload-or-restart", "nginx"]), 1)
+            self.assertEqual(calls.count([ACTIVATE.SYSTEMCTL_BINARY, "stop", "nginx"]), 1)
+            self.assertEqual(calls.count([ACTIVATE.SYSTEMCTL_BINARY, "is-active", "--quiet", "nginx"]), 2)
 
     def test_ufw_uses_one_atomic_multiport_rule_and_rolls_back_on_failure(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-nginx-") as raw:
