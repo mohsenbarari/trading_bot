@@ -316,7 +316,10 @@ class EmergencyIrStandaloneActivationTests(unittest.TestCase):
                 image_tar=image, source_sha=SOURCE_SHA, patch_sha=PATCH_SHA, profile="telegram-only"
             )
             self.assertEqual({entry.kind for entry in entries}, {"app", "postgres", "redis"})
-            self.assertEqual(next(entry for entry in entries if entry.kind == "app").config_id, "sha256:" + "a" * 64)
+            self.assertEqual(
+                next(entry for entry in entries if entry.kind == "app").sealed_config_id,
+                "sha256:" + "a" * 64,
+            )
 
             bad = root / "bad-images.tar"
             write_image_bundle(bad, bad_app_labels=True)
@@ -335,13 +338,128 @@ class EmergencyIrStandaloneActivationTests(unittest.TestCase):
                 image_tar=image, source_sha=SOURCE_SHA, patch_sha=PATCH_SHA, profile="telegram-only"
             )
             self.assertEqual({entry.kind for entry in entries}, {"app", "postgres", "redis"})
-            self.assertTrue(all(entry.config_id.startswith("sha256:") for entry in entries))
+            self.assertTrue(all(entry.sealed_config_id.startswith("sha256:") for entry in entries))
 
             bad = root / "bad-oci-images.tar"
             write_image_bundle(bad, oci_layout=True, bad_oci_layer_source=True)
             with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "LayerSources descriptor"):
                 ACTIVATE.inspect_image_bundle(
                     image_tar=bad, source_sha=SOURCE_SHA, patch_sha=PATCH_SHA, profile="telegram-only"
+                )
+
+    def test_load_images_accepts_docker_normalized_id_but_rechecks_tags_and_app_provenance(self) -> None:
+        """Docker 29 may rewrite an OCI config ID when loading a sealed archive."""
+
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-images-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            campaign = ACTIVATE.VerifiedCampaign(
+                campaign_id="20260802T110000Z-emergency-ir-01",
+                manifest_sha256="d" * 64,
+                plan={},
+                artifacts={},
+            )
+            paths = ACTIVATE.ActivationPaths(
+                emergency_root=root / "emergency",
+                activation_root=root / "emergency" / "activation",
+                releases_root=root / "emergency" / "releases",
+            )
+            package_root = paths.releases_root / PATCH_SHA / ACTIVATE.PACKAGE_ROOT_NAME
+            package_root.mkdir(parents=True, mode=0o700)
+            entries = [
+                {
+                    "kind": "app",
+                    "tag": f"trading_bot_emergency_ir_app:{PATCH_SHA}",
+                    "sealed_config_id": "sha256:" + "a" * 64,
+                },
+                {
+                    "kind": "postgres",
+                    "tag": f"trading_bot_emergency_ir_postgres:15-alpine-{PATCH_SHA}",
+                    "sealed_config_id": "sha256:" + "b" * 64,
+                },
+                {
+                    "kind": "redis",
+                    "tag": f"trading_bot_emergency_ir_redis:7-alpine-{PATCH_SHA}",
+                    "sealed_config_id": "sha256:" + "c" * 64,
+                },
+            ]
+            ACTIVATE._write_receipt(
+                paths,
+                campaign,
+                stage="prepared",
+                payload={
+                    "profile": "telegram-only",
+                    "source_release_sha": SOURCE_SHA,
+                    "emergency_patch_sha": PATCH_SHA,
+                    "package_root": str(package_root),
+                    "images": entries,
+                },
+            )
+
+            app_config = {
+                "Labels": {
+                    "org.opencontainers.image.revision": PATCH_SHA,
+                    "org.goldtrade.emergency.base-revision": SOURCE_SHA,
+                    "org.goldtrade.emergency.scope": "ir-standalone",
+                    "org.goldtrade.emergency.auth": "webapp-initdata-and-local-sms-otp",
+                },
+                "Env": ["PATH=/usr/bin"],
+            }
+            normalized_ids = {
+                "app": "sha256:" + "1" * 64,
+                "postgres": "sha256:" + "2" * 64,
+                "redis": "sha256:" + "3" * 64,
+            }
+            loaded = False
+
+            def runner(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+                nonlocal loaded
+                if command[:3] == [ACTIVATE.DOCKER_BINARY, "image", "inspect"] and "--format" not in command:
+                    return completed(command, 1)
+                if command[:2] == [ACTIVATE.DOCKER_BINARY, "load"]:
+                    loaded = True
+                    return completed(command)
+                if command[:3] == [ACTIVATE.DOCKER_BINARY, "image", "inspect"]:
+                    self.assertTrue(loaded)
+                    tag = command[3]
+                    item = next(entry for entry in entries if entry["tag"] == tag)
+                    config = app_config if item["kind"] == "app" else {}
+                    tags = [tag]
+                    if item["kind"] == "redis":
+                        # A pre-existing upstream alias can share Docker's
+                        # normalized config ID; the new Emergency tag still
+                        # had to be absent before the load and is exact here.
+                        tags.insert(0, "redis:7-alpine")
+                    payload = {
+                        "Id": normalized_ids[str(item["kind"])],
+                        "RepoTags": tags,
+                        "Config": config,
+                    }
+                    return subprocess.CompletedProcess(command, 0, stdout=json.dumps(payload).encode("utf-8"))
+                raise AssertionError(f"unexpected command: {command!r}")
+
+            result = ACTIVATE.load_images(
+                campaign=campaign,
+                paths=paths,
+                profile="telegram-only",
+                runner=runner,
+            )
+            self.assertEqual(
+                {item["kind"]: item["docker_image_id"] for item in result["images"]},
+                normalized_ids,
+            )
+
+            bad_payload = {
+                "Id": normalized_ids["app"],
+                "RepoTags": [entries[0]["tag"]],
+                "Config": {"Labels": {}, "Env": ["PATH=/usr/bin"]},
+            }
+            with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "provenance"):
+                ACTIVATE._validate_loaded_image(
+                    item=ACTIVATE.ImageEntry(**entries[0]),
+                    payload=bad_payload,
+                    source_sha=SOURCE_SHA,
+                    patch_sha=PATCH_SHA,
                 )
 
     def test_plan_is_non_authorizing_and_binds_each_stage_confirmation(self) -> None:
