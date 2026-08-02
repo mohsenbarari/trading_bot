@@ -29,8 +29,16 @@ def _missing(code: str) -> ClientError:
 
 
 class _FakeS3:
-    def __init__(self, *, public: bool = False):
+    def __init__(
+        self,
+        *,
+        public: bool = False,
+        policy_public: bool = False,
+        provider_policy_public: bool = False,
+    ):
         self.public = public
+        self.policy_public = policy_public
+        self.provider_policy_public = provider_policy_public
         self.encryption: dict = {
             "Rules": [
                 {"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}
@@ -73,7 +81,25 @@ class _FakeS3:
         return {"Rules": self.lifecycle_rules}
 
     def get_bucket_policy_status(self, *, Bucket):  # noqa: N803, ARG002
-        return {"PolicyStatus": {"IsPublic": self.public}}
+        return {"PolicyStatus": {"IsPublic": self.provider_policy_public}}
+
+    def get_bucket_policy(self, *, Bucket):  # noqa: N803, ARG002
+        principal = "*" if self.policy_public else "arn:aws:iam:::user/p1:specific-key"
+        return {
+            "Policy": json.dumps(
+                {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {"AWS": principal},
+                            "Action": "s3:GetObject",
+                            "Resource": f"arn:aws:s3:::{STAGING_BUCKET}/*",
+                        }
+                    ],
+                }
+            )
+        }
 
     def delete_bucket_encryption(self, *, Bucket):  # noqa: N803, ARG002
         self.mutations.append("delete-incompatible-encryption-config")
@@ -183,6 +209,28 @@ class HardenThreeSiteStage3ObjectStorageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             fake = _FakeS3(public=True)
             with self.assertRaisesRegex(Stage3ObjectStorageError, "ACL is public"):
+                execute(
+                    _args(
+                        Path(raw),
+                        apply=True,
+                        confirm=confirmation_phrase(STAGING_BUCKET, PREFIX),
+                    ),
+                    client=fake,
+                )
+            self.assertEqual(fake.mutations, [])
+
+    def test_provider_public_flag_with_specific_principal_is_recorded_not_blocked(self):
+        with tempfile.TemporaryDirectory() as raw:
+            fake = _FakeS3(provider_policy_public=True)
+            result = execute(_args(Path(raw)), client=fake)
+            self.assertFalse(result["before"]["bucket_policy_public"])
+            self.assertTrue(result["before"]["provider_policy_status_public"])
+            self.assertEqual(fake.mutations, [])
+
+    def test_wildcard_allow_policy_fails_before_mutation(self):
+        with tempfile.TemporaryDirectory() as raw:
+            fake = _FakeS3(policy_public=True)
+            with self.assertRaisesRegex(Stage3ObjectStorageError, "policy is public"):
                 execute(
                     _args(
                         Path(raw),

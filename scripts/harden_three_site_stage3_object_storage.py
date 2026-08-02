@@ -94,6 +94,55 @@ def _encryption_is_aes256(configuration: dict[str, Any]) -> bool:
     )
 
 
+def _principal_is_public(principal: Any) -> bool:
+    if isinstance(principal, str):
+        return "*" in principal
+    if isinstance(principal, list):
+        return any(_principal_is_public(item) for item in principal)
+    if isinstance(principal, dict):
+        return any(_principal_is_public(value) for value in principal.values())
+    return True
+
+
+def _policy_statements(policy: dict[str, Any]) -> list[dict[str, Any]]:
+    statements = policy.get("Statement") or []
+    if isinstance(statements, dict):
+        statements = [statements]
+    if not isinstance(statements, list) or any(
+        not isinstance(statement, dict) for statement in statements
+    ):
+        raise Stage3ObjectStorageError("bucket policy statements are malformed")
+    return statements
+
+
+def _policy_has_public_allow(policy: dict[str, Any]) -> bool:
+    for statement in _policy_statements(policy):
+        if statement.get("Effect") != "Allow":
+            continue
+        if "NotPrincipal" in statement:
+            return True
+        if "Principal" not in statement or _principal_is_public(statement["Principal"]):
+            return True
+    return False
+
+
+def _bucket_policy(client, *, bucket: str) -> dict[str, Any]:  # noqa: ANN001
+    response = _optional_configuration(
+        lambda: client.get_bucket_policy(Bucket=bucket),
+        missing_codes={"NoSuchBucketPolicy", "NoSuchBucketPolicyConfiguration"},
+    )
+    encoded = response.get("Policy")
+    if encoded is None:
+        return {}
+    try:
+        policy = json.loads(encoded) if isinstance(encoded, str) else encoded
+    except (TypeError, ValueError) as exc:
+        raise Stage3ObjectStorageError("bucket policy is not valid JSON") from exc
+    if not isinstance(policy, dict):
+        raise Stage3ObjectStorageError("bucket policy document is malformed")
+    return policy
+
+
 def _lifecycle_rule(campaign_id: str, prefix: str) -> dict[str, Any]:
     return {
         "ID": f"three-site-stage3-{campaign_id}-retention",
@@ -125,13 +174,17 @@ def audit(client, *, bucket: str, lifecycle_rule: dict[str, Any]) -> dict[str, A
         lambda: client.get_public_access_block(Bucket=bucket),
         missing_codes={"NoSuchPublicAccessBlockConfiguration"},
     ).get("PublicAccessBlockConfiguration", {})
-    policy_status = client.get_bucket_policy_status(Bucket=bucket).get("PolicyStatus") or {}
+    policy = _bucket_policy(client, bucket=bucket)
+    provider_policy_status = client.get_bucket_policy_status(Bucket=bucket).get("PolicyStatus") or {}
     rules = lifecycle.get("Rules") or []
     return {
         "bucket_exists": True,
         "versioning_enabled": versioning.get("Status") == "Enabled",
         "private_acl": _acl_is_private(acl),
-        "bucket_policy_public": policy_status.get("IsPublic") is True,
+        "bucket_policy_present": bool(policy),
+        "bucket_policy_statement_count": len(_policy_statements(policy)) if policy else 0,
+        "bucket_policy_public": _policy_has_public_allow(policy),
+        "provider_policy_status_public": provider_policy_status.get("IsPublic") is True,
         "server_default_encryption_configured": bool(encryption),
         "default_encryption_aes256": _encryption_is_aes256(encryption),
         "public_access_block_configured": bool(public_access_block),
