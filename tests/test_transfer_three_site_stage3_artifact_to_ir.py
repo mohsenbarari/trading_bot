@@ -32,10 +32,26 @@ class Stage3ArtifactTransferTests(unittest.TestCase):
         )
         self.assertEqual(name, "trading-bot-postgres-boottime-0e63a7ec.tar.zst")
 
+    def test_application_archive_is_allowed(self):
+        name, destination = artifact_spec(
+            Path("/tmp/trading-bot-three-site-app-0e63a7ec.tar.zst"),
+            release_sha=self.release,
+            campaign_id=self.campaign,
+        )
+        self.assertEqual(name, "trading-bot-three-site-app-0e63a7ec.tar.zst")
+        self.assertEqual(
+            destination,
+            Path(
+                "/tmp/stage3-0e63a7ec-fd34231d-transfer/"
+                "trading-bot-three-site-app-0e63a7ec.tar.zst"
+            ),
+        )
+
     def test_other_release_or_filename_is_rejected(self):
         for name in (
             "three-site-stage3-deadbeef.bundle",
             "trading-bot-postgres-boottime-0e63a7ec.tar",
+            "trading-bot-three-site-app-deadbeef.tar.zst",
             "planned-inventory.json",
         ):
             with self.subTest(name=name), self.assertRaises(Stage3ArtifactTransferError):
