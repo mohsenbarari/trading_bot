@@ -3,6 +3,7 @@ import unittest
 
 from scripts.run_three_site_stage3_postgres_restore_drill import (
     RestoreDrillError,
+    logical_dump_hash,
     verify_drill_document,
 )
 
@@ -64,6 +65,15 @@ class Stage3PostgresRestoreDrillTests(unittest.TestCase):
             document[field] = not document[field]
             with self.subTest(field=field), self.assertRaises(RestoreDrillError):
                 self.verify(document)
+
+    def test_pg_dump_restrict_nonce_is_not_part_of_logical_identity(self):
+        first = b"-- dump\n\\restrict ABC123\nCREATE TABLE x ();\n\\unrestrict ABC123\n"
+        second = b"-- dump\n\\restrict XYZ789\nCREATE TABLE x ();\n\\unrestrict XYZ789\n"
+        self.assertEqual(logical_dump_hash(first), logical_dump_hash(second))
+        self.assertNotEqual(
+            logical_dump_hash(first),
+            logical_dump_hash(second.replace(b"x", b"y")),
+        )
 
 
 if __name__ == "__main__":

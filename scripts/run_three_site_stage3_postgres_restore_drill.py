@@ -42,6 +42,7 @@ ROLE_DB = {
 }
 IDENT_RE = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+PG_DUMP_RESTRICT_RE = re.compile(br"^\\(?:un)?restrict [A-Za-z0-9]+\r?\n$")
 SAFE_ENV = {
     "PATH": "/usr/bin:/bin",
     "HOME": "/nonexistent",
@@ -59,6 +60,15 @@ def _canonical_hash(value: Any) -> str:
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+def logical_dump_hash(raw: bytes) -> str:
+    """Hash logical dump bytes without PostgreSQL's per-run psql nonce."""
+    canonical = b"".join(
+        line for line in raw.splitlines(keepends=True)
+        if PG_DUMP_RESTRICT_RE.fullmatch(line) is None
+    )
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def verify_drill_document(
@@ -221,8 +231,8 @@ def _fingerprints(
         timeout=1800,
     )
     return {
-        "schema_sha256": hashlib.sha256(schema).hexdigest(),
-        "data_sha256": hashlib.sha256(data).hexdigest(),
+        "schema_sha256": logical_dump_hash(schema),
+        "data_sha256": logical_dump_hash(data),
     }
 
 
