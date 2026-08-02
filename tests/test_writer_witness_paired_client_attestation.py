@@ -1,6 +1,8 @@
 import base64
+import contextlib
 from datetime import datetime, timedelta, timezone
 import hashlib
+import io
 import json
 from pathlib import Path
 import ssl
@@ -122,6 +124,70 @@ def _signed_witness_payload(
     }
 
 
+def _write_rotation_policy(
+    root: Path,
+    *,
+    fi: dict,
+    ir: dict,
+    profile: dict = PROFILE,
+    policy_id: str = "witness-rotation-current-v1",
+    fi_key_id_sha256: str | None = None,
+    ir_key_id_sha256: str | None = None,
+    witness_endpoint_sha256: str | None = None,
+    ca_bundle_sha256: str | None = None,
+    witness_public_key_sha256: str | None = None,
+    issued_at: datetime = NOW - timedelta(minutes=1),
+    fi_not_before: datetime = NOW - timedelta(minutes=1),
+    fi_not_after: datetime = NOW + timedelta(hours=1),
+    ir_not_before: datetime = NOW - timedelta(minutes=1),
+    ir_not_after: datetime = NOW + timedelta(hours=1),
+) -> Path:
+    public_key = client_attestation._decode_public_key(
+        fi["pinned_witness_public_key"],
+        field="test Witness public key",
+    )
+    payload = {
+        "schema": control.CREDENTIAL_ROTATION_POLICY_SCHEMA,
+        "policy_id": policy_id,
+        "issued_at": issued_at.isoformat(),
+        "profile": {
+            "release_id": profile["release_id"],
+            "source_commit": profile["source_commit"],
+            "source_runtime_profile_sha256": profile["source_runtime_profile_sha256"],
+            "source_release_manifest_sha256": profile["source_release_manifest_sha256"],
+            "profile_sha256": pair_attestation._profile_sha256(profile),
+        },
+        "witness_trust": {
+            "witness_endpoint_sha256": witness_endpoint_sha256
+            or fi["witness_endpoint_sha256"],
+            "ca_bundle_sha256": ca_bundle_sha256 or fi["ca_bundle_sha256"],
+            "witness_public_key_sha256": witness_public_key_sha256
+            or hashlib.sha256(public_key).hexdigest(),
+        },
+        "clients": {
+            "webapp_fi": {
+                "site": "webapp_fi",
+                "key_id_sha256": fi_key_id_sha256
+                or fi["witness_attestation"]["caller_key_id_sha256"],
+                "generation": "fi-current-g1",
+                "not_before": fi_not_before.isoformat(),
+                "not_after": fi_not_after.isoformat(),
+            },
+            "webapp_ir": {
+                "site": "webapp_ir",
+                "key_id_sha256": ir_key_id_sha256
+                or ir["witness_attestation"]["caller_key_id_sha256"],
+                "generation": "ir-current-g1",
+                "not_before": ir_not_before.isoformat(),
+                "not_after": ir_not_after.isoformat(),
+            },
+        },
+    }
+    path = root / "rotation-policy.json"
+    _write(path, control._canonical_json_bytes(payload) + b"\n")
+    return path
+
+
 class _Response:
     def __init__(self, payload: bytes, *, status: int = 200):
         self.payload = payload
@@ -146,8 +212,9 @@ class WriterWitnessPairedClientAttestationTests(unittest.TestCase):
         ir_request_id: str = "ir-attestation-nonce",
         fi_key_id: str | None = None,
         ir_key_id: str | None = None,
+        private: Ed25519PrivateKey | None = None,
     ) -> tuple[dict, dict]:
-        private = Ed25519PrivateKey.generate()
+        private = private or Ed25519PrivateKey.generate()
         public_key = _public_key_base64(private)
         fi_config = _agent_config(
             site="webapp_fi",
@@ -254,11 +321,13 @@ class WriterWitnessPairedClientAttestationTests(unittest.TestCase):
             ir_path = root / "ir-receipt.json"
             _write(fi_path, client_attestation._canonical_json_bytes(fi))
             _write(ir_path, client_attestation._canonical_json_bytes(ir))
+            policy_path = _write_rotation_policy(root, fi=fi, ir=ir)
 
             verified = pair_attestation.verify_paired_attestations(
                 webapp_fi_attestation_path=fi_path,
                 webapp_ir_attestation_path=ir_path,
-                verification_time=NOW + timedelta(seconds=5),
+                _rotation_policy_path_for_test=policy_path,
+                _verification_time_for_test=NOW + timedelta(seconds=5),
             )
 
             self.assertEqual(verified["status"], "verified")
@@ -288,8 +357,113 @@ class WriterWitnessPairedClientAttestationTests(unittest.TestCase):
                 pair_attestation.verify_paired_attestations(
                     webapp_fi_attestation_path=fi_path,
                     webapp_ir_attestation_path=ir_path,
-                    verification_time=NOW + timedelta(seconds=5),
+                    _rotation_policy_path_for_test=policy_path,
+                    _verification_time_for_test=NOW + timedelta(seconds=5),
                 )
+
+    def test_create_only_policy_builder_derives_verified_hashes_and_rejects_mismatch_or_replace(self):
+        with tempfile.TemporaryDirectory(prefix="witness-policy-builder-") as raw:
+            root = Path(raw)
+            fi, ir = self._receipts(root)
+            fi_path = root / "fi-receipt.json"
+            ir_path = root / "ir-receipt.json"
+            _write(fi_path, client_attestation._canonical_json_bytes(fi))
+            _write(ir_path, client_attestation._canonical_json_bytes(ir))
+            policy_path = root / pair_attestation.ROTATION_POLICY_FILENAME
+
+            created = pair_attestation.create_rotation_policy(
+                webapp_fi_attestation_path=fi_path,
+                webapp_ir_attestation_path=ir_path,
+                policy_id="witness-current-20260802",
+                webapp_fi_generation="fi-g1",
+                webapp_ir_generation="ir-g1",
+                not_after=NOW + timedelta(hours=1),
+                _output_path_for_test=policy_path,
+                _verification_time_for_test=NOW + timedelta(seconds=1),
+            )
+
+            raw_policy = policy_path.read_bytes()
+            parsed_policy = json.loads(raw_policy.decode("utf-8"))
+            self.assertEqual(raw_policy, control._canonical_json_bytes(parsed_policy) + b"\n")
+            self.assertEqual(created["status"], "created")
+            self.assertEqual(
+                created["clients"]["webapp_fi"]["caller_key_id_sha256"],
+                fi["witness_attestation"]["caller_key_id_sha256"],
+            )
+            self.assertEqual(
+                created["witness_public_key_sha256"],
+                hashlib.sha256(
+                    client_attestation._decode_public_key(
+                        fi["pinned_witness_public_key"],
+                        field="test Witness public key",
+                    )
+                ).hexdigest(),
+            )
+            encoded = json.dumps(created, sort_keys=True)
+            self.assertNotIn("https://", encoded)
+            self.assertNotIn("a" * 64, encoded)
+            self.assertEqual(policy_path.stat().st_mode & 0o777, 0o600)
+
+            verified = pair_attestation.verify_paired_attestations(
+                webapp_fi_attestation_path=fi_path,
+                webapp_ir_attestation_path=ir_path,
+                _rotation_policy_path_for_test=policy_path,
+                _verification_time_for_test=NOW + timedelta(seconds=2),
+            )
+            self.assertEqual(verified["credential_rotation_policy"]["policy_id"], created["policy_id"])
+
+            # A different root-supplied receipt pair cannot replace the
+            # current exact-current allowlist in place.
+            replacement_fi, replacement_ir = self._receipts(
+                root,
+                fi_key_id="fi-replacement-key",
+                ir_key_id="ir-replacement-key",
+            )
+            _write(fi_path, client_attestation._canonical_json_bytes(replacement_fi))
+            _write(ir_path, client_attestation._canonical_json_bytes(replacement_ir))
+            with self.assertRaisesRegex(
+                pair_attestation.WriterWitnessPairAttestationError,
+                "already exists; replacement is forbidden",
+            ):
+                pair_attestation.create_rotation_policy(
+                    webapp_fi_attestation_path=fi_path,
+                    webapp_ir_attestation_path=ir_path,
+                    policy_id="witness-current-replacement",
+                    webapp_fi_generation="fi-g2",
+                    webapp_ir_generation="ir-g2",
+                    not_after=NOW + timedelta(hours=1),
+                    _output_path_for_test=policy_path,
+                    _verification_time_for_test=NOW + timedelta(seconds=2),
+                )
+
+            # Even in a new path, two independently signed but different
+            # Witness trust contracts cannot be promoted into one policy.
+            mismatch_parent = root / "mismatch"
+            mismatch_parent.mkdir(mode=0o700)
+            trusted_private = Ed25519PrivateKey.generate()
+            rogue_private = Ed25519PrivateKey.generate()
+            mismatch_fi, _ = self._receipts(root, private=trusted_private)
+            _, mismatch_ir = self._receipts(root, private=rogue_private)
+            _write(fi_path, client_attestation._canonical_json_bytes(mismatch_fi))
+            _write(ir_path, client_attestation._canonical_json_bytes(mismatch_ir))
+            with self.assertRaisesRegex(
+                pair_attestation.WriterWitnessPairAttestationError,
+                "identical TLS/endpoint Witness trust binding",
+            ):
+                pair_attestation.create_rotation_policy(
+                    webapp_fi_attestation_path=fi_path,
+                    webapp_ir_attestation_path=ir_path,
+                    policy_id="witness-current-mismatch",
+                    webapp_fi_generation="fi-g3",
+                    webapp_ir_generation="ir-g3",
+                    not_after=NOW + timedelta(hours=1),
+                    _output_path_for_test=mismatch_parent
+                    / pair_attestation.ROTATION_POLICY_FILENAME,
+                    _verification_time_for_test=NOW + timedelta(seconds=2),
+                )
+            self.assertFalse(
+                (mismatch_parent / pair_attestation.ROTATION_POLICY_FILENAME).exists()
+            )
 
     def test_client_rejects_a_signed_response_for_the_wrong_release_manifest(self):
         with tempfile.TemporaryDirectory(prefix="witness-client-release-mismatch-") as raw:
@@ -377,18 +551,21 @@ class WriterWitnessPairedClientAttestationTests(unittest.TestCase):
                     request_id="bad-signature-nonce",
                 )
 
-    def test_pair_rejects_replayed_nonce_stale_observation_and_trust_drift(self):
+    def test_pair_rejects_replayed_nonce_swap_stale_observation_and_trust_drift(self):
         with tempfile.TemporaryDirectory(prefix="witness-paired-rejection-") as raw:
             root = Path(raw)
+            private = Ed25519PrivateKey.generate()
             fi, ir = self._receipts(
                 root,
                 fi_request_id="shared-nonce",
                 ir_request_id="shared-nonce",
+                private=private,
             )
             fi_path = root / "fi-receipt.json"
             ir_path = root / "ir-receipt.json"
             _write(fi_path, client_attestation._canonical_json_bytes(fi))
             _write(ir_path, client_attestation._canonical_json_bytes(ir))
+            policy_path = _write_rotation_policy(root, fi=fi, ir=ir)
 
             with self.assertRaisesRegex(
                 pair_attestation.WriterWitnessPairAttestationError,
@@ -397,33 +574,14 @@ class WriterWitnessPairedClientAttestationTests(unittest.TestCase):
                 pair_attestation.verify_paired_attestations(
                     webapp_fi_attestation_path=fi_path,
                     webapp_ir_attestation_path=ir_path,
-                    verification_time=NOW + timedelta(seconds=1),
+                    _rotation_policy_path_for_test=policy_path,
+                    _verification_time_for_test=NOW + timedelta(seconds=1),
                 )
 
-            fi, ir = self._receipts(root)
+            fi, ir = self._receipts(root, private=private)
             _write(fi_path, client_attestation._canonical_json_bytes(fi))
             _write(ir_path, client_attestation._canonical_json_bytes(ir))
-
-            same_client_fi, same_client_ir = self._receipts(
-                root,
-                fi_key_id="shared-client-key",
-                ir_key_id="shared-client-key",
-            )
-            _write(fi_path, client_attestation._canonical_json_bytes(same_client_fi))
-            _write(ir_path, client_attestation._canonical_json_bytes(same_client_ir))
-            with self.assertRaisesRegex(
-                pair_attestation.WriterWitnessPairAttestationError,
-                "distinct authenticated client identities",
-            ):
-                pair_attestation.verify_paired_attestations(
-                    webapp_fi_attestation_path=fi_path,
-                    webapp_ir_attestation_path=ir_path,
-                    verification_time=NOW + timedelta(seconds=1),
-                )
-
-            fi, ir = self._receipts(root)
-            _write(fi_path, client_attestation._canonical_json_bytes(fi))
-            _write(ir_path, client_attestation._canonical_json_bytes(ir))
+            policy_path = _write_rotation_policy(root, fi=fi, ir=ir)
 
             # Receipt paths are not labels: a valid IR proof cannot be
             # substituted for FI (or vice versa), because the signed caller
@@ -435,7 +593,8 @@ class WriterWitnessPairedClientAttestationTests(unittest.TestCase):
                 pair_attestation.verify_paired_attestations(
                     webapp_fi_attestation_path=ir_path,
                     webapp_ir_attestation_path=fi_path,
-                    verification_time=NOW + timedelta(seconds=1),
+                    _rotation_policy_path_for_test=policy_path,
+                    _verification_time_for_test=NOW + timedelta(seconds=1),
                 )
 
             forged_fi_envelope = dict(ir)
@@ -449,7 +608,8 @@ class WriterWitnessPairedClientAttestationTests(unittest.TestCase):
                 pair_attestation.verify_paired_attestations(
                     webapp_fi_attestation_path=fi_path,
                     webapp_ir_attestation_path=ir_path,
-                    verification_time=NOW + timedelta(seconds=1),
+                    _rotation_policy_path_for_test=policy_path,
+                    _verification_time_for_test=NOW + timedelta(seconds=1),
                 )
             _write(fi_path, client_attestation._canonical_json_bytes(fi))
 
@@ -464,7 +624,8 @@ class WriterWitnessPairedClientAttestationTests(unittest.TestCase):
                 pair_attestation.verify_paired_attestations(
                     webapp_fi_attestation_path=fi_path,
                     webapp_ir_attestation_path=ir_path,
-                    verification_time=NOW,
+                    _rotation_policy_path_for_test=policy_path,
+                    _verification_time_for_test=NOW,
                 )
 
             _write(fi_path, client_attestation._canonical_json_bytes(fi))
@@ -473,13 +634,127 @@ class WriterWitnessPairedClientAttestationTests(unittest.TestCase):
             _write(ir_path, client_attestation._canonical_json_bytes(drift))
             with self.assertRaisesRegex(
                 pair_attestation.WriterWitnessPairAttestationError,
-                "identical TLS/endpoint Witness trust binding",
+                "root-controlled Witness trust binding",
             ):
                 pair_attestation.verify_paired_attestations(
                     webapp_fi_attestation_path=fi_path,
                     webapp_ir_attestation_path=ir_path,
-                    verification_time=NOW + timedelta(seconds=1),
+                    _rotation_policy_path_for_test=policy_path,
+                    _verification_time_for_test=NOW + timedelta(seconds=1),
                 )
+
+    def test_pair_rejects_previous_or_expired_exact_current_credential_policy(self):
+        with tempfile.TemporaryDirectory(prefix="witness-paired-rotation-") as raw:
+            root = Path(raw)
+            private = Ed25519PrivateKey.generate()
+            current_fi, current_ir = self._receipts(
+                root,
+                fi_key_id="fi-current-key",
+                ir_key_id="ir-current-key",
+                private=private,
+            )
+            policy_path = _write_rotation_policy(root, fi=current_fi, ir=current_ir)
+            previous_fi, current_ir = self._receipts(
+                root,
+                fi_key_id="fi-previous-key",
+                ir_key_id="ir-current-key",
+                private=private,
+            )
+            fi_path = root / "fi-receipt.json"
+            ir_path = root / "ir-receipt.json"
+            _write(fi_path, client_attestation._canonical_json_bytes(previous_fi))
+            _write(ir_path, client_attestation._canonical_json_bytes(current_ir))
+            with self.assertRaisesRegex(
+                pair_attestation.WriterWitnessPairAttestationError,
+                "caller credential identity does not match",
+            ):
+                pair_attestation.verify_paired_attestations(
+                    webapp_fi_attestation_path=fi_path,
+                    webapp_ir_attestation_path=ir_path,
+                    _rotation_policy_path_for_test=policy_path,
+                    _verification_time_for_test=NOW + timedelta(seconds=1),
+                )
+
+            _write(fi_path, client_attestation._canonical_json_bytes(current_fi))
+            policy_path = _write_rotation_policy(
+                root,
+                fi=current_fi,
+                ir=current_ir,
+                fi_not_after=NOW,
+            )
+            with self.assertRaisesRegex(
+                pair_attestation.WriterWitnessPairAttestationError,
+                "exact-current credential rotation policy is not active",
+            ):
+                pair_attestation.verify_paired_attestations(
+                    webapp_fi_attestation_path=fi_path,
+                    webapp_ir_attestation_path=ir_path,
+                    _rotation_policy_path_for_test=policy_path,
+                    _verification_time_for_test=NOW + timedelta(seconds=1),
+                )
+
+    def test_pair_rejects_coordinated_receipt_trust_and_profile_policy_drift(self):
+        with tempfile.TemporaryDirectory(prefix="witness-paired-trust-") as raw:
+            root = Path(raw)
+            trusted_private = Ed25519PrivateKey.generate()
+            fi, ir = self._receipts(root, private=trusted_private)
+            policy_path = _write_rotation_policy(root, fi=fi, ir=ir)
+            rogue_fi, rogue_ir = self._receipts(root, private=Ed25519PrivateKey.generate())
+            fi_path = root / "fi-receipt.json"
+            ir_path = root / "ir-receipt.json"
+            _write(fi_path, client_attestation._canonical_json_bytes(rogue_fi))
+            _write(ir_path, client_attestation._canonical_json_bytes(rogue_ir))
+            with self.assertRaisesRegex(
+                pair_attestation.WriterWitnessPairAttestationError,
+                "root-controlled Witness trust binding",
+            ):
+                pair_attestation.verify_paired_attestations(
+                    webapp_fi_attestation_path=fi_path,
+                    webapp_ir_attestation_path=ir_path,
+                    _rotation_policy_path_for_test=policy_path,
+                    _verification_time_for_test=NOW + timedelta(seconds=1),
+                )
+
+            _write(fi_path, client_attestation._canonical_json_bytes(fi))
+            _write(ir_path, client_attestation._canonical_json_bytes(ir))
+            policy = json.loads(policy_path.read_text(encoding="utf-8"))
+            policy["profile"]["profile_sha256"] = "0" * 64
+            _write(policy_path, control._canonical_json_bytes(policy) + b"\n")
+            with self.assertRaisesRegex(
+                pair_attestation.WriterWitnessPairAttestationError,
+                "not bound to the trusted control profile",
+            ):
+                pair_attestation.verify_paired_attestations(
+                    webapp_fi_attestation_path=fi_path,
+                    webapp_ir_attestation_path=ir_path,
+                    _rotation_policy_path_for_test=policy_path,
+                    _verification_time_for_test=NOW + timedelta(seconds=1),
+                )
+
+    def test_pair_requires_root_and_cli_has_no_profile_policy_or_clock_override(self):
+        with patch.object(pair_attestation.os, "geteuid", return_value=1000), self.assertRaisesRegex(
+            pair_attestation.WriterWitnessPairAttestationError,
+            "must run as root",
+        ):
+            pair_attestation.verify_paired_attestations(
+                webapp_fi_attestation_path=Path("/tmp/fi.json"),
+                webapp_ir_attestation_path=Path("/tmp/ir.json"),
+                    _rotation_policy_path_for_test=Path("/tmp/policy.json"),
+            )
+        base_arguments = [
+            "--webapp-fi-attestation",
+            "/tmp/fi.json",
+            "--webapp-ir-attestation",
+            "/tmp/ir.json",
+        ]
+        for forbidden in (
+            ["--verification-time", NOW.isoformat()],
+            ["--rotation-policy", "/tmp/policy.json"],
+            ["--profile", "/tmp/profile.json"],
+            ["--maximum-age-seconds", "60"],
+        ):
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                pair_attestation._parser().parse_args(base_arguments + forbidden)
 
 
 if __name__ == "__main__":

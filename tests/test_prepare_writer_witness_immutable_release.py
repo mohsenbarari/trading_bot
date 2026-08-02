@@ -251,6 +251,15 @@ class WriterWitnessImmutableReleaseTests(unittest.TestCase):
         )
         self.assertEqual(profile["witness"]["lease_duration_seconds"], 60)
         self.assertTrue(profile["witness"]["enforce_configured_lease_duration"])
+        self.assertEqual(
+            profile["client_credential_rotation"]["schema"],
+            release_package.CREDENTIAL_ROTATION_POLICY_SCHEMA,
+        )
+        self.assertTrue(profile["client_credential_rotation"]["require_exact_current_credential"])
+        self.assertEqual(
+            profile["client_credential_rotation"]["maximum_attestation_age_seconds"],
+            60,
+        )
         self.assertEqual(profile["webapp_fi_client"]["renew_interval_seconds"], 10)
         self.assertEqual(profile["webapp_ir_client"]["renew_interval_seconds"], 10)
 
