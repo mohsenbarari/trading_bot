@@ -75,6 +75,49 @@ the checked Git tree does not include generated `mini_app_dist`; a release
 build context must contain its separately reviewed frontend output before
 Docker is invoked.
 
+### Clean Source + Static-Asset Input Binding
+
+Never copy `mini_app_dist` into the immutable application checkout.  A fresh
+checkout must remain Git-clean **including ignored/untracked build debris**;
+putting the generated assets there makes the candidate fail closed.  On the
+controlled build host, let the approved frontend build produce a root-owned
+`mini_app_dist` directory outside both the application checkout and the
+private manifest-output directories.  The directory may contain only regular,
+root-owned, non-executable static files and directories: symlinks, writable
+entries, `node_modules`, dotfiles, secret-like filenames, and high-confidence
+private-key/credential literals are refused.
+
+Before an image build, create two separate root-only, create-only manifests.
+The first records ordered asset paths, SHA-256 values, and byte sizes; it does
+not copy asset contents.  The second binds that static snapshot to the exact
+non-`2c08` application commit/tree, the canonical term-fenced source evidence,
+and the Git-matching `Dockerfile`/`.dockerignore` hashes.  Neither manifest is
+a writer permit, promotion approval, deployment approval, Docker action, or
+network action.
+
+```bash
+# Each output directory is root:root 0700 and empty.  Keep them distinct.
+python3 /srv/trading-bot-three-site/releases/<application-sha>/scripts/prepare_fenced_fi_candidate_build_inputs.py snapshot-static \
+  --mini-app-dist-root /srv/trading-bot-three-site/generated/<application-sha>/mini_app_dist \
+  --output /root/secure-release-inputs/static-manifests/<application-sha>.mini-app-dist.json
+
+python3 /srv/trading-bot-three-site/releases/<application-sha>/scripts/prepare_fenced_fi_candidate_build_inputs.py bind \
+  --application-release-root /srv/trading-bot-three-site/releases/<application-sha> \
+  --term-fenced-application-evidence /root/secure-release-inputs/webapp-fi-term-fenced-application-evidence.json \
+  --mini-app-dist-root /srv/trading-bot-three-site/generated/<application-sha>/mini_app_dist \
+  --mini-app-dist-manifest /root/secure-release-inputs/static-manifests/<application-sha>.mini-app-dist.json \
+  --output /root/secure-release-inputs/build-input-manifests/<application-sha>.candidate-build-inputs.json
+```
+
+The bind step scans source and static inputs twice and refuses a swap, source
+pollution, static mutation, a `2c08` release, symlink, unsafe owner/mode, or a
+Dockerfile/Dockerignore byte mismatch.  It creates no build context itself.
+The later controlled context assembler must use this manifest to verify a
+separate root-owned build context containing the immutable source files plus
+the manifest-matching `mini_app_dist`; it must not alter the source checkout.
+If any input changes, start again with new output paths—these manifests are
+create-only and must never be overwritten.
+
 On a controlled build host, first stage clean immutable application and
 control checkouts in directories named by their exact commits.  The following
 local-only evidence step must succeed before an image build is considered:
@@ -93,13 +136,18 @@ local build command is:
 
 ```bash
 docker build --no-cache --pull=false \
-  --file /srv/trading-bot-three-site/releases/<application-sha>/Dockerfile \
+  --file /srv/trading-bot-three-site/candidate-contexts/<application-sha>/Dockerfile \
   --build-arg TERM_FENCED_RELEASE_SHA=<application-sha> \
   --build-arg TERM_FENCED_RELEASE_TREE_SHA=<application-tree-sha> \
   --build-arg TERM_FENCED_APPLICATION_EVIDENCE_SHA256=<evidence-sha256> \
   --tag <reviewed-local-app-tag> \
-  /srv/trading-bot-three-site/releases/<application-sha>
+  /srv/trading-bot-three-site/candidate-contexts/<application-sha>
 ```
+
+`candidate-contexts/<application-sha>` above is a later externally controlled
+assembly output, not the application checkout and not evidence that a build is
+safe by itself.  Its source/Dockerfile/static bytes must first be checked
+against the two manifests above.
 
 Build/tag the bot candidate under its own reviewed local tag with the same
 three values.  This command alone cannot satisfy Release-0: an image built
