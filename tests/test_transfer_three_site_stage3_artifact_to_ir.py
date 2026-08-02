@@ -39,6 +39,14 @@ class Stage3ArtifactTransferTests(unittest.TestCase):
             release_sha=self.release,
             campaign_id=self.campaign,
         )
+        self.assertEqual(name, "trading-bot-three-site-app-0e63a7ec.tar.zst")
+        self.assertEqual(
+            destination,
+            Path(
+                "/tmp/stage3-0e63a7ec-fd34231d-transfer/"
+                "trading-bot-three-site-app-0e63a7ec.tar.zst"
+            ),
+        )
 
     def test_third_party_archive_is_allowed(self):
         name, destination = artifact_spec(
@@ -54,14 +62,6 @@ class Stage3ArtifactTransferTests(unittest.TestCase):
             Path(
                 "/tmp/stage3-0e63a7ec-fd34231d-transfer/"
                 "trading-bot-three-site-third-party-0e63a7ec.tar.zst"
-            ),
-        )
-        self.assertEqual(name, "trading-bot-three-site-app-0e63a7ec.tar.zst")
-        self.assertEqual(
-            destination,
-            Path(
-                "/tmp/stage3-0e63a7ec-fd34231d-transfer/"
-                "trading-bot-three-site-app-0e63a7ec.tar.zst"
             ),
         )
 
