@@ -1,0 +1,283 @@
+{
+  "schema": "three-site-stage3-host-readiness-audit-v1",
+  "captured_at_utc": "2026-08-02T16:06:30Z",
+  "branch": "stage/three-site-staging-03-host-readiness",
+  "base_sha": "aab3558aebf6a25454a4d1f532e516b75dcbddde",
+  "tested_release_sha": "0e63a7ec1b08bef29ea199041215298a021b56ef",
+  "audit_mode": "read-only",
+  "bot_fi_collection_path": "local-host-direct",
+  "remote_mutations": [],
+  "sensitive_values_persisted": false,
+  "hosts": {
+    "bot_fi": {
+      "expected_ip": "65.109.216.187",
+      "hostname": "ubuntu-4gb-hel1-1",
+      "machine_id_sha256": "b28f465a402cb7a8d1192ed2eaf249f3982ebcf23f9b7137cb4d9229f61685d4",
+      "os": "Ubuntu 24.04.4 LTS",
+      "kernel": "Linux 6.8.0-134-generic x86_64 GNU/Linux",
+      "docker_server": "29.5.3",
+      "docker_compose": "v5.1.4",
+      "postgresql": "container images identify PostgreSQL 15; host psql is absent",
+      "capacity": {
+        "cpu_count": 8,
+        "memory_total_bytes": 16372285440,
+        "memory_available_bytes": 11579932672,
+        "pid_count": 385,
+        "root_available": "15.3G",
+        "production_disk_available": "56.9G",
+        "staging_disk_available": "34G"
+      },
+      "storage": {
+        "production_root": "/srv/trading-bot/production-data",
+        "production_source": "/dev/sdb",
+        "production_uuid": "9d19fc8e-f71a-4089-b826-5dddfe83ea28",
+        "staging_root": "/srv/trading-bot-three-site-staging-data",
+        "staging_source": "/dev/sdc",
+        "staging_uuid": "b1d8fed1-8e73-4b1f-92f8-d200b774d12d",
+        "staging_options": "rw,nosuid,nodev,noexec,relatime",
+        "independent_from_production": true
+      },
+      "clock": {
+        "ntp_synchronized": true,
+        "tool": "chronyc",
+        "offset": "0.000185754 seconds fast"
+      },
+      "resource_boundary": {
+        "slice": "trading-bot-three-site-staging.slice",
+        "active": true,
+        "cpu_quota_percent": 200,
+        "memory_high_bytes": 4294967296,
+        "memory_max_bytes": 5368709120,
+        "tasks_max": 2048
+      },
+      "docker_projects": {
+        "three-site-dc32d90392b0-bot-fi": {"containers": 8, "running": 8, "release": "3138d0c2a8d20a84042c3a438fbc88db7a4db498"},
+        "three-site-727c1f337b75-bot-fi": {"containers": 1, "running": 1, "release": "771c957bf22d094c40e9e406f5b136c88d056930"},
+        "trading_bot": {"containers": 5, "running": 5, "classification": "production"},
+        "trading_bot_staging": {"containers": 2, "running": 2, "classification": "legacy-staging"},
+        "trading_bot_monitoring_dev": {"containers": 3, "running": 3, "classification": "development"}
+      },
+      "network": {
+        "public_listeners": ["22", "80", "443", "8443"],
+        "target_api_listener": "127.0.0.1:8211",
+        "firewall_sha256": "9f8483b9ce27a08ba81240e0a41ebe9eeaaa22293f5860c691ca5d7939c3fc5f",
+        "firewall_rule_count": 113,
+        "routes_to_all_topology_peers": true,
+        "nginx_domains": ["coin.362514.ir", "mini-app.362514.ir", "staging.362514.ir"]
+      }
+    },
+    "webapp_fi": {
+      "expected_ip": "65.109.220.59",
+      "hostname": "iran",
+      "machine_id_sha256": "aeed36f1233493d8ce420dc4f7df1df0199bf4b32ed095e2c38237ab7be5af04",
+      "os": "Ubuntu 26.04 LTS",
+      "kernel": "Linux 7.0.0-27-generic x86_64 GNU/Linux",
+      "docker_server": "29.1.3",
+      "docker_compose": "2.40.3+ds1-0ubuntu1",
+      "postgresql": "container images identify PostgreSQL 15; host psql is absent",
+      "capacity": {
+        "cpu_count": 4,
+        "memory_total_bytes": 8116580352,
+        "memory_available_bytes": 4387737600,
+        "pid_count": 258,
+        "root_available": "98.4G",
+        "staging_disk_available": "50.3G"
+      },
+      "storage": {
+        "production_root": "root filesystem Docker volumes",
+        "production_source": "/dev/sda1",
+        "production_uuid": "dce03124-bc1e-47f1-8767-b5bf64a7664a",
+        "staging_root": "/srv/trading-bot-three-site-staging-data",
+        "staging_source": "/dev/sdb",
+        "staging_uuid": "e7f47458-ffc1-4181-81e1-58c6fc4519a2",
+        "staging_options": "rw,nosuid,nodev,noexec,relatime",
+        "independent_from_production": true
+      },
+      "clock": {
+        "ntp_synchronized": true,
+        "tool": "chronyc",
+        "offset": "0.000025782 seconds fast"
+      },
+      "resource_boundary": {
+        "slice": "trading-bot-three-site-staging.slice",
+        "active": true,
+        "cpu_quota_percent": 150,
+        "memory_high_bytes": 2147483648,
+        "memory_max_bytes": 3221225472,
+        "tasks_max": 1536
+      },
+      "docker_projects": {
+        "three-site-dc32d90392b0-webapp-fi": {"containers": 14, "running": 10, "release": "3138d0c2a8d20a84042c3a438fbc88db7a4db498"},
+        "three-site-727c1f337b75-webapp-fi": {"containers": 1, "running": 1, "release": "771c957bf22d094c40e9e406f5b136c88d056930"},
+        "trading-bot-three-site-staging-webapp-fi": {"containers": 7, "running": 0, "release": "e53a56119ccc73c84aa12e21697820e7e0a1f90b"},
+        "current": {"containers": 4, "running": 4, "classification": "production"},
+        "trading_bot_staging_iran": {"containers": 5, "running": 2, "classification": "legacy-staging"}
+      },
+      "network": {
+        "public_listeners": ["37067", "80", "443", "8443"],
+        "target_api_listener": "127.0.0.1:8212",
+        "firewall_sha256": "8669dbba13c14c7c254576e9a687098c6ce404042c56b31024484e9054b382b7",
+        "firewall_rule_count": 98,
+        "routes_to_all_topology_peers": true,
+        "nginx_domains": ["coin.gold-trade.ir", "staging.gold-trade.ir"]
+      }
+    },
+    "webapp_ir": {
+      "expected_ip": "95.38.164.29",
+      "hostname": "ubuntu---4-vcpu---12-gb-ram",
+      "machine_id_sha256": "a15cda1ed208fbfe3fe985dc76fad1c45294b5db69740f6ce665d97f4fa04574",
+      "os": "Ubuntu 24.04.1 LTS",
+      "kernel": "Linux 6.8.0-45-generic x86_64 GNU/Linux",
+      "docker_server": "29.1.3",
+      "docker_compose": "2.40.3+ds1-0ubuntu1~24.04.1",
+      "postgresql": "psql 16.14; staging container images identify PostgreSQL 15",
+      "capacity": {
+        "cpu_count": 4,
+        "memory_total_bytes": 12567363584,
+        "memory_available_bytes": 10089799680,
+        "pid_count": 274,
+        "root_available": "48.4G",
+        "staging_disk_available": "42.4G"
+      },
+      "storage": {
+        "production_root": "root filesystem Docker volumes",
+        "production_source": "/dev/vda3",
+        "production_uuid": "2236c001-2b51-4977-aab3-216695eadc02",
+        "staging_root": "/srv/trading-bot-three-site-staging-data",
+        "staging_source": "/dev/vdb",
+        "staging_uuid": "08ae6418-0a2d-4909-81f0-1560c5fc9b35",
+        "staging_options": "rw,nosuid,nodev,noexec,relatime",
+        "independent_from_production": true
+      },
+      "clock": {
+        "ntp_synchronized": true,
+        "tool": "chronyc",
+        "offset": "0.002080120 seconds slow"
+      },
+      "resource_boundary": {
+        "slice": "trading-bot-three-site-staging.slice",
+        "active": true,
+        "cpu_quota_percent": 200,
+        "memory_high_bytes": 3221225472,
+        "memory_max_bytes": 4294967296,
+        "tasks_max": 1536
+      },
+      "docker_projects": {
+        "three-site-dc32d90392b0-webapp-ir": {"containers": 15, "running": 10, "release": "3138d0c2a8d20a84042c3a438fbc88db7a4db498"},
+        "three-site-727c1f337b75-webapp-ir": {"containers": 1, "running": 1, "release": "771c957bf22d094c40e9e406f5b136c88d056930"},
+        "trading-bot-three-site-staging-webapp-ir": {"containers": 7, "running": 0, "release": "e53a56119ccc73c84aa12e21697820e7e0a1f90b"},
+        "trading-bot-emergency-ir": {"containers": 4, "running": 3, "classification": "production-emergency"}
+      },
+      "network": {
+        "public_listeners": ["22", "80", "443", "8443"],
+        "target_api_listener": "127.0.0.1:8213",
+        "firewall_sha256": "1d65096f462373e607635ba98a4c2fd418c596bb1dd7ab575175dffd3265638f",
+        "firewall_rule_count": 265,
+        "routes_to_all_topology_peers": true,
+        "nginx_domains": ["coin.gold-trade.ir", "_"]
+      }
+    },
+    "witness": {
+      "expected_ip": "37.152.191.11",
+      "hostname": "ubuntu---2-vcpu---2-gb-ram",
+      "machine_id_sha256": "7804dbd107c25c8e87f5703f0c05fd87fd111bb6f58361b6ec90dbf5b6fc5a0e",
+      "os": "Ubuntu 24.04.1 LTS",
+      "kernel": "Linux 6.8.0-45-generic x86_64 GNU/Linux",
+      "docker_server": null,
+      "docker_compose": null,
+      "postgresql": "server and psql 16.14",
+      "capacity": {
+        "cpu_count": 2,
+        "memory_total_bytes": 2066341888,
+        "memory_available_bytes": 1449893888,
+        "pid_count": 192,
+        "root_available": "35.1G",
+        "staging_disk_available": null
+      },
+      "storage": {
+        "production_root": "/",
+        "production_source": "/dev/vda3",
+        "production_uuid": "2236c001-2b51-4977-aab3-216695eadc02",
+        "staging_root": "/srv/trading-bot-three-site-staging-data",
+        "staging_source": null,
+        "staging_uuid": null,
+        "independent_from_production": false,
+        "block_device_count": 1
+      },
+      "clock": {
+        "ntp_synchronized": true,
+        "tool": null,
+        "offset": null
+      },
+      "resource_boundary": {
+        "slice": "trading-bot-three-site-staging.slice",
+        "active": false,
+        "cpu_quota_percent": null,
+        "memory_high_bytes": null,
+        "memory_max_bytes": null,
+        "tasks_max": null
+      },
+      "runtime": {
+        "deployment_type": "native-systemd-production",
+        "service": "writer-witness.service",
+        "active": true,
+        "source_release_sha": "4c171289eb62bd82822a6821e0cd474c10f88bab",
+        "activation": "/opt/trading-bot-witness/activations/4c171289-witness-r7",
+        "release_manifest_sha256": "648e4d47905f47c48051c71ff8801e16c78caa318a1ad403e49893369f079b75",
+        "listen": "127.0.0.1:8011",
+        "postgres_listen": "127.0.0.1:5432"
+      },
+      "network": {
+        "public_listeners": ["22", "443"],
+        "firewall_sha256": "5aeffc15748a268ee90566f645125db3bea2fce99efcd83131de79306335015c",
+        "firewall_rule_count": 173,
+        "routes_to_all_topology_peers": true,
+        "nginx_domains": ["_"]
+      }
+    }
+  },
+  "object_storage": {
+    "endpoint": "https://s3.ir-thr-at1.arvanstorage.ir",
+    "region": "ir-thr-at1",
+    "bucket": "gold-trade-staging-three-site-dr",
+    "observed_active_prefix": "staging/three-site/3138d0c2/dc32d903-92b0-4229-b6b1-f0442adfd8e3/blobs/sha256",
+    "credential_id_sha256": "285b32f788d99dfde46ff733fda1027d5851f56efb12b09a075002473868b6de",
+    "head_bucket": "ok",
+    "versioning": "Enabled",
+    "mfa_delete": "Disabled",
+    "bucket_encryption_configuration": "missing",
+    "lifecycle_configuration": "missing",
+    "public_access_block_configuration": "missing",
+    "private_status": "not-proven-by-read-only-api",
+    "release_target_prefix_created": false,
+    "encrypted_upload_download_test_for_release_target": false
+  },
+  "release_target_presence": {
+    "source_sha_on_controller": "0e63a7ec1b08bef29ea199041215298a021b56ef",
+    "application_image_id_on_controller": "sha256:71aac59e324f324529b92701bb551b2ebab91772dafb85dbb16330360de3832a",
+    "postgres_image_id_on_controller": "sha256:d40d850c6017ab4729467ec2856919ebd7e96c1e01b18aa6db9e5d72210d1087",
+    "matching_release_on_destination_count": 0
+  },
+  "section_a_findings": {
+    "status": "complete-with-blockers",
+    "independent_staging_mount_roles": ["bot_fi", "webapp_fi", "webapp_ir"],
+    "missing_independent_staging_mount_roles": ["witness"],
+    "bounded_cgroup_roles": ["bot_fi", "webapp_fi", "webapp_ir"],
+    "missing_bounded_cgroup_roles": ["witness"],
+    "release_drift_detected": true,
+    "preexisting_staging_projects_detected": true,
+    "preexisting_bot_fi_staging_volume_on_production_disk_detected": true,
+    "production_routes_or_containers_changed": false,
+    "credential_rotation_required_before_stage4": true
+  },
+  "g3_current_evaluation": {
+    "fresh_host_attestations": "blocked until exact release and planned inventory are installed",
+    "independent_mounts": "failed on witness",
+    "production_identifier_exclusion": "not yet evaluable; planned inventory does not exist",
+    "backup_restore_drill": "not run for release target",
+    "rollback_dry_run": "not run for release target",
+    "destination_release_hash_match": "failed; 0 of 4",
+    "owner_stage4_authorization": false,
+    "decision": "G3_NOT_PASSED"
+  }
+}
