@@ -156,7 +156,8 @@ class RunEmergencyIrObjectStorageReceiveTests(unittest.TestCase):
         self.assertIn("scripts/emergency_ir_standalone_activate.py", runner.REMOTE_BOOTSTRAP)
         self.assertIn("def bundled_key_id(path):", runner.REMOTE_BOOTSTRAP)
         self.assertIn("receiver bundle signing public key does not match descriptor", runner.REMOTE_BOOTSTRAP)
-        self.assertIn('(\"receiver-\"+bundle_hash)', runner.REMOTE_BOOTSTRAP)
+        self.assertIn('receiver=campaign_root/"receiver"', runner.REMOTE_BOOTSTRAP)
+        self.assertNotIn('(\"receiver-\"+bundle_hash)', runner.REMOTE_BOOTSTRAP)
         self.assertNotIn("bundle_hash[:16]", runner.REMOTE_BOOTSTRAP)
         self.assertNotIn("os.rename(temporary,target)", runner.REMOTE_BOOTSTRAP)
         self.assertIn("try: target.mkdir(mode=0o700)", runner.REMOTE_BOOTSTRAP)
@@ -284,9 +285,7 @@ class RunEmergencyIrObjectStorageReceiveTests(unittest.TestCase):
                 self.assertIn("signing public key does not match descriptor", completed.stderr)
                 self.assertFalse(marker.exists())
 
-                receiver_directory = runtime / "20260801T210000Z-emergency-ir-03" / (
-                    "receiver-" + bundle_hash
-                )
+                receiver_directory = runtime / "20260801T210000Z-emergency-ir-03" / "receiver"
                 sentinel = receiver_directory / "forensic-sentinel"
                 sentinel.write_text("must-not-be-replaced\n", encoding="utf-8")
                 sentinel.chmod(0o600)
