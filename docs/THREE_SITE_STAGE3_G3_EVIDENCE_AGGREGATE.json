@@ -1,7 +1,7 @@
 {
   "schema": "three-site-stage3-g3-evidence-aggregate-v2",
-  "status": "G3_EVIDENCE_COMPLETE_AWAITING_OWNER_ACCEPTANCE_AND_STAGE4_AUTHORIZATION",
-  "generated_at": "2026-08-02T20:20:49Z",
+  "status": "G3_ACCEPTED_STAGE4_AUTHORIZED",
+  "generated_at": "2026-08-02T20:27:34Z",
   "campaign_id": "fd34231d-f52e-498a-aab4-438c99d88fc5",
   "deployment_id": "stage3-0e63a7ec-fd34231d",
   "release_sha": "0e63a7ec1b08bef29ea199041215298a021b56ef",
@@ -110,10 +110,15 @@
     "volume_or_data_cleanup_authorized": false,
     "revoked_object_storage_secret_must_not_be_restored": true
   },
-  "open_requirements": [
-    "owner reviews this aggregate and explicitly authorizes Stage 4 for the exact release SHA"
-  ],
+  "open_requirements": [],
   "g3_technical_requirements_complete": true,
-  "owner_g3_acceptance_recorded": false,
-  "stage4_authorized": false
+  "owner_g3_acceptance_recorded": true,
+  "stage4_authorized": true,
+  "owner_authorization": {
+    "recorded_at_utc": "2026-08-02T20:27:34Z",
+    "source": "direct_owner_message",
+    "accepted_gate": "G3",
+    "authorized_stage": "Stage 4",
+    "release_sha": "0e63a7ec1b08bef29ea199041215298a021b56ef"
+  }
 }

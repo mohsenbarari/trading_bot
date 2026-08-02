@@ -803,9 +803,10 @@ detach، rebuild یا resize نمی‌شود. چهار IP canonical و تمام 
   `bc053cdbd2a43b999a0ddf8c96ef4a25d60416a37b7cc364aa6e5763eb811a88`
   verify شد. policy issuer exact با mode `0600` داخل evidence root همین کمپین
   نگهداری می‌شود؛ approval inventory تکرار نشد.
-- تمام الزام‌های فنی G3 کامل‌اند. تنها gate باقیمانده، مرور و پذیرش مالک و مجوز
-  صریح شروع Stage 4 برای release دقیق `0e63a7ec1b08bef29ea199041215298a021b56ef`
-  است. Production touched: `no`.
+- تمام الزام‌های فنی G3 کامل‌اند. مالک در `2026-08-02T20:27:34Z`، G3 را برای
+  release دقیق `0e63a7ec1b08bef29ea199041215298a021b56ef` پذیرفت و شروع Stage 4
+  را صریحاً مجاز کرد. این تصمیم مستقیم جایگزین token/gate تکراری است.
+  Production touched: `no`.
 
 ### Exit gate — G3 Hosts Isolated
 
@@ -824,7 +825,7 @@ detach، rebuild یا resize نمی‌شود. چهار IP canonical و تمام 
 
 ### گزارش پایان Stage 3
 
-- Status: `READY_FOR_OWNER_ACCEPTANCE — G3_TECHNICAL_EVIDENCE_COMPLETE_STAGE4_NOT_AUTHORIZED`
+- Status: `COMPLETED — G3 ACCEPTED / STAGE 4 AUTHORIZED`
 - Branch: `stage/three-site-staging-03-host-readiness`
 - Base SHA / implementation commits:
   `aab3558aebf6a25454a4d1f532e516b75dcbddde /
@@ -863,7 +864,7 @@ detach، rebuild یا resize نمی‌شود. چهار IP canonical و تمام 
   rotated bootstrap material manifest =
   887b521175caca8ddfb301ec123917e520947d9367600381122de87de98398cc؛
   aggregate = docs/THREE_SITE_STAGE3_G3_EVIDENCE_AGGREGATE.json / SHA-256
-  `27d1b36c469aea282520d27162fb3d8578ea5b79278c9ff224443314352df2b4`؛
+  `ce96778c06d7afbbe9c390bf07ef75f7930e50378ceb5eef5c6d242cb3cb8959`؛
   rollback plan = docs/THREE_SITE_STAGE3_ROLLBACK_PLAN.json / SHA-256
   `20c8a126843a9422b323589eabd337bf7120be2dfb9dceaa681bcae7c2fea625`
 - Production touched: `no`
@@ -875,9 +876,9 @@ detach، rebuild یا resize نمی‌شود. چهار IP canonical و تمام 
   encryption اجباری است؛ هیچ منبع پنل بدون اجازه مالک ساخته یا حذف نمی‌شود.`
 - Rollback verified: `yes برای boundary پیش از deploy؛ چهار restore drill و command-plan dry-run قبول شدند. freeze/restore bundle source قدیمی طبق مرز production در ابتدای Stage 4 انجام می‌شود.`
 - Decision / next stage:
-  `G3_TECHNICALLY_READY_AWAITING_OWNER / no؛ rotation و تمام شواهد فنی کامل‌اند؛
-  فقط پذیرش G3 و اجازه صریح مالک برای همین release باقی است. Stage 4 هنوز مجاز
-  نیست.`
+  `G3_ACCEPTED / yes؛ مالک G3 را پذیرفت و Stage 4 را برای release دقیق
+  0e63a7ec1b08bef29ea199041215298a021b56ef مجاز کرد. gate inventory یا token
+  دیگری برای شروع Stage 4 ساخته نمی‌شود.`
 
 ---
 
