@@ -4,6 +4,8 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -104,6 +106,21 @@ class RotateStage3ObjectStorageMaterialTests(unittest.TestCase):
                 (args.material_root / "secrets/staging-dr-blob-s3.json").read_bytes(),
                 before,
             )
+
+    def test_direct_cli_help_runs_from_repository_root(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "scripts/rotate_three_site_stage3_object_storage_material.py",
+                "--help",
+            ],
+            cwd=Path(__file__).resolve().parents[1],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--material-root", result.stdout)
 
     def test_apply_rotates_only_credential_and_manifest(self):
         with tempfile.TemporaryDirectory() as raw:
