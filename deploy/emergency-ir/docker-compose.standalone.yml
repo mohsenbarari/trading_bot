@@ -132,7 +132,7 @@ services:
       - -ec
       - >-
         exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
-        --proxy-headers --forwarded-allow-ips 127.0.0.1,172.29.250.1
+        --proxy-headers --forwarded-allow-ips 127.0.0.1,172.29.253.1
     environment: *api_environment
     ports:
       - "127.0.0.1:${EMERGENCY_APP_PORT:-18000}:8000"
@@ -152,6 +152,10 @@ services:
         condition: service_healthy
     networks:
       - emergency_ir_internal
+      # Docker's host-published loopback port needs one non-internal bridge
+      # attachment.  This bridge has no masquerade and no peer services; the
+      # explicit port binding below remains the only host ingress path.
+      - emergency_ir_loopback
     healthcheck:
       test:
         [
@@ -177,6 +181,16 @@ networks:
     ipam:
       config:
         - subnet: 172.29.250.0/28
+  emergency_ir_loopback:
+    internal: false
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+      com.docker.network.bridge.enable_icc: "false"
+      com.docker.network.bridge.host_binding_ipv4: "127.0.0.1"
+    ipam:
+      config:
+        # Keep this separate from the optional SMS relay/egress subnets.
+        - subnet: 172.29.253.0/30
 
 volumes:
   emergency_ir_postgres_data:

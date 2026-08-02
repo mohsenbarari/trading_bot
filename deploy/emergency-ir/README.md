@@ -11,11 +11,20 @@ Release-0/Full-Matrix promotion path.
   patch.  `verify_emergency_ir_image_provenance.py` rejects an unlabelled,
   staging, or mis-tagged image.
 - Docker uses only `trading-bot-emergency-ir-*` names, its own internal
-  `172.29.250.0/28` network, and its own volumes.  Never point it at a
+  `172.29.250.0/28` data network, a Compose-managed single-API
+  `172.29.253.0/30` loopback bridge, and its own volumes. Never point it at a
   three-site path, volume, network, image, secret, or Compose project.
-- The application network is internal-only.  There is no bot, sync worker,
-  DR worker, writer service, or outbound service credential.  Direct sync is
-  additionally disabled by `TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH=true`.
+- DB and Redis remain on the internal data network only. The API additionally
+  uses the loopback bridge solely for its explicit
+  `127.0.0.1:${EMERGENCY_APP_PORT:-18000}:8000` host binding; that bridge has
+  IP masquerading and inter-container communication disabled. There is no
+  bot, sync worker, DR worker, writer service, or outbound service credential.
+  Direct sync is additionally disabled by
+  `TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH=true`.
+- The pre-existing host bridge named `trading-bot-emergency-ir-loopback` is a
+  live compatibility attachment, not an Emergency source-owned resource. The
+  Compose manifest deliberately neither adopts nor removes it; a fresh
+  Emergency deployment creates its own non-overlapping loopback bridge.
 - `WEBAPP_INITDATA_BOT_TOKEN` is a narrowly scoped Telegram WebApp HMAC
   validation credential, not `BOT_TOKEN`.  It is used only by the explicit
   Emergency image and never starts a bot process.

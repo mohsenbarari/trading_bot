@@ -1,9 +1,10 @@
 # Explicit opt-in overlay for domestic SMS OTP in Emergency IR Standalone.
 #
 # Invoke only together with docker-compose.standalone.yml and --profile sms-otp.
-# The API remains isolated from the Internet: it receives a second *internal*
-# network only.  The relay is the sole service with an egress network and its
-# Nginx configuration can forward only POST /v1/send/verify to api.sms.ir.
+# The API remains isolated from the Internet: it retains the base internal
+# data network and loopback-only port-publishing bridge, plus a private relay
+# bridge. The relay is the sole service with an egress network and its Nginx
+# configuration can forward only POST /v1/send/verify to api.sms.ir.
 
 services:
   # Giving every service the same profile means combining this overlay without
@@ -46,7 +47,7 @@ services:
         test -z "$${SYNC_API_KEY:-}" &&
         test -z "$${PEER_SERVER_URL:-}" &&
         exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
-        --proxy-headers --forwarded-allow-ips 127.0.0.1,172.29.250.1
+        --proxy-headers --forwarded-allow-ips 127.0.0.1,172.29.253.1
     environment:
       EMERGENCY_AUTH_PROFILE: "sms-otp"
       EMERGENCY_SMS_OTP_ENABLED: "true"
@@ -72,6 +73,7 @@ services:
         condition: service_healthy
     networks:
       emergency_ir_internal: {}
+      emergency_ir_loopback: {}
       emergency_ir_sms_relay:
         ipv4_address: 172.29.251.2
 

@@ -29,7 +29,7 @@ COMMON_EXPECTED = {
     "TELEGRAM_REGISTRATION_RECONCILIATION_ENABLED": "false",
     "REGISTRATION_SYNC_V2_ENABLED": "false",
     "REGISTRATION_SYNC_ACCEPT_UNVERSIONED": "false",
-    "TRUSTED_PROXY_CIDRS": "127.0.0.1/32,172.29.250.1/32,::1/128",
+    "TRUSTED_PROXY_CIDRS": "127.0.0.1/32,172.29.253.1/32,::1/128",
 }
 TELEGRAM_ONLY_EXPECTED = {
     "EMERGENCY_AUTH_PROFILE": AUTH_PROFILE_TELEGRAM_ONLY,
@@ -206,6 +206,48 @@ def verify_values(
     return failures
 
 
+def _compose_service_networks(text: str, service: str) -> tuple[str, ...] | None:
+    """Read one service's declared Compose networks without loading a YAML runtime."""
+
+    service_match = re.search(
+        rf"(?ms)^  {re.escape(service)}:\n(?P<body>.*?)(?=^  [A-Za-z0-9][A-Za-z0-9_-]*:\n|^networks:\n|\Z)",
+        text,
+    )
+    if service_match is None:
+        return None
+    network_match = re.search(
+        r"(?m)^    networks:\n(?P<entries>(?:^      [^\n]*(?:\n|\Z))*)",
+        service_match.group("body"),
+    )
+    if network_match is None:
+        return None
+    names: list[str] = []
+    for raw in network_match.group("entries").splitlines():
+        entry = raw.strip()
+        if not entry or entry.startswith("#"):
+            continue
+        if entry.startswith("- "):
+            entry = entry[2:].strip()
+        else:
+            entry = entry.split(":", 1)[0].strip()
+        if entry:
+            names.append(entry)
+    return tuple(names)
+
+
+def _compose_network_block(text: str, network: str) -> str | None:
+    """Return one top-level Compose network declaration, if present."""
+
+    section_start = text.find("\nnetworks:\n")
+    if section_start < 0:
+        return None
+    match = re.search(
+        rf"(?ms)^  {re.escape(network)}:\n(?P<body>.*?)(?=^  [A-Za-z0-9][A-Za-z0-9_-]*:\n|^volumes:\n|\Z)",
+        text[section_start + 1 :],
+    )
+    return None if match is None else match.group("body")
+
+
 def verify_compose(path: Path) -> list[str]:
     text = path.read_text(encoding="utf-8")
     failures: list[str] = []
@@ -214,10 +256,31 @@ def verify_compose(path: Path) -> list[str]:
         "trading-bot-emergency-ir-postgres", "trading-bot-emergency-ir-redis",
         "trading-bot-emergency-ir-uploads", "trading-bot-emergency-ir-audit",
         "internal: true", "EMERGENCY_IR_STANDALONE: \"true\"",
-        "--forwarded-allow-ips 127.0.0.1,172.29.250.1",
+        "--forwarded-allow-ips 127.0.0.1,172.29.253.1",
     ):
         if required not in text:
             failures.append(f"compose is missing required isolation contract: {required}")
+    api_networks = _compose_service_networks(text, "api")
+    if api_networks != ("emergency_ir_internal", "emergency_ir_loopback"):
+        failures.append("Emergency API must attach only to the internal and loopback networks")
+    for service in ("db", "redis", "migration"):
+        if _compose_service_networks(text, service) != ("emergency_ir_internal",):
+            failures.append(f"Emergency {service} must remain only on the internal network")
+    loopback = _compose_network_block(text, "emergency_ir_loopback")
+    if loopback is None:
+        failures.append("compose is missing the dedicated Emergency loopback network")
+    else:
+        for required in (
+            "internal: false",
+            "com.docker.network.bridge.enable_ip_masquerade: \"false\"",
+            "com.docker.network.bridge.enable_icc: \"false\"",
+            "com.docker.network.bridge.host_binding_ipv4: \"127.0.0.1\"",
+            "172.29.253.0/30",
+        ):
+            if required not in loopback:
+                failures.append(f"loopback network is missing required contract: {required}")
+        if "name:" in loopback:
+            failures.append("loopback network must use its Compose-managed name")
     for forbidden in ("sync_worker:", "bot:", "writer_control", "dr_receiver", "dr_projection", "dr_delivery", "dr_blob", "dr_effect", "./api:/app/api", "./core:/app/core"):
         if forbidden in text:
             failures.append(f"compose contains forbidden service or source bind: {forbidden}")
@@ -238,6 +301,7 @@ def verify_sms_otp_compose(path: Path) -> list[str]:
         'SMSIR_BASE_URL: "http://sms-egress:8080"',
         'SMSIR_TRUST_ENV: "false"',
         'SMSIR_TIMEOUT_SECONDS: "10"',
+        '--forwarded-allow-ips 127.0.0.1,172.29.253.1',
         'EMERGENCY_SMS_EGRESS_IMAGE',
         '172.29.251.0/29', '172.29.251.2', '172.29.251.3',
         '172.29.252.0/29', '172.29.252.2',
@@ -251,14 +315,24 @@ def verify_sms_otp_compose(path: Path) -> list[str]:
     ):
         if required not in text:
             failures.append(f"SMS OTP compose is missing required isolation contract: {required}")
-    api_start = text.find("  api:")
-    relay_start = text.find("  sms-egress:")
-    api_block = text[api_start:relay_start] if api_start >= 0 and relay_start > api_start else ""
+    api_match = re.search(r"(?m)^  api:\n", text)
+    relay_match = re.search(r"(?m)^  sms-egress:\n", text)
+    api_block = (
+        text[api_match.start() : relay_match.start()]
+        if api_match is not None and relay_match is not None and relay_match.start() > api_match.start()
+        else ""
+    )
     if not api_block:
         failures.append("SMS OTP compose does not contain a bounded API overlay")
-    elif "emergency_ir_sms_egress" in api_block:
-        failures.append("API must not attach to the SMS egress network")
-    relay_block = text[relay_start:text.find("\nnetworks:", relay_start)] if relay_start >= 0 else ""
+    else:
+        if "emergency_ir_loopback: {}" not in api_block:
+            failures.append("SMS OTP API must retain the base loopback-only bridge")
+        if "emergency_ir_sms_egress" in api_block:
+            failures.append("API must not attach to the SMS egress network")
+    relay_block = ""
+    if relay_match is not None:
+        relay_end = text.find("\nnetworks:\n", relay_match.start())
+        relay_block = text[relay_match.start() : None if relay_end < 0 else relay_end]
     if relay_block and "emergency_ir_sms_relay" not in relay_block:
         failures.append("SMS relay must attach to the internal relay network")
     if relay_block and "emergency_ir_sms_egress" not in relay_block:

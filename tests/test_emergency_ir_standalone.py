@@ -90,6 +90,51 @@ class EmergencyStandaloneTests(unittest.TestCase):
         failures = VERIFY.verify_compose(ROOT / "deploy/emergency-ir/docker-compose.standalone.yml")
         self.assertEqual(failures, [])
 
+    def test_compose_rejects_loopback_egress_or_data_service_attachment(self) -> None:
+        source = (ROOT / "deploy/emergency-ir/docker-compose.standalone.yml").read_text(
+            encoding="utf-8"
+        )
+        cases = {
+            "masquerade": (
+                source.replace(
+                    'com.docker.network.bridge.enable_ip_masquerade: "false"',
+                    'com.docker.network.bridge.enable_ip_masquerade: "true"',
+                    1,
+                ),
+                "loopback network is missing required contract: com.docker.network.bridge.enable_ip_masquerade: \"false\"",
+            ),
+            "db-loopback": (
+                source.replace(
+                    "    networks:\n      - emergency_ir_internal\n    healthcheck:",
+                    "    networks:\n      - emergency_ir_internal\n      - emergency_ir_loopback\n    healthcheck:",
+                    1,
+                ),
+                "Emergency db must remain only on the internal network",
+            ),
+            "api-loopback-removed": (
+                source.replace(
+                    "      - emergency_ir_loopback\n    healthcheck:",
+                    "    healthcheck:",
+                    1,
+                ),
+                "Emergency API must attach only to the internal and loopback networks",
+            ),
+            "manual-loopback-name": (
+                source.replace(
+                    "  emergency_ir_loopback:\n    internal: false",
+                    "  emergency_ir_loopback:\n    name: trading-bot-emergency-ir-loopback\n    internal: false",
+                    1,
+                ),
+                "loopback network must use its Compose-managed name",
+            ),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            candidate = Path(directory) / "docker-compose.yml"
+            for label, (content, expected) in cases.items():
+                with self.subTest(label=label):
+                    candidate.write_text(content, encoding="utf-8")
+                    self.assertIn(expected, VERIFY.verify_compose(candidate))
+
     def test_nginx_blocks_cross_site_surfaces(self) -> None:
         failures = VERIFY.verify_nginx(ROOT / "deploy/emergency-ir/nginx.standalone.conf.template")
         self.assertEqual(failures, [])
@@ -206,6 +251,21 @@ class EmergencyStandaloneTests(unittest.TestCase):
             ),
             [],
         )
+
+    def test_sms_otp_manifest_rejects_lost_loopback_attachment(self) -> None:
+        source = (ROOT / "deploy/emergency-ir/docker-compose.sms-otp.yml").read_text(
+            encoding="utf-8"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            candidate = Path(directory) / "docker-compose.sms-otp.yml"
+            candidate.write_text(
+                source.replace("      emergency_ir_loopback: {}\n", "", 1),
+                encoding="utf-8",
+            )
+            self.assertIn(
+                "SMS OTP API must retain the base loopback-only bridge",
+                VERIFY.verify_sms_otp_compose(candidate),
+            )
 
     def test_renderer_requires_explicit_sms_opt_in_and_renders_stage6_direct_sms(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

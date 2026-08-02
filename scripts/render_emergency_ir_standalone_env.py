@@ -28,7 +28,7 @@ SMSIR_TEMPLATE_PARAMETER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
 DOMAIN = "coin.gold-trade.ir"
 RUNTIME_PATH = Path("/etc/trading-bot-emergency/standalone/runtime.env")
 SETTINGS_PATH = Path("/srv/trading-bot-emergency/current/trading_settings.json")
-NETWORK_GATEWAY = "172.29.250.1"
+LOOPBACK_NETWORK_GATEWAY = "172.29.253.1"
 AUTH_PROFILE_TELEGRAM_ONLY = "telegram-only"
 AUTH_PROFILE_SMS_OTP = "sms-otp"
 SMSIR_RELAY_URL = "http://sms-egress:8080"
@@ -265,7 +265,7 @@ def render(
         # HMAC verification.  No bot service is present in this Compose file.
         "WEBAPP_INITDATA_BOT_TOKEN": webapp_initdata_token,
         "OBSERVABILITY_TELEGRAM_USER_HASH_SALT": secrets.token_urlsafe(32),
-        "TRUSTED_PROXY_CIDRS": f"127.0.0.1/32,{NETWORK_GATEWAY}/32,::1/128",
+        "TRUSTED_PROXY_CIDRS": f"127.0.0.1/32,{LOOPBACK_NETWORK_GATEWAY}/32,::1/128",
         "BACKGROUND_JOBS_ENABLED": "false",
         "TRADING_BOT_DISABLE_DIRECT_SYNC_PUSH": "true",
         "WEB_PUSH_ENABLED": "false",
