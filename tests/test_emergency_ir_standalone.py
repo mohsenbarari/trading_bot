@@ -136,7 +136,10 @@ class EmergencyStandaloneTests(unittest.TestCase):
             source = (ROOT / "deploy/emergency-ir/nginx.standalone.conf.template").read_text(
                 encoding="utf-8"
             )
-            candidate.write_text(source.replace("    ssl_certificate /etc/trading-bot-emergency/acme/config/live/emergency-coin-gold-trade-ir/fullchain.pem;\n", "", 1), encoding="utf-8")
+            candidate.write_text(
+                source.replace("    ssl_certificate __EMERGENCY_TLS_FULLCHAIN__;\n", "", 1),
+                encoding="utf-8",
+            )
             self.assertIn(
                 "both TLS virtual hosts must load the pinned emergency certificate",
                 VERIFY.verify_nginx(candidate),

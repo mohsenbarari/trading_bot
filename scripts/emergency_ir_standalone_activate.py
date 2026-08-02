@@ -26,6 +26,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import secrets
 import shutil
 import socket
 import ssl
@@ -70,17 +71,48 @@ MAX_CERTIFICATE_BYTES = 1024 * 1024
 DISK_HEADROOM_BYTES = 256 * 1024 * 1024
 CERTIFICATE_MIN_REMAINING = timedelta(days=7)
 EMERGENCY_DOMAIN = "coin.gold-trade.ir"
-PREARM_INTENT_STAGE = "prearm-intent"
-PREARM_ARMED_STAGE = "prearm-armed"
-PREARM_JOURNAL_SCHEMA = "gold-trade-emergency-ir-prearm-journal-v1"
-PREARM_ARMED_SCHEMA = "gold-trade-emergency-ir-prearm-armed-v1"
+PREARM_ATTEMPT_ID_RE = re.compile(r"^[a-f0-9]{32}$", re.ASCII)
+PREARM_ATTEMPT_STAGE_RE = re.compile(
+    r"^prearm-attempt-([a-f0-9]{32})-(intent|ufw-pending|aborted|armed)$", re.ASCII
+)
+PREARM_ATTEMPT_INTENT_SCHEMA = "gold-trade-emergency-ir-prearm-attempt-intent-v2"
+PREARM_ATTEMPT_PENDING_SCHEMA = "gold-trade-emergency-ir-prearm-ufw-pending-v2"
+PREARM_ATTEMPT_ABORTED_SCHEMA = "gold-trade-emergency-ir-prearm-attempt-aborted-v2"
+PREARM_ATTEMPT_ARMED_SCHEMA = "gold-trade-emergency-ir-prearm-armed-v2"
+UFW_BASELINE_SCHEMA = "gold-trade-emergency-ir-ufw-baseline-v1"
+FIREWALL_ATTESTATION_SCHEMA = "gold-trade-emergency-ir-firewall-attestation-v1"
+UFW_VERSION_RE = re.compile(r"^ufw 0\.36(?:\.\d+)?$", re.ASCII)
+NFT_COUNTER_RE = re.compile(r"\bcounter packets \d+ bytes \d+\b")
 UFW_RULE_COMMENT = "trading-bot-emergency-ir"
 UFW_RULE_COMMAND_TEXT = "allow proto tcp from any to any port 80,443 comment trading-bot-emergency-ir"
 UFW_SHOW_ADDED_OWNED_RULE = "ufw allow 80,443/tcp comment 'trading-bot-emergency-ir'"
-UFW_SHOW_ADDED_PORT_RULE_RE = re.compile(r"^ufw allow 80,443/tcp(?: comment '[^']*')?$")
-UFW_STATUS_OWNED_RULE_RE = re.compile(
-    r"^\[\s*\d+\]\s+80,443/tcp(?:(?P<v6>\s+\(v6\))\s+ALLOW IN\s+Anywhere\s+\(v6\)|\s+ALLOW IN\s+Anywhere)"
-    r"\s+#\s+trading-bot-emergency-ir$"
+UFW_CONTROL_RULE_COMMENT = "three-site-wa-ir-control"
+UFW_CONTROL_SHOW_ADDED_RULE = "ufw allow 22/tcp comment 'three-site-wa-ir-control'"
+UFW_DEFAULT_POLICY_RE = re.compile(
+    r"^Default:\s+deny\s+\(incoming\),\s+allow\s+\(outgoing\),\s+(?:deny|disabled)\s+\(routed\)$"
+)
+IPTABLES_COUNTER_RE = re.compile(rb"\[\d+:\d+\]")
+IPTABLES_RULE_RE = re.compile(r"^-A\s+(?P<chain>\S+)\s+(?P<body>.+)$")
+IPTABLES_DPORT_RE = re.compile(r"(?:--dport|--dports|--destination-port)\s+(?P<ports>[0-9,:-]+)")
+IPTABLES_TARGET_RE = re.compile(r"(?:-j|--jump|--goto)\s+(?P<target>\S+)")
+IPTABLES_LOOPBACK_RE = re.compile(
+    r"(?:-(?:i|s)\s+lo\b|--(?:in-interface|source)\s+(?:lo|127(?:\.\d{1,3}){3}(?:/\d{1,2})?|::1(?:/128)?))"
+)
+IPTABLES_PRIVATE_DESTINATION_RE = re.compile(
+    r"(?:-(?:d)\s+|--destination\s+)(?:10(?:\.\d{1,3}){3}(?:/\d{1,2})?|"
+    r"127(?:\.\d{1,3}){3}(?:/\d{1,2})?|192\.168(?:\.\d{1,3}){2}(?:/\d{1,2})?|"
+    r"172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}(?:/\d{1,2})?|"
+    r"::1(?:/128)?|f[cd][0-9a-f:]+(?:/\d{1,3})?)\b",
+    re.IGNORECASE,
+)
+NFT_DPORT_RE = re.compile(
+    r"\b(?:tcp|th)\s+dport\s+(?P<ports>\{[^}]+\}|[0-9]+(?:[:-][0-9]+)?(?:\s*,\s*[0-9]+(?:[:-][0-9]+)?)*)(?=\s|$)",
+    re.IGNORECASE,
+)
+NFT_LOOPBACK_RE = re.compile(r"\b(?:iif|iifname)\s+(?:lo|\"lo\")\b", re.IGNORECASE)
+NFT_PRIVATE_DESTINATION_RE = re.compile(
+    r"\b(?:ip|ip6)\s+daddr\s+(?:10\.|127\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|::1\b|f[cd][0-9a-f:])",
+    re.IGNORECASE,
 )
 
 AGE_BINARY = "/usr/bin/age"
@@ -89,6 +121,10 @@ DOCKER_BINARY = "/usr/bin/docker"
 NGINX_BINARY = "/usr/sbin/nginx"
 SYSTEMCTL_BINARY = "/usr/bin/systemctl"
 UFW_BINARY = "/usr/sbin/ufw"
+IPTABLES_SAVE_BINARY = "/usr/sbin/iptables-save"
+IP6TABLES_SAVE_BINARY = "/usr/sbin/ip6tables-save"
+NFT_BINARY = "/usr/sbin/nft"
+PYTHON_BINARY = "/usr/bin/python3"
 
 
 class EmergencyActivationError(RuntimeError):
@@ -124,6 +160,11 @@ class ActivationPaths:
     )
     tls_pinned_fullchain: Path = Path("/etc/trading-bot-emergency/standalone/tls/fullchain.pem")
     tls_pinned_privkey: Path = Path("/etc/trading-bot-emergency/standalone/tls/privkey.pem")
+    ufw_defaults: Path = Path("/etc/default/ufw")
+    ufw_before_rules: Path = Path("/etc/ufw/before.rules")
+    ufw_after_rules: Path = Path("/etc/ufw/after.rules")
+    ufw_before6_rules: Path = Path("/etc/ufw/before6.rules")
+    ufw_after6_rules: Path = Path("/etc/ufw/after6.rules")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -173,6 +214,7 @@ class NginxLifecycleChanges:
 class UfwRuleState:
     rule_present: bool
     ipv6_rule_present: bool
+    baseline: Mapping[str, Any]
 
 
 def _fail(message: str) -> None:
@@ -298,8 +340,10 @@ def _read_root_regular(path: Path, *, label: str, maximum_bytes: int, private: b
             os.close(descriptor)
 
 
-def _hash_root_regular(path: Path, *, label: str, maximum_bytes: int) -> tuple[str, int]:
-    before = _root_regular(path, label=label, maximum_bytes=maximum_bytes)
+def _hash_root_regular(
+    path: Path, *, label: str, maximum_bytes: int, private: bool = True
+) -> tuple[str, int]:
+    before = _root_regular(path, label=label, maximum_bytes=maximum_bytes, private=private)
     descriptor: int | None = None
     try:
         descriptor = os.open(
@@ -537,7 +581,7 @@ def verify_campaign(
 
 
 def confirmation_phrase(campaign: VerifiedCampaign, *, stage: str, profile: str) -> str:
-    if stage not in {"prepare", "images", "database", "api", "tls", "prearm"}:
+    if stage not in {"prepare", "images", "database", "api", "tls", "firewall", "prearm"}:
         _fail("activation stage is invalid")
     if profile not in {"telegram-only", "sms-otp"}:
         _fail("activation profile is invalid")
@@ -578,6 +622,11 @@ def activation_plan(campaign: VerifiedCampaign, *, profile: str) -> dict[str, An
                 "stage": "tls",
                 "does": "verify the local certbot source and create a root-only pinned certificate/key receipt",
                 "confirm": confirmation_phrase(campaign, stage="tls", profile=profile),
+            },
+            {
+                "stage": "firewall",
+                "does": "record a human-confirmed raw firewall baseline and strict UFW ingress contract before any Nginx switch",
+                "confirm": confirmation_phrase(campaign, stage="firewall", profile=profile),
             },
             {
                 "stage": "prearm",
@@ -769,6 +818,7 @@ def _release_file_specs(release: Mapping[str, Any]) -> list[dict[str, Any]]:
         "scripts/render_emergency_ir_standalone_env.py",
         "scripts/verify_emergency_ir_standalone.py",
         "scripts/verify_emergency_ir_image_provenance.py",
+        "scripts/verify_emergency_ir_sms_egress_image.py",
         "scripts/emergency_ir_standalone_activate.py",
     }
     if not required.issubset(seen):
@@ -1249,6 +1299,164 @@ def _run_renderer(
     _docker_result(command, runner=runner, input_data=input_data, timeout=60)
 
 
+def _packaged_control_file(*, package_root: Path, relative: str, label: str) -> Path:
+    """Return one sealed, extracted control file only after a fresh safe read check."""
+
+    path = package_root / relative
+    _root_regular(path, label=label, maximum_bytes=MAX_JSON_BYTES)
+    return path
+
+
+def _run_packaged_control(
+    command: Sequence[str], *, label: str, runner: Callable[..., Any] = subprocess.run, timeout: int = 60
+) -> None:
+    """Execute one checked package control before Compose is allowed to mutate state."""
+
+    try:
+        result = runner(list(command), check=False, capture_output=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise EmergencyActivationError(f"{label} could not run") from exc
+    if getattr(result, "returncode", 1) != 0:
+        _fail(f"{label} failed")
+
+
+def _verify_rendered_emergency_semantics(
+    *,
+    package_root: Path,
+    paths: ActivationPaths,
+    prepared: Mapping[str, Any],
+    profile: str,
+    runner: Callable[..., Any] = subprocess.run,
+) -> None:
+    """Run sealed semantic verifiers before any ``docker compose up``.
+
+    The renderer only writes the private runtime environment.  This gate is
+    deliberately between rendering and every Docker/Compose operation, so a
+    malformed or accidentally broadened isolated configuration cannot create
+    a volume, network, or container.  The verifier scripts are themselves
+    read again as root-only regular files from the sealed extracted package.
+    """
+
+    source_sha = prepared.get("source_release_sha")
+    patch_sha = prepared.get("emergency_patch_sha")
+    if not isinstance(source_sha, str) or SHA_RE.fullmatch(source_sha) is None:
+        _fail("prepared Emergency source release identity is invalid")
+    if not isinstance(patch_sha, str) or SHA_RE.fullmatch(patch_sha) is None:
+        _fail("prepared Emergency patch identity is invalid")
+    if profile not in {"telegram-only", "sms-otp"}:
+        _fail("activation profile is invalid")
+
+    standalone_verifier = _packaged_control_file(
+        package_root=package_root,
+        relative="scripts/verify_emergency_ir_standalone.py",
+        label="Emergency standalone semantic verifier",
+    )
+    compose = _packaged_control_file(
+        package_root=package_root,
+        relative="deploy/emergency-ir/docker-compose.standalone.yml",
+        label="Emergency standalone Compose configuration",
+    )
+    nginx_name = "nginx.sms-otp.conf.template" if profile == "sms-otp" else "nginx.standalone.conf.template"
+    nginx = _packaged_control_file(
+        package_root=package_root,
+        relative=f"deploy/emergency-ir/{nginx_name}",
+        label="Emergency Nginx configuration template",
+    )
+    session_reset = _packaged_control_file(
+        package_root=package_root,
+        relative="deploy/emergency-ir/reset-emergency-sessions.sql",
+        label="Emergency session-reset SQL",
+    )
+    _root_regular(paths.runtime_env, label="Emergency rendered runtime environment", maximum_bytes=MAX_JSON_BYTES)
+    command = [
+        PYTHON_BINARY,
+        "-I",
+        "-B",
+        str(standalone_verifier),
+        "--profile",
+        profile,
+        "--env",
+        str(paths.runtime_env),
+        "--compose",
+        str(compose),
+        "--nginx",
+        str(nginx),
+        "--session-reset",
+        str(session_reset),
+    ]
+    if profile == "sms-otp":
+        sms_compose = _packaged_control_file(
+            package_root=package_root,
+            relative="deploy/emergency-ir/docker-compose.sms-otp.yml",
+            label="Emergency SMS Compose configuration",
+        )
+        sms_relay = _packaged_control_file(
+            package_root=package_root,
+            relative="deploy/emergency-ir/sms-egress.nginx.conf",
+            label="Emergency SMS relay configuration",
+        )
+        nginx_rate_limit = _packaged_control_file(
+            package_root=package_root,
+            relative="deploy/emergency-ir/nginx.sms-otp.rate-limit.conf",
+            label="Emergency SMS Nginx rate-limit configuration",
+        )
+        command.extend(
+            [
+                "--sms-compose",
+                str(sms_compose),
+                "--sms-relay",
+                str(sms_relay),
+                "--nginx-rate-limit",
+                str(nginx_rate_limit),
+            ]
+        )
+    _run_packaged_control(command, label="Emergency standalone semantic verification", runner=runner)
+
+    app_verifier = _packaged_control_file(
+        package_root=package_root,
+        relative="scripts/verify_emergency_ir_image_provenance.py",
+        label="Emergency application image verifier",
+    )
+    _run_packaged_control(
+        [
+            PYTHON_BINARY,
+            "-I",
+            "-B",
+            str(app_verifier),
+            "--image",
+            f"trading_bot_emergency_ir_app:{patch_sha}",
+            "--source-release-sha",
+            source_sha,
+            "--emergency-patch-sha",
+            patch_sha,
+        ],
+        label="Emergency application image provenance verification",
+        runner=runner,
+    )
+    if profile == "sms-otp":
+        sms_verifier = _packaged_control_file(
+            package_root=package_root,
+            relative="scripts/verify_emergency_ir_sms_egress_image.py",
+            label="Emergency SMS relay image verifier",
+        )
+        _run_packaged_control(
+            [
+                PYTHON_BINARY,
+                "-I",
+                "-B",
+                str(sms_verifier),
+                "--image",
+                f"trading_bot_emergency_ir_sms_egress:{patch_sha}",
+                "--source-release-sha",
+                source_sha,
+                "--emergency-patch-sha",
+                patch_sha,
+            ],
+            label="Emergency SMS relay image provenance verification",
+            runner=runner,
+        )
+
+
 def _assert_fresh_docker_resources(*, runner: Callable[..., Any] = subprocess.run, profile: str) -> None:
     names = [
         "trading-bot-emergency-ir-postgres", "trading-bot-emergency-ir-redis",
@@ -1339,11 +1547,14 @@ def database(
     _read_receipt(paths, campaign, stage="images-loaded")
     package_root = Path(str(prepared["package_root"]))
     settings = read_settings_bundle(settings_tar=_plain_path(paths, campaign.campaign_id, "settings"), profile=profile)
-    _assert_fresh_docker_resources(runner=runner, profile=profile)
     _ensure_current_link(paths=paths, package_root=package_root)
     _run_renderer(
         package_root=package_root, paths=paths, prepared=prepared, profile=profile, settings=settings, runner=runner
     )
+    _verify_rendered_emergency_semantics(
+        package_root=package_root, paths=paths, prepared=prepared, profile=profile, runner=runner
+    )
+    _assert_fresh_docker_resources(runner=runner, profile=profile)
     compose = _compose_command(package_root=package_root, runtime_env=paths.runtime_env, profile=profile, trailing=[])
     _docker_result([*compose, "config", "--quiet"], runner=runner, timeout=60)
     _docker_result([*compose, "up", "-d", "--pull", "never", "db", "redis"], runner=runner, timeout=300)
@@ -1391,6 +1602,9 @@ def api(
     prepared = _require_prepare(paths, campaign, profile=profile)
     _read_receipt(paths, campaign, stage="database-ready")
     package_root = Path(str(prepared["package_root"]))
+    _verify_rendered_emergency_semantics(
+        package_root=package_root, paths=paths, prepared=prepared, profile=profile, runner=runner
+    )
     compose = _compose_command(package_root=package_root, runtime_env=paths.runtime_env, profile=profile, trailing=[])
     _docker_result([*compose, "up", "-d", "--pull", "never", "api"], runner=runner, timeout=600)
     _wait_service_health(compose, "api", runner=runner)
@@ -1442,29 +1656,29 @@ def _read_certbot_tls_source(
         before = source.lstat()
     except OSError as exc:
         raise EmergencyActivationError(f"{label} source cannot be inspected") from exc
-    if stat.S_ISLNK(before.st_mode):
-        if before.st_uid != 0 or before.st_nlink != 1:
-            _fail(f"{label} source symlink is not root-controlled")
-        try:
-            target = source.resolve(strict=True)
-        except OSError as exc:
-            raise EmergencyActivationError(f"{label} source symlink cannot be resolved") from exc
-        if not target.is_relative_to(archive_root):
-            _fail(f"{label} source symlink escapes the trusted certbot archive")
-        _secure_directory(target.parent, create=False)
-        payload = _read_root_regular(
-            target, label=f"{label} archive target", maximum_bytes=MAX_CERTIFICATE_BYTES, private=private
-        )
-        try:
-            after = source.lstat()
-            resolved_after = source.resolve(strict=True)
-        except OSError as exc:
-            raise EmergencyActivationError(f"{label} source changed while being read") from exc
-        fields = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink", "st_size", "st_mtime_ns")
-        if any(getattr(before, field) != getattr(after, field) for field in fields) or resolved_after != target:
-            _fail(f"{label} source changed while being read")
-        return payload
-    return _read_root_regular(source, label=label, maximum_bytes=MAX_CERTIFICATE_BYTES, private=private)
+    if not stat.S_ISLNK(before.st_mode):
+        _fail(f"{label} source must be a root-controlled symlink into the trusted certbot archive")
+    if before.st_uid != 0 or before.st_nlink != 1:
+        _fail(f"{label} source symlink is not root-controlled")
+    try:
+        target = source.resolve(strict=True)
+    except OSError as exc:
+        raise EmergencyActivationError(f"{label} source symlink cannot be resolved") from exc
+    if not target.is_relative_to(archive_root):
+        _fail(f"{label} source symlink escapes the trusted certbot archive")
+    _secure_directory(target.parent, create=False)
+    payload = _read_root_regular(
+        target, label=f"{label} archive target", maximum_bytes=MAX_CERTIFICATE_BYTES, private=private
+    )
+    try:
+        after = source.lstat()
+        resolved_after = source.resolve(strict=True)
+    except OSError as exc:
+        raise EmergencyActivationError(f"{label} source changed while being read") from exc
+    fields = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink", "st_size", "st_mtime_ns")
+    if any(getattr(before, field) != getattr(after, field) for field in fields) or resolved_after != target:
+        _fail(f"{label} source changed while being read")
+    return payload
 
 
 def _validate_tls_material(*, fullchain: bytes, private_key: bytes) -> None:
@@ -1680,43 +1894,383 @@ def _ufw_query(
     return _result_text(result)
 
 
-def _capture_ufw_rule_state(*, runner: Callable[..., Any] = subprocess.run) -> UfwRuleState:
-    """Read the exact UFW-managed ingress rule without mutating the firewall."""
+def _normalized_ufw_line(value: str) -> str:
+    return " ".join(value.strip().split())
 
-    status_lines = [line.strip() for line in _ufw_query(("status", "numbered"), runner=runner).splitlines() if line.strip()]
-    if not status_lines or status_lines[0] != "Status: active":
+
+def _ufw_numbered_rows(text: str) -> tuple[str, ...]:
+    lines = [_normalized_ufw_line(line) for line in text.splitlines() if line.strip()]
+    if not lines or lines[0] != "Status: active":
         _fail("Emergency UFW must be active before ingress can be armed")
-    status_owned = [line for line in status_lines[1:] if UFW_RULE_COMMENT in line]
-    ipv4_matches = 0
-    ipv6_matches = 0
-    for line in status_owned:
-        matched = UFW_STATUS_OWNED_RULE_RE.fullmatch(line)
+    rows: list[str] = []
+    for line in lines[1:]:
+        if line == "To Action From" or re.fullmatch(r"-+ -+ -+", line):
+            continue
+        matched = re.fullmatch(r"\[\s*\d+\]\s+(.+)", line)
         if matched is None:
-            _fail("Emergency UFW rule has an unrecognized running form")
-        if matched.group("v6") is None:
-            ipv4_matches += 1
-        else:
-            ipv6_matches += 1
-    if ipv4_matches > 1 or ipv6_matches > 1:
-        _fail("Emergency UFW rule is duplicated")
+            _fail("Emergency UFW numbered-rule output is unrecognized")
+        rows.append(matched.group(1))
+    if len(rows) != len(set(rows)):
+        _fail("Emergency UFW numbered rules are duplicated")
+    return tuple(sorted(rows))
 
-    added_lines = [line.strip() for line in _ufw_query(("show", "added"), runner=runner).splitlines() if line.strip()]
+
+def _ufw_verbose_baseline(text: str, *, expect_emergency_rule: bool) -> tuple[str, ...]:
+    lines = [_normalized_ufw_line(line) for line in text.splitlines() if line.strip()]
+    if not lines or lines[0] != "Status: active":
+        _fail("Emergency UFW must be active before ingress can be armed")
+    defaults = [line for line in lines if line.startswith("Default:")]
+    if len(defaults) != 1 or UFW_DEFAULT_POLICY_RE.fullmatch(defaults[0]) is None:
+        _fail("Emergency UFW must retain an incoming-deny default policy")
+    owned = [line for line in lines if UFW_RULE_COMMENT in line]
+    expected_owned = {
+        "80,443/tcp ALLOW IN Anywhere # trading-bot-emergency-ir",
+        "80,443/tcp (v6) ALLOW IN Anywhere (v6) # trading-bot-emergency-ir",
+    }
+    if expect_emergency_rule:
+        if set(owned) != expected_owned or len(owned) != len(expected_owned):
+            _fail("Emergency UFW verbose state lacks the exact owned ingress rules")
+    elif owned:
+        _fail("Emergency UFW already exposes owned Emergency ingress before prearm")
+    return tuple(line for line in lines if line not in owned)
+
+
+def _ufw_baseline_payload(*, verbose: tuple[str, ...], numbered: tuple[str, ...], added: tuple[str, ...]) -> dict[str, Any]:
+    return {
+        "schema": UFW_BASELINE_SCHEMA,
+        "status_verbose": list(verbose),
+        "status_numbered": list(numbered),
+        "show_added": list(added),
+    }
+
+
+def _validate_ufw_baseline(value: Any) -> dict[str, Any]:
+    required = {"schema", "status_verbose", "status_numbered", "show_added"}
+    if not isinstance(value, dict) or set(value) != required or value.get("schema") != UFW_BASELINE_SCHEMA:
+        _fail("Emergency UFW baseline is malformed")
+    normalized: dict[str, Any] = {"schema": UFW_BASELINE_SCHEMA}
+    for key in ("status_verbose", "status_numbered", "show_added"):
+        rows = value.get(key)
+        if not isinstance(rows, list) or not rows or any(not isinstance(row, str) or not row for row in rows):
+            _fail("Emergency UFW baseline is malformed")
+        normalized[key] = list(rows)
+    return normalized
+
+
+def _ufw_baseline_digest(value: Mapping[str, Any]) -> str:
+    return hashlib.sha256(_canonical_json(value)).hexdigest()
+
+
+def _require_ufw_baseline(actual: UfwRuleState, expected: Any) -> None:
+    baseline = _validate_ufw_baseline(expected)
+    if dict(actual.baseline) != baseline:
+        _fail("Emergency UFW state drifted from the recorded safe baseline")
+
+
+def _capture_ufw_rule_state(
+    *, runner: Callable[..., Any] = subprocess.run, expect_emergency_rule: bool
+) -> UfwRuleState:
+    """Require the explicit safe UFW contract and capture its non-Emergency baseline.
+
+    Fresh prearm permits only the audited WA-IR control SSH rule under an
+    incoming-deny policy.  That prevents an old profile/range/broad rule from
+    making the new Nginx candidate public before its local probes.  The owned
+    80/443 rule is accepted only after the durable UFW-pending journal exists.
+    """
+
+    verbose = _ufw_verbose_baseline(
+        _ufw_query(("status", "verbose"), runner=runner), expect_emergency_rule=expect_emergency_rule
+    )
+    numbered = _ufw_numbered_rows(_ufw_query(("status", "numbered"), runner=runner))
+    expected_numbered = {
+        "22/tcp ALLOW IN Anywhere # three-site-wa-ir-control",
+        "22/tcp (v6) ALLOW IN Anywhere (v6) # three-site-wa-ir-control",
+    }
+    emergency_numbered = {
+        "80,443/tcp ALLOW IN Anywhere # trading-bot-emergency-ir",
+        "80,443/tcp (v6) ALLOW IN Anywhere (v6) # trading-bot-emergency-ir",
+    }
+    if set(numbered) != expected_numbered | (emergency_numbered if expect_emergency_rule else set()):
+        _fail("Emergency UFW numbered rules do not match the safe ingress contract")
+
+    added_lines = [_normalized_ufw_line(line) for line in _ufw_query(("show", "added"), runner=runner).splitlines() if line.strip()]
     if not added_lines or added_lines[0] != "Added user rules (see 'ufw status' for running firewall):":
         _fail("Emergency UFW added-rule state is unrecognized")
-    added_owned = [line for line in added_lines[1:] if UFW_RULE_COMMENT in line]
-    if any(line != UFW_SHOW_ADDED_OWNED_RULE for line in added_owned) or len(added_owned) > 1:
-        _fail("Emergency UFW stored rule has an unrecognized form")
-    conflicting_port_rules = [
-        line
-        for line in added_lines[1:]
-        if UFW_SHOW_ADDED_PORT_RULE_RE.fullmatch(line) is not None and line != UFW_SHOW_ADDED_OWNED_RULE
-    ]
-    if conflicting_port_rules:
-        _fail("Emergency UFW already has an unowned overlapping 80/443 rule")
-    rule_present = ipv4_matches == 1
-    if (len(added_owned) == 1) != rule_present:
-        _fail("Emergency UFW running and stored rule state disagree")
-    return UfwRuleState(rule_present=rule_present, ipv6_rule_present=ipv6_matches == 1)
+    added = tuple(sorted(added_lines[1:]))
+    expected_added = {UFW_CONTROL_SHOW_ADDED_RULE}
+    if expect_emergency_rule:
+        expected_added.add(UFW_SHOW_ADDED_OWNED_RULE)
+    if set(added) != expected_added or len(added) != len(expected_added):
+        _fail("Emergency UFW stored rules do not match the safe ingress contract")
+
+    return UfwRuleState(
+        rule_present=expect_emergency_rule,
+        ipv6_rule_present=expect_emergency_rule,
+        baseline=_ufw_baseline_payload(verbose=verbose, numbered=numbered if not expect_emergency_rule else tuple(sorted(expected_numbered)), added=added if not expect_emergency_rule else (UFW_CONTROL_SHOW_ADDED_RULE,)),
+    )
+
+
+def _firewall_command_output(
+    command: Sequence[str], *, runner: Callable[..., Any] = subprocess.run
+) -> bytes:
+    environment = dict(os.environ)
+    environment.update({"LANG": "C", "LANGUAGE": "C", "LC_ALL": "C"})
+    try:
+        result = runner(
+            list(command), check=False, capture_output=True, timeout=60, env=environment
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise EmergencyActivationError("Emergency raw firewall state cannot be inspected") from exc
+    if getattr(result, "returncode", 1) != 0:
+        _fail("Emergency raw firewall state cannot be inspected")
+    output = getattr(result, "stdout", b"")
+    stderr = getattr(result, "stderr", b"")
+    if isinstance(output, str):
+        output = output.encode("utf-8")
+    if isinstance(stderr, str):
+        stderr = stderr.encode("utf-8")
+    if not isinstance(output, bytes) or not output or len(output) > MAX_JSON_BYTES:
+        _fail("Emergency raw firewall state is invalid")
+    if not isinstance(stderr, bytes) or len(stderr) > MAX_JSON_BYTES:
+        _fail("Emergency raw firewall diagnostics are invalid")
+    return output
+
+
+def _normalized_nft_ruleset(payload: bytes) -> bytes:
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise EmergencyActivationError("Emergency nft ruleset is not UTF-8") from exc
+    # nft emits live packet/byte counters in otherwise-identical rules.  Only
+    # those two decimal values are normalized; every chain, rule and token is
+    # retained in the attested representation.
+    return NFT_COUNTER_RE.sub("counter packets <n> bytes <n>", text).encode("utf-8")
+
+
+def _normalized_iptables_save(payload: bytes) -> bytes:
+    """Normalize only iptables-save's live ``[packets:bytes]`` counters."""
+
+    return IPTABLES_COUNTER_RE.sub(b"[<n>:<n>]", payload)
+
+
+def _port_expression_contains_http_port(value: str) -> bool:
+    """Return true only when a literal/range/set includes TCP 80 or 443."""
+
+    normalized = value.strip().strip("{}").replace(" ", "")
+    if not normalized:
+        return False
+    for component in normalized.split(","):
+        if not component:
+            return False
+        if ":" in component:
+            lower_raw, upper_raw = component.split(":", 1)
+        elif "-" in component:
+            lower_raw, upper_raw = component.split("-", 1)
+        else:
+            if not component.isdecimal():
+                return False
+            if int(component) in {80, 443}:
+                return True
+            continue
+        if not lower_raw.isdecimal() or not upper_raw.isdecimal():
+            return False
+        lower, upper = int(lower_raw), int(upper_raw)
+        if lower > upper or lower < 1 or upper > 65535:
+            return False
+        if lower <= 80 <= upper or lower <= 443 <= upper:
+            return True
+    return False
+
+
+def _iptables_raw_exposure(*, payload: bytes, family: str) -> None:
+    """Reject an unambiguous public TCP 80/443 path in raw iptables state.
+
+    A Docker forward rule for a private container's *post-DNAT* port 443 is
+    not a host public-443 publication.  It is therefore allowed only when the
+    rule carries a private destination; the corresponding NAT rule is judged
+    by its original destination port (for example 8443 is allowed, 443 is
+    rejected).
+    """
+
+    try:
+        lines = payload.decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise EmergencyActivationError("Emergency raw firewall state is not UTF-8") from exc
+    table = ""
+    for raw in lines:
+        if raw.startswith("*"):
+            table = raw[1:]
+            continue
+        matched = IPTABLES_RULE_RE.fullmatch(raw)
+        if matched is None:
+            continue
+        body = matched.group("body")
+        dport = IPTABLES_DPORT_RE.search(body)
+        if dport is None or not _port_expression_contains_http_port(dport.group("ports")):
+            continue
+        if IPTABLES_LOOPBACK_RE.search(body) is not None:
+            continue
+        target_match = IPTABLES_TARGET_RE.search(body)
+        target = target_match.group("target").upper() if target_match is not None else ""
+        if target in {"DROP", "REJECT"}:
+            continue
+        # The private container accept after a non-public host-port DNAT is
+        # not a new public listener.  Never grant this exception to INPUT or
+        # nat, where the packet still represents a host-facing port decision.
+        if table != "nat" and matched.group("chain") != "INPUT" and IPTABLES_PRIVATE_DESTINATION_RE.search(body):
+            continue
+        _fail(
+            f"Emergency raw {family} firewall exposes or routes TCP 80/443 before ingress prearm"
+        )
+
+
+def _nft_raw_exposure(*, payload: bytes) -> None:
+    """Apply the same bounded public-port rule to nft syntax."""
+
+    try:
+        lines = payload.decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise EmergencyActivationError("Emergency nft ruleset is not UTF-8") from exc
+    for raw in lines:
+        line = raw.split("#", 1)[0]
+        matched = NFT_DPORT_RE.search(line)
+        if matched is None or not _port_expression_contains_http_port(matched.group("ports")):
+            continue
+        lowered = line.lower()
+        if NFT_LOOPBACK_RE.search(line) is not None or " drop" in lowered or " reject" in lowered:
+            continue
+        # nftables' Docker forward allow is post-DNAT and bound to the
+        # private container destination.  A direct input/NAT dport rule has
+        # no such exemption and is rejected.
+        if NFT_PRIVATE_DESTINATION_RE.search(line) is not None and " dnat " not in lowered and " redirect" not in lowered:
+            continue
+        _fail("Emergency raw nft firewall exposes or routes TCP 80/443 before ingress prearm")
+
+
+def _assert_no_raw_external_http_exposure(*, iptables: bytes, ip6tables: bytes, nft: bytes) -> None:
+    """Require a closed raw 80/443 baseline before the explicit UFW PONR."""
+
+    _iptables_raw_exposure(payload=iptables, family="IPv4")
+    _iptables_raw_exposure(payload=ip6tables, family="IPv6")
+    _nft_raw_exposure(payload=nft)
+
+
+def _ufw_static_hashes(paths: ActivationPaths) -> dict[str, str]:
+    values = {
+        "defaults": paths.ufw_defaults,
+        "before_rules": paths.ufw_before_rules,
+        "after_rules": paths.ufw_after_rules,
+        "before6_rules": paths.ufw_before6_rules,
+        "after6_rules": paths.ufw_after6_rules,
+    }
+    result: dict[str, str] = {}
+    for name, path in values.items():
+        digest, _ = _hash_root_regular(
+            path, label=f"Emergency UFW static {name}", maximum_bytes=MAX_JSON_BYTES, private=False
+        )
+        result[name] = digest
+    defaults = _read_root_regular(
+        paths.ufw_defaults, label="Emergency UFW defaults", maximum_bytes=MAX_JSON_BYTES, private=False
+    )
+    if not any(line.strip() == b"IPV6=yes" for line in defaults.splitlines()):
+        _fail("Emergency UFW must have IPV6=yes for paired ingress rules")
+    return result
+
+
+def _capture_firewall_attestation(
+    *, paths: ActivationPaths, runner: Callable[..., Any] = subprocess.run
+) -> dict[str, Any]:
+    version_text = _firewall_command_output((UFW_BINARY, "--version"), runner=runner).decode("utf-8", "strict").splitlines()
+    if not version_text or UFW_VERSION_RE.fullmatch(version_text[0].strip()) is None:
+        _fail("Emergency UFW version is outside the attested 0.36 contract")
+    ufw_state = _capture_ufw_rule_state(runner=runner, expect_emergency_rule=False)
+    iptables = _firewall_command_output((IPTABLES_SAVE_BINARY,), runner=runner)
+    ip6tables = _firewall_command_output((IP6TABLES_SAVE_BINARY,), runner=runner)
+    nft = _firewall_command_output((NFT_BINARY, "list", "ruleset"), runner=runner)
+    _assert_no_raw_external_http_exposure(iptables=iptables, ip6tables=ip6tables, nft=nft)
+    return {
+        "schema": FIREWALL_ATTESTATION_SCHEMA,
+        "ufw_version": version_text[0].strip(),
+        "ufw_baseline": dict(ufw_state.baseline),
+        "ufw_static_sha256": _ufw_static_hashes(paths),
+        "iptables_save_sha256": hashlib.sha256(_normalized_iptables_save(iptables)).hexdigest(),
+        "ip6tables_save_sha256": hashlib.sha256(_normalized_iptables_save(ip6tables)).hexdigest(),
+        "nft_ruleset_sha256": hashlib.sha256(_normalized_nft_ruleset(nft)).hexdigest(),
+    }
+
+
+def _validate_firewall_attestation(value: Any) -> dict[str, Any]:
+    required = {
+        "schema",
+        "ufw_version",
+        "ufw_baseline",
+        "ufw_static_sha256",
+        "iptables_save_sha256",
+        "ip6tables_save_sha256",
+        "nft_ruleset_sha256",
+    }
+    if not isinstance(value, dict) or set(value) != required or value.get("schema") != FIREWALL_ATTESTATION_SCHEMA:
+        _fail("Emergency firewall attestation is malformed")
+    version = value.get("ufw_version")
+    if not isinstance(version, str) or UFW_VERSION_RE.fullmatch(version) is None:
+        _fail("Emergency firewall attestation has an unsupported UFW version")
+    static_hashes = value.get("ufw_static_sha256")
+    expected_static = {"defaults", "before_rules", "after_rules", "before6_rules", "after6_rules"}
+    if (
+        not isinstance(static_hashes, dict)
+        or set(static_hashes) != expected_static
+        or any(not isinstance(digest, str) or SHA256_RE.fullmatch(digest) is None for digest in static_hashes.values())
+    ):
+        _fail("Emergency firewall static attestation is malformed")
+    normalized = {
+        "schema": FIREWALL_ATTESTATION_SCHEMA,
+        "ufw_version": version,
+        "ufw_baseline": _validate_ufw_baseline(value.get("ufw_baseline")),
+        "ufw_static_sha256": {name: static_hashes[name] for name in sorted(expected_static)},
+    }
+    for name in ("iptables_save_sha256", "ip6tables_save_sha256", "nft_ruleset_sha256"):
+        digest = value.get(name)
+        if not isinstance(digest, str) or SHA256_RE.fullmatch(digest) is None:
+            _fail("Emergency raw firewall attestation is malformed")
+        normalized[name] = digest
+    return normalized
+
+
+def firewall_attest(
+    *,
+    campaign: VerifiedCampaign,
+    paths: ActivationPaths,
+    profile: str,
+    runner: Callable[..., Any] = subprocess.run,
+) -> dict[str, Any]:
+    """Record a human-confirmed, immutable raw firewall baseline before prearm."""
+
+    if _path_exists_or_symlink(_receipt_path(paths, campaign.campaign_id, "firewall-attested")):
+        _fail("Emergency firewall attestation already exists; refusing to overwrite it")
+    _require_prepare(paths, campaign, profile=profile)
+    _read_receipt(paths, campaign, stage="api-ready")
+    _require_pinned_tls(paths=paths, campaign=campaign, profile=profile)
+    payload = {
+        "profile": profile,
+        "attestation": _validate_firewall_attestation(
+            _capture_firewall_attestation(paths=paths, runner=runner)
+        ),
+    }
+    _write_receipt(paths, campaign, stage="firewall-attested", payload=payload)
+    return payload
+
+
+def _require_firewall_attestation(
+    *, paths: ActivationPaths, campaign: VerifiedCampaign, profile: str, runner: Callable[..., Any]
+) -> dict[str, Any]:
+    payload = _read_receipt(paths, campaign, stage="firewall-attested")
+    if set(payload) != {"profile", "attestation"} or payload.get("profile") != profile:
+        _fail("Emergency firewall attestation is not bound to this profile")
+    recorded = _validate_firewall_attestation(payload.get("attestation"))
+    observed = _validate_firewall_attestation(_capture_firewall_attestation(paths=paths, runner=runner))
+    if _canonical_json(recorded) != _canonical_json(observed):
+        _fail("Emergency raw firewall state differs from the confirmed attestation")
+    return recorded
 
 
 def _capture_nginx_lifecycle(*, runner: Callable[..., Any] = subprocess.run) -> NginxLifecycle:
@@ -1859,10 +2413,76 @@ def _local_tls_probe() -> None:
         raise EmergencyActivationError("Emergency local TLS ingress probe failed") from exc
 
 
-def _prearm_recovery_paths(paths: ActivationPaths, campaign: VerifiedCampaign) -> tuple[Path, Path]:
-    return (
-        paths.nginx_backup_root / f"default.before-{campaign.campaign_id}",
-        paths.nginx_backup_root / f"emergency-site.failed-{campaign.campaign_id}",
+NGINX_DUMP_FILE_RE = re.compile(r"^# configuration file (?P<path>[^:]+):$")
+NGINX_PUBLIC_LISTEN_RE = re.compile(
+    r"(?:^|[;{}])\s*listen\s+(?:(?:\[[^\]]+\]|[^\s;{}]+):)?(?P<port>80|443)(?=\s|;)",
+    re.ASCII,
+)
+
+
+def _assert_nginx_public_listener_inventory(
+    *,
+    paths: ActivationPaths,
+    allowed_config: Path,
+    required_ports: frozenset[int],
+    runner: Callable[..., Any] = subprocess.run,
+) -> None:
+    """Fail closed if an uncontrolled Nginx file can compete on public ports.
+
+    The installed Debian default vhost legitimately has only port 80 before
+    Emergency prearm.  It is safe only when it is the *sole* effective public
+    listener and it is the exact symlink that the transaction journals and
+    restores.  The rendered Emergency candidate must instead own both ports.
+    """
+
+    if not required_ports or not required_ports.issubset({80, 443}):
+        _fail("Emergency Nginx listener inventory request is invalid")
+
+    try:
+        result = runner([NGINX_BINARY, "-T"], check=False, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise EmergencyActivationError("Emergency Nginx listener inventory cannot be inspected") from exc
+    if getattr(result, "returncode", 1) != 0:
+        _fail("Emergency Nginx listener inventory cannot be inspected")
+    output = _result_text(result)
+    current: Path | None = None
+    listeners: dict[int, set[Path]] = {80: set(), 443: set()}
+    for raw in output.splitlines():
+        header = NGINX_DUMP_FILE_RE.fullmatch(raw.strip())
+        if header is not None:
+            current = Path(header.group("path"))
+            continue
+        for matched in NGINX_PUBLIC_LISTEN_RE.finditer(raw.split("#", 1)[0]):
+            if current is None:
+                _fail("Emergency Nginx listener inventory has an unbound public listener")
+            listeners[int(matched.group("port"))].add(current)
+    actual_ports = {port for port, source_files in listeners.items() if source_files}
+    if (
+        not required_ports.issubset(actual_ports)
+        or any(source_files != {allowed_config} for source_files in listeners.values() if source_files)
+    ):
+        _fail("Emergency Nginx has an uncontrolled public 80/443 listener")
+
+
+@dataclasses.dataclass(frozen=True)
+class PrearmAttempt:
+    attempt_id: str
+    backup: Path
+    failed: Path
+
+
+def _attempt_stage(attempt_id: str, state: str) -> str:
+    if PREARM_ATTEMPT_ID_RE.fullmatch(attempt_id) is None or state not in {"intent", "ufw-pending", "aborted", "armed"}:
+        _fail("Emergency prearm attempt identity is invalid")
+    return f"prearm-attempt-{attempt_id}-{state}"
+
+
+def _attempt_paths(paths: ActivationPaths, campaign: VerifiedCampaign, attempt_id: str) -> PrearmAttempt:
+    _attempt_stage(attempt_id, "intent")
+    return PrearmAttempt(
+        attempt_id=attempt_id,
+        backup=paths.nginx_backup_root / f"default.before-{campaign.campaign_id}.{attempt_id}",
+        failed=paths.nginx_backup_root / f"emergency-site.failed-{campaign.campaign_id}.{attempt_id}",
     )
 
 
@@ -1874,85 +2494,6 @@ def _journal_lifecycle(value: Any, *, label: str) -> NginxLifecycle:
     return NginxLifecycle(enabled=value["enabled"], active=value["active"])
 
 
-def _prearm_intent_payload(
-    *,
-    paths: ActivationPaths,
-    campaign: VerifiedCampaign,
-    profile: str,
-    lifecycle: NginxLifecycle,
-    ufw_state: UfwRuleState,
-    backup: Path,
-    failed: Path,
-) -> dict[str, Any]:
-    nginx_sha256, _ = _hash_root_regular(
-        paths.nginx_available,
-        label="Emergency rendered Nginx configuration",
-        maximum_bytes=MAX_JSON_BYTES,
-    )
-    return {
-        "schema": PREARM_JOURNAL_SCHEMA,
-        "profile": profile,
-        "nginx_available_path": str(paths.nginx_available),
-        "nginx_available_sha256": nginx_sha256,
-        "nginx_enabled_path": str(paths.nginx_enabled),
-        "nginx_enabled_target": str(paths.nginx_available),
-        "nginx_default_path": str(paths.nginx_default),
-        "nginx_default_backup_path": str(backup),
-        "nginx_default_target": _root_owned_symlink_target(
-            paths.nginx_default, label="existing Nginx default site"
-        ),
-        "nginx_failed_path": str(failed),
-        "initial_lifecycle": dataclasses.asdict(lifecycle),
-        "expected_lifecycle": {"enabled": True, "active": True},
-        "ufw_rule_present_before": ufw_state.rule_present,
-    }
-
-
-def _read_prearm_intent(
-    *, paths: ActivationPaths, campaign: VerifiedCampaign, profile: str
-) -> dict[str, Any]:
-    payload = _read_receipt(paths, campaign, stage=PREARM_INTENT_STAGE)
-    backup, failed = _prearm_recovery_paths(paths, campaign)
-    expected_paths = {
-        "nginx_available_path": str(paths.nginx_available),
-        "nginx_enabled_path": str(paths.nginx_enabled),
-        "nginx_enabled_target": str(paths.nginx_available),
-        "nginx_default_path": str(paths.nginx_default),
-        "nginx_default_backup_path": str(backup),
-        "nginx_failed_path": str(failed),
-    }
-    required = {
-        "schema",
-        "profile",
-        "nginx_available_path",
-        "nginx_available_sha256",
-        "nginx_enabled_path",
-        "nginx_enabled_target",
-        "nginx_default_path",
-        "nginx_default_backup_path",
-        "nginx_default_target",
-        "nginx_failed_path",
-        "initial_lifecycle",
-        "expected_lifecycle",
-        "ufw_rule_present_before",
-    }
-    if set(payload) != required or payload.get("schema") != PREARM_JOURNAL_SCHEMA or payload.get("profile") != profile:
-        _fail("Emergency prearm transaction journal is malformed")
-    if any(payload.get(key) != value for key, value in expected_paths.items()):
-        _fail("Emergency prearm transaction journal is not bound to this ingress layout")
-    if not isinstance(payload.get("nginx_default_target"), str) or not payload["nginx_default_target"] or "\x00" in payload["nginx_default_target"]:
-        _fail("Emergency prearm transaction journal has an invalid default-site target")
-    if not isinstance(payload.get("nginx_available_sha256"), str) or SHA256_RE.fullmatch(payload["nginx_available_sha256"]) is None:
-        _fail("Emergency prearm transaction journal has an invalid Nginx digest")
-    _journal_lifecycle(payload.get("initial_lifecycle"), label="Emergency prearm initial lifecycle")
-    expected_lifecycle = _journal_lifecycle(payload.get("expected_lifecycle"), label="Emergency prearm expected lifecycle")
-    if expected_lifecycle != NginxLifecycle(enabled=True, active=True):
-        _fail("Emergency prearm transaction journal has an invalid final lifecycle")
-    if type(payload.get("ufw_rule_present_before")) is not bool:
-        _fail("Emergency prearm transaction journal has an invalid UFW pre-state")
-    return payload
-
-
 def _prearm_action(lifecycle: NginxLifecycle) -> str:
     if lifecycle.active:
         return "reloaded"
@@ -1961,21 +2502,144 @@ def _prearm_action(lifecycle: NginxLifecycle) -> str:
     return "enabled-and-started"
 
 
-def _prearmed_payload(
+def _ensure_create_or_identical(path: Path, payload: bytes, *, label: str) -> None:
+    if not _path_exists_or_symlink(path):
+        _write_create_only(path, payload)
+        return
+    existing = _read_root_regular(path, label=label, maximum_bytes=MAX_JSON_BYTES)
+    if not hmac.compare_digest(existing, payload):
+        _fail(f"{label} already exists with different content")
+
+
+def _prearm_attempt_intent_payload(
     *,
+    paths: ActivationPaths,
+    campaign: VerifiedCampaign,
     profile: str,
-    intent: Mapping[str, Any],
-    final_lifecycle: NginxLifecycle,
+    attempt: PrearmAttempt,
+    lifecycle: NginxLifecycle,
+    ufw_baseline: Mapping[str, Any],
+) -> dict[str, Any]:
+    nginx_sha256, _ = _hash_root_regular(
+        paths.nginx_available,
+        label="Emergency rendered Nginx configuration",
+        maximum_bytes=MAX_JSON_BYTES,
+    )
+    baseline = _validate_ufw_baseline(dict(ufw_baseline))
+    return {
+        "schema": PREARM_ATTEMPT_INTENT_SCHEMA,
+        "profile": profile,
+        "attempt_id": attempt.attempt_id,
+        "nginx_available_path": str(paths.nginx_available),
+        "nginx_available_sha256": nginx_sha256,
+        "nginx_enabled_path": str(paths.nginx_enabled),
+        "nginx_enabled_target": str(paths.nginx_available),
+        "nginx_default_path": str(paths.nginx_default),
+        "nginx_default_backup_path": str(attempt.backup),
+        "nginx_default_target": _root_owned_symlink_target(
+            paths.nginx_default, label="existing Nginx default site"
+        ),
+        "nginx_failed_path": str(attempt.failed),
+        "initial_lifecycle": dataclasses.asdict(lifecycle),
+        "expected_lifecycle": {"enabled": True, "active": True},
+        "ufw_baseline": baseline,
+        "ufw_baseline_sha256": _ufw_baseline_digest(baseline),
+    }
+
+
+def _prearm_attempt_intent_sha256(intent: Mapping[str, Any]) -> str:
+    return hashlib.sha256(_canonical_json(intent)).hexdigest()
+
+
+def _read_prearm_attempt_intent(
+    *, paths: ActivationPaths, campaign: VerifiedCampaign, profile: str, attempt: PrearmAttempt
+) -> dict[str, Any]:
+    payload = _read_receipt(paths, campaign, stage=_attempt_stage(attempt.attempt_id, "intent"))
+    required = {
+        "schema", "profile", "attempt_id", "nginx_available_path", "nginx_available_sha256",
+        "nginx_enabled_path", "nginx_enabled_target", "nginx_default_path", "nginx_default_backup_path",
+        "nginx_default_target", "nginx_failed_path", "initial_lifecycle", "expected_lifecycle",
+        "ufw_baseline", "ufw_baseline_sha256",
+    }
+    expected_paths = {
+        "nginx_available_path": str(paths.nginx_available),
+        "nginx_enabled_path": str(paths.nginx_enabled),
+        "nginx_enabled_target": str(paths.nginx_available),
+        "nginx_default_path": str(paths.nginx_default),
+        "nginx_default_backup_path": str(attempt.backup),
+        "nginx_failed_path": str(attempt.failed),
+    }
+    if (
+        set(payload) != required
+        or payload.get("schema") != PREARM_ATTEMPT_INTENT_SCHEMA
+        or payload.get("profile") != profile
+        or payload.get("attempt_id") != attempt.attempt_id
+        or any(payload.get(key) != value for key, value in expected_paths.items())
+    ):
+        _fail("Emergency prearm attempt intent is malformed")
+    if not isinstance(payload.get("nginx_default_target"), str) or not payload["nginx_default_target"] or "\x00" in payload["nginx_default_target"]:
+        _fail("Emergency prearm attempt intent has an invalid default-site target")
+    if not isinstance(payload.get("nginx_available_sha256"), str) or SHA256_RE.fullmatch(payload["nginx_available_sha256"]) is None:
+        _fail("Emergency prearm attempt intent has an invalid Nginx digest")
+    _journal_lifecycle(payload.get("initial_lifecycle"), label="Emergency prearm attempt initial lifecycle")
+    if _journal_lifecycle(payload.get("expected_lifecycle"), label="Emergency prearm attempt final lifecycle") != NginxLifecycle(True, True):
+        _fail("Emergency prearm attempt intent has an invalid final lifecycle")
+    baseline = _validate_ufw_baseline(payload.get("ufw_baseline"))
+    if payload.get("ufw_baseline_sha256") != _ufw_baseline_digest(baseline):
+        _fail("Emergency prearm attempt intent has an invalid UFW baseline digest")
+    return dict(payload)
+
+
+def _prearm_pending_payload(*, attempt: PrearmAttempt, intent: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "schema": PREARM_ATTEMPT_PENDING_SCHEMA,
+        "attempt_id": attempt.attempt_id,
+        "intent_sha256": _prearm_attempt_intent_sha256(intent),
+        "ufw_baseline_sha256": intent["ufw_baseline_sha256"],
+    }
+
+
+def _read_prearm_pending(
+    *, paths: ActivationPaths, campaign: VerifiedCampaign, attempt: PrearmAttempt, intent: Mapping[str, Any]
+) -> None:
+    payload = _read_receipt(paths, campaign, stage=_attempt_stage(attempt.attempt_id, "ufw-pending"))
+    if payload != _prearm_pending_payload(attempt=attempt, intent=intent):
+        _fail("Emergency prearm UFW-pending journal is malformed")
+
+
+def _prearm_aborted_payload(*, attempt: PrearmAttempt, intent: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "schema": PREARM_ATTEMPT_ABORTED_SCHEMA,
+        "attempt_id": attempt.attempt_id,
+        "intent_sha256": _prearm_attempt_intent_sha256(intent),
+        "rollback": "proven-before-ufw-pending",
+    }
+
+
+def _write_prearm_aborted(
+    *, paths: ActivationPaths, campaign: VerifiedCampaign, attempt: PrearmAttempt, intent: Mapping[str, Any]
+) -> None:
+    stage = _attempt_stage(attempt.attempt_id, "aborted")
+    payload = _prearm_aborted_payload(attempt=attempt, intent=intent)
+    receipt_path = _receipt_path(paths, campaign.campaign_id, stage)
+    if _path_exists_or_symlink(receipt_path):
+        if _read_receipt(paths, campaign, stage=stage) != payload:
+            _fail("Emergency prearm aborted journal disagrees with the proven rollback")
+        return
+    _write_receipt(paths, campaign, stage=stage, payload=payload)
+
+
+def _prearmed_payload(
+    *, profile: str, attempt: PrearmAttempt, intent: Mapping[str, Any], final_lifecycle: NginxLifecycle,
     final_ufw: UfwRuleState,
 ) -> dict[str, Any]:
-    initial_lifecycle = _journal_lifecycle(intent["initial_lifecycle"], label="Emergency prearm initial lifecycle")
-    if final_lifecycle != NginxLifecycle(enabled=True, active=True) or not final_ufw.rule_present:
+    initial_lifecycle = _journal_lifecycle(intent["initial_lifecycle"], label="Emergency prearm attempt initial lifecycle")
+    if final_lifecycle != NginxLifecycle(True, True) or not final_ufw.rule_present or not final_ufw.ipv6_rule_present:
         _fail("Emergency final ingress state cannot be recorded")
-    rule_present_before = intent["ufw_rule_present_before"]
-    if type(rule_present_before) is not bool:
-        _fail("Emergency prearm transaction journal has an invalid UFW pre-state")
+    _require_ufw_baseline(final_ufw, intent["ufw_baseline"])
     return {
         "profile": profile,
+        "attempt_id": attempt.attempt_id,
         "nginx": "prearmed",
         "nginx_lifecycle": {
             "before": dataclasses.asdict(initial_lifecycle),
@@ -1984,326 +2648,398 @@ def _prearmed_payload(
         },
         "ufw": {
             "command": UFW_RULE_COMMAND_TEXT,
-            "action": "already-present" if rule_present_before else "added",
-            "rule_present_before": rule_present_before,
-            "ipv6_rule_present_final": final_ufw.ipv6_rule_present,
+            "action": "added",
+            "ipv6_rule_present_final": True,
+            "baseline_sha256": intent["ufw_baseline_sha256"],
         },
         "transaction": {
-            "intent_stage": PREARM_INTENT_STAGE,
-            "armed_stage": PREARM_ARMED_STAGE,
+            "intent_stage": _attempt_stage(attempt.attempt_id, "intent"),
+            "pending_stage": _attempt_stage(attempt.attempt_id, "ufw-pending"),
+            "armed_stage": _attempt_stage(attempt.attempt_id, "armed"),
         },
     }
 
 
-def _prearm_intent_sha256(intent: Mapping[str, Any]) -> str:
-    return hashlib.sha256(_canonical_json(intent)).hexdigest()
-
-
-def _prearm_armed_payload(*, intent: Mapping[str, Any], prearmed_payload: Mapping[str, Any]) -> dict[str, Any]:
+def _prearm_armed_payload(*, attempt: PrearmAttempt, intent: Mapping[str, Any], prearmed_payload: Mapping[str, Any]) -> dict[str, Any]:
     return {
-        "schema": PREARM_ARMED_SCHEMA,
-        "intent_sha256": _prearm_intent_sha256(intent),
+        "schema": PREARM_ATTEMPT_ARMED_SCHEMA,
+        "attempt_id": attempt.attempt_id,
+        "intent_sha256": _prearm_attempt_intent_sha256(intent),
         "prearmed_payload": dict(prearmed_payload),
     }
 
 
 def _read_prearm_armed(
-    *, paths: ActivationPaths, campaign: VerifiedCampaign, intent: Mapping[str, Any]
+    *, paths: ActivationPaths, campaign: VerifiedCampaign, attempt: PrearmAttempt, intent: Mapping[str, Any]
 ) -> dict[str, Any]:
-    payload = _read_receipt(paths, campaign, stage=PREARM_ARMED_STAGE)
-    if (
-        set(payload) != {"schema", "intent_sha256", "prearmed_payload"}
-        or payload.get("schema") != PREARM_ARMED_SCHEMA
-        or payload.get("intent_sha256") != _prearm_intent_sha256(intent)
-        or not isinstance(payload.get("prearmed_payload"), dict)
-    ):
+    payload = _read_receipt(paths, campaign, stage=_attempt_stage(attempt.attempt_id, "armed"))
+    expected = _prearm_armed_payload(attempt=attempt, intent=intent, prearmed_payload=payload.get("prearmed_payload", {}))
+    if payload != expected or not isinstance(payload.get("prearmed_payload"), dict):
         _fail("Emergency armed ingress journal is malformed")
     return dict(payload["prearmed_payload"])
 
 
-def _verify_prearm_final_state(
-    *,
-    paths: ActivationPaths,
-    campaign: VerifiedCampaign,
-    intent: Mapping[str, Any],
-    profile: str,
-    runner: Callable[..., Any],
-    tls_probe: Callable[[], None],
-    staging_listener: Callable[[int], None],
-) -> tuple[NginxLifecycle, UfwRuleState]:
-    """Verify a pending transaction without changing Nginx, UFW, or Docker."""
-
-    current_intent = _read_prearm_intent(paths=paths, campaign=campaign, profile=profile)
-    if current_intent != dict(intent):
-        _fail("Emergency prearm transaction journal changed during recovery")
+def _verify_attempt_configuration(paths: ActivationPaths, intent: Mapping[str, Any]) -> None:
     _secure_directory(paths.nginx_available.parent, create=False)
-    actual_nginx_sha256, _ = _hash_root_regular(
-        paths.nginx_available,
-        label="Emergency rendered Nginx configuration",
-        maximum_bytes=MAX_JSON_BYTES,
+    digest, _ = _hash_root_regular(
+        paths.nginx_available, label="Emergency rendered Nginx configuration", maximum_bytes=MAX_JSON_BYTES
     )
-    if actual_nginx_sha256 != intent["nginx_available_sha256"]:
-        _fail("Emergency final ingress state has a different Nginx configuration")
+    if digest != intent["nginx_available_sha256"]:
+        _fail("Emergency prearm attempt has a different Nginx configuration")
+
+
+def _assert_attempt_original_state(
+    *, paths: ActivationPaths, attempt: PrearmAttempt, intent: Mapping[str, Any], runner: Callable[..., Any]
+) -> None:
+    _verify_attempt_configuration(paths, intent)
+    if _root_owned_symlink_target(paths.nginx_default, label="Emergency original Nginx default site") != intent["nginx_default_target"]:
+        _fail("Emergency prearm attempt did not restore the original default site")
+    _require_absent(paths.nginx_enabled, label="Emergency original enabled Nginx path")
+    _require_absent(attempt.backup, label="Emergency original Nginx backup path")
+    if _path_exists_or_symlink(attempt.failed) and _root_owned_symlink_target(
+        attempt.failed, label="Emergency failed Nginx recovery path"
+    ) != intent["nginx_enabled_target"]:
+        _fail("Emergency failed Nginx recovery path is not bound to the candidate")
+    if _capture_nginx_lifecycle(runner=runner) != _journal_lifecycle(intent["initial_lifecycle"], label="Emergency prearm attempt initial lifecycle"):
+        _fail("Emergency prearm attempt did not restore the original Nginx lifecycle")
+    _require_ufw_baseline(
+        _capture_ufw_rule_state(runner=runner, expect_emergency_rule=False), intent["ufw_baseline"]
+    )
+
+
+def _assert_attempt_candidate_state(
+    *, paths: ActivationPaths, attempt: PrearmAttempt, intent: Mapping[str, Any], runner: Callable[..., Any],
+    expect_emergency_rule: bool = False,
+) -> None:
+    _verify_attempt_configuration(paths, intent)
     if _root_owned_symlink_target(paths.nginx_enabled, label="Emergency enabled Nginx site") != intent["nginx_enabled_target"]:
-        _fail("Emergency final ingress state has a different enabled Nginx site")
-    backup = Path(str(intent["nginx_default_backup_path"]))
-    if _root_owned_symlink_target(backup, label="Emergency Nginx default-site backup") != intent["nginx_default_target"]:
-        _fail("Emergency final ingress state has a different default-site backup")
-    _require_absent(paths.nginx_default, label="Emergency final Nginx default-site path")
-    _require_absent(Path(str(intent["nginx_failed_path"])), label="Emergency failed Nginx recovery path")
-    lifecycle = _capture_nginx_lifecycle(runner=runner)
-    if lifecycle != NginxLifecycle(enabled=True, active=True):
-        _fail("Emergency final ingress state does not have Nginx enabled and active")
+        _fail("Emergency prearm attempt has a different enabled Nginx site")
+    if _root_owned_symlink_target(attempt.backup, label="Emergency Nginx default-site backup") != intent["nginx_default_target"]:
+        _fail("Emergency prearm attempt has a different default-site backup")
+    _require_absent(paths.nginx_default, label="Emergency candidate Nginx default-site path")
+    _require_absent(attempt.failed, label="Emergency failed Nginx recovery path")
+    if _capture_nginx_lifecycle(runner=runner) != NginxLifecycle(True, True):
+        _fail("Emergency prearm attempt does not have Nginx enabled and active")
+    _require_ufw_baseline(
+        _capture_ufw_rule_state(runner=runner, expect_emergency_rule=expect_emergency_rule), intent["ufw_baseline"]
+    )
+
+
+def _verify_prearm_final_state(
+    *, paths: ActivationPaths, campaign: VerifiedCampaign, attempt: PrearmAttempt, intent: Mapping[str, Any],
+    profile: str, runner: Callable[..., Any], tls_probe: Callable[[], None], staging_listener: Callable[[int], None],
+) -> tuple[NginxLifecycle, UfwRuleState]:
+    """Verify an armed transaction without mutating Nginx, UFW, or Docker."""
+
+    current_intent = _read_prearm_attempt_intent(
+        paths=paths, campaign=campaign, profile=profile, attempt=attempt
+    )
+    if current_intent != dict(intent):
+        _fail("Emergency prearm attempt journal changed during recovery")
+    _read_prearm_pending(paths=paths, campaign=campaign, attempt=attempt, intent=intent)
+    _assert_attempt_candidate_state(
+        paths=paths, attempt=attempt, intent=intent, runner=runner, expect_emergency_rule=True
+    )
+    _assert_nginx_public_listener_inventory(
+        paths=paths, allowed_config=paths.nginx_enabled, required_ports=frozenset({80, 443}), runner=runner
+    )
     tls_probe()
     staging_listener(8213)
     staging_listener(8443)
-    ufw_state = _capture_ufw_rule_state(runner=runner)
-    if not ufw_state.rule_present:
-        _fail("Emergency final ingress state does not have the bounded UFW rule")
-    return lifecycle, ufw_state
+    ufw_state = _capture_ufw_rule_state(runner=runner, expect_emergency_rule=True)
+    _require_ufw_baseline(ufw_state, intent["ufw_baseline"])
+    return NginxLifecycle(True, True), ufw_state
+
+
+def _new_attempt(paths: ActivationPaths, campaign: VerifiedCampaign) -> PrearmAttempt:
+    for _ in range(16):
+        attempt = _attempt_paths(paths, campaign, secrets.token_hex(16))
+        if not _path_exists_or_symlink(_receipt_path(paths, campaign.campaign_id, _attempt_stage(attempt.attempt_id, "intent"))):
+            return attempt
+    _fail("could not allocate an immutable Emergency prearm attempt")
+
+
+def _list_open_prearm_attempts(paths: ActivationPaths, campaign: VerifiedCampaign) -> list[PrearmAttempt]:
+    root = _activation_campaign_root(paths, campaign.campaign_id)
+    if not _path_exists_or_symlink(root):
+        return []
+    _secure_directory(root, create=False)
+    states: dict[str, set[str]] = {}
+    try:
+        entries = list(root.iterdir())
+    except OSError as exc:
+        raise EmergencyActivationError("Emergency prearm journals cannot be listed") from exc
+    for item in entries:
+        matched = PREARM_ATTEMPT_STAGE_RE.fullmatch(item.stem)
+        if matched is None:
+            continue
+        _read_receipt(paths, campaign, stage=item.stem)
+        states.setdefault(matched.group(1), set()).add(matched.group(2))
+    open_attempts: list[PrearmAttempt] = []
+    for attempt_id, attempt_states in states.items():
+        if (
+            "intent" not in attempt_states
+            or ("aborted" in attempt_states and len(attempt_states) != 2)
+            or ("armed" in attempt_states and "ufw-pending" not in attempt_states)
+            or ("aborted" in attempt_states and "ufw-pending" in attempt_states)
+        ):
+            _fail("Emergency prearm attempt journal sequence is invalid")
+        if "aborted" not in attempt_states:
+            open_attempts.append(_attempt_paths(paths, campaign, attempt_id))
+    if len(open_attempts) > 1:
+        _fail("multiple unresolved Emergency prearm attempts require manual review")
+    return open_attempts
+
+
+def _mark_rollback_proven(
+    *, paths: ActivationPaths, campaign: VerifiedCampaign, profile: str, attempt: PrearmAttempt,
+    intent: Mapping[str, Any], runner: Callable[..., Any],
+) -> None:
+    _assert_attempt_original_state(paths=paths, attempt=attempt, intent=intent, runner=runner)
+    _require_firewall_attestation(paths=paths, campaign=campaign, profile=profile, runner=runner)
+    _write_prearm_aborted(paths=paths, campaign=campaign, attempt=attempt, intent=intent)
+
+
+def _rollback_pre_pending_attempt(
+    *, paths: ActivationPaths, campaign: VerifiedCampaign, profile: str, attempt: PrearmAttempt,
+    intent: Mapping[str, Any], lifecycle: NginxLifecycle, changes: NginxLifecycleChanges,
+    runner: Callable[..., Any],
+) -> None:
+    _restore_default_nginx_after_failed_prearm(
+        paths=paths, backup=attempt.backup, failed=attempt.failed, lifecycle=lifecycle, changes=changes, runner=runner
+    )
+    _mark_rollback_proven(
+        paths=paths, campaign=campaign, profile=profile, attempt=attempt, intent=intent, runner=runner
+    )
+
+
+def _recover_pre_pending_attempt(
+    *, paths: ActivationPaths, campaign: VerifiedCampaign, profile: str, attempt: PrearmAttempt,
+    runner: Callable[..., Any],
+) -> None:
+    intent = _read_prearm_attempt_intent(paths=paths, campaign=campaign, profile=profile, attempt=attempt)
+    try:
+        _assert_attempt_original_state(paths=paths, attempt=attempt, intent=intent, runner=runner)
+    except EmergencyActivationError:
+        original = False
+    else:
+        original = True
+    if original:
+        _require_firewall_attestation(paths=paths, campaign=campaign, profile=profile, runner=runner)
+        _write_prearm_aborted(paths=paths, campaign=campaign, attempt=attempt, intent=intent)
+        return
+    try:
+        _assert_attempt_candidate_state(paths=paths, attempt=attempt, intent=intent, runner=runner)
+    except EmergencyActivationError as exc:
+        raise EmergencyActivationError(
+            "Emergency prearm attempt is neither rollback-proven nor an exact unarmed candidate; manual recovery is required"
+        ) from exc
+    initial_lifecycle = _journal_lifecycle(
+        intent["initial_lifecycle"], label="Emergency prearm attempt initial lifecycle"
+    )
+    _rollback_pre_pending_attempt(
+        paths=paths, campaign=campaign, profile=profile, attempt=attempt, intent=intent,
+        lifecycle=initial_lifecycle,
+        changes=NginxLifecycleChanges(
+            enable_attempted=not initial_lifecycle.enabled,
+            start_attempted=not initial_lifecycle.active,
+        ),
+        runner=runner,
+    )
+
+
+def _recover_pending_prearm(
+    *, paths: ActivationPaths, campaign: VerifiedCampaign, profile: str, attempt: PrearmAttempt,
+    runner: Callable[..., Any], tls_probe: Callable[[], None], staging_listener: Callable[[int], None],
+) -> dict[str, Any]:
+    intent = _read_prearm_attempt_intent(paths=paths, campaign=campaign, profile=profile, attempt=attempt)
+    final_lifecycle, final_ufw = _verify_prearm_final_state(
+        paths=paths, campaign=campaign, attempt=attempt, intent=intent, profile=profile, runner=runner,
+        tls_probe=tls_probe, staging_listener=staging_listener,
+    )
+    expected = _prearmed_payload(
+        profile=profile, attempt=attempt, intent=intent, final_lifecycle=final_lifecycle, final_ufw=final_ufw
+    )
+    armed_stage = _attempt_stage(attempt.attempt_id, "armed")
+    if _path_exists_or_symlink(_receipt_path(paths, campaign.campaign_id, armed_stage)):
+        if _read_prearm_armed(paths=paths, campaign=campaign, attempt=attempt, intent=intent) != expected:
+            _fail("Emergency armed ingress journal disagrees with the verified final state")
+    else:
+        _write_receipt(
+            paths, campaign, stage=armed_stage, payload=_prearm_armed_payload(
+                attempt=attempt, intent=intent, prearmed_payload=expected
+            )
+        )
+    final_path = _receipt_path(paths, campaign.campaign_id, "prearmed")
+    if _path_exists_or_symlink(final_path):
+        recorded = _read_receipt(paths, campaign, stage="prearmed")
+        if recorded != expected:
+            _fail("Emergency prearm receipt disagrees with the verified final state")
+        return recorded
+    _write_receipt(paths, campaign, stage="prearmed", payload=expected)
+    return expected
 
 
 def _prearm_nginx(
-    *,
-    paths: ActivationPaths,
-    campaign: VerifiedCampaign,
-    package_root: Path,
-    profile: str,
-    runner: Callable[..., Any] = subprocess.run,
-    tls_probe: Callable[[], None] | None = None,
+    *, paths: ActivationPaths, campaign: VerifiedCampaign, package_root: Path, profile: str,
+    runner: Callable[..., Any] = subprocess.run, tls_probe: Callable[[], None] | None = None,
     staging_listener: Callable[[int], None] | None = None,
 ) -> dict[str, Any]:
+    """Start one fresh attempt; only a durable UFW-pending receipt is a PONR."""
+
     if tls_probe is None:
         tls_probe = _local_tls_probe
     if staging_listener is None:
         staging_listener = _check_staging_listener
     fullchain_path, private_key_path = _require_pinned_tls(paths=paths, campaign=campaign, profile=profile)
     rendered = _render_nginx_configuration(
-        package_root=package_root,
-        profile=profile,
-        fullchain_path=fullchain_path,
-        private_key_path=private_key_path,
+        package_root=package_root, profile=profile, fullchain_path=fullchain_path, private_key_path=private_key_path
     )
-    _write_create_only(paths.nginx_available, rendered)
+    _ensure_create_or_identical(paths.nginx_available, rendered, label="Emergency rendered Nginx configuration")
     if profile == "sms-otp":
-        _copy_create_only(
-            package_root / "deploy/emergency-ir/nginx.sms-otp.rate-limit.conf",
+        _ensure_create_or_identical(
             paths.nginx_sms_rate_limit,
-            maximum_bytes=MAX_JSON_BYTES,
+            _read_root_regular(
+                package_root / "deploy/emergency-ir/nginx.sms-otp.rate-limit.conf",
+                label="Emergency SMS Nginx rate limit", maximum_bytes=MAX_JSON_BYTES,
+            ),
+            label="Emergency SMS Nginx rate-limit configuration",
         )
     _secure_directory(paths.nginx_backup_root, create=True)
-    backup, failed = _prearm_recovery_paths(paths, campaign)
-    for candidate in (paths.nginx_enabled, backup, failed):
-        if _path_exists_or_symlink(candidate):
-            _fail("refusing to overwrite an existing Nginx Emergency recovery path")
-    _root_owned_symlink_target(paths.nginx_default, label="existing Nginx default site")
-    lifecycle = _capture_nginx_lifecycle(runner=runner)
-    ufw_before = _capture_ufw_rule_state(runner=runner)
-    intent = _prearm_intent_payload(
-        paths=paths,
-        campaign=campaign,
-        profile=profile,
-        lifecycle=lifecycle,
-        ufw_state=ufw_before,
-        backup=backup,
-        failed=failed,
+    _require_absent(paths.nginx_enabled, label="Emergency enabled Nginx path")
+    _assert_nginx_public_listener_inventory(
+        paths=paths, allowed_config=paths.nginx_default, required_ports=frozenset({80}), runner=runner
     )
-    # This durable intent is written before the site switch.  Its presence
-    # deliberately prevents a later invocation from repeating host mutation:
-    # recovery may only prove the final state and register its receipt.
-    _write_receipt(paths, campaign, stage=PREARM_INTENT_STAGE, payload=intent)
+    lifecycle = _capture_nginx_lifecycle(runner=runner)
+    attestation = _require_firewall_attestation(paths=paths, campaign=campaign, profile=profile, runner=runner)
+    attempt = _new_attempt(paths, campaign)
+    _require_absent(attempt.backup, label="Emergency Nginx backup path")
+    _require_absent(attempt.failed, label="Emergency Nginx failed path")
+    intent = _prearm_attempt_intent_payload(
+        paths=paths, campaign=campaign, profile=profile, attempt=attempt, lifecycle=lifecycle,
+        ufw_baseline=_validate_ufw_baseline(attestation["ufw_baseline"]),
+    )
+    _write_receipt(paths, campaign, stage=_attempt_stage(attempt.attempt_id, "intent"), payload=intent)
     changes = NginxLifecycleChanges()
     default_moved = False
     try:
-        os.rename(paths.nginx_default, backup)
+        os.rename(paths.nginx_default, attempt.backup)
         default_moved = True
         os.symlink(str(paths.nginx_available), paths.nginx_enabled)
     except OSError as exc:
         if default_moved:
             try:
-                os.rename(backup, paths.nginx_default)
+                os.rename(attempt.backup, paths.nginx_default)
             except OSError as restore_exc:
                 raise EmergencyActivationError(
-                    "recoverable Nginx prearm could not create the Emergency site and the default site could not be restored"
+                    "Emergency prearm could not create the candidate and the default site could not be restored"
                 ) from restore_exc
-        raise EmergencyActivationError("recoverable Nginx prearm cannot move the default site") from exc
+        _mark_rollback_proven(
+            paths=paths, campaign=campaign, profile=profile, attempt=attempt, intent=intent, runner=runner
+        )
+        raise EmergencyActivationError("Emergency prearm cannot create the recoverable Nginx candidate") from exc
     try:
         tested = runner([NGINX_BINARY, "-t"], check=False, capture_output=True, timeout=60)
         if getattr(tested, "returncode", 1) != 0:
             _fail("Emergency Nginx candidate configuration test failed")
         action = _activate_candidate_nginx(lifecycle=lifecycle, changes=changes, runner=runner)
-        final_lifecycle = _capture_nginx_lifecycle(runner=runner)
-        if final_lifecycle != NginxLifecycle(enabled=True, active=True):
-            _fail("Emergency Nginx did not reach the enabled and active lifecycle state")
-        if action != _prearm_action(lifecycle):
-            _fail("Emergency Nginx lifecycle action does not match the transaction journal")
+        if _capture_nginx_lifecycle(runner=runner) != NginxLifecycle(True, True) or action != _prearm_action(lifecycle):
+            _fail("Emergency Nginx did not reach the recorded candidate lifecycle")
+        _assert_nginx_public_listener_inventory(
+            paths=paths, allowed_config=paths.nginx_enabled, required_ports=frozenset({80, 443}), runner=runner
+        )
         tls_probe()
         staging_listener(8213)
         staging_listener(8443)
-    except (EmergencyActivationError, OSError, subprocess.SubprocessError) as exc:
-        _restore_default_nginx_after_failed_prearm(
-            paths=paths,
-            backup=backup,
-            failed=failed,
-            lifecycle=lifecycle,
-            changes=changes,
-            runner=runner,
+        latest_attestation = _require_firewall_attestation(
+            paths=paths, campaign=campaign, profile=profile, runner=runner
         )
-        if isinstance(exc, EmergencyActivationError):
-            message = str(exc)
-        else:
-            message = "Emergency Nginx prearm command could not run"
-        raise EmergencyActivationError(f"{message}; the previous default site was restored") from exc
-    # Point of no rollback: a UFW command can have a successful side effect
-    # even when its caller later gets an exception or an inconclusive status.
-    # The immutable intent now makes a retry verification-only, so preserve
-    # the already-probed candidate rather than restoring Nginx while leaving
-    # an unknown 80/443 firewall outcome behind.
-    try:
-        if not ufw_before.rule_present:
-            allowed = runner(
-                [
-                    UFW_BINARY,
-                    "allow",
-                    "proto",
-                    "tcp",
-                    "from",
-                    "any",
-                    "to",
-                    "any",
-                    "port",
-                    "80,443",
-                    "comment",
-                    UFW_RULE_COMMENT,
-                ],
-                check=False,
-                capture_output=True,
-                timeout=60,
-            )
-            if getattr(allowed, "returncode", 1) != 0:
-                _fail("bounded Emergency UFW rule outcome could not be confirmed")
-        final_ufw = _capture_ufw_rule_state(runner=runner)
-        if not final_ufw.rule_present:
-            _fail("bounded Emergency UFW rule is not present after ingress arm")
+        if _validate_ufw_baseline(latest_attestation["ufw_baseline"]) != intent["ufw_baseline"]:
+            _fail("Emergency UFW baseline drifted before the pending journal")
     except (EmergencyActivationError, OSError, subprocess.SubprocessError) as exc:
-        if isinstance(exc, EmergencyActivationError):
-            message = str(exc)
-        else:
-            message = "Emergency UFW command outcome could not be confirmed"
+        _rollback_pre_pending_attempt(
+            paths=paths, campaign=campaign, profile=profile, attempt=attempt, intent=intent,
+            lifecycle=lifecycle, changes=changes, runner=runner,
+        )
+        message = str(exc) if isinstance(exc, EmergencyActivationError) else "Emergency prearm command could not run"
+        raise EmergencyActivationError(f"{message}; the previous default site was restored and the attempt was aborted") from exc
+    pending_stage = _attempt_stage(attempt.attempt_id, "ufw-pending")
+    try:
+        _write_receipt(
+            paths, campaign, stage=pending_stage, payload=_prearm_pending_payload(attempt=attempt, intent=intent)
+        )
+    except EmergencyActivationError as exc:
+        if _path_exists_or_symlink(_receipt_path(paths, campaign.campaign_id, pending_stage)):
+            raise EmergencyActivationError(
+                "Emergency UFW-pending journal may exist but is not durable; candidate is preserved for fail-closed manual recovery"
+            ) from exc
+        _rollback_pre_pending_attempt(
+            paths=paths, campaign=campaign, profile=profile, attempt=attempt, intent=intent,
+            lifecycle=lifecycle, changes=changes, runner=runner,
+        )
         raise EmergencyActivationError(
-            f"{message}; Emergency ingress remains journaled for verification-only recovery"
+            "Emergency UFW-pending journal could not be written; the attempt was rolled back and aborted"
         ) from exc
-    prearmed_payload = _prearmed_payload(
-        profile=profile,
-        intent=intent,
-        final_lifecycle=final_lifecycle,
-        final_ufw=final_ufw,
+    # From this exact durable receipt onward a UFW invocation may have a side
+    # effect.  No subsequent path restores Nginx or changes/deletes UFW.
+    try:
+        allowed = runner(
+            [UFW_BINARY, "allow", "proto", "tcp", "from", "any", "to", "any", "port", "80,443", "comment", UFW_RULE_COMMENT],
+            check=False, capture_output=True, timeout=60,
+        )
+        if getattr(allowed, "returncode", 1) != 0:
+            _fail("bounded Emergency UFW rule outcome could not be confirmed")
+        final_lifecycle, final_ufw = _verify_prearm_final_state(
+            paths=paths, campaign=campaign, attempt=attempt, intent=intent, profile=profile, runner=runner,
+            tls_probe=tls_probe, staging_listener=staging_listener,
+        )
+    except (EmergencyActivationError, OSError, subprocess.SubprocessError) as exc:
+        message = str(exc) if isinstance(exc, EmergencyActivationError) else "Emergency UFW command outcome could not be confirmed"
+        raise EmergencyActivationError(
+            f"{message}; Emergency ingress remains UFW-pending for verification-only recovery"
+        ) from exc
+    prearmed = _prearmed_payload(
+        profile=profile, attempt=attempt, intent=intent, final_lifecycle=final_lifecycle, final_ufw=final_ufw
     )
     try:
         _write_receipt(
-            paths,
-            campaign,
-            stage=PREARM_ARMED_STAGE,
-            payload=_prearm_armed_payload(intent=intent, prearmed_payload=prearmed_payload),
+            paths, campaign, stage=_attempt_stage(attempt.attempt_id, "armed"),
+            payload=_prearm_armed_payload(attempt=attempt, intent=intent, prearmed_payload=prearmed),
         )
-        _write_receipt(paths, campaign, stage="prearmed", payload=prearmed_payload)
-    except EmergencyActivationError as exc:
-        # The exact final ingress state was observed.  Do not roll it back or
-        # delete its UFW rule merely because forensic receipt storage failed:
-        # a retry is restricted to read-only verification plus receipt repair.
-        raise EmergencyActivationError(
-            "Emergency ingress is armed but its final receipt could not be registered; "
-            "rerun the same confirmed prearm stage for verification-only recovery"
-        ) from exc
-    return prearmed_payload
-
-
-def _recover_prearm_receipt(
-    *,
-    paths: ActivationPaths,
-    campaign: VerifiedCampaign,
-    profile: str,
-    runner: Callable[..., Any] = subprocess.run,
-) -> dict[str, Any]:
-    """Recover only a missing final receipt after exact read-only verification."""
-
-    _require_prepare(paths, campaign, profile=profile)
-    _read_receipt(paths, campaign, stage="api-ready")
-    if profile == "sms-otp":
-        _require_sms_preflight(paths, campaign)
-    _require_pinned_tls(paths=paths, campaign=campaign, profile=profile)
-    intent = _read_prearm_intent(paths=paths, campaign=campaign, profile=profile)
-    final_lifecycle, final_ufw = _verify_prearm_final_state(
-        paths=paths,
-        campaign=campaign,
-        intent=intent,
-        profile=profile,
-        runner=runner,
-        tls_probe=_local_tls_probe,
-        staging_listener=_check_staging_listener,
-    )
-    expected_prearmed = _prearmed_payload(
-        profile=profile,
-        intent=intent,
-        final_lifecycle=final_lifecycle,
-        final_ufw=final_ufw,
-    )
-    armed_path = _receipt_path(paths, campaign.campaign_id, PREARM_ARMED_STAGE)
-    if _path_exists_or_symlink(armed_path):
-        recorded_prearmed = _read_prearm_armed(paths=paths, campaign=campaign, intent=intent)
-        if recorded_prearmed != expected_prearmed:
-            _fail("Emergency armed ingress journal disagrees with the verified final state")
-    else:
-        try:
-            _write_receipt(
-                paths,
-                campaign,
-                stage=PREARM_ARMED_STAGE,
-                payload=_prearm_armed_payload(intent=intent, prearmed_payload=expected_prearmed),
-            )
-        except EmergencyActivationError as exc:
-            raise EmergencyActivationError(
-                "Emergency ingress remains journaled but its armed receipt could not be registered"
-            ) from exc
-
-    final_path = _receipt_path(paths, campaign.campaign_id, "prearmed")
-    if _path_exists_or_symlink(final_path):
-        recorded_prearmed = _read_receipt(paths, campaign, stage="prearmed")
-        if recorded_prearmed != expected_prearmed:
-            _fail("Emergency prearm receipt disagrees with the verified final state")
-        return recorded_prearmed
-    try:
-        _write_receipt(paths, campaign, stage="prearmed", payload=expected_prearmed)
+        _write_receipt(paths, campaign, stage="prearmed", payload=prearmed)
     except EmergencyActivationError as exc:
         raise EmergencyActivationError(
-            "Emergency ingress remains armed but its final receipt could not be recovered"
+            "Emergency ingress is armed but its final receipt could not be registered; rerun the same confirmed prearm stage for verification-only recovery"
         ) from exc
-    return expected_prearmed
+    return prearmed
 
 
 def prearm(
-    *,
-    campaign: VerifiedCampaign,
-    paths: ActivationPaths,
-    profile: str,
+    *, campaign: VerifiedCampaign, paths: ActivationPaths, profile: str,
     runner: Callable[..., Any] = subprocess.run,
 ) -> dict[str, Any]:
-    if _path_exists_or_symlink(_receipt_path(paths, campaign.campaign_id, PREARM_INTENT_STAGE)):
-        return _recover_prearm_receipt(paths=paths, campaign=campaign, profile=profile, runner=runner)
     if _path_exists_or_symlink(_receipt_path(paths, campaign.campaign_id, "prearmed")):
         _fail("Emergency prearm receipt already exists; refusing to overwrite prior ingress state")
     prepared = _require_prepare(paths, campaign, profile=profile)
     _read_receipt(paths, campaign, stage="api-ready")
     if profile == "sms-otp":
         _require_sms_preflight(paths, campaign)
+    open_attempts = _list_open_prearm_attempts(paths, campaign)
+    if open_attempts:
+        attempt = open_attempts[0]
+        pending_path = _receipt_path(paths, campaign.campaign_id, _attempt_stage(attempt.attempt_id, "ufw-pending"))
+        if _path_exists_or_symlink(pending_path):
+            return _recover_pending_prearm(
+                paths=paths, campaign=campaign, profile=profile, attempt=attempt, runner=runner,
+                tls_probe=_local_tls_probe, staging_listener=_check_staging_listener,
+            )
+        _recover_pre_pending_attempt(
+            paths=paths, campaign=campaign, profile=profile, attempt=attempt, runner=runner
+        )
     _check_staging_listener(8213)
     _check_staging_listener(8443)
     return _prearm_nginx(
-        paths=paths,
-        campaign=campaign,
-        package_root=Path(str(prepared["package_root"])),
-        profile=profile,
-        runner=runner,
+        paths=paths, campaign=campaign, package_root=Path(str(prepared["package_root"])), profile=profile, runner=runner
     )
 
 
@@ -2331,6 +3067,7 @@ def execute(
         "database": database,
         "api": api,
         "tls": pin_tls,
+        "firewall": firewall_attest,
         "prearm": prearm,
     }
     payload = handlers[stage](campaign=campaign, paths=paths, profile=profile, runner=runner)
@@ -2348,7 +3085,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--campaign", required=True)
     parser.add_argument("--profile", choices=("telegram-only", "sms-otp"), default="telegram-only")
-    parser.add_argument("--stage", choices=("prepare", "images", "database", "api", "tls", "prearm"))
+    parser.add_argument("--stage", choices=("prepare", "images", "database", "api", "tls", "firewall", "prearm"))
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--confirm")
     return parser.parse_args(argv)

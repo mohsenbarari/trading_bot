@@ -70,10 +70,10 @@ arguments, and writes them only to the root-owned runtime environment:
 ```
 
 Use `--enable-sms-otp --sms-otp-secrets-stdin`, plus the exact SMS template ID
-and relay image tag matching the Emergency patch.  Before starting anything,
-run `verify_emergency_ir_standalone.py --profile sms-otp` with the base
-Compose file, the SMS overlay, `sms-egress.nginx.conf`, and
-`nginx.sms-otp.rate-limit.conf`; then verify the relay image with
+and relay image tag matching the Emergency patch.  Before any Compose start,
+the activator runs the sealed `verify_emergency_ir_standalone.py --profile
+sms-otp` with the base Compose file, the SMS overlay, `sms-egress.nginx.conf`,
+and `nginx.sms-otp.rate-limit.conf`; it then runs
 `verify_emergency_ir_sms_egress_image.py`.  Start it only with both Compose
 files and `--profile sms-otp`.
 
@@ -99,21 +99,40 @@ a generic proxy.
    hashes, the WA-IR age recipient, and allowlisted Emergency inbox paths.
 2. Verify the manifest with its pinned Ed25519 public key before downloading.
    Verify ciphertext and plaintext hashes after download/decryption.
-3. Load images, render a fresh root-only runtime environment locally, restore
-   the snapshot, run the session-reset SQL, migrate, and verify API health.
+3. Load images, render a fresh root-only runtime environment locally, then run
+   the sealed standalone semantic verifier and the sealed image-provenance
+   verifier(s) before *any* Docker/Compose operation.  A verifier failure
+   creates no Emergency volume, network, or container.  Only then restore the
+   snapshot, run the session-reset SQL, migrate, and verify API health.
 4. Verify the local Certbot `live` symlink only through its root-controlled
-   `archive` target, then create a root-only, non-symlink pinned certificate
-   and private-key pair under `/etc/trading-bot-emergency/standalone/tls/`.
+   `archive` target.  A regular file at the `live` leaf is rejected.  The
+   activator then creates a root-only, non-symlink pinned certificate and
+   private-key pair under `/etc/trading-bot-emergency/standalone/tls/`.
    Nginx consumes only that pinned pair, never Certbot's mutable live links.
-5. Before switching ingress, create an immutable local prearm-intent journal.
-   Only after all local checks pass, recoverably replace the Nginx default
-   symlink, enable/start or reload Nginx as needed, and make a direct local
-   CA-validated TLS/SNI request for `coin.gold-trade.ir`. The probe requires
-   `/api/config` to return 200 and `/api/sync` to remain 404; it also rechecks
-   protected three-site listeners on 8213/8443. Only then does it preserve an
-   already-owned exact UFW rule or add the one bounded TCP multiport rule for
-   80,443.
-6. Only then is a DNS A-record switch to `95.38.164.29` the sole cutover
+5. Run the separately confirmed `firewall` stage before any Nginx change.  It
+   records an immutable, strict WA-IR prearm baseline: UFW 0.36 with IPv6
+   enabled, incoming deny, and only the paired `three-site-wa-ir-control`
+   SSH rule; no pre-existing owned, broad, or other TCP 80/443 rule is allowed.
+   It also captures root-controlled UFW static files and raw
+   `iptables-save`, `ip6tables-save`, and `nft` state.  Only live packet/byte
+   counters are normalized; all rules remain bound.  A raw direct public
+   TCP 80/443 path is rejected, while the separate protected staging mapping
+   from host TCP 8443 to its private container is not treated as public
+   80/443 ingress.
+6. Before switching ingress, inventory `nginx -T`.  The normal sole Debian
+   default vhost with only port 80 is acceptable only because that exact
+   root-owned default symlink is transactionally journaled and restorable;
+   any additional effective 80/443 vhost blocks prearm.  Create a new,
+   immutable attempt intent, then recoverably replace the default symlink,
+   enable/start or reload Nginx as needed, and require the rendered candidate
+   to be the sole owner of both 80 and 443.  Make a direct local CA-validated
+   TLS/SNI request for `coin.gold-trade.ir`; `/api/config` must return 200 and
+   `/api/sync` must remain 404, and protected three-site listeners on
+   8213/8443 must remain healthy.  Failures before the durable
+   `ufw-pending` receipt restore the default and record the attempt as
+   aborted.  Only after that exact receipt is durable can the one bounded
+   dual-stack UFW TCP 80,443 command run.
+7. Only then is a DNS A-record switch to `95.38.164.29` the sole cutover
    action.
 
 The DNS-01 certificate currently expires on 2026-10-30.  Renewal needs a
@@ -134,10 +153,11 @@ python3 -I -B /run/trading-bot-emergency-bootstrap/<campaign>/receiver/scripts/e
 The result contains a distinct confirmation phrase for each stage.  Copy the
 phrase for exactly one stage into `--confirm`, together with `--apply` and
 `--stage prepare`, then repeat in order for `images`, `database`, `api`,
-`tls`, and finally `prearm`.  The activator re-checks the pinned manifest/public key,
-age recipient identity, ciphertext hash/size, and plaintext hash/size before
-it decrypts or uses an artifact.  It uses create-only files and receipts, so a
-failed attempt is intentionally not retried by overwriting state.
+`tls`, `firewall`, and finally `prearm`.  The activator re-checks the pinned
+manifest/public key, age recipient identity, ciphertext hash/size, and
+plaintext hash/size before it decrypts or uses an artifact.  It uses
+create-only files and receipts, so a failed attempt is intentionally not
+retried by overwriting state.
 
 The `prepare` stage accepts the following exact uncompressed `settings.tar`
 member layout and nothing else:
@@ -161,34 +181,44 @@ stdin; they are never accepted on a command line or emitted in a receipt.
 The SMS profile also refuses Nginx/UFW prearm without a root-only canonical
 provider-preflight receipt for the same campaign.
 
-Before any Docker mutation, the image tar is inspected for the exact app tag,
-provenance labels, isolated image namespace, expected image count, regular
-layers, and no pre-existing target tags.  The database stage refuses an
-existing Emergency volume/network/container, starts only DB and Redis,
-restores the custom dump, runs session reset, then runs migration.  It never
-uses a broad `compose up` before this sequence. The `tls` stage accepts
-Certbot's normal `live` symlinks only as a local source whose resolved
-root-owned archive target remains inside the exact Emergency archive directory.
-It verifies the leaf/key pairing, exact DNS SAN, and a seven-day validity
-margin before creating fixed pinned TLS files and a campaign receipt. The
-ingress stage creates a root-only `prearm-intent` journal before it moves the
-existing default Nginx *symlink* to a root-only backup. Candidate-test,
-lifecycle, TLS-probe, staging-health, and failures before a possible UFW
-mutation restore that default by rename. If Nginx began disabled/inactive, a
-failed prearm stops/disables only the service action it attempted, returning
-it to that prior lifecycle.
+Before Docker/Compose can create anything, the image tar is inspected for the
+exact app tag, provenance labels, isolated image namespace, expected image
+count, regular layers, and no pre-existing target tags.  After rendering, the
+package's standalone semantic verifier and app/SMS image verifier(s) run from
+the sealed root-only package.  The database stage refuses an existing
+Emergency volume/network/container, starts only DB and Redis, restores the
+custom dump, runs session reset, then runs migration.  It never uses a broad
+`compose up` before this sequence.
 
-After the UFW arm point, the tool never guesses that a failed command had no
-side effect and never deletes a rule. It preserves the journaled candidate and
-requires a later invocation of the same confirmed `prearm` stage to perform
-only exact read-only verification: pinned TLS, rendered-config digest,
-Nginx link/backup layout, enabled/active lifecycle, direct TLS/SNI routes,
-protected staging listeners, and the exact active UFW rule. Only if all of
-those checks match may it create the `prearm-armed` and final `prearmed`
-receipts; otherwise it fails without repeating a Nginx or UFW mutation. An
-already-present exact owned UFW rule is recorded as such and not added,
-changed, or deleted; an unowned overlapping 80/443 rule blocks prearm for
-manual review. The activator never deletes the prior configuration, a Docker
+The `tls` stage accepts only Certbot's normal `live` terminal symlinks as a
+local source whose resolved root-owned archive target remains inside the exact
+Emergency archive directory.  It rejects a regular `live` leaf, verifies the
+leaf/key pairing, exact DNS SAN, and a seven-day validity margin, then creates
+fixed pinned TLS files and a campaign receipt.  The `firewall` stage is an
+explicit human-confirmed baseline, not a claim that arbitrary post-UFW raw
+netfilter changes can be inferred later.  It must be re-read exactly before a
+fresh Nginx transaction begins and immediately before the PONR receipt.
+
+The ingress stage creates an attempt-specific root-only intent journal before
+it moves the existing default Nginx *symlink* to an attempt-specific backup.
+Candidate-test, lifecycle, listener-inventory, TLS-probe, staging-health, and
+every other failure before the durable `ufw-pending` receipt restore that
+default by rename and write an immutable `aborted` receipt.  If Nginx began
+disabled/inactive, a failed prearm stops/disables only the service action it
+attempted, returning it to that prior lifecycle.  A fresh attempt rejects even
+an exact pre-existing Emergency UFW 80/443 rule; it may start only from the
+closed attested baseline.
+
+`ufw-pending` is the sole point of no return: after it is durable, the tool
+never guesses that a failed command had no side effect, never restores Nginx,
+and never deletes or repeats a UFW rule.  A later invocation of the same
+confirmed `prearm` stage performs only exact read-only verification: pinned
+TLS, rendered-config digest, Nginx link/backup layout, enabled/active
+lifecycle, sole candidate 80/443 listener inventory, direct TLS/SNI routes,
+protected staging listeners, and the paired active IPv4/IPv6 UFW rule against
+the recorded baseline.  Only if all checks match may it create the attempt's
+`armed` and final `prearmed` receipts; otherwise it fails closed for manual
+recovery.  The activator never deletes the prior configuration, a Docker
 resource, or a UFW rule.
 
 ## Rollback

@@ -276,14 +276,12 @@ def verify_sms_otp_compose(path: Path) -> list[str]:
 
 
 def _verify_tls_certificate_contract(text: str, failures: list[str]) -> None:
-    certificate = (
-        "/etc/trading-bot-emergency/acme/config/live/"
-        "emergency-coin-gold-trade-ir/fullchain.pem"
-    )
-    key = (
-        "/etc/trading-bot-emergency/acme/config/live/"
-        "emergency-coin-gold-trade-ir/privkey.pem"
-    )
+    # The sealed template never consumes Certbot's mutable `live` leaf.  The
+    # activator verifies that leaf through the trusted archive and renders its
+    # root-only immutable snapshots into these two placeholders immediately
+    # before Nginx prearm.
+    certificate = "__EMERGENCY_TLS_FULLCHAIN__"
+    key = "__EMERGENCY_TLS_PRIVATE_KEY__"
     if text.count(f"ssl_certificate {certificate};") != 2:
         failures.append("both TLS virtual hosts must load the pinned emergency certificate")
     if text.count(f"ssl_certificate_key {key};") != 2:
@@ -295,7 +293,7 @@ def verify_nginx(path: Path) -> list[str]:
     failures: list[str] = []
     for required in (
         "listen 80 default_server", "ssl_reject_handshake on", "server_name coin.gold-trade.ir",
-        "/etc/trading-bot-emergency/acme/config/live/emergency-coin-gold-trade-ir/fullchain.pem",
+        "__EMERGENCY_TLS_FULLCHAIN__",
         "proxy_pass http://127.0.0.1:18000",
         "location = /metrics { return 404; }",
     ):
