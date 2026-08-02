@@ -94,6 +94,23 @@ SHA256_RE = re.compile(r"^[a-f0-9]{64}$", re.ASCII)
 TAG_SUFFIX_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$", re.ASCII)
 SMS_PARAMETER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$", re.ASCII)
 CAMPAIGN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$", re.ASCII)
+DOCKER_LEGACY_CONFIG_RE = re.compile(r"^([a-f0-9]{64})\.json$", re.ASCII)
+DOCKER_OCI_BLOB_RE = re.compile(r"^blobs/sha256/([a-f0-9]{64})$", re.ASCII)
+
+DOCKER_LEGACY_MANIFEST_FIELDS = frozenset({"Config", "RepoTags", "Layers"})
+DOCKER_OCI_MANIFEST_FIELDS = DOCKER_LEGACY_MANIFEST_FIELDS | {"LayerSources"}
+# Docker 29 writes OCI-layout blobs while retaining the Docker-compatible
+# manifest.json.  Keep this a closed allowlist: the layer bytes and descriptor
+# digest are checked before docker load is allowed to mutate local tags.
+OCI_LAYER_MEDIA_TYPES = frozenset(
+    {
+        "application/vnd.oci.image.layer.v1.tar",
+        "application/vnd.oci.image.layer.v1.tar+gzip",
+        "application/vnd.oci.image.layer.v1.tar+zstd",
+        "application/vnd.docker.image.rootfs.diff.tar",
+        "application/vnd.docker.image.rootfs.diff.tar.gzip",
+    }
+)
 
 MAX_PACKAGE_BYTES = 32 * 1024 * 1024
 MAX_SETTINGS_BYTES = 4 * 1024 * 1024
@@ -914,6 +931,100 @@ def _validate_app_image_config(config: Mapping[str, Any], *, source_sha: str, pa
         _fail("image archive application embeds a forbidden credential or proxy")
 
 
+def _oci_blob_digest(path: str, *, label: str) -> str:
+    _safe_relative(path, label=label)
+    matched = DOCKER_OCI_BLOB_RE.fullmatch(path)
+    if matched is None:
+        _fail(f"{label} is not an OCI sha256 blob path")
+    return matched.group(1)
+
+
+def _image_config_identity(config_name: str, *, oci_layout: bool) -> str:
+    if not isinstance(config_name, str):
+        _fail("Docker image archive config identity is invalid")
+    if oci_layout:
+        return _oci_blob_digest(config_name, label="Docker image config")
+    matched = DOCKER_LEGACY_CONFIG_RE.fullmatch(config_name)
+    if matched is None:
+        _fail("Docker image archive config identity is invalid")
+    return matched.group(1)
+
+
+def _hash_tar_member(
+    archive: tarfile.TarFile,
+    member: tarfile.TarInfo,
+    *,
+    label: str,
+    maximum_bytes: int,
+) -> tuple[str, int]:
+    """Hash one already-validated tar member without buffering a layer."""
+
+    if member.size < 1 or member.size > maximum_bytes:
+        _fail(f"{label} size is invalid")
+    source = archive.extractfile(member)
+    if source is None:
+        _fail(f"{label} cannot be read")
+    digest = hashlib.sha256()
+    size = 0
+    while True:
+        chunk = source.read(1024 * 1024)
+        if not chunk:
+            break
+        size += len(chunk)
+        if size > maximum_bytes:
+            _fail(f"{label} exceeds its exact size bound")
+        digest.update(chunk)
+    if size != member.size:
+        _fail(f"{label} changed while being read")
+    return digest.hexdigest(), size
+
+
+def _validate_oci_layer_sources(
+    *,
+    archive: tarfile.TarFile,
+    layers: Sequence[str],
+    layer_members: Mapping[str, tarfile.TarInfo],
+    layer_sources: Any,
+    verified_blobs: dict[str, tuple[str, int]],
+) -> None:
+    """Validate Docker's current OCI-layout LayerSources extension exactly."""
+
+    if not isinstance(layer_sources, dict):
+        _fail("Docker image archive LayerSources are invalid")
+    expected = {"sha256:" + _oci_blob_digest(layer, label="Docker image layer") for layer in layers}
+    if len(expected) != len(layers) or set(layer_sources) != expected:
+        _fail("Docker image archive LayerSources do not exactly bind its layers")
+    for digest, descriptor in layer_sources.items():
+        if not isinstance(descriptor, dict) or set(descriptor) != {"mediaType", "size", "digest"}:
+            _fail("Docker image archive LayerSources descriptor is unsupported")
+        media_type = descriptor.get("mediaType")
+        expected_size = descriptor.get("size")
+        if (
+            media_type not in OCI_LAYER_MEDIA_TYPES
+            or isinstance(expected_size, bool)
+            or not isinstance(expected_size, int)
+            or expected_size < 1
+            or expected_size > MAX_IMAGE_BYTES
+            or descriptor.get("digest") != digest
+        ):
+            _fail("Docker image archive LayerSources descriptor is invalid")
+        blob_name = "blobs/sha256/" + digest.removeprefix("sha256:")
+        member = layer_members.get(blob_name)
+        if member is None or member.size != expected_size:
+            _fail("Docker image archive LayerSources descriptor does not match its layer")
+        actual = verified_blobs.get(blob_name)
+        if actual is None:
+            actual = _hash_tar_member(
+                archive,
+                member,
+                label="Docker image OCI layer",
+                maximum_bytes=MAX_IMAGE_BYTES,
+            )
+            verified_blobs[blob_name] = actual
+        if actual != (digest.removeprefix("sha256:"), expected_size):
+            _fail("Docker image archive LayerSources digest does not match its layer")
+
+
 def inspect_image_bundle(
     *,
     image_tar: Path,
@@ -945,28 +1056,47 @@ def inspect_image_bundle(
             entries: list[ImageEntry] = []
             seen_kinds: set[str] = set()
             seen_tags: set[str] = set()
+            verified_oci_blobs: dict[str, tuple[str, int]] = {}
             for value in values:
-                if not isinstance(value, dict) or set(value) != {"Config", "RepoTags", "Layers"}:
+                if not isinstance(value, dict):
+                    _fail("Docker image archive manifest entry is unsupported")
+                fields = frozenset(value)
+                if fields == DOCKER_LEGACY_MANIFEST_FIELDS:
+                    oci_layout = False
+                elif fields == DOCKER_OCI_MANIFEST_FIELDS:
+                    oci_layout = True
+                else:
                     _fail("Docker image archive manifest entry is unsupported")
                 config_name = value.get("Config")
                 tags = value.get("RepoTags")
                 layers = value.get("Layers")
-                if not isinstance(config_name, str) or not re.fullmatch(r"[a-f0-9]{64}\.json", config_name):
-                    _fail("Docker image archive config identity is invalid")
+                config_id = _image_config_identity(config_name, oci_layout=oci_layout)
                 if not isinstance(tags, list) or len(tags) != 1 or not isinstance(tags[0], str):
                     _fail("Docker image archive must provide exactly one tag per image")
-                if not isinstance(layers, list) or not layers:
+                if not isinstance(layers, list) or not layers or any(not isinstance(layer, str) for layer in layers):
                     _fail("Docker image archive layers are invalid")
+                if len(layers) != len(set(layers)):
+                    _fail("Docker image archive layers are invalid")
+                layer_members: dict[str, tarfile.TarInfo] = {}
                 for layer in layers:
-                    if not isinstance(layer, str):
-                        _fail("Docker image archive layer is invalid")
                     _safe_relative(layer, label="Docker image layer")
+                    if oci_layout:
+                        _oci_blob_digest(layer, label="Docker image layer")
                     try:
                         layer_member = archive.getmember(layer)
                     except KeyError as exc:
                         raise EmergencyActivationError("Docker image archive omits a declared layer") from exc
                     if not layer_member.isreg() or layer_member.issym() or layer_member.islnk() or layer_member.size < 1:
                         _fail("Docker image archive layer is unsafe")
+                    layer_members[layer] = layer_member
+                if oci_layout:
+                    _validate_oci_layer_sources(
+                        archive=archive,
+                        layers=layers,
+                        layer_members=layer_members,
+                        layer_sources=value.get("LayerSources"),
+                        verified_blobs=verified_oci_blobs,
+                    )
                 tag = tags[0]
                 if tag in seen_tags or "staging" in tag.lower() or "three_site" in tag.lower():
                     _fail("Docker image archive has a duplicate or forbidden tag")
@@ -986,6 +1116,8 @@ def inspect_image_bundle(
                 if not config_member.isreg() or config_member.issym() or config_member.islnk():
                     _fail("Docker image config is unsafe")
                 config_raw = _read_tar_member(archive, config_member, maximum_bytes=MAX_JSON_BYTES)
+                if oci_layout and hashlib.sha256(config_raw).hexdigest() != config_id:
+                    _fail("Docker image OCI config digest does not match its blob")
                 config_json = _parse_strict_json(config_raw, label="Docker image config", maximum_bytes=MAX_JSON_BYTES)
                 config = config_json.get("config")
                 if not isinstance(config, dict):
@@ -998,7 +1130,7 @@ def inspect_image_bundle(
                         _fail("SMS relay image provenance is invalid")
                 seen_tags.add(tag)
                 seen_kinds.add(kind)
-                entries.append(ImageEntry(kind=kind, tag=tag, config_id="sha256:" + config_name[:-5]))
+                entries.append(ImageEntry(kind=kind, tag=tag, config_id="sha256:" + config_id))
     except (tarfile.TarError, OSError) as exc:
         raise EmergencyActivationError("decrypted Docker image archive is invalid") from exc
     expected_kinds = {"app", "postgres", "redis"} | ({"sms-egress"} if profile == "sms-otp" else set())
