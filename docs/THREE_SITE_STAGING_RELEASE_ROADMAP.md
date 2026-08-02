@@ -1,6 +1,6 @@
 # نقشه راه اجرایی انتشار معماری سه‌سایته روی Staging
 
-وضعیت سند: `Stage 0 / در حال تثبیت`
+وضعیت سند: `Stage 0 / تدوین تکمیل‌شده؛ در انتظار پذیرش مالک`
 
 دامنه: انتشار و ارزیابی معماری `Bot-FI + WebApp-FI + WebApp-IR + Witness`
 روی منابع کاملاً مجزای staging. این سند مجوز انتشار production یا تغییر دامنه
@@ -284,20 +284,41 @@ approval gate مستقل نیستند.
 
 ### گزارش پایان Stage 0
 
-- Status: `IN_PROGRESS`
+- Status: `COMPLETED_PENDING_OWNER_ACCEPTANCE`
 - Branch: `roadmap/three-site-staging-release`
 - Base SHA: `9105264000f51b480eb88f1f80845fd7608bd6b2`
-- Implementation commits: `در closure ثبت می‌شود`
-- Changes delivered: `در closure ثبت می‌شود`
-- Commands/tests executed: `در closure ثبت می‌شود`
-- Passed / failed / skipped: `در closure ثبت می‌شود`
+- Implementation commits:
+  `aac81474879d93113ffff348c222e8659ef838cc` — تعریف نسخه اولیه roadmap
+- Changes delivered:
+  - تعریف M1 و M2 و تفکیک صریح staging از production؛
+  - تعریف Stageهای 0 تا 6، branch هر Stage، exit gate یکتا و rollback؛
+  - کاهش approval انسانی به چهار نقطه تصمیم؛
+  - انتقال Full Matrix کامل، destructive hosts و 24-hour endurance به
+    pre-production؛
+  - تعریف matrix ریسک‌محور ۱۲سناریویی برای M2؛
+  - تعریف closure record و commit contract اجباری برای تمام Stageها.
+- Commands/tests executed:
+  - کنترل whitespace با `git diff --no-index --check`؛
+  - شمارش ساختاری Stage، exit gate و closure record؛
+  - بررسی وجود pathها و branchهای مرجع roadmap؛
+  - `python3 scripts/verify_three_site_topology_contract.py --json`؛
+  - `docker compose ... docker-compose.three-site.yml config --quiet`؛
+  - `git diff --cached --check` پیش از commit اولیه.
+- Passed / failed / skipped:
+  `7 stages / 7 exit gates / 7 closure records؛ topology passed؛ Compose passed؛ 0 failed؛ 0 skipped`
 - External evidence: `ندارد`
 - Production touched: `no`
-- Deviations: `در closure ثبت می‌شود`
-- Open risks: `در closure ثبت می‌شود`
-- Rollback verified: `در closure ثبت می‌شود`
-- Decision: `pending`
-- Next stage authorized: `no`
+- Deviations:
+  `docs/*` در `.gitignore` است؛ فایل roadmap با `git add -f` عمداً tracked شد.
+- Open risks:
+  - owner هنوز scope و gateهای roadmap را تأیید نکرده است؛
+  - خطای فعلی suite سه‌سایته و ۲۴ تست PostgreSQL skip‌شده در Stage 1/2 باز است؛
+  - backup tag فعلی همه refها را حفظ نمی‌کند؛
+  - runtime واقعی چهار میزبان هنوز read-only audit نشده است.
+- Rollback verified:
+  `yes؛ Stage 0 فقط یک فایل مستند روی branch مستقل از main افزوده و هیچ runtime یا data mutation ندارد.`
+- Decision: `READY_FOR_OWNER_ACCEPTANCE`
+- Next stage authorized: `no؛ پس از پذیرش صریح G0 توسط مالک`
 
 ---
 
