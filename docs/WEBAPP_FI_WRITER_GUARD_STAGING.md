@@ -66,6 +66,70 @@ warning: preflight rejects the pinned image before a Witness term is acquired.
 The release procedure must record the resulting image ID and repository digest
 in the signed v2 descriptor; the Docker labels never replace those pins.
 
+## Candidate Construction Gate
+
+This repository contains the local construction/verification pieces, but it
+does **not** contain a built app/bot candidate, a private-registry digest, or
+a signing key.  Treat those as intentional external inputs.  In particular,
+the checked Git tree does not include generated `mini_app_dist`; a release
+build context must contain its separately reviewed frontend output before
+Docker is invoked.
+
+On a controlled build host, first stage clean immutable application and
+control checkouts in directories named by their exact commits.  The following
+local-only evidence step must succeed before an image build is considered:
+
+```bash
+python3 /srv/trading-bot-three-site/releases/<application-sha>/scripts/verify_term_fenced_application_source.py build \
+  --source-root /srv/trading-bot-three-site/releases/<application-sha> \
+  --expected-release-sha <application-sha> \
+  --expected-release-tree-sha <application-tree-sha> \
+  --output /root/secure-release-inputs/webapp-fi-term-fenced-application-evidence.json
+```
+
+Use the resulting SHA-256 and the three values emitted by `image-labels` as
+the exact build arguments for both candidate image tags.  A representative
+local build command is:
+
+```bash
+docker build --no-cache --pull=false \
+  --file /srv/trading-bot-three-site/releases/<application-sha>/Dockerfile \
+  --build-arg TERM_FENCED_RELEASE_SHA=<application-sha> \
+  --build-arg TERM_FENCED_RELEASE_TREE_SHA=<application-tree-sha> \
+  --build-arg TERM_FENCED_APPLICATION_EVIDENCE_SHA256=<evidence-sha256> \
+  --tag <reviewed-local-app-tag> \
+  /srv/trading-bot-three-site/releases/<application-sha>
+```
+
+Build/tag the bot candidate under its own reviewed local tag with the same
+three values.  This command alone cannot satisfy Release-0: an image built
+only locally has no `RepoDigests` entry.  A separately approved private
+registry publication and local re-adoption must provide the immutable
+`repository@sha256:...` value for each app/bot tag.  Do not substitute a tag,
+an image ID, a registry URL, or a manually copied label for that digest.
+
+Only after both local images show the expected digest and labels, construct
+the create-only signed descriptor (the tool only performs bounded local image
+inspection; it never builds, pulls, or starts Docker):
+
+```bash
+python3 /srv/trading-bot-three-site/control-releases/<control-sha>/scripts/build_fenced_fi_release_identity.py \
+  --application-release-root /srv/trading-bot-three-site/releases/<application-sha> \
+  --control-release-root /srv/trading-bot-three-site/control-releases/<control-sha> \
+  --term-fenced-application-evidence /root/secure-release-inputs/webapp-fi-term-fenced-application-evidence.json \
+  --app-image <reviewed-local-app-tag> \
+  --app-repo-digest <app-repository@sha256:...> \
+  --bot-image <reviewed-local-bot-tag> \
+  --bot-repo-digest <bot-repository@sha256:...> \
+  --signing-private-key /root/secure-release-inputs/webapp-fi-release-identity.key \
+  --authority-public-key /root/secure-release-inputs/webapp-fi-release-identity-authority.pub \
+  --output /root/secure-release-inputs/webapp-fi-fenced-release-identity.json
+```
+
+The descriptor builder and later host preflight both hard-refuse the legacy
+`2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5` release.  No command above starts
+Compose, obtains a Witness term, changes routing, or authorizes a writer.
+
 After controlled start, the guard-start phase additionally requires the
 post-health runtime receipt, live local Witness lease, and inspected app/bot
 container identities.  It does not authorize a second writer, a promotion, or

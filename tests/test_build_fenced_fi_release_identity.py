@@ -307,6 +307,33 @@ class BuildFencedFiReleaseIdentityTests(TestCase):
                 ):
                     fixture.build()
 
+    def test_hard_blocks_legacy_2c08_before_control_or_image_inspection(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = DescriptorBuilderFixture(Path(raw))
+            legacy = subject.SourceRelease(
+                root=fixture.source_root,
+                release_sha=subject.LEGACY_UNFENCED_APPLICATION_RELEASE_SHA,
+                release_tree_sha="0" * 40,
+                evidence_sha256="1" * 64,
+            )
+            with (
+                mock.patch.object(
+                    subject,
+                    "_load_source_release",
+                    return_value=legacy,
+                ),
+                mock.patch.object(subject, "_load_control_release") as control,
+                mock.patch.object(subject, "_inspect_local_image") as image,
+                self.assertRaisesRegex(
+                    subject.BuildFencedFiReleaseIdentityError,
+                    "LEGACY_2C08_APPLICATION_BLOCKED",
+                ),
+            ):
+                fixture.build()
+
+            control.assert_not_called()
+            image.assert_not_called()
+
     def test_refuses_private_key_that_does_not_match_pinned_authority(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             fixture = DescriptorBuilderFixture(Path(raw))

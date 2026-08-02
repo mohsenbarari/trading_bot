@@ -57,6 +57,14 @@ IMAGE_REPO_DIGEST_RE = re.compile(
 FENCED_COMPOSE_RELATIVE_PATH = Path(
     "deploy/production/docker-compose.webapp-fi-writer-2c08.yml"
 )
+# This historical source tree is permanently non-candidate material.  The
+# semantic evidence verifier would reject it as well (it lacks the required
+# startup fence files), but descriptor construction must fail before control
+# or Docker-image inspection so a future refactor cannot accidentally turn
+# the known unsafe SHA into an admissible input.
+LEGACY_UNFENCED_APPLICATION_RELEASE_SHA = (
+    "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5"
+)
 SIGNING_DOMAIN = b"gold-trade-wa-fi-fenced-release-identity-v2\x00"
 SAFE_GIT_ENV = {
     "PATH": "/usr/bin:/bin",
@@ -680,6 +688,19 @@ def _same_image(left: LocalImageIdentity, right: LocalImageIdentity) -> bool:
     return left == right
 
 
+def _reject_legacy_unfenced_application_release(source: SourceRelease) -> None:
+    """Hard-refuse the historical 2c08 application before image inspection.
+
+    The later writer preflight repeats this refusal.  Keeping it at descriptor
+    construction prevents a valid signing key and a merely local image tag
+    from ever producing an apparently reviewable identity for source code
+    whose term fence and schema-safe startup contract are known to be absent.
+    """
+
+    if source.release_sha == LEGACY_UNFENCED_APPLICATION_RELEASE_SHA:
+        _fail("FENCED_FI_RELEASE_DESCRIPTOR_LEGACY_2C08_APPLICATION_BLOCKED")
+
+
 def build_fenced_fi_release_identity(
     *,
     application_release_root: Path,
@@ -716,6 +737,7 @@ def build_fenced_fi_release_identity(
         application_release_root,
         evidence_document=evidence_document,
     )
+    _reject_legacy_unfenced_application_release(first_source)
     first_control = _load_control_release(control_release_root)
     first_app = _inspect_local_image(
         service="APP",
@@ -742,6 +764,7 @@ def build_fenced_fi_release_identity(
         application_release_root,
         evidence_document=final_evidence_document,
     )
+    _reject_legacy_unfenced_application_release(final_source)
     final_control = _load_control_release(control_release_root)
     final_app = _inspect_local_image(
         service="APP",
