@@ -1,5 +1,5 @@
 {
-  "schema": "three-site-stage3-rollback-command-plan-v1",
+  "schema": "three-site-stage3-rollback-command-plan-v2",
   "status": "DRY_RUN_VERIFIED_NOT_EXECUTED",
   "campaign_id": "fd34231d-f52e-498a-aab4-438c99d88fc5",
   "release_sha": "0e63a7ec1b08bef29ea199041215298a021b56ef",
@@ -74,5 +74,20 @@
     "application_services_started": false,
     "rollback_commands_executed": false,
     "legacy_source_overwritten": false
+  },
+  "object_storage_credential_rollback": {
+    "active_material_manifest_sha256": "887b521175caca8ddfb301ec123917e520947d9367600381122de87de98398cc",
+    "active_credential_file_sha256": "b3806a027cf3c832e3483b26daf8cc5da9ede30cd8e4e5881befedbf29b6f66c",
+    "previous_secret_revoked": true,
+    "restore_previous_secret_forbidden": true,
+    "failure_response": [
+      "stop only explicit blob services if they were started",
+      "leave databases and volumes running and unchanged",
+      "issue one replacement secret for the same staging-only principal",
+      "prove encrypted versioned readback and old-secret rejection",
+      "atomically redistribute credential only to webapp-fi and webapp-ir",
+      "redistribute the matching manifest to all four test roles"
+    ],
+    "bucket_or_object_deletion_required": false
   }
 }

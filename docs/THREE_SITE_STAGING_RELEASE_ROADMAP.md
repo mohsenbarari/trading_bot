@@ -765,6 +765,48 @@ detach، rebuild یا resize نمی‌شود. چهار IP canonical و تمام 
   پاک شدند؛ archiveهای نهایی و backupها تا acceptance حفظ می‌شوند.
 - Production touched: `no`.
 
+#### checkpoint بخش B — rotation نهایی Object Storage — 2026-08-02
+
+- Secret همان principal اختصاصی staging در پنل Arvan rotate شد. Access Key ID
+  ثابت ماند، ولی fingerprint secret از
+  `5032a2e79be5a2660ae239240759b83dc4edd1a414cffcc808731f36dca4ea74`
+  به
+  `ddc1973db41e0a52b816479a8d63a069fba210dd325918173dbd6095aed0f9b1`
+  تغییر کرد؛ secret قبلی روی `HeadBucket` پاسخ `403` و secret جدید پاسخ `200`
+  گرفت. بنابراین rollback به secret قبلی ممنوع است و در صورت نیاز فقط rotation
+  تازه مجاز خواهد بود.
+- hardener پس از rotation یک drift ارائه‌دهنده را fail-closed متوقف کرد. Arvan
+  برای policy شامل دو statement با principal دقیقاً یکسانِ Access Key جاری،
+  `IsPublic=true` گزارش می‌کرد؛ خود policy هیچ wildcard یا `NotPrincipal Allow`
+  نداشت و probe ناشناس `HEAD/LIST/GET` همگی `403` بودند. تحلیل semantic policy با
+  commit `1657ea80` اضافه شد؛ wildcard همچنان gate را می‌بندد. اتصال fingerprint
+  credential به evidence با commit `e730ff0e` ثبت شد.
+- probe نهایی fingerprint-bound با `AES-256-GCM`، versioned upload، readback و
+  decrypt قبول شد. evidence owner-only در
+  `/root/secure-envs/trading-bot/three-site-staging-0e63a7ec-fd34231d/object-storage-readiness-rotated-v2/object-storage-readiness.json`
+  با SHA-256 برابر
+  `76c3671fd3c1bc32374f069675d05c78013bb50e785ae23a4dc001e549d2e4d1`
+  و VersionId برابر `lEnt7fUtdJoE3jKlZkalN5BDYe1gnkx` ثبت شد.
+- ابزار rotation محدود material با commitهای `d06ec8f6` و `8f513b03` ثبت شد؛
+  ۱۷ تست مرتبط قبول شدند. فقط credential JSON و manifest تغییر کردند؛ TLS، HMAC،
+  database secrets، role env و role compose بازتولید نشدند. manifest نهایی
+  `887b521175caca8ddfb301ec123917e520947d9367600381122de87de98398cc`
+  و credential file نهایی
+  `b3806a027cf3c832e3483b26daf8cc5da9ede30cd8e4e5881befedbf29b6f66c`
+  است.
+- credential فقط روی WebApp-FI و WebApp-IR با mode `0600` نصب شد؛ Bot-FI و
+  Witness مطابق secret boundary فاقد آن ماندند. manifest روی هر چهار role match
+  شد، هیچ فایل موقت باقی نماند و تنها container فعال هر میزبان همان PostgreSQL
+  قبلی است. probe read-only از image پین‌شده روی هر دو WebApp، `HeadBucket=200`
+  و versioning=`Enabled` داد و container یک‌بارمصرف حذف شد.
+- campaign bundle با provisioned inventory امضاشده، policy issuer اصلی و hash
+  `bc053cdbd2a43b999a0ddf8c96ef4a25d60416a37b7cc364aa6e5763eb811a88`
+  verify شد. policy issuer exact با mode `0600` داخل evidence root همین کمپین
+  نگهداری می‌شود؛ approval inventory تکرار نشد.
+- تمام الزام‌های فنی G3 کامل‌اند. تنها gate باقیمانده، مرور و پذیرش مالک و مجوز
+  صریح شروع Stage 4 برای release دقیق `0e63a7ec1b08bef29ea199041215298a021b56ef`
+  است. Production touched: `no`.
+
 ### Exit gate — G3 Hosts Isolated
 
 - چهار host attestation تازه و aggregate معتبر است؛
@@ -782,13 +824,14 @@ detach، rebuild یا resize نمی‌شود. چهار IP canonical و تمام 
 
 ### گزارش پایان Stage 3
 
-- Status: `IN_PROGRESS — G3_PENDING_OBJECT_STORAGE_CREDENTIAL_ROTATION_AND_OWNER_STAGE4_AUTHORIZATION`
+- Status: `READY_FOR_OWNER_ACCEPTANCE — G3_TECHNICAL_EVIDENCE_COMPLETE_STAGE4_NOT_AUTHORIZED`
 - Branch: `stage/three-site-staging-03-host-readiness`
 - Base SHA / implementation commits:
   `aab3558aebf6a25454a4d1f532e516b75dcbddde /
   7effce5bf808885b186c20f14f030180f2a1c681, 8dcbba1e, bf5c6e98, 9fc10979,
   34102db5, 67e5ed17, 75e3836c, 41546339, da2a45f8, 7f7d8aee,
-  55fdab64, 9693a875, 57392f15, 679bfdec, 59023838, 2331b2d2`
+  55fdab64, 9693a875, 57392f15, 679bfdec, 59023838, 2331b2d2,
+  c2f5aee5, 1657ea80, e730ff0e, d06ec8f6, 8f513b03`
 - Tested release SHA: `0e63a7ec1b08bef29ea199041215298a021b56ef`
 - Host inventory summary:
   `چهار VPS disposable قابل‌دسترسی و هر کدام فقط دارای PostgreSQL سالم کمپین
@@ -802,9 +845,12 @@ detach، rebuild یا resize نمی‌شود. چهار IP canonical و تمام 
   تستی؛ VNC/SSH host-key و SSH policy؛ lsblk/findmnt/wipefs --no-act؛ Docker/NTP/
   cgroup؛ دو security-group rule محدود تستی؛ structural inventory verifier =
   PASS؛ S3 private/versioning/lifecycle و provider-compatibility diagnostics؛
-  AES-256-GCM upload/readback = PASS؛ image inventory چهار role = PASS؛ چهار
+  AES-256-GCM fingerprint-bound upload/readback = PASS؛ secret قبلی = 403؛
+  credential نصب‌شده از هر دو WebApp = HEAD 200/versioning Enabled؛ semantic
+  policy و anonymous HEAD/LIST/GET = PASS؛ image inventory چهار role = PASS؛ چهار
   backup/restore scratch drill و attestation پس از آن = PASS؛ unittestهای ابزارهای
-  جدید = PASS. lifecycle منابع پنل و application start = صفر.`
+  جدید = PASS؛ campaign bundle و secret boundary = PASS. lifecycle منابع پنل و
+  application start = صفر.`
 - Evidence paths and SHA-256:
   docs/THREE_SITE_STAGE3_HOST_READINESS_AUDIT.json =
   28950ff335fce269fc5e9886eb878a9c1a52ba74be9e9dc04266611e9b934514؛
@@ -813,22 +859,25 @@ detach، rebuild یا resize نمی‌شود. چهار IP canonical و تمام 
   owner-only provisioned inventory =
   a44a795ad2753caa38357deda26f5269ba14082fd1d969587b1fd7b9b1408c25؛
   owner-only Object Storage readiness =
-  d803fd9e914fa5cd517f3888ec8394e247492176e497754cfa99cc8a8b307d1e؛
+  76c3671fd3c1bc32374f069675d05c78013bb50e785ae23a4dc001e549d2e4d1؛
+  rotated bootstrap material manifest =
+  887b521175caca8ddfb301ec123917e520947d9367600381122de87de98398cc؛
   aggregate = docs/THREE_SITE_STAGE3_G3_EVIDENCE_AGGREGATE.json / SHA-256
-  `633cd192b387328c6445e5f1aba8c068eec1d1060c4d4d1d567bed28ff7c2c88`؛
+  `27d1b36c469aea282520d27162fb3d8578ea5b79278c9ff224443314352df2b4`؛
   rollback plan = docs/THREE_SITE_STAGE3_ROLLBACK_PLAN.json / SHA-256
-  `05a648cc70431c55dbcc862f999e78d6bf753463d359b29310206bfe468acc02`
+  `20c8a126843a9422b323589eabd337bf7120be2dfb9dceaa681bcae7c2fea625`
 - Production touched: `no`
 - Deviations / open risks:
   `ingress بین‌المللی مستقیم WebApp-IR هنوز timeout است و control از relay ایران
-  عبور می‌کند؛ credential فعلی در کمپین‌های قدیمی staging تکرار شده و باید پیش از
-  Stage 4 rotate شود؛ SSE پیش‌فرض
-  و strict PAB به‌علت رفتار ناسازگار provider قابل استفاده نیستند و client-side
+  عبور می‌کند؛ Arvan policy-status را برای principal صریح جاری public گزارش می‌کند،
+  ولی policy semantic فاقد wildcard و دسترسی ناشناس عملاً بسته است؛ SSE پیش‌فرض و
+  strict PAB به‌علت رفتار ناسازگار provider قابل استفاده نیستند و client-side
   encryption اجباری است؛ هیچ منبع پنل بدون اجازه مالک ساخته یا حذف نمی‌شود.`
 - Rollback verified: `yes برای boundary پیش از deploy؛ چهار restore drill و command-plan dry-run قبول شدند. freeze/restore bundle source قدیمی طبق مرز production در ابتدای Stage 4 انجام می‌شود.`
 - Decision / next stage:
-  `G3_NOT_PASSED / no؛ فقط چرخش credential Object Storage و سپس مرور/اجازه صریح
-  مالک باقی است. شروع Stage 4 پیش از هر دو ممنوع است.`
+  `G3_TECHNICALLY_READY_AWAITING_OWNER / no؛ rotation و تمام شواهد فنی کامل‌اند؛
+  فقط پذیرش G3 و اجازه صریح مالک برای همین release باقی است. Stage 4 هنوز مجاز
+  نیست.`
 
 ---
 

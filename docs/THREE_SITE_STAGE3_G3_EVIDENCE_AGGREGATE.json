@@ -1,7 +1,7 @@
 {
-  "schema": "three-site-stage3-g3-evidence-aggregate-v1",
-  "status": "G3_PENDING_OBJECT_STORAGE_CREDENTIAL_ROTATION_AND_OWNER_STAGE4_AUTHORIZATION",
-  "generated_at": "2026-08-02T19:25:26Z",
+  "schema": "three-site-stage3-g3-evidence-aggregate-v2",
+  "status": "G3_EVIDENCE_COMPLETE_AWAITING_OWNER_ACCEPTANCE_AND_STAGE4_AUTHORIZATION",
+  "generated_at": "2026-08-02T20:20:49Z",
   "campaign_id": "fd34231d-f52e-498a-aab4-438c99d88fc5",
   "deployment_id": "stage3-0e63a7ec-fd34231d",
   "release_sha": "0e63a7ec1b08bef29ea199041215298a021b56ef",
@@ -65,9 +65,37 @@
     }
   },
   "object_storage": {
-    "readiness_evidence_sha256": "d803fd9e914fa5cd517f3888ec8394e247492176e497754cfa99cc8a8b307d1e",
+    "initial_readiness_evidence_sha256": "d803fd9e914fa5cd517f3888ec8394e247492176e497754cfa99cc8a8b307d1e",
+    "rotated_credential_readiness_evidence_sha256": "76c3671fd3c1bc32374f069675d05c78013bb50e785ae23a4dc001e549d2e4d1",
     "private_versioned_lifecycle_encrypted_readback": true,
-    "credential_rotated_for_this_campaign": false
+    "credential_rotated_for_this_campaign": true,
+    "access_key_id_changed": false,
+    "previous_secret_key_sha256": "5032a2e79be5a2660ae239240759b83dc4edd1a414cffcc808731f36dca4ea74",
+    "active_secret_key_sha256": "ddc1973db41e0a52b816479a8d63a069fba210dd325918173dbd6095aed0f9b1",
+    "previous_secret_rejected_http_403": true,
+    "active_secret_controller_roundtrip": true,
+    "active_secret_webapp_fi_read_only_probe": true,
+    "active_secret_webapp_ir_read_only_probe": true,
+    "bucket_versioning": "Enabled",
+    "provider_policy_status_public": true,
+    "policy_has_wildcard_or_not_principal_allow": false,
+    "anonymous_head_list_get_denied": true,
+    "client_side_encryption": "AES-256-GCM",
+    "readback_version_id": "lEnt7fUtdJoE3jKlZkalN5BDYe1gnkx",
+    "bootstrap_material_manifest_sha256": "887b521175caca8ddfb301ec123917e520947d9367600381122de87de98398cc",
+    "bootstrap_credential_file_sha256": "b3806a027cf3c832e3483b26daf8cc5da9ede30cd8e4e5881befedbf29b6f66c",
+    "role_distribution": {
+      "webapp-fi": "credential_and_manifest_verified",
+      "webapp-ir": "credential_and_manifest_verified",
+      "bot-fi": "manifest_verified_credential_absent",
+      "witness": "manifest_verified_credential_absent"
+    },
+    "campaign_bundle_sha256": "bc053cdbd2a43b999a0ddf8c96ef4a25d60416a37b7cc364aa6e5763eb811a88",
+    "secret_boundary": {
+      "status": "verified",
+      "service_count": 45,
+      "managed_network_count": 11
+    }
   },
   "dns_tls": {
     "routing_change_applied": false,
@@ -79,10 +107,13 @@
   "rollback": {
     "plan": "docs/THREE_SITE_STAGE3_ROLLBACK_PLAN.json",
     "config_dry_run_passed_on_all_roles": true,
-    "volume_or_data_cleanup_authorized": false
+    "volume_or_data_cleanup_authorized": false,
+    "revoked_object_storage_secret_must_not_be_restored": true
   },
   "open_requirements": [
-    "rotate the reused Arvan Object Storage credential and rebuild role material fingerprints",
     "owner reviews this aggregate and explicitly authorizes Stage 4 for the exact release SHA"
-  ]
+  ],
+  "g3_technical_requirements_complete": true,
+  "owner_g3_acceptance_recorded": false,
+  "stage4_authorized": false
 }
