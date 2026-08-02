@@ -196,6 +196,7 @@ class HardenThreeSiteStage3ObjectStorageTests(unittest.TestCase):
             self.assertFalse(evidence["after"]["public_access_block_configured"])
             self.assertTrue(evidence["probe"]["readback_verified"])
             self.assertFalse(evidence["probe"]["ephemeral_key_persisted"])
+            self.assertEqual(evidence["credential_fingerprints_sha256"], {})
             self.assertFalse(evidence["bucket_or_object_deleted"])
 
     def test_unpinned_bucket_fails_before_any_request(self):

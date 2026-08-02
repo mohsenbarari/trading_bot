@@ -293,8 +293,14 @@ def execute(args: argparse.Namespace, *, client=None) -> dict[str, Any]:  # noqa
     campaign_id = match.group(1)
     expected_rule = _lifecycle_rule(campaign_id, prefix)
     expected_confirmation = confirmation_phrase(bucket, prefix)
+    credential_fingerprints: dict[str, str] = {}
     if client is None:
-        client = _client(_credentials(args.credentials))
+        credentials = _credentials(args.credentials)
+        client = _client(credentials)
+        credential_fingerprints = {
+            "access_key_sha256": hashlib.sha256(credentials[0].encode()).hexdigest(),
+            "secret_key_sha256": hashlib.sha256(credentials[1].encode()).hexdigest(),
+        }
     before = audit(client, bucket=bucket, lifecycle_rule=expected_rule)
     if not before["versioning_enabled"]:
         raise Stage3ObjectStorageError("staging bucket versioning is not enabled")
@@ -385,6 +391,7 @@ def execute(args: argparse.Namespace, *, client=None) -> dict[str, Any]:  # noqa
             "private_boundary": "private ACL plus non-public bucket policy",
         },
         "probe": probe,
+        "credential_fingerprints_sha256": credential_fingerprints,
         "bucket_created": False,
         "bucket_or_object_deleted": False,
         "credentials_persisted": False,
