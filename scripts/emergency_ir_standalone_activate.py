@@ -17,6 +17,15 @@ forensic and fail-closed rather than "helpfully" destructive.
 
 from __future__ import annotations
 
+import sys
+
+# This is a privileged local activation entrypoint.  Reject an ambient Python
+# process before it can import any package code.  The fixed package controls
+# use the same isolated interpreter boundary.
+if __name__ == "__main__" and (not sys.flags.isolated or not sys.flags.dont_write_bytecode):
+    print('{"error":"Emergency activation must be launched with /usr/bin/python3 -I -B","error_class":"EmergencyActivationError","status":"blocked"}')
+    raise SystemExit(2)
+
 import argparse
 import dataclasses
 import hashlib
@@ -28,7 +37,6 @@ import shutil
 import socket
 import stat
 import subprocess
-import sys
 import tarfile
 import time
 import types
@@ -89,11 +97,53 @@ SOURCE_RELEASE_SHA = "2c08da14bfa0ef94d9c788e478d30ddc3f31a3c5"
 PACKAGE_ROOT_NAME = "emergency-ir-standalone"
 PACKAGE_RELEASE_SCHEMA = "gold-trade-emergency-ir-release-package-v1"
 STATE_SCHEMA = "gold-trade-emergency-ir-activation-state-v1"
+HOST_ISOLATION_RECEIPT_SCHEMA = "gold-trade-emergency-ir-host-isolation-receipt-v2"
+HOST_ISOLATION_PUBLIC_MODE = "public-p0"
+HOST_ISOLATION_RUNTIME_MODE = "runtime-p1"
+HOST_ISOLATION_RECEIPT_STAGE = "host-isolation"
+HOST_ISOLATION_RUNTIME_RECEIPT_STAGE = "host-isolation-runtime"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$", re.ASCII)
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$", re.ASCII)
 TAG_SUFFIX_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$", re.ASCII)
 SMS_PARAMETER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$", re.ASCII)
 CAMPAIGN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{7,127}$", re.ASCII)
+
+# These are source controls, not configuration inputs.  They are never
+# imported from an ambient Python path: a later activation stage will first
+# re-read and re-hash their exact package members against RELEASE.json before
+# it considers executing either control.
+HOST_ISOLATION_PREFLIGHT_MEMBER = "scripts/preflight_emergency_ir_host_isolation.py"
+HOST_ISOLATION_COMPOSE_VALIDATOR_MEMBER = "scripts/validate_emergency_ir_compose_contract.py"
+HOST_ISOLATION_SEALED_MEMBERS = (
+    "deploy/emergency-ir/docker-compose.standalone.yml",
+    "deploy/emergency-ir/docker-compose.sms-otp.yml",
+    HOST_ISOLATION_PREFLIGHT_MEMBER,
+    HOST_ISOLATION_COMPOSE_VALIDATOR_MEMBER,
+)
+HOST_ISOLATION_PREFLIGHT_SCHEMA = "gold-trade-emergency-ir-host-isolation-preflight-v1"
+HOST_ISOLATION_COMPOSE_SCHEMA = "gold-trade-emergency-ir-compose-contract-v1"
+HOST_ISOLATION_PROFILES = frozenset({"telegram-only", "sms-otp"})
+HOST_ISOLATION_MODES = frozenset({HOST_ISOLATION_PUBLIC_MODE, HOST_ISOLATION_RUNTIME_MODE})
+HOST_ISOLATION_PROJECT_NAME = "trading-bot-emergency-ir"
+HOST_ISOLATION_APP_PORT = 18000
+HOST_ISOLATION_READ_ONLY_ACTIONS = (
+    "docker.ps",
+    "docker.inspect",
+    "docker.volume.ls",
+    "docker.volume.inspect",
+    "docker.network.ls",
+    "docker.network.inspect",
+    "ss.listen-tcp",
+)
+HOST_ISOLATION_MAX_DOCKER_OBJECTS = 1024
+PINNED_PYTHON_BINARY = "/usr/bin/python3"
+HOST_ISOLATION_PYTHON = PINNED_PYTHON_BINARY
+HOST_ISOLATION_CONTROL_TIMEOUT_SECONDS = 120
+HOST_ISOLATION_CONTROL_ENV = {
+    "PATH": "/usr/bin:/bin",
+    "LANG": "C.UTF-8",
+    "LC_ALL": "C.UTF-8",
+}
 
 MAX_PACKAGE_BYTES = 32 * 1024 * 1024
 MAX_SETTINGS_BYTES = 4 * 1024 * 1024
@@ -774,10 +824,557 @@ def _release_file_specs(release: Mapping[str, Any]) -> list[dict[str, Any]]:
         "scripts/verify_emergency_ir_standalone.py",
         "scripts/verify_emergency_ir_image_provenance.py",
         "scripts/emergency_ir_standalone_activate.py",
+        HOST_ISOLATION_PREFLIGHT_MEMBER,
+        HOST_ISOLATION_COMPOSE_VALIDATOR_MEMBER,
     }
     if not required.issubset(seen):
         _fail("package RELEASE.json omits a mandatory Emergency activation control")
     return normalized
+
+
+def sealed_package_member_identity(*, package_root: Path, relative_path: str) -> dict[str, Any]:
+    """Read and re-hash one exact RELEASE.json-bound package member.
+
+    The returned object deliberately contains only the member's public
+    identity.  It does not return source bytes, runtime configuration, or any
+    receipt data.  Each parent directory is re-checked before opening the
+    member, so a path replacement after package extraction cannot redirect a
+    later host-isolation command outside the sealed release tree.
+    """
+
+    normalized = _safe_relative(relative_path, label="sealed package member")
+    if str(normalized) != relative_path:
+        _fail("sealed package member path is not canonical")
+    _secure_directory(package_root, create=False)
+    release_payload = _read_root_regular(
+        package_root / "RELEASE.json",
+        label="sealed package RELEASE.json",
+        maximum_bytes=MAX_JSON_BYTES,
+    )
+    release = _parse_strict_json(
+        release_payload,
+        label="sealed package RELEASE.json",
+        maximum_bytes=MAX_JSON_BYTES,
+    )
+    if _canonical_json(release) != release_payload:
+        _fail("sealed package RELEASE.json is not canonical")
+    specs = {item["path"]: item for item in _release_file_specs(release)}
+    expected = specs.get(relative_path)
+    if expected is None:
+        _fail("sealed package RELEASE.json omits the requested member")
+    member_path = package_root.joinpath(*normalized.parts)
+    _secure_directory(member_path.parent, create=False)
+    payload = _read_root_regular(
+        member_path,
+        label="sealed package member",
+        maximum_bytes=int(expected["bytes"]),
+    )
+    digest = hashlib.sha256(payload).hexdigest()
+    if len(payload) != expected["bytes"] or digest != expected["sha256"]:
+        _fail("sealed package member differs from its RELEASE.json identity")
+    return {"path": relative_path, "sha256": digest, "bytes": len(payload)}
+
+
+def sealed_host_isolation_member_identities(*, package_root: Path) -> list[dict[str, Any]]:
+    """Return freshly re-hashed public identities for host-isolation controls."""
+
+    return [
+        sealed_package_member_identity(package_root=package_root, relative_path=relative_path)
+        for relative_path in HOST_ISOLATION_SEALED_MEMBERS
+    ]
+
+
+def _host_isolation_integer(value: Any, *, label: str, maximum: int) -> int:
+    if type(value) is not int or not 0 <= value <= maximum:
+        _fail(f"host-isolation {label} is invalid")
+    return value
+
+
+def _normalize_host_isolation_preflight(report: Mapping[str, Any], *, profile: str) -> dict[str, Any]:
+    """Accept only a passing, non-secret, no-mutation preflight report."""
+
+    expected_fields = {
+        "schema",
+        "status",
+        "profile",
+        "collisions",
+        "checked",
+        "read_only_actions",
+        "mutating_actions",
+        "docker_or_service_changed",
+        "authorizes_activation",
+    }
+    if not isinstance(report, Mapping) or set(report) != expected_fields:
+        _fail("host-isolation preflight evidence fields are unsupported")
+    if (
+        report.get("schema") != HOST_ISOLATION_PREFLIGHT_SCHEMA
+        or report.get("status") != "ready"
+        or report.get("profile") != profile
+        or report.get("collisions") != []
+        or report.get("read_only_actions") != list(HOST_ISOLATION_READ_ONLY_ACTIONS)
+        or report.get("mutating_actions") != []
+        or report.get("docker_or_service_changed") is not False
+        or report.get("authorizes_activation") is not False
+    ):
+        _fail("host-isolation preflight evidence is not an explicit local pass")
+    checked = report.get("checked")
+    expected_checked = {
+        "compose_project",
+        "planned_host_port",
+        "container_count",
+        "volume_count",
+        "network_count",
+        "protected_host_roots",
+    }
+    if not isinstance(checked, Mapping) or set(checked) != expected_checked:
+        _fail("host-isolation preflight checked evidence is unsupported")
+    if (
+        checked.get("compose_project") != HOST_ISOLATION_PROJECT_NAME
+        or checked.get("planned_host_port") != HOST_ISOLATION_APP_PORT
+        or checked.get("protected_host_roots") != 2
+    ):
+        _fail("host-isolation preflight checked evidence differs from the sealed contract")
+    return {
+        "schema": HOST_ISOLATION_PREFLIGHT_SCHEMA,
+        "status": "ready",
+        "profile": profile,
+        "collisions": [],
+        "checked": {
+            "compose_project": HOST_ISOLATION_PROJECT_NAME,
+            "planned_host_port": HOST_ISOLATION_APP_PORT,
+            "container_count": _host_isolation_integer(
+                checked.get("container_count"),
+                label="container count",
+                maximum=HOST_ISOLATION_MAX_DOCKER_OBJECTS,
+            ),
+            "volume_count": _host_isolation_integer(
+                checked.get("volume_count"),
+                label="volume count",
+                maximum=HOST_ISOLATION_MAX_DOCKER_OBJECTS,
+            ),
+            "network_count": _host_isolation_integer(
+                checked.get("network_count"),
+                label="network count",
+                maximum=HOST_ISOLATION_MAX_DOCKER_OBJECTS,
+            ),
+            "protected_host_roots": 2,
+        },
+        "read_only_actions": list(HOST_ISOLATION_READ_ONLY_ACTIONS),
+        "mutating_actions": [],
+        "docker_or_service_changed": False,
+        "authorizes_activation": False,
+    }
+
+
+def _normalize_host_isolation_compose_contract(report: Mapping[str, Any], *, profile: str) -> dict[str, Any]:
+    """Accept only bounded public evidence from the sealed Compose validator."""
+
+    expected_fields = {
+        "schema",
+        "status",
+        "profile",
+        "base_sha256",
+        "base_bytes",
+        "docker_or_service_changed",
+        "network_action",
+    }
+    if profile == "sms-otp":
+        expected_fields.update({"sms_sha256", "sms_bytes"})
+    if not isinstance(report, Mapping) or set(report) != expected_fields:
+        _fail("host-isolation Compose evidence fields are unsupported")
+    if (
+        report.get("schema") != HOST_ISOLATION_COMPOSE_SCHEMA
+        or report.get("status") != "verified-local-only"
+        or report.get("profile") != profile
+        or not isinstance(report.get("base_sha256"), str)
+        or SHA256_RE.fullmatch(str(report.get("base_sha256"))) is None
+        or report.get("docker_or_service_changed") is not False
+        or report.get("network_action") is not False
+    ):
+        _fail("host-isolation Compose evidence is not an explicit local pass")
+    result: dict[str, Any] = {
+        "schema": HOST_ISOLATION_COMPOSE_SCHEMA,
+        "status": "verified-local-only",
+        "profile": profile,
+        "base_sha256": str(report["base_sha256"]),
+        "base_bytes": _host_isolation_integer(
+            report.get("base_bytes"), label="base Compose bytes", maximum=MAX_PACKAGE_BYTES
+        ),
+        "docker_or_service_changed": False,
+        "network_action": False,
+    }
+    if profile == "sms-otp":
+        sms_sha256 = report.get("sms_sha256")
+        if not isinstance(sms_sha256, str) or SHA256_RE.fullmatch(sms_sha256) is None:
+            _fail("host-isolation SMS Compose digest is invalid")
+        result.update(
+            {
+                "sms_sha256": sms_sha256,
+                "sms_bytes": _host_isolation_integer(
+                    report.get("sms_bytes"), label="SMS Compose bytes", maximum=MAX_PACKAGE_BYTES
+                ),
+            }
+        )
+    return result
+
+
+def _require_host_isolation_compose_evidence_bound_to_sealed_members(
+    *,
+    compose_contract: Mapping[str, Any],
+    sealed_members: Sequence[Mapping[str, Any]],
+    profile: str,
+) -> None:
+    """Require public Compose evidence to name the freshly re-hashed sources."""
+
+    identities = {str(item.get("path")): item for item in sealed_members}
+    base = identities.get("deploy/emergency-ir/docker-compose.standalone.yml")
+    if (
+        not isinstance(base, Mapping)
+        or compose_contract.get("base_sha256") != base.get("sha256")
+        or compose_contract.get("base_bytes") != base.get("bytes")
+    ):
+        _fail("host-isolation Compose evidence is not bound to the sealed base source")
+    if profile == "sms-otp":
+        sms = identities.get("deploy/emergency-ir/docker-compose.sms-otp.yml")
+        if (
+            not isinstance(sms, Mapping)
+            or compose_contract.get("sms_sha256") != sms.get("sha256")
+            or compose_contract.get("sms_bytes") != sms.get("bytes")
+        ):
+            _fail("host-isolation Compose evidence is not bound to the sealed SMS source")
+
+
+def _host_isolation_receipt_payload(
+    *,
+    package_root: Path,
+    profile: str,
+    preflight_report: Mapping[str, Any],
+    compose_report: Mapping[str, Any],
+) -> dict[str, Any]:
+    if profile not in HOST_ISOLATION_PROFILES:
+        _fail("host-isolation profile is invalid")
+    sealed_members = sealed_host_isolation_member_identities(package_root=package_root)
+    preflight = _normalize_host_isolation_preflight(preflight_report, profile=profile)
+    compose_contract = _normalize_host_isolation_compose_contract(compose_report, profile=profile)
+    _require_host_isolation_compose_evidence_bound_to_sealed_members(
+        compose_contract=compose_contract,
+        sealed_members=sealed_members,
+        profile=profile,
+    )
+    return {
+        "schema": HOST_ISOLATION_RECEIPT_SCHEMA,
+        "status": "passed",
+        "profile": profile,
+        "preflight": preflight,
+        "compose_contract": compose_contract,
+        "sealed_package_members": sealed_members,
+    }
+
+
+def write_host_isolation_receipt(
+    *,
+    paths: ActivationPaths,
+    campaign: VerifiedCampaign,
+    package_root: Path,
+    profile: str,
+    preflight_report: Mapping[str, Any],
+    compose_report: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Create one campaign-bound receipt from explicit non-secret evidence."""
+
+    payload = _host_isolation_receipt_payload(
+        package_root=package_root,
+        profile=profile,
+        preflight_report=preflight_report,
+        compose_report=compose_report,
+    )
+    _write_receipt(paths, campaign, stage=HOST_ISOLATION_RECEIPT_STAGE, payload=payload)
+    return payload
+
+
+def read_host_isolation_receipt(
+    *,
+    paths: ActivationPaths,
+    campaign: VerifiedCampaign,
+    package_root: Path,
+    profile: str,
+) -> dict[str, Any]:
+    """Re-check the campaign receipt and its sealed source identities."""
+
+    if profile not in HOST_ISOLATION_PROFILES:
+        _fail("host-isolation profile is invalid")
+    payload = _read_receipt(paths, campaign, stage=HOST_ISOLATION_RECEIPT_STAGE)
+    if (
+        set(payload)
+        != {"schema", "status", "profile", "preflight", "compose_contract", "sealed_package_members"}
+        or payload.get("schema") != HOST_ISOLATION_RECEIPT_SCHEMA
+        or payload.get("status") != "passed"
+        or payload.get("profile") != profile
+        or not isinstance(payload.get("preflight"), Mapping)
+        or not isinstance(payload.get("compose_contract"), Mapping)
+        or not isinstance(payload.get("sealed_package_members"), list)
+    ):
+        _fail("host-isolation receipt is malformed or not bound to this profile")
+    preflight = _normalize_host_isolation_preflight(payload["preflight"], profile=profile)
+    compose_contract = _normalize_host_isolation_compose_contract(payload["compose_contract"], profile=profile)
+    sealed_members = sealed_host_isolation_member_identities(package_root=package_root)
+    if payload["sealed_package_members"] != sealed_members:
+        _fail("host-isolation receipt sealed package identities no longer match")
+    _require_host_isolation_compose_evidence_bound_to_sealed_members(
+        compose_contract=compose_contract,
+        sealed_members=sealed_members,
+        profile=profile,
+    )
+    return {
+        "schema": HOST_ISOLATION_RECEIPT_SCHEMA,
+        "status": "passed",
+        "profile": profile,
+        "preflight": preflight,
+        "compose_contract": compose_contract,
+        "sealed_package_members": sealed_members,
+    }
+
+
+def _canonical_host_isolation_control_json(value: Mapping[str, Any]) -> bytes:
+    """Return the one stable public JSON serialization used by the controls.
+
+    The two sealed controls deliberately emit only a sorted JSON object on
+    stdout.  Keep this serialization separate from activation receipts: those
+    are compact canonical records, while an executable's stdout is line
+    oriented and must retain its terminal newline.
+    """
+
+    try:
+        return (
+            json.dumps(value, ensure_ascii=True, sort_keys=True, allow_nan=False)
+            + "\n"
+        ).encode("ascii")
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise EmergencyActivationError("host-isolation control output cannot be canonicalized") from exc
+
+
+def _reject_host_isolation_json_constant(_value: str) -> None:
+    _fail("host-isolation control output contains an unsupported JSON constant")
+
+
+def _parse_host_isolation_control_output(raw: Any, *, label: str) -> dict[str, Any]:
+    """Strictly accept one bounded, canonical, non-secret control report."""
+
+    if isinstance(raw, bytes):
+        payload = raw
+    elif isinstance(raw, str):
+        try:
+            payload = raw.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise EmergencyActivationError("host-isolation control output is not UTF-8") from exc
+    else:
+        _fail("host-isolation control output is invalid")
+    if not 1 <= len(payload) <= MAX_JSON_BYTES:
+        _fail("host-isolation control output size is invalid")
+    try:
+        value = json.loads(
+            payload.decode("utf-8"),
+            object_pairs_hook=_strict_object,
+            parse_constant=_reject_host_isolation_json_constant,
+        )
+    except EmergencyActivationError:
+        raise
+    except (UnicodeDecodeError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise EmergencyActivationError("host-isolation control output is not strict JSON") from exc
+    if not isinstance(value, dict):
+        _fail("host-isolation control output must be a JSON object")
+    if _canonical_host_isolation_control_json(value) != payload:
+        _fail("host-isolation control output is not canonical JSON")
+    return value
+
+
+def _sealed_host_isolation_control_paths(*, package_root: Path, profile: str) -> tuple[Path, Path, Path | None]:
+    """Re-hash every sealed control member before selecting executable paths."""
+
+    if profile not in HOST_ISOLATION_PROFILES:
+        _fail("host-isolation profile is invalid")
+    # This includes both Compose sources and both executable controls.  The
+    # result is intentionally not cached: every invocation is a fresh
+    # RELEASE.json-bound re-hash immediately before the executable paths are
+    # used.
+    sealed_host_isolation_member_identities(package_root=package_root)
+    base = package_root / "deploy/emergency-ir/docker-compose.standalone.yml"
+    sms = package_root / "deploy/emergency-ir/docker-compose.sms-otp.yml"
+    preflight = package_root / HOST_ISOLATION_PREFLIGHT_MEMBER
+    validator = package_root / HOST_ISOLATION_COMPOSE_VALIDATOR_MEMBER
+    if profile == "telegram-only":
+        return preflight, validator, None
+    return preflight, validator, sms
+
+
+def _run_host_isolation_control(
+    *,
+    command: Sequence[str],
+    label: str,
+    runner: Callable[..., Any] = subprocess.run,
+) -> dict[str, Any]:
+    """Run one exact packaged control without inheriting ambient process state."""
+
+    try:
+        result = runner(
+            list(command),
+            check=False,
+            capture_output=True,
+            text=False,
+            timeout=HOST_ISOLATION_CONTROL_TIMEOUT_SECONDS,
+            cwd="/",
+            env=dict(HOST_ISOLATION_CONTROL_ENV),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise EmergencyActivationError(f"{label} could not be executed") from exc
+    if getattr(result, "returncode", 1) != 0:
+        _fail(f"{label} did not report an explicit local pass")
+    stderr = getattr(result, "stderr", b"")
+    if stderr not in (b"", ""):
+        _fail(f"{label} emitted unexpected diagnostic output")
+    return _parse_host_isolation_control_output(getattr(result, "stdout", None), label=label)
+
+
+def _run_host_isolation_controls(
+    *,
+    paths: ActivationPaths,
+    package_root: Path,
+    profile: str,
+    runner: Callable[..., Any] = subprocess.run,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Freshly re-hash and run both sealed no-mutation host controls.
+
+    Each launch is preceded by a complete member re-hash.  A final binding
+    pass then confirms that both reports describe the exact current package
+    rather than an earlier copy of one of its files.
+    """
+
+    preflight, validator, sms = _sealed_host_isolation_control_paths(
+        package_root=package_root,
+        profile=profile,
+    )
+    base = package_root / "deploy/emergency-ir/docker-compose.standalone.yml"
+    validator_command = [
+        HOST_ISOLATION_PYTHON,
+        "-I",
+        "-B",
+        str(validator),
+        "--base",
+        str(base),
+        "--profile",
+        profile,
+    ]
+    if sms is not None:
+        validator_command.extend(["--sms", str(sms)])
+    compose_report = _normalize_host_isolation_compose_contract(
+        _run_host_isolation_control(
+            command=validator_command,
+            label="sealed Emergency Compose contract validator",
+            runner=runner,
+        ),
+        profile=profile,
+    )
+
+    # Do not let a successful validator run authorize a later, replaced
+    # preflight source.  Re-hash the whole sealed set again before launching
+    # the second executable.
+    preflight, _validator, sms = _sealed_host_isolation_control_paths(
+        package_root=package_root,
+        profile=profile,
+    )
+    preflight_command = [
+        HOST_ISOLATION_PYTHON,
+        "-I",
+        "-B",
+        str(preflight),
+        "--runtime-env",
+        str(paths.runtime_env),
+        "--compose",
+        str(base),
+        "--profile",
+        profile,
+    ]
+    if sms is not None:
+        preflight_command.extend(["--sms-compose", str(sms)])
+    preflight_report = _normalize_host_isolation_preflight(
+        _run_host_isolation_control(
+            command=preflight_command,
+            label="sealed Emergency host-isolation preflight",
+            runner=runner,
+        ),
+        profile=profile,
+    )
+
+    # A final re-hash also binds the reports to the current Compose bytes.  It
+    # returns no configuration values and cannot persist a secret.
+    bound = _host_isolation_receipt_payload(
+        package_root=package_root,
+        profile=profile,
+        preflight_report=preflight_report,
+        compose_report=compose_report,
+    )
+    return dict(bound["preflight"]), dict(bound["compose_contract"])
+
+
+def _write_host_isolation_receipt_from_controls(
+    *,
+    paths: ActivationPaths,
+    campaign: VerifiedCampaign,
+    package_root: Path,
+    profile: str,
+    runner: Callable[..., Any] = subprocess.run,
+) -> dict[str, Any]:
+    """Run the fresh-host gate once and create its campaign-bound receipt."""
+
+    preflight_report, compose_report = _run_host_isolation_controls(
+        paths=paths,
+        package_root=package_root,
+        profile=profile,
+        runner=runner,
+    )
+    return write_host_isolation_receipt(
+        paths=paths,
+        campaign=campaign,
+        package_root=package_root,
+        profile=profile,
+        preflight_report=preflight_report,
+        compose_report=compose_report,
+    )
+
+
+def _require_fresh_host_isolation_before_first_compose_up(
+    *,
+    paths: ActivationPaths,
+    campaign: VerifiedCampaign,
+    package_root: Path,
+    profile: str,
+    runner: Callable[..., Any] = subprocess.run,
+) -> None:
+    """Re-read the create-only receipt and re-run controls adjacent to first up.
+
+    Receipts are deliberately create-only.  The second pass therefore cannot
+    overwrite forensic evidence; it must exactly reproduce the public
+    no-mutation evidence immediately before Docker is allowed to create the
+    initial database/Redis resources.
+    """
+
+    receipt = read_host_isolation_receipt(
+        paths=paths,
+        campaign=campaign,
+        package_root=package_root,
+        profile=profile,
+    )
+    preflight_report, compose_report = _run_host_isolation_controls(
+        paths=paths,
+        package_root=package_root,
+        profile=profile,
+        runner=runner,
+    )
+    if (
+        receipt["preflight"] != preflight_report
+        or receipt["compose_contract"] != compose_report
+    ):
+        _fail("host-isolation evidence changed after its create-only receipt")
 
 
 def extract_and_verify_package(
@@ -1212,7 +1809,7 @@ def _run_renderer(
         _fail("refusing to replace an existing Emergency runtime environment")
     images = {str(item["kind"]): str(item["tag"]) for item in prepared["images"]}
     command = [
-        sys.executable,
+        PINNED_PYTHON_BINARY,
         "-I",
         "-B",
         str(package_root / "scripts/render_emergency_ir_standalone_env.py"),
@@ -1349,8 +1946,30 @@ def database(
     _run_renderer(
         package_root=package_root, paths=paths, prepared=prepared, profile=profile, settings=settings, runner=runner
     )
+    # The renderer has just created the fixed runtime environment the sealed
+    # preflight needs to inspect.  No Docker or Compose resource-creating
+    # action is permitted until both packaged, RELEASE-bound controls pass and
+    # leave their campaign-bound, non-secret receipt.
+    _write_host_isolation_receipt_from_controls(
+        paths=paths,
+        campaign=campaign,
+        package_root=package_root,
+        profile=profile,
+        runner=runner,
+    )
     compose = _compose_command(package_root=package_root, runtime_env=paths.runtime_env, profile=profile, trailing=[])
     _docker_result([*compose, "config", "--quiet"], runner=runner, timeout=60)
+    # ``config`` is non-mutating, but it is still deliberately outside the
+    # last gate.  Immediately before the first collision-relevant ``up``,
+    # re-read/re-hash the create-only receipt and require a second fresh
+    # no-mutation pass.
+    _require_fresh_host_isolation_before_first_compose_up(
+        paths=paths,
+        campaign=campaign,
+        package_root=package_root,
+        profile=profile,
+        runner=runner,
+    )
     _docker_result([*compose, "up", "-d", "--pull", "never", "db", "redis"], runner=runner, timeout=300)
     _wait_service_health(compose, "db", runner=runner)
     _wait_service_health(compose, "redis", runner=runner)
@@ -1396,6 +2015,16 @@ def api(
     prepared = _require_prepare(paths, campaign, profile=profile)
     _read_receipt(paths, campaign, stage="database-ready")
     package_root = Path(str(prepared["package_root"]))
+    # The database stage has intentionally created this project's Docker
+    # namespace, so the fresh-host preflight cannot be re-run here without
+    # treating the expected resources as collisions.  Re-reading the receipt
+    # still re-hashes every sealed member and fails closed on tampering.
+    read_host_isolation_receipt(
+        paths=paths,
+        campaign=campaign,
+        package_root=package_root,
+        profile=profile,
+    )
     compose = _compose_command(package_root=package_root, runtime_env=paths.runtime_env, profile=profile, trailing=[])
     _docker_result([*compose, "up", "-d", "--pull", "never", "api"], runner=runner, timeout=600)
     _wait_service_health(compose, "api", runner=runner)
@@ -1620,6 +2249,12 @@ def prearm(
         _fail("Emergency prearm receipt already exists; refusing to overwrite prior ingress state")
     prepared = _require_prepare(paths, campaign, profile=profile)
     _read_receipt(paths, campaign, stage="api-ready")
+    read_host_isolation_receipt(
+        paths=paths,
+        campaign=campaign,
+        package_root=Path(str(prepared["package_root"])),
+        profile=profile,
+    )
     if profile == "sms-otp":
         _require_sms_preflight(paths, campaign)
     _check_staging_listener(8213)

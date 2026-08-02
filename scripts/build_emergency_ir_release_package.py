@@ -36,6 +36,8 @@ PACKAGE_PATHS = (
     "scripts/emergency_ir_standalone_activate.py",
     "scripts/run_emergency_ir_object_storage_receive.py",
     "scripts/render_emergency_ir_standalone_env.py",
+    "scripts/preflight_emergency_ir_host_isolation.py",
+    "scripts/validate_emergency_ir_compose_contract.py",
     "scripts/verify_emergency_ir_image_provenance.py",
     "scripts/verify_emergency_ir_sms_egress_image.py",
     "scripts/verify_emergency_ir_standalone.py",

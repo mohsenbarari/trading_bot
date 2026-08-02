@@ -27,6 +27,8 @@ class BuildEmergencyIrReleasePackageTests(unittest.TestCase):
         return subprocess.check_output(["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"], text=True).strip()
 
     def test_builds_minimal_deterministic_release_package(self) -> None:
+        self.assertIn("scripts/preflight_emergency_ir_host_isolation.py", package.PACKAGE_PATHS)
+        self.assertIn("scripts/validate_emergency_ir_compose_contract.py", package.PACKAGE_PATHS)
         with tempfile.TemporaryDirectory(prefix="emergency-ir-package-") as raw:
             directory = Path(raw)
             directory.chmod(0o700)
@@ -49,6 +51,12 @@ class BuildEmergencyIrReleasePackageTests(unittest.TestCase):
                 )
                 self.assertIn(
                     f"{package.PACKAGE_ROOT}/scripts/emergency_ir_standalone_activate.py", members
+                )
+                self.assertIn(
+                    f"{package.PACKAGE_ROOT}/scripts/preflight_emergency_ir_host_isolation.py", members
+                )
+                self.assertIn(
+                    f"{package.PACKAGE_ROOT}/scripts/validate_emergency_ir_compose_contract.py", members
                 )
                 self.assertNotIn(f"{package.PACKAGE_ROOT}/app/main.py", members)
                 release = json.loads(archive.extractfile(f"{package.PACKAGE_ROOT}/RELEASE.json").read())

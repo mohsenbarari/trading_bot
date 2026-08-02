@@ -101,17 +101,28 @@ def completed(command: object, returncode: int = 0) -> subprocess.CompletedProce
 def package_files() -> dict[str, bytes]:
     return {
         "deploy/emergency-ir/docker-compose.standalone.yml": b"name: trading-bot-emergency-ir\n",
+        "deploy/emergency-ir/docker-compose.sms-otp.yml": b"services: {}\n",
         "deploy/emergency-ir/nginx.standalone.conf.template": b"server {}\n",
         "deploy/emergency-ir/reset-emergency-sessions.sql": b"BEGIN; COMMIT;\n",
         "scripts/render_emergency_ir_standalone_env.py": b"# renderer\n",
+        "scripts/preflight_emergency_ir_host_isolation.py": b"# host preflight\n",
+        "scripts/validate_emergency_ir_compose_contract.py": b"# Compose validator\n",
         "scripts/verify_emergency_ir_standalone.py": b"# verifier\n",
         "scripts/verify_emergency_ir_image_provenance.py": b"# provenance\n",
         "scripts/emergency_ir_standalone_activate.py": b"# activation\n",
     }
 
 
-def write_package(path: Path, *, symlink_member: bool = False, wrong_hash: bool = False) -> None:
+def write_package(
+    path: Path,
+    *,
+    symlink_member: bool = False,
+    wrong_hash: bool = False,
+    omit: str | None = None,
+) -> None:
     files = package_files()
+    if omit is not None:
+        del files[omit]
     release = {
         "schema": ACTIVATE.PACKAGE_RELEASE_SCHEMA,
         "source_release_sha": SOURCE_SHA,
@@ -135,6 +146,62 @@ def write_package(path: Path, *, symlink_member: bool = False, wrong_hash: bool 
                 kind=tarfile.SYMTYPE if symlink_member and index == 0 else tarfile.REGTYPE,
             )
     path.chmod(0o600)
+
+
+def host_isolation_preflight_report(*, profile: str = "telegram-only") -> dict[str, object]:
+    return {
+        "schema": ACTIVATE.HOST_ISOLATION_PREFLIGHT_SCHEMA,
+        "status": "ready",
+        "profile": profile,
+        "collisions": [],
+        "checked": {
+            "compose_project": ACTIVATE.HOST_ISOLATION_PROJECT_NAME,
+            "planned_host_port": ACTIVATE.HOST_ISOLATION_APP_PORT,
+            "container_count": 3,
+            "volume_count": 4,
+            "network_count": 2,
+            "protected_host_roots": 2,
+        },
+        "read_only_actions": list(ACTIVATE.HOST_ISOLATION_READ_ONLY_ACTIONS),
+        "mutating_actions": [],
+        "docker_or_service_changed": False,
+        "authorizes_activation": False,
+    }
+
+
+def host_isolation_compose_report(*, package_root: Path, profile: str = "telegram-only") -> dict[str, object]:
+    identities = {
+        str(item["path"]): item
+        for item in ACTIVATE.sealed_host_isolation_member_identities(package_root=package_root)
+    }
+    base = identities["deploy/emergency-ir/docker-compose.standalone.yml"]
+    report: dict[str, object] = {
+        "schema": ACTIVATE.HOST_ISOLATION_COMPOSE_SCHEMA,
+        "status": "verified-local-only",
+        "profile": profile,
+        "base_sha256": base["sha256"],
+        "base_bytes": base["bytes"],
+        "docker_or_service_changed": False,
+        "network_action": False,
+    }
+    if profile == "sms-otp":
+        sms = identities["deploy/emergency-ir/docker-compose.sms-otp.yml"]
+        report.update({"sms_sha256": sms["sha256"], "sms_bytes": sms["bytes"]})
+    return report
+
+
+def canonical_host_control_output(value: object) -> bytes:
+    return (json.dumps(value, ensure_ascii=True, sort_keys=True, allow_nan=False) + "\n").encode("ascii")
+
+
+def host_control_completed(
+    command: object,
+    payload: object,
+    *,
+    returncode: int = 0,
+    stderr: bytes = b"",
+) -> subprocess.CompletedProcess[object]:
+    return subprocess.CompletedProcess(command, returncode, stdout=payload, stderr=stderr)
 
 
 def write_settings(path: Path, *, profile: str = "telegram-only", extra: bool = False) -> None:
@@ -358,6 +425,146 @@ class EmergencyIrStandaloneActivationTests(unittest.TestCase):
                 write_package(package, **kwargs)
                 with self.subTest(name=name), self.assertRaises(ACTIVATE.EmergencyActivationError):
                     ACTIVATE.extract_and_verify_package(package_tar=package, releases_root=root / name)
+
+    def test_host_isolation_controls_are_mandatory_and_rehashed_from_sealed_release(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-activation-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            package = root / "package.tar.gz"
+            write_package(package)
+            identity = ACTIVATE.extract_and_verify_package(package_tar=package, releases_root=root / "releases")
+            identities = ACTIVATE.sealed_host_isolation_member_identities(package_root=identity.package_root)
+            self.assertEqual(
+                [item["path"] for item in identities],
+                list(ACTIVATE.HOST_ISOLATION_SEALED_MEMBERS),
+            )
+            self.assertTrue(all(len(str(item["sha256"])) == 64 for item in identities))
+
+            validator = identity.package_root / ACTIVATE.HOST_ISOLATION_COMPOSE_VALIDATOR_MEMBER
+            root_file(validator, b"# changed validator\n")
+            with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "RELEASE.json identity"):
+                ACTIVATE.sealed_host_isolation_member_identities(package_root=identity.package_root)
+
+            for omitted in (
+                ACTIVATE.HOST_ISOLATION_PREFLIGHT_MEMBER,
+                ACTIVATE.HOST_ISOLATION_COMPOSE_VALIDATOR_MEMBER,
+            ):
+                missing = root / f"missing-{Path(omitted).stem}.tar.gz"
+                write_package(missing, omit=omitted)
+                with self.subTest(omitted=omitted), self.assertRaisesRegex(
+                    ACTIVATE.EmergencyActivationError, "mandatory Emergency activation control"
+                ):
+                    ACTIVATE.extract_and_verify_package(package_tar=missing, releases_root=root / Path(omitted).stem)
+
+    def test_host_isolation_receipt_is_campaign_bound_nonsecret_and_rehashes_controls(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-activation-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            package = root / "package.tar.gz"
+            write_package(package)
+            identity = ACTIVATE.extract_and_verify_package(package_tar=package, releases_root=root / "releases")
+            campaign = ACTIVATE.VerifiedCampaign(
+                campaign_id="20260801T220000Z-emergency-ir-01",
+                manifest_sha256="d" * 64,
+                plan={},
+                artifacts={},
+            )
+            paths = ACTIVATE.ActivationPaths(emergency_root=root / "emergency", activation_root=root / "emergency" / "activation")
+            receipt = ACTIVATE.write_host_isolation_receipt(
+                paths=paths,
+                campaign=campaign,
+                package_root=identity.package_root,
+                profile="telegram-only",
+                preflight_report=host_isolation_preflight_report(),
+                compose_report=host_isolation_compose_report(package_root=identity.package_root),
+            )
+            serialized = json.dumps(receipt, sort_keys=True)
+            self.assertNotIn("JWT_SECRET_KEY", serialized)
+            self.assertNotIn("runtime.env", serialized)
+            self.assertEqual(receipt, ACTIVATE.read_host_isolation_receipt(
+                paths=paths,
+                campaign=campaign,
+                package_root=identity.package_root,
+                profile="telegram-only",
+            ))
+            different_manifest = ACTIVATE.VerifiedCampaign(
+                campaign_id=campaign.campaign_id,
+                manifest_sha256="e" * 64,
+                plan={},
+                artifacts={},
+            )
+            with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "not bound to this campaign"):
+                ACTIVATE.read_host_isolation_receipt(
+                    paths=paths,
+                    campaign=different_manifest,
+                    package_root=identity.package_root,
+                    profile="telegram-only",
+                )
+
+            root_file(
+                identity.package_root / ACTIVATE.HOST_ISOLATION_PREFLIGHT_MEMBER,
+                b"# changed host preflight\n",
+            )
+            with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "sealed package member|sealed package identities"):
+                ACTIVATE.read_host_isolation_receipt(
+                    paths=paths,
+                    campaign=campaign,
+                    package_root=identity.package_root,
+                    profile="telegram-only",
+                )
+
+    def test_host_isolation_receipt_refuses_unknown_or_secret_bearing_evidence(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-activation-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            package = root / "package.tar.gz"
+            write_package(package)
+            identity = ACTIVATE.extract_and_verify_package(package_tar=package, releases_root=root / "releases")
+            campaign = ACTIVATE.VerifiedCampaign(
+                campaign_id="20260801T220000Z-emergency-ir-01",
+                manifest_sha256="d" * 64,
+                plan={},
+                artifacts={},
+            )
+            paths = ACTIVATE.ActivationPaths(emergency_root=root / "emergency", activation_root=root / "emergency" / "activation")
+            preflight = host_isolation_preflight_report()
+            preflight["runtime_env"] = "must-never-be-persisted"
+            with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "evidence fields"):
+                ACTIVATE.write_host_isolation_receipt(
+                    paths=paths,
+                    campaign=campaign,
+                    package_root=identity.package_root,
+                    profile="telegram-only",
+                    preflight_report=preflight,
+                    compose_report=host_isolation_compose_report(package_root=identity.package_root),
+                )
+            self.assertFalse((paths.activation_root / campaign.campaign_id / "host-isolation.json").exists())
+
+    def test_host_isolation_receipt_binds_compose_evidence_to_the_sealed_sources(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="emergency-ir-activation-") as raw:
+            root = Path(raw)
+            root.chmod(0o700)
+            package = root / "package.tar.gz"
+            write_package(package)
+            identity = ACTIVATE.extract_and_verify_package(package_tar=package, releases_root=root / "releases")
+            campaign = ACTIVATE.VerifiedCampaign(
+                campaign_id="20260801T220000Z-emergency-ir-01",
+                manifest_sha256="d" * 64,
+                plan={},
+                artifacts={},
+            )
+            paths = ACTIVATE.ActivationPaths(emergency_root=root / "emergency", activation_root=root / "emergency" / "activation")
+            compose = host_isolation_compose_report(package_root=identity.package_root)
+            compose["base_sha256"] = "0" * 64
+            with self.assertRaisesRegex(ACTIVATE.EmergencyActivationError, "sealed base source"):
+                ACTIVATE.write_host_isolation_receipt(
+                    paths=paths,
+                    campaign=campaign,
+                    package_root=identity.package_root,
+                    profile="telegram-only",
+                    preflight_report=host_isolation_preflight_report(),
+                    compose_report=compose,
+                )
 
     def test_settings_tar_accepts_only_profile_exact_members_without_persisting_secret(self) -> None:
         with tempfile.TemporaryDirectory(prefix="emergency-ir-activation-") as raw:

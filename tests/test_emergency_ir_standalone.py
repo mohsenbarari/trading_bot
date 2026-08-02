@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import stat
 import tempfile
@@ -89,6 +90,50 @@ class EmergencyStandaloneTests(unittest.TestCase):
     def test_compose_is_strictly_isolated(self) -> None:
         failures = VERIFY.verify_compose(ROOT / "deploy/emergency-ir/docker-compose.standalone.yml")
         self.assertEqual(failures, [])
+
+    def test_compose_verifier_rejects_canonical_nested_drift(self) -> None:
+        """The verifier must use the deep-exact JSON contract, not text snippets."""
+
+        with tempfile.TemporaryDirectory(prefix="emergency-compose-verifier-") as directory:
+            candidate = Path(directory) / "docker-compose.standalone.json"
+            value = json.loads(
+                (ROOT / "deploy/emergency-ir/docker-compose.standalone.yml").read_text(
+                    encoding="utf-8"
+                )
+            )
+            value["services"]["api"]["ports"] = ["0.0.0.0:18000:8000"]
+            candidate.write_text(
+                json.dumps(
+                    value,
+                    ensure_ascii=True,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            candidate.chmod(0o644)
+            failures = VERIFY.verify_compose(candidate)
+        self.assertTrue(any("deep-exact contract" in failure for failure in failures))
+
+    def test_compose_verifier_refuses_a_symlinked_sibling_validator(self) -> None:
+        """The validator is fixed beside the verifier, never imported by name."""
+
+        with tempfile.TemporaryDirectory(prefix="emergency-compose-validator-") as directory:
+            scripts = Path(directory) / "scripts"
+            scripts.mkdir(mode=0o700)
+            verifier = scripts / "verify_emergency_ir_standalone.py"
+            verifier.write_text("# fixed sibling location for test\n", encoding="utf-8")
+            verifier.chmod(0o644)
+            (scripts / VERIFY.COMPOSE_CONTRACT_VALIDATOR_NAME).symlink_to(
+                ROOT / "scripts" / VERIFY.COMPOSE_CONTRACT_VALIDATOR_NAME
+            )
+            with mock.patch.object(VERIFY, "__file__", str(verifier)):
+                failures = VERIFY.verify_compose(
+                    ROOT / "deploy/emergency-ir/docker-compose.standalone.yml"
+                )
+        self.assertTrue(any("Compose contract validator" in failure for failure in failures))
 
     def test_nginx_blocks_cross_site_surfaces(self) -> None:
         failures = VERIFY.verify_nginx(ROOT / "deploy/emergency-ir/nginx.standalone.conf.template")
@@ -189,9 +234,19 @@ class EmergencyStandaloneTests(unittest.TestCase):
     def test_sms_otp_overlay_is_explicit_and_strictly_bounded(self) -> None:
         self.assertEqual(
             VERIFY.verify_sms_otp_compose(
-                ROOT / "deploy/emergency-ir/docker-compose.sms-otp.yml"
+                ROOT / "deploy/emergency-ir/docker-compose.standalone.yml",
+                ROOT / "deploy/emergency-ir/docker-compose.sms-otp.yml",
             ),
             [],
+        )
+        self.assertTrue(
+            any(
+                "requires its sealed overlay" in failure
+                for failure in VERIFY.verify_compose(
+                    ROOT / "deploy/emergency-ir/docker-compose.standalone.yml",
+                    profile=VERIFY.AUTH_PROFILE_SMS_OTP,
+                )
+            )
         )
         self.assertEqual(
             VERIFY.verify_sms_egress_relay(

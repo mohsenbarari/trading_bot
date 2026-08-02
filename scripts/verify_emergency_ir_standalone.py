@@ -3,11 +3,25 @@
 
 from __future__ import annotations
 
+import sys
+
+# The verifier is a release control, not a general-purpose local utility.
+# Refuse an ambient Python path before importing any non-builtin module when it
+# is invoked as a program.  Test modules load it by an explicit file path and
+# exercise its pure functions without taking this CLI path.
+if __name__ == "__main__" and (
+    not sys.flags.isolated or not sys.flags.dont_write_bytecode
+):
+    raise SystemExit(
+        "Emergency IR standalone verifier must be launched with python3 -I -B"
+    )
+
 import argparse
 import os
 import re
 import stat
 from pathlib import Path
+from types import ModuleType
 
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -92,10 +106,150 @@ SMS_OTP_PUBLIC_PATHS = (
 SMS_OTP_BLOCKED_NGINX_PREFIXES = tuple(
     prefix for prefix in BLOCKED_NGINX_PREFIXES if prefix not in SMS_OTP_PUBLIC_PATHS
 )
+COMPOSE_CONTRACT_VALIDATOR_NAME = "validate_emergency_ir_compose_contract.py"
+MAX_COMPOSE_CONTRACT_VALIDATOR_BYTES = 4 * 1024 * 1024
 
 
 class EmergencyVerificationError(RuntimeError):
     pass
+
+
+def _absolute_path(path: Path | str, *, label: str) -> Path:
+    """Accept one canonical absolute path without resolving a symlink."""
+
+    raw = str(path)
+    candidate = Path(raw)
+    if (
+        not raw
+        or "\x00" in raw
+        or not candidate.is_absolute()
+        or raw.startswith("//")
+        or raw != os.path.normpath(raw)
+    ):
+        raise EmergencyVerificationError(f"{label} path is invalid")
+    return candidate
+
+
+def _safe_root_directory_chain(path: Path, *, label: str) -> None:
+    """Require each parent of the fixed sibling to be root controlled."""
+
+    path = _absolute_path(path, label=label)
+    current = Path("/")
+    for component in path.parts[1:]:
+        current /= component
+        try:
+            metadata = current.lstat()
+        except OSError as exc:
+            raise EmergencyVerificationError(f"{label} parent cannot be inspected") from exc
+        mode = stat.S_IMODE(metadata.st_mode)
+        sticky_tmp = (
+            current == Path("/tmp")
+            and stat.S_ISDIR(metadata.st_mode)
+            and metadata.st_uid == 0
+            and bool(mode & stat.S_ISVTX)
+        )
+        if (
+            stat.S_ISLNK(metadata.st_mode)
+            or not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != 0
+            or ((mode & 0o022) and not sticky_tmp)
+        ):
+            raise EmergencyVerificationError(f"{label} parent is not root-controlled")
+
+
+def _fixed_compose_contract_validator_path() -> Path:
+    """Resolve only the validator beside this verifier, never via sys.path."""
+
+    verifier = _absolute_path(Path(__file__), label="Emergency verifier")
+    _safe_root_directory_chain(verifier.parent, label="Emergency verifier")
+    return verifier.parent / COMPOSE_CONTRACT_VALIDATOR_NAME
+
+
+def _read_trusted_compose_contract_validator(path: Path) -> bytes:
+    """Read the exact sibling module once, without links or a pathname race."""
+
+    path = _absolute_path(path, label="Compose contract validator")
+    _safe_root_directory_chain(path.parent, label="Compose contract validator")
+    no_follow = getattr(os, "O_NOFOLLOW", None)
+    if type(no_follow) is not int:
+        raise EmergencyVerificationError("Compose contract validator requires O_NOFOLLOW")
+    try:
+        listed = path.lstat()
+    except OSError as exc:
+        raise EmergencyVerificationError("Compose contract validator cannot be inspected") from exc
+    descriptor: int | None = None
+    try:
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | no_follow,
+        )
+        before = os.fstat(descriptor)
+        identity = (
+            "st_dev",
+            "st_ino",
+            "st_mode",
+            "st_uid",
+            "st_gid",
+            "st_nlink",
+            "st_size",
+            "st_mtime_ns",
+            "st_ctime_ns",
+        )
+        mode = stat.S_IMODE(before.st_mode)
+        if (
+            any(getattr(listed, field) != getattr(before, field) for field in identity)
+            or stat.S_ISLNK(listed.st_mode)
+            or not stat.S_ISREG(before.st_mode)
+            or before.st_uid != 0
+            or before.st_nlink != 1
+            or mode & 0o022
+            or not 1 <= before.st_size <= MAX_COMPOSE_CONTRACT_VALIDATOR_BYTES
+        ):
+            raise EmergencyVerificationError(
+                "Compose contract validator must be one bounded root-controlled regular file"
+            )
+        payload = bytearray()
+        while len(payload) <= MAX_COMPOSE_CONTRACT_VALIDATOR_BYTES:
+            chunk = os.read(
+                descriptor,
+                min(65536, MAX_COMPOSE_CONTRACT_VALIDATOR_BYTES + 1 - len(payload)),
+            )
+            if not chunk:
+                break
+            payload.extend(chunk)
+        after = os.fstat(descriptor)
+        if (
+            len(payload) != before.st_size
+            or len(payload) > MAX_COMPOSE_CONTRACT_VALIDATOR_BYTES
+            or any(getattr(before, field) != getattr(after, field) for field in identity)
+        ):
+            raise EmergencyVerificationError("Compose contract validator changed while being read")
+        return bytes(payload)
+    except EmergencyVerificationError:
+        raise
+    except OSError as exc:
+        raise EmergencyVerificationError("Compose contract validator cannot be read") from exc
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _load_compose_contract_validator() -> ModuleType:
+    """Execute a checked sibling from verified bytes, never an ambient import."""
+
+    path = _fixed_compose_contract_validator_path()
+    payload = _read_trusted_compose_contract_validator(path)
+    module = ModuleType("_emergency_ir_compose_contract_validator")
+    module.__file__ = str(path)
+    module.__package__ = ""
+    try:
+        code = compile(payload, str(path), "exec")
+        exec(code, module.__dict__, module.__dict__)
+    except Exception as exc:
+        raise EmergencyVerificationError("Compose contract validator cannot be loaded") from exc
+    if not callable(getattr(module, "validate_contract", None)):
+        raise EmergencyVerificationError("Compose contract validator has no validation entrypoint")
+    return module
 
 
 def parse_env(path: Path) -> dict[str, str]:
@@ -206,73 +360,62 @@ def verify_values(
     return failures
 
 
-def verify_compose(path: Path) -> list[str]:
-    text = path.read_text(encoding="utf-8")
-    failures: list[str] = []
-    for required in (
-        "name: trading-bot-emergency-ir", "172.29.250.0/28", "127.0.0.1:${EMERGENCY_APP_PORT:-18000}:8000",
-        "trading-bot-emergency-ir-postgres", "trading-bot-emergency-ir-redis",
-        "trading-bot-emergency-ir-uploads", "trading-bot-emergency-ir-audit",
-        "internal: true", "EMERGENCY_IR_STANDALONE: \"true\"",
-        "--forwarded-allow-ips 127.0.0.1,172.29.250.1",
-    ):
-        if required not in text:
-            failures.append(f"compose is missing required isolation contract: {required}")
-    for forbidden in ("sync_worker:", "bot:", "writer_control", "dr_receiver", "dr_projection", "dr_delivery", "dr_blob", "dr_effect", "./api:/app/api", "./core:/app/core"):
-        if forbidden in text:
-            failures.append(f"compose contains forbidden service or source bind: {forbidden}")
-    return failures
+def _verify_canonical_compose_contract(
+    *,
+    base: Path,
+    profile: str,
+    sms: Path | None = None,
+) -> list[str]:
+    """Delegate only to the sealed, strict-JSON Compose contract validator."""
+
+    try:
+        validator = _load_compose_contract_validator()
+        evidence = validator.validate_contract(base=base, profile=profile, sms=sms)
+        if (
+            not isinstance(evidence, dict)
+            or evidence.get("schema")
+            != "gold-trade-emergency-ir-compose-contract-v1"
+            or evidence.get("status") != "verified-local-only"
+            or evidence.get("profile") != profile
+            or evidence.get("docker_or_service_changed") is not False
+            or evidence.get("network_action") is not False
+        ):
+            raise EmergencyVerificationError(
+                "Compose contract validator returned invalid local-only evidence"
+            )
+    except EmergencyVerificationError as exc:
+        return [str(exc)]
+    except Exception as exc:
+        # The validator deliberately uses its own narrow failure messages for
+        # malformed JSON, ownership, canonicalization, and digest mismatch.
+        # Do not fall back to parsing Compose text here.
+        return [f"canonical Compose contract validation failed: {exc}"]
+    return []
 
 
-def verify_sms_otp_compose(path: Path) -> list[str]:
-    """Validate the opt-in overlay without treating it as a generic egress path."""
+def verify_compose(
+    path: Path,
+    *,
+    profile: str = AUTH_PROFILE_TELEGRAM_ONLY,
+    sms_path: Path | None = None,
+) -> list[str]:
+    """Verify the exact base contract, and the overlay only as its SMS pair."""
 
-    text = path.read_text(encoding="utf-8")
-    failures: list[str] = []
-    for required in (
-        'profiles: ["sms-otp"]',
-        'EMERGENCY_AUTH_PROFILE: "sms-otp"',
-        'EMERGENCY_SMS_OTP_ENABLED: "true"',
-        'TELEGRAM_LOGIN_OTP_ENABLED: "true"',
-        'OTP_SMS_AUTO_FALLBACK_ENABLED: "false"',
-        'SMSIR_BASE_URL: "http://sms-egress:8080"',
-        'SMSIR_TRUST_ENV: "false"',
-        'SMSIR_TIMEOUT_SECONDS: "10"',
-        'EMERGENCY_SMS_EGRESS_IMAGE',
-        '172.29.251.0/29', '172.29.251.2', '172.29.251.3',
-        '172.29.252.0/29', '172.29.252.2',
-        'emergency_ir_sms_relay:', 'emergency_ir_sms_egress:',
-        'internal: true', 'internal: false',
-        'read_only: true', 'no-new-privileges:true',
-        'test -z "$${BOT_TOKEN:-}"', 'test -z "$${SYNC_API_KEY:-}"',
-        'test -z "$${PEER_SERVER_URL:-}"',
-        'migration:\n    profiles: ["sms-otp"]',
-        'SMSIR_API_KEY: ""',
-    ):
-        if required not in text:
-            failures.append(f"SMS OTP compose is missing required isolation contract: {required}")
-    api_start = text.find("  api:")
-    relay_start = text.find("  sms-egress:")
-    api_block = text[api_start:relay_start] if api_start >= 0 and relay_start > api_start else ""
-    if not api_block:
-        failures.append("SMS OTP compose does not contain a bounded API overlay")
-    elif "emergency_ir_sms_egress" in api_block:
-        failures.append("API must not attach to the SMS egress network")
-    relay_block = text[relay_start:text.find("\nnetworks:", relay_start)] if relay_start >= 0 else ""
-    if relay_block and "emergency_ir_sms_relay" not in relay_block:
-        failures.append("SMS relay must attach to the internal relay network")
-    if relay_block and "emergency_ir_sms_egress" not in relay_block:
-        failures.append("SMS relay must be the only service with SMS egress")
-    if relay_block and "volumes:" in relay_block:
-        failures.append("SMS relay must not mount a mutable host configuration")
-    for forbidden in (
-        "ports:", "network_mode:", "privileged:", "cap_add:", "\n      BOT_TOKEN:",
-        "\n      SYNC_API_KEY:", "\n      PEER_SERVER_URL:", "bot:", "sync_worker:", "writer_control",
-        "dr_receiver", "dr_projection", "dr_delivery", "dr_blob", "dr_effect",
-    ):
-        if forbidden in text:
-            failures.append(f"SMS OTP compose contains forbidden egress or cross-site control: {forbidden}")
-    return failures
+    return _verify_canonical_compose_contract(
+        base=path,
+        profile=profile,
+        sms=sms_path,
+    )
+
+
+def verify_sms_otp_compose(base: Path, sms: Path) -> list[str]:
+    """Verify the SMS overlay only together with its exact base contract."""
+
+    return verify_compose(
+        base,
+        profile=AUTH_PROFILE_SMS_OTP,
+        sms_path=sms,
+    )
 
 
 def _verify_tls_certificate_contract(text: str, failures: list[str]) -> None:
@@ -418,10 +561,12 @@ def main() -> int:
             )
         values = parse_env(Path(args.env))
         failures = verify_values(values, expected_profile=args.profile)
-        failures.extend(verify_compose(Path(args.compose)))
         if args.profile == AUTH_PROFILE_SMS_OTP:
             failures.extend(
-                verify_sms_otp_compose(Path(args.sms_compose))
+                verify_sms_otp_compose(
+                    Path(args.compose),
+                    Path(args.sms_compose),
+                )
             )
             failures.extend(
                 verify_sms_egress_relay(Path(args.sms_relay))
@@ -430,6 +575,7 @@ def main() -> int:
                 verify_sms_otp_nginx(Path(args.nginx), Path(args.nginx_rate_limit))
             )
         else:
+            failures.extend(verify_compose(Path(args.compose)))
             failures.extend(verify_nginx(Path(args.nginx)))
         failures.extend(verify_session_reset(Path(args.session_reset)))
     except Exception as exc:
