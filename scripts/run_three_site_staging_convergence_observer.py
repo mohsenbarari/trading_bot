@@ -47,7 +47,6 @@ from scripts.run_three_site_sync_timing_observer import (
     SITE_SERVICE,
     _run_json,
     _secure_regular_file,
-    _ssh_base,
 )
 from scripts.verify_three_site_staging_inventory import verify_inventory
 
@@ -55,6 +54,13 @@ from scripts.verify_three_site_staging_inventory import verify_inventory
 CONFIG_SCHEMA = "three-site-staging-convergence-observer-config-v1"
 EXPORT_SCHEMA = "three-site-staging-convergence-snapshot-export-v1"
 WEBAPP_IR = "webapp_ir"
+WEBAPP_IR_RELAY = {
+    "host": "185.231.182.6",
+    "port": 22,
+    "user": "root",
+    "identity_file": "/root/.ssh/id_rsa",
+    "known_hosts_file": "/root/.ssh/known_hosts",
+}
 MAX_REMOTE_SNAPSHOT_BYTES = 16 * 1024 * 1024
 SAFE_NAME = re.compile(r"^[a-z_][a-z0-9_-]{0,62}$")
 SAFE_PATH = re.compile(r"^/[A-Za-z0-9_./-]{1,511}$")
@@ -137,9 +143,12 @@ def _validate_sites(value: Any, *, inventory: dict[str, Any]) -> dict[str, dict[
     output: dict[str, dict[str, Any]] = {}
     for site in SITES:
         item = value[site]
-        if not isinstance(item, dict) or set(item) != {
+        direct_fields = {
             "host", "port", "user", "repo_root", "compose_file", "env_file"
-        }:
+        }
+        if not isinstance(item, dict) or (
+            set(item) != direct_fields and set(item) != direct_fields | {"proxy"}
+        ):
             raise ConvergenceObserverError(f"{site} observer site config is invalid")
         if str(item["host"]) != inventory_hosts.get(site):
             raise ConvergenceObserverError(f"{site} observer host differs from signed inventory")
@@ -153,8 +162,60 @@ def _validate_sites(value: Any, *, inventory: dict[str, Any]) -> dict[str, dict[
                 raise ConvergenceObserverError(f"{site} observer remote path is unsafe")
         if str(item["compose_file"]) != f"{repo_root}/deploy/staging/docker-compose.three-site.yml":
             raise ConvergenceObserverError(f"{site} observer Compose path is not canonical")
+        proxy = item.get("proxy")
+        if proxy is not None:
+            if site != WEBAPP_IR or not isinstance(proxy, dict) or set(proxy) != {
+                "binary", "host", "port", "user", "identity_file", "known_hosts_file"
+            }:
+                raise ConvergenceObserverError(f"{site} observer proxy config is invalid")
+            if (
+                proxy.get("binary") != "/usr/bin/ssh"
+                or proxy.get("host") != WEBAPP_IR_RELAY["host"]
+                or proxy.get("port") != WEBAPP_IR_RELAY["port"]
+                or proxy.get("user") != WEBAPP_IR_RELAY["user"]
+                or proxy.get("identity_file") != WEBAPP_IR_RELAY["identity_file"]
+                or proxy.get("known_hosts_file") != WEBAPP_IR_RELAY["known_hosts_file"]
+            ):
+                raise ConvergenceObserverError("WebApp-IR observer proxy identity differs")
+            _secure_regular_file(Path(proxy["binary"]), private=False, label="proxy OpenSSH client")
+            _secure_regular_file(
+                Path(str(proxy["identity_file"])), private=True, label="proxy SSH identity"
+            )
+            _secure_regular_file(
+                Path(str(proxy["known_hosts_file"])),
+                private=False,
+                label="proxy known_hosts",
+            )
         output[site] = dict(item)
     return output
+
+
+def _observer_ssh_base(config: dict[str, Any], site: str) -> list[str]:
+    ssh = config["ssh"]
+    target = config["sites"][site]
+    command = [
+        ssh["binary"], "-F", "/dev/null", "-i", ssh["identity_file"],
+        "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes",
+        "-o", "StrictHostKeyChecking=yes",
+        "-o", f"UserKnownHostsFile={ssh['known_hosts_file']}",
+        "-o", f"ConnectTimeout={ssh['connect_timeout_seconds']}",
+    ]
+    proxy = target.get("proxy")
+    if proxy is not None:
+        proxy_command = " ".join(
+            [
+                proxy["binary"], "-F", "/dev/null", "-i", proxy["identity_file"],
+                "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes",
+                "-o", "StrictHostKeyChecking=yes",
+                "-o", f"UserKnownHostsFile={proxy['known_hosts_file']}",
+                "-o", f"ConnectTimeout={ssh['connect_timeout_seconds']}",
+                "-p", str(proxy["port"]), "-W", "%h:%p",
+                f"{proxy['user']}@{proxy['host']}",
+            ]
+        )
+        command.extend(["-o", f"ProxyCommand={proxy_command}"])
+    command.extend(["-p", str(target["port"]), "--", f"{target['user']}@{target['host']}"])
+    return command
 
 
 def load_config(path: Path, *, campaign_id: str, release_sha: str, plan_sha256: str, output: Path) -> dict[str, Any]:
@@ -216,7 +277,7 @@ def _remote_command(config: dict[str, Any], site: str, script: str, *arguments: 
         "webapp_ir_convergence_exporter" if site == WEBAPP_IR else SITE_SERVICE[site]
     )
     return [
-        *_ssh_base(config, site),
+        *_observer_ssh_base(config, site),
         "/usr/bin/docker", "compose",
         "--project-directory", str(remote["repo_root"]),
         "-f", str(remote["compose_file"]),
