@@ -958,6 +958,58 @@ Confirmationهای هم‌معنی ادغام می‌شوند، ولی fencing �
 - Production touched: `no`. هیچ VPS/volume ساخته، حذف، detach، rebuild، resize یا
   format نشد؛ هیچ production project، bucket، route یا domain تغییر نکرد.
 
+#### checkpoint اجرای Stage 4 — target migration و private plane — 2026-08-03
+
+- plan اولیه هنگام توقف لایه approval ابزار منقضی شد و بدون bypass کنار گذاشته
+  شد. plan هم‌محتوای چهار‌ساعته با همان release، inventory، mapping و evidenceها
+  ساخته و با password+TOTP دوباره به‌صورت exact-subject تأیید شد. canonical hash
+  plan جدید `6b2590843dfb78d49d18d974455b292d1cca48e6ff995a667875e231df8758bd`
+  و approval ID برابر `bc2fbc2f-eb66-40ad-a8d8-bac0603270f0` است. G3 و approval
+  inventory تکرار نشدند.
+- target seed هر چهار role تأیید شد: Bot-FI و WebApp-FI از مسیر SSH pin‌شده داخل
+  Finland، WebApp-IR فقط از سه VersionId ثبت‌شده در Object Storage خصوصی و Witness
+  به‌صورت empty seed. canonical evidence hashها به‌ترتیب
+  `1415f574a57b5dfee9e17c0a4b9b5bf412f83f1c78524e5220584d9b14acf9c5`،
+  `ef7fcc92d1644596c79dfbffbb8f2190eeeace5d9f1151b9e5c661e9356308f0`،
+  `bde18c050d2fc1ebf49c1838e56eb0176e8ee406bdbb5fa5328af4eb398a35ba`
+  و `fd12e924bf840f72749cc5c7735905dbcb2ab14357a9969c79b1c25b368249ea`
+  هستند. Redis restore نشد.
+- Python میزبان WebApp-IR فاقد `boto3` بود. به‌جای package install یا تغییر system
+  Python، bundle pure-Python نسخه‌های موجود در image exact release با container
+  بدون شبکه استخراج شد؛ import روی Python میزبان قبول و aggregate hash آن
+  `cfc8cd66946c13e7c0874ba92542d7cdd475764a8934ef05eb448f3f4b82157b`
+  ثبت شد.
+- journalهای durable چهار role ساخته شدند. seed سه دیتابیس محصول restore شد؛
+  Witness خالی باقی ماند؛ schema و نقش‌های کم‌اختیار هر چهار دیتابیس پیکربندی شد؛
+  private receiver/projection/TLS و سپس workerها با barrier چهار-journalی شروع
+  شدند. وضعیت فعلی Bot-FI `workers_ready`، WebApp-FI `writer_initialized +
+  workers_ready`، WebApp-IR `standby_fenced + workers_ready` و Witness
+  `private_ready` است. public services و route هنوز شروع/تغییر داده نشده‌اند.
+- security groupهای تستی data-plane نداشتند و اتصال WebApp-FI به Witness پیش از
+  acquire fail-closed شد. ابزار idempotent با server/group ID pin‌شده و production
+  denylist در commit `1c53bab8` اضافه شد. هفت rule محدود `/32` برای پورت‌های
+  private TLS `8443/8444` با commitment
+  `fe03fea6dc0c2590a506d3a1424b9795aeb250dea1d56c0ed003f6b2eac477e4`
+  در دو security group تستی اعمال و از پنل بازخوانی شد؛ lifecycle operation و
+  production overlap هر دو false بودند.
+- WebApp-FI با request ID ثابت `1306c6a2-c162-4055-bf62-59ab0a752a06` term اولیه
+  epoch 1 را از Witness گرفت و proof را اتمی import کرد. سپس agent کنترل FI یک
+  renewal تازه را اثبات کرد؛ WebApp-IR هم‌زمان epoch 1 fenced، بدون lease و بدون
+  Writer authority باقی ماند.
+- مسیر مستقیم بین‌المللی WebApp-IR همچنان طبق inventory timeout است. controller
+  convergence در commit `ff9cdac9` فقط برای WebApp-IR به relay تستی pin‌شده
+  `185.231.182.6` مجهز شد؛ SSH از این مسیر فقط receipt کوچک exporter را برمی‌گرداند
+  و snapshot payload از SSH عبور نمی‌کند.
+- گام بعدی `routing-hold` است. ابزار convergence یک snapshot JSON redacted شامل
+  hash/count/checkpoint، بدون business value یا file bytes، را با presigned URL در
+  باکت private/versioned `gold-trade-staging-three-site-dr` زیر prefix staging
+  ایجاد و exact VersionId را بازخوانی می‌کند. لایه ایمنی اجرا برای همین write به
+  سرویس cloud شخص ثالث، approval صریح تازه مالک خواسته است؛ هیچ workaround انجام
+  نشد و Stage 4 در همین مرز fail-closed متوقف است.
+- Production touched: `no`. هیچ production host، security group، bucket، domain
+  یا route تغییر نکرد و هیچ VPS/volume ساخته، حذف، detach، rebuild، resize یا
+  format نشد.
+
 ### Exit gate — G4 Staging Published
 
 - هر چهار role exact release SHA را گزارش می‌کنند؛
