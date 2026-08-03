@@ -467,6 +467,7 @@ class DeploySurfaceSmokeTests(unittest.TestCase):
         dockerfile = (REPO_ROOT / 'Dockerfile').read_text(encoding='utf-8')
 
         self.assertIn('COPY dr_receiver_app.py .', dockerfile)
+        self.assertIn('COPY durability_journal_app.py .', dockerfile)
         self.assertIn('COPY writer_witness_app.py .', dockerfile)
         self.assertIn(
             'COPY deploy/writer-witness/001_initial.sql '
