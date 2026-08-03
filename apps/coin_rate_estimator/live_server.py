@@ -929,7 +929,7 @@ def render_analytics_leaderboard_table(
             rows.append(
                 f"<tr>"
                 f"<td class='rank-col'>#{fa_number(idx)}</td>"
-                f"<td><a class='user-link' href='javascript:void(0)' onclick='openUserModal({js_name}, {group}, \"{kind}\")'><strong>{escaped_name}</strong></a></td>"
+                f"<td><button type='button' class='user-link-btn' onclick='openUserModal({js_name}, {group}, \"{kind}\")'><strong>{escaped_name}</strong></button></td>"
                 f"<td class='value-col'><strong>{val}</strong> <small>{val_unit}</small></td>"
                 f"</tr>"
             )
@@ -2307,14 +2307,21 @@ td {{
   padding: 12px;
 }}
 
-.user-link {{
+.user-link-btn {{
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
   color: var(--text-main);
   text-decoration: underline;
   text-decoration-color: var(--border-gold);
   text-underline-offset: 3px;
+  cursor: pointer;
   transition: all 0.2s ease;
+  text-align: right;
 }}
-.user-link:hover {{
+.user-link-btn:hover {{
   color: var(--accent-gold);
   text-decoration-color: var(--accent-gold);
 }}
