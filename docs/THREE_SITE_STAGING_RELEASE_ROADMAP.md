@@ -1109,6 +1109,19 @@ Confirmationهای هم‌معنی ادغام می‌شوند، ولی fencing �
   listener عمومی `80/443`، Nginx، Certbot یا certificate ندارد. بنابراین probe
   مستقیم `--resolve staging.gold-trade.ir:443:194.5.206.69` timeout شد و switch
   Arvan عمداً اجرا نشد.
+- record رسمی `staging.gold-trade.ir` به‌صورت read-only بازخوانی شد: proxied،
+  `upstream_https=https`، TTL `120` و origin فعلی `65.109.220.59` است؛ پاسخ
+  public فعلی `401` Basic Auth می‌دهد. certificate origin فعلی نیز مستقیم
+  read-only بررسی شد: `CN=staging.gold-trade.ir`، issuer `Let's Encrypt YE1` و
+  expiry `2026-10-08T16:39:33Z` دارد. این دو مقدار boundary دقیق rollback و
+  استاندارد TLS مقصد هستند.
+- authoritative DNS این zone روی `j.ns.arvancdn.ir` و `r.ns.arvancdn.ir` است و
+  `lego` نصب‌شده، provider `arvancloud` DNS-01 را پشتیبانی می‌کند؛ بنابراین صدور
+  certificate trusted بدون تغییر origin شدنی است. ACME account محلی contact
+  email ندارد؛ صدور account بدون email عمداً انجام نشد. گام بعدی فقط دریافت email
+  تماس مالک، سپس DNS-01 موقتی، نصب owner-only certificate و Nginx محدود روی
+  WebApp-FI است. تا آن زمان هیچ listener، package، DNS record یا route تغییر
+  نکرده است.
 - مسیر بعدی پیش از هر switch عمومی: (۱) تعریف exact public-origin bundle برای
   `staging.gold-trade.ir` با bundle حاضر، (۲) provision محدود Nginx/TLS روی VPS
   آزمایشی WebApp-FI و اثبات direct
