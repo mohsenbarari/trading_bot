@@ -188,7 +188,9 @@ def _routing(root: Path, *, observed_at: str) -> Path:
     return path
 
 
-def _acceptance(root: Path, *, role: str, routing: Path) -> Path:
+def _acceptance(
+    root: Path, *, role: str, routing: Path, runtime_material: bool = False
+) -> Path:
     revision = "003" if role == "witness" else "b986c7d8e0f1"
     _bind_key, tls_port, tls_name = ROLE_TLS[role]
     observations = {
@@ -216,7 +218,9 @@ def _acceptance(root: Path, *, role: str, routing: Path) -> Path:
                     "image_id": "sha256:" + "1" * 64,
                     "expected_image_reference": "example/image:pinned",
                     "expected_image_id": "sha256:" + "1" * 64,
-                    "release_sha": None if service.endswith("_tls") else RELEASE_SHA,
+                    "release_sha": (
+                        None if service.endswith(("_tls", "_redis")) else RELEASE_SHA
+                    ),
                     "log_window_seconds": 300,
                     "log_sha256": "6" * 64,
                     "unexpected_log_lines": 0,
@@ -243,6 +247,26 @@ def _acceptance(root: Path, *, role: str, routing: Path) -> Path:
             "image_inventory_sha256": "e" * 64,
         },
     }
+    if runtime_material:
+        observations["runtime_material_amendment"] = {
+            "schema": "three-site-staging-bot-token-amendment-v1",
+            "base_role_env_sha256": "d" * 64,
+            "runtime_role_env_sha256": "8" * 64,
+            "evidence_file_sha256": "9" * 64,
+            "evidence_canonical_sha256": "a" * 64,
+            "amended_keys": ["BOT_TOKEN"],
+            "token_sha256": "f" * 64,
+            "telegram_identity_sha256": "1" * 64,
+        }
+        bot_service = next(
+            row
+            for row in observations["service_health"]["services"]
+            if row["service"] == "bot_fi_bot"
+        )
+        bot_service["runtime_material_token_sha256"] = "f" * 64
+    check_names = set(ACCEPTANCE_CHECKS)
+    if runtime_material:
+        check_names.add("runtime_material_amendment")
     path = root / f"accept-{role}.json"
     _secure_json(
         path,
@@ -254,7 +278,7 @@ def _acceptance(root: Path, *, role: str, routing: Path) -> Path:
             "role": role,
             "observed_at": datetime.now(timezone.utc).isoformat(),
             "collector": "collect_three_site_staging_migration_observation.py",
-            "checks": {name: _check(observations[name]) for name in ACCEPTANCE_CHECKS},
+            "checks": {name: _check(observations[name]) for name in check_names},
             "routing_observation": {
                 "path": str(routing),
                 "sha256": hashlib.sha256(routing.read_bytes()).hexdigest(),
@@ -360,6 +384,45 @@ class ThreeSiteStagingMigrationCoordinationTests(unittest.TestCase):
             )["global-commit"]
             self.assertTrue(commit["all_roles_committed"])
             self.assertEqual(set(commit["role_journals"]), set(ROLE_PHASES))
+
+    def test_acceptance_binds_bot_runtime_material_to_live_service(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journals, _states_initial = _journals(root)
+            for role, phase in REQUIRED_PHASE["role-acceptance"].items():
+                _advance(journals[role], phase)
+            routing = _routing(root, observed_at=datetime.now(timezone.utc).isoformat())
+            observations = []
+            for role in ROLE_PHASES:
+                path = _acceptance(
+                    root,
+                    role=role,
+                    routing=routing,
+                    runtime_material=role == "bot_fi",
+                )
+                observations.append(f"{role}={path}")
+            documents = build_documents(
+                action="role-acceptance",
+                journals=_states(journals),
+                acceptance_observations=observations,
+            )
+            self.assertEqual(set(documents), set(ROLE_PHASES))
+
+            bot_path = Path(observations[0].partition("=")[2])
+            payload = json.loads(bot_path.read_text())
+            service_health = payload["checks"]["service_health"]["observation"]
+            bot_service = next(
+                row for row in service_health["services"] if row["service"] == "bot_fi_bot"
+            )
+            bot_service["runtime_material_token_sha256"] = "0" * 64
+            payload["checks"]["service_health"] = _check(service_health)
+            _secure_json(bot_path, payload)
+            with self.assertRaisesRegex(MigrationCoordinationError, "runtime material"):
+                build_documents(
+                    action="role-acceptance",
+                    journals=_states(journals),
+                    acceptance_observations=observations,
+                )
 
 
 if __name__ == "__main__":

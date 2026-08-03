@@ -29,6 +29,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.secure_file_io import read_secure_bytes, write_secure_atomic_bytes
+from scripts.amend_three_site_staging_bot_token import verify_amendment
 from scripts.arvan_origin_switch import inspect_or_switch, load_token
 from scripts.render_three_site_staging_role_compose import parse_env_values
 from scripts.verify_three_site_staging_image_inventory import verify_image_document
@@ -412,9 +413,10 @@ def collect_routing(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _compose(args: argparse.Namespace) -> list[str]:
+    env_file = getattr(args, "runtime_env_file", None) or args.env_file
     return [
         "/usr/bin/docker", "compose", "-f", str(args.role_compose),
-        "--env-file", str(args.env_file),
+        "--env-file", str(env_file),
     ]
 
 
@@ -489,7 +491,7 @@ def _service_observation(
         )
         if observed_release != args.release_sha:
             raise ObservationError(f"required service has the wrong release: {service}")
-    return {
+    result = {
         "service": service,
         "container_id": container,
         "image_id": image_id,
@@ -503,6 +505,20 @@ def _service_observation(
         "log_sha256": hashlib.sha256(logs.encode()).hexdigest(),
         "unexpected_log_lines": unexpected_log_lines,
     }
+    material = getattr(args, "_bot_material", None)
+    if service == "bot_fi_bot" and material is not None:
+        observed_token_sha256 = _run(
+            [
+                *_compose(args), "exec", "-T", service, "python", "-c",
+                "import hashlib,os; print(hashlib.sha256("
+                "os.environ.get('BOT_TOKEN','').encode()).hexdigest())",
+            ],
+            timeout=30,
+        )
+        if observed_token_sha256 != material["token_sha256"]:
+            raise ObservationError("Bot runtime token differs from approved amendment")
+        result["runtime_material_token_sha256"] = observed_token_sha256
+    return result
 
 
 def _direct_origin_http_observation(
@@ -585,6 +601,28 @@ def collect_role(args: argparse.Namespace) -> dict[str, Any]:
     compose_bytes = _verify_bundle_source(args.role_compose, expected_mode=0o640)
     compose_hash = hashlib.sha256(compose_bytes).hexdigest()
     env_hash = hashlib.sha256(env_bytes).hexdigest()
+    runtime_env_file = getattr(args, "runtime_env_file", None)
+    bot_material_amendment = getattr(args, "bot_material_amendment", None)
+    if (runtime_env_file is None) != (bot_material_amendment is None):
+        raise ObservationError(
+            "runtime env and Bot material amendment must be supplied together"
+        )
+    bot_material = None
+    if runtime_env_file is not None:
+        if args.role != "bot_fi":
+            raise ObservationError("runtime material amendment is valid only for Bot-FI")
+        try:
+            bot_material = verify_amendment(
+                evidence_path=bot_material_amendment,
+                base_env=args.env_file,
+                runtime_env=runtime_env_file,
+                campaign_id=args.campaign_id,
+                release_sha=args.release_sha,
+                plan_sha256=args.plan_sha256,
+            )
+        except Exception as exc:
+            raise ObservationError("Bot runtime material amendment is invalid") from exc
+    args._bot_material = bot_material
     compose_document = yaml.safe_load(compose_bytes)
     if not isinstance(compose_document, dict) or not isinstance(compose_document.get("services"), dict):
         raise ObservationError("role Compose is invalid")
@@ -717,6 +755,17 @@ def collect_role(args: argparse.Namespace) -> dict[str, Any]:
             "image_inventory_sha256": hashlib.sha256(image_raw).hexdigest(),
         },
     }
+    if bot_material is not None:
+        observations["runtime_material_amendment"] = {
+            "schema": "three-site-staging-bot-token-amendment-v1",
+            "base_role_env_sha256": env_hash,
+            "runtime_role_env_sha256": bot_material["runtime_env_sha256"],
+            "evidence_file_sha256": bot_material["evidence_file_sha256"],
+            "evidence_canonical_sha256": bot_material["evidence_canonical_sha256"],
+            "amended_keys": ["BOT_TOKEN"],
+            "token_sha256": bot_material["token_sha256"],
+            "telegram_identity_sha256": bot_material["telegram_identity_sha256"],
+        }
     checks = {
         name: {
             "status": "passed",
@@ -760,6 +809,8 @@ def main(argv: list[str] | None = None) -> int:
     role.add_argument("--role", choices=tuple(ROLE_DB), required=True)
     role.add_argument("--role-compose", type=Path, required=True)
     role.add_argument("--env-file", type=Path, required=True)
+    role.add_argument("--runtime-env-file", type=Path)
+    role.add_argument("--bot-material-amendment", type=Path)
     role.add_argument("--routing-observation", type=Path, required=True)
     role.add_argument("--image-inventory", type=Path, required=True)
     role.add_argument("--expected-head", default="b986c7d8e0f1")

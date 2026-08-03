@@ -224,7 +224,12 @@ def _acceptance_observations(
             or value.get("role") != role
             or value.get("collector") != "collect_three_site_staging_migration_observation.py"
             or not isinstance(value.get("checks"), dict)
-            or set(value["checks"]) != ACCEPTANCE_CHECKS
+            or set(value["checks"])
+            not in (
+                (ACCEPTANCE_CHECKS, ACCEPTANCE_CHECKS | {"runtime_material_amendment"})
+                if role == "bot_fi"
+                else (ACCEPTANCE_CHECKS,)
+            )
         ):
             raise MigrationCoordinationError(f"{role} acceptance observation is invalid")
         for check_name, check in value["checks"].items():
@@ -272,7 +277,7 @@ def _acceptance_observations(
                 or row.get("unexpected_log_lines") != 0
                 or re.fullmatch(r"[0-9a-f]{64}", str(row.get("log_sha256", ""))) is None
                 or (
-                    not str(row.get("service", "")).endswith("_tls")
+                    not str(row.get("service", "")).endswith(("_tls", "_redis"))
                     and row.get("release_sha") != identity["release_sha"]
                 )
                 for row in services
@@ -311,6 +316,38 @@ def _acceptance_observations(
             raise MigrationCoordinationError(
                 f"{role} acceptance observations do not satisfy the closed policy"
             )
+        material = observations.get("runtime_material_amendment")
+        if material is not None:
+            bot_service = next(
+                (row for row in services if row.get("service") == "bot_fi_bot"), None
+            )
+            if (
+                not isinstance(material, dict)
+                or set(material) != {
+                    "schema", "base_role_env_sha256", "runtime_role_env_sha256",
+                    "evidence_file_sha256", "evidence_canonical_sha256",
+                    "amended_keys", "token_sha256", "telegram_identity_sha256",
+                }
+                or material.get("schema")
+                != "three-site-staging-bot-token-amendment-v1"
+                or material.get("base_role_env_sha256")
+                != journals[role]["role_env_sha256"]
+                or material.get("amended_keys") != ["BOT_TOKEN"]
+                or any(
+                    re.fullmatch(r"[0-9a-f]{64}", str(material.get(field, ""))) is None
+                    for field in {
+                        "runtime_role_env_sha256", "evidence_file_sha256",
+                        "evidence_canonical_sha256", "token_sha256",
+                        "telegram_identity_sha256",
+                    }
+                )
+                or not isinstance(bot_service, dict)
+                or bot_service.get("runtime_material_token_sha256")
+                != material.get("token_sha256")
+            ):
+                raise MigrationCoordinationError(
+                    "Bot-FI runtime material amendment is invalid"
+                )
         routing_reference = value.get("routing_observation")
         if not isinstance(routing_reference, dict) or set(routing_reference) != {"path", "sha256"}:
             raise MigrationCoordinationError(f"{role} routing observation reference is invalid")

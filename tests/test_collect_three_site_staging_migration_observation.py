@@ -293,6 +293,42 @@ class MigrationObservationCollectorTests(unittest.TestCase):
         self.assertIn("witness_api", command)
         self.assertIn("http://127.0.0.1:8000/health/ready", command[-1])
 
+    def test_bot_service_observation_binds_live_runtime_token_fingerprint(self):
+        stack, args = self._fixture()
+        token_sha256 = "f" * 64
+        args._bot_material = {"token_sha256": token_sha256}
+
+        def run(arguments, **_kwargs):
+            joined = " ".join(arguments)
+            if " ps -q " in f" {joined} ":
+                return "container-id"
+            if "{{json .State}}" in arguments:
+                return json.dumps({"Running": True, "Health": {"Status": "healthy"}})
+            if "{{.Image}}" in arguments:
+                return "sha256:" + "c" * 64
+            if "{{.RestartCount}}" in arguments:
+                return "0"
+            if "logs" in arguments:
+                return ""
+            if "settings.release_sha" in joined:
+                return RELEASE_SHA
+            if "BOT_TOKEN" in joined:
+                return token_sha256
+            raise AssertionError(arguments)
+
+        with stack, patch(
+            "scripts.collect_three_site_staging_migration_observation._run",
+            side_effect=run,
+        ):
+            observation = _service_observation(
+                args,
+                "bot_fi_bot",
+                expected_image_reference=f"trading_bot_three_site_staging:{RELEASE_SHA}",
+                expected_image_id="sha256:" + "c" * 64,
+            )
+
+        self.assertEqual(observation["runtime_material_token_sha256"], token_sha256)
+
 
 if __name__ == "__main__":
     unittest.main()
