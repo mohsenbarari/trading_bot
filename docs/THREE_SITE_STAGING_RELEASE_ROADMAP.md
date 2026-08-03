@@ -1496,6 +1496,78 @@ route عمومی، production و lifecycle زیرساخت در rollback 4R تغ�
   یا secret rotation انجام نشد. Decision: `continue Stage 4R from the real
   2PC journal marker and restore/outage drills`.
 
+#### checkpoint final four-role rollout and upstream remediation Stage 4R — 2026-08-03
+
+- Status: `IN_PROGRESS — RELEASE 554503a7 DEPLOYED ON ALL FOUR ROLES; G4R/G4
+  REMAIN CLOSED`. این checkpoint جای evidence تاریخی releaseهای قدیمی را
+  نمی‌گیرد و به‌هیچ‌وجه پذیرش M1 یا بازشدن Tier-1 نیست.
+- Source remediation: commit
+  `554503a7cb6e15f0c606ab99b32437f4ead14879` (`fix(three-site): re-resolve
+  private TLS upstreams`) در هر چهار Nginx role، Docker DNS resolver
+  `127.0.0.11`، TTL ده‌ثانیه‌ای و variable upstream را جای lookup یک‌بارهٔ
+  startup قرار می‌دهد. علت واقعی مشاهده‌شده این بود که restart کنترل‌شدهٔ
+  journal، IP Docker آن را عوض می‌کرد و Nginx قدیمی به IP مرده می‌ماند؛ پاسخ
+  recovery در آن پنجره `502` و fail-closed بود. 37 تست focused مربوط به
+  journal، 2PC، role Compose/bundle و secret boundary با dummy env قبول شدند.
+  اجرای بدون env محلی صرفاً در import `Settings` با required-env validation
+  متوقف شد و test failure محسوب نشد؛ rerun با URLهای loopback dummy،
+  `37 tests / OK` بود.
+- Delivery release: چهار role bundle با CSE به bucket خصوصی و versioned
+  `gold-trade-staging-three-site-dr` رسیدند. VersionIdهای exact به‌ترتیب
+  Bot-FI `ZH0NJM1qvRcvNdfUj7vlDhE4UzcwVW7`، WebApp-FI
+  `ttfjDnfehHDFK2n3InT6AUXODD.Dmg8`، WebApp-IR
+  `n2EIjqMVfBMJWoAkCnGFfsndNcxMt0E` و Witness
+  `vhp.HcwrSCqvV-5ePgmvRzGIshBq6rG` هستند. همهٔ receiptها
+  `ssh_payload_transfer=false` دارند. build مستقیم WebApp-IR به‌علت timeout
+  Docker Hub تکرار نشد: image نهایی WebApp-FI با age برای کلید WebApp-IR
+  رمز شد، از همین bucket upload/read-back و سپس در مقصد load شد. VersionId آن
+  `ZjrjIVJ9O0v.f306YWMI-JT.JXv-mjZ`، plaintext SHA-256
+  `d56c31bf3320d47c6b67ffa2b3396fbbf78fd4de4d9eb9356c0a079f0e28fea1` و
+  ciphertext SHA-256
+  `b92d70c01161447bc6ed77351dbbb76f2d0181ff2dd9524e80a17ac33c8c7ba3` است.
+  receipt owner-only آن در
+  `.../three-site-staging-0e63a7ec-fd34231d/stage4r-554503a7/transfer-webapp-fi-to-webapp-ir-image.json`
+  قرار دارد. هیچ payloadی با SCP/rsync/SSH جابه‌جا نشد.
+- State-preserving rollout: در اولین اجرای release جدید مشخص شد namespace
+  Compose که به SHA release وابسته است، volume تازه و خالی می‌سازد. هیچ volume
+  حذف نشد و هیچ data copy مستقیمی انجام نشد. roleهای جدید با image و material
+  `554503a7` اما با `-p` namespace state قبلی
+  `three-site-stage4r-456a3765-{bot-fi,webapp-fi,webapp-ir,witness}` دوباره
+  ایجاد شدند تا دقیقاً همان volumeهای موجود را mount کنند. این قاعده برای
+  deployهای بعدی Stage 4R اجباری است تا پیش از یک migration مستقل و
+  Object-Storage-backed، state را با namespace release جدید جایگزین نکند.
+- Runtime evidence: Bot-FI، WebApp-FI، WebApp-IR و Witness همگی image exact
+  `trading_bot_three_site_staging:554503a7cb6e15f0c606ab99b32437f4ead14879`
+  را گزارش می‌کنند؛ PostgreSQL هر role healthy و migrationهای WebApp-FI/IR
+  موفق‌اند؛ DR receiverهای Bot-FI، WebApp-FI و WebApp-IR healthy و `nginx -t`
+  در هر role موفق است. `*_sync_observer` و
+  `webapp_ir_convergence_exporter` one-shot/manual هستند و پیام
+  `invoke with docker compose run` با exit=1 دارند؛ worker crash تلقی نشده‌اند.
+  درخواست مستقیم HTTPS با SNI صحیح به
+  `staging.gold-trade.ir` روی origin `194.5.206.69` پاسخ مورد انتظار
+  `401` و TLS معتبر داد؛ DNS/CDN تغییر نکرد.
+- Restart proof: recovery-status امضاشده و فقط‌خواندنی یک marker مصنوعیِ
+  committed، از WebApp-FI قبل از restart journal Bot-FI `committed` بود؛ بعد
+  از restart تنها container journal، healthy شدن آن و گذشت TTL resolver نیز
+  همان پاسخ `committed` را داد. هیچ دادهٔ کسب‌وکاری، production، DNS/CDN یا
+  lifecycle VPS/volume تغییر نکرد.
+- Prior durability drill remains evidence but not acceptance: marker مصنوعی
+  قبلی مسیر کامل local PostgreSQL `PREPARE TRANSACTION`، journal `PREPARE` و
+  `COMMIT` امضاشده، `COMMIT PREPARED` و `pg_prepared_xacts=0` را گذراند؛ dump
+  journal در scratch DB restore شد و outage کنترل‌شدهٔ journal باعث block
+  fail-closed و سپس rollback/reconciliation امن شد. release جدید همان marker
+  committed را در status امضاشده دید، اما این اثبات event journal به‌تنهایی
+  قرارداد blob را کامل نمی‌کند.
+- Still closed: `STAGING_WEBAPP_FI_JOURNAL_TWO_PHASE_ENABLED=false`، health
+  controller برای event/blob هنوز false، evidence readiness منقضی و blob
+  journal/read-back اثبات‌نشده است. برای همین Tier-1، G4R و G4 با وجود bring-up
+  موفق، **accepted نیستند**. رفع بعدی فقط با evidence واقعی controller و
+  blob journal/read-back روی همین branch و release جدید انجام می‌شود، نه با
+  تغییر مستقیم control table یا bypass configuration.
+- Production touched: `no`; DNS/CDN mutation: `no`; VPS/volume creation or
+  deletion: `no`; Decision: `continue Stage 4R with the remaining durability
+  controller and blob-read-back evidence`.
+
 ### Exit gate — G4 Staging Published
 
 - هر چهار role exact release SHA را گزارش می‌کنند؛
