@@ -1132,6 +1132,49 @@ Confirmationهای هم‌معنی ادغام می‌شوند، ولی fencing �
   reversible همان container **staging قدیمی** بود؛ هیچ container production،
   VPS/volume، bucket یا route/domain production تغییر نکرد.
 
+#### checkpoint اجرای Stage 4 — public ingress، TLS و dry-run route — 2026-08-03
+
+- آدرس تماس ACME فقط برای صدور account/certificate استفاده شد و در Git یا evidence
+  ثبت نشده است. provider داخلی `lego` به endpoint قدیمی `.com` متصل نمی‌شد؛ hook
+  محدود DNS-01 در commit `c2ebcf23` فقط TXT موقت
+  `_acme-challenge.staging.gold-trade.ir` را از طریق API رسمی `.ir` ایجاد و پاک
+  می‌کند. گواهی trusted صادر شد، سپس همان TXT پاک شد؛ certificate/key هر دو
+  owner-only بیرون از repository نگهداری می‌شوند. SHA-256 certificate برابر
+  `d03b3b640806d13be5937ec98be6d2acb6d48a34bc32729c900d07bab9d50a10`،
+  CN برابر `staging.gold-trade.ir`، issuer برابر `Let's Encrypt YE1` و بازهٔ
+  اعتبار `2026-08-03T04:56:59Z` تا `2026-11-01T04:56:58Z` است. renewal باید
+  حداکثر تا `2026-10-01` با همان hook محدود اجرا شود؛ این مورد handoff عملیاتی
+  Stage 6 است، نه gate تکراری برای switch فعلی.
+- روی تنها WebApp-FI آزمایشی `194.5.206.69`، Nginx با configuration محدود commit
+  `9a8efa61` نصب و پس از `nginx -t` فعال شد. فقط hostname دقیق
+  `staging.gold-trade.ir` پذیرفته، TLS به loopback `127.0.0.1:8212` proxy می‌شود،
+  Basic Auth روی public surface اجباری است و `/metrics` به‌صورت صریح `404` است.
+  site پیش‌فرض package حذف نشد و به
+  `sites-disabled/default.pre-three-site-stage4` منتقل شد. خطای نخستین `500` فقط
+  از نبود execute permission برای گروه worker روی directory خصوصی htpasswd بود؛
+  با `root:www-data 0750` برای directory و `root:www-data 0640` برای خود فایل
+  اصلاح و reload شد. این تغییر فقط روی VPS آزمایشی انجام شد.
+- guard محدود commit `9a8efa61` دو rule inbound عمومی TCP `80/443` را صرفاً به
+  security group آزمایشی مشترک اروپایی با commitment
+  `7145d1da80b841191428e8e1898e2f21f8367f2a61b55649a3135ddc72ca4b70`
+  افزود؛ production overlap ندارد و هیچ VPS/volume/network production تغییر
+  نکرد. commit `2a147f89` اجرای مستقیم guard را نیز repair کرد.
+- direct-origin proof با `--resolve staging.gold-trade.ir:443:194.5.206.69` و
+  credential موجود staging قبول شد: `/health/ready` برابر `200` و
+  `ready=true,database_ok=true,redis_ok=true,physical_site=webapp_fi` است؛ root
+  بدون credential برابر `401` و `/metrics` بدون credential برابر `404` است.
+  TLS مستقیم trusted و با CN/issuer/bازهٔ اعتبار بالا match دارد. بنابراین خود
+  ingress و application target برای switch آماده‌اند.
+- dry-run ابزار fail-closed route (بدون `--apply`) نیز دقیقاً record
+  `staging` در zone `gold-trade.ir` را بازخوانی کرد: id
+  `d763b36e-ad18-44fe-84a0-9a374b9c81f4`، proxied، `upstream_https=https`،
+  TTL `120` و origin پیشین `65.109.220.59`. target پیشنهادی فقط
+  `194.5.206.69` است. route هنوز تغییر نکرده است؛ اعمال آن به authorization
+  مستقل و صریح owner برای همین source/target نیاز دارد.
+- Production touched: `no`. هیچ domain/route production، VPS/volume، bucket یا
+  lifecycle تغییر نکرد؛ mutationهای این checkpoint فقط certificate hook و
+  security group/Nginx روی هدف آزمایشی WebApp-FI هستند.
+
 ### Exit gate — G4 Staging Published
 
 - هر چهار role exact release SHA را گزارش می‌کنند؛
@@ -1151,23 +1194,23 @@ restart فقط سرویس‌هایی که در freeze evidence فعال بوده
 
 ### گزارش پایان Stage 4
 
-- Status: `IN_PROGRESS — FOUR ROLES FINISHED; ROUTING HELD PENDING INGRESS/TLS`
+- Status: `IN_PROGRESS — TARGET PUBLICLY PROVEN; ROUTING HELD PENDING EXPLICIT CDN SWITCH AUTHORIZATION`
 - Branch: `stage/three-site-staging-04-deploy`
 - Base / implementation / deployed SHA:
   `0e63a7ec1b08bef29ea199041215298a021b56ef / through fe20ab9e / exact release unchanged`
 - Role health and writer term:
   `four fresh observations, role-acceptance, global-commit and finish passed; WebApp-FI remains the accepted epoch-1 Writer and WebApp-IR remains fenced standby.`
 - Smoke and parity results:
-  `convergence and private/direct readiness passed; public direct-origin and Tier-1 smoke intentionally not started because ingress/TLS and public URL provenance are not yet valid.`
+  `convergence and private readiness passed; the new direct public origin is TLS-valid and returns authenticated /health/ready=200, unauthenticated /=401 and /metrics=404. Tier-1 public smoke waits only for the explicitly authorized CDN switch.`
 - Evidence paths and SHA-256:
   `owner-only .../stage4/controller-role-acceptance-v1/evidence/global-commit-global-commit.json = ae12bd249f301a6c2dc01cc222065c5a8d7f16c65debb5a0d786ced481a1eaf1; .../stage4/convergence-role-acceptance-v3/summary.json = 5367e4de832f0d352d7552bd9d2136e92be8c80a428ef53646b76b3b9ab2d935; .../stage4/routing-observation-v4.json = d1d71ed987621616b986f61f7d19f43fa78a27f19ab0c318c25d969a544c2429.`
 - Production touched: `no`
 - Deviations / open risks:
-  `the owner confirmed staging.gold-trade.ir as the authorized staging route, so the deployed public URL bundle is correct. WebApp-FI has no public ingress or TLS; no public route can be switched until direct-origin proof passes.`
+  `the owner confirmed staging.gold-trade.ir as the authorized staging route, so the deployed public URL bundle is correct. WebApp-FI ingress/TLS is now proven; only the separately authorized CDN origin switch and post-switch Tier-1 smoke remain. Certificate renewal is due by 2026-10-01 and is an operational handoff item.`
 - Rollback verified:
   `yes for the completed private topology; route remains at prior origin, target data is retained, and the stopped stale staging poller remains recoverable by start-only rollback.`
 - Decision / next stage:
-  `G4 not yet accepted / no; obtain explicit authorization for limited WebApp-FI ingress/TLS provisioning before any CDN change.`
+  `G4 not yet accepted / no; obtain explicit authorization only for staging.gold-trade.ir: 65.109.220.59 -> 194.5.206.69, then run public Tier-1 smoke. No other record is in scope.`
 
 ---
 
