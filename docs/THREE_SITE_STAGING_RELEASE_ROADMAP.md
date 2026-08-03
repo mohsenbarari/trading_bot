@@ -1010,6 +1010,71 @@ Confirmationهای هم‌معنی ادغام می‌شوند، ولی fencing �
   یا route تغییر نکرد و هیچ VPS/volume ساخته، حذف، detach، rebuild، resize یا
   format نشد.
 
+#### checkpoint اجرای Stage 4 — convergence، routing-hold و public-ready — 2026-08-03
+
+- مالک upload snapshot redacted مربوط به convergence در باکت خصوصی و versioned
+  `gold-trade-staging-three-site-dr` و exact VersionId readback را صریحاً مجاز کرد.
+  اجرای نهایی سه snapshot هم‌هویت را از Bot-FI، WebApp-FI و WebApp-IR گرفت؛ raw
+  snapshotها فقط شامل hash/count/checkpoint و فاقد business value/file bytes هستند.
+  WebApp-IR payload را از SSH عبور نداد و آن را زیر object key
+  `staging/wa-ir-transport/convergence/fd34231d-f52e-498a-aab4-438c99d88fc5/0e63a7ec1b08bef29ea199041215298a021b56ef/010a99bc-ec8a-4eec-8633-89d74ebee50d.json`
+  منتشر کرد. exact VersionId بازخوانی‌شده
+  `vWH0DikDqX6vkYmxsNNCEyJDo6FsOWG` است؛ summary خام SHA-256 برابر
+  `0fc77c7b977bbe6b50327c14d13ddb6988f95b0ea035e60875210af64efab8d0`
+  دارد. نسخه‌های fail-closed قبلی برای audit حذف نشدند.
+- convergence نهایی قبول شد: event checkpoint SHA-256 برابر
+  `0e56638e2f1f500e4ec145e885c217a804eab745e9c4d175f38d7c67eabad23a`،
+  database parity برابر
+  `f2e2bf13855e511508f4d79a3431bf7ace73feb1ab6a749a61eeead4f6de24d7`
+  و blob parity برابر
+  `55b5f5e45f3a7e32032a3273217162b88998feef50e696a8e8d5831fe003f9eb`
+  است. release checkout/image تغییر نکرد؛ adapter read-only با SHA-256
+  `9ce088da14bcdefe345418cae36a0c44a00dd1180f848c113e16c1024947c52f`
+  فقط transaction observer را محدود کرد. اصلاحات controller در commitهای
+  `dbde9b2c`، `5b1d0ff9`، `34569c89` و `c454b5c7` ثبت و ۲۶ تا ۴۲ تست مرتبط در
+  مجموعه‌های مربوط قبول شدند.
+- routing provider به‌صورت read-only بازخوانی شد و `app.gold-trading.ir` همچنان
+  روی origin قبلی `65.109.220.59` ماند. routing-hold سه role محصول با evidenceهای
+  SHA-256 `4e1b85f1...59cc`، `a07058e9...7bc` و `5b129948...bb53` قبول شد؛ هیچ
+  DNS/origin mutation انجام نشد. سپس `start-public` برای Bot-FI، WebApp-FI و
+  WebApp-IR با confirmation همان plan اجرا شد و journalها به `public_ready`
+  رسیدند؛ state hashها به‌ترتیب `00e185b0...acee`، `287d8915...e968` و
+  `54385fe7...6335` هستند. Witness طبق topology در `private_ready` ماند.
+- observation اولیه WebApp-FI و WebApp-IR قبول شد. collector برای Witness دو
+  وابستگی اشتباه به config کامل WebApp و host-published port داشت؛ اصلاحات
+  control-plane در commitهای `14fc4f24` و `aacee34e` ثبت و ۲۴/۸ تست مرتبط قبول
+  شدند. ابزار با SHA-256
+  `1471ee35ed139d1a21a922548fb328cced5bb138392273b051dfd4f7729059dc`
+  خارج از release tree روی Witness نصب شد و probe مستقیم آن با artifact SHA-256
+  `583198eaafba8e82dc6dd09a41d08215998f32a0a7ae03030a882819e239b1b4`
+  قبول شد. acceptance نهایی عمداً تا routing/convergence تازه تکرار نمی‌شود.
+- Bot-FI با bootstrap token مصنوعی Stage 3 start شده بود و پس از phase به restart
+  افتاد. به‌جای re-plan/re-approval یا تغییر خام env، amendment تک‌کلیدی و
+  evidence-bound در commit `8b8f1d97` اضافه شد؛ ۳۸ تست migration/observer/
+  coordinator قبول شدند. ابزار هر تغییر غیر از `BOT_TOKEN`، تطبیق با `.env`
+  canonical، image خارج از inventory، fingerprint متفاوت زنده، restart یا خطای
+  Telegram را رد می‌کند. runtime env SHA-256 برابر
+  `51937482825106c3397f4f5dda759e87e99c197bdba71b91bec5359646c9b704`،
+  evidence canonical hash برابر
+  `e4202d09eb782fb83d894b7b076ffc85a8aade9d283277d3f04e81ea0ae4a3e1`
+  و evidence file SHA-256 برابر
+  `bc2c65813d407ac7eccf68023ba6d1bb0b410b2f8be95f74efea831f8c80adac`
+  است. `getMe` قبول و token fingerprint `d70357f9...9438` از production
+  fingerprint `e3321b43...a9f7` متمایز است؛ plaintext persist/log نشد.
+- apply amendment روی VPS آزمایشی Bot-FI قبل از receipt fail-closed شد: token
+  معتبر بود و polling شروع شد، ولی Telegram وجود poller دوم را گزارش کرد. poller
+  رقیب دقیقاً container کمپین staging قدیمی با release `3138d0c2...` و همان
+  fingerprint `d70357f9...9438` روی BOT-FL/`65.109.216.187` است؛ Bot canonical
+  fingerprint دیگری دارد. ابزار فقط Bot جدید روی `130.185.121.98` را متوقف کرد.
+  چون BOT-FL در denylist canonical است، poller قدیمی بدون مجوز تازه متوقف نشد.
+  اسکن owner-only نشان داد هر ۷۶ env معتبر staging همین یک token را دارند؛ بنابراین
+  مسیر فنی بعدی یا مجوز محدود stop همان container staging قدیمی (بدون remove) است
+  یا دریافت token اختصاصی staging تازه. این blocker با token/approval تکراری دور
+  زده نمی‌شود.
+- Production touched: `read-only only`. روی `65.109.216.187` فقط container list و
+  token/release fingerprint hash خوانده شد؛ هیچ container/service/route/file روی
+  آن تغییر نکرد. هیچ VPS/volume/bucket/domain ساخته، حذف یا تغییر lifecycle نکرد.
+
 ### Exit gate — G4 Staging Published
 
 - هر چهار role exact release SHA را گزارش می‌کنند؛
@@ -1029,9 +1094,10 @@ restart فقط سرویس‌هایی که در freeze evidence فعال بوده
 
 ### گزارش پایان Stage 4
 
-- Status: `NOT_STARTED`
+- Status: `IN_PROGRESS — ROUTING HELD / BOT POLLER CONFLICT BLOCKED`
 - Branch: `stage/three-site-staging-04-deploy`
-- Base / implementation / deployed SHA: `pending`
+- Base / implementation / deployed SHA:
+  `0e63a7ec1b08bef29ea199041215298a021b56ef / through 8b8f1d97 / exact release unchanged`
 - Role health and writer term: `pending`
 - Smoke and parity results: `pending`
 - Evidence paths and SHA-256: `pending`
