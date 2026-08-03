@@ -269,6 +269,16 @@ reduced both online and frozen-anchor point error while narrowing the measured
 mean range. It is deliberately not promoted. It needs a later untouched cohort
 before it can change any quality gate.
 
+## Melted-market relationship discovery — 2026-08-03
+
+The dedicated relationship-discovery contract is documented in
+[`MELTED_MARKET_RELATIONSHIP_DISCOVERY_SHADOW.md`](MELTED_MARKET_RELATIONSHIP_DISCOVERY_SHADOW.md).
+It adds a separate point-in-time research graph for paper normal/reverse/swim,
+today/tomorrow, physical, conditional and support-market behaviour.  Its goal
+is to find, then strictly validate, cross-market and lead/lag relations before
+they can inform sparse-coin, reopening, or regime decisions.  It is aggregate
+only, leakage-safe, disabled from runtime use and has no automatic promotion.
+
 ## Three-site placement and data flows
 
 This section is a **design contract only**. The three-site architecture is not
