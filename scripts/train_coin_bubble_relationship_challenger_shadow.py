@@ -22,6 +22,7 @@ from core.market_intelligence.coin_relationship_challenger import (
     median_baseline,
     readiness,
 )
+from core.market_intelligence.relationship_ledger import iter_labels
 
 
 DATASET_SCHEMA = "COIN_INTRINSIC_RELATIONSHIP_DATASET_V1_SHADOW_20260803"
@@ -41,31 +42,32 @@ def _timestamp(value: object) -> datetime:
     return parsed
 
 
-def _load_rows(path: Path) -> list[CoinBubbleRow]:
+def _rows_from_items(items) -> list[CoinBubbleRow]:
     rows: list[CoinBubbleRow] = []
-    with path.open(encoding="utf-8") as handle:
-        for line in handle:
-            if not line.strip():
-                continue
-            item = json.loads(line)
-            if item.get("schema_version") != DATASET_SCHEMA:
-                raise ValueError("challenger_dataset_schema_invalid")
-            features = {
-                str(name): float(value)
-                for name, value in dict(item.get("features") or {}).items()
-            }
-            rows.append(
-                CoinBubbleRow(
-                    available_at_utc=_timestamp(item["available_at_utc"]),
-                    realized_at_utc=_timestamp(item["realized_at_utc"]),
-                    commodity=str(item["commodity"]),
-                    settlement=str(item["settlement"]),
-                    trade_form=str(item["trade_form"]),
-                    bubble_ratio=float(item["bubble_ratio"]),
-                    features=features,
-                )
+    for item in items:
+        if item.get("schema_version") != DATASET_SCHEMA:
+            raise ValueError("challenger_dataset_schema_invalid")
+        features = {
+            str(name): float(value)
+            for name, value in dict(item.get("features") or {}).items()
+        }
+        rows.append(
+            CoinBubbleRow(
+                available_at_utc=_timestamp(item["available_at_utc"]),
+                realized_at_utc=_timestamp(item["realized_at_utc"]),
+                commodity=str(item["commodity"]),
+                settlement=str(item["settlement"]),
+                trade_form=str(item["trade_form"]),
+                bubble_ratio=float(item["bubble_ratio"]),
+                features=features,
             )
+        )
     return rows
+
+
+def _load_rows(path: Path) -> list[CoinBubbleRow]:
+    with path.open(encoding="utf-8") as handle:
+        return _rows_from_items(json.loads(line) for line in handle if line.strip())
 
 
 def _write_json_atomic(path: Path, payload: dict) -> None:
@@ -79,20 +81,28 @@ def _write_json_atomic(path: Path, payload: dict) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--acknowledge-shadow-only", action="store_true")
-    parser.add_argument("--dataset", type=Path, required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--dataset", type=Path)
+    source.add_argument("--ledger", type=Path)
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--execute-catboost", action="store_true")
     args = parser.parse_args()
     if not args.acknowledge_shadow_only:
         raise SystemExit("--acknowledge-shadow-only is required")
     report_path = _outside_repository(args.report)
-    rows = _load_rows(args.dataset)
+    if args.dataset is not None:
+        rows = _load_rows(_outside_repository(args.dataset))
+        input_kind = "EPHEMERAL_DATASET"
+    else:
+        rows = _rows_from_items(iter_labels(_outside_repository(args.ledger)))
+        input_kind = "DURABLE_LEDGER"
     split = chronological_split(rows)
     gate = readiness(split)
     report = {
         "version": CHALLENGER_VERSION,
         "status": "SHADOW_CHALLENGER_NOT_PROMOTED",
         "dataset_rows": len(rows),
+        "input_kind": input_kind,
         "split": {
             "method": "chronological_60_20_20_availability_time_with_15m_purge",
             "validation_start_utc": split.validation_start_utc.isoformat(),

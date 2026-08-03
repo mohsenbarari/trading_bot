@@ -145,3 +145,19 @@ part of the application image and its execution requires the explicit
 `--execute-catboost` switch even after the data gates pass.  A completed
 experiment writes a report only.  It neither saves an active runtime model nor
 alters a source weight or range.
+
+## Durable collection and readiness cycle
+
+`run_coin_relationship_shadow_cycle.py` runs the bounded research sequence
+under a non-blocking local lock: regenerate the current privacy-minimized coin
+labels, upsert them to the durable ledger, compact only labels older than the
+configured retention period (initially 180 days), then evaluate the challenger
+from that ledger.  It is an explicit operator command, not an application job
+or an active-inference dependency.
+
+The ledger stores only timestamps, canonical commodity/settlement/form,
+strictly-prior melted-anchor metadata, numeric intrinsic/actual/bubble values
+and numeric feature maps.  It rejects raw offer text, message IDs, sender or
+counterparty fields.  An economic label key is a one-way digest of its market
+time/dimensions and anchor; parser corrections update the existing aggregate
+label instead of silently accumulating two contradictory versions.
