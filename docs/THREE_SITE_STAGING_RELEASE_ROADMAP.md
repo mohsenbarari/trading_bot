@@ -1693,9 +1693,26 @@ route عمومی، production و lifecycle زیرساخت در rollback 4R تغ�
 
 #### remediation 4R-OS — event plane بین FI و IR فقط Object Storage
 
-- Status: `IMPLEMENTED IN SOURCE — STAGING DEPLOY/SYNTHETIC EVIDENCE PENDING`.
+- Status: `CORRECTIVE IMMUTABLE RELEASE READY — FOUR-ROLE DEPLOY/SYNTHETIC
+  EVIDENCE PENDING`.
   این remediation بخشی از همان Stage 4R و همان branch است؛ VPS، DNS/CDN،
   security-group، production یا lifecycle جدیدی ایجاد نمی‌کند.
+- اصلاح deploy: نخستین start کنترل‌شدهٔ `webapp_ir_dr_delivery` از release
+  `8f9dea34` پیش از پردازش هر event با نبودن فایل CA در
+  `/run/staging-dr-ca/ca.crt` fail-closed شد. علت، رفتار استاندارد Compose بود:
+  `volumes` مختص service، `x-app.volumes` را جایگزین کرده بود. commit
+  `5fd6cad3cacb56da48426a039d7e8fec08b7a535` mount گواهی را صریحاً به هر دو
+  worker delivery اضافه و regression test را ثبت می‌کند. فقط همان worker IR به
+  Compose/image شناخته‌شدهٔ قبلی برگردانده شد؛ database، Redis، TLS، volume،
+  DNS/CDN و production تغییر نکرد و هیچ event/blob یا payload بین FI و IR
+  منتقل نشد. release بعدی باید یک‌باره و immutable برای هر چهار role، فقط با
+  Object Storage private/versioned و CSE، بسته‌بندی و deploy شود.
+- Verification اصلاح: `31` unittest focused شامل role Compose/secret boundary/
+  role و campaign bundle و Object-Storage transport با `OK` قبول شد؛ بخش
+  transport با environment ساختگی و بدون secret اجرا شد. `compileall` و
+  `git diff --check` نیز قبول شدند. این مشاهدهٔ health یک gate جدید نیست؛ همان
+  fail-closed بودن موردنیاز، قبل از هر synthetic evidence، خطای واقعی را گرفته
+  است.
 - Scope دقیق: هر دو hop `webapp_fi ↔ webapp_ir` در `dr_delivery_worker` و
   receiptهای Blob در `dr_blob_worker`. خود Blob پیش‌تر فقط در Object Storage
   private/versioned بود؛ اکنون درخواست receipt و acknowledgement آن نیز همان
