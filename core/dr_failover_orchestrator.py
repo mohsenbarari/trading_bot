@@ -135,8 +135,8 @@ def parse_plan(payload: Any, *, require_approval: bool = True) -> FailoverPlan:
     release_sha = str(payload["release_sha"]).lower()
     if not SHA_RE.fullmatch(release_sha):
         raise DrOrchestrationError("release SHA is malformed")
-    if payload["domain"] != "gold-trading.ir" or payload["record"] != "app":
-        raise DrOrchestrationError("source orchestrator remains locked to the failover-test domain")
+    if payload["domain"] != "gold-trade.ir" or payload["record"] != "staging":
+        raise DrOrchestrationError("source orchestrator remains locked to the exact staging record")
     try:
         current_ip = str(ipaddress.ip_address(str(payload["expected_current_ip"])))
         target_ip = str(ipaddress.ip_address(str(payload["target_ip"])))

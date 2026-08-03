@@ -102,7 +102,8 @@ roadmap جداگانه پیش‌تولید انجام می‌شوند.
 - NTP معتبر روی Writerها و Witness؛
 - رمزنگاری و hash verification برای payloadهای Object Storage؛
 - journal و rollback برای عملیات چندمرحله‌ای؛
-- عدم تغییر production DNS/CDN/domain در این roadmap؛
+- عدم تغییر route/domain سرویس production (`coin.gold-trade.ir`) یا هر record
+  غیر staging در این roadmap؛
 - عدم انتقال secret به Git، shell history یا خروجی roadmap.
 
 ### 3.2 gateهایی که برای کوتاه شدن مسیر ادغام می‌شوند
@@ -123,7 +124,7 @@ roadmap جداگانه پیش‌تولید انجام می‌شوند.
 - شش آزمون destructive روی میزبان‌های production؛
 - Gate-D aggregate به‌عنوان شرط بالا آمدن staging؛
 - production shadow، production cutover controller و emergency standalone؛
-- تغییر Arvan production origin یا دامنه `coin.gold-trade.ir`؛
+- تغییر Arvan production origin یا record سرویس production `coin.gold-trade.ir`؛
 - migration داده production به staging؛
 - فعال‌سازی Queue-v1 پیش از اثبات معماری پایه در حالت legacy؛
 - اجرای benchmarkها یا سناریوهای تکراری که invariant جدیدی را پوشش نمی‌دهند.
@@ -909,7 +910,7 @@ detach، rebuild یا resize نمی‌شود. چهار IP canonical و تمام 
 11. start API و background jobهای WebApp-FI؛
 12. start API standby محدود WebApp-IR بدون public writer authority؛
 13. start Bot-FI با `TELEGRAM_DELIVERY_EXECUTION_OWNER=legacy`؛
-14. route فقط دامنه staging به WebApp-FI؛
+14. route فقط `staging.gold-trade.ir` به WebApp-FI؛
 15. اجرای smokeهای login، offer، trade، notification، messenger و upload؛
 16. تأیید backlog صفر یا bounded و convergence اولیه؛
 17. ثبت global staging commit evidence.
@@ -1097,22 +1098,21 @@ Confirmationهای هم‌معنی ادغام می‌شوند، ولی fencing �
   `.../stage4/routing-observation-v4.json` با SHA-256
   `d1d71ed987621616b986f61f7d19f43fa78a27f19ab0c318c25d969a544c2429`
   همین وضعیت را ثبت می‌کند؛ هیچ DNS/CDN mutation انجام نشده است.
+- مالک روشن کرد که آدرس رسمی staging پروژه `staging.gold-trade.ir` است و در
+  این بازه برای آزمون معماری سه‌سایته آزاد است؛ `app.gold-trading.ir` فقط جایگزین
+  موقت بوده است. بنابراین `FRONTEND_URL` و `PUBLIC_WEBAPP_URL` bundle اجراشده
+  که هر دو `https://staging.gold-trade.ir` هستند، **درست**‌اند و replan/redeploy
+  لازم نیست. در guard route نیز فقط record دقیق `staging` در zone `gold-trade.ir`
+  مجاز است؛ recordهای production و namespace موقت read-only هستند.
 - preflight مستقیم WebApp-FI آزمایشی نشان داد application exact release روی
   `127.0.0.1:8212` سالم است (`/` و `/health/ready` هر دو `200`)، اما host هیچ
   listener عمومی `80/443`، Nginx، Certbot یا certificate ندارد. بنابراین probe
-  مستقیم `--resolve app.gold-trading.ir:443:194.5.206.69` timeout شد و switch
+  مستقیم `--resolve staging.gold-trade.ir:443:194.5.206.69` timeout شد و switch
   Arvan عمداً اجرا نشد.
-- همان preflight یک drift دامنه را آشکار کرد: `FRONTEND_URL` و
-  `PUBLIC_WEBAPP_URL` در role bundle اجراشده برابر
-  `https://staging.gold-trade.ir` هستند، در حالی که route مجاز این roadmap
-  `https://app.gold-trading.ir` است. این دو مقدار فقط نمایش نیستند: linkهای
-  invitation و Telegram از آن‌ها ساخته می‌شوند. چون SHA-256 env bundle در
-  plan/journal/acceptance bind شده، تغییر خام فایل env یا restart انتخابی مجاز
-  نیست؛ اصلاح باید با plan و evidence جدید و کنترل‌شده انجام شود.
 - مسیر بعدی پیش از هر switch عمومی: (۱) تعریف exact public-origin bundle برای
-  `app.gold-trading.ir` و recovery/redeploy controlled بدون تغییر release یا
-  data، (۲) provision محدود Nginx/TLS روی VPS آزمایشی WebApp-FI و اثبات direct
-  origin، (۳) dry-run و فقط سپس با authorization مستقل، switch record test-domain
+  `staging.gold-trade.ir` با bundle حاضر، (۲) provision محدود Nginx/TLS روی VPS
+  آزمایشی WebApp-FI و اثبات direct
+  origin، (۳) dry-run و فقط سپس با authorization مستقل، switch record دقیق staging
   در Arvan و smoke عمومی. این مسیر هیچ domain یا route production را در بر
   نمی‌گیرد.
 - Production touched: `no`. تنها mutation روی میزبان canonical، stop مجاز و
@@ -1138,7 +1138,7 @@ restart فقط سرویس‌هایی که در freeze evidence فعال بوده
 
 ### گزارش پایان Stage 4
 
-- Status: `IN_PROGRESS — FOUR ROLES FINISHED; ROUTING HELD PENDING CORRECTED PUBLIC BUNDLE AND INGRESS`
+- Status: `IN_PROGRESS — FOUR ROLES FINISHED; ROUTING HELD PENDING INGRESS/TLS`
 - Branch: `stage/three-site-staging-04-deploy`
 - Base / implementation / deployed SHA:
   `0e63a7ec1b08bef29ea199041215298a021b56ef / through fe20ab9e / exact release unchanged`
@@ -1150,11 +1150,11 @@ restart فقط سرویس‌هایی که در freeze evidence فعال بوده
   `owner-only .../stage4/controller-role-acceptance-v1/evidence/global-commit-global-commit.json = ae12bd249f301a6c2dc01cc222065c5a8d7f16c65debb5a0d786ced481a1eaf1; .../stage4/convergence-role-acceptance-v3/summary.json = 5367e4de832f0d352d7552bd9d2136e92be8c80a428ef53646b76b3b9ab2d935; .../stage4/routing-observation-v4.json = d1d71ed987621616b986f61f7d19f43fa78a27f19ab0c318c25d969a544c2429.`
 - Production touched: `no`
 - Deviations / open risks:
-  `the deployed public URL bundle targets staging.gold-trade.ir instead of the isolated app.gold-trading.ir test route; WebApp-FI has no public ingress or TLS. No public route can be switched until both are corrected under a new controlled plan.`
+  `the owner confirmed staging.gold-trade.ir as the authorized staging route, so the deployed public URL bundle is correct. WebApp-FI has no public ingress or TLS; no public route can be switched until direct-origin proof passes.`
 - Rollback verified:
   `yes for the completed private topology; route remains at prior origin, target data is retained, and the stopped stale staging poller remains recoverable by start-only rollback.`
 - Decision / next stage:
-  `G4 not yet accepted / no; obtain explicit authorization for the corrected public-origin replan and limited WebApp-FI ingress/TLS provisioning before any CDN change.`
+  `G4 not yet accepted / no; obtain explicit authorization for limited WebApp-FI ingress/TLS provisioning before any CDN change.`
 
 ---
 

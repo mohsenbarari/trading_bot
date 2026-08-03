@@ -31,8 +31,8 @@ def _prepared():  # noqa: ANN202
         action="promote_ir",
         source_site="webapp_fi",
         target_site="webapp_ir",
-        domain="gold-trading.ir",
-        record="app",
+        domain="gold-trade.ir",
+        record="staging",
     )
     backend = SimpleNamespace(
         config=SimpleNamespace(

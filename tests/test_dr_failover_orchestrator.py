@@ -64,8 +64,8 @@ def approved_plan(*, manifest_payload=None, rpo_policy=None):
         "expected_epoch": 7,
         "target_epoch": 8,
         "release_sha": "a" * 40,
-        "domain": "gold-trading.ir",
-        "record": "app",
+        "domain": "gold-trade.ir",
+        "record": "staging",
         "expected_current_ip": "192.0.2.10",
         "target_ip": "192.0.2.20",
         "classification": {
@@ -321,7 +321,7 @@ class DrFailoverOrchestratorTests(unittest.IsolatedAsyncioTestCase):
 
         raw, _policy = approved_plan()
         raw["record"] = "other"
-        with self.assertRaisesRegex(DrOrchestrationError, "failover-test domain"):
+        with self.assertRaisesRegex(DrOrchestrationError, "exact staging record"):
             parse_plan(raw)
 
         raw, _policy = approved_plan()

@@ -14,11 +14,11 @@ from scripts.arvan_origin_switch import (
 )
 
 
-def record(ip: str) -> dict:
+def record(ip: str, *, name: str = "staging") -> dict:
     return {
         "id": "record-1",
         "type": "a",
-        "name": "switch-test",
+        "name": name,
         "value": [{"ip": ip, "port": None, "weight": 100, "country": ""}],
         "ttl": 120,
         "cloud": True,
@@ -49,15 +49,17 @@ class FakeApi:
 
 
 class ArvanOriginSwitchTests(unittest.TestCase):
-    def test_apply_is_restricted_to_isolated_test_domain(self) -> None:
-        with self.assertRaisesRegex(ArvanOriginSwitchError, "restricted to the failover-test"):
-            enforce_apply_domain_scope("gold-trade.ir", apply=True)
-        enforce_apply_domain_scope("gold-trade.ir", apply=False)
-        enforce_apply_domain_scope("gold-trading.ir", apply=True)
+    def test_apply_is_restricted_to_exact_owner_authorized_staging_record(self) -> None:
+        with self.assertRaisesRegex(ArvanOriginSwitchError, "exact staging"):
+            enforce_apply_domain_scope("gold-trade.ir", "app", apply=True)
+        with self.assertRaisesRegex(ArvanOriginSwitchError, "exact staging"):
+            enforce_apply_domain_scope("gold-trading.ir", "app", apply=True)
+        enforce_apply_domain_scope("gold-trade.ir", "app", apply=False)
+        enforce_apply_domain_scope("gold-trade.ir", "staging", apply=True)
 
     def test_production_apply_is_rejected_before_api_access(self) -> None:
         fake = FakeApi()
-        with self.assertRaisesRegex(ArvanOriginSwitchError, "post-matrix authorization"):
+        with self.assertRaisesRegex(ArvanOriginSwitchError, "exact staging"):
             inspect_or_switch(
                 domain="gold-trade.ir",
                 record_name="app",
@@ -73,8 +75,8 @@ class ArvanOriginSwitchTests(unittest.TestCase):
     def test_dry_run_never_writes(self) -> None:
         fake = FakeApi()
         result = inspect_or_switch(
-            domain="gold-trading.ir",
-            record_name="switch-test",
+            domain="gold-trade.ir",
+            record_name="staging",
             target_ip="10.0.0.2",
             token="secret",
             expected_current_ip=None,
@@ -89,13 +91,13 @@ class ArvanOriginSwitchTests(unittest.TestCase):
     def test_apply_requires_expected_current_ip(self) -> None:
         with self.assertRaisesRegex(ArvanOriginSwitchError, "expected-current-ip"):
             inspect_or_switch(
-                domain="gold-trading.ir",
-                record_name="switch-test",
+                domain="gold-trade.ir",
+                record_name="staging",
                 target_ip="10.0.0.2",
                 token="secret",
                 expected_current_ip=None,
                 apply=True,
-                confirmation=confirmation_phrase("gold-trading.ir", "switch-test", "10.0.0.2"),
+                confirmation=confirmation_phrase("gold-trade.ir", "staging", "10.0.0.2"),
                 request_fn=FakeApi(),
             )
 
@@ -103,13 +105,13 @@ class ArvanOriginSwitchTests(unittest.TestCase):
         fake = FakeApi("10.0.0.9")
         with self.assertRaisesRegex(ArvanOriginSwitchError, "explicitly expected"):
             inspect_or_switch(
-                domain="gold-trading.ir",
-                record_name="switch-test",
+                domain="gold-trade.ir",
+                record_name="staging",
                 target_ip="10.0.0.2",
                 token="secret",
                 expected_current_ip="10.0.0.1",
                 apply=True,
-                confirmation=confirmation_phrase("gold-trading.ir", "switch-test", "10.0.0.2"),
+                confirmation=confirmation_phrase("gold-trade.ir", "staging", "10.0.0.2"),
                 request_fn=fake,
             )
         self.assertEqual([call[0] for call in fake.calls], ["GET"])
@@ -118,8 +120,8 @@ class ArvanOriginSwitchTests(unittest.TestCase):
         fake = FakeApi()
         with self.assertRaisesRegex(ArvanOriginSwitchError, "Confirmation mismatch"):
             inspect_or_switch(
-                domain="gold-trading.ir",
-                record_name="switch-test",
+                domain="gold-trade.ir",
+                record_name="staging",
                 target_ip="10.0.0.2",
                 token="secret",
                 expected_current_ip="10.0.0.1",
@@ -132,13 +134,13 @@ class ArvanOriginSwitchTests(unittest.TestCase):
     def test_apply_preserves_proxy_safety_and_verifies_readback(self) -> None:
         fake = FakeApi()
         result = inspect_or_switch(
-            domain="gold-trading.ir",
-            record_name="switch-test",
+            domain="gold-trade.ir",
+            record_name="staging",
             target_ip="10.0.0.2",
             token="secret",
             expected_current_ip="10.0.0.1",
             apply=True,
-            confirmation=confirmation_phrase("gold-trading.ir", "switch-test", "10.0.0.2"),
+            confirmation=confirmation_phrase("gold-trade.ir", "staging", "10.0.0.2"),
             request_fn=fake,
         )
         self.assertEqual(result["status"], "switched")
@@ -153,8 +155,8 @@ class ArvanOriginSwitchTests(unittest.TestCase):
     def test_already_at_target_is_idempotent(self) -> None:
         fake = FakeApi("10.0.0.2")
         result = inspect_or_switch(
-            domain="gold-trading.ir",
-            record_name="switch-test",
+            domain="gold-trade.ir",
+            record_name="staging",
             target_ip="10.0.0.2",
             token="secret",
             expected_current_ip="10.0.0.1",
@@ -194,8 +196,8 @@ class ArvanOriginSwitchTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             parse_args(
                 [
-                    "--domain", "gold-trading.ir",
-                    "--record", "switch-test",
+                    "--domain", "gold-trade.ir",
+                    "--record", "staging",
                     "--target-ip", "10.0.0.2",
                     "--api-base", "https://attacker.invalid",
                 ]
@@ -205,8 +207,8 @@ class ArvanOriginSwitchTests(unittest.TestCase):
         fake = FakeApi()
         with self.assertRaisesRegex(ArvanOriginSwitchError, "custom Arvan API"):
             inspect_or_switch(
-                domain="gold-trading.ir",
-                record_name="switch-test",
+                domain="gold-trade.ir",
+                record_name="staging",
                 target_ip="10.0.0.2",
                 token="secret",
                 expected_current_ip=None,

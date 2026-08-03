@@ -153,8 +153,8 @@ def _routing_observation(path: Path, identity: dict[str, str]) -> tuple[dict[str
         set(value) != fields
         or value.get("schema") != "three-site-staging-routing-observation-v2"
         or any(value.get(key) != expected for key, expected in identity.items())
-        or value.get("domain") != "gold-trading.ir"
-        or value.get("record") != "app"
+        or value.get("domain") != "gold-trade.ir"
+        or value.get("record") != "staging"
         or current_origin != expected_origin
         or re.fullmatch(r"[0-9a-f]{64}", str(value.get("provider_read_sha256", ""))) is None
         or not isinstance(value.get("artifacts"), dict)
@@ -298,7 +298,7 @@ def _acceptance_observations(
                 str(observations["direct_origin_http"].get("response_sha256", "")),
             ) is None
             or observations["production_boundaries_untouched"].get("routing_change_applied") is not False
-            or observations["production_boundaries_untouched"].get("test_domain") != "gold-trading.ir"
+            or observations["production_boundaries_untouched"].get("test_domain") != "staging.gold-trade.ir"
             or observations["production_boundaries_untouched"].get("compose_project")
             != "trading-bot-three-site-staging"
             or observations["unexpected_errors_absent"].get("restart_count_total") != 0

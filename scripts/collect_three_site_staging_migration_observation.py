@@ -382,8 +382,8 @@ def _artifact(
 
 def collect_routing(args: argparse.Namespace) -> dict[str, Any]:
     provider = inspect_or_switch(
-        domain="gold-trading.ir",
-        record_name="app",
+        domain="gold-trade.ir",
+        record_name="staging",
         target_ip=args.expected_legacy_origin_ip,
         token=load_token(args.arvan_token_file),
         expected_current_ip=None,
@@ -413,8 +413,8 @@ def collect_routing(args: argparse.Namespace) -> dict[str, Any]:
         "release_sha": args.release_sha,
         "plan_sha256": args.plan_sha256,
         "observed_at": datetime.now(timezone.utc).isoformat(),
-        "domain": "gold-trading.ir",
-        "record": "app",
+        "domain": "gold-trade.ir",
+        "record": "staging",
         "current_origin_ip": current_origin,
         "expected_legacy_origin_ip": args.expected_legacy_origin_ip,
         "provider_read_sha256": _sha(provider),
@@ -745,7 +745,7 @@ def collect_role(args: argparse.Namespace) -> dict[str, Any]:
         },
         "production_boundaries_untouched": {
             "compose_project": "trading-bot-three-site-staging",
-            "test_domain": "gold-trading.ir",
+            "test_domain": "staging.gold-trade.ir",
             "routing_change_applied": False,
         },
         "unexpected_errors_absent": {

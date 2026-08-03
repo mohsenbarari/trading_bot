@@ -177,8 +177,8 @@ def _routing(root: Path, *, observed_at: str) -> Path:
             "release_sha": RELEASE_SHA,
             "plan_sha256": PLAN_SHA,
             "observed_at": observed_at,
-            "domain": "gold-trading.ir",
-            "record": "app",
+            "domain": "gold-trade.ir",
+            "record": "staging",
             "current_origin_ip": "10.30.0.9",
             "expected_legacy_origin_ip": "10.30.0.9",
             "provider_read_sha256": "a" * 64,
@@ -231,7 +231,7 @@ def _acceptance(
         "direct_origin_http": {"status_code": 200, "response_sha256": "7" * 64},
         "production_boundaries_untouched": {
             "routing_change_applied": False,
-            "test_domain": "gold-trading.ir",
+            "test_domain": "staging.gold-trade.ir",
             "compose_project": "trading-bot-three-site-staging",
         },
         "unexpected_errors_absent": {

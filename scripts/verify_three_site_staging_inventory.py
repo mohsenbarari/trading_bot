@@ -152,8 +152,10 @@ def verify_inventory(
         raise InventoryError("release_sha must be one exact Git SHA")
     if payload["canonical_domain"] != "staging.gold-trade.ir":
         raise InventoryError("canonical staging domain is not staging.gold-trade.ir")
-    if payload["optional_ingress"] not in {None, "app.gold-trading.ir"}:
-        raise InventoryError("optional ingress is outside the isolated Arvan test root")
+    if payload["optional_ingress"] not in {
+        None, "app.gold-trading.ir", "staging.gold-trade.ir",
+    }:
+        raise InventoryError("optional ingress is outside the approved staging scope")
     if payload["credential_scope"] != "staging-only":
         raise InventoryError("all credentials must be explicitly staging-only")
     boundaries = payload["production_boundaries"]

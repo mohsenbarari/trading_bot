@@ -25,8 +25,9 @@ from core.secure_file_io import SecureFileError, append_hash_chained_jsonl, read
 
 
 DEFAULT_API_BASE = "https://napi.arvancloud.ir/cdn/4.0"
-PRODUCTION_ROOT_DOMAIN = "gold-trade.ir"
-FAILOVER_TEST_ROOT_DOMAIN = "gold-trading.ir"
+STAGING_ROOT_DOMAIN = "gold-trade.ir"
+STAGING_RECORD_NAME = "staging"
+RETIRED_FAILOVER_TEST_ROOT_DOMAIN = "gold-trading.ir"
 
 
 class ArvanOriginSwitchError(RuntimeError):
@@ -173,15 +174,22 @@ def confirmation_phrase(domain: str, record_name: str, target_ip: str) -> str:
     return f"switch:{domain}:{record_name}:{target_ip}"
 
 
-def enforce_apply_domain_scope(domain: str, *, apply: bool) -> None:
-    """Keep this pre-production primitive confined to the isolated test zone."""
+def enforce_apply_domain_scope(domain: str, record_name: str, *, apply: bool) -> None:
+    """Confine mutations to the one owner-authorized staging record.
+
+    ``gold-trade.ir`` also contains production records, so allowing the root
+    domain alone would be too broad.  The current approved staging endpoint is
+    precisely ``staging.gold-trade.ir``; the former ``gold-trading.ir`` test
+    namespace remains readable but cannot be changed by this primitive.
+    """
     if not apply:
         return
-    if domain != FAILOVER_TEST_ROOT_DOMAIN:
+    if (domain, record_name) != (STAGING_ROOT_DOMAIN, STAGING_RECORD_NAME):
         raise ArvanOriginSwitchError(
-            "Applied Arvan changes are currently restricted to the failover-test "
-            f"domain {FAILOVER_TEST_ROOT_DOMAIN!r}; production domain "
-            f"{PRODUCTION_ROOT_DOMAIN!r} requires a separate post-matrix authorization"
+            "Applied Arvan changes are currently restricted to the exact staging "
+            f"record {STAGING_RECORD_NAME}.{STAGING_ROOT_DOMAIN}; retired failover "
+            f"test domain {RETIRED_FAILOVER_TEST_ROOT_DOMAIN!r} and all other "
+            "gold-trade.ir records are read-only"
         )
 
 
@@ -212,7 +220,7 @@ def inspect_or_switch(
     api_base: str = DEFAULT_API_BASE,
     request_fn: RequestFn = api_request,
 ) -> dict[str, Any]:
-    enforce_apply_domain_scope(domain, apply=apply)
+    enforce_apply_domain_scope(domain, record_name, apply=apply)
     if api_base.rstrip("/") != DEFAULT_API_BASE:
         raise ArvanOriginSwitchError("custom Arvan API bases are forbidden")
     encoded_domain = urllib.parse.quote(domain, safe="")

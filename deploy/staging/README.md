@@ -425,7 +425,7 @@ Arvan token, connectivity evidence, readiness key, journals, plans, and
 evidence directories owner-only.
 
 The backend is restricted to the approved provisioned inventory, release SHA,
-the two exact WebApp host IPs, and `app.gold-trading.ir`. It uses key-only SSH
+the two exact WebApp host IPs, and `staging.gold-trade.ir`. It uses key-only SSH
 with strict known-host checking. SSH is only the low-volume staging management
 plane; it never transports seed or Blob payloads. Source fencing captures the
 destination-specific FI-to-IR or IR-to-FI stream sequence and transaction hash,

@@ -125,8 +125,8 @@ def load_staging_backend_config(
     if (
         set(payload) != fields
         or payload.get("schema") != "three-site-staging-failover-backend-v1"
-        or payload.get("domain") != "gold-trading.ir"
-        or payload.get("record") != "app"
+        or payload.get("domain") != "gold-trade.ir"
+        or payload.get("record") != "staging"
     ):
         raise StagingOperationBackendError("staging backend scope/schema is invalid")
     verified = verify_approved_inventory(
@@ -308,8 +308,8 @@ class StagingTypedOperationBackend:
     def validate_plan_scope(self, plan: FailoverPlan) -> None:
         if (
             plan.release_sha != self.config.release_sha
-            or plan.domain != "gold-trading.ir"
-            or plan.record != "app"
+            or plan.domain != "gold-trade.ir"
+            or plan.record != "staging"
             or plan.expected_current_ip != self.config.hosts[plan.source_site].host_ip
             or plan.target_ip != self.config.hosts[plan.target_site].host_ip
         ):
