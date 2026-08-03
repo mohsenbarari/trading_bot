@@ -1255,6 +1255,19 @@ class EstimatorTests(unittest.TestCase):
         self.assertIn("گروه ۱", body)
         self.assertIn("گروه ۲", body)
 
+    def test_session_store_and_authentication(self) -> None:
+        from live_server import SessionStore, render_login_page
+        db_path = Path(tempfile.gettempdir()) / "test_sessions_db.sqlite3"
+        store = SessionStore(db_path)
+        token = store.create_session("bahar")
+        self.assertIsNotNone(token)
+        self.assertEqual(store.validate_session(token), "bahar")
+        store.revoke_session(token)
+        self.assertIsNone(store.validate_session(token))
+        login_body = render_login_page("/login", error="خطا").decode("utf-8")
+        self.assertIn("ورود به سامانه", login_body)
+        self.assertIn("خطا", login_body)
+
 
 if __name__ == "__main__":
     unittest.main()

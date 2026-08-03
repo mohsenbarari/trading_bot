@@ -19,6 +19,7 @@ import threading
 import time
 from datetime import datetime, time as dt_time, timedelta, timezone
 from http import HTTPStatus
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -974,8 +975,244 @@ def render_manual_entry_panel(
     """
 
 
+class SessionStore:
+    def __init__(self, db_path: Path):
+        self._db_path = db_path
+        self._lock = threading.Lock()
+        self._memory: dict[str, tuple[str, float]] = {}
+        self._init_db()
+
+    def _init_db(self) -> None:
+        try:
+            self._db_path.parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(self._db_path)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS web_sessions (
+                    token TEXT PRIMARY KEY,
+                    username TEXT NOT NULL,
+                    expires_at_utc REAL NOT NULL
+                )
+                """
+            )
+            conn.commit()
+            now = time.time()
+            rows = conn.execute("SELECT token, username, expires_at_utc FROM web_sessions WHERE expires_at_utc > ?", (now,)).fetchall()
+            for token, username, expires_at in rows:
+                self._memory[token] = (username, expires_at)
+            conn.close()
+        except Exception:
+            pass
+
+    def create_session(self, username: str) -> str:
+        token = secrets.token_hex(32)
+        expires_at = time.time() + 2_592_000  # 30 days
+        with self._lock:
+            self._memory[token] = (username, expires_at)
+            try:
+                conn = sqlite3.connect(self._db_path)
+                conn.execute(
+                    "INSERT OR REPLACE INTO web_sessions (token, username, expires_at_utc) VALUES (?, ?, ?)",
+                    (token, username, expires_at),
+                )
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
+        return token
+
+    def validate_session(self, token: str | None) -> str | None:
+        if not token:
+            return None
+        with self._lock:
+            if token not in self._memory:
+                return None
+            username, expires_at = self._memory[token]
+            if time.time() > expires_at:
+                del self._memory[token]
+                try:
+                    conn = sqlite3.connect(self._db_path)
+                    conn.execute("DELETE FROM web_sessions WHERE token = ?", (token,))
+                    conn.commit()
+                    conn.close()
+                except Exception:
+                    pass
+                return None
+            return username
+
+    def revoke_session(self, token: str | None) -> None:
+        if not token:
+            return
+        with self._lock:
+            self._memory.pop(token, None)
+            try:
+                conn = sqlite3.connect(self._db_path)
+                conn.execute("DELETE FROM web_sessions WHERE token = ?", (token,))
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
+
+
+def render_login_page(login_path: str = "/login", error: str | None = None) -> bytes:
+    error_html = f"<div class='alert-error'>⚠️ {html.escape(error)}</div>" if error else ""
+    document = f"""<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ورود به سامانه تخمین نرخ سکه</title>
+<style>
+@import url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css');
+:root {{
+  --bg-deep: #0b1329;
+  --bg-surface: rgba(15, 23, 42, 0.85);
+  --bg-card: #141f36;
+  --border-line: rgba(255, 255, 255, 0.08);
+  --border-gold: rgba(245, 158, 11, 0.35);
+  --border-gold-glow: 0 0 15px rgba(245, 158, 11, 0.12);
+  --text-main: #f8fafc;
+  --text-sub: #94a3b8;
+  --accent-gold: #f59e0b;
+  --accent-cyan: #06b6d4;
+  --accent-indigo: #6366f1;
+  --accent-rose: #f43f5e;
+}}
+* {{ box-sizing: border-box; }}
+body {{
+  margin: 0;
+  background: radial-gradient(circle at 50% 20%, #1e1b4b 0%, #0b1329 80%);
+  color: var(--text-main);
+  font-family: Vazirmatn, system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}}
+.login-card {{
+  width: 100%;
+  max-width: 400px;
+  background: var(--bg-surface);
+  backdrop-filter: blur(24px);
+  border: 1px solid var(--border-gold);
+  box-shadow: var(--border-gold-glow);
+  border-radius: 20px;
+  padding: 32px 28px;
+}}
+.login-brand {{
+  text-align: center;
+  margin-bottom: 24px;
+}}
+.logo-badge {{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.25), rgba(99, 102, 241, 0.25));
+  border: 1px solid var(--accent-gold);
+  font-size: 28px;
+  margin-bottom: 12px;
+}}
+h1 {{
+  margin: 0 0 6px;
+  font-size: 22px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #ffffff 40%, var(--accent-gold) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}}
+p.subtitle {{
+  margin: 0;
+  color: var(--text-sub);
+  font-size: 13px;
+}}
+.alert-error {{
+  background: rgba(244, 63, 94, 0.15);
+  border: 1px solid rgba(244, 63, 94, 0.4);
+  color: #fca5a5;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  margin-bottom: 20px;
+  text-align: center;
+}}
+.form-group {{
+  margin-bottom: 18px;
+}}
+label {{
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-sub);
+  margin-bottom: 6px;
+}}
+input[type="text"], input[type="password"] {{
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border-line);
+  background: rgba(15, 23, 42, 0.9);
+  color: var(--text-main);
+  font-family: inherit;
+  font-size: 14px;
+  transition: all 0.2s ease;
+}}
+input[type="text"]:focus, input[type="password"]:focus {{
+  outline: none;
+  border-color: var(--accent-gold);
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.2);
+}}
+.submit-btn {{
+  width: 100%;
+  padding: 12px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent-gold), #d97706);
+  color: #0b1329;
+  font-weight: 800;
+  font-size: 15px;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(245, 158, 11, 0.25);
+  transition: all 0.2s ease;
+  margin-top: 6px;
+}}
+.submit-btn:hover {{
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(245, 158, 11, 0.35);
+}}
+</style>
+</head>
+<body>
+<div class="login-card">
+  <div class="login-brand">
+    <div class="logo-badge">🪙</div>
+    <h1>ورود به سامانه <span>تخمین نرخ سکه</span></h1>
+    <p class="subtitle">جهت دسترسی به اطلاعات بازار، نام کاربری و رمز عبور را وارد کنید</p>
+  </div>
+  {error_html}
+  <form method="post" action="{html.escape(login_path)}">
+    <div class="form-group">
+      <label>نام کاربری</label>
+      <input type="text" name="username" placeholder="نام کاربری خود را وارد کنید" required autofocus autocomplete="username">
+    </div>
+    <div class="form-group">
+      <label>رمز عبور</label>
+      <input type="password" name="password" placeholder="••••••••" required autocomplete="current-password">
+    </div>
+    <button type="submit" class="submit-btn">ورود به سامانه</button>
+  </form>
+</div>
+</body>
+</html>"""
+    return document.encode("utf-8")
+
+
 def render_page(
     state: dict[str, Any], *, manual_path: str = "/manual-entry", analytics_path: str = "/analytics",
+    logout_path: str = "/logout", user_session: str | None = None,
     estimate_path: str = "/estimates.html", activity_path: str = "/activity.html", write_enabled: bool = False,
     flash: str | None = None, open_manual_offers: list[dict[str, Any]] | None = None,
     estimate_fragment: bool = False, page: str = "home",
@@ -1026,12 +1263,15 @@ def render_page(
         open_manual_offers=open_manual_offers or [],
     )
 
+    user_badge = f"<span class='user-label' style='font-size:13px;color:var(--text-sub);margin-left:6px'>👤 <strong>{html.escape(user_session or 'bahar')}</strong></span>"
+    logout_btn = f"<a class='nav-btn secondary' href='{html.escape(logout_path)}'>خروج</a>"
+
     if page == "manual":
-        navigation = f"<a class='nav-btn secondary' href='{html.escape('/' + manual_path.strip('/').rsplit('/', 1)[0])}'>بازگشت به داشبورد</a>"
+        navigation = f"{user_badge} <a class='nav-btn secondary' href='{html.escape('/' + manual_path.strip('/').rsplit('/', 1)[0])}'>بازگشت به داشبورد</a> {logout_btn}"
         page_content = manual_panel_html
         refresh_script = ""
     else:
-        navigation = f"<a class='nav-btn secondary' href='{html.escape(analytics_path)}'>📊 آمار کاربران</a> <a class='nav-btn' href='{html.escape(manual_path)}'>ثبت دستی آفر</a>"
+        navigation = f"{user_badge} <a class='nav-btn secondary' href='{html.escape(analytics_path)}'>📊 آمار کاربران</a> <a class='nav-btn' href='{html.escape(manual_path)}'>ثبت دستی آفر</a> {logout_btn}"
         page_content = f"""
         <div class="top-ticker">
           <div class='inputs'>{render_input_cards(inputs)}{melted_cards}</div>
@@ -1650,6 +1890,8 @@ def render_analytics_page(
     *,
     analytics_path: str = "/analytics",
     home_path: str = "/",
+    logout_path: str = "/logout",
+    user_session: str | None = None,
     range_type: str = "today",
     start_shamsi: str | None = None,
     end_shamsi: str | None = None,
@@ -1689,7 +1931,9 @@ def render_analytics_page(
             """
         )
 
-    navigation = f"<a class='nav-btn secondary' href='{html.escape(home_path)}'>بازگشت به داشبورد اصلی</a>"
+    user_badge = f"<span class='user-label' style='font-size:13px;color:var(--text-sub);margin-left:6px'>👤 <strong>{html.escape(user_session or 'bahar')}</strong></span>"
+    logout_btn = f"<a class='nav-btn secondary' href='{html.escape(logout_path)}'>خروج</a>"
+    navigation = f"{user_badge} <a class='nav-btn secondary' href='{html.escape(home_path)}'>بازگشت به داشبورد اصلی</a> {logout_btn}"
 
     document = f"""<!doctype html>
 <html lang="fa" dir="rtl">
@@ -1997,9 +2241,12 @@ def handler_factory(
     health_path = normalized + "/healthz"
     manual_path = normalized + "/manual-entry"
     analytics_path = normalized + "/analytics"
+    login_path = normalized + "/login"
+    logout_path = normalized + "/logout"
     estimate_path = normalized + "/estimates.html"
     activity_path = normalized + "/activity.html"
     parse_offer_path = manual_path + "/parse-text"
+    session_store = SessionStore(RUNTIME_ROOT / "web_sessions.sqlite3")
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "CoinEstimator/1"
@@ -2026,14 +2273,78 @@ def handler_factory(
             self.send_header("X-Frame-Options", "DENY")
             self.end_headers()
 
+        def _redirect_with_cookie(self, target: str, cookie_str: str) -> None:
+            self.send_response(HTTPStatus.SEE_OTHER)
+            self.send_header("Location", target)
+            self.send_header("Set-Cookie", cookie_str)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.end_headers()
+
+        def _get_session_token(self) -> str | None:
+            cookie_header = self.headers.get("Cookie", "")
+            if not cookie_header:
+                return None
+            try:
+                cookie = SimpleCookie(cookie_header)
+                if "coin_session_token" in cookie:
+                    return cookie["coin_session_token"].value
+            except Exception:
+                pass
+            return None
+
         def do_GET(self) -> None:  # noqa: N802
             path = urlsplit(self.path).path.rstrip("/") or "/"
             state = state_store.get()
+
+            if path == health_path:
+                body = json.dumps(
+                    {
+                        "status": state.get("service_status", "UNKNOWN"),
+                        "generated_at_utc": state.get("generated_at_utc"),
+                    },
+                    ensure_ascii=False,
+                ).encode("utf-8")
+                self._headers(HTTPStatus.OK, "application/json; charset=utf-8", len(body))
+                self.wfile.write(body)
+                return
+
+            if path == login_path:
+                token = self._get_session_token()
+                if session_store.validate_session(token):
+                    self._redirect(normalized)
+                    return
+                body = render_login_page(login_path=login_path)
+                self._headers(HTTPStatus.OK, "text/html; charset=utf-8", len(body))
+                self.wfile.write(body)
+                return
+
+            if path == logout_path:
+                token = self._get_session_token()
+                session_store.revoke_session(token)
+                self._redirect_with_cookie(login_path, "coin_session_token=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
+                return
+
+            # Authentication Check
+            token = self._get_session_token()
+            user_session = session_store.validate_session(token)
+            if not user_session:
+                if path.endswith(".json"):
+                    body = b'{"error":"unauthorized"}'
+                    self._headers(HTTPStatus.UNAUTHORIZED, "application/json; charset=utf-8", len(body))
+                    self.wfile.write(body)
+                else:
+                    self._redirect(login_path)
+                return
+
             if path == normalized:
                 body = render_page(
                     state,
                     manual_path=manual_path,
                     analytics_path=analytics_path,
+                    logout_path=logout_path,
+                    user_session=user_session,
                     estimate_path=estimate_path,
                     activity_path=activity_path,
                     write_enabled=write_token is not None,
@@ -2052,6 +2363,8 @@ def handler_factory(
                     conversation_db,
                     analytics_path=analytics_path,
                     home_path=normalized,
+                    logout_path=logout_path,
+                    user_session=user_session,
                     range_type=range_type,
                     start_shamsi=start_shamsi,
                     end_shamsi=end_shamsi,
@@ -2080,6 +2393,9 @@ def handler_factory(
                 body = render_page(
                     state,
                     manual_path=manual_path,
+                    analytics_path=analytics_path,
+                    logout_path=logout_path,
+                    user_session=user_session,
                     estimate_path=estimate_path,
                     activity_path=activity_path,
                     write_enabled=write_token is not None,
@@ -2129,6 +2445,37 @@ def handler_factory(
 
         def do_POST(self) -> None:  # noqa: N802
             path = urlsplit(self.path).path.rstrip("/") or "/"
+            if path == login_path:
+                try:
+                    content_length = int(self.headers.get("Content-Length", "0"))
+                except ValueError:
+                    content_length = 0
+                payload = self.rfile.read(content_length).decode("utf-8", errors="replace") if content_length > 0 else ""
+                parsed = parse_qs(payload, keep_blank_values=True)
+                u_val = parsed.get("username", [""])[-1].strip()
+                p_val = parsed.get("password", [""])[-1].strip()
+
+                if hmac.compare_digest(u_val, "bahar") and hmac.compare_digest(p_val, "858518"):
+                    new_token = session_store.create_session("bahar")
+                    cookie_str = f"coin_session_token={new_token}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax"
+                    self._redirect_with_cookie(normalized, cookie_str)
+                    return
+                else:
+                    body = render_login_page(login_path=login_path, error="نام کاربری یا رمز عبور اشتباه است")
+                    self._headers(HTTPStatus.UNAUTHORIZED, "text/html; charset=utf-8", len(body))
+                    self.wfile.write(body)
+                    return
+
+            token = self._get_session_token()
+            user_session = session_store.validate_session(token)
+            if not user_session:
+                if path.endswith(".json") or path == parse_offer_path:
+                    body = b'{"error":"unauthorized"}'
+                    self._headers(HTTPStatus.UNAUTHORIZED, "application/json; charset=utf-8", len(body))
+                    self.wfile.write(body)
+                else:
+                    self._redirect(login_path)
+                return
             if path == parse_offer_path:
                 try:
                     content_length = int(self.headers.get("Content-Length", "0"))
