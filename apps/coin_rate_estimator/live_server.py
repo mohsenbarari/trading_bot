@@ -609,6 +609,24 @@ def read_recent_group_activity(conversation_db: Path) -> dict[str, list[dict[str
     return result
 
 
+def render_live_rows(items: list[dict[str, Any]], *, kind: str) -> str:
+    if not items:
+        return f"<li class='missing'>{NO_DATA_TOKEN}</li>"
+    side = {"BUY": "خرید", "SELL": "فروش"}
+    rows = []
+    for item in items:
+        quantity = f" / {fa_number(item.get('quantity'))} عدد" if item.get("quantity") is not None else ""
+        rows.append(
+            "<li>"
+            f"<time>{fa_datetime(item.get('event_time_utc'))}</time> "
+            f"<strong>{html.escape(str(item.get('commodity') or '—'))}</strong> "
+            f"{side.get(str(item.get('side')), '—')} {fa_number(item.get('price'))}{quantity}"
+            f" <small>{SETTLEMENT_FA.get(str(item.get('settlement')), '—')}</small>"
+            "</li>"
+        )
+    return "".join(rows)
+
+
 def render_group_activity_fragment(conversation_db: Path) -> str:
     activity = read_recent_group_activity(conversation_db)
     return f"""<section><div class="section-head"><h2>آخرین فعالیت گروه‌های معاملاتی</h2><span class="badge">داده‌های ثبت‌شده</span></div>
