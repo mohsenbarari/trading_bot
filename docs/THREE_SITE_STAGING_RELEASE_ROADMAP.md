@@ -1896,6 +1896,64 @@ route عمومی، production و lifecycle زیرساخت در rollback 4R تغ�
 - Production touched: `no`; Decision: `continue Stage 4R with durability
   evidence and do not reopen Tier-1 yet`.
 
+#### checkpoint d624 immutable rollout, Object-Storage evidence and fail-closed controller — 2026-08-03
+
+- Status: `IN_PROGRESS — RELEASE d624 DEPLOYED ON FOUR ROLES; OBJECT-STORAGE
+  EVENT/BLOB READ-BACK VERIFIED; DURABILITY CONTROLLER CORRECTLY FAIL-CLOSED;
+  G4R/G4/TIER-1 NOT ACCEPTED`. این checkpoint یک نقص واقعیِ release قبلی را نیز
+  ثبت و اصلاح می‌کند: `durability_health_controller` در فهرست dark-standby
+  نبود و invocation کنترلر را با `DarkStandbyRuntimeError` متوقف می‌کرد. commit
+  `d624dd2a3137cd91604b7cf0e82694096ca05860` آن service را به deny-list اضافه
+  و تست role entrypoint را به‌روز کرد؛ ۱۱ تست focused (`test_dark_standby_runtime`
+  و `test_three_site_staging_role_compose`) `OK` شدند.
+- source bundle این release با CSE و bucket خصوصی/نسخه‌دار
+  `gold-trade-staging-three-site-dr` به چهار role رسید: Bot-FI
+  `HZDT2pWQdxNKeb56etySGw0lL8M8agP`، WebApp-FI
+  `QNA8kTzXmWTokV4wsKOdKOep-9k9hUj`، WebApp-IR
+  `aJXnR2I9RwsI6GcgmvIZcosH03wYdoP` و Witness
+  `VvViGKLNVqJGv9X7surl6Zi6DwLSrtO`. frontend untracked نیز همان SHA-256
+  `a4fe3affab506d50172cb0f692155d681d5717c0e770a69320c5b3be343e6cbd` و
+  `5,693,440` bytes با Object Storage نصب شد.
+- image مشترک فقط روی WebApp-FI build شد:
+  `trading_bot_three_site_staging:d624dd2a…` با image ID
+  `sha256:608cc4e0aaec849cdd80ad58c29b192ebea7392efdc48a96e1b70555c01b3449`.
+  archive رمز‌شدهٔ آن در key
+  `staging/three-site-stage4r/d624dd2a3137cd91604b7cf0e82694096ca05860/shared-image/trading_bot_three_site_staging.zst.age`
+  با VersionId `bBXDNXpC5Vgj5PmETcYaTUO7NIDEqwd`، ciphertext SHA-256
+  `0bbb2076c4d645b76199eb63880de73e927e43ea6caf66bffbbacae335e713bc` و
+  `226,497,455` bytes read-back شد؛ Bot-FI، WebApp-IR و Witness همان bytes را
+  از Object Storage دریافت، age-decrypt، zstd-test و با image ID یکسان load
+  کردند. فقط workerهای stateless recreate شدند؛ DB، Redis، TLS و volumeها
+  untouched ماندند. Bot-FI با token فعلی `Start polling` و بدون
+  `TokenValidationError`/`TelegramConflictError` بالا آمد.
+- marker بی‌اثر 2PC روی `market_runtime_state.id=1` با release دقیق d624
+  commit شد: transaction `782e8986-416d-40b4-b4f0-bc83443c6048`، transaction
+  hash `dab08875e5b7074278957db253cb39c121b94077c58791ea0580e77ad7bb28ff`،
+  writer epoch `1`، GID
+  `_sa_ed8fbccb5fdea03326a1f9c3a0c32a48`، state `committed`، و
+  `prepared_at=20:54:05.888891Z` / `resolved_at=20:54:06.072219Z`. این marker
+  فقط timestamp آزمایشی را تغییر داد و business payload نبود.
+- read-backهای تازهٔ Object Storage در همین release قبول شدند: Blob با content
+  hash `6e2e2d9a34da15d34a8a89180d2bb94d23fbac01db19ffd7c609ca2c5c70d3ac`،
+  size `196`، object VersionId `8p6Q13A2bCltRbXi11MpnhpdmDwcC.5` و receipt
+  VersionId `5ezxwK3AJriTIpQbwSExi58.fnped3f`; event replay دو رویداد با object
+  VersionId `pVZ-i3J4k0ynyhiqfgom7fKrWndguID` و receipt VersionId
+  `0sAdQusUQtMG8LsOekQkQJ.lH0Ar8fc` verify شد. این مسیر FI↔IR فقط Object
+  Storage بود؛ `ssh_payload_transfer=false`.
+- کنترلر `webapp_fi_durability_health` اکنون از نظر runtime service registration
+  عبور کرد، اما با `DurabilityHealthError` fail-closed ماند. read-only state
+  دقیق آن: `connectivity_mode=ambiguous`، `event_journal_healthy=false`،
+  `blob_journal_healthy=false`، `evidence_hash=null` و
+  `evidence_expires_at=null`. بنابراین هیچ state یا flag دستی تغییر نکرد و
+  این اجرا pass محسوب نمی‌شود؛ نبود evidence آنلاینِ امضاشده blocker واقعی
+  باقی‌مانده است.
+- evidence تجمیعی owner-only در
+  `.../stage4r-d624dd2a-evidence.json` و receipt image در
+  `.../stage4r-d624dd2a-shared-image.json` نگهداری شد. Production، DNS/CDN،
+  VPS lifecycle و مسیر SSH payload untouched هستند. Decision: `continue Stage
+  4R فقط برای connectivity evidence امضاشده و سپس controller؛ G4R/G4/Tier-1
+  همچنان بسته‌اند`.
+
 ### Exit gate — G4 Staging Published
 
 - هر چهار role exact release SHA را گزارش می‌کنند؛
