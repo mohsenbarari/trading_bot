@@ -85,6 +85,7 @@ ROLE_API = {
 }
 ROLE_API_SERVICE = {
     "bot_fi": "bot_fi_api",
+    "witness": "witness_api",
 }
 ROLE_TLS = {
     "bot_fi": ("BOT_FI_DR_BIND_ADDRESS", 8443, "bot-fi-dr.staging.internal"),

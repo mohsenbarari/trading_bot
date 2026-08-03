@@ -12,6 +12,7 @@ from unittest.mock import patch
 from scripts.collect_three_site_staging_migration_observation import (
     ObservationError,
     ROLE_SERVICES,
+    _direct_origin_http_observation,
     _service_observation,
     collect_role,
 )
@@ -273,6 +274,24 @@ class MigrationObservationCollectorTests(unittest.TestCase):
         self.assertEqual(len(release_calls), 1)
         self.assertIn("WRITER_WITNESS_RELEASE_SHA", release_calls[0][-1])
         self.assertNotIn("core.config", release_calls[0][-1])
+
+    def test_witness_http_probe_runs_inside_unpublished_api_container(self):
+        stack, args = self._fixture()
+        args.role = "witness"
+        with stack, patch(
+            "scripts.collect_three_site_staging_migration_observation._run",
+            return_value='200\n{"status":"ready"}',
+        ) as run:
+            status, body, url = _direct_origin_http_observation(
+                args, port=8214, path="/health/ready"
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body, b'{"status":"ready"}')
+        self.assertEqual(url, "container://witness_api:8000/health/ready")
+        command = run.call_args.args[0]
+        self.assertIn("witness_api", command)
+        self.assertIn("http://127.0.0.1:8000/health/ready", command[-1])
 
 
 if __name__ == "__main__":
