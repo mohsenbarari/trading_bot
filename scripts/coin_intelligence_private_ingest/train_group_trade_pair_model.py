@@ -32,7 +32,7 @@ except ModuleNotFoundError:  # Standalone immutable runtime deployment.
     PIPELINE_ROOT = Path(__file__).resolve().parent
     CONVERSATION_LABEL_DB = (
         PIPELINE_ROOT.parents[1]
-        / "apps/coin-intelligence/data/conversation_events.cleaned_snapshot_20260727.sqlite3"
+        / "apps/coin-intelligence/data/conversation_events.sqlite3"
     )
     sys.path.insert(0, str(PIPELINE_ROOT))
     from train_group_noise_filter import (  # type: ignore[no-redef]
@@ -43,7 +43,7 @@ except ModuleNotFoundError:  # Standalone immutable runtime deployment.
     )
 
 
-VERSION = "group-trade-pair-nb-v2.1-chain-purged-fail-closed"
+VERSION = "group-trade-pair-nb-v2.2-active-quality-gated-chain-purged"
 DEFAULT_OUTPUT = PIPELINE_ROOT / "group_trade_pair_nb_v2.json"
 
 
@@ -57,6 +57,8 @@ def _rows(path: Path) -> list[tuple[str, str, int, str]]:
                   CAST(t.import_id AS TEXT) || ':' ||
                     CAST(t.offer_message_id AS TEXT)
         FROM confirmed_trades AS t
+        JOIN trade_market_quality AS quality
+          ON quality.trade_id=t.id
         JOIN messages AS confirm_message
           ON confirm_message.import_id=t.import_id
          AND confirm_message.message_id=t.confirmation_message_id
@@ -64,6 +66,7 @@ def _rows(path: Path) -> list[tuple[str, str, int, str]]:
           ON offer_message.import_id=t.import_id
          AND offer_message.message_id=t.offer_message_id
         WHERE t.offer_message_id IS NOT NULL
+          AND quality.training_eligible=1
         ORDER BY t.event_time_utc,t.id"""
     ).fetchall()
     negative = connection.execute(

@@ -70,6 +70,11 @@ def release_files(runtime_source: Path, pipeline_root: Path) -> list[tuple[Path,
             / "scripts/coin_intelligence_private_ingest/link_group_trades_by_message_id.py",
             pipeline_root / "link_group_trades_by_message_id.py",
         ),
+        (
+            REPOSITORY_ROOT
+            / "scripts/coin_intelligence_private_ingest/train_group_trade_pair_model.py",
+            pipeline_root / "train_group_trade_pair_model.py",
+        ),
     ]
 
 
