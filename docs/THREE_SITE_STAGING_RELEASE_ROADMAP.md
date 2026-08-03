@@ -1298,10 +1298,14 @@ controller موجود عمداً هر دو flag دوام را `false` می‌ن�
    خواندن نیستند. receiver جدید فقط envelope رمز‌شده و opaque، hash، epoch و
    checkpoint را ثبت می‌کند؛ role آن به جدول‌های business و projection دسترسی
    ندارد. کلید decrypt به receiver داده نمی‌شود.
-3. commit mutation حیاتی در FI باید پس از final شدن envelopeهای همان transaction
-   و ACK معتبر receiver انجام شود. timeout، ACK ناسازگار/تکراری، قطع Bot-FI،
-   hash mismatch یا expiry evidence باید transaction را rollback/freeze کند.
-   orphan journal مجاز است، اما acknowledgement بدون نگهداری پایدار مجاز نیست.
+3. commit mutation حیاتی در FI باید با یک coordinator پایدار دو‌مرحله‌ای انجام
+   شود: receiver ابتدا record را `prepared` می‌کند، Writer پس از flush موفق
+   transaction محلی را با GID یکتا `PREPARE TRANSACTION` می‌کند، سپس coordinator
+   record را `committed` و Writer همان GID را `COMMIT PREPARED` می‌کند. بنابراین
+   ACK سادهٔ پیش از commit و orphan نامشخص مجاز نیست. timeout، ACK ناسازگار/تکراری،
+   قطع Bot-FI، hash mismatch، GID unresolved یا expiry evidence باید mutation را
+   freeze کند؛ reconciliation فقط می‌تواند GID prepared را به commit قطعی یا
+   rollback قطعی برساند.
 4. blobهای `chat_files` قرارداد جداگانه دارند: پیش از پذیرش mutation مرجع blob،
    ciphertext/hash/size آن باید در journal مستقل FI قابل read-back باشد. تا
    تکمیل این قرارداد، blob flag false است و upload حیاتی باز نمی‌شود.
@@ -1321,14 +1325,18 @@ controller موجود عمداً هر دو flag دوام را `false` می‌ن�
    least-privilege را پیاده می‌کنیم. پیام opaque client-side-encrypted است و
    idempotency فقط بر `(origin_site, epoch, transaction_id, envelope_hash)`
    تعریف می‌شود.
-3. hook هم‌زمان پیش از commit برای event و قرارداد جداگانهٔ blob را اضافه می‌کنیم؛
-   مسیر async فعلی DR حذف یا bypass نمی‌شود و فقط transport/recovery دوردست است.
+3. hook دو‌مرحله‌ای برای event را اضافه می‌کنیم: `flush → journal prepare →
+   PostgreSQL PREPARE TRANSACTION → journal commit → COMMIT PREPARED`. این به
+   `max_prepared_transactions>0` نیاز دارد و lifecycle کامل GID (از جمله crash
+   recovery) را تست می‌کند. مسیر async فعلی DR حذف یا bypass نمی‌شود و فقط
+   transport/recovery دوردست است.
 4. controller evidence را به receipt معتبر journal وصل می‌کنیم، به‌طوری که
    expiry طبیعی یا هر خطای health دوباره gate را ببندد. IR در هر حالت false/fenced
    باقی می‌ماند.
 5. تست‌های unit/integration برای ACL، malformed/replayed ACK، duplicate، rollback
-   local، outage Bot-FI، expiry، محرمانگی WebApp payload، blob read-back و restore
-   اجرا می‌شوند. test پاس‌شده بدون fault injection کافی نیست.
+   local، outage Bot-FI، expiry، crash در هر مرز 2PC، reconciliation GID،
+   محرمانگی WebApp payload، blob read-back و restore اجرا می‌شوند. test پاس‌شده
+   بدون fault injection کافی نیست.
 6. image/migration immutable ساخته و روی هر نقش با همان release attestation
    می‌شود. هر artifact لازم برای WebApp-IR فقط با Object Storage private/versioned
    و CSE منتقل می‌شود؛ هیچ artifact با SSH/SCP منتقل نمی‌شود.
@@ -1341,9 +1349,10 @@ controller موجود عمداً هر دو flag دوام را `false` می‌ن�
 
 #### Exit gate — G4R Journal Proven
 
-- mutation حیاتی FI تنها با ACK پایدار Bot-FI و receipt تازه پذیرفته می‌شود؛
+- mutation حیاتی FI تنها با 2PC پایدار Bot-FI و receipt تازه پذیرفته می‌شود؛
 - restore drill marker از journal مستقل FI hash-identical است؛
 - قطع receiver یا expiry evidence فوراً mutation حیاتی FI را freeze می‌کند؛
+- هیچ GID prepared یا outcome نامشخص پس از crash/reconciliation باقی نمانده است؛
 - IR همچنان fenced است و journal health آن true ادعا نمی‌شود؛
 - ACL receiver به business/projection داده دسترسی ندارد و تمام تست‌های قرارداد
   و Tier-1 لازم قبول‌اند.
@@ -1360,6 +1369,10 @@ route عمومی، production و lifecycle زیرساخت در rollback 4R تغ�
 - Status: `IN_PROGRESS — DESIGN COMMITTED; IMPLEMENTATION NOT YET STARTED`
 - Basis: `e00283c0` روی چهار نقش deploy است و function امن read-only کار می‌کند؛
   blocker باقی‌مانده نبود journal واقعی و independent برای `webapp_fi` است.
+- Observation: امکان‌سنجی read-only روی PostgreSQL واقعی `webapp_fi` نشان داد
+  `max_prepared_transactions=0`، `wal_level=replica` و `synchronous_commit=on`.
+  بنابراین 2PC هنوز فعال نیست و تا build/test/deploy و restart کنترل‌شدهٔ PostgreSQL
+  staging، flag دوام نباید true شود.
 - Production touched: `no`.
 
 ### Exit gate — G4 Staging Published
