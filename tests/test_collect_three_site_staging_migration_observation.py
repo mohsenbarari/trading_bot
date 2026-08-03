@@ -185,6 +185,13 @@ class MigrationObservationCollectorTests(unittest.TestCase):
 
     def test_role_collector_observes_every_service_release_health_and_restart(self):
         stack, args = self._fixture()
+        expected_image_inventory_sha = hashlib.sha256(
+            json.dumps(
+                json.loads(args.image_inventory.read_text()),
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
         with stack, patch(
                 "scripts.collect_three_site_staging_migration_observation._run",
                 side_effect=self._runner(),
@@ -212,6 +219,11 @@ class MigrationObservationCollectorTests(unittest.TestCase):
                 for item in services
                 if not item["service"].endswith(("_tls", "_redis"))
             )
+        )
+        self.assertEqual(
+            result["checks"]["signed_runtime_bundle"]["observation"]
+            ["image_inventory_sha256"],
+            expected_image_inventory_sha,
         )
 
     def test_wrong_running_release_fails_closed(self):

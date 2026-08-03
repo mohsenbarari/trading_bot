@@ -764,7 +764,11 @@ def collect_role(args: argparse.Namespace) -> dict[str, Any]:
         "signed_runtime_bundle": {
             "role_compose_sha256": compose_hash,
             "role_env_sha256": env_hash,
-            "image_inventory_sha256": hashlib.sha256(image_raw).hexdigest(),
+            # The signed migration plan binds the inventory's canonical JSON
+            # document, whereas the owner-only file may legitimately retain
+            # indentation/newlines from its local transfer.  Report the same
+            # canonical identity used by the plan and durable journal.
+            "image_inventory_sha256": _sha(image_document),
         },
     }
     if bot_material is not None:
