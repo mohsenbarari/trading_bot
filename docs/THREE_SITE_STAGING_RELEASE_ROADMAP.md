@@ -1747,9 +1747,57 @@ route عمومی، production و lifecycle زیرساخت در rollback 4R تغ�
   شامل publish/read-back exact VersionId، idempotence، tamper MAC، receipt
   advance و حذف host route مستقیم است.
 - Completion criterion: release immutable روی هر چهار role deploy شود، یک
-  synthetic non-business event و یک Blob با exact source/receipt VersionId در
-  staging قبول شود و هیچ FI↔IR TCP payload/receipt مشاهده نشود. فقط پس از آن
-  connectivity fresh و evidence 2PC/blob مرحلهٔ 4R ادامه می‌یابد.
+  **event replay بدون mutation** از دو event قبلاً `applied` و یک Blob marker
+  داخلی non-business با exact source/receipt VersionId در staging قبول شود و
+  هیچ FI↔IR TCP payload/receipt مشاهده نشود. بازپخش کنترل‌شده به‌جای ساخت event
+  کسب‌وکاری تازه، همان protocol/crypto/receipt واقعی را می‌آزماید و یک gate یا
+  fixture غیرضروری به مسیر اضافه نمی‌کند. فقط پس از آن connectivity fresh و
+  evidence 2PC/blob مرحلهٔ 4R ادامه می‌یابد.
+
+#### checkpoint runtime repair و probe آمادهٔ 4R-OS — 2026-08-03
+
+- Status: `IN_PROGRESS — LIVE EVENT DELIVERY RECOVERED; IMMUTABLE PROBE
+  RELEASE/FOUR-ROLE ATTESTATION PENDING`. این checkpoint پذیرش 4R-OS، G4R، G4
+  یا Tier-1 نیست.
+- نخستین deploy `8f9dea34` روی delivery worker ایران fail-closed شد، زیرا
+  `volumes` service-specific فایل CA را از `x-app` override می‌کرد. commit
+  `5fd6cad3cacb56da48426a039d7e8fec08b7a535` mount صریح CA را به هر دو
+  delivery worker افزود و 31 آزمون focused قبول شد. database schema، Redis،
+  TLS proxy، volume، DNS/CDN و production تغییر نکردند.
+- سپس یک record واقعی Object Storage تا receiver ایران رسید و نبود grant
+  `dr_stream_checkpoints` برای role delivery را آشکار کرد. commit
+  `61e199b12eeeb01249bc9628a8dc9f5c6686b148` فقط grantهای least-privilege
+  ledger لازم برای consumer delivery را اضافه کرد؛ replay nonce، Blob grant و
+  هرگونه access business به این role اضافه نشد. 49 آزمون focused و compile/diff
+  check قبول شد. fencing idempotent روی هر دو WebApp با 308 statement اعمال
+  شد؛ این تنها mutation database این corrective deployment است و business/schema
+  data را تغییر نمی‌دهد.
+- observation زنده پس از remediation: فقط `webapp_fi_dr_delivery` و
+  `webapp_ir_dr_delivery` با image `61e199b1` recreate شدند و هر دو
+  `running` با restart صفر هستند. ledger خلاصه نشان می‌دهد 12 delivery
+  WebApp-FI→WebApp-IR در source `acknowledged` و در IR receiptها `applied`
+  هستند؛ checkpoint IR برای origin WebApp-FI برابر `received=12` و
+  `applied=12` است. خطای CA یا permission در log جدید دیده نشد. این evidence
+  data payload یا مقدار کسب‌وکاری را ثبت نمی‌کند.
+- Blob fixture قبلی وجود نداشت (هر دو WebApp count صفر برای manifest، delivery
+  و receipt داشتند)؛ نبود fixture failure نیست و با دادهٔ واقعی جبران نمی‌شود.
+  commit `c2eac188` ابزار bounded
+  `scripts/run_stage4r_object_storage_probe.py` را افزود: event probe فقط دو
+  event قبلاً applied را بدون mutation بازپخش می‌کند؛ Blob probe یک marker
+  کوچک content-addressed، جدا از `chat_files` و با run-id یکتا می‌سازد. Blob
+  در IR decrypt/hash-verify می‌شود و request/ack receipt نیز فقط Object
+  Storage private/versioned را استفاده می‌کند. ابزار URL peer یا HTTP client
+  ندارد، bucket production را نمی‌پذیرد و خارج از `staging` یا role صحیح
+  fail-closed است. آزمون‌های آن به مجموعهٔ focused افزوده و نتیجهٔ محلی
+  `52 tests / OK` است.
+- next controlled action: release immutable شامل `c2eac188` با CSE و
+  Object Storage private/versioned به چهار role می‌رسد؛ فقط WebApp-FI/IR
+  commandهای one-shot probe را اجرا می‌کنند و SSH صرفاً receipt کوتاه JSON
+  حمل می‌کند. سپس VersionIdهای source/event receipt/blob receipt و source
+  acknowledgement ثبت می‌شوند. هیچ SCP/rsync/SSH payload، TCP FI↔IR، تغییر
+  DNS/CDN، production یا lifecycle VPS/volume مجاز نیست.
+- Production touched: `no`; direct FI↔IR payload/receipt TCP used: `no`;
+  Decision: `continue 4R-OS with the committed Object-Storage-only probe`.
 
 ### Exit gate — G4 Staging Published
 
