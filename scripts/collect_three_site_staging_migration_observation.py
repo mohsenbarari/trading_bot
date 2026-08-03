@@ -473,10 +473,16 @@ def _service_observation(
         raise ObservationError(f"required service emitted errors in the five-minute window: {service}")
     observed_release = None
     if not service.endswith(("_tls", "_redis")):
+        release_probe = (
+            "import os; "
+            "print(str(os.environ.get('WRITER_WITNESS_RELEASE_SHA') or ''))"
+            if service == "witness_api"
+            else "from core.config import settings; print(str(settings.release_sha or ''))"
+        )
         observed_release = _run(
             [
                 *_compose(args), "exec", "-T", service, "python", "-c",
-                "from core.config import settings; print(str(settings.release_sha or ''))",
+                release_probe,
             ],
             timeout=30,
         )

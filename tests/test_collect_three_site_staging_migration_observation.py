@@ -12,6 +12,7 @@ from unittest.mock import patch
 from scripts.collect_three_site_staging_migration_observation import (
     ObservationError,
     ROLE_SERVICES,
+    _service_observation,
     collect_role,
 )
 from scripts.verify_three_site_staging_image_inventory import _canonical_sha256
@@ -144,6 +145,21 @@ class MigrationObservationCollectorTests(unittest.TestCase):
     def _runner(*, wrong_release: bool = False):
         def run(arguments, **_kwargs):
             joined = " ".join(arguments)
+            if arguments[-3:] == ["config", "--format", "json"]:
+                return json.dumps(
+                    {
+                        "services": {
+                            service: {
+                                "image": (
+                                    "nginx:1.27-alpine"
+                                    if service.endswith("_tls")
+                                    else f"trading_bot_three_site_staging:{RELEASE_SHA}"
+                                )
+                            }
+                            for service in ROLE_SERVICES["bot_fi"]
+                        }
+                    }
+                )
             if "psql" in arguments:
                 return json.dumps(
                     {"database": "bot", "user": "bot", "revision": "b986c7d8e0f1"}
@@ -160,6 +176,8 @@ class MigrationObservationCollectorTests(unittest.TestCase):
                 return ""
             if "settings.release_sha" in joined:
                 return "d" * 40 if wrong_release else RELEASE_SHA
+            if "urllib.request.urlopen" in joined:
+                return '200\n{"bot_username":"staging_bot"}'
             raise AssertionError(arguments)
 
         return run
@@ -191,7 +209,7 @@ class MigrationObservationCollectorTests(unittest.TestCase):
             all(
                 item["release_sha"] == RELEASE_SHA
                 for item in services
-                if not item["service"].endswith("_tls")
+                if not item["service"].endswith(("_tls", "_redis"))
             )
         )
 
@@ -216,6 +234,45 @@ class MigrationObservationCollectorTests(unittest.TestCase):
             ):
             with self.assertRaisesRegex(ObservationError, "wrong release"):
                 collect_role(args)
+
+    def test_witness_release_probe_uses_witness_specific_environment(self):
+        stack, args = self._fixture()
+        with stack:
+            calls = []
+
+            def run(arguments, **_kwargs):
+                calls.append(arguments)
+                joined = " ".join(arguments)
+                if " ps -q " in f" {joined} ":
+                    return "container-id"
+                if "{{json .State}}" in arguments:
+                    return json.dumps({"Running": True, "Health": {"Status": "healthy"}})
+                if "{{.Image}}" in arguments:
+                    return "sha256:" + "c" * 64
+                if "{{.RestartCount}}" in arguments:
+                    return "0"
+                if "logs" in arguments:
+                    return ""
+                if "WRITER_WITNESS_RELEASE_SHA" in joined:
+                    return RELEASE_SHA
+                raise AssertionError(arguments)
+
+            with patch(
+                "scripts.collect_three_site_staging_migration_observation._run",
+                side_effect=run,
+            ):
+                observation = _service_observation(
+                    args,
+                    "witness_api",
+                    expected_image_reference=f"trading_bot_three_site_staging:{RELEASE_SHA}",
+                    expected_image_id="sha256:" + "c" * 64,
+                )
+
+        self.assertEqual(observation["release_sha"], RELEASE_SHA)
+        release_calls = [call for call in calls if "python" in call and "-c" in call]
+        self.assertEqual(len(release_calls), 1)
+        self.assertIn("WRITER_WITNESS_RELEASE_SHA", release_calls[0][-1])
+        self.assertNotIn("core.config", release_calls[0][-1])
 
 
 if __name__ == "__main__":
