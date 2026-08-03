@@ -1932,7 +1932,8 @@ route عمومی، production و lifecycle زیرساخت در rollback 4R تغ�
   writer epoch `1`، GID
   `_sa_ed8fbccb5fdea03326a1f9c3a0c32a48`، state `committed`، و
   `prepared_at=20:54:05.888891Z` / `resolved_at=20:54:06.072219Z`. این marker
-  فقط timestamp آزمایشی را تغییر داد و business payload نبود.
+  فقط timestamp آزمایشی را تغییر داد و business payload نبود؛ read-only query
+  بعدی `pg_prepared_xacts=0` را نشان داد.
 - read-backهای تازهٔ Object Storage در همین release قبول شدند: Blob با content
   hash `6e2e2d9a34da15d34a8a89180d2bb94d23fbac01db19ffd7c609ca2c5c70d3ac`،
   size `196`، object VersionId `8p6Q13A2bCltRbXi11MpnhpdmDwcC.5` و receipt
