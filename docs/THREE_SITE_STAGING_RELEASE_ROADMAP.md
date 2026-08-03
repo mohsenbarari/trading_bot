@@ -1799,6 +1799,71 @@ route عمومی، production و lifecycle زیرساخت در rollback 4R تغ�
 - Production touched: `no`; direct FI↔IR payload/receipt TCP used: `no`;
   Decision: `continue 4R-OS with the committed Object-Storage-only probe`.
 
+#### checkpoint completion remediation 4R-OS — 2026-08-03
+
+- Status: `COMPLETE — OBJECT-STORAGE-ONLY FI↔IR EVENT/BLOB DATA PLANE
+  ATTESTED ON FOUR-ROLE STAGING RELEASE`. این فقط completion remediation
+  `4R-OS` است؛ Stage 4R همچنان `IN_PROGRESS` و G4R، G4 و Tier-1 همچنان
+  بسته‌اند.
+- Source repairهای حین اجرای واقعی، هر دو fail-closed و پیش از ایجاد evidence
+  نادرست متوقف شدند: `cb1ca2308ac31b8395f2200ac559edb6b3738ffd` metadata
+  ذخیره‌شدهٔ receipt event (object key و VersionId واقعی) را به ابزار افزود؛
+  `471ab9de34ee059b05a5d26eda7938f66bd1d4a8` manifest Blob را پیش از delivery
+  flush می‌کند تا foreign key PostgreSQL ترتیب ORM را حدس نزند. 53 unittest
+  focused برای repair اول و 54 unittest focused برای repair نهایی با `OK`، همراه
+  `git diff --check`، قبول شد. خطای نخست فقط هنگام چاپ receipt بود، اما receipt
+  پیش‌تر در Object Storage ثبت شده بود؛ خطای دوم قبل از upload Blob و پیش از
+  commit ledger rollback شد. هیچ business row یا fixture کسب‌وکاری ایجاد نشد.
+- Release نهایی `471ab9de…` با role bundleهای CSE، bucket private/versioned
+  `gold-trade-staging-three-site-dr`، read-back exact VersionId و decrypt/hash
+  verify به چهار نقش رسید: Bot-FI `ZGua2dP5AO.CfPIy2IYtWmJhWW6gPh4`،
+  WebApp-FI `khOYgwh2tfJdpySpTsqqH1tQM0qX.QK`، WebApp-IR
+  `ky6Q7AnlWc9x6EG4JIc0pOs0ZnhmnzM` و Witness
+  `cEa.Cg1W7jLWnglnB4hjCHpZsn.rVBJ`. receiptهای owner-only در
+  `.../stage4r-471ab9de/transfer-*.json` هستند و همگی
+  `ssh_payload_transfer=false` دارند. source هر نقش از همان bundle محلی clone و
+  روی SHA دقیق checkout شد؛ image overlay نیز با `--network=none` ساخته شد.
+- Runtime چهار نقش با namespace state-preserving قبلی
+  `three-site-stage4r-456a3765-*` و image exact
+  `trading_bot_three_site_staging:471ab9de34ee059b05a5d26eda7938f66bd1d4a8`
+  بازسازی شد. Bot-FI receiver و durability journal، هر دو WebApp receiver و
+  Witness healthy هستند؛ همهٔ delivery/projection/blob/effects/control/API
+  workerهای موردنیاز `running` و `RestartCount=0` دارند.
+- Event evidence روی همین release: دو event از قبل `applied` بدون ساخت event یا
+  mutation تازه از WebApp-FI در Object Storage replay شدند. source VersionId
+  `pVZ-i3J4k0ynyhiqfgom7fKrWndguID` و receipt VersionId
+  `xkdNPdZFAmCw5sUWPSzwdtMpipobYeG` هستند؛ WebApp-IR MAC/decrypt/ledger apply
+  را تأیید و WebApp-FI همان receipt را read/verify کرد. receipt hash
+  `c519ad10c1fa33b07ed3baae2d699642a70d0d2aa38c4bb5d799a4791998978f` است.
+- Blob evidence روی همین release: marker داخلی non-business با content hash
+  `e51971429dd92514e3391d3de0b9f7c4310066647eb79999d2c574ea3b52ace7` و 196
+  bytes، جدا از `chat_files`، در WebApp-FI ساخته شد. source Blob VersionId
+  `9cLl6wD.u22bqv1NkBdAyCXFVCPQpgh` است. WebApp-IR همان شیء را مستقیم از
+  Object Storage decrypt/hash-verify کرد و receipt/ack VersionId
+  `yG.tpmZobpBxDJvsE3LMhRC0wTZHbze` را نوشت. ledger FI اکنون `acknowledged` و
+  hash تأییدیهٔ مشترک
+  `69b57b7d6c52d82658c7f1998ff321beb68f50b498c53822340f40a41adc4a33` دارد؛
+  receipt IR نیز موجود و به همان acknowledgement bound است.
+- Boundary اثبات‌شده: payload event، Blob و receipt فقط از Object Storage
+  private/versioned عبور کردند. SSH (و relay ایران) فقط command کوتاه و receipt
+  JSON حمل کرد؛ SCP/rsync/SSH payload و TCP payload/receipt مستقیم FI↔IR صفر
+  بود. DNS/CDN، security group، VPS/volume lifecycle، دادهٔ production و
+  scriptهای production deployment تغییر نکردند.
+- Exception عملیاتی که جداگانه باقی می‌ماند: `bot_fi_bot` با image نهایی
+  `RestartCount=11` دارد، زیرا `BOT_TOKEN` فعال staging طول 80 دارد اما از نظر
+  validator Telegram نامعتبر است. یک candidate معتبر فقط در material owner-only
+  قدیمی `stage4/bot-token-amendment-v1/bot-fi.runtime.env` وجود دارد، ولی بدون
+  تصمیم صریح owner به release فعال promote نشد و مقدار هیچ tokenی چاپ نشد. این
+  مورد، G4 عمومی را باز نگه می‌دارد؛ completion 4R-OS را به pass ساختگی تبدیل
+  نمی‌کند.
+- Remaining real work، نه gate افزوده: انتخاب/نصب token معتبر staging، marker
+  2PC و recovery/outage drill واقعی، observation connectivity تازه و اجرای
+  controller bounded durability-health برای evidence تازهٔ event/blob. تا آن
+  زمان `STAGING_WEBAPP_FI_JOURNAL_TWO_PHASE_ENABLED=false`، G4R/G4 و Tier-1
+  fail-closed باقی می‌مانند.
+- Production touched: `no`; Decision: `close remediation 4R-OS and continue
+  Stage 4R from the valid staging Bot token and remaining durability evidence`.
+
 ### Exit gate — G4 Staging Published
 
 - هر چهار role exact release SHA را گزارش می‌کنند؛
