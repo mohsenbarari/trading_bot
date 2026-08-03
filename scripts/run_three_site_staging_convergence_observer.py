@@ -54,6 +54,11 @@ from scripts.verify_three_site_staging_inventory import verify_inventory
 CONFIG_SCHEMA = "three-site-staging-convergence-observer-config-v1"
 EXPORT_SCHEMA = "three-site-staging-convergence-snapshot-export-v1"
 WEBAPP_IR = "webapp_ir"
+SITE_ROLE_CLI = {
+    "bot_fi": "bot-fi",
+    "webapp_fi": "webapp-fi",
+    "webapp_ir": "webapp-ir",
+}
 WEBAPP_IR_RELAY = {
     "host": "185.231.182.6",
     "port": 22,
@@ -162,6 +167,8 @@ def _validate_sites(value: Any, *, inventory: dict[str, Any]) -> dict[str, dict[
                 raise ConvergenceObserverError(f"{site} observer remote path is unsafe")
         if str(item["compose_file"]) != f"{repo_root}/deploy/staging/docker-compose.three-site.yml":
             raise ConvergenceObserverError(f"{site} observer Compose path is not canonical")
+        if Path(str(item["env_file"])).name != f"{SITE_ROLE_CLI[site]}.env":
+            raise ConvergenceObserverError(f"{site} observer role env path is not pinned")
         proxy = item.get("proxy")
         if proxy is not None:
             if site != WEBAPP_IR or not isinstance(proxy, dict) or set(proxy) != {
@@ -273,6 +280,15 @@ def load_config(path: Path, *, campaign_id: str, release_sha: str, plan_sha256: 
 
 def _remote_command(config: dict[str, Any], site: str, script: str, *arguments: str) -> list[str]:
     remote = config["sites"][site]
+    # The canonical Compose path above binds the observer to the exact release,
+    # but it cannot be rendered with a least-privilege, role-only env file: the
+    # full document interpolates required secrets for every other site.  Stage 3
+    # already rendered and attested a role Compose beside each role env.  Derive
+    # that path from the pinned env basename so no second, independently mutable
+    # path enters the observer configuration.
+    role_compose = str(
+        Path(str(remote["env_file"])).with_name(f"{SITE_ROLE_CLI[site]}.compose.yml")
+    )
     service = (
         "webapp_ir_convergence_exporter" if site == WEBAPP_IR else SITE_SERVICE[site]
     )
@@ -280,7 +296,7 @@ def _remote_command(config: dict[str, Any], site: str, script: str, *arguments: 
         *_observer_ssh_base(config, site),
         "/usr/bin/docker", "compose",
         "--project-directory", str(remote["repo_root"]),
-        "-f", str(remote["compose_file"]),
+        "-f", role_compose,
         "--env-file", str(remote["env_file"]),
         "--profile", SITE_PROFILE[site],
         "run", "--rm", "--no-deps", "-T", service,

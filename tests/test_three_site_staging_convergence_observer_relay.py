@@ -106,6 +106,27 @@ class ConvergenceObserverRelayTests(unittest.TestCase):
             result = subject._validate_sites(sites, inventory=self._inventory())
         self.assertEqual(result["webapp_ir"]["proxy"]["host"], "185.231.182.6")
 
+    def test_remote_command_uses_attested_role_compose_beside_role_env(self):
+        config = self._config()
+        config["sites"] = self._sites()
+        command = subject._remote_command(
+            config,
+            "webapp_ir",
+            "scripts/export_three_site_staging_convergence_snapshot.py",
+        )
+        compose_index = command.index("-f")
+        self.assertEqual(
+            command[compose_index + 1],
+            "/etc/trading-bot/roles/webapp-ir.compose.yml",
+        )
+        self.assertNotIn(config["sites"]["webapp_ir"]["compose_file"], command)
+
+    def test_role_env_basename_is_pinned_to_site(self):
+        sites = self._sites()
+        sites["webapp_ir"]["env_file"] = "/etc/trading-bot/roles/webapp-fi.env"
+        with self.assertRaisesRegex(subject.ConvergenceObserverError, "role env path"):
+            subject._validate_sites(sites, inventory=self._inventory())
+
 
 if __name__ == "__main__":
     unittest.main()
