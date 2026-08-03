@@ -609,27 +609,9 @@ def read_recent_group_activity(conversation_db: Path) -> dict[str, list[dict[str
     return result
 
 
-def render_live_rows(items: list[dict[str, Any]], *, kind: str) -> str:
-    if not items:
-        return f"<li class='missing'>{NO_DATA_TOKEN}</li>"
-    side = {"BUY": "خرید", "SELL": "فروش"}
-    rows = []
-    for item in items:
-        quantity = f" / {fa_number(item.get('quantity'))} عدد" if item.get("quantity") is not None else ""
-        rows.append(
-            "<li>"
-            f"<time>{fa_datetime(item.get('event_time_utc'))}</time> "
-            f"<strong>{html.escape(str(item.get('commodity') or '—'))}</strong> "
-            f"{side.get(str(item.get('side')), '—')} {fa_number(item.get('price'))}{quantity}"
-            f" <small>{SETTLEMENT_FA.get(str(item.get('settlement')), '—')}</small>"
-            "</li>"
-        )
-    return "".join(rows)
-
-
 def render_group_activity_fragment(conversation_db: Path) -> str:
     activity = read_recent_group_activity(conversation_db)
-    return f"""<section><div class="section-head"><h2>آخرین فعالیت گروه‌های معاملاتی</h2><span class="badge">دادهٔ ثبت‌شده در مدل</span></div>
+    return f"""<section><div class="section-head"><h2>آخرین فعالیت گروه‌های معاملاتی</h2><span class="badge">داده‌های ثبت‌شده</span></div>
       <div class="group-grid">
         <article class="feed-card"><h3>۵ آفر آخر — گروه ۱</h3><ul>{render_live_rows(activity.get('group_1_offers', []), kind='offer')}</ul></article>
         <article class="feed-card"><h3>۵ آفر آخر — گروه ۲</h3><ul>{render_live_rows(activity.get('group_2_offers', []), kind='offer')}</ul></article>
@@ -641,11 +623,11 @@ def render_group_activity_fragment(conversation_db: Path) -> str:
 
 def render_input_cards(inputs: dict[str, dict[str, Any]]) -> str:
     labels = {
-        "melted_gold": "آب‌شده",
-        "generic_coin": "سکه عمومی کانال",
+        "melted_gold": "طلا آب‌شده",
+        "generic_coin": "سکه عمومی",
         "xauusd": "اونس جهانی",
         "usd": "دلار هرات",
-        "usdt": "تتر/تومان",
+        "usdt": "تتر / تومان",
     }
     cards = []
     for key, label in labels.items():
@@ -654,48 +636,23 @@ def render_input_cards(inputs: dict[str, dict[str, Any]]) -> str:
         observed = value.get("status") in {"OBSERVED", "ESTIMATED"}
         if estimated:
             label = (
-                "دلار هرات نقدی (برآورد زمانی)"
+                "دلار هرات نقدی"
                 if value.get("market_movement_driver")
-                else "دلار هرات فردایی (برآورد روندی)"
+                else "دلار هرات فردایی"
             )
         rendered = fa_number(value.get("average_price"), decimals=2 if key == "xauusd" else 0)
         samples = fa_number(value.get("sample_count", 0))
         css = "estimated" if estimated else ("observed" if observed else "no-data")
         if estimated:
-            trend_code = value.get("market_direction") or value.get(
-                "usdt_trend"
-            )
+            trend_code = value.get("market_direction") or value.get("usdt_trend")
             direction = {
                 "UP": "افزایشی",
                 "DOWN": "کاهشی",
                 "NEUTRAL": "خنثی",
             }.get(str(trend_code), "نامشخص")
-            anchor = fa_number(value.get("anchor_price"))
-            age_minutes = fa_number(
-                float(value.get("anchor_age_seconds") or 0.0) / 60.0,
-                decimals=1,
-            )
-            if value.get("market_movement_driver"):
-                tomorrow = fa_number(value.get("market_driver_current_price"))
-                basis = fa_number(
-                    value.get("cash_tomorrow_basis_estimated_current")
-                )
-                closed_hours = fa_number(
-                    value.get("cash_closed_hours"),
-                    decimals=1,
-                )
-                detail = (
-                    f"لنگر نقدی: {anchor} | فردایی فعلی: {tomorrow} | "
-                    f"جهت: {direction} | فاصله: {basis} | "
-                    f"زمان بسته: {closed_hours} ساعت"
-                )
-            else:
-                detail = (
-                    f"لنگر هرات: {anchor} | روند تتر: {direction} | "
-                    f"سن لنگر: {age_minutes} دقیقه"
-                )
+            detail = f"برآورد روند: {direction}"
         else:
-            detail = f"تعداد نمونه: {samples}"
+            detail = f"تعداد رویداد: {samples}"
         cards.append(
             f"<div class='input-card {css}'>"
             f"<span>{label}</span><strong>{rendered}</strong>"
@@ -739,13 +696,13 @@ def render_manual_entry_panel(
     )
     flash_html = ""
     if flash == "saved":
-        flash_html = "<p class='flash success'>ثبت شد و تخمین فوراً بازمحاسبه شد.</p>"
+        flash_html = "<p class='flash success'>آفر با موفقیت ثبت و نرخ‌ها بروزرسانی شدند.</p>"
     elif flash == "saved_refresh_failed":
-        flash_html = "<p class='flash warning'>ثبت شد؛ بازمحاسبهٔ فوری خطا داشت و در چرخهٔ بعدی تکرار می‌شود.</p>"
+        flash_html = "<p class='flash warning'>اطلاعات ثبت شد، اما بروزرسانی لحظه‌ای با خطا مواجه شد.</p>"
     elif flash == "invalid":
-        flash_html = "<p class='flash warning'>اطلاعات واردشده معتبر نبود. زمان‌های غیرلایو را با ساعت تهران وارد کنید.</p>"
+        flash_html = "<p class='flash warning'>اطلاعات ورودی معتبر نیست. لطفاً فرم را بررسی کنید.</p>"
     elif flash == "forbidden":
-        flash_html = "<p class='flash warning'>توکن ثبت معتبر نیست.</p>"
+        flash_html = "<p class='flash warning'>کلید دسترسی ثبت معتبر نمی‌باشد.</p>"
     disabled = "" if write_enabled else " disabled"
     open_offer_options = "".join(
         "<option value='{id}'>#{id} — {commodity} / {side} / {price} — {time}</option>".format(
@@ -758,52 +715,48 @@ def render_manual_entry_panel(
         for offer in open_manual_offers
     )
     confirm_disabled = disabled if open_offer_options else " disabled"
-    availability = (
-        "این فرم موقت است و زمان‌ها همگی بر اساس ساعت تهران ثبت می‌شوند."
-        if write_enabled
-        else "ثبت دستی در این اجرا غیرفعال است."
-    )
     counts = state.get("manual_entry_counts") or {}
     tehran_now = datetime.now(TEHRAN).strftime("%Y-%m-%dT%H:%M")
     return f"""
     <section id="manual-entry" class="manual-section">
-      <div class="section-head"><div><h2>ثبت آفر و معاملهٔ گروه</h2>
-      <p class="manual-help">همهٔ زمان‌ها ساعت تهران هستند. قیمت با «واحد پروژه» است؛ مثلاً ۱۸۵٬۰۰۰ یعنی ۱۸۵٬۰۰۰٬۰۰۰ تومان.</p></div>
-      <span class="badge">ثبت دستی: {fa_number(counts.get('offers', 0))} آفر / {fa_number(counts.get('confirmed_trades', 0))} معامله</span></div>
+      <div class="section-head">
+        <div>
+          <h2>ثبت آفر و معامله دستی</h2>
+        </div>
+        <span class="badge">ثبت شده: {fa_number(counts.get('offers', 0))} آفر / {fa_number(counts.get('confirmed_trades', 0))} معامله</span>
+      </div>
       {flash_html}
       <div class="manual-grid">
         <form class="manual-form" method="post" action="{html.escape(manual_path)}">
-          <h3 class="wide">۱. ثبت آفر جدید</h3>
-          <label class="wide">متن خام آفر گروه (اختیاری؛ برای استخراج و آموزش)
+          <h3 class="wide">1. ثبت آفر جدید</h3>
+          <label class="wide">متن آفر
             <textarea id="raw-offer-text" name="raw_offer_text" maxlength="2000" rows="3" placeholder="مثلاً: ۱۵:۳۱ — ۱۰ تا ربع ۵۱۲۰۰ ف"{disabled}></textarea>
           </label>
-          <button class="wide secondary" id="parse-offer-text" type="button"{disabled}>استخراج اولیه از متن و پر کردن فرم</button>
-          <p id="parse-offer-result" class="manual-help wide">اگر ساعت را به شکل ۱۵:۳۱ بنویسید، فرم از آخرین آفر ثبت‌شده تاریخ تهران را استنباط می‌کند. ساعت فقط برای زمان رخداد مصرف می‌شود و داخل متن آفر ذخیره نخواهد شد.</p>
+          <button class="wide secondary" id="parse-offer-text" type="button"{disabled}>استخراج هوشمند اطلاعات از متن</button>
+          <p id="parse-offer-result" class="manual-help wide"></p>
           <label>کالا<select name="commodity" required{disabled}>{commodity_options}</select></label>
-          <label>تسویه<select name="settlement" required{disabled}><option value="CASH">نقدی / امروز</option><option value="TOMORROW">فردایی</option></select></label>
+          <label>تسویه<select name="settlement" required{disabled}><option value="CASH">نقدی</option><option value="TOMORROW">فردایی</option></select></label>
           <label>نوع معامله<select name="trade_form" required{disabled}><option value="PHYSICAL">فیزیکی / واقعی</option><option value="PAPER">کاغذی / حواله</option></select></label>
-          <label>سمت آفر<select name="side" required{disabled}><option value="" selected>تشخیص داده نشد؛ انتخاب کنید</option><option value="BUY">خرید</option><option value="SELL">فروش</option></select></label>
-          <label>قیمت آفر (واحد پروژه)<input name="price" inputmode="numeric" required{disabled}></label>
+          <label>نوع آفر<select name="side" required{disabled}><option value="" selected>انتخاب کنید...</option><option value="BUY">خرید</option><option value="SELL">فروش</option></select></label>
+          <label>قیمت آفر (تومان)<input name="price" inputmode="numeric" required{disabled}></label>
           <label>تعداد آفر (اختیاری)<input name="quantity" inputmode="numeric"{disabled}></label>
-          <label class="check"><input type="checkbox" name="offer_live" value="1" checked{disabled}> آفر همین حالا (به وقت تهران) لایو است</label>
-          <label>اگر لایو نیست: زمان آفر (تهران)<input name="offer_time" type="datetime-local" value="{tehran_now}"{disabled}></label>
-          <label class="wide">توضیحات (اختیاری)<textarea name="description" maxlength="2000" rows="2"{disabled}></textarea></label>
-          <button class="wide" type="submit"{disabled}>ثبت و باز‌محاسبهٔ تخمین</button>
-          <p class="manual-help wide">{availability} اگر آفر لایو نباشد، زمان آفر الزامی است.</p>
+          <label class="check"><input type="checkbox" name="offer_live" value="1" checked{disabled}> آفر لایو (زمان حال)</label>
+          <label>زمان ثبت آفر<input name="offer_time" type="datetime-local" value="{tehran_now}"{disabled}></label>
+          <label class="wide">توضیحات تکمیلی<textarea name="description" maxlength="2000" rows="2"{disabled}></textarea></label>
+          <button class="wide" type="submit"{disabled}>ثبت آفر و محاسبه مجدد</button>
         </form>
         <form class="manual-form confirm-form" method="post" action="{html.escape(manual_path)}">
           <input type="hidden" name="entry_mode" value="confirm_existing">
-          <h3 class="wide">۲. ثبت معامله برای آفرِ ثبت‌شده</h3>
-          <label class="wide">آفر باز<select name="offer_id" required{confirm_disabled}><option value="">انتخاب آفر…</option>{open_offer_options}</select></label>
-          <label class="check"><input type="checkbox" name="trade_live" value="1" checked{confirm_disabled}> معامله همین حالا (به وقت تهران) انجام شده است</label>
-          <label>اگر لایو نیست: زمان معامله (تهران)<input name="trade_time" type="datetime-local" value="{tehran_now}"{confirm_disabled}></label>
-          <label>قیمت معامله (اختیاری؛ پیش‌فرض قیمت آفر)<input name="trade_price" inputmode="numeric"{confirm_disabled}></label>
-          <label>تعداد معامله (اختیاری؛ برای معاملهٔ جزئی)<input name="trade_quantity" inputmode="numeric"{confirm_disabled}></label>
-          <button class="wide" type="submit"{confirm_disabled}>اتصال معامله و باز‌محاسبهٔ تخمین</button>
-          <p class="manual-help wide">{('ابتدا یک آفر ثبت کنید؛ سپس در همین بخش معاملهٔ آن را ثبت کنید.' if not open_offer_options else 'پس از ثبت معامله، آفرِ مرتبط دیگر به‌عنوان آفر باز در لنگر لحظه‌ای شمرده نمی‌شود.')}</p>
+          <h3 class="wide">2. ثبت معامله برای آفر موجود</h3>
+          <label class="wide">انتخاب آفر باز<select name="offer_id" required{confirm_disabled}><option value="">انتخاب آفر...</option>{open_offer_options}</select></label>
+          <label class="check"><input type="checkbox" name="trade_live" value="1" checked{confirm_disabled}> معامله لایو (زمان حال)</label>
+          <label>زمان ثبت معامله<input name="trade_time" type="datetime-local" value="{tehran_now}"{confirm_disabled}></label>
+          <label>قیمت معامله (تومان)<input name="trade_price" inputmode="numeric"{confirm_disabled}></label>
+          <label>تعداد معامله<input name="trade_quantity" inputmode="numeric"{confirm_disabled}></label>
+          <button class="wide" type="submit"{confirm_disabled}>ثبت معامله و محاسبات</button>
         </form>
-        <aside class="manual-effect"><h3>تأثیر فعلی بر تخمین</h3>
-          <p class="manual-help">این مقادیر پس از هر ثبت موفق، با دادهٔ تازه دوباره محاسبه می‌شوند.</p>
+        <aside class="manual-effect">
+          <h3>تأثیر لحظه‌ای بر تخمین</h3>
           <div class="effect-grid">{render_manual_effect(state)}</div>
         </aside>
       </div>
@@ -827,26 +780,42 @@ def render_page(
     melted = read_melted_minute_averages(market_db, state.get("window_end_utc")) if market_db else {}
     melted_cards = "".join(
         f"<div class='input-card {'observed' if value.get('average_price') is not None else 'no-data'}'>"
-        f"<span>آب‌شدهٔ {'کاغذی' if form == 'PAPER' else 'فیزیکی'} — میانگین یک دقیقه</span>"
+        f"<span>طلا آب‌شده {'کاغذی' if form == 'PAPER' else 'فیزیکی'}</span>"
         f"<strong>{fa_number(value.get('average_price'))}</strong>"
         f"<small>{fa_number(value.get('sample_count', 0))} رویداد</small></div>"
         for form, value in melted.items()
     )
     estimate_view = f"""
-      <div class='estimate-meta'>پنجره داده: {window_start} تا {window_end}<br>آخرین محاسبه: {generated}</div>
-      <section><div class='section-head'><h2>ورودی‌های بازار</h2><span class='badge'>مقادیر فقط بر اساس دادهٔ واقعی همان بازه‌اند</span></div>
-        <div class='inputs'>{render_input_cards(inputs)}{melted_cards}</div></section>
-      <section><div class='section-head'><h2>تخمین انواع سکه</h2><span class='badge'>نقدی و فردایی در یک جدول</span></div>
-        <div class='table-wrap'><table><thead><tr><th>کالا</th><th>نقدی <small>(واحد پروژه / بازه)</small></th><th>فردایی <small>(واحد پروژه / بازه)</small></th></tr></thead>
-        <tbody>{render_combined_rate_rows(settlements)}</tbody></table></div></section>
+      <section>
+        <div class='section-head'>
+          <h2>شاخص‌ها و ورودی‌های بازار</h2>
+          <span class='badge'>داده‌های برآورد شده بر پایه بازار واقعی</span>
+        </div>
+        <div class='inputs'>{render_input_cards(inputs)}{melted_cards}</div>
+      </section>
+      <section>
+        <div class='section-head'>
+          <h2>جدول نرخ و تخمین سکه</h2>
+          <span class='badge'>محاسبه نقدی و فردایی</span>
+        </div>
+        <div class='table-wrap'>
+          <table>
+            <thead>
+              <tr>
+                <th>نوع کالا</th>
+                <th>نرخ نقدی (تومان)</th>
+                <th>نرخ فردایی (تومان)</th>
+              </tr>
+            </thead>
+            <tbody>{render_combined_rate_rows(settlements)}</tbody>
+          </table>
+        </div>
+      </section>
     """
-    estimate_view = (
-        estimate_view
-    )
     if estimate_fragment:
         return estimate_view.encode("utf-8")
     if page == "manual":
-        navigation = f"<a class='nav-link' href='{html.escape('/' + manual_path.strip('/').rsplit('/', 1)[0])}'>بازگشت به تخمین‌ها</a>"
+        navigation = f"<a class='nav-link secondary' href='{html.escape('/' + manual_path.strip('/').rsplit('/', 1)[0])}'>بازگشت به نرخ‌ها</a>"
         page_content = render_manual_entry_panel(
             state,
             manual_path=manual_path,
@@ -856,29 +825,521 @@ def render_page(
         )
         refresh_script = ""
     else:
-        navigation = f"<a class='nav-link primary' href='{html.escape(manual_path)}'>ثبت دستی آفر و معامله</a>"
+        navigation = f"<a class='nav-btn' href='{html.escape(manual_path)}'>ثبت دستی آفر و معامله</a>"
         page_content = f"""
         <div id="estimate-content">{estimate_view}</div>
         <div id="activity-content">{render_group_activity_fragment(conversation_db) if conversation_db else ''}</div>"""
         refresh_script = "window.setInterval(refreshEstimateView, 15000); window.setInterval(refreshActivityView, 15000);"
     document = f"""<!doctype html>
-<html lang="fa" dir="rtl"><head>
+<html lang="fa" dir="rtl">
+<head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>تخمین‌گر نرخ سکه</title>
+<title>سامانه تخمین و تحلیل نرخ سکه</title>
 <style>
-:root{{--bg:#07111f;--card:#101d2e;--line:#24364c;--text:#edf4ff;--muted:#9fb0c7;--cyan:#4fd1c5;--gold:#f6c453;--red:#ff8a8a}}
-*{{box-sizing:border-box}}body{{margin:0;background:radial-gradient(circle at top,#17304b 0,#07111f 42%);color:var(--text);font-family:Tahoma,Arial,sans-serif;line-height:1.65}}
-.wrap{{width:min(1280px,94%);margin:34px auto 60px}}header{{display:flex;justify-content:space-between;gap:20px;align-items:flex-end;margin-bottom:22px}}h1{{margin:0;font-size:clamp(24px,4vw,42px)}}h1 span{{color:var(--gold)}}.meta,.estimate-meta{{color:var(--muted);font-size:13px;text-align:left;direction:rtl}}.estimate-meta{{margin:18px 2px}}section{{background:rgba(16,29,46,.94);border:1px solid var(--line);border-radius:18px;padding:20px;margin:18px 0;box-shadow:0 18px 50px rgba(0,0,0,.22)}}.section-head{{display:flex;align-items:center;justify-content:space-between;gap:12px}}h2{{margin:0 0 14px;font-size:20px}}h3{{margin:0 0 8px}}.badge{{border:1px solid #2d8079;color:var(--cyan);padding:3px 10px;border-radius:99px;font-size:12px}}.inputs{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:8px 0 18px}}.input-card{{display:flex;flex-direction:column;padding:12px;border-radius:12px;border:1px solid var(--line);background:#0b1727}}.input-card span,.input-card small{{color:var(--muted);font-size:12px}}.input-card strong{{font-size:17px;margin:3px 0;direction:ltr;text-align:right}}.input-card.observed{{border-color:#27655f}}.input-card.estimated{{border-color:#aa7a2a}}.input-card.no-data strong,.missing{{color:var(--red)}}.table-wrap{{overflow:auto}}table{{width:100%;border-collapse:collapse;white-space:nowrap}}th,td{{padding:11px 12px;border-bottom:1px solid var(--line);text-align:right}}th{{color:var(--muted);font-size:12px}}td{{font-size:14px}}.rate-cell{{min-width:220px}}.rate-cell strong{{display:block;color:var(--gold);font-size:17px;direction:ltr;text-align:right}}.rate-cell small{{display:block;color:var(--muted);font-size:11px;direction:ltr;text-align:right}}footer{{color:var(--muted);font-size:12px;padding:8px 4px}}code{{direction:ltr;display:inline-block}}.status{{color:var(--cyan)}}.nav-link{{display:inline-block;border:1px solid #2d8079;color:var(--cyan);padding:8px 12px;border-radius:9px;text-decoration:none;font-size:13px}}.nav-link.primary{{background:var(--cyan);color:#06211f;font-weight:700}}.group-grid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}}.feed-card{{background:#0b1727;border:1px solid var(--line);border-radius:12px;padding:13px}}.feed-card h3{{font-size:15px;color:var(--gold)}}.feed-card ul{{list-style:none;margin:0;padding:0}}.feed-card li{{padding:7px 0;border-top:1px solid #1c2c40;font-size:13px}}.feed-card time,.feed-card small{{color:var(--muted);font-size:11px}}
-.manual-grid{{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(280px,.65fr);gap:18px}}.manual-form{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:14px;border:1px solid var(--line);border-radius:14px;background:#0b1727}}.manual-form label{{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:12px}}.manual-form input,.manual-form select,.manual-form textarea{{width:100%;padding:9px 10px;border-radius:8px;border:1px solid #334964;background:#081321;color:var(--text);font:inherit}}.manual-form textarea{{resize:vertical}}.manual-form .check{{flex-direction:row;align-items:center;padding-top:22px;color:var(--text)}}.manual-form .check input{{width:auto}}.manual-form .wide{{grid-column:1 / -1}}.manual-form hr{{width:100%;border:0;border-top:1px solid var(--line);margin:2px 0}}button{{border:0;border-radius:9px;padding:11px 15px;background:var(--cyan);color:#06211f;font-weight:700;font:inherit;cursor:pointer}}button:disabled,input:disabled,select:disabled,textarea:disabled{{opacity:.55;cursor:not-allowed}}.manual-help{{margin:0;color:var(--muted);font-size:12px}}.manual-effect{{border:1px solid #2d8079;border-radius:14px;padding:14px;background:#0b1727}}.manual-effect h3{{margin:0 0 5px;color:var(--cyan)}}.effect-grid{{display:grid;gap:10px;margin-top:12px}}.effect-card{{border-top:1px solid var(--line);padding-top:8px}}.effect-card h3{{font-size:15px;color:var(--gold)}}.effect-card ul{{padding:0;margin:0;list-style:none}}.effect-card li{{padding:4px 0;font-size:13px}}.effect-card small{{color:var(--muted)}}.flash{{padding:9px 12px;border-radius:9px}}.flash.success{{background:#113a35;color:#aaf0e8}}.flash.warning{{background:#4a2b26;color:#ffd0c8}}
-.manual-grid{{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(280px,.65fr);gap:18px}}.manual-form{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;padding:14px;border:1px solid var(--line);border-radius:14px;background:#0b1727}}.manual-form label{{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:12px}}.manual-form input,.manual-form select,.manual-form textarea{{width:100%;padding:9px 10px;border-radius:8px;border:1px solid #334964;background:#081321;color:var(--text);font:inherit}}.manual-form textarea{{resize:vertical}}.manual-form .check{{flex-direction:row;align-items:center;padding-top:22px;color:var(--text)}}.manual-form .check input{{width:auto}}.manual-form .wide{{grid-column:1 / -1}}.manual-form hr{{width:100%;border:0;border-top:1px solid var(--line);margin:2px 0}}button{{border:0;border-radius:9px;padding:11px 15px;background:var(--cyan);color:#06211f;font-weight:700;font:inherit;cursor:pointer}}button.secondary{{background:#17324b;color:var(--cyan);border:1px solid #2d8079}}button:disabled,input:disabled,select:disabled,textarea:disabled{{opacity:.55;cursor:not-allowed}}.manual-help{{margin:0;color:var(--muted);font-size:12px}}.manual-effect{{border:1px solid #2d8079;border-radius:14px;padding:14px;background:#0b1727}}.manual-effect h3{{margin:0 0 5px;color:var(--cyan)}}.effect-grid{{display:grid;gap:10px;margin-top:12px}}.effect-card{{border-top:1px solid var(--line);padding-top:8px}}.effect-card h3{{font-size:15px;color:var(--gold)}}.effect-card ul{{padding:0;margin:0;list-style:none}}.effect-card li{{padding:4px 0;font-size:13px}}.effect-card small{{color:var(--muted)}}.flash{{padding:9px 12px;border-radius:9px}}.flash.success{{background:#113a35;color:#aaf0e8}}.flash.warning{{background:#4a2b26;color:#ffd0c8}}
-@media(max-width:850px){{header{{display:block}}.meta{{text-align:right;margin-top:12px}}.nav-link{{margin-top:12px}}.inputs,.group-grid{{grid-template-columns:repeat(2,minmax(0,1fr))}}}}
-@media(max-width:850px){{.manual-grid{{grid-template-columns:1fr}}}}@media(max-width:520px){{.inputs,.manual-form{{grid-template-columns:1fr}}section{{padding:14px}}.manual-form .wide{{grid-column:auto}}}}
-</style></head><body><main class="wrap">
-<header><div><h1>مدل <span>تخمین نرخ سکه</span></h1><div class="status">وضعیت سرویس: {service_status}</div></div>
-<div class="meta">پنجره داده: {window_start} تا {window_end}<br>آخرین محاسبه: {generated}<br>{navigation}</div></header>
-{page_content}
-<footer>این خروجی آزمایشی است و توصیه خرید یا فروش نیست. مقدار <code>{NO_DATA_TOKEN}</code> یعنی در همان دقیقه داده واقعی وجود نداشته و مقدار قبلی حمل نشده است. قیمت «واحد پروژه» با ضریب ×۱۰۰۰ به تومان کامل تبدیل می‌شود. اطمینان هیچ کالا در این نسخه «بالا» نیست.</footer>
-</main><script>
+@import url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css');
+:root {{
+  --bg-deep: #090d16;
+  --bg-surface: rgba(15, 23, 42, 0.75);
+  --bg-card: rgba(30, 41, 59, 0.55);
+  --border-line: rgba(255, 255, 255, 0.08);
+  --border-glow: rgba(99, 102, 241, 0.2);
+  --text-main: #f8fafc;
+  --text-sub: #94a3b8;
+  --accent-gold: #f59e0b;
+  --accent-cyan: #06b6d4;
+  --accent-emerald: #10b981;
+  --accent-rose: #f43f5e;
+  --accent-indigo: #6366f1;
+}}
+* {{ box-sizing: border-box; }}
+body {{
+  margin: 0;
+  background: radial-gradient(circle at 50% -20%, #1e1b4b 0%, #090d16 60%);
+  color: var(--text-main);
+  font-family: Vazirmatn, system-ui, -apple-system, sans-serif;
+  line-height: 1.6;
+  min-height: 100vh;
+}}
+.wrap {{
+  width: min(1280px, 94%);
+  margin: 28px auto 60px;
+}}
+header {{
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 28px;
+  padding: 20px 24px;
+  background: var(--bg-surface);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-line);
+  border-radius: 20px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+}}
+.header-brand {{
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}}
+.logo-badge {{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(99, 102, 241, 0.2));
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  font-size: 22px;
+}}
+h1 {{
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #ffffff 30%, var(--accent-gold) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}}
+.status-pill {{
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  border-radius: 99px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  color: var(--accent-emerald);
+  font-size: 13px;
+  font-weight: 600;
+}}
+.status-dot {{
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-emerald);
+  box-shadow: 0 0 10px var(--accent-emerald);
+  animation: pulse 2s infinite;
+}}
+@keyframes pulse {{
+  0% {{ opacity: 0.6; transform: scale(0.95); }}
+  50% {{ opacity: 1; transform: scale(1.15); }}
+  100% {{ opacity: 0.6; transform: scale(0.95); }}
+}}
+.meta {{
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}}
+.meta-time {{
+  color: var(--text-sub);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: left;
+}}
+.nav-btn {{
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--accent-indigo), #4f46e5);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 14px;
+  text-decoration: none;
+  box-shadow: 0 10px 25px rgba(99, 102, 241, 0.25);
+  transition: all 0.2s ease;
+  border: none;
+  cursor: pointer;
+}}
+.nav-btn:hover {{
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px rgba(99, 102, 241, 0.35);
+}}
+.nav-btn.secondary {{
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-line);
+  color: var(--text-main);
+  box-shadow: none;
+}}
+section {{
+  background: var(--bg-surface);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-line);
+  border-radius: 20px;
+  padding: 24px;
+  margin-bottom: 24px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+}}
+.section-head {{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}}
+h2 {{
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text-main);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}}
+.badge {{
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 99px;
+  background: rgba(6, 182, 212, 0.1);
+  border: 1px solid rgba(6, 182, 212, 0.25);
+  color: var(--accent-cyan);
+  font-size: 12px;
+  font-weight: 600;
+}}
+.inputs {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}}
+.input-card {{
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  border-radius: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-line);
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}}
+.input-card:hover {{
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.15);
+}}
+.input-card span {{
+  color: var(--text-sub);
+  font-size: 13px;
+  font-weight: 500;
+}}
+.input-card strong {{
+  font-size: 20px;
+  font-weight: 800;
+  margin: 6px 0;
+  color: var(--text-main);
+  direction: ltr;
+  text-align: right;
+}}
+.input-card small {{
+  color: var(--text-sub);
+  font-size: 12px;
+  opacity: 0.85;
+}}
+.input-card.observed {{
+  border-color: rgba(16, 185, 129, 0.3);
+  background: linear-gradient(180deg, rgba(16, 185, 129, 0.05) 0%, var(--bg-card) 100%);
+}}
+.input-card.observed strong {{
+  color: var(--accent-emerald);
+}}
+.input-card.estimated {{
+  border-color: rgba(245, 158, 11, 0.3);
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.05) 0%, var(--bg-card) 100%);
+}}
+.input-card.estimated strong {{
+  color: var(--accent-gold);
+}}
+.input-card.no-data strong, .missing {{
+  color: var(--accent-rose);
+}}
+.table-wrap {{
+  overflow-x: auto;
+  border-radius: 14px;
+  border: 1px solid var(--border-line);
+}}
+table {{
+  width: 100%;
+  border-collapse: collapse;
+  white-space: nowrap;
+}}
+th {{
+  background: rgba(15, 23, 42, 0.9);
+  padding: 14px 18px;
+  color: var(--text-sub);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: right;
+  border-bottom: 1px solid var(--border-line);
+}}
+td {{
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border-line);
+  font-size: 14px;
+}}
+tr:last-child td {{
+  border-bottom: none;
+}}
+tr:hover td {{
+  background: rgba(255, 255, 255, 0.02);
+}}
+.rate-cell {{
+  min-width: 200px;
+}}
+.rate-cell strong {{
+  display: block;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--accent-gold);
+  direction: ltr;
+  text-align: right;
+}}
+.rate-cell small {{
+  display: block;
+  color: var(--text-sub);
+  font-size: 12px;
+  margin-top: 2px;
+  direction: ltr;
+  text-align: right;
+}}
+.manual-grid {{
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.6fr);
+  gap: 24px;
+}}
+.manual-form {{
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  padding: 20px;
+  border-radius: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-line);
+}}
+.manual-form h3 {{
+  margin: 0 0 4px;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--accent-gold);
+}}
+.manual-form label {{
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-sub);
+  font-size: 13px;
+  font-weight: 600;
+}}
+.manual-form input, .manual-form select, .manual-form textarea {{
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border-line);
+  background: rgba(15, 23, 42, 0.8);
+  color: var(--text-main);
+  font-family: inherit;
+  font-size: 14px;
+  transition: all 0.2s ease;
+}}
+.manual-form input:focus, .manual-form select:focus, .manual-form textarea:focus {{
+  outline: none;
+  border-color: var(--accent-indigo);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}}
+.manual-form textarea {{
+  resize: vertical;
+}}
+.manual-form .check {{
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding-top: 20px;
+  color: var(--text-main);
+}}
+.manual-form .check input {{
+  width: auto;
+}}
+.manual-form .wide {{
+  grid-column: 1 / -1;
+}}
+button {{
+  padding: 12px 20px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent-indigo), #4f46e5);
+  color: #ffffff;
+  font-weight: 700;
+  font-family: inherit;
+  font-size: 14px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}}
+button:hover {{
+  opacity: 0.92;
+  transform: translateY(-1px);
+}}
+button.secondary {{
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-line);
+  color: var(--accent-cyan);
+}}
+button:disabled, input:disabled, select:disabled, textarea:disabled {{
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+}}
+.manual-help {{
+  margin: 0;
+  color: var(--text-sub);
+  font-size: 12px;
+  line-height: 1.6;
+}}
+.manual-effect {{
+  border: 1px solid var(--border-line);
+  border-radius: 16px;
+  padding: 20px;
+  background: var(--bg-card);
+}}
+.manual-effect h3 {{
+  margin: 0 0 8px;
+  color: var(--accent-cyan);
+  font-size: 16px;
+}}
+.effect-grid {{
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+}}
+.effect-card {{
+  border-top: 1px solid var(--border-line);
+  padding-top: 10px;
+}}
+.effect-card h3 {{
+  font-size: 14px;
+  color: var(--accent-gold);
+}}
+.effect-card ul {{
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}}
+.effect-card li {{
+  padding: 5px 0;
+  font-size: 13px;
+}}
+.effect-card small {{
+  color: var(--text-sub);
+}}
+.flash {{
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}}
+.flash.success {{
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #6ee7b7;
+}}
+.flash.warning {{
+  background: rgba(244, 63, 94, 0.15);
+  border: 1px solid rgba(244, 63, 94, 0.3);
+  color: #fda4af;
+}}
+.group-grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}}
+.feed-card {{
+  background: var(--bg-card);
+  border: 1px solid var(--border-line);
+  border-radius: 14px;
+  padding: 16px;
+}}
+.feed-card h3 {{
+  font-size: 14px;
+  color: var(--accent-gold);
+  margin-bottom: 10px;
+}}
+.feed-card ul {{
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}}
+.feed-card li {{
+  padding: 8px 0;
+  border-top: 1px solid var(--border-line);
+  font-size: 13px;
+}}
+.feed-card time, .feed-card small {{
+  color: var(--text-sub);
+  font-size: 12px;
+}}
+footer {{
+  color: var(--text-sub);
+  font-size: 12px;
+  padding: 20px 4px 0;
+  border-top: 1px solid var(--border-line);
+  margin-top: 32px;
+  line-height: 1.7;
+}}
+footer code {{
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--accent-gold);
+  font-family: monospace;
+}}
+@media (max-width: 850px) {{
+  header {{
+    flex-direction: column;
+    align-items: flex-start;
+  }}
+  .meta {{
+    width: 100%;
+    justify-content: space-between;
+  }}
+  .manual-grid {{
+    grid-template-columns: 1fr;
+  }}
+}}
+@media (max-width: 520px) {{
+  .manual-form {{
+    grid-template-columns: 1fr;
+  }}
+}}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <div class="header-brand">
+      <div class="logo-badge">🪙</div>
+      <div>
+        <h1>سامانه <span>تخمین نرخ سکه</span></h1>
+        <div class="status-pill">
+          <span class="status-dot"></span>
+          وضعیت سرویس: {service_status}
+        </div>
+      </div>
+    </div>
+    <div class="meta">
+      <div class="meta-time">
+        بروزرسانی: {generated}<br>
+        بازه داده: {window_start} تا {window_end}
+      </div>
+      {navigation}
+    </div>
+  </header>
+  {page_content}
+  <footer>
+    این سامانه یک ابزار تحلیل و برآورد هوشمند است و توصیه خرید یا فروش نیست.
+    مقدار <code>{NO_DATA_TOKEN}</code> نشان‌دهنده عدم وجود داده واقعی در دقیقه جاری است.
+  </footer>
+</main>
+<script>
 async function refreshEstimateView() {{
   try {{
     const response = await fetch({json.dumps(estimate_path)}, {{cache: "no-store"}});
@@ -924,10 +1385,9 @@ document.getElementById("parse-offer-text")?.addEventListener("click", async () 
         FIRST_CLOCK_DATE_INFERRED_AS_PREVIOUS_DAY: "به‌دلیل نبود آفر قبلی، تاریخ روز قبل در نظر گرفته شد"
       }}[item] || item)).join("؛ ");
       const timeText = suggested.time_detected
-        ? `زمان پیشنهادی تهران: ${{suggested.offer_time}}؛ ساعت در متن ذخیره نمی‌شود`
+        ? `زمان پیشنهادی تهران: ${{suggested.offer_time}}`
         : "ساعتی در متن پیدا نشد";
-      result.textContent = `${{timeText}} — parser: ${{suggested.parser}} / ${{suggested.training_examples || 0}} نمونه`
-        + (warningText ? ` — توجه: ${{warningText}}` : "");
+      result.textContent = `${{timeText}}` + (warningText ? ` — توجه: ${{warningText}}` : "");
       result.classList.toggle("missing", Boolean((suggested.warnings || []).length));
     }}
   }} catch (_) {{}}
@@ -941,7 +1401,9 @@ document.querySelectorAll(".manual-form").forEach((form) => {{
     }}
   }});
 }});
-</script></body></html>"""
+</script>
+</body>
+</html>"""
     return document.encode("utf-8")
 
 
