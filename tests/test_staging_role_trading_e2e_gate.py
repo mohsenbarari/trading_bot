@@ -46,6 +46,17 @@ class StagingRoleTradingE2EGateTests(unittest.TestCase):
             r"^trading-bot-three-site-stage[0-9]+-[0-9a-f-]+-webapp-(fi|ir)-webapp_(fi|ir)_api-1$",
         )
 
+    def test_three_site_staging_gate_uses_writer_fenced_mapper_cleanup(self):
+        gate = (ROOT / "scripts/run_staging_role_trading_e2e_gate.sh").read_text(encoding="utf-8")
+        runtime = (ROOT / "frontend/e2e/helpers/mutationRuntime.ts").read_text(encoding="utf-8")
+
+        self.assertIn("run_three_site_fenced_cleanup", gate)
+        self.assertIn("writer_fence_scope", gate)
+        self.assertIn("deleted_change_logs=0", gate)
+        self.assertNotIn("python scripts/trading_core_probe_worker.py cleanup", gate)
+        self.assertIn("STAGING_WRITER_FENCE_BOOTSTRAP", runtime)
+        self.assertIn("require_witness_lease", runtime)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,6 +7,35 @@ const STAGING_MUTATION_CONFIRM = 'role-trading-staging-only'
 const LOCAL_MUTATION_CONFIRM = 'local-dev-only'
 const THREE_SITE_STAGING_APP_CONTAINER = /^trading-bot-three-site-stage\d+-[0-9a-f-]+-webapp-(?:fi|ir)-webapp_(?:fi|ir)_api-1$/i
 const THREE_SITE_STAGING_REDIS_CONTAINER = /^trading-bot-three-site-stage\d+-[0-9a-f-]+-webapp-(?:fi|ir)-webapp_(?:fi|ir)_redis-1$/i
+const STAGING_WRITER_FENCE_BOOTSTRAP = String.raw`
+import asyncio as _e2e_asyncio
+from core.config import settings as _e2e_settings
+from core.db import AsyncSessionLocal as _e2e_sessions
+from core.runtime_identity import resolve_runtime_identity as _e2e_resolve_identity
+from core.webapp_writer_control import load_writer_snapshot as _e2e_load_snapshot
+from core.writer_fencing import writer_fence_scope as _e2e_writer_fence_scope
+
+_e2e_original_asyncio_run = _e2e_asyncio.run
+
+async def _e2e_run_with_current_writer_capability(coro):
+    _e2e_identity = _e2e_resolve_identity(_e2e_settings)
+    if not _e2e_identity.is_webapp_authority:
+        raise RuntimeError("staging mutation helper requires a WebApp authority")
+    async with _e2e_sessions() as _e2e_control_db:
+        _e2e_snapshot = await _e2e_load_snapshot(_e2e_control_db)
+    with _e2e_writer_fence_scope(
+        _e2e_identity,
+        _e2e_snapshot,
+        source="staging_role_trading_e2e",
+        require_witness_lease=bool(_e2e_settings.writer_witness_required),
+    ):
+        return await coro
+
+def _e2e_scoped_asyncio_run(coro, *, debug=None):
+    return _e2e_original_asyncio_run(_e2e_run_with_current_writer_capability(coro), debug=debug)
+
+_e2e_asyncio.run = _e2e_scoped_asyncio_run
+`
 
 export function getE2EBackendBaseUrl() {
   return (process.env.E2E_BACKEND_BASE_URL || DEFAULT_LOCAL_BACKEND_BASE_URL).trim()
@@ -123,9 +152,12 @@ function assertMutatingRuntime(containerName: string, backendBaseUrl: string) {
 export function runPythonInApp<T>(script: string, helperName = 'e2e mutation helper'): T {
   const containerName = getE2EAppContainerName()
   assertMutatingRuntime(containerName, getE2EBackendBaseUrl())
+  const input = getTargetEnvironment() === 'staging'
+    ? `${STAGING_WRITER_FENCE_BOOTSTRAP}\n${script}`
+    : script
 
   const stdout = execFileSync('docker', ['exec', '-i', containerName, 'python', '-'], {
-    input: script,
+    input,
     encoding: 'utf8',
   })
 

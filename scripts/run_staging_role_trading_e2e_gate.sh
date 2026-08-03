@@ -138,12 +138,157 @@ cleanup_prefix() {
   local dry_run_path="$ARTIFACT_ROOT/${phase}-${prefix}-dry-run.json"
   local delete_path="$ARTIFACT_ROOT/${phase}-${prefix}-delete.json"
 
-  docker exec "$STAGING_APP_CONTAINER_NAME" python scripts/trading_core_probe_worker.py cleanup \
-    --prefix "$prefix" \
-    --dry-run >"$dry_run_path"
+  run_three_site_fenced_cleanup "$prefix" dry-run >"$dry_run_path"
+  run_three_site_fenced_cleanup "$prefix" delete >"$delete_path"
+}
 
-  docker exec "$STAGING_APP_CONTAINER_NAME" python scripts/trading_core_probe_worker.py cleanup \
-    --prefix "$prefix" >"$delete_path"
+run_three_site_fenced_cleanup() {
+  local prefix="$1"
+  local mode="$2"
+  docker exec -i "$STAGING_APP_CONTAINER_NAME" python - "$prefix" "$mode" <<'PY'
+import asyncio
+import json
+import sys
+
+from core.config import settings
+from core.db import AsyncSessionLocal
+from core.runtime_identity import resolve_runtime_identity
+from core.webapp_writer_control import load_writer_snapshot
+from core.writer_fencing import writer_fence_scope
+from models.accountant_relation import AccountantRelation
+from models.chat_member import ChatMember
+from models.customer_relation import CustomerRelation
+from models.invitation import Invitation
+from models.notification import Notification
+from models.offer import Offer
+from models.offer_publication_state import OfferPublicationState
+from models.offer_request import OfferRequest
+from models.push_subscription import PushSubscription
+from models.session import (
+    SessionLoginRequest,
+    SingleSessionRecoveryAdminTarget,
+    SingleSessionRecoveryRequest,
+    UserSession,
+)
+from models.telegram_admin_broadcast import TelegramAdminBroadcast, TelegramAdminBroadcastReceipt
+from models.telegram_link_token import TelegramLinkToken
+from models.trade import Trade
+from models.trade_delivery_receipt import TradeDeliveryReceipt
+from models.user import User
+from models.user_block import UserBlock
+from scripts.trading_core_probe_worker import (
+    cleanup_redis_for_user_ids,
+    cleanup_report_payload,
+    collect_cleanup_plan,
+)
+from sqlalchemy import select
+
+prefix = sys.argv[1]
+dry_run = sys.argv[2] == "dry-run"
+
+async def delete_by_ids(db, model, ids):
+    deleted = 0
+    for record_id in ids:
+        record = await db.get(model, record_id)
+        if record is not None:
+            await db.delete(record)
+            deleted += 1
+    await db.flush()
+    return deleted
+
+async def main():
+    plan = await collect_cleanup_plan(prefix)
+    if dry_run:
+        planned_redis_keys = await cleanup_redis_for_user_ids(plan.user_ids, dry_run=True)
+        print(json.dumps(cleanup_report_payload(
+            plan=plan,
+            dry_run=True,
+            deleted_redis_keys=planned_redis_keys,
+        ), ensure_ascii=False, sort_keys=True))
+        return
+
+    identity = resolve_runtime_identity(settings)
+    if not identity.is_webapp_authority:
+        raise RuntimeError("three-site E2E cleanup requires a WebApp authority")
+    async with AsyncSessionLocal() as control_db:
+        snapshot = await load_writer_snapshot(control_db)
+
+    with writer_fence_scope(
+        identity,
+        snapshot,
+        source="staging_role_trading_e2e_cleanup",
+        require_witness_lease=bool(settings.writer_witness_required),
+    ):
+        async with AsyncSessionLocal() as db:
+            deleted_recovery_admin_targets = await delete_by_ids(
+                db, SingleSessionRecoveryAdminTarget, plan.recovery_admin_target_ids)
+            deleted_recovery_requests = await delete_by_ids(
+                db, SingleSessionRecoveryRequest, plan.recovery_request_ids)
+            deleted_session_login_requests = await delete_by_ids(
+                db, SessionLoginRequest, plan.session_login_request_ids)
+            deleted_user_sessions = await delete_by_ids(db, UserSession, plan.user_session_ids)
+            deleted_telegram_link_tokens = await delete_by_ids(
+                db, TelegramLinkToken, plan.telegram_link_token_ids)
+            deleted_push_subscriptions = await delete_by_ids(db, PushSubscription, plan.push_subscription_ids)
+            deleted_trade_delivery_receipts = await delete_by_ids(
+                db, TradeDeliveryReceipt, plan.trade_delivery_receipt_ids)
+            deleted_telegram_admin_broadcast_receipts = await delete_by_ids(
+                db, TelegramAdminBroadcastReceipt, plan.telegram_admin_broadcast_receipt_ids)
+            deleted_notifications = await delete_by_ids(db, Notification, plan.notification_ids)
+            deleted_telegram_admin_broadcasts = await delete_by_ids(
+                db, TelegramAdminBroadcast, plan.telegram_admin_broadcast_ids)
+            deleted_publication_states = await delete_by_ids(
+                db, OfferPublicationState, plan.publication_state_ids)
+            deleted_offer_requests = await delete_by_ids(db, OfferRequest, plan.offer_request_ids)
+            deleted_chat_members = await delete_by_ids(db, ChatMember, plan.chat_member_ids)
+            deleted_user_blocks = await delete_by_ids(db, UserBlock, plan.user_block_ids)
+            deleted_accountant_relations = await delete_by_ids(
+                db, AccountantRelation, plan.accountant_relation_ids)
+            deleted_customer_relations = await delete_by_ids(
+                db, CustomerRelation, plan.customer_relation_ids)
+            deleted_invitations = await delete_by_ids(db, Invitation, plan.invitation_ids)
+            deleted_trades = await delete_by_ids(db, Trade, plan.trade_ids)
+            deleted_offers = await delete_by_ids(db, Offer, plan.offer_ids)
+            residual_members = list((await db.execute(
+                select(ChatMember).where(ChatMember.user_id.in_(plan.user_ids))
+            )).scalars().all()) if plan.user_ids else []
+            for member in residual_members:
+                await db.delete(member)
+            await db.flush()
+            deleted_chat_members += len(residual_members)
+            deleted_users = await delete_by_ids(db, User, plan.user_ids)
+            await db.commit()
+
+    deleted_redis_keys = await cleanup_redis_for_user_ids(plan.user_ids)
+    print(json.dumps(cleanup_report_payload(
+        plan=plan,
+        dry_run=False,
+        deleted_users=deleted_users,
+        deleted_invitations=deleted_invitations,
+        deleted_accountant_relations=deleted_accountant_relations,
+        deleted_customer_relations=deleted_customer_relations,
+        deleted_user_sessions=deleted_user_sessions,
+        deleted_session_login_requests=deleted_session_login_requests,
+        deleted_recovery_requests=deleted_recovery_requests,
+        deleted_recovery_admin_targets=deleted_recovery_admin_targets,
+        deleted_telegram_link_tokens=deleted_telegram_link_tokens,
+        deleted_push_subscriptions=deleted_push_subscriptions,
+        deleted_chat_members=deleted_chat_members,
+        deleted_user_blocks=deleted_user_blocks,
+        deleted_offers=deleted_offers,
+        deleted_trades=deleted_trades,
+        deleted_trade_delivery_receipts=deleted_trade_delivery_receipts,
+        deleted_telegram_admin_broadcasts=deleted_telegram_admin_broadcasts,
+        deleted_telegram_admin_broadcast_receipts=deleted_telegram_admin_broadcast_receipts,
+        deleted_notifications=deleted_notifications,
+        deleted_offer_requests=deleted_offer_requests,
+        deleted_publication_states=deleted_publication_states,
+        deleted_change_logs=0,
+        deleted_redis_keys=deleted_redis_keys,
+    ), ensure_ascii=False, sort_keys=True))
+
+asyncio.run(main())
+PY
 }
 
 cleanup_test_commodities() {
@@ -152,22 +297,42 @@ cleanup_test_commodities() {
 import asyncio
 import json
 import sys
-from sqlalchemy import delete, select
+from sqlalchemy import select
+from core.config import settings
 from core.db import AsyncSessionLocal
+from core.runtime_identity import resolve_runtime_identity
+from core.webapp_writer_control import load_writer_snapshot
+from core.writer_fencing import writer_fence_scope
 from models.commodity import Commodity, CommodityAlias
 
 prefixes = sys.argv[1:]
 
 async def main():
-    async with AsyncSessionLocal() as db:
-        ids = []
-        for prefix in prefixes:
-            result = await db.execute(select(Commodity.id).where(Commodity.name.like(f"{prefix}%")))
-            ids.extend(int(item) for item in result.scalars().all())
-        ids = sorted(set(ids))
-        if ids:
-            await db.execute(delete(CommodityAlias).where(CommodityAlias.commodity_id.in_(ids)))
-            await db.execute(delete(Commodity).where(Commodity.id.in_(ids)))
+    identity = resolve_runtime_identity(settings)
+    if not identity.is_webapp_authority:
+        raise RuntimeError("three-site E2E commodity cleanup requires a WebApp authority")
+    async with AsyncSessionLocal() as control_db:
+        snapshot = await load_writer_snapshot(control_db)
+    with writer_fence_scope(
+        identity,
+        snapshot,
+        source="staging_role_trading_e2e_commodity_cleanup",
+        require_witness_lease=bool(settings.writer_witness_required),
+    ):
+        async with AsyncSessionLocal() as db:
+            commodities = []
+            for prefix in prefixes:
+                result = await db.execute(select(Commodity).where(Commodity.name.like(f"{prefix}%")))
+                commodities.extend(result.scalars().all())
+            by_id = {int(commodity.id): commodity for commodity in commodities}
+            ids = sorted(by_id)
+            for commodity in by_id.values():
+                aliases = list((await db.execute(
+                    select(CommodityAlias).where(CommodityAlias.commodity_id == commodity.id)
+                )).scalars().all())
+                for alias in aliases:
+                    await db.delete(alias)
+                await db.delete(commodity)
             await db.commit()
     print(json.dumps({"commodity_ids": ids, "deleted": len(ids)}, ensure_ascii=False, sort_keys=True))
 
