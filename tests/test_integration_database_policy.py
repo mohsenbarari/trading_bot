@@ -73,6 +73,22 @@ class IntegrationDatabasePolicyTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             projection_scope_for_service("api")
 
+    def test_object_storage_delivery_consumer_has_only_its_receive_ledger(self):
+        """The delivery role can consume versioned objects without HTTP authority."""
+
+        self.assertEqual(
+            DR_SERVICE_INTERNAL_GRANTS["delivery"],
+            {
+                "dr_events": "SELECT",
+                "dr_event_deliveries": "SELECT, INSERT, UPDATE",
+                "dr_event_receipts": "SELECT, INSERT, UPDATE",
+                "dr_stream_checkpoints": "SELECT, INSERT, UPDATE",
+                "dr_conflict_quarantine": "SELECT, INSERT",
+            },
+        )
+        self.assertNotIn("dr_replay_nonces", DR_SERVICE_INTERNAL_GRANTS["delivery"])
+        self.assertNotIn("dr_blob_deliveries", DR_SERVICE_INTERNAL_GRANTS["delivery"])
+
     def test_bot_queue_grants_and_webapp_deny_set_are_the_same_closed_surface(self):
         self.assertEqual(
             frozenset(BOT_LOCAL_QUEUE_APPLICATION_GRANTS),

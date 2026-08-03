@@ -98,7 +98,13 @@ DR_SERVICE_INTERNAL_GRANTS = {
     },
     "delivery": {
         "dr_events": "SELECT",
-        "dr_event_deliveries": "SELECT, UPDATE",
+        # An Object-Storage delivery worker is also the authenticated local
+        # consumer for the opposite WebApp.  It needs the receive ledger, but
+        # deliberately not the direct-HTTP replay nonce or Blob authority.
+        "dr_event_deliveries": "SELECT, INSERT, UPDATE",
+        "dr_event_receipts": "SELECT, INSERT, UPDATE",
+        "dr_stream_checkpoints": "SELECT, INSERT, UPDATE",
+        "dr_conflict_quarantine": "SELECT, INSERT",
     },
     "projector": {
         "dr_events": "SELECT",
@@ -450,11 +456,12 @@ $$
     ).scalars().all()
     if not receiver_event_columns:
         raise RuntimeError("dr_events receiver insert columns are missing")
-    statements.append(
-        "GRANT INSERT ("
-        + ", ".join(_ident(str(column)) for column in receiver_event_columns)
-        + f") ON TABLE public.dr_events TO {service_roles['receiver']}"
-    )
+    for scope in ("receiver", "delivery"):
+        statements.append(
+            "GRANT INSERT ("
+            + ", ".join(_ident(str(column)) for column in receiver_event_columns)
+            + f") ON TABLE public.dr_events TO {service_roles[scope]}"
+        )
     statements.append(
         "GRANT EXECUTE ON FUNCTION "
         "public.trading_bot_cleanup_expired_replay_nonces(timestamptz, integer) "
