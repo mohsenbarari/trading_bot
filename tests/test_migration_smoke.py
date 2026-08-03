@@ -136,6 +136,17 @@ class MigrationSmokeTests(unittest.TestCase):
                 source,
             )
 
+    def test_runtime_durability_gate_function_is_owner_locked_and_closed(self):
+        source = (
+            REPO_ROOT / 'scripts/activate_three_site_database_fencing.py'
+        ).read_text(encoding='utf-8')
+        self.assertIn('CREATE OR REPLACE FUNCTION public.{DURABILITY_GATE_READ_FUNCTION}()', source)
+        self.assertIn('SECURITY DEFINER', source)
+        self.assertIn('SET search_path = pg_catalog, public', source)
+        self.assertIn('FOR SHARE', source)
+        self.assertIn('REVOKE ALL ON FUNCTION public.{DURABILITY_GATE_READ_FUNCTION}()', source)
+        self.assertIn('GRANT EXECUTE ON FUNCTION public.{DURABILITY_GATE_READ_FUNCTION}()', source)
+
     def test_webapp_writer_migration_bootstraps_current_fi_writer(self):
         migration = (
             REPO_ROOT

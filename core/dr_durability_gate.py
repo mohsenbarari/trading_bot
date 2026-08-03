@@ -16,6 +16,9 @@ from core.dr_connectivity_classifier import (
 )
 
 
+DURABILITY_GATE_READ_FUNCTION = "trading_bot_read_durability_state_for_write_gate"
+
+
 class DrDurabilityGateError(RuntimeError):
     """Raised when an acknowledged critical write would exceed safe RPO."""
 
@@ -129,12 +132,10 @@ def decide_durability(
 def enforce_session_durability(session, table_names: Iterable[str]) -> None:  # noqa: ANN001
     row = session.connection().execute(
         text(
-            """
+            f"""
             SELECT connectivity_mode, event_journal_healthy, blob_journal_healthy,
                    evidence_expires_at
-            FROM dr_durability_state
-            WHERE singleton_id = 1
-            FOR SHARE
+            FROM public.{DURABILITY_GATE_READ_FUNCTION}()
             """
         )
     ).mappings().one_or_none()

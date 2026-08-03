@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 
 from core.dr_event_receiver import _event_values
+from core.dr_durability_gate import DURABILITY_GATE_READ_FUNCTION
 from core.dr_event_protocol import sha256_json, validate_envelope
 from core.dr_database_roles import (
     PROJECTION_SERVICE_SCOPES,
@@ -13,6 +14,7 @@ from core.dr_database_roles import (
 )
 from core.sync_parity import synced_parity_table_names
 from scripts.activate_three_site_database_fencing import (
+    APPLICATION_INTERNAL_GRANTS,
     BOT_LOCAL_EXECUTION_TABLES,
     CONVERGENCE_OBSERVER_TABLES as WEBAPP_CONVERGENCE_OBSERVER_TABLES,
     DR_SERVICE_INTERNAL_GRANTS,
@@ -42,6 +44,16 @@ EXPECTED_BOT_LOCAL_EXECUTION_TABLES = frozenset(
 
 
 class IntegrationDatabasePolicyTests(unittest.TestCase):
+    def test_application_reads_durability_through_a_closed_security_definer_surface(self):
+        self.assertEqual(
+            DURABILITY_GATE_READ_FUNCTION,
+            "trading_bot_read_durability_state_for_write_gate",
+        )
+        self.assertEqual(
+            APPLICATION_INTERNAL_GRANTS["dr_durability_state"],
+            "SELECT",
+        )
+
     def test_private_dr_processes_have_closed_distinct_database_scopes(self):
         self.assertEqual(
             set(PROJECTION_SERVICE_SCOPES.values()),

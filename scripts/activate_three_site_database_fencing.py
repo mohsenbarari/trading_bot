@@ -13,6 +13,7 @@ from sqlalchemy import create_engine, text
 
 ROLE_RE = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 CONFIRMATION = "ENABLE-THREE-SITE-DATABASE-FENCING"
+DURABILITY_GATE_READ_FUNCTION = "trading_bot_read_durability_state_for_write_gate"
 CONTROL_TABLES = (
     "dr_database_runtime",
     "dr_durability_state",
@@ -344,6 +345,39 @@ def build_statements(
             f"public.webapp_writer_state TO {role}"
         )
     owner_role = _ident(str(connection.scalar(text("SELECT current_user"))))
+    statements.extend(
+        (
+            f"""
+CREATE OR REPLACE FUNCTION public.{DURABILITY_GATE_READ_FUNCTION}()
+RETURNS TABLE (
+    connectivity_mode text,
+    event_journal_healthy boolean,
+    blob_journal_healthy boolean,
+    evidence_expires_at timestamptz
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT state.connectivity_mode::text,
+           state.event_journal_healthy,
+           state.blob_journal_healthy,
+           state.evidence_expires_at
+    FROM public.dr_durability_state AS state
+    WHERE state.singleton_id = 1
+    FOR SHARE;
+END;
+$$
+""".strip(),
+            f"ALTER FUNCTION public.{DURABILITY_GATE_READ_FUNCTION}() OWNER TO {owner_role}",
+            f"REVOKE ALL ON FUNCTION public.{DURABILITY_GATE_READ_FUNCTION}() "
+            f"FROM PUBLIC, {role_list}",
+            f"GRANT EXECUTE ON FUNCTION public.{DURABILITY_GATE_READ_FUNCTION}() "
+            f"TO {application_role}",
+        )
+    )
     statements.extend(
         (
             f"ALTER DEFAULT PRIVILEGES FOR ROLE {owner_role} IN SCHEMA public REVOKE ALL ON TABLES FROM {role_list}",
