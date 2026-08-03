@@ -391,6 +391,17 @@ class ThreeSiteStagingRoleMigrationTests(unittest.TestCase):
                 ),
                 0,
             )
+            self.assertEqual(journal.load()["status"], "committed")
+            self.assertEqual(
+                main(
+                    [
+                        "finish", "--role", "webapp_fi", "--journal", str(journal.path),
+                        "--evidence", str(global_commit), "--apply", "--confirm",
+                        f"migrate-role:{CAMPAIGN_ID}:webapp_fi:finish:{PLAN_SHA}",
+                    ]
+                ),
+                0,
+            )
             self.assertEqual(journal.load()["status"], "finished")
 
     def test_failed_phase_is_not_forward_resumable(self):

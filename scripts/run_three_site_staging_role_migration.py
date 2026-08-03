@@ -963,7 +963,20 @@ def main(argv: list[str] | None = None) -> int:
             if args.evidence is None:
                 raise RoleMigrationError("finish requires global commit evidence")
             _verify_global_commit(args.evidence, role=args.role, state=state)
-            result = journal.finish()
+            required = confirmation_phrase(
+                state["campaign_id"], args.role, args.action, state["plan_sha256"]
+            )
+            if not args.apply:
+                result = {
+                    "status": "planned",
+                    "action": "finish",
+                    "role": args.role,
+                    "required_confirmation": required,
+                }
+            else:
+                if args.confirm != required:
+                    raise RoleMigrationError("role finish confirmation mismatch")
+                result = journal.finish()
         elif args.action == "rollback":
             _require_rollback_inputs(args)
             # Rollback remains possible after plan expiry. The exact Compose
