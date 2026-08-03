@@ -937,40 +937,85 @@ def render_user_details_pdf_page(
         rows_html.append("<tr><td colspan='8' style='text-align:center;padding:20px;color:#888'>هیچ داده‌ای در این بازه زمانی یافت نشد.</td></tr>")
     elif is_trade:
         for idx, item in enumerate(data["items"], 1):
-            side_color = "#10b981" if item["side"] == "خرید" else "#ef4444"
+            side_color = "#059669" if item["side"] == "خرید" else "#dc2626"
             rows_html.append(
                 f"<tr>"
-                f"<td>{fa_number(idx)}</td>"
+                f"<td style='text-align:center'>{fa_number(idx)}</td>"
                 f"<td>{item['time']}</td>"
                 f"<td><strong>{item['role']}</strong></td>"
                 f"<td><strong style='color:#b45309'>{item['counterparty']}</strong></td>"
                 f"<td>{item['commodity']}</td>"
-                f"<td style='color:{side_color};font-weight:bold'>{item['side']}</td>"
-                f"<td dir='ltr' style='text-align:left'><strong>{item['price']}</strong> تومان</td>"
-                f"<td dir='ltr' style='text-align:left'>{item['quantity']} عدد</td>"
+                f"<td style='color:{side_color};font-weight:bold;text-align:center'>{item['side']}</td>"
+                f"<td dir='ltr' style='text-align:left;font-weight:bold'>{item['price']}</td>"
+                f"<td dir='ltr' style='text-align:left'>{item['quantity']}</td>"
                 f"</tr>"
             )
     else:
         for idx, item in enumerate(data["items"], 1):
-            side_color = "#10b981" if item["side"] == "خرید" else "#ef4444"
+            side_color = "#059669" if item["side"] == "خرید" else "#dc2626"
             rows_html.append(
                 f"<tr>"
-                f"<td>{fa_number(idx)}</td>"
+                f"<td style='text-align:center'>{fa_number(idx)}</td>"
                 f"<td>{item['time']}</td>"
                 f"<td>{item['commodity']}</td>"
-                f"<td style='color:{side_color};font-weight:bold'>{item['side']}</td>"
-                f"<td dir='ltr' style='text-align:left'><strong>{item['price']}</strong> تومان</td>"
-                f"<td dir='ltr' style='text-align:left'>{item['quantity']} عدد</td>"
+                f"<td style='color:{side_color};font-weight:bold;text-align:center'>{item['side']}</td>"
+                f"<td dir='ltr' style='text-align:left;font-weight:bold'>{item['price']}</td>"
+                f"<td dir='ltr' style='text-align:left'>{item['quantity']}</td>"
                 f"<td>{item['settlement']}</td>"
-                f"<td style='max-width:250px;word-break:break-word'>{item['text']}</td>"
+                f"<td style='word-break:break-word'>{item['text']}</td>"
                 f"</tr>"
             )
 
-    table_headers = """
-      <tr><th>#</th><th>زمان ثبت</th><th>نقش کاربر</th><th>طرف مقابل معامله</th><th>کالا</th><th>سمت</th><th style="text-align:left">قیمت</th><th style="text-align:left">تعداد</th></tr>
-    """ if is_trade else """
-      <tr><th>#</th><th>زمان ثبت</th><th>کالا</th><th>سمت</th><th style="text-align:left">قیمت</th><th style="text-align:left">تعداد</th><th>تسویه</th><th>متن آفر</th></tr>
-    """
+    if is_trade:
+        colgroup_html = """
+          <colgroup>
+            <col style="width:5%">
+            <col style="width:20%">
+            <col style="width:13%">
+            <col style="width:24%">
+            <col style="width:13%">
+            <col style="width:7%">
+            <col style="width:11%">
+            <col style="width:7%">
+          </colgroup>
+        """
+        table_headers = """
+          <tr>
+            <th style="text-align:center">#</th>
+            <th>زمان ثبت</th>
+            <th>نقش کاربر</th>
+            <th>طرف مقابل معامله</th>
+            <th>کالا</th>
+            <th style="text-align:center">سمت</th>
+            <th style="text-align:left">قیمت (تومان)</th>
+            <th style="text-align:left">تعداد</th>
+          </tr>
+        """
+    else:
+        colgroup_html = """
+          <colgroup>
+            <col style="width:5%">
+            <col style="width:20%">
+            <col style="width:12%">
+            <col style="width:7%">
+            <col style="width:12%">
+            <col style="width:7%">
+            <col style="width:10%">
+            <col style="width:27%">
+          </colgroup>
+        """
+        table_headers = """
+          <tr>
+            <th style="text-align:center">#</th>
+            <th>زمان ثبت</th>
+            <th>کالا</th>
+            <th style="text-align:center">سمت</th>
+            <th style="text-align:left">قیمت (تومان)</th>
+            <th style="text-align:left">تعداد</th>
+            <th>تسویه</th>
+            <th>متن آفر</th>
+          </tr>
+        """
 
     doc = f"""<!doctype html>
 <html lang="fa" dir="rtl">
@@ -981,88 +1026,98 @@ def render_user_details_pdf_page(
 @import url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css');
 @page {{
   size: A4 portrait;
-  margin: 15mm;
+  margin: 8mm 10mm;
 }}
 body {{
   font-family: Vazirmatn, system-ui, -apple-system, sans-serif;
-  color: #1e293b;
+  color: #0f172a;
   background: #ffffff;
   margin: 0;
-  padding: 24px;
-  line-height: 1.5;
+  padding: 16px;
+  line-height: 1.4;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }}
 .header {{
   display: flex;
   justify-content: space-between;
   align-items: center;
   border-bottom: 2px solid #f59e0b;
-  padding-bottom: 14px;
-  margin-bottom: 20px;
+  padding-bottom: 10px;
+  margin-bottom: 16px;
 }}
 .header h1 {{
   margin: 0 0 4px;
-  font-size: 20px;
+  font-size: 19px;
   color: #0f172a;
+  font-weight: 800;
 }}
 .header p {{
   margin: 0;
-  font-size: 13px;
-  color: #64748b;
+  font-size: 12.5px;
+  color: #475569;
 }}
 .meta-grid {{
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-  margin-bottom: 20px;
+  gap: 10px;
+  margin-bottom: 16px;
   background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 14px 18px;
-  font-size: 13px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
 }}
 .meta-item strong {{
   color: #0f172a;
   display: block;
-  font-size: 14px;
+  font-size: 13.5px;
   margin-top: 2px;
 }}
 table {{
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
-  margin-top: 10px;
+  table-layout: fixed;
+  font-size: 11.5px;
+  margin-top: 8px;
+}}
+th, td {{
+  padding: 7px 8px;
+  border: 1px solid #cbd5e1;
+  text-align: right;
+  vertical-align: middle;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }}
 th {{
-  background: #0f172a;
-  color: #ffffff;
-  padding: 9px 12px;
-  text-align: right;
+  background: #0f172a !important;
+  color: #ffffff !important;
   font-weight: 700;
-}}
-td {{
-  padding: 9px 12px;
-  border-bottom: 1px solid #e2e8f0;
+  font-size: 11.5px;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }}
 tr:nth-child(even) td {{
   background: #f8fafc;
 }}
 .footer {{
-  margin-top: 30px;
-  border-top: 1px solid #e2e8f0;
-  padding-top: 12px;
+  margin-top: 24px;
+  border-top: 1px solid #cbd5e1;
+  padding-top: 10px;
   text-align: center;
   font-size: 11px;
-  color: #94a3b8;
+  color: #64748b;
 }}
 @media print {{
   .no-print {{ display: none !important; }}
-  body {{ padding: 0; }}
+  body {{ padding: 0; margin: 0; }}
+  @page {{ margin: 8mm 10mm; }}
 }}
 </style>
 </head>
 <body>
-<div class="no-print" style="margin-bottom:20px;text-align:left">
-  <button onclick="window.print()" style="background:#f59e0b;color:#0f172a;border:none;padding:10px 22px;font-family:inherit;font-weight:bold;font-size:14px;border-radius:8px;cursor:pointer;box-shadow:0 4px 12px rgba(245,158,11,0.3)">🖨️ چاپ / ذخیره مستقیم به عنوان PDF</button>
+<div class="no-print" style="margin-bottom:16px;text-align:left">
+  <button onclick="window.print()" style="background:#f59e0b;color:#0f172a;border:none;padding:9px 20px;font-family:inherit;font-weight:bold;font-size:13.5px;border-radius:8px;cursor:pointer;box-shadow:0 4px 12px rgba(245,158,11,0.3)">🖨️ چاپ / ذخیره مستقیم به عنوان PDF</button>
 </div>
 
 <div class="header">
@@ -1070,8 +1125,8 @@ tr:nth-child(even) td {{
     <h1>گزارش آمار و فعالیت کاربر: {html.escape(username)}</h1>
     <p>نوع گزارش: {kind_title} — گروه معاملاتی {fa_number(group)}</p>
   </div>
-  <div style="text-align:left;font-size:12px;color:#64748b">
-    <div>سامانه هوشمند تحلیل بازار سکه</div>
+  <div style="text-align:left;font-size:11.5px;color:#475569">
+    <div>سامانه تحلیل و برآورد بازار سکه</div>
     <div>تاریخ تنظیم: {now_fa}</div>
   </div>
 </div>
@@ -1084,6 +1139,7 @@ tr:nth-child(even) td {{
 </div>
 
 <table>
+  {colgroup_html}
   <thead>{table_headers}</thead>
   <tbody>{''.join(rows_html)}</tbody>
 </table>
