@@ -29,12 +29,22 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.secure_file_io import read_secure_bytes, write_secure_atomic_bytes
-from scripts.amend_three_site_staging_bot_token import verify_amendment
 from scripts.arvan_origin_switch import inspect_or_switch, load_token
 from scripts.render_three_site_staging_role_compose import parse_env_values
 from scripts.verify_three_site_staging_image_inventory import verify_image_document
 from scripts.verify_three_site_staging_inventory import _strict_object
 from scripts.verify_three_site_staging_role_bundle import _verify_bundle_source
+
+try:
+    from scripts.amend_three_site_staging_bot_token import verify_amendment
+except ModuleNotFoundError:
+    # The release checkout is intentionally immutable.  During a staging
+    # migration the optional Bot material verifier therefore lives beside this
+    # owner-only control tool, not under the attested release's scripts/ tree.
+    try:
+        from amend_three_site_staging_bot_token import verify_amendment
+    except ModuleNotFoundError:
+        verify_amendment = None
 
 
 SAFE_ENV = {
@@ -611,6 +621,8 @@ def collect_role(args: argparse.Namespace) -> dict[str, Any]:
     if runtime_env_file is not None:
         if args.role != "bot_fi":
             raise ObservationError("runtime material amendment is valid only for Bot-FI")
+        if verify_amendment is None:
+            raise ObservationError("Bot runtime material verifier is unavailable")
         try:
             bot_material = verify_amendment(
                 evidence_path=bot_material_amendment,
