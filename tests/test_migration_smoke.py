@@ -39,7 +39,7 @@ class MigrationSmokeTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
         heads = [line for line in result.stdout.splitlines() if line.strip()]
-        self.assertEqual(heads, ['e0a4b6c8d1e3 (head)'])
+        self.assertEqual(heads, ['f2c3d4e5a6b7 (head)'])
 
     def test_executed_e653_revision_is_immutable_and_remediation_is_forward_only(self):
         versions = REPO_ROOT / 'migrations' / 'versions'
@@ -79,6 +79,12 @@ class MigrationSmokeTests(unittest.TestCase):
         self.assertIn('column_name="first_attempt_at"', projection_policy_fix_source)
         self.assertIn('ON CONFLICT (table_name, column_name) DO NOTHING', projection_policy_fix_source)
         self.assertIn('forward-only', projection_policy_fix_source)
+        two_phase_capture = versions / 'f2c3d4e5a6b7_make_authoritative_capture_2pc_safe.py'
+        two_phase_source = two_phase_capture.read_text(encoding='utf-8')
+        self.assertIn('down_revision = "e0a4b6c8d1e3"', two_phase_source)
+        self.assertIn('dr_authoritative_mutations', two_phase_source)
+        self.assertIn('PREPARE TRANSACTION', two_phase_source)
+        self.assertIn('forward-only', two_phase_source)
 
     def test_writer_trigger_uses_database_boottime_not_wall_clock(self):
         migration = (

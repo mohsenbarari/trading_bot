@@ -406,6 +406,16 @@ $$
             f"REVOKE EXECUTE ON FUNCTION {function_identity} FROM PUBLIC, "
             f"{role_list}"
         )
+    # The durability-gate function is intentionally the one closed
+    # SECURITY DEFINER read surface that the application role may execute.
+    # It is included in the generic SECURITY DEFINER revoke query above, so
+    # restore its least-privilege grant after that loop.  Keeping this grant
+    # last prevents a repeat fencing run from silently breaking every
+    # authoritative WebApp write at the durability gate.
+    statements.append(
+        f"GRANT EXECUTE ON FUNCTION public.{DURABILITY_GATE_READ_FUNCTION}() "
+        f"TO {application_role}"
+    )
     writer_tables = connection.execute(
         text(
             "SELECT DISTINCT c.relname FROM pg_trigger t "
