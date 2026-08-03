@@ -29,6 +29,16 @@ class StagingRoleTradingE2EGateTests(unittest.TestCase):
         self.assertIn("select(MarketScheduleOverride)", configure_fixture)
         self.assertIn("await db.delete(override)", configure_fixture)
 
+    def test_three_site_staging_container_names_are_explicitly_accepted(self):
+        gate = (ROOT / "scripts/run_staging_role_trading_e2e_gate.sh").read_text(encoding="utf-8")
+        runtime = (ROOT / "frontend/e2e/helpers/mutationRuntime.ts").read_text(encoding="utf-8")
+
+        self.assertIn("trading-bot-three-site-stage", gate)
+        self.assertIn("webapp_(fi|ir)_api-1", gate)
+        self.assertIn("webapp_(fi|ir)_redis-1", gate)
+        self.assertIn("THREE_SITE_STAGING_APP_CONTAINER", runtime)
+        self.assertIn("THREE_SITE_STAGING_REDIS_CONTAINER", runtime)
+
 
 if __name__ == "__main__":
     unittest.main()

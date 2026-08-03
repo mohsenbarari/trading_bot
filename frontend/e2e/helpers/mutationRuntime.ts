@@ -5,6 +5,8 @@ const DEFAULT_LOCAL_APP_CONTAINER_NAME = 'trading_bot_app'
 const DEFAULT_LOCAL_REDIS_CONTAINER_NAME = 'trading_bot_redis'
 const STAGING_MUTATION_CONFIRM = 'role-trading-staging-only'
 const LOCAL_MUTATION_CONFIRM = 'local-dev-only'
+const THREE_SITE_STAGING_APP_CONTAINER = /^trading-bot-three-site-stage\d+-[0-9a-f]+-webapp-(?:fi|ir)-webapp_(?:fi|ir)_api-1$/i
+const THREE_SITE_STAGING_REDIS_CONTAINER = /^trading-bot-three-site-stage\d+-[0-9a-f]+-webapp-(?:fi|ir)-webapp_(?:fi|ir)_redis-1$/i
 
 export function getE2EBackendBaseUrl() {
   return (process.env.E2E_BACKEND_BASE_URL || DEFAULT_LOCAL_BACKEND_BASE_URL).trim()
@@ -12,6 +14,14 @@ export function getE2EBackendBaseUrl() {
 
 function getTargetEnvironment() {
   return (process.env.E2E_TARGET_ENV || '').trim().toLowerCase()
+}
+
+function isExplicitStagingAppContainer(containerName: string) {
+  return /staging/i.test(containerName) || THREE_SITE_STAGING_APP_CONTAINER.test(containerName)
+}
+
+function isExplicitStagingRedisContainer(containerName: string) {
+  return /staging/i.test(containerName) || THREE_SITE_STAGING_REDIS_CONTAINER.test(containerName)
 }
 
 function discoverLocalAppContainerName() {
@@ -62,7 +72,7 @@ function assertStagingMutationRuntime(containerName: string, backendBaseUrl: str
       `staging mutation e2e requires E2E_ALLOW_STAGING_MUTATION=${STAGING_MUTATION_CONFIRM}`,
     )
   }
-  if (containerName === DEFAULT_LOCAL_APP_CONTAINER_NAME || !/staging/i.test(containerName)) {
+  if (containerName === DEFAULT_LOCAL_APP_CONTAINER_NAME || !isExplicitStagingAppContainer(containerName)) {
     throw new Error(
       `staging mutation e2e must target an explicit staging app container, got "${containerName}"`,
     )
@@ -80,7 +90,7 @@ function assertStagingMutationRuntime(containerName: string, backendBaseUrl: str
 }
 
 function assertStagingRedisTarget(containerName: string) {
-  if (containerName === DEFAULT_LOCAL_REDIS_CONTAINER_NAME || !/staging/i.test(containerName)) {
+  if (containerName === DEFAULT_LOCAL_REDIS_CONTAINER_NAME || !isExplicitStagingRedisContainer(containerName)) {
     throw new Error(
       `staging mutation e2e must target an explicit staging Redis container, got "${containerName}"`,
     )

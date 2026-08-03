@@ -59,6 +59,18 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
 }
 
+is_explicit_staging_app_container() {
+  local name="$1"
+  [[ "$name" == *staging* ]] && return 0
+  [[ "$name" =~ ^trading-bot-three-site-stage[0-9]+-[0-9a-f]+-webapp-(fi|ir)-webapp_(fi|ir)_api-1$ ]]
+}
+
+is_explicit_staging_redis_container() {
+  local name="$1"
+  [[ "$name" == *staging* ]] && return 0
+  [[ "$name" =~ ^trading-bot-three-site-stage[0-9]+-[0-9a-f]+-webapp-(fi|ir)-webapp_(fi|ir)_redis-1$ ]]
+}
+
 write_json() {
   local path="$1"
   shift
@@ -78,9 +90,9 @@ PY
 
 assert_safe_staging_target() {
   [[ "$STAGING_APP_CONTAINER_NAME" != "trading_bot_app" ]] || die "refusing to target production-like container trading_bot_app"
-  [[ "$STAGING_APP_CONTAINER_NAME" == *staging* ]] || die "staging app container must include 'staging': $STAGING_APP_CONTAINER_NAME"
+  is_explicit_staging_app_container "$STAGING_APP_CONTAINER_NAME" || die "staging app container is not an approved staging name: $STAGING_APP_CONTAINER_NAME"
   [[ "$STAGING_REDIS_CONTAINER_NAME" != "trading_bot_redis" ]] || die "refusing to target production-like Redis container trading_bot_redis"
-  [[ "$STAGING_REDIS_CONTAINER_NAME" == *staging* ]] || die "staging Redis container must include 'staging': $STAGING_REDIS_CONTAINER_NAME"
+  is_explicit_staging_redis_container "$STAGING_REDIS_CONTAINER_NAME" || die "staging Redis container is not an approved staging name: $STAGING_REDIS_CONTAINER_NAME"
   [[ "$STAGING_BACKEND_BASE_URL" != "http://127.0.0.1:8000" ]] || die "refusing to target default production-like backend URL"
   [[ "$STAGING_BACKEND_BASE_URL" == *":8100"* || "$STAGING_BACKEND_BASE_URL" == *staging* ]] || die "backend URL must visibly point to staging: $STAGING_BACKEND_BASE_URL"
 
