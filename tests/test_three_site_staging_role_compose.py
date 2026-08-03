@@ -129,6 +129,30 @@ class ThreeSiteStagingRoleComposeTests(unittest.TestCase):
         self.assertEqual(fi_control["WRITER_WITNESS_REQUIRED"], "true")
         self.assertEqual(ir_control["WRITER_WITNESS_REQUIRED"], "true")
 
+    def test_private_tls_proxies_reresolve_restartable_service_names(self):
+        """A service restart must not leave the private TLS proxy on a stale IP."""
+
+        expected = {
+            "bot-fi-dr.conf": (
+                ("bot_fi_journal_upstream", "bot_fi_durability_journal"),
+                ("bot_fi_receiver_upstream", "bot_fi_dr_receiver"),
+            ),
+            "webapp-fi-dr.conf": (("webapp_fi_receiver_upstream", "webapp_fi_dr_receiver"),),
+            "webapp-ir-dr.conf": (("webapp_ir_receiver_upstream", "webapp_ir_dr_receiver"),),
+            "witness-dr.conf": (("witness_api_upstream", "witness_api"),),
+        }
+        for name, upstreams in expected.items():
+            with self.subTest(config=name):
+                config = (ROOT / "deploy" / "staging" / "nginx" / name).read_text(
+                    encoding="utf-8"
+                )
+                self.assertIn("resolver 127.0.0.11 ipv6=off valid=10s;", config)
+                self.assertIn("resolver_timeout 3s;", config)
+                for variable, service in upstreams:
+                    self.assertIn(f"set ${variable} {service}:8000;", config)
+                    self.assertIn(f"proxy_pass http://${variable};", config)
+                    self.assertNotIn(f"proxy_pass http://{service}:8000;", config)
+
 
 if __name__ == "__main__":
     unittest.main()
