@@ -785,7 +785,33 @@ def query_user_analytics(
                 ).fetchall()
             ]
 
+            total_offer_row = conn.execute(
+                """
+                SELECT COUNT(*) AS c, SUM(COALESCE(quantity, 1)) AS q
+                FROM offer_training_examples
+                WHERE group_number = ? AND occurred_at_utc >= ? AND occurred_at_utc <= ?
+                """,
+                (group, start_utc, end_utc),
+            ).fetchone()
+
+            total_trade_row = conn.execute(
+                """
+                SELECT COUNT(*) AS c, SUM(COALESCE(quantity, 1)) AS q
+                FROM confirmed_trade_training_examples
+                WHERE group_number = ? AND occurred_at_utc >= ? AND occurred_at_utc <= ?
+                """,
+                (group, start_utc, end_utc),
+            ).fetchone()
+
+            summary = {
+                "total_offer_count": total_offer_row["c"] if total_offer_row else 0,
+                "total_offer_qty": total_offer_row["q"] if (total_offer_row and total_offer_row["q"]) else 0,
+                "total_trade_count": total_trade_row["c"] if total_trade_row else 0,
+                "total_trade_qty": total_trade_row["q"] if (total_trade_row and total_trade_row["q"]) else 0,
+            }
+
             groups_data[group] = {
+                "summary": summary,
                 "top_offer_count": top_offer_count,
                 "top_trade_count": top_trade_count,
                 "top_offer_qty": top_offer_qty,
@@ -2278,6 +2304,46 @@ def render_analytics_page(
     groups_html = []
     for grp in (1, 2):
         gdata = data["groups"].get(grp, {})
+        summary = gdata.get("summary", {})
+
+        off_c = fa_number(summary.get("total_offer_count", 0))
+        off_q = fa_number(summary.get("total_offer_qty", 0))
+        trd_c = fa_number(summary.get("total_trade_count", 0))
+        trd_q = fa_number(summary.get("total_trade_qty", 0))
+
+        summary_cards_html = f"""
+        <div class='group-summary-grid'>
+          <div class='summary-card'>
+            <div class='stat-icon'>📨</div>
+            <div class='stat-info'>
+              <span>تعداد کل آفرها</span>
+              <strong>{off_c} <small>آفر</small></strong>
+            </div>
+          </div>
+          <div class='summary-card'>
+            <div class='stat-icon'>🤝</div>
+            <div class='stat-info'>
+              <span>تعداد کل معاملات</span>
+              <strong>{trd_c} <small>معامله</small></strong>
+            </div>
+          </div>
+          <div class='summary-card'>
+            <div class='stat-icon'>📦</div>
+            <div class='stat-info'>
+              <span>حجم کالای آفرشده</span>
+              <strong>{off_q} <small>عدد کالا</small></strong>
+            </div>
+          </div>
+          <div class='summary-card'>
+            <div class='stat-icon'>🏷️</div>
+            <div class='stat-info'>
+              <span>حجم کالای معامله‌شده</span>
+              <strong>{trd_q} <small>عدد کالا</small></strong>
+            </div>
+          </div>
+        </div>
+        """
+
         t1 = render_analytics_leaderboard_table("۱۰ کاربر بیشترین آفر دهنده", "بر اساس تعداد آفر ثبت‌شده", gdata.get("top_offer_count", []), "count", "آفر", grp, "offer")
         t2 = render_analytics_leaderboard_table("۱۰ کاربر بیشترین معامله کننده", "شامل خریدار و فروشنده / آفر و درخواست", gdata.get("top_trade_count", []), "count", "معامله", grp, "trade")
         t3 = render_analytics_leaderboard_table("۱۰ کاربر بیشترین حجم آفر", "مجموع تعداد کالای پیشنهادشده", gdata.get("top_offer_qty", []), "total_qty", "عدد کالا", grp, "offer_qty")
@@ -2287,9 +2353,10 @@ def render_analytics_page(
             f"""
             <section class='group-analytics-section'>
               <div class='section-head'>
-                <h2>تحلیل و لیدربورد کاربران — گروه {fa_number(grp)}</h2>
+                <h2>تحلیل و خلاصه آمار — گروه {fa_number(grp)}</h2>
                 <span class='badge'>گروه {fa_number(grp)} معاملاتی</span>
               </div>
+              {summary_cards_html}
               <div class='leaderboards-grid'>
                 {t1}
                 {t2}
@@ -2479,6 +2546,59 @@ h1 {{
   align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
+}}
+.group-summary-grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}}
+.summary-card {{
+  background: var(--bg-card);
+  border: 1px solid var(--border-gold);
+  box-shadow: var(--border-gold-glow);
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}}
+.summary-card:hover {{
+  transform: translateY(-2px);
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.25);
+}}
+.stat-icon {{
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.2), rgba(6, 182, 212, 0.2));
+  border: 1px solid var(--border-gold);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  flex-shrink: 0;
+}}
+.stat-info {{
+  display: flex;
+  flex-direction: column;
+}}
+.stat-info span {{
+  font-size: 12px;
+  color: var(--text-sub);
+  font-weight: 600;
+}}
+.stat-info strong {{
+  font-size: 19px;
+  font-weight: 800;
+  color: var(--accent-gold);
+  line-height: 1.2;
+}}
+.stat-info strong small {{
+  font-size: 11.5px;
+  color: var(--accent-cyan);
+  font-weight: 600;
 }}
 h2 {{
   margin: 0;

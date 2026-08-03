@@ -1250,8 +1250,11 @@ class EstimatorTests(unittest.TestCase):
         self.assertIsNotNone(iso_start)
         res = query_user_analytics(db_path, range_type="today")
         self.assertIn("groups", res)
+        self.assertIn("summary", res["groups"].get(1, {}))
         body = render_analytics_page(db_path, range_type="today").decode("utf-8")
         self.assertIn("آمار و تحلیل", body)
+        self.assertIn("تعداد کل آفرها", body)
+        self.assertIn("تعداد کل معاملات", body)
         self.assertIn("گروه ۱", body)
         self.assertIn("گروه ۲", body)
 
