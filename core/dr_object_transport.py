@@ -81,6 +81,10 @@ class ObjectStorageEventReceipt:
     event_object_version_id: str
     event_ciphertext_hash: str
     event_ciphertext_size: int
+    receipt_object_key: str
+    receipt_object_version_id: str
+    receipt_ciphertext_hash: str
+    receipt_ciphertext_size: int
     acknowledgement: dict[str, Any]
     receipt_hash: str
 
@@ -501,6 +505,7 @@ def parse_event_receipt(
     *,
     event: ObjectStorageEventRecord,
     stored: StoredControlObject,
+    receipt_stored: StoredControlObject,
     key: PairwiseDrKey,
 ) -> ObjectStorageEventReceipt:
     receipt = _strict_json(plaintext)
@@ -543,6 +548,10 @@ def parse_event_receipt(
         event_object_version_id=stored.version_id,
         event_ciphertext_hash=stored.identity.ciphertext_hash,
         event_ciphertext_size=stored.identity.ciphertext_size,
+        receipt_object_key=receipt_stored.object_key,
+        receipt_object_version_id=receipt_stored.version_id,
+        receipt_ciphertext_hash=receipt_stored.identity.ciphertext_hash,
+        receipt_ciphertext_size=receipt_stored.identity.ciphertext_size,
         acknowledgement=receipt["acknowledgement"],
         receipt_hash=receipt["receipt_hash"],
     )
@@ -568,7 +577,13 @@ def publish_event_receipt(
         keyring=keyring,
         immutable=False,
     )
-    return parse_event_receipt(receipt.plaintext, event=event, stored=stored, key=key)
+    return parse_event_receipt(
+        receipt.plaintext,
+        event=event,
+        stored=stored,
+        receipt_stored=receipt,
+        key=key,
+    )
 
 
 def load_event_receipt(
@@ -581,7 +596,13 @@ def load_event_receipt(
 ) -> ObjectStorageEventReceipt:
     receipt_key = _receipt_object_key(key=key, event=event, stored=stored)
     receipt = load_control_record(config, object_key=receipt_key, keyring=keyring)
-    return parse_event_receipt(receipt.plaintext, event=event, stored=stored, key=key)
+    return parse_event_receipt(
+        receipt.plaintext,
+        event=event,
+        stored=stored,
+        receipt_stored=receipt,
+        key=key,
+    )
 
 
 def _blob_receipt_request_hash(

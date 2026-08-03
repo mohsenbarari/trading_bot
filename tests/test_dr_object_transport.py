@@ -223,6 +223,8 @@ class DrObjectTransportTests(unittest.TestCase):
             keyring=self.keyring,
         )
         self.assertEqual(receipt.event_object_version_id, stored.version_id)
+        self.assertNotEqual(receipt.receipt_object_key, stored.object_key)
+        self.assertTrue(receipt.receipt_object_version_id)
         self.assertEqual(self.s3.put_count, 2)
 
         applied = {**received, "results": [{"status": "applied"}]}

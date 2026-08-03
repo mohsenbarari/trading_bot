@@ -236,8 +236,8 @@ async def _event_consume(object_key: str) -> None:
             "kind": "non_mutating_event_replay_receipt",
             "event_count": len(event_ids),
             "event_object_version_id": stored.version_id,
-            "receipt_object_key": receipt.object_key,
-            "receipt_object_version_id": receipt.object_version_id,
+            "receipt_object_key": receipt.receipt_object_key,
+            "receipt_object_version_id": receipt.receipt_object_version_id,
             "receipt_hash": receipt.receipt_hash,
         }
     )
@@ -274,7 +274,7 @@ async def _event_verify(object_key: str) -> None:
             "schema": PROBE_SCHEMA,
             "kind": "non_mutating_event_replay_verified",
             "event_object_version_id": stored.version_id,
-            "receipt_object_version_id": receipt.object_version_id,
+            "receipt_object_version_id": receipt.receipt_object_version_id,
             "receipt_hash": receipt.receipt_hash,
         }
     )
