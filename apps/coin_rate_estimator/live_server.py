@@ -928,7 +928,7 @@ def render_analytics_leaderboard_table(
             rows.append(
                 f"<tr>"
                 f"<td class='rank-col'>#{fa_number(idx)}</td>"
-                f"<td><a class='user-link' href='#' data-username='{escaped_name}' data-group='{group}' data-kind='{kind}'><strong>{escaped_name}</strong></a></td>"
+                f"<td><a class='user-link' href='javascript:void(0)' data-username='{escaped_name}' data-group='{group}' data-kind='{kind}' onclick='openUserModal(this.getAttribute(\"data-username\"), this.getAttribute(\"data-group\"), this.getAttribute(\"data-kind\"))'><strong>{escaped_name}</strong></a></td>"
                 f"<td class='value-col'><strong>{val}</strong> <small>{val_unit}</small></td>"
                 f"</tr>"
             )
@@ -2549,6 +2549,7 @@ function closeUserModal(e) {{
 document.addEventListener("keydown", (e) => {{
   if (e.key === "Escape") closeUserModal();
 }});
+</script>
 </body>
 </html>"""
     return document.encode("utf-8")
