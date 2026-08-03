@@ -34,6 +34,7 @@ SOURCE_ROOT_RE = re.compile(
     r"^/srv/trading-bot-three-site-staging-data/releases/([0-9a-f]{40})/source$"
 )
 JOURNAL_KEY_ID = "staging-fi-journal-v1"
+DR_MIGRATION_REVISION = "e0a4b6c8d1e3"
 JOURNAL_KEYS = frozenset(
     {
         "BOT_FI_JOURNAL_DB_PASSWORD",
@@ -124,6 +125,7 @@ def build_environment(
             "WEBAPP_FI_SAME_REGION_JOURNAL_ENCRYPTION_SECRET": encryption_secret,
             "STAGING_WEBAPP_FI_JOURNAL_TWO_PHASE_ENABLED": "false",
             "STAGING_WEBAPP_FI_MAX_PREPARED_TRANSACTIONS": "32",
+            "ORIGIN_EXPECTED_MIGRATION_REVISION": DR_MIGRATION_REVISION,
         }
     )
     rendered = canonical_role_env_bytes(values, required_names=frozenset(values))
@@ -194,6 +196,7 @@ def rebind_existing_environment(
         raise JournalMaterialError("rebound journal secret is unsafe")
     values["STAGING_RELEASE_SHA"] = release
     values["STAGING_SOURCE_ROOT"] = source_root
+    values["ORIGIN_EXPECTED_MIGRATION_REVISION"] = DR_MIGRATION_REVISION
     rendered = canonical_role_env_bytes(values, required_names=frozenset(values))
     metadata = {
         "release_sha": release,
@@ -205,6 +208,7 @@ def rebind_existing_environment(
         "database_password_sha256": hashlib.sha256(database_password.encode()).hexdigest(),
         "environment_sha256": hashlib.sha256(rendered).hexdigest(),
         "journal_material_reused": "true",
+        "dr_migration_revision": DR_MIGRATION_REVISION,
     }
     return rendered, metadata
 
@@ -250,6 +254,7 @@ def main(argv: list[str] | None = None) -> int:
                 "environment_sha256": metadata["environment_sha256"],
                 "two_phase_enabled": False,
                 "journal_material_reused": args.reuse_existing_journal_material,
+                "dr_migration_revision": metadata["dr_migration_revision"],
                 "secrets_printed": False,
             },
             sort_keys=True,

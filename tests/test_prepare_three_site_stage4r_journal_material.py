@@ -4,6 +4,7 @@ import hashlib
 import unittest
 
 from scripts.prepare_three_site_stage4r_journal_material import (
+    DR_MIGRATION_REVISION,
     JOURNAL_KEY_ID,
     JournalMaterialError,
     build_environment,
@@ -36,6 +37,7 @@ class Stage4RJournalMaterialTests(unittest.TestCase):
         self.assertIn(f"STAGING_SOURCE_ROOT={SOURCE_ROOT}\n", text)
         self.assertIn("STAGING_WEBAPP_FI_JOURNAL_TWO_PHASE_ENABLED=false\n", text)
         self.assertIn("STAGING_WEBAPP_FI_MAX_PREPARED_TRANSACTIONS=32\n", text)
+        self.assertIn(f"ORIGIN_EXPECTED_MIGRATION_REVISION={DR_MIGRATION_REVISION}\n", text)
         self.assertIn(f"WEBAPP_FI_SAME_REGION_JOURNAL_ENCRYPTION_KEY_ID={JOURNAL_KEY_ID}\n", text)
         bot = next(line for line in text.splitlines() if line.startswith("BOT_FI_SAME_REGION_JOURNAL_KEYS_JSON="))
         webapp = next(line for line in text.splitlines() if line.startswith("WEBAPP_FI_SAME_REGION_JOURNAL_KEYS_JSON="))
@@ -89,6 +91,7 @@ class Stage4RJournalMaterialTests(unittest.TestCase):
         self.assertEqual(metadata["encryption_secret_sha256"], old_metadata["encryption_secret_sha256"])
         self.assertEqual(metadata["database_password_sha256"], old_metadata["database_password_sha256"])
         self.assertEqual(metadata["journal_material_reused"], "true")
+        self.assertEqual(metadata["dr_migration_revision"], DR_MIGRATION_REVISION)
 
     def test_rebind_rejects_changed_pairwise_material(self):
         values = iter(("database-secret-" + "a" * 48, "pairwise-secret-" + "b" * 48, "encryption-secret-" + "c" * 48))
