@@ -106,6 +106,7 @@ def main() -> int:
     append_report = runtime_root / "latest_ledger_append_report.json"
     melted_append_report = runtime_root / "latest_melted_ledger_append_report.json"
     challenger_report = runtime_root / "latest_challenger_report.json"
+    melted_challenger_report = runtime_root / "latest_melted_challenger_report.json"
     with lock_path.open("a+") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -141,6 +142,15 @@ def main() -> int:
             {"status": "SHADOW_MELTED_LEDGER_UPDATED", "automatic_promotion": False}
         )
         _write_json_atomic(melted_append_report, melted_ledger)
+        melted_challenger = _run(
+            [
+                sys.executable,
+                str(REPO_ROOT / "scripts" / "train_melted_relationship_challenger_shadow.py"),
+                "--acknowledge-shadow-only",
+                "--ledger", str(ledger_path),
+                "--report", str(melted_challenger_report),
+            ]
+        )
         challenger = _run(
             [
                 sys.executable,
@@ -160,6 +170,7 @@ def main() -> int:
         "discovery": discovery,
         "ledger": ledger,
         "melted_ledger": melted_ledger,
+        "melted_challenger": melted_challenger,
         "challenger": challenger,
         "runtime_root": str(runtime_root),
         "discovery_since_utc": since_utc,

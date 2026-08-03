@@ -168,3 +168,12 @@ point-in-time feature map for every target segment.  This is what will give the
 future melted challenger enough chronological history to discover interactions
 between normal/reverse/swim, today/tomorrow, flow, support markets and calendar
 state without reconstructing raw Telegram traffic.
+
+`train_melted_relationship_challenger_shadow.py` is the corresponding optional
+non-linear challenger.  It predicts the later return of a melted target
+segment, never an active coin quote.  Before CatBoost may even be imported, it
+requires 1,500 fit rows, 350 validation rows, 350 untouched test rows, seven
+distinct fit days and a target segment with at least 300 fit rows.  The split
+is chronological with a 15-minute purge band.  Its baseline is the prior
+median return for that exact target segment.  This keeps an abundant but short
+three-day sequence from being mistaken for reliable market knowledge.
