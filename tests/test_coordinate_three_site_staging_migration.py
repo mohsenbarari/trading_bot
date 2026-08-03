@@ -191,7 +191,7 @@ def _routing(root: Path, *, observed_at: str) -> Path:
 def _acceptance(
     root: Path, *, role: str, routing: Path, runtime_material: bool = False
 ) -> Path:
-    revision = "003" if role == "witness" else "d9e3f5a7b2c4"
+    revision = "003" if role == "witness" else "e0a4b6c8d1e3"
     _bind_key, tls_port, tls_name = ROLE_TLS[role]
     observations = {
         "database_identity": {"role": role},

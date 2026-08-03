@@ -39,7 +39,7 @@ class MigrationSmokeTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
         heads = [line for line in result.stdout.splitlines() if line.strip()]
-        self.assertEqual(heads, ['d9e3f5a7b2c4 (head)'])
+        self.assertEqual(heads, ['e0a4b6c8d1e3 (head)'])
 
     def test_executed_e653_revision_is_immutable_and_remediation_is_forward_only(self):
         versions = REPO_ROOT / 'migrations' / 'versions'
@@ -70,6 +70,15 @@ class MigrationSmokeTests(unittest.TestCase):
         self.assertIn('cursor.last_sequence>0', boundary_source)
         self.assertIn('NEW.source_xid IS NOT DISTINCT FROM OLD.source_xid', boundary_source)
         self.assertIn('forward-only DR safety migration', boundary_source)
+        projection_policy_fix = (
+            versions / 'e0a4b6c8d1e3_allow_dr_delivery_first_attempt_projection.py'
+        )
+        projection_policy_fix_source = projection_policy_fix.read_text(encoding='utf-8')
+        self.assertIn('down_revision = "d9e3f5a7b2c4"', projection_policy_fix_source)
+        self.assertIn('table_name="dr_event_deliveries"', projection_policy_fix_source)
+        self.assertIn('column_name="first_attempt_at"', projection_policy_fix_source)
+        self.assertIn('ON CONFLICT (table_name, column_name) DO NOTHING', projection_policy_fix_source)
+        self.assertIn('forward-only', projection_policy_fix_source)
 
     def test_writer_trigger_uses_database_boottime_not_wall_clock(self):
         migration = (

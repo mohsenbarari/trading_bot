@@ -13,7 +13,7 @@ from sqlalchemy import create_engine, text
 
 
 HISTORY_LABELS = frozenset({"fresh", "main_parent", "queue_parent", "dr_parent"})
-DEFAULT_EXPECTED_HEAD = "d9e3f5a7b2c4"
+DEFAULT_EXPECTED_HEAD = "e0a4b6c8d1e3"
 
 
 class MigrationHistoryError(RuntimeError):

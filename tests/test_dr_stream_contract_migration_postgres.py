@@ -20,7 +20,7 @@ from sqlalchemy.engine import make_url
 
 PARENT_REVISION = "e653f4a5b7c8"
 LOCKED_PARENT_REVISION = "a875b6c7d9e0"
-HEAD_REVISION = "d9e3f5a7b2c4"
+HEAD_REVISION = "e0a4b6c8d1e3"
 ADMIN_URL = str(os.getenv("DR_STREAM_MIGRATION_TEST_ADMIN_URL", "")).strip()
 SCRATCH_CLUSTER_SYSTEM_ID = str(
     os.getenv("TRADING_BOT_EXPECTED_SCRATCH_CLUSTER_SYSTEM_ID", "")
