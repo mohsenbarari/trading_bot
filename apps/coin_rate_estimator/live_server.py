@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import glob
 import hmac
 import html
 import json
@@ -16,13 +17,14 @@ import sqlite3
 import sys
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time as dt_time, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
 from zoneinfo import ZoneInfo
+import jdatetime
 
 
 APP_ROOT = Path(__file__).resolve().parent
@@ -639,6 +641,200 @@ def render_group_activity_fragment(conversation_db: Path) -> str:
     </section>"""
 
 
+def find_analytics_db(conversation_db: Path) -> Path | None:
+    snapshots = sorted(glob.glob("/srv/trading-bot-three-site-staging-data/coin-intelligence/private-channel-ingest/pipeline/training-snapshots/group-training-*.sqlite3"))
+    if snapshots:
+        return Path(snapshots[-1])
+    shadow = Path("/srv/trading-bot-three-site-staging-data/coin-intelligence/private-channel-ingest/pipeline/group_training_dataset_shadow.sqlite3")
+    if shadow.exists():
+        return shadow
+    if conversation_db.exists():
+        return conversation_db
+    return None
+
+
+def parse_shamsi_to_utc_iso(shamsi_str: str, *, is_end: bool = False) -> str | None:
+    if not shamsi_str:
+        return None
+    cleaned = shamsi_str.replace("/", "-").strip()
+    parts = [int(p) for p in cleaned.split("-") if p.isdigit()]
+    if len(parts) != 3:
+        return None
+    try:
+        jdate = jdatetime.date(parts[0], parts[1], parts[2])
+        gdate = jdate.togregorian()
+        time_part = dt_time(23, 59, 59, 999999) if is_end else dt_time(0, 0, 0)
+        dt = datetime.combine(gdate, time_part).replace(tzinfo=TEHRAN)
+        return dt.astimezone(timezone.utc).isoformat()
+    except Exception:
+        return None
+
+
+def calculate_time_bounds(range_type: str, start_shamsi: str | None = None, end_shamsi: str | None = None) -> tuple[str, str, str]:
+    tehran_now = datetime.now(TEHRAN)
+    if range_type == "7d":
+        start_dt = tehran_now - timedelta(days=7)
+        end_dt = tehran_now
+        label = "۷ روز اخیر"
+    elif range_type == "30d":
+        start_dt = tehran_now - timedelta(days=30)
+        end_dt = tehran_now
+        label = "۳۰ روز اخیر (۱ ماهه)"
+    elif range_type == "custom" and (start_shamsi or end_shamsi):
+        iso_start = parse_shamsi_to_utc_iso(start_shamsi, is_end=False) if start_shamsi else None
+        iso_end = parse_shamsi_to_utc_iso(end_shamsi, is_end=True) if end_shamsi else None
+        start_str = iso_start or "1970-01-01T00:00:00+00:00"
+        end_str = iso_end or tehran_now.astimezone(timezone.utc).isoformat()
+        label = f"بازه شمسی ({start_shamsi or 'ابتدا'} تا {end_shamsi or 'اکنون'})"
+        return start_str, end_str, label
+    else:
+        start_dt = tehran_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_dt = tehran_now.replace(hour=23, minute=59, second=59, microsecond=999999)
+        label = "امروز (روز جاری)"
+
+    start_str = start_dt.astimezone(timezone.utc).isoformat()
+    end_str = end_dt.astimezone(timezone.utc).isoformat()
+    return start_str, end_str, label
+
+
+def query_user_analytics(
+    conversation_db: Path,
+    *,
+    range_type: str = "today",
+    start_shamsi: str | None = None,
+    end_shamsi: str | None = None,
+) -> dict[str, Any]:
+    db_path = find_analytics_db(conversation_db)
+    start_utc, end_utc, label = calculate_time_bounds(range_type, start_shamsi, end_shamsi)
+
+    empty_result = {
+        "range_type": range_type,
+        "range_label": label,
+        "start_utc": start_utc,
+        "end_utc": end_utc,
+        "start_shamsi": start_shamsi or "",
+        "end_shamsi": end_shamsi or "",
+        "groups": {1: {}, 2: {}},
+    }
+    if not db_path or not db_path.exists():
+        return empty_result
+
+    try:
+        conn = sqlite3.connect(f"file:{db_path.resolve()}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+        if "offer_training_examples" not in tables or "confirmed_trade_training_examples" not in tables:
+            conn.close()
+            return empty_result
+
+        groups_data = {}
+        for group in (1, 2):
+            top_offer_count = [
+                dict(r) for r in conn.execute(
+                    """
+                    SELECT offerer_name AS username, COUNT(*) AS count
+                    FROM offer_training_examples
+                    WHERE group_number = ? AND occurred_at_utc >= ? AND occurred_at_utc <= ?
+                    GROUP BY offerer_name ORDER BY count DESC LIMIT 10
+                    """,
+                    (group, start_utc, end_utc),
+                ).fetchall()
+            ]
+
+            top_trade_count = [
+                dict(r) for r in conn.execute(
+                    """
+                    WITH user_trades AS (
+                        SELECT offerer_name AS username FROM confirmed_trade_training_examples WHERE group_number = ? AND occurred_at_utc >= ? AND occurred_at_utc <= ?
+                        UNION ALL
+                        SELECT counterparty_name AS username FROM confirmed_trade_training_examples WHERE group_number = ? AND occurred_at_utc >= ? AND occurred_at_utc <= ? AND counterparty_name IS NOT NULL AND counterparty_name != ''
+                    )
+                    SELECT username, COUNT(*) AS count FROM user_trades GROUP BY username ORDER BY count DESC LIMIT 10
+                    """,
+                    (group, start_utc, end_utc, group, start_utc, end_utc),
+                ).fetchall()
+            ]
+
+            top_offer_qty = [
+                dict(r) for r in conn.execute(
+                    """
+                    SELECT offerer_name AS username, SUM(COALESCE(quantity, 1)) AS total_qty
+                    FROM offer_training_examples
+                    WHERE group_number = ? AND occurred_at_utc >= ? AND occurred_at_utc <= ?
+                    GROUP BY offerer_name ORDER BY total_qty DESC LIMIT 10
+                    """,
+                    (group, start_utc, end_utc),
+                ).fetchall()
+            ]
+
+            top_trade_qty = [
+                dict(r) for r in conn.execute(
+                    """
+                    WITH user_trade_qty AS (
+                        SELECT offerer_name AS username, COALESCE(quantity, 1) AS qty FROM confirmed_trade_training_examples WHERE group_number = ? AND occurred_at_utc >= ? AND occurred_at_utc <= ?
+                        UNION ALL
+                        SELECT counterparty_name AS username, COALESCE(quantity, 1) AS qty FROM confirmed_trade_training_examples WHERE group_number = ? AND occurred_at_utc >= ? AND occurred_at_utc <= ? AND counterparty_name IS NOT NULL AND counterparty_name != ''
+                    )
+                    SELECT username, SUM(qty) AS total_qty FROM user_trade_qty GROUP BY username ORDER BY total_qty DESC LIMIT 10
+                    """,
+                    (group, start_utc, end_utc, group, start_utc, end_utc),
+                ).fetchall()
+            ]
+
+            groups_data[group] = {
+                "top_offer_count": top_offer_count,
+                "top_trade_count": top_trade_count,
+                "top_offer_qty": top_offer_qty,
+                "top_trade_qty": top_trade_qty,
+            }
+
+        conn.close()
+        return {
+            "range_type": range_type,
+            "range_label": label,
+            "start_utc": start_utc,
+            "end_utc": end_utc,
+            "start_shamsi": start_shamsi or "",
+            "end_shamsi": end_shamsi or "",
+            "groups": groups_data,
+        }
+    except Exception:
+        return empty_result
+
+
+def render_analytics_leaderboard_table(title: str, subtitle: str, items: list[dict[str, Any]], val_key: str, val_unit: str) -> str:
+    rows = []
+    if not items:
+        rows.append(f"<tr><td colspan='3' class='missing'>{NO_DATA_TOKEN}</td></tr>")
+    else:
+        for idx, item in enumerate(items, 1):
+            name = html.escape(str(item.get("username") or item.get("offerer_name") or "—"))
+            val = fa_number(item.get(val_key, 0))
+            rows.append(
+                f"<tr>"
+                f"<td class='rank-col'>#{fa_number(idx)}</td>"
+                f"<td><strong>{name}</strong></td>"
+                f"<td class='value-col'><strong>{val}</strong> <small>{val_unit}</small></td>"
+                f"</tr>"
+            )
+    return f"""
+    <div class='leaderboard-card'>
+      <div class='card-header'>
+        <h3>{title}</h3>
+        <small>{subtitle}</small>
+      </div>
+      <div class='table-wrap'>
+        <table>
+          <thead>
+            <tr><th style='width:50px'>رتبه</th><th>نام کاربر</th><th style='text-align:left'>تعداد / مقدار</th></tr>
+          </thead>
+          <tbody>{''.join(rows)}</tbody>
+        </table>
+      </div>
+    </div>
+    """
+
+
 def render_input_cards(inputs: dict[str, dict[str, Any]]) -> str:
     labels = {
         "melted_gold": "طلا آب‌شده",
@@ -779,7 +975,7 @@ def render_manual_entry_panel(
 
 
 def render_page(
-    state: dict[str, Any], *, manual_path: str = "/manual-entry",
+    state: dict[str, Any], *, manual_path: str = "/manual-entry", analytics_path: str = "/analytics",
     estimate_path: str = "/estimates.html", activity_path: str = "/activity.html", write_enabled: bool = False,
     flash: str | None = None, open_manual_offers: list[dict[str, Any]] | None = None,
     estimate_fragment: bool = False, page: str = "home",
@@ -835,7 +1031,7 @@ def render_page(
         page_content = manual_panel_html
         refresh_script = ""
     else:
-        navigation = f"<a class='nav-btn' href='{html.escape(manual_path)}'>ثبت دستی آفر</a>"
+        navigation = f"<a class='nav-btn secondary' href='{html.escape(analytics_path)}'>📊 آمار کاربران</a> <a class='nav-btn' href='{html.escape(manual_path)}'>ثبت دستی آفر</a>"
         page_content = f"""
         <div class="top-ticker">
           <div class='inputs'>{render_input_cards(inputs)}{melted_cards}</div>
@@ -1449,6 +1645,344 @@ document.querySelectorAll(".manual-form").forEach((form) => {{
     return document.encode("utf-8")
 
 
+def render_analytics_page(
+    conversation_db: Path,
+    *,
+    analytics_path: str = "/analytics",
+    home_path: str = "/",
+    range_type: str = "today",
+    start_shamsi: str | None = None,
+    end_shamsi: str | None = None,
+) -> bytes:
+    data = query_user_analytics(
+        conversation_db,
+        range_type=range_type,
+        start_shamsi=start_shamsi,
+        end_shamsi=end_shamsi,
+    )
+
+    def btn_active(r: str) -> str:
+        return "active-filter" if data["range_type"] == r else ""
+
+    groups_html = []
+    for grp in (1, 2):
+        gdata = data["groups"].get(grp, {})
+        t1 = render_analytics_leaderboard_table("۱۰ کاربر بیشترین آفر دهنده", "بر اساس تعداد آفر ثبت‌شده", gdata.get("top_offer_count", []), "count", "آفر")
+        t2 = render_analytics_leaderboard_table("۱۰ کاربر بیشترین معامله کننده", "شامل خریدار و فروشنده / آفر و درخواست", gdata.get("top_trade_count", []), "count", "معامله")
+        t3 = render_analytics_leaderboard_table("۱۰ کاربر بیشترین حجم آفر", "مجموع تعداد کالای پیشنهادشده", gdata.get("top_offer_qty", []), "total_qty", "عدد کالا")
+        t4 = render_analytics_leaderboard_table("۱۰ کاربر بیشترین حجم معامله", "مجموع تعداد کالای معامله‌شده", gdata.get("top_trade_qty", []), "total_qty", "عدد کالا")
+
+        groups_html.append(
+            f"""
+            <section class='group-analytics-section'>
+              <div class='section-head'>
+                <h2>تحلیل و لیدربورد کاربران — گروه {fa_number(grp)}</h2>
+                <span class='badge'>گروه {fa_number(grp)} معاملاتی</span>
+              </div>
+              <div class='leaderboards-grid'>
+                {t1}
+                {t2}
+                {t3}
+                {t4}
+              </div>
+            </section>
+            """
+        )
+
+    navigation = f"<a class='nav-btn secondary' href='{html.escape(home_path)}'>بازگشت به داشبورد اصلی</a>"
+
+    document = f"""<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>آمار و تحلیل کاربران گروه‌های معاملاتی</title>
+<style>
+@import url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css');
+:root {{
+  --bg-deep: #0b1329;
+  --bg-surface: rgba(15, 23, 42, 0.85);
+  --bg-card: #141f36;
+  --border-line: rgba(255, 255, 255, 0.08);
+  --border-gold: rgba(245, 158, 11, 0.35);
+  --border-gold-glow: 0 0 15px rgba(245, 158, 11, 0.12);
+  --text-main: #f8fafc;
+  --text-sub: #94a3b8;
+  --accent-gold: #f59e0b;
+  --accent-cyan: #06b6d4;
+  --accent-emerald: #10b981;
+  --accent-indigo: #6366f1;
+}}
+* {{ box-sizing: border-box; }}
+body {{
+  margin: 0;
+  background: radial-gradient(circle at 50% -10%, #1e1b4b 0%, #0b1329 70%);
+  color: var(--text-main);
+  font-family: Vazirmatn, system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+  min-height: 100vh;
+}}
+.wrap {{
+  width: min(1440px, 96%);
+  margin: 16px auto 40px;
+}}
+header {{
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 14px 20px;
+  background: var(--bg-surface);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--border-gold);
+  box-shadow: var(--border-gold-glow);
+  border-radius: 16px;
+}}
+.header-brand {{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}}
+.logo-badge {{
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.25), rgba(99, 102, 241, 0.25));
+  border: 1px solid var(--accent-gold);
+  font-size: 20px;
+}}
+h1 {{
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #ffffff 40%, var(--accent-gold) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}}
+.nav-btn {{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent-indigo), #4f46e5);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 13px;
+  text-decoration: none;
+  box-shadow: 0 6px 18px rgba(99, 102, 241, 0.3);
+  transition: all 0.2s ease;
+  border: none;
+  cursor: pointer;
+}}
+.nav-btn.secondary {{
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-line);
+  color: var(--text-main);
+  box-shadow: none;
+}}
+.filter-bar {{
+  background: var(--bg-surface);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--border-gold);
+  border-radius: 16px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}}
+.filter-presets {{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}}
+.filter-btn {{
+  padding: 8px 16px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-line);
+  color: var(--text-sub);
+  font-weight: 600;
+  font-size: 13px;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}}
+.filter-btn.active-filter, .filter-btn:hover {{
+  background: var(--accent-gold);
+  color: #0b1329;
+  border-color: var(--accent-gold);
+  font-weight: 800;
+}}
+.shamsi-form {{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}}
+.shamsi-form label {{
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-sub);
+}}
+.shamsi-form input {{
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-line);
+  background: rgba(15, 23, 42, 0.85);
+  color: var(--text-main);
+  font-family: inherit;
+  font-size: 13px;
+  width: 110px;
+  text-align: center;
+}}
+.shamsi-form button {{
+  padding: 7px 14px;
+  border-radius: 8px;
+  background: var(--accent-cyan);
+  color: #0b1329;
+  font-weight: 700;
+  font-size: 13px;
+  border: none;
+  cursor: pointer;
+}}
+.group-analytics-section {{
+  background: var(--bg-surface);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--border-line);
+  border-radius: 18px;
+  padding: 20px;
+  margin-bottom: 24px;
+}}
+.section-head {{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}}
+h2 {{
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text-main);
+}}
+.badge {{
+  padding: 3px 10px;
+  border-radius: 99px;
+  background: rgba(6, 182, 212, 0.12);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  color: var(--accent-cyan);
+  font-size: 11.5px;
+  font-weight: 600;
+}}
+.leaderboards-grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}}
+.leaderboard-card {{
+  background: var(--bg-card);
+  border: 1px solid var(--border-gold);
+  box-shadow: var(--border-gold-glow);
+  border-radius: 14px;
+  padding: 14px;
+}}
+.card-header {{
+  margin-bottom: 10px;
+}}
+.card-header h3 {{
+  margin: 0 0 2px;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--accent-gold);
+}}
+.card-header small {{
+  color: var(--text-sub);
+  font-size: 11px;
+}}
+.table-wrap {{
+  overflow-x: auto;
+  border-radius: 10px;
+  border: 1px solid var(--border-line);
+}}
+table {{
+  width: 100%;
+  border-collapse: collapse;
+  white-space: nowrap;
+}}
+th {{
+  background: rgba(15, 23, 42, 0.95);
+  padding: 9px 12px;
+  color: var(--text-sub);
+  font-size: 11.5px;
+  font-weight: 700;
+  text-align: right;
+  border-bottom: 1px solid var(--border-line);
+}}
+td {{
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border-line);
+  font-size: 12.5px;
+}}
+.rank-col {{
+  color: var(--accent-cyan);
+  font-weight: 700;
+}}
+.value-col {{
+  text-align: left;
+  direction: ltr;
+}}
+.value-col strong {{
+  color: var(--accent-gold);
+}}
+.missing {{
+  color: var(--accent-rose);
+  text-align: center;
+  padding: 12px;
+}}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <div class="header-brand">
+      <div class="logo-badge">📊</div>
+      <div>
+        <h1>آمار و تحلیل <span>کاربران گروه‌های معاملاتی</span></h1>
+        <small style="color:var(--text-sub)">بازه‌ فعلی: <strong>{data['range_label']}</strong></small>
+      </div>
+    </div>
+    {navigation}
+  </header>
+
+  <div class="filter-bar">
+    <div class="filter-presets">
+      <span style="font-size:13px;font-weight:700;color:var(--text-sub)">فیلتر سریع:</span>
+      <a class="filter-btn {btn_active('today')}" href="{analytics_path}?range_type=today">امروز (روز جاری)</a>
+      <a class="filter-btn {btn_active('7d')}" href="{analytics_path}?range_type=7d">۷ روز اخیر</a>
+      <a class="filter-btn {btn_active('30d')}" href="{analytics_path}?range_type=30d">۳۰ روز اخیر (۱ ماهه)</a>
+    </div>
+    <form class="shamsi-form" method="get" action="{analytics_path}">
+      <input type="hidden" name="range_type" value="custom">
+      <label>از تاریخ (شمسی): <input name="start_shamsi" placeholder="1405/05/10" value="{html.escape(data['start_shamsi'])}"></label>
+      <label>تا تاریخ (شمسی): <input name="end_shamsi" placeholder="1405/05/12" value="{html.escape(data['end_shamsi'])}"></label>
+      <button type="submit">اعمال فیلتر شمسی</button>
+    </form>
+  </div>
+
+  {''.join(groups_html)}
+</main>
+</body>
+</html>"""
+    return document.encode("utf-8")
+
+
 def handler_factory(
     route: str,
     state_store: StateStore,
@@ -1462,6 +1996,7 @@ def handler_factory(
     data_path = normalized + "/data.json"
     health_path = normalized + "/healthz"
     manual_path = normalized + "/manual-entry"
+    analytics_path = normalized + "/analytics"
     estimate_path = normalized + "/estimates.html"
     activity_path = normalized + "/activity.html"
     parse_offer_path = manual_path + "/parse-text"
@@ -1498,6 +2033,7 @@ def handler_factory(
                 body = render_page(
                     state,
                     manual_path=manual_path,
+                    analytics_path=analytics_path,
                     estimate_path=estimate_path,
                     activity_path=activity_path,
                     write_enabled=write_token is not None,
@@ -1505,6 +2041,37 @@ def handler_factory(
                     conversation_db=conversation_db,
                 )
                 self._headers(HTTPStatus.OK, "text/html; charset=utf-8", len(body))
+                self.wfile.write(body)
+                return
+            if path == analytics_path:
+                query = parse_qs(urlsplit(self.path).query)
+                range_type = query.get("range_type", ["today"])[0]
+                start_shamsi = query.get("start_shamsi", [None])[0]
+                end_shamsi = query.get("end_shamsi", [None])[0]
+                body = render_analytics_page(
+                    conversation_db,
+                    analytics_path=analytics_path,
+                    home_path=normalized,
+                    range_type=range_type,
+                    start_shamsi=start_shamsi,
+                    end_shamsi=end_shamsi,
+                )
+                self._headers(HTTPStatus.OK, "text/html; charset=utf-8", len(body))
+                self.wfile.write(body)
+                return
+            if path == analytics_path + ".json":
+                query = parse_qs(urlsplit(self.path).query)
+                range_type = query.get("range_type", ["today"])[0]
+                start_shamsi = query.get("start_shamsi", [None])[0]
+                end_shamsi = query.get("end_shamsi", [None])[0]
+                data = query_user_analytics(
+                    conversation_db,
+                    range_type=range_type,
+                    start_shamsi=start_shamsi,
+                    end_shamsi=end_shamsi,
+                )
+                body = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+                self._headers(HTTPStatus.OK, "application/json; charset=utf-8", len(body))
                 self.wfile.write(body)
                 return
             if path == manual_path:

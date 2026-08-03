@@ -1243,6 +1243,18 @@ class EstimatorTests(unittest.TestCase):
         self.assertIn(NO_DATA_TOKEN, body)
         self.assertIn("توصیه خرید یا فروش نیست", body)
 
+    def test_analytics_query_and_render(self) -> None:
+        from live_server import parse_shamsi_to_utc_iso, query_user_analytics, render_analytics_page
+        db_path = Path(tempfile.gettempdir()) / "test_analytics_db.sqlite3"
+        iso_start = parse_shamsi_to_utc_iso("1405/05/10", is_end=False)
+        self.assertIsNotNone(iso_start)
+        res = query_user_analytics(db_path, range_type="today")
+        self.assertIn("groups", res)
+        body = render_analytics_page(db_path, range_type="today").decode("utf-8")
+        self.assertIn("آمار و تحلیل", body)
+        self.assertIn("گروه ۱", body)
+        self.assertIn("گروه ۲", body)
+
 
 if __name__ == "__main__":
     unittest.main()
