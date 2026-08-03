@@ -108,6 +108,40 @@ def _release_sha() -> str:
     return value
 
 
+async def _stage_probe_blob_delivery(
+    session: Any,
+    *,
+    content_hash: str,
+    size_bytes: int,
+    local_path: str,
+) -> None:
+    """Insert the Blob parent before its delivery child.
+
+    The ORM models intentionally have no relationship edge between these
+    internal records.  Flush the manifest explicitly, so PostgreSQL always
+    sees the referenced parent before the delivery foreign-key row.
+    """
+
+    session.add(
+        DrBlobManifest(
+            content_hash=content_hash,
+            size_bytes=size_bytes,
+            mime_type=PROBE_MIME_TYPE,
+            local_path=local_path,
+            state="local",
+        )
+    )
+    await session.flush()
+    session.add(
+        DrBlobDelivery(
+            content_hash=content_hash,
+            destination_site=WEBAPP_IR,
+            status="pending_upload",
+            attempt_count=0,
+        )
+    )
+
+
 def _probe_blob_bytes(*, run_id: str, release_sha: str) -> bytes:
     return canonical_json_bytes(
         {
@@ -302,22 +336,11 @@ async def _blob_source(run_id: str) -> None:
         async with DrProjectionSessionLocal() as session:
             if await session.get(DrBlobManifest, content_hash) is not None:
                 raise Stage4rObjectProbeError("probe content hash unexpectedly already exists")
-            session.add(
-                DrBlobManifest(
-                    content_hash=content_hash,
-                    size_bytes=len(contents),
-                    mime_type=PROBE_MIME_TYPE,
-                    local_path=local_path,
-                    state="local",
-                )
-            )
-            session.add(
-                DrBlobDelivery(
-                    content_hash=content_hash,
-                    destination_site=WEBAPP_IR,
-                    status="pending_upload",
-                    attempt_count=0,
-                )
+            await _stage_probe_blob_delivery(
+                session,
+                content_hash=content_hash,
+                size_bytes=len(contents),
+                local_path=local_path,
             )
             await session.commit()
     result = await upload_one_blob(config, keyring)

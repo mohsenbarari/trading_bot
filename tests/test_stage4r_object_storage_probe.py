@@ -9,6 +9,7 @@ from scripts.run_stage4r_object_storage_probe import (
     _probe_blob_bytes,
     _require_applied_results,
     _run_id,
+    _stage_probe_blob_delivery,
 )
 
 
@@ -50,6 +51,28 @@ class Stage4rObjectStorageProbeTests(unittest.TestCase):
                 {"results": [{"event_id": "event-a", "status": "received"}]},
                 event_ids,
             )
+
+    def test_blob_probe_flushes_manifest_before_adding_delivery(self):
+        calls: list[str] = []
+
+        class RecordingSession:
+            def add(self, value):  # noqa: ANN001
+                calls.append(type(value).__name__)
+
+            async def flush(self):
+                calls.append("flush")
+
+        import asyncio
+
+        asyncio.run(
+            _stage_probe_blob_delivery(
+                RecordingSession(),
+                content_hash="a" * 64,
+                size_bytes=1,
+                local_path="/tmp/stage4r-probe",
+            )
+        )
+        self.assertEqual(calls, ["DrBlobManifest", "flush", "DrBlobDelivery"])
 
 
 if __name__ == "__main__":
