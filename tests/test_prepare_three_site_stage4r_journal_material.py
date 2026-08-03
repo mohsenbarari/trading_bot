@@ -11,6 +11,7 @@ from scripts.prepare_three_site_stage4r_journal_material import (
 
 
 RELEASE = "a" * 40
+SOURCE_ROOT = "/srv/trading-bot-three-site-staging-data/releases/" + RELEASE + "/source"
 SOURCE = "\n".join(
     (
         "STAGING_RELEASE_SHA=" + "b" * 40,
@@ -26,10 +27,12 @@ class Stage4RJournalMaterialTests(unittest.TestCase):
         rendered, metadata = build_environment(
             SOURCE,
             release_sha=RELEASE,
+            staging_source_root=SOURCE_ROOT,
             token_factory=lambda _length: next(values),
         )
         text = rendered.decode()
         self.assertIn(f"STAGING_RELEASE_SHA={RELEASE}\n", text)
+        self.assertIn(f"STAGING_SOURCE_ROOT={SOURCE_ROOT}\n", text)
         self.assertIn("STAGING_WEBAPP_FI_JOURNAL_TWO_PHASE_ENABLED=false\n", text)
         self.assertIn("STAGING_WEBAPP_FI_MAX_PREPARED_TRANSACTIONS=32\n", text)
         self.assertIn(f"WEBAPP_FI_SAME_REGION_JOURNAL_ENCRYPTION_KEY_ID={JOURNAL_KEY_ID}\n", text)
@@ -41,8 +44,24 @@ class Stage4RJournalMaterialTests(unittest.TestCase):
 
     def test_rejects_existing_journal_variables_to_prevent_implicit_rotation(self):
         with self.assertRaisesRegex(JournalMaterialError, "already contains journal material"):
-            build_environment(SOURCE + "BOT_FI_JOURNAL_DB_PASSWORD=already-present\n", release_sha=RELEASE)
+            build_environment(
+                SOURCE + "BOT_FI_JOURNAL_DB_PASSWORD=already-present\n",
+                release_sha=RELEASE,
+                staging_source_root=SOURCE_ROOT,
+            )
 
     def test_rejects_non_exact_release_identity(self):
         with self.assertRaisesRegex(JournalMaterialError, "exactly 40"):
-            build_environment(SOURCE, release_sha="not-a-release")
+            build_environment(
+                SOURCE,
+                release_sha="not-a-release",
+                staging_source_root=SOURCE_ROOT,
+            )
+
+    def test_rejects_source_root_bound_to_another_release(self):
+        with self.assertRaisesRegex(JournalMaterialError, "source root"):
+            build_environment(
+                SOURCE,
+                release_sha=RELEASE,
+                staging_source_root=SOURCE_ROOT.replace(RELEASE, "b" * 40),
+            )

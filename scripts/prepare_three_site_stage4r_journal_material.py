@@ -30,6 +30,9 @@ from scripts.render_three_site_staging_role_compose import (
 
 
 RELEASE_RE = re.compile(r"^[0-9a-f]{40}$")
+SOURCE_ROOT_RE = re.compile(
+    r"^/srv/trading-bot-three-site-staging-data/releases/([0-9a-f]{40})/source$"
+)
 JOURNAL_KEY_ID = "staging-fi-journal-v1"
 JOURNAL_KEYS = frozenset(
     {
@@ -59,6 +62,7 @@ def build_environment(
     source: str,
     *,
     release_sha: str,
+    staging_source_root: str,
     token_factory: Callable[[int], str] = secrets.token_urlsafe,
 ) -> tuple[bytes, dict[str, str]]:
     """Return an exact release env and redacted identity metadata.
@@ -72,6 +76,10 @@ def build_environment(
     release = str(release_sha).lower()
     if RELEASE_RE.fullmatch(release) is None:
         raise JournalMaterialError("release SHA must be exactly 40 lowercase hex characters")
+    source_root = str(staging_source_root)
+    source_root_match = SOURCE_ROOT_RE.fullmatch(source_root)
+    if source_root_match is None or source_root_match.group(1) != release:
+        raise JournalMaterialError("staging source root must bind the exact release SHA")
     values = parse_env_values(source)
     missing = {"STAGING_RELEASE_SHA", "STAGING_SOURCE_ROOT"} - set(values)
     if missing:
@@ -99,6 +107,7 @@ def build_environment(
     values.update(
         {
             "STAGING_RELEASE_SHA": release,
+            "STAGING_SOURCE_ROOT": source_root,
             "BOT_FI_JOURNAL_DB_PASSWORD": database_password,
             "BOT_FI_SAME_REGION_JOURNAL_KEYS_JSON": pairwise,
             "WEBAPP_FI_SAME_REGION_JOURNAL_KEYS_JSON": pairwise,
@@ -126,6 +135,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-env", type=Path, required=True)
     parser.add_argument("--release-sha", required=True)
+    parser.add_argument("--staging-source-root", required=True)
     parser.add_argument("--output-env", type=Path, required=True)
     parser.add_argument("--output-metadata", type=Path, required=True)
     args = parser.parse_args(argv)
@@ -135,6 +145,7 @@ def main(argv: list[str] | None = None) -> int:
         rendered, metadata = build_environment(
             read_secure_text(args.source_env, label="Stage 4R source environment"),
             release_sha=args.release_sha,
+            staging_source_root=args.staging_source_root,
         )
         write_secure_new_bytes(
             args.output_env,
