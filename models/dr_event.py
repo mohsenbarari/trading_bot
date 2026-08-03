@@ -428,3 +428,50 @@ class DrDurabilityState(Base):
     evidence_expires_at = Column(DateTime(timezone=True), nullable=True)
     updated_by = Column(String(128), nullable=False)
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class DrSameRegionJournal(Base):
+    """Opaque two-phase durability records held on the independent FI host.
+
+    The model exists in the common schema so migrations remain deterministic,
+    but only the dedicated Bot-FI journal receiver receives table privileges.
+    It holds ciphertext and immutable public integrity metadata; it is never a
+    business projection or an asynchronous DR-delivery table.
+    """
+
+    __tablename__ = "dr_same_region_journal"
+    __table_args__ = (
+        CheckConstraint("writer_epoch >= 1", name="ck_dr_same_region_journal_epoch"),
+        CheckConstraint(
+            "state IN ('prepared', 'committed', 'rolled_back')",
+            name="ck_dr_same_region_journal_state",
+        ),
+        CheckConstraint(
+            "(state = 'prepared' AND resolved_at IS NULL) OR "
+            "(state IN ('committed', 'rolled_back') AND resolved_at IS NOT NULL)",
+            name="ck_dr_same_region_journal_resolution_time",
+        ),
+        CheckConstraint(
+            "(state = 'committed' AND prepared_transaction_gid IS NOT NULL) OR "
+            "(state <> 'committed')",
+            name="ck_dr_same_region_journal_commit_gid",
+        ),
+        Index("ix_dr_same_region_journal_state_prepared_at", "state", "prepared_at"),
+    )
+
+    origin_physical_site = Column(String(16), primary_key=True)
+    writer_epoch = Column(BigInteger, primary_key=True)
+    transaction_id = Column(String(36), primary_key=True)
+    transaction_hash = Column(String(64), nullable=False)
+    release_sha = Column(String(64), nullable=False)
+    encryption_key_id = Column(String(64), nullable=False)
+    event_ids = Column(JSON, nullable=False)
+    event_hashes = Column(JSON, nullable=False)
+    nonce = Column(String(32), nullable=False)
+    ciphertext = Column(Text, nullable=False)
+    ciphertext_hash = Column(String(64), nullable=False)
+    prepare_request_hash = Column(String(64), nullable=False)
+    state = Column(String(16), nullable=False, default="prepared")
+    prepared_transaction_gid = Column(String(192), nullable=True)
+    prepared_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    resolved_at = Column(DateTime(timezone=True), nullable=True)

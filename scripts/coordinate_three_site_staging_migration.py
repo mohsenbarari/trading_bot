@@ -250,7 +250,7 @@ def _acceptance_observations(
         observations = {
             name: check["observation"] for name, check in value["checks"].items()
         }
-        expected_revision = "003" if role == "witness" else "b986c7d8e0f1"
+        expected_revision = "003" if role == "witness" else "c8d2e9f4a6b1"
         services = observations["service_health"].get("services")
         service_names = [row.get("service") for row in services] if isinstance(services, list) else []
         tls = observations["private_tls"]

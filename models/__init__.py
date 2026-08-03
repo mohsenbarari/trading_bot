@@ -107,6 +107,7 @@ from .dr_event import (
     DrBlobReceipt,
     DrRecoveryManifest,
     DrDurabilityState,
+    DrSameRegionJournal,
     DrEvent,
     DrEventDelivery,
     DrEventReceipt,
@@ -234,4 +235,5 @@ __all__ = [
     "DrBlobReceipt",
     "DrRecoveryManifest",
     "DrDurabilityState",
+    "DrSameRegionJournal",
 ]

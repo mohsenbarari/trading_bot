@@ -95,6 +95,9 @@ SECRET_REFERENCES = {
     "BOT_FI_DELIVERY_DB_PASSWORD": lambda service: service in {
         "bot_fi_db_roles", "bot_fi_dr_delivery",
     },
+    "BOT_FI_JOURNAL_DB_PASSWORD": lambda service: service in {
+        "bot_fi_db_roles", "bot_fi_durability_journal",
+    },
     "BOT_FI_DR_PAIRWISE_KEYS_JSON": lambda service: service in {
         "bot_fi_dr_receiver", "bot_fi_dr_delivery",
     },
@@ -103,6 +106,13 @@ SECRET_REFERENCES = {
     },
     "WEBAPP_IR_DR_PAIRWISE_KEYS_JSON": lambda service: service in {
         "webapp_ir_dr_receiver", "webapp_ir_dr_delivery", "webapp_ir_blobs",
+    },
+    "BOT_FI_SAME_REGION_JOURNAL_KEYS_JSON": lambda service: service == "bot_fi_durability_journal",
+    "WEBAPP_FI_SAME_REGION_JOURNAL_KEYS_JSON": lambda service: service in {
+        "webapp_fi_api", "webapp_fi_effects",
+    },
+    "WEBAPP_FI_SAME_REGION_JOURNAL_ENCRYPTION_SECRET": lambda service: service in {
+        "webapp_fi_api", "webapp_fi_effects",
     },
     "WITNESS_POSTGRES_PASSWORD": lambda service: service in {
         "witness_db", "witness_role_bootstrap",
@@ -181,6 +191,12 @@ EXPECTED_CROSS_HOSTS = {
     "webapp_fi_blobs": [
         "bot-fi-dr.staging.internal:${WEBAPP_FI_PEER_BOT_FI_IP:?required}",
         "webapp-ir-dr.staging.internal:${WEBAPP_FI_PEER_WEBAPP_IR_IP:?required}",
+    ],
+    "webapp_fi_api": [
+        "bot-fi-dr.staging.internal:${WEBAPP_FI_PEER_BOT_FI_IP:?required}",
+    ],
+    "webapp_fi_effects": [
+        "bot-fi-dr.staging.internal:${WEBAPP_FI_PEER_BOT_FI_IP:?required}",
     ],
     "webapp_fi_writer_control": [
         "witness-dr.staging.internal:${WEBAPP_FI_WITNESS_IP:?required}",

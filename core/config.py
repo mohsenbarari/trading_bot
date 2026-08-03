@@ -35,6 +35,16 @@ class Settings(BaseSettings):
     dr_sync_http_timeout_seconds: float = 5.0
     dr_sync_verify_tls: bool = True
     dr_sync_ca_bundle: str | None = None
+    # Separate opaque FI journal.  It is disabled by default and is never a
+    # substitute for the asynchronous cross-region event/blob delivery plane.
+    dr_same_region_journal_enabled: bool = False
+    dr_same_region_journal_url: str | None = None
+    dr_same_region_journal_pairwise_keys_json: str | None = None
+    dr_same_region_journal_encryption_key_id: str | None = None
+    dr_same_region_journal_encryption_secret: SecretStr | None = None
+    dr_same_region_journal_timeout_seconds: float = 2.0
+    dr_same_region_journal_verify_tls: bool = True
+    dr_same_region_journal_ca_bundle: str | None = None
     dr_projection_database_url: str | None = None
     dr_control_database_url: str | None = None
     dr_auxiliary_db_pool_size: int = 3
@@ -298,6 +308,12 @@ class Settings(BaseSettings):
             raise ValueError("dr_sync_request_max_age_seconds_must_be_positive")
         if int(self.dr_replay_nonce_retention_seconds) <= 0:
             raise ValueError("dr_replay_nonce_retention_seconds_must_be_positive")
+        if (
+            not math.isfinite(float(self.dr_same_region_journal_timeout_seconds))
+            or float(self.dr_same_region_journal_timeout_seconds) <= 0
+            or float(self.dr_same_region_journal_timeout_seconds) > 30
+        ):
+            raise ValueError("dr_same_region_journal_timeout_seconds_must_be_0_to_30")
         return self
 
     @model_validator(mode="after")

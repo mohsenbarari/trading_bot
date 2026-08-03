@@ -829,7 +829,7 @@ def main(argv: list[str] | None = None) -> int:
     role.add_argument("--bot-material-amendment", type=Path)
     role.add_argument("--routing-observation", type=Path, required=True)
     role.add_argument("--image-inventory", type=Path, required=True)
-    role.add_argument("--expected-head", default="b986c7d8e0f1")
+    role.add_argument("--expected-head", default="c8d2e9f4a6b1")
     args = parser.parse_args(argv)
     try:
         document = collect_routing(args) if args.action == "routing" else collect_role(args)

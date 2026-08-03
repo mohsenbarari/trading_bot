@@ -64,6 +64,7 @@ LOCAL_PROJECTION_TABLES = frozenset(
         "dr_producer_cursors", "dr_projection_versions",
         "dr_blob_manifests", "dr_file_intents", "dr_blob_deliveries",
         "dr_blob_receipts", "dr_recovery_manifests",
+        "dr_same_region_journal",
     }
 )
 CONTROL_TABLES = frozenset(

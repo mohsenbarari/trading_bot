@@ -42,6 +42,7 @@ JOURNAL_MAX_CIPHERTEXT_BYTES = 8 * 1024 * 1024
 JOURNAL_MAX_TRANSACTION_EVENTS = 500
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _KEY_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_PREPARED_GID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,191}$")
 
 
 class DurabilityJournalError(RuntimeError):
@@ -79,6 +80,29 @@ class JournalPrepare:
             "ciphertext": self.ciphertext,
             "ciphertext_hash": self.ciphertext_hash,
         }
+
+
+@dataclass(frozen=True)
+class JournalResolution:
+    """Identity supplied to a terminal coordinator transition."""
+
+    origin_physical_site: str
+    writer_epoch: int
+    transaction_id: str
+    transaction_hash: str
+    prepared_transaction_gid: str | None = None
+
+    def as_payload(self) -> dict[str, Any]:
+        result = {
+            "schema": JOURNAL_SCHEMA,
+            "origin_physical_site": self.origin_physical_site,
+            "writer_epoch": self.writer_epoch,
+            "transaction_id": self.transaction_id,
+            "transaction_hash": self.transaction_hash,
+        }
+        if self.prepared_transaction_gid is not None:
+            result["prepared_transaction_gid"] = self.prepared_transaction_gid
+        return result
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -306,6 +330,43 @@ def parse_prepare(raw: Mapping[str, Any] | str | bytes) -> JournalPrepare:
     )
 
 
+def parse_resolution(
+    raw: Mapping[str, Any] | str | bytes,
+    *,
+    require_prepared_gid: bool,
+) -> JournalResolution:
+    """Parse a commit/rollback/status identity without exposing ciphertext."""
+
+    if isinstance(raw, (str, bytes)):
+        try:
+            raw = json.loads(raw, object_pairs_hook=_strict_object)
+        except (json.JSONDecodeError, TypeError, DurabilityJournalError) as exc:
+            raise DurabilityJournalError("journal resolution is not strict JSON") from exc
+    required = {
+        "schema", "origin_physical_site", "writer_epoch", "transaction_id", "transaction_hash",
+    }
+    if require_prepared_gid:
+        required.add("prepared_transaction_gid")
+    if not isinstance(raw, Mapping) or set(raw) != required:
+        raise DurabilityJournalError("journal resolution fields are invalid")
+    if raw["schema"] != JOURNAL_SCHEMA or raw["origin_physical_site"] != SITE_WEBAPP_FI:
+        raise DurabilityJournalError("journal resolution source is invalid")
+    if isinstance(raw["writer_epoch"], bool) or not isinstance(raw["writer_epoch"], int) or raw["writer_epoch"] < 1:
+        raise DurabilityJournalError("journal resolution writer epoch is invalid")
+    gid = None
+    if require_prepared_gid:
+        gid = str(raw["prepared_transaction_gid"] or "")
+        if not _PREPARED_GID_RE.fullmatch(gid):
+            raise DurabilityJournalError("journal prepared transaction GID is invalid")
+    return JournalResolution(
+        origin_physical_site=SITE_WEBAPP_FI,
+        writer_epoch=int(raw["writer_epoch"]),
+        transaction_id=_require_uuid(raw["transaction_id"], field="transaction_id"),
+        transaction_hash=_require_sha256(raw["transaction_hash"], field="transaction_hash"),
+        prepared_transaction_gid=gid,
+    )
+
+
 def decrypt_prepare(prepare: JournalPrepare, *, encryption_secret: str) -> tuple[dict[str, Any], ...]:
     """Decrypt and revalidate a record for a controlled recovery drill only."""
 
@@ -348,6 +409,7 @@ def acknowledgement_payload(
     request_hash: str,
     receiver_site: str = SITE_BOT_FI,
     resolved_at: datetime | None = None,
+    prepared_transaction_gid: str | None = None,
 ) -> dict[str, Any]:
     """Build the unsigned terminal/prepared acknowledgement identity."""
 
@@ -356,7 +418,7 @@ def acknowledgement_payload(
     if receiver_site != SITE_BOT_FI:
         raise DurabilityJournalError("journal acknowledgement receiver site is invalid")
     timestamp = (resolved_at or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    return {
+    result = {
         "schema": JOURNAL_SCHEMA,
         "state": state,
         "receiver_site": receiver_site,
@@ -369,6 +431,14 @@ def acknowledgement_payload(
         "request_hash": _require_sha256(request_hash, field="request_hash"),
         "resolved_at": timestamp.isoformat(),
     }
+    if state == "committed":
+        gid = str(prepared_transaction_gid or "")
+        if not _PREPARED_GID_RE.fullmatch(gid):
+            raise DurabilityJournalError("journal committed acknowledgement lacks a valid GID")
+        result["prepared_transaction_gid"] = gid
+    elif prepared_transaction_gid is not None:
+        raise DurabilityJournalError("journal non-committed acknowledgement must not expose a GID")
+    return result
 
 
 def verify_acknowledgement(
@@ -386,6 +456,8 @@ def verify_acknowledgement(
         "transaction_id", "transaction_hash", "ciphertext_hash", "release_sha",
         "request_hash", "resolved_at", "acknowledgement_mac",
     }
+    if expected_state == "committed":
+        required.add("prepared_transaction_gid")
     if not isinstance(raw, Mapping) or set(raw) != required:
         raise DurabilityJournalError("journal acknowledgement fields are invalid")
     unsigned = {key: raw[key] for key in required - {"acknowledgement_mac"}}
@@ -400,6 +472,11 @@ def verify_acknowledgement(
         state=expected_state,
         request_hash=request_hash,
         resolved_at=datetime.fromisoformat(str(raw["resolved_at"]).replace("Z", "+00")),
+        prepared_transaction_gid=(
+            str(raw["prepared_transaction_gid"])
+            if expected_state == "committed"
+            else None
+        ),
     )
     if any(raw.get(key) != value for key, value in expected.items()):
         raise DurabilityJournalError("journal acknowledgement does not bind the prepared transaction")

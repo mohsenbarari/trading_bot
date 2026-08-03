@@ -55,6 +55,7 @@ _INTERNAL_TABLES = frozenset(
         "dr_blob_receipts",
         "dr_recovery_manifests",
         "dr_durability_state",
+        "dr_same_region_journal",
         "dr_destination_cursors",
         "dr_event_deliveries",
         "dr_event_receipts",

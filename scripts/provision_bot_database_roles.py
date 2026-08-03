@@ -225,6 +225,7 @@ def main() -> int:
         f"{prefix}_delivery": _required("BOT_DELIVERY_DB_PASSWORD"),
         f"{prefix}_projection": _required("BOT_PROJECTION_DB_PASSWORD"),
         f"{prefix}_observer": _required("BOT_OBSERVER_DB_PASSWORD"),
+        f"{prefix}_journal": _required("BOT_JOURNAL_DB_PASSWORD"),
     }
     app_role = f"{prefix}_app"
     service_roles = {
@@ -234,6 +235,7 @@ def main() -> int:
     }
     projection_role = service_roles["projector"]
     observer_role = f"{prefix}_observer"
+    journal_role = f"{prefix}_journal"
     engine = create_engine(_required(args.database_url_env))
     try:
         with engine.begin() as connection:
@@ -295,6 +297,13 @@ def main() -> int:
                 statements.append(
                     f"GRANT {permissions} ON TABLE public.{_ident(table)} TO {app_role}"
                 )
+            # This receiver is intentionally independent of the ordinary DR
+            # projection role.  It stores only opaque journal ciphertext and
+            # 2PC outcome metadata; no business or dr_events privilege exists.
+            statements.append(
+                "GRANT SELECT, INSERT, UPDATE ON TABLE public.dr_same_region_journal "
+                f"TO {journal_role}"
+            )
             for scope, grants in BOT_DR_SERVICE_GRANTS.items():
                 for table, permissions in grants.items():
                     statements.append(

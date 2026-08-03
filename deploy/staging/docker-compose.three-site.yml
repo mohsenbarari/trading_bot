@@ -92,6 +92,15 @@ x-webapp-fi-app-env: &webapp_fi_app_env
   POSTGRES_PASSWORD: ${WEBAPP_FI_APP_DB_PASSWORD}
   JWT_SECRET_KEY: runtime-role-does-not-serve-jwt-webapp-fi
   WRITER_WITNESS_REQUIRED: "true"
+  # The FI application has only the directed journal transport/encryption
+  # material. Bot-FI receives the HMAC key but never this encryption secret.
+  DR_SAME_REGION_JOURNAL_ENABLED: "true"
+  DR_SAME_REGION_JOURNAL_URL: https://bot-fi-dr.staging.internal:8443
+  DR_SAME_REGION_JOURNAL_PAIRWISE_KEYS_JSON: ${WEBAPP_FI_SAME_REGION_JOURNAL_KEYS_JSON:?required}
+  DR_SAME_REGION_JOURNAL_ENCRYPTION_KEY_ID: ${WEBAPP_FI_SAME_REGION_JOURNAL_ENCRYPTION_KEY_ID:?required}
+  DR_SAME_REGION_JOURNAL_ENCRYPTION_SECRET: ${WEBAPP_FI_SAME_REGION_JOURNAL_ENCRYPTION_SECRET:?required}
+  DR_SAME_REGION_JOURNAL_VERIFY_TLS: "true"
+  DR_SAME_REGION_JOURNAL_CA_BUNDLE: /run/staging-dr-ca/ca.crt
 
 x-webapp-fi-env: &webapp_fi_env
   <<: *webapp_fi_app_env
@@ -360,6 +369,7 @@ services:
       BOT_DELIVERY_DB_PASSWORD: ${BOT_FI_DELIVERY_DB_PASSWORD:?required}
       BOT_PROJECTION_DB_PASSWORD: ${BOT_FI_PROJECTION_DB_PASSWORD:?required}
       BOT_OBSERVER_DB_PASSWORD: ${BOT_FI_OBSERVER_DB_PASSWORD:?required}
+      BOT_JOURNAL_DB_PASSWORD: ${BOT_FI_JOURNAL_DB_PASSWORD:?required}
     depends_on: {bot_fi_migration: {condition: service_completed_successfully}}
     networks: [bot_fi]
 
@@ -377,6 +387,27 @@ services:
       JWT_SECRET_KEY: sync-observer-does-not-serve-jwt-bot-fi
     depends_on: {bot_fi_db_roles: {condition: service_completed_successfully}}
     networks: [bot_fi]
+
+  bot_fi_durability_journal:
+    profiles: [bot-fi]
+    <<: *app
+    command: [uvicorn, durability_journal_app:app, --host, 0.0.0.0, --port, "8000", --workers, "1"]
+    environment:
+      <<: *bot_env
+      TRADING_BOT_SERVICE: same_region_journal_receiver
+      DR_SAME_REGION_JOURNAL_ENABLED: "true"
+      DR_SAME_REGION_JOURNAL_PAIRWISE_KEYS_JSON: ${BOT_FI_SAME_REGION_JOURNAL_KEYS_JSON:?required}
+      DATABASE_URL: postgresql+asyncpg://bot_fi_journal:${BOT_FI_JOURNAL_DB_PASSWORD}@bot_fi_db/${BOT_FI_POSTGRES_DB}
+      SYNC_DATABASE_URL: postgresql://bot_fi_journal:${BOT_FI_JOURNAL_DB_PASSWORD}@bot_fi_db/${BOT_FI_POSTGRES_DB}
+      POSTGRES_USER: bot_fi_journal
+      POSTGRES_PASSWORD: ${BOT_FI_JOURNAL_DB_PASSWORD}
+    depends_on: {bot_fi_db_roles: {condition: service_completed_successfully}}
+    networks: [bot_fi]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
 
   webapp_fi_db:
     profiles: [webapp-fi]
@@ -496,6 +527,8 @@ services:
     depends_on:
       webapp_fi_db_fencing: {condition: service_completed_successfully}
       webapp_fi_redis: {condition: service_started}
+    extra_hosts:
+      - "bot-fi-dr.staging.internal:${WEBAPP_FI_PEER_BOT_FI_IP:?required}"
     networks: [webapp_fi, webapp_fi_egress]
 
   webapp_fi_writer_control:
@@ -554,6 +587,8 @@ services:
       WEB_PUSH_VAPID_PRIVATE_KEY: ${WEB_PUSH_VAPID_PRIVATE_KEY:-}
       WEB_PUSH_VAPID_SUBJECT: ${WEB_PUSH_VAPID_SUBJECT:-}
     depends_on: {webapp_fi_api: {condition: service_started}}
+    extra_hosts:
+      - "bot-fi-dr.staging.internal:${WEBAPP_FI_PEER_BOT_FI_IP:?required}"
     networks: [webapp_fi, webapp_fi_egress]
 
   webapp_fi_blobs:
@@ -943,7 +978,9 @@ services:
       - ${STAGING_SOURCE_ROOT:?required}/deploy/staging/nginx/bot-fi-dr.conf:/etc/nginx/conf.d/default.conf:ro
       - ${STAGING_BOT_FI_TLS_CERT:?required}:/run/tls/server.crt:ro
       - ${STAGING_BOT_FI_TLS_KEY:?required}:/run/tls/server.key:ro
-    depends_on: {bot_fi_dr_receiver: {condition: service_healthy}}
+    depends_on:
+      bot_fi_dr_receiver: {condition: service_healthy}
+      bot_fi_durability_journal: {condition: service_healthy}
     ports: ["${BOT_FI_DR_BIND_ADDRESS:?required}:8443:443"]
     networks: [bot_fi, bot_fi_ingress]
     logging: *logging

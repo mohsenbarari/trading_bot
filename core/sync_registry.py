@@ -62,6 +62,12 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
         ("dr_orchestrator", "durability_health_controller"), "local DR control plane",
         "signed expiring health evidence only", "write-freeze policy",
     ),
+    "dr_same_region_journal": _entry(
+        "dr_same_region_journal", SyncPolicy.INTERNAL_BOOKKEEPING,
+        ("same_region_journal_receiver", "same_region_journal_coordinator"),
+        "opaque Bot-FI durability coordinator",
+        "two-phase terminal state bound to transaction hash", "write durability only",
+    ),
     "dr_blob_deliveries": _entry(
         "dr_blob_deliveries", SyncPolicy.INTERNAL_BOOKKEEPING,
         ("dr_blob_worker",), "local DR file plane",
