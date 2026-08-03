@@ -1217,6 +1217,61 @@ Confirmationهای هم‌معنی ادغام می‌شوند، ولی fencing �
   lifecycle VPS در این remediation وجود ندارد.
 - Production touched: `no`.
 
+#### checkpoint اجرای Stage 4 — hotfix مرز نقش دوام و re-attestation — 2026-08-03
+
+- سیاست مالک برای این مرحله دوباره صریح شد: SSH فقط برای اجرای فرمان روی
+  مقصد و receipt کوتاه است؛ هیچ artifact/data payload نباید با `scp` میان
+  Finland و Iran جابه‌جا شود و مسیر انتقال artifact باید Object Storage باشد.
+  یک تلاش اولیه برای انتقال image به WebApp-IR با `scp` پیش از `docker load` یا
+  هر mutation runtime متوقف شد؛ هیچ process `scp` باقی نماند و artifact جزئی
+  روی IR پاک شد. image نهایی فقط با client-side encryption از Object Storage
+  private/versioned staging دریافت و روی خود IR decrypt/hash-verify شد.
+- artifact دقیق application hotfix با release
+  `e00283c037ec5ca63340b9827768256b1c5ef144`، SHA-256 plaintext
+  `db2323e6f65298e8c4a0804389e2e8096bd50de683742cce7eb247bc0e43e241`
+  و اندازه `249970667` bytes در key اختصاصی campaign زیر
+  `staging/fd34231d-f52e-498a-aab4-438c99d88fc5/transport/webapp-ir/hotfix/e00283c037ec5ca63340b9827768256b1c5ef144/`
+  منتشر و از exact VersionId
+  `SLk.xxyu-IcZIXNLuwZvgpDqw1e-a5Z` بازخوانی شد. ciphertext SHA-256 برابر
+  `5e96356c5d385e4e9949dea7e62d8aea152de19ec56bf1d2295cc80aabf99cc8`
+  است. هیچ bucket production استفاده یا تغییر نکرد.
+- پیش از mutation، dry-run activation روی هر دو DB WebApp با `303` statement
+  پذیرفته شد. سپس تنها application serviceهای چهار role با image جدید
+  بازسازی شدند؛ PostgreSQL image/container، Redis، TLS و همه volumeها ثابت
+  ماندند. env قبلی هر role دست‌نخورده و env hotfix جداگانه با تنها تفاوت
+  `STAGING_RELEASE_SHA=e002...` برای rollback نگهداری شد. هر دو activation
+  database با status `applied` و `303` statement پایان یافت.
+- remediation `e00283c0` در runtime درست است: function parameterless
+  `public.trading_bot_read_durability_state_for_write_gate()` در هر دو WebApp
+  اجرا می‌شود؛ role برنامه هنوز روی table
+  `dr_durability_state` فقط `SELECT` دارد و `UPDATE` نگرفته است. FI در epoch 1
+  active با lease تازه Witness است؛ IR در epoch 1، `fenced`، بدون lease و بدون
+  authority Writer است. renewalهای FI پس از deploy به Witness با `200` ادامه
+  دارند.
+- re-attestation یک blocker مستقل و واقعی را آشکار کرد: هر دو state دوام
+  `connectivity_mode=ambiguous`، `event_journal_healthy=false`،
+  `blob_journal_healthy=false` و بدون expiry تازه هستند. این وضعیت باید
+  critical write را fail-closed نگه دارد. ریشه در
+  `scripts/update_dr_connectivity_state.py` است: controller موجود به‌صراحت
+  هر دو health flag را همواره `false` می‌نویسد و خود کد می‌گوید local journal
+  مستقل/approved هنوز پیاده نشده است. بنابراین پس از رفع privilege mismatch،
+  Tier-1 تجاری به خطای درستِ durability policy می‌رسد مگر آنکه evidence
+  journal واقعی ساخته شود؛ هیچ grant گسترده یا bypass مجاز نیست.
+- اجرای نخست Tier-1 hotfix پیش از شروع Playwright/fixture تجاری متوقف شد، چون
+  listener قدیمی `127.0.0.1:8100` یک SSH tunnel بود. tunnel قدیمی تغییر یا
+  حذف نشد، ولی runner متوقف و دیگر از آن استفاده نمی‌شود. cleanupهای scoped
+  پیش از توقف فقط prefixهای staging را زیر Writer fence بررسی کردند؛ report
+  یا pass Tier-1 ادعا نمی‌شود. credential Basic Auth قدیمیِ موجود نیز برای
+  edge فعلی `401` داد و plaintext آن نمایش یا ثبت نشد.
+- Decision: `G4_BLOCKED / no`. scope بعدی باید کوچک و واقعی باشد: implementation
+  یک same-region event/blob journal با restore drill و controller evidence
+  کوتاه‌عمر که فقط پس از اثبات بتواند health flags را true کند؛ سپس release
+  جدید، re-attestation، و Tier-1 بدون SSH data path. تا آن زمان public route
+  staging و writer fencing حفظ می‌شوند و critical business mutation عمداً
+  frozen است.
+- Production touched: `no`. هیچ VPS/volume lifecycle، route/DNS/CDN، bucket
+  production یا workload production تغییر نکرد.
+
 ### Exit gate — G4 Staging Published
 
 - هر چهار role exact release SHA را گزارش می‌کنند؛
@@ -1238,10 +1293,10 @@ restart فقط سرویس‌هایی که در freeze evidence فعال بوده
 
 ### گزارش پایان Stage 4
 
-- Status: `IN_PROGRESS — PUBLIC ROUTE SWITCHED; TIER-1 BLOCKED BY A REAL DURABILITY-GATE ROLE-BOUNDARY DEFECT`
+- Status: `IN_PROGRESS — PUBLIC ROUTE SWITCHED; ACL HOTFIX DEPLOYED; TIER-1 BLOCKED BY MISSING SAME-REGION DURABILITY JOURNAL EVIDENCE`
 - Branch: `stage/three-site-staging-04-deploy`
 - Base / implementation / deployed SHA:
-  `0e63a7ec1b08bef29ea199041215298a021b56ef / through e00283c0 / deployed release remains 0e63a7ec1b08bef29ea199041215298a021b56ef`
+  `0e63a7ec1b08bef29ea199041215298a021b56ef / e00283c037ec5ca63340b9827768256b1c5ef144 / application services on all four roles = e00283c037ec5ca63340b9827768256b1c5ef144`
 - Role health and writer term:
   `four fresh observations, role-acceptance, global-commit and finish passed; WebApp-FI remains the accepted epoch-1 Writer and WebApp-IR remains fenced standby.`
 - Smoke and parity results:
@@ -1250,11 +1305,11 @@ restart فقط سرویس‌هایی که در freeze evidence فعال بوده
   `owner-only .../stage4/controller-role-acceptance-v1/evidence/global-commit-global-commit.json = ae12bd249f301a6c2dc01cc222065c5a8d7f16c65debb5a0d786ced481a1eaf1; .../stage4/convergence-role-acceptance-v3/summary.json = 5367e4de832f0d352d7552bd9d2136e92be8c80a428ef53646b76b3b9ab2d935; .../stage4/public-ingress-v1/arvan-origin-switch-audit.jsonl = e4c6736522af924c15b37e0dcf4d0947b5141ea81b8d40767a8483bab1d71848; .../stage4/tier1-role-trading-e2e-v5/report.json = aa2a690a6eccf873b1b8045b8ea16116eca3e666f3971033bd378678bead8042.`
 - Production touched: `no`
 - Deviations / open risks:
-  `the owner confirmed staging.gold-trade.ir as the authorized staging route and the exact CDN origin switch is complete. WebApp-FI ingress/TLS is proven. A real PostgreSQL row-lock privilege mismatch blocks public business mutation; e00283c0 corrects it without broadening application-table DML, but deploy/re-attestation requires fresh authorization because it changes the exact accepted release. Certificate renewal is due by 2026-10-01 and is an operational handoff item.`
+  `the owner confirmed staging.gold-trade.ir as the authorized staging route and the exact CDN origin switch is complete. WebApp-FI ingress/TLS is proven. e00283c0 is deployed and fixes the PostgreSQL row-lock privilege mismatch without broadening application-table DML. Re-attestation then proved the deeper blocker: same-region event/blob durability evidence is not implemented, and the existing controller deliberately writes both health flags false. A stale local SSH tunnel was discovered and is excluded from further testing; Iran-bound artifact transport is Object Storage only. Certificate renewal is due by 2026-10-01 and is an operational handoff item.`
 - Rollback verified:
   `yes for the completed private topology; route rollback is exactly staging.gold-trade.ir back to 65.109.220.59, target data is retained, and the stopped stale staging poller remains recoverable by start-only rollback.`
 - Decision / next stage:
-  `G4 not yet accepted / no; request authorization limited to applying the closed durability-gate function on the two staging WebApp DBs, deploying/re-attesting a new immutable staging release from e00283c0 across the four staging roles, then rerunning fenced Tier-1. No Arvan/DNS, production, VPS or lifecycle action is in scope.`
+  `G4 not yet accepted / no; the closed durability-gate function is already applied and e00283c0 is deployed. Implement and independently restore-drill a real same-region event/blob journal evidence path, then deploy/re-attest its immutable release and rerun fenced Tier-1 without an SSH data path. No Arvan/DNS, production, VPS or lifecycle action is in scope.`
 
 ---
 
