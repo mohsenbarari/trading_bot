@@ -1416,6 +1416,38 @@ route عمومی، production و lifecycle زیرساخت در rollback 4R تغ�
   مانده است. پس G4R و G4 هر دو هنوز پذیرفته نشده‌اند.
 - Production touched: `no`; Decision: `continue Stage 4R`.
 
+#### checkpoint runtime remediation Stage 4R — 2026-08-03
+
+- Status: `IN_PROGRESS — RUNTIME BLOCKER FIXED IN SOURCE; STAGING DEPLOY PENDING`.
+  این checkpoint پایان Stage 4R یا پذیرش G4R نیست.
+- Read-only observation از PostgreSQL واقعی `webapp_fi` و log پنج‌دقیقه‌ای worker
+  نشان داد release فعال `e00283c0` روی migration `b986c7d8e0f1` است و
+  `webapp_fi_dr_delivery` با خطای
+  `three-site projection attempted a forbidden field on dr_event_deliveries`
+  restart می‌شود. allowlist پایدار همهٔ fieldهای mutateشدهٔ delivery را داشت جز
+  `first_attempt_at`; همان column در migration بعدی `a875b6c7d9e0` اضافه شده بود
+  و در policy reconcile قدیمی ثبت نشده بود. این failure مستقل از journal/2PC
+  است و هر claim را عمداً fail-closed می‌کرد.
+- Remediation implementation: `c2c890464d6fcd300410acfe234237b61850b295`.
+  migration forward-only `e0a4b6c8d1e3` فقط tuple
+  `dr_event_deliveries/first_attempt_at` را، idempotent، به
+  `dr_projection_field_allowlist` اضافه می‌کند. trigger، service role و هیچ
+  field دیگری broaden نشده‌اند. expected head تمام ابزارهای staging و testها
+  به `e0a4b6c8d1e3` تغییر کرده است.
+- Verification local: `python3 -m unittest` برای ۶۷ آزمون foundation، migration
+  graph/history، role plan/journal و collector با `OK`؛ `compileall`،
+  `git diff --check` و `alembic heads` نیز قبول‌اند و head یکتا
+  `e0a4b6c8d1e3` است. آزمون live 2PC هنوز انجام نشده و به‌عنوان evidence pass
+  ثبت نشده است.
+- Next controlled action: image و role bundle همین SHA فقط از Object Storage
+  private/versioned و CSE به نقش‌های staging می‌رسد؛ سپس migration اول روی
+  `webapp_fi` اعمال و restart worker بدون crash-loop مشاهده می‌شود. تا آن
+  observation، `max_prepared_transactions` همچنان `0` و هر دو durability health
+  flag `false` است؛ Tier-1 باز نمی‌شود. IR fenced، public route و production
+  بدون تغییر می‌مانند.
+- Production touched: `no`; artifact/data transfer via SSH/SCP: `no`; Decision:
+  `continue Stage 4R with controlled staging deployment`.
+
 ### Exit gate — G4 Staging Published
 
 - هر چهار role exact release SHA را گزارش می‌کنند؛
