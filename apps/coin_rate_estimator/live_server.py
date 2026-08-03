@@ -908,6 +908,202 @@ def query_user_details(
         return empty_res
 
 
+def render_user_details_pdf_page(
+    conversation_db: Path,
+    username: str,
+    group: int,
+    kind: str,
+    *,
+    range_type: str = "today",
+    start_shamsi: str | None = None,
+    end_shamsi: str | None = None,
+) -> bytes:
+    data = query_user_details(
+        conversation_db,
+        username,
+        group,
+        kind,
+        range_type=range_type,
+        start_shamsi=start_shamsi,
+        end_shamsi=end_shamsi,
+    )
+
+    is_trade = kind in ("trade", "trade_qty")
+    kind_title = "معاملات تاییدشده" if is_trade else "آفرهای ثبت‌شده"
+    now_fa = fa_datetime(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+
+    rows_html = []
+    if not data["items"]:
+        rows_html.append("<tr><td colspan='8' style='text-align:center;padding:20px;color:#888'>هیچ داده‌ای در این بازه زمانی یافت نشد.</td></tr>")
+    elif is_trade:
+        for idx, item in enumerate(data["items"], 1):
+            side_color = "#10b981" if item["side"] == "خرید" else "#ef4444"
+            rows_html.append(
+                f"<tr>"
+                f"<td>{fa_number(idx)}</td>"
+                f"<td>{item['time']}</td>"
+                f"<td><strong>{item['role']}</strong></td>"
+                f"<td><strong style='color:#b45309'>{item['counterparty']}</strong></td>"
+                f"<td>{item['commodity']}</td>"
+                f"<td style='color:{side_color};font-weight:bold'>{item['side']}</td>"
+                f"<td dir='ltr' style='text-align:left'><strong>{item['price']}</strong> تومان</td>"
+                f"<td dir='ltr' style='text-align:left'>{item['quantity']} عدد</td>"
+                f"</tr>"
+            )
+    else:
+        for idx, item in enumerate(data["items"], 1):
+            side_color = "#10b981" if item["side"] == "خرید" else "#ef4444"
+            rows_html.append(
+                f"<tr>"
+                f"<td>{fa_number(idx)}</td>"
+                f"<td>{item['time']}</td>"
+                f"<td>{item['commodity']}</td>"
+                f"<td style='color:{side_color};font-weight:bold'>{item['side']}</td>"
+                f"<td dir='ltr' style='text-align:left'><strong>{item['price']}</strong> تومان</td>"
+                f"<td dir='ltr' style='text-align:left'>{item['quantity']} عدد</td>"
+                f"<td>{item['settlement']}</td>"
+                f"<td style='max-width:250px;word-break:break-word'>{item['text']}</td>"
+                f"</tr>"
+            )
+
+    table_headers = """
+      <tr><th>#</th><th>زمان ثبت</th><th>نقش کاربر</th><th>طرف مقابل معامله</th><th>کالا</th><th>سمت</th><th style="text-align:left">قیمت</th><th style="text-align:left">تعداد</th></tr>
+    """ if is_trade else """
+      <tr><th>#</th><th>زمان ثبت</th><th>کالا</th><th>سمت</th><th style="text-align:left">قیمت</th><th style="text-align:left">تعداد</th><th>تسویه</th><th>متن آفر</th></tr>
+    """
+
+    doc = f"""<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>گزارش {kind_title} — {html.escape(username)}</title>
+<style>
+@import url('https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css');
+@page {{
+  size: A4 portrait;
+  margin: 15mm;
+}}
+body {{
+  font-family: Vazirmatn, system-ui, -apple-system, sans-serif;
+  color: #1e293b;
+  background: #ffffff;
+  margin: 0;
+  padding: 24px;
+  line-height: 1.5;
+}}
+.header {{
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 2px solid #f59e0b;
+  padding-bottom: 14px;
+  margin-bottom: 20px;
+}}
+.header h1 {{
+  margin: 0 0 4px;
+  font-size: 20px;
+  color: #0f172a;
+}}
+.header p {{
+  margin: 0;
+  font-size: 13px;
+  color: #64748b;
+}}
+.meta-grid {{
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px 18px;
+  font-size: 13px;
+}}
+.meta-item strong {{
+  color: #0f172a;
+  display: block;
+  font-size: 14px;
+  margin-top: 2px;
+}}
+table {{
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-top: 10px;
+}}
+th {{
+  background: #0f172a;
+  color: #ffffff;
+  padding: 9px 12px;
+  text-align: right;
+  font-weight: 700;
+}}
+td {{
+  padding: 9px 12px;
+  border-bottom: 1px solid #e2e8f0;
+}}
+tr:nth-child(even) td {{
+  background: #f8fafc;
+}}
+.footer {{
+  margin-top: 30px;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 12px;
+  text-align: center;
+  font-size: 11px;
+  color: #94a3b8;
+}}
+@media print {{
+  .no-print {{ display: none !important; }}
+  body {{ padding: 0; }}
+}}
+</style>
+</head>
+<body>
+<div class="no-print" style="margin-bottom:20px;text-align:left">
+  <button onclick="window.print()" style="background:#f59e0b;color:#0f172a;border:none;padding:10px 22px;font-family:inherit;font-weight:bold;font-size:14px;border-radius:8px;cursor:pointer;box-shadow:0 4px 12px rgba(245,158,11,0.3)">🖨️ چاپ / ذخیره مستقیم به عنوان PDF</button>
+</div>
+
+<div class="header">
+  <div>
+    <h1>گزارش آمار و فعالیت کاربر: {html.escape(username)}</h1>
+    <p>نوع گزارش: {kind_title} — گروه معاملاتی {fa_number(group)}</p>
+  </div>
+  <div style="text-align:left;font-size:12px;color:#64748b">
+    <div>سامانه هوشمند تحلیل بازار سکه</div>
+    <div>تاریخ تنظیم: {now_fa}</div>
+  </div>
+</div>
+
+<div class="meta-grid">
+  <div class="meta-item">نام کاربر: <strong>{html.escape(username)}</strong></div>
+  <div class="meta-item">گروه معاملاتی: <strong>گروه {fa_number(group)}</strong></div>
+  <div class="meta-item">بازه زمانی: <strong>{data['range_label']}</strong></div>
+  <div class="meta-item">تعداد / حجم کل: <strong>{fa_number(data['total_items'])} رویداد ({fa_number(data['total_qty'])} کالا)</strong></div>
+</div>
+
+<table>
+  <thead>{table_headers}</thead>
+  <tbody>{''.join(rows_html)}</tbody>
+</table>
+
+<div class="footer">
+  این گزارش از سامانه هوشمند قیمت‌گذاری و تحلیل بازار سکه استخراج شده است.
+</div>
+
+<script>
+window.onload = function() {{
+  setTimeout(function() {{
+    window.print();
+  }}, 400);
+}};
+</script>
+</body>
+</html>"""
+    return doc.encode("utf-8")
+
+
 def render_analytics_leaderboard_table(
     title: str,
     subtitle: str,
@@ -2496,9 +2692,12 @@ async function openUserModal(username, group, kind) {{
       `).join("");
 
       body.innerHTML = `
-        <div class="modal-badge-bar">
-          <div class="modal-badge">تعداد کل معاملات: <strong>${{data.total_items}}</strong></div>
-          <div class="modal-badge">مجموع حجم کالا: <strong>${{data.total_qty}} عدد</strong></div>
+        <div class="modal-badge-bar" style="justify-content:space-between;align-items:center">
+          <div style="display:flex;gap:12px">
+            <div class="modal-badge">تعداد کل معاملات: <strong>${{data.total_items}}</strong></div>
+            <div class="modal-badge">مجموع حجم کالا: <strong>${{data.total_qty}} عدد</strong></div>
+          </div>
+          <a href="{analytics_path}/user-details/pdf?${{urlParams.toString()}}" target="_blank" class="nav-btn secondary" style="font-size:12.5px;padding:6px 14px">📄 دریافت گزارش PDF</a>
         </div>
         <div class="table-wrap">
           <table>
@@ -2523,9 +2722,12 @@ async function openUserModal(username, group, kind) {{
       `).join("");
 
       body.innerHTML = `
-        <div class="modal-badge-bar">
-          <div class="modal-badge">تعداد کل آفرها: <strong>${{data.total_items}}</strong></div>
-          <div class="modal-badge">مجموع حجم کالا: <strong>${{data.total_qty}} عدد</strong></div>
+        <div class="modal-badge-bar" style="justify-content:space-between;align-items:center">
+          <div style="display:flex;gap:12px">
+            <div class="modal-badge">تعداد کل آفرها: <strong>${{data.total_items}}</strong></div>
+            <div class="modal-badge">مجموع حجم کالا: <strong>${{data.total_qty}} عدد</strong></div>
+          </div>
+          <a href="{analytics_path}/user-details/pdf?${{urlParams.toString()}}" target="_blank" class="nav-btn secondary" style="font-size:12.5px;padding:6px 14px">📄 دریافت گزارش PDF</a>
         </div>
         <div class="table-wrap">
           <table>
@@ -2737,6 +2939,29 @@ def handler_factory(
                 )
                 body = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
                 self._headers(HTTPStatus.OK, "application/json; charset=utf-8", len(body))
+                self.wfile.write(body)
+                return
+            if path == analytics_path + "/user-details/pdf":
+                query = parse_qs(urlsplit(self.path).query)
+                username = query.get("username", [""])[0]
+                try:
+                    group = int(query.get("group", [1])[0])
+                except ValueError:
+                    group = 1
+                kind = query.get("kind", ["offer"])[0]
+                range_type = query.get("range_type", ["today"])[0]
+                start_shamsi = query.get("start_shamsi", [None])[0]
+                end_shamsi = query.get("end_shamsi", [None])[0]
+                body = render_user_details_pdf_page(
+                    conversation_db,
+                    username,
+                    group,
+                    kind,
+                    range_type=range_type,
+                    start_shamsi=start_shamsi,
+                    end_shamsi=end_shamsi,
+                )
+                self._headers(HTTPStatus.OK, "text/html; charset=utf-8", len(body))
                 self.wfile.write(body)
                 return
             if path == manual_path:
