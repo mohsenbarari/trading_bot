@@ -1272,6 +1272,96 @@ Confirmationهای هم‌معنی ادغام می‌شوند، ولی fencing �
 - Production touched: `no`. هیچ VPS/volume lifecycle، route/DNS/CDN، bucket
   production یا workload production تغییر نکرد.
 
+### Stage 4R — remediation journal دوام هم‌منطقه‌ای
+
+#### مسئله و هدف محدود
+
+hotfix `e00283c0` مرز دسترسی PostgreSQL را درست کرد، اما بررسی مستقیم نشان داد
+controller موجود عمداً هر دو flag دوام را `false` می‌نویسد. پس Tier-1 تا اینجا
+باید fail-closed بماند. هدف 4R تنها بستن این شکاف است: Writer فعال در
+`webapp_fi` فقط پس از ثبت **هم‌زمان، مستقل و قابل بازیابی** journal خود روی
+`bot_fi` بتواند mutation حیاتی را commit کند. `webapp_ir` receiver مستقل
+هم‌منطقه‌ای ندارد؛ بنابراین در این remediation Writer نمی‌شود و flagهایش false
+و fence آن پابرجا می‌ماند.
+
+این یک gate اضافی نیست: همان شرط بنیادی RPO برای بازکردن Tier-1 است. نتیجهٔ آن
+صرفاً evidence کوتاه‌عمر برای gate موجود است؛ هیچ approval، token یا تغییر route
+جدیدی ایجاد نمی‌کند.
+
+#### حدود و قراردادهای غیرقابل‌مذاکره
+
+1. مقصد journal، PostgreSQL/volume مستقل `bot_fi` روی میزبان Finland است؛ نه
+   همان DB/volume/host Writer و نه Object Storage ایران. Object Storage فقط برای
+   artifact و evidence انتقال بین کشورها به‌کار می‌رود، نه برای ادعای دوام
+   هم‌منطقه‌ای.
+2. رخدادهای WebApp-private (از جمله Messenger) در Bot قابل projection یا
+   خواندن نیستند. receiver جدید فقط envelope رمز‌شده و opaque، hash، epoch و
+   checkpoint را ثبت می‌کند؛ role آن به جدول‌های business و projection دسترسی
+   ندارد. کلید decrypt به receiver داده نمی‌شود.
+3. commit mutation حیاتی در FI باید پس از final شدن envelopeهای همان transaction
+   و ACK معتبر receiver انجام شود. timeout، ACK ناسازگار/تکراری، قطع Bot-FI،
+   hash mismatch یا expiry evidence باید transaction را rollback/freeze کند.
+   orphan journal مجاز است، اما acknowledgement بدون نگهداری پایدار مجاز نیست.
+4. blobهای `chat_files` قرارداد جداگانه دارند: پیش از پذیرش mutation مرجع blob،
+   ciphertext/hash/size آن باید در journal مستقل FI قابل read-back باشد. تا
+   تکمیل این قرارداد، blob flag false است و upload حیاتی باز نمی‌شود.
+5. controller فقط receiptهای امضاشدهٔ همین release، site=`webapp_fi`، epoch فعال
+   و restore drill تازه را می‌پذیرد و TTL حداکثر 60 ثانیه می‌دهد. هیچ command یا
+   role application حق set کردن مستقیم flagها را ندارد.
+6. SSH فقط اجرای command و receipt کوتاه روی مقصد است. هیچ payload، image،
+   snapshot یا test fixture میان Finland و Iran با SCP/tunnel عبور نمی‌کند.
+   تغییر DNS/CDN، production، lifecycle VPS/volume و secret rotation خارج از
+   scope 4R هستند.
+
+#### ترتیب اجرا
+
+1. این طراحی، مدل تهدید، schema/ACL و rollback را در همین roadmap ثبت و commit
+   می‌کنیم؛ سپس pipeline و policy فعلی را با تست‌های red مشخص می‌کنیم.
+2. journal append-only Bot-FI، endpoint mTLS/authenticated و schema migration
+   least-privilege را پیاده می‌کنیم. پیام opaque client-side-encrypted است و
+   idempotency فقط بر `(origin_site, epoch, transaction_id, envelope_hash)`
+   تعریف می‌شود.
+3. hook هم‌زمان پیش از commit برای event و قرارداد جداگانهٔ blob را اضافه می‌کنیم؛
+   مسیر async فعلی DR حذف یا bypass نمی‌شود و فقط transport/recovery دوردست است.
+4. controller evidence را به receipt معتبر journal وصل می‌کنیم، به‌طوری که
+   expiry طبیعی یا هر خطای health دوباره gate را ببندد. IR در هر حالت false/fenced
+   باقی می‌ماند.
+5. تست‌های unit/integration برای ACL، malformed/replayed ACK، duplicate، rollback
+   local، outage Bot-FI، expiry، محرمانگی WebApp payload، blob read-back و restore
+   اجرا می‌شوند. test پاس‌شده بدون fault injection کافی نیست.
+6. image/migration immutable ساخته و روی هر نقش با همان release attestation
+   می‌شود. هر artifact لازم برای WebApp-IR فقط با Object Storage private/versioned
+   و CSE منتقل می‌شود؛ هیچ artifact با SSH/SCP منتقل نمی‌شود.
+7. روی staging، تنها marker مصنوعی مخصوص campaign در journal Bot-FI ثبت، read-back
+   و restore در database scratch انجام می‌شود؛ سپس outage کنترل‌شدهٔ receiver
+   باید freeze را اثبات کند. business data و production لمس نمی‌شوند.
+8. پس از evidence تازه، Tier-1 از runner مقصد یا artifact قابل‌ردیابی اجرا
+   می‌شود؛ از tunnel محلی قدیمی و Basic-Auth نامعتبر استفاده نمی‌شود. در پایان
+   result و decision در همین Stage ثبت و commit می‌شوند.
+
+#### Exit gate — G4R Journal Proven
+
+- mutation حیاتی FI تنها با ACK پایدار Bot-FI و receipt تازه پذیرفته می‌شود؛
+- restore drill marker از journal مستقل FI hash-identical است؛
+- قطع receiver یا expiry evidence فوراً mutation حیاتی FI را freeze می‌کند؛
+- IR همچنان fenced است و journal health آن true ادعا نمی‌شود؛
+- ACL receiver به business/projection داده دسترسی ندارد و تمام تست‌های قرارداد
+  و Tier-1 لازم قبول‌اند.
+
+#### Rollback
+
+هیچ journal یا volume حذف نمی‌شود. قطع receiver، revoke کردن evidence controller
+یا پایان TTL به‌تنهایی مسیر را fail-closed می‌کند. rollback release فقط سرویس‌های
+4R را به image پیشین برمی‌گرداند و immutable journal برای recovery حفظ می‌شود.
+route عمومی، production و lifecycle زیرساخت در rollback 4R تغییر نمی‌کند.
+
+#### checkpoint شروع Stage 4R — 2026-08-03
+
+- Status: `IN_PROGRESS — DESIGN COMMITTED; IMPLEMENTATION NOT YET STARTED`
+- Basis: `e00283c0` روی چهار نقش deploy است و function امن read-only کار می‌کند؛
+  blocker باقی‌مانده نبود journal واقعی و independent برای `webapp_fi` است.
+- Production touched: `no`.
+
 ### Exit gate — G4 Staging Published
 
 - هر چهار role exact release SHA را گزارش می‌کنند؛
