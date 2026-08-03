@@ -450,10 +450,13 @@ def fa_number(value: Any, *, decimals: int = 0) -> str:
 def fa_datetime(value: str | None) -> str:
     if not value:
         return NO_DATA_TOKEN
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(TEHRAN)
-    return parsed.strftime("%Y-%m-%d %H:%M:%S").translate(
-        str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
-    )
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(TEHRAN)
+        j_dt = jdatetime.datetime.fromgregorian(datetime=parsed)
+        formatted = j_dt.strftime("%Y/%m/%d %H:%M:%S")
+        return formatted.translate(str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹"))
+    except Exception:
+        return NO_DATA_TOKEN
 
 
 CONFIDENCE_FA = {
