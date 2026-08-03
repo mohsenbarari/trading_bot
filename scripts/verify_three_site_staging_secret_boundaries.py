@@ -33,7 +33,7 @@ SECRET_REFERENCES = {
         "webapp_ir_writer_control", "witness_api",
     },
     "WEBAPP_FI_CONTROL_DB_PASSWORD": lambda service: service in {
-        "webapp_fi_writer_control", "webapp_fi_db_roles",
+        "webapp_fi_writer_control", "webapp_fi_durability_health", "webapp_fi_db_roles",
     },
     "WEBAPP_IR_CONTROL_DB_PASSWORD": lambda service: service in {
         "webapp_ir_writer_control", "webapp_ir_db_roles",
@@ -109,7 +109,7 @@ SECRET_REFERENCES = {
     },
     "BOT_FI_SAME_REGION_JOURNAL_KEYS_JSON": lambda service: service == "bot_fi_durability_journal",
     "WEBAPP_FI_SAME_REGION_JOURNAL_KEYS_JSON": lambda service: service in {
-        "webapp_fi_api", "webapp_fi_effects",
+        "webapp_fi_api", "webapp_fi_effects", "webapp_fi_durability_health",
     },
     "WEBAPP_FI_SAME_REGION_JOURNAL_ENCRYPTION_SECRET": lambda service: service in {
         "webapp_fi_api", "webapp_fi_effects",
@@ -140,7 +140,7 @@ SECRET_REFERENCES = {
 OWNER_REFERENCE = re.compile(r"(?:BOT_FI|WEBAPP_FI|WEBAPP_IR)_POSTGRES_PASSWORD")
 MANAGED_NETWORK_MEMBERS = {
     "bot_fi_dr_egress": {"bot_fi_dr_delivery"},
-    "webapp_fi_dr_egress": {"webapp_fi_dr_delivery"},
+    "webapp_fi_dr_egress": {"webapp_fi_dr_delivery", "webapp_fi_durability_health"},
     "webapp_ir_dr_egress": {"webapp_ir_dr_delivery"},
     "writer_witness_egress": {
         "webapp_fi_writer_control", "webapp_ir_writer_control",
@@ -160,6 +160,7 @@ WRITER_CONTROL_SERVICES = {
     "webapp_fi_writer_control",
     "webapp_ir_writer_control",
 }
+CONTROL_PLANE_SERVICES = WRITER_CONTROL_SERVICES | {"webapp_fi_durability_health"}
 WRITER_CONTROL_ONLY_ENV_KEYS = {
     "DR_CONTROL_DATABASE_URL",
     "WRITER_WITNESS_CLIENT_KEY_ID",
@@ -200,6 +201,9 @@ EXPECTED_CROSS_HOSTS = {
     ],
     "webapp_fi_writer_control": [
         "witness-dr.staging.internal:${WEBAPP_FI_WITNESS_IP:?required}",
+    ],
+    "webapp_fi_durability_health": [
+        "bot-fi-dr.staging.internal:${WEBAPP_FI_PEER_BOT_FI_IP:?required}",
     ],
     "webapp_ir_dr_delivery": [
         "webapp-fi-dr.staging.internal:${WEBAPP_IR_PEER_WEBAPP_FI_IP:?required}",
@@ -268,7 +272,7 @@ def verify_compose(path: Path) -> dict[str, object]:
         if isinstance(environment, dict):
             forbidden_control_keys = (
                 set(environment) & WRITER_CONTROL_ONLY_ENV_KEYS
-                if str(service) not in WRITER_CONTROL_SERVICES
+                if str(service) not in CONTROL_PLANE_SERVICES
                 else set()
             )
             for key in sorted(forbidden_control_keys):

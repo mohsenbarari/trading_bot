@@ -117,6 +117,19 @@ class ThreeSiteStagingRoleComposeTests(unittest.TestCase):
             with self.subTest(service=service):
                 self.assertEqual(self.payload["services"][service]["command"], command)
 
+    def test_durability_health_is_an_explicit_one_shot_control_service(self):
+        service = self.payload["services"]["webapp_fi_durability_health"]
+        self.assertEqual(service["restart"], "no")
+        self.assertEqual(service["networks"], ["webapp_fi", "webapp_fi_dr_egress"])
+        self.assertEqual(
+            service["extra_hosts"],
+            ["bot-fi-dr.staging.internal:${WEBAPP_FI_PEER_BOT_FI_IP:?required}"],
+        )
+        environment = service["environment"]
+        self.assertEqual(environment["TRADING_BOT_SERVICE"], "durability_health_controller")
+        self.assertNotIn("WEBAPP_FI_SAME_REGION_JOURNAL_ENCRYPTION_SECRET", environment)
+        self.assertNotIn("WRITER_WITNESS_CLIENT_SECRET", environment)
+
     def test_witness_is_an_independent_role_and_fi_is_the_normal_writer(self):
         witness = self.payload["services"]["witness_api"]["environment"]
         fi_control = self.payload["services"]["webapp_fi_writer_control"]["environment"]

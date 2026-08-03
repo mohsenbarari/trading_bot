@@ -134,6 +134,27 @@ networks:
         self.assertIn("inbound_surface_forbidden", message)
         self.assertIn("public_egress_forbidden", message)
 
+    def test_durability_health_controller_has_only_its_closed_journal_egress(self):
+        source = """
+services:
+  webapp_fi_durability_health:
+    image: test
+    ports: ["8000:8000"]
+    networks: [webapp_fi, webapp_fi_egress]
+    environment:
+      DR_CONTROL_DATABASE_URL: postgresql://control:literal@db/app
+networks:
+  webapp_fi_egress: {}
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "compose.yml"
+            path.write_text(source, encoding="utf-8")
+            with self.assertRaises(SecretBoundaryError) as captured:
+                verify_compose(path)
+        message = str(captured.exception)
+        self.assertIn("unexpected_published_port", message)
+        self.assertIn("forbidden_network:webapp_fi_egress", message)
+
     def test_convergence_exporter_is_one_shot_and_cannot_receive_storage_credentials(self):
         source = """
 services:

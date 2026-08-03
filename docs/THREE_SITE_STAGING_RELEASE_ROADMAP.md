@@ -1568,6 +1568,55 @@ route عمومی، production و lifecycle زیرساخت در rollback 4R تغ�
   deletion: `no`; Decision: `continue Stage 4R with the remaining durability
   controller and blob-read-back evidence`.
 
+#### checkpoint bounded durability-health controller Stage 4R — 2026-08-03
+
+- Status: `IN_PROGRESS — SOURCE IMPLEMENTED AND TESTED; NO NEW RELEASE OR
+  GATE ACCEPTANCE`. این checkpoint فقط blocker واقعیِ controller را رفع می‌کند؛
+  هیچ state، feature flag، writer lease، DNS/CDN یا production تغییر نکرده است.
+- مسئلهٔ تأییدشده: `update_dr_connectivity_state.py` عمداً فقط evidence
+  connectivity را می‌نوشت و `event_journal_healthy` و
+  `blob_journal_healthy` را هر بار `false` می‌گذاشت. بنابراین اجرای دوبارهٔ
+  connectivity controller یا update مستقیم جدول، نمی‌توانست و نباید G4 را
+  باز کند.
+- تغییر source: control-plane one-shot جدید
+  `webapp_fi_durability_health` و command
+  `scripts/refresh_three_site_durability_health.py` اضافه شد. این command فقط
+  با role `webapp_fi_control` اجرا می‌شود و نه role application دارد، نه secret
+  رمزگذاری journal، نه credential Object Storage، نه Witness authority، نه
+  public ingress و نه loop دائمی. دسترسی شبکه‌اش دقیقاً TLS خصوصی Bot-FI journal
+  روی `webapp_fi_dr_egress` است.
+- شرط ثبت health=true: controller ابتدا recovery-status زنده و MAC-verified
+  Bot-FI را برای **GID مشخص** می‌خواند و فقط `committed` با release SHA فعال و
+  transaction/ciphertext hash معتبر را می‌پذیرد. سپس فقط‌خواندنی، delivery
+  `acknowledged` WebApp-FI→WebApp-IR را با source manifest `uploaded`،
+  `acknowledgement_hash`، ciphertext identity و exact Object Storage
+  `VersionId` می‌سنجد. acknowledgement مقصد پیش‌تر در receiver مبدأ با HMAC و
+  receiptی که پس از decrypt/hash read-back در IR ساخته شده تأیید شده است؛ پس
+  controller نه Object Storage credential می‌گیرد و نه blob را انتقال می‌دهد.
+- fail-closed/time bound: evidence connectivity باید هنوز `online` و fresh باشد؛
+  receipt blob حداکثر ۱۲۰ ثانیه عمر دارد؛ TTL health حداکثر ۱۲۰ ثانیه است و
+  هرگز expiry connectivity را تمدید نمی‌کند. هر خطا قبل از commit باعث error
+  و باقی‌ماندن gate بسته می‌شود. کنترلر به هیچ‌وجه row state را مستقیم از CLI
+  یا evidence تاریخی update نمی‌کند.
+- database boundary: fencing فقط `SELECT` روی `dr_blob_deliveries` و
+  `dr_blob_manifests` به role control می‌دهد؛ write آن role همچنان فقط
+  `dr_durability_state` و control-tableهای قبلی است. `verify_three_site_database_role_bindings`
+  نیز service جدید را فقط role `control` می‌پذیرد.
+- Local verification: `compileall`، `git diff --check` و ۴۵ unittest متمرکز
+  (health validator، journal/2PC/reconciliation، role compose/bundle و secret
+  boundary) با dummy env و `OK` اجرا شد. آزمون‌های جدید non-online/expired
+  connectivity، journal stale/wrong-release، Blob stale/wrong-destination و
+  VersionId missing را fail-closed بررسی می‌کنند.
+- اقدام deployment بعدی (هنوز انجام نشده): immutable release این commit از
+  همان CSE/Object-Storage private+versioned به چهار role می‌رود؛ fencing
+  WebApp-FI دوباره اعمال می‌شود؛ سپس فقط روی staging یک marker مصنوعیِ جدید
+  2PC با SHA همین release، یک Blob مصنوعی non-business با IR read-back و یک
+  connectivity observation تازه تولید می‌شود. در انتها command one-shot با
+  شناسه‌های کوتاه receipt اجرا خواهد شد. هیچ payloadی از SSH/SCP/rsync عبور
+  نمی‌کند.
+- Production touched: `no`; Object Storage/SSH payload transfer: `no`; Decision:
+  `continue Stage 4R with immutable controller release and fresh evidence`.
+
 ### Exit gate — G4 Staging Published
 
 - هر چهار role exact release SHA را گزارش می‌کنند؛

@@ -126,6 +126,24 @@ x-webapp-fi-control-env: &webapp_fi_control_env
   WRITER_WITNESS_PUBLIC_KEY: ${WRITER_WITNESS_PUBLIC_KEY:?required}
   WRITER_WITNESS_AUTO_RENEW_ENABLED: "true"
 
+# This one-shot controller has the control role plus the *read* journal
+# protocol material.  It deliberately has no WebApp application credential,
+# journal encryption secret, Object Storage credential, or Witness authority.
+x-webapp-fi-durability-health-env: &webapp_fi_durability_health_env
+  <<: *webapp_fi_owner_env
+  DATABASE_URL: postgresql+asyncpg://webapp_fi_control:${WEBAPP_FI_CONTROL_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+  SYNC_DATABASE_URL: postgresql://webapp_fi_control:${WEBAPP_FI_CONTROL_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+  DR_CONTROL_DATABASE_URL: postgresql+asyncpg://webapp_fi_control:${WEBAPP_FI_CONTROL_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
+  POSTGRES_USER: webapp_fi_control
+  POSTGRES_PASSWORD: ${WEBAPP_FI_CONTROL_DB_PASSWORD}
+  JWT_SECRET_KEY: durability-health-does-not-serve-jwt-webapp-fi
+  DR_SAME_REGION_JOURNAL_ENABLED: "true"
+  DR_SAME_REGION_JOURNAL_TWO_PHASE_ENABLED: ${STAGING_WEBAPP_FI_JOURNAL_TWO_PHASE_ENABLED:-false}
+  DR_SAME_REGION_JOURNAL_URL: https://bot-fi-dr.staging.internal:8443
+  DR_SAME_REGION_JOURNAL_PAIRWISE_KEYS_JSON: ${WEBAPP_FI_SAME_REGION_JOURNAL_KEYS_JSON:?required}
+  DR_SAME_REGION_JOURNAL_VERIFY_TLS: "true"
+  DR_SAME_REGION_JOURNAL_CA_BUNDLE: /run/staging-dr-ca/ca.crt
+
 x-webapp-fi-projection-env: &webapp_fi_projection_env
   <<: *webapp_fi_owner_env
   DATABASE_URL: postgresql+asyncpg://webapp_fi_projection:${WEBAPP_FI_PROJECTION_DB_PASSWORD}@webapp_fi_db/${WEBAPP_FI_POSTGRES_DB}
@@ -551,6 +569,24 @@ services:
     extra_hosts:
       - "witness-dr.staging.internal:${WEBAPP_FI_WITNESS_IP:?required}"
     networks: [webapp_fi, writer_witness_egress]
+
+  # Explicitly invoked only after a fresh online-connectivity observation, a
+  # committed current-release journal transaction, and an acknowledged Blob
+  # read-back.  Its default command fails so Compose ``up`` cannot turn a
+  # transient proof into an unattended long-running authority.
+  webapp_fi_durability_health:
+    profiles: [webapp-fi]
+    <<: *app
+    restart: "no"
+    command: [python, -c, "raise SystemExit('invoke with docker compose run')"]
+    environment:
+      <<: *webapp_fi_durability_health_env
+      TRADING_BOT_SERVICE: durability_health_controller
+    depends_on:
+      webapp_fi_db_fencing: {condition: service_completed_successfully}
+    extra_hosts:
+      - "bot-fi-dr.staging.internal:${WEBAPP_FI_PEER_BOT_FI_IP:?required}"
+    networks: [webapp_fi, webapp_fi_dr_egress]
 
   webapp_fi_dr_delivery:
     profiles: [webapp-fi]

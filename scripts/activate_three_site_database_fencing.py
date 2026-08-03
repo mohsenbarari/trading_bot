@@ -332,7 +332,7 @@ def build_statements(
         f"GRANT CONNECT ON DATABASE {database_name} TO {role_list}",
         f"GRANT USAGE ON SCHEMA public TO {role_list}",
         f"GRANT SELECT ON ALL TABLES IN SCHEMA public TO {application_role}",
-        f"GRANT SELECT ON TABLE public.dr_database_runtime, public.dr_durability_state, public.webapp_writer_state, public.webapp_writer_transitions TO {control_role}",
+        f"GRANT SELECT ON TABLE public.dr_database_runtime, public.dr_durability_state, public.webapp_writer_state, public.webapp_writer_transitions, public.dr_blob_deliveries, public.dr_blob_manifests TO {control_role}",
         "GRANT SELECT ON TABLE "
         + ", ".join(f"public.{table}" for table in sorted(CONVERGENCE_OBSERVER_TABLES))
         + f" TO {_ident(observer_role)}",

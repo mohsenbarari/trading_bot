@@ -162,7 +162,7 @@ async def verify_three_site_database_role_bindings() -> None:
     }
     if service == "dr_effect_worker":
         required_roles = ("application", "projection")
-    elif service == "writer_control_agent":
+    elif service in {"writer_control_agent", "durability_health_controller"}:
         required_roles = ("control",)
     elif service in projection_services:
         required_roles = ("projection",)
