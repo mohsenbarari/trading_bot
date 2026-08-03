@@ -39,7 +39,7 @@ DEFAULT_DB = Path(os.environ.get("COIN_CONVERSATION_CANDIDATE_DB", "conversation
 DEFAULT_JSON = DEFAULT_SOURCE / "group_market_filtered.json"
 DEFAULT_MANIFEST = Path(os.environ.get("COIN_CONVERSATION_IMPORT_MANIFEST", "conversation_import.candidate.json"))
 
-EXTRACTOR_VERSION = "reply-rules-v6-coin-default-tomorrow"
+EXTRACTOR_VERSION = "reply-rules-v7-negotiated-price-and-owner-acceptance"
 MAX_REPLY_AGE_SECONDS = 2 * 60 * 60
 POST_CONFIRMATION_PRICE_AUDIT_SECONDS = 15 * 60
 
@@ -64,6 +64,7 @@ REMAINING_BUY_RE = re.compile(
     r"^(?:مابقی|باقی(?:ش)?|بقیه(?:ش)?)\s+(?:من|مال\s+من)(?:\s|$)"
 )
 CONDITIONAL_BUY_RE = re.compile(r"^ب\s+(?:اگه|اگر)\s+(?:هست|دارید|داری)(?:\s|$)")
+EYE_B_ACCEPT_RE = re.compile(r"^چشم\s+ب(?:\s|$)")
 QUANTITY_ONLY_RE = re.compile(r"^\d{1,3}\s*(?:تا|عدد)?$")
 OFFERISH_RE = re.compile(
     r"(?:\d|ربع|نیم|امام|بهار|گرمی).*(?:خرید|فروش|(?<![آ-ی])[خف](?![آ-ی]))|"
@@ -155,6 +156,10 @@ def classify_signal(text: str) -> str:
         return "QUANTITY_QUESTION" if has_small_quantity else "QUESTION"
     if BAREKAT_RE.search(compact):
         return "BLESSING_ACK" if BLESSING_PREFIX_RE.search(compact) else "BAREKAT_ACCEPT"
+    if EYE_B_ACCEPT_RE.search(compact):
+        return "ACCEPT"
+    if _has_price_qualified_buy_accept(compact):
+        return "BUY_ACCEPT"
     if BUY_REPLY_RE.search(compact):
         return "BUY_ACCEPT"
     if REMAINING_BUY_RE.search(compact):
@@ -166,6 +171,44 @@ def classify_signal(text: str) -> str:
     if has_small_quantity:
         return "QUANTITY_REQUEST"
     return "NEGOTIATION"
+
+
+def _has_price_qualified_buy_accept(text: str) -> bool:
+    """Recognize a buy request whose price and ``ب`` touch or swap order.
+
+    Traders commonly write ``ب10 تا182900``, ``93100 ب``, or
+    ``24 تا 183100 ب``.  Those are executable price proposals inside a reply
+    chain, not new root offers.  A standalone one-letter buy marker is kept
+    deliberately strict: it must be adjacent to a non-quantity price token.
+    """
+
+    # ``ب10 تا182900`` is a compact but common request: the buy marker comes
+    # first, followed by an optional explicit quantity and then the price.  It
+    # cannot be inferred by simple character distance because ``10 تا`` sits
+    # between ``ب`` and the price.
+    if re.search(
+        r"(?<![آ-ی])ب(?![آ-ی])(?:\s*\d{1,3}\s*(?:تا|عدد)?\s*)?\d{3,}",
+        text,
+    ):
+        return True
+
+    _, quantity_spans, _ = explicit_quantity(text)
+    prices = [
+        token
+        for token in numeric_tokens(text)
+        if len(token.digits) >= 3
+        and not any(token.start < end and token.end > start for start, end in quantity_spans)
+        and not token_has_non_price_context(text, token)
+    ]
+    if not prices:
+        return False
+    for match in re.finditer(r"(?<![آ-ی])ب(?![آ-ی])", text):
+        if any(
+            min(abs(match.start() - token.end), abs(token.start - match.end())) <= 2
+            for token in prices
+        ):
+            return True
+    return False
 
 
 def reply_quantity(text: str, offered_quantity: int | None = None) -> int | None:

@@ -4,15 +4,42 @@
 Outputs candidates only.  No result is promoted to a production model table.
 """
 from __future__ import annotations
-import json, sqlite3
+import json, os, sqlite3, sys
 from datetime import datetime, timezone
+from pathlib import Path
+
+
+def _pipeline_root() -> Path:
+    """Use repository paths in tests and the pinned runtime source in service."""
+
+    try:
+        from scripts.coin_intelligence_private_ingest.runtime_paths import PIPELINE_ROOT
+    except ModuleNotFoundError:
+        runtime_source = Path(
+            os.environ.get(
+                "COIN_INTELLIGENCE_RUNTIME_SOURCE",
+                "/srv/trading-bot-three-site-staging-data/coin-intelligence/runtime-source",
+            )
+        ).resolve()
+        if not (runtime_source / "core").is_dir():
+            raise RuntimeError("coin-intelligence runtime source is unavailable")
+        sys.path.insert(0, str(runtime_source))
+        private_root = Path(
+            os.environ.get(
+                "COIN_PRIVATE_EVENT_ROOT",
+                "/srv/trading-bot-three-site-staging-data/coin-intelligence/private-channel-ingest",
+            )
+        ).resolve()
+        return private_root / "pipeline"
+    return PIPELINE_ROOT
+
+PIPE=_pipeline_root()
 
 from core.market_intelligence.group_commodity_context import resolve_offer_commodity
 from core.market_intelligence.group_offer_parser import enrich_records
 from core.market_intelligence.group_trade_parser import classify_signal, EXTRACTOR_VERSION
-from scripts.coin_intelligence_private_ingest.runtime_paths import PIPELINE_ROOT
 
-DB=PIPELINE_ROOT/'text_staging.sqlite3'
+DB=PIPE/'text_staging.sqlite3'
 NOW=lambda: datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00','Z')
 
 

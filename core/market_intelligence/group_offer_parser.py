@@ -492,6 +492,15 @@ def extract_single_offer(text: str, full_anchor: float | None = None) -> dict[st
     if commodity is None:
         return None
 
+    # Product names are deliberately optional in the project's offer syntax.
+    # A full-coin quote without an explicit product name has one business
+    # default: Imam.  This is not a statistical commodity guess; it is the
+    # user-facing contract.  Keeping a separate method lets the context layer
+    # preserve that rule while still validating explicitly named products.
+    commodity_method = "explicit" if commodity_was_explicit else "price_inference"
+    if not commodity_was_explicit and commodity == "امام":
+        commodity_method = "default_imam_omitted_commodity"
+
     if quantity is None:
         quantity = implicit_quantity(normalized, tokens, price.token, sides)
         if quantity is not None:
@@ -501,7 +510,7 @@ def extract_single_offer(text: str, full_anchor: float | None = None) -> dict[st
 
     return {
         "commodity": commodity,
-        "commodity_method": "explicit" if commodity_was_explicit else "price_inference",
+        "commodity_method": commodity_method,
         "price": price.value,
         "price_raw": price.token.raw,
         "price_method": price.method,

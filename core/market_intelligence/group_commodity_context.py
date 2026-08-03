@@ -29,6 +29,7 @@ BLOCKING_VALIDATION_STATUSES = frozenset(
 PRIMARY_ANCHOR_METHODS = frozenset(
     {"explicit", "reply_parent_explicit", "reply_parent_context"}
 )
+PROJECT_DEFAULT_IMAM_METHOD = "default_imam_omitted_commodity"
 MAX_ANCHOR_AGE_SECONDS = 45 * 60
 MAX_WINNER_DISTANCE = 0.015
 MAX_PARENT_DISTANCE = 0.015
@@ -178,6 +179,10 @@ def resolve_offer_commodity(
     settlement = str(resolved.get("settlement") or "UNKNOWN")
     trade_form = str(resolved.get("trade_form") or "UNKNOWN")
     claimed_commodity = str(resolved.get("commodity") or "")
+    is_project_default_imam = (
+        str(resolved.get("commodity_method") or "")
+        == PROJECT_DEFAULT_IMAM_METHOD
+    )
 
     if is_explicit and not _plausible(claimed_commodity, price):
         resolved["commodity_validation_status"] = "EXPLICIT_PRICE_CONTEXT_CONFLICT"
@@ -244,6 +249,20 @@ def resolve_offer_commodity(
             "relative_distance": round(
                 _distance(price, float(int(parent["price"]))), 6
             ),
+        }
+        return resolved
+
+    # An unnamed full-coin offer means Imam by project convention.  Do not
+    # silently relabel it as Bahar merely because the broad historical price
+    # bands overlap.  The downstream market-quality layer still rejects an
+    # economically implausible quote; this layer only resolves its product.
+    if is_project_default_imam:
+        resolved["commodity"] = "امام"
+        resolved["commodity_validation_status"] = "PROJECT_DEFAULT_IMAM"
+        resolved["commodity_evidence"] = {
+            "kind": "project_default_for_omitted_commodity",
+            "commodity": "امام",
+            "price": price,
         }
         return resolved
 

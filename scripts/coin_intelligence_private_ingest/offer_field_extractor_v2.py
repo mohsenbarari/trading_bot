@@ -12,9 +12,42 @@ the first relevance decision, linked trades, or any production/model input.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
+
+
+def _pipeline_root() -> Path:
+    """Use repository paths in tests and the pinned runtime source in service."""
+
+    try:
+        from scripts.coin_intelligence_private_ingest.runtime_paths import (
+            PIPELINE_ROOT,
+        )
+    except ModuleNotFoundError:
+        runtime_source = Path(
+            os.environ.get(
+                "COIN_INTELLIGENCE_RUNTIME_SOURCE",
+                "/srv/trading-bot-three-site-staging-data/coin-intelligence/runtime-source",
+            )
+        ).resolve()
+        if not (runtime_source / "core").is_dir():
+            raise RuntimeError("coin-intelligence runtime source is unavailable")
+        sys.path.insert(0, str(runtime_source))
+        private_root = Path(
+            os.environ.get(
+                "COIN_PRIVATE_EVENT_ROOT",
+                "/srv/trading-bot-three-site-staging-data/coin-intelligence/private-channel-ingest",
+            )
+        ).resolve()
+        return private_root / "pipeline"
+    return PIPELINE_ROOT
+
+
+PIPE = _pipeline_root()
 
 from core.market_intelligence.group_commodity_context import (
     commodity_context_requires_abstention,
@@ -27,12 +60,10 @@ from core.market_intelligence.group_offer_parser import (
     numeric_tokens,
     explicit_commodity,
 )
-from scripts.coin_intelligence_private_ingest.runtime_paths import PIPELINE_ROOT as PIPE
-
 STAGE = PIPE / 'text_staging.sqlite3'
 FILTER = PIPE / 'group_filter.sqlite3'
 OUT = PIPE / 'offer_field_staging.sqlite3'
-VERSION = 'group-offer-fields-shadow-v2.2-market-context'
+VERSION = 'group-offer-fields-shadow-v2.3-default-imam-compact-price'
 GROUP_NUMBER = {'account2_group1': 1, 'account2_group2': 2}
 
 SCHEMA = '''
@@ -109,6 +140,11 @@ def prepare(text: str) -> str:
     # price (e.g. ``40ف فردا 187300``).
     value = re.sub(r'(?<!\d)(\d{1,3})([خف])\s*فردا\s*(\d{5,6})(?!\d)',
                    r'\1 تا \2 \3 فردا', value)
+    # A quantity and abbreviated buy/sell marker can touch the price directly
+    # (``10تاف 182950``).  The boundary is unambiguous only when the marker
+    # is immediately followed by a numeric price.
+    value = re.sub(r'(?<!\d)(\d{1,3})\s*(?:د?تا|عدد)\s*([خف])(?=\s*\d)',
+                   r'\1 تا \2 ', value)
     # "زیر ب 80" / "بالا ب80" are community shorthand for low-date coins.
     value = re.sub(r'(?:زیر|بالا)\s*ب\s*80', 'تاریخ پایین', value)
     value = re.sub(r'(?<=(?:ربع|نیم)\s)ب\s*80', 'تاریخ پایین', value)
