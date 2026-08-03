@@ -1019,17 +1019,18 @@ h2 {{
 }}
 .inputs {{
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
 }}
 .input-card {{
   display: flex;
   flex-direction: column;
-  padding: 16px;
+  padding: 12px 14px;
   border-radius: 14px;
   background: var(--bg-card);
   border: 1px solid var(--border-line);
   transition: transform 0.2s ease, border-color 0.2s ease;
+  min-width: 0;
 }}
 .input-card:hover {{
   transform: translateY(-2px);
@@ -1037,21 +1038,27 @@ h2 {{
 }}
 .input-card span {{
   color: var(--text-sub);
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }}
 .input-card strong {{
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 800;
-  margin: 6px 0;
+  margin: 4px 0;
   color: var(--text-main);
   direction: ltr;
   text-align: right;
 }}
 .input-card small {{
   color: var(--text-sub);
-  font-size: 12px;
+  font-size: 11px;
   opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }}
 .input-card.observed {{
   border-color: rgba(16, 185, 129, 0.3);
@@ -1309,6 +1316,11 @@ footer code {{
   border-radius: 4px;
   color: var(--accent-gold);
   font-family: monospace;
+}}
+@media (max-width: 950px) {{
+  .inputs {{
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }}
 }}
 @media (max-width: 850px) {{
   header {{
