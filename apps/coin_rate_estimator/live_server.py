@@ -843,10 +843,9 @@ def render_page(
         <div class="dashboard-grid">
           <div class="main-column">
             <div id="estimate-content">{estimate_view}</div>
-            <div id="activity-content">{render_group_activity_fragment(conversation_db) if conversation_db else ''}</div>
           </div>
           <div class="side-column">
-            {manual_panel_html}
+            <div id="activity-content">{render_group_activity_fragment(conversation_db) if conversation_db else ''}</div>
           </div>
         </div>"""
         refresh_script = "window.setInterval(refreshEstimateView, 15000); window.setInterval(refreshActivityView, 15000);"
