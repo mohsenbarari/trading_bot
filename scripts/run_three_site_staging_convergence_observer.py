@@ -91,6 +91,12 @@ def _convergence_read_only(sql):
 sync_outbox_guard.raw_sql_is_provably_read_only = _convergence_read_only
 dr_event_outbox.raw_sql_is_provably_read_only = _convergence_read_only
 writer_fencing.raw_sql_is_provably_read_only = _convergence_read_only
+# Bot-FI normally installs transaction-local mutation-capability settings in
+# after_begin.  The SELECT-only observer has no mutation capability to install,
+# and those set_config queries would run before the collector can select its
+# repeatable-read/read-only transaction characteristics.  Replace only this
+# not-yet-registered hook in the one-shot process; runtime services are untouched.
+writer_fencing._set_database_capability_after_begin = lambda session, transaction, connection: None
 _target = sys.argv[1]
 sys.argv = sys.argv[1:]
 runpy.run_path(_target, run_name="__main__")
@@ -518,6 +524,7 @@ def observe(*, config: dict[str, Any], output: Path) -> dict[str, Any]:
         "release_guard_adapter": {
             "sha256": RELEASE_GUARD_ADAPTER_SHA256,
             "allowed_statement": "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY",
+            "observer_mutation_capability_hook": False,
             "source_file_mutation": False,
         },
         "artifacts": outputs,

@@ -137,6 +137,7 @@ class ConvergenceObserverRelayTests(unittest.TestCase):
             hashlib.sha256(subject.RELEASE_GUARD_ADAPTER.encode()).hexdigest(),
             subject.RELEASE_GUARD_ADAPTER_SHA256,
         )
+        self.assertIn("_set_database_capability_after_begin", subject.RELEASE_GUARD_ADAPTER)
         self.assertEqual(command[python_index + 3], "scripts/snapshot.py")
 
     def test_role_env_basename_is_pinned_to_site(self):
