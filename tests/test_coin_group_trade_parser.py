@@ -87,6 +87,24 @@ class GroupTradeParserTests(unittest.TestCase):
         self.assertEqual(trade["quantity"], 3)
         self.assertEqual(trade["confirmation_type"], "RECIPROCAL_OFFERER_CONFIRMATION")
 
+    def test_owner_explicit_aggregate_fill_is_not_limited_to_one_offer(self) -> None:
+        messages = [
+            message(1, "offerer", "10 تا نیم ف نقدی 93000"),
+            message(2, "offerer", "20 تا مع شد", reply_to=1),
+        ]
+        half = {**offer(price=93_000), "commodity": "نیم بهار", "settlement": "CASH"}
+
+        analysis = analyze_reply_trades(messages, {1: [half]})
+
+        self.assertEqual(len(analysis["accepted_trades"]), 1)
+        trade = analysis["accepted_trades"][0]
+        self.assertEqual(trade["price"], 93_000)
+        self.assertEqual(trade["quantity"], 20)
+        self.assertEqual(
+            trade["confirmation_type"], "OWNER_EXPLICIT_AGGREGATE_REPLY_TRADE"
+        )
+        self.assertTrue(trade["is_aggregate"])
+
 
 if __name__ == "__main__":
     unittest.main()

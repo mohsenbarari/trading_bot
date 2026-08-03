@@ -39,7 +39,7 @@ DEFAULT_DB = Path(os.environ.get("COIN_CONVERSATION_CANDIDATE_DB", "conversation
 DEFAULT_JSON = DEFAULT_SOURCE / "group_market_filtered.json"
 DEFAULT_MANIFEST = Path(os.environ.get("COIN_CONVERSATION_IMPORT_MANIFEST", "conversation_import.candidate.json"))
 
-EXTRACTOR_VERSION = "reply-rules-v7-negotiated-price-and-owner-acceptance"
+EXTRACTOR_VERSION = "reply-rules-v8-aggregate-owner-fill"
 MAX_REPLY_AGE_SECONDS = 2 * 60 * 60
 POST_CONFIRMATION_PRICE_AUDIT_SECONDS = 15 * 60
 
@@ -965,26 +965,27 @@ def analyze_reply_trades(
             confirmation_ids.add(message_id)
             relevant_ids.update(trade["context_message_ids"])
             continue
-        if earlier_owner_trade or (
-            quantity is not None
-            and offer.get("quantity") is not None
-            and int(quantity) > int(offer["quantity"])
-        ):
+        if earlier_owner_trade:
             context_ids = [int(item["message_id"]) for item in chain]
             relevant_ids.update(context_ids)
             review_items.append(
                 {
                     "message_id": message_id,
-                    "reason": (
-                        "POSSIBLE_CUMULATIVE_OR_DUPLICATE_OWNER_TRADE_ANNOUNCEMENT"
-                        if earlier_owner_trade
-                        else "OWNER_TRADE_QUANTITY_EXCEEDS_LINKED_OFFER"
-                    ),
+                    "reason": "POSSIBLE_CUMULATIVE_OR_DUPLICATE_OWNER_TRADE_ANNOUNCEMENT",
                     "confidence": 0.68,
                     "context_message_ids": context_ids,
                 }
             )
             continue
+        # A direct, explicit completed-trade reply from the offerer is decisive
+        # even when its stated quantity exceeds the one visible offer. This is
+        # the aggregate-fill pattern: multiple offers can be filled at the
+        # linked price, while Telegram preserves only one reply anchor.
+        aggregate_quantity = bool(
+            quantity is not None
+            and offer.get("quantity") is not None
+            and int(quantity) > int(offer["quantity"])
+        )
         trade = {
             "offer_message_id": root_id,
             "request_message_id": None,
@@ -1009,12 +1010,25 @@ def analyze_reply_trades(
             "side": offer.get("side") or "UNKNOWN",
             "settlement": offer.get("settlement") or "CASH",
             "trade_form": offer.get("trade_form") or "PHYSICAL",
-            "confidence": 0.97,
-            "confirmation_type": "OWNER_EXPLICIT_REPLY_TRADE",
+            "confidence": 0.95 if aggregate_quantity else 0.97,
+            "confirmation_type": (
+                "OWNER_EXPLICIT_AGGREGATE_REPLY_TRADE"
+                if aggregate_quantity
+                else "OWNER_EXPLICIT_REPLY_TRADE"
+            ),
             "status": "ACCEPTED",
             "reason": None,
-            "evidence": ["EXPLICIT_TRADE_LANGUAGE", "OWNER_REPLIED_TO_LINKED_OFFER"],
+            "evidence": [
+                "EXPLICIT_TRADE_LANGUAGE",
+                "OWNER_REPLIED_TO_LINKED_OFFER",
+                *(
+                    ["QUANTITY_EXCEEDS_SINGLE_OFFER_AGGREGATE_FILL"]
+                    if aggregate_quantity
+                    else []
+                ),
+            ],
             "context_message_ids": [int(item["message_id"]) for item in chain],
+            "is_aggregate": aggregate_quantity,
         }
         accepted_trades.append(trade)
         confirmation_ids.add(message_id)
