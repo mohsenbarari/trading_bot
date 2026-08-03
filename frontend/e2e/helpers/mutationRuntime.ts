@@ -5,8 +5,8 @@ const DEFAULT_LOCAL_APP_CONTAINER_NAME = 'trading_bot_app'
 const DEFAULT_LOCAL_REDIS_CONTAINER_NAME = 'trading_bot_redis'
 const STAGING_MUTATION_CONFIRM = 'role-trading-staging-only'
 const LOCAL_MUTATION_CONFIRM = 'local-dev-only'
-const THREE_SITE_STAGING_APP_CONTAINER = /^trading-bot-three-site-stage\d+-[0-9a-f]+-webapp-(?:fi|ir)-webapp_(?:fi|ir)_api-1$/i
-const THREE_SITE_STAGING_REDIS_CONTAINER = /^trading-bot-three-site-stage\d+-[0-9a-f]+-webapp-(?:fi|ir)-webapp_(?:fi|ir)_redis-1$/i
+const THREE_SITE_STAGING_APP_CONTAINER = /^trading-bot-three-site-stage\d+-[0-9a-f-]+-webapp-(?:fi|ir)-webapp_(?:fi|ir)_api-1$/i
+const THREE_SITE_STAGING_REDIS_CONTAINER = /^trading-bot-three-site-stage\d+-[0-9a-f-]+-webapp-(?:fi|ir)-webapp_(?:fi|ir)_redis-1$/i
 
 export function getE2EBackendBaseUrl() {
   return (process.env.E2E_BACKEND_BASE_URL || DEFAULT_LOCAL_BACKEND_BASE_URL).trim()

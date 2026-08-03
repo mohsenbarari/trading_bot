@@ -39,6 +39,13 @@ class StagingRoleTradingE2EGateTests(unittest.TestCase):
         self.assertIn("THREE_SITE_STAGING_APP_CONTAINER", runtime)
         self.assertIn("THREE_SITE_STAGING_REDIS_CONTAINER", runtime)
 
+    def test_hyphenated_three_site_campaign_identifier_matches_the_guard(self):
+        container = "trading-bot-three-site-stage3-0e63a7ec-fd34231d-webapp-fi-webapp_fi_api-1"
+        self.assertRegex(
+            container,
+            r"^trading-bot-three-site-stage[0-9]+-[0-9a-f-]+-webapp-(fi|ir)-webapp_(fi|ir)_api-1$",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

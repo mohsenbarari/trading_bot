@@ -62,13 +62,13 @@ require_command() {
 is_explicit_staging_app_container() {
   local name="$1"
   [[ "$name" == *staging* ]] && return 0
-  [[ "$name" =~ ^trading-bot-three-site-stage[0-9]+-[0-9a-f]+-webapp-(fi|ir)-webapp_(fi|ir)_api-1$ ]]
+  [[ "$name" =~ ^trading-bot-three-site-stage[0-9]+-[0-9a-f-]+-webapp-(fi|ir)-webapp_(fi|ir)_api-1$ ]]
 }
 
 is_explicit_staging_redis_container() {
   local name="$1"
   [[ "$name" == *staging* ]] && return 0
-  [[ "$name" =~ ^trading-bot-three-site-stage[0-9]+-[0-9a-f]+-webapp-(fi|ir)-webapp_(fi|ir)_redis-1$ ]]
+  [[ "$name" =~ ^trading-bot-three-site-stage[0-9]+-[0-9a-f-]+-webapp-(fi|ir)-webapp_(fi|ir)_redis-1$ ]]
 }
 
 write_json() {
