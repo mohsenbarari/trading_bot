@@ -34,7 +34,7 @@ SOURCE_ROOT_RE = re.compile(
     r"^/srv/trading-bot-three-site-staging-data/releases/([0-9a-f]{40})/source$"
 )
 JOURNAL_KEY_ID = "staging-fi-journal-v1"
-DR_MIGRATION_REVISION = "e0a4b6c8d1e3"
+DR_MIGRATION_REVISION = "f2c3d4e5a6b7"
 JOURNAL_KEYS = frozenset(
     {
         "BOT_FI_JOURNAL_DB_PASSWORD",
