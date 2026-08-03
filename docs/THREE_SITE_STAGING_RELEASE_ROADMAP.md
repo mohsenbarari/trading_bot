@@ -1448,6 +1448,47 @@ route عمومی، production و lifecycle زیرساخت در rollback 4R تغ�
 - Production touched: `no`; artifact/data transfer via SSH/SCP: `no`; Decision:
   `continue Stage 4R with controlled staging deployment`.
 
+#### checkpoint immutable deployment remediation Stage 4R — 2026-08-03
+
+- Status: `IN_PROGRESS — FOUR-ROLE IMMUTABLE RELEASE DEPLOYED; 2PC/restore
+  evidence NOT YET ACCEPTED`. این checkpoint پایان Stage 4R، پذیرش G4R یا
+  بازشدن Tier-1 نیست.
+- Deployed runtime release: `456a3765bc8dd10f2776c3dc4e38d3e3da118f9d` روی
+  Bot-FI، WebApp-FI، WebApp-IR و Witness. branch همچنان
+  `stage/three-site-staging-04-deploy` است. دو remediation واقعی در جریان
+  deploy کشف و به‌صورت commitهای جدا ثبت شدند: `f66c4f21`، که
+  `durability_journal_app.py` را به image اضافه می‌کند، و `456a3765`، که
+  `ORIGIN_EXPECTED_MIGRATION_REVISION=e0a4b6c8d1e3` را به material role bind
+  می‌کند. هیچ hot-fix خارج از Git اعمال نشد.
+- Delivery: هر چهار bundle با CSE، bucket private/versioned
+  `gold-trade-staging-three-site-dr`، read-back exact VersionId و decrypt/hash
+  verify روی مقصد تحویل شد. VersionIdها به‌ترتیب Bot-FI
+  `k0yExogHsGCeB4R1Y4spQj8r3GBTLa-`، WebApp-FI
+  `rcGhgC6kp8OTF.YtK5s0IO4gqSQI0nj`، WebApp-IR
+  `y476sM93108kFB-UEvKs9a3JkiyW71V` و Witness
+  `J6p3Wu-CxG6uA7AWt37UGR7x7E.rzX` هستند. SSH فقط command نصب و receipt کوتاه
+  حمل کرد (`ssh_payload_transfer=false`). bundle رمزگشایی‌شده پس از نصب پاک شد؛
+  نسخهٔ encrypted و versioned Object Storage باقی مانده است.
+- Runtime observation: سه PostgreSQL application role تا
+  `e0a4b6c8d1e3` migrated هستند؛ WebApp-FI مقدار startup
+  `max_prepared_transactions=32` را گزارش می‌کند. Bot-FI journal و هر سه DR
+  receiver healthy هستند. receiver/delivery/projection روی هر سه role
+  application با image exact release و `RestartCount=0` دیده شدند؛ restart-loop
+  قبلی `webapp_fi_dr_delivery` دیگر مشاهده نشد. processهای `*_sync_observer`
+  و `webapp_ir_convergence_exporter` one-shot/manual هستند و exit=1 آن‌ها
+  failure runtime worker تلقی نشده است.
+- Public staging: درخواست مستقیم HTTPS با SNI
+  `staging.gold-trade.ir` به origin مجاز `194.5.206.69` برای `/` و
+  `/api/config` پاسخ `401` مورد انتظار Basic Auth داد؛ مسیر public پس از
+  recreate برقرار است. DNS/CDN تغییر نکرد.
+- هنوز عمداً بسته است: `STAGING_WEBAPP_FI_JOURNAL_TWO_PHASE_ENABLED=false`،
+  flagهای controller health true نشده‌اند، marker 2PC/restore drill و outage
+  freeze واقعی اجرا نشده و قرارداد blob read-back نیز evidence ندارد. پس
+  mutation حیاتی، Tier-1، G4R و G4 همگی fail-closed باقی می‌مانند.
+- Production touched: `no`. هیچ route/DNS/CDN production، VPS/volume lifecycle
+  یا secret rotation انجام نشد. Decision: `continue Stage 4R from the real
+  2PC journal marker and restore/outage drills`.
+
 ### Exit gate — G4 Staging Published
 
 - هر چهار role exact release SHA را گزارش می‌کنند؛
