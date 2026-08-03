@@ -923,13 +923,12 @@ def render_analytics_leaderboard_table(
     else:
         for idx, item in enumerate(items, 1):
             raw_name = str(item.get("username") or item.get("offerer_name") or "—")
-            escaped_name = html.escape(raw_name)
-            js_name = json.dumps(raw_name)
+            escaped_name = html.escape(raw_name, quote=True)
             val = fa_number(item.get(val_key, 0))
             rows.append(
                 f"<tr>"
                 f"<td class='rank-col'>#{fa_number(idx)}</td>"
-                f"<td><button type='button' class='user-link-btn' onclick='openUserModal({js_name}, {group}, \"{kind}\")'><strong>{escaped_name}</strong></button></td>"
+                f"<td><a class='user-link' href='#' data-username='{escaped_name}' data-group='{group}' data-kind='{kind}'><strong>{escaped_name}</strong></a></td>"
                 f"<td class='value-col'><strong>{val}</strong> <small>{val_unit}</small></td>"
                 f"</tr>"
             )
@@ -2307,21 +2306,15 @@ td {{
   padding: 12px;
 }}
 
-.user-link-btn {{
-  background: none;
-  border: none;
-  padding: 0;
-  margin: 0;
-  font: inherit;
+.user-link {{
   color: var(--text-main);
   text-decoration: underline;
   text-decoration-color: var(--border-gold);
   text-underline-offset: 3px;
   cursor: pointer;
   transition: all 0.2s ease;
-  text-align: right;
 }}
-.user-link-btn:hover {{
+.user-link:hover {{
   color: var(--accent-gold);
   text-decoration-color: var(--accent-gold);
 }}
@@ -2444,6 +2437,19 @@ td {{
 </div>
 
 <script>
+document.addEventListener("click", function(e) {{
+  const target = e.target.closest(".user-link");
+  if (target) {{
+    e.preventDefault();
+    const username = target.getAttribute("data-username");
+    const group = target.getAttribute("data-group");
+    const kind = target.getAttribute("data-kind");
+    if (username) {{
+      openUserModal(username, group, kind);
+    }}
+  }}
+}});
+
 async function openUserModal(username, group, kind) {{
   const modal = document.getElementById("detail-modal");
   const title = document.getElementById("modal-title");
