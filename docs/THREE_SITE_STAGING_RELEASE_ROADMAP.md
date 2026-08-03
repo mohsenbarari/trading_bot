@@ -1617,6 +1617,77 @@ route عمومی، production و lifecycle زیرساخت در rollback 4R تغ�
 - Production touched: `no`; Object Storage/SSH payload transfer: `no`; Decision:
   `continue Stage 4R with immutable controller release and fresh evidence`.
 
+#### checkpoint deployed bounded durability-health controller Stage 4R — 2026-08-03
+
+- Status: `IN_PROGRESS — FOUR-ROLE RELEASE DEPLOYED; WEBAPP_FI→WEBAPP_IR
+  NETWORK GATE BLOCKED; G4R/G4 NOT ACCEPTED`. این checkpoint rollout را ثبت
+  می‌کند، نه پذیرش durability، Tier-1 یا M1.
+- Runtime release: `94a691f4515f2f235dddb05d2997fe6bdf6d0e52`
+  (`feat(three-site): attest bounded durability health`) روی Bot-FI، WebApp-FI،
+  WebApp-IR و Witness نصب شد. تست source همان ۴۵ unittest focused و
+  `compileall` پیش از build قبول شد؛ هیچ migration جدیدی بین `554503a7` و این
+  release وجود نداشت.
+- انتقال source role bundle فقط با CSE و bucket private/versioned
+  `gold-trade-staging-three-site-dr` انجام شد: Bot-FI VersionId
+  `VZvxGNPPDqMONCByN9Na2dikG20WeDd`، WebApp-FI
+  `VsTKj5A96s5neYkla5LYvRODFneL7Xv`، WebApp-IR
+  `UvWEFVqfPrA15pdY6hjSqA4Mkl8.BF8` و Witness
+  `JTVkIaXGIl3NqoTz31c-.691.0fFvpx`. receiptهای owner-only در
+  `.../stage4r-94a691f4/transfer-*.json` هستند؛ `ssh_payload_transfer=false`.
+- `mini_app_dist_staging` چون untracked بود در Git bundle نبود. artifact آن
+  روی WebApp-FI از release فعال ساخته، به Object Storage upload/read-back و
+  سپس روی هر چهار source root از همان Object Storage نصب شد: SHA-256
+  `753b1887627ca62fb1951b6358419a0b81e247010bafe38a15ddbb91f9d2b415`،
+  5,693,440 bytes، VersionId `MyP1hn8XNdP8T-I1.ZNJS5RrCWU9D1o` و 173 file.
+  هیچ SCP/rsync/SSH payloadی وجود نداشت.
+- WebApp-IR image cache نیز فقط از Object Storage پر شد: app و PostgreSQL
+  bundle plaintext SHA-256
+  `5437c429bed85cdbdd63d187ee69774b688bd123969b1b15eed1d8ce50a3ce6f`
+  (341,112,892 bytes) پس از age encryption به exact VersionId
+  `3epcaMZTxSWj31i7mORclS6-FJAmGmL` upload/read-back شد. ciphertext SHA-256
+  `5af161ab4fa0850594242a8048dbae7b3f453fef3d66447e466b9f3a830d926b` است.
+  receipt owner-only:
+  `.../stage4r-94a691f4/transfer-webapp-ir-images.json`. decrypt و `zstd --test`
+  پذیرفته شد و همان archive locally به Docker load شد؛ SSH فقط URL کوتاه، hash
+  و receipt حمل کرد.
+- Rollout state-preserving بود: همهٔ commandها با namespace موجود
+  `three-site-stage4r-456a3765-{bot-fi,webapp-fi,webapp-ir,witness}` و
+  `--no-build --no-deps` اجرا شدند. PostgreSQL، Redis، TLS proxy و volumeهای
+  موجود restart/recreate نشدند. فقط application workerها و Bot journal روی
+  image جدید recreate شدند. `webapp_fi_db_fencing` با image جدید بدون restart
+  dependency اجرا و 304 statement idempotent را با status `applied` ثبت کرد.
+- Runtime verification: application image exact در هر چهار role
+  `trading_bot_three_site_staging:94a691f4515f2f235dddb05d2997fe6bdf6d0e52`
+  است؛ Bot receiver و durability journal، WebApp-FI/IR receiver و Witness API
+  healthy هستند. WebApp-FI `/health/ready` روی loopback قبول شد. درخواست SNI
+  مستقیم به `staging.gold-trade.ir` روی origin `194.5.206.69` پاسخ expected
+  `401` Basic Auth همراه TLS/headerهای staging داد؛ DNS/CDN تغییر نکرد.
+  `webapp_fi_durability_health` عمداً invoke نشده است.
+- Private TLS پس از recreate workerها: WebApp-FI→Bot-FI و
+  WebApp-FI→Witness پاسخ `200` health دادند و WebApp-IR self-proxy نیز سالم
+  بود؛ بنابراین dynamic Docker resolver در proxyهای restart‌نشده، upstream IP
+  جدید را درست resolve کرد. اما WebApp-FI→WebApp-IR `188.213.198.115:8443`
+  timeout شد. Bot-FI→همان endpoint نیز timeout شد.
+- تشخیص محدود network: listener WebApp-IR روی `188.213.198.115:8443` و
+  self TLS healthy است؛ `tcpdump` 15-second روی WebApp-IR هنگام probe TCP از
+  WebApp-FI هیچ SYNی ندید و Docker DNAT counter نیز صفر ماند. IP مشاهده‌شدهٔ
+  خروجی WebApp-FI دقیقاً `194.5.206.69` است. Arvan API read-only نشان داد
+  security group مقصد ruleهای TCP/8443 برای هر دو `194.5.206.69/32` و
+  `130.185.121.98/32` دارد و security group مبدأ egress TCP باز دارد. پس
+  نقص خارج از application/host firewall و در provider/network path است؛ rule
+  حدسی، DNS/CDN یا production تغییر داده نشد.
+- Still closed: `STAGING_WEBAPP_FI_JOURNAL_TWO_PHASE_ENABLED=false`،
+  `event_journal_healthy=false` و `blob_journal_healthy=false` باقی می‌مانند؛
+  controller one-shot، marker 2PC جدید، Blob receipt جدید و connectivity
+  observation fresh اجرا نشده‌اند. timeout مسیر الزامی WebApp-FI→WebApp-IR
+  نیز مانع انجام آن evidenceها است. Tier-1، G4R و G4 همچنان fail-closed هستند.
+- Production touched: `no`; DNS/CDN mutation: `no`; server/volume lifecycle:
+  `no`; SSH/SCP/rsync payload transfer: `no`. Decision: `BLOCKED pending
+  provider-level restoration of the already-authorized narrow TCP/8443 path
+  from WebApp-FI to WebApp-IR`; پس از آن connectivity evidence، synthetic
+  2PC/blob receipts و one-shot durability controller در همین branch ادامه
+  می‌یابد.
+
 ### Exit gate — G4 Staging Published
 
 - هر چهار role exact release SHA را گزارش می‌کنند؛
