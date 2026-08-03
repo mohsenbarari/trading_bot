@@ -1,4 +1,6 @@
 import copy
+import hashlib
+import shlex
 import unittest
 from unittest.mock import patch
 
@@ -120,6 +122,22 @@ class ConvergenceObserverRelayTests(unittest.TestCase):
             "/etc/trading-bot/roles/webapp-ir.compose.yml",
         )
         self.assertNotIn(config["sites"]["webapp_ir"]["compose_file"], command)
+
+    def test_remote_command_uses_hashable_source_free_release_adapter(self):
+        config = self._config()
+        config["sites"] = self._sites()
+        command = subject._remote_command(config, "bot_fi", "scripts/snapshot.py")
+        python_index = command.index("python")
+        self.assertEqual(command[python_index + 1], "-c")
+        self.assertEqual(
+            shlex.split(command[python_index + 2]),
+            [subject.RELEASE_GUARD_ADAPTER],
+        )
+        self.assertEqual(
+            hashlib.sha256(subject.RELEASE_GUARD_ADAPTER.encode()).hexdigest(),
+            subject.RELEASE_GUARD_ADAPTER_SHA256,
+        )
+        self.assertEqual(command[python_index + 3], "scripts/snapshot.py")
 
     def test_role_env_basename_is_pinned_to_site(self):
         sites = self._sites()

@@ -296,6 +296,13 @@ def raw_sql_is_provably_read_only(sql: str) -> bool:
     """
 
     normalized = _LEADING_SQL_COMMENTS_RE.sub("", str(sql), count=1).strip()
+    # Transaction characteristics do not read or mutate application state.
+    # This exact statement makes a convergence snapshot safer and consistent;
+    # keep the allowlist exact so SET cannot become a general guard bypass.
+    if " ".join(normalized.split()).upper() == (
+        "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
+    ):
+        return True
     if not normalized or ";" in normalized or "(" in normalized or ")" in normalized:
         return False
     if not _RAW_READ_PREFIX_RE.match(normalized):

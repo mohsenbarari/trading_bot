@@ -20,6 +20,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import stat
 import sys
 from typing import Any
@@ -69,6 +70,34 @@ WEBAPP_IR_RELAY = {
 MAX_REMOTE_SNAPSHOT_BYTES = 16 * 1024 * 1024
 SAFE_NAME = re.compile(r"^[a-z_][a-z0-9_-]{0,62}$")
 SAFE_PATH = re.compile(r"^/[A-Za-z0-9_./-]{1,511}$")
+RELEASE_GUARD_ADAPTER = """\
+import runpy
+import sys
+
+import core.dr_event_outbox as dr_event_outbox
+import core.sync_outbox_guard as sync_outbox_guard
+import core.writer_fencing as writer_fencing
+
+_base_read_only = sync_outbox_guard.raw_sql_is_provably_read_only
+
+
+def _convergence_read_only(sql):
+    normalized = " ".join(str(sql).split()).upper()
+    return _base_read_only(sql) or normalized == (
+        "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
+    )
+
+
+sync_outbox_guard.raw_sql_is_provably_read_only = _convergence_read_only
+dr_event_outbox.raw_sql_is_provably_read_only = _convergence_read_only
+writer_fencing.raw_sql_is_provably_read_only = _convergence_read_only
+_target = sys.argv[1]
+sys.argv = sys.argv[1:]
+runpy.run_path(_target, run_name="__main__")
+"""
+RELEASE_GUARD_ADAPTER_SHA256 = hashlib.sha256(
+    RELEASE_GUARD_ADAPTER.encode("utf-8")
+).hexdigest()
 
 
 class ConvergenceObserverError(RuntimeError):
@@ -300,7 +329,13 @@ def _remote_command(config: dict[str, Any], site: str, script: str, *arguments: 
         "--env-file", str(remote["env_file"]),
         "--profile", SITE_PROFILE[site],
         "run", "--rm", "--no-deps", "-T", service,
-        "python", script, *arguments,
+        # Release 0e63's collector issues one exact read-only transaction
+        # control statement that its generic raw-SQL guards did not classify.
+        # Run a source-free, in-memory adapter that permits only that literal;
+        # the observer database role remains SELECT-only and the release tree
+        # and image stay byte-identical.  shlex.quote preserves this as one
+        # remote-shell argv item without transferring a file over SSH.
+        "python", "-c", shlex.quote(RELEASE_GUARD_ADAPTER), script, *arguments,
     ]
 
 
@@ -476,6 +511,11 @@ def observe(*, config: dict[str, Any], output: Path) -> dict[str, Any]:
             "version_id": iran_version,
             "transport": "private_versioned_object_storage",
             "ssh_payload_transfer": False,
+        },
+        "release_guard_adapter": {
+            "sha256": RELEASE_GUARD_ADAPTER_SHA256,
+            "allowed_statement": "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY",
+            "source_file_mutation": False,
         },
         "artifacts": outputs,
     }

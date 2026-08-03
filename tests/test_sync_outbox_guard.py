@@ -435,6 +435,16 @@ class SyncOutboxGuardTests(unittest.TestCase):
     def test_raw_sql_read_allowlist_is_deliberately_narrow(self):
         self.assertTrue(raw_sql_is_provably_read_only("SELECT id, status FROM offers"))
         self.assertTrue(raw_sql_is_provably_read_only("-- audit\n SHOW transaction_read_only"))
+        self.assertTrue(
+            raw_sql_is_provably_read_only(
+                "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
+            )
+        )
+        self.assertFalse(
+            raw_sql_is_provably_read_only(
+                "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ WRITE"
+            )
+        )
         self.assertFalse(raw_sql_is_provably_read_only("WITH rows AS (SELECT 1) SELECT * FROM rows"))
         self.assertFalse(raw_sql_is_provably_read_only("SELECT now()"))
         self.assertFalse(raw_sql_is_provably_read_only("SELECT 1; SELECT 2"))
