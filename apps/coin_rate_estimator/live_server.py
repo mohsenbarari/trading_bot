@@ -803,18 +803,133 @@ def query_user_analytics(
         return empty_result
 
 
-def render_analytics_leaderboard_table(title: str, subtitle: str, items: list[dict[str, Any]], val_key: str, val_unit: str) -> str:
+def query_user_details(
+    conversation_db: Path,
+    username: str,
+    group: int,
+    kind: str,
+    *,
+    range_type: str = "today",
+    start_shamsi: str | None = None,
+    end_shamsi: str | None = None,
+) -> dict[str, Any]:
+    db_path = find_analytics_db(conversation_db)
+    start_utc, end_utc, label = calculate_time_bounds(range_type, start_shamsi, end_shamsi)
+
+    empty_res = {
+        "username": username,
+        "group": group,
+        "kind": kind,
+        "range_label": label,
+        "total_items": 0,
+        "total_qty": 0,
+        "items": [],
+    }
+
+    if not db_path or not db_path.exists():
+        return empty_res
+
+    try:
+        conn = sqlite3.connect(f"file:{db_path.resolve()}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+
+        items = []
+        total_qty = 0
+
+        if kind in ("offer", "offer_qty"):
+            if "offer_training_examples" not in tables:
+                conn.close()
+                return empty_res
+            rows = conn.execute(
+                """
+                SELECT occurred_at_utc, commodity, side, price, quantity, settlement, offer_text
+                FROM offer_training_examples
+                WHERE group_number = ? AND offerer_name = ? AND occurred_at_utc >= ? AND occurred_at_utc <= ?
+                ORDER BY occurred_at_utc DESC
+                """,
+                (group, username, start_utc, end_utc),
+            ).fetchall()
+            for r in rows:
+                d = dict(r)
+                q = d.get("quantity") or 1
+                total_qty += q
+                items.append({
+                    "time": fa_datetime(d.get("occurred_at_utc")),
+                    "commodity": html.escape(str(d.get("commodity") or "—")),
+                    "side": "خرید" if d.get("side") == "BUY" else "فروش",
+                    "price": fa_number(d.get("price")),
+                    "quantity": fa_number(q),
+                    "settlement": SETTLEMENT_FA.get(str(d.get("settlement")), "—"),
+                    "text": html.escape(str(d.get("offer_text") or "")),
+                })
+        else:
+            if "confirmed_trade_training_examples" not in tables:
+                conn.close()
+                return empty_res
+            rows = conn.execute(
+                """
+                SELECT occurred_at_utc, offerer_name, counterparty_name, commodity, side, price, quantity, settlement
+                FROM confirmed_trade_training_examples
+                WHERE group_number = ? AND (offerer_name = ? OR counterparty_name = ?) AND occurred_at_utc >= ? AND occurred_at_utc <= ?
+                ORDER BY occurred_at_utc DESC
+                """,
+                (group, username, username, start_utc, end_utc),
+            ).fetchall()
+            for r in rows:
+                d = dict(r)
+                q = d.get("quantity") or 1
+                total_qty += q
+                is_offerer = d.get("offerer_name") == username
+                counterparty = d.get("counterparty_name") if is_offerer else d.get("offerer_name")
+                role = "آفر دهنده" if is_offerer else "پاسخ‌دهنده"
+                items.append({
+                    "time": fa_datetime(d.get("occurred_at_utc")),
+                    "role": role,
+                    "counterparty": html.escape(str(counterparty or "—")),
+                    "commodity": html.escape(str(d.get("commodity") or "—")),
+                    "side": "خرید" if d.get("side") == "BUY" else "فروش",
+                    "price": fa_number(d.get("price")),
+                    "quantity": fa_number(q),
+                    "settlement": SETTLEMENT_FA.get(str(d.get("settlement")), "—"),
+                })
+
+        conn.close()
+        return {
+            "username": username,
+            "group": group,
+            "kind": kind,
+            "range_label": label,
+            "total_items": len(items),
+            "total_qty": total_qty,
+            "items": items,
+        }
+    except Exception:
+        return empty_res
+
+
+def render_analytics_leaderboard_table(
+    title: str,
+    subtitle: str,
+    items: list[dict[str, Any]],
+    val_key: str,
+    val_unit: str,
+    group: int = 1,
+    kind: str = "offer",
+) -> str:
     rows = []
     if not items:
         rows.append(f"<tr><td colspan='3' class='missing'>{NO_DATA_TOKEN}</td></tr>")
     else:
         for idx, item in enumerate(items, 1):
-            name = html.escape(str(item.get("username") or item.get("offerer_name") or "—"))
+            raw_name = str(item.get("username") or item.get("offerer_name") or "—")
+            escaped_name = html.escape(raw_name)
+            js_name = json.dumps(raw_name)
             val = fa_number(item.get(val_key, 0))
             rows.append(
                 f"<tr>"
                 f"<td class='rank-col'>#{fa_number(idx)}</td>"
-                f"<td><strong>{name}</strong></td>"
+                f"<td><a class='user-link' href='javascript:void(0)' onclick='openUserModal({js_name}, {group}, \"{kind}\")'><strong>{escaped_name}</strong></a></td>"
                 f"<td class='value-col'><strong>{val}</strong> <small>{val_unit}</small></td>"
                 f"</tr>"
             )
@@ -1909,10 +2024,10 @@ def render_analytics_page(
     groups_html = []
     for grp in (1, 2):
         gdata = data["groups"].get(grp, {})
-        t1 = render_analytics_leaderboard_table("۱۰ کاربر بیشترین آفر دهنده", "بر اساس تعداد آفر ثبت‌شده", gdata.get("top_offer_count", []), "count", "آفر")
-        t2 = render_analytics_leaderboard_table("۱۰ کاربر بیشترین معامله کننده", "شامل خریدار و فروشنده / آفر و درخواست", gdata.get("top_trade_count", []), "count", "معامله")
-        t3 = render_analytics_leaderboard_table("۱۰ کاربر بیشترین حجم آفر", "مجموع تعداد کالای پیشنهادشده", gdata.get("top_offer_qty", []), "total_qty", "عدد کالا")
-        t4 = render_analytics_leaderboard_table("۱۰ کاربر بیشترین حجم معامله", "مجموع تعداد کالای معامله‌شده", gdata.get("top_trade_qty", []), "total_qty", "عدد کالا")
+        t1 = render_analytics_leaderboard_table("۱۰ کاربر بیشترین آفر دهنده", "بر اساس تعداد آفر ثبت‌شده", gdata.get("top_offer_count", []), "count", "آفر", grp, "offer")
+        t2 = render_analytics_leaderboard_table("۱۰ کاربر بیشترین معامله کننده", "شامل خریدار و فروشنده / آفر و درخواست", gdata.get("top_trade_count", []), "count", "معامله", grp, "trade")
+        t3 = render_analytics_leaderboard_table("۱۰ کاربر بیشترین حجم آفر", "مجموع تعداد کالای پیشنهادشده", gdata.get("top_offer_qty", []), "total_qty", "عدد کالا", grp, "offer_qty")
+        t4 = render_analytics_leaderboard_table("۱۰ کاربر بیشترین حجم معامله", "مجموع تعداد کالای معامله‌شده", gdata.get("top_trade_qty", []), "total_qty", "عدد کالا", grp, "trade_qty")
 
         groups_html.append(
             f"""
@@ -1955,6 +2070,7 @@ def render_analytics_page(
   --accent-cyan: #06b6d4;
   --accent-emerald: #10b981;
   --accent-indigo: #6366f1;
+  --accent-rose: #f43f5e;
 }}
 * {{ box-sizing: border-box; }}
 body {{
@@ -2190,6 +2306,88 @@ td {{
   text-align: center;
   padding: 12px;
 }}
+
+.user-link {{
+  color: var(--text-main);
+  text-decoration: underline;
+  text-decoration-color: var(--border-gold);
+  text-underline-offset: 3px;
+  transition: all 0.2s ease;
+}}
+.user-link:hover {{
+  color: var(--accent-gold);
+  text-decoration-color: var(--accent-gold);
+}}
+.modal-overlay {{
+  display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(11, 19, 41, 0.85);
+  backdrop-filter: blur(12px);
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}}
+.modal-overlay.active {{
+  display: flex;
+}}
+.modal-card {{
+  width: 100%;
+  max-width: 950px;
+  max-height: 85vh;
+  background: #141f36;
+  border: 1px solid var(--border-gold);
+  box-shadow: 0 0 30px rgba(245, 158, 11, 0.2);
+  border-radius: 20px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}}
+.modal-header {{
+  padding: 16px 24px;
+  background: rgba(15, 23, 42, 0.95);
+  border-bottom: 1px solid var(--border-line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}}
+.modal-header h2 {{
+  margin: 0 0 2px;
+  font-size: 17px;
+  color: var(--accent-gold);
+}}
+.modal-close-btn {{
+  background: none;
+  border: none;
+  color: var(--text-sub);
+  font-size: 24px;
+  cursor: pointer;
+  padding: 0 6px;
+  line-height: 1;
+}}
+.modal-close-btn:hover {{
+  color: var(--accent-rose);
+}}
+.modal-body {{
+  padding: 20px;
+  overflow-y: auto;
+}}
+.modal-badge-bar {{
+  display: flex;
+  gap: 12px;
+  margin-bottom: 14px;
+}}
+.modal-badge {{
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-line);
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
+}}
+.modal-badge strong {{
+  color: var(--accent-cyan);
+}}
 </style>
 </head>
 <body>
@@ -2222,6 +2420,122 @@ td {{
 
   {''.join(groups_html)}
 </main>
+
+<div id="detail-modal" class="modal-overlay" onclick="closeUserModal(event)">
+  <div class="modal-card" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div>
+        <h2 id="modal-title">جزییات فعالیت کاربر</h2>
+        <small id="modal-subtitle" style="color:var(--text-sub)"></small>
+      </div>
+      <button class="modal-close-btn" onclick="closeUserModal()">&times;</button>
+    </div>
+    <div id="modal-body" class="modal-body">
+      <div style="text-align:center;padding:30px;color:var(--text-sub)">در حال دریافت داده‌ها…</div>
+    </div>
+  </div>
+</div>
+
+<script>
+async function openUserModal(username, group, kind) {{
+  const modal = document.getElementById("detail-modal");
+  const title = document.getElementById("modal-title");
+  const subtitle = document.getElementById("modal-subtitle");
+  const body = document.getElementById("modal-body");
+
+  const isTrade = kind === "trade" || kind === "trade_qty";
+  const kindTitle = isTrade ? "معاملات تاییدشده" : "آفرهای ثبت‌شده";
+  title.textContent = `ریز جزییات ${{kindTitle}} — ${{username}}`;
+  subtitle.textContent = `گروه ${{group}} | در حال بارگذاری…`;
+  body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-sub)">در حال دریافت داده‌ها…</div>';
+  modal.classList.add("active");
+
+  const urlParams = new URLSearchParams(window.location.search);
+  urlParams.set("username", username);
+  urlParams.set("group", group);
+  urlParams.set("kind", kind);
+
+  try {{
+    const res = await fetch("{analytics_path}/user-details.json?" + urlParams.toString());
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+
+    subtitle.textContent = `گروه ${{data.group}} | ${{data.range_label}}`;
+
+    if (!data.items || data.items.length === 0) {{
+      body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--accent-rose)">هیچ رکوردی در این بازه زمانی یافت نشد.</div>';
+      return;
+    }}
+
+    let rows = "";
+    if (isTrade) {{
+      rows = data.items.map(item => `
+        <tr>
+          <td>${{item.time}}</td>
+          <td><span class="badge" style="background:rgba(99,102,241,0.15);color:var(--accent-indigo);border-color:rgba(99,102,241,0.3)">${{item.role}}</span></td>
+          <td><strong style="color:var(--accent-gold)">${{item.counterparty}}</strong></td>
+          <td>${{item.commodity}}</td>
+          <td><span style="color:${{item.side === 'خرید' ? 'var(--accent-emerald)' : 'var(--accent-rose)'}}">${{item.side}}</span></td>
+          <td dir="ltr" style="text-align:left"><strong>${{item.price}}</strong> تومان</td>
+          <td dir="ltr" style="text-align:left">${{item.quantity}} عدد</td>
+          <td><small>${{item.settlement}}</small></td>
+        </tr>
+      `).join("");
+
+      body.innerHTML = `
+        <div class="modal-badge-bar">
+          <div class="modal-badge">تعداد کل معاملات: <strong>${{data.total_items}}</strong></div>
+          <div class="modal-badge">مجموع حجم کالا: <strong>${{data.total_qty}} عدد</strong></div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>زمان ثبت</th><th>نقش کاربر</th><th>طرف مقابل معامله</th><th>کالا</th><th>سمت</th><th style="text-align:left">قیمت</th><th style="text-align:left">تعداد</th><th>تسویه</th></tr>
+            </thead>
+            <tbody>${{rows}}</tbody>
+          </table>
+        </div>
+      `;
+    }} else {{
+      rows = data.items.map(item => `
+        <tr>
+          <td>${{item.time}}</td>
+          <td>${{item.commodity}}</td>
+          <td><span style="color:${{item.side === 'خرید' ? 'var(--accent-emerald)' : 'var(--accent-rose)'}}">${{item.side}}</span></td>
+          <td dir="ltr" style="text-align:left"><strong>${{item.price}}</strong> تومان</td>
+          <td dir="ltr" style="text-align:left">${{item.quantity}} عدد</td>
+          <td><small>${{item.settlement}}</small></td>
+          <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis" title="${{item.text}}">${{item.text}}</td>
+        </tr>
+      `).join("");
+
+      body.innerHTML = `
+        <div class="modal-badge-bar">
+          <div class="modal-badge">تعداد کل آفرها: <strong>${{data.total_items}}</strong></div>
+          <div class="modal-badge">مجموع حجم کالا: <strong>${{data.total_qty}} عدد</strong></div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>زمان ثبت</th><th>کالا</th><th>سمت</th><th style="text-align:left">قیمت</th><th style="text-align:left">تعداد</th><th>تسویه</th><th>متن آفر</th></tr>
+            </thead>
+            <tbody>${{rows}}</tbody>
+          </table>
+        </div>
+      `;
+    }}
+  }} catch (e) {{
+    body.innerHTML = '<div style="text-align:center;padding:30px;color:var(--accent-rose)">خطا در دریافت اطلاعات.</div>';
+  }}
+}}
+
+function closeUserModal(e) {{
+  if (e && e.target !== e.currentTarget && !e.target.classList.contains('modal-close-btn')) return;
+  document.getElementById("detail-modal").classList.remove("active");
+}}
+document.addEventListener("keydown", (e) => {{
+  if (e.key === "Escape") closeUserModal();
+}});
 </body>
 </html>"""
     return document.encode("utf-8")
@@ -2379,6 +2693,30 @@ def handler_factory(
                 end_shamsi = query.get("end_shamsi", [None])[0]
                 data = query_user_analytics(
                     conversation_db,
+                    range_type=range_type,
+                    start_shamsi=start_shamsi,
+                    end_shamsi=end_shamsi,
+                )
+                body = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+                self._headers(HTTPStatus.OK, "application/json; charset=utf-8", len(body))
+                self.wfile.write(body)
+                return
+            if path == analytics_path + "/user-details.json":
+                query = parse_qs(urlsplit(self.path).query)
+                username = query.get("username", [""])[0]
+                try:
+                    group = int(query.get("group", [1])[0])
+                except ValueError:
+                    group = 1
+                kind = query.get("kind", ["offer"])[0]
+                range_type = query.get("range_type", ["today"])[0]
+                start_shamsi = query.get("start_shamsi", [None])[0]
+                end_shamsi = query.get("end_shamsi", [None])[0]
+                data = query_user_details(
+                    conversation_db,
+                    username,
+                    group,
+                    kind,
                     range_type=range_type,
                     start_shamsi=start_shamsi,
                     end_shamsi=end_shamsi,

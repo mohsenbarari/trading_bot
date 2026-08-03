@@ -1268,6 +1268,15 @@ class EstimatorTests(unittest.TestCase):
         self.assertIn("ورود به سامانه", login_body)
         self.assertIn("خطا", login_body)
 
+    def test_query_user_details(self) -> None:
+        from live_server import query_user_details
+        db_path = Path(tempfile.gettempdir()) / "test_user_details_db.sqlite3"
+        res = query_user_details(db_path, "TestUser", 1, "offer", range_type="today")
+        self.assertEqual(res["username"], "TestUser")
+        self.assertEqual(res["group"], 1)
+        self.assertEqual(res["total_items"], 0)
+        self.assertIn("items", res)
+
 
 if __name__ == "__main__":
     unittest.main()
