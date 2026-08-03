@@ -185,7 +185,25 @@ def _remote_receive(
         timeout=3600,
     )
     if completed.returncode != 0:
-        raise Stage4RBundleTransferError("remote Object Storage bundle receiver failed closed")
+        diagnostic = str(completed.stderr).lower()
+        safe_codes = {
+            "bundle url is outside approved object storage": "remote_url_policy",
+            "bundle destination is outside stage 4r root": "remote_destination_policy",
+            "age identity path drifted": "remote_identity_path",
+            "age identity is unsafe": "remote_identity_safety",
+            "ciphertext exceeds expected size": "remote_ciphertext_size",
+            "ciphertext identity mismatch": "remote_ciphertext_identity",
+            "bundle decryption failed closed": "remote_decryption",
+            "plaintext identity mismatch": "remote_plaintext_identity",
+            "existing bundle identity differs": "remote_existing_identity",
+            "host key verification failed": "ssh_host_key",
+            "permission denied": "ssh_authentication",
+        }
+        code = next(
+            (value for marker, value in safe_codes.items() if marker in diagnostic),
+            "remote_receiver",
+        )
+        raise Stage4RBundleTransferError(f"remote receiver failed closed: {code}")
     try:
         result = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
@@ -331,7 +349,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = execute(parse_args(argv))
     except Exception as exc:
-        print(json.dumps({"status": "blocked", "error_class": type(exc).__name__}, sort_keys=True))
+        # All Stage4RBundleTransferError messages are locally generated fixed
+        # diagnostics; never surface remote stderr, presigned URLs, or secrets.
+        payload = {"status": "blocked", "error_class": type(exc).__name__}
+        if isinstance(exc, Stage4RBundleTransferError):
+            payload["error"] = str(exc)
+        print(json.dumps(payload, sort_keys=True))
         return 1
     print(json.dumps(result, sort_keys=True))
     return 0
