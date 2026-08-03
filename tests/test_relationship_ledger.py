@@ -3,7 +3,12 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from core.market_intelligence.relationship_ledger import append_labels, iter_labels
+from core.market_intelligence.relationship_ledger import (
+    append_labels,
+    append_melted_features,
+    iter_labels,
+    iter_melted_features,
+)
 
 
 UTC = timezone.utc
@@ -23,6 +28,18 @@ def label(*, bubble=0.02):
         "intrinsic_project_price": 180_000.0,
         "actual_project_price": 183_600.0,
         "bubble_ratio": bubble,
+        "features": {"PAPER:TOMORROW:NORMAL|1m|offer_imbalance": 0.5},
+    }
+
+
+def melted_feature():
+    return {
+        "schema_version": "MELTED_MARKET_RELATIONSHIP_DISCOVERY_V1_SHADOW_20260803",
+        "available_at_utc": (NOW - timedelta(minutes=5)).isoformat(),
+        "realized_at_utc": NOW.isoformat(),
+        "target_market": "PAPER:TOMORROW:NORMAL",
+        "target_anchor_price": 80_000_000.0,
+        "target_return_bps": 12.5,
         "features": {"PAPER:TOMORROW:NORMAL|1m|offer_imbalance": 0.5},
     }
 
@@ -53,6 +70,15 @@ class RelationshipLedgerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             result = append_labels(Path(directory) / "ledger.sqlite3", [unsafe])
             self.assertEqual(result["rejected"], 1)
+
+    def test_melted_feature_evidence_is_idempotent_and_strictly_future(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ledger = Path(directory) / "ledger.sqlite3"
+            first = append_melted_features(ledger, [melted_feature()], retention_days=None)
+            second = append_melted_features(ledger, [melted_feature()], retention_days=None)
+            self.assertEqual(first["inserted"], 1)
+            self.assertEqual(second["unchanged"], 1)
+            self.assertEqual(len(list(iter_melted_features(ledger))), 1)
 
 
 if __name__ == "__main__":

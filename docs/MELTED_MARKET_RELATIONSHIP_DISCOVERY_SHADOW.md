@@ -161,3 +161,10 @@ and numeric feature maps.  It rejects raw offer text, message IDs, sender or
 counterparty fields.  An economic label key is a one-way digest of its market
 time/dimensions and anchor; parser corrections update the existing aggregate
 label instead of silently accumulating two contradictory versions.
+
+The same ledger keeps the independent melted-market feature/target rows.  They
+retain the future return only after it is observed, with an aggregate
+point-in-time feature map for every target segment.  This is what will give the
+future melted challenger enough chronological history to discover interactions
+between normal/reverse/swim, today/tomorrow, flow, support markets and calendar
+state without reconstructing raw Telegram traffic.

@@ -17,7 +17,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.market_intelligence.relationship_ledger import append_labels
+from core.market_intelligence.relationship_ledger import (
+    append_labels,
+    append_melted_features,
+)
 
 
 def _outside_repository(path: Path) -> Path:
@@ -97,9 +100,11 @@ def main() -> int:
     runtime_root.mkdir(parents=True, exist_ok=True)
     lock_path = runtime_root / "relationship_cycle.lock"
     labels_path = runtime_root / "current_coin_intrinsic_labels.jsonl"
+    melted_features_path = runtime_root / "current_melted_relationship_features.jsonl"
     discovery_report = runtime_root / "latest_discovery_report.json"
     ledger_path = runtime_root / "coin_intrinsic_labels.sqlite3"
     append_report = runtime_root / "latest_ledger_append_report.json"
+    melted_append_report = runtime_root / "latest_melted_ledger_append_report.json"
     challenger_report = runtime_root / "latest_challenger_report.json"
     with lock_path.open("a+") as lock:
         try:
@@ -116,6 +121,7 @@ def main() -> int:
                 "--coin-trade-target-db", str(coin_trade_db),
                 "--since", since_utc,
                 "--report", str(discovery_report),
+                "--dataset", str(melted_features_path),
                 "--coin-intrinsic-dataset", str(labels_path),
             ]
         )
@@ -126,6 +132,15 @@ def main() -> int:
         )
         ledger.update({"status": "SHADOW_LEDGER_UPDATED", "automatic_promotion": False})
         _write_json_atomic(append_report, ledger)
+        melted_ledger = append_melted_features(
+            ledger_path,
+            _load_jsonl(melted_features_path),
+            retention_days=args.retention_days,
+        )
+        melted_ledger.update(
+            {"status": "SHADOW_MELTED_LEDGER_UPDATED", "automatic_promotion": False}
+        )
+        _write_json_atomic(melted_append_report, melted_ledger)
         challenger = _run(
             [
                 sys.executable,
@@ -135,11 +150,16 @@ def main() -> int:
                 "--report", str(challenger_report),
             ]
         )
+        # These are rebuildable transport files.  Both datasets have already
+        # committed atomically to the durable ledger before this cleanup.
+        labels_path.unlink(missing_ok=True)
+        melted_features_path.unlink(missing_ok=True)
     result = {
         "status": "SHADOW_RELATIONSHIP_CYCLE_COMPLETE",
         "automatic_promotion": False,
         "discovery": discovery,
         "ledger": ledger,
+        "melted_ledger": melted_ledger,
         "challenger": challenger,
         "runtime_root": str(runtime_root),
         "discovery_since_utc": since_utc,
