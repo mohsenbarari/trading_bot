@@ -1075,6 +1075,50 @@ Confirmationهای هم‌معنی ادغام می‌شوند، ولی fencing �
   token/release fingerprint hash خوانده شد؛ هیچ container/service/route/file روی
   آن تغییر نکرد. هیچ VPS/volume/bucket/domain ساخته، حذف یا تغییر lifecycle نکرد.
 
+#### checkpoint اجرای Stage 4 — completion داخلی و مانع ingress عمومی — 2026-08-03
+
+- مالک stop فقط همان poller قدیمی staging روی BOT-FL را صریحاً مجاز کرد. container
+  کمپین قدیمی با release `3138d0c2...` و fingerprint staging مشترک، با timeout
+  graceful متوقف شد و **remove نشد**؛ rollback آن صرفاً `docker start` همان
+  container است. Bot canonical و هر credential یا workload production تغییر
+  نکرد. پس از آن amendment Bot-FI به receipt canonical SHA-256
+  `b6990bbfe034fc6e0b6aac3faf36839fcb1c7bc2d5330153ffea4c8cf01cbe15`
+  رسید و Bot آزمایشی با همان release شروع شد.
+- observation تازه هر چهار role، `role-acceptance` و سپس `global-commit` اجرا
+  و verify شدند. hash سند global commit برابر
+  `ae12bd249f301a6c2dc01cc222065c5a8d7f16c65debb5a0d786ced481a1eaf1` و
+  summary convergence نهایی در مسیر owner-only
+  `.../stage4/convergence-role-acceptance-v3/summary.json` برابر
+  `5367e4de832f0d352d7552bd9d2136e92be8c80a428ef53646b76b3b9ab2d935` است.
+  `finish` پس از dry-run و confirmation دقیق روی هر چهار target انجام شد؛ exact
+  release همچنان `0e63a7ec1b08bef29ea199041215298a021b56ef` است.
+- route عمداً همچنان روی origin سابق `65.109.220.59` نگه داشته شد. read-only
+  observation جدید routing در مسیر owner-only
+  `.../stage4/routing-observation-v4.json` با SHA-256
+  `d1d71ed987621616b986f61f7d19f43fa78a27f19ab0c318c25d969a544c2429`
+  همین وضعیت را ثبت می‌کند؛ هیچ DNS/CDN mutation انجام نشده است.
+- preflight مستقیم WebApp-FI آزمایشی نشان داد application exact release روی
+  `127.0.0.1:8212` سالم است (`/` و `/health/ready` هر دو `200`)، اما host هیچ
+  listener عمومی `80/443`، Nginx، Certbot یا certificate ندارد. بنابراین probe
+  مستقیم `--resolve app.gold-trading.ir:443:194.5.206.69` timeout شد و switch
+  Arvan عمداً اجرا نشد.
+- همان preflight یک drift دامنه را آشکار کرد: `FRONTEND_URL` و
+  `PUBLIC_WEBAPP_URL` در role bundle اجراشده برابر
+  `https://staging.gold-trade.ir` هستند، در حالی که route مجاز این roadmap
+  `https://app.gold-trading.ir` است. این دو مقدار فقط نمایش نیستند: linkهای
+  invitation و Telegram از آن‌ها ساخته می‌شوند. چون SHA-256 env bundle در
+  plan/journal/acceptance bind شده، تغییر خام فایل env یا restart انتخابی مجاز
+  نیست؛ اصلاح باید با plan و evidence جدید و کنترل‌شده انجام شود.
+- مسیر بعدی پیش از هر switch عمومی: (۱) تعریف exact public-origin bundle برای
+  `app.gold-trading.ir` و recovery/redeploy controlled بدون تغییر release یا
+  data، (۲) provision محدود Nginx/TLS روی VPS آزمایشی WebApp-FI و اثبات direct
+  origin، (۳) dry-run و فقط سپس با authorization مستقل، switch record test-domain
+  در Arvan و smoke عمومی. این مسیر هیچ domain یا route production را در بر
+  نمی‌گیرد.
+- Production touched: `no`. تنها mutation روی میزبان canonical، stop مجاز و
+  reversible همان container **staging قدیمی** بود؛ هیچ container production،
+  VPS/volume، bucket یا route/domain production تغییر نکرد.
+
 ### Exit gate — G4 Staging Published
 
 - هر چهار role exact release SHA را گزارش می‌کنند؛
@@ -1094,17 +1138,23 @@ restart فقط سرویس‌هایی که در freeze evidence فعال بوده
 
 ### گزارش پایان Stage 4
 
-- Status: `IN_PROGRESS — ROUTING HELD / BOT POLLER CONFLICT BLOCKED`
+- Status: `IN_PROGRESS — FOUR ROLES FINISHED; ROUTING HELD PENDING CORRECTED PUBLIC BUNDLE AND INGRESS`
 - Branch: `stage/three-site-staging-04-deploy`
 - Base / implementation / deployed SHA:
-  `0e63a7ec1b08bef29ea199041215298a021b56ef / through 8b8f1d97 / exact release unchanged`
-- Role health and writer term: `pending`
-- Smoke and parity results: `pending`
-- Evidence paths and SHA-256: `pending`
+  `0e63a7ec1b08bef29ea199041215298a021b56ef / through fe20ab9e / exact release unchanged`
+- Role health and writer term:
+  `four fresh observations, role-acceptance, global-commit and finish passed; WebApp-FI remains the accepted epoch-1 Writer and WebApp-IR remains fenced standby.`
+- Smoke and parity results:
+  `convergence and private/direct readiness passed; public direct-origin and Tier-1 smoke intentionally not started because ingress/TLS and public URL provenance are not yet valid.`
+- Evidence paths and SHA-256:
+  `owner-only .../stage4/controller-role-acceptance-v1/evidence/global-commit-global-commit.json = ae12bd249f301a6c2dc01cc222065c5a8d7f16c65debb5a0d786ced481a1eaf1; .../stage4/convergence-role-acceptance-v3/summary.json = 5367e4de832f0d352d7552bd9d2136e92be8c80a428ef53646b76b3b9ab2d935; .../stage4/routing-observation-v4.json = d1d71ed987621616b986f61f7d19f43fa78a27f19ab0c318c25d969a544c2429.`
 - Production touched: `no`
-- Deviations / open risks: `pending`
-- Rollback verified: `pending`
-- Decision / next stage: `pending / no`
+- Deviations / open risks:
+  `the deployed public URL bundle targets staging.gold-trade.ir instead of the isolated app.gold-trading.ir test route; WebApp-FI has no public ingress or TLS. No public route can be switched until both are corrected under a new controlled plan.`
+- Rollback verified:
+  `yes for the completed private topology; route remains at prior origin, target data is retained, and the stopped stale staging poller remains recoverable by start-only rollback.`
+- Decision / next stage:
+  `G4 not yet accepted / no; obtain explicit authorization for the corrected public-origin replan and limited WebApp-FI ingress/TLS provisioning before any CDN change.`
 
 ---
 
