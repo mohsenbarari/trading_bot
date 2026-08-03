@@ -100,6 +100,7 @@ def decide_durability(
     evidence_expires_at: datetime | None,
     now: datetime,
     isolated_critical_write_policy: str = "freeze",
+    same_region_two_phase_enabled: bool = True,
 ) -> DurabilityDecision:
     tables = set(table_names)
     critical = tables & (FINANCIAL_TABLES | IDENTITY_TABLES | MESSENGER_TABLES)
@@ -116,6 +117,8 @@ def decide_durability(
             reasons.append("durability_evidence_expired")
     if not event_journal_healthy:
         reasons.append("same_region_event_journal_unhealthy")
+    if not same_region_two_phase_enabled:
+        reasons.append("same_region_two_phase_disabled")
     if tables & BLOB_TABLES and not blob_journal_healthy:
         reasons.append("same_region_blob_journal_unhealthy")
     if connectivity_mode == "online":
@@ -150,6 +153,10 @@ def enforce_session_durability(session, table_names: Iterable[str]) -> None:  # 
         now=datetime.now(timezone.utc),
         isolated_critical_write_policy=str(
             getattr(settings, "dr_isolated_critical_write_policy", "freeze") or "freeze"
+        ),
+        same_region_two_phase_enabled=bool(
+            settings.dr_same_region_journal_enabled
+            and settings.dr_same_region_journal_two_phase_enabled
         ),
     )
     if not decision.allowed:

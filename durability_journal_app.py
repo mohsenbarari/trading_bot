@@ -20,13 +20,17 @@ from core.dr_durability_journal import (
     JournalPrepare,
     acknowledgement_payload,
     parse_prepare,
+    parse_recovery_lookup,
     parse_resolution,
+    recovery_lookup_payload,
 )
 from core.dr_durability_journal_store import (
     commit_record,
     prepare_record,
     read_record,
+    read_record_by_local_gid,
     rollback_record,
+    rollback_record_by_local_gid,
 )
 from core.dr_sync_auth import DrSyncAuthError, parse_pairwise_keys, sign_acknowledgement, verify_request
 from core.runtime_identity import resolve_runtime_identity
@@ -51,6 +55,7 @@ def _record_to_prepare(row: DrSameRegionJournal) -> JournalPrepare:
         writer_epoch=int(row.writer_epoch),
         transaction_id=row.transaction_id,
         transaction_hash=row.transaction_hash,
+        local_transaction_gid=row.local_transaction_gid,
         release_sha=row.release_sha,
         encryption_key_id=row.encryption_key_id,
         event_ids=tuple(str(item) for item in row.event_ids or ()),
@@ -234,5 +239,42 @@ async def status(request: Request):
                 secret=key.secret,
             )
             return acknowledgement
+    except (DrSyncAuthError, DurabilityJournalError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/dr-journal/v1/recover-status")
+async def recover_status(request: Request):
+    """Return signed opaque state for one local PostgreSQL prepared GID."""
+
+    body = await _body(request, limit=64 * 1024)
+    try:
+        authenticated, key = _authenticated(request, body)
+        lookup = recovery_lookup_payload(local_transaction_gid=parse_recovery_lookup(body))
+        async with SessionLocal() as session:
+            row = await read_record_by_local_gid(
+                session, local_transaction_gid=lookup["local_transaction_gid"]
+            )
+            if row is None:
+                raise DurabilityJournalError("journal recovery GID has no record")
+            return _acknowledgement(row=row, request_hash=authenticated.request_hash, secret=key.secret)
+    except (DrSyncAuthError, DurabilityJournalError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/dr-journal/v1/recover-rollback")
+async def recover_rollback(request: Request):
+    """Record a rollback decision before local ROLLBACK PREPARED."""
+
+    body = await _body(request, limit=64 * 1024)
+    try:
+        authenticated, key = _authenticated(request, body)
+        lookup = recovery_lookup_payload(local_transaction_gid=parse_recovery_lookup(body))
+        async with SessionLocal() as session:
+            row = await rollback_record_by_local_gid(
+                session, local_transaction_gid=lookup["local_transaction_gid"]
+            )
+            await session.commit()
+            return _acknowledgement(row=row, request_hash=authenticated.request_hash, secret=key.secret)
     except (DrSyncAuthError, DurabilityJournalError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

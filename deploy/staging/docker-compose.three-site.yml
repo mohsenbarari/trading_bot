@@ -95,6 +95,9 @@ x-webapp-fi-app-env: &webapp_fi_app_env
   # The FI application has only the directed journal transport/encryption
   # material. Bot-FI receives the HMAC key but never this encryption secret.
   DR_SAME_REGION_JOURNAL_ENABLED: "true"
+  # Remains false until the immutable image, PostgreSQL prepared-transaction
+  # capacity, and restoration drill are all attested on staging.
+  DR_SAME_REGION_JOURNAL_TWO_PHASE_ENABLED: ${STAGING_WEBAPP_FI_JOURNAL_TWO_PHASE_ENABLED:-false}
   DR_SAME_REGION_JOURNAL_URL: https://bot-fi-dr.staging.internal:8443
   DR_SAME_REGION_JOURNAL_PAIRWISE_KEYS_JSON: ${WEBAPP_FI_SAME_REGION_JOURNAL_KEYS_JSON:?required}
   DR_SAME_REGION_JOURNAL_ENCRYPTION_KEY_ID: ${WEBAPP_FI_SAME_REGION_JOURNAL_ENCRYPTION_KEY_ID:?required}
@@ -412,6 +415,11 @@ services:
   webapp_fi_db:
     profiles: [webapp-fi]
     <<: *postgres
+    # PostgreSQL reads this only at startup.  The release runbook changes it
+    # on the isolated WebApp-FI staging role, verifies it read-only, and runs
+    # the recovery drill before the application feature flag can become true.
+    command:
+      [postgres, -c, timezone=UTC, -c, log_timezone=UTC, -c, "max_prepared_transactions=${STAGING_WEBAPP_FI_MAX_PREPARED_TRANSACTIONS:-32}"]
     environment:
       TZ: UTC
       POSTGRES_USER: ${WEBAPP_FI_POSTGRES_USER:?required}

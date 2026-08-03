@@ -38,11 +38,16 @@ JOURNAL_SCHEMA = "three-site-same-region-journal-v1"
 JOURNAL_PREPARE_PATH = "/api/dr-journal/v1/prepare"
 JOURNAL_COMMIT_PATH = "/api/dr-journal/v1/commit"
 JOURNAL_ROLLBACK_PATH = "/api/dr-journal/v1/rollback"
+JOURNAL_RECOVER_STATUS_PATH = "/api/dr-journal/v1/recover-status"
+JOURNAL_RECOVER_ROLLBACK_PATH = "/api/dr-journal/v1/recover-rollback"
 JOURNAL_MAX_CIPHERTEXT_BYTES = 8 * 1024 * 1024
 JOURNAL_MAX_TRANSACTION_EVENTS = 500
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _KEY_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-_PREPARED_GID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,191}$")
+# PostgreSQL 2PC identifiers created by SQLAlchemy currently begin ``_sa_``.
+# The identifier is public coordination metadata only; it never contains a
+# business key or encrypted payload.
+_PREPARED_GID_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._:-]{7,191}$")
 
 
 class DurabilityJournalError(RuntimeError):
@@ -57,6 +62,7 @@ class JournalPrepare:
     writer_epoch: int
     transaction_id: str
     transaction_hash: str
+    local_transaction_gid: str
     release_sha: str
     encryption_key_id: str
     event_ids: tuple[str, ...]
@@ -72,6 +78,7 @@ class JournalPrepare:
             "writer_epoch": self.writer_epoch,
             "transaction_id": self.transaction_id,
             "transaction_hash": self.transaction_hash,
+            "local_transaction_gid": self.local_transaction_gid,
             "release_sha": self.release_sha,
             "encryption_key_id": self.encryption_key_id,
             "event_ids": list(self.event_ids),
@@ -170,6 +177,7 @@ def _aad(payload: Mapping[str, Any]) -> bytes:
             "writer_epoch": payload["writer_epoch"],
             "transaction_id": payload["transaction_id"],
             "transaction_hash": payload["transaction_hash"],
+            "local_transaction_gid": payload["local_transaction_gid"],
             "release_sha": payload["release_sha"],
             "encryption_key_id": payload["encryption_key_id"],
             "event_ids": payload["event_ids"],
@@ -223,6 +231,7 @@ def build_prepare(
     writer_epoch: int,
     transaction_id: str,
     transaction_hash: str,
+    local_transaction_gid: str,
     release_sha: str,
     encryption_key_id: str,
     encryption_secret: str,
@@ -235,6 +244,9 @@ def build_prepare(
         raise DurabilityJournalError("journal writer epoch must be positive")
     normalized_transaction_id = _require_uuid(transaction_id, field="transaction_id")
     normalized_hash = _require_sha256(transaction_hash, field="transaction_hash")
+    normalized_gid = str(local_transaction_gid or "")
+    if not _PREPARED_GID_RE.fullmatch(normalized_gid):
+        raise DurabilityJournalError("journal local transaction GID is invalid")
     normalized_release = _require_release_sha(release_sha)
     normalized_key_id = str(encryption_key_id or "")
     if not _KEY_ID_RE.fullmatch(normalized_key_id):
@@ -251,6 +263,7 @@ def build_prepare(
         "writer_epoch": int(writer_epoch),
         "transaction_id": normalized_transaction_id,
         "transaction_hash": normalized_hash,
+        "local_transaction_gid": normalized_gid,
         "release_sha": normalized_release,
         "encryption_key_id": normalized_key_id,
         "event_ids": [item["event_id"] for item in events],
@@ -268,6 +281,7 @@ def build_prepare(
         writer_epoch=int(writer_epoch),
         transaction_id=normalized_transaction_id,
         transaction_hash=normalized_hash,
+        local_transaction_gid=normalized_gid,
         release_sha=normalized_release,
         encryption_key_id=normalized_key_id,
         event_ids=tuple(metadata["event_ids"]),
@@ -288,7 +302,7 @@ def parse_prepare(raw: Mapping[str, Any] | str | bytes) -> JournalPrepare:
             raise DurabilityJournalError("journal prepare payload is not strict JSON") from exc
     required = {
         "schema", "origin_physical_site", "writer_epoch", "transaction_id",
-        "transaction_hash", "release_sha", "encryption_key_id", "event_ids",
+        "transaction_hash", "local_transaction_gid", "release_sha", "encryption_key_id", "event_ids",
         "event_hashes", "nonce", "ciphertext", "ciphertext_hash",
     }
     if not isinstance(raw, Mapping) or set(raw) != required:
@@ -297,6 +311,9 @@ def parse_prepare(raw: Mapping[str, Any] | str | bytes) -> JournalPrepare:
         raise DurabilityJournalError("journal prepare source is invalid")
     if isinstance(raw["writer_epoch"], bool) or not isinstance(raw["writer_epoch"], int) or raw["writer_epoch"] < 1:
         raise DurabilityJournalError("journal writer epoch is invalid")
+    local_gid = str(raw["local_transaction_gid"] or "")
+    if not _PREPARED_GID_RE.fullmatch(local_gid):
+        raise DurabilityJournalError("journal local transaction GID is invalid")
     key_id = str(raw["encryption_key_id"] or "")
     if not _KEY_ID_RE.fullmatch(key_id):
         raise DurabilityJournalError("journal encryption key id is invalid")
@@ -320,6 +337,7 @@ def parse_prepare(raw: Mapping[str, Any] | str | bytes) -> JournalPrepare:
         writer_epoch=int(raw["writer_epoch"]),
         transaction_id=_require_uuid(raw["transaction_id"], field="transaction_id"),
         transaction_hash=_require_sha256(raw["transaction_hash"], field="transaction_hash"),
+        local_transaction_gid=local_gid,
         release_sha=_require_release_sha(raw["release_sha"]),
         encryption_key_id=key_id,
         event_ids=event_ids,
@@ -365,6 +383,33 @@ def parse_resolution(
         transaction_hash=_require_sha256(raw["transaction_hash"], field="transaction_hash"),
         prepared_transaction_gid=gid,
     )
+
+
+def recovery_lookup_payload(*, local_transaction_gid: str) -> dict[str, Any]:
+    """Build a signed recovery lookup without disclosing application data."""
+
+    gid = str(local_transaction_gid or "")
+    if not _PREPARED_GID_RE.fullmatch(gid):
+        raise DurabilityJournalError("journal recovery GID is invalid")
+    return {"schema": JOURNAL_SCHEMA, "local_transaction_gid": gid}
+
+
+def parse_recovery_lookup(raw: Mapping[str, Any] | str | bytes) -> str:
+    """Parse one strict recovery lookup request and return its local GID."""
+
+    if isinstance(raw, (str, bytes)):
+        try:
+            raw = json.loads(raw, object_pairs_hook=_strict_object)
+        except (json.JSONDecodeError, TypeError, DurabilityJournalError) as exc:
+            raise DurabilityJournalError("journal recovery lookup is not strict JSON") from exc
+    if not isinstance(raw, Mapping) or set(raw) != {"schema", "local_transaction_gid"}:
+        raise DurabilityJournalError("journal recovery lookup fields are invalid")
+    if raw["schema"] != JOURNAL_SCHEMA:
+        raise DurabilityJournalError("journal recovery lookup schema is invalid")
+    normalized = recovery_lookup_payload(
+        local_transaction_gid=str(raw["local_transaction_gid"] or "")
+    )
+    return str(normalized["local_transaction_gid"])
 
 
 def decrypt_prepare(prepare: JournalPrepare, *, encryption_secret: str) -> tuple[dict[str, Any], ...]:
@@ -426,6 +471,7 @@ def acknowledgement_payload(
         "writer_epoch": prepare.writer_epoch,
         "transaction_id": prepare.transaction_id,
         "transaction_hash": prepare.transaction_hash,
+        "local_transaction_gid": prepare.local_transaction_gid,
         "ciphertext_hash": prepare.ciphertext_hash,
         "release_sha": prepare.release_sha,
         "request_hash": _require_sha256(request_hash, field="request_hash"),
@@ -453,7 +499,7 @@ def verify_acknowledgement(
 
     required = {
         "schema", "state", "receiver_site", "origin_physical_site", "writer_epoch",
-        "transaction_id", "transaction_hash", "ciphertext_hash", "release_sha",
+        "transaction_id", "transaction_hash", "local_transaction_gid", "ciphertext_hash", "release_sha",
         "request_hash", "resolved_at", "acknowledgement_mac",
     }
     if expected_state == "committed":
@@ -480,4 +526,52 @@ def verify_acknowledgement(
     )
     if any(raw.get(key) != value for key, value in expected.items()):
         raise DurabilityJournalError("journal acknowledgement does not bind the prepared transaction")
+    return dict(unsigned)
+
+
+def verify_recovery_acknowledgement(
+    raw: Mapping[str, Any],
+    *,
+    local_transaction_gid: str,
+    request_hash: str,
+    shared_secret: str,
+) -> dict[str, Any]:
+    """Verify only the opaque state necessary to reconcile a local GID.
+
+    Unlike a normal write-path ACK, recovery starts with a PostgreSQL GID and
+    therefore cannot know the encrypted prepare payload in advance.  The
+    signed response carries no plaintext or ciphertext; it is sufficient to
+    determine the one safe terminal action for that exact GID.
+    """
+
+    expected_gid = recovery_lookup_payload(local_transaction_gid=local_transaction_gid)[
+        "local_transaction_gid"
+    ]
+    state = raw.get("state") if isinstance(raw, Mapping) else None
+    required = {
+        "schema", "state", "receiver_site", "origin_physical_site", "writer_epoch",
+        "transaction_id", "transaction_hash", "local_transaction_gid", "ciphertext_hash",
+        "release_sha", "request_hash", "resolved_at", "acknowledgement_mac",
+    }
+    if state == "committed":
+        required.add("prepared_transaction_gid")
+    if not isinstance(raw, Mapping) or set(raw) != required:
+        raise DurabilityJournalError("journal recovery acknowledgement fields are invalid")
+    unsigned = {key: raw[key] for key in required - {"acknowledgement_mac"}}
+    if not acknowledgement_signature_is_valid(
+        payload=unsigned,
+        signature=str(raw["acknowledgement_mac"]),
+        secret=str(shared_secret or ""),
+    ):
+        raise DurabilityJournalError("journal recovery acknowledgement signature is invalid")
+    if raw["schema"] != JOURNAL_SCHEMA or raw["receiver_site"] != SITE_BOT_FI:
+        raise DurabilityJournalError("journal recovery acknowledgement source is invalid")
+    if raw["local_transaction_gid"] != expected_gid:
+        raise DurabilityJournalError("journal recovery acknowledgement GID does not bind the request")
+    if raw["state"] not in {"prepared", "committed", "rolled_back"}:
+        raise DurabilityJournalError("journal recovery acknowledgement state is invalid")
+    if raw["state"] == "committed" and raw["prepared_transaction_gid"] != expected_gid:
+        raise DurabilityJournalError("journal recovery acknowledgement commit GID is invalid")
+    if raw["request_hash"] != _require_sha256(request_hash, field="request_hash"):
+        raise DurabilityJournalError("journal recovery acknowledgement request hash is invalid")
     return dict(unsigned)

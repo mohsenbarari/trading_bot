@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.dr_durability_journal import (
@@ -23,6 +24,7 @@ from models.dr_event import DrSameRegionJournal
 def _same_prepare(row: DrSameRegionJournal, prepare: JournalPrepare) -> bool:
     return (
         row.transaction_hash == prepare.transaction_hash
+        and row.local_transaction_gid == prepare.local_transaction_gid
         and row.release_sha == prepare.release_sha
         and row.encryption_key_id == prepare.encryption_key_id
         and list(row.event_ids or []) == list(prepare.event_ids)
@@ -54,6 +56,7 @@ async def prepare_record(
         writer_epoch=prepare.writer_epoch,
         transaction_id=prepare.transaction_id,
         transaction_hash=prepare.transaction_hash,
+        local_transaction_gid=prepare.local_transaction_gid,
         release_sha=prepare.release_sha,
         encryption_key_id=prepare.encryption_key_id,
         event_ids=list(prepare.event_ids),
@@ -93,6 +96,8 @@ async def commit_record(
     if row is None:
         raise DurabilityJournalError("journal commit references a missing prepared record")
     _assert_resolution_matches(row, resolution)
+    if row.local_transaction_gid != resolution.prepared_transaction_gid:
+        raise DurabilityJournalError("journal commit GID does not match the bound local transaction")
     if row.state == "prepared":
         row.state = "committed"
         row.prepared_transaction_gid = resolution.prepared_transaction_gid
@@ -142,6 +147,45 @@ async def read_record(
     return row
 
 
+async def read_record_by_local_gid(
+    session: AsyncSession,
+    *,
+    local_transaction_gid: str,
+) -> DrSameRegionJournal | None:
+    """Find exactly one recovery record bound to a local PostgreSQL GID."""
+
+    return await session.scalar(
+        select(DrSameRegionJournal).where(
+            DrSameRegionJournal.local_transaction_gid == local_transaction_gid
+        )
+    )
+
+
+async def rollback_record_by_local_gid(
+    session: AsyncSession,
+    *,
+    local_transaction_gid: str,
+) -> DrSameRegionJournal:
+    """Resolve a recovery record only when no commit decision exists."""
+
+    row = await session.scalar(
+        select(DrSameRegionJournal)
+        .where(DrSameRegionJournal.local_transaction_gid == local_transaction_gid)
+        .with_for_update()
+    )
+    if row is None:
+        raise DurabilityJournalError("journal recovery GID has no record")
+    return await rollback_record(
+        session,
+        resolution=JournalResolution(
+            origin_physical_site=row.origin_physical_site,
+            writer_epoch=int(row.writer_epoch),
+            transaction_id=row.transaction_id,
+            transaction_hash=row.transaction_hash,
+        ),
+    )
+
+
 def public_record_state(row: DrSameRegionJournal) -> dict[str, Any]:
     """Return no ciphertext or private payload in operational acknowledgements."""
 
@@ -150,6 +194,7 @@ def public_record_state(row: DrSameRegionJournal) -> dict[str, Any]:
         "writer_epoch": int(row.writer_epoch),
         "transaction_id": row.transaction_id,
         "transaction_hash": row.transaction_hash,
+        "local_transaction_gid": row.local_transaction_gid,
         "release_sha": row.release_sha,
         "ciphertext_hash": row.ciphertext_hash,
         "state": row.state,

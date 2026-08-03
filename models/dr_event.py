@@ -457,12 +457,20 @@ class DrSameRegionJournal(Base):
             name="ck_dr_same_region_journal_commit_gid",
         ),
         Index("ix_dr_same_region_journal_state_prepared_at", "state", "prepared_at"),
+        Index(
+            "ux_dr_same_region_journal_local_transaction_gid",
+            "local_transaction_gid",
+            unique=True,
+        ),
     )
 
     origin_physical_site = Column(String(16), primary_key=True)
     writer_epoch = Column(BigInteger, primary_key=True)
     transaction_id = Column(String(36), primary_key=True)
     transaction_hash = Column(String(64), nullable=False)
+    # Bound before local PREPARE so a crash between the two local/remote
+    # phases can be reconciled deterministically from pg_prepared_xacts.
+    local_transaction_gid = Column(String(192), nullable=True)
     release_sha = Column(String(64), nullable=False)
     encryption_key_id = Column(String(64), nullable=False)
     event_ids = Column(JSON, nullable=False)

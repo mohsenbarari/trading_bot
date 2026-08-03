@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     # Separate opaque FI journal.  It is disabled by default and is never a
     # substitute for the asynchronous cross-region event/blob delivery plane.
     dr_same_region_journal_enabled: bool = False
+    dr_same_region_journal_two_phase_enabled: bool = False
     dr_same_region_journal_url: str | None = None
     dr_same_region_journal_pairwise_keys_json: str | None = None
     dr_same_region_journal_encryption_key_id: str | None = None

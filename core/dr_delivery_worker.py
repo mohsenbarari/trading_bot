@@ -18,7 +18,7 @@ from sqlalchemy import or_, select
 from core.config import settings
 from core.dark_standby import assert_not_dark_standby
 from core.db import DrProjectionSessionLocal, verify_three_site_database_role_bindings
-from core.dr_event_protocol import canonical_json_bytes, transport_peers, validate_envelope
+from core.dr_event_protocol import canonical_json_bytes, event_envelope_from_record, transport_peers, validate_envelope
 from core.dr_sync_auth import (
     PairwiseDrKey,
     acknowledgement_signature_is_valid,
@@ -120,42 +120,10 @@ def _key_for_destination(
 
 
 def event_envelope(event: DrEvent) -> dict[str, Any]:
-    created_at = event.created_at
-    if created_at.tzinfo is None:
-        created_at = created_at.replace(tzinfo=timezone.utc)
-    payload = {
-        "protocol_version": event.protocol_version,
-        "event_id": event.event_id,
-        "origin_authority": event.origin_authority,
-        "origin_physical_site": event.origin_physical_site,
-        "producer_epoch": event.producer_epoch,
-        "producer_sequence": event.producer_sequence,
-        "aggregate_type": event.aggregate_type,
-        "aggregate_id": event.aggregate_id,
-        "aggregate_db_id": event.aggregate_db_id,
-        "aggregate_version": event.aggregate_version,
-        "operation": event.operation,
-        "canonical_payload": event.canonical_payload,
-        "canonical_payload_hash": event.canonical_payload_hash,
-        "schema_version": event.schema_version,
-        "causation_id": event.causation_id,
-        "idempotency_key": event.idempotency_key,
-        "writer_epoch": event.writer_epoch,
-        "tombstone": event.tombstone,
-        "created_at": created_at.astimezone(timezone.utc).isoformat(),
-    }
-    if int(event.protocol_version) >= 2:
-        payload.update(
-            transaction_id=event.transaction_id,
-            transaction_position=event.transaction_position,
-            transaction_size=event.transaction_size,
-            transaction_hash=event.transaction_hash,
-            destination_streams=event.destination_streams,
-        )
-    validated = validate_envelope(payload)
-    if validated.envelope_hash != event.envelope_hash:
-        raise DrDeliveryError(f"stored DR event hash mismatch for {event.event_id}")
-    return validated.payload
+    try:
+        return event_envelope_from_record(event)
+    except Exception as exc:
+        raise DrDeliveryError(f"stored DR event hash mismatch for {event.event_id}") from exc
 
 
 async def claim_delivery_batch(*, local_site: str) -> ClaimedDeliveryBatch | None:

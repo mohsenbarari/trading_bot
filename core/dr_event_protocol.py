@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import re
-from typing import Any
+from typing import Any, Mapping
 from uuid import UUID, uuid4
 
 from sqlalchemy import text
@@ -582,6 +582,57 @@ def append_local_dr_event(
             {"event_id": event_id, "destination": destination},
         )
     return event_id
+
+
+def event_envelope_from_record(event: Mapping[str, Any] | Any) -> dict[str, Any]:
+    """Reconstruct and validate a finalized envelope from ORM or SQL row data.
+
+    Both normal async delivery and the synchronous opaque journal must attest
+    the exact same immutable bytes.  Keeping this conversion here prevents a
+    second, subtly divergent serialization path at the durability boundary.
+    """
+
+    def value(name: str) -> Any:
+        if isinstance(event, Mapping):
+            return event[name]
+        return getattr(event, name)
+
+    created_at = value("created_at")
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    payload = {
+        "protocol_version": value("protocol_version"),
+        "event_id": value("event_id"),
+        "origin_authority": value("origin_authority"),
+        "origin_physical_site": value("origin_physical_site"),
+        "producer_epoch": value("producer_epoch"),
+        "producer_sequence": value("producer_sequence"),
+        "aggregate_type": value("aggregate_type"),
+        "aggregate_id": value("aggregate_id"),
+        "aggregate_db_id": value("aggregate_db_id"),
+        "aggregate_version": value("aggregate_version"),
+        "operation": value("operation"),
+        "canonical_payload": value("canonical_payload"),
+        "canonical_payload_hash": value("canonical_payload_hash"),
+        "schema_version": value("schema_version"),
+        "causation_id": value("causation_id"),
+        "idempotency_key": value("idempotency_key"),
+        "writer_epoch": value("writer_epoch"),
+        "tombstone": value("tombstone"),
+        "created_at": created_at.astimezone(timezone.utc).isoformat(),
+    }
+    if int(value("protocol_version")) >= 2:
+        payload.update(
+            transaction_id=value("transaction_id"),
+            transaction_position=value("transaction_position"),
+            transaction_size=value("transaction_size"),
+            transaction_hash=value("transaction_hash"),
+            destination_streams=value("destination_streams"),
+        )
+    validated = validate_envelope(payload)
+    if validated.envelope_hash != value("envelope_hash"):
+        raise DrEventProtocolError(f"stored DR event hash mismatch for {value('event_id')}")
+    return validated.payload
 
 
 def finalize_local_dr_transaction(connection, event_ids: list[str]) -> str:

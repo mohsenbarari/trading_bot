@@ -15,6 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from typing import AsyncGenerator
 from .config import settings
+from core.dr_durability_two_phase import DurabilityCoordinatedSession
 
 __all__ = [
     "engine",
@@ -43,6 +44,7 @@ engine = create_async_engine(
 AsyncSessionLocal = async_sessionmaker(
     engine,
     class_=AsyncSession,
+    sync_session_class=DurabilityCoordinatedSession,
     expire_on_commit=False,  # جلوگیری از lazy loading بعد از commit
     autoflush=False,  # کنترل دستی flush برای بهینه‌سازی
 )
@@ -56,6 +58,7 @@ def _auxiliary_session_factory(url: str | None, *, role: str):
         return async_sessionmaker(
             engine,
             class_=AsyncSession,
+            sync_session_class=DurabilityCoordinatedSession,
             expire_on_commit=False,
             autoflush=False,
             info={"three_site_db_role": role},
@@ -71,6 +74,7 @@ def _auxiliary_session_factory(url: str | None, *, role: str):
     return async_sessionmaker(
         auxiliary_engine,
         class_=AsyncSession,
+        sync_session_class=DurabilityCoordinatedSession,
         expire_on_commit=False,
         autoflush=False,
         info={"three_site_db_role": role},
@@ -89,9 +93,11 @@ DrControlSessionLocal = _auxiliary_session_factory(
 # importing main.py for enforcement.
 from core.writer_fencing import register_writer_fence_listener  # noqa: E402
 from core.dr_event_outbox import register_dr_event_outbox_listener  # noqa: E402
+from core.dr_durability_two_phase import register_same_region_two_phase_listener  # noqa: E402
 
 register_writer_fence_listener()
 register_dr_event_outbox_listener()
+register_same_region_two_phase_listener()
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

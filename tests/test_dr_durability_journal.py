@@ -10,7 +10,10 @@ from core.dr_durability_journal import (
     build_prepare,
     decrypt_prepare,
     parse_prepare,
+    parse_recovery_lookup,
+    recovery_lookup_payload,
     verify_acknowledgement,
+    verify_recovery_acknowledgement,
 )
 from core.dr_event_protocol import (
     destination_transaction_hash,
@@ -88,6 +91,7 @@ class DurabilityJournalTests(unittest.TestCase):
             writer_epoch=7,
             transaction_id=_TRANSACTION_ID,
             transaction_hash=events[0]["transaction_hash"],
+            local_transaction_gid="_sa_1234567890abcdef1234567890abcdef",
             release_sha="e00283c037ec5ca63340b9827768256b1c5ef144",
             encryption_key_id="staging-fi-journal-v1",
             encryption_secret=_SECRET,
@@ -120,6 +124,12 @@ class DurabilityJournalTests(unittest.TestCase):
         with self.assertRaisesRegex(DurabilityJournalError, "cannot be authenticated"):
             decrypt_prepare(parsed, encryption_secret=_SECRET)
 
+        tampered_gid = prepare.as_payload()
+        tampered_gid["local_transaction_gid"] = "_sa_ffffffffffffffffffffffffffffffff"
+        parsed = parse_prepare(tampered_gid)
+        with self.assertRaisesRegex(DurabilityJournalError, "cannot be authenticated"):
+            decrypt_prepare(parsed, encryption_secret=_SECRET)
+
     def test_rejects_non_fi_or_incomplete_transaction(self):
         events = _transaction()
         with self.assertRaisesRegex(DurabilityJournalError, "WebApp-FI"):
@@ -129,6 +139,7 @@ class DurabilityJournalTests(unittest.TestCase):
                 writer_epoch=7,
                 transaction_id=_TRANSACTION_ID,
                 transaction_hash=events[0]["transaction_hash"],
+                local_transaction_gid="_sa_1234567890abcdef1234567890abcdef",
                 release_sha="e00283c037ec5ca63340b9827768256b1c5ef144",
                 encryption_key_id="staging-fi-journal-v1",
                 encryption_secret=_SECRET,
@@ -141,6 +152,7 @@ class DurabilityJournalTests(unittest.TestCase):
                 writer_epoch=7,
                 transaction_id=_TRANSACTION_ID,
                 transaction_hash=events[0]["transaction_hash"],
+                local_transaction_gid="_sa_1234567890abcdef1234567890abcdef",
                 release_sha="e00283c037ec5ca63340b9827768256b1c5ef144",
                 encryption_key_id="staging-fi-journal-v1",
                 encryption_secret=_SECRET,
@@ -198,3 +210,42 @@ class DurabilityJournalTests(unittest.TestCase):
                 request_hash="d" * 64,
                 receiver_site="webapp_ir",
             )
+
+    def test_recovery_acknowledgement_binds_only_the_exact_local_gid(self):
+        prepare = self._prepare()
+        request_hash = "e" * 64
+        unsigned = acknowledgement_payload(
+            prepare=prepare,
+            state="committed",
+            request_hash=request_hash,
+            prepared_transaction_gid=prepare.local_transaction_gid,
+        )
+        acknowledgement = {
+            **unsigned,
+            "acknowledgement_mac": sign_acknowledgement(
+                payload=unsigned,
+                secret=_HMAC_SECRET,
+            ),
+        }
+        self.assertEqual(
+            verify_recovery_acknowledgement(
+                acknowledgement,
+                local_transaction_gid=prepare.local_transaction_gid,
+                request_hash=request_hash,
+                shared_secret=_HMAC_SECRET,
+            )["state"],
+            "committed",
+        )
+        with self.assertRaisesRegex(DurabilityJournalError, "GID"):
+            verify_recovery_acknowledgement(
+                acknowledgement,
+                local_transaction_gid="_sa_ffffffffffffffffffffffffffffffff",
+                request_hash=request_hash,
+                shared_secret=_HMAC_SECRET,
+            )
+        self.assertEqual(
+            parse_recovery_lookup(recovery_lookup_payload(
+                local_transaction_gid=prepare.local_transaction_gid
+            )),
+            prepare.local_transaction_gid,
+        )

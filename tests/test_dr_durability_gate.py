@@ -1,8 +1,10 @@
 import unittest
+from datetime import datetime, timezone
 
 from core.dr_durability_gate import (
     DURABILITY_GATE_READ_FUNCTION,
     DrDurabilityGateError,
+    decide_durability,
     enforce_session_durability,
 )
 
@@ -37,6 +39,19 @@ class _Session:
 
 
 class DurabilityGateTests(unittest.TestCase):
+    def test_healthy_row_cannot_bypass_an_unconfigured_two_phase_coordinator(self):
+        decision = decide_durability(
+            table_names={"offers"},
+            connectivity_mode="online",
+            event_journal_healthy=True,
+            blob_journal_healthy=True,
+            evidence_expires_at=None,
+            now=datetime.now(timezone.utc),
+            same_region_two_phase_enabled=False,
+        )
+        self.assertFalse(decision.allowed)
+        self.assertIn("same_region_two_phase_disabled", decision.reasons)
+
     def test_gate_reads_through_security_definer_without_table_lock_privilege(self):
         session = _Session(
             {

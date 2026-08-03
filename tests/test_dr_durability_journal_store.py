@@ -64,6 +64,7 @@ def _prepare():
         writer_epoch=7,
         transaction_id=_TRANSACTION_ID,
         transaction_hash=event["transaction_hash"],
+        local_transaction_gid="_sa_1234567890abcdef1234567890abcdef",
         release_sha="e00283c037ec5ca63340b9827768256b1c5ef144",
         encryption_key_id="staging-fi-journal-v1",
         encryption_secret="journal-encryption-secret-is-at-least-32-bytes",
@@ -114,13 +115,23 @@ class DurabilityJournalStoreTests(unittest.IsolatedAsyncioTestCase):
         session = _MemorySession()
         record = _prepare()
         await prepare_record(session, prepare=record, request_hash="a" * 64)
-        gid = "drj:v1:12345678-1234-4234-8234-123456789abc"
+        gid = "_sa_1234567890abcdef1234567890abcdef"
         committed = await commit_record(session, resolution=self._resolution(gid=gid))
         self.assertEqual((committed.state, committed.prepared_transaction_gid), ("committed", gid))
         repeated = await commit_record(session, resolution=self._resolution(gid=gid))
         self.assertIs(repeated, committed)
         with self.assertRaisesRegex(DurabilityJournalError, "committed"):
             await rollback_record(session, resolution=self._resolution(gid=None))
+
+    async def test_commit_gid_must_match_the_prepare_binding(self):
+        session = _MemorySession()
+        record = _prepare()
+        await prepare_record(session, prepare=record, request_hash="a" * 64)
+        with self.assertRaisesRegex(DurabilityJournalError, "does not match"):
+            await commit_record(
+                session,
+                resolution=self._resolution(gid="_sa_ffffffffffffffffffffffffffffffff"),
+            )
 
     async def test_rollback_only_resolves_unprepared_record(self):
         session = _MemorySession()
