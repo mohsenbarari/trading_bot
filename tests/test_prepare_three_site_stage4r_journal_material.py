@@ -7,6 +7,7 @@ from scripts.prepare_three_site_stage4r_journal_material import (
     JOURNAL_KEY_ID,
     JournalMaterialError,
     build_environment,
+    rebind_existing_environment,
 )
 
 
@@ -64,4 +65,46 @@ class Stage4RJournalMaterialTests(unittest.TestCase):
                 SOURCE,
                 release_sha=RELEASE,
                 staging_source_root=SOURCE_ROOT.replace(RELEASE, "b" * 40),
+            )
+
+    def test_rebinds_complete_existing_material_without_rotating_it(self):
+        values = iter(("database-secret-" + "a" * 48, "pairwise-secret-" + "b" * 48, "encryption-secret-" + "c" * 48))
+        existing, old_metadata = build_environment(
+            SOURCE,
+            release_sha=RELEASE,
+            staging_source_root=SOURCE_ROOT,
+            token_factory=lambda _length: next(values),
+        )
+        successor = "c" * 40
+        successor_root = "/srv/trading-bot-three-site-staging-data/releases/" + successor + "/source"
+        rebound, metadata = rebind_existing_environment(
+            existing.decode(),
+            release_sha=successor,
+            staging_source_root=successor_root,
+        )
+        rebound_text = rebound.decode()
+        self.assertIn(f"STAGING_RELEASE_SHA={successor}\n", rebound_text)
+        self.assertIn(f"STAGING_SOURCE_ROOT={successor_root}\n", rebound_text)
+        self.assertEqual(metadata["pairwise_secret_sha256"], old_metadata["pairwise_secret_sha256"])
+        self.assertEqual(metadata["encryption_secret_sha256"], old_metadata["encryption_secret_sha256"])
+        self.assertEqual(metadata["database_password_sha256"], old_metadata["database_password_sha256"])
+        self.assertEqual(metadata["journal_material_reused"], "true")
+
+    def test_rebind_rejects_changed_pairwise_material(self):
+        values = iter(("database-secret-" + "a" * 48, "pairwise-secret-" + "b" * 48, "encryption-secret-" + "c" * 48))
+        existing, _metadata = build_environment(
+            SOURCE,
+            release_sha=RELEASE,
+            staging_source_root=SOURCE_ROOT,
+            token_factory=lambda _length: next(values),
+        )
+        malformed = existing.decode().replace(
+            "WEBAPP_FI_SAME_REGION_JOURNAL_KEYS_JSON=",
+            "WEBAPP_FI_SAME_REGION_JOURNAL_KEYS_JSON=changed-",
+        )
+        with self.assertRaisesRegex(JournalMaterialError, "pairwise journal keys differ"):
+            rebind_existing_environment(
+                malformed,
+                release_sha="c" * 40,
+                staging_source_root="/srv/trading-bot-three-site-staging-data/releases/" + "c" * 40 + "/source",
             )
