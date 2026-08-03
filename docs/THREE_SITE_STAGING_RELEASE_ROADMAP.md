@@ -1485,6 +1485,13 @@ route عمومی، production و lifecycle زیرساخت در rollback 4R تغ�
   flagهای controller health true نشده‌اند، marker 2PC/restore drill و outage
   freeze واقعی اجرا نشده و قرارداد blob read-back نیز evidence ندارد. پس
   mutation حیاتی، Tier-1، G4R و G4 همگی fail-closed باقی می‌مانند.
+- Read-only post-deploy state: `webapp_fi` در epoch=1 و `active` است، اما
+  readiness evidence آن منقضی شده است؛ `dr_durability_state` نیز
+  `connectivity_mode=ambiguous`, `event_journal_healthy=false` و
+  `blob_journal_healthy=false` گزارش می‌کند. `webapp_ir` در همان epoch با
+  `control_state=fenced` و evidence منقضی باقی مانده است. این وضعیت با lease
+  یا token جدید، update مستقیم control table، یا bypass آزمایشی تغییر داده
+  نشد؛ هر drill بعدی باید ابتدا evidence واقعی controller را تولید کند.
 - Production touched: `no`. هیچ route/DNS/CDN production، VPS/volume lifecycle
   یا secret rotation انجام نشد. Decision: `continue Stage 4R from the real
   2PC journal marker and restore/outage drills`.
