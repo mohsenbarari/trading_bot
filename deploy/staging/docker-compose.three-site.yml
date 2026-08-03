@@ -610,6 +610,9 @@ services:
       DR_BLOB_S3_CREDENTIALS_FILE: /run/secrets/dr-blob-s3.json
       DR_BLOB_ENCRYPTION_KEYRING_FILE: /run/secrets/dr-blob-keyring.json
     volumes:
+      # Defining this list replaces x-app.volumes, so retain the private TLS
+      # trust anchor alongside the two Object Storage-only worker secrets.
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
       - ${STAGING_DR_BLOB_CREDENTIALS_FILE:?required}:/run/secrets/dr-blob-s3.json:ro
       - ${STAGING_DR_BLOB_ENCRYPTION_KEYRING_FILE:?required}:/run/secrets/dr-blob-keyring.json:ro
     depends_on: {webapp_fi_dr_receiver: {condition: service_healthy}}
@@ -867,6 +870,9 @@ services:
       DR_BLOB_S3_CREDENTIALS_FILE: /run/secrets/dr-blob-s3.json
       DR_BLOB_ENCRYPTION_KEYRING_FILE: /run/secrets/dr-blob-keyring.json
     volumes:
+      # Defining this list replaces x-app.volumes, so retain the private TLS
+      # trust anchor alongside the two Object Storage-only worker secrets.
+      - ${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro
       - ${STAGING_DR_BLOB_CREDENTIALS_FILE:?required}:/run/secrets/dr-blob-s3.json:ro
       - ${STAGING_DR_BLOB_ENCRYPTION_KEYRING_FILE:?required}:/run/secrets/dr-blob-keyring.json:ro
     depends_on: {webapp_ir_dr_receiver: {condition: service_healthy}}

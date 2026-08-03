@@ -190,6 +190,12 @@ class ThreeSiteStagingRoleComposeTests(unittest.TestCase):
             )
             self.assertIn("DR_BLOB_S3_CREDENTIALS_FILE", environment)
             self.assertIn("DR_BLOB_ENCRYPTION_KEYRING_FILE", environment)
+        for service in (fi_delivery, ir_delivery):
+            with self.subTest(service=service):
+                self.assertIn(
+                    "${STAGING_DR_CA_CERT:?required}:/run/staging-dr-ca/ca.crt:ro",
+                    service["volumes"],
+                )
         self.assertIn("webapp_fi_egress", fi_delivery["networks"])
         self.assertEqual(ir_delivery["networks"], ["webapp_ir", "webapp_ir_egress"])
         self.assertNotIn("webapp_ir_dr_egress", self.payload["networks"])
