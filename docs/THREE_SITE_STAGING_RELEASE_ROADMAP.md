@@ -1,6 +1,6 @@
 # نقشه راه اجرایی انتشار معماری سه‌سایته روی Staging
 
-وضعیت سند: `Stage 2 / پذیرفته‌شده؛ Stage 3 / در حال اجرا`
+وضعیت سند: `Stage 0 تا 3 / پذیرفته‌شده؛ Stage 4 / در حال اجرا`
 
 دامنه: انتشار و ارزیابی معماری `Bot-FI + WebApp-FI + WebApp-IR + Witness`
 روی منابع کاملاً مجزای staging. این سند مجوز انتشار production یا تغییر دامنه
@@ -1175,13 +1175,57 @@ Confirmationهای هم‌معنی ادغام می‌شوند، ولی fencing �
   lifecycle تغییر نکرد؛ mutationهای این checkpoint فقط certificate hook و
   security group/Nginx روی هدف آزمایشی WebApp-FI هستند.
 
+#### checkpoint اجرای Stage 4 — switch عمومی و مانع واقعی Tier-1 — 2026-08-03
+
+- مالک فقط تغییر origin رکورد دقیق `staging.gold-trade.ir` از
+  `65.109.220.59` به `194.5.206.69` را مجاز کرد. ابزار fail-closed ابتدا state
+  پیشین را با expected origin تطبیق داد و سپس همان رکورد immutable با ID
+  `d763b36e-ad18-44fe-84a0-9a374b9c81f4` را تغییر داد؛ proxy،
+  `upstream_https=https` و TTL `120` ثابت ماندند. audit owner-only در
+  `.../stage4/public-ingress-v1/arvan-origin-switch-audit.jsonl` با SHA-256
+  `e4c6736522af924c15b37e0dcf4d0947b5141ea81b8d40767a8483bab1d71848`
+  ثبت شده است. edge عمومی پس از switch با credential staging،
+  `/health/ready=200` و `physical_site=webapp_fi` را داد؛ `/` بدون credential
+  `401` و `/metrics` `404` ماندند.
+- runner واقعی Tier-1 نقش‌های معامله با release مستقر، containerهای exact
+  campaign و cleanup mapper-based زیر Writer fence اجرا شد. پیش‌پاکسازی هر ۱۳
+  prefix و commodity test fixture، planned/deleted=0 بود. در اولین fixture
+  business، خطای واقعی PostgreSQL ظاهر شد و run متوقف شد؛ بنابراین هیچ پذیرش
+  fixture یا نتیجهٔ Tier-1 موفق ادعا نمی‌شود. evidence immutable این تلاش در
+  `.../stage4/tier1-role-trading-e2e-v5/` است؛ `playwright.log` و
+  `report.json` به‌ترتیب SHA-256
+  `da922faa0b39c38531afb7523f684d8f500cc9b28dcc2516c1505af6771763dc` و
+  `aa2a690a6eccf873b1b8045b8ea16116eca3e666f3971033bd378678bead8042` دارند.
+- علت، ضعف fixture یا bypass fencing نیست: نقش برنامه `webapp_fi_app` روی
+  `dr_durability_state` عمداً فقط `SELECT` دارد؛ SELECT ساده کار می‌کند، اما
+  PostgreSQL برای `FOR SHARE` به privilege قفل‌کنندهٔ گسترده‌تری نیاز دارد و
+  گیت دوام قبل از هر mutation با `permission denied for table
+  dr_durability_state` fail می‌شود. دادن `UPDATE` به نقش برنامه مرز control
+  plane را می‌شکند و رد شد.
+- remediation source در commit `e00283c0` آماده و ۳۸ test مرتبط سبز است:
+  گیت برنامه فقط تابع parameterless و `SECURITY DEFINER`
+  `public.trading_bot_read_durability_state_for_write_gate()` را فراخوانی
+  می‌کند؛ تابع با owner دیتابیس همان row را `FOR SHARE` می‌خواند،
+  `search_path` ثابت دارد، `PUBLIC` و تمام runtime roleها از execute revoke
+  می‌شوند و فقط role برنامه `EXECUTE` می‌گیرد. ACL جدول برای برنامه همچنان
+  `SELECT` است. این commit هنوز deploy نشده و هیچ DB grant، container، route یا
+  سرویس staging به‌خاطر remediation تغییر نکرده است.
+- اقدام بعدی فقط با مجوز جدید مالک انجام می‌شود، زیرا release پذیرفته‌شده را
+  تغییر می‌دهد: activation idempotent تابع روی هر دو DB staging WebApp-FI و
+  WebApp-IR، build/deploy release جدید روی چهار role staging، re-attestation و
+  اجرای دوبارهٔ Tier-1 از cleanup fence‌شده. هیچ تغییر Arvan/DNS، production یا
+  lifecycle VPS در این remediation وجود ندارد.
+- Production touched: `no`.
+
 ### Exit gate — G4 Staging Published
 
 - هر چهار role exact release SHA را گزارش می‌کنند؛
 - FI lease معتبر دارد و تنها Writer است؛
 - IR Writer نیست و داده standby آن با snapshot/event boundary منطبق است؛
 - مسیر عمومی staging healthy و production route بدون تغییر است؛
-- smokeهای Tier-1 قبول و error/backlog بحرانی صفر است؛
+- smokeهای Tier-1 روی release فعال قبول و error/backlog بحرانی صفر است؛
+- گیت دوام مسیر business mutation بدون اعطای DML روی control table به role
+  برنامه اجرا می‌شود؛
 - rollback به source staging قدیمی dry-run و قابل اجراست.
 
 پایان این stage برابر **M1 — Staging Published** است.
@@ -1194,23 +1238,23 @@ restart فقط سرویس‌هایی که در freeze evidence فعال بوده
 
 ### گزارش پایان Stage 4
 
-- Status: `IN_PROGRESS — TARGET PUBLICLY PROVEN; ROUTING HELD PENDING EXPLICIT CDN SWITCH AUTHORIZATION`
+- Status: `IN_PROGRESS — PUBLIC ROUTE SWITCHED; TIER-1 BLOCKED BY A REAL DURABILITY-GATE ROLE-BOUNDARY DEFECT`
 - Branch: `stage/three-site-staging-04-deploy`
 - Base / implementation / deployed SHA:
-  `0e63a7ec1b08bef29ea199041215298a021b56ef / through fe20ab9e / exact release unchanged`
+  `0e63a7ec1b08bef29ea199041215298a021b56ef / through e00283c0 / deployed release remains 0e63a7ec1b08bef29ea199041215298a021b56ef`
 - Role health and writer term:
   `four fresh observations, role-acceptance, global-commit and finish passed; WebApp-FI remains the accepted epoch-1 Writer and WebApp-IR remains fenced standby.`
 - Smoke and parity results:
-  `convergence and private readiness passed; the new direct public origin is TLS-valid and returns authenticated /health/ready=200, unauthenticated /=401 and /metrics=404. Tier-1 public smoke waits only for the explicitly authorized CDN switch.`
+  `convergence and private readiness passed; public staging.gold-trade.ir now returns authenticated /health/ready=200, unauthenticated /=401 and /metrics=404. The first Tier-1 business fixture exposed the durability-gate database-privilege defect before acceptance; its run stopped and is not counted as a pass.`
 - Evidence paths and SHA-256:
-  `owner-only .../stage4/controller-role-acceptance-v1/evidence/global-commit-global-commit.json = ae12bd249f301a6c2dc01cc222065c5a8d7f16c65debb5a0d786ced481a1eaf1; .../stage4/convergence-role-acceptance-v3/summary.json = 5367e4de832f0d352d7552bd9d2136e92be8c80a428ef53646b76b3b9ab2d935; .../stage4/routing-observation-v4.json = d1d71ed987621616b986f61f7d19f43fa78a27f19ab0c318c25d969a544c2429.`
+  `owner-only .../stage4/controller-role-acceptance-v1/evidence/global-commit-global-commit.json = ae12bd249f301a6c2dc01cc222065c5a8d7f16c65debb5a0d786ced481a1eaf1; .../stage4/convergence-role-acceptance-v3/summary.json = 5367e4de832f0d352d7552bd9d2136e92be8c80a428ef53646b76b3b9ab2d935; .../stage4/public-ingress-v1/arvan-origin-switch-audit.jsonl = e4c6736522af924c15b37e0dcf4d0947b5141ea81b8d40767a8483bab1d71848; .../stage4/tier1-role-trading-e2e-v5/report.json = aa2a690a6eccf873b1b8045b8ea16116eca3e666f3971033bd378678bead8042.`
 - Production touched: `no`
 - Deviations / open risks:
-  `the owner confirmed staging.gold-trade.ir as the authorized staging route, so the deployed public URL bundle is correct. WebApp-FI ingress/TLS is now proven; only the separately authorized CDN origin switch and post-switch Tier-1 smoke remain. Certificate renewal is due by 2026-10-01 and is an operational handoff item.`
+  `the owner confirmed staging.gold-trade.ir as the authorized staging route and the exact CDN origin switch is complete. WebApp-FI ingress/TLS is proven. A real PostgreSQL row-lock privilege mismatch blocks public business mutation; e00283c0 corrects it without broadening application-table DML, but deploy/re-attestation requires fresh authorization because it changes the exact accepted release. Certificate renewal is due by 2026-10-01 and is an operational handoff item.`
 - Rollback verified:
-  `yes for the completed private topology; route remains at prior origin, target data is retained, and the stopped stale staging poller remains recoverable by start-only rollback.`
+  `yes for the completed private topology; route rollback is exactly staging.gold-trade.ir back to 65.109.220.59, target data is retained, and the stopped stale staging poller remains recoverable by start-only rollback.`
 - Decision / next stage:
-  `G4 not yet accepted / no; obtain explicit authorization only for staging.gold-trade.ir: 65.109.220.59 -> 194.5.206.69, then run public Tier-1 smoke. No other record is in scope.`
+  `G4 not yet accepted / no; request authorization limited to applying the closed durability-gate function on the two staging WebApp DBs, deploying/re-attesting a new immutable staging release from e00283c0 across the four staging roles, then rerunning fenced Tier-1. No Arvan/DNS, production, VPS or lifecycle action is in scope.`
 
 ---
 
