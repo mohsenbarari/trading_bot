@@ -17,6 +17,7 @@ class DarkStandbyRuntimeTests(unittest.TestCase):
             "redis_restore",
             "nginx",
             "background_worker",
+            "durability_health_controller",
         ):
             with self.subTest(service=service):
                 with self.assertRaisesRegex(DarkStandbyRuntimeError, "DB-only"):

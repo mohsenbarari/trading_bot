@@ -27,6 +27,7 @@ FORBIDDEN_DARK_SERVICES = frozenset(
         "dr_effect_worker",
         "dr_projection_worker",
         "recovery_manifest",
+        "durability_health_controller",
     }
 )
 TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
