@@ -1,4 +1,7 @@
 import unittest
+from pathlib import Path
+import subprocess
+import sys
 from unittest.mock import patch
 
 from scripts.ensure_three_site_stage4_public_ingress import (
@@ -65,6 +68,17 @@ class Stage4PublicIngressTests(unittest.TestCase):
             with self.assertRaisesRegex(Stage4PublicIngressError, "confirmation mismatch"):
                 execute("token", apply=True, confirm="wrong")
         request.assert_not_called()
+
+    def test_direct_script_execution_reaches_argument_parser(self):
+        script = Path(__file__).resolve().parents[1] / "scripts" / "ensure_three_site_stage4_public_ingress.py"
+        result = subprocess.run(
+            [sys.executable, str(script), "--help"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("Open only WebApp-FI", result.stdout)
 
 
 if __name__ == "__main__":
