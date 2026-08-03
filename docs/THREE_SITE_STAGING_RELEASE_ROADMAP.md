@@ -1674,19 +1674,22 @@ route عمومی، production و lifecycle زیرساخت در rollback 4R تغ�
   خروجی WebApp-FI دقیقاً `194.5.206.69` است. Arvan API read-only نشان داد
   security group مقصد ruleهای TCP/8443 برای هر دو `194.5.206.69/32` و
   `130.185.121.98/32` دارد و security group مبدأ egress TCP باز دارد. پس
-  نقص خارج از application/host firewall و در provider/network path است؛ rule
-  حدسی، DNS/CDN یا production تغییر داده نشد.
+  نقص خارج از application/host firewall و در provider/network path است. مهم‌تر
+  از آن، این direct event path با policy صریح انتقال payload/data بین FI و IR
+  فقط از Object Storage سازگار نیست؛ rule حدسی، DNS/CDN یا production تغییر
+  داده نشد و این مسیر هدف remediation شبکه قرار نمی‌گیرد.
 - Still closed: `STAGING_WEBAPP_FI_JOURNAL_TWO_PHASE_ENABLED=false`،
   `event_journal_healthy=false` و `blob_journal_healthy=false` باقی می‌مانند؛
   controller one-shot، marker 2PC جدید، Blob receipt جدید و connectivity
   observation fresh اجرا نشده‌اند. timeout مسیر الزامی WebApp-FI→WebApp-IR
   نیز مانع انجام آن evidenceها است. Tier-1، G4R و G4 همچنان fail-closed هستند.
 - Production touched: `no`; DNS/CDN mutation: `no`; server/volume lifecycle:
-  `no`; SSH/SCP/rsync payload transfer: `no`. Decision: `BLOCKED pending
-  provider-level restoration of the already-authorized narrow TCP/8443 path
-  from WebApp-FI to WebApp-IR`; پس از آن connectivity evidence، synthetic
-  2PC/blob receipts و one-shot durability controller در همین branch ادامه
-  می‌یابد.
+  `no`; SSH/SCP/rsync payload transfer: `no`. Decision: `BLOCKED pending a
+  committed Object-Storage-only FI↔IR event-plane remediation`; provider-level
+  restoration of direct TCP/8443 is neither required nor authorized as a
+  substitute. پس از implementation/test/deploy آن remediation، connectivity
+  evidence، synthetic 2PC/blob receipts و one-shot durability controller در
+  همین branch ادامه می‌یابد.
 
 ### Exit gate — G4 Staging Published
 
