@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 import unittest
 
 from scripts.run_stage4r_object_storage_probe import (
@@ -12,6 +13,11 @@ from scripts.run_stage4r_object_storage_probe import (
 
 
 class Stage4rObjectStorageProbeTests(unittest.TestCase):
+    def test_probe_bootstraps_repository_root_for_direct_file_execution(self):
+        source = Path("scripts/run_stage4r_object_storage_probe.py").read_text(encoding="utf-8")
+        self.assertIn("REPO_ROOT = Path(__file__).resolve().parents[1]", source)
+        self.assertIn("sys.path.insert(0, str(REPO_ROOT))", source)
+
     def test_probe_blob_bytes_are_canonical_non_business_marker(self):
         payload = _probe_blob_bytes(run_id="11111111-1111-4111-8111-111111111111", release_sha="a" * 40)
         self.assertEqual(

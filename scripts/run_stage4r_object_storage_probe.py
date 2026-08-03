@@ -21,10 +21,21 @@ import asyncio
 from datetime import datetime, timezone
 import hashlib
 import json
+from pathlib import Path
+import sys
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func, select
+
+
+# ``docker compose run --entrypoint python`` executes this file from
+# ``/app/scripts``.  Keep the one-shot self-contained instead of relying on a
+# caller-provided PYTHONPATH; the worker image itself remains the only source
+# of protocol code and credentials.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from core.config import settings
 from core.db import DrProjectionSessionLocal
