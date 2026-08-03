@@ -374,7 +374,10 @@ def _put_descriptor(config: dict[str, Any], *, client, bucket: str, key: str) ->
             "method": "POST",
             "headers": {},
             "form_fields": post["fields"],
-            "expected_status": [200, 201],
+            # S3-compatible presigned POST returns 204 by default when no
+            # success_action_status field is requested.  Keep all three
+            # protocol success codes explicit and reject every other status.
+            "expected_status": [200, 201, 204],
         },
     }
     return base64.urlsafe_b64encode(
@@ -410,7 +413,7 @@ def _iran_snapshot(config: dict[str, Any], *, client, bucket: str, key: str) -> 
         or SHA256.fullmatch(str(receipt.get("snapshot_sha256") or "")) is None
         or type(receipt.get("snapshot_bytes")) is not int
         or not 1 <= int(receipt["snapshot_bytes"]) <= MAX_REMOTE_SNAPSHOT_BYTES
-        or int(receipt.get("upload_http_status") or 0) not in {200, 201}
+        or int(receipt.get("upload_http_status") or 0) not in {200, 201, 204}
     ):
         raise ConvergenceObserverError("WebApp-IR Object Storage export receipt is invalid")
     try:

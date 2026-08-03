@@ -220,7 +220,7 @@ class ThreeSiteConvergenceEvidenceTests(unittest.TestCase):
         self.assertEqual(client.ttl, 300)
         self.assertEqual(upload["method"], "POST")
         self.assertEqual(upload["headers"], {})
-        self.assertEqual(upload["expected_status"], [200, 201])
+        self.assertEqual(upload["expected_status"], [200, 201, 204])
         self.assertEqual(upload["form_fields"]["key"], "x/y.json")
         with self.assertRaises(ConvergenceExportError):
             _descriptor(
