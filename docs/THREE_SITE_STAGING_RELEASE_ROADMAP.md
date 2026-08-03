@@ -1864,6 +1864,38 @@ route عمومی، production و lifecycle زیرساخت در rollback 4R تغ�
 - Production touched: `no`; Decision: `close remediation 4R-OS and continue
   Stage 4R from the valid staging Bot token and remaining durability evidence`.
 
+#### checkpoint staging Bot token transfer — 2026-08-03
+
+- Status: `COMPLETE — OWNER-AUTHORIZED STAGING BOT TOKEN TRANSFERRED AND
+  BOT-FI STABLE`. این checkpoint فقط blocker عملیاتی Bot-FI را می‌بندد؛ Stage
+  4R، G4R، G4 و Tier-1 هنوز به‌دلیل durability/2PC evidence پذیرفته نشده‌اند.
+- material قدیمیِ owner-only
+  `stage4/bot-token-amendment-v1/bot-fi.runtime.env` با `getMe` رسمی Telegram
+  تأیید شد. amendment فقط `BOT_TOKEN` را نسبت به role env پایه تغییر داد؛
+  `runtime_env_sha256=69451fd44760d34db3cfc4d02548daa051910d4ffd0f23bf73297e2babc9ca18`،
+  `token_sha256=d70357f9a1e4a42f902564812e622be00049428ade6bd53a03c32823ecc99438`
+  و Telegram identity fingerprint همان material قبلی است. مقدار secret در هیچ
+  log یا roadmap ثبت نشد.
+- role bundle جدید با CSE به همان bucket private/versioned رسید و مقصد exact
+  VersionId `lOd4ETlQE5Y4hiUKUz-l5RgeGz27c.U` را read-back/decrypt/hash کرد.
+  bundle قبلی روی Bot-FI حذف نشد و در مسیر superseded با نام
+  `stage4r-bot-fi-471ab9de-pre-token-amendment.tar` نگه‌داری شد تا rollback
+  recoverable باشد. انتقال payload با SSH/SCP انجام نشد.
+- روی Bot-FI فقط `bot-fi.env` از archive جدید نصب و فقط `bot_fi_bot` با همان
+  Compose namespace و image دقیق `471ab9de…` force-recreate شد. مشاهدهٔ نهایی:
+  `running=true`، `RestartCount=0`، env fingerprint برابر material آماده‌شده و
+  در دو دقیقهٔ پس از start هیچ `TokenValidationError`، `TelegramConflictError`
+  یا traceback دیده نشد. receiver، journal و workerهای دیگر restart نشدند.
+- نتیجه: restart loop ناشی از token نامعتبر بسته شد؛ این مورد دیگر blocker
+  staging health نیست. Production، DNS/CDN، VPS/volume lifecycle و scriptهای
+  production deployment همچنان untouched هستند.
+- Remaining real work، نه gate افزوده: marker واقعی 2PC و recovery/outage drill،
+  connectivity observation تازه و controller bounded durability-health برای
+  event/blob evidence. `STAGING_WEBAPP_FI_JOURNAL_TWO_PHASE_ENABLED=false` و
+  G4R/G4/Tier-1 تا تکمیل همین evidenceها fail-closed می‌مانند.
+- Production touched: `no`; Decision: `continue Stage 4R with durability
+  evidence and do not reopen Tier-1 yet`.
+
 ### Exit gate — G4 Staging Published
 
 - هر چهار role exact release SHA را گزارش می‌کنند؛
