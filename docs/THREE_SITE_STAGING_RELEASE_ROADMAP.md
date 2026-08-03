@@ -1691,6 +1691,46 @@ route عمومی، production و lifecycle زیرساخت در rollback 4R تغ�
   evidence، synthetic 2PC/blob receipts و one-shot durability controller در
   همین branch ادامه می‌یابد.
 
+#### remediation design 4R-OS — event plane بین FI و IR فقط Object Storage
+
+- Status: `PLANNED — NO SOURCE OR RUNTIME CHANGE YET`. این remediation بخشی از
+  همان Stage 4R و همان branch است؛ branch، VPS، DNS/CDN، security-group و
+  production جدیدی ایجاد نمی‌کند.
+- Scope دقیق: فقط hopهای `webapp_fi → webapp_ir` در `dr_delivery_worker` و
+  `dr_blob_worker`، شامل event/blob envelope و acknowledgement آن. ارتباط
+  Bot-FI↔WebApp-FI، WebApp-FI↔Witness و تمام control/lease RPCهای داخلی FI
+  خارج از تغییر هستند. direct `webapp-ir-dr.staging.internal:8443` برای
+  payload/receipt از configuration فعال FI حذف می‌شود؛ port شبکه جایگزین یا
+  bypass ایجاد نمی‌گردد.
+- publish: source یک envelope immutable و HMAC-verified موجود را با encryption
+  application-level keyring و hash/size bound در prefix مختص destination
+  می‌نویسد. object private/versioned است و source فقط پس از read-back exact
+  `VersionId` آن را قابل delivery می‌داند. object name از event id و hash
+  مشتق می‌شود و هیچ secret یا business payload در log/SSH receipt نمی‌آید.
+- consume: worker جداگانهٔ WebApp-IR فقط Object Storage را poll می‌کند، object
+  exact version را decrypt/hash/verify می‌کند و receiver محلی را invoke می‌کند؛
+  سپس acknowledgement HMAC-bound با source object VersionId را در prefix
+  receipt می‌نویسد. هیچ HTTP بین FI و IR برقرار نمی‌شود.
+- acknowledge: WebApp-FI فقط receipt versioned و verified را poll می‌کند؛
+  `dr_event_deliveries`/`DrBlobDelivery` فقط پس از تطبیق event id، envelope
+  hash، source VersionId و acknowledgement hash به `acknowledged` می‌رود.
+  timeout/error همچنان pending/retry است و هیچ write critical را healthy
+  نمی‌کند.
+- secret boundary: source publish credential و target consume/receipt credential
+  به roleهای محدود worker mount می‌شود؛ API، writer-control، observer و
+  durability controller credential Object Storage نمی‌گیرند. grantهای database
+  و `verify_three_site_staging_secret_boundaries.py` همزمان به‌روز و test
+  می‌شوند. SSH فقط command کوتاه یا redacted receipt خواهد بود.
+- verification کوتاه و کافی: unit testهای publish/read-back/version mismatch،
+  decrypt/HMAC failure، duplicate/out-of-order receipt و direct FI→IR URL
+  forbidden؛ سپس یک synthetic non-business event و Blob روی staging با exact
+  source/receipt VersionId. این evidence جایگزین direct-TLS probe می‌شود؛ از
+  Full Matrix یا تغییر route جدید برای این remediation استفاده نمی‌شود.
+- Completion criterion: peer URL FI→IR در runtime فعال نباشد، payload/receipt
+  تنها CSE/private/versioned Object Storage باشند، retry idempotent بماند و
+  synthetic evidence hash-bound قبول شود. فقط پس از آن connectivity fresh و
+  2PC/blob evidence مرحلهٔ 4R ادامه می‌یابد.
+
 ### Exit gate — G4 Staging Published
 
 - هر چهار role exact release SHA را گزارش می‌کنند؛
