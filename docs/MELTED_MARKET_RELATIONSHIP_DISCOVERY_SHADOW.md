@@ -123,3 +123,25 @@ near-zero correlations that merely share a sign by chance.
 
 No automatic promotion, online self-training, or automatic coefficient update
 is allowed in this subsystem.
+
+## Non-linear bubble challenger
+
+`scripts/train_coin_bubble_relationship_challenger_shadow.py` is the next,
+still-disabled research layer.  It can evaluate an optional CatBoost model only
+after the intrinsic-label dataset has enough chronological evidence.  The
+candidate learns the bubble residual, never the full coin price.  Its numeric
+input is the aggregate feature graph only; it does not load raw messages or
+live application data.
+
+Before the optional dependency is even imported, it requires at least 250 fit
+rows, 60 validation rows, 60 untouched test rows, seven distinct Tehran-market
+fit days and at least one commodity/settlement/form cell with 30 fit rows.  A
+15-minute purge band separates each chronological 60/20/20 split.  It reports
+a fitted-market median-bubble baseline on the untouched test cohort.  Failure
+of any gate is a successful safe abstention, not a reason to lower the gate.
+
+CatBoost remains optional in `requirements-market-intelligence.txt`; it is not
+part of the application image and its execution requires the explicit
+`--execute-catboost` switch even after the data gates pass.  A completed
+experiment writes a report only.  It neither saves an active runtime model nor
+alters a source weight or range.

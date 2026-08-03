@@ -1,3 +1,4 @@
-# Optional dependency for the explicit Shadow Telegram collector only.
-# It is intentionally not part of the default application image yet.
+# Optional dependencies for explicit market-intelligence Shadow tools only.
+# They are intentionally not part of the default application image yet.
 Telethon>=1.42,<2
+catboost>=1.2,<2
