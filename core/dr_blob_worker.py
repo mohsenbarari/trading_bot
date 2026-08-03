@@ -11,13 +11,11 @@ import os
 import secrets
 import tempfile
 from typing import Any
-from urllib.parse import urlsplit
-
-import boto3
 import httpx
 from botocore.exceptions import ClientError
 from sqlalchemy import String, and_, cast, or_, select, update
 
+from api.routers.dr_sync import apply_blob_receipt
 from core.config import settings
 from core.dark_standby import assert_not_dark_standby
 from core.db import DrProjectionSessionLocal, verify_three_site_database_role_bindings
@@ -42,38 +40,48 @@ from core.dr_blob_crypto import (
     metadata_for_ciphertext,
 )
 from core.dr_delivery_worker import _key_for_destination, parse_peer_urls
+from core.dr_event_receiver import DrEventReceiveError
 from core.dr_event_protocol import canonical_json_bytes
+from core.dr_object_storage import (
+    ARVAN_ENDPOINT,
+    ARVAN_REGION,
+    DrObjectStorageError,
+    S3Config,
+    load_s3_config as _load_s3_config,
+    object_not_found,
+    object_storage_client,
+    validate_versioned_bucket,
+)
+from core.dr_object_transport import (
+    DrObjectTransportError,
+    DrObjectTransportMissing,
+    list_blob_receipt_record_keys,
+    load_blob_receipt_ack,
+    load_blob_receipt_record,
+    publish_blob_receipt_ack,
+    publish_blob_receipt_record,
+    uses_object_storage_blob_receipt_transport,
+)
 from core.dr_sync_auth import (
     PairwiseDrKey,
     acknowledgement_signature_is_valid,
     canonical_request_bytes,
     parse_pairwise_keys,
+    sign_acknowledgement,
     sign_request,
 )
 from core.runtime_identity import resolve_runtime_identity
-from core.secure_file_io import read_secure_text
 from core.writer_fencing import projection_fence_scope
 from models.chat_file import ChatFile
 from models.dr_event import DrBlobDelivery, DrBlobManifest, DrBlobReceipt, DrEvent
 
 
-ARVAN_ENDPOINT = "https://s3.ir-thr-at1.arvanstorage.ir"
-ARVAN_REGION = "ir-thr-at1"
 MAX_BLOB_BYTES = 50 * 1024 * 1024
 BLOB_RECEIPTS_PATH = "/api/dr-sync/blob-receipts"
 
 
 class DrBlobWorkerError(RuntimeError):
     pass
-
-
-@dataclass(frozen=True)
-class S3Config:
-    endpoint: str
-    region: str
-    bucket: str
-    access_key: str
-    secret_key: str
 
 
 @dataclass(frozen=True)
@@ -84,48 +92,23 @@ class ObjectStorageBlobResult:
 
 
 def load_s3_config() -> S3Config:
-    endpoint = str(settings.dr_blob_object_endpoint or "").rstrip("/")
-    region = str(settings.dr_blob_object_region or "")
-    bucket = str(settings.dr_blob_object_bucket or "")
-    path = settings.dr_blob_s3_credentials_file
-    if endpoint != ARVAN_ENDPOINT or region != ARVAN_REGION or not bucket or not path:
-        raise DrBlobWorkerError("DR blob Object Storage endpoint/region/bucket/credential file is incomplete")
-    parsed = urlsplit(endpoint)
-    if parsed.scheme != "https" or parsed.hostname != "s3.ir-thr-at1.arvanstorage.ir":
-        raise DrBlobWorkerError("DR blob endpoint is outside the reviewed Arvan HTTPS origin")
-    if settings.environment == "staging" and bucket == "production-sync-coin":
-        raise DrBlobWorkerError("staging DR blob worker refuses the production bucket")
     try:
-        credentials = json.loads(read_secure_text(path, label="DR blob S3 credentials", max_size=16 * 1024))
+        return _load_s3_config()
     except Exception as exc:
-        raise DrBlobWorkerError("DR blob S3 credential file is invalid") from exc
-    if not isinstance(credentials, dict) or set(credentials) != {"access_key", "secret_key"}:
-        raise DrBlobWorkerError("DR blob S3 credential fields are invalid")
-    access_key = str(credentials["access_key"])
-    secret_key = str(credentials["secret_key"])
-    if len(access_key) < 8 or len(secret_key) < 32:
-        raise DrBlobWorkerError("DR blob S3 credentials are malformed")
-    return S3Config(endpoint, region, bucket, access_key, secret_key)
+        raise DrBlobWorkerError(str(exc)) from exc
 
 
 def _client(config: S3Config):  # noqa: ANN001
-    return boto3.client(
-        "s3",
-        endpoint_url=config.endpoint,
-        region_name=config.region,
-        aws_access_key_id=config.access_key,
-        aws_secret_access_key=config.secret_key,
-    )
+    return object_storage_client(config)
 
 
 def validate_s3_controls(config: S3Config) -> None:
     """Fail startup unless the transport bucket has the required durability."""
 
-    client = _client(config)
-    if settings.dr_blob_require_versioning:
-        versioning = client.get_bucket_versioning(Bucket=config.bucket)
-        if versioning.get("Status") != "Enabled":
-            raise DrBlobWorkerError("DR blob bucket versioning is not enabled")
+    try:
+        validate_versioned_bucket(config)
+    except DrObjectStorageError as exc:
+        raise DrBlobWorkerError(str(exc)) from exc
 
 
 async def maintain_blob_retention() -> str:
@@ -139,9 +122,7 @@ async def maintain_blob_retention() -> str:
 
 
 def _not_found(exc: ClientError) -> bool:
-    return str((exc.response.get("Error") or {}).get("Code") or "") in {
-        "404", "NoSuchKey", "NotFound",
-    }
+    return object_not_found(exc)
 
 
 def _verify_object_body(
@@ -584,12 +565,83 @@ def _verify_blob_receipt_ack(
     return delivery_hash
 
 
+async def _persist_reported_blob_receipt(
+    *,
+    local_site: str,
+    destination: str,
+    snapshot: dict[str, Any],
+    acknowledgement_hash: str,
+) -> None:
+    with projection_fence_scope(source="dr_blob_receipt_reported"):
+        async with DrProjectionSessionLocal() as session:
+            receipt = await session.get(
+                DrBlobReceipt,
+                (str(snapshot["content_hash"]), local_site, destination),
+                with_for_update=True,
+            )
+            if receipt is None or receipt.receipt_hash != snapshot["receipt_hash"]:
+                raise DrBlobWorkerError("DR blob receipt changed before acknowledgement persistence")
+            receipt.source_acknowledgement_hash = acknowledgement_hash
+            receipt.reported_at = datetime.now(timezone.utc)
+            await session.commit()
+
+
+async def _report_one_blob_receipt_via_object_storage(
+    *,
+    local_site: str,
+    destination: str,
+    snapshot: dict[str, Any],
+    config: S3Config,
+    keyring: DrBlobKeyring,
+    keys: dict[str, PairwiseDrKey],
+) -> str:
+    key = _key_for_destination(keys, source_site=local_site, destination_site=destination)
+    body = canonical_json_bytes(snapshot)
+    try:
+        record, stored = await asyncio.to_thread(
+            publish_blob_receipt_record,
+            config,
+            body=body,
+            source_site=local_site,
+            destination_site=destination,
+            key=key,
+            keyring=keyring,
+        )
+        acknowledgement = await asyncio.to_thread(
+            load_blob_receipt_ack,
+            config,
+            record=record,
+            stored=stored,
+            key=key,
+            keyring=keyring,
+        )
+        acknowledgement_hash = _verify_blob_receipt_ack(
+            acknowledgement.acknowledgement,
+            destination_site=destination,
+            request_hash=record.request_hash,
+            content_hash=str(snapshot["content_hash"]),
+            receipt_hash=str(snapshot["receipt_hash"]),
+            key=key,
+        )
+    except (DrObjectTransportError, DrBlobWorkerError, ValueError):
+        return "retry"
+    await _persist_reported_blob_receipt(
+        local_site=local_site,
+        destination=destination,
+        snapshot=snapshot,
+        acknowledgement_hash=acknowledgement_hash,
+    )
+    return "acknowledged"
+
+
 async def report_one_blob_receipt(
     *,
     local_site: str,
     client: httpx.AsyncClient,
     peer_urls: dict[str, str],
     keys,  # noqa: ANN001
+    config: S3Config | None = None,
+    keyring: DrBlobKeyring | None = None,
 ) -> str:
     async with DrProjectionSessionLocal() as session:
         receipt = await session.scalar(
@@ -615,6 +667,19 @@ async def report_one_blob_receipt(
             "origin_site": receipt.origin_physical_site,
         }
     destination = str(snapshot.pop("origin_site"))
+    if uses_object_storage_blob_receipt_transport(
+        source_site=local_site, destination_site=destination
+    ):
+        if config is None or keyring is None:
+            return "retry"
+        return await _report_one_blob_receipt_via_object_storage(
+            local_site=local_site,
+            destination=destination,
+            snapshot=snapshot,
+            config=config,
+            keyring=keyring,
+            keys=keys,
+        )
     key = _key_for_destination(keys, source_site=local_site, destination_site=destination)
     body = canonical_json_bytes(snapshot)
     timestamp = int(datetime.now(timezone.utc).timestamp())
@@ -669,19 +734,92 @@ async def report_one_blob_receipt(
         )
     except (httpx.HTTPError, ValueError, DrBlobWorkerError):
         return "retry"
-    with projection_fence_scope(source="dr_blob_receipt_reported"):
-        async with DrProjectionSessionLocal() as session:
-            receipt = await session.get(
-                DrBlobReceipt,
-                (str(snapshot["content_hash"]), local_site, destination),
-                with_for_update=True,
-            )
-            if receipt is None or receipt.receipt_hash != snapshot["receipt_hash"]:
-                raise DrBlobWorkerError("DR blob receipt changed before acknowledgement persistence")
-            receipt.source_acknowledgement_hash = acknowledgement_hash
-            receipt.reported_at = datetime.now(timezone.utc)
-            await session.commit()
+    await _persist_reported_blob_receipt(
+        local_site=local_site,
+        destination=destination,
+        snapshot=snapshot,
+        acknowledgement_hash=acknowledgement_hash,
+    )
     return "acknowledged"
+
+
+async def consume_one_object_storage_blob_receipt(
+    *,
+    local_site: str,
+    config: S3Config,
+    keyring: DrBlobKeyring,
+    keys: dict[str, PairwiseDrKey],
+) -> str:
+    """Apply one peer blob-receipt request without cross-site HTTP."""
+
+    if local_site not in {"webapp_fi", "webapp_ir"}:
+        return "idle"
+    source_site = "webapp_ir" if local_site == "webapp_fi" else "webapp_fi"
+    if not uses_object_storage_blob_receipt_transport(
+        source_site=source_site, destination_site=local_site
+    ):
+        return "idle"
+    key = _key_for_destination(keys, source_site=source_site, destination_site=local_site)
+    try:
+        object_keys = await asyncio.to_thread(
+            list_blob_receipt_record_keys,
+            config,
+            source_site=source_site,
+            destination_site=local_site,
+            key=key,
+        )
+    except DrObjectTransportError:
+        return "retry"
+    for object_key in object_keys:
+        try:
+            record, stored = await asyncio.to_thread(
+                load_blob_receipt_record,
+                config,
+                object_key=object_key,
+                source_site=source_site,
+                destination_site=local_site,
+                key=key,
+                keyring=keyring,
+            )
+            try:
+                await asyncio.to_thread(
+                    load_blob_receipt_ack,
+                    config,
+                    record=record,
+                    stored=stored,
+                    key=key,
+                    keyring=keyring,
+                )
+                continue
+            except DrObjectTransportMissing:
+                pass
+            with projection_fence_scope(source="dr_object_storage_blob_receipt_receive"):
+                async with DrProjectionSessionLocal() as session:
+                    acknowledgement = await apply_blob_receipt(
+                        session,
+                        payload=record.body,
+                        local_site=local_site,
+                        source_site=source_site,
+                        key_id=key.key_id,
+                        request_hash=record.request_hash,
+                    )
+                    await session.commit()
+            acknowledgement["acknowledgement_mac"] = sign_acknowledgement(
+                payload=acknowledgement, secret=key.secret
+            )
+            await asyncio.to_thread(
+                publish_blob_receipt_ack,
+                config,
+                record=record,
+                stored=stored,
+                acknowledgement=acknowledgement,
+                key=key,
+                keyring=keyring,
+            )
+            return "acknowledged"
+        except (DrObjectTransportError, DrBlobWorkerError, DrEventReceiveError, ValueError):
+            return "retry"
+    return "idle"
 
 
 async def dr_blob_loop() -> None:
@@ -700,6 +838,12 @@ async def dr_blob_loop() -> None:
         follow_redirects=False,
     ) as client:
         while True:
+            received_receipt = await consume_one_object_storage_blob_receipt(
+                local_site=identity.physical_site,
+                config=config,
+                keyring=keyring,
+                keys=keys,
+            )
             uploaded = await upload_one_blob(config, keyring)
             downloaded = await download_one_blob(config, keyring)
             reported = await report_one_blob_receipt(
@@ -707,9 +851,11 @@ async def dr_blob_loop() -> None:
                 client=client,
                 peer_urls=peer_urls,
                 keys=keys,
+                config=config,
+                keyring=keyring,
             )
             retention = await maintain_blob_retention()
-            if uploaded == downloaded == reported == retention == "idle":
+            if received_receipt == uploaded == downloaded == reported == retention == "idle":
                 await asyncio.sleep(1.0)
 
 

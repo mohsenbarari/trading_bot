@@ -112,6 +112,9 @@ class ThreeSiteStagingCampaignBundleTests(unittest.TestCase):
         cls.values["DR_BLOB_OBJECT_PREFIX"] = (
             cls.inventory["object_storage"]["prefix"] + "blobs/sha256"
         )
+        cls.values["DR_OBJECT_TRANSPORT_PREFIX"] = (
+            cls.inventory["object_storage"]["prefix"] + "object-transport"
+        )
         bind_names = {
             "bot_fi": "BOT_FI_DR_BIND_ADDRESS",
             "webapp_fi": "WEBAPP_FI_DR_BIND_ADDRESS",
@@ -158,7 +161,7 @@ class ThreeSiteStagingCampaignBundleTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "verified")
         self.assertEqual(result["directional_pairwise_key_count"], 4)
-        self.assertEqual(result["database_credential_count"], 27)
+        self.assertEqual(result["database_credential_count"], 28)
         self.assertEqual(len(result["campaign_bundle_sha256"]), 64)
 
     def test_mismatched_endpoint_pairwise_secret_is_rejected(self):

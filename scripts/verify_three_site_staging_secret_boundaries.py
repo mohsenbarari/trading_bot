@@ -24,8 +24,14 @@ SECRET_REFERENCES = {
     "STAGING_HUMAN_APPROVAL_RELAY_SESSION_FILE": lambda service: service == "witness_api",
     "STAGING_HUMAN_APPROVAL_RELAY_POLICY_FILE": lambda service: service == "witness_api",
     "STAGING_HUMAN_APPROVAL_RELAY_ORCHESTRATOR_SECRET": lambda service: service == "witness_api",
-    "STAGING_DR_BLOB_CREDENTIALS_FILE": lambda service: service.endswith("_blobs"),
-    "STAGING_DR_BLOB_ENCRYPTION_KEYRING_FILE": lambda service: service.endswith("_blobs"),
+    "STAGING_DR_BLOB_CREDENTIALS_FILE": lambda service: service in {
+        "webapp_fi_dr_delivery", "webapp_ir_dr_delivery",
+        "webapp_fi_blobs", "webapp_ir_blobs",
+    },
+    "STAGING_DR_BLOB_ENCRYPTION_KEYRING_FILE": lambda service: service in {
+        "webapp_fi_dr_delivery", "webapp_ir_dr_delivery",
+        "webapp_fi_blobs", "webapp_ir_blobs",
+    },
     "WEBAPP_FI_WITNESS_SECRET": lambda service: service in {
         "webapp_fi_writer_control", "witness_api",
     },
@@ -141,7 +147,6 @@ OWNER_REFERENCE = re.compile(r"(?:BOT_FI|WEBAPP_FI|WEBAPP_IR)_POSTGRES_PASSWORD"
 MANAGED_NETWORK_MEMBERS = {
     "bot_fi_dr_egress": {"bot_fi_dr_delivery"},
     "webapp_fi_dr_egress": {"webapp_fi_dr_delivery", "webapp_fi_durability_health"},
-    "webapp_ir_dr_egress": {"webapp_ir_dr_delivery"},
     "writer_witness_egress": {
         "webapp_fi_writer_control", "webapp_ir_writer_control",
     },
@@ -150,9 +155,11 @@ MANAGED_NETWORK_MEMBERS = {
     "webapp_ir_ingress": {"webapp_ir_dr_tls"},
     "witness_ingress": {"witness_dr_tls"},
     "bot_fi_egress": {"bot_fi_api", "bot_fi_bot"},
-    "webapp_fi_egress": {"webapp_fi_api", "webapp_fi_blobs", "webapp_fi_effects"},
+    "webapp_fi_egress": {
+        "webapp_fi_api", "webapp_fi_dr_delivery", "webapp_fi_blobs", "webapp_fi_effects",
+    },
     "webapp_ir_egress": {
-        "webapp_ir_api", "webapp_ir_blobs", "webapp_ir_effects",
+        "webapp_ir_api", "webapp_ir_dr_delivery", "webapp_ir_blobs", "webapp_ir_effects",
         "webapp_ir_convergence_exporter",
     },
 }
@@ -187,11 +194,9 @@ EXPECTED_CROSS_HOSTS = {
     ],
     "webapp_fi_dr_delivery": [
         "bot-fi-dr.staging.internal:${WEBAPP_FI_PEER_BOT_FI_IP:?required}",
-        "webapp-ir-dr.staging.internal:${WEBAPP_FI_PEER_WEBAPP_IR_IP:?required}",
     ],
     "webapp_fi_blobs": [
         "bot-fi-dr.staging.internal:${WEBAPP_FI_PEER_BOT_FI_IP:?required}",
-        "webapp-ir-dr.staging.internal:${WEBAPP_FI_PEER_WEBAPP_IR_IP:?required}",
     ],
     "webapp_fi_api": [
         "bot-fi-dr.staging.internal:${WEBAPP_FI_PEER_BOT_FI_IP:?required}",
@@ -204,12 +209,6 @@ EXPECTED_CROSS_HOSTS = {
     ],
     "webapp_fi_durability_health": [
         "bot-fi-dr.staging.internal:${WEBAPP_FI_PEER_BOT_FI_IP:?required}",
-    ],
-    "webapp_ir_dr_delivery": [
-        "webapp-fi-dr.staging.internal:${WEBAPP_IR_PEER_WEBAPP_FI_IP:?required}",
-    ],
-    "webapp_ir_blobs": [
-        "webapp-fi-dr.staging.internal:${WEBAPP_IR_PEER_WEBAPP_FI_IP:?required}",
     ],
     "webapp_ir_writer_control": [
         "witness-dr.staging.internal:${WEBAPP_IR_WITNESS_IP:?required}",

@@ -49,6 +49,9 @@ class ThreeSiteStagingRoleBundleTests(unittest.TestCase):
         cls.values["DR_BLOB_OBJECT_PREFIX"] = (
             cls.inventory["object_storage"]["prefix"] + "blobs/sha256"
         )
+        cls.values["DR_OBJECT_TRANSPORT_PREFIX"] = (
+            cls.inventory["object_storage"]["prefix"] + "object-transport"
+        )
         bind_names = {
             "bot_fi": "BOT_FI_DR_BIND_ADDRESS",
             "webapp_fi": "WEBAPP_FI_DR_BIND_ADDRESS",

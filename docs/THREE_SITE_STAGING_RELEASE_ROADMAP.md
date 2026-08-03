@@ -1691,45 +1691,48 @@ route عمومی، production و lifecycle زیرساخت در rollback 4R تغ�
   evidence، synthetic 2PC/blob receipts و one-shot durability controller در
   همین branch ادامه می‌یابد.
 
-#### remediation design 4R-OS — event plane بین FI و IR فقط Object Storage
+#### remediation 4R-OS — event plane بین FI و IR فقط Object Storage
 
-- Status: `PLANNED — NO SOURCE OR RUNTIME CHANGE YET`. این remediation بخشی از
-  همان Stage 4R و همان branch است؛ branch، VPS، DNS/CDN، security-group و
-  production جدیدی ایجاد نمی‌کند.
-- Scope دقیق: فقط hopهای `webapp_fi → webapp_ir` در `dr_delivery_worker` و
-  `dr_blob_worker`، شامل event/blob envelope و acknowledgement آن. ارتباط
-  Bot-FI↔WebApp-FI، WebApp-FI↔Witness و تمام control/lease RPCهای داخلی FI
-  خارج از تغییر هستند. direct `webapp-ir-dr.staging.internal:8443` برای
-  payload/receipt از configuration فعال FI حذف می‌شود؛ port شبکه جایگزین یا
-  bypass ایجاد نمی‌گردد.
-- publish: source یک envelope immutable و HMAC-verified موجود را با encryption
-  application-level keyring و hash/size bound در prefix مختص destination
-  می‌نویسد. object private/versioned است و source فقط پس از read-back exact
-  `VersionId` آن را قابل delivery می‌داند. object name از event id و hash
-  مشتق می‌شود و هیچ secret یا business payload در log/SSH receipt نمی‌آید.
-- consume: worker جداگانهٔ WebApp-IR فقط Object Storage را poll می‌کند، object
-  exact version را decrypt/hash/verify می‌کند و receiver محلی را invoke می‌کند؛
-  سپس acknowledgement HMAC-bound با source object VersionId را در prefix
-  receipt می‌نویسد. هیچ HTTP بین FI و IR برقرار نمی‌شود.
-- acknowledge: WebApp-FI فقط receipt versioned و verified را poll می‌کند؛
-  `dr_event_deliveries`/`DrBlobDelivery` فقط پس از تطبیق event id، envelope
-  hash، source VersionId و acknowledgement hash به `acknowledged` می‌رود.
-  timeout/error همچنان pending/retry است و هیچ write critical را healthy
-  نمی‌کند.
-- secret boundary: source publish credential و target consume/receipt credential
-  به roleهای محدود worker mount می‌شود؛ API، writer-control، observer و
-  durability controller credential Object Storage نمی‌گیرند. grantهای database
-  و `verify_three_site_staging_secret_boundaries.py` همزمان به‌روز و test
-  می‌شوند. SSH فقط command کوتاه یا redacted receipt خواهد بود.
-- verification کوتاه و کافی: unit testهای publish/read-back/version mismatch،
-  decrypt/HMAC failure، duplicate/out-of-order receipt و direct FI→IR URL
-  forbidden؛ سپس یک synthetic non-business event و Blob روی staging با exact
-  source/receipt VersionId. این evidence جایگزین direct-TLS probe می‌شود؛ از
-  Full Matrix یا تغییر route جدید برای این remediation استفاده نمی‌شود.
-- Completion criterion: peer URL FI→IR در runtime فعال نباشد، payload/receipt
-  تنها CSE/private/versioned Object Storage باشند، retry idempotent بماند و
-  synthetic evidence hash-bound قبول شود. فقط پس از آن connectivity fresh و
-  2PC/blob evidence مرحلهٔ 4R ادامه می‌یابد.
+- Status: `IMPLEMENTED IN SOURCE — STAGING DEPLOY/SYNTHETIC EVIDENCE PENDING`.
+  این remediation بخشی از همان Stage 4R و همان branch است؛ VPS، DNS/CDN،
+  security-group، production یا lifecycle جدیدی ایجاد نمی‌کند.
+- Scope دقیق: هر دو hop `webapp_fi ↔ webapp_ir` در `dr_delivery_worker` و
+  receiptهای Blob در `dr_blob_worker`. خود Blob پیش‌تر فقط در Object Storage
+  private/versioned بود؛ اکنون درخواست receipt و acknowledgement آن نیز همان
+  مسیر را دارند. ارتباط Bot-FI↔WebApp-FI، WebApp↔Witness و تمام control/lease
+  RPCهای داخلی FI خارج از تغییر هستند.
+- publish/consume: record رویداد canonical با HMAC جهت‌دار و AES-256-GCM
+  application keyring در کلید opaque ذخیره می‌شود. writer فقط پس از decrypt و
+  read-back همان `VersionId` آن را منتشرشده می‌داند. مقصد record را از Object
+  Storage poll، decrypt/hash/HMAC verify و در receiver محلی اعمال می‌کند؛ سپس
+  receipt HMAC-bound به `object key + VersionId + ciphertext hash + size` را
+  می‌نویسد. source فقط چنین receiptی را terminal می‌پذیرد. receipt رویداد فقط
+  از `received` به `applied` یک Version جدید می‌سازد؛ event record هرگز
+  overwrite نمی‌شود.
+- fail-closed: object مفقود، metadata/ciphertext/plaintext hash ناسازگار،
+  VersionId مفقود/تغییرکرده، JSON تکراری، key-id/source/destination/MAC نادرست
+  یا acknowledgement خارج از batch دقیق، delivery را `pending/retry` نگه
+  می‌دارد. ledger و source-object VersionId مرز replay/dedup این مسیرند.
+- direct route removal: `webapp_fi_dr_delivery` و `webapp_fi_blobs` دیگر host
+  map ایران ندارند؛ `webapp_ir_dr_delivery` و `webapp_ir_blobs` نیز host map
+  فنلاند یا شبکهٔ `webapp_ir_dr_egress` ندارند. peer URL فقط قرارداد sparse
+  topology برای مسیرهای دیگر است و در این hop فراخوانی HTTP نمی‌شود. port،
+  rule شبکه یا bypass تازه‌ای ایجاد نشده است.
+- secret boundary: credential و keyring فقط به چهار worker delivery/blob دو
+  WebApp mount می‌شود؛ API، receiver public، writer-control، observer و
+  durability controller credential Object Storage ندارند. verifier bundle و
+  Compose این boundary و نبود route مستقیم را enforce می‌کنند.
+- Source/tests: `core/dr_object_storage.py` و `core/dr_object_transport.py`
+  access مشترک private/versioned و envelope/receiptهای encrypted را فراهم
+  می‌کنند؛ `api/routers/dr_sync.py` receipt Blob را برای local Object Storage
+  consumer refactor کرده است. `61` unittest مرتبط (transport crypto/API,
+  Compose، secret boundary، role bundle و campaign bundle) با `OK` قبول شد؛
+  شامل publish/read-back exact VersionId، idempotence، tamper MAC، receipt
+  advance و حذف host route مستقیم است.
+- Completion criterion: release immutable روی هر چهار role deploy شود، یک
+  synthetic non-business event و یک Blob با exact source/receipt VersionId در
+  staging قبول شود و هیچ FI↔IR TCP payload/receipt مشاهده نشود. فقط پس از آن
+  connectivity fresh و evidence 2PC/blob مرحلهٔ 4R ادامه می‌یابد.
 
 ### Exit gate — G4 Staging Published
 

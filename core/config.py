@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     dr_delivery_poll_seconds: float = 0.25
     dr_blob_root: str = "uploads/blobs"
     dr_blob_object_prefix: str = "three-site-dr/blobs/sha256"
+    # Cross-region WebApp event envelopes and their acknowledgements use the
+    # same private, versioned Object Storage bucket as encrypted blobs.  This
+    # is intentionally separate from the content-addressed blob prefix.
+    dr_object_transport_prefix: str = "three-site-dr/object-transport"
     dr_blob_object_endpoint: str | None = None
     dr_blob_object_region: str | None = None
     dr_blob_object_bucket: str | None = None

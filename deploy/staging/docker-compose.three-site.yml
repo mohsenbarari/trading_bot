@@ -602,11 +602,20 @@ services:
       POSTGRES_PASSWORD: ${WEBAPP_FI_DELIVERY_DB_PASSWORD}
       DR_SYNC_PEER_URLS_JSON: ${WEBAPP_FI_DR_PEERS_JSON:?required}
       DR_SYNC_PAIRWISE_KEYS_JSON: ${WEBAPP_FI_DR_PAIRWISE_KEYS_JSON:?required}
+      DR_BLOB_OBJECT_ENDPOINT: ${DR_BLOB_OBJECT_ENDPOINT:?required}
+      DR_BLOB_OBJECT_REGION: ${DR_BLOB_OBJECT_REGION:?required}
+      DR_BLOB_OBJECT_BUCKET: ${DR_BLOB_OBJECT_BUCKET:?required}
+      DR_OBJECT_TRANSPORT_PREFIX: ${DR_OBJECT_TRANSPORT_PREFIX:?required}
+      DR_BLOB_REQUIRE_VERSIONING: ${DR_BLOB_REQUIRE_VERSIONING:-true}
+      DR_BLOB_S3_CREDENTIALS_FILE: /run/secrets/dr-blob-s3.json
+      DR_BLOB_ENCRYPTION_KEYRING_FILE: /run/secrets/dr-blob-keyring.json
+    volumes:
+      - ${STAGING_DR_BLOB_CREDENTIALS_FILE:?required}:/run/secrets/dr-blob-s3.json:ro
+      - ${STAGING_DR_BLOB_ENCRYPTION_KEYRING_FILE:?required}:/run/secrets/dr-blob-keyring.json:ro
     depends_on: {webapp_fi_dr_receiver: {condition: service_healthy}}
     extra_hosts:
       - "bot-fi-dr.staging.internal:${WEBAPP_FI_PEER_BOT_FI_IP:?required}"
-      - "webapp-ir-dr.staging.internal:${WEBAPP_FI_PEER_WEBAPP_IR_IP:?required}"
-    networks: [webapp_fi, webapp_fi_dr_egress]
+    networks: [webapp_fi, webapp_fi_dr_egress, webapp_fi_egress]
 
   webapp_fi_dr_projection:
     profiles: [webapp-fi]
@@ -653,6 +662,7 @@ services:
       DR_BLOB_OBJECT_REGION: ${DR_BLOB_OBJECT_REGION:?required}
       DR_BLOB_OBJECT_BUCKET: ${DR_BLOB_OBJECT_BUCKET:?required}
       DR_BLOB_OBJECT_PREFIX: ${DR_BLOB_OBJECT_PREFIX:?required}
+      DR_OBJECT_TRANSPORT_PREFIX: ${DR_OBJECT_TRANSPORT_PREFIX:?required}
       DR_BLOB_REQUIRE_VERSIONING: ${DR_BLOB_REQUIRE_VERSIONING:-true}
       DR_BLOB_S3_CREDENTIALS_FILE: /run/secrets/dr-blob-s3.json
       DR_BLOB_ENCRYPTION_KEYRING_FILE: /run/secrets/dr-blob-keyring.json
@@ -664,7 +674,6 @@ services:
     depends_on: {webapp_fi_api: {condition: service_started}}
     extra_hosts:
       - "bot-fi-dr.staging.internal:${WEBAPP_FI_PEER_BOT_FI_IP:?required}"
-      - "webapp-ir-dr.staging.internal:${WEBAPP_FI_PEER_WEBAPP_IR_IP:?required}"
     networks: [webapp_fi, webapp_fi_egress]
 
   webapp_fi_dr_receiver:
@@ -850,10 +859,18 @@ services:
       POSTGRES_PASSWORD: ${WEBAPP_IR_DELIVERY_DB_PASSWORD}
       DR_SYNC_PEER_URLS_JSON: ${WEBAPP_IR_DR_PEERS_JSON:?required}
       DR_SYNC_PAIRWISE_KEYS_JSON: ${WEBAPP_IR_DR_PAIRWISE_KEYS_JSON:?required}
+      DR_BLOB_OBJECT_ENDPOINT: ${DR_BLOB_OBJECT_ENDPOINT:?required}
+      DR_BLOB_OBJECT_REGION: ${DR_BLOB_OBJECT_REGION:?required}
+      DR_BLOB_OBJECT_BUCKET: ${DR_BLOB_OBJECT_BUCKET:?required}
+      DR_OBJECT_TRANSPORT_PREFIX: ${DR_OBJECT_TRANSPORT_PREFIX:?required}
+      DR_BLOB_REQUIRE_VERSIONING: ${DR_BLOB_REQUIRE_VERSIONING:-true}
+      DR_BLOB_S3_CREDENTIALS_FILE: /run/secrets/dr-blob-s3.json
+      DR_BLOB_ENCRYPTION_KEYRING_FILE: /run/secrets/dr-blob-keyring.json
+    volumes:
+      - ${STAGING_DR_BLOB_CREDENTIALS_FILE:?required}:/run/secrets/dr-blob-s3.json:ro
+      - ${STAGING_DR_BLOB_ENCRYPTION_KEYRING_FILE:?required}:/run/secrets/dr-blob-keyring.json:ro
     depends_on: {webapp_ir_dr_receiver: {condition: service_healthy}}
-    extra_hosts:
-      - "webapp-fi-dr.staging.internal:${WEBAPP_IR_PEER_WEBAPP_FI_IP:?required}"
-    networks: [webapp_ir, webapp_ir_dr_egress]
+    networks: [webapp_ir, webapp_ir_egress]
 
   webapp_ir_dr_projection:
     profiles: [webapp-ir]
@@ -898,6 +915,7 @@ services:
       DR_BLOB_OBJECT_REGION: ${DR_BLOB_OBJECT_REGION:?required}
       DR_BLOB_OBJECT_BUCKET: ${DR_BLOB_OBJECT_BUCKET:?required}
       DR_BLOB_OBJECT_PREFIX: ${DR_BLOB_OBJECT_PREFIX:?required}
+      DR_OBJECT_TRANSPORT_PREFIX: ${DR_OBJECT_TRANSPORT_PREFIX:?required}
       DR_BLOB_REQUIRE_VERSIONING: ${DR_BLOB_REQUIRE_VERSIONING:-true}
       DR_BLOB_S3_CREDENTIALS_FILE: /run/secrets/dr-blob-s3.json
       DR_BLOB_ENCRYPTION_KEYRING_FILE: /run/secrets/dr-blob-keyring.json
@@ -907,8 +925,6 @@ services:
       - ${STAGING_DR_BLOB_CREDENTIALS_FILE:?required}:/run/secrets/dr-blob-s3.json:ro
       - ${STAGING_DR_BLOB_ENCRYPTION_KEYRING_FILE:?required}:/run/secrets/dr-blob-keyring.json:ro
     depends_on: {webapp_ir_api: {condition: service_started}}
-    extra_hosts:
-      - "webapp-fi-dr.staging.internal:${WEBAPP_IR_PEER_WEBAPP_FI_IP:?required}"
     networks: [webapp_ir, webapp_ir_egress]
 
   webapp_ir_dr_receiver:
@@ -1090,7 +1106,6 @@ networks:
   # approved inventory peers before services are started.
   bot_fi_dr_egress: {}
   webapp_fi_dr_egress: {}
-  webapp_ir_dr_egress: {}
   writer_witness_egress: {}
   bot_fi_ingress: {}
   webapp_fi_ingress: {}

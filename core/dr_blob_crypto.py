@@ -230,6 +230,102 @@ def encrypt_local_blob(
         os.close(fd)
 
 
+def encrypt_bytes(
+    plaintext: bytes,
+    *,
+    content_hash: str,
+    object_key: str,
+    key_id: str,
+    keyring: DrBlobKeyring,
+    mime_type: str,
+) -> tuple[BinaryIO, CiphertextIdentity]:
+    """Encrypt a small canonical control record with the blob wire format.
+
+    Event envelopes and receipts have a strict bounded size and use the same
+    AES-GCM format as blobs.  Keeping the format identical means the provider
+    still sees only ciphertext and every exact VersionId can be read back with
+    one verifier.
+    """
+
+    if not isinstance(plaintext, bytes):
+        raise DrBlobCryptoError("encrypted control record plaintext must be bytes")
+    size_bytes = len(plaintext)
+    if hashlib.sha256(plaintext).hexdigest() != content_hash:
+        raise DrBlobCryptoError("control record plaintext hash mismatch")
+    output: BinaryIO | None = None
+    try:
+        output = tempfile.TemporaryFile(mode="w+b")
+        nonce = os.urandom(NONCE_BYTES)
+        prefix = ENCRYPTION_MAGIC + nonce
+        output.write(prefix)
+        ciphertext_digest = hashlib.sha256(prefix)
+        encryptor = Cipher(algorithms.AES(keyring.key(key_id)), modes.GCM(nonce)).encryptor()
+        encryptor.authenticate_additional_data(
+            authenticated_context(
+                object_key=object_key,
+                content_hash=content_hash,
+                size_bytes=size_bytes,
+                mime_type=mime_type,
+            )
+        )
+        ciphertext = encryptor.update(plaintext)
+        if ciphertext:
+            output.write(ciphertext)
+            ciphertext_digest.update(ciphertext)
+        tail = encryptor.finalize()
+        if tail:
+            output.write(tail)
+            ciphertext_digest.update(tail)
+        output.write(encryptor.tag)
+        ciphertext_digest.update(encryptor.tag)
+        output.flush()
+        output.seek(0)
+        return output, CiphertextIdentity(
+            object_key=object_key,
+            key_id=key_id,
+            algorithm=ENCRYPTION_ALGORITHM,
+            ciphertext_hash=ciphertext_digest.hexdigest(),
+            ciphertext_size=size_bytes + FORMAT_OVERHEAD,
+        )
+    except Exception:
+        if output is not None:
+            output.close()
+        raise
+
+
+def decrypt_bytes(
+    source: BinaryIO,
+    *,
+    ciphertext_size: int,
+    expected_ciphertext_hash: str,
+    content_hash: str,
+    object_key: str,
+    key_id: str,
+    keyring: DrBlobKeyring,
+    mime_type: str,
+) -> bytes:
+    """Decrypt a bounded control record after checking its full identity."""
+
+    size_bytes = ciphertext_size - FORMAT_OVERHEAD
+    if size_bytes < 0:
+        raise DrBlobCryptoError("control record ciphertext size is invalid")
+    with tempfile.TemporaryFile(mode="w+b") as plaintext:
+        decrypt_blob_stream(
+            source,
+            ciphertext_size=ciphertext_size,
+            expected_ciphertext_hash=expected_ciphertext_hash,
+            content_hash=content_hash,
+            size_bytes=size_bytes,
+            mime_type=mime_type,
+            object_key=object_key,
+            key_id=key_id,
+            keyring=keyring,
+            plaintext_sink=plaintext,
+        )
+        plaintext.seek(0)
+        return plaintext.read()
+
+
 def decrypt_blob_stream(
     source: BinaryIO,
     *,

@@ -53,11 +53,9 @@ PEER_IP_ENV = {
     "bot-fi": {"BOT_FI_PEER_WEBAPP_FI_IP": "webapp_fi"},
     "webapp-fi": {
         "WEBAPP_FI_PEER_BOT_FI_IP": "bot_fi",
-        "WEBAPP_FI_PEER_WEBAPP_IR_IP": "webapp_ir",
         "WEBAPP_FI_WITNESS_IP": "witness",
     },
     "webapp-ir": {
-        "WEBAPP_IR_PEER_WEBAPP_FI_IP": "webapp_fi",
         "WEBAPP_IR_WITNESS_IP": "witness",
     },
     "witness": {},
@@ -342,6 +340,8 @@ def verify_role_bundle(
         if (
             values["DR_BLOB_OBJECT_BUCKET"] != storage["bucket"]
             or not values["DR_BLOB_OBJECT_PREFIX"].startswith(storage["prefix"])
+            or not values["DR_OBJECT_TRANSPORT_PREFIX"].startswith(storage["prefix"])
+            or values["DR_OBJECT_TRANSPORT_PREFIX"] == values["DR_BLOB_OBJECT_PREFIX"]
             or values["DR_BLOB_REQUIRE_VERSIONING"] != "true"
         ):
             raise RoleBundleError("role Object Storage settings differ from approved inventory")

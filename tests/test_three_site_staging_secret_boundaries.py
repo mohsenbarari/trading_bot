@@ -19,7 +19,7 @@ class ThreeSiteStagingSecretBoundaryTests(unittest.TestCase):
         result = verify_compose(ROOT / "deploy/staging/docker-compose.three-site.yml")
         self.assertEqual(result["status"], "verified")
         self.assertGreaterEqual(result["service_count"], 37)
-        self.assertEqual(result["managed_network_count"], 11)
+        self.assertEqual(result["managed_network_count"], 10)
 
     def test_global_env_file_and_cross_role_secret_are_rejected(self):
         source = """

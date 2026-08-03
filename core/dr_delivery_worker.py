@@ -18,12 +18,28 @@ from sqlalchemy import or_, select
 from core.config import settings
 from core.dark_standby import assert_not_dark_standby
 from core.db import DrProjectionSessionLocal, verify_three_site_database_role_bindings
-from core.dr_event_protocol import canonical_json_bytes, event_envelope_from_record, transport_peers, validate_envelope
+from core.dr_blob_crypto import DrBlobKeyring, load_blob_keyring
+from core.dr_event_receiver import DrEventReceiveError, receive_object_storage_batch
+from core.dr_event_protocol import canonical_json_bytes, event_envelope_from_record, transport_peers
+from core.dr_object_storage import S3Config, load_s3_config, validate_versioned_bucket
+from core.dr_object_transport import (
+    DrObjectTransportError,
+    DrObjectTransportMissing,
+    ObjectStorageEventRecord,
+    StoredControlObject,
+    list_control_record_keys,
+    load_event_receipt,
+    load_event_record,
+    publish_event_receipt,
+    publish_event_record,
+    uses_object_storage_event_transport,
+)
 from core.dr_sync_auth import (
     PairwiseDrKey,
     acknowledgement_signature_is_valid,
     canonical_request_bytes,
     parse_pairwise_keys,
+    sign_acknowledgement,
     sign_request,
 )
 from core.runtime_identity import resolve_runtime_identity
@@ -37,6 +53,12 @@ DR_EVENTS_PATH = "/api/dr-sync/events"
 
 class DrDeliveryError(RuntimeError):
     """Raised when peer configuration or acknowledgement is unsafe."""
+
+
+@dataclass(frozen=True)
+class ObjectStorageTransport:
+    config: S3Config
+    keyring: DrBlobKeyring
 
 
 def _mark_delivery_attempt(delivery: Any, *, now: datetime, local_site: str) -> None:
@@ -363,6 +385,155 @@ def _update_delivery_from_result(
     )[:64]
 
 
+async def _deliver_object_storage_batch(
+    batch: ClaimedDeliveryBatch,
+    *,
+    local_site: str,
+    keys: dict[str, PairwiseDrKey],
+    transport: ObjectStorageTransport,
+) -> str:
+    """Publish FI→IR events and consume only a version-bound S3 receipt."""
+
+    key = _key_for_destination(
+        keys, source_site=local_site, destination_site=batch.destination_site
+    )
+    body = canonical_json_bytes({"events": list(batch.envelopes)})
+    try:
+        event, stored = await asyncio.to_thread(
+            publish_event_record,
+            transport.config,
+            body=body,
+            source_site=local_site,
+            destination_site=batch.destination_site,
+            key=key,
+            keyring=transport.keyring,
+        )
+        receipt = await asyncio.to_thread(
+            load_event_receipt,
+            transport.config,
+            event=event,
+            stored=stored,
+            key=key,
+            keyring=transport.keyring,
+        )
+        results = _verify_acknowledgement(
+            receipt.acknowledgement,
+            batch=batch,
+            request_hash=event.request_hash,
+            key=key,
+        )
+        await _finish_batch(
+            batch,
+            results=results,
+            acknowledgement_hash=str(receipt.acknowledgement["acknowledgement_hash"]),
+        )
+        return "acknowledged"
+    except (DrObjectTransportError, DrDeliveryError, ValueError) as exc:
+        await _finish_batch(batch, results=None, error_code=type(exc).__name__)
+        return "retry"
+
+
+def _receipt_is_applied(
+    receipt: dict[str, Any],
+    *,
+    event: ObjectStorageEventRecord,
+    key: PairwiseDrKey,
+) -> bool:
+    """A prior S3 receipt is complete only after every event is applied."""
+
+    batch = ClaimedDeliveryBatch(
+        claim_id="object-storage-receipt-check",
+        destination_site=event.destination_site,
+        event_ids=tuple(str(item.get("event_id") or "") for item in event.events),
+        envelopes=event.events,
+    )
+    results = _verify_acknowledgement(
+        receipt,
+        batch=batch,
+        request_hash=event.request_hash,
+        key=key,
+    )
+    return all(result["status"] == "applied" for result in results.values())
+
+
+async def consume_one_object_storage_event(
+    *,
+    local_site: str,
+    keys: dict[str, PairwiseDrKey],
+    transport: ObjectStorageTransport | None,
+) -> str:
+    """Let either WebApp pull, verify, receive, and receipt one peer record."""
+
+    if transport is None or local_site not in {"webapp_fi", "webapp_ir"}:
+        return "idle"
+    source_site = "webapp_ir" if local_site == "webapp_fi" else "webapp_fi"
+    key = _key_for_destination(
+        keys, source_site=source_site, destination_site=local_site
+    )
+    try:
+        object_keys = await asyncio.to_thread(
+            list_control_record_keys,
+            transport.config,
+            source_site=source_site,
+            destination_site=local_site,
+            key=key,
+        )
+    except DrObjectTransportError:
+        return "retry"
+    for object_key in object_keys:
+        try:
+            event, stored = await asyncio.to_thread(
+                load_event_record,
+                transport.config,
+                object_key=object_key,
+                source_site=source_site,
+                destination_site=local_site,
+                key=key,
+                keyring=transport.keyring,
+            )
+            try:
+                receipt = await asyncio.to_thread(
+                    load_event_receipt,
+                    transport.config,
+                    event=event,
+                    stored=stored,
+                    key=key,
+                    keyring=transport.keyring,
+                )
+                if _receipt_is_applied(receipt.acknowledgement, event=event, key=key):
+                    continue
+            except DrObjectTransportMissing:
+                # No prior receipt: process the verified source object below.
+                pass
+            with projection_fence_scope(source="dr_object_storage_event_receive"):
+                async with DrProjectionSessionLocal() as session:
+                    acknowledgement = await receive_object_storage_batch(
+                        session,
+                        raw_envelopes=list(event.events),
+                        local_site=local_site,
+                        source_site=source_site,
+                        key_id=key.key_id,
+                        request_hash=event.request_hash,
+                    )
+                    await session.commit()
+            acknowledgement["acknowledgement_mac"] = sign_acknowledgement(
+                payload=acknowledgement, secret=key.secret
+            )
+            await asyncio.to_thread(
+                publish_event_receipt,
+                transport.config,
+                event=event,
+                stored=stored,
+                acknowledgement=acknowledgement,
+                key=key,
+                keyring=transport.keyring,
+            )
+            return "acknowledged"
+        except (DrObjectTransportError, DrDeliveryError, DrEventReceiveError, ValueError):
+            return "retry"
+    return "idle"
+
+
 async def deliver_batch(
     batch: ClaimedDeliveryBatch,
     *,
@@ -370,7 +541,20 @@ async def deliver_batch(
     client: httpx.AsyncClient,
     peer_urls: dict[str, str],
     keys: dict[str, PairwiseDrKey],
+    object_transport: ObjectStorageTransport | None = None,
 ) -> str:
+    if uses_object_storage_event_transport(
+        source_site=local_site, destination_site=batch.destination_site
+    ):
+        if object_transport is None:
+            await _finish_batch(batch, results=None, error_code="ObjectStorageTransportMissing")
+            return "retry"
+        return await _deliver_object_storage_batch(
+            batch,
+            local_site=local_site,
+            keys=keys,
+            transport=object_transport,
+        )
     key = _key_for_destination(keys, source_site=local_site, destination_site=batch.destination_site)
     body = canonical_json_bytes({"events": list(batch.envelopes)})
     timestamp = int(datetime.now(timezone.utc).timestamp())
@@ -439,12 +623,29 @@ async def dr_delivery_loop() -> None:
         raise DrDeliveryError("three-site DR transport refuses disabled TLS verification")
     peer_urls = parse_peer_urls(settings.dr_sync_peer_urls_json, local_site=identity.physical_site)
     keys = parse_pairwise_keys(settings.dr_sync_pairwise_keys_json)
+    object_transport: ObjectStorageTransport | None = None
+    if identity.physical_site in {"webapp_fi", "webapp_ir"}:
+        try:
+            config = load_s3_config()
+            keyring = load_blob_keyring(settings.dr_blob_encryption_keyring_file)
+            await asyncio.to_thread(validate_versioned_bucket, config)
+            object_transport = ObjectStorageTransport(config=config, keyring=keyring)
+        except Exception as exc:
+            raise DrDeliveryError("Object Storage event transport configuration is unsafe") from exc
     verify: bool | str = settings.dr_sync_ca_bundle or True
     timeout = max(1.0, float(settings.dr_sync_http_timeout_seconds))
     async with httpx.AsyncClient(verify=verify, timeout=timeout, follow_redirects=False) as client:
         while True:
+            received = await consume_one_object_storage_event(
+                local_site=identity.physical_site,
+                keys=keys,
+                transport=object_transport,
+            )
             batch = await claim_delivery_batch(local_site=identity.physical_site)
             if batch is None:
+                if received == "retry":
+                    await asyncio.sleep(max(1.0, float(settings.dr_delivery_poll_seconds)))
+                    continue
                 await asyncio.sleep(max(0.05, float(settings.dr_delivery_poll_seconds)))
                 continue
             await deliver_batch(
@@ -453,6 +654,7 @@ async def dr_delivery_loop() -> None:
                 client=client,
                 peer_urls=peer_urls,
                 keys=keys,
+                object_transport=object_transport,
             )
 
 

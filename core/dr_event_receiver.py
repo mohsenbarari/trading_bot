@@ -17,6 +17,7 @@ from core.dr_event_protocol import (
     ValidatedDrEnvelope,
     decide_receipt,
     relay_destinations,
+    transport_peers,
     validate_envelope,
     validate_transport_path,
 )
@@ -389,6 +390,52 @@ async def receive_batch(
         "source_site": request.source_site,
         "key_id": request.key_id,
         "request_hash": request.request_hash,
+        "results": results,
+    }
+    acknowledgement["acknowledgement_hash"] = hashlib.sha256(
+        json.dumps(acknowledgement, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return acknowledgement
+
+
+async def receive_object_storage_batch(
+    session: AsyncSession,
+    *,
+    raw_envelopes: list[dict[str, Any]],
+    local_site: str,
+    source_site: str,
+    key_id: str,
+    request_hash: str,
+) -> dict[str, Any]:
+    """Receive a verified immutable Object Storage event record.
+
+    The encrypted record already has a source/destination-bound HMAC and an
+    exact Object Storage VersionId.  Unlike direct HTTPS ingress, its durable
+    identity—not a short-lived HTTP nonce—is the replay boundary.  The event
+    ledger remains the final idempotency and conflict authority.
+    """
+
+    if source_site not in transport_peers(local_site):
+        raise DrEventReceiveError("Object Storage event source is outside the fixed topology")
+    if not raw_envelopes or len(raw_envelopes) > 500:
+        raise DrEventReceiveError("DR batch size must be between 1 and 500")
+    envelopes = [validate_envelope(item) for item in raw_envelopes]
+    envelopes.sort(key=lambda item: (item.origin_physical_site, item.producer_epoch, item.producer_sequence))
+    results = []
+    for envelope in envelopes:
+        results.append(
+            await receive_envelope(
+                session,
+                envelope=envelope,
+                local_site=local_site,
+                received_from_site=source_site,
+            )
+        )
+    acknowledgement = {
+        "destination_site": local_site,
+        "source_site": source_site,
+        "key_id": key_id,
+        "request_hash": request_hash,
         "results": results,
     }
     acknowledgement["acknowledgement_hash"] = hashlib.sha256(

@@ -166,6 +166,34 @@ class ThreeSiteStagingRoleComposeTests(unittest.TestCase):
                     self.assertIn(f"proxy_pass http://${variable};", config)
                     self.assertNotIn(f"proxy_pass http://{service}:8000;", config)
 
+    def test_interregion_workers_use_object_storage_and_have_no_peer_host_route(self):
+        fi_delivery = self.payload["services"]["webapp_fi_dr_delivery"]
+        ir_delivery = self.payload["services"]["webapp_ir_dr_delivery"]
+        fi_blobs = self.payload["services"]["webapp_fi_blobs"]
+        ir_blobs = self.payload["services"]["webapp_ir_blobs"]
+
+        self.assertEqual(
+            fi_delivery["extra_hosts"],
+            ["bot-fi-dr.staging.internal:${WEBAPP_FI_PEER_BOT_FI_IP:?required}"],
+        )
+        self.assertNotIn("extra_hosts", ir_delivery)
+        self.assertEqual(
+            fi_blobs["extra_hosts"],
+            ["bot-fi-dr.staging.internal:${WEBAPP_FI_PEER_BOT_FI_IP:?required}"],
+        )
+        self.assertNotIn("extra_hosts", ir_blobs)
+        for service in (fi_delivery, ir_delivery, fi_blobs, ir_blobs):
+            environment = service["environment"]
+            self.assertEqual(
+                environment["DR_OBJECT_TRANSPORT_PREFIX"],
+                "${DR_OBJECT_TRANSPORT_PREFIX:?required}",
+            )
+            self.assertIn("DR_BLOB_S3_CREDENTIALS_FILE", environment)
+            self.assertIn("DR_BLOB_ENCRYPTION_KEYRING_FILE", environment)
+        self.assertIn("webapp_fi_egress", fi_delivery["networks"])
+        self.assertEqual(ir_delivery["networks"], ["webapp_ir", "webapp_ir_egress"])
+        self.assertNotIn("webapp_ir_dr_egress", self.payload["networks"])
+
 
 if __name__ == "__main__":
     unittest.main()
