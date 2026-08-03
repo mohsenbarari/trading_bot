@@ -1375,6 +1375,47 @@ route عمومی، production و lifecycle زیرساخت در rollback 4R تغ�
   staging، flag دوام نباید true شود.
 - Production touched: `no`.
 
+#### checkpoint implementation Stage 4R — 2026-08-03
+
+- Status: `IN_PROGRESS — CODE/MIGRATION/RECOVERY IMPLEMENTED; STAGING DEPLOY NOT STARTED`
+- Branch: `stage/three-site-staging-04-deploy`; Base: release staging فعلی
+  `e00283c037ec5ca63340b9827768256b1c5ef144`؛ implementation commit:
+  `d6f86634`.
+- تغییر تحویل‌شده: receiver اختصاصی Bot-FI فقط ciphertext opaque و metadata
+  امضاشده را با role `bot_fi_journal` نگه می‌دارد؛ schema به head
+  `d9e3f5a7b2c4` رسیده و GID محلی PostgreSQL به prepare record متصل و unique
+  شده است. WebApp-FI فقط در صورت feature flag صریح، `flush → remote prepare →
+  PREPARE TRANSACTION → remote commit decision → COMMIT PREPARED` را اجرا
+  می‌کند. پاسخ گم‌شدهٔ phase-2 به `DurabilityJournalInDoubtError` منتهی می‌شود؛
+  transaction prepared حفظ می‌شود و command محدود
+  `reconcile_same_region_journal_prepared_transaction.py --gid …` تنها از روی
+  status امضاشدهٔ Bot آن را commit یا rollback می‌کند.
+- hardening: ACK ساده هرگز evidence commit نیست؛ GID، request hash، release,
+  ciphertext hash و state در پاسخ امضاشده bind می‌شوند. اگر 2PC feature فعال
+  نباشد، durability gate حتی با health flag اشتباه true نیز critical write را
+  با reason `same_region_two_phase_disabled` می‌بندد. مسیر async فعلی DR حذف یا
+  bypass نشده و IR همچنان receiver هم‌منطقه‌ای/Writer ندارد.
+- آماده‌سازی deployment: Compose فقط برای DB آزمایشی WebApp-FI ظرفیت startup
+  `max_prepared_transactions` با default `32` دارد، ولی feature flag default
+  `false` است. تا migration، restart کنترل‌شده، read-only attestation و drill
+  واقعی انجام نشود، هیچ mutation حیاتی باز نمی‌شود.
+- Commands/tests executed: مجموعهٔ گستردهٔ unittest شامل ۱۴۴ آزمون Writer,
+  Witness, DR protocol/blob/failover، contract journal، migration، role-compose
+  و secret boundary با `OK`؛ `python3 -m compileall` و `git diff --check` نیز
+  قبول شدند؛ Alembic head دقیق `d9e3f5a7b2c4` است.
+- محدودیت آزمون محلی: یک کانتینر PostgreSQL موقت `--rm` برای integration 2PC
+  ساخته شد، اما Docker daemon در readiness/read-only log پاسخ به‌موقع نداد؛
+  بدون اجرای test، با `docker stop` متوقف و به‌علت `--rm` حذف شد. بنابراین
+  اجرای واقعی 2PC همچنان فقط روی staging کنترل‌شده و پیش از هر health=true
+  اثبات می‌شود؛ این failure به‌هیچ‌وجه pass یا evidence تلقی نشده است.
+- Deployed/tested release SHA: `none after d6f86634`; artifact، snapshot یا
+  payloadی منتقل نشده است. DNS/CDN، production، VPS/volume lifecycle، bucket
+  و secret rotation تغییر نکرده‌اند.
+- Open risks: blob journal/read-back هنوز پیاده نشده، controller هنوز health
+  false می‌نویسد، و `max_prepared_transactions=0` روی WebApp-FI مستقر باقی
+  مانده است. پس G4R و G4 هر دو هنوز پذیرفته نشده‌اند.
+- Production touched: `no`; Decision: `continue Stage 4R`.
+
 ### Exit gate — G4 Staging Published
 
 - هر چهار role exact release SHA را گزارش می‌کنند؛
