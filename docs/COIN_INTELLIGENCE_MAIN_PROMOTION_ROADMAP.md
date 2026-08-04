@@ -1134,6 +1134,54 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   checks باید جدا تصویب شوند؛ سپس P4-B می‌تواند از factهای eligible گروه
   برای anchor/range استفاده کند.
 
+### P4-B-A — engine ساختاری range سکه — 2026-08-04 — PARTIAL
+
+- Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
+- Promotion branch commit(s): commit P4-B-A شامل rate engine pure، test و
+  این یادداشت روی `candidate/coin-commodity-inference-promotion`.
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - `core/market_intelligence/coin_rate_engine.py`: انتخاب source-separated
+    آبشده، intrinsic تاریخ‌پایین، transfer لنگر همان کالا/settlement، IME
+    امام نقدی و interval bounded؛
+  - `docs/COIN_INTELLIGENCE_COIN_RATE_ENGINE.md` و fixtureهای synthetic.
+- موارد عمداً انجام‌نشده:
+  - Snapshot publication P4-A هنوز rateها را embed نمی‌کند؛ calendar/ساعت
+    بانکی، Herat↔USDT bridge، learned residual/model و P5 selector افزوده
+    نشده‌اند.
+- قرارداد/schema/versionهای افزوده یا تغییرکرده:
+  - تنها conversion این module: `IRT_PER_MESGHAL_750 / 10,000` به واحد
+    project و coefficientهای صریح 2.253/2/4/8.130؛
+  - CASH و TOMORROW source/lenght/anchor جدا دارند؛ fallback کاغذی visible
+    است؛
+  - تاریخ‌پایین بدون offer از intrinsic آبشده قابل تولید است؛ premium coin
+    بدون لنگر همان کالا abstain می‌کند، جز امام نقدی با IME fresh؛
+  - range حداکثر ۲٪ است و فقط spread، سن لنگر و رژیم کاغذی آن را تغییر
+    می‌دهند.
+- Migration و نتیجهٔ upgrade/downgrade: schema/migration/write ندارد و تنها
+  reader pure است؛ rollback برابر عدم فراخوانی engine است.
+- Test commands و نتیجهٔ دقیق:
+  - `python3 -m unittest -q tests.test_coin_intelligence_coin_rate_engine`
+    با pycache موقت اجرا شد؛ نتیجه: `Ran 4 tests in 0.084s ... OK`.
+  - baseline ترکیبیِ P0 تا P4-A/P2-B/P2-D/P2-C-B5/P4-B-A و guardهای
+    Offer/Trade/migration با env ساختگی و pycache موقت اجرا شد؛ نتیجه:
+    `Ran 226 tests in 6.105s ... OK`.
+- داده/fixture استفاده‌شده و محل امن آن: فقط SQLite موقت و قیمت synthetic؛
+  market DB، Telegram، API یا service واقعی استفاده نشد.
+- نتیجهٔ health/freshness/replay: تاریخ‌پایین با آبشدهٔ فیزیکال تازه و بدون
+  offer سکه rate گرفت؛ transfer امام با تغییر آبشده حرکت کرد؛ paper fallback
+  برچسب خورد؛ quote stale/no-anchor fail-closed شد.
+- رفتار rollback آزموده‌شده: سکه premium بدون لنگر `NO_DATA` می‌دهد، نه حباب
+  ثابت؛ range bounded است و قیمت اعشاری/واحد دیگر به‌طور ضمنی convert
+  نمی‌شود.
+- ریسک‌های باقیمانده و مالک/تاریخ پیگیری:
+  - P4-B-B باید engine output را در snapshot atomic publish کند و canonical
+    completeness/version را enforce کند؛
+  - source-policy آبشده public/private باید با replay scrubbed واقعی بررسی
+    شود؛
+  - رفتار نقدی بعد از ساعت بانکی، تعطیلی و bridge هرات هنوز deferred است.
+- تصمیم مرحلهٔ بعد و تأیید لازم: P4-B-B snapshot integration و test
+  no-leakage لازم است؛ سپس P5 فقط snapshot published را می‌خواند.
+
 ### P2-D — adapter external تتر و IME — 2026-08-04 — PARTIAL
 
 - Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
