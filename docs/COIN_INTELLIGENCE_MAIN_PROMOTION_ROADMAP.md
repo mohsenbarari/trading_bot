@@ -1509,3 +1509,58 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
 - تصمیم مرحلهٔ بعد و تأیید لازم: اتصال P6 فقط shadow-first و با submit-time
   recomputation/receipt validation شروع شود؛ پیش از آن migration P5-C نباید
   روی production اجرا شود.
+
+### P6-A — API پیش‌نمایش shadow و feature flag — 2026-08-04 — PARTIAL
+
+- Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
+- Promotion branch commit(s): این commit شامل endpoint preview، config، test
+  و مستند API روی `candidate/coin-commodity-inference-promotion` است.
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - `POST /api/offers/inference-preview` با input محدود به `price` در واحد
+    پروژه و `cash|tomorrow`؛
+  - دو setting خاموشِ پیش‌فرض
+    `COIN_INTELLIGENCE_INFERENCE_PREVIEW_ENABLED=false` و
+    `COIN_INTELLIGENCE_INFERENCE_SNAPSHOT_PATH`؛
+  - این endpoint یک Snapshot local atomic را با P5-A/B می‌خواند، سپس P5-C
+    را پیش از پاسخ append می‌کند؛
+  - `docs/COIN_INTELLIGENCE_SHADOW_PREVIEW_API.md` و test API مستقیم.
+- موارد عمداً انجام‌نشده:
+  - `POST /api/offers/`، `OfferCreate`، parser بات، parser متن WebApp، UI،
+    worker، collector، Snapshot publisher، Telegram و sync سه‌سروره تغییر
+    نکرده‌اند؛
+  - پیش‌نمایش هرگز Offer ایجاد/ویرایش/لغو یا commodity پیش‌فرض تعیین نمی‌کند؛
+  - migration P5-C یا flag روی runtime/production فعال نشده است.
+- قرارداد/schema/versionهای افزوده یا تغییرکرده:
+  - endpoint authenticated است، key opaque server-generated برمی‌گرداند و
+    فقط result `AUTO_SELECT|CONFIRM|ABSTAIN` و candidateهای catalog-resolved
+    را نشان می‌دهد؛
+  - flag خاموش `404`، نبود path `503`، و خطای catalog/audit `503` با rollback
+    می‌دهد؛ هیچ خطا به امام fallback نمی‌شود؛
+  - `AUTO_SELECT` پاسخ shadow است نه اجازهٔ ثبت آفر؛ submit-time recompute و
+    confirmation هنوز لازم است.
+- Migration و نتیجهٔ upgrade/downgrade: migration جدیدی در P6-A ندارد؛ این
+  endpoint تا اجرای کنترل‌شدهٔ migration P5-C در محیط target فقط fail-closed
+  خواهد بود.
+- Test commands و نتیجهٔ دقیق:
+  - command محیط ساختگی با
+    `python3 -m unittest -q tests.test_coin_intelligence_preview_api` →
+    `Ran 4 tests ... OK`؛
+  - regression کامل P0 تا P6-A و guardهای Offer/Trade/migration با env
+    ساختگی و pycache موقت → `Ran 245 tests in 5.398s ... OK`.
+- داده/fixture استفاده‌شده و محل امن آن: فقط Snapshot/catalog/audit synthetic
+  و fake DB؛ endpoint واقعی، user واقعی، snapshot واقعی یا service بیرونی
+  استفاده یا mutate نشد.
+- نتیجهٔ health/freshness/replay: P5-A age/receipt را validate می‌کند؛ P6-A
+  آن‌ها را فقط carry/audit می‌کند. هر استثنا rollback می‌شود و پاسخ unavailable
+  می‌گیرد، نه دادهٔ stale یا انتخاب پنهان.
+- رفتار rollback آزموده‌شده: failure catalog/audit یک commit صفر و rollback
+  واحد دارد؛ ABSTAIN معتبر به‌عنوان پاسخ سالم بدون candidate برمی‌گردد.
+- ریسک‌های باقیمانده و مالک/تاریخ پیگیری:
+  - endpoint تنها پس از publisher/permission deployment و migration P5-C
+    می‌تواند برای shadow telemetry فعال شود؛ owner deployment؛
+  - P6-B باید parserهای بات/WebApp و P6-C باید submit-time receipt/recompute,
+    confirmation و idempotency fingerprint را بدون broadening بی‌اجازه اضافه
+    کنند؛
+  - replay/race واقعی audit باید در PostgreSQL scratch gate سنجیده شود.
+- تصمیم مرحلهٔ بعد و تأیید لازم: تا زمان عبور از P6-B/C و E2E، preview فقط
+  ابزار مشاهده است و هدف اولیهٔ «ثبت آفر بدون نام کالا» هنوز فعال نشده است.

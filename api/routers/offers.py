@@ -7,7 +7,8 @@ import binascii
 import json
 import logging
 import os
-from datetime import datetime, timedelta
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
 from uuid import UUID
 
@@ -111,6 +112,12 @@ from core.services.offer_republish_service import (
     ensure_republish_payload_matches_source,
     list_repeatable_offers,
     lock_repeatable_offer,
+)
+from core.market_intelligence.coin_catalog import resolve_coin_inference_against_catalog
+from core.market_intelligence.coin_inference import infer_coin_commodity_from_published_snapshot
+from core.market_intelligence.coin_inference_audit import (
+    CoinInferenceAuditCommand,
+    append_coin_inference_audit,
 )
 from core import telegram_gateway
 from core.trade_forwarding import verify_internal_signature
@@ -249,6 +256,53 @@ class OfferCreate(BaseModel):
         pattern=r"^[A-Za-z0-9][A-Za-z0-9:._-]{7,63}$",
         description="شناسه یکتای پایدار تلاش ثبت لفظ",
     )
+
+
+class CoinInferencePreviewRequest(BaseModel):
+    """Shadow-only product inference request; it cannot create an offer."""
+
+    price: int = Field(..., gt=0, description="قیمت در واحد پروژه (هزار تومان)")
+    settlement_type: str = Field(
+        default="cash",
+        pattern="^(cash|tomorrow)$",
+        description="نقدی یا فردایی",
+    )
+
+
+class CoinInferencePreviewCandidateResponse(BaseModel):
+    commodity_id: int
+    commodity_code: str
+    commodity_name: str
+    center_project_price: int
+    lower_project_price: int
+    upper_project_price: int
+    confidence: str
+    distance_to_center_relative: float
+
+
+class CoinInferencePreviewResponse(BaseModel):
+    status: str
+    decision_key: str
+    settlement_type: str
+    snapshot_generated_at_utc: str | None
+    snapshot_receipt: str | None
+    reason: str | None
+    candidates: list[CoinInferencePreviewCandidateResponse]
+
+
+def _coin_inference_preview_path_or_error() -> str:
+    if not settings.coin_intelligence_inference_preview_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="قابلیت آزمایشی تشخیص کالا فعال نیست.",
+        )
+    snapshot_path = (settings.coin_intelligence_inference_snapshot_path or "").strip()
+    if not snapshot_path:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="snapshot محلی تشخیص کالا آماده نیست.",
+        )
+    return snapshot_path
 
 
 def _build_webapp_offer_creation_command(
@@ -1131,6 +1185,73 @@ async def _forward_offer_expiry_if_remote_home(
 
 
 # --- Endpoints ---
+
+@router.post("/inference-preview", response_model=CoinInferencePreviewResponse)
+async def preview_coin_commodity_inference(
+    payload: CoinInferencePreviewRequest,
+    db: AsyncSession = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """Return a shadow inference decision without changing an Offer."""
+
+    snapshot_path = _coin_inference_preview_path_or_error()
+    settlement = "CASH" if payload.settlement_type == "cash" else "TOMORROW"
+    try:
+        ranker_result = infer_coin_commodity_from_published_snapshot(
+            snapshot_path,
+            price_project_thousand_toman=payload.price,
+            settlement_term=settlement,
+            now_utc=datetime.now(timezone.utc),
+        )
+        catalog_result = await resolve_coin_inference_against_catalog(db, ranker_result)
+        decision_key = secrets.token_hex(32)
+        await append_coin_inference_audit(
+            db,
+            CoinInferenceAuditCommand(
+                decision_key=decision_key,
+                source_surface="WEBAPP",
+                submitted_project_price=payload.price,
+                decision=catalog_result,
+            ),
+        )
+        await db.commit()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await db.rollback()
+        log_trading_event(
+            logger,
+            "coin_inference_preview.unavailable",
+            level="warning",
+            action="coin_inference_preview",
+            result="abstained",
+            error_class=type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="پیش‌نمایش تشخیص کالا در حال حاضر در دسترس نیست.",
+        ) from exc
+    return CoinInferencePreviewResponse(
+        status=catalog_result.status,
+        decision_key=decision_key,
+        settlement_type=payload.settlement_type,
+        snapshot_generated_at_utc=catalog_result.snapshot_generated_at_utc,
+        snapshot_receipt=catalog_result.snapshot_receipt,
+        reason=catalog_result.reason,
+        candidates=[
+            CoinInferencePreviewCandidateResponse(
+                commodity_id=item.commodity_id,
+                commodity_code=item.commodity_code,
+                commodity_name=item.commodity_name,
+                center_project_price=item.center_project_price,
+                lower_project_price=item.lower_project_price,
+                upper_project_price=item.upper_project_price,
+                confidence=item.confidence,
+                distance_to_center_relative=item.distance_to_center_relative,
+            )
+            for item in catalog_result.candidates
+        ],
+    )
 
 @router.post("/", response_model=OfferResponse, status_code=status.HTTP_201_CREATED)
 async def create_offer(
