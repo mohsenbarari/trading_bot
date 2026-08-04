@@ -987,6 +987,53 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   و same-book، explicit price conflict و کالای unnamed را resolve یا reject
   کند؛ بدون default امام در data pipeline.
 
+### P2-C-B3 — resolution علّی کالای گروه — 2026-08-04 — PARTIAL
+
+- Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
+- Promotion branch commit(s): commit B3 شامل resolver pure، projection
+  privacy-minimized، test و این یادداشت روی
+  `candidate/coin-commodity-inference-promotion`.
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - `core/market_intelligence/coin_group_resolution.py`: strict-prior
+    same-book anchor policy، abstention، reject explicit conflict و projection
+    با availability صحیح reconciliation؛
+  - `docs/COIN_INTELLIGENCE_COIN_GROUP_RESOLUTION.md` و fixtureهای synthetic.
+- موارد عمداً انجام‌نشده:
+  - provider anchor از Store/Snapshot، re-evaluation scheduling، write
+    transaction، trade linking و هرگونه default امام وجود ندارد.
+- قرارداد/schema/versionهای افزوده یا تغییرکرده:
+  - حداقل دو anchor `ELIGIBLE` با unit از پیش تبدیل‌شدهٔ project لازم است؛
+    anchor آینده، دیررس، ناهم‌settlement/form یا فاقد quality قابل استفاده
+    نیست؛
+  - کالای بی‌نام فقط با winner نزدیک و margin کافی `ELIGIBLE` می‌شود؛
+    نام explicit ناسازگار `REJECTED` می‌شود و هرگز rewrite نمی‌شود؛
+  - زمان event fact همان پیام اصلی و `available_at` آن زمان واقعی resolution
+    است؛ بنابراین backtest/snapshot به آینده leak نمی‌کند.
+- Migration و نتیجهٔ upgrade/downgrade: migration یا worker ندارد. rollback
+  برابر عدم فراخوانی resolver است و factهای PENDING قبلی را تغییر نمی‌دهد.
+- Test commands و نتیجهٔ دقیق:
+  - `python3 -m unittest -q
+    tests.test_coin_intelligence_coin_group_resolution` با pycache موقت اجرا
+    شد؛ نتیجه: `Ran 5 tests in 0.008s ... OK`.
+  - baseline ترکیبیِ P0 تا P4-A/P2-B/P2-D/P2-C-B3 و guardهای Offer/Trade/
+    migration با env ساختگی و pycache موقت اجرا شد؛ نتیجه:
+    `Ran 212 tests in 5.365s ... OK`.
+- داده/fixture استفاده‌شده و محل امن آن: فقط anchor/text synthetic در process
+  test؛ Store، Telegram، فایل staging واقعی یا دادهٔ کاربر خوانده نشد.
+- نتیجهٔ health/freshness/replay: explicit typo در صورت winner متفاوت reject
+  می‌شود؛ future/wrong-book/thin evidence pending می‌ماند؛ resolved fact تا
+  resolution timestamp برای Snapshot در دسترس نیست.
+- رفتار rollback آزموده‌شده: نبود/ابهام anchor هیچ offer را eligible نمی‌کند
+  و projection فاقد text/message/sender/reply است.
+- ریسک‌های باقیمانده و مالک/تاریخ پیگیری:
+  - anchor provider باید source/unit/conversion را جدا و fail-closed ثابت
+    کند؛ P2-C-B3 integration owner؛
+  - trade agreement، partial fill و source edit chain هنوز B4 هستند؛
+  - P4-B rate producer تا data flow کامل فعال نمی‌شود.
+- تصمیم مرحلهٔ بعد و تأیید لازم: P2-C-B4 باید با reply graph موقت فقط
+  confirmationهای قطعی را trade کند، قیمت توافقی را بر offer مقدم بداند و
+  پس از این quality gate به canonical Store بنویسد.
+
 ### P2-D — adapter external تتر و IME — 2026-08-04 — PARTIAL
 
 - Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
