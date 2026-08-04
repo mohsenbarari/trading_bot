@@ -598,7 +598,7 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
                     expected,
                 )
 
-    async def test_text_offer_accepts_compact_and_legacy_compatibility_contexts(self):
+    async def test_text_offer_accepts_all_compact_and_full_valid_contexts(self):
         cases = (
             ("خف امام 30تا 75800", "buy", "tomorrow"),
             ("خ‌ف امام 30تا 75800", "buy", "tomorrow"),
@@ -606,11 +606,6 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
             ("ف‌ف امام 30تا 75800", "sell", "tomorrow"),
             ("خریدفردا امام 30تا 75800", "buy", "tomorrow"),
             ("فروش‌فردایی امام 30تا 75800", "sell", "tomorrow"),
-            ("خریدنقد امام 30تا 75800", "buy", "cash"),
-            ("خ ن امام 30تا 75800", "buy", "cash"),
-            ("ف ن امام 30تا 75800", "sell", "cash"),
-            ("خ ن ف امام 30تا 75800", "buy", "tomorrow"),
-            ("ف ن ف امام 30تا 75800", "sell", "tomorrow"),
         )
 
         for sample, expected_side, expected_settlement in cases:
@@ -619,6 +614,21 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNone(error)
                 self.assertIsNotNone(result)
                 self.assertEqual((result.trade_type, result.settlement_type), (expected_side, expected_settlement))
+
+    async def test_text_offer_rejects_deprecated_cash_marker_forms(self):
+        invalid_samples = (
+            "خ ن امام 30تا 75800",
+            "ف ن امام 30تا 75800",
+            "خ ن ف امام 30تا 75800",
+            "ف ن ف امام 30تا 75800",
+            "خرید نقد امام 30تا 75800",
+            "فروش نقد فردا امام 30تا 75800",
+        )
+        for sample in invalid_samples:
+            with self.subTest(sample=sample):
+                result, error = await offer_parser.parse_offer_text(sample)
+                self.assertIsNone(result)
+                self.assertIsNotNone(error)
 
     async def test_low_date_marker_is_optional_inference_constraint(self):
         result, error = await offer_parser.parse_offer_text("خ ربع پ 30تا 45800")

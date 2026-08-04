@@ -1776,8 +1776,7 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     `OMITTED`، `UNRESOLVED` یا `LOW_DATE_HINT` را نگه می‌دارد؛
   - grammar استاندارد به `خ`/`ف` برای نقد و `خ ف`/`ف ف` برای فردا تغییر
     کرد. شکل‌های چسبیده و نیم‌فاصلهٔ فردایی (`خف`/`خ‌ف` و `فف`/`ف‌ف`) و
-    فرم‌های کامل معتبرند؛ grammar قدیمی فقط برای خواندن پیام‌های گذشته
-    پذیرفته می‌شود؛
+    فرم‌های کامل معتبرند؛ marker قدیمی نقد به‌صورت مستقل معتبر نیست؛
   - `پ` مستقل به‌عنوان قید اختیاری تاریخ پایین ثبت می‌شود. aliasهای صریح
     پایین مانند `ربع پ` و `ت پ` همچنان کالا را قطعی map می‌کنند؛
   - API parse metadata `commodity_resolution` و `low_date_hint` را برمی‌گرداند
@@ -1795,7 +1794,7 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
 - Test command و نتیجه:
   - `tests.test_manual_offer_validation` با catalog کامل، جابه‌جایی همهٔ
     بلوک‌ها، فرم چسبیده/نیم‌فاصله، compatibility و `پ` اجرا شد؛ همراه
-    router/bot/tutorial/probe/suggestion، `56` تست backend سبز شد؛
+    router/bot/tutorial/probe/suggestion، `57` تست backend سبز شد؛
   - `src/utils/settlementType.test.ts` و `src/views/MarketView.test.ts`
     با `38` تست سبز، `vue-tsc --noEmit` سبز و build Vite نیز در sandbox
     موقت اجرا شد؛ وابستگی جدیدی نصب نشد.

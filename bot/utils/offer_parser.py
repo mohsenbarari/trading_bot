@@ -55,24 +55,16 @@ RESIDUAL_SETTLEMENT_MARKER_MESSAGE = (
     "❌ نشانگر تسویه فقط داخل بلوک نوع معامله و تسویه مجاز است"
 )
 OFFER_CONTEXT_PATTERNS = (
-    # Full forms. «نقد» remains accepted for users with an older habit, but
-    # the compact current form no longer needs it.
-    (re.compile(r'(?<![\u0600-\u06FF\u200c])خرید(?:[\s\u200c]*نقد)?[\s\u200c]*(?:فردا|فردایی)(?![\u0600-\u06FF\u200c])'), "buy", SettlementType.TOMORROW.value),
-    (re.compile(r'(?<![\u0600-\u06FF\u200c])فروش(?:[\s\u200c]*نقد)?[\s\u200c]*(?:فردا|فردایی)(?![\u0600-\u06FF\u200c])'), "sell", SettlementType.TOMORROW.value),
+    # Full current forms.  «نقد» and the old standalone «ن» marker are not
+    # part of the grammar anymore: cash is implicit in خرید/فروش or خ/ف.
+    (re.compile(r'(?<![\u0600-\u06FF\u200c])خرید[\s\u200c]*(?:فردا|فردایی)(?![\u0600-\u06FF\u200c])'), "buy", SettlementType.TOMORROW.value),
+    (re.compile(r'(?<![\u0600-\u06FF\u200c])فروش[\s\u200c]*(?:فردا|فردایی)(?![\u0600-\u06FF\u200c])'), "sell", SettlementType.TOMORROW.value),
     # Current compact forms accept normal space, zero-width non-joiner, or no
     # separator: خ ف / خ‌ف / خف and ف ف / ف‌ف / فف.
     (re.compile(r'(?<![\u0600-\u06FF\u200c])خ[\s\u200c]*ف(?![\u0600-\u06FF\u200c])'), "buy", SettlementType.TOMORROW.value),
     (re.compile(r'(?<![\u0600-\u06FF\u200c])ف[\s\u200c]*ف(?![\u0600-\u06FF\u200c])'), "sell", SettlementType.TOMORROW.value),
-    # Compatibility only for already-saved draft/repeat text. New generated
-    # text and help never emit these forms.
-    (re.compile(r'(?<![\u0600-\u06FF\u200c])خ[\s\u200c]+ن[\s\u200c]+ف(?![\u0600-\u06FF\u200c])'), "buy", SettlementType.TOMORROW.value),
-    (re.compile(r'(?<![\u0600-\u06FF\u200c])ف[\s\u200c]+ن[\s\u200c]+ف(?![\u0600-\u06FF\u200c])'), "sell", SettlementType.TOMORROW.value),
-    (re.compile(r'(?<![\u0600-\u06FF\u200c])خرید[\s\u200c]*نقد(?![\u0600-\u06FF\u200c])'), "buy", SettlementType.CASH.value),
-    (re.compile(r'(?<![\u0600-\u06FF\u200c])فروش[\s\u200c]*نقد(?![\u0600-\u06FF\u200c])'), "sell", SettlementType.CASH.value),
     (re.compile(r'(?<![\u0600-\u06FF\u200c])خرید(?![\u0600-\u06FF\u200c])'), "buy", SettlementType.CASH.value),
     (re.compile(r'(?<![\u0600-\u06FF\u200c])فروش(?![\u0600-\u06FF\u200c])'), "sell", SettlementType.CASH.value),
-    (re.compile(r'(?<![\u0600-\u06FF\u200c])خ[\s\u200c]+ن(?![\u0600-\u06FF\u200c])'), "buy", SettlementType.CASH.value),
-    (re.compile(r'(?<![\u0600-\u06FF\u200c])ف[\s\u200c]+ن(?![\u0600-\u06FF\u200c])'), "sell", SettlementType.CASH.value),
     (re.compile(r'(?<![\u0600-\u06FF\u200c])خ(?![\u0600-\u06FF\u200c])'), "buy", SettlementType.CASH.value),
     (re.compile(r'(?<![\u0600-\u06FF\u200c])ف(?![\u0600-\u06FF\u200c])'), "sell", SettlementType.CASH.value),
 )
