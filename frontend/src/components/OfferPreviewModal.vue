@@ -12,6 +12,28 @@ type ParsedOfferPreview = {
   is_wholesale: boolean
   lot_sizes: number[] | null
   notes: string | null
+  commodity_inference?: CoinInferenceShadowPreview
+}
+
+type CoinInferenceShadowCandidate = {
+  commodity_id: number
+  commodity_code: string
+  commodity_name: string
+  center_project_price: number
+  lower_project_price: number
+  upper_project_price: number
+  confidence: string
+  distance_to_center_relative: number
+}
+
+type CoinInferenceShadowPreview = {
+  mode: 'SHADOW_ONLY'
+  status: 'AUTO_SELECT' | 'CONFIRM' | 'ABSTAIN'
+  decision_key: string | null
+  snapshot_generated_at_utc: string | null
+  snapshot_receipt: string | null
+  reason: string | null
+  candidates: CoinInferenceShadowCandidate[]
 }
 
 type OfferPriceWarning = {
@@ -46,6 +68,15 @@ const lotSummary = computed(() => {
   if (!props.offer.lot_sizes?.length) return 'خُرد'
   return `خُرد ${props.offer.lot_sizes.join(' + ')}`
 })
+const shadowInference = computed(() => (
+  props.offer.commodity_inference?.mode === 'SHADOW_ONLY'
+    ? props.offer.commodity_inference
+    : null
+))
+const shadowLeadCandidate = computed(() => shadowInference.value?.candidates[0] ?? null)
+const shadowCandidateNames = computed(() => (
+  shadowInference.value?.candidates.map((candidate) => candidate.commodity_name).join('، ') ?? ''
+))
 const confirmButtonText = computed(() => {
   if (props.submitting) return 'در حال ارسال...'
   return props.warning ? 'با وجود هشدار منتشر کن' : 'تایید و ارسال'
@@ -90,6 +121,25 @@ function handleConfirmClick() {
             توضیحات: {{ offer.notes }}
           </div>
         </div>
+
+        <section v-if="shadowInference" class="offer-inference-shadow" data-test="offer-inference-shadow" aria-live="polite">
+          <div class="offer-inference-shadow-heading">
+            <strong>تشخیص آزمایشی کالا</strong>
+            <span>در ثبت آفر اثری ندارد</span>
+          </div>
+          <p v-if="shadowInference.status === 'AUTO_SELECT' && shadowLeadCandidate" class="offer-inference-shadow-copy">
+            مدل قیمت را نزدیک به «{{ shadowLeadCandidate.commodity_name }}» می‌بیند؛ کالای این آفر همچنان «{{ offer.commodity_name }}» است.
+          </p>
+          <p v-else-if="shadowInference.status === 'CONFIRM'" class="offer-inference-shadow-copy">
+            مدل بین چند کالا به نتیجهٔ یکتا نرسیده است؛ هیچ کالایی خودکار انتخاب نمی‌شود.
+          </p>
+          <p v-else class="offer-inference-shadow-copy">
+            مدل برای این قیمت نتیجهٔ قابل اتکا ندارد؛ کالای آفر بدون تغییر می‌ماند.
+          </p>
+          <p v-if="shadowCandidateNames" class="offer-inference-shadow-candidates">
+            گزینه‌های مدل: {{ shadowCandidateNames }}
+          </p>
+        </section>
 
         <div v-if="warning" class="offer-preview-warning" data-test="offer-preview-warning">
           <div class="offer-preview-warning-title">{{ warning.detail }}</div>
@@ -204,6 +254,49 @@ function handleConfirmClick() {
   font-size: 0.92rem;
   line-height: 1.75;
   color: var(--ds-text-secondary, #475569);
+}
+
+.offer-inference-shadow {
+  margin-top: 0.9rem;
+  padding: 0.9rem 1rem;
+  border: 1px dashed rgba(14, 116, 144, 0.34);
+  border-radius: 0.95rem;
+  background: rgba(14, 116, 144, 0.07);
+  color: #155e75;
+}
+
+.offer-inference-shadow-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+.offer-inference-shadow-heading strong {
+  font-weight: 800;
+}
+
+.offer-inference-shadow-heading span {
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(14, 116, 144, 0.12);
+  font-size: 0.73rem;
+  font-weight: 700;
+}
+
+.offer-inference-shadow-copy,
+.offer-inference-shadow-candidates {
+  margin: 0.55rem 0 0;
+  font-size: 0.86rem;
+  line-height: 1.75;
+}
+
+.offer-inference-shadow-candidates {
+  color: #0f766e;
+  font-weight: 700;
 }
 
 .offer-preview-error {

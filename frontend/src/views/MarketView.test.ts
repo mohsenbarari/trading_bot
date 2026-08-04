@@ -763,6 +763,67 @@ describe('MarketView.vue', () => {
     wrapper.unmount()
   })
 
+  it('shows parser inference as shadow metadata without changing the offer commodity', async () => {
+    const wrapper = await mountMarketView()
+    await flushPromises()
+    marketViewMocks.apiFetchMock.mockClear()
+    marketViewMocks.apiFetchJsonMock.mockResolvedValueOnce({
+      success: true,
+      data: {
+        trade_type: 'buy',
+        settlement_type: 'tomorrow',
+        commodity_id: 1,
+        commodity_name: 'امام',
+        quantity: 5,
+        price: 182700,
+        is_wholesale: false,
+        lot_sizes: [5],
+        notes: null,
+        commodity_inference: {
+          mode: 'SHADOW_ONLY',
+          status: 'AUTO_SELECT',
+          decision_key: 'a'.repeat(64),
+          snapshot_generated_at_utc: '2026-08-04T12:00:00+00:00',
+          snapshot_receipt: 'b'.repeat(64),
+          reason: null,
+          candidates: [{
+            commodity_id: 71,
+            commodity_code: 'BAHAR',
+            commodity_name: 'بهار',
+            center_project_price: 182650,
+            lower_project_price: 181900,
+            upper_project_price: 183400,
+            confidence: 'HIGH',
+            distance_to_center_relative: 0.0003,
+          }],
+        },
+      },
+    })
+
+    await wrapper.find('.text-offer-input').setValue('خرید 5 تا 182700')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    const shadow = wrapper.get('[data-test="offer-inference-shadow"]')
+    expect(shadow.text()).toContain('تشخیص آزمایشی کالا')
+    expect(shadow.text()).toContain('در ثبت آفر اثری ندارد')
+    expect(shadow.text()).toContain('بهار')
+    expect(shadow.text()).toContain('امام')
+
+    await wrapper.find('.offer-preview-confirm').trigger('click')
+    await flushPromises()
+
+    const postCall = marketViewMocks.apiFetchMock.mock.calls.find(
+      ([path, options]) => path === '/api/offers/' && options?.method === 'POST',
+    )
+    expect(postCall).toBeTruthy()
+    expect(JSON.parse(String(postCall![1].body))).toEqual(expect.objectContaining({
+      commodity_id: 1,
+      price: 182700,
+    }))
+    wrapper.unmount()
+  })
+
   it('locks offer publishing during in-flight confirmation and uses one stable idempotency key', async () => {
     let resolvePost: ((value: any) => void) | null = null
     marketViewMocks.apiFetchMock.mockImplementation((path: string, options?: RequestInit) => {

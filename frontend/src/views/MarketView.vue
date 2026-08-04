@@ -37,6 +37,28 @@ interface ParsedOfferPreview {
   is_wholesale: boolean
   lot_sizes: number[] | null
   notes: string | null
+  commodity_inference?: CoinInferenceShadowPreview
+}
+
+interface CoinInferenceShadowCandidate {
+  commodity_id: number
+  commodity_code: string
+  commodity_name: string
+  center_project_price: number
+  lower_project_price: number
+  upper_project_price: number
+  confidence: string
+  distance_to_center_relative: number
+}
+
+interface CoinInferenceShadowPreview {
+  mode: 'SHADOW_ONLY'
+  status: 'AUTO_SELECT' | 'CONFIRM' | 'ABSTAIN'
+  decision_key: string | null
+  snapshot_generated_at_utc: string | null
+  snapshot_receipt: string | null
+  reason: string | null
+  candidates: CoinInferenceShadowCandidate[]
 }
 
 interface OfferPriceWarning {

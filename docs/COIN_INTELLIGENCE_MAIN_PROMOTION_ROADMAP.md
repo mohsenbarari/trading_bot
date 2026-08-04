@@ -1674,3 +1674,35 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     contract را در preview خودش مصرف کند؛
   - پس از replay/telemetry کافی، فقط P6-C می‌تواند receipt تازه و انتخاب
     explicit کاربر را در submit به commodity نهایی تبدیل کند.
+
+### P6-B1 — نمایش metadata سایه در WebApp — 2026-08-04 — COMPLETE
+
+- Scope انجام‌شده:
+  - `OfferPreviewModal` در پاسخ parse فقط وقتی `commodity_inference.mode`
+    برابر `SHADOW_ONLY` باشد، بخش «تشخیص آزمایشی کالا» را نمایش می‌دهد؛
+  - نتیجهٔ `AUTO_SELECT` فقط نام candidate مدل را در کنار کالای فعلی parser
+    نشان می‌دهد؛ `CONFIRM` و `ABSTAIN` نیز صریحاً عدم انتخاب خودکار را
+    اعلام می‌کنند؛
+  - متن UI می‌گوید «در ثبت آفر اثری ندارد» و هیچ control برای پذیرش یا
+    انتخاب candidate ندارد.
+- مرز قطعی و رفتار ایمنی:
+  - `buildOfferCreatePayload` تغییر نکرده است؛ بنابراین `commodity_id` و
+    `commodity_name` ارسالی همان نتیجهٔ legacy parser باقی می‌ماند، حتی اگر
+    candidate سایه کالای دیگری باشد؛
+  - receipt/key/candidateهای metadata به payload ثبت آفر یا متن آفر اضافه
+    نمی‌شوند؛ این مرحله فقط مشاهده‌پذیری کاربر را اضافه می‌کند؛
+  - پاسخ parse بدون metadata و همهٔ مسیرهای عادی پیش‌نمایش دقیقاً UI پیشین
+    را دارند.
+- Test command و نتیجه:
+  - `MarketView.test.ts` با پاسخ `AUTO_SELECT` متناقض با کالای legacy اجرا
+    شد و اثبات می‌کند UI هر دو را نمایش می‌دهد، اما POST نهایی همچنان همان
+    `commodity_id` legacy را می‌فرستد؛ `34 tests ... OK`؛
+  - production build و `vue-tsc --noEmit` در sandbox موقت و با dependency
+    موجود اجرا شدند و موفق بودند؛ وابستگی جدیدی نصب نشد.
+- گیت مرحلهٔ بعد:
+  - این تغییر هنوز به معنی فعال بودن flag یا publisher/collector نیست؛
+    snapshot واقعی، migration audit در PostgreSQL scratch، و telemetry
+    shadow باید پیش از P6-C فراهم شوند؛
+  - P6-C تنها پس از بازبینی دادهٔ سایه می‌تواند confirmation صریح کاربر،
+    recompute در submit-time و receipt binding را طراحی کند. تا آن زمان
+    هیچ انتخاب خودکار کالا مجاز نیست.
