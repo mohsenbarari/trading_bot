@@ -7,7 +7,6 @@ import binascii
 import json
 import logging
 import os
-import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
 from uuid import UUID
@@ -113,12 +112,7 @@ from core.services.offer_republish_service import (
     list_repeatable_offers,
     lock_repeatable_offer,
 )
-from core.market_intelligence.coin_catalog import resolve_coin_inference_against_catalog
-from core.market_intelligence.coin_inference import infer_coin_commodity_from_published_snapshot
-from core.market_intelligence.coin_inference_audit import (
-    CoinInferenceAuditCommand,
-    append_coin_inference_audit,
-)
+from core.market_intelligence.coin_inference_shadow import observe_coin_inference_shadow
 from core import telegram_gateway
 from core.trade_forwarding import verify_internal_signature
 from core.trading_observability import log_trading_event
@@ -358,27 +352,18 @@ async def _shadow_inference_for_implicit_commodity(
         }
     settlement = "CASH" if settlement_type == "cash" else "TOMORROW"
     try:
-        ranker_result = infer_coin_commodity_from_published_snapshot(
-            snapshot_path,
-            price_project_thousand_toman=price,
-            settlement_term=settlement,
-            now_utc=datetime.now(timezone.utc),
-        )
-        catalog_result = await resolve_coin_inference_against_catalog(db, ranker_result)
-        decision_key = secrets.token_hex(32)
-        await append_coin_inference_audit(
+        observation = await observe_coin_inference_shadow(
             db,
-            CoinInferenceAuditCommand(
-                decision_key=decision_key,
-                source_surface="WEBAPP",
-                submitted_project_price=price,
-                decision=catalog_result,
-            ),
+            snapshot_path=snapshot_path,
+            submitted_project_price=price,
+            settlement_term=settlement,
+            source_surface="WEBAPP",
+            now_utc=datetime.now(timezone.utc),
         )
         await db.commit()
         return _catalog_inference_shadow_payload(
-            catalog_result,
-            decision_key=decision_key,
+            observation.decision,
+            decision_key=observation.decision_key,
         )
     except Exception as exc:
         await db.rollback()
@@ -1293,22 +1278,13 @@ async def preview_coin_commodity_inference(
     snapshot_path = _coin_inference_preview_path_or_error()
     settlement = "CASH" if payload.settlement_type == "cash" else "TOMORROW"
     try:
-        ranker_result = infer_coin_commodity_from_published_snapshot(
-            snapshot_path,
-            price_project_thousand_toman=payload.price,
-            settlement_term=settlement,
-            now_utc=datetime.now(timezone.utc),
-        )
-        catalog_result = await resolve_coin_inference_against_catalog(db, ranker_result)
-        decision_key = secrets.token_hex(32)
-        await append_coin_inference_audit(
+        observation = await observe_coin_inference_shadow(
             db,
-            CoinInferenceAuditCommand(
-                decision_key=decision_key,
-                source_surface="WEBAPP",
-                submitted_project_price=payload.price,
-                decision=catalog_result,
-            ),
+            snapshot_path=snapshot_path,
+            submitted_project_price=payload.price,
+            settlement_term=settlement,
+            source_surface="WEBAPP",
+            now_utc=datetime.now(timezone.utc),
         )
         await db.commit()
     except HTTPException:
@@ -1328,12 +1304,12 @@ async def preview_coin_commodity_inference(
             detail="پیش‌نمایش تشخیص کالا در حال حاضر در دسترس نیست.",
         ) from exc
     return CoinInferencePreviewResponse(
-        status=catalog_result.status,
-        decision_key=decision_key,
+        status=observation.decision.status,
+        decision_key=observation.decision_key,
         settlement_type=payload.settlement_type,
-        snapshot_generated_at_utc=catalog_result.snapshot_generated_at_utc,
-        snapshot_receipt=catalog_result.snapshot_receipt,
-        reason=catalog_result.reason,
+        snapshot_generated_at_utc=observation.decision.snapshot_generated_at_utc,
+        snapshot_receipt=observation.decision.snapshot_receipt,
+        reason=observation.decision.reason,
         candidates=[
             CoinInferencePreviewCandidateResponse(
                 commodity_id=item.commodity_id,
@@ -1345,7 +1321,7 @@ async def preview_coin_commodity_inference(
                 confidence=item.confidence,
                 distance_to_center_relative=item.distance_to_center_relative,
             )
-            for item in catalog_result.candidates
+            for item in observation.decision.candidates
         ],
     )
 

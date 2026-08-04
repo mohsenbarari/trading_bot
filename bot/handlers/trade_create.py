@@ -117,6 +117,7 @@ from core.services.telegram_notification_outbox_service import (
     enqueue_offer_success_preview_notification_once,
 )
 from core.telegram_delivery_queue_contract import TelegramDeliveryAction
+from core.market_intelligence.coin_inference_shadow import observe_coin_inference_shadow
 
 
 logger = logging.getLogger(__name__)
@@ -168,6 +169,75 @@ def _build_channel_offer_text(
     if normalized_notes:
         message += f"\nتوضیحات: {normalized_notes}"
     return f"{message}\n{INVISIBLE_CHANNEL_PADDING}"
+
+
+async def _text_offer_shadow_inference_summary(result: object) -> str | None:
+    """Build an observation-only inference note for an omitted commodity name.
+
+    This runs only behind the off-by-default preview flag.  It never changes
+    the parser output, FSM data, or eventual offer command; an unavailable
+    model simply produces an explicit shadow abstention in the preview.
+    """
+
+    if not getattr(settings, "coin_intelligence_inference_preview_enabled", False):
+        return None
+    if getattr(result, "commodity_resolution", None) != "IMPLICIT_DEFAULT":
+        return None
+    snapshot_path = str(
+        getattr(settings, "coin_intelligence_inference_snapshot_path", "") or ""
+    ).strip()
+    if not snapshot_path:
+        return (
+            "🔬 تشخیص آزمایشی کالا: Snapshot محلی آماده نیست؛ "
+            "کالای آفر بدون تغییر می‌ماند."
+        )
+
+    settlement_value = getattr(result, "settlement_type", SettlementType.CASH.value)
+    normalized_settlement = getattr(settlement_value, "value", settlement_value)
+    settlement_term = (
+        "TOMORROW"
+        if str(normalized_settlement).strip().lower() == SettlementType.TOMORROW.value
+        else "CASH"
+    )
+    try:
+        async with AsyncSessionLocal() as session:
+            observation = await observe_coin_inference_shadow(
+                session,
+                snapshot_path=snapshot_path,
+                submitted_project_price=int(getattr(result, "price")),
+                settlement_term=settlement_term,
+                source_surface="TELEGRAM_BOT",
+            )
+            await session.commit()
+    except Exception as exc:
+        logger.warning(
+            "Coin inference shadow is unavailable for bot text preview",
+            extra={
+                "event": "coin_inference_bot_shadow.unavailable",
+                "error_class": type(exc).__name__,
+            },
+        )
+        return (
+            "🔬 تشخیص آزمایشی کالا: فعلاً نتیجهٔ قابل اتکا ندارد؛ "
+            "کالای آفر بدون تغییر می‌ماند."
+        )
+
+    decision = observation.decision
+    candidate_names = "، ".join(item.commodity_name for item in decision.candidates)
+    if decision.status == "AUTO_SELECT" and decision.candidates:
+        return (
+            f"🔬 تشخیص آزمایشی کالا: مدل قیمت را نزدیک به «{decision.candidates[0].commodity_name}» "
+            f"می‌بیند؛ کالای آفر همچنان «{getattr(result, 'commodity_name', 'نامشخص')}» است و ثبت آفر تغییری نمی‌کند."
+        )
+    if decision.status == "CONFIRM":
+        return (
+            "🔬 تشخیص آزمایشی کالا: مدل بین چند کالا به نتیجهٔ یکتا نرسیده است "
+            f"({candidate_names or 'بدون گزینه'})؛ هیچ کالایی خودکار انتخاب نمی‌شود."
+        )
+    return (
+        "🔬 تشخیص آزمایشی کالا: مدل برای این قیمت نتیجهٔ قابل اتکا ندارد؛ "
+        "کالای آفر بدون تغییر می‌ماند."
+    )
 
 
 async def _canonical_commodity_name_from_session(session, commodity_id: object, fallback: object = None) -> str:
@@ -2216,7 +2286,13 @@ async def _prepare_text_offer(
 
     from bot.utils.offer_parser import parse_offer_text
 
-    result, error = await parse_offer_text(offer_text)
+    if getattr(settings, "coin_intelligence_inference_preview_enabled", False):
+        result, error = await parse_offer_text(
+            offer_text,
+            capture_commodity_resolution=True,
+        )
+    else:
+        result, error = await parse_offer_text(offer_text)
     if result is None and error is None:
         if wizard_source:
             await _text_offer_response(
@@ -2263,6 +2339,8 @@ async def _prepare_text_offer(
             )
             return False
 
+    shadow_inference_summary = await _text_offer_shadow_inference_summary(result)
+
     await state.update_data(
         trade_type=result.trade_type,
         settlement_type=getattr(result, "settlement_type", SettlementType.CASH.value),
@@ -2284,10 +2362,12 @@ async def _prepare_text_offer(
         notes=result.notes,
     )
     lot_info = "یکجا" if result.is_wholesale else f"خُرد {result.lot_sizes}"
+    shadow_section = f"{shadow_inference_summary}\n\n" if shadow_inference_summary else ""
     preview = (
         "پیش‌نمایش لفظ:\n\n"
         f"{channel_text}\n\n"
         f"📦 نوع: {lot_info}\n\n"
+        f"{shadow_section}"
         "آیا تایید می‌کنید؟"
     )
     confirm_kb = InlineKeyboardMarkup(inline_keyboard=[

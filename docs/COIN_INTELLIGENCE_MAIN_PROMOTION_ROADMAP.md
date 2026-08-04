@@ -1706,3 +1706,39 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   - P6-C تنها پس از بازبینی دادهٔ سایه می‌تواند confirmation صریح کاربر،
     recompute در submit-time و receipt binding را طراحی کند. تا آن زمان
     هیچ انتخاب خودکار کالا مجاز نیست.
+
+### P6-B2 — قرارداد مشترک shadow برای Web و بات — 2026-08-04 — COMPLETE (inactive by default)
+
+- Scope انجام‌شده:
+  - `core/market_intelligence/coin_inference_shadow.py` مالک مشترکِ یک
+    observation است: Snapshot را rank می‌کند، catalog را exact resolve و
+    audit حداقلی append می‌کند، اما commit/rollback/config/HTTP/Telegram و
+    هرگونه mutation آفر را به caller واگذار می‌کند؛
+  - endpoint Web و parse Web از همین library استفاده می‌کنند؛ بنابراین
+    یک مسیر یکتا برای rank/catalog/audit دارند؛
+  - بات فقط وقتی preview flag روشن باشد parser را با
+    `capture_commodity_resolution=True` فرا می‌خواند و فقط برای
+    `IMPLICIT_DEFAULT` نتیجهٔ shadow را در متن پیش‌نمایش نشان می‌دهد.
+- مرز قطعی و رفتار ایمنی:
+  - بات همچنان `commodity_id`/`commodity_name` legacy parser را در FSM
+    می‌گذارد و همان‌ها را هنگام ثبت ارسال می‌کند؛ candidate مدل صرفاً متن
+    اطلاع‌رسانی است؛
+  - flag پیش‌فرض خاموش است؛ در حالت پیش‌فرض signature فراخوانی parser بات،
+    state، متن preview و مسیر ثبت تغییر نمی‌کنند؛
+  - Snapshot غایب یا هر failure مدل، preview عادی را مسدود نمی‌کند، تصمیم
+    پنهان تولید نمی‌کند و فقط «عدم نتیجهٔ قابل اتکا» را نشان می‌دهد؛
+  - audit فاقد متن/کاربر/Telegram ID است و تنها در transaction مستقلی که
+    caller آن را commit می‌کند نوشته می‌شود.
+- Test command و نتیجه:
+  - unitهای shared observation، endpoint/parse Web، parser و preview بات با
+    محیط DB/Redis ساختگی اجرا شدند: `Ran 47 tests ... OK`؛
+  - test بات اثبات می‌کند حتی `AUTO_SELECT` مخالف با کالای legacy، state و
+    POST آفر را تغییر نمی‌دهد؛
+  - تلاش برای `unittest discover` کامل به‌دلیل زمان اجرای suite پیش از
+    رسیدن به summary پایان یافت؛ failure‌ای گزارش نشد، اما به‌عنوان موفقیت
+    regression کامل ثبت نمی‌شود.
+- گیت مرحلهٔ بعد:
+  - تا اجرای migration P5-C روی PostgreSQL scratch و فراهم شدن publisher
+    و telemetry واقعی، هیچ flag یا runtime جدیدی فعال نمی‌شود؛
+  - P6-C به تأیید مستقل مالک نیاز دارد: طراحی confirmation صریح کاربر،
+    recompute/receipt تازه در لحظهٔ submit و testهای replay/idempotency.

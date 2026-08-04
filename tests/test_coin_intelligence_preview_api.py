@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from api.routers.offers import CoinInferencePreviewRequest, preview_coin_commodity_inference
 from core.market_intelligence.coin_catalog import CatalogCoinCommodityCandidate, CatalogCoinCommodityInference
+from core.market_intelligence.coin_inference_shadow import CoinInferenceShadowObservation
 
 
 class _DB:
@@ -63,9 +64,10 @@ class CoinInferencePreviewApiTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch("api.routers.offers.settings.coin_intelligence_inference_preview_enabled", True),
             patch("api.routers.offers.settings.coin_intelligence_inference_snapshot_path", "/safe/snapshot.json"),
-            patch("api.routers.offers.infer_coin_commodity_from_published_snapshot", return_value=SimpleNamespace()),
-            patch("api.routers.offers.resolve_coin_inference_against_catalog", new=AsyncMock(return_value=catalog())),
-            patch("api.routers.offers.append_coin_inference_audit", new=AsyncMock()) as audit,
+            patch(
+                "api.routers.offers.observe_coin_inference_shadow",
+                new=AsyncMock(return_value=CoinInferenceShadowObservation("a" * 64, catalog())),
+            ) as observe,
         ):
             result = await preview_coin_commodity_inference(
                 CoinInferencePreviewRequest(price=186_800, settlement_type="tomorrow"),
@@ -73,8 +75,8 @@ class CoinInferencePreviewApiTests(unittest.IsolatedAsyncioTestCase):
                 _current_user=SimpleNamespace(id=5),
             )
         self.assertEqual((result.status, result.candidates[0].commodity_id, db.commits, db.rollbacks), ("AUTO_SELECT", 71, 1, 0))
-        audit.assert_awaited_once()
-        self.assertEqual(audit.await_args.args[1].decision.status, "AUTO_SELECT")
+        observe.assert_awaited_once()
+        self.assertEqual(observe.await_args.kwargs["source_surface"], "WEBAPP")
         self.assertRegex(result.decision_key, r"^[a-f0-9]{64}$")
 
     async def test_valid_abstention_is_returned_not_replaced_by_default_imam(self) -> None:
@@ -82,9 +84,10 @@ class CoinInferencePreviewApiTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch("api.routers.offers.settings.coin_intelligence_inference_preview_enabled", True),
             patch("api.routers.offers.settings.coin_intelligence_inference_snapshot_path", "/safe/snapshot.json"),
-            patch("api.routers.offers.infer_coin_commodity_from_published_snapshot", return_value=SimpleNamespace()),
-            patch("api.routers.offers.resolve_coin_inference_against_catalog", new=AsyncMock(return_value=catalog("ABSTAIN"))),
-            patch("api.routers.offers.append_coin_inference_audit", new=AsyncMock()),
+            patch(
+                "api.routers.offers.observe_coin_inference_shadow",
+                new=AsyncMock(return_value=CoinInferenceShadowObservation("a" * 64, catalog("ABSTAIN"))),
+            ),
         ):
             result = await preview_coin_commodity_inference(
                 CoinInferencePreviewRequest(price=190_000, settlement_type="cash"),
@@ -98,8 +101,10 @@ class CoinInferencePreviewApiTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch("api.routers.offers.settings.coin_intelligence_inference_preview_enabled", True),
             patch("api.routers.offers.settings.coin_intelligence_inference_snapshot_path", "/safe/snapshot.json"),
-            patch("api.routers.offers.infer_coin_commodity_from_published_snapshot", return_value=SimpleNamespace()),
-            patch("api.routers.offers.resolve_coin_inference_against_catalog", new=AsyncMock(side_effect=RuntimeError("db unavailable"))),
+            patch(
+                "api.routers.offers.observe_coin_inference_shadow",
+                new=AsyncMock(side_effect=RuntimeError("db unavailable")),
+            ),
         ):
             with self.assertRaises(HTTPException) as exc_info:
                 await preview_coin_commodity_inference(

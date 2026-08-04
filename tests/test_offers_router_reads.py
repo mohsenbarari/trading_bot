@@ -17,6 +17,7 @@ from core.market_intelligence.coin_catalog import (
     CatalogCoinCommodityCandidate,
     CatalogCoinCommodityInference,
 )
+from core.market_intelligence.coin_inference_shadow import CoinInferenceShadowObservation
 from models.customer_relation import CustomerTier
 
 
@@ -154,9 +155,10 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
             patch("api.routers.offers.settings.coin_intelligence_inference_preview_enabled", True),
             patch("api.routers.offers.settings.coin_intelligence_inference_snapshot_path", "/safe/snapshot.json"),
             patch("bot.utils.offer_parser.parse_offer_text", new=AsyncMock(return_value=(parsed, None))),
-            patch("api.routers.offers.infer_coin_commodity_from_published_snapshot", return_value=SimpleNamespace()),
-            patch("api.routers.offers.resolve_coin_inference_against_catalog", new=AsyncMock(return_value=decision)),
-            patch("api.routers.offers.append_coin_inference_audit", new=AsyncMock()) as audit,
+            patch(
+                "api.routers.offers.observe_coin_inference_shadow",
+                new=AsyncMock(return_value=CoinInferenceShadowObservation("a" * 64, decision)),
+            ) as observe,
         ):
             result = await parse_offer_text(
                 ParseOfferRequest(text="خ ن 10تا 186800"),
@@ -169,7 +171,7 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
             ("SHADOW_ONLY", "AUTO_SELECT"),
         )
         self.assertEqual(result.data["commodity_inference"]["candidates"][0]["commodity_id"], 71)
-        audit.assert_awaited_once()
+        observe.assert_awaited_once()
         db.commit.assert_awaited_once()
 
     async def test_offer_read_options_only_load_owner_when_identity_is_required(self):
