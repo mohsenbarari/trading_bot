@@ -111,7 +111,7 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
         fake_dp.start_polling.assert_awaited_once_with(fake_bot)
         fake_bot.session.close.assert_awaited_once()
 
-    async def test_main_logs_polling_errors_and_still_closes_bot(self):
+    async def test_main_propagates_polling_errors_and_still_closes_bot(self):
         fake_bot = MagicMock()
         fake_bot.session.close = AsyncMock()
         fake_dp = MagicMock()
@@ -135,10 +135,10 @@ class RunBotRuntimeTests(unittest.IsolatedAsyncioTestCase):
             'run_bot.telegram_trade_delivery_loop', _worker_forever
         ), patch('run_bot.telegram_admin_broadcast_delivery_loop', _worker_forever), patch(
             'run_bot.telegram_notification_outbox_delivery_loop', _worker_forever
-        ), patch.object(run_bot, 'logger') as logger:
-            await run_bot.main()
+        ):
+            with self.assertRaisesRegex(RuntimeError, 'boom'):
+                await run_bot.main()
 
-        logger.error.assert_called_once()
         fake_bot.session.close.assert_awaited_once()
 
     async def test_main_module_logs_stop_message_on_keyboard_interrupt(self):
