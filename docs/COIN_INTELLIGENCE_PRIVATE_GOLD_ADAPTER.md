@@ -90,3 +90,10 @@ ingestion را metric کند و `private_gold_pipeline` را با commit/retry �
 اجرا کند. pipeline فقط minute کاغذیِ بسته‌شده و non-conditional را با وزن
 offer=`1` و trade=`3` materialize می‌کند؛ physical aggregate نمی‌شود. worker
 در این commit وجود ندارد و بدون تأیید deployment فعال نخواهد شد.
+
+برای evidence دستی، `scripts/ingest_private_gold_event_spool.py` فقط فایل‌های
+JSONL موجود در runtime root را می‌پذیرد. فایل offer و trade جدا معرفی می‌شود؛
+هر line باید `published_at_utc` و `payload_text` داشته باشد. staging پیش از
+Market Store commit می‌شود تا failure بعدی با replay امن جبران شود. این command
+نه Telegram را می‌خواند، نه spool را حذف می‌کند و نه به‌صورت خودکار اجرا
+می‌شود.

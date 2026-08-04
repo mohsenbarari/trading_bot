@@ -960,9 +960,40 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     import config اجرا شد؛ `Ran 127 tests ... OK` و هیچ اتصال واقعی انجام
     نشد.
 - گیت مرحلهٔ بعد:
-  - runner دستیِ one-shot باید فقط input spool محلی و runtime root مجاز را
-    بپذیرد، ترتیب commit/retry را اجرا کند و status کاملاً redacted منتشر
-    کند. اتصال مستقیم Telegram و scheduler پس از آن و با approval جداست.
+  - اتصال مستقیم Telegram و scheduler پس از approval جدا و پس از مشاهدهٔ
+    telemetry runner روی staging انجام می‌شود.
+
+### P2-B4 — runner دستیِ spool آبشدهٔ خصوصی — 2026-08-04 — COMPLETE (manual only)
+
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - `scripts/ingest_private_gold_event_spool.py`: one-shot runner برای فایل
+    JSONL محلی، با spoolهای جداگانهٔ `--offer-spool` و `--trade-spool`؛
+  - `tests/test_ingest_private_gold_event_spool.py`: path guard، record بد،
+    retry/idempotency و خروجی redacted را تست می‌کند.
+- مرز قطعی و رفتار ایمنی:
+  - هر record فقط `published_at_utc` و `payload_text` می‌خواند؛ stream از
+    گزینهٔ CLI تعیین و در decoder دوباره با inner event verify می‌شود؛ فایل
+    spool هرگز حذف، rename یا rewrite نمی‌شود؛
+  - staging ابتدا commit می‌شود. اگر Market Store commit نشود، runner در
+    اجرای بعدی همان factهای opaque را بدون دوباره‌شماری rebuild می‌کند؛
+  - lock غیرمسدودکنندهٔ staging از دو writer محلی جلوگیری می‌کند؛ خروجی فقط
+    counter و status دارد، نه متن، شناسه یا path؛
+  - Telegram/Telethon، credential، listener، worker، cron و startup hook
+    اضافه یا فعال نشده‌اند.
+- Test command و نتیجه:
+  - `PYTHONPYCACHEPREFIX=/tmp/coin-intelligence-pycache python3 -m unittest -v
+    tests.test_ingest_private_gold_event_spool
+    tests.test_coin_intelligence_private_gold_pipeline
+    tests.test_coin_intelligence_private_gold_payloads
+    tests.test_coin_intelligence_private_gold_staging
+    tests.test_coin_intelligence_private_gold` → `Ran 28 tests ... OK`.
+  - تمام `test_coin_intelligence_*.py` با environment ساختگیِ فقط برای
+    import config اجرا شد؛ `Ran 127 tests ... OK`؛ command runner نیز جداگانه
+    `Ran 3 tests ... OK` بود. هیچ اتصال واقعی انجام نشد.
+- گیت مرحلهٔ بعد:
+  - پیش از transport Telegram، باید owner اجرایی، mapping واقعی channel→spool
+    و retention/health telemetry در staging تصویب شوند. هیچ scheduler بدون
+    این approval ساخته یا فعال نمی‌شود.
 
 ### P2-C-A — فیلتر نخست گروه‌های سکه — 2026-08-04 — PARTIAL
 
