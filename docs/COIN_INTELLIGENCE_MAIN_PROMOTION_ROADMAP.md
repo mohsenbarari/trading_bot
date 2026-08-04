@@ -1085,6 +1085,55 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   collector خودکار، برای read staging → resolve → link → upsert atomic و
   replay-safe بسازد؛ سپس fixture scrubbed برای acceptance لازم است.
 
+### P2-C-B5 — orchestrator محلی staging تا Market Store — 2026-08-04 — PARTIAL
+
+- Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
+- Promotion branch commit(s): commit B5 شامل orchestration pure/caller-driven,
+  test و این یادداشت روی `candidate/coin-commodity-inference-promotion`.
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - `core/market_intelligence/coin_group_pipeline.py`: read bounded staging,
+    strict unit-safe anchor read، resolve، link و upsert idempotent؛
+  - `docs/COIN_INTELLIGENCE_COIN_GROUP_PIPELINE.md` و end-to-end SQLite tests.
+- موارد عمداً انجام‌نشده:
+  - هیچ collector/scheduler/startup hook، config/runtime path، API، worker یا
+    deployment فعال نشده است؛ caller transaction را خودش commit/rollback
+    می‌کند.
+- قرارداد/schema/versionهای افزوده یا تغییرکرده:
+  - فقط anchorهای `ELIGIBLE`, non-conditional, `PROJECT_THOUSAND_TOMAN` و
+    integer-exact خوانده می‌شوند؛ conversion یا float truncation ممنوع است؛
+  - هر staging replay با event key opaque upsert است؛ fact جدید duplicate
+    نمی‌شود؛
+  - ریشهٔ چند-offer eligible به linker داده نمی‌شود تا trade به کالای مبهم
+    نسبت داده نشود؛
+  - بدون anchor کافی offer pending و trade آن absent می‌ماند.
+- Migration و نتیجهٔ upgrade/downgrade: migration ندارد و SQLite schemaهای
+  P1/B1 را reuse می‌کند. rollback برابر rollback caller transaction است؛
+  scheduler/background mutation وجود ندارد.
+- Test commands و نتیجهٔ دقیق:
+  - `python3 -m unittest -q tests.test_coin_intelligence_coin_group_pipeline`
+    با pycache موقت اجرا شد؛ نتیجه: `Ran 3 tests in 0.139s ... OK`.
+  - baseline ترکیبیِ P0 تا P4-A/P2-B/P2-D/P2-C-B5 و guardهای Offer/Trade/
+    migration با env ساختگی و pycache موقت اجرا شد؛ نتیجه:
+    `Ran 222 tests in 5.622s ... OK`.
+- داده/fixture استفاده‌شده و محل امن آن: SQLite موقت و offer/trade/anchor
+  کاملاً synthetic؛ هیچ staging، DB یا پیام واقعی باز/تغییر نکرد.
+- نتیجهٔ health/freshness/replay: دو anchor prior آفر امام و trade توافقی را
+  eligible کرد؛ replay شمار Store را زیاد نکرد؛ anchor غیرinteger هرگز به
+  int truncate نشد؛ بدون anchor trade ایجاد نشد.
+- رفتار rollback آزموده‌شده: absence/error-safe anchor result pending است و
+  writer خودکار/خارج از transaction ندارد؛ attributes نهایی فاقد identity
+  خصوصی‌اند.
+- ریسک‌های باقیمانده و مالک/تاریخ پیگیری:
+  - production caller باید lock/transaction boundary و retry policy روشن
+    داشته باشد؛ P2-C runtime owner؛
+  - fixture scrubbed واقعی برای acceptance و precision trade لازم است؛
+    P2-C validation owner؛
+  - health/lag/retention scheduler و collector production هنوز defer شده‌اند.
+- تصمیم مرحلهٔ بعد و تأیید لازم: P2-C functional core اکنون کامل اما inactive
+  است. پیش از activation فقط fixture scrubbed، deployment policy و health
+  checks باید جدا تصویب شوند؛ سپس P4-B می‌تواند از factهای eligible گروه
+  برای anchor/range استفاده کند.
+
 ### P2-D — adapter external تتر و IME — 2026-08-04 — PARTIAL
 
 - Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
