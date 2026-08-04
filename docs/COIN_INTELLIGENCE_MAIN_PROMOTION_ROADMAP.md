@@ -854,9 +854,11 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     partial fill، edit reconciliation و contextual commodity resolution
     پیاده/فعال نشده‌اند؛ P2-C همچنان `PARTIAL` است.
 - قرارداد/schema/versionهای افزوده یا تغییرکرده:
-  - explicit group offer به `COIN_<canonical-code>` و unit
-    `PROJECT_THOUSAND_TOMAN` وارد canonical fact table می‌شود؛
-  - کالای بی‌نام عمداً `COIN_UNRESOLVED/PENDING_REVIEW` است، نه default Imam؛
+  - offer گروه به `COIN_<canonical-code>` (یا `COIN_UNRESOLVED`) و unit
+    `PROJECT_THOUSAND_TOMAN` وارد canonical fact table می‌شود، اما همهٔ
+    آن‌ها تا P2-C-B `PENDING_REVIEW` هستند؛
+  - کالای بی‌نام عمداً `COIN_UNRESOLVED` است، نه default Imam؛ نام صریح هم
+    تا سنجش strictly-prior بازار حق ورود به مدل ندارد؛
   - 403/404/کشیک و ساختار ناقص fact ندارند؛ هر خط multi-line مستقل است؛
   - source identity/text در event key opaque می‌شوند و در column/attribute
     ذخیره نمی‌شوند.
@@ -874,15 +876,69 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
 - نتیجهٔ health/freshness/replay: first-pass یک parser pure است؛ transport و
   replay edited message intentionally deferred هستند. event key برای همان
   message/line deterministic است.
-- رفتار rollback آزموده‌شده: input ناقص/استثنایی fact نمی‌سازد؛ unnamed row
-  eligible نیست؛ هیچ مسیر Offer/Trade محصول تغییر نکرده است.
+- رفتار rollback آزموده‌شده: input ناقص/استثنایی fact نمی‌سازد؛ هیچ row
+  گروهی پیش از validation eligible نیست؛ هیچ مسیر Offer/Trade محصول تغییر
+  نکرده است.
 - ریسک‌های باقیمانده و مالک/تاریخ پیگیری:
   - default امام و نام explicit هنوز باید با Snapshot strictly-prior validate
     شوند؛ P2-C-B/P5 مالک؛
   - معامله و قیمت توافقی/partial fill هنوز parse نشده‌اند؛ P2-C-B مالک؛
   - raw three-day staging و live transport نیازمند deployment policy جداست.
 - تصمیم مرحلهٔ بعد و تأیید لازم: P2-C-B باید پیش از activation گروه‌ها
-  انجام شود؛ P4-B می‌تواند فقط از factهای ELIGIBLE explicit استفاده کند.
+  انجام شود؛ P4-B فقط پس از validation می‌تواند fact گروه را مصرف کند.
+
+### P2-C-B1 — raw staging محدود گروه‌های سکه — 2026-08-04 — PARTIAL
+
+- Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
+- Promotion branch commit(s): commit B1 شامل staging boundary، hardening
+  eligibility مرحلهٔ A، test و این یادداشت روی
+  `candidate/coin-commodity-inference-promotion`.
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - `core/market_intelligence/coin_group_staging.py`: SQLite جدا با raw text
+    کوتاه‌مدت، reply graph، sender digest، content-digest idempotency، edit
+    revision و purge سه‌روزه؛
+  - hardening در `coin_groups.py`: هیچ offer گروه، حتی نام صریح، پیش از
+    validation علّی `ELIGIBLE` نیست؛
+  - `docs/COIN_INTELLIGENCE_COIN_GROUP_STAGING.md` و testهای synthetic.
+- موارد عمداً انجام‌نشده:
+  - transport Telegram، split payload چند-event، collector/checkpoint،
+    contextual price resolver، trade detection و promotion به Store فعال یا
+    پیاده نشده‌اند.
+- قرارداد/schema/versionهای افزوده یا تغییرکرده:
+  - schema جداگانهٔ `coin_group_staged_messages` فقط در volume runtime خارج
+    از checkout مجاز است؛ مسیر زیر repository fail-closed رد می‌شود؛
+  - کلید موقت `(group_number,message_id)` است؛ replay برابر no-op و edit
+    واقعی فقط current version را با revision بیشتر جایگزین می‌کند؛
+  - sender plaintext ذخیره نمی‌شود؛ متن و reply بعد از سه روز حذف می‌شوند؛
+  - Store/Model فقط از fact نهایی privacy-minimized استفاده خواهد کرد.
+- Migration و نتیجهٔ upgrade/downgrade: SQLite staging schema v1 مستقل است؛
+  migration application ندارد و upgrade implicit ممنوع است. rollback برابر
+  توقف caller و حذف صرفاً staging تازه‌ساخته‌شده طبق runbook بعدی است، نه
+  حذف Market Store.
+- Test commands و نتیجهٔ دقیق:
+  - `python3 -m unittest -q tests.test_coin_intelligence_coin_groups
+    tests.test_coin_intelligence_coin_group_staging` با pycache موقت اجرا
+    شد؛ نتیجه: `Ran 11 tests in 0.121s ... OK`.
+  - baseline ترکیبیِ P0 تا P4-A/P2-B/P2-D/P2-C-B1 و guardهای Offer/Trade/
+    migration با env ساختگی و pycache موقت اجرا شد؛ نتیجه:
+    `Ran 202 tests in 4.823s ... OK`.
+- داده/fixture استفاده‌شده و محل امن آن: فقط fixture synthetic در
+  `TemporaryDirectory`؛ هیچ متن، نام، شناسه، channel یا export واقعی در
+  checkout/staging پایدار ساخته نشد.
+- نتیجهٔ health/freshness/replay: duplicate replay revision را زیاد نمی‌کند؛
+  edit revision را یک‌بار زیاد می‌کند؛ expiry دقیق سه روز پس از
+  `available_at_utc` است. scheduler و health endpoint هنوز وجود ندارند.
+- رفتار rollback آزموده‌شده: مسیر repository، ID/timestamp نامعتبر و متن
+  بیش‌ازحد fail-closed هستند؛ purge فقط جدول staging را حذف می‌کند.
+- ریسک‌های باقیمانده و مالک/تاریخ پیگیری:
+  - activation path باید runtime root، encryption/backup، lock و metricهای
+    privacy-safe را پیش از live data تعیین کند؛ P2-C deployment owner؛
+  - rowهای PENDING هنوز به resolver strictly-prior و linking معامله نیاز
+    دارند؛ P2-C-B2/B3/B4 مالک؛
+  - هیچ پیکربندی سه‌سروره یا sync در این stage افزوده نشده است.
+- تصمیم مرحلهٔ بعد و تأیید لازم: B2 باید input JSON یک‌رویدادی/چندرویدادی را
+  بدون duplication به staging map کند؛ B3 فقط پس از آن resolution کالای
+  explicit/unnamed را با snapshot strictly-prior اضافه می‌کند.
 
 ### P2-D — adapter external تتر و IME — 2026-08-04 — PARTIAL
 

@@ -48,6 +48,10 @@ Snapshot strictly-prior، price range و policy conflict می‌تواند آن 
 کالای canonical تبدیل کند. حتی نام explicit هم در P2-C-B با مدل بازار
 سنجیده خواهد شد تا typo یا outlier وارد مدل نشود.
 
+در نتیجه در P2-C-A **همهٔ** آفرهای عبورکرده از parser، حتی آفر با نام کالای
+صریح، ابتدا `PENDING_REVIEW` هستند. range ثابت فقط ساختار ناممکن را رد
+می‌کند؛ هرگز مجوز ورود مستقیم به snapshot، training یا تخمین قیمت نیست.
+
 ## ماندۀ P2-C
 
 P2-C-B باید raw محدود به سه روز را خارج از checkout نگه دارد، event یک‌تایی
