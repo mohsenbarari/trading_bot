@@ -1034,6 +1034,57 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   confirmationهای قطعی را trade کند، قیمت توافقی را بر offer مقدم بداند و
   پس از این quality gate به canonical Store بنویسد.
 
+### P2-C-B4 — linking محافظه‌کار trade گروه — 2026-08-04 — PARTIAL
+
+- Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
+- Promotion branch commit(s): commit B4 شامل reply linker pure، projection
+  trade، hardening هویت staging، test و این یادداشت روی
+  `candidate/coin-commodity-inference-promotion`.
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - `core/market_intelligence/coin_group_trades.py`: root-link حداکثر ۱۲
+    reply، confirmation ownership، قیمت توافقی، partial fill و overfill
+    gate؛
+  - B2 اکنون peer identity را پیش از display name به digest گذرا تبدیل
+    می‌کند؛
+  - `docs/COIN_INTELLIGENCE_COIN_GROUP_TRADES.md` و testهای synthetic.
+- موارد عمداً انجام‌نشده:
+  - writer transaction که offer/trade resolved را atomically به Store ببرد،
+    reprocessing worker، metric/alert و LLM second-opinion پیاده/فعال نشده‌اند.
+- قرارداد/schema/versionهای افزوده یا تغییرکرده:
+  - bare request معامله نیست؛ confirmation مالک یا declaration صریح طرف
+    مقابل در زنجیرهٔ قطعی لازم است؛ هویت گذرا برای هر دو سمت required است؛
+  - negotiated reply price فقط نزدیک به آفر و با parse قطعی جایگزین price
+    آفر می‌شود؛
+  - fillهای معمول مجموعاً از quantity آفر عبور نمی‌کنند؛ aggregate بیش از
+    offer حفظ اما `PENDING_REVIEW` است؛
+  - projection trade فاقد message/reply/sender/counterparty است و فقط key
+    opaque دارد.
+- Migration و نتیجهٔ upgrade/downgrade: migration/worker ندارد و بدون call
+  هیچ اثر ندارد. rollback برابر عدم فراخوانی linker/projection است.
+- Test commands و نتیجهٔ دقیق:
+  - `python3 -m unittest -q tests.test_coin_intelligence_coin_group_payloads
+    tests.test_coin_intelligence_coin_group_trades` با pycache موقت اجرا شد؛
+    نتیجه: `Ran 12 tests in 0.136s ... OK`.
+  - baseline ترکیبیِ P0 تا P4-A/P2-B/P2-D/P2-C-B4 و guardهای Offer/Trade/
+    migration با env ساختگی و pycache موقت اجرا شد؛ نتیجه:
+    `Ran 219 tests in 4.755s ... OK`.
+- داده/fixture استفاده‌شده و محل امن آن: فقط متن/هویت bytes synthetic در
+  memory و SQLite temporary؛ هیچ chain، نام، ID یا پیام واقعی پردازش نشد.
+- نتیجهٔ health/freshness/replay: price توافقی 182900 با تأیید offerer به
+  trade تبدیل شد؛ request بدون confirm، parent مبهم، هویت غایب و overfill
+  market fact نساختند.
+- رفتار rollback آزموده‌شده: aggregate بزرگ‌تر از offer ثبت audit-safe اما
+  model-ineligible است؛ final fact هیچ identity خصوصی ندارد.
+- ریسک‌های باقیمانده و مالک/تاریخ پیگیری:
+  - قرارداد quality برای declaration یک‌طرفه باید با corpus scrubbed و
+    precision report بازبینی شود؛ P2-C validation owner؛
+  - transaction orchestrator باید resolution و trade را idempotent و با
+    availability واقعی Store کند؛ P2-C-B5 owner؛
+  - P4-B فقط پس از B5 می‌تواند group trades را بخواند.
+- تصمیم مرحلهٔ بعد و تأیید لازم: P2-C-B5 باید یک orchestrator local، بدون
+  collector خودکار، برای read staging → resolve → link → upsert atomic و
+  replay-safe بسازد؛ سپس fixture scrubbed برای acceptance لازم است.
+
 ### P2-D — adapter external تتر و IME — 2026-08-04 — PARTIAL
 
 - Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.

@@ -25,6 +25,10 @@ cross-routed sibling هیچ sibling درست را مسموم نمی‌کند، �
 reply فقط وقتی parent ID نگه می‌دارد که source آن را `resolved_*` اعلام کرده
 باشد. reply مبهم، هرگز non-reply یا parent حدسی نمی‌شود.
 
+برای reply-chain، `sender_peer_id` در صورت وجود بر نام نمایشی ترجیح دارد و
+فوراً به digest یک‌طرفه تبدیل می‌شود؛ نام و peer خام به Market Store منتقل
+نمی‌شوند.
+
 ## وضعیت runtime
 
 این decoder pure است و collector، credential، scheduler و انتقال سه‌سروره

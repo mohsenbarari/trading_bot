@@ -107,6 +107,15 @@ class CoinGroupPayloadTests(unittest.TestCase):
         self.assertEqual(len(decoded.messages), 1)
         self.assertEqual((decoded.messages[0].text, decoded.messages[0].reply_to_message_id), ("امام فروش 187,000 / 5 تا", None))
 
+    def test_sender_peer_identity_is_preferred_over_display_name_before_staging(self) -> None:
+        item = event(sender_name="mutable display name", sender_peer_id="9001")
+        report = stage_coin_group_payload(self.connection, self.envelope(item))
+        self.connection.commit()
+        digest = self.connection.execute("SELECT sender_digest FROM coin_group_staged_messages").fetchone()[0]
+        self.assertEqual(report.inserted_or_updated_messages, 1)
+        self.assertNotIn("9001", str(digest))
+        self.assertNotIn("mutable", str(digest))
+
 
 if __name__ == "__main__":
     unittest.main()

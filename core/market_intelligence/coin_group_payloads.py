@@ -145,7 +145,17 @@ def _decode_item(item: Mapping[str, Any], *, available_at_utc: str) -> CoinGroup
         reply_id = _positive_decimal_id(payload.get("reply_message_id"))
         if reply_id is None:
             return None
-    sender = payload.get("sender_name")
+    # Peer identity, when the scraper exposed it, is more stable than a
+    # display name for checking that an offerer accepted a reply.  Either
+    # value remains transient and is immediately one-way hashed by staging.
+    peer_identity = payload.get("sender_peer_id")
+    sender_name = payload.get("sender_name")
+    if isinstance(peer_identity, (str, int)) and str(peer_identity).strip():
+        sender = "peer:" + str(peer_identity).strip()
+    elif isinstance(sender_name, str):
+        sender = "name:" + sender_name
+    else:
+        sender = None
     return CoinGroupStagingMessage(
         group_number=group_number,
         message_id=message_id,
@@ -153,7 +163,7 @@ def _decode_item(item: Mapping[str, Any], *, available_at_utc: str) -> CoinGroup
         available_at_utc=available_at_utc,
         text=text,
         reply_to_message_id=reply_id,
-        sender_identity=sender if isinstance(sender, str) else None,
+        sender_identity=sender,
         edited_at_utc=edited_at_utc,
     )
 
