@@ -525,6 +525,61 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
 
 ## گزارش اجرای مرحله‌ها
 
+### P4-A — تحویل Outbox و Snapshot نقطه‌زمانی — 2026-08-04 — PARTIAL
+
+- Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
+- Promotion branch commit(s): commit P4-A شامل consumer، artifact Snapshot،
+  تست‌ها و این یادداشت روی `candidate/coin-commodity-inference-promotion`.
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - `core/market_intelligence/project_outbox_consumer.py`: claim دارای lease،
+    projection مستقیم و idempotent به Market Store، complete/failure/retry
+    محدود؛
+  - `core/market_intelligence/market_snapshot.py`: Snapshot source-separated
+    با cutoff دوگانهٔ event/available time و publish/load اتمیک؛
+  - `docs/COIN_INTELLIGENCE_P4_SNAPSHOT_OUTBOX.md` و testهای اختصاصی.
+- موارد عمداً انجام‌نشده:
+  - هیچ worker، task lifespan، cron، config runtime یا اتصال به SQLite/Telegram
+    واقعی فعال یا ثبت نشد؛
+  - P2-B/C/D، producer عددی کامل، low-date/range/anchor، ranker محصولی و API
+    inference منتقل نشده‌اند؛
+  - هیچ code/config مرتبط با معماری سه‌سروره وارد نشده است.
+- قرارداد/schema/versionهای افزوده یا تغییرکرده:
+  - `PROJECT_OUTBOX_CONSUMER_VERSION = project-outbox-consumer-v1`؛
+  - `MARKET_SNAPSHOT_SCHEMA_VERSION = 1`؛ Snapshot فقط روی
+    `MARKET_STORE_CONTRACT_VERSION = 1` معتبر است؛
+  - event پروژه با opaque key و quality مستقیم وارد همان table canonical
+    `market_observations` می‌شود؛ جدول موازی جدیدی ساخته نشد.
+- Migration و نتیجهٔ upgrade/downgrade: migration جدیدی در P4-A ساخته نشد.
+  consumer به table P3 وابسته است و Snapshot صرفاً artifact file محلی است.
+- Test commands و نتیجهٔ دقیق:
+  - `python3 -m unittest -q tests.test_coin_intelligence_project_outbox_consumer
+    tests.test_coin_intelligence_market_snapshot` با pycache موقت اجرا شد؛
+    نتیجه: `Ran 7 tests ... OK`.
+  - suite ترکیبی P1 تا P4-A به‌علاوهٔ baseline آفر/معامله/API/migration با
+    environment ساختگی اجرا شد؛ نتیجه: `Ran 177 tests ... OK`. logهای اتصال
+    ناموفق به PostgreSQL/Redis ساختگی expected بودند و هیچ endpoint واقعی
+    استفاده نشد.
+- داده/fixture استفاده‌شده و محل امن آن: فقط قیمت‌های synthetic داخل test و
+  SQLite موقت process-local؛ هیچ raw message، credential، شماره یا دادهٔ بازار
+  واقعی استفاده نشد.
+- نتیجهٔ health/freshness/replay:
+  - replay یک claim همان یک observation را نگه می‌دارد؛
+  - payload نامعتبر fail-closed است؛ خطای Store retry می‌شود؛
+  - دادهٔ event که در زمان `as_of` هنوز available نبوده، در Snapshot دیده
+    نمی‌شود؛ تتر و هرات با واحد/منشأ مستقل دیده می‌شوند.
+- رفتار rollback آزموده‌شده: شکست Store row را `PENDING` نگه می‌دارد؛
+  publish نامعتبر Snapshot معتبر قبلی را replace نمی‌کند؛ هنوز هیچ runtime
+  reader یا writer خودکار وجود ندارد.
+- ریسک‌های باقیمانده و مالک/تاریخ پیگیری:
+  - consumer در runtime register نشده و path volume/config آن هنوز policy
+    عملیاتی ندارد؛ P4-B/P7 مالک آن است؛
+  - Snapshot فعلی `PARTIAL_UNDERLYING_STATE` است و rate کالا تولید نمی‌کند؛
+    P4-B مالک آن است؛
+  - sourceهای خصوصی/IME/USDT product adapter هنوز موجود نیستند؛ P2-B/C/D
+    مالک آن است.
+- تصمیم مرحلهٔ بعد و تأیید لازم: P4-B فقط پس از انتقال حداقل adapterهای
+  لازم، برای لنگر/rangeهای canonical و regression تاریخی شروع می‌شود.
+
 ### P0 — پایهٔ Promotion و انجماد scope — 2026-08-04 — COMPLETE
 
 - Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`
