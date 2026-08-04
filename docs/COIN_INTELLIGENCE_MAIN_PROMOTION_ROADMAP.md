@@ -660,3 +660,70 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     این branch P2-A است: انتقال Collectorهای عمومی به adapter بدون فعال‌سازی
     runtime. پیش از شروع، policy volume/runtime path و retention باید در همان
     مرحله ثبت شود.
+
+### P2-A — adapter کانال‌های عمومی تلگرام — 2026-08-04 — PARTIAL
+
+- Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
+- Promotion branch commit(s): commit P2-A شامل parser/ingest/transport
+  اختیاری، schema additive و این یادداشت روی
+  `candidate/coin-commodity-inference-promotion`.
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - `core/market_intelligence/public_telegram/`: allowlist، parser pure،
+    ingest idempotent و transport صریحِ optional برای چهار source عمومی؛
+  - `core/market_intelligence/market_store.py`: schema `1 → 2` با جدول کوچک
+    `market_source_checkpoints` و API cursor؛
+  - `docs/COIN_INTELLIGENCE_PUBLIC_TELEGRAM_ADAPTER.md`: policy source،
+    conversion، runtime boundary و credential boundary؛
+  - `tests/test_coin_intelligence_public_telegram.py`: parser، ingest،
+    checkpoint، replay، minute compaction، side linking و fake transport.
+- موارد عمداً انجام‌نشده:
+  - Telethon به dependency سراسری یا runtime production اضافه نشد؛
+  - هیچ session/API key/phone واقعی خوانده نشد؛ هیچ کانال واقعی، network،
+    daemon، cron، startup hook یا volume path فعال نشد؛
+  - sourceهای خصوصی آبشده، گروه‌های سکه، تتر و IME هنوز منتقل نشده‌اند؛
+  - Snapshot/producer یا inference هنوز consumer این observationها نیست.
+- قرارداد/schema/versionهای افزوده یا تغییرکرده:
+  - `MARKET_STORE_SCHEMA_VERSION = 2`; upgrade از v1 فقط cursor source را
+    اضافه می‌کند و factهای موجود را بازنویسی نمی‌کند؛
+  - متن و message ID در `market_observations` ذخیره نمی‌شوند. message ID فقط
+    در checkpoint برای resume است و event key fact یک digest opaque است؛
+  - آبشده/هراتِ این sourceها از تومان به `IRT` (`×10`) تبدیل می‌شود؛ اونس
+    USD/spot باقی می‌ماند؛
+  - آبشدهٔ NaghdP `PAPER_NORMAL` است و trade بدون side فقط با آفر strictly
+    prior هم‌قیمت/هم‌settlement تا ۱۸۰ ثانیه enrich می‌شود؛
+  - قیمت گرم و summaryهای ساعت‌به‌ساعت حذف می‌شوند؛ XAUUSD فقط آخرین quote
+    همان دقیقه را نگه می‌دارد؛ هر source provenance مستقل دارد.
+- Migration و نتیجهٔ upgrade/downgrade:
+  - PostgreSQL/Alembic تغییر نکرد؛ migrationهای باقی‌ماندهٔ main دست‌نخورده
+    هستند؛
+  - SQLite v1→v2 در temporary fixture تست شد و فقط
+    `market_source_checkpoints` را ساخت؛ rollback برابر عدم شروع adapter
+    جدید است، چون P2-A هنوز consumer/runtime فعال ندارد.
+- Test commands و نتیجهٔ دقیق:
+  - `python3 -m unittest -v tests.test_coin_intelligence_market_store
+    tests.test_coin_intelligence_public_telegram` → `Ran 19 tests ... OK`؛
+  - baseline کامل P0/P1/P2-A با env ساختگیِ process-local اجرا شد →
+    `Ran 165 tests in 4.519s ... OK`.
+- داده/fixture استفاده‌شده و محل امن آن:
+  - فقط fixtureهای synthetic داخل test process و SQLite موقت؛ هیچ متن واقعی
+    کانال، credential، session، API call یا دیتابیس عملیاتی استفاده نشد.
+- نتیجهٔ health/freshness/replay:
+  - replay message edited به همان opaque event key update می‌شود؛ forwarded
+    یا پیام ignored checkpoint را جلو می‌برد ولی fact نمی‌سازد؛
+  - message قدیمی‌تر اونس در همان دقیقه نمی‌تواند quote جدیدتر را overwrite
+    کند؛ health/freshness شبکه تا شروع عملیاتی collector deferred است.
+- رفتار rollback آزموده‌شده:
+  - adapter فقط library است و به startup متصل نیست؛ حذف/عدم فراخوانی آن روی
+    Offer/Trade یا API فعلی اثری ندارد؛
+  - schema upgrade additive است و دادهٔ source واقعی نداشت.
+- ریسک‌های باقیمانده و مالک/تاریخ پیگیری:
+  - نصب optional dependency، path دقیق volume، health/alert و schedule باید
+    در deployment review پایان P2 تصویب شوند؛
+  - conversion تومان→IRT با replay دادهٔ واقعی و cross-check منبع در P4
+    دوباره سنجیده می‌شود؛
+  - parser عمومی هنوز صرفاً rule-based است و موارد مبهم را emit نمی‌کند؛
+  - P2-B/C/D و P3 همچنان لازم‌اند.
+- تصمیم مرحلهٔ بعد و تأیید لازم:
+  - P2-A از نظر کد و تست offline کامل است، ولی P2 کلان تا انجام P2-B/C/D
+    `PARTIAL` می‌ماند؛ گام بعدی P3 (outbox پروژه) می‌تواند مستقل از collector
+    توسعه یابد و به هیچ معماری سه‌سروره متصل نخواهد شد.

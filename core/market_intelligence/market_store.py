@@ -23,7 +23,7 @@ from .market_contracts import (
 )
 
 
-MARKET_STORE_SCHEMA_VERSION = 1
+MARKET_STORE_SCHEMA_VERSION = 2
 
 _SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -82,6 +82,13 @@ CREATE INDEX IF NOT EXISTS idx_market_observations_source_available
 CREATE INDEX IF NOT EXISTS idx_market_observations_quality_time
     ON market_observations(quality_state, event_time_utc);
 
+CREATE TABLE IF NOT EXISTS market_source_checkpoints (
+    source_code TEXT PRIMARY KEY,
+    last_message_id INTEGER NOT NULL CHECK(last_message_id > 0),
+    last_event_time_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL
+);
+
 -- This compatibility projection retains the established external-market name
 -- without creating a second writable schema.  P2-D writes through the one
 -- canonical MarketObservation contract and reads this view where useful.
@@ -121,6 +128,30 @@ class LegacyUpgradeReport:
     imported_price_events: int
     imported_external_observations: int
     skipped_unsupported_rows: int
+
+
+def _upgrade_v1_to_v2(connection: sqlite3.Connection) -> None:
+    """Add only the public-source operational cursor; no fact is rewritten."""
+
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS market_source_checkpoints (
+            source_code TEXT PRIMARY KEY,
+            last_message_id INTEGER NOT NULL CHECK(last_message_id > 0),
+            last_event_time_utc TEXT NOT NULL,
+            updated_at_utc TEXT NOT NULL
+        );
+        """
+    )
+    connection.execute(
+        """
+        UPDATE market_store_metadata
+        SET schema_version = ?
+        WHERE singleton = 1 AND schema_version = 1
+        """,
+        (MARKET_STORE_SCHEMA_VERSION,),
+    )
+    connection.commit()
 
 
 def _utc_now() -> str:
@@ -176,13 +207,21 @@ def initialize_market_store(connection: sqlite3.Connection) -> None:
         ).fetchone()
         if row is None:
             raise MarketStoreError("market_store_metadata_missing_singleton")
-        if int(row["schema_version"]) != MARKET_STORE_SCHEMA_VERSION:
+        schema_version = int(row["schema_version"])
+        if schema_version == 1:
+            _upgrade_v1_to_v2(connection)
+            schema_version = MARKET_STORE_SCHEMA_VERSION
+        if schema_version != MARKET_STORE_SCHEMA_VERSION:
             raise MarketStoreMigrationRequired("market_store_schema_upgrade_required")
         if int(row["contract_version"]) != MARKET_STORE_CONTRACT_VERSION:
             raise MarketStoreMigrationRequired("market_store_contract_upgrade_required")
-        if not _table_exists(connection, "market_observations") or not _view_exists(
-            connection,
-            "external_market_observations",
+        if (
+            not _table_exists(connection, "market_observations")
+            or not _table_exists(connection, "market_source_checkpoints")
+            or not _view_exists(
+                connection,
+                "external_market_observations",
+            )
         ):
             raise MarketStoreError("market_store_schema_incomplete")
         return
@@ -260,6 +299,78 @@ def upsert_observation(
         _storage_values(normalized),
     )
     return int(cursor.lastrowid or 0)
+
+
+def read_source_checkpoint(
+    connection: sqlite3.Connection,
+    source_code: str,
+) -> int | None:
+    """Return the compact operational cursor, never a raw message identity."""
+
+    row = connection.execute(
+        """
+        SELECT last_message_id
+        FROM market_source_checkpoints
+        WHERE source_code = ?
+        """,
+        (str(source_code).strip().upper(),),
+    ).fetchone()
+    return int(row["last_message_id"]) if row is not None else None
+
+
+def advance_source_checkpoint(
+    connection: sqlite3.Connection,
+    *,
+    source_code: str,
+    message_id: int,
+    event_time_utc: str,
+) -> None:
+    """Advance a restart cursor monotonically after a message is processed."""
+
+    if message_id <= 0:
+        raise MarketStoreContractError("source_message_id_must_be_positive")
+    connection.execute(
+        """
+        INSERT INTO market_source_checkpoints(
+            source_code, last_message_id, last_event_time_utc, updated_at_utc
+        ) VALUES (?, ?, ?, ?)
+        ON CONFLICT(source_code) DO UPDATE SET
+            last_message_id = MAX(
+                market_source_checkpoints.last_message_id,
+                excluded.last_message_id
+            ),
+            last_event_time_utc = CASE
+                WHEN excluded.last_message_id >=
+                     market_source_checkpoints.last_message_id
+                THEN excluded.last_event_time_utc
+                ELSE market_source_checkpoints.last_event_time_utc
+            END,
+            updated_at_utc = excluded.updated_at_utc
+        """,
+        (
+            str(source_code).strip().upper(),
+            message_id,
+            event_time_utc,
+            _utc_now(),
+        ),
+    )
+
+
+def observation_event_time(
+    connection: sqlite3.Connection,
+    event_key: bytes,
+) -> str | None:
+    """Read just the event timestamp needed for safe compact-source ordering."""
+
+    row = connection.execute(
+        """
+        SELECT event_time_utc
+        FROM market_observations
+        WHERE event_key = ?
+        """,
+        (event_key,),
+    ).fetchone()
+    return str(row["event_time_utc"]) if row is not None else None
 
 
 def _storage_values(observation: NormalizedMarketObservation) -> tuple[object, ...]:

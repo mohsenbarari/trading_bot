@@ -1,7 +1,7 @@
 # قرارداد Market Store برای تشخیص کالا
 
 **Contract version:** `1`
-**SQLite schema version:** `1`
+**SQLite schema version:** `2`
 **وضعیت:** P1 — قرارداد ذخیره‌سازی؛ هنوز هیچ collector، worker یا API محصولی
 را فعال نمی‌کند.
 
@@ -54,6 +54,12 @@ legacy، عمداً خطا می‌دهد. مسیر درست فقط این است
 
 source با `mode=ro` باز می‌شود. واحد یا conversion نامعلوم skip می‌شود، نه
 حدس زده. متن خام و شناسه‌های legacy در مقصد کپی نمی‌شوند.
+
+Schema `2` فقط جدول عملیاتی `market_source_checkpoints` را اضافه می‌کند. این
+جدول برای restart-safe خواندن public sourceها، حداکثر message ID و زمان آن را
+نگه می‌دارد؛ این شناسه در observation/model row ذخیره نمی‌شود. upgrade `1`
+به `2` additive است، هیچ fact موجودی را بازنویسی نمی‌کند و فقط در زمان باز
+شدن Store انجام می‌شود.
 
 ## خارج از P1
 
