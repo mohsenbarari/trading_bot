@@ -901,9 +901,38 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     واقعی انجام نشد)؛
   - `compileall` چهار فایلِ تغییرکرده نیز با موفقیت اجرا شد.
 - گیت مرحلهٔ بعد:
-  - decoder envelope و router channel باید جداگانه با fixture synthetic
-    اضافه شود؛ سپس runner دستیِ one-shot با runtime root مصوب، health و
-    metric ترتیب رویداد، بدون activation خودکار ساخته می‌شود.
+  - runner دستیِ one-shot با runtime root مصوب، health و metric ترتیب
+    رویداد، بدون activation خودکار ساخته می‌شود.
+
+### P2-B2 — decoder کانال‌های آفر/تأیید آبشده — 2026-08-04 — COMPLETE (library only)
+
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - `core/market_intelligence/private_gold_payloads.py`: decoder سخت‌گیر
+    object/list/batch delimiter برای envelope نسخهٔ `1.0` و route جداگانهٔ
+    `OFFER`/`TRADE`؛
+  - `tests/test_coin_intelligence_private_gold_payloads.py`: route مخالف،
+    payload ناقص، batch، duplicate/conflict و staging-rejection را با fixture
+    synthetic بررسی می‌کند.
+- مرز قطعی و رفتار ایمنی:
+  - stream از channel بیرونیِ trusted collector می‌آید، اما inner event نیز
+    باید `market=gold`، `source_key=account1_channel` و `event_type` سازگار
+    داشته باشد؛ عدم تطابق وارد staging نمی‌شود؛
+  - decoder هیچ channel ID، نام، متن یا identifierی را در report/Market Store
+    نمی‌نویسد؛ فقط متن موقتِ معتبر را برای staging برمی‌گرداند؛
+  - هیچ client، config واقعی، network، listener، worker یا scheduler اضافه
+    یا فعال نشده است.
+- Test command و نتیجه:
+  - `PYTHONPYCACHEPREFIX=/tmp/coin-intelligence-pycache python3 -m unittest -v
+    tests.test_coin_intelligence_private_gold_payloads
+    tests.test_coin_intelligence_private_gold_staging
+    tests.test_coin_intelligence_private_gold` → `Ran 23 tests ... OK`.
+  - تمام `test_coin_intelligence_*.py` با environment ساختگیِ فقط برای
+    import config اجرا شد؛ `Ran 125 tests ... OK` و هیچ اتصال واقعی انجام
+    نشد.
+- گیت مرحلهٔ بعد:
+  - runner دستی باید mapping channel→stream را فقط از config runtime بگیرد،
+    پس از staging promotion را در transaction کنترل‌شده اجرا کند و health/
+    counter ترتیب event را بدون raw data ارائه دهد.
 
 ### P2-C-A — فیلتر نخست گروه‌های سکه — 2026-08-04 — PARTIAL
 

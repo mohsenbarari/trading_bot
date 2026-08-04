@@ -79,8 +79,13 @@ physical امروز/فردا و تمام six paper cellها را جدا نگه �
 ## ماندۀ P2-B
 
 کتابخانهٔ staging اکنون retention سه‌روزه، ادغام idempotent و promotion بدون
-متن خام را دارد. برای complete شدن P2-B، worker/transport جدا باید event
-envelope را validate کند، آن را در runtime path محافظت‌شده صدا بزند، ترتیب
+متن خام را دارد. decoder آفلاین نیز envelope نسخهٔ `1.0` را فقط وقتی
+می‌پذیرد که market/source/channel role آن با stream مورد اعتماد collector
+سازگار باشد؛ offer و verifier در دو stream جدا هستند و batchهای JSON نیز
+بدون حدس پردازش می‌شوند.
+
+برای complete شدن P2-B، worker/transport جدا باید channel بیرونی را به stream
+مورد اعتماد bind کند، decoder و runtime path محافظت‌شده را صدا بزند، ترتیب
 ingestion را metric کند و minute quoteهای کاغذی را فقط پس از بسته‌شدن دقیقه
 materialize کند. آن worker در این commit وجود ندارد و بدون تأیید deployment
 فعال نخواهد شد.
