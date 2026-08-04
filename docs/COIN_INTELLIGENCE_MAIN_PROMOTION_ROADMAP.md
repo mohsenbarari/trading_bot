@@ -1345,3 +1345,59 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   - P3 producer کامل است اما تا consumer idempotent P4 به `PARTIAL` می‌ماند.
     گام بعد P4: projection Outbox به Market Store و Snapshot/bundle local-first
     بدون تغییر API/Bot فعلی.
+
+### P5-A — Ranker محصولیِ کالا از Snapshot منتشرشده — 2026-08-04 — COMPLETE (library only)
+
+- Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
+- Promotion branch commit(s): این commit شامل ranker، test و مستند قرارداد روی
+  `candidate/coin-commodity-inference-promotion` است.
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - `core/market_intelligence/coin_inference.py`: reader/ranker فقط-خواندنی
+    که دقیقاً یک Snapshot اتمیک و rate-ready را می‌گیرد و برای یک قیمت و
+    settlement، گزینه‌های کالای سکه را رتبه‌بندی می‌کند؛
+  - `docs/COIN_INTELLIGENCE_PRODUCT_RANKER.md`: قرارداد مرز محصول و قانون
+    canonical-name-only؛
+  - `tests/test_coin_intelligence_coin_inference.py`: آزمون انتخاب یکتا،
+    overlap، confidence پایین و stale/outside range.
+- موارد عمداً انجام‌نشده:
+  - هیچ API، بات، WebApp، مسیر `OfferCreate`، database lookup، feature flag
+    runtime، worker، collector یا network call تغییر نکرده یا فعال نشده است؛
+  - هیچ `commodity_id`، alias، متن خام، هویت، آفر یا معامله به ranker وارد
+    نمی‌شود؛
+  - audit append-only و exact catalog mapping عمداً P5-B/P6 باقی می‌ماند.
+- قرارداد/schema/versionهای افزوده یا تغییرکرده:
+  - `coin-inference-v1` فقط `commodity_code` و نام canonical (`امام`، `بهار`
+    و ...) را برمی‌گرداند، هرگز شناسهٔ PostgreSQL را نه؛
+  - `AUTO_SELECT` فقط برای یک range یکتای HIGH/MEDIUM، Snapshot معتبر و تازه
+    ممکن است؛ چند range یا LOW paper fallback به `CONFIRM` می‌رود؛
+  - Snapshot ناموجود/خراب/legacy، زمان آینده/کهنه یا قیمت بیرون بازه به
+    `ABSTAIN` می‌رسد؛ default پنهان امام وجود ندارد؛
+  - receipt از SHA-256 canonical Snapshot و generated timestamp برگردانده
+    می‌شود تا P6 بتواند هنگام submit همان snapshot/freshness را دوباره
+    کنترل کند.
+- Migration و نتیجهٔ upgrade/downgrade: schema و migration ندارد؛ rollback
+  برابر حذف caller این library است و هیچ داده‌ای نوشته نشده است.
+- Test commands و نتیجهٔ دقیق:
+  - `PYTHONPYCACHEPREFIX=/tmp/coin-intelligence-pycache python3 -m unittest -q
+    tests.test_coin_intelligence_coin_inference` → `Ran 4 tests ... OK`؛
+  - regression ترکیبی P0 تا P5-A و guardهای Offer/Trade/migration با env
+    ساختگی و pycache موقت → `Ran 231 tests in 5.034s ... OK`.
+- داده/fixture استفاده‌شده و محل امن آن: فقط Snapshot synthetic و SQLite
+  موقت در test process؛ هیچ دادهٔ بازار، credential، API یا service واقعی
+  استفاده یا mutate نشد.
+- نتیجهٔ health/freshness/replay: ranker فقط artifact اتمیک را یک بار load
+  می‌کند؛ age منفی یا بیش از policy fail-closed است و receipt به artifact
+  دقیق تصمیم متصل می‌ماند.
+- رفتار rollback آزموده‌شده: malformed یا stale Snapshot و قیمت خارج از range
+  abstain می‌کند؛ overlap هرگز به کالای پیش‌فرض یا انتخاب خودکار تبدیل
+  نمی‌شود.
+- ریسک‌های باقیمانده و مالک/تاریخ پیگیری:
+  - P5-B باید نام canonical را با `commodities.name` محلی، exact و یکتا به
+    ID همان site نگاشت کند؛ صفر یا چند match باید abstain باشد؛
+  - P6 باید receipt/freshness را در submit دوباره validate، تصمیم را minimal
+    audit و مسیرهای bot/web را با feature flag shadow-first متصل کند؛
+  - کیفیت rate/interval و calendar/Herat bridge همچنان مالک مراحل P4
+    research/deployment است و ranker آن‌ها را جبران نمی‌کند.
+- تصمیم مرحلهٔ بعد و تأیید لازم: P5-B mapping محلی و audit contract فقط پس
+  از بررسی دقیق مدل `Commodity` و mutation pathهای موجود انجام شود؛ تا آن
+  زمان هیچ کاربر یا آفر پروژه از این ranker استفاده نمی‌کند.
