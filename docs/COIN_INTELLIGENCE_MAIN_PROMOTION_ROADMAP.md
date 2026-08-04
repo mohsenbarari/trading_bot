@@ -839,6 +839,51 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   underlying موردنیاز باید offline منتقل شوند، سپس P4-B anchor/range با
   replay historical شروع می‌شود.
 
+### P2-C-A — فیلتر نخست گروه‌های سکه — 2026-08-04 — PARTIAL
+
+- Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
+- Promotion branch commit(s): commit P2-C-A شامل parser خالص، projection
+  canonical، test و این یادداشت روی
+  `candidate/coin-commodity-inference-promotion`.
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - `core/market_intelligence/coin_groups.py`: rejection policy، parse
+    offerهای explicit، unit project، settlement/trade form و row unresolved؛
+  - `docs/COIN_INTELLIGENCE_COIN_GROUPS_FIRST_PASS.md` و testهای synthetic.
+- موارد عمداً انجام‌نشده:
+  - raw staging/retention، Telegram transport، reply-chain، trade detection،
+    partial fill، edit reconciliation و contextual commodity resolution
+    پیاده/فعال نشده‌اند؛ P2-C همچنان `PARTIAL` است.
+- قرارداد/schema/versionهای افزوده یا تغییرکرده:
+  - explicit group offer به `COIN_<canonical-code>` و unit
+    `PROJECT_THOUSAND_TOMAN` وارد canonical fact table می‌شود؛
+  - کالای بی‌نام عمداً `COIN_UNRESOLVED/PENDING_REVIEW` است، نه default Imam؛
+  - 403/404/کشیک و ساختار ناقص fact ندارند؛ هر خط multi-line مستقل است؛
+  - source identity/text در event key opaque می‌شوند و در column/attribute
+    ذخیره نمی‌شوند.
+- Migration و نتیجهٔ upgrade/downgrade: migration جدیدی ندارد و worker
+  خودکار ندارد. rollback برابر عدم فراخوانی library است.
+- Test commands و نتیجهٔ دقیق:
+  - `python3 -m unittest -q tests.test_coin_intelligence_coin_groups` با
+    pycache موقت اجرا شد؛ نتیجه: `Ran 6 tests ... OK`.
+  - baseline ترکیبیِ P0 تا P4-A/P2-B/P2-D/P2-C-A و guardهای Offer/Trade/
+    migration با env ساختگی و pycache موقت اجرا شد؛ نتیجه:
+    `Ran 197 tests in 5.067s ... OK`.
+- داده/fixture استفاده‌شده و محل امن آن: فقط text/price synthetic در test
+  process و SQLite موقت؛ هیچ گروه، هویت، message ID یا export واقعی استفاده
+  نشد.
+- نتیجهٔ health/freshness/replay: first-pass یک parser pure است؛ transport و
+  replay edited message intentionally deferred هستند. event key برای همان
+  message/line deterministic است.
+- رفتار rollback آزموده‌شده: input ناقص/استثنایی fact نمی‌سازد؛ unnamed row
+  eligible نیست؛ هیچ مسیر Offer/Trade محصول تغییر نکرده است.
+- ریسک‌های باقیمانده و مالک/تاریخ پیگیری:
+  - default امام و نام explicit هنوز باید با Snapshot strictly-prior validate
+    شوند؛ P2-C-B/P5 مالک؛
+  - معامله و قیمت توافقی/partial fill هنوز parse نشده‌اند؛ P2-C-B مالک؛
+  - raw three-day staging و live transport نیازمند deployment policy جداست.
+- تصمیم مرحلهٔ بعد و تأیید لازم: P2-C-B باید پیش از activation گروه‌ها
+  انجام شود؛ P4-B می‌تواند فقط از factهای ELIGIBLE explicit استفاده کند.
+
 ### P2-D — adapter external تتر و IME — 2026-08-04 — PARTIAL
 
 - Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
