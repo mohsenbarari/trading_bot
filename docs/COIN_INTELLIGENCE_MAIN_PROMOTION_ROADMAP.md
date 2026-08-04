@@ -571,3 +571,92 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
 - تصمیم مرحلهٔ بعد و تأیید لازم: ورود به P1، فقط برای طراحی و پیاده‌سازی
   قرارداد canonical Market Store و migration سازگار. پیش از P2، review
   قرارداد و retention لازم است.
+
+### P1 — قرارداد canonical دادهٔ بازار — 2026-08-04 — COMPLETE
+
+- Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
+- Promotion branch commit(s): commit P1 شامل contract، SQLite Store، تست‌ها و
+  این یادداشت روی `candidate/coin-commodity-inference-promotion`.
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - `core/market_intelligence/market_contracts.py`: قرارداد immutable
+    `MarketObservation` و representation نرمال‌شده؛
+  - `core/market_intelligence/market_store.py`: SQLite Market Store versioned،
+    idempotent write، compatibility view و explicit legacy import؛
+  - `docs/COIN_INTELLIGENCE_MARKET_STORE_CONTRACT.md`: مرز privacy، unit و
+    migration policy؛
+  - `tests/test_coin_intelligence_market_store.py`: contract، timezone، unit،
+    deduplication، privacy و upgrade tests.
+- موارد عمداً انجام‌نشده:
+  - هیچ Telegram/تتر/IME Collector یا scheduler اضافه/فعال نشد؛
+  - هیچ event پروژه، callback ORM، Postgres outbox، API، Bot یا WebApp تغییر
+    نکرد؛
+  - هیچ runtime path، config، secret، volume policy یا sync مربوط به معماری
+    سه‌سروره منتقل نشد؛
+  - دادهٔ واقعی یا SQLite عملیاتی به branch وارد/مهاجرت داده نشد.
+- قرارداد/schema/versionهای افزوده یا تغییرکرده:
+  - `MARKET_STORE_CONTRACT_VERSION = 1` و
+    `MARKET_STORE_SCHEMA_VERSION = 1` افزوده شد؛
+  - تنها table قابل‌نوشتن `market_observations` است؛ تمام source familyها
+    (`PROJECT`، group، عمومی/خصوصی، external و manual review) از یک قرارداد
+    می‌گذرند؛
+  - `external_market_observations` فقط view read-only برای
+    `EXTERNAL_MARKET` است؛ schema خارجی دوم ساخته نشد؛
+  - event key فقط bytes digest opaque است. raw text/ID/name/link/phone در
+    contract و attributeهای آن ممنوع است؛
+  - UTC aware اجباری است و Tehran datetime/date/minute/weekday فقط از
+    `event_time_utc` مشتق می‌شود؛
+  - unitهای canonical صریح‌اند، و mismatchهای هرات/تتر/اونس/آبشده/IME/coin
+    fail-closed می‌شوند؛ هیچ conversion یا bridge پنهان وجود ندارد.
+- Migration و نتیجهٔ upgrade/downgrade:
+  - migration جدید PostgreSQL/Alembic ساخته نشد. P1 به‌صورت عمدی SQLite
+    مستقل از migrationهای باقی‌ماندهٔ `main` است؛ Postgres در P3 فقط outbox
+    محصول خواهد گرفت؛
+  - `initialize_market_store` روی schema قدیمی به‌جای DDL in-place،
+    `MarketStoreMigrationRequired` می‌دهد؛
+  - `upgrade_legacy_market_store(source_path, destination_path)` source را
+    با SQLite read-only باز و فقط factهای دارای unit نرمال‌شده را به مقصد
+    جدا کپی می‌کند. source حذف/ویرایش نمی‌شود؛ unit نامعلوم skip می‌شود؛
+    raw text/identity کپی نمی‌شود؛
+  - upgrade و rollback فقط با fixture SQLite جدا آزموده شد؛ migration دادهٔ
+    واقعی یا downgrade destructive انجام نشد.
+- Test commands و نتیجهٔ دقیق:
+  - `python3 -m unittest -v tests.test_coin_intelligence_market_store` →
+    `Ran 7 tests ... OK`؛
+  - baseline P0 به‌علاوهٔ P1 با env ساختگیِ process-local اجرا شد:
+    `python3 -m unittest -q tests.test_coin_intelligence_market_store
+    tests.test_manual_offer_validation tests.test_offer_creation_service
+    tests.test_offers_router_create_guards tests.test_offers_router_create_success
+    tests.test_offers_router_reads tests.test_offers_router_expire
+    tests.test_trades_router_authoritative_guards
+    tests.test_trades_router_authoritative_success
+    tests.test_bot_trade_create_text_offer_parse_flow tests.test_migration_smoke`
+    → `Ran 153 tests in 4.169s ... OK`.
+- داده/fixture استفاده‌شده و محل امن آن:
+  - فقط temporary SQLite fixture در test process؛ یک raw text نمونه صرفاً در
+    legacy source fixture برای اثبات عدم انتقال وجود دارد و در مقصد هرگز
+    ذخیره/چاپ نمی‌شود؛
+  - API key، session، کانال، پیام واقعی، نام واقعی، model artifact و دیتابیس
+    عملیاتی استفاده نشد.
+- نتیجهٔ health/freshness/replay:
+  - replay برای همان opaque event key یک ردیف را update می‌کند و duplicate
+    نمی‌سازد؛
+  - health/freshness adapterها خارج از P1 است، زیرا هیچ adapter اجرا نمی‌شود.
+- رفتار rollback آزموده‌شده:
+  - P1 هیچ مصرف‌کنندهٔ runtime ندارد؛ حذف/عدم استفاده از Store اثر ثبت
+    Offer/Trade را تغییر نمی‌دهد؛
+  - legacy import فقط به مقصد جدا می‌نویسد و source read-only است، بنابراین
+    rollback برابر عدم سوییچ adapter به مقصد است.
+- ریسک‌های باقیمانده و مالک/تاریخ پیگیری:
+  - جدول external legacy واقعی ممکن است unitهای غیرcanonical داشته باشد؛
+    P2-D باید conversion policy قابل‌آزمون و migration report واقعی تعریف
+    کند؛
+  - path حفاظت‌شدهٔ SQLite، retention سه‌روزهٔ raw staging و health endpoint
+    در P2 تعیین می‌شوند؛
+  - semantic mapping تمام source codeها به `source_family` و تمام attributeهای
+    آبشده در P2-A/B/C تکمیل می‌شود؛
+  - Projection قطعی Offer/Trade پروژه و lifecycle آن در P3 مالک دارد.
+- تصمیم مرحلهٔ بعد و تأیید لازم:
+  - P2 و P3 از نظر dependency آمادهٔ توسعهٔ موازی هستند، اما مرحلهٔ بعدی
+    این branch P2-A است: انتقال Collectorهای عمومی به adapter بدون فعال‌سازی
+    runtime. پیش از شروع، policy volume/runtime path و retention باید در همان
+    مرحله ثبت شود.
