@@ -19,3 +19,11 @@ and `ABSTAIN` never receive a hidden Imam fallback.
 
 No collector, snapshot publisher, scheduler, external AI call, Telegram action,
 or multi-server synchronization is started by this endpoint.
+
+When the same flag is enabled, `POST /api/offers/parse` also observes only an
+omitted-name parse that reached the legacy Imam fallback. Its existing
+`commodity_id` and `commodity_name` remain untouched; the response gains a
+`commodity_inference` object with `mode=SHADOW_ONLY`. Explicit commodity text,
+the bot flow, and the WebApp UI are unchanged. This lets the interface compare
+the legacy result with an inferred result before any user-visible policy is
+promoted.

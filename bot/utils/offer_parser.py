@@ -25,6 +25,9 @@ class ParsedOffer:
     lot_sizes: Optional[List[int]]
     notes: Optional[str]
     settlement_type: str = SettlementType.CASH.value
+    # Kept optional for all legacy callers. It distinguishes an explicit
+    # catalog match from the project's historical omitted-name Imam fallback.
+    commodity_resolution: str = "UNKNOWN"
 
 
 @dataclass 
@@ -312,7 +315,11 @@ def extract_lot_sizes(text: str, quantity: int, price: int) -> Tuple[Optional[Li
     return lot_candidates, False, None
 
 
-async def find_commodity(text: str) -> Tuple[Optional[int], str]:
+async def find_commodity(
+    text: str,
+    *,
+    include_resolution: bool = False,
+) -> tuple[Optional[int], str] | tuple[Optional[int], str, str]:
     """
     پیدا کردن کالا از متن
     Returns: (commodity_id, commodity_name)
@@ -363,18 +370,28 @@ async def find_commodity(text: str) -> Tuple[Optional[int], str]:
     # جستجو در متن (اولویت با نام/نام مستعار بلندتر و فقط به صورت عبارت مستقل)
     commodity_id, commodity_name = _match_commodity_name(text, name_to_commodity)
     if commodity_id is not None:
+        if include_resolution:
+            return commodity_id, commodity_name, "EXPLICIT"
         return commodity_id, commodity_name
 
     residual_commodity_text = _extract_residual_commodity_text(text)
     if not residual_commodity_text:
         implicit_commodity_id, implicit_commodity_name = _resolve_implicit_default_commodity(name_to_commodity)
         if implicit_commodity_id is not None:
+            if include_resolution:
+                return implicit_commodity_id, implicit_commodity_name, "IMPLICIT_DEFAULT"
             return implicit_commodity_id, implicit_commodity_name
 
+    if include_resolution:
+        return None, "نامشخص", "UNRESOLVED"
     return None, "نامشخص"
 
 
-async def parse_offer_text(text: str) -> Tuple[Optional[ParsedOffer], Optional[ParseError]]:
+async def parse_offer_text(
+    text: str,
+    *,
+    capture_commodity_resolution: bool = False,
+) -> Tuple[Optional[ParsedOffer], Optional[ParseError]]:
     """
     پارس کامل متن لفظ
     Returns: (ParsedOffer, ParseError)
@@ -432,7 +449,14 @@ async def parse_offer_text(text: str) -> Tuple[Optional[ParsedOffer], Optional[P
         return None, ParseError(error)
     
     # پیدا کردن کالا
-    commodity_id, commodity_name = await find_commodity(clean_text)
+    commodity_resolution = "UNKNOWN"
+    if capture_commodity_resolution:
+        commodity_id, commodity_name, commodity_resolution = await find_commodity(
+            clean_text,
+            include_resolution=True,
+        )
+    else:
+        commodity_id, commodity_name = await find_commodity(clean_text)
     if commodity_id is None:
         return None, ParseError("❌ کالا یافت نشد")
     
@@ -446,4 +470,5 @@ async def parse_offer_text(text: str) -> Tuple[Optional[ParsedOffer], Optional[P
         lot_sizes=lot_sizes,
         notes=notes,
         settlement_type=settlement_type or SettlementType.CASH.value,
+        commodity_resolution=commodity_resolution,
     ), None

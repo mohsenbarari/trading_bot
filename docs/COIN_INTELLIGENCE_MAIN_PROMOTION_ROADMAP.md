@@ -1647,3 +1647,30 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     `coin_intelligence_audit_<run>_test` باید upgrade head، insert audit،
     rejection UPDATE/DELETE trigger و downgrade fail-closed به‌صورت واقعی
     آزموده شوند؛ owner deployment/release gate.
+
+### P6-B — metadata سایه در parser Web — 2026-08-04 — PARTIAL
+
+- Scope انجام‌شده:
+  - `ParsedOffer` می‌تواند match kind را گزارش کند: `EXPLICIT`,
+    `IMPLICIT_DEFAULT` یا `UNRESOLVED`؛ رفتار پیش‌فرض parser و default امام
+    برای callerهای قدیمی بدون تغییر است؛
+  - فقط وقتی flag preview روشن است، `/api/offers/parse` برای
+    `IMPLICIT_DEFAULT` همان Snapshot/ranker/catalog/audit را به‌صورت shadow
+    اجرا و `commodity_inference` را به پاسخ اضافه می‌کند؛
+  - کالا/شناسهٔ اصلی response عمداً همان Imam legacy می‌ماند؛ metadata شامل
+    `mode=SHADOW_ONLY`، status، receipt، reason و candidateهای catalog است.
+- موارد عمداً انجام‌نشده:
+  - `OfferCreate`، submit، idempotency آفر، بات، WebApp UI، کالای explicit و
+    هر انتخاب/confirm کاربر تغییر نکرده‌اند؛
+  - flag خاموش response فعلی `/parse` را byte-for-byte از نظر فیلدها حفظ
+    می‌کند؛ snapshot path غایب نیز فقط ABSTAIN shadow می‌دهد.
+- Test command و نتیجه:
+  - test parser، router-read و preview با env ساختگی →
+    `Ran 43 tests ... OK`.
+  - regression کامل P0 تا P6-B/P4-C/P5-D و guardهای Offer/Trade/migration →
+    `Ran 271 tests in 5.384s ... OK`.
+- ریسک و گیت بعدی:
+  - WebApp باید metadata را بدون auto-select نمایش دهد؛ بات نیز باید همین
+    contract را در preview خودش مصرف کند؛
+  - پس از replay/telemetry کافی، فقط P6-C می‌تواند receipt تازه و انتخاب
+    explicit کاربر را در submit به commodity نهایی تبدیل کند.

@@ -305,6 +305,102 @@ def _coin_inference_preview_path_or_error() -> str:
     return snapshot_path
 
 
+def _catalog_inference_shadow_payload(
+    decision: object,
+    *,
+    decision_key: str,
+) -> dict[str, object]:
+    candidates = []
+    for item in getattr(decision, "candidates", ()):
+        candidates.append(
+            {
+                "commodity_id": int(item.commodity_id),
+                "commodity_code": str(item.commodity_code),
+                "commodity_name": str(item.commodity_name),
+                "center_project_price": int(item.center_project_price),
+                "lower_project_price": int(item.lower_project_price),
+                "upper_project_price": int(item.upper_project_price),
+                "confidence": str(item.confidence),
+                "distance_to_center_relative": float(item.distance_to_center_relative),
+            }
+        )
+    return {
+        "mode": "SHADOW_ONLY",
+        "status": str(getattr(decision, "status", "ABSTAIN")),
+        "decision_key": decision_key,
+        "snapshot_generated_at_utc": getattr(decision, "snapshot_generated_at_utc", None),
+        "snapshot_receipt": getattr(decision, "snapshot_receipt", None),
+        "reason": getattr(decision, "reason", None),
+        "candidates": candidates,
+    }
+
+
+async def _shadow_inference_for_implicit_commodity(
+    db: AsyncSession,
+    *,
+    price: int,
+    settlement_type: str,
+) -> dict[str, object] | None:
+    """Observe a missing-name parse without changing its legacy commodity."""
+
+    if not settings.coin_intelligence_inference_preview_enabled:
+        return None
+    snapshot_path = (settings.coin_intelligence_inference_snapshot_path or "").strip()
+    if not snapshot_path:
+        return {
+            "mode": "SHADOW_ONLY",
+            "status": "ABSTAIN",
+            "decision_key": None,
+            "snapshot_generated_at_utc": None,
+            "snapshot_receipt": None,
+            "reason": "SNAPSHOT_PATH_UNCONFIGURED",
+            "candidates": [],
+        }
+    settlement = "CASH" if settlement_type == "cash" else "TOMORROW"
+    try:
+        ranker_result = infer_coin_commodity_from_published_snapshot(
+            snapshot_path,
+            price_project_thousand_toman=price,
+            settlement_term=settlement,
+            now_utc=datetime.now(timezone.utc),
+        )
+        catalog_result = await resolve_coin_inference_against_catalog(db, ranker_result)
+        decision_key = secrets.token_hex(32)
+        await append_coin_inference_audit(
+            db,
+            CoinInferenceAuditCommand(
+                decision_key=decision_key,
+                source_surface="WEBAPP",
+                submitted_project_price=price,
+                decision=catalog_result,
+            ),
+        )
+        await db.commit()
+        return _catalog_inference_shadow_payload(
+            catalog_result,
+            decision_key=decision_key,
+        )
+    except Exception as exc:
+        await db.rollback()
+        log_trading_event(
+            logger,
+            "coin_inference_parse_shadow.unavailable",
+            level="warning",
+            action="coin_inference_parse_shadow",
+            result="abstained",
+            error_class=type(exc).__name__,
+        )
+        return {
+            "mode": "SHADOW_ONLY",
+            "status": "ABSTAIN",
+            "decision_key": None,
+            "snapshot_generated_at_utc": None,
+            "snapshot_receipt": None,
+            "reason": "INFERENCE_UNAVAILABLE",
+            "candidates": [],
+        }
+
+
 def _build_webapp_offer_creation_command(
     offer_data: OfferCreate,
     *,
@@ -2675,6 +2771,7 @@ async def cancel_all_active_offers(
 async def parse_offer_text(
     request: ParseOfferRequest,
     context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     پارس متن لفظ با parser مشترک بات و وب اپ.
@@ -2682,7 +2779,13 @@ async def parse_offer_text(
     _ensure_accountant_market_access_allowed(context)
     from bot.utils.offer_parser import parse_offer_text as parser
     
-    result, error = await parser(request.text)
+    if settings.coin_intelligence_inference_preview_enabled:
+        result, error = await parser(
+            request.text,
+            capture_commodity_resolution=True,
+        )
+    else:
+        result, error = await parser(request.text)
     
     if error:
         return ParseOfferResponse(success=False, error=error.message)
@@ -2690,17 +2793,23 @@ async def parse_offer_text(
     if result is None:
         return ParseOfferResponse(success=False, error="متن قابل تشخیص نیست.")
     
-    return ParseOfferResponse(
-        success=True,
-        data={
-            "trade_type": result.trade_type,
-            "settlement_type": settlement_type_value(getattr(result, "settlement_type", None)),
-            "commodity_id": result.commodity_id,
-            "commodity_name": result.commodity_name,
-            "quantity": result.quantity,
-            "price": result.price,
-            "is_wholesale": result.is_wholesale,
-            "lot_sizes": result.lot_sizes,
-            "notes": result.notes
-        }
-    )
+    parsed_data = {
+        "trade_type": result.trade_type,
+        "settlement_type": settlement_type_value(getattr(result, "settlement_type", None)),
+        "commodity_id": result.commodity_id,
+        "commodity_name": result.commodity_name,
+        "quantity": result.quantity,
+        "price": result.price,
+        "is_wholesale": result.is_wholesale,
+        "lot_sizes": result.lot_sizes,
+        "notes": result.notes,
+    }
+    if getattr(result, "commodity_resolution", None) == "IMPLICIT_DEFAULT":
+        shadow = await _shadow_inference_for_implicit_commodity(
+            db,
+            price=result.price,
+            settlement_type=parsed_data["settlement_type"],
+        )
+        if shadow is not None:
+            parsed_data["commodity_inference"] = shadow
+    return ParseOfferResponse(success=True, data=parsed_data)

@@ -351,6 +351,25 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
         ), patch("bot.utils.redis_helpers.set_cached_commodities", AsyncMock()):
             self.assertEqual(await self.original_find_commodity("ناشناس 30تا 75800"), (None, "نامشخص"))
 
+    async def test_parser_can_distinguish_explicit_commodity_from_legacy_default(self):
+        cached_items = [
+            {"id": 1, "name": "امام", "aliases": ["امامی"]},
+        ]
+        with patch(
+            "bot.utils.redis_helpers.get_cached_commodities",
+            AsyncMock(return_value=cached_items),
+        ):
+            explicit = await self.original_find_commodity(
+                "امامی 30تا 186800",
+                include_resolution=True,
+            )
+            implicit = await self.original_find_commodity(
+                "30تا 186800",
+                include_resolution=True,
+            )
+        self.assertEqual(explicit, (1, "امام", "EXPLICIT"))
+        self.assertEqual(implicit, (1, "امام", "IMPLICIT_DEFAULT"))
+
     async def test_parse_offer_text_guard_paths(self):
         too_long_notes = "خ ن امام 30تا 75800:" + ("الف" * 201)
         result, error = await offer_parser.parse_offer_text(too_long_notes)

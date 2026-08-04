@@ -13,6 +13,10 @@ from api.routers.offers import (
     get_my_repeatable_offers,
     parse_offer_text,
 )
+from core.market_intelligence.coin_catalog import (
+    CatalogCoinCommodityCandidate,
+    CatalogCoinCommodityInference,
+)
 from models.customer_relation import CustomerTier
 
 
@@ -111,6 +115,62 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "حسابدار دسترسی به بازار ندارد.")
+
+    async def test_parse_offer_keeps_legacy_commodity_and_returns_shadow_metadata_only(self):
+        context = self.make_context(owner_id=5)
+        db = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
+        parsed = SimpleNamespace(
+            trade_type="buy",
+            settlement_type="tomorrow",
+            commodity_id=1,
+            commodity_name="امام",
+            commodity_resolution="IMPLICIT_DEFAULT",
+            quantity=10,
+            price=186_800,
+            is_wholesale=True,
+            lot_sizes=None,
+            notes=None,
+        )
+        decision = CatalogCoinCommodityInference(
+            status="AUTO_SELECT",
+            settlement_term="TOMORROW",
+            candidates=(
+                CatalogCoinCommodityCandidate(
+                    commodity_id=71,
+                    commodity_code="IMAM",
+                    commodity_name="امام",
+                    center_project_price=186_900,
+                    lower_project_price=185_500,
+                    upper_project_price=188_300,
+                    confidence="HIGH",
+                    distance_to_center_relative=0.000535,
+                ),
+            ),
+            snapshot_generated_at_utc="2026-08-04T10:00:00Z",
+            snapshot_receipt="b" * 64,
+            reason=None,
+        )
+        with (
+            patch("api.routers.offers.settings.coin_intelligence_inference_preview_enabled", True),
+            patch("api.routers.offers.settings.coin_intelligence_inference_snapshot_path", "/safe/snapshot.json"),
+            patch("bot.utils.offer_parser.parse_offer_text", new=AsyncMock(return_value=(parsed, None))),
+            patch("api.routers.offers.infer_coin_commodity_from_published_snapshot", return_value=SimpleNamespace()),
+            patch("api.routers.offers.resolve_coin_inference_against_catalog", new=AsyncMock(return_value=decision)),
+            patch("api.routers.offers.append_coin_inference_audit", new=AsyncMock()) as audit,
+        ):
+            result = await parse_offer_text(
+                ParseOfferRequest(text="خ ن 10تا 186800"),
+                context=context,
+                db=db,
+            )
+        self.assertEqual((result.data["commodity_id"], result.data["commodity_name"]), (1, "امام"))
+        self.assertEqual(
+            (result.data["commodity_inference"]["mode"], result.data["commodity_inference"]["status"]),
+            ("SHADOW_ONLY", "AUTO_SELECT"),
+        )
+        self.assertEqual(result.data["commodity_inference"]["candidates"][0]["commodity_id"], 71)
+        audit.assert_awaited_once()
+        db.commit.assert_awaited_once()
 
     async def test_offer_read_options_only_load_owner_when_identity_is_required(self):
         self.assertEqual(len(build_offer_read_options(include_owner_identity=False)), 1)
