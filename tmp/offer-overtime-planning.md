@@ -2,7 +2,7 @@
 
 ## Branch and Stage Delivery Policy
 
-- All implementation changes defined by this document must be committed only on branch `candidate/offer-overtime`.
+- All implementation changes defined by this document must be committed only on branch `candidate/offer-overtime`. That branch already exists and currently carries this document only; documentation commits on it are explicitly permitted before implementation approval.
 - Every roadmap stage must end with its own commit on `candidate/offer-overtime` before work begins on the next stage.
 - Immediately after a stage is completed, this document must be updated with: the commit SHA and title, implemented scope, affected components, test commands and results, retained log/artifact paths, decisions or approved deviations, and the purpose, risks, and prerequisites of the next stage.
 - A stage is not complete until its required verification has passed, its completion notes have been recorded here, and its stage commit exists on `candidate/offer-overtime`.
@@ -14,7 +14,8 @@
 - Implementation status: not started. The branch `candidate/offer-overtime` currently holds only this document; the delivery policy above governs implementation commits once the roadmap is approved.
 - Rule: no implementation, database, deployment, or runtime changes are allowed until the plan is complete and explicitly approved.
 - Decision policy: only confirmed decisions are recorded as final. Unresolved items remain explicitly open.
-- Verification status: the technical review below was re-verified against the codebase at commit `540b2c0c`. Corrections from that verification are folded into the tables and stages. Behavior requirements are confirmed; the product scenario prose and exact copy still carry draft markers and need a final wording pass, which is the only remaining approval gate besides the open questions listed near the end.
+- Verification status: the technical review below was re-verified against the codebase at commit `540b2c0c`. Corrections from that verification are folded into the tables and stages.
+- Copy policy: every user-facing message and displayed text in this feature requires explicit product-owner approval of its exact wording before the stage that ships it may be implemented. The message inventory section is the single index of record, and eight of its entries have no text yet.
 
 ## 1. Feature Naming
 
@@ -68,7 +69,7 @@ Abuse prevention and operational limits are the least developed topic: the per-o
 | 19 | Historical overtime marker | A proportional static `⏳` remains in history only if at least one overtime request produced a committed trade; otherwise it is removed. | Confirmed |
 | 20 | Marker coexistence and placement | Telegram keeps `⏳` beside existing trade markers. WebApp places it in the header metadata group at the end side of the RTL text flow, beside and not over the relative time. Its size is set against the adjacent relative-time text, which is `۱۰px`, not against the `۱۳px` card body. | Confirmed |
 | 21 | Active-state semantics | An offer remains fully active throughout overtime, counts toward active-offer limits, and enters history/republish flows only after final termination. | Confirmed |
-| 22 | User-setting UX | WebApp settings and the bot user panel use an explicit-save 0-10 minute stepper; zero is shown as disabled and changes affect only new offers. In the WebApp this reuses the existing number-stepper component. In the bot there is no plus/minus stepper anywhere today, so this is a brand-new interaction pattern; the nearest existing precedent is the limit-settings flow, which takes a typed value and confirms it with explicit accept/cancel buttons. | Confirmed |
+| 22 | User-setting UX | The setting is an explicit-save integer from 0 to 10 minutes, offered only to accounts eligible to own offers; zero is shown as disabled and changes affect only new offers. The two surfaces use different controls by decision. WebApp uses the plus/minus stepper with a one-minute step and an explicit save, reusing the existing number-stepper component. The bot uses a typed value confirmed by explicit accept/cancel, reusing the existing limit-settings pattern; no plus/minus stepper is added to the bot. Zero is entered as the value `0` rather than through a separate disable button. | Confirmed |
 | 23 | Origin-scoped sequential presentation | For each offer owner and offer home server, at most one overtime request is actionable at a time; eligible requests for that owner's other offers on the same home server wait in that origin-scoped queue. | Confirmed |
 | 24 | Queued-request activation | A queued request's 30-second decision lifetime starts only when it is promoted for presentation to the owner, after full revalidation. | Confirmed |
 | 25 | Normal-time boundary | A request received exactly at the end of normal offer time is rejected; automatic execution ends strictly before that boundary and owner approval begins strictly after it. | Confirmed |
@@ -99,6 +100,8 @@ Abuse prevention and operational limits are the least developed topic: the per-o
 | 50 | Worker and request path share one boundary | The expiry worker and the request path evaluate the same strict comparison against the same lifecycle projection. The current asymmetry, where the worker expires an offer exactly at the deadline while the trade path still accepts it, is closed. | Confirmed |
 | 51 | Idempotency key is mandatory | Every overtime request carries an idempotency key, because the request ledger's synchronization identity refuses a row without one. | Confirmed |
 | 52 | Requester concurrency cap exists | A per-requester cap on simultaneously outstanding requests across distinct offers is required and is enforced atomically alongside the per-offer lock. Its numeric value is an open question. | Confirmed in principle, value open |
+| 53 | Owner reachability warning is required | Enabling a nonzero value must warn the owner where approvals will appear. The warning must not promise one fixed surface, because the preference is global while approval is bound per offer to that offer's own origin. Confirmed wording: `تأیید هر آفر فقط در همان محل ثبت آفر نمایش داده می‌شود: آفر وب در وب‌اپ و آفر بات در بات.` Repeated silent expiry for one owner is also an operational signal in the diagnostics stage. | Confirmed |
+| 54 | Message-text approval gate | Every message sent to a user and every text shown to a user by this feature requires explicit product-owner approval of its exact wording before the stage that ships it may be implemented. This covers bot messages and their edits, WebApp prompts and status text, inline button labels, callback answers, validation and error text, the preference-save confirmations, the reachability warning, and any channel post change. No stage may introduce, reword, or reuse a user-facing string outside the approved inventory. | Confirmed |
 
 ## Draft Product Scenario
 
@@ -123,7 +126,10 @@ Abuse prevention and operational limits are the least developed topic: the per-o
 - مقدار وقت اضافه فقط می‌تواند یک عدد صحیح از صفر تا ۱۰ دقیقه باشد و سقف آن از تنظیمات مدیر کنترل نمی‌شود.
 - مقدار اولیه برای تمام کاربران فعلی و جدید صفر است؛ بنابراین قابلیت برای هر کاربر به‌صورت انتخابی فعال می‌شود.
 - در وب‌اپ، تنظیم در صفحه تنظیمات کاربر و بخش بازار با کنترل منفی/مثبت، گام یک دقیقه و دکمه ذخیره صریح نمایش داده می‌شود.
-- در بات، دکمه `⏳ وقت اضافه آفر` در پنل کاربر، کنترل منفی/مثبت، دکمه ذخیره، غیرفعال‌کردن و بازگشت را نمایش می‌دهد. دکمه ورودی در همان کیبورد پنل کاربر موجود اضافه می‌شود و هیچ آیتم تازه‌ای به منوی اصلی افزوده نمی‌شود. کنترل منفی/مثبت در بات هیچ نمونه فعلی ندارد و یک الگوی تعاملی تازه است؛ اگر حجم کال‌بک یا ریسک پیاده‌سازی آن پذیرفته نشود، جایگزین کم‌ریسک همان الگوی موجود «مقدار را تایپ کن و با تأیید صریح ذخیره کن» است.
+- در بات، دکمه `⏳ وقت اضافه آفر` در همان کیبورد پنل کاربر موجود اضافه می‌شود و هیچ آیتم تازه‌ای به منوی اصلی افزوده نمی‌شود.
+- کنترل بات ورودی تایپی با تأیید صریح است، نه کنترل منفی/مثبت. کاربر عددی بین صفر تا ده می‌فرستد، بات آن را اعتبارسنجی می‌کند و مقدار را با دکمه‌های تأیید و انصراف می‌پرسد، و ذخیره فقط پس از تأیید و پس از ثبت قطعی در ایران انجام می‌شود. این همان الگوی موجود تنظیم محدودیت‌های کاربر است و استپر منفی/مثبت به بات اضافه نمی‌شود.
+- غیرفعال‌کردن در بات با فرستادن مقدار `۰` انجام می‌شود و دکمه مستقل غیرفعال‌سازی ندارد.
+- ورودی خارج از بازه یا غیرعددی با یک متن اعتبارسنجی رد می‌شود و مقدار ذخیره‌شده را تغییر نمی‌دهد.
 - مقدار صفر در هر دو سطح با عنوان `غیرفعال` نمایش داده می‌شود.
 - این تنظیم فقط برای حساب‌هایی نمایش داده می‌شود که مجاز به ثبت آفر متعلق به خودشان هستند.
 - مقدار وقت اضافه انتخابی کاربر هنگام ثبت آفر روی همان آفر تثبیت می‌شود؛ تغییر بعدی تنظیم کاربر فقط روی آفرهای جدید اثر می‌گذارد.
@@ -281,9 +287,61 @@ Abuse prevention and operational limits are the least developed topic: the per-o
 - لفظ‌دهنده درخواست‌های منتظر را در محل قابل دسترس می‌بیند و می‌تواند فقط یک‌بار درباره هر درخواست تصمیم بگیرد.
 - مدیر امکان مشاهده مسیر کامل درخواست، تصمیم، زمان‌ها و علت رد را برای پشتیبانی و حسابرسی خواهد داشت.
 
+## User-Facing Message Approval Gate
+
+Every message this feature sends to a user, and every text it shows a user, requires explicit product-owner approval of its exact wording before the stage that ships it may be implemented. This covers bot messages and every later edit of them, WebApp prompts and status text, inline and reply button labels, callback answers, validation and error text, preference-save confirmations, the reachability warning, and any change to a channel post. No stage may introduce, reword, or silently reuse a user-facing string that is not in the inventory below with an approved status.
+
+The inventory is the single index of record. If implementation discovers a state that needs a message not listed here, work stops on that path until the text is added and approved.
+
+| No. | Surface | Moment | Exact text | Approval |
+| --- | --- | --- | --- | --- |
+| M1 | Bot | User-panel entry button | `⏳ وقت اضافه آفر` | Drafted, needs approval |
+| M2 | Bot | Prompt asking for the value, shown with the current value | `وقت اضافه آفرهای جدید شما: {مقدار فعلی}` and `عددی بین ۰ تا ۱۰ دقیقه بفرستید. صفر یعنی غیرفعال.` | Drafted, needs approval |
+| M2b | Bot | Confirmation question after a valid typed value | `وقت اضافه روی {تعداد} دقیقه تنظیم شود؟` | Drafted, needs approval |
+| M2c | Bot | Confirm and cancel buttons on that question | `✅ تایید` and `❌ انصراف` | Drafted, needs approval |
+| M3 | Both | Zero value shown as | `غیرفعال` | Drafted, needs approval |
+| M4 | Both | Save succeeded, nonzero | `✅ وقت اضافه آفرهای جدید شما روی {تعداد} دقیقه تنظیم شد.` | Drafted, needs approval |
+| M5 | Both | Save succeeded, zero | `✅ وقت اضافه برای آفرهای جدید شما غیرفعال شد.` | Drafted, needs approval |
+| M6 | Both | Warning when enabling a nonzero value | `تأیید هر آفر فقط در همان محل ثبت آفر نمایش داده می‌شود: آفر وب در وب‌اپ و آفر بات در بات.` | Confirmed |
+| M7 | Bot | Bot save rejected because Iran is unreachable | Not written | Missing, must be written |
+| M8 | Both | Value outside the 0–10 range, or non-numeric input in the bot | Not written | Missing, must be written |
+| M9 | WebApp | Settings and market section label for the stepper | Not written | Missing, must be written |
+| M10 | Bot | Requester status, request queued | `⏳ درخواست معامله ثبت شد و در صف بررسی است.` | Drafted, needs approval |
+| M11 | Bot | Requester status edited at promotion | `⏳ درخواست در حال بررسی است.` | Drafted, needs approval |
+| M12 | Both | Requester cancellation button | `لغو درخواست` | Drafted, needs approval |
+| M13 | Bot | Requester status after successful approval | `معامله انجام شد.` | Drafted, needs approval |
+| M14 | Bot | Requester status after rejection, timeout, or invalidation | `درخواست انجام نشد.` | Drafted, needs approval |
+| M15 | Both | Requester status after own cancellation | `درخواست لغو شد.` | Drafted, needs approval |
+| M16 | Both | Second request on an offer already under review | `درخواست دیگری برای این آفر در حال بررسی است؛ لطفاً {زمان باقی‌مانده} ثانیه دیگر دوباره تلاش کنید.` | Drafted, needs approval |
+| M17 | Both | Same requester still in cooldown on that offer | `برای ارسال مجدد درخواست روی این آفر، لطفاً {زمان باقی‌مانده} ثانیه دیگر تلاش کنید.` | Drafted, needs approval |
+| M18 | Both | Cross-server delivery outcome uncertain | `⏳ در حال بررسی درخواست...` | Drafted, needs approval |
+| M19 | Both | Definite pre-send failure, retry advised | Not written | Missing, must be written |
+| M20 | Both | Per-requester concurrency cap reached | Not written | Missing, must be written; depends on the open cap decision |
+| M21 | WebApp | Requester queued state before promotion | `در حال ارسال درخواست...` | Drafted, needs approval |
+| M22 | WebApp | Requester countdown display | `۰۰:۳۰` counting to `۰۰:۰۰` | Drafted, needs approval |
+| M23 | Bot | Owner approval message title | `⏳ **درخواست معامله در وقت اضافه**` | Drafted, needs approval |
+| M24 | Bot | Owner approval message lead line | `درخواست معامله برای آفر شما:` | Drafted, needs approval |
+| M25 | Bot | Owner approval deadline line | `⏱ مهلت پاسخ: ۳۰ ثانیه` | Drafted, needs approval |
+| M26 | Bot | Owner approval closing line | `در صورت تأیید، معامله پس از بررسی نهایی ثبت می‌شود.` | Drafted, needs approval |
+| M27 | Both | Requested quantity line, lot-based offers only | `📦 مقدار درخواستی: {تعداد} عدد` | Drafted, needs approval |
+| M28 | Bot | Owner approval buttons | `✅ تأیید معامله` and `❌ رد درخواست` | Drafted, needs approval |
+| M29 | Bot | Owner message after own approval | `معامله انجام شد.` | Drafted, needs approval |
+| M30 | Bot | Owner message after own rejection | `درخواست رد شد.` | Drafted, needs approval |
+| M31 | Bot | Owner message after timeout, requester cancellation, or invalidation | `درخواست بسته شد.` | Drafted, needs approval |
+| M32 | Bot | Callback answer when the owner clicks after the deadline | Not written | Missing, must be written |
+| M33 | Bot | Callback answer when the click is a duplicate or the request is already terminal | Not written | Missing, must be written |
+| M34 | Bot | Callback answer when the clicker is not the economic owner | Not written | Missing, must be written |
+| M35 | WebApp | Owner prompt title | `درخواست معامله در وقت اضافه` | Drafted, needs approval |
+| M36 | WebApp | Owner prompt buttons | `تأیید معامله` and `رد درخواست` | Drafted, needs approval |
+| M37 | Both | Owner approved but revalidation failed, so no trade was created | Not written | Missing, must be written |
+| M38 | Channel | Overtime marker added to the public post, and removed or retained at terminal outcome | `⏳` | Drafted, needs approval |
+| M39 | Both | Standard trade messages to both parties after a successful overtime trade | Existing project text, content contract unchanged | Existing, unchanged |
+
+Eight entries have no text yet. They are all states the confirmed behavior already requires, so each one needs wording before its stage can be implemented: rejecting a bot save while Iran is unreachable, range and non-numeric validation, the WebApp control label, the definite pre-send failure, the per-requester concurrency cap, the three owner callback answers for a late click, a duplicate or already-terminal click, and a click by someone who is not the economic owner, and the case where the owner approved but revalidation prevented the trade.
+
 ## Draft Exact Product Copy
 
-> Status: copy draft; behavior requirements are confirmed, but wording still requires product approval.
+> Status: copy draft; behavior requirements are confirmed, but every string below is subject to the approval gate above and none may be implemented before it is approved.
 
 ### بازخورد وضعیت به درخواست‌دهنده
 
@@ -428,7 +486,7 @@ Abuse prevention and operational limits are the least developed topic: the per-o
 19. A proportional static `⏳` remains in history only when at least one committed trade originated from an overtime request.
 20. Telegram overtime and trade markers coexist; WebApp integrates `⏳` beside the existing upper-left relative time without overlap.
 21. Overtime offers remain active, count against active-offer limits, and do not enter history or republish eligibility until final termination.
-22. WebApp and bot expose an explicit-save 0-10 minute stepper to eligible offer owners; zero is disabled and changes apply only to new offers.
+22. WebApp and bot both expose an explicit-save 0-10 minute setting to eligible offer owners, with different controls by decision: a plus/minus stepper in the WebApp, and a typed value confirmed by explicit accept/cancel in the bot. Zero means disabled and changes apply only to new offers.
 23. The admin-configured normal offer lifetime preserves the current dynamic behavior for still-active offers; operational changes are made only while the market is closed, and expired offers are never revived.
 24. Each owner receives only one actionable overtime request per offer home server at a time; valid requests for the owner's other offers on that same server wait in FIFO order, while WebApp- and bot-origin queues remain independent.
 25. A queued request receives its full 30-second decision lifetime only when promoted for presentation, after full business revalidation.
@@ -468,7 +526,7 @@ Abuse prevention and operational limits are the least developed topic: the per-o
 
 | No. | Challenge | What exists now | Required low-risk design |
 | --- | --- | --- | --- |
-| 1 | One authoritative offer lifecycle | No offer row stores a deadline. Every caller recomputes `created_at + current offer_expiry_minutes`, and that setting is read through a 60-second cache. Roughly fifteen independent computation sites exist across API, worker, trade path, publication queue, web push, and frontend. | Create one server-side lifecycle projection returning normal deadline, overtime deadline, phase, interaction availability, and terminal reason. Expose its read-only result through the REST responses and the existing realtime WebSocket events. Every write path must use that same projection and the same cached settings accessor so no two surfaces can disagree. |
+| 1 | One authoritative offer lifecycle | No offer row stores a deadline. Every caller recomputes `created_at + current offer_expiry_minutes`, reading that setting through a cache with a 60-second TTL, a local fallback, and its own sync path. Roughly fifteen independent computation sites exist across API, worker, trade path, publication queue, web push, and frontend. | Create one server-side lifecycle projection returning normal deadline, overtime deadline, phase, interaction availability, and terminal reason. The offer home server owns that projection and is the single authoritative answer for its own offers; all other surfaces display it rather than recomputing. Expose the read-only result through the REST responses and the existing realtime WebSocket events. The settings cache is only a read mechanism and must not be treated as a cross-server convergence guarantee. |
 | 2 | Exact time boundaries across two servers | Three separate behaviors exist today and they disagree. The trade path forgives transit delay: when the trusted edge receipt is `<= deadline` and transit is within `trade_forward_grace_seconds` (config default `3`, raised to `max(grace, 8)` on the bot path), a request that lands after the deadline still trades automatically. When that branch does not apply, classification falls back to the home server's own processing time via `now > expiry_at`. The expiry worker instead uses `created_at <= now - minutes`, so it expires an offer exactly at the deadline while the trade path still accepts it. Separately, `allow_in_flight_after_time_limit_expiry` lets an offer already flipped to `EXPIRED`/`time_limit` still finalize a trade when the edge grace applies. | Replace all three with one rule: the trusted first-server receipt time alone determines the phase, and transit delay never changes the phase. Compare strictly against that receipt: `< normal deadline` is automatic, `== normal deadline` rejects, `> normal deadline && < final deadline` enters approval, and `>= final deadline` rejects. The numeric grace window is therefore removed from phase classification; its only remaining job is to let a request whose receipt was validly inside a phase still be finalized after the worker has advanced the offer's status. The processing-time fallback must be deleted so a slow but valid overtime request reaches owner approval instead of being rejected as expired. The home server remains the final clock authority and device time is never trusted. |
 | 3 | Durable request state and queue | `OfferRequest` has a durable ledger but no queued/presented/owner-decision lifecycle, decision deadline, delivery reference, or overtime marker. | Extend this ledger with explicit nonterminal and terminal approval states, immutable timestamps, queue ordering, home-server/owner snapshots, decision deadline, Telegram message reference, and rejection/invalidation reason. Add targeted database indexes and PostgreSQL-enum migrations. |
 | 4 | Atomic one-request-per-offer rule | Current direct trade processing locks the offer, but does not model a pending owner decision. | At the offer home server, lock the offer and active request state in one transaction. A second request for the same offer must be rejected immediately, regardless of lot or requested quantity, and must never join the owner queue. |
@@ -492,9 +550,9 @@ Abuse prevention and operational limits are the least developed topic: the per-o
 | 22 | Republish snapshot semantics | Existing republish creates an independent replacement offer but has no overtime value to select. | Snapshot the economic owner's current persisted overtime setting when the replacement is created. Never copy the source offer's overtime configuration or historical marker. |
 | 23 | Final-tail visual consistency | Existing UI has no state between active and terminal expiry. | When one accepted request outlives overtime, complete the overtime bar, make WebApp `⏳` static, retain channel `⏳`, disable all new interaction, and resolve the marker only at the final request outcome. |
 | 24 | Requester concurrency across offers | One request per offer and one presented request per owner scope both bound the owner side. Nothing bounds how many distinct offers a single requester may hold under logical lock at once, so one requester could lock a large share of the market for thirty seconds at a time. | Add an explicit per-requester cap on simultaneously outstanding overtime requests across distinct offers, enforced atomically at the offer home server alongside the per-offer lock. The cap value is an open product decision recorded below. |
-| 25 | Ledger sync preconditions | The `offer_requests` sync natural identity requires a non-null idempotency key, so a row without one never synchronizes. The sync registry declares this table's home column as `offer_home_server` while the model column is actually `request_home_server`. The table is also in the quick parity set, with an explicit local-only field list. | Require an idempotency key on every overtime request without exception. Resolve the registry/model naming mismatch before adding fields rather than layering a third name on top. Register every new local reference column, such as a Telegram delivery job reference, in the parity local-only list so hash comparison does not report false drift. Confirm that the many nonterminal transitions an overtime request goes through are compatible with the registry's stated terminal-row immutability. |
+| 25 | Ledger sync preconditions | The `offer_requests` sync natural identity requires a non-null idempotency key, so a row without one never synchronizes. The table is also in the quick parity set, with an explicit local-only field list. No naming problem exists here: the registry's `offer_home_server` text is a free-form authority description, like the authority strings of every other table, not a column name. The real column is `request_home_server`, the sync authority resolver reads exactly that column, and ledger creation deliberately populates it from `Offer.home_server`, so it already carries offer-home semantics. | Require an idempotency key on every overtime request without exception. Keep `request_home_server` as-is and continue populating it from the offer's home server; no rename is needed and none should be introduced. Register every new local reference column, such as a Telegram delivery job reference, in the parity local-only list so hash comparison does not report false drift. Confirm that the many nonterminal transitions an overtime request goes through are compatible with the registry's stated terminal-row immutability. |
 | 26 | Migration surface | `alembic.ini` sets the script location to `migrations`, and the separate `alembic/` tree is a stale leftover with its own disconnected revision root. The safe enum-extension pattern already used in this repository is `ALTER TYPE ... ADD VALUE IF NOT EXISTS`, with values intentionally retained on downgrade. | Author every migration in `migrations/versions` only. Extend `offerrequeststatus` with the established `ADD VALUE IF NOT EXISTS` pattern and do not attempt to remove values on downgrade. |
-| 27 | Owner reachability on the wrong surface | Approval is bound to the offer's origin surface with no cross-surface fallback, while the overtime preference is a single global per-user value applied to every new offer. A user who registers offers on a surface they do not actually monitor therefore never sees any request, and every request against their offers expires silently with no signal to anyone. | Surface this consequence at the moment the user enables a nonzero value: state on which surface approvals will appear, based on where that user actually creates offers. Treat persistent silent expiry for one owner as an operational signal in the diagnostics stage. |
+| 27 | Owner reachability on the wrong surface | Approval is bound to the offer's origin surface with no cross-surface fallback, while the overtime preference is a single global per-user value applied to every new offer. A user who registers offers on a surface they do not actually monitor therefore never sees any request, and every request against their offers expires silently with no signal to anyone. | Show the confirmed warning at the moment the user enables a nonzero value, stating the per-offer rule rather than promising one surface. Treat persistent silent expiry for one owner as an operational signal in the diagnostics stage. |
 
 ### Cross-Cutting Risks and Controls
 
@@ -541,29 +599,32 @@ All metadata belonging to the offer and its overtime requests is retained as dur
 21. **Requester concurrency cap:** requests against many distinct offers by one requester up to and past the cap, cap release on every terminal outcome, interaction with the per-offer lock and the per-owner presented limit, and concurrent attempts racing the cap boundary.
 22. **Deadline agreement:** worker and request path evaluated at the same exact deadline instant, the in-flight allowance extended to the overtime phase and the tail, and no path where a worker-advanced status silently drops a validly received request.
 23. **Telegram rank contention:** an overtime approval and an overdue trade result both resolving at `M0` rank `1`, verifying the delivery-deadline and sequence tie-break and that neither starves the other.
-24. **Sync preconditions:** a request without an idempotency key never reaching the wire, parity hashing with the new local reference columns registered as local-only, repeated nonterminal transitions against the registry's immutability rule, and an old receiver encountering a new enum value before its own migration has landed.
+24. **Message conformance:** every user-facing string emitted on either surface matches its approved inventory entry exactly, no state produces an unlisted message, and no path silently reuses an existing project string in place of an approved overtime string.
+25. **Sync preconditions:** a request without an idempotency key never reaching the wire, parity hashing with the new local reference columns registered as local-only, repeated nonterminal transitions against the registry's immutability rule, and an old receiver encountering a new enum value before its own migration has landed.
 
 ## Open Questions Requiring a Decision
 
 Detailed schema, migration, API, queue, and test design will be derived from the confirmed requirements above without changing the stated behavior. Three items remain open and must be answered before Stage 4.
 
 1. **Per-requester concurrency cap.** How many distinct offers may one requester hold under logical lock at the same time? Every confirmed rule bounds the owner side; nothing bounds the requester side, so one user could lock a large share of the market in thirty-second windows. A cap is required; its value is a product decision. The narrowest option is one outstanding request per requester at a time, which is simplest to reason about and hardest to abuse.
-2. **Owner reachability warning.** Approval never crosses surfaces, but the preference is global per user. An owner who creates offers on a surface they do not monitor will silently lose every overtime request. The confirmed behavior is accepted; what is undecided is whether enabling a nonzero value must show an explicit warning naming the surface, and whether repeated silent expiry for one owner should raise an operational signal.
-3. **Final copy approval.** Behavior is confirmed, but the product scenario prose and the exact strings still carry draft markers, including the new remaining-time retry message that replaces the existing contention text.
+2. **Final copy approval.** Every user-facing string in this feature requires explicit product-owner approval before its stage may be implemented. See the message inventory section for the full list and its approval state.
+
+Resolved since the previous revision: the owner reachability warning is now a confirmed requirement with fixed wording, so it is no longer open and Stage 2 may proceed with it.
 
 ## Stage-Based Implementation Roadmap
 
-> Status: planning only. No implementation, branch creation, migration, deployment, or runtime action may start until this roadmap is explicitly approved.
+> Status: planning only. No code, migration, deployment, or runtime action may start until this roadmap is explicitly approved. Branch creation is not part of that prohibition: `candidate/offer-overtime` already exists for documentation work and is where implementation will later land.
 
 ### Global Delivery Rules
 
-1. Work starts from the then-current `main` in one dedicated feature branch; unrelated worktree changes are never included.
+1. Work continues on the existing `candidate/offer-overtime` branch, rebased on the then-current `main`; unrelated worktree changes are never included.
 2. Every stage has focused automated tests and a recorded result before the next stage starts. A failing regression blocks progress.
 3. All database changes are additive first. Both servers receive compatible schema before any code can emit a new request state or enable user overtime.
 4. The feature is inert by default: every user starts at `0` minutes. No existing offer is altered by migration.
 5. `Offer.home_server` remains the only authority for request creation, cancellation, decision, expiry, and trade commit. No local mirror may make an overtime decision.
 6. Existing normal-time trade behavior, customer-manager settlement chain, limits, blocks, fair-price behavior, notifications, and Telegram queue contracts are preserved unless a stage explicitly extends them.
 7. Staging uses isolated test users and offers. No production trade, production user, or production data mutation is used as a test fixture.
+8. No stage may ship a user-facing string that is not approved in the message inventory. A stage whose scope includes a message with missing or unapproved text is blocked until that text is written and approved, and each stage's exit criteria include confirming that every string it introduced matches the approved inventory entry exactly.
 
 ### Stage 0 — Baseline and Delivery Contract
 
@@ -571,7 +632,7 @@ Detailed schema, migration, API, queue, and test design will be derived from the
 
 - Record the exact `main` commit, current migrations, server schema versions, sync health, and Telegram queue contract version.
 - Run the existing market, expiry, request-ledger, sync, Telegram queue, and relevant WebApp test suites unchanged.
-- Create the dedicated feature branch only after explicit implementation approval; collect per-stage logs under an ignored `tmp/` evidence directory.
+- The feature branch already exists and carries this document; begin committing implementation to it only after explicit approval, and collect per-stage logs under an ignored `tmp/` evidence directory.
 - Define the feature-disabled acceptance baseline: user setting is absent before migration and, after migration, defaults to `0` with unchanged market behavior.
 
 **Exit criteria:** clean baseline evidence and no untriaged failure in existing behavior.
@@ -585,10 +646,10 @@ Detailed schema, migration, API, queue, and test design will be derived from the
 - Extend the existing `OfferRequest` ledger, not a parallel table, with workflow kind, queue/presentation/decision state, immutable offer/request snapshots, owner/home-server references, timestamps, deadline, terminal reason, Telegram delivery/message reference, and resulting trade reference.
 - Add PostgreSQL enum values through safe, ordered migrations and targeted partial indexes for one nonterminal request per offer, queued FIFO lookup, one presented request per `(economic_owner, offer_home_server)`, and the per-requester concurrency cap.
 - Author all migrations in `migrations/versions` only; the separate `alembic/` tree is a stale leftover and must not be touched. Extend `offerrequeststatus` with the established `ALTER TYPE ... ADD VALUE IF NOT EXISTS` pattern and retain values on downgrade.
-- Resolve the existing naming mismatch where the sync registry calls this table's home column `offer_home_server` while the model column is `request_home_server`, before adding new fields on top of it.
+- Keep the existing `request_home_server` column and its current derivation from `Offer.home_server`. It is already the offer-home key that the sync authority resolver reads, so no rename or new home column is introduced.
 - Ensure migration downgrade/old-code compatibility is defined before deployment; no new state is emitted in this stage.
 
-**Primary locations:** `models/user.py`, `models/offer.py`, `models/offer_request.py`, `migrations/versions`, `core/events.py`, `core/sync_registry.py`.
+**Primary locations:** `models/user.py`, `models/offer.py`, `models/offer_request.py`, `migrations/versions`, `core/events.py`.
 
 **Tests:** migration upgrade on empty and representative databases; default-zero backfill; enum compatibility; index/concurrency probes; existing request-ledger tests.
 
@@ -602,7 +663,7 @@ Detailed schema, migration, API, queue, and test design will be derived from the
 - WebApp writes on Iran. Bot writes are signed internal commands to Iran and acknowledge success only after Iran persists the value, reusing the existing signed internal-command mechanism.
 - During Iran/foreign disconnection, reject bot saves without a local write, deferred intent, or false success. Note that disconnection behavior in this project is not uniform: the trade forward rejects, the registration reconciler retries, and the sync receiver defers. This preference follows the reject pattern explicitly.
 - Add the field to explicit user serialization, event payload, sync allow lists, versioning, and cache invalidation. Place it in the Iran-authoritative identity field set and never in the foreign-writable set, so the existing write-authority guard is what enforces single-writer.
-- When the user saves a nonzero value, tell them which surface approvals will appear on, because approval is bound to each offer's origin surface with no fallback and a global preference can otherwise produce silent expiry for an owner who does not monitor that surface.
+- When the user saves a nonzero value, show the confirmed reachability warning: `تأیید هر آفر فقط در همان محل ثبت آفر نمایش داده می‌شود: آفر وب در وب‌اپ و آفر بات در بات.` It must not name one fixed surface for the user, because the preference is global while approval is bound per offer to that offer's own origin.
 - At creation of any new offer, including a republished offer, snapshot the economic owner’s current persisted value. Never copy the source offer’s snapshot during republish.
 
 **Primary locations:** `models/user.py`, user API/service layer, bot internal-command client, `api/routers/sync.py`, `core/events.py`, `core/sync_metadata.py`, offer creation services.
@@ -616,7 +677,7 @@ Detailed schema, migration, API, queue, and test design will be derived from the
 **Goal:** replace scattered expiry calculations with one authoritative lifecycle calculation.
 
 - Implement a server-side lifecycle projection that returns normal deadline, final overtime deadline, phase, public interaction availability, and terminal transition eligibility.
-- Preserve current dynamic normal-lifetime behavior for still-active offers; combine it with the immutable offer overtime snapshot. Read the admin lifetime only through the existing cached settings accessor so all surfaces see the same value within its 60-second window.
+- Preserve current dynamic normal-lifetime behavior for still-active offers; combine it with the immutable offer overtime snapshot. Read the admin lifetime only through the existing settings accessor, and treat that accessor purely as a settings read mechanism: its 60-second TTL, its local fallback, and the separate settings sync path mean the cache is not a convergence guarantee between the two servers. The offer home server's projection is the single authoritative answer for that offer's lifecycle, and every other surface displays that answer rather than recomputing one.
 - Enforce confirmed strict boundaries using the trusted first-server receipt time as the only phase input: automatic trade only strictly before the normal deadline; exact normal and exact final boundaries reject; approval only strictly within overtime. Delete the current home-server processing-time fallback and remove the transit-grace window from phase classification.
 - Close the current worker-versus-request asymmetry so both evaluate the same comparison against this projection.
 - Keep an accepted request actionable in the 30-second final tail, while disabling all new public interaction. Extend the existing in-flight allowance, which today only covers normal-time expiry, to cover the overtime phase and the tail.
@@ -714,14 +775,14 @@ Detailed schema, migration, API, queue, and test design will be derived from the
 
 **Goal:** expose the confirmed bot behavior without changing the persistent keyboard layout.
 
-- Add `⏳ وقت اضافه آفر` controls to the existing eligible user panel, with explicit save/disable/back behavior and Iran-authoritative save result.
+- Add the `⏳ وقت اضافه آفر` entry to the existing eligible user panel. The control is a typed value confirmed by explicit accept/cancel, reusing the limit-settings pattern; do not build a plus/minus stepper in the bot. Zero is entered as a value, not a separate disable button. The save result is Iran-authoritative and is reported only after Iran persists it.
 - Add bot-origin request creation and source-side status messages with the existing inline `لغو درخواست` button only; add no new main-menu, panel, or pending-request-list button.
 - Implement queued-to-presented requester status edit, confirmed terminal texts, owner approval texts/buttons, and button removal through the queue.
 - Keep requester identity hidden in every pre-trade bot message.
 
 **Primary locations:** `bot/keyboards.py`, relevant trade handlers/callbacks, `bot/states.py`, bot delivery runtime helpers.
 
-**Tests:** setting UX/authorization; queued/presented/terminal text; cancellation; owner approve/reject; requester/owner identity privacy; remote-home flow; no reply-keyboard/anchor regression; normal bot trading regression.
+**Tests:** setting authorization and the typed-input flow including non-numeric input, out-of-range values, zero entered as a value, cancel at each step, and a save attempt while Iran is unreachable; queued/presented/terminal text; cancellation; owner approve/reject; late, duplicate, and non-owner callback clicks; requester/owner identity privacy; remote-home flow; no reply-keyboard/anchor regression; normal bot trading regression; every string emitted matches its approved inventory entry exactly.
 
 **Exit criteria:** bot behavior matches every confirmed message, control, queue, and cancellation decision in this document.
 
