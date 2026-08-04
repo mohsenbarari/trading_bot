@@ -148,6 +148,20 @@ class CoinInferenceAuditTests(unittest.IsolatedAsyncioTestCase):
 
 
 class CoinInferenceAuditStorageTests(unittest.TestCase):
+    def test_postgresql_identifiers_fit_the_database_limit(self) -> None:
+        """Keep model-level schema names valid for PostgreSQL migrations."""
+        identifier_names = [
+            item.name
+            for item in CoinIntelligenceInferenceAudit.__table__.constraints
+            | CoinIntelligenceInferenceAudit.__table__.indexes
+            if item.name
+        ]
+        self.assertTrue(identifier_names)
+        self.assertTrue(
+            all(len(name) <= 63 for name in identifier_names),
+            msg=f"PostgreSQL identifier limit exceeded: {identifier_names}",
+        )
+
     def test_table_rejects_an_auto_decision_without_a_selected_commodity(self) -> None:
         engine = create_engine("sqlite:///:memory:")
         CoinIntelligenceInferenceAudit.__table__.create(engine)

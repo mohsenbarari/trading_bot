@@ -1622,7 +1622,7 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   P5-C و سپس runtime planِ بدون معماری سه‌سروره لازم است؛ هیچ activation
   خودکاری از این commit مجاز نیست.
 
-### P5-D — guard اجرای migration روی PostgreSQL scratch — 2026-08-04 — PARTIAL
+### P5-D — guard اجرای migration روی PostgreSQL scratch — 2026-08-04 — COMPLETE
 
 - Scope انجام‌شده:
   - `scripts/run_guarded_scratch_alembic.py` فقط namespace محدود
@@ -1636,17 +1636,20 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   - نام‌هایی مانند `trading_bot` یا `trading_bot_db` حتی با این تغییر قابل
     قبول نیستند؛ namespace جدید فقط اجازهٔ آزمایش isolated را می‌دهد.
 - Test command و نتیجه:
-  - `python3 -m unittest -q tests.test_guarded_scratch_alembic
-    tests.test_migration_smoke` → `Ran 30 tests ... OK`.
+  - `python3 -m unittest -q tests.test_coin_intelligence_inference_audit
+    tests.test_guarded_scratch_alembic tests.test_migration_smoke` → `Ran 37
+    tests ... OK`.
 - وضعیت اجرای واقعی:
-  - هیچ PostgreSQL scratch یا container محلی آماده نبود؛ برای حفظ دیسک و
-    جلوگیری از ایجاد/download container، migration واقعی اجرا نشد؛
-  - production، main و runtime هیچ تغییری نکردند.
-- گیت باقی‌مانده:
-  - با یک database disposable به نامی مانند
-    `coin_intelligence_audit_<run>_test` باید upgrade head، insert audit،
-    rejection UPDATE/DELETE trigger و downgrade fail-closed به‌صورت واقعی
-    آزموده شوند؛ owner deployment/release gate.
+  - روی یک PostgreSQL disposable محلی با نام
+    `coin_intelligence_audit_20260804_p6c`، `upgrade head` واقعی اجرا شد؛
+    سپس insert یک audit، rejection واقعی `UPDATE` توسط trigger append-only
+    و rejection واقعی `downgrade base` با وجود audit آزموده شد؛ همه سبز بودند.
+  - پیش از اجرای نهایی، این gate یک نام CheckConstraint با طول بیش از حد
+    PostgreSQL را کشف کرد. نام در model و migration به
+    `ck_coin_infer_audit_selected_commodity_positive` کوتاه شد و test
+    دائمی سقف ۶۳ کاراکتر برای نام‌های schema مدل اضافه شد.
+  - container و database آزمایشی در پایان هر اجرا خودکار حذف شدند؛ production،
+    main و runtime هیچ تغییری نکردند.
 
 ### P6-B — metadata سایه در parser Web — 2026-08-04 — PARTIAL
 
@@ -1826,8 +1829,8 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     را با Snapshot محلیِ تازه دوباره اجرا می‌کنند. تغییر candidate، receipt
     نامعتبر، Snapshot stale/unavailable یا flag خاموش fail-closed است.
   - audit append-only اکنون `candidate_scope` را نیز نگه می‌دارد؛ migration
-    اولیهٔ audit در همین promotion branch به‌روزرسانی شد و هنوز روی دیتابیس
-    واقعی اجرا نشده است.
+    اولیهٔ audit در PostgreSQL scratch ایزوله با موفقیت اجرا شده، اما هنوز
+    روی هیچ دیتابیس runtime اجرا نشده است.
 - مرز قطعی و رفتار ایمنی:
   - تصمیم قبلی هرگز فرمان ایجاد Offer نیست. client نمی‌تواند با یک
     `commodity_id` حدسی یا receipt متعلق به price/settlement/surface دیگر
@@ -1846,8 +1849,9 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     `npm run build` نیز در sandbox موقت سبز شدند. هیچ dependency جدیدی نصب
     نشد.
 - گیت release/staging:
-  - migration append-only audit باید ابتدا در PostgreSQL scratch با upgrade،
-    trigger immutability و downgrade fail-closed آزموده شود.
+  - migration append-only audit در PostgreSQL scratch با upgrade، trigger
+    immutability و downgrade fail-closed آزموده شده است؛ اجرای migration در
+    staging/runtime همچنان فقط در release gate مجاز است.
   - publisher محلی Snapshot، permission/path و freshness telemetry باید پیش
     از روشن‌کردن flag فراهم باشند؛ شروع با `CONFIRM` و telemetry shadow-first
     ضروری است. activation production، collectorها و معماری سه‌سروره خارج از

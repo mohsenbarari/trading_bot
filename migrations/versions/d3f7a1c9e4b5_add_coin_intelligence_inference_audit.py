@@ -68,7 +68,7 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(
             "selected_commodity_id IS NULL OR selected_commodity_id > 0",
-            name="ck_coin_intelligence_inference_audit_selected_commodity_positive",
+            name="ck_coin_infer_audit_selected_commodity_positive",
         ),
         sa.CheckConstraint(
             "(decision_status = 'AUTO_SELECT' AND candidate_count = 1 "
