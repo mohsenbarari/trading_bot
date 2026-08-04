@@ -783,6 +783,36 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     `PARTIAL` می‌ماند؛ گام بعدی P3 (outbox پروژه) می‌تواند مستقل از collector
     توسعه یابد و به هیچ معماری سه‌سروره متصل نخواهد شد.
 
+### P2-A1 — فرمان دستی و session-safe برای کانال‌های عمومی — 2026-08-04 — COMPLETE (manual only)
+
+- Scope انجام‌شده:
+  - `scripts/collect_coin_market_telegram.py` اجرای one-shot چهار source
+    allowlisted را به‌شکل صریح فراهم می‌کند. مسیر Store و session باید زیر
+    یک runtime root موجود باشند؛ خروجی JSON فقط counterهای source عمومی را
+    دارد و مسیر، متن یا credential را چاپ نمی‌کند.
+  - transport دیگر به‌صورت پیش‌فرض login تعاملی شروع نمی‌کند. اگر session
+    Telegram مجاز نباشد، collector با
+    `public_telegram_session_authorization_required` متوقف می‌شود. bootstrap
+    فقط با `--bootstrap-session` و TTY مجاز است.
+  - `--replay-window` تنها checkpoint را برای بازهٔ bounded انتخاب‌شده کنار
+    می‌گذارد؛ run معمولی فقط پس از checkpoint ادامه می‌دهد.
+- Test command و نتیجه:
+  - `PYTHONPYCACHEPREFIX=/tmp/coin-intelligence-pycache python3 -m unittest -q
+    tests.test_collect_coin_market_telegram
+    tests.test_coin_intelligence_public_telegram
+    tests.test_publish_coin_intelligence_snapshot
+    tests.test_coin_intelligence_snapshot_publisher
+    tests.test_coin_intelligence_market_snapshot
+    tests.test_coin_intelligence_market_store` → `Ran 33 tests ... OK`.
+- مرز عملیاتی و گیت باقی‌مانده:
+  - Telethon همچنان dependency اختیاری است و به image/runtime اضافه نشده؛
+    این commit نه session واقعی می‌سازد، نه API/phone می‌خواند و نه network
+    call انجام می‌دهد.
+  - پیش از staging باید dependency در image مخصوص collector، runtime root
+    خارج از checkout، مجوز session و مالک اجرای one-shot تصویب شود. پس از
+    آن publish/check P4-D می‌تواند از همان Market Store استفاده کند؛ cron
+    یا worker خودکار هنوز مرحلهٔ جداگانه است.
+
 ### P2-B — adapter آبشدهٔ خصوصی — 2026-08-04 — PARTIAL
 
 - Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.

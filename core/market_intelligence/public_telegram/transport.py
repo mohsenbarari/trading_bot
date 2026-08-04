@@ -61,6 +61,10 @@ class PublicTelegramTransportSettings:
     credentials: PublicTelegramCredentials = field(repr=False)
     market_store_path: Path
     session_path: Path
+    # A scheduled/non-interactive run must never pause while Telethon requests
+    # a login code.  Bootstrap is a separate, explicitly authorized console
+    # operation that persists the session under the protected runtime root.
+    allow_interactive_login: bool = False
 
     def validate_paths(self, *, repository_root: Path) -> None:
         database = self.market_store_path.expanduser().resolve()
@@ -153,7 +157,13 @@ async def collect_public_market_telegram(
             flood_sleep_threshold=60,
             sequential_updates=True,
         )
-        await client.start(phone=settings.credentials.phone)
+        await client.connect()
+        if not await client.is_user_authorized():
+            if not settings.allow_interactive_login:
+                raise PublicTelegramTransportError(
+                    "public_telegram_session_authorization_required"
+                )
+            await client.start(phone=settings.credentials.phone)
         for source in selected:
             entity = await client.get_entity(source.public_username)
             minimum_id = (

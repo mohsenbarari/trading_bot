@@ -244,6 +244,12 @@ class PublicTelegramTransportTests(unittest.TestCase):
             def __init__(self, *_args, **_kwargs) -> None:
                 self.disconnected = False
 
+            async def connect(self) -> None:
+                return None
+
+            async def is_user_authorized(self) -> bool:
+                return True
+
             async def start(self, *, phone: str) -> None:
                 self.phone = phone
 
@@ -301,6 +307,55 @@ class PublicTelegramTransportTests(unittest.TestCase):
                 connection.close()
         self.assertEqual(result["MELTED_AGGREGATE"]["events"], 1)
         self.assertNotIn("message", columns)
+
+    def test_noninteractive_run_refuses_an_unapproved_session(self) -> None:
+        class FakeTelegramClient:
+            start_calls = 0
+
+            def __init__(self, *_args, **_kwargs) -> None:
+                pass
+
+            async def connect(self) -> None:
+                return None
+
+            async def is_user_authorized(self) -> bool:
+                return False
+
+            async def start(self, *, phone: str) -> None:
+                type(self).start_calls += 1
+
+            async def disconnect(self) -> None:
+                return None
+
+        fake_telethon = ModuleType("telethon")
+        fake_telethon.TelegramClient = FakeTelegramClient
+        credentials = PublicTelegramCredentials(
+            api_id=12345,
+            api_hash="a" * 32,
+            phone="+15551234567",
+        )
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            sys.modules, {"telethon": fake_telethon}
+        ):
+            import asyncio
+
+            settings = PublicTelegramTransportSettings(
+                credentials=credentials,
+                market_store_path=Path(directory) / "market.sqlite3",
+                session_path=Path(directory) / "session" / "market-reader",
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "session_authorization_required"
+            ):
+                asyncio.run(
+                    collect_public_market_telegram(
+                        settings,
+                        sources=(source_for_code("MELTED_AGGREGATE"),),
+                        days=1,
+                        resume_from_checkpoint=True,
+                    )
+                )
+        self.assertEqual(FakeTelegramClient.start_calls, 0)
 
     def test_credentials_are_redacted_and_repository_runtime_path_is_rejected(self) -> None:
         credentials = PublicTelegramCredentials(
