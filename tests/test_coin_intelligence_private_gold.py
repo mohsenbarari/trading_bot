@@ -96,6 +96,28 @@ class PrivateGoldParserTests(unittest.TestCase):
 
         self.assertEqual([item.event_type for item in observations], ["OFFER"])
 
+    def test_edit_without_verifier_quantity_is_full_trade_by_source_convention(self) -> None:
+        observations = private_gold_observations(
+            self.source(
+                "80,300,000 فروش 5 تا با حواله",
+                edited_at_utc="2026-08-04T10:02:00Z",
+            )
+        )
+
+        self.assertEqual([item.event_type for item in observations], ["OFFER", "TRADE"])
+        self.assertEqual(observations[1].quantity, 5)
+
+    def test_explicit_no_trade_overrides_an_edit(self) -> None:
+        observations = private_gold_observations(
+            self.source(
+                "80,300,000 فروش 5 تا با حواله",
+                edited_at_utc="2026-08-04T10:02:00Z",
+                trade_status="NONE",
+            )
+        )
+
+        self.assertEqual([item.event_type for item in observations], ["OFFER"])
+
 
 class PrivateGoldMinuteAggregationTests(unittest.TestCase):
     def setUp(self) -> None:

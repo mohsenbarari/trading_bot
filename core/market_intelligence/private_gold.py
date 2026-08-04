@@ -178,6 +178,10 @@ def _trade_time_and_quantity(
     quantity: int,
 ) -> tuple[str | None, int | None]:
     status = str(source.trade_status or "").strip().upper()
+    # An explicit verifier result of no trade is stronger than the generic
+    # source convention below.  The staging layer also applies this guard.
+    if status in {"NONE", "NO_TRADE"}:
+        return None, None
     if status not in {"FULL", "PARTIAL", "COMPLETED", "TRADED"} and not source.edited_at_utc:
         return None, None
     # This feed's verified convention is that an edit is settlement evidence;
@@ -193,10 +197,16 @@ def _trade_time_and_quantity(
     traded_quantity = _positive_int(source.traded_quantity)
     if traded_quantity is not None:
         return trade_time, min(traded_quantity, quantity)
+    if status == "PARTIAL":
+        # A partial confirmation without a quantity is preserved as offer
+        # evidence only; inventing a full trade would overweight the price.
+        return None, None
     if status in {"FULL", "COMPLETED", "TRADED"}:
         return trade_time, quantity
-    # A partial confirmation without a quantity is preserved as offer evidence
-    # only; inventing a full trade would overweight the price.
+    if source.edited_at_utc:
+        # In this source an edited offer is the completion signal.  In the
+        # absence of an explicit partial quantity, treat it as the full offer.
+        return trade_time, quantity
     return None, None
 
 

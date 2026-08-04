@@ -6,15 +6,22 @@
 می‌تواند متن و شناسهٔ خصوصی رویداد را داشته باشد، اما خروجی آن فقط
 `MarketObservation`های privacy-minimized با opaque event key است.
 
-این commit:
+در این مرحله:
 
-- Telegram client، listener، staging database، retention job یا scheduler را
-  فعال نمی‌کند؛
+- کتابخانهٔ raw staging سه‌روزه، با مسیر اجباری خارج از checkout، برای ادغام
+  idempotent آفر و verifier اضافه شده است؛
 - متن، نام فرستنده، شناسهٔ پیام یا لینک را در Market Store ذخیره نمی‌کند؛
 - هیچ آفر یا معاملهٔ واقعی را نمی‌خواند.
 
-لایهٔ production که raw کوتاه‌مدت سه‌روزه را نگه می‌دارد و سپس این adapter را
-فراخوانی می‌کند، بعد از review lifecycle و deployment جدا اضافه خواهد شد.
+`private_gold_staging` می‌تواند update معامله را—even اگر زودتر از متن آفر
+برسد—موقتاً با `source_message_id` نگه دارد. تا وقتی متن آفر نرسیده، هیچ
+factی به Market Store نوشته نمی‌شود. پس از رسیدن آفر، fact آفر با زمان
+دریافت خود آفر و fact معامله با زمان دریافت verifier جداگانه ساخته می‌شوند؛
+بنابراین update دیررس نمی‌تواند زمانِ در دسترس‌بودن آفر را تغییر دهد.
+
+Telegram client، listener، runtime path، retention job، scheduler و ingest
+واقعی هنوز فعال یا ساخته نشده‌اند. لایهٔ production که این کتابخانه را صدا
+می‌زند، پس از review lifecycle و deployment جدا اضافه خواهد شد.
 
 ## قواعد قطعی بازار
 
@@ -42,6 +49,8 @@
 دیررس مقدم است.
 - معاملهٔ `FULL` با quantity نامشخص از quantity آفر استفاده می‌کند؛ اما
 `PARTIAL` بدون quantity هیچ معاملهٔ کامل ساختگی ایجاد نمی‌کند.
+- edit بدون نتیجهٔ صریحِ مخالف نیز طبق convention همین source، معاملهٔ کامل
+  به اندازهٔ quantity آفر است؛ `NONE` صریح بر edit مقدم است.
 - آفر شرطی (فیش، مهلت، چک، شرط صریح یا توضیحات آزاد) در fact store حفظ و با
 `is_conditional=true` برچسب می‌خورد، ولی از minute quote عادی و مرجع قیمت
 فیزیکال مستقیم کنار گذاشته می‌شود. policy آینده می‌تواند آن را فقط پس از
@@ -69,8 +78,9 @@ physical امروز/فردا و تمام six paper cellها را جدا نگه �
 
 ## ماندۀ P2-B
 
-برای complete شدن P2-B، worker/transport جدا باید raw private event را در
-مسیر محافظت‌شده و خارج از checkout حداکثر سه روز نگه دارد، edit/verifier را
-idempotent reconcile کند، ingestion order را metric کند و بعد فقط factهای
-خروجی این adapter را در Market Store بنویسد. آن worker در این commit وجود
-ندارد و بدون تأیید deployment فعال نخواهد شد.
+کتابخانهٔ staging اکنون retention سه‌روزه، ادغام idempotent و promotion بدون
+متن خام را دارد. برای complete شدن P2-B، worker/transport جدا باید event
+envelope را validate کند، آن را در runtime path محافظت‌شده صدا بزند، ترتیب
+ingestion را metric کند و minute quoteهای کاغذی را فقط پس از بسته‌شدن دقیقه
+materialize کند. آن worker در این commit وجود ندارد و بدون تأیید deployment
+فعال نخواهد شد.

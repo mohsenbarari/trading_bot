@@ -827,8 +827,8 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     physical cell و شش paper cell خصوصی؛
   - `docs/COIN_INTELLIGENCE_PRIVATE_GOLD_ADAPTER.md` و testهای offline.
 - موارد عمداً انجام‌نشده:
-  - client خصوصی Telegram، raw staging، retention سه‌روزه، worker،
-    checkpoint/health/schedule و ingest واقعی ایجاد یا فعال نشد؛
+  - client خصوصی Telegram، worker، checkpoint/health/schedule و ingest واقعی
+    ایجاد یا فعال نشد؛
   - در نتیجه P2-B و کل P2 همچنان `PARTIAL` هستند.
 - قرارداد/schema/versionهای افزوده یا تغییرکرده:
   - `PRIVATE_GOLD_PARSER_VERSION = private-gold-rules-v1`؛
@@ -868,6 +868,42 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
 - تصمیم مرحلهٔ بعد و تأیید لازم: ابتدا P2-C/P2-D یا حداقل adapterهای
   underlying موردنیاز باید offline منتقل شوند، سپس P4-B anchor/range با
   replay historical شروع می‌شود.
+
+### P2-B1 — raw staging و reconciliation آبشدهٔ خصوصی — 2026-08-04 — COMPLETE (library only)
+
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - `core/market_intelligence/private_gold_staging.py`: SQLite موقت با
+    retention دقیق سه‌روزه، مسیر محافظت‌شده خارج از checkout، deduplication
+    و ادغام causal آفر/verification با کلید message؛
+  - `core/market_intelligence/private_gold.py`: editِ بدون نتیجهٔ صریحِ
+    مخالف، طبق convention source، معاملهٔ کامل است؛ `NONE` صریح مقدم است؛
+  - `tests/test_coin_intelligence_private_gold_staging.py`: ترتیب عادی و
+    معکوس، partial بدون quantity، edit-only، retention و guard path.
+- مرز قطعی و رفتار ایمنی:
+  - متن خام فقط در staging موقت می‌ماند؛ Market Store فقط factهای اقتصادی با
+    opaque event key دریافت می‌کند؛
+  - update معامله—even اگر قبل از آفر برسد—تا رسیدن متن آفر fact نمی‌سازد؛
+    آفر و معامله availability مستقل خود را حفظ می‌کنند؛
+  - worker، Telethon، session، network، cron، config runtime و اتصال به
+    دادهٔ واقعی اضافه یا فعال نشده‌اند.
+- قرارداد/schema افزوده:
+  - `PRIVATE_GOLD_STAGING_SCHEMA_VERSION = 1` و retention=`3 days`؛
+  - جدول staging فاقد sender/link/channel است و فقط message id، متن، زمان و
+    نتیجهٔ verification لازم برای reconciliation را کوتاه‌مدت نگه می‌دارد.
+- Test command و نتیجه:
+  - `PYTHONPYCACHEPREFIX=/tmp/coin-intelligence-pycache python3 -m unittest -v
+    tests.test_coin_intelligence_private_gold_staging
+    tests.test_coin_intelligence_private_gold
+    tests.test_coin_intelligence_market_store
+    tests.test_coin_intelligence_market_snapshot` → `Ran 28 tests ... OK`؛
+  - تمام `test_coin_intelligence_*.py` با environment ساختگیِ فقط برای
+    import config اجرا شد؛ `Ran 119 tests ... OK` (هیچ اتصال DB/Redis/Telegram
+    واقعی انجام نشد)؛
+  - `compileall` چهار فایلِ تغییرکرده نیز با موفقیت اجرا شد.
+- گیت مرحلهٔ بعد:
+  - decoder envelope و router channel باید جداگانه با fixture synthetic
+    اضافه شود؛ سپس runner دستیِ one-shot با runtime root مصوب، health و
+    metric ترتیب رویداد، بدون activation خودکار ساخته می‌شود.
 
 ### P2-C-A — فیلتر نخست گروه‌های سکه — 2026-08-04 — PARTIAL
 
