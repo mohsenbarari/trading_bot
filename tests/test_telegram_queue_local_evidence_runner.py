@@ -42,10 +42,15 @@ class TelegramQueueLocalEvidenceRunnerTests(unittest.TestCase):
                     "telegram_queue_stage3_runner_test"
                 ),
                 redis_url="redis://127.0.0.1:56379/15",
+                expected_system_id="7429384756102938475",
             )
             self.assertEqual(os.environ["BOT_TOKEN"], "")
             self.assertEqual(os.environ["CHANNEL_EDITOR_BOT_TOKEN"], "")
             self.assertEqual(os.environ["ENVIRONMENT"], "synthetic-test")
+            self.assertEqual(
+                os.environ["TRADING_BOT_EXPECTED_SCRATCH_CLUSTER_SYSTEM_ID"],
+                "7429384756102938475",
+            )
 
     def test_scratch_lock_identity_is_stable_and_credential_free(self):
         first = runner._scratch_lock_identity(
@@ -72,7 +77,7 @@ class TelegramQueueLocalEvidenceRunnerTests(unittest.TestCase):
                 self.executions.append((statement, parameters))
 
             def fetchone(self):
-                return (self.acquired,)
+                return (self.acquired, "7429384756102938475")
 
             def close(self):
                 return None
@@ -97,6 +102,7 @@ class TelegramQueueLocalEvidenceRunnerTests(unittest.TestCase):
                     "telegram_queue_stage3_runner_test"
                 ),
                 redis_url="redis://127.0.0.1:56379/15",
+                expected_system_id="7429384756102938475",
             )
         scratch_lock.release()
         scratch_lock.release()
@@ -113,6 +119,7 @@ class TelegramQueueLocalEvidenceRunnerTests(unittest.TestCase):
                     "telegram_queue_stage3_runner_test"
                 ),
                 redis_url="redis://127.0.0.1:56379/15",
+                expected_system_id="7429384756102938475",
             )
         self.assertEqual(rejected_connection.closed, 1)
 
@@ -130,8 +137,27 @@ class TelegramQueueLocalEvidenceRunnerTests(unittest.TestCase):
                     "telegram_queue_stage3_runner_test"
                 ),
                 redis_url="redis://127.0.0.1:56379/15",
+                expected_system_id="7429384756102938475",
             )
         self.assertEqual(broken_connection.closed, 1)
+
+        mismatched_connection = FakeConnection(True)
+        mismatched_connection.cursors[0].fetchone = Mock(
+            return_value=(True, "6123456789012345678")
+        )
+        with patch("psycopg2.connect", return_value=mismatched_connection), self.assertRaisesRegex(
+            runner.LocalEvidenceConfigurationError,
+            "expected scratch cluster",
+        ):
+            runner._acquire_exclusive_scratch_lock(
+                database_url=(
+                    "postgresql://u:p@127.0.0.1:55433/"
+                    "telegram_queue_stage3_runner_test"
+                ),
+                redis_url="redis://127.0.0.1:56379/15",
+                expected_system_id="7429384756102938475",
+            )
+        self.assertEqual(mismatched_connection.closed, 1)
 
     def test_loop_factory_uses_declared_threshold_and_captures_failures(self):
         failures: list[str] = []

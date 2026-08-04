@@ -9,13 +9,16 @@ from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
 )
 from run_bot import (
+    BotRuntimeTaskError,
     offer_telegram_publication_loop,
     telegram_admin_broadcast_delivery_loop,
     telegram_delivery_queue_loop,
     configured_telegram_delivery_queue_worker_factory,
     telegram_execution_worker_factories,
     telegram_notification_outbox_delivery_loop,
+    telegram_market_notice_delivery_loop,
     telegram_trade_delivery_loop,
+    supervise_bot_runtime,
 )
 
 
@@ -54,6 +57,7 @@ class BotTelegramExecutionOwnershipTests(unittest.TestCase):
                 telegram_trade_delivery_loop,
                 telegram_admin_broadcast_delivery_loop,
                 telegram_notification_outbox_delivery_loop,
+                telegram_market_notice_delivery_loop,
             ),
         )
         self.assertNotIn(telegram_delivery_queue_loop, factories)
@@ -77,6 +81,7 @@ class BotTelegramExecutionOwnershipTests(unittest.TestCase):
         self.assertNotIn(telegram_trade_delivery_loop, factories)
         self.assertNotIn(telegram_admin_broadcast_delivery_loop, factories)
         self.assertNotIn(telegram_notification_outbox_delivery_loop, factories)
+        self.assertNotIn(telegram_market_notice_delivery_loop, factories)
 
     def test_configured_queue_factory_binds_registry_adapters_and_shared_limiter(self):
         settings_obj = self._queue_settings(
@@ -135,6 +140,49 @@ class BotTelegramExecutionOwnershipTests(unittest.TestCase):
                 TelegramDeliveryRuntimeConfigurationError
             ):
                 telegram_execution_worker_factories(decision)
+
+    def test_child_worker_failure_cancels_polling_and_fails_process(self):
+        polling_cancelled = asyncio.Event()
+
+        async def polling():
+            try:
+                await asyncio.Event().wait()
+            finally:
+                polling_cancelled.set()
+
+        async def failing_worker():
+            await asyncio.sleep(0)
+            raise RuntimeError("synthetic worker failure")
+
+        async def scenario():
+            with self.assertRaisesRegex(BotRuntimeTaskError, "child task failed"):
+                await supervise_bot_runtime(
+                    polling_coro=polling(),
+                    child_coroutines=[failing_worker()],
+                )
+            self.assertTrue(polling_cancelled.is_set())
+
+        asyncio.run(scenario())
+
+    def test_normal_polling_exit_cancels_required_workers(self):
+        worker_cancelled = asyncio.Event()
+
+        async def polling():
+            await asyncio.sleep(0)
+
+        async def worker():
+            try:
+                await asyncio.Event().wait()
+            finally:
+                worker_cancelled.set()
+
+        asyncio.run(
+            supervise_bot_runtime(
+                polling_coro=polling(),
+                child_coroutines=[worker()],
+            )
+        )
+        self.assertTrue(worker_cancelled.is_set())
 
 
 if __name__ == "__main__":

@@ -47,8 +47,15 @@ class _FakeAsyncClient:
 class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         market_transition_service.invalidate_market_runtime_view_cache()
+        self.bot_credential = patch.object(
+            market_transition_service.settings,
+            "bot_token",
+            "test-bot-token",
+        )
+        self.bot_credential.start()
 
     def tearDown(self):
+        self.bot_credential.stop()
         market_transition_service.invalidate_market_runtime_view_cache()
 
     def test_runtime_helper_functions_cover_default_and_naive_times(self):
@@ -132,6 +139,10 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
         with patch(
             "core.services.market_transition_service.configured_telegram_delivery_runtime",
             return_value=queue_runtime,
+        ), patch.object(
+            market_transition_service.settings,
+            "channel_id",
+            "@market",
         ), patch(
             "core.services.market_transition_service.telegram_gateway.send_message",
             new=AsyncMock(),
@@ -182,8 +193,8 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
             "_get_or_create_market_notice_receipt",
             new=AsyncMock(return_value=receipt),
         ), patch(
-            "core.services.market_transition_service.configured_telegram_delivery_runtime",
-            return_value=queue_runtime,
+            "core.services.market_transition_service.configured_telegram_delivery_producer_mode",
+            return_value=queue_runtime.mode,
         ), patch.object(
             market_transition_service,
             "_send_market_channel_notice",
@@ -643,9 +654,23 @@ class MarketTransitionServiceTests(unittest.IsolatedAsyncioTestCase):
 
         await market_transition_service._acquire_market_runtime_lock(db)
 
-        stmt, params = db.execute.await_args.args
+        stmt = db.execute.await_args.args[0]
         self.assertIn("pg_advisory_xact_lock", str(stmt))
-        self.assertEqual(params, {"lock_key": market_transition_service.MARKET_RUNTIME_ADVISORY_LOCK_KEY})
+        self.assertNotIn("TextClause", type(stmt).__name__)
+
+    async def test_acquire_market_runtime_lock_uses_typed_select_for_lock_timeout(self):
+        db = SimpleNamespace(execute=AsyncMock())
+
+        await market_transition_service._acquire_market_runtime_lock(
+            db, lock_timeout_ms=750
+        )
+
+        self.assertEqual(db.execute.await_count, 2)
+        timeout_stmt, lock_stmt = [call.args[0] for call in db.execute.await_args_list]
+        self.assertIn("set_config", str(timeout_stmt))
+        self.assertIn("pg_advisory_xact_lock", str(lock_stmt))
+        self.assertNotIn("TextClause", type(timeout_stmt).__name__)
+        self.assertNotIn("TextClause", type(lock_stmt).__name__)
 
     async def test_offer_admission_fence_locks_before_final_open_evaluation(self):
         events = []

@@ -33,6 +33,7 @@ from core.services.offer_expiry_service import (
 from core.services.telegram_offer_channel_service import apply_offer_channel_state
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeMode,
+    assert_telegram_provider_execution_authority,
     configured_telegram_delivery_runtime,
 )
 from core.utils import utc_now_naive
@@ -82,6 +83,7 @@ async def remove_channel_buttons(channel_message_id: int) -> None:
         == TelegramDeliveryRuntimeMode.QUEUE_V1
     ):
         return
+    assert_telegram_provider_execution_authority()
 
     channel_id = settings.channel_id
     

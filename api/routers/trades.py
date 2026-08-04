@@ -95,6 +95,8 @@ from core.trading_observability import log_trading_event
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeConfigurationError,
     TelegramDeliveryRuntimeMode,
+    assert_telegram_provider_execution_authority,
+    configured_telegram_delivery_producer_mode,
     configured_telegram_delivery_runtime,
 )
 
@@ -121,6 +123,7 @@ router = APIRouter(
 
 
 def _assert_legacy_direct_delivery_owner() -> None:
+    assert_telegram_provider_execution_authority()
     runtime = configured_telegram_delivery_runtime()
     if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
         raise TelegramDeliveryRuntimeConfigurationError(
@@ -1873,10 +1876,11 @@ async def update_channel_buttons(offer: Offer) -> bool:
     if current_server() != "foreign":
         return False
     if (
-        configured_telegram_delivery_runtime().mode
+        configured_telegram_delivery_producer_mode()
         == TelegramDeliveryRuntimeMode.QUEUE_V1
     ):
         return True
+    _assert_legacy_direct_delivery_owner()
 
     bot_token = os.getenv("BOT_TOKEN")
     channel_id = settings.channel_id
@@ -2206,10 +2210,11 @@ def _queue_trade_channel_buttons_update(background_tasks: BackgroundTasks, offer
 def update_channel_buttons_sync(offer_id: int, remaining_quantity: int, status, lot_sizes) -> bool:
     """نسخه sync برای استفاده در BackgroundTasks"""
     if (
-        configured_telegram_delivery_runtime().mode
+        configured_telegram_delivery_producer_mode()
         == TelegramDeliveryRuntimeMode.QUEUE_V1
     ):
         return True
+    _assert_legacy_direct_delivery_owner()
     from core.db import AsyncSessionLocal
     import asyncio
     
@@ -2247,10 +2252,11 @@ def update_channel_buttons_sync(offer_id: int, remaining_quantity: int, status, 
 async def _update_channel_buttons_async(offer_id: int, remaining_quantity: int, offer_status, lot_sizes) -> bool:
     """Helper async function - باید offer را از دیتابیس بخواند"""
     if (
-        configured_telegram_delivery_runtime().mode
+        configured_telegram_delivery_producer_mode()
         == TelegramDeliveryRuntimeMode.QUEUE_V1
     ):
         return True
+    _assert_legacy_direct_delivery_owner()
     from core.db import AsyncSessionLocal
     
     bot_token = os.getenv("BOT_TOKEN")

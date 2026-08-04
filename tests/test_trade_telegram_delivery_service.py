@@ -317,8 +317,8 @@ class TradeTelegramDeliveryServiceTests(unittest.IsolatedAsyncioTestCase):
 
         with patch(
             "core.services.trade_telegram_delivery_service."
-            "configured_telegram_delivery_runtime",
-            return_value=self._queue_runtime(),
+            "configured_telegram_delivery_producer_mode",
+            return_value=service.TelegramDeliveryRuntimeMode.QUEUE_V1,
         ):
             result = await service.deliver_telegram_trade_notification(
                 db,

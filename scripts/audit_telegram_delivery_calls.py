@@ -123,15 +123,15 @@ REMAINING_DISPOSITION_BUDGETS = {
 }
 EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "durable_exempt": 4,
-    "legacy_mode_guarded": 69,
-    "legacy_owner_guarded": 15,
+    "legacy_mode_guarded": 68,
+    "legacy_owner_guarded": 13,
     "legacy_parameter_guarded": 2,
     "non_delivery_timer": 5,
     "non_message_control": 2,
     "queue_execution": 1,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
-    "a7e5f6b27808625af362e7d091b6f7b2e8cae716ce730a7a5fd4cf7e790817bc"
+    "51fdc4c1e2ae9779d7c8139854477deecee85657992a173cdced4f59c6112032"
 )
 
 
@@ -368,6 +368,7 @@ def _queue_mode_condition_polarity(
     runtime_base = runtime_side.removesuffix(".mode")
     if not (
         "configured_telegram_delivery_runtime" in runtime_side
+        or "configured_telegram_delivery_producer_mode" in runtime_side
         or aliases.get(runtime_base) == _RUNTIME_OBJECT_ALIAS
         or aliases.get(runtime_side) in {-1, 1}
     ):
@@ -425,8 +426,14 @@ def _function_mode_aliases(
                 if rendered in {
                     "configured_telegram_delivery_runtime()",
                     "configured_telegram_delivery_runtime",
+                    "configured_telegram_delivery_producer_mode()",
+                    "configured_telegram_delivery_producer_mode",
                 }:
-                    polarity = _RUNTIME_OBJECT_ALIAS
+                    polarity = (
+                        1
+                        if "producer_mode" in rendered
+                        else _RUNTIME_OBJECT_ALIAS
+                    )
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             for target in targets:
                 if isinstance(target, ast.Name) and polarity:
@@ -497,6 +504,11 @@ def _block_always_exits(statements: Sequence[ast.stmt]) -> bool:
 
 
 def _statement_contains_legacy_assert(statement: ast.AST) -> bool:
+    # Definitions are declarations, not executed predecessors. Descending into
+    # a sibling/nested function here made its guard appear to dominate later
+    # provider calls in another function and allowed the audit to false-green.
+    if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+        return False
     for node in _iter_scope_nodes(
         statement,
         scope_root=statement,

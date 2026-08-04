@@ -22,6 +22,17 @@ def upgrade() -> None:
         "offer_publication_states",
         sa.Column("publisher_bot_identity", sa.String(length=32), nullable=True),
     )
+    # Install the constraint while every existing row still has NULL in the
+    # new nullable column.  PostgreSQL refuses a later ALTER TABLE when the
+    # backfill has queued trigger events in this same Alembic transaction.
+    # Creating it first also makes PostgreSQL enforce the invariant while the
+    # backfill runs.
+    op.create_check_constraint(
+        "ck_offer_publication_states_publisher_bot_identity",
+        "offer_publication_states",
+        "publisher_bot_identity IS NULL OR "
+        "(surface = 'telegram_channel' AND publisher_bot_identity = 'primary')",
+    )
     op.execute(
         sa.text(
             """
@@ -31,12 +42,6 @@ def upgrade() -> None:
               AND publisher_bot_identity IS NULL
             """
         )
-    )
-    op.create_check_constraint(
-        "ck_offer_publication_states_publisher_bot_identity",
-        "offer_publication_states",
-        "publisher_bot_identity IS NULL OR "
-        "(surface = 'telegram_channel' AND publisher_bot_identity = 'primary')",
     )
 
 

@@ -24,6 +24,7 @@ from core.services.offer_publication_state_service import (
 )
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeConfigurationError,
+    assert_telegram_provider_execution_authority,
     configured_telegram_delivery_runtime,
 )
 from core.utils import utc_now_naive
@@ -60,6 +61,7 @@ SENT_TELEGRAM_PUBLICATION_STATUSES = {
 
 
 def _assert_legacy_direct_delivery_owner() -> None:
+    assert_telegram_provider_execution_authority()
     runtime = configured_telegram_delivery_runtime()
     if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
         raise TelegramDeliveryRuntimeConfigurationError(

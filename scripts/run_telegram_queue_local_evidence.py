@@ -31,6 +31,7 @@ _SCRATCH_DATABASE_PATTERN = re.compile(
     r"^telegram_queue_stage3_[a-z0-9_]+_test$"
 )
 _LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+_POSTGRES_SYSTEM_IDENTIFIER_PATTERN = re.compile(r"^[1-9][0-9]{15,19}$")
 _SYNTHETIC_CHANNEL_ID = -1001234567890
 # Physical PostgreSQL/Alembic/CLI tests legitimately block their isolated test
 # task for several seconds while a subprocess runs. Ten seconds suppresses that
@@ -249,17 +250,28 @@ def _acquire_exclusive_scratch_lock(
     *,
     database_url: str,
     redis_url: str,
+    expected_system_id: str,
 ) -> _ExclusiveScratchLock:
     import psycopg2
 
+    expected = str(expected_system_id or "").strip()
+    if _POSTGRES_SYSTEM_IDENTIFIER_PATTERN.fullmatch(expected) is None:
+        raise LocalEvidenceConfigurationError(
+            "expected scratch-cluster system identifier is required"
+        )
     lock_key, fingerprint = _scratch_lock_identity(database_url, redis_url)
     connection = psycopg2.connect(database_url, connect_timeout=5)
     try:
         connection.autocommit = True
         cursor = connection.cursor()
         try:
-            cursor.execute("SELECT pg_try_advisory_lock(%s)", (lock_key,))
-            acquired = bool(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT pg_try_advisory_lock(%s), system_identifier::text "
+                "FROM pg_control_system()",
+                (lock_key,),
+            )
+            acquired, observed_system_id = cursor.fetchone()
+            acquired = bool(acquired)
         finally:
             cursor.close()
     except BaseException:
@@ -270,6 +282,11 @@ def _acquire_exclusive_scratch_lock(
         raise LocalEvidenceConfigurationError(
             "local evidence scratch database is already owned by another runner"
         )
+    if str(observed_system_id) != expected:
+        connection.close()
+        raise LocalEvidenceConfigurationError(
+            "local evidence database is not on the expected scratch cluster"
+        )
     return _ExclusiveScratchLock(
         connection,
         lock_key=lock_key,
@@ -277,7 +294,9 @@ def _acquire_exclusive_scratch_lock(
     )
 
 
-def _configure_synthetic_environment(*, database_url: str, redis_url: str) -> None:
+def _configure_synthetic_environment(
+    *, database_url: str, redis_url: str, expected_system_id: str
+) -> None:
     sync_url, async_url = _validated_database_urls(database_url)
     validated_redis = _validated_redis_url(redis_url)
     values = {
@@ -300,6 +319,7 @@ def _configure_synthetic_environment(*, database_url: str, redis_url: str) -> No
         "BOT_TOKEN": "",
         "TELEGRAM_DELIVERY_QUEUE_CHANNEL_EDITOR_BOT_TOKEN": "",
         "CHANNEL_EDITOR_BOT_TOKEN": "",
+        "TRADING_BOT_EXPECTED_SCRATCH_CLUSTER_SYSTEM_ID": expected_system_id,
     }
     os.environ.update(values)
 
@@ -362,6 +382,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--environment", required=True, choices=("synthetic-test",))
     parser.add_argument("--database-url", required=True)
     parser.add_argument("--redis-url", required=True)
+    parser.add_argument(
+        "--expected-postgres-system-id",
+        default=os.getenv("TRADING_BOT_EXPECTED_SCRATCH_CLUSTER_SYSTEM_ID", ""),
+    )
     parser.add_argument("--pattern", default="test_telegram*.py")
     parser.add_argument("--start-directory", default="tests")
     parser.add_argument("--report")
@@ -372,11 +396,13 @@ def main(argv: list[str] | None = None) -> int:
     _configure_synthetic_environment(
         database_url=args.database_url,
         redis_url=args.redis_url,
+        expected_system_id=args.expected_postgres_system_id,
     )
     sync_database_url, _ = _validated_database_urls(args.database_url)
     scratch_lock = _acquire_exclusive_scratch_lock(
         database_url=sync_database_url,
         redis_url=_validated_redis_url(args.redis_url),
+        expected_system_id=args.expected_postgres_system_id,
     )
     atexit.register(scratch_lock.release)
     # Nested CLI negative tests must not inherit this runner's arguments.
@@ -502,6 +528,7 @@ def main(argv: list[str] | None = None) -> int:
         "provider_credentials_forced_empty": True,
         "exclusive_scratch_lock": True,
         "scratch_lock_fingerprint": scratch_lock.fingerprint,
+        "scratch_cluster_system_id": args.expected_postgres_system_id,
         "git": _git_metadata(repo_root),
         "runtime": {
             "python": platform.python_version(),
@@ -525,6 +552,8 @@ def main(argv: list[str] | None = None) -> int:
                 "[redacted-local-scratch-url]",
                 "--redis-url",
                 "[redacted-local-scratch-url]",
+                "--expected-postgres-system-id",
+                args.expected_postgres_system_id,
                 "--pattern",
                 args.pattern,
                 "--start-directory",

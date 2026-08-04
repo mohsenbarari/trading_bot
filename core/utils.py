@@ -30,6 +30,7 @@ from core.registration_identity import normalize_account_name, normalize_persian
 from core.redis import pool
 from core.telegram_delivery_runtime_policy import (
     TelegramDeliveryRuntimeConfigurationError,
+    assert_telegram_provider_execution_authority,
     configured_telegram_delivery_runtime,
 )
 from models.notification import Notification
@@ -196,6 +197,7 @@ def unique_user_ids(user_ids: list[object]) -> list[int]:
 
 
 def _assert_legacy_direct_delivery_owner() -> None:
+    assert_telegram_provider_execution_authority()
     runtime = configured_telegram_delivery_runtime()
     if not runtime.legacy_workers_enabled or runtime.queue_worker_enabled:
         raise TelegramDeliveryRuntimeConfigurationError(

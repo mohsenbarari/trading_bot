@@ -65,6 +65,18 @@ class UserAccountStatusHelperTests(unittest.TestCase):
 
 
 class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.enqueue_account_notice = AsyncMock()
+        self.enqueue_account_notice_patcher = patch(
+            "core.services.telegram_notification_outbox_service."
+            "enqueue_account_status_telegram_notification_once",
+            new=self.enqueue_account_notice,
+        )
+        self.enqueue_account_notice_patcher.start()
+
+    async def asyncTearDown(self):
+        self.enqueue_account_notice_patcher.stop()
+
     async def test_build_activation_join_line_closes_bot_and_tolerates_failures(self):
         bot = SimpleNamespace(session=SimpleNamespace(close=AsyncMock()))
 
@@ -121,8 +133,9 @@ class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(create_notification.await_args.args[1], 7)
         self.assertEqual(create_notification.await_args.args[3], NotificationLevel.WARNING)
         self.assertEqual(create_notification.await_args.args[4], NotificationCategory.SYSTEM)
-        send_telegram.assert_awaited_once()
-        remove_from_channel.assert_awaited_once_with(71)
+        send_telegram.assert_not_awaited()
+        remove_from_channel.assert_not_awaited()
+        self.enqueue_account_notice.assert_awaited_once()
 
     async def test_transition_user_account_status_logs_channel_removal_failure(self):
         user = SimpleNamespace(
@@ -147,7 +160,8 @@ class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
             result = await status_service.transition_user_account_status(SimpleNamespace(), user, UserAccountStatus.INACTIVE)
 
         self.assertTrue(result.changed)
-        log_exception.assert_called_once()
+        log_exception.assert_not_called()
+        self.enqueue_account_notice.assert_awaited_once()
 
     async def test_queue_owner_persists_account_notice_without_direct_send(self):
         now = datetime(2026, 5, 18, 12, 0, 0)
@@ -228,8 +242,9 @@ class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(user.messenger_grace_expires_at)
         self.assertIsNone(user.messenger_blocked_at)
         create_notification.assert_awaited_once()
-        send_telegram.assert_awaited_once()
-        self.assertIn("درخواست عضویت", send_telegram.await_args.args[1])
+        send_telegram.assert_not_awaited()
+        self.enqueue_account_notice.assert_awaited_once()
+        self.assertIn("درخواست عضویت", self.enqueue_account_notice.await_args.kwargs["text"])
 
     async def test_transition_user_account_status_is_idempotent_for_existing_inactive_state(self):
         now = datetime(2026, 5, 18, 12, 0, 0)
@@ -309,7 +324,8 @@ class UserAccountStatusTransitionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(blocked_count, 1)
         self.assertEqual(owner.messenger_blocked_at, now)
         self.assertEqual(create_notification.await_count, 2)
-        self.assertEqual(send_telegram.await_count, 2)
+        self.assertEqual(send_telegram.await_count, 0)
+        self.assertEqual(self.enqueue_account_notice.await_count, 2)
         force_clear_sessions.assert_awaited_once_with(db, owner.id)
 
     async def test_queue_owner_uses_timed_security_for_due_global_lock(self):

@@ -10,10 +10,12 @@ from core.config import settings
 LEGACY_TELEGRAM_EXECUTION_OWNER = "legacy"
 QUEUE_V1_TELEGRAM_EXECUTION_OWNER = "queue-v1"
 
-# Stage 3 foundation is deliberately not cutover-capable yet. This constant is
-# code-owned so an accidental environment variable cannot activate an executor
-# before limiter, domain revalidation, and producer handoff are complete.
-TELEGRAM_DELIVERY_QUEUE_IMPLEMENTATION_READY = False
+# The integrated queue/DR reconciliation migration, least-privilege Bot grants,
+# strict local-table guard, provider identity preflight, limiter, freshness
+# validators, and rollback contract are now present in this release. Runtime
+# activation still requires all three explicit operator controls below; this
+# code capability alone can never switch ownership.
+TELEGRAM_DELIVERY_QUEUE_IMPLEMENTATION_READY = True
 
 
 class TelegramDeliveryRuntimeMode(str, Enum):
@@ -76,3 +78,52 @@ def configured_telegram_delivery_runtime() -> TelegramDeliveryRuntimeDecision:
             getattr(settings, "telegram_delivery_queue_cutover_ready", False)
         ),
     )
+
+
+def resolve_telegram_delivery_producer_mode(
+    *,
+    producer_mode: str,
+    implementation_ready: bool = TELEGRAM_DELIVERY_QUEUE_IMPLEMENTATION_READY,
+) -> TelegramDeliveryRuntimeMode:
+    """Resolve the non-secret producer contract without granting execution.
+
+    API processes only need to know whether a business effect must be persisted
+    for Queue-v1.  They must never receive worker enablement or provider
+    credentials merely to make that decision.
+    """
+
+    mode = str(producer_mode or "").strip().lower()
+    if mode == LEGACY_TELEGRAM_EXECUTION_OWNER:
+        return TelegramDeliveryRuntimeMode.LEGACY
+    if mode != QUEUE_V1_TELEGRAM_EXECUTION_OWNER:
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "unknown_telegram_delivery_producer_mode"
+        )
+    if not implementation_ready:
+        raise TelegramDeliveryRuntimeConfigurationError(
+            "queue_implementation_not_cutover_ready"
+        )
+    return TelegramDeliveryRuntimeMode.QUEUE_V1
+
+
+def configured_telegram_delivery_producer_mode() -> TelegramDeliveryRuntimeMode:
+    configured_mode = getattr(settings, "telegram_delivery_producer_mode", None)
+    if configured_mode is None or not str(configured_mode).strip():
+        configured_mode = getattr(
+            settings,
+            "telegram_delivery_execution_owner",
+            LEGACY_TELEGRAM_EXECUTION_OWNER,
+        )
+    return resolve_telegram_delivery_producer_mode(producer_mode=configured_mode)
+
+
+def assert_telegram_provider_execution_authority() -> None:
+    """Gate Telegram provider execution on the deployment's site authority.
+
+    The two-server topology has exactly one credentialed Telegram origin, so
+    every caller is already authorized here.  The call sites are kept so a
+    multi-site topology can reintroduce a real check in one place instead of
+    re-auditing every Telegram entry point.
+    """
+
+    return

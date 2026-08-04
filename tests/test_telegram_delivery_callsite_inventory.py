@@ -163,15 +163,21 @@ class TelegramDeliveryCallsiteInventoryTests(unittest.TestCase):
             {
                 ("api/routers/users.py", "send_block_notification"),
                 ("api/routers/users.py", "send_limitation_notification"),
-                (
-                    "core/services/user_deletion_service.py",
-                    "delete_user_account",
-                ),
-                (
-                    "api/routers/sync.py",
-                    "_run_synced_deleted_user_telegram_effects",
-                ),
             }.issubset(guarded_scopes)
+        )
+        self.assertFalse(
+            any(
+                item.path in {
+                    "api/routers/sync.py",
+                    "core/services/user_deletion_service.py",
+                }
+                and item.scope in {
+                    "_run_synced_deleted_user_telegram_effects",
+                    "delete_user_account",
+                }
+                and item.disposition.startswith("legacy_")
+                for item in self.inventory
+            )
         )
 
     def test_callback_inventory_excludes_new_private_messages(self):
@@ -277,6 +283,27 @@ async def unsafe(message):
 
         self.assertEqual(len(inventory), 1)
         self.assertEqual(inventory[0].disposition, "remaining_interactive_direct")
+
+    def test_guard_in_sibling_function_does_not_dominate_later_function(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "api").mkdir()
+            (root / "api" / "sample.py").write_text(
+                """
+def guarded_sibling():
+    _assert_legacy_direct_delivery_owner()
+
+async def unsafe():
+    await telegram_gateway.edit_message_reply_markup(1, 2)
+""",
+                encoding="utf-8",
+            )
+
+            inventory = build_inventory(root)
+
+        self.assertEqual(len(inventory), 1)
+        self.assertEqual(inventory[0].scope, "unsafe")
+        self.assertEqual(inventory[0].disposition, "remaining_business_direct")
 
     def test_queue_else_closure_is_legacy_guarded(self):
         with TemporaryDirectory() as tmp:

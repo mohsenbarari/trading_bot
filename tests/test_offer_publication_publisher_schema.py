@@ -56,6 +56,15 @@ class OfferPublicationPublisherSchemaTests(unittest.TestCase):
             source,
         )
         self.assertNotIn('drop_table("offer_publication_states")', source)
+        self.assertLess(
+            source.index(
+                'op.create_check_constraint(\n'
+                '        "ck_offer_publication_states_publisher_bot_identity"'
+            ),
+            source.index("UPDATE offer_publication_states"),
+            "the check constraint must be installed before the trigger-producing "
+            "backfill so PostgreSQL does not reject a later ALTER TABLE",
+        )
 
 
 if __name__ == "__main__":

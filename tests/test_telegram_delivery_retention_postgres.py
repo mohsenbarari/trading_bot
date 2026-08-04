@@ -39,12 +39,10 @@ class TelegramDeliveryRetentionPostgresTests(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        sync_url, _ = DATABASE_URLS
-        _run_alembic(sync_url, "upgrade", "head")
+        _run_alembic(DATABASE_URLS.owner_sync, "upgrade", "head")
 
     async def asyncSetUp(self):
-        _, async_url = DATABASE_URLS
-        self.engine = create_async_engine(async_url, pool_pre_ping=True)
+        self.engine = create_async_engine(DATABASE_URLS.runtime_async, pool_pre_ping=True)
         self.Session = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.engine.begin() as connection:
             await connection.execute(
