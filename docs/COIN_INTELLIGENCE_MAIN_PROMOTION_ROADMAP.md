@@ -1565,3 +1565,59 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   - replay/race واقعی audit باید در PostgreSQL scratch gate سنجیده شود.
 - تصمیم مرحلهٔ بعد و تأیید لازم: تا زمان عبور از P6-B/C و E2E، preview فقط
   ابزار مشاهده است و هدف اولیهٔ «ثبت آفر بدون نام کالا» هنوز فعال نشده است.
+
+### P4-C — publisher صریح Snapshot سایه — 2026-08-04 — COMPLETE (library only)
+
+- Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
+- Promotion branch commit(s): این commit شامل publisher، read-only Store
+  guard، test و مستند runtime boundary روی
+  `candidate/coin-commodity-inference-promotion` است.
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - `connect_market_store_read_only()` و verification بدون upgrade در
+    `market_store.py`؛
+  - `snapshot_publisher.py` با `publish_rate_ready_snapshot()`؛
+  - `docs/COIN_INTELLIGENCE_SNAPSHOT_PUBLISHER.md` و testهای artifact.
+- موارد عمداً انجام‌نشده:
+  - هیچ scheduler، worker، cron، lifespan، collector، Telegram/API client،
+    setting runtime، volume path، health endpoint یا deployment فعال نشده
+    است؛
+  - publisher هیچ row در SQLite یا PostgreSQL نمی‌نویسد و outbox را consume
+    نمی‌کند؛ caller آینده باید آن مرزها را جداگانه مالک شود.
+- قرارداد/schema/versionهای افزوده یا تغییرکرده:
+  - Store باید file موجود، schema و contract version دقیق داشته باشد؛ v1 یا
+    Store ناقص به‌جای migration خودکار reject می‌شود؛
+  - مسیر Store و target Snapshot نباید یکی باشند؛ publisher هرگز Store غایب
+    را ایجاد نمی‌کند؛
+  - فقط Snapshot با حداقل یک نرخ canonical `ESTIMATED` atomically replace
+    می‌شود؛ `NOT_RATE_READY` با صفر نرخ، artifact سالم قبلی را دست‌نخورده
+    نگه می‌دارد؛
+  - نتیجهٔ publisher فقط status، digest، generated time و countهای rate است
+    و دادهٔ خام/identity ندارد.
+- Migration و نتیجهٔ upgrade/downgrade: migration/schema جدید ندارد؛ helper
+  read-only صراحتاً migration را انجام نمی‌دهد. rollback برابر عدم فراخوانی
+  publisher است و Snapshot قبلی پابرجا می‌ماند.
+- Test commands و نتیجهٔ دقیق:
+  - `PYTHONPYCACHEPREFIX=/tmp/coin-intelligence-pycache python3 -m unittest -q
+    tests.test_coin_intelligence_snapshot_publisher
+    tests.test_coin_intelligence_market_store
+    tests.test_coin_intelligence_market_snapshot` →
+    `Ran 14 tests ... OK`؛
+  - regression کامل P0 تا P6-A/P4-C و guardهای Offer/Trade/migration با env
+    ساختگی و pycache موقت → `Ran 248 tests in 6.006s ... OK`.
+- داده/fixture استفاده‌شده و محل امن آن: SQLite و Snapshot موقت با قیمت
+  synthetic؛ هیچ Store/live credential/API یا فایل volume واقعی استفاده یا
+  mutate نشد.
+- نتیجهٔ health/freshness/replay: builder نقطه‌زمانی و atomic writer موجود
+  را حفظ می‌کند؛ publisher صرفاً جلوی replace ناشی از evidence تهی را اضافه
+  می‌کند. snapshot stale بعداً در P5 همچنان abstain می‌شود.
+- رفتار rollback آزموده‌شده: Store غایب artifact/SQLite جدید نمی‌سازد؛ Store
+  خالی `NOT_RATE_READY` می‌دهد و Snapshot منتشرشدهٔ قبل قابل خواندن می‌ماند.
+- ریسک‌های باقیمانده و مالک/تاریخ پیگیری:
+  - single-writer lock، زمان‌بندی، path/permission volume، health sidecar و
+    alert باید در deployment stage مشخص شوند؛
+  - publisher بدون ingestion/outbox consumer دادهٔ جدید تولید نمی‌کند؛
+  - P6-B parser shadow فقط پس از تعیین همین runtime ownership باید به
+    artifact متصل شود.
+- تصمیم مرحلهٔ بعد و تأیید لازم: PostgreSQL scratch gate برای migration
+  P5-C و سپس runtime planِ بدون معماری سه‌سروره لازم است؛ هیچ activation
+  خودکاری از این commit مجاز نیست.

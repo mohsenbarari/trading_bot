@@ -191,6 +191,56 @@ def connect_market_store(path: Path | str) -> sqlite3.Connection:
     return connection
 
 
+def connect_market_store_read_only(path: Path | str) -> sqlite3.Connection:
+    """Open an existing Market Store without creating or mutating anything.
+
+    A Snapshot publisher is a reader of evidence. It must not create an empty
+    database, apply a schema upgrade, or change a runtime store when its source
+    path is absent or malformed.
+    """
+
+    database = Path(path).expanduser()
+    if not database.is_file():
+        raise MarketStoreError("market_store_read_only_file_unavailable")
+    try:
+        uri = f"{database.resolve().as_uri()}?mode=ro"
+        connection = sqlite3.connect(uri, uri=True)
+    except (OSError, sqlite3.Error) as exc:
+        raise MarketStoreError("market_store_read_only_open_failed") from exc
+    connection.row_factory = sqlite3.Row
+    try:
+        connection.execute("PRAGMA busy_timeout = 5000")
+        connection.execute("PRAGMA query_only = ON")
+        connection.execute("PRAGMA foreign_keys = ON")
+    except sqlite3.Error as exc:
+        connection.close()
+        raise MarketStoreError("market_store_read_only_configuration_failed") from exc
+    return connection
+
+
+def verify_market_store_read_only(connection: sqlite3.Connection) -> None:
+    """Verify the current canonical schema without attempting any upgrade."""
+
+    if not _table_exists(connection, "market_store_metadata"):
+        raise MarketStoreError("market_store_metadata_unavailable")
+    row = connection.execute(
+        "SELECT schema_version, contract_version "
+        "FROM market_store_metadata WHERE singleton = 1"
+    ).fetchone()
+    if row is None:
+        raise MarketStoreError("market_store_metadata_missing_singleton")
+    if int(row["schema_version"]) != MARKET_STORE_SCHEMA_VERSION:
+        raise MarketStoreMigrationRequired("market_store_schema_upgrade_required")
+    if int(row["contract_version"]) != MARKET_STORE_CONTRACT_VERSION:
+        raise MarketStoreMigrationRequired("market_store_contract_upgrade_required")
+    if (
+        not _table_exists(connection, "market_observations")
+        or not _table_exists(connection, "market_source_checkpoints")
+        or not _view_exists(connection, "external_market_observations")
+    ):
+        raise MarketStoreError("market_store_schema_incomplete")
+
+
 def initialize_market_store(connection: sqlite3.Connection) -> None:
     """Initialize a fresh canonical database, or verify an existing one.
 
