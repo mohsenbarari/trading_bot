@@ -1452,7 +1452,7 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   policy shadow-first باید جدا طراحی و تست شود؛ تا آن زمان mapper هیچ اثر
   کاربرمحور یا عملیاتی ندارد.
 
-### P5-C — audit append-only تصمیم inference — 2026-08-04 — PARTIAL (not called)
+### P5-C — audit append-only تصمیم inference — 2026-08-04 — PARTIAL (shadow preview only)
 
 - Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
 - Promotion branch commit(s): این commit شامل مدل، migration، writer library،
@@ -1465,8 +1465,9 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     idempotent که transaction/commit را به caller واگذار می‌کند؛
   - `docs/COIN_INTELLIGENCE_INFERENCE_AUDIT.md` و testهای contract/storage.
 - موارد عمداً انجام‌نشده:
-  - هیچ route، بات، WebApp، `OfferCreate`، worker یا feature flag این writer
-    را call نمی‌کند؛ migration روی دیتابیس واقعی اجرا نشده است؛
+  - فقط `P6-A` و فقط با feature flag روشن writer را برای preview فراخوانی
+    می‌کند؛ بات، WebApp، `OfferCreate`، parser، worker و مسیر submit هنوز آن
+    را call نمی‌کنند؛ migration روی دیتابیس واقعی اجرا نشده است؛
   - audit به Offer/Trade/user/message/text/note/Telegram ID متصل نیست و
     جایگزین audit اصلی محصول نمی‌شود.
 - قرارداد/schema/versionهای افزوده یا تغییرکرده:
