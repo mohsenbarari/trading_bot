@@ -11,9 +11,10 @@
 ## Document Status
 
 - Phase: product and engineering discovery
-- Implementation status: not started
-- Rule: no implementation, branch, database, deployment, or runtime changes are allowed until the plan is complete and explicitly approved.
+- Implementation status: not started. The branch `candidate/offer-overtime` currently holds only this document; the delivery policy above governs implementation commits once the roadmap is approved.
+- Rule: no implementation, database, deployment, or runtime changes are allowed until the plan is complete and explicitly approved.
 - Decision policy: only confirmed decisions are recorded as final. Unresolved items remain explicitly open.
+- Verification status: the technical review below was re-verified against the codebase at commit `540b2c0c`. Corrections from that verification are folded into the tables and stages. Behavior requirements are confirmed; the product scenario prose and exact copy still carry draft markers and need a final wording pass, which is the only remaining approval gate besides the open questions listed near the end.
 
 ## 1. Feature Naming
 
@@ -31,34 +32,16 @@ After the normal offer lifetime ends, the offer may remain available during its 
 
 - Confirmed by product owner.
 
-## Planning Sections
+## How This Document Is Organized
 
-The following sections will be completed sequentially after discussion and explicit approval:
+The discovery topics were not written as separate numbered sections. They are resolved across four places, and this is where to look for each:
 
-1. Feature naming
-2. Exact time semantics and boundaries
-3. User configuration and administrator limits
-4. Offer lifecycle and visible states
-5. Trade-request lifecycle during overtime
-6. Confirmation, rejection, and timeout behavior
-7. Quantity and lot reservation policy
-8. Concurrent and duplicate request handling
-9. Offer-owner and delegated-actor authority
-10. Customer and manager behavior
-11. WebApp user experience
-12. Telegram bot and channel user experience
-13. Notifications and delivery failure behavior
-14. Cross-server ownership, forwarding, and synchronization
-15. Connectivity-loss and recovery behavior
-16. Market close, manual expiry, cancellation, and blocking rules
-17. Partial trades, completed offers, and republishing behavior
-18. Abuse prevention and operational limits
-19. Data model, migration, and backward compatibility
-20. Observability, audit trail, and administrative monitoring
-21. Security and privacy requirements
-22. Rollout, feature flags, and rollback strategy
-23. Test matrix and acceptance criteria
-24. Final implementation roadmap
+- **Decision Log** — every confirmed product and behavioral rule, including time semantics, configuration limits, request lifecycle, confirmation and timeout behavior, concurrency, authority, cross-server rules, and presentation.
+- **Draft Product Scenario** and **Draft Exact Product Copy** — the same rules told as a walkthrough, plus the exact user-facing strings.
+- **Technical Compatibility and Challenge Review** — the codebase reality behind each rule, the components to reuse, the design work required, cross-cutting risks, the audit payload scope, and the test matrix.
+- **Stage-Based Implementation Roadmap** — the delivery order, with per-stage scope, locations, tests, and exit criteria.
+
+Abuse prevention and operational limits are the least developed topic: the per-offer lock, the per-owner presented-request limit, and the requester cooldown are all confirmed, but the per-requester concurrency cap across distinct offers is still an open question below.
 
 ## Decision Log
 
@@ -83,25 +66,25 @@ The following sections will be completed sequentially after discussion and expli
 | 17 | Overtime presentation | Telegram adds only `⏳` to the post; WebApp restarts the lifetime bar in green and shows an animated `⏳` in the offer-card corner. | Confirmed |
 | 18 | Admin normal-lifetime changes | Preserve the current dynamic behavior: the latest admin-configured normal lifetime applies to all still-active offers. Operationally, this rarely changed setting will be edited only while the market is closed so no active offer is affected. | Confirmed |
 | 19 | Historical overtime marker | A proportional static `⏳` remains in history only if at least one overtime request produced a committed trade; otherwise it is removed. | Confirmed |
-| 20 | Marker coexistence and placement | Telegram keeps `⏳` beside existing trade markers; WebApp places it in the upper-left header metadata group beside, not over, the relative time. | Confirmed |
+| 20 | Marker coexistence and placement | Telegram keeps `⏳` beside existing trade markers. WebApp places it in the header metadata group at the end side of the RTL text flow, beside and not over the relative time. Its size is set against the adjacent relative-time text, which is `۱۰px`, not against the `۱۳px` card body. | Confirmed |
 | 21 | Active-state semantics | An offer remains fully active throughout overtime, counts toward active-offer limits, and enters history/republish flows only after final termination. | Confirmed |
-| 22 | User-setting UX | WebApp settings and the bot user panel use an explicit-save 0-10 minute stepper; zero is shown as disabled and changes affect only new offers. | Confirmed |
+| 22 | User-setting UX | WebApp settings and the bot user panel use an explicit-save 0-10 minute stepper; zero is shown as disabled and changes affect only new offers. In the WebApp this reuses the existing number-stepper component. In the bot there is no plus/minus stepper anywhere today, so this is a brand-new interaction pattern; the nearest existing precedent is the limit-settings flow, which takes a typed value and confirms it with explicit accept/cancel buttons. | Confirmed |
 | 23 | Origin-scoped sequential presentation | For each offer owner and offer home server, at most one overtime request is actionable at a time; eligible requests for that owner's other offers on the same home server wait in that origin-scoped queue. | Confirmed |
 | 24 | Queued-request activation | A queued request's 30-second decision lifetime starts only when it is promoted for presentation to the owner, after full revalidation. | Confirmed |
 | 25 | Normal-time boundary | A request received exactly at the end of normal offer time is rejected; automatic execution ends strictly before that boundary and owner approval begins strictly after it. | Confirmed |
 | 26 | Final-overtime pending tail | After overtime ends, an already-active request remains actionable for its own 30-second lifetime; the offer accepts no new requests during this tail. | Confirmed |
-| 27 | Same-offer request contention | A second request on the same offer, regardless of its requested lot or quantity, never enters the owner queue; it receives the existing retry feedback and must be initiated again later. | Confirmed |
+| 27 | Same-offer request contention | A second request on the same offer, regardless of its requested lot or quantity, never enters the owner queue; it receives the new remaining-time retry feedback defined in the copy section and must be initiated again later. This is a new string, not one of the existing contention messages. | Confirmed |
 | 28 | Final-overtime boundary | A request received exactly at the final overtime deadline is rejected. | Confirmed |
 | 29 | Presentation and decision-clock start | WebApp starts the 30-second clock when the server promotes the request; Telegram starts it only after successful Telegram acceptance and a recorded message id. | Confirmed |
 | 30 | Telegram delivery expiry | A bot-origin request that cannot be delivered by the end of its offer-validity window closes silently and releases the owner queue. | Confirmed |
-| 31 | Overtime-setting write authority | Iran is the single writer for the synchronized user setting. A bot save is an internal command to Iran and succeeds only after Iran persists it; when the servers are disconnected, it is rejected without a local write or deferred intent. | Confirmed |
+| 31 | Overtime-setting write authority | Iran is the single writer for this specific synchronized user field, enforced by placing it in the Iran-authoritative field set rather than by any whole-record rule, since write authority on user records is field-level. A bot save is an internal command to Iran and succeeds only after Iran persists it; when the servers are disconnected, it is rejected without a local write or deferred intent. | Confirmed |
 | 32 | WebApp prompt priority | A security/session-recovery approval is always shown before an overtime approval. The overtime prompt is shown immediately afterward with its remaining server-authoritative time and may expire while the security prompt is resolved. | Confirmed |
-| 33 | Queued bot requester feedback | A valid request queued behind another offer of the same owner and home server receives only: `⏳ درخواست معامله ثبت شد و در صف بررسی است.` This does not apply to a second request for the same offer, which receives the existing retry feedback. | Confirmed |
+| 33 | Queued bot requester feedback | A valid request queued behind another offer of the same owner and home server receives only: `⏳ درخواست معامله ثبت شد و در صف بررسی است.` This does not apply to a second request for the same offer, which receives the new remaining-time retry feedback instead. | Confirmed |
 | 34 | Audit-data completeness | Persist all metadata belonging to each offer and overtime request, including immutable creation snapshots and every lifecycle transition. This internal data is not exposed to counterparties before a committed trade or to public Telegram content. | Confirmed |
-| 35 | Uncertain remote request delivery | When a cross-server request has definitely not been sent, reject it with a retry message. When delivery is uncertain after a timeout, retain one idempotency key, show `⏳ در حال بررسی درخواست...`, and recover the authoritative result; never create a local request or a second request. | Confirmed |
+| 35 | Uncertain remote request delivery | When a cross-server request has definitely not been sent, reject it with a retry message. When delivery is uncertain after a timeout, retain one idempotency key, show `⏳ در حال بررسی درخواست...`, and recover the authoritative result; never create a local request or a second request. The home-server half of this already exists; the forwarding-server retention and reconciliation is new work, not reuse. | Confirmed |
 | 36 | Cross-server normal-time boundary | Follow the current market pattern: use the trusted first-server receipt time for a forwarded request. A receipt strictly before the normal deadline stays automatic, a receipt exactly at the deadline is rejected, and device time is never trusted. | Confirmed |
 | 37 | Owner-decision boundary | Follow the current timed-request pattern: an owner decision is valid only when received by the offer home server strictly before the 30-second deadline. Receipt exactly at, or after, the deadline is expired and cannot create a trade. | Confirmed |
-| 38 | Telegram approval-delivery priority | A private overtime approval uses Telegram queue priority `M0` with rank `1`: after current immediate callback/expiry work at rank `0`, and before offer publication, normal messages, and trade-result delivery. | Confirmed |
+| 38 | Telegram approval-delivery priority | A private overtime approval uses Telegram queue priority `M0` with rank `1`: after current immediate callback/expiry work at rank `0`, and before offer publication at rank `2` and all `M1` and lower work. Rank `1` is not exclusive: an overdue `TRADE_RESULT` is dynamically promoted to exactly `(M0, 1)` at claim time, so the two share that rank and are separated by the existing `delivery_deadline_at` then `created_sequence` tie-break. Overtime approvals must therefore carry a delivery deadline so this tie-break is meaningful, and a starved overdue trade result must never be displaced indefinitely. | Confirmed |
 | 39 | Requester cancellation | Until the owner has successfully approved the request, the requester may cancel it. Cancellation creates no trade, sends no separate owner message, closes any owner prompt, and releases the offer/owner queue for the next eligible request. | Confirmed |
 | 40 | Cancellation-versus-approval race | Cancellation and owner approval are serialized atomically on the offer home server. The first valid command received by that server wins; the later command only observes the terminal result. | Confirmed |
 | 41 | Cancellation controls and feedback | Bot request-status messages include `لغو درخواست`; a successful cancellation updates that same message to `درخواست لغو شد.` and removes the button. WebApp shows `لغو درخواست` while waiting, then closes the status with the same short confirmation. The owner receives no separate cancellation message. | Confirmed |
@@ -111,6 +94,11 @@ The following sections will be completed sequentially after discussion and expli
 | 45 | Owner approval-message terminal text | Never delete the owner's bot approval message. Remove its inline buttons and edit it to `معامله انجام شد.` after approval, `درخواست رد شد.` after owner rejection, and `درخواست بسته شد.` after timeout, requester cancellation, or invalidation. | Confirmed |
 | 46 | Republished-offer overtime value | A republished offer is a new independent offer and snapshots the economic owner's current persisted overtime setting at its own creation. It never inherits the source offer's overtime snapshot or overtime-history marker. | Confirmed |
 | 47 | Final-tail visual state | After overtime ends while one valid approval is still pending, complete the green bar and make WebApp `⏳` static; retain channel `⏳`. The offer is read-only. On terminal completion, retain the marker only if an overtime request committed a trade; otherwise remove it. | Confirmed |
+| 48 | Receipt time is the only phase input | The trusted first-server receipt time alone classifies a request into automatic, approval, or rejected. Transit delay, home-server processing time, and the current transit-grace window never move a request between phases. The existing processing-time fallback is removed, so a valid overtime request that arrives slowly reaches owner approval instead of being rejected as expired. | Confirmed |
+| 49 | Grace window's remaining role | Transit grace no longer decides automatic versus approval. It survives only to let a request whose receipt was validly inside a phase still be finalized after the expiry worker has already advanced the offer's status, which is the situation the current in-flight allowance handles for normal-time expiry. That allowance must be extended to the overtime phase and the final tail rather than left applying only to normal time. | Confirmed |
+| 50 | Worker and request path share one boundary | The expiry worker and the request path evaluate the same strict comparison against the same lifecycle projection. The current asymmetry, where the worker expires an offer exactly at the deadline while the trade path still accepts it, is closed. | Confirmed |
+| 51 | Idempotency key is mandatory | Every overtime request carries an idempotency key, because the request ledger's synchronization identity refuses a row without one. | Confirmed |
+| 52 | Requester concurrency cap exists | A per-requester cap on simultaneously outstanding requests across distinct offers is required and is enforced atomically alongside the per-offer lock. Its numeric value is an open question. | Confirmed in principle, value open |
 
 ## Draft Product Scenario
 
@@ -135,7 +123,7 @@ The following sections will be completed sequentially after discussion and expli
 - مقدار وقت اضافه فقط می‌تواند یک عدد صحیح از صفر تا ۱۰ دقیقه باشد و سقف آن از تنظیمات مدیر کنترل نمی‌شود.
 - مقدار اولیه برای تمام کاربران فعلی و جدید صفر است؛ بنابراین قابلیت برای هر کاربر به‌صورت انتخابی فعال می‌شود.
 - در وب‌اپ، تنظیم در صفحه تنظیمات کاربر و بخش بازار با کنترل منفی/مثبت، گام یک دقیقه و دکمه ذخیره صریح نمایش داده می‌شود.
-- در بات، دکمه `⏳ وقت اضافه آفر` در پنل کاربری، کنترل منفی/مثبت، دکمه ذخیره، غیرفعال‌کردن و بازگشت را نمایش می‌دهد.
+- در بات، دکمه `⏳ وقت اضافه آفر` در پنل کاربر، کنترل منفی/مثبت، دکمه ذخیره، غیرفعال‌کردن و بازگشت را نمایش می‌دهد. دکمه ورودی در همان کیبورد پنل کاربر موجود اضافه می‌شود و هیچ آیتم تازه‌ای به منوی اصلی افزوده نمی‌شود. کنترل منفی/مثبت در بات هیچ نمونه فعلی ندارد و یک الگوی تعاملی تازه است؛ اگر حجم کال‌بک یا ریسک پیاده‌سازی آن پذیرفته نشود، جایگزین کم‌ریسک همان الگوی موجود «مقدار را تایپ کن و با تأیید صریح ذخیره کن» است.
 - مقدار صفر در هر دو سطح با عنوان `غیرفعال` نمایش داده می‌شود.
 - این تنظیم فقط برای حساب‌هایی نمایش داده می‌شود که مجاز به ثبت آفر متعلق به خودشان هستند.
 - مقدار وقت اضافه انتخابی کاربر هنگام ثبت آفر روی همان آفر تثبیت می‌شود؛ تغییر بعدی تنظیم کاربر فقط روی آفرهای جدید اثر می‌گذارد.
@@ -160,16 +148,16 @@ The following sections will be completed sequentially after discussion and expli
 - در گوشه کارت آفر وب‌اپ، نشان متحرک `⏳` نمایش داده می‌شود.
 - متن یا برچسب جداگانه «وقت اضافه» روی کارت وب‌اپ نمایش داده نمی‌شود.
 - حرکت نشان شامل چرخش عمودی و بالا‌به‌پایین، قرارگرفتن در وضعیت اصلی و یک لرزش کوتاه افقی است.
-- نشان با اندازه پیشنهادی `۱۸px` داخل کادر ثابت `۲۲×۲۲px` نمایش داده می‌شود تا با متن اصلی `۱۳px`، توضیحات `۱۱.۵px` و ابعاد فشرده کارت فعلی متناسب باشد.
-- انیمیشن باید فقط با تبدیل‌های بصری سبک اجرا شود و در حالت کاهش حرکت سیستم‌عامل به شکل ثابت نمایش داده شود.
+- اندازه نشان باید با عنصر مجاور خودش سنجیده شود، نه با متن اصلی کارت. متن اصلی کارت `۱۳px` و توضیحات `۱۱.۵px` است، اما زمان نسبی که ساعت‌شنی کنارش می‌نشیند `۱۳px` نیست و `۱۰px` است. بنابراین اندازه نشان `۱۲px` داخل کادر ثابت `۱۴×۱۴px` تعیین می‌شود تا از متن مجاور بزرگ‌تر و از بج‌های هدر ناهمخوان نشود. مقدار `۱۸px` در کادر `۲۲×۲۲px` که پیش‌تر پیشنهاد شده بود رد می‌شود، چون تقریباً دو برابر متن مجاور و بزرگ‌ترین عنصر هدر می‌شد.
+- انیمیشن باید فقط با تبدیل‌های بصری سبک اجرا شود و در حالت کاهش حرکت سیستم‌عامل به شکل ثابت نمایش داده شود. این الگو روی کارت آفر امروز وجود ندارد: انیمیشن `ring-pulse` روی حالت بحرانی تایمر هیچ گارد کاهش حرکتی ندارد. پس افزودن گارد کاهش حرکت برای نشان جدید و اصلاح همین انیمیشن موجود، هر دو کار تازه‌اند.
 - اگر حداقل یک درخواست وقت اضافه به معامله قطعی تبدیل شود، پس از نهایی‌شدن آفر نشان `⏳` به‌صورت ثابت و بدون انیمیشن در کارت تاریخچه باقی می‌ماند.
 - اگر آفر در وقت اضافه هیچ معامله قطعی نداشته باشد، هنگام پایان یا انقضای آفر نشان `⏳` از نمایش تاریخی حذف می‌شود.
 - اگر معامله وقت اضافه جزئی باشد و آفر همچنان فعال بماند، نشان تا زمان فعال‌بودن وقت اضافه متحرک باقی می‌ماند و پس از ورود آفر به تاریخچه ثابت می‌شود.
 - ملاک ثبت نشان تاریخی، مرحله درخواست در زمان ایجاد آن است؛ درخواست ثبت‌شده در وقت اضافه که در مهلت معتبر خود تأیید می‌شود، معامله وقت اضافه محسوب می‌شود.
 - در نسخه نهایی پست کانال، نشان `⏳` جایگزین استیکرها و علامت‌های فعلی انجام معامله نمی‌شود و در کنار آن‌ها باقی می‌ماند.
 - اگر معامله‌ای در وقت اضافه انجام نشود، فقط `⏳` از نسخه نهایی پست حذف می‌شود و سایر علامت‌های فعلی بدون تغییر می‌مانند.
-- گوشه بالای چپ کارت فعلی وب‌اپ محل نمایش زمان نسبی آفر است؛ بنابراین ساعت‌شنی نباید به‌صورت لایه‌ای روی آن قرار گیرد.
-- زمان نسبی و ساعت‌شنی در یک گروه ثابت در سمت چپ هدر قرار می‌گیرند؛ ساعت‌شنی در بیرونی‌ترین گوشه چپ و زمان در کنار آن نمایش داده می‌شود.
+- زمان نسبی آفر در سطر هدر کارت و در سمت مقابل بج‌ها نمایش داده می‌شود. چون رابط کاربری RTL است و هدر با `justify-content: space-between` چیده شده، بج‌ها در سمت شروع (راست) و زمان نسبی در سمت پایان (چپ صفحه) می‌نشیند. ساعت‌شنی نباید به‌صورت لایه‌ای روی زمان نسبی قرار گیرد.
+- زمان نسبی و ساعت‌شنی در یک گروه ثابت در همان سمت پایان هدر قرار می‌گیرند؛ ساعت‌شنی در بیرونی‌ترین لبه پایان و زمان در کنار آن. برای پرهیز از اشتباه پیاده‌سازی در چیدمان RTL، مرجع «سمت پایان جریان متن» است، نه واژه چپ یا راست.
 - این گروه باید فضای ثابت داشته باشد تا شروع یا توقف انیمیشن، متن، نشان‌های خرید و فروش یا تاریخچه را جابه‌جا نکند.
 
 ### 4. درخواست معامله در وقت اضافه
@@ -315,6 +303,8 @@ The following sections will be completed sequentially after discussion and expli
 
 > درخواست دیگری برای این آفر در حال بررسی است؛ لطفاً `{زمان باقی‌مانده}` ثانیه دیگر دوباره تلاش کنید.
 
+این یک متن **تازه** است و همان «بازخورد تلاش مجدد موجود» نیست. متن موجود پروژه برای رقابت روی یک آفر این است: `درخواست دیگری همزمان روی این لفظ در حال ثبت است. چند لحظه بعد دوباره تلاش کنید.` و در سطح API نیز `این لفظ توسط کاربر دیگری در حال معامله است. لطفاً مجدداً تلاش کنید.` هیچ‌کدام زمان باقی‌مانده را نشان نمی‌دهند. تصمیم ثبت‌شده این است که برای وقت اضافه متن تازه با زمان باقی‌مانده استفاده شود، چون کاربر باید بداند چه‌قدر صبر کند؛ بنابراین در متن تصمیم‌ها هرجا «بازخورد تلاش مجدد موجود» آمده، منظور همین متن تازه است و نه رشته‌های فعلی بات.
+
 ### بازخورد دوره انتظار همان درخواست‌دهنده
 
 > برای ارسال مجدد درخواست روی این آفر، لطفاً `{زمان باقی‌مانده}` ثانیه دیگر تلاش کنید.
@@ -449,14 +439,18 @@ The following sections will be completed sequentially after discussion and expli
 30. A request received exactly at the final overtime deadline is rejected.
 31. WebApp begins the decision clock when the server promotes the request; Telegram begins it only after Telegram accepts the approval message and its id is recorded.
 32. A bot-origin request that remains undelivered through the offer-validity window closes silently and releases the owner queue.
+33. The trusted first-server receipt time is the only input that classifies a request into automatic, approval, or rejected. Transit delay, home-server processing time, and the current transit-grace window never move a request between phases.
+34. The expiry worker and the request path evaluate the same strict boundary comparison against the same lifecycle projection, closing the current asymmetry at the exact deadline.
+35. Every overtime request carries an idempotency key without exception, because the request ledger's synchronization identity requires one.
 
 ## Technical Compatibility and Challenge Review (2026-08-04)
 
 ### Review Scope
 
-- This review is read-only and is based on `main` at commit `540b2c0c`.
+- This review is read-only and is based on `main` at commit `540b2c0c`, which was the branch head at the time of review.
 - No source code, deployment configuration, branch, database, or running service was changed during this review.
 - The feature can be implemented within the current two-server architecture. It does not require Object Storage, CDN, a second bot, or a new cross-server queue.
+- One structural fact underpins several decisions and is worth stating plainly: the offer home server is derived directly from the origin surface, so a bot-created offer is always foreign-home and a WebApp-created offer is always Iran-home. "Origin surface" and `offer_home_server` are therefore the same axis, which is what makes the origin-scoped queue rule coherent.
 
 ### Existing Components That Must Be Reused
 
@@ -466,7 +460,7 @@ The following sections will be completed sequentially after discussion and expli
 | Offer-home authority and forwarding | `api/routers/trades.py` | Keep `Offer.home_server` as the sole authority. A remote request is forwarded to that authority before it is classified as automatic, queued, or approval-required. |
 | Offer expiry transitions | `core/offer_expiry.py`, `core/services/offer_expiry_service.py`, `core/services/market_transition_service.py` | Replace the current one-deadline interpretation with a shared normal/overtime lifecycle; all expiry callers must use it. |
 | Telegram publication queue | `core/telegram_delivery_queue_contract.py`, `core/telegram_delivery_freshness_router.py` | Add a dedicated, deadline-aware private approval action. Do not bypass the queue with a direct bot send. |
-| Global WebApp approval runtime | `frontend/src/composables/useSessionApprovalRuntime.ts`, `frontend/src/components/SessionApprovalModal.vue`, `frontend/src/AppAuthenticatedShell.vue` | Reuse its authenticated-shell, reconnect, countdown, and multi-tab patterns; create an overtime-specific state and UI rather than duplicating polling/modal infrastructure. |
+| Global WebApp approval runtime | `frontend/src/composables/useSessionApprovalRuntime.ts`, `frontend/src/components/SessionApprovalModal.vue`, `frontend/src/components/AppAuthenticatedShell.vue` | Reuse its authenticated-shell mount point, WebSocket-plus-HTTP-fallback refresh, reconnect/visibility recovery, and server-seeded countdown; create an overtime-specific state and UI rather than duplicating that infrastructure. Note that only login requests are primary-session gated today and there is no cross-tab coordination, so multi-tab behavior for overtime must be specified rather than inherited. |
 | User and request synchronization | `core/events.py`, `core/sync_metadata.py`, `api/routers/sync.py` | Add new fields to the existing explicit sync payload and allow-list contracts on both servers. Do not rely on implicit ORM replication. |
 | Channel rendering | `core/services/telegram_offer_channel_service.py` | Extend the central renderer and its queued publication flow for `⏳`; do not independently edit channel messages from the overtime workflow. |
 
@@ -474,21 +468,21 @@ The following sections will be completed sequentially after discussion and expli
 
 | No. | Challenge | What exists now | Required low-risk design |
 | --- | --- | --- | --- |
-| 1 | One authoritative offer lifecycle | Active offers use only `created_at + current offer_expiry_minutes`; API, worker, trade path, WebApp timer, and channel rendering calculate it in separate places. | Create one server-side lifecycle projection returning normal deadline, overtime deadline, phase, interaction availability, and terminal reason. Expose its read-only result to API/SSE/WebApp. Every write path must use that same projection. |
-| 2 | Exact time boundaries across two servers | The current trade path accepts a forwarded edge receipt at or before the old deadline. | Preserve the existing trusted first-server ingress timestamp for remote forwarding, but compare strictly: `< normal deadline` is automatic, `== normal deadline` rejects, and only `> normal deadline && < final deadline` can enter approval. The home server remains the final clock authority. Device time is never trusted. |
+| 1 | One authoritative offer lifecycle | No offer row stores a deadline. Every caller recomputes `created_at + current offer_expiry_minutes`, and that setting is read through a 60-second cache. Roughly fifteen independent computation sites exist across API, worker, trade path, publication queue, web push, and frontend. | Create one server-side lifecycle projection returning normal deadline, overtime deadline, phase, interaction availability, and terminal reason. Expose its read-only result through the REST responses and the existing realtime WebSocket events. Every write path must use that same projection and the same cached settings accessor so no two surfaces can disagree. |
+| 2 | Exact time boundaries across two servers | Three separate behaviors exist today and they disagree. The trade path forgives transit delay: when the trusted edge receipt is `<= deadline` and transit is within `trade_forward_grace_seconds` (config default `3`, raised to `max(grace, 8)` on the bot path), a request that lands after the deadline still trades automatically. When that branch does not apply, classification falls back to the home server's own processing time via `now > expiry_at`. The expiry worker instead uses `created_at <= now - minutes`, so it expires an offer exactly at the deadline while the trade path still accepts it. Separately, `allow_in_flight_after_time_limit_expiry` lets an offer already flipped to `EXPIRED`/`time_limit` still finalize a trade when the edge grace applies. | Replace all three with one rule: the trusted first-server receipt time alone determines the phase, and transit delay never changes the phase. Compare strictly against that receipt: `< normal deadline` is automatic, `== normal deadline` rejects, `> normal deadline && < final deadline` enters approval, and `>= final deadline` rejects. The numeric grace window is therefore removed from phase classification; its only remaining job is to let a request whose receipt was validly inside a phase still be finalized after the worker has advanced the offer's status. The processing-time fallback must be deleted so a slow but valid overtime request reaches owner approval instead of being rejected as expired. The home server remains the final clock authority and device time is never trusted. |
 | 3 | Durable request state and queue | `OfferRequest` has a durable ledger but no queued/presented/owner-decision lifecycle, decision deadline, delivery reference, or overtime marker. | Extend this ledger with explicit nonterminal and terminal approval states, immutable timestamps, queue ordering, home-server/owner snapshots, decision deadline, Telegram message reference, and rejection/invalidation reason. Add targeted database indexes and PostgreSQL-enum migrations. |
 | 4 | Atomic one-request-per-offer rule | Current direct trade processing locks the offer, but does not model a pending owner decision. | At the offer home server, lock the offer and active request state in one transaction. A second request for the same offer must be rejected immediately, regardless of lot or requested quantity, and must never join the owner queue. |
 | 5 | Independent owner queues by offer home server | There is no current owner-approval queue. | Scope ordering and exclusivity to `(economic_owner_id, offer_home_server)`. WebApp- and bot-origin offers of one owner may each show one request concurrently; offers with the same home server are FIFO. Use `offer.user_id`, never the delegated actor or a customer's manager, as the owner key. |
 | 6 | Finalization without a second trade implementation | The current direct path creates the ledger and commits a trade in one authorization flow. | Separate request creation/classification from final approval, then reuse the current authoritative trade-validation/commit core for approval. This preserves lot, block, customer-manager, price, idempotency, and accounting rules instead of recreating them. |
-| 7 | User overtime preference and immediate consistency | `User` has no overtime field; user sync uses explicit payload fields and source-authority allow lists. | Add a user-level integer default with migration default `0`, self-service save endpoints/handlers, explicit sync fields, and a per-offer snapshot at creation. Iran is the sole write authority. A bot save is forwarded to Iran and is shown as successful only after Iran persists it; during an Iran/foreign outage it is rejected without a local write or deferred intent. A new offer uses its persisted local snapshot, never an unsaved browser/bot value. |
+| 7 | User overtime preference and immediate consistency | `User` has no overtime field. Write authority on `users` is field-level, not whole-record: `allowed_user_fields_for_source` grants the foreign server a small subset, so "Iran is the only writer" is only true per field. Emitting a forbidden foreign write already raises `foreign_user_write_authority_forbidden`. | Add a user-level integer default with migration default `0`, self-service save endpoints/handlers, explicit sync fields, and a per-offer snapshot at creation. Place the field in the Iran-authoritative identity field set, never the foreign-writable set, so the existing authority guard is what mechanically enforces single-writer. A bot save is forwarded to Iran and is shown as successful only after Iran persists it; during an Iran/foreign outage it is rejected without a local write or deferred intent. A new offer uses its persisted local snapshot, never an unsaved browser/bot value. Because bot-origin offers are always foreign-home, a bot-created offer snapshots the foreign mirror of this Iran-authoritative value; that snapshot is accepted as-is even when the mirror is briefly stale, and the staleness window must be bounded and logged rather than blocking offer creation. |
 | 8 | Terminal invalidation fan-out | Manual expiry, automatic expiry, market close, cancel-all, completion, account blocking, and deactivation have separate callers. | Centralize `invalidate_overtime_requests_for_offer(...)` in the existing terminal-transition service. It must atomically close active/queued requests, prevent later callbacks from trading, remove/obsolete Telegram deliveries, close WebApp prompts, and promote the next eligible request only where the offer remains valid. |
-| 9 | Telegram 30-second clock and stale delivery | The current queue is fail-closed: every action needs a freshness validator, but it has no overtime-approval action. | Add a dedicated, deadline-aware private approval action with priority `M0`/rank `1` and a freshness validator. The clock begins only after Telegram accepts the message and its id is persisted. Retry only while the offer and queue entry are valid; otherwise silently close and release that same home-server queue. Callback payloads must be opaque and every click must be idempotent. |
+| 9 | Telegram 30-second clock and stale delivery | The current queue is fail-closed: the freshness router refuses to build an incomplete lane and raises on a missing validator at dispatch, so a new action cannot ship without one. Private delivery, per-entry `delivery_deadline_at`/`freshness_deadline_at`, durable `telegram_message_id` capture, and edit-with-empty-keyboard are all already supported. There is no overtime-approval action, and `(M0, 1)` is already reachable by promoted overdue trade results. | Add a dedicated, deadline-aware private approval action at priority `M0`/rank `1`, register its freshness validator in the primary lane, and define its tie-break against promoted trade results. The clock begins only after Telegram accepts the message and its id is persisted. Retry only while the offer and queue entry are valid; otherwise silently close and release that same home-server queue. Callback payloads must be opaque and every click must be idempotent. |
 | 10 | Channel marker and public interactivity | Channel renderer currently derives text/buttons from `Offer.status == ACTIVE`. | Render `⏳` from the shared lifecycle state, preserve normal trade markers, and remove/disable public trade interaction during the final pending tail. Route all edits through the publication queue to avoid races with expiry, trades, and retries. |
-| 11 | WebApp global approval UX | The WebApp already has a global security/session-approval modal and primary-session conventions. Market cards currently depend on the old single expiry timestamp. | Add a dedicated overtime approval coordinator to the authenticated shell, server-authoritative countdown/reconnect recovery, and one owner/home-server prompt. Security/session-recovery approval always has priority; overtime is shown immediately afterward with its remaining server time. Update offer responses/SSE and market cards for normal phase, overtime animation, final-tail read-only state, and historical static marker. |
-| 12 | Sync and rolling deployment | `OfferRequest` and `User` are synchronized through hand-maintained payloads; request status is a PostgreSQL enum. | Deliver additive migrations to both servers before enabling the feature. Then deploy backward-compatible code to both, keep the feature disabled by default (`0`), and only enable after schema/sync parity checks. Old code must tolerate the new columns and statuses during the rollout. |
+| 11 | WebApp global approval UX | The WebApp has a global security/session-approval modal mounted in the authenticated shell, but there is no cross-modal priority or queueing mechanism: competing overlays are independent teleported components. Market cards depend on the single `expires_at_ts` value plus a separate `expiryMinutes` prop for the bar denominator. | Add a dedicated overtime approval coordinator to the authenticated shell, server-authoritative countdown/reconnect recovery, and one owner/home-server prompt. The priority rule below must be built as new shared arbitration, not inherited. Update offer REST responses and realtime WebSocket events, and give the overtime bar a server-provided total duration instead of reusing the `expiryMinutes` prop. |
+| 12 | Sync and rolling deployment | `OfferRequest` and `User` are synchronized through hand-maintained payloads; request status is a PostgreSQL enum crossing the wire as a plain string. The receiver already drops payload keys that are not persisted columns, so a newer peer's extra fields are generally tolerated rather than rejected. | Deliver additive migrations to both servers before enabling the feature. Then deploy backward-compatible code to both, keep the feature disabled by default (`0`), and only enable after schema/sync parity checks. Old code tolerates the new columns because of the existing column filter, but an old receiver will still reject an unknown enum *value* at write time, so the enum migration must land on both servers strictly before either server can emit a new status. |
 | 13 | Privacy and auditability | Requester identity is intentionally hidden before a committed trade; channel-monitoring data is sensitive. | Never put requester identity, mobile number, or approval callback data in public/channel content. Persist all offer and request metadata, including immutable snapshots and lifecycle transitions, as internal data. Restrict any later admin view to existing admin authorization. |
 | 14 | Regression coverage | Current tests cover direct trade, expiry, sync, Telegram delivery, and WebApp session approval separately. | Add focused tests for each lifecycle boundary and integration point, then execute a two-server staging matrix covering WebApp and bot origins, remote forwarding, customer ownership, queue ordering, terminal invalidations, retry/freshness, sync recovery, and UI reconnect behavior. |
-| 15 | Ambiguous cross-server delivery | The current remote trade path can time out after the request has reached, or failed to reach, the offer home server. | Reuse the current idempotency/recovery pattern. A definite pre-send failure returns a short retry error. An uncertain timeout retains the same idempotency key, shows `⏳ در حال بررسی درخواست...`, and queries/reconciles the home-server request state without creating a local queue entry. |
+| 15 | Ambiguous cross-server delivery | Only half of this pattern exists. On the offer home server the durable ledger, its unique idempotency key, and authoritative replay of a completed request are all real and reusable. On the forwarding server a timeout simply returns `504` to the caller: no intent is retained, no reconciliation worker exists, and recovery depends entirely on the user retrying with the same key. | Reuse the home-server idempotency and replay half unchanged. Build the forwarding-server half as new work: retain the idempotency key with a pending marker, show `⏳ در حال بررسی درخواست...` instead of the current retry error, and reconcile the authoritative home-server result in the background without creating a local queue entry or a second request. A definite pre-send failure keeps returning a short retry error and retains nothing. |
 | 16 | Owner decision at the deadline | Timed project requests are active only while their expiry is strictly later than server time. | Require owner approval to reach the offer home server strictly before its stored 30-second deadline. At or after the deadline, atomically expire the request and reject the click/callback without creating a trade. |
 | 17 | Requester cancellation | A queued or presented request may otherwise lead to a trade after the requester has changed their mind. | Allow only the original economic requester to cancel before owner approval. Finalize cancellation at the offer home server, remove/obsolete any owner prompt through the existing queue, and promote the next eligible request. |
 | 18 | Cancellation-versus-approval race | Owner approval and requester cancellation may arrive concurrently from different surfaces/servers. | Lock the request and offer at the home server. The first valid mutation wins atomically; the later command is idempotent and reports the already-final state without creating a second trade or reopening the queue. |
@@ -497,6 +491,10 @@ The following sections will be completed sequentially after discussion and expli
 | 21 | Terminal bot-status cleanup | Deleting a business message can disturb the reply-keyboard anchor, while leaving its old cancellation button exposes a stale action. | Never delete overtime status/approval messages. Edit the existing status to the confirmed terminal text and remove its inline buttons through the queue; retain normal trade delivery unchanged. |
 | 22 | Republish snapshot semantics | Existing republish creates an independent replacement offer but has no overtime value to select. | Snapshot the economic owner's current persisted overtime setting when the replacement is created. Never copy the source offer's overtime configuration or historical marker. |
 | 23 | Final-tail visual consistency | Existing UI has no state between active and terminal expiry. | When one accepted request outlives overtime, complete the overtime bar, make WebApp `⏳` static, retain channel `⏳`, disable all new interaction, and resolve the marker only at the final request outcome. |
+| 24 | Requester concurrency across offers | One request per offer and one presented request per owner scope both bound the owner side. Nothing bounds how many distinct offers a single requester may hold under logical lock at once, so one requester could lock a large share of the market for thirty seconds at a time. | Add an explicit per-requester cap on simultaneously outstanding overtime requests across distinct offers, enforced atomically at the offer home server alongside the per-offer lock. The cap value is an open product decision recorded below. |
+| 25 | Ledger sync preconditions | The `offer_requests` sync natural identity requires a non-null idempotency key, so a row without one never synchronizes. The sync registry declares this table's home column as `offer_home_server` while the model column is actually `request_home_server`. The table is also in the quick parity set, with an explicit local-only field list. | Require an idempotency key on every overtime request without exception. Resolve the registry/model naming mismatch before adding fields rather than layering a third name on top. Register every new local reference column, such as a Telegram delivery job reference, in the parity local-only list so hash comparison does not report false drift. Confirm that the many nonterminal transitions an overtime request goes through are compatible with the registry's stated terminal-row immutability. |
+| 26 | Migration surface | `alembic.ini` sets the script location to `migrations`, and the separate `alembic/` tree is a stale leftover with its own disconnected revision root. The safe enum-extension pattern already used in this repository is `ALTER TYPE ... ADD VALUE IF NOT EXISTS`, with values intentionally retained on downgrade. | Author every migration in `migrations/versions` only. Extend `offerrequeststatus` with the established `ADD VALUE IF NOT EXISTS` pattern and do not attempt to remove values on downgrade. |
+| 27 | Owner reachability on the wrong surface | Approval is bound to the offer's origin surface with no cross-surface fallback, while the overtime preference is a single global per-user value applied to every new offer. A user who registers offers on a surface they do not actually monitor therefore never sees any request, and every request against their offers expires silently with no signal to anyone. | Surface this consequence at the moment the user enables a nonzero value: state on which surface approvals will appear, based on where that user actually creates offers. Treat persistent silent expiry for one owner as an operational signal in the diagnostics stage. |
 
 ### Cross-Cutting Risks and Controls
 
@@ -505,7 +503,9 @@ The following sections will be completed sequentially after discussion and expli
 3. **Different displays report different time:** WebApp, bot, channel, expiry worker, and trade API must consume server-provided lifecycle fields. Browser or Telegram clock is presentation only.
 4. **Queue starvation or a late Telegram message:** use FIFO per owner/home server, a delivery deadline, freshness checks immediately before delivery, and a durable recorded Telegram message id before exposing an actionable deadline.
 5. **A user's new setting is silently stale on the other server:** do not show a save success before canonical persistence; use the persisted synchronized value at offer creation and log a retriable failure when the required authority is unavailable.
-6. **Migration incompatibility:** PostgreSQL enum additions and explicit sync payload changes require migration-first deployment, staged health checks on both servers, and a feature flag/default of zero until rollout completes.
+6. **Migration incompatibility:** PostgreSQL enum additions and explicit sync payload changes require migration-first deployment, staged health checks on both servers, and a feature flag/default of zero until rollout completes. New columns are tolerated by an old receiver because non-column payload keys are already filtered out, but a new enum value is not, so the enum migration must land on both servers strictly before either can emit a new status.
+7. **Market-wide lock by one requester:** without a per-requester cap on outstanding requests across distinct offers, a single user can hold many offers under a thirty-second logical lock at once and stall the market for everyone else. The cap must be enforced in the same atomic boundary as the per-offer lock, and released on every terminal outcome including cancellation, timeout, and hard invalidation.
+8. **Silent expiry for an unreachable owner:** because approval never crosses surfaces while the preference is global, an owner can accumulate expired requests without any party noticing. Persistent silent expiry for one owner must be visible in the diagnostics stage rather than only in per-request records.
 
 ### Confirmed Audit Payload Scope
 
@@ -528,7 +528,7 @@ All metadata belonging to the offer and its overtime requests is retained as dur
 8. **Synchronization and rollout:** user-setting propagation, offer snapshot propagation, request transition parity, temporary cross-server failure/recovery, migration compatibility, and feature-disabled behavior.
 9. **Staging acceptance:** a real two-server functional matrix with isolated test users and offers, recording complete offer/request metadata, request ids, offer ids, home-server logs, queue transitions, sync evidence, and before/after database state. No production data or production trades are used.
 10. **Ambiguous forwarding:** definite connection failure, timeout after remote acceptance, timeout before remote acceptance, idempotent retry, authoritative recovery, and no duplicate local or remote request.
-11. **Forwarded normal boundary:** trusted first-server receipt strictly before, exactly at, and strictly after the normal deadline; device-time tampering; and delayed arrival at the offer home server.
+11. **Forwarded normal boundary:** trusted first-server receipt strictly before, exactly at, and strictly after the normal deadline; device-time tampering; delayed arrival at the offer home server; a receipt validly inside overtime that arrives late and must reach approval rather than rejection; and confirmation that the removed transit-grace window no longer changes phase.
 12. **Owner-decision boundary:** approve/reject strictly before, exactly at, and after the 30-second server deadline; delayed WebApp request, delayed Telegram callback, duplicate click, and concurrent expiry worker.
 13. **Telegram priority:** approval delivery follows `M0`/rank `1`, remains behind existing rank-`0` callback/expiry actions, and cannot be starved by publication or normal-result jobs.
 14. **Requester cancellation:** queued and presented cancellation from WebApp and bot, unauthorized cancellation, duplicate cancellation, owner-prompt cleanup, queue promotion, and races with owner approval, expiry, invalidation, and market close.
@@ -538,10 +538,18 @@ All metadata belonging to the offer and its overtime requests is retained as dur
 18. **Terminal message safety:** approve, reject, timeout, invalidation, cancellation, stale callback, and queue retry edit the existing bot status/approval message, remove inline buttons, preserve the reply-keyboard anchor, and emit normal trade messages only on successful approval.
 19. **Republish semantics:** source and replacement with different current overtime settings, customer/delegated creation, historical marker isolation, remaining lots, and two-server synchronization.
 20. **Final-tail visuals:** end of overtime with an active approval, completed green bar, static WebApp marker, retained channel marker, disabled public interaction, approval/rejection/timeout, and historical marker removal/retention.
+21. **Requester concurrency cap:** requests against many distinct offers by one requester up to and past the cap, cap release on every terminal outcome, interaction with the per-offer lock and the per-owner presented limit, and concurrent attempts racing the cap boundary.
+22. **Deadline agreement:** worker and request path evaluated at the same exact deadline instant, the in-flight allowance extended to the overtime phase and the tail, and no path where a worker-advanced status silently drops a validly received request.
+23. **Telegram rank contention:** an overtime approval and an overdue trade result both resolving at `M0` rank `1`, verifying the delivery-deadline and sequence tie-break and that neither starves the other.
+24. **Sync preconditions:** a request without an idempotency key never reaching the wire, parity hashing with the new local reference columns registered as local-only, repeated nonterminal transitions against the registry's immutability rule, and an old receiver encountering a new enum value before its own migration has landed.
 
 ## Open Questions Requiring a Decision
 
-No blocking product or technical decision remains. Detailed schema, migration, API, queue, and test design will be derived from the confirmed requirements above without changing the stated behavior.
+Detailed schema, migration, API, queue, and test design will be derived from the confirmed requirements above without changing the stated behavior. Three items remain open and must be answered before Stage 4.
+
+1. **Per-requester concurrency cap.** How many distinct offers may one requester hold under logical lock at the same time? Every confirmed rule bounds the owner side; nothing bounds the requester side, so one user could lock a large share of the market in thirty-second windows. A cap is required; its value is a product decision. The narrowest option is one outstanding request per requester at a time, which is simplest to reason about and hardest to abuse.
+2. **Owner reachability warning.** Approval never crosses surfaces, but the preference is global per user. An owner who creates offers on a surface they do not monitor will silently lose every overtime request. The confirmed behavior is accepted; what is undecided is whether enabling a nonzero value must show an explicit warning naming the surface, and whether repeated silent expiry for one owner should raise an operational signal.
+3. **Final copy approval.** Behavior is confirmed, but the product scenario prose and the exact strings still carry draft markers, including the new remaining-time retry message that replaces the existing contention text.
 
 ## Stage-Based Implementation Roadmap
 
@@ -575,10 +583,12 @@ No blocking product or technical decision remains. Detailed schema, migration, A
 - Add `User.offer_overtime_minutes` with default `0`, range validation `0..10`, and explicit source/sync metadata.
 - Add immutable overtime snapshot fields to `Offer`, plus a durable historical marker recording whether an overtime request committed a trade.
 - Extend the existing `OfferRequest` ledger, not a parallel table, with workflow kind, queue/presentation/decision state, immutable offer/request snapshots, owner/home-server references, timestamps, deadline, terminal reason, Telegram delivery/message reference, and resulting trade reference.
-- Add PostgreSQL enum values through safe, ordered migrations and targeted partial indexes for one nonterminal request per offer, queued FIFO lookup, and one presented request per `(economic_owner, offer_home_server)`.
+- Add PostgreSQL enum values through safe, ordered migrations and targeted partial indexes for one nonterminal request per offer, queued FIFO lookup, one presented request per `(economic_owner, offer_home_server)`, and the per-requester concurrency cap.
+- Author all migrations in `migrations/versions` only; the separate `alembic/` tree is a stale leftover and must not be touched. Extend `offerrequeststatus` with the established `ALTER TYPE ... ADD VALUE IF NOT EXISTS` pattern and retain values on downgrade.
+- Resolve the existing naming mismatch where the sync registry calls this table's home column `offer_home_server` while the model column is `request_home_server`, before adding new fields on top of it.
 - Ensure migration downgrade/old-code compatibility is defined before deployment; no new state is emitted in this stage.
 
-**Primary locations:** `models/user.py`, `models/offer.py`, `models/offer_request.py`, migration files, `core/events.py`.
+**Primary locations:** `models/user.py`, `models/offer.py`, `models/offer_request.py`, `migrations/versions`, `core/events.py`, `core/sync_registry.py`.
 
 **Tests:** migration upgrade on empty and representative databases; default-zero backfill; enum compatibility; index/concurrency probes; existing request-ledger tests.
 
@@ -589,9 +599,10 @@ No blocking product or technical decision remains. Detailed schema, migration, A
 **Goal:** implement the confirmed single-writer preference contract before any offer can rely on it.
 
 - Add a self-service preference service with validation and explicit save semantics.
-- WebApp writes on Iran. Bot writes are signed internal commands to Iran and acknowledge success only after Iran persists the value.
-- During Iran/foreign disconnection, reject bot saves without a local write, deferred intent, or false success.
-- Add the field to explicit user serialization, event payload, source-authority policy, sync allow lists, versioning, and cache invalidation.
+- WebApp writes on Iran. Bot writes are signed internal commands to Iran and acknowledge success only after Iran persists the value, reusing the existing signed internal-command mechanism.
+- During Iran/foreign disconnection, reject bot saves without a local write, deferred intent, or false success. Note that disconnection behavior in this project is not uniform: the trade forward rejects, the registration reconciler retries, and the sync receiver defers. This preference follows the reject pattern explicitly.
+- Add the field to explicit user serialization, event payload, sync allow lists, versioning, and cache invalidation. Place it in the Iran-authoritative identity field set and never in the foreign-writable set, so the existing write-authority guard is what enforces single-writer.
+- When the user saves a nonzero value, tell them which surface approvals will appear on, because approval is bound to each offer's origin surface with no fallback and a global preference can otherwise produce silent expiry for an owner who does not monitor that surface.
 - At creation of any new offer, including a republished offer, snapshot the economic owner’s current persisted value. Never copy the source offer’s snapshot during republish.
 
 **Primary locations:** `models/user.py`, user API/service layer, bot internal-command client, `api/routers/sync.py`, `core/events.py`, `core/sync_metadata.py`, offer creation services.
@@ -605,14 +616,16 @@ No blocking product or technical decision remains. Detailed schema, migration, A
 **Goal:** replace scattered expiry calculations with one authoritative lifecycle calculation.
 
 - Implement a server-side lifecycle projection that returns normal deadline, final overtime deadline, phase, public interaction availability, and terminal transition eligibility.
-- Preserve current dynamic normal-lifetime behavior for still-active offers; combine it with the immutable offer overtime snapshot.
-- Enforce confirmed strict boundaries using trusted project-server receipt time: normal automatic trade only before normal deadline; exact normal/final boundary rejects; approval only strictly within overtime.
-- Keep an accepted request actionable in the 30-second final tail, while disabling all new public interaction.
+- Preserve current dynamic normal-lifetime behavior for still-active offers; combine it with the immutable offer overtime snapshot. Read the admin lifetime only through the existing cached settings accessor so all surfaces see the same value within its 60-second window.
+- Enforce confirmed strict boundaries using the trusted first-server receipt time as the only phase input: automatic trade only strictly before the normal deadline; exact normal and exact final boundaries reject; approval only strictly within overtime. Delete the current home-server processing-time fallback and remove the transit-grace window from phase classification.
+- Close the current worker-versus-request asymmetry so both evaluate the same comparison against this projection.
+- Keep an accepted request actionable in the 30-second final tail, while disabling all new public interaction. Extend the existing in-flight allowance, which today only covers normal-time expiry, to cover the overtime phase and the tail.
 - Update automatic-expiry scheduling to defer terminal expiry until final overtime/tail resolution without changing non-overtime offers.
+- Migrate every existing deadline computation site onto the projection. The known sites are: the three computations in `core/offer_expiry.py` (stale expiry cutoff, next-delay scheduling, remote stale channel state); the trade guard in `api/routers/trades.py`; the four in `api/routers/offers.py` (private response, public response, creation realtime payload, market history stale-active expression) plus the expired filter in the my-offers listing; the realtime payload in `api/routers/sync.py`; the live-offer check in `core/web_push.py`; the publication freshness deadline in `core/services/telegram_offer_queue_service.py`, which carries its own five-second safety margin; the settings read in `core/telegram_offer_queue_feeder.py`; and on the client, the timer math in the offers list component and the active-row filter in the offers composable. This list is the completion checklist for the stage.
 
-**Primary locations:** `core/offer_expiry.py`, `core/services/offer_expiry_service.py`, `api/routers/trades.py`, `api/routers/offers.py`, `core/utils.py`.
+**Primary locations:** `core/offer_expiry.py`, `core/services/offer_expiry_service.py`, `api/routers/trades.py`, `api/routers/offers.py`, `api/routers/sync.py`, `core/web_push.py`, `core/services/telegram_offer_queue_service.py`, `core/telegram_offer_queue_feeder.py`, `core/utils.py`.
 
-**Tests:** zero/one/ten-minute snapshots; normal and final boundary triplets; trusted forwarded receipt versus delayed home arrival; dynamic normal setting; final-tail behavior; no revival; worker timing and clock-skew guards.
+**Tests:** zero/one/ten-minute snapshots; normal and final boundary triplets; trusted forwarded receipt versus delayed home arrival, including a receipt validly inside overtime that arrives late and must reach approval rather than rejection; removal of the transit-grace effect on classification; worker and request path agreeing at the exact deadline; dynamic normal setting including a change landing inside the settings cache window; final-tail behavior; no revival of an already-expired offer; worker timing and clock-skew guards.
 
 **Exit criteria:** one server-side answer drives all lifecycle decisions, with no active behavior change for snapshot `0`.
 
@@ -625,6 +638,8 @@ No blocking product or technical decision remains. Detailed schema, migration, A
 - Implement independent FIFO queues per `(economic_owner, offer_home_server)`, with at most one presented/delivering request per scope.
 - Revalidate offer, market, accounts, blocks, quantity/lot, ownership, and business rules before promoting every queued request.
 - Add requester-offer cooldown after owner rejection or timeout; never apply it after a completed trade.
+- Enforce the per-requester cap on simultaneously outstanding requests across distinct offers in the same atomic boundary as the per-offer lock.
+- Require an idempotency key on every overtime request, because the ledger's sync natural identity refuses a row without one.
 - Implement requester cancellation, owner decision, timeout, and their atomic first-valid-command-wins race.
 
 **Primary locations:** `models/offer_request.py`, `core/services/offer_request_ledger_service.py`, new focused overtime workflow service, transaction/locking helpers.
@@ -669,8 +684,8 @@ No blocking product or technical decision remains. Detailed schema, migration, A
 **Goal:** preserve home-server authority through both directions of the existing topology.
 
 - Extend signed internal trade/request commands with an idempotency key, trusted first-server receipt time, request source surface/server, and overtime workflow result.
-- Reuse the existing ambiguous-forward recovery model: definite pre-send failure returns retry; uncertain timeout shows `⏳ در حال بررسی درخواست...` and reconciles the home-server result with the same key.
-- Extend explicit `OfferRequest`, `Offer`, and `User` sync payloads, field policies, natural identities, localization, version guards, and parity checks for every new field/state.
+- Keep the existing home-server half of ambiguous-forward recovery, which already retains the unique key and replays a completed request. Build the forwarding-server half as new work, since a timeout there currently returns `504` with no retained intent and no reconciler: retain the key with a pending marker, show `⏳ در حال بررسی درخواست...`, and reconcile the authoritative result in the background. A definite pre-send failure still returns a short retry error and retains nothing.
+- Extend explicit `OfferRequest`, `Offer`, and `User` sync payloads, field policies, natural identities, localization, version guards, and parity checks for every new field/state. Register every new local reference column in the parity local-only field list so hash comparison does not report false drift, and confirm that repeated nonterminal transitions of an overtime request are compatible with the registry's stated terminal-row immutability.
 - Verify foreign mirrors never authorize, queue, or decide an Iran-home request, and vice versa.
 
 **Primary locations:** `core/trade_forwarding.py`, `api/routers/trades.py`, `api/routers/sync.py`, `core/events.py`, `core/sync_metadata.py`, `core/sync_field_policy.py`, `core/sync_parity.py`.
@@ -714,14 +729,14 @@ No blocking product or technical decision remains. Detailed schema, migration, A
 
 **Goal:** make lifecycle and overtime-request state available to WebApp without client-side inference.
 
-- Extend offer read models, public/private list responses, history responses, and SSE/WebSocket events with server-derived lifecycle fields, interaction availability, overtime marker state, and request status.
+- Extend offer read models, public/private list responses, history responses, and the existing realtime WebSocket events with server-derived lifecycle fields, interaction availability, overtime marker state, and request status. The market UI consumes WebSocket events plus one-second HTTP polling; the separate SSE endpoints are not part of this surface and must not be assumed.
 - Add authenticated endpoints for preference save, current owner approval request, decision, requester cancellation, and reconnect recovery.
 - Enforce the same home-server authority, locks, deadlines, and idempotency as the bot paths; no WebApp-only shortcut is allowed.
 - Preserve compatibility for feature-disabled offers and old clients during rolling deployment.
 
 **Primary locations:** `api/routers/offers.py`, `api/routers/trades.py`, realtime router/events, schemas, response serializers.
 
-**Tests:** API contracts; SSE event order; owner/requester authorization; reconnect; remote home; disabled feature; stale request; decision/cancel race; backward-compatible response parsing.
+**Tests:** API contracts; realtime WebSocket event order and interaction with one-second polling; owner/requester authorization; reconnect; remote home; disabled feature; stale request; decision/cancel race; backward-compatible response parsing.
 
 **Exit criteria:** WebApp receives authoritative phase and request state from the server and cannot create a conflicting decision.
 
@@ -729,12 +744,13 @@ No blocking product or technical decision remains. Detailed schema, migration, A
 
 **Goal:** add the global, authenticated WebApp interaction surface.
 
-- Reuse the authenticated-shell/session-approval runtime pattern; do not create a competing global modal system.
-- Enforce confirmed priority: security/session-recovery approval first, overtime approval immediately afterward with remaining server time.
+- Reuse the authenticated-shell mount point and the session-approval runtime pattern; do not create a competing global modal system.
+- Build the confirmed priority as new shared arbitration: no cross-modal priority or queueing mechanism exists today, and competing overlays are currently independent teleported components at the same stacking level. Security and session-recovery approval comes first, overtime approval immediately afterward with remaining server time.
+- Specify multi-tab behavior explicitly rather than inheriting it: today only login requests are primary-session gated and there is no cross-tab coordination.
 - Show one request per owner/home-server scope, full offer/notes, lot quantity where applicable, anonymous requester, authoritative countdown, approve/reject, and requester cancellation state.
 - Add the explicit-save 0–10 minute preference stepper in the confirmed WebApp settings and market locations.
 
-**Primary locations:** `frontend/src/AppAuthenticatedShell.vue`, `frontend/src/composables/useSessionApprovalRuntime.ts`, approval components/composables, market settings components.
+**Primary locations:** `frontend/src/components/AppAuthenticatedShell.vue`, `frontend/src/composables/useSessionApprovalRuntime.ts`, approval components/composables, market settings components.
 
 **Tests:** authenticated routes, multi-tab primary-session behavior, reconnect/visibility restore, security-modal priority, countdown drift, owner/requester authorization, setting save/error, accessibility, and reduced motion preference.
 
@@ -746,7 +762,9 @@ No blocking product or technical decision remains. Detailed schema, migration, A
 
 - Preserve normal timer behavior; restart the green overtime bar only when server phase changes.
 - Render animated `⏳` in the fixed upper-left metadata group during overtime, static during final tail, and static in history only after a committed overtime trade.
-- Respect reduced-motion preferences; ensure no overlap, text shift, stale interactive control, or incorrect history marker.
+- Respect reduced-motion preferences. The offer card has no such guard today and its existing critical-timer pulse animation is unguarded, so add the guard for the new marker and fix that existing animation in the same change.
+- Size the marker against the adjacent relative-time text rather than the card body, and place it at the end side of the RTL text flow beside the relative time in a fixed-width group so starting or stopping the animation shifts nothing.
+- Ensure no overlap, text shift, stale interactive control, or incorrect history marker.
 - Make final-tail cards read-only while the single valid approval is pending.
 
 **Primary locations:** market list/card components, timer composables, CSS, history/dashboard recent-trade views.
@@ -775,7 +793,7 @@ No blocking product or technical decision remains. Detailed schema, migration, A
 **Goal:** make every overtime decision diagnosable without exposing private data.
 
 - Persist and expose internally all confirmed offer/request metadata and transition reasons.
-- Add structured logs/metrics for classification, queue wait/presentation, decision, cancellation, invalidation, forwarding recovery, Telegram delivery, and sync conflict.
+- Add structured logs/metrics for classification, queue wait/presentation, decision, cancellation, invalidation, forwarding recovery, Telegram delivery, and sync conflict. Include a signal for an owner whose requests repeatedly expire unseen, and for a bot-created offer that snapshotted a stale mirror of the Iran-authoritative preference.
 - Add a reconciliation job/report that detects impossible nonterminal requests, mismatched delivery references, overdue queue entries, or lifecycle inconsistencies and repairs only through authoritative state transitions.
 - Do not add a new public or admin UI in this version; use existing authorization for any internal inspection path.
 
