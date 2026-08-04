@@ -10,6 +10,11 @@ from typing import Any
 
 
 SYNC_FIELD_POLICY_VERSION = 2
+# Canonical transport payloads may contain a small closed set of derived
+# identities that are not physical columns on the source table.
+SYNC_DERIVED_FIELDS = frozenset(
+    {("offer_requests", "customer_relation_invitation_token")}
+)
 
 
 class SyncFieldClassification(str, Enum):
@@ -526,7 +531,7 @@ _FIELD_POLICIES: dict[tuple[str, str], SyncFieldPolicyEntry] = {
         action=SyncFieldAction.HASH,
         sensitive=True,
         output_field="endpoint_hash",
-        reason="browser push endpoints are Iran-local runtime secrets",
+        reason="legacy Bot/WebApp sync exposes only a stable endpoint identity",
     ),
     ("push_subscriptions", "p256dh"): _entry(
         "push_subscriptions",
@@ -534,7 +539,7 @@ _FIELD_POLICIES: dict[tuple[str, str], SyncFieldPolicyEntry] = {
         SyncFieldClassification.NO_SYNC,
         action=SyncFieldAction.DROP,
         sensitive=True,
-        reason="browser push key material is Iran-local runtime state",
+        reason="browser push key material never crosses the Bot/WebApp trust boundary",
     ),
     ("push_subscriptions", "auth"): _entry(
         "push_subscriptions",
@@ -542,7 +547,7 @@ _FIELD_POLICIES: dict[tuple[str, str], SyncFieldPolicyEntry] = {
         SyncFieldClassification.NO_SYNC,
         action=SyncFieldAction.DROP,
         sensitive=True,
-        reason="browser push auth secret is Iran-local runtime state",
+        reason="browser push auth secret never crosses the Bot/WebApp trust boundary",
     ),
     ("push_subscriptions", "user_agent"): _entry(
         "push_subscriptions",
