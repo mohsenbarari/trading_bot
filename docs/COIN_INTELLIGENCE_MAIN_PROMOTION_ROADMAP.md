@@ -931,8 +931,38 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     نشد.
 - گیت مرحلهٔ بعد:
   - runner دستی باید mapping channel→stream را فقط از config runtime بگیرد،
-    پس از staging promotion را در transaction کنترل‌شده اجرا کند و health/
-    counter ترتیب event را بدون raw data ارائه دهد.
+    pipeline را در commit/retry کنترل‌شده اجرا کند و health/counter ترتیب
+    event را بدون raw data ارائه دهد.
+
+### P2-B3 — pipeline محلی آبشدهٔ خصوصی — 2026-08-04 — COMPLETE (library only)
+
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - `core/market_intelligence/private_gold_pipeline.py`: اتصال caller-driven
+    decode → staging → fact promotion → refresh quote دقیقه‌ای کاغذی؛
+  - `tests/test_coin_intelligence_private_gold_pipeline.py`: ترتیب معکوس
+    verifier/offer، quote بسته‌شده، دقیقهٔ باز و idempotency را بررسی می‌کند.
+- مرز قطعی و رفتار ایمنی:
+  - فقط paper non-conditional به quote دقیقه‌ای می‌رود؛ physical همچنان
+    fact منفرد است؛ update دیررسِ حداکثر سه‌روزه می‌تواند quote همان دقیقه را
+    با event key ثابت اصلاح کند؛
+  - commit دو SQLite عمداً به caller سپرده شده است: ابتدا staging قابل retry
+    حفظ می‌شود و factهای opaque idempotent هستند؛ بنابراین failure میان دو
+    commit سبب دوباره‌شماری نمی‌شود؛
+  - هیچ runner، file reader، config، Telegram/Telethon، worker یا scheduler
+    فعال نشده است.
+- Test command و نتیجه:
+  - `PYTHONPYCACHEPREFIX=/tmp/coin-intelligence-pycache python3 -m unittest -v
+    tests.test_coin_intelligence_private_gold_pipeline
+    tests.test_coin_intelligence_private_gold_payloads
+    tests.test_coin_intelligence_private_gold_staging
+    tests.test_coin_intelligence_private_gold` → `Ran 25 tests ... OK`.
+  - تمام `test_coin_intelligence_*.py` با environment ساختگیِ فقط برای
+    import config اجرا شد؛ `Ran 127 tests ... OK` و هیچ اتصال واقعی انجام
+    نشد.
+- گیت مرحلهٔ بعد:
+  - runner دستیِ one-shot باید فقط input spool محلی و runtime root مجاز را
+    بپذیرد، ترتیب commit/retry را اجرا کند و status کاملاً redacted منتشر
+    کند. اتصال مستقیم Telegram و scheduler پس از آن و با approval جداست.
 
 ### P2-C-A — فیلتر نخست گروه‌های سکه — 2026-08-04 — PARTIAL
 

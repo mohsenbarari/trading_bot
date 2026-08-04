@@ -86,6 +86,7 @@ physical امروز/فردا و تمام six paper cellها را جدا نگه �
 
 برای complete شدن P2-B، worker/transport جدا باید channel بیرونی را به stream
 مورد اعتماد bind کند، decoder و runtime path محافظت‌شده را صدا بزند، ترتیب
-ingestion را metric کند و minute quoteهای کاغذی را فقط پس از بسته‌شدن دقیقه
-materialize کند. آن worker در این commit وجود ندارد و بدون تأیید deployment
-فعال نخواهد شد.
+ingestion را metric کند و `private_gold_pipeline` را با commit/retry کنترل‌شده
+اجرا کند. pipeline فقط minute کاغذیِ بسته‌شده و non-conditional را با وزن
+offer=`1` و trade=`3` materialize می‌کند؛ physical aggregate نمی‌شود. worker
+در این commit وجود ندارد و بدون تأیید deployment فعال نخواهد شد.
