@@ -91,6 +91,7 @@ from .upload_session import (
 from .change_log import ChangeLog
 from .sync_block import SyncBlock
 from .sync_apply_watermark import SyncApplyWatermark
+from .coin_intelligence_market_outbox import CoinIntelligenceMarketOutbox
 
 __all__ = [
     # User & Auth
@@ -190,4 +191,5 @@ __all__ = [
     "ChangeLog",
     "SyncBlock",
     "SyncApplyWatermark",
+    "CoinIntelligenceMarketOutbox",
 ]

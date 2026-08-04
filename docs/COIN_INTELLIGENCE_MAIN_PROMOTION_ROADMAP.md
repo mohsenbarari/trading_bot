@@ -727,3 +727,72 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   - P2-A از نظر کد و تست offline کامل است، ولی P2 کلان تا انجام P2-B/C/D
     `PARTIAL` می‌ماند؛ گام بعدی P3 (outbox پروژه) می‌تواند مستقل از collector
     توسعه یابد و به هیچ معماری سه‌سروره متصل نخواهد شد.
+
+### P3 — Outbox پایدار Offer/Trade پروژه — 2026-08-04 — PARTIAL
+
+- Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
+- Promotion branch commit(s): commit P3 شامل model، migration، listener،
+  test و این یادداشت روی `candidate/coin-commodity-inference-promotion`.
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - `models/coin_intelligence_market_outbox.py`: outbox product-owned با
+    idempotency، status، lease و payload privacy-minimized؛
+  - `core/market_intelligence/project_outbox.py`: listener transaction-local
+    برای lifecycle Offer/Trade؛
+  - `migrations/versions/b2d4e6f8a0c2_add_coin_intelligence_market_outbox.py`:
+    migration مستقل از head فعلی main؛
+  - `tests/test_coin_intelligence_project_outbox.py`: transaction lifecycle و
+    rollback tests؛
+  - `docs/COIN_INTELLIGENCE_PROJECT_OUTBOX.md`: contract، deployment order و
+    rollback policy.
+- موارد عمداً انجام‌نشده:
+  - هیچ worker، schedule، SQLite write، Snapshot rebuild، network call یا
+    inference بعد از commit فعال نشد؛
+  - هیچ parser متنی یا دادهٔ گروه/کانال در مسیر eventهای native پروژه نیست؛
+  - هیچ sync/runtime سه‌سروره اضافه یا تغییر نکرد.
+- قرارداد/schema/versionهای افزوده یا تغییرکرده:
+  - table `coin_intelligence_market_outbox` eventهای `OFFER_OPENED`،
+    `OFFER_PARTIAL`، `OFFER_COMPLETED`، `OFFER_CANCELLED`، `OFFER_EXPIRED` و
+    `TRADE_COMPLETED` را نگه می‌دارد؛
+  - idempotency key از subject/event/version تولید می‌شود؛
+  - payload فقط fact اقتصادی normalized دارد؛ identity، mobile، notes و raw
+    text در آن نیست؛
+  - آفر `exclude_from_competitive_price` نگه‌داری می‌شود، ولی `model_eligible`
+    آن false است؛
+  - listener در همان session/transaction row را اضافه می‌کند؛ rollback هم
+    Offer/Trade و هم outbox event را برمی‌گرداند.
+- Migration و نتیجهٔ upgrade/downgrade:
+  - migration PostgreSQL جدید additive و مستقل از migrationهای به‌جاماندهٔ
+    معماری پیشین است؛ Offer/Trade schema تغییر نکرد؛
+  - downgrade fail-closed است: تا outbox drain/archive نشده باشد table حذف
+    نمی‌شود؛
+  - test compile و Alembic head روی graph جدید سبز است. Migration واقعی روی
+    دیتابیس production اجرا نشده است.
+- Test commands و نتیجهٔ دقیق:
+  - `python3 -m unittest -v tests.test_coin_intelligence_project_outbox
+    tests.test_coin_intelligence_market_store
+    tests.test_coin_intelligence_public_telegram tests.test_migration_smoke`
+    → `Ran 33 tests ... OK`؛
+  - baseline کامل P0 تا P3 با env ساختگیِ process-local اجرا شد →
+    `Ran 170 tests in 4.686s ... OK`.
+- داده/fixture استفاده‌شده و محل امن آن:
+  - فقط three-table SQLite in-memory برای Offer/Trade/outbox و fixtureهای
+    synthetic؛ هیچ PostgreSQL، آفر واقعی، identity، API key یا session واقعی
+    استفاده نشد.
+- نتیجهٔ health/freshness/replay:
+  - همان optimistic version همان event key را duplicate نمی‌کند؛ partial و
+    terminal lifecycle جدا هستند؛
+  - health/lease consumer خارج از scope فعلی است، چون consumer هنوز شروع
+    نشده است.
+- رفتار rollback آزموده‌شده:
+  - flush و سپس rollback نه Offer و نه outbox event بر جا نمی‌گذارد؛
+  - downgrade migration اگر حتی یک row موجود باشد fail-closed است.
+- ریسک‌های باقیمانده و مالک/تاریخ پیگیری:
+  - app code باید فقط بعد از migration P3 deploy شود؛
+  - claim/lease/retry worker و projection outbox به SQLite در P4 مالک دارد؛
+  - هر mutation path که ORM flush را bypass کند باید در P3 acceptance audit
+    بررسی شود؛
+  - P2-B/C/D هنوز برای کامل شدن feedهای خارجی باقی است.
+- تصمیم مرحلهٔ بعد و تأیید لازم:
+  - P3 producer کامل است اما تا consumer idempotent P4 به `PARTIAL` می‌ماند.
+    گام بعد P4: projection Outbox به Market Store و Snapshot/bundle local-first
+    بدون تغییر API/Bot فعلی.

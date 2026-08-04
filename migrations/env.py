@@ -30,6 +30,7 @@ import models.telegram_delivery_job
 import models.telegram_delivery_feeder_state
 import models.telegram_delivery_resume_operation
 import models.telegram_admin_broadcast
+import models.coin_intelligence_market_outbox
 
 # --- خواندن تنظیمات Alembic ---
 config = context.config
