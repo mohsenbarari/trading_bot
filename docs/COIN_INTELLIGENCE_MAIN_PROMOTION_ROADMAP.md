@@ -940,6 +940,53 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   بدون duplication به staging map کند؛ B3 فقط پس از آن resolution کالای
   explicit/unnamed را با snapshot strictly-prior اضافه می‌کند.
 
+### P2-C-B2 — decoder JSON تک/چندرویدادی گروه‌ها — 2026-08-04 — PARTIAL
+
+- Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
+- Promotion branch commit(s): commit B2 شامل decoder pure، test و این
+  یادداشت روی `candidate/coin-commodity-inference-promotion`.
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - `core/market_intelligence/coin_group_payloads.py`: decode object، array
+    و divider افقی مستند؛ routing strict برای دو گروه؛ map به staging؛
+  - `docs/COIN_INTELLIGENCE_COIN_GROUP_PAYLOADS.md` و fixtureهای synthetic.
+- موارد عمداً انجام‌نشده:
+  - Telethon listener، archive file، cursor، scheduler و config runtime
+    اضافه/فعال نشده‌اند؛ text فقط از input گذرا به B1 منتقل می‌شود.
+- قرارداد/schema/versionهای افزوده یا تغییرکرده:
+  - availability صرفاً timestamp trusted outer collector است و event time
+    داخلی نمی‌تواند آن را عقب ببرد؛
+  - source غیر `account2_group1/2`، market غیر coin، type نامعتبر، ID/date
+    ناقص و reply parent مبهم fail-closed می‌شوند؛
+  - duplicate دقیق یک بار، update با edit time اکیداً جدیدتر یک نسخه و
+    conflict هم‌زمان/بی‌ترتیب هیچ نسخه‌ای ندارد.
+- Migration و نتیجهٔ upgrade/downgrade: migration ندارد؛ decoder/statging
+  library بدون invocation اثر عملیاتی ندارد. rollback برابر عدم فراخوانی آن
+  است.
+- Test commands و نتیجهٔ دقیق:
+  - `python3 -m unittest -q tests.test_coin_intelligence_coin_groups
+    tests.test_coin_intelligence_coin_group_staging
+    tests.test_coin_intelligence_coin_group_payloads` با pycache موقت اجرا
+    شد؛ نتیجه: `Ran 16 tests in 0.208s ... OK`.
+  - baseline ترکیبیِ P0 تا P4-A/P2-B/P2-D/P2-C-B2 و guardهای Offer/Trade/
+    migration با env ساختگی و pycache موقت اجرا شد؛ نتیجه:
+    `Ran 207 tests in 5.169s ... OK`.
+- داده/fixture استفاده‌شده و محل امن آن: JSON و متن synthetic فقط در test
+  process/TemporaryDirectory؛ channel ID، Telegram payload واقعی، credential
+  یا runtime log استفاده نشده است.
+- نتیجهٔ health/freshness/replay: batch malformed sibling را از sibling درست
+  جدا می‌کند؛ replays idempotent B1 می‌مانند؛ telemetry فعلاً فقط counter
+  result است و endpoint/scheduler ندارد.
+- رفتار rollback آزموده‌شده: cross-route، message conflict و reply مبهم row
+  staging نمی‌سازند و Market Store دست‌نخورده می‌ماند.
+- ریسک‌های باقیمانده و مالک/تاریخ پیگیری:
+  - contract sender باید با fixture واقعیِ scrubbed از crawler پیش از
+    activation replay شود؛ P2-C deployment owner؛
+  - B3 causal commodity validation و B4 trade linking همچنان لازم‌اند؛
+  - سه‌سروره/transport این feature عمداً defer شده است.
+- تصمیم مرحلهٔ بعد و تأیید لازم: P2-C-B3 باید فقط با evidence strictly-prior
+  و same-book، explicit price conflict و کالای unnamed را resolve یا reject
+  کند؛ بدون default امام در data pipeline.
+
 ### P2-D — adapter external تتر و IME — 2026-08-04 — PARTIAL
 
 - Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
