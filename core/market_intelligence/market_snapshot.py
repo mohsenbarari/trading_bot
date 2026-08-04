@@ -19,6 +19,7 @@ import sqlite3
 import tempfile
 from typing import Any, Iterable, Mapping, Sequence
 
+from .coin_rate_engine import COIN_RATE_ENGINE_VERSION, COIN_SPECS, build_coin_rate_estimates
 from .market_contracts import MARKET_STORE_CONTRACT_VERSION, normalize_utc
 
 
@@ -547,6 +548,7 @@ def build_market_snapshot(
             ),
         )
     )
+    rate_items = [item.to_dict() for item in build_coin_rate_estimates(connection, as_of_utc=as_of)]
     snapshot = {
         "schema_version": MARKET_SNAPSHOT_SCHEMA_VERSION,
         "market_store_contract_version": MARKET_STORE_CONTRACT_VERSION,
@@ -554,10 +556,15 @@ def build_market_snapshot(
         "generated_at_utc": _iso(as_of),
         "signals": signals,
         "market_regime": _regime_from_signals(signals),
-        # P4 publishes trustworthy raw underlyings.  Range production and
-        # commodity selection are deliberately deferred to P4-B/P5.
-        "rates": {},
-        "snapshot_status": "PARTIAL_UNDERLYING_STATE",
+        # Range generation is deterministic and source-separated.  Product
+        # commodity selection remains deliberately deferred to P5.
+        "rates": {
+            "engine_version": COIN_RATE_ENGINE_VERSION,
+            "items": rate_items,
+            "estimated_count": sum(item["status"] == "ESTIMATED" for item in rate_items),
+            "no_data_count": sum(item["status"] == "NO_DATA" for item in rate_items),
+        },
+        "snapshot_status": "PARTIAL_COIN_RATE_STATE",
     }
     validate_market_snapshot(snapshot)
     return snapshot
@@ -591,7 +598,41 @@ def validate_market_snapshot(snapshot: Mapping[str, Any]) -> None:
     rates = snapshot.get("rates")
     if not isinstance(rates, Mapping):
         raise MarketSnapshotError("snapshot_rates_mapping_required")
+    if rates:
+        _validate_coin_rates(rates)
     _canonical_snapshot_bytes(snapshot)
+
+
+def _validate_coin_rates(rates: Mapping[str, Any]) -> None:
+    """Reject malformed estimates before an atomic artifact can expose them."""
+
+    if str(rates.get("engine_version") or "") != COIN_RATE_ENGINE_VERSION:
+        raise MarketSnapshotError("snapshot_rate_engine_version_invalid")
+    items = rates.get("items")
+    if not isinstance(items, list) or len(items) != len(COIN_SPECS) * 2:
+        raise MarketSnapshotError("snapshot_rate_items_invalid")
+    seen: set[tuple[str, str]] = set()
+    for item in items:
+        if not isinstance(item, Mapping):
+            raise MarketSnapshotError("snapshot_rate_item_invalid")
+        code = str(item.get("commodity_code") or "")
+        settlement = str(item.get("settlement_term") or "")
+        status = str(item.get("status") or "")
+        if code not in COIN_SPECS or settlement not in {"CASH", "TOMORROW"} or status not in {"ESTIMATED", "NO_DATA"}:
+            raise MarketSnapshotError("snapshot_rate_item_invalid")
+        if (code, settlement) in seen:
+            raise MarketSnapshotError("snapshot_rate_item_duplicate")
+        seen.add((code, settlement))
+        values = (item.get("estimated_project_price"), item.get("lower_project_price"), item.get("upper_project_price"))
+        if status == "NO_DATA":
+            if any(value is not None for value in values):
+                raise MarketSnapshotError("snapshot_no_data_rate_has_price")
+            continue
+        if not all(isinstance(value, int) and value > 0 for value in values):
+            raise MarketSnapshotError("snapshot_estimated_rate_invalid")
+        center, lower, upper = values
+        if not lower <= center <= upper:
+            raise MarketSnapshotError("snapshot_rate_interval_invalid")
 
 
 def publish_market_snapshot_atomically(

@@ -143,6 +143,26 @@ class MarketSnapshotTests(unittest.TestCase):
             "external_reference_not_herat_substitution_v1",
         )
 
+    def test_snapshot_embeds_structural_low_date_range_without_coin_offer(self) -> None:
+        self._store(
+            identity="private-physical",
+            source_code="PRIVATE_GOLD_CHANNEL",
+            instrument="MELTED_GOLD_PRIVATE",
+            price=803_000_000,
+            price_unit="IRT_PER_MESGHAL_750",
+            event_time=self.now - timedelta(seconds=20),
+            settlement="TODAY",
+            trade_form="PHYSICAL",
+            event_type="QUOTE",
+        )
+
+        snapshot = build_market_snapshot(self.connection, as_of_utc=self.now)
+        rate = next(
+            item for item in snapshot["rates"]["items"]
+            if item["commodity_code"] == "BAHAR" and item["settlement_term"] == "CASH"
+        )
+        self.assertEqual((snapshot["snapshot_status"], rate["status"], rate["estimated_project_price"]), ("PARTIAL_COIN_RATE_STATE", "ESTIMATED", 180_900))
+
     def test_atomic_publish_preserves_valid_snapshot_on_invalid_replacement(self) -> None:
         snapshot = build_market_snapshot(self.connection, as_of_utc=self.now)
         digest = publish_market_snapshot_atomically(self.snapshot_path, snapshot)

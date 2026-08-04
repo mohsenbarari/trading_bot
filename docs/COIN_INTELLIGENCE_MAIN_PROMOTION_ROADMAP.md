@@ -1182,6 +1182,54 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
 - تصمیم مرحلهٔ بعد و تأیید لازم: P4-B-B snapshot integration و test
   no-leakage لازم است؛ سپس P5 فقط snapshot published را می‌خواند.
 
+### P4-B-B — انتشار atomic rate در Snapshot — 2026-08-04 — PARTIAL
+
+- Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
+- Promotion branch commit(s): commit P4-B-B شامل integration Snapshot،
+  validation و test روی `candidate/coin-commodity-inference-promotion`.
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - `market_snapshot.py` اکنون output P4-B-A را زیر `rates` همراه engine
+    version و شمار estimated/no-data می‌سازد؛
+  - validator interval و complete matrix همهٔ ۷ کالا × CASH/TOMORROW را پیش
+    از publish atomic enforce می‌کند؛
+  - test low-date range در Snapshot افزوده شد.
+- موارد عمداً انجام‌نشده:
+  - publisher schedule/runtime root و consumer P5 اضافه نشده‌اند؛ build فقط
+    با call صریح قبلی کار می‌کند.
+- قرارداد/schema/versionهای افزوده یا تغییرکرده:
+  - `rates` دیگر map خالی نیست و شامل `engine_version`, `items`,
+    `estimated_count`, `no_data_count` است؛
+  - هر سلول فقط `ESTIMATED` با lower≤center≤upper integer یا `NO_DATA` با
+    هیچ قیمت است؛ duplicate/missing/code/settlement نامعتبر artifact را رد
+    می‌کند؛
+  - Snapshot قدیمی P4-A با `rates={}` فقط برای read compatibility معتبر است
+    ولی P5 بعدی آن را rate-ready نمی‌داند.
+- Migration و نتیجهٔ upgrade/downgrade: schema Store و migration ندارد؛
+  snapshot invalid فایل قبلی را replace نمی‌کند و rollback همان artifact
+  معتبر قبلی است.
+- Test commands و نتیجهٔ دقیق:
+  - `python3 -m unittest -q tests.test_coin_intelligence_market_snapshot
+    tests.test_coin_intelligence_coin_rate_engine` با pycache موقت اجرا شد؛
+    نتیجه: `Ran 8 tests in 0.174s ... OK`.
+  - baseline ترکیبیِ P0 تا P4-B-B و guardهای Offer/Trade/migration با env
+    ساختگی و pycache موقت اجرا شد؛ نتیجه:
+    `Ran 227 tests in 5.625s ... OK`.
+- داده/fixture استفاده‌شده و محل امن آن: تنها SQLite TemporaryDirectory و
+  قیمت synthetic؛ هیچ artifact/DB/خدمت واقعی mutate نشد.
+- نتیجهٔ health/freshness/replay: physical melted تازه، low-date CASH را در
+  Snapshot بدون offer سکه estimated کرد؛ validator unit/range/policy را
+  پیش از publish کنترل می‌کند.
+- رفتار rollback آزموده‌شده: malformed rate matrix publish نمی‌شود و
+  provider فایل معتبر قبلی را همچنان می‌خواند.
+- ریسک‌های باقیمانده و مالک/تاریخ پیگیری:
+  - freshness/health runtime و writer ownership هنوز P4 deployment owner؛
+  - P5 باید rate-ready snapshot را جدا از P4-A legacy لازم بداند؛
+  - calendar, banking session, Herat bridge و learned model substageهای
+    بعدی P4 باقی مانده‌اند.
+- تصمیم مرحلهٔ بعد و تأیید لازم: P5-A reader/ranker باید فقط Snapshot
+  atomically published و rate-ready را بخواند و commodity result را با
+  catalog canonical name (نه ID) برگرداند.
+
 ### P2-D — adapter external تتر و IME — 2026-08-04 — PARTIAL
 
 - Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
