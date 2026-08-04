@@ -839,6 +839,53 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   underlying موردنیاز باید offline منتقل شوند، سپس P4-B anchor/range با
   replay historical شروع می‌شود.
 
+### P2-D — adapter external تتر و IME — 2026-08-04 — PARTIAL
+
+- Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
+- Promotion branch commit(s): commit P2-D شامل adapter unit-safe، Snapshot
+  extension، test و این یادداشت روی
+  `candidate/coin-commodity-inference-promotion`.
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - `core/market_intelligence/external_markets.py`: input transient و
+    projection canonical برای `USDT_IRT`, `IME_GOLD_BAR` و
+    `IME_GOLD_COIN_IMAM`؛
+  - Snapshot source-separated برای دو instrument رسمی IME؛
+  - `docs/COIN_INTELLIGENCE_EXTERNAL_MARKETS_ADAPTER.md` و testهای offline.
+- موارد عمداً انجام‌نشده:
+  - هیچ client/HTTP request، API key، session، collector، retry loop،
+    historical backfill، collector ایران یا sync سه‌سروره فعال نشد؛
+  - P2-D تا deployment transport و health/freshness واقعی `PARTIAL` است.
+- قرارداد/schema/versionهای افزوده یا تغییرکرده:
+  - تترِ ورودی تومان فقط با conversion صریح `×10` به
+    `IRT_PER_USDT` می‌رسد و جای هرات نام‌گذاری نمی‌شود؛
+  - IME certificate `0.1g/995` با تبدیل وزن و عیار صریح به
+    `IRT_PER_MESGHAL_750` می‌رسد؛ IME امامِ `IRR_PER_COIN` identity است؛
+  - event time و available time هر دو required و ترتیب معکوس fail-closed
+    است؛ quote kind نامعتبر یا price غیرمثبت هم reject می‌شود.
+- Migration و نتیجهٔ upgrade/downgrade: migration جدیدی ندارد و فقط fact
+  canonical P1 را می‌سازد. rollback برابر عدم فراخوانی library است.
+- Test commands و نتیجهٔ دقیق:
+  - `python3 -m unittest -q tests.test_coin_intelligence_external_markets
+    tests.test_coin_intelligence_market_snapshot` با pycache موقت اجرا شد؛
+    نتیجه: `Ran 8 tests ... OK`.
+  - suite ترکیبی P1 تا P4-A، P2-B/D و baseline آفر/معامله/API/migration با
+    environment ساختگی اجرا شد؛ نتیجه: `Ran 191 tests ... OK`. logهای
+    endpointهای ساختگی expected بودند و هیچ service واقعی استفاده نشد.
+- داده/fixture استفاده‌شده و محل امن آن: فقط input synthetic در test process
+  و SQLite موقت؛ network، endpoint، raw response، credential یا بازار واقعی
+  استفاده نشد.
+- نتیجهٔ health/freshness/replay:
+  - Snapshot شمش IME و سکه IME را مستقل و با unit متفاوت نشان می‌دهد؛
+  - dedupe key opaque است و health/provider runtime عمداً deferred است.
+- رفتار rollback آزموده‌شده: conversion یا timestamp نامعتبر پیش از write
+  fail-closed است؛ هیچ startup/write خودکار ندارد.
+- ریسک‌های باقیمانده و مالک/تاریخ پیگیری:
+  - صحت endpoint و fieldهای live IME/Tether، نرخ/تاخیر و تاریخچه باید در
+    deployment/replay جدا بررسی شود؛ owner P2-D deployment؛
+  - P2-C گروه‌های سکه برای anchorهای خارجی هنوز لازم است.
+- تصمیم مرحلهٔ بعد و تأیید لازم: P2-C parser گروه‌های سکه یا P4-B producer
+  فقط پس از داشتن fixture و policy صریح raw-retention شروع شود.
+
 ### P3 — Outbox پایدار Offer/Trade پروژه — 2026-08-04 — PARTIAL
 
 - Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
