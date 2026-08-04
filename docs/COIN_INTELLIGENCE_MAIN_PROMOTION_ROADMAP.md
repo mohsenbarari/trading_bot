@@ -1621,3 +1621,29 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
 - تصمیم مرحلهٔ بعد و تأیید لازم: PostgreSQL scratch gate برای migration
   P5-C و سپس runtime planِ بدون معماری سه‌سروره لازم است؛ هیچ activation
   خودکاری از این commit مجاز نیست.
+
+### P5-D — guard اجرای migration روی PostgreSQL scratch — 2026-08-04 — PARTIAL
+
+- Scope انجام‌شده:
+  - `scripts/run_guarded_scratch_alembic.py` فقط namespace محدود
+    `coin_intelligence_[a-z0-9_]+` را علاوه بر namespaceهای قبلی برای target
+    scratch می‌پذیرد؛ runtime databaseها همچنان صراحتاً deny هستند؛
+  - `tests/test_guarded_scratch_alembic.py` پذیرش target نمونهٔ
+    `coin_intelligence_audit_test` را کنترل می‌کند.
+- قرارداد ایمنی:
+  - `TRADING_BOT_MIGRATION_MODE=scratch`، URL sync/app یکسان، checkout دقیق
+    و یک Alembic head همچنان اجباری‌اند؛
+  - نام‌هایی مانند `trading_bot` یا `trading_bot_db` حتی با این تغییر قابل
+    قبول نیستند؛ namespace جدید فقط اجازهٔ آزمایش isolated را می‌دهد.
+- Test command و نتیجه:
+  - `python3 -m unittest -q tests.test_guarded_scratch_alembic
+    tests.test_migration_smoke` → `Ran 30 tests ... OK`.
+- وضعیت اجرای واقعی:
+  - هیچ PostgreSQL scratch یا container محلی آماده نبود؛ برای حفظ دیسک و
+    جلوگیری از ایجاد/download container، migration واقعی اجرا نشد؛
+  - production، main و runtime هیچ تغییری نکردند.
+- گیت باقی‌مانده:
+  - با یک database disposable به نامی مانند
+    `coin_intelligence_audit_<run>_test` باید upgrade head، insert audit،
+    rejection UPDATE/DELETE trigger و downgrade fail-closed به‌صورت واقعی
+    آزموده شوند؛ owner deployment/release gate.
