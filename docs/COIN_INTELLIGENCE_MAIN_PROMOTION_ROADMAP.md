@@ -1401,3 +1401,53 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
 - تصمیم مرحلهٔ بعد و تأیید لازم: P5-B mapping محلی و audit contract فقط پس
   از بررسی دقیق مدل `Commodity` و mutation pathهای موجود انجام شود؛ تا آن
   زمان هیچ کاربر یا آفر پروژه از این ranker استفاده نمی‌کند.
+
+### P5-B — نگاشت fail-closed catalog محلی — 2026-08-04 — COMPLETE (library only)
+
+- Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
+- Promotion branch commit(s): این commit شامل mapper، test و مستند مرز
+  catalog روی `candidate/coin-commodity-inference-promotion` است.
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - `core/market_intelligence/coin_catalog.py`: projection جدا از ranker که
+    candidateهای P5-A را فقط با catalog محلی resolve می‌کند؛
+  - `docs/COIN_INTELLIGENCE_CATALOG_MAPPING.md`: قرارداد exact-name و
+    ممنوعیت alias/fuzzy/default؛
+  - `tests/test_coin_intelligence_coin_catalog.py`: guardهای catalog.
+- موارد عمداً انجام‌نشده:
+  - API، بات، WebApp، `OfferCreate`، parser، scheduler، feature flag، audit
+    persistence و هرگونه write به database تغییر نکرده یا فعال نشده است؛
+  - mapper هرگز کالا/alias جدید نمی‌سازد و به هیچ دادهٔ market دسترسی ندارد.
+- قرارداد/schema/versionهای افزوده یا تغییرکرده:
+  - `coin-catalog-resolution-v1` تنها query مجاز
+    `commodities.name == canonical_name` را انجام می‌دهد؛ equality دقیق است؛
+  - `commodity_aliases`، case/fuzzy normalization، order catalog و fallback
+    امام همگی ممنوع‌اند؛
+  - همهٔ candidateهای `AUTO_SELECT` و `CONFIRM` باید دقیقاً یک row معتبر با
+    ID مثبت بگیرند؛ صفر/چند/نام نابرابر = کل تصمیم
+    `ABSTAIN / CATALOG_CANONICAL_NAME_UNAVAILABLE`؛
+  - ranker از پیش abstain‌شده اصلاً catalog را query نمی‌کند و reason اصلی
+    خود را حفظ می‌کند.
+- Migration و نتیجهٔ upgrade/downgrade: migration/schema/write ندارد؛ mapper
+  library محلی و read-only است، پس rollback برابر عدم فراخوانی آن است.
+- Test commands و نتیجهٔ دقیق:
+  - `PYTHONPYCACHEPREFIX=/tmp/coin-intelligence-pycache python3 -m unittest -q
+    tests.test_coin_intelligence_coin_catalog` → `Ran 4 tests ... OK`؛
+  - regression کامل P0 تا P5-B و guardهای Offer/Trade/migration با env
+    ساختگی و pycache موقت → `Ran 235 tests in 5.765s ... OK`.
+- داده/fixture استفاده‌شده و محل امن آن: فقط commodityهای synthetic با
+  IDهای ساختگی در memory؛ دیتابیس/alias/کاربر/آفر واقعی خوانده یا mutate نشد.
+- نتیجهٔ health/freshness/replay: catalog mapping هیچ freshness را تمدید یا
+  receipt را تغییر نمی‌دهد؛ timestamp و receipt P5-A عیناً carry می‌شوند تا
+  submit-time validation در P6 ممکن بماند.
+- رفتار rollback آزموده‌شده: نام alias‌مانند یا catalog فرضاً duplicate به
+  جای انتخاب اشتباه abstain می‌دهد؛ `CONFIRM` نیمه‌قابل‌نمایش ایجاد نمی‌شود.
+- ریسک‌های باقیمانده و مالک/تاریخ پیگیری:
+  - uniqueness database فعلی از duplicate جلوگیری می‌کند، اما guard mapper
+    برای importهای معیوب و test double عمداً باقی می‌ماند؛
+  - P5-C/P6 باید audit append-only، receipt replay و submit-time freshness
+    را بدون ذخیرهٔ متن یا identity اضافه کند؛
+  - P6 باید فقط بعد از confirmation کاربر `commodity_id` را به command
+    موجود بدهد و semantic idempotency را حفظ کند.
+- تصمیم مرحلهٔ بعد و تأیید لازم: پیش از اتصال HTTP، contract تصمیم/audit و
+  policy shadow-first باید جدا طراحی و تست شود؛ تا آن زمان mapper هیچ اثر
+  کاربرمحور یا عملیاتی ندارد.
