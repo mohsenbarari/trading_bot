@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from api.routers.users import send_limitation_notification
+from core.telegram_delivery_runtime_policy import TelegramDeliveryRuntimeMode
 
 
 class UsersRouterLimitationNotificationTests(unittest.IsolatedAsyncioTestCase):
@@ -43,8 +44,8 @@ class UsersRouterLimitationNotificationTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.users.create_user_notification",
             new=AsyncMock(side_effect=record_web_notification),
         ), patch(
-            "api.routers.users.configured_telegram_delivery_runtime",
-            return_value=SimpleNamespace(mode="queue-v1"),
+            "api.routers.users.configured_telegram_delivery_producer_mode",
+            return_value=TelegramDeliveryRuntimeMode.QUEUE_V1,
         ), patch(
             "api.routers.users.enqueue_account_restriction_telegram_notification_once",
             new=AsyncMock(side_effect=record_telegram_intent),

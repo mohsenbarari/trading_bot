@@ -318,6 +318,8 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("api.routers.offers.current_server", return_value="foreign"), patch.object(
             offers_module.settings, "channel_id", "@offers"
+        ), patch.object(
+            offers_module.settings, "bot_token", "token"
         ), patch(
             "api.routers.offers.telegram_gateway.send_message",
             new=AsyncMock(
@@ -350,6 +352,8 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
         )
         with patch("api.routers.offers.current_server", return_value="foreign"), patch.object(
             offers_module.settings, "channel_id", "@offers"
+        ), patch.object(
+            offers_module.settings, "bot_token", "token"
         ), patch(
             "core.services.telegram_offer_channel_service.get_available_trade_amounts",
             return_value=[10, 8, 10],
@@ -371,6 +375,8 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("api.routers.offers.current_server", return_value="foreign"), patch.object(
             offers_module.settings, "channel_id", "@offers"
+        ), patch.object(
+            offers_module.settings, "bot_token", "token"
         ), patch(
             "api.routers.offers.telegram_gateway.send_message",
             new=AsyncMock(return_value=TelegramGatewayResult(ok=False, method="sendMessage", status_code=500, error="bad gateway")),
@@ -381,6 +387,8 @@ class OffersRouterHelperTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("api.routers.offers.current_server", return_value="foreign"), patch.object(
             offers_module.settings, "channel_id", "@offers"
+        ), patch.object(
+            offers_module.settings, "bot_token", "token"
         ), patch(
             "api.routers.offers.telegram_gateway.send_message",
             new=AsyncMock(side_effect=RuntimeError("telegram down")),

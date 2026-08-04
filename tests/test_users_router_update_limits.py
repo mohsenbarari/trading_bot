@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 import schemas
 from api.routers.users import update_user
 from core.enums import UserRole
+from core.telegram_delivery_runtime_policy import TelegramDeliveryRuntimeMode
 
 
 def make_user(**overrides):
@@ -74,8 +75,8 @@ class UsersRouterUpdateLimitsTests(unittest.IsolatedAsyncioTestCase):
             "api.routers.users.sync_mandatory_channel_for_user_state_change",
             new=AsyncMock(),
         ), patch(
-            "api.routers.users.configured_telegram_delivery_runtime",
-            return_value=SimpleNamespace(mode="queue-v1"),
+            "api.routers.users.configured_telegram_delivery_producer_mode",
+            return_value=TelegramDeliveryRuntimeMode.QUEUE_V1,
         ), patch(
             "api.routers.users.enqueue_account_restriction_telegram_notification_once",
             new=AsyncMock(side_effect=record_intent),
