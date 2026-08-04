@@ -1451,3 +1451,61 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
 - تصمیم مرحلهٔ بعد و تأیید لازم: پیش از اتصال HTTP، contract تصمیم/audit و
   policy shadow-first باید جدا طراحی و تست شود؛ تا آن زمان mapper هیچ اثر
   کاربرمحور یا عملیاتی ندارد.
+
+### P5-C — audit append-only تصمیم inference — 2026-08-04 — PARTIAL (not called)
+
+- Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
+- Promotion branch commit(s): این commit شامل مدل، migration، writer library،
+  test و مستند audit روی `candidate/coin-commodity-inference-promotion` است.
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - `models/coin_intelligence_inference_audit.py` و migration
+    `d3f7a1c9e4b5`: table تصمیم‌های inference با check constraint و trigger
+    PostgreSQL برای منع UPDATE/DELETE؛
+  - `core/market_intelligence/coin_inference_audit.py`: writer صریح و
+    idempotent که transaction/commit را به caller واگذار می‌کند؛
+  - `docs/COIN_INTELLIGENCE_INFERENCE_AUDIT.md` و testهای contract/storage.
+- موارد عمداً انجام‌نشده:
+  - هیچ route، بات، WebApp، `OfferCreate`، worker یا feature flag این writer
+    را call نمی‌کند؛ migration روی دیتابیس واقعی اجرا نشده است؛
+  - audit به Offer/Trade/user/message/text/note/Telegram ID متصل نیست و
+    جایگزین audit اصلی محصول نمی‌شود.
+- قرارداد/schema/versionهای افزوده یا تغییرکرده:
+  - فقط decision key opaque، source surface، قیمت پروژه، settlement، status،
+    reason-code، count، کالای canonical منتخب در AUTO، نسخه‌های inference/
+    catalog و receipt/timestamp snapshot ذخیره می‌شوند؛
+  - نام/شناسهٔ کاربر، متن خام، note، chat/channel/message/Telegram ID، mobile
+    و reference آفر/معامله column ندارند؛
+  - key hex-64 exact replay را برمی‌گرداند؛ reuse همان key با اقتصاد/نتیجه
+    متفاوت conflict می‌دهد؛
+  - AUTO دقیقاً یک candidate و کالا دارد؛ CONFIRM/ABSTAIN هیچ کالای پنهان
+    selected ندارند؛ reason آزاد یا candidate با code/name غیرcanonical پیش
+    از write reject می‌شود؛
+  - migration downgrade اگر row وجود داشته باشد fail-closed است.
+- Migration و نتیجهٔ upgrade/downgrade:
+  - revision `d3f7a1c9e4b5` بعد از P3 head است و `alembic heads` همان یک head
+    را گزارش کرد؛ migration production اجرا نشده است؛
+  - trigger PostgreSQL هر UPDATE/DELETE را reject می‌کند؛ downgrade فقط پس از
+    archive/drain جدول ممکن است.
+- Test commands و نتیجهٔ دقیق:
+  - `python3 -m unittest -q tests.test_coin_intelligence_inference_audit
+    tests.test_migration_smoke` → `Ran 15 tests ... OK`؛
+  - regression کامل P0 تا P5-C و guardهای Offer/Trade/migration با env
+    ساختگی و pycache موقت → `Ran 241 tests in 5.773s ... OK`.
+- داده/fixture استفاده‌شده و محل امن آن: فقط ID، key، snapshot و قیمت
+  synthetic و SQLite in-memory؛ database/service/credential/data واقعی
+  استفاده یا mutate نشد.
+- نتیجهٔ health/freshness/replay: writer freshness را نمی‌سازد و receipt را
+  تغییر نمی‌دهد؛ AUTO/CONFIRM بدون provenance snapshot reject می‌شوند و
+  ABSTAIN علت fail-closed را بدون query یا انتخاب کالا نگه می‌دارد.
+- رفتار rollback آزموده‌شده: SQLite schema شکل AUTO ناقص را reject کرد؛
+  migration PostgreSQL downgrade با هر row موجود fail-closed تعریف شده است.
+- ریسک‌های باقیمانده و مالک/تاریخ پیگیری:
+  - اجرای واقعی upgrade/trigger و race یکتایی باید در PostgreSQL scratch gate
+    پیش از deployment آزمایش شود؛ owner P6/deployment؛
+  - P6 باید audit را داخل همان transaction preview/submit و با handling
+    `IntegrityError` فراخواند؛
+  - برای confirmation کاربر یک event تصمیم دوم یا receipt submit باید در P6
+    طراحی شود؛ row پیشنهادی نباید به‌تنهایی acceptance کاربر تلقی شود.
+- تصمیم مرحلهٔ بعد و تأیید لازم: اتصال P6 فقط shadow-first و با submit-time
+  recomputation/receipt validation شروع شود؛ پیش از آن migration P5-C نباید
+  روی production اجرا شود.
