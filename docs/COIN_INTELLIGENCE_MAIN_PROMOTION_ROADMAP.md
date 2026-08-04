@@ -1622,6 +1622,34 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   P5-C و سپس runtime planِ بدون معماری سه‌سروره لازم است؛ هیچ activation
   خودکاری از این commit مجاز نیست.
 
+### P4-D — فرمان دستیِ محافظت‌شده برای publish/check Snapshot — 2026-08-04 — COMPLETE (manual only)
+
+- Scope انجام‌شده:
+  - `scripts/publish_coin_intelligence_snapshot.py` یک فرمان صریح با دو
+    حالت `publish` و `check` اضافه می‌کند؛ هیچ scheduler، cron، worker،
+    collector، API route یا feature flag جدیدی ثبت نمی‌کند.
+  - هر دو path باید زیر یک `runtime-root` موجود باشند. Store غایب، path
+    خارج از root، parent غایب Snapshot و root غایب پیش از هر write رد
+    می‌شوند؛ publisher همچنان Store را فقط read-only باز می‌کند.
+  - publish با lock غیرمسدودکنندهٔ کنار artifact انجام می‌شود. خروجی صرفاً
+    JSON privacy-safe شامل status/freshness/count/digest است؛ متن پیام،
+    شناسهٔ کاربر، مسیر و credential چاپ نمی‌شوند.
+  - check همان artifact اتمیک را بدون write می‌خواند و با سقف پیش‌فرض ۱۲۰
+    ثانیه، `FRESH`، `STALE` یا `UNAVAILABLE` را اعلام می‌کند.
+- Test command و نتیجه:
+  - `PYTHONPYCACHEPREFIX=/tmp/coin-intelligence-pycache python3 -m unittest -q
+    tests.test_publish_coin_intelligence_snapshot
+    tests.test_coin_intelligence_snapshot_publisher
+    tests.test_coin_intelligence_market_snapshot
+    tests.test_coin_intelligence_market_store` → `Ran 18 tests ... OK`.
+- مرز عملیاتی و rollback:
+  - این فرمان در staging/production خودکار اجرا نشده و هیچ volume/compose
+    mount یا setting runtime تغییر نکرده است؛ rollback کد یعنی عدم فراخوانی
+    فرمان و artifact قبلی به‌دلیل atomic publish باقی می‌ماند.
+  - برای staging باید root محافظت‌شده به‌طور مشترک برای writer/publisher
+    (write) و API/Bot (read-only) mount شود، مالک تک‌نویسنده و monitor خروجی
+    JSON تعیین شود. این‌ها release gate هستند، نه بخشی از این commit.
+
 ### P5-D — guard اجرای migration روی PostgreSQL scratch — 2026-08-04 — COMPLETE
 
 - Scope انجام‌شده:
