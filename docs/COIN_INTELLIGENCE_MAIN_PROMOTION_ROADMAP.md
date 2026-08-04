@@ -783,6 +783,62 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     `PARTIAL` می‌ماند؛ گام بعدی P3 (outbox پروژه) می‌تواند مستقل از collector
     توسعه یابد و به هیچ معماری سه‌سروره متصل نخواهد شد.
 
+### P2-B — adapter آبشدهٔ خصوصی — 2026-08-04 — PARTIAL
+
+- Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
+- Promotion branch commit(s): commit P2-B شامل parser خالص، projection
+  canonical، minute aggregation، Snapshot extension، test و این یادداشت روی
+  `candidate/coin-commodity-inference-promotion`.
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - `core/market_intelligence/private_gold.py`: تفکیک physical/paper،
+    today/tomorrow، normal/reverse/swim، conditional، edit-trade و projection
+    بدون raw text؛
+  - `core/market_intelligence/market_snapshot.py`: signalهای جدا برای دو
+    physical cell و شش paper cell خصوصی؛
+  - `docs/COIN_INTELLIGENCE_PRIVATE_GOLD_ADAPTER.md` و testهای offline.
+- موارد عمداً انجام‌نشده:
+  - client خصوصی Telegram، raw staging، retention سه‌روزه، worker،
+    checkpoint/health/schedule و ingest واقعی ایجاد یا فعال نشد؛
+  - در نتیجه P2-B و کل P2 همچنان `PARTIAL` هستند.
+- قرارداد/schema/versionهای افزوده یا تغییرکرده:
+  - `PRIVATE_GOLD_PARSER_VERSION = private-gold-rules-v1`؛
+  - قیمت source که تومان است فقط با conversion صریح `×10` وارد
+    `IRT_PER_MESGHAL_750` می‌شود؛
+  - physical non-conditional raw می‌ماند؛ paper minute quote derived با وزن
+    offer=`1` و trade=`3` و cellهای جدا ساخته می‌شود؛
+  - conditional fact حفظ می‌شود اما در quote عادی کنار گذاشته می‌شود؛
+  - `edited_at` زمان معامله است و `PARTIAL` بدون quantity معاملهٔ کامل
+    تولید نمی‌کند.
+- Migration و نتیجهٔ upgrade/downgrade: Alembic یا schema جدیدی ایجاد نشد؛
+  فقط همان canonical `market_observations` P1 نوشته می‌شود. rollback برابر
+  عدم فراخوانی adapter است؛ runtime خودکاری وجود ندارد.
+- Test commands و نتیجهٔ دقیق:
+  - `python3 -m unittest -q tests.test_coin_intelligence_private_gold
+    tests.test_coin_intelligence_market_snapshot` با pycache موقت اجرا شد؛
+    نتیجه: `Ran 12 tests ... OK`.
+  - suite ترکیبی P1 تا P4-A به‌علاوهٔ P2-B و baseline آفر/معامله/API/migration
+    با environment ساختگی اجرا شد؛ نتیجه: `Ran 186 tests ... OK`. logهای
+    endpointهای ساختگی expected بودند و هیچ service واقعی استفاده نشد.
+- داده/fixture استفاده‌شده و محل امن آن: تمام textها و priceها synthetic و
+  فقط داخل test process/SQLite موقت هستند؛ هیچ event، channel، identity یا
+  credential واقعی استفاده نشد.
+- نتیجهٔ health/freshness/replay:
+  - same opaque source-event/role با upsert تکراری fact دوم ایجاد نمی‌کند؛
+  - Snapshot paper variantها را merge نمی‌کند و conditional را در aggregate
+    عادی وارد نمی‌کند؛ health شبکه تا ساخته‌شدن transport وجود ندارد.
+- رفتار rollback آزموده‌شده: unmarked input abstain می‌شود؛ partial trade
+  بدون quantity فقط offer می‌ماند؛ هیچ background writer به product متصل
+  نیست و حذف/عدم استفاده از library روی آفر/معاملهٔ پروژه اثر ندارد.
+- ریسک‌های باقیمانده و مالک/تاریخ پیگیری:
+  - معنی تومان source باید با replay محدود production پیش از activation
+    cross-check شود؛ P2-B deployment owner؛
+  - lifecycle واقعی edit/verifier و raw retention باید در worker جداگانه
+    آزموده شود؛ P2-B completion owner؛
+  - P2-C group coin و P2-D USDT/IME همچنان لازم‌اند.
+- تصمیم مرحلهٔ بعد و تأیید لازم: ابتدا P2-C/P2-D یا حداقل adapterهای
+  underlying موردنیاز باید offline منتقل شوند، سپس P4-B anchor/range با
+  replay historical شروع می‌شود.
+
 ### P3 — Outbox پایدار Offer/Trade پروژه — 2026-08-04 — PARTIAL
 
 - Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.

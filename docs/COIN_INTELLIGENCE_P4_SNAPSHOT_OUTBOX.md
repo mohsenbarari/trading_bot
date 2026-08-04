@@ -59,6 +59,8 @@ Snapshot فعلی source-separated است و موارد زیر را مستقل �
   نمی‌کند، پس به‌اشتباه CASH نام نمی‌گیرد؛
 - آبشدهٔ کاغذی امروز/فردا از `MELTED_FLOW`، با شمارش مستقل offer/trade و
   median وزن‌دارِ trade بالاتر؛
+- آبشدهٔ خصوصی: فیزیکال امروز/فردا به‌صورت individual fact، و هر شش cell
+  کاغذیِ `(today/tomorrow × normal/reverse/swim)` به‌شکل minute quote مستقل؛
 - هرات نقدی، امروز و فردا؛
 - تتر، فقط به‌عنوان `USDT_IRT` مستقل و با برچسب صریح «not Herat
   substitution»؛
