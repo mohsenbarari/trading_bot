@@ -102,6 +102,8 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
                 "settlement_type": "tomorrow",
                 "commodity_id": 3,
                 "commodity_name": "Gold",
+                "commodity_resolution": "UNKNOWN",
+                "low_date_hint": False,
                 "quantity": 10,
                 "price": 123456,
                 "is_wholesale": False,
@@ -117,15 +119,16 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "حسابدار دسترسی به بازار ندارد.")
 
-    async def test_parse_offer_keeps_legacy_commodity_and_returns_shadow_metadata_only(self):
+    async def test_parse_offer_keeps_omitted_commodity_null_and_returns_shadow_metadata_only(self):
         context = self.make_context(owner_id=5)
         db = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
         parsed = SimpleNamespace(
             trade_type="buy",
             settlement_type="tomorrow",
-            commodity_id=1,
-            commodity_name="امام",
-            commodity_resolution="IMPLICIT_DEFAULT",
+            commodity_id=None,
+            commodity_name=None,
+            commodity_resolution="OMITTED",
+            low_date_hint=False,
             quantity=10,
             price=186_800,
             is_wholesale=True,
@@ -165,7 +168,9 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
                 context=context,
                 db=db,
             )
-        self.assertEqual((result.data["commodity_id"], result.data["commodity_name"]), (1, "امام"))
+        self.assertEqual((result.data["commodity_id"], result.data["commodity_name"]), (None, None))
+        self.assertEqual(result.data["commodity_resolution"], "OMITTED")
+        self.assertFalse(result.data["low_date_hint"])
         self.assertEqual(
             (result.data["commodity_inference"]["mode"], result.data["commodity_inference"]["status"]),
             ("SHADOW_ONLY", "AUTO_SELECT"),

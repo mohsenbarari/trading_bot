@@ -181,7 +181,7 @@ async def _text_offer_shadow_inference_summary(result: object) -> str | None:
 
     if not getattr(settings, "coin_intelligence_inference_preview_enabled", False):
         return None
-    if getattr(result, "commodity_resolution", None) != "IMPLICIT_DEFAULT":
+    if getattr(result, "commodity_resolution", None) != "OMITTED":
         return None
     snapshot_path = str(
         getattr(settings, "coin_intelligence_inference_snapshot_path", "") or ""
@@ -224,10 +224,11 @@ async def _text_offer_shadow_inference_summary(result: object) -> str | None:
 
     decision = observation.decision
     candidate_names = "، ".join(item.commodity_name for item in decision.candidates)
+    current_commodity_name = str(getattr(result, "commodity_name", None) or "نامشخص")
     if decision.status == "AUTO_SELECT" and decision.candidates:
         return (
             f"🔬 تشخیص آزمایشی کالا: مدل قیمت را نزدیک به «{decision.candidates[0].commodity_name}» "
-            f"می‌بیند؛ کالای آفر همچنان «{getattr(result, 'commodity_name', 'نامشخص')}» است و ثبت آفر تغییری نمی‌کند."
+            f"می‌بیند؛ کالای آفر همچنان «{current_commodity_name}» است و ثبت آفر تغییری نمی‌کند."
         )
     if decision.status == "CONFIRM":
         return (
@@ -1940,14 +1941,14 @@ def _get_offer_suggestion(original_text: str, error_message: str) -> str:
     """پیشنهاد فرمت صحیح بر اساس نوع خطا"""
     # نمونه‌های صحیح
     examples = [
-        "خ ن ربع 30تا 75800",
-        "نیم 50عدد فروش نقد فردا 758000",
-        "امام 40تا 87000 خرید نقد: فقط نقدی",
-        "امام 30تا 75800 ف ن 15 15"
+        "خ ربع 30تا 75800",
+        "نیم 50عدد فروش فردا 758000",
+        "امام 40تا 87000 خرید: فقط نقدی",
+        "امام 30تا 75800 ف 15 15"
     ]
 
     hint = "💡 **فرمت صحیح:**\n"
-    hint += "`[کالا] [تعداد]تا [قیمت] + [خ ن/ف ن/خ ن ف/ف ن ف]`\n"
+    hint += "`[کالا اختیاری] [تعداد]تا [قیمت] + [خ/ف/خ ف/ف ف]`\n"
     hint += "ترتیب بخش‌ها آزاد است.\n\n"
 
     # پیشنهادات بر اساس نوع خطا
@@ -1967,15 +1968,15 @@ def _get_offer_suggestion(original_text: str, error_message: str) -> str:
         for marker in ("خرید", "فروش", "نوع معامله", "تسویه")
     ):
         hint += "📌 نوع معامله و تسویه باید یک بلوک کامل و فقط یک بار باشند؛ جای بلوک آزاد است\n"
-        hint += "نقد حاضر: `خ ن` یا `ف ن`\n"
-        hint += "فردایی: `خ ن ف` یا `ف ن ف`\n"
+        hint += "نقد حاضر: `خ` یا `ف`\n"
+        hint += "فردایی: `خ ف` یا `ف ف` (چسبیده و نیم‌فاصله هم مجاز است)\n"
 
     elif "بخش" in error_message or "جمع" in error_message:
         hint += "📌 برای خُرده‌فروشی:\n"
         hint += "- حداکثر 3 بخش\n"
         hint += "- هر بخش حداقل 5 عدد\n"
         hint += "- جمع بخش‌ها = تعداد کل\n"
-        hint += "مثال: `خ ن 30تا 75800 15 15`\n"
+        hint += "مثال: `خ 30تا 75800 15 15`\n"
 
     elif "کاراکتر" in error_message:
         hint += "📌 از علائم خاص استفاده نکنید\n"
@@ -2314,6 +2315,36 @@ async def _prepare_text_offer(
             edit=edit_response,
             reply_markup=get_wizard_review_keyboard() if wizard_source else None,
             parse_mode="Markdown",
+        )
+        return False
+
+    # Until the next promotion stage adds a reviewed model selection and the
+    # confirmation UI, a missing/unknown commodity must fail closed.  The
+    # parser deliberately keeps the structured fields, but no state or offer
+    # may be created with a null commodity id.
+    if getattr(result, "commodity_id", None) is None:
+        resolution = getattr(result, "commodity_resolution", "UNRESOLVED")
+        if resolution == "LOW_DATE_HINT":
+            commodity_message = (
+                "نام کالای تاریخ پایین از روی قیمت هنوز به انتخاب قطعی نرسیده است. "
+                "نام کالا را بنویسید و در صورت نیاز «پ» را نیز نگه دارید."
+            )
+        elif resolution == "OMITTED":
+            commodity_message = (
+                "نام کالا در لفظ نیامده است. تشخیص قیمت‌محور در این مسیر هنوز "
+                "فقط آزمایشی است؛ فعلاً نام کالا را اضافه کنید."
+            )
+        else:
+            commodity_message = (
+                "نام کالا در فهرست کالاهای پروژه تشخیص داده نشد. "
+                "نام یا نام مستعار معتبر را بررسی کنید."
+            )
+        await _text_offer_response(
+            message,
+            user,
+            f"❌ {commodity_message}",
+            edit=edit_response,
+            reply_markup=get_wizard_review_keyboard() if wizard_source else None,
         )
         return False
 

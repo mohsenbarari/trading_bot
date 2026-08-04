@@ -30,8 +30,10 @@ interface TradingSettings {
 interface ParsedOfferPreview {
   trade_type: 'buy' | 'sell'
   settlement_type: SettlementType
-  commodity_id: number
-  commodity_name: string
+  commodity_id: number | null
+  commodity_name: string | null
+  commodity_resolution?: 'EXPLICIT' | 'OMITTED' | 'UNRESOLVED' | 'LOW_DATE_HINT' | 'UNKNOWN'
+  low_date_hint?: boolean
   quantity: number
   price: number
   is_wholesale: boolean
@@ -299,10 +301,10 @@ async function retryActiveOfferLoad() {
 // Computed
 const randomPlaceholder = computed(() => {
   if (!commodities.value || commodities.value.length === 0) {
-    return 'مثال: خرید نقد سکه 30 عدد 125000'
+    return 'مثال: خ سکه 30 عدد 125000'
   }
   const comm = commodities.value[Math.floor(Math.random() * commodities.value.length)]
-  return `خرید نقد ${comm?.name || 'کالا'} 50 عدد 125000`
+  return `خ ${comm?.name || 'کالا'} 50 عدد 125000`
 })
 
 // API Helpers
@@ -877,7 +879,14 @@ function parseAndSubmitTextOffer() {
     })
   .then(res => {
       if (res.success && res.data) {
-          pendingOfferPreview.value = res.data as ParsedOfferPreview
+          const parsed = res.data as ParsedOfferPreview
+          if (!Number.isInteger(parsed.commodity_id) || Number(parsed.commodity_id) <= 0) {
+            parseError.value = parsed.low_date_hint
+              ? 'کالای تاریخ پایین هنوز از روی قیمت به انتخاب قطعی نرسیده است؛ فعلاً نام کالا را نیز وارد کنید.'
+              : 'نام کالا از روی قیمت هنوز به انتخاب قطعی نرسیده است؛ فعلاً نام کالا را وارد کنید.'
+            return null
+          }
+          pendingOfferPreview.value = parsed
           return null
       } else {
           throw new Error(res.error || 'خطا در پردازش متن')

@@ -22,8 +22,8 @@ describe('settlement type presentation', () => {
   })
 
   it('builds drafts with grammar accepted by the strict parser', () => {
-    expect(offerDraftPrefix('buy', 'cash')).toBe('خرید نقد')
-    expect(offerDraftPrefix('sell', 'tomorrow')).toBe('فروش نقد فردا')
+    expect(offerDraftPrefix('buy', 'cash')).toBe('خ')
+    expect(offerDraftPrefix('sell', 'tomorrow')).toBe('ف ف')
     expect(buildOfferDraftText({
       trade_type: 'sell',
       settlement_type: 'tomorrow',
@@ -33,6 +33,6 @@ describe('settlement type presentation', () => {
       is_wholesale: false,
       lot_sizes: [10, 30],
       notes: 'تحویل بازار',
-    })).toBe('فروش نقد فردا ربع بهار 40 عدد 178000 10 30: تحویل بازار')
+    })).toBe('ف ف ربع بهار 40 عدد 178000 10 30: تحویل بازار')
   })
 })

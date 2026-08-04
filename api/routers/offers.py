@@ -2774,13 +2774,15 @@ async def parse_offer_text(
         "settlement_type": settlement_type_value(getattr(result, "settlement_type", None)),
         "commodity_id": result.commodity_id,
         "commodity_name": result.commodity_name,
+        "commodity_resolution": getattr(result, "commodity_resolution", "UNKNOWN"),
+        "low_date_hint": bool(getattr(result, "low_date_hint", False)),
         "quantity": result.quantity,
         "price": result.price,
         "is_wholesale": result.is_wholesale,
         "lot_sizes": result.lot_sizes,
         "notes": result.notes,
     }
-    if getattr(result, "commodity_resolution", None) == "IMPLICIT_DEFAULT":
+    if getattr(result, "commodity_resolution", None) == "OMITTED":
         shadow = await _shadow_inference_for_implicit_commodity(
             db,
             price=result.price,

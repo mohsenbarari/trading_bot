@@ -1767,3 +1767,39 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
 - گیت مرحلهٔ بعد:
   - سیاست UI انتخاب کاربر، parser بدون نام کالا و submit-time validation
     عمداً هنوز انجام نشده‌اند و پیش از آن توضیحات تکمیلی مالک لازم است.
+
+### P6-B3 — قرارداد کوتاه parser بدون پیش‌فرض امام — 2026-08-04 — COMPLETE (selection deferred)
+
+- Scope انجام‌شده:
+  - parser مشترک بات/WebApp دیگر در نبود نام کالا `IMPLICIT_DEFAULT` یا
+    امام تولید نمی‌کند؛ به‌جای آن `commodity_id/name=null` و یکی از
+    `OMITTED`، `UNRESOLVED` یا `LOW_DATE_HINT` را نگه می‌دارد؛
+  - grammar استاندارد به `خ`/`ف` برای نقد و `خ ف`/`ف ف` برای فردا تغییر
+    کرد. شکل‌های چسبیده و نیم‌فاصلهٔ فردایی (`خف`/`خ‌ف` و `فف`/`ف‌ف`) و
+    فرم‌های کامل معتبرند؛ grammar قدیمی فقط برای خواندن پیام‌های گذشته
+    پذیرفته می‌شود؛
+  - `پ` مستقل به‌عنوان قید اختیاری تاریخ پایین ثبت می‌شود. aliasهای صریح
+    پایین مانند `ربع پ` و `ت پ` همچنان کالا را قطعی map می‌کنند؛
+  - API parse metadata `commodity_resolution` و `low_date_hint` را برمی‌گرداند
+    و متن‌های تولیدشدهٔ بات/WebApp از grammar جدید استفاده می‌کنند؛
+  - قرارداد کامل ورودی‌ها، تمام نگارش‌های معامله و تمام فیلدهای parser در
+    `COIN_INTELLIGENCE_OFFER_PARSER_CONTRACT.md` ثبت شد.
+- مرز قطعی و رفتار ایمنی:
+  - Bot و WebApp تا P6-C با `commodity_id=null` آفر منتشر نمی‌کنند؛ parser
+    داده را می‌خواند اما مسیر submit fail-closed است؛
+  - ranking سایه فقط برای `OMITTED` باقی می‌ماند و برای `پ` بدون mapping
+    صریح تا افزوده‌شدن filter تاریخ پایین در selector، انتخابی پیشنهاد
+    نمی‌دهد؛
+  - هیچ feature flag، migration، collector، worker یا معماری سه‌سروره در
+    این مرحله فعال یا تغییر داده نشده است.
+- Test command و نتیجه:
+  - `tests.test_manual_offer_validation` با catalog کامل، جابه‌جایی همهٔ
+    بلوک‌ها، فرم چسبیده/نیم‌فاصله، compatibility و `پ` اجرا شد؛ همراه
+    router/bot/tutorial/probe/suggestion، `56` تست backend سبز شد؛
+  - `src/utils/settlementType.test.ts` و `src/views/MarketView.test.ts`
+    با `38` تست سبز، `vue-tsc --noEmit` سبز و build Vite نیز در sandbox
+    موقت اجرا شد؛ وابستگی جدیدی نصب نشد.
+- گیت مرحلهٔ بعد:
+  - P6-C باید snapshot/receipt را در submit دوباره محاسبه کند، نتیجهٔ
+    یکتا را فقط از همان خانوادهٔ وزنی انتخاب کند، گزینه‌های مبهم را به کاربر
+    نشان دهد و پس از تأیید، شناسهٔ کالا را به command نهایی متصل کند.

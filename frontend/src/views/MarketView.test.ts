@@ -824,6 +824,39 @@ describe('MarketView.vue', () => {
     wrapper.unmount()
   })
 
+  it('fails closed instead of previewing or posting an offer with an unresolved commodity', async () => {
+    const wrapper = await mountMarketView()
+    await flushPromises()
+    marketViewMocks.apiFetchMock.mockClear()
+    marketViewMocks.apiFetchJsonMock.mockResolvedValueOnce({
+      success: true,
+      data: {
+        trade_type: 'buy',
+        settlement_type: 'cash',
+        commodity_id: null,
+        commodity_name: null,
+        commodity_resolution: 'OMITTED',
+        low_date_hint: false,
+        quantity: 10,
+        price: 186800,
+        is_wholesale: true,
+        lot_sizes: null,
+        notes: null,
+      },
+    })
+
+    await wrapper.find('.text-offer-input').setValue('خ 10تا 186800')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.offer-preview-card').exists()).toBe(false)
+    expect(wrapper.text()).toContain('نام کالا از روی قیمت هنوز به انتخاب قطعی نرسیده است')
+    expect(marketViewMocks.apiFetchMock.mock.calls.some(
+      ([path, options]) => path === '/api/offers/' && options?.method === 'POST',
+    )).toBe(false)
+    wrapper.unmount()
+  })
+
   it('locks offer publishing during in-flight confirmation and uses one stable idempotency key', async () => {
     let resolvePost: ((value: any) => void) | null = null
     marketViewMocks.apiFetchMock.mockImplementation((path: string, options?: RequestInit) => {
@@ -890,7 +923,7 @@ describe('MarketView.vue', () => {
     await flushPromises()
 
     expect(wrapper.find('.offer-preview-card').exists()).toBe(false)
-    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).value).toBe('خرید نقد فردا طلای آب‌شده 50 عدد 222222: از متن بازار')
+    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).value).toBe('خ ف طلای آب‌شده 50 عدد 222222: از متن بازار')
 
     wrapper.unmount()
   })
@@ -1241,7 +1274,7 @@ describe('MarketView.vue', () => {
     await flushPromises()
 
     expect(wrapper.find('.offer-preview-card').exists()).toBe(false)
-    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).value).toBe('فروش نقد سکه 12 عدد 345678: از لیست اخیر')
+    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).value).toBe('ف سکه 12 عدد 345678: از لیست اخیر')
 
     wrapper.unmount()
   })
@@ -1566,7 +1599,7 @@ describe('MarketView.vue', () => {
     const wrapper = await mountMarketView()
     await flushPromises()
 
-    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).placeholder).toBe('مثال: خرید نقد سکه 30 عدد 125000')
+    expect((wrapper.find('.text-offer-input').element as HTMLTextAreaElement).placeholder).toBe('مثال: خ سکه 30 عدد 125000')
     expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to load commodities', expect.any(Error))
     expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to load settings', expect.any(Error))
     expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to load market state', expect.any(Error))

@@ -4836,7 +4836,7 @@ def build_bot_offer_text(
     lots_text = ""
     if not is_wholesale and lot_sizes:
         lots_text = " " + " ".join(str(item) for item in lot_sizes)
-    return f"{verb} ن {commodity_name} {quantity} عدد {price}{lots_text}: {marker}", marker
+    return f"{verb} {commodity_name} {quantity} عدد {price}{lots_text}: {marker}", marker
 
 
 async def create_bot_offer_with_dispatcher(
