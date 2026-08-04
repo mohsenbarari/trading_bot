@@ -91,6 +91,22 @@ class CoinInferenceTests(unittest.TestCase):
         self.assertEqual((stale.status, stale.reason), ("ABSTAIN", "SNAPSHOT_STALE_OR_FUTURE"))
         self.assertEqual((outside.status, outside.reason), ("ABSTAIN", "PRICE_OUTSIDE_PUBLISHED_RANGES"))
 
+    def test_low_date_scope_excludes_normal_date_candidates(self) -> None:
+        value = snapshot()
+        set_rate(value, "IMAM", "CASH", 186_900, 185_500, 188_300)
+        set_rate(value, "BAHAR", "CASH", 186_700, 185_500, 187_900)
+        result = infer_coin_commodity(
+            value,
+            price_project_thousand_toman=186_800,
+            settlement_term="CASH",
+            now_utc="2026-08-04T10:00:30Z",
+            candidate_scope="LOW_DATE_ONLY",
+        )
+        self.assertEqual(
+            (result.status, [item.commodity_code for item in result.candidates]),
+            ("AUTO_SELECT", ["BAHAR"]),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

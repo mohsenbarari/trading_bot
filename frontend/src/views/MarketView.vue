@@ -6,6 +6,7 @@ import { useWebSocket } from '../composables/useWebSocket'
 import { pushBackState, popBackState, clearBackStack } from '../composables/useBackButton'
 import OffersList from '../components/OffersList.vue'
 import OfferPreviewModal from '../components/OfferPreviewModal.vue'
+import CommodityInferenceSelectionModal from '../components/CommodityInferenceSelectionModal.vue'
 import { AppEmptyState, AppFilterChips, AppIconButton, AppLoadingState, AppStatusBadge } from '../components/ui'
 import { apiFetch, apiFetchJson } from '../utils/auth'
 import { cacheCurrentUserSummary, currentUserSummary } from '../utils/currentUser'
@@ -32,14 +33,14 @@ interface ParsedOfferPreview {
   settlement_type: SettlementType
   commodity_id: number | null
   commodity_name: string | null
-  commodity_resolution?: 'EXPLICIT' | 'OMITTED' | 'UNRESOLVED' | 'LOW_DATE_HINT' | 'UNKNOWN'
+  commodity_resolution?: 'EXPLICIT' | 'INFERRED' | 'OMITTED' | 'UNRESOLVED' | 'LOW_DATE_HINT' | 'UNKNOWN'
   low_date_hint?: boolean
   quantity: number
   price: number
   is_wholesale: boolean
   lot_sizes: number[] | null
   notes: string | null
-  commodity_inference?: CoinInferenceShadowPreview
+  commodity_inference?: CoinInferencePreview
 }
 
 interface CoinInferenceShadowCandidate {
@@ -53,8 +54,8 @@ interface CoinInferenceShadowCandidate {
   distance_to_center_relative: number
 }
 
-interface CoinInferenceShadowPreview {
-  mode: 'SHADOW_ONLY'
+interface CoinInferencePreview {
+  mode: 'SHADOW_ONLY' | 'SELECTABLE'
   status: 'AUTO_SELECT' | 'CONFIRM' | 'ABSTAIN'
   decision_key: string | null
   snapshot_generated_at_utc: string | null
@@ -194,6 +195,7 @@ const offerText = ref('')
 const parseError = ref('')
 const isSubmitting = ref(false)
 const pendingOfferPreview = ref<ParsedOfferPreview | null>(null)
+const pendingCommodityInference = ref<ParsedOfferPreview | null>(null)
 const previewError = ref('')
 const previewWarning = ref<OfferPriceWarning | null>(null)
 const republishedFromOfferId = ref<number | null>(null)
@@ -530,6 +532,7 @@ function toggleAdminMarketMessage() {
 }
 
 function buildOfferCreatePayload(offer: ParsedOfferPreview) {
+  const inference = offer.commodity_inference
   return {
     offer_type: offer.trade_type,
     settlement_type: normalizeSettlementType(offer.settlement_type),
@@ -539,6 +542,14 @@ function buildOfferCreatePayload(offer: ParsedOfferPreview) {
     is_wholesale: offer.is_wholesale,
     lot_sizes: offer.lot_sizes,
     notes: offer.notes,
+    ...(inference?.mode === 'SELECTABLE' && inference.decision_key && Number.isInteger(offer.commodity_id)
+      ? {
+          commodity_inference: {
+            decision_key: inference.decision_key,
+            selected_commodity_id: offer.commodity_id,
+          },
+        }
+      : {}),
   }
 }
 
@@ -749,6 +760,7 @@ function discardRepeatPreviewForMarketTransition() {
 
 function cancelOfferPreview() {
   pendingOfferPreview.value = null
+  pendingCommodityInference.value = null
   previewError.value = ''
   previewWarning.value = null
   republishedFromOfferId.value = null
@@ -775,6 +787,27 @@ function editPendingOfferPreview() {
   offerText.value = buildOfferDraftText(pendingOfferPreview.value)
   parseError.value = ''
   cancelOfferPreview()
+  focusOfferInput()
+}
+
+function selectInferredCommodity(candidate: CoinInferenceShadowCandidate) {
+  const parsed = pendingCommodityInference.value
+  if (!parsed) return
+  pendingCommodityInference.value = null
+  pendingOfferPreview.value = {
+    ...parsed,
+    commodity_id: candidate.commodity_id,
+    commodity_name: candidate.commodity_name,
+    commodity_resolution: 'INFERRED',
+  }
+}
+
+function editPendingCommodityInference() {
+  const parsed = pendingCommodityInference.value
+  if (!parsed) return
+  offerText.value = buildOfferDraftText(parsed)
+  pendingCommodityInference.value = null
+  parseError.value = ''
   focusOfferInput()
 }
 
@@ -880,6 +913,17 @@ function parseAndSubmitTextOffer() {
   .then(res => {
       if (res.success && res.data) {
           const parsed = res.data as ParsedOfferPreview
+          const inference = parsed.commodity_inference
+          if (
+            (!Number.isInteger(parsed.commodity_id) || Number(parsed.commodity_id) <= 0)
+            && inference?.mode === 'SELECTABLE'
+            && inference.status === 'CONFIRM'
+            && inference.decision_key
+            && inference.candidates.length > 0
+          ) {
+            pendingCommodityInference.value = parsed
+            return null
+          }
           if (!Number.isInteger(parsed.commodity_id) || Number(parsed.commodity_id) <= 0) {
             parseError.value = parsed.low_date_hint
               ? 'کالای تاریخ پایین هنوز از روی قیمت به انتخاب قطعی نرسیده است؛ فعلاً نام کالا را نیز وارد کنید.'
@@ -1131,6 +1175,14 @@ onUnmounted(() => {
       :warning="previewWarning"
       @confirm="confirmOfferPreview"
       @edit="editPendingOfferPreview"
+      @cancel="cancelOfferPreview"
+    />
+    <CommodityInferenceSelectionModal
+      v-if="pendingCommodityInference?.commodity_inference?.mode === 'SELECTABLE'"
+      :candidates="pendingCommodityInference.commodity_inference.candidates"
+      :low-date-hint="pendingCommodityInference.low_date_hint"
+      @select="selectInferredCommodity"
+      @edit="editPendingCommodityInference"
       @cancel="cancelOfferPreview"
     />
 

@@ -62,6 +62,7 @@ class Trade(StatesGroup):
     awaiting_wizard_review = State()  # منتظر ادامه، اصلاح یا لغو متن تولیدشده
     awaiting_wizard_edit = State()  # منتظر انتخاب فیلد برای اصلاح
     awaiting_legacy_confirm = State()  # فقط برای callbackهای قدیمی و غیرفعال
+    awaiting_text_inference_choice = State()  # انتخاب کالای هم‌گروه از تشخیص قیمت
     awaiting_text_confirm = State()  # منتظر تایید لفظ متنی
 
 

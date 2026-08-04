@@ -1802,3 +1802,53 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   - P6-C باید snapshot/receipt را در submit دوباره محاسبه کند، نتیجهٔ
     یکتا را فقط از همان خانوادهٔ وزنی انتخاب کند، گزینه‌های مبهم را به کاربر
     نشان دهد و پس از تأیید، شناسهٔ کالا را به command نهایی متصل کند.
+
+### P6-C — انتخاب کالا و revalidation در ثبت نهایی — 2026-08-04 — COMPLETE (inactive by default)
+
+- Scope انجام‌شده:
+  - یک flag مستقل و پیش‌فرض خاموش به نام
+    `coin_intelligence_inference_selection_enabled` اضافه شد. flag قدیمی
+    preview همچنان فقط مشاهده‌پذیری shadow است؛ هیچ‌کدام collector، worker
+    یا ارتباط شبکه‌ای جدیدی را فعال نمی‌کنند.
+  - ranker قید تصمیم `ALL` یا `LOW_DATE_ONLY` را می‌پذیرد. `پ` مستقل فقط
+    `بهار`، `نیم تاریخ پایین` و `ربع تاریخ پایین` را به selector می‌دهد و
+    هر overlap میان وزن‌های متفاوت همچنان `ABSTAIN` است.
+  - `/api/offers/parse` در صورت فعال‌بودن flag، تصمیم audit‌شدهٔ
+    `SELECTABLE` می‌سازد: `AUTO_SELECT` نام/شناسهٔ canonical را فقط برای
+    پیش‌نمایش پر می‌کند و `CONFIRM` گزینه‌های هم‌خانواده را بدون default به
+    WebApp می‌دهد. Snapshot غایب یا نتیجهٔ نامطمئن هیچ آفر ایجاد نمی‌کند.
+  - WebApp برای `CONFIRM` modal انتخاب دارد؛ انتخاب همراه با `decision_key`
+    و شناسهٔ همان گزینه به `OfferCreate` می‌رود. Bot نیز برای همان تصمیم
+    keyboard گزینه‌های current را نشان می‌دهد و فقط candidate ذخیره‌شده در
+    FSM را می‌پذیرد.
+  - `POST /api/offers/` و تایید نهایی Bot پیش از validation/creation، receipt
+    را با surface، قیمت، settlement و candidate scope می‌خوانند و rank/catalog
+    را با Snapshot محلیِ تازه دوباره اجرا می‌کنند. تغییر candidate، receipt
+    نامعتبر، Snapshot stale/unavailable یا flag خاموش fail-closed است.
+  - audit append-only اکنون `candidate_scope` را نیز نگه می‌دارد؛ migration
+    اولیهٔ audit در همین promotion branch به‌روزرسانی شد و هنوز روی دیتابیس
+    واقعی اجرا نشده است.
+- مرز قطعی و رفتار ایمنی:
+  - تصمیم قبلی هرگز فرمان ایجاد Offer نیست. client نمی‌تواند با یک
+    `commodity_id` حدسی یا receipt متعلق به price/settlement/surface دیگر
+    آفر بسازد؛ idempotency replay موجود نیز پیش از revalidation با command
+    اولیه تطبیق داده می‌شود.
+  - failure مدل یا catalog هیچ fallback به امام یا alias ندارد. مسیر کالای
+    explicit بدون تغییر می‌ماند و در flag خاموش، نبود کالا همان fail-closed
+    P6-B3 است.
+  - تصمیم‌ها فقط از Snapshot فایل محلی و catalog اصلی همان deployment
+    ساخته می‌شوند؛ هنوز inference مشترک شبکه‌ای یا کاری برای معماری سه‌سروره
+    اضافه نشده است.
+- Test command و نتیجه:
+  - unitهای ranker/catalog/audit/observation/revalidation، parse API، parser
+    و مسیر preview بات با env ساختگی اجرا شدند: `Ran 75 tests ... OK`.
+  - `src/views/MarketView.test.ts`: `36` test سبز؛ `vue-tsc --noEmit` و
+    `npm run build` نیز در sandbox موقت سبز شدند. هیچ dependency جدیدی نصب
+    نشد.
+- گیت release/staging:
+  - migration append-only audit باید ابتدا در PostgreSQL scratch با upgrade،
+    trigger immutability و downgrade fail-closed آزموده شود.
+  - publisher محلی Snapshot، permission/path و freshness telemetry باید پیش
+    از روشن‌کردن flag فراهم باشند؛ شروع با `CONFIRM` و telemetry shadow-first
+    ضروری است. activation production، collectorها و معماری سه‌سروره خارج از
+    این مرحله‌اند.

@@ -39,6 +39,20 @@ COIN_CANDIDATE_FAMILY_BY_CODE = {
     "ONE_GRAM": "ONE_GRAM",
 }
 
+# A standalone optional ``پ`` in an offer is a user-provided hint that the
+# intended coin is a low-date variant.  The ranker must therefore never offer
+# a normal-date candidate for that particular request.  The scope is recorded
+# with the audit decision and applied again at final offer submission.
+COIN_INFERENCE_CANDIDATE_SCOPE_ALL = "ALL"
+COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY = "LOW_DATE_ONLY"
+COIN_INFERENCE_CANDIDATE_SCOPES = frozenset(
+    {
+        COIN_INFERENCE_CANDIDATE_SCOPE_ALL,
+        COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY,
+    }
+)
+_LOW_DATE_COMMODITY_CODES = frozenset({"BAHAR", "HALF_LOW_DATE", "QUARTER_LOW_DATE"})
+
 
 @dataclass(frozen=True, slots=True)
 class CoinCommodityCandidate:
@@ -77,6 +91,15 @@ def _receipt(snapshot: Mapping[str, Any]) -> str:
     return sha256(payload).hexdigest()
 
 
+def normalize_coin_inference_candidate_scope(value: str | None) -> str:
+    """Return one explicit candidate scope or reject an unknown constraint."""
+
+    scope = str(value or COIN_INFERENCE_CANDIDATE_SCOPE_ALL).strip().upper()
+    if scope not in COIN_INFERENCE_CANDIDATE_SCOPES:
+        raise ValueError("coin_inference_candidate_scope_invalid")
+    return scope
+
+
 def _abstain(settlement: str, reason: str, snapshot: Mapping[str, Any] | None = None) -> CoinCommodityInference:
     return CoinCommodityInference(
         status="ABSTAIN",
@@ -95,6 +118,7 @@ def infer_coin_commodity(
     settlement_term: str,
     now_utc: datetime | str,
     maximum_snapshot_age_seconds: int = 120,
+    candidate_scope: str = COIN_INFERENCE_CANDIDATE_SCOPE_ALL,
 ) -> CoinCommodityInference:
     """Return AUTO_SELECT/CONFIRM/ABSTAIN; never a product database ID."""
 
@@ -107,6 +131,7 @@ def infer_coin_commodity(
         raise ValueError("coin_inference_price_invalid") from exc
     if price <= 0 or maximum_snapshot_age_seconds <= 0:
         raise ValueError("coin_inference_input_invalid")
+    scope = normalize_coin_inference_candidate_scope(candidate_scope)
     try:
         validate_market_snapshot(snapshot)
     except Exception:
@@ -125,6 +150,8 @@ def infer_coin_commodity(
             continue
         code = str(item.get("commodity_code") or "")
         if code not in COIN_SPECS or str(item.get("settlement_term") or "") != settlement:
+            continue
+        if scope == COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY and code not in _LOW_DATE_COMMODITY_CODES:
             continue
         center = item.get("estimated_project_price")
         lower = item.get("lower_project_price")
@@ -173,6 +200,7 @@ def infer_coin_commodity_from_published_snapshot(
     settlement_term: str,
     now_utc: datetime | str,
     maximum_snapshot_age_seconds: int = 120,
+    candidate_scope: str = COIN_INFERENCE_CANDIDATE_SCOPE_ALL,
 ) -> CoinCommodityInference:
     """Load once atomically and rank against that exact immutable snapshot."""
 
@@ -187,4 +215,5 @@ def infer_coin_commodity_from_published_snapshot(
         settlement_term=settlement_term,
         now_utc=now_utc,
         maximum_snapshot_age_seconds=maximum_snapshot_age_seconds,
+        candidate_scope=candidate_scope,
     )

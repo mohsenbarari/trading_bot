@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # Product inference stays opt-in until its local atomic Snapshot publisher
     # and replay gates are deployed. This flag never starts a collector.
     coin_intelligence_inference_preview_enabled: bool = False
+    # Separate from the passive preview switch.  This authorizes an inferred
+    # commodity to enter a real offer only after final-submit revalidation.
+    coin_intelligence_inference_selection_enabled: bool = False
     coin_intelligence_inference_snapshot_path: str | None = None
     log_level: str = "INFO"
     log_format: str = "json"

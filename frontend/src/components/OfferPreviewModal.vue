@@ -12,7 +12,7 @@ type ParsedOfferPreview = {
   is_wholesale: boolean
   lot_sizes: number[] | null
   notes: string | null
-  commodity_inference?: CoinInferenceShadowPreview
+  commodity_inference?: CoinInferencePreview
 }
 
 type CoinInferenceShadowCandidate = {
@@ -26,8 +26,8 @@ type CoinInferenceShadowCandidate = {
   distance_to_center_relative: number
 }
 
-type CoinInferenceShadowPreview = {
-  mode: 'SHADOW_ONLY'
+type CoinInferencePreview = {
+  mode: 'SHADOW_ONLY' | 'SELECTABLE'
   status: 'AUTO_SELECT' | 'CONFIRM' | 'ABSTAIN'
   decision_key: string | null
   snapshot_generated_at_utc: string | null

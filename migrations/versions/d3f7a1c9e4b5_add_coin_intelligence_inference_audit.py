@@ -26,6 +26,7 @@ def upgrade() -> None:
         sa.Column("decision_status", sa.String(length=16), nullable=False),
         sa.Column("reason_code", sa.String(length=96), nullable=True),
         sa.Column("settlement_term", sa.String(length=16), nullable=False),
+        sa.Column("candidate_scope", sa.String(length=16), nullable=False),
         sa.Column("submitted_project_price", sa.Integer(), nullable=False),
         sa.Column("candidate_count", sa.Integer(), nullable=False),
         sa.Column("selected_commodity_id", sa.Integer(), nullable=True),
@@ -52,6 +53,10 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "settlement_term IN ('CASH', 'TOMORROW')",
             name="ck_coin_intelligence_inference_audit_settlement_term",
+        ),
+        sa.CheckConstraint(
+            "candidate_scope IN ('ALL', 'LOW_DATE_ONLY')",
+            name="ck_coin_intelligence_inference_audit_candidate_scope",
         ),
         sa.CheckConstraint(
             "submitted_project_price > 0",

@@ -24,6 +24,10 @@ class CoinIntelligenceInferenceAudit(Base):
             name="ck_coin_intelligence_inference_audit_settlement_term",
         ),
         CheckConstraint(
+            "candidate_scope IN ('ALL', 'LOW_DATE_ONLY')",
+            name="ck_coin_intelligence_inference_audit_candidate_scope",
+        ),
+        CheckConstraint(
             "submitted_project_price > 0",
             name="ck_coin_intelligence_inference_audit_price_positive",
         ),
@@ -63,6 +67,7 @@ class CoinIntelligenceInferenceAudit(Base):
     decision_status = Column(String(16), nullable=False)
     reason_code = Column(String(96), nullable=True)
     settlement_term = Column(String(16), nullable=False)
+    candidate_scope = Column(String(16), nullable=False, default="ALL")
     submitted_project_price = Column(Integer, nullable=False)
     candidate_count = Column(Integer, nullable=False)
     selected_commodity_id = Column(Integer, nullable=True)

@@ -40,6 +40,7 @@ async def observe_coin_inference_shadow(
     settlement_term: str,
     source_surface: str,
     now_utc: datetime | None = None,
+    candidate_scope: str = "ALL",
 ) -> CoinInferenceShadowObservation:
     """Rank, catalog-resolve, and append one shadow decision without commit.
 
@@ -54,6 +55,7 @@ async def observe_coin_inference_shadow(
         price_project_thousand_toman=submitted_project_price,
         settlement_term=settlement_term,
         now_utc=now,
+        candidate_scope=candidate_scope,
     )
     catalog_result = await resolve_coin_inference_against_catalog(db, ranker_result)
     decision_key = secrets.token_hex(32)
@@ -64,6 +66,7 @@ async def observe_coin_inference_shadow(
             source_surface=source_surface,
             submitted_project_price=submitted_project_price,
             decision=catalog_result,
+            candidate_scope=candidate_scope,
         ),
     )
     return CoinInferenceShadowObservation(

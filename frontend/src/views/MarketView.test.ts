@@ -857,6 +857,81 @@ describe('MarketView.vue', () => {
     wrapper.unmount()
   })
 
+  it('requires a same-denomination choice and sends its audited receipt with the offer', async () => {
+    const wrapper = await mountMarketView()
+    await flushPromises()
+    marketViewMocks.apiFetchMock.mockClear()
+    marketViewMocks.apiFetchJsonMock.mockResolvedValueOnce({
+      success: true,
+      data: {
+        trade_type: 'sell',
+        settlement_type: 'tomorrow',
+        commodity_id: null,
+        commodity_name: null,
+        commodity_resolution: 'OMITTED',
+        low_date_hint: false,
+        quantity: 5,
+        price: 186800,
+        is_wholesale: true,
+        lot_sizes: null,
+        notes: null,
+        commodity_inference: {
+          mode: 'SELECTABLE',
+          status: 'CONFIRM',
+          decision_key: 'a'.repeat(64),
+          snapshot_generated_at_utc: '2026-08-04T12:00:00+00:00',
+          snapshot_receipt: 'b'.repeat(64),
+          reason: 'MULTIPLE_OR_LOW_CONFIDENCE_CANDIDATES',
+          candidates: [
+            {
+              commodity_id: 71,
+              commodity_code: 'IMAM',
+              commodity_name: 'امام',
+              center_project_price: 186900,
+              lower_project_price: 185500,
+              upper_project_price: 188300,
+              confidence: 'HIGH',
+              distance_to_center_relative: 0.0005,
+            },
+            {
+              commodity_id: 72,
+              commodity_code: 'BAHAR',
+              commodity_name: 'بهار',
+              center_project_price: 186700,
+              lower_project_price: 185600,
+              upper_project_price: 187900,
+              confidence: 'HIGH',
+              distance_to_center_relative: 0.0005,
+            },
+          ],
+        },
+      },
+    })
+
+    await wrapper.find('.text-offer-input').setValue('ف ف 5تا 186800')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="commodity-inference-selector"]').exists()).toBe(true)
+    await wrapper.find('[data-test="commodity-inference-option-72"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.offer-preview-card').text()).toContain('بهار')
+
+    await wrapper.find('.offer-preview-confirm').trigger('click')
+    await flushPromises()
+    const postCall = marketViewMocks.apiFetchMock.mock.calls.find(
+      ([path, options]) => path === '/api/offers/' && options?.method === 'POST',
+    )
+    expect(JSON.parse(String(postCall![1].body))).toEqual(expect.objectContaining({
+      commodity_id: 72,
+      commodity_inference: {
+        decision_key: 'a'.repeat(64),
+        selected_commodity_id: 72,
+      },
+    }))
+    wrapper.unmount()
+  })
+
   it('locks offer publishing during in-flight confirmation and uses one stable idempotency key', async () => {
     let resolvePost: ((value: any) => void) | null = null
     marketViewMocks.apiFetchMock.mockImplementation((path: string, options?: RequestInit) => {

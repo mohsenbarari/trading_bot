@@ -15,7 +15,11 @@ from .coin_catalog import (
     COIN_CATALOG_RESOLUTION_VERSION,
     CatalogCoinCommodityInference,
 )
-from .coin_inference import CANONICAL_COMMODITY_NAMES, COIN_INFERENCE_VERSION
+from .coin_inference import (
+    CANONICAL_COMMODITY_NAMES,
+    COIN_INFERENCE_VERSION,
+    normalize_coin_inference_candidate_scope,
+)
 from .market_contracts import normalize_utc
 
 
@@ -40,6 +44,7 @@ class CoinInferenceAuditCommand:
     source_surface: str
     submitted_project_price: int
     decision: CatalogCoinCommodityInference
+    candidate_scope: str = "ALL"
 
 
 def _normalized_key(value: str) -> str:
@@ -70,6 +75,7 @@ def _record_values(command: CoinInferenceAuditCommand) -> dict[str, object]:
     decision = command.decision
     if decision.status not in {"AUTO_SELECT", "CONFIRM", "ABSTAIN"}:
         raise ValueError("coin_inference_audit_status_invalid")
+    candidate_scope = normalize_coin_inference_candidate_scope(command.candidate_scope)
     if decision.settlement_term not in {"CASH", "TOMORROW"}:
         raise ValueError("coin_inference_audit_settlement_invalid")
     receipt = decision.snapshot_receipt
@@ -110,6 +116,7 @@ def _record_values(command: CoinInferenceAuditCommand) -> dict[str, object]:
         "decision_status": decision.status,
         "reason_code": str(reason) if reason is not None else None,
         "settlement_term": decision.settlement_term,
+        "candidate_scope": candidate_scope,
         "submitted_project_price": price,
         "candidate_count": candidate_count,
         "selected_commodity_id": int(selected.commodity_id) if selected else None,
@@ -128,6 +135,7 @@ def _same_record(record: CoinIntelligenceInferenceAudit, values: dict[str, objec
         "decision_status",
         "reason_code",
         "settlement_term",
+        "candidate_scope",
         "submitted_project_price",
         "candidate_count",
         "selected_commodity_id",
@@ -168,8 +176,25 @@ async def append_coin_inference_audit(
     return record
 
 
+async def load_coin_inference_audit(
+    db: AsyncSession,
+    *,
+    decision_key: str,
+) -> CoinIntelligenceInferenceAudit | None:
+    """Read one opaque decision receipt after strict local validation."""
+
+    normalized_key = _normalized_key(decision_key)
+    result = await db.execute(
+        select(CoinIntelligenceInferenceAudit).where(
+            CoinIntelligenceInferenceAudit.decision_key == normalized_key
+        )
+    )
+    return result.scalar_one_or_none()
+
+
 __all__ = [
     "CoinInferenceAuditCommand",
     "CoinInferenceAuditConflictError",
     "append_coin_inference_audit",
+    "load_coin_inference_audit",
 ]
