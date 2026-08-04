@@ -14,7 +14,7 @@ from .market_contracts import normalize_utc
 from .market_snapshot import AtomicMarketSnapshotProvider, MarketSnapshotUnavailable, validate_market_snapshot
 
 
-COIN_INFERENCE_VERSION = "coin-inference-v1"
+COIN_INFERENCE_VERSION = "coin-inference-v2"
 CANONICAL_COMMODITY_NAMES = {
     "IMAM": "امام",
     "BAHAR": "بهار",
@@ -23,6 +23,20 @@ CANONICAL_COMMODITY_NAMES = {
     "HALF_LOW_DATE": "نیم تاریخ پایین",
     "QUARTER_LOW_DATE": "ربع تاریخ پایین",
     "ONE_GRAM": "یک گرمی",
+}
+
+# A price can be uncertain between date variants of the *same denomination*,
+# never between a full coin, half coin, quarter coin, or one-gram coin.  If a
+# malformed/stale rate artifact creates a cross-denomination overlap, fail
+# closed instead of presenting an implausible choice to the user.
+COIN_CANDIDATE_FAMILY_BY_CODE = {
+    "IMAM": "FULL",
+    "BAHAR": "FULL",
+    "HALF_BAHAR": "HALF",
+    "HALF_LOW_DATE": "HALF",
+    "QUARTER_BAHAR": "QUARTER",
+    "QUARTER_LOW_DATE": "QUARTER",
+    "ONE_GRAM": "ONE_GRAM",
 }
 
 
@@ -133,6 +147,12 @@ def infer_coin_commodity(
     candidates.sort(key=lambda item: (item.distance_to_center_relative, item.commodity_code))
     if not candidates:
         return _abstain(settlement, "PRICE_OUTSIDE_PUBLISHED_RANGES", snapshot)
+    candidate_families = {
+        COIN_CANDIDATE_FAMILY_BY_CODE[candidate.commodity_code]
+        for candidate in candidates
+    }
+    if len(candidate_families) != 1:
+        return _abstain(settlement, "CROSS_DENOMINATION_CANDIDATES", snapshot)
     # A unique high/medium rate can be selected; low paper fallback remains a
     # visible user confirmation until its production quality is demonstrated.
     status = "AUTO_SELECT" if len(candidates) == 1 and candidates[0].confidence in {"HIGH", "MEDIUM"} else "CONFIRM"

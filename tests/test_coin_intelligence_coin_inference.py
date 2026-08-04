@@ -69,6 +69,20 @@ class CoinInferenceTests(unittest.TestCase):
         result = infer_coin_commodity(value, price_project_thousand_toman=180_900, settlement_term="CASH", now_utc="2026-08-04T10:00:30Z")
         self.assertEqual(result.status, "CONFIRM")
 
+    def test_same_denomination_date_variants_can_require_confirmation(self) -> None:
+        value = snapshot()
+        set_rate(value, "HALF_BAHAR", "CASH", 94_600, 93_500, 95_700)
+        set_rate(value, "HALF_LOW_DATE", "CASH", 94_200, 93_300, 95_100)
+        result = infer_coin_commodity(value, price_project_thousand_toman=94_500, settlement_term="CASH", now_utc="2026-08-04T10:00:30Z")
+        self.assertEqual((result.status, [item.commodity_code for item in result.candidates]), ("CONFIRM", ["HALF_BAHAR", "HALF_LOW_DATE"]))
+
+    def test_cross_denomination_overlap_abstains_instead_of_offering_an_implausible_choice(self) -> None:
+        value = snapshot()
+        set_rate(value, "IMAM", "CASH", 186_900, 80_000, 190_000)
+        set_rate(value, "HALF_BAHAR", "CASH", 94_600, 93_500, 95_700)
+        result = infer_coin_commodity(value, price_project_thousand_toman=94_500, settlement_term="CASH", now_utc="2026-08-04T10:00:30Z")
+        self.assertEqual((result.status, result.reason, result.candidates), ("ABSTAIN", "CROSS_DENOMINATION_CANDIDATES", ()))
+
     def test_stale_or_out_of_range_snapshot_abstains(self) -> None:
         value = snapshot()
         set_rate(value, "IMAM", "TOMORROW", 186_900, 185_500, 188_300)

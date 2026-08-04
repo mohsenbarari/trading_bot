@@ -80,7 +80,7 @@ class CoinInferenceAuditTests(unittest.IsolatedAsyncioTestCase):
         result = await append_coin_inference_audit(db, command())
         self.assertIs(result, db.added[0])
         self.assertEqual((result.decision_status, result.selected_commodity_id, result.selected_commodity_name), ("AUTO_SELECT", 71, "امام"))
-        self.assertEqual((result.inference_version, result.catalog_resolution_version, db.flushes), ("coin-inference-v1", "coin-catalog-resolution-v1", 1))
+        self.assertEqual((result.inference_version, result.catalog_resolution_version, db.flushes), ("coin-inference-v2", "coin-catalog-resolution-v1", 1))
         self.assertFalse(any(token in name for name in result.__table__.columns.keys() for token in ("raw", "text", "user", "telegram", "message", "note")))
 
     async def test_exact_idempotent_replay_returns_existing_row_without_write(self) -> None:
@@ -89,7 +89,7 @@ class CoinInferenceAuditTests(unittest.IsolatedAsyncioTestCase):
             source_surface="WEBAPP", decision_status="AUTO_SELECT", reason_code=None,
             settlement_term="TOMORROW", submitted_project_price=186_800, candidate_count=1,
             selected_commodity_id=71, selected_commodity_code="IMAM", selected_commodity_name="امام",
-            inference_version="coin-inference-v1", catalog_resolution_version="coin-catalog-resolution-v1",
+            inference_version="coin-inference-v2", catalog_resolution_version="coin-catalog-resolution-v1",
             snapshot_receipt="b" * 64, snapshot_generated_at_utc=datetime(2026, 8, 4, 10, 0, tzinfo=timezone.utc),
         )
         db = _DB(existing)
@@ -102,7 +102,7 @@ class CoinInferenceAuditTests(unittest.IsolatedAsyncioTestCase):
             source_surface="WEBAPP", decision_status="AUTO_SELECT", reason_code=None,
             settlement_term="TOMORROW", submitted_project_price=186_800, candidate_count=1,
             selected_commodity_id=71, selected_commodity_code="IMAM", selected_commodity_name="امام",
-            inference_version="coin-inference-v1", catalog_resolution_version="coin-catalog-resolution-v1",
+            inference_version="coin-inference-v2", catalog_resolution_version="coin-catalog-resolution-v1",
             snapshot_receipt="b" * 64, snapshot_generated_at_utc=datetime(2026, 8, 4, 10, 0, tzinfo=timezone.utc),
         )
         with self.assertRaises(CoinInferenceAuditConflictError):
@@ -160,7 +160,7 @@ class CoinInferenceAuditStorageTests(unittest.TestCase):
                     settlement_term="CASH",
                     submitted_project_price=186_800,
                     candidate_count=1,
-                    inference_version="coin-inference-v1",
+                    inference_version="coin-inference-v2",
                     catalog_resolution_version="coin-catalog-resolution-v1",
                     snapshot_receipt="b" * 64,
                     snapshot_generated_at_utc=datetime(2026, 8, 4, 10, 0, tzinfo=timezone.utc),

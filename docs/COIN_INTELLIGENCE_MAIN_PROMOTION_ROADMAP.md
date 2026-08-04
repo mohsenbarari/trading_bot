@@ -1742,3 +1742,28 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     و telemetry واقعی، هیچ flag یا runtime جدیدی فعال نمی‌شود؛
   - P6-C به تأیید مستقل مالک نیاز دارد: طراحی confirmation صریح کاربر،
     recompute/receipt تازه در لحظهٔ submit و testهای replay/idempotency.
+
+### P5-A1 — قید خانوادهٔ سکه در ranker — 2026-08-04 — COMPLETE (library only)
+
+- Scope انجام‌شده:
+  - ranker یک خانوادهٔ صریح برای هر کالا دارد: `FULL` (امام/بهار)، `HALF`
+    (نیم بهار/نیم تاریخ پایین)، `QUARTER` (ربع بهار/ربع تاریخ پایین) و
+    `ONE_GRAM`؛
+  - اگر یک Snapshot ناقص یا ناسالم به‌اشتباه هم‌زمان نامزدهایی از دو خانواده
+    با وزن متفاوت بسازد، نتیجه `ABSTAIN` با reason
+    `CROSS_DENOMINATION_CANDIDATES` است، نه فهرست انتخاب نامعقول؛
+  - تردید معتبر میان تاریخ پایین و غیرتاریخ پایینِ همان وزن حفظ شده است؛
+    از جمله امام/بهار و نیم بهار/نیم تاریخ پایین.
+- مرز قطعی و رفتار ایمنی:
+  - این تغییر parser، کالای پیش‌فرض امام، API ثبت آفر، UI یا runtime را
+    تغییر نمی‌دهد؛ فقط خروجی library ranker را fail-closed می‌کند؛
+  - نسخهٔ تصمیم از `coin-inference-v1` به `coin-inference-v2` افزایش یافت
+    تا audit هر نتیجه را با قاعدهٔ خانوادهٔ اعمال‌شده قابل تفکیک نگه دارد.
+- Test command و نتیجه:
+  - test ranker، audit، catalog، shared observation، API/parse و preview بات
+    با محیط ساختگی اجرا شدند: `Ran 37 tests ... OK`؛
+  - testها هم تردید مجاز میان دو نیم‌سکه را و هم reject شدن overlap مصنوعی
+    میان امام و نیم‌سکه را اثبات می‌کنند.
+- گیت مرحلهٔ بعد:
+  - سیاست UI انتخاب کاربر، parser بدون نام کالا و submit-time validation
+    عمداً هنوز انجام نشده‌اند و پیش از آن توضیحات تکمیلی مالک لازم است.
