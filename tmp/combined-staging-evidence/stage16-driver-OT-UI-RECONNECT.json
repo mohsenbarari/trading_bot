@@ -1,0 +1,48 @@
+{
+  "id": "OT-UI-RECONNECT",
+  "status": "passed",
+  "run_prefix": "OTACC_20260805170451_UIR",
+  "payload": {
+    "mode": "run",
+    "scenario": "OT-UI-RECONNECT",
+    "run_prefix": "OTACC_20260805170451_UIR",
+    "server_mode": "iran",
+    "started_at": "2026-08-05T17:04:52.204920+00:00",
+    "finished_at": "2026-08-05T17:04:55.533967+00:00",
+    "cleanup": {
+      "users_retired": 2
+    },
+    "owner_user_id": 1470,
+    "requester_user_id": 1472,
+    "offer_id": 542,
+    "offer_public_id": "ofr_I8IbbeE93j57tOr0t7N-DcAk",
+    "overtime_minutes_snapshot": 5,
+    "normal_lifetime_minutes": 2,
+    "request_id": 348,
+    "request_public_id": "req_Mvby64we8phHQUy30Ej1Nlfv",
+    "presented_status": "overtime_presented",
+    "promoted_on_create": true,
+    "owner_poll_1": {
+      "request_public_id": "req_Mvby64we8phHQUy30Ej1Nlfv",
+      "is_occupying": true,
+      "is_actionable": true,
+      "remaining_decision_seconds": 29,
+      "decision_deadline_at": "2026-08-05T17:05:25.238520+00:00"
+    },
+    "requester_poll_1": {
+      "request_public_id": "req_Mvby64we8phHQUy30Ej1Nlfv",
+      "remaining_decision_seconds": 29,
+      "is_actionable": true
+    },
+    "owner_poll_2": {
+      "request_public_id": "req_Mvby64we8phHQUy30Ej1Nlfv",
+      "remaining_decision_seconds": 29
+    },
+    "requester_poll_2": {
+      "request_public_id": "req_Mvby64we8phHQUy30Ej1Nlfv",
+      "remaining_decision_seconds": 29
+    },
+    "detail_restore_ok": true,
+    "passed": true
+  }
+}

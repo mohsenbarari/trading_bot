@@ -715,14 +715,30 @@ through the shared queue resolve API rather than a live flake).
 
 Evidence: `tmp/combined-staging-evidence/stage16-driver-OT-TG-RETRY.json`.
 
+### 12.19 WebApp poll/reconnect restore (`OT-UI-RECONNECT`)
+
+Iran creates a presented overtime request, then calls the same pending-owner /
+pending-requester recovery endpoints the WebApp polls every 2s and on
+`ws:reconnect`. Two successive polls restore the occupying owner prompt and
+requester countdown; single-request detail GET works for both roles.
+
+| Assertion | Result |
+| --- | --- |
+| Owner `current` occupying + actionable after poll #1 | yes |
+| Requester countdown (`remaining_decision_seconds` > 0) | yes |
+| Poll #2 keeps same `request_public_id` and coherent countdown | yes |
+| Detail GET restores owner + requester viewer roles | yes |
+
+Evidence: `tmp/combined-staging-evidence/stage16-driver-OT-UI-RECONNECT.json`.
+
 ### 12.4 Remaining work before `main`
 
 | Item | State |
 | --- | --- |
-| Mutating Stage 16 scenario drivers | 14 of 15 wired and passing live; `execute` → `execute_partial` once transport env is set |
+| Mutating Stage 16 scenario drivers | **15 of 15** wired and passing live; `execute` → `execute_partial` once transport env is set |
 | Overtime preferences | staging users remain at `0` after driver cleanup |
 | Coin inference flags | off by default, untouched |
 | Arvan CDN origin for `staging.gold-trade.ir` | broken, needs panel fix |
 | Sync parity comparison | `comparison_status: missing` — no parity run yet on this pair |
 | coin-price vs coin-commodity comparison | still owed per the handoff prompt |
-| Next drivers | `OT-UI-RECONNECT` |
+| Next drivers | none (Stage 16 catalog complete) |
