@@ -195,6 +195,31 @@ class SessionsRouterLoginRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 400)
         self.assertEqual(exc_info.exception.detail, "failed approve")
 
+    async def test_approve_request_rejects_login_request_of_another_account(self):
+        rid_uuid = uuid.uuid4()
+        rid = str(rid_uuid)
+        current_user = SimpleNamespace(id=5)
+        request = make_request(host="10.0.0.8")
+        primary = make_session(uuid.uuid4(), is_primary=True)
+        foreign_request = make_login_request(request_id=rid_uuid, user_id=6)
+
+        with patch("api.routers.sessions.create_refresh_token", return_value="refresh-token"), patch(
+            "api.routers.sessions.approve_login_request",
+            new=AsyncMock(),
+        ) as approve_mock:
+            with self.assertRaises(HTTPException) as exc_info:
+                await approve_request(
+                    rid,
+                    request=request,
+                    db=FakeDB([FakeExecuteResult(value=primary), FakeExecuteResult(value=foreign_request)]),
+                    current_user=current_user,
+                )
+
+        # Same status and message as a missing request, so existence is not disclosed.
+        self.assertEqual(exc_info.exception.status_code, 404)
+        self.assertEqual(exc_info.exception.detail, "درخواست یافت نشد")
+        approve_mock.assert_not_awaited()
+
     async def test_approve_request_stores_refresh_token_and_returns_session(self):
         rid_uuid = uuid.uuid4()
         rid = str(rid_uuid)

@@ -1213,7 +1213,7 @@ async def approve_request(
     # Generate refresh token for new session
     stmt_req = select(SessionLoginRequest).where(SessionLoginRequest.id == rid)
     login_req = (await db.execute(stmt_req)).scalar_one_or_none()
-    if not login_req:
+    if not login_req or login_req.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="درخواست یافت نشد")
 
     new_refresh = create_refresh_token(subject=current_user.id)
