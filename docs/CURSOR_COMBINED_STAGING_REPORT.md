@@ -111,7 +111,7 @@ Read-only probe of canonical SQLite:
 | Bridge state | `staging-market-input-bridge-v1`, updated `2026-08-05T13:08:03Z` |
 | `source_code` mix | `MELTED_AGGREGATE`, `WALLEX_PUBLIC_API`, `MELTED_FLOW`, `USD_HERAT`, `XAUUSD`, `GROUP_HISTORICAL`, `GROUP_2`, `IME_REALTIME_BOARD`, `PRIVATE_GOLD_CHANNEL`, `GROUP_1`, `PRIVATE_GOLD_PAPER_MINUTE` — `GROUP_HISTORICAL` remains distinct from groups 1/2 |
 
-Full chronological replay / side-by-side coin-price metrics are **not** declared complete in this report; they remain the next coin-eval session work under the handoff prompt, with isolated outputs.
+Chronological replay + side-by-side metrics are recorded in §13 (still not a fair leakage-identical bake-off; Web/Bot shadow remains owed).
 
 ## 6. Automated tests run on combined tip
 
@@ -758,10 +758,10 @@ Evidence: `tmp/combined-staging-evidence/stage16-sync-parity-quick-summary.json`
 | Coin inference flags | off by default, untouched |
 | Arvan CDN / public Iran hostname | **fixed** (origin `401`, no CDN `504`) |
 | Sync parity comparison | quick run done — `critical_drift` from leftover tombstone + one expired-request timestamp skew (see §12.20) |
-| coin-price vs coin-commodity comparison | discovery started (§13); full chronological replay still owed |
-| Next work | isolated coin-price vs coin-commodity chronological replay + side-by-side metrics |
+| coin-price vs coin-commodity comparison | chronological replay + side-by-side done (§13); shadow still owed |
+| Next work | Web/Bot shadow checks; investigate commodity unit-scale / Imam swings; optional fair Market Store port for price |
 
-### 13. Coin-price vs coin-commodity eval (started)
+### 13. Coin-price vs coin-commodity eval
 
 Per `docs/CURSOR_COMBINED_STAGING_HANDOFF_PROMPT.md`. Combined trading-bot line
 stays **coin-commodity + overtime** only; coin-price remains a parallel eval
@@ -772,13 +772,12 @@ branch until this comparison recommends otherwise.
 | Branch | Worktree | HEAD |
 | --- | --- | --- |
 | `candidate/coin-commodity-inference-promotion` | `/root/trading-bot/coin-commodity-inference-promotion` | `0fbd6a1b` |
-| `candidate/coin-price-intelligence` | `/tmp/coin-price-intelligence` | `dffb2abb` |
+| `candidate/coin-price-intelligence` | dirty `/tmp/coin-price-intelligence`; clean eval `/tmp/coin-price-eval-clean` | `dffb2abb` |
 
 - Merge base: `f81d2c8e`
 - Unique commits: commodity +67 / price +158 from merge base
 - Overlapping changed paths: 69 (includes shared API/bot/sync surfaces)
-- coin-price worktree is **dirty** (4 modified estimator/collector files) — fair
-  compare must pin clean `dffb2abb`, not the dirty tree
+- coin-price dirty worktree was **not** used for replay — clean detach at `dffb2abb`
 
 #### 13.2 Shared staging inputs (read-only check)
 
@@ -796,10 +795,64 @@ Canonical Market Store:
 Notes: `IME_REALTIME_BOARD` and `GROUP_HISTORICAL` look sparse/stale relative to
 live sources; live groups and melted/public feeds are advancing.
 
-#### 13.3 Still owed before coin recommendation
+#### 13.3 Isolated replay topology
 
-1. Isolated output roots/ports for each candidate (no shared residual/snapshot writes)
-2. Identical chronological cutoffs with `available_at_utc` leakage controls
-3. Side-by-side metrics (commodity detection, abstention, cash/future, intervals, error vs trusted future)
-4. Web/Bot shadow checks (no Offer/Trade/Telegram mutation)
-5. Explicit recommendation + rollback commands
+| Candidate | Runner | Input | Output namespace |
+| --- | --- | --- | --- |
+| commodity `@0fbd6a1b` | `publish_coin_intelligence_snapshot.py --as-of-utc` | Market Store `market_observations` / `available_at_utc` | `$RUNTIME/eval/commodity-0fbd6a1b/snapshots/` |
+| price `@dffb2abb` | `run_coin_intelligence_shadow_cycle.py --as-of` | legacy `market_prices.sqlite3` (`price_events` / `event_time`) | `/tmp/coin-eval-price-dffb2abb/{snapshots,health,locks,meta}/` |
+
+`$RUNTIME=/srv/trading-bot/production-data/coin-intelligence/private-gold-live`
+
+Hard rules respected: no writes to live `staging/coin-rates.json`; collector/bridge not restarted.
+
+**Fairness caveat (explicit):** cutoffs are wall-clock aligned, but inputs are **not** the same store. A leakage-identical 1:1 bake-off is therefore **not** claimed.
+
+Identical cutoffs (9): `2026-08-05T13:30Z` … `17:15Z` step 30m (last 17:15). Both runners succeeded for all 9; price marks `input_quality: DEGRADED` from `17:00Z`.
+
+#### 13.4 Side-by-side metrics (126 commodity×settlement pairs)
+
+Evidence:
+`tmp/combined-staging-evidence/coin-price-vs-commodity-chrono-compare.json`
+
+| Metric | Result |
+| --- | --- |
+| ESTIMATED coverage | commodity **33** / price **70** / both **32** / price-only **38** / commodity-only **1** / both NO_DATA **55** |
+| Raw paired relative center error | median **~7.51** (dominated by unit mismatch) |
+| After tight ~10× adjust (ratio ∈ [9.7,10.3], 15 pairs) | remaining paired median error **~0.17%** on aligned low-date/BAHAR family |
+| Future error vs ELIGIBLE TRADE median (`available_at_utc` ∈ (cutoff, +90m]) | price median **~0.81%** (n=43); commodity raw median **~88%** (n=24); commodity after loose scale adjust median **~1.5%** (see caveat below) |
+| Commodity interval hit-rate vs future median | **12.5%** (3/24) even with scale adjust — intervals too narrow or centers wrong |
+
+Notable failure modes:
+
+1. **Commodity unit-scale bug:** at `13:30Z`/`14:00Z`, BAHAR/HALF_LOW_DATE/QUARTER_LOW_DATE centers are ~10× too small (`18050` vs price `180250`).
+2. **Commodity Imam instability (not pure 10×):** e.g. `13:30Z` `21750` vs price `185100` (ratio ~8.5); later `118300` / `346550` vs price ~`184k–186k`.
+3. **Price broader CASH coverage:** commodity often `NO_DATA` on CASH while price still `ESTIMATED` (legacy-store advantage possible).
+4. When units align (`14:30Z+` low-date family), centers nearly match (e.g. HALF_LOW_DATE `89800` = `89800`).
+
+#### 13.5 Recommendation (this session)
+
+| Decision | Call |
+| --- | --- |
+| Merge `coin-price-intelligence` into combined staging line | **NO** |
+| Keep combined line on coin-commodity + overtime | **YES** (flags still off) |
+| Promote either coin candidate to production | **NO** |
+
+Reasons: unfair store mismatch; commodity scale/Imam defects; price looks stronger on this window’s future-trade error and coverage but cannot be trusted as a fair winner yet; Web/Bot shadow still unpaid.
+
+Rollback / containment:
+
+```bash
+# eval artifacts only — safe to delete
+rm -rf /srv/trading-bot/production-data/coin-intelligence/private-gold-live/eval/commodity-0fbd6a1b \
+       /tmp/coin-eval-price-dffb2abb /tmp/coin-price-eval-clean
+# do NOT restart private-gold collector/bridge; do NOT write staging/coin-rates.json
+# combined staging stays on candidate/combined-staging-overtime-coin with coin flags off
+```
+
+#### 13.6 Still owed
+
+1. Web/Bot shadow checks (no Offer/Trade/Telegram mutation; safe MISSING/ABSTAIN)
+2. Optional: port price shadow cycle onto Market Store + `available_at_utc` for a fair leakage-identical rematch
+3. Fix/investigate commodity ~10× project-price scale and Imam center swings before any promotion talk
+4. Human review of §13 evidence before changing the combined merge line
