@@ -55,14 +55,14 @@ CURRENT_COMMODITY_CATALOG = (
 )
 
 OFFER_CONTEXT_CASES = (
-    ("خ ن", "buy", "cash"),
-    ("ف ن", "sell", "cash"),
-    ("خ ن ف", "buy", "tomorrow"),
-    ("ف ن ف", "sell", "tomorrow"),
-    ("خرید نقد", "buy", "cash"),
-    ("فروش نقد", "sell", "cash"),
-    ("خرید نقد فردا", "buy", "tomorrow"),
-    ("فروش نقد فردا", "sell", "tomorrow"),
+    ("خ", "buy", "cash"),
+    ("ف", "sell", "cash"),
+    ("خ ف", "buy", "tomorrow"),
+    ("ف ف", "sell", "tomorrow"),
+    ("خرید", "buy", "cash"),
+    ("فروش", "sell", "cash"),
+    ("خرید فردا", "buy", "tomorrow"),
+    ("فروش فردا", "sell", "tomorrow"),
 )
 
 
@@ -238,7 +238,7 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
             lot_max_count=5,
         )
 
-        async def fake_find_commodity(text):
+        async def fake_find_commodity(text, *, include_resolution=False):
             mapping = {
                 accepted_name: (commodity_id, canonical_name)
                 for commodity_id, canonical_name, accepted_names in CURRENT_COMMODITY_CATALOG
@@ -246,10 +246,13 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
             }
             commodity = _match_commodity_name(text, mapping)
             if commodity[0] is not None:
-                return commodity
-            if not offer_parser._extract_residual_commodity_text(text):
-                return mapping["امام"]
-            return None, "نامشخص"
+                return (*commodity, "EXPLICIT") if include_resolution else commodity
+            resolution = (
+                "OMITTED"
+                if not offer_parser._extract_residual_commodity_text(text)
+                else "UNRESOLVED"
+            )
+            return (None, None, resolution) if include_resolution else (None, None)
 
         offer_parser.find_commodity = fake_find_commodity
 
@@ -258,7 +261,7 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
         offer_parser.get_trading_settings = self.original_get_trading_settings
 
     async def test_text_offer_accepts_required_manual_format(self):
-        result, error = await offer_parser.parse_offer_text("خ ن امام 30تا 75800 15 15: فقط نقدی")
+        result, error = await offer_parser.parse_offer_text("خ امام 30تا 75800 15 15: فقط نقدی")
 
         self.assertIsNone(error)
         self.assertIsNotNone(result)
@@ -278,28 +281,27 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
             lot_max_count=3,
         )
 
-        result, error = await offer_parser.parse_offer_text("خ ن امام 60تا 75800")
+        result, error = await offer_parser.parse_offer_text("خ امام 60تا 75800")
 
         self.assertIsNone(error)
         self.assertIsNotNone(result)
         self.assertEqual(result.quantity, 60)
 
-    async def test_text_offer_defaults_to_implicit_imam_when_commodity_is_omitted(self):
-        result, error = await offer_parser.parse_offer_text("خ ن 30تا 75800")
+    async def test_text_offer_keeps_commodity_omitted_for_price_inference(self):
+        result, error = await offer_parser.parse_offer_text("خ 30تا 75800")
 
         self.assertIsNone(error)
         self.assertIsNotNone(result)
-        self.assertEqual(result.commodity_id, 1)
-        self.assertEqual(result.commodity_name, "امام")
+        self.assertIsNone(result.commodity_id)
+        self.assertIsNone(result.commodity_name)
+        self.assertEqual(result.commodity_resolution, "OMITTED")
 
     async def test_text_offer_rejects_invalid_manual_format(self):
         invalid_samples = [
-            "خ ن امام 51تا 75800",
-            "خ ن امام 30تا 9999",
-            "خ ن امام 30 75800",
-            "خ ن امام 30تا 75800 10 10",
-            "خ ن ربغ 30تا 75800",
-            "خ ن کالای ناشناخته 10تا 75800",
+            "خ امام 51تا 75800",
+            "خ امام 30تا 9999",
+            "خ امام 30 75800",
+            "خ امام 30تا 75800 10 10",
         ]
 
         for sample in invalid_samples:
@@ -316,7 +318,7 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
             lot_max_count=4,
         )
 
-        result, error = await offer_parser.parse_offer_text("خ ن امام 45تا 184000 5 20 20: تک فیش")
+        result, error = await offer_parser.parse_offer_text("خ امام 45تا 184000 5 20 20: تک فیش")
 
         self.assertIsNone(result)
         self.assertIsNotNone(error)
@@ -330,8 +332,8 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
             "bot.utils.redis_helpers.set_cached_commodities", AsyncMock()
         ) as set_cached:
             self.assertEqual(await self.original_find_commodity("امامی 30تا 75800"), (1, "امام"))
-            self.assertEqual(await self.original_find_commodity("30تا 75800"), (1, "امام"))
-            self.assertEqual(await self.original_find_commodity("ربغ 30تا 75800"), (None, "نامشخص"))
+            self.assertEqual(await self.original_find_commodity("30تا 75800"), (None, None))
+            self.assertEqual(await self.original_find_commodity("ربغ 30تا 75800"), (None, None))
         set_cached.assert_not_awaited()
 
         commodities = [SimpleNamespace(id=1, name="امام"), SimpleNamespace(id=2, name="بهار")]
@@ -349,10 +351,29 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
             "bot.utils.redis_helpers.get_cached_commodities",
             AsyncMock(return_value=[{"id": 1, "name": "امام", "aliases": []}]),
         ), patch("bot.utils.redis_helpers.set_cached_commodities", AsyncMock()):
-            self.assertEqual(await self.original_find_commodity("ناشناس 30تا 75800"), (None, "نامشخص"))
+            self.assertEqual(await self.original_find_commodity("ناشناس 30تا 75800"), (None, None))
+
+    async def test_parser_can_distinguish_explicit_commodity_from_omitted_name(self):
+        cached_items = [
+            {"id": 1, "name": "امام", "aliases": ["امامی"]},
+        ]
+        with patch(
+            "bot.utils.redis_helpers.get_cached_commodities",
+            AsyncMock(return_value=cached_items),
+        ):
+            explicit = await self.original_find_commodity(
+                "امامی 30تا 186800",
+                include_resolution=True,
+            )
+            omitted = await self.original_find_commodity(
+                "30تا 186800",
+                include_resolution=True,
+            )
+        self.assertEqual(explicit, (1, "امام", "EXPLICIT"))
+        self.assertEqual(omitted, (None, None, "OMITTED"))
 
     async def test_parse_offer_text_guard_paths(self):
-        too_long_notes = "خ ن امام 30تا 75800:" + ("الف" * 201)
+        too_long_notes = "خ امام 30تا 75800:" + ("الف" * 201)
         result, error = await offer_parser.parse_offer_text(too_long_notes)
         self.assertIsNone(result)
         self.assertEqual(error.message, "❌ توضیحات نباید بیش از 200 کاراکتر باشد")
@@ -361,15 +382,15 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result)
         self.assertIsNone(error)
 
-        result, error = await offer_parser.parse_offer_text("خ ن امام 30تا 75800 @")
+        result, error = await offer_parser.parse_offer_text("خ امام 30تا 75800 @")
         self.assertIsNone(result)
         self.assertEqual(error.message, "کاراکتر غیرمجاز: «@»")
 
-        result, error = await offer_parser.parse_offer_text("خ ن خرید امام 30تا 75800")
+        result, error = await offer_parser.parse_offer_text("خ خرید امام 30تا 75800")
         self.assertIsNone(result)
         self.assertEqual(
             error.message,
-            "❌ نشانگر خرید یا فروش فقط داخل بلوک نوع معامله و تسویه مجاز است",
+            "❌ نوع معامله و تسویه فقط یک بار در لفظ مجاز است",
         )
 
         offer_parser.get_trading_settings = lambda: SimpleNamespace(
@@ -378,7 +399,7 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
             lot_min_size=5,
             lot_max_count=3,
         )
-        result, error = await offer_parser.parse_offer_text("خ ن امام 4تا 75800")
+        result, error = await offer_parser.parse_offer_text("خ امام 4تا 75800")
         self.assertIsNone(result)
         self.assertEqual(error.message, "❌ حداقل تعداد باید 5 باشد")
 
@@ -449,7 +470,7 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(tested_cases, 1200)
 
-    async def test_movable_block_supports_implicit_default_commodity_at_every_position(self):
+    async def test_movable_block_preserves_omitted_commodity_at_every_position(self):
         tested_cases = 0
 
         for context, expected_trade_type, expected_settlement_type in OFFER_CONTEXT_CASES:
@@ -465,8 +486,9 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIsNotNone(result)
                     self.assertEqual(result.trade_type, expected_trade_type)
                     self.assertEqual(result.settlement_type, expected_settlement_type)
-                    self.assertEqual(result.commodity_id, 1)
-                    self.assertEqual(result.commodity_name, "امام")
+                    self.assertIsNone(result.commodity_id)
+                    self.assertIsNone(result.commodity_name)
+                    self.assertEqual(result.commodity_resolution, "OMITTED")
                 tested_cases += 1
 
         self.assertEqual(tested_cases, 24)
@@ -485,15 +507,12 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
                     )
 
         invalid_samples = (
-            "امام خ 30تا 75800",
-            "امام ف 30تا 75800",
-            "امام خرید 30تا 75800",
-            "امام فروش 30تا 75800",
             "امام خ فردا 30تا 75800",
-            "امام خ ف 30تا 75800",
             "امام خ ن فردا 30تا 75800",
-            "امام فروش فردا 30تا 75800",
             "امام خ 30تا ن 75800",
+            "امام خ 30تا 75800 خرید",
+            "امام ف 30تا 75800 فروش",
+            "امام خ ف 30تا 75800 ف",
         )
         for sample in invalid_samples:
             with self.subTest(sample=sample):
@@ -503,11 +522,11 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_trade_and_settlement_markers_outside_the_single_block_are_rejected(self):
         cases = (
-            ("امام 30تا 75800 خ ن خرید", offer_parser.RESIDUAL_TRADE_MARKER_MESSAGE),
-            ("فروش امام 30تا 75800 خ ن", offer_parser.RESIDUAL_TRADE_MARKER_MESSAGE),
-            ("امام نقد 30تا 75800 خ ن", offer_parser.RESIDUAL_SETTLEMENT_MARKER_MESSAGE),
-            ("امام 30تا فردا 75800 خ ن", offer_parser.RESIDUAL_SETTLEMENT_MARKER_MESSAGE),
-            ("امام 30تا 75800 خ ن فردایی", offer_parser.RESIDUAL_SETTLEMENT_MARKER_MESSAGE),
+            ("امام 30تا 75800 خ خرید", offer_parser.MULTIPLE_OFFER_CONTEXT_MESSAGE),
+            ("فروش امام 30تا 75800 خ", offer_parser.MULTIPLE_OFFER_CONTEXT_MESSAGE),
+            ("امام نقد 30تا 75800 خ", offer_parser.RESIDUAL_SETTLEMENT_MARKER_MESSAGE),
+            ("امام 30تا فردا 75800 خ", offer_parser.RESIDUAL_SETTLEMENT_MARKER_MESSAGE),
+            ("امام 30تا 75800 خ فردایی", offer_parser.RESIDUAL_SETTLEMENT_MARKER_MESSAGE),
         )
 
         for sample, expected_message in cases:
@@ -519,16 +538,16 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_notes_are_excluded_from_movable_block_detection(self):
         result, error = await offer_parser.parse_offer_text(
-            "امام 30تا 75800 خ ن: فروش نقد فردا"
+            "امام 30تا 75800 خ: فروش فردا"
         )
         self.assertIsNone(error)
         self.assertIsNotNone(result)
         self.assertEqual(result.trade_type, "buy")
         self.assertEqual(result.settlement_type, "cash")
-        self.assertEqual(result.notes, "فروش نقد فردا")
+        self.assertEqual(result.notes, "فروش فردا")
 
         result, error = await offer_parser.parse_offer_text(
-            "امام 30تا 75800: خ ن"
+            "امام 30تا 75800: خ"
         )
         self.assertIsNone(result)
         self.assertIsNone(error)
@@ -536,7 +555,7 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
     async def test_button_wizard_drafts_round_trip_through_shared_parser(self):
         cases = (
             (
-                "خ ن امام 30 عدد 75800",
+                "خ امام 30 عدد 75800",
                 build_offer_draft_text(
                     offer_type="buy",
                     settlement_type="cash",
@@ -547,7 +566,7 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
                 ("buy", "cash", True, None, None),
             ),
             (
-                "ف ن ف ربع بهار 40 عدد 178000 30 10: تحویل هماهنگ شود",
+                "ف ف ربع بهار 40 عدد 178000 30 10: تحویل هماهنگ شود",
                 build_offer_draft_text(
                     offer_type="sell",
                     settlement_type="tomorrow",
@@ -579,23 +598,57 @@ class ManualOfferParserTests(unittest.IsolatedAsyncioTestCase):
                     expected,
                 )
 
-    async def test_text_offer_rejects_legacy_and_loose_settlement_prefixes(self):
-        invalid_samples = (
-            "خ امام 30تا 75800",
-            "ف امام 30تا 75800",
-            "خرید امام 30تا 75800",
-            "فروش امام 30تا 75800",
-            "خ فردا امام 30تا 75800",
-            "خ ف امام 30تا 75800",
-            "خ ن فردا امام 30تا 75800",
-            "فروش فردا امام 30تا 75800",
+    async def test_text_offer_accepts_all_compact_and_full_valid_contexts(self):
+        cases = (
+            ("خف امام 30تا 75800", "buy", "tomorrow"),
+            ("خ‌ف امام 30تا 75800", "buy", "tomorrow"),
+            ("فف امام 30تا 75800", "sell", "tomorrow"),
+            ("ف‌ف امام 30تا 75800", "sell", "tomorrow"),
+            ("خریدفردا امام 30تا 75800", "buy", "tomorrow"),
+            ("فروش‌فردایی امام 30تا 75800", "sell", "tomorrow"),
         )
 
+        for sample, expected_side, expected_settlement in cases:
+            with self.subTest(sample=sample):
+                result, error = await offer_parser.parse_offer_text(sample)
+                self.assertIsNone(error)
+                self.assertIsNotNone(result)
+                self.assertEqual((result.trade_type, result.settlement_type), (expected_side, expected_settlement))
+
+    async def test_text_offer_rejects_deprecated_cash_marker_forms(self):
+        invalid_samples = (
+            "خ ن امام 30تا 75800",
+            "ف ن امام 30تا 75800",
+            "خ ن ف امام 30تا 75800",
+            "ف ن ف امام 30تا 75800",
+            "خرید نقد امام 30تا 75800",
+            "فروش نقد فردا امام 30تا 75800",
+        )
         for sample in invalid_samples:
             with self.subTest(sample=sample):
                 result, error = await offer_parser.parse_offer_text(sample)
                 self.assertIsNone(result)
                 self.assertIsNotNone(error)
+
+    async def test_low_date_marker_is_optional_inference_constraint(self):
+        result, error = await offer_parser.parse_offer_text("خ ربع پ 30تا 45800")
+        self.assertIsNone(error)
+        self.assertIsNotNone(result)
+        self.assertTrue(result.low_date_hint)
+        self.assertEqual(result.commodity_resolution, "EXPLICIT")
+        self.assertEqual(result.commodity_id, 5)
+        self.assertEqual(result.commodity_name, "ربع تاریخ پایین")
+
+        result, error = await offer_parser.parse_offer_text("خ پ 30تا 45800")
+        self.assertIsNone(error)
+        self.assertIsNotNone(result)
+        self.assertTrue(result.low_date_hint)
+        self.assertEqual(result.commodity_resolution, "LOW_DATE_HINT")
+
+        result, error = await offer_parser.parse_offer_text("خ ربع پ پ 30تا 45800")
+        self.assertIsNone(result)
+        self.assertIsNotNone(error)
+        self.assertEqual(error.message, "❌ نشانگر «پ» فقط یک بار در لفظ مجاز است")
 
 
 if __name__ == "__main__":

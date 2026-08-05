@@ -149,3 +149,13 @@ Index(
     Offer.home_server,
     unique=True,
 )
+
+
+# Register the transactional market-outbox listener wherever Offer is loaded.
+# The listener only appends a row to the same DB transaction; it has no worker
+# or external side effect.
+from core.market_intelligence.project_outbox import (  # noqa: E402
+    register_project_market_outbox_listeners,
+)
+
+register_project_market_outbox_listeners()

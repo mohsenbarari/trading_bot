@@ -116,6 +116,14 @@ class GuardedScratchAlembicTests(unittest.TestCase):
             )
         self.assertEqual(target.database_name, "telegram_queue_stage3_foundation_test")
 
+    def test_accepts_coin_intelligence_scratch_target(self):
+        with patch.dict(os.environ, {"TRADING_BOT_MIGRATION_MODE": "scratch"}, clear=True):
+            target = validate_scratch_database_urls(
+                sync_database_url="postgresql+psycopg2://user:pass@db/coin_intelligence_audit_test",
+                database_url="postgresql+asyncpg://user:pass@db/coin_intelligence_audit_test",
+            )
+        self.assertEqual(target.database_name, "coin_intelligence_audit_test")
+
     def test_rejects_runtime_name_and_url_mismatch(self):
         with patch.dict(os.environ, {"TRADING_BOT_MIGRATION_MODE": "scratch"}, clear=True):
             with self.assertRaisesRegex(ScratchMigrationSafetyError, "runtime"):

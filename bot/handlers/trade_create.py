@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.exc import StaleDataError
 from typing import Optional
+from types import SimpleNamespace
 from datetime import datetime
 from uuid import uuid4
 
@@ -89,6 +90,7 @@ from bot.callbacks import (
     AcceptLotsCallback,
     SkipNotesCallback,
     TextOfferActionCallback,
+    TextOfferInferenceCandidateCallback,
     TradeWizardActionCallback,
     TradeWizardEditCallback,
 )
@@ -117,6 +119,16 @@ from core.services.telegram_notification_outbox_service import (
     enqueue_offer_success_preview_notification_once,
 )
 from core.telegram_delivery_queue_contract import TelegramDeliveryAction
+from core.market_intelligence.coin_inference_shadow import observe_coin_inference_shadow
+from core.market_intelligence.coin_inference_selection import (
+    CoinInferenceSelectionRejected,
+    revalidate_coin_inference_selection,
+)
+from core.market_intelligence.coin_inference_outcome import (
+    CoinInferenceAcceptedSelection,
+    append_coin_inference_accepted_selection,
+)
+from core.market_intelligence.coin_inference import COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY
 
 
 logger = logging.getLogger(__name__)
@@ -168,6 +180,128 @@ def _build_channel_offer_text(
     if normalized_notes:
         message += f"\nتوضیحات: {normalized_notes}"
     return f"{message}\n{INVISIBLE_CHANNEL_PADDING}"
+
+
+async def _text_offer_shadow_inference_summary(result: object) -> str | None:
+    """Build an observation-only inference note for an omitted commodity name.
+
+    This runs only behind the off-by-default preview flag.  It never changes
+    the parser output, FSM data, or eventual offer command; an unavailable
+    model simply produces an explicit shadow abstention in the preview.
+    """
+
+    if not getattr(settings, "coin_intelligence_inference_preview_enabled", False):
+        return None
+    if getattr(result, "commodity_resolution", None) != "OMITTED":
+        return None
+    snapshot_path = str(
+        getattr(settings, "coin_intelligence_inference_snapshot_path", "") or ""
+    ).strip()
+    if not snapshot_path:
+        return (
+            "🔬 تشخیص آزمایشی کالا: Snapshot محلی آماده نیست؛ "
+            "کالای آفر بدون تغییر می‌ماند."
+        )
+
+    settlement_value = getattr(result, "settlement_type", SettlementType.CASH.value)
+    normalized_settlement = getattr(settlement_value, "value", settlement_value)
+    settlement_term = (
+        "TOMORROW"
+        if str(normalized_settlement).strip().lower() == SettlementType.TOMORROW.value
+        else "CASH"
+    )
+    try:
+        async with AsyncSessionLocal() as session:
+            observation = await observe_coin_inference_shadow(
+                session,
+                snapshot_path=snapshot_path,
+                submitted_project_price=int(getattr(result, "price")),
+                settlement_term=settlement_term,
+                source_surface="TELEGRAM_BOT",
+            )
+            await session.commit()
+    except Exception as exc:
+        logger.warning(
+            "Coin inference shadow is unavailable for bot text preview",
+            extra={
+                "event": "coin_inference_bot_shadow.unavailable",
+                "error_class": type(exc).__name__,
+            },
+        )
+        return (
+            "🔬 تشخیص آزمایشی کالا: فعلاً نتیجهٔ قابل اتکا ندارد؛ "
+            "کالای آفر بدون تغییر می‌ماند."
+        )
+
+    decision = observation.decision
+    candidate_names = "، ".join(item.commodity_name for item in decision.candidates)
+    current_commodity_name = str(getattr(result, "commodity_name", None) or "نامشخص")
+    if decision.status == "AUTO_SELECT" and decision.candidates:
+        return (
+            f"🔬 تشخیص آزمایشی کالا: مدل قیمت را نزدیک به «{decision.candidates[0].commodity_name}» "
+            f"می‌بیند؛ کالای آفر همچنان «{current_commodity_name}» است و ثبت آفر تغییری نمی‌کند."
+        )
+    if decision.status == "CONFIRM":
+        return (
+            "🔬 تشخیص آزمایشی کالا: مدل بین چند کالا به نتیجهٔ یکتا نرسیده است "
+            f"({candidate_names or 'بدون گزینه'})؛ هیچ کالایی خودکار انتخاب نمی‌شود."
+        )
+    return (
+        "🔬 تشخیص آزمایشی کالا: مدل برای این قیمت نتیجهٔ قابل اتکا ندارد؛ "
+        "کالای آفر بدون تغییر می‌ماند."
+    )
+
+
+async def _text_offer_selection_observation(result: object):
+    """Return an audited local decision for a missing bot commodity name.
+
+    The feature is separately opt-in.  It does not alter any offer until the
+    user confirms an auto-choice or picks an explicit same-family candidate.
+    """
+
+    if not getattr(settings, "coin_intelligence_inference_selection_enabled", False):
+        return None
+    snapshot_path = str(
+        getattr(settings, "coin_intelligence_inference_snapshot_path", "") or ""
+    ).strip()
+    if not snapshot_path:
+        return None
+    settlement_value = getattr(result, "settlement_type", SettlementType.CASH.value)
+    normalized_settlement = getattr(settlement_value, "value", settlement_value)
+    settlement_term = (
+        "TOMORROW"
+        if str(normalized_settlement).strip().lower() == SettlementType.TOMORROW.value
+        else "CASH"
+    )
+    candidate_scope = (
+        COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY
+        if bool(getattr(result, "low_date_hint", False))
+        else "ALL"
+    )
+    try:
+        async with AsyncSessionLocal() as session:
+            observation = await observe_coin_inference_shadow(
+                session,
+                snapshot_path=snapshot_path,
+                submitted_project_price=int(getattr(result, "price")),
+                settlement_term=settlement_term,
+                source_surface="TELEGRAM_BOT",
+                candidate_scope=candidate_scope,
+                force_confirmation=not bool(
+                    getattr(settings, "coin_intelligence_inference_auto_selection_enabled", False)
+                ),
+            )
+            await session.commit()
+        return observation
+    except Exception as exc:
+        logger.warning(
+            "Coin inference selection is unavailable for bot text offer",
+            extra={
+                "event": "coin_inference_bot_selection.unavailable",
+                "error_class": type(exc).__name__,
+            },
+        )
+        return None
 
 
 async def _canonical_commodity_name_from_session(session, commodity_id: object, fallback: object = None) -> str:
@@ -1167,6 +1301,87 @@ async def handle_wizard_cancel(
     await answer_callback_query_via_runtime(callback)
 
 
+async def _revalidate_bot_inferred_commodity(data: Mapping[str, object]) -> tuple[str | None, object | None]:
+    """Return a user-safe error and the revalidated candidate when available."""
+
+    decision_key = str(data.get("coin_inference_decision_key") or "").strip()
+    selected_commodity_id = data.get("coin_inference_selected_commodity_id")
+    if not decision_key and selected_commodity_id is None:
+        return None, None
+    if not decision_key or selected_commodity_id is None:
+        return "رسید تشخیص کالا کامل نیست؛ لفظ را دوباره ثبت کنید.", None
+    if not getattr(settings, "coin_intelligence_inference_selection_enabled", False):
+        return "تشخیص قیمت‌محور کالا در حال حاضر فعال نیست؛ نام کالا را در لفظ وارد کنید.", None
+    snapshot_path = str(
+        getattr(settings, "coin_intelligence_inference_snapshot_path", "") or ""
+    ).strip()
+    if not snapshot_path:
+        return "دادهٔ لحظه‌ای تشخیص کالا آماده نیست؛ نام کالا را در لفظ وارد کنید.", None
+    settlement_value = data.get("settlement_type", SettlementType.CASH.value)
+    settlement_term = (
+        "TOMORROW"
+        if str(getattr(settlement_value, "value", settlement_value)).lower() == SettlementType.TOMORROW.value
+        else "CASH"
+    )
+    try:
+        async with AsyncSessionLocal() as session:
+            revalidation = await revalidate_coin_inference_selection(
+                session,
+                snapshot_path=snapshot_path,
+                decision_key=decision_key,
+                selected_commodity_id=int(selected_commodity_id),
+                submitted_project_price=int(data.get("price") or 0),
+                settlement_term=settlement_term,
+                source_surface="TELEGRAM_BOT",
+            )
+    except CoinInferenceSelectionRejected as exc:
+        logger.info(
+            "Rejected stale bot commodity inference selection",
+            extra={
+                "event": "coin_inference_bot_submit.rejected",
+                "reason": exc.reason,
+            },
+        )
+        return "نتیجهٔ تشخیص کالا تغییر کرده یا دیگر معتبر نیست؛ لفظ را دوباره بررسی کنید.", None
+    except Exception:
+        logger.warning("Could not revalidate bot commodity inference", exc_info=True)
+        return "امکان بررسی دوبارهٔ کالا نیست؛ نام کالا را در لفظ وارد کنید.", None
+    return None, revalidation
+
+
+async def _record_bot_inference_accepted_selection(
+    *,
+    data: Mapping[str, object],
+    revalidation: object | None,
+) -> None:
+    """Best-effort P7 telemetry after a Bot Offer is authoritatively accepted."""
+
+    if revalidation is None:
+        return
+    decision_key = str(data.get("coin_inference_decision_key") or "").strip()
+    if not decision_key:
+        return
+    try:
+        async with AsyncSessionLocal() as session:
+            await append_coin_inference_accepted_selection(
+                session,
+                CoinInferenceAcceptedSelection(
+                    decision_key=decision_key,
+                    source_surface="TELEGRAM_BOT",
+                    candidate=revalidation.candidate,
+                ),
+            )
+            await session.commit()
+    except Exception as exc:
+        logger.warning(
+            "Could not record accepted Bot commodity-inference outcome",
+            extra={
+                "event": "coin_inference_outcome.bot_unavailable",
+                "error_class": type(exc).__name__,
+            },
+        )
+
+
 async def _handle_trade_confirm_core(
     callback: types.CallbackQuery,
     state: FSMContext,
@@ -1262,6 +1477,13 @@ async def _handle_trade_confirm_core(
     ).strip()
     republish_source_local_id = data.get("republished_from_offer_id")
     republish_idempotency_key = str(data.get("republish_idempotency_key") or "").strip()
+
+    inference_error, inference_revalidation = await _revalidate_bot_inferred_commodity(data)
+    if inference_error:
+        await edit_callback_message_via_runtime(callback, user, f"❌ {inference_error}")
+        await state.clear()
+        await answer_callback_query_via_runtime(callback)
+        return
 
     price_warning = None
     async with AsyncSessionLocal() as session:
@@ -1412,6 +1634,12 @@ async def _handle_trade_confirm_core(
             offer_acceptance_committed = True
             offer_id = new_offer.id
             offer_public_id = getattr(new_offer, "offer_public_id", None)
+
+        if offer_acceptance_committed:
+            await _record_bot_inference_accepted_selection(
+                data=data,
+                revalidation=inference_revalidation,
+            )
 
         from bot.callbacks import ExpireOfferCallback
 
@@ -1870,14 +2098,14 @@ def _get_offer_suggestion(original_text: str, error_message: str) -> str:
     """پیشنهاد فرمت صحیح بر اساس نوع خطا"""
     # نمونه‌های صحیح
     examples = [
-        "خ ن ربع 30تا 75800",
-        "نیم 50عدد فروش نقد فردا 758000",
-        "امام 40تا 87000 خرید نقد: فقط نقدی",
-        "امام 30تا 75800 ف ن 15 15"
+        "خ ربع 30تا 75800",
+        "نیم 50عدد فروش فردا 758000",
+        "امام 40تا 87000 خرید: فقط نقدی",
+        "امام 30تا 75800 ف 15 15"
     ]
 
     hint = "💡 **فرمت صحیح:**\n"
-    hint += "`[کالا] [تعداد]تا [قیمت] + [خ ن/ف ن/خ ن ف/ف ن ف]`\n"
+    hint += "`[کالا اختیاری] [تعداد]تا [قیمت] + [خ/ف/خ ف/ف ف]`\n"
     hint += "ترتیب بخش‌ها آزاد است.\n\n"
 
     # پیشنهادات بر اساس نوع خطا
@@ -1897,15 +2125,15 @@ def _get_offer_suggestion(original_text: str, error_message: str) -> str:
         for marker in ("خرید", "فروش", "نوع معامله", "تسویه")
     ):
         hint += "📌 نوع معامله و تسویه باید یک بلوک کامل و فقط یک بار باشند؛ جای بلوک آزاد است\n"
-        hint += "نقد حاضر: `خ ن` یا `ف ن`\n"
-        hint += "فردایی: `خ ن ف` یا `ف ن ف`\n"
+        hint += "نقد حاضر: `خ` یا `ف`\n"
+        hint += "فردایی: `خ ف` یا `ف ف` (چسبیده و نیم‌فاصله هم مجاز است)\n"
 
     elif "بخش" in error_message or "جمع" in error_message:
         hint += "📌 برای خُرده‌فروشی:\n"
         hint += "- حداکثر 3 بخش\n"
         hint += "- هر بخش حداقل 5 عدد\n"
         hint += "- جمع بخش‌ها = تعداد کل\n"
-        hint += "مثال: `خ ن 30تا 75800 15 15`\n"
+        hint += "مثال: `خ 30تا 75800 15 15`\n"
 
     elif "کاراکتر" in error_message:
         hint += "📌 از علائم خاص استفاده نکنید\n"
@@ -2163,6 +2391,93 @@ async def _send_repeat_offer_menu_refresh(
         )
 
 
+async def _show_text_offer_preview(
+    message: types.Message,
+    state: FSMContext,
+    user: User | object,
+    result: object,
+    *,
+    edit_response: bool,
+    inference_selection: dict[str, object] | None = None,
+) -> bool:
+    """Persist a validated draft and show its final Telegram confirmation."""
+
+    shadow_inference_summary = await _text_offer_shadow_inference_summary(result)
+    await state.update_data(
+        trade_type=result.trade_type,
+        settlement_type=getattr(result, "settlement_type", SettlementType.CASH.value),
+        commodity_id=result.commodity_id,
+        commodity_name=result.commodity_name,
+        quantity=result.quantity,
+        price=result.price,
+        is_wholesale=result.is_wholesale,
+        lot_sizes=result.lot_sizes,
+        notes=result.notes,
+        coin_inference_decision_key=(
+            inference_selection.get("decision_key") if inference_selection else None
+        ),
+        coin_inference_selected_commodity_id=(
+            inference_selection.get("selected_commodity_id") if inference_selection else None
+        ),
+    )
+    channel_text = _build_channel_offer_text(
+        trade_type=result.trade_type,
+        commodity_name=result.commodity_name,
+        quantity=result.quantity,
+        price=result.price,
+        settlement_type=getattr(result, "settlement_type", SettlementType.CASH.value),
+        notes=result.notes,
+    )
+    lot_info = "یکجا" if result.is_wholesale else f"خُرد {result.lot_sizes}"
+    shadow_section = f"{shadow_inference_summary}\n\n" if shadow_inference_summary else ""
+    preview = (
+        "پیش‌نمایش لفظ:\n\n"
+        f"{channel_text}\n\n"
+        f"📦 نوع: {lot_info}\n\n"
+        f"{shadow_section}"
+        "آیا تایید می‌کنید؟"
+    )
+    confirm_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ تایید و ارسال", callback_data=TextOfferActionCallback(action="confirm").pack()),
+            InlineKeyboardButton(text="❌ انصراف", callback_data=TextOfferActionCallback(action="cancel").pack()),
+        ]
+    ])
+    confirmation_message = await _text_offer_response(
+        message,
+        user,
+        preview,
+        edit=edit_response,
+        reply_markup=confirm_kb,
+    )
+    if isinstance(confirmation_message, types.Message):
+        await state.update_data(
+            text_offer_confirmation_chat_id=confirmation_message.chat.id,
+            text_offer_confirmation_message_id=confirmation_message.message_id,
+        )
+    else:
+        outbox = getattr(
+            getattr(confirmation_message, "notification", None),
+            "outbox",
+            None,
+        )
+        receipt_id = getattr(outbox, "id", None)
+        if isinstance(receipt_id, int) and not isinstance(receipt_id, bool):
+            await state.update_data(
+                text_offer_confirmation_receipt_id=(
+                    None if edit_response else receipt_id
+                ),
+                text_offer_confirmation_chat_id=(
+                    message.chat.id if edit_response else None
+                ),
+                text_offer_confirmation_message_id=(
+                    message.message_id if edit_response else None
+                ),
+            )
+    await state.set_state(Trade.awaiting_text_confirm)
+    return True
+
+
 async def _prepare_text_offer(
     message: types.Message,
     state: FSMContext,
@@ -2216,7 +2531,16 @@ async def _prepare_text_offer(
 
     from bot.utils.offer_parser import parse_offer_text
 
-    result, error = await parse_offer_text(offer_text)
+    if (
+        getattr(settings, "coin_intelligence_inference_preview_enabled", False)
+        or getattr(settings, "coin_intelligence_inference_selection_enabled", False)
+    ):
+        result, error = await parse_offer_text(
+            offer_text,
+            capture_commodity_resolution=True,
+        )
+    else:
+        result, error = await parse_offer_text(offer_text)
     if result is None and error is None:
         if wizard_source:
             await _text_offer_response(
@@ -2241,6 +2565,104 @@ async def _prepare_text_offer(
         )
         return False
 
+    inference_selection: dict[str, object] | None = None
+    # A missing/unknown commodity fails closed unless the explicitly enabled
+    # local selector returns an audited fresh decision.  This code never uses
+    # a default commodity and never creates an offer from an ABSTAIN result.
+    if getattr(result, "commodity_id", None) is None:
+        resolution = getattr(result, "commodity_resolution", "UNRESOLVED")
+        observation = None
+        if resolution in {"OMITTED", "LOW_DATE_HINT"}:
+            observation = await _text_offer_selection_observation(result)
+        if observation is not None and observation.decision.status == "AUTO_SELECT":
+            selected = observation.decision.candidates[0]
+            result.commodity_id = selected.commodity_id
+            result.commodity_name = selected.commodity_name
+            result.commodity_resolution = "INFERRED"
+            inference_selection = {
+                "decision_key": observation.decision_key,
+                "selected_commodity_id": selected.commodity_id,
+            }
+        elif observation is not None and observation.decision.status == "CONFIRM":
+            candidates = list(observation.decision.candidates)
+            if not candidates:
+                observation = None
+            else:
+                await state.update_data(
+                    text_offer_inference_draft={
+                        "trade_type": result.trade_type,
+                        "settlement_type": getattr(result, "settlement_type", SettlementType.CASH.value),
+                        "quantity": result.quantity,
+                        "price": result.price,
+                        "is_wholesale": result.is_wholesale,
+                        "lot_sizes": result.lot_sizes,
+                        "notes": result.notes,
+                    },
+                    text_offer_inference_decision_key=observation.decision_key,
+                    text_offer_inference_candidates=[
+                        {"commodity_id": item.commodity_id, "commodity_name": item.commodity_name}
+                        for item in candidates
+                    ],
+                )
+                choice_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text=item.commodity_name,
+                            callback_data=TextOfferInferenceCandidateCallback(
+                                commodity_id=item.commodity_id
+                            ).pack(),
+                        )
+                        for item in candidates
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text="❌ انصراف",
+                            callback_data=TextOfferActionCallback(action="cancel").pack(),
+                        )
+                    ],
+                ])
+                selection_message = await _text_offer_response(
+                    message,
+                    user,
+                    "قیمت آفر در بازهٔ چند کالای هم‌گروه است. کالای مدنظر را انتخاب کنید؛ "
+                    "پیش از ثبت نهایی دوباره با نرخ لحظه‌ای بررسی می‌شود.",
+                    edit=edit_response,
+                    reply_markup=choice_keyboard,
+                )
+                if isinstance(selection_message, types.Message):
+                    await state.update_data(
+                        text_offer_inference_message_id=selection_message.message_id,
+                    )
+                await state.set_state(Trade.awaiting_text_inference_choice)
+                return True
+
+        if getattr(result, "commodity_id", None) is not None:
+            pass
+        elif resolution == "LOW_DATE_HINT":
+            commodity_message = (
+                "نام کالای تاریخ پایین از روی قیمت به نتیجهٔ قابل اتکا نرسید. "
+                "نام کالا را نیز وارد کنید."
+            )
+        elif resolution == "OMITTED":
+            commodity_message = (
+                "نام کالا در لفظ نیامده و مدل برای این قیمت گزینهٔ امنی ندارد. "
+                "نام کالا را اضافه کنید."
+            )
+        else:
+            commodity_message = (
+                "نام کالا در فهرست کالاهای پروژه تشخیص داده نشد. "
+                "نام یا نام مستعار معتبر را بررسی کنید."
+            )
+        if getattr(result, "commodity_id", None) is None:
+            await _text_offer_response(
+                message,
+                user,
+                f"❌ {commodity_message}",
+                edit=edit_response,
+                reply_markup=get_wizard_review_keyboard() if wizard_source else None,
+            )
+            return False
+
     from core.trading_settings import get_trading_settings
     ts = get_trading_settings()
 
@@ -2263,72 +2685,14 @@ async def _prepare_text_offer(
             )
             return False
 
-    await state.update_data(
-        trade_type=result.trade_type,
-        settlement_type=getattr(result, "settlement_type", SettlementType.CASH.value),
-        commodity_id=result.commodity_id,
-        commodity_name=result.commodity_name,
-        quantity=result.quantity,
-        price=result.price,
-        is_wholesale=result.is_wholesale,
-        lot_sizes=result.lot_sizes,
-        notes=result.notes,
-    )
-
-    channel_text = _build_channel_offer_text(
-        trade_type=result.trade_type,
-        commodity_name=result.commodity_name,
-        quantity=result.quantity,
-        price=result.price,
-        settlement_type=getattr(result, "settlement_type", SettlementType.CASH.value),
-        notes=result.notes,
-    )
-    lot_info = "یکجا" if result.is_wholesale else f"خُرد {result.lot_sizes}"
-    preview = (
-        "پیش‌نمایش لفظ:\n\n"
-        f"{channel_text}\n\n"
-        f"📦 نوع: {lot_info}\n\n"
-        "آیا تایید می‌کنید؟"
-    )
-    confirm_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✅ تایید و ارسال", callback_data=TextOfferActionCallback(action="confirm").pack()),
-            InlineKeyboardButton(text="❌ انصراف", callback_data=TextOfferActionCallback(action="cancel").pack())
-        ]
-    ])
-    confirmation_message = await _text_offer_response(
+    return await _show_text_offer_preview(
         message,
+        state,
         user,
-        preview,
-        edit=edit_response,
-        reply_markup=confirm_kb,
+        result,
+        edit_response=edit_response,
+        inference_selection=inference_selection,
     )
-    if isinstance(confirmation_message, types.Message):
-        await state.update_data(
-            text_offer_confirmation_chat_id=confirmation_message.chat.id,
-            text_offer_confirmation_message_id=confirmation_message.message_id,
-        )
-    else:
-        outbox = getattr(
-            getattr(confirmation_message, "notification", None),
-            "outbox",
-            None,
-        )
-        receipt_id = getattr(outbox, "id", None)
-        if isinstance(receipt_id, int) and not isinstance(receipt_id, bool):
-            await state.update_data(
-                text_offer_confirmation_receipt_id=(
-                    None if edit_response else receipt_id
-                ),
-                text_offer_confirmation_chat_id=(
-                    message.chat.id if edit_response else None
-                ),
-                text_offer_confirmation_message_id=(
-                    message.message_id if edit_response else None
-                ),
-            )
-    await state.set_state(Trade.awaiting_text_confirm)
-    return True
 
 
 @router.message(StateFilter(None), F.text.startswith(BOT_REPEAT_OFFER_BUTTON_PREFIX))
@@ -2429,6 +2793,7 @@ async def handle_text_offer(message: types.Message, state: FSMContext, user: Opt
 
 
 @router.message(Trade.awaiting_text_confirm, F.text.func(has_trade_indicator))
+@router.message(Trade.awaiting_text_inference_choice, F.text.func(has_trade_indicator))
 async def handle_text_offer_while_confirmation_pending(
     message: types.Message,
     state: FSMContext,
@@ -2558,6 +2923,84 @@ async def handle_unexpected_trade_builder_message(
         },
     )
     await _send_stale_trade_builder_guidance(message, user=user)
+
+
+@router.callback_query(
+    Trade.awaiting_text_inference_choice,
+    TextOfferInferenceCandidateCallback.filter(),
+)
+async def handle_text_offer_inference_choice(
+    callback: types.CallbackQuery,
+    callback_data: TextOfferInferenceCandidateCallback,
+    state: FSMContext,
+    user: Optional[User],
+):
+    """Accept only a candidate shown in the current same-family selector."""
+
+    if not user:
+        await answer_callback_query_via_runtime(callback)
+        return
+    data = await state.get_data()
+    expected_message_id = data.get("text_offer_inference_message_id")
+    actual_message_id = getattr(getattr(callback, "message", None), "message_id", None)
+    if isinstance(expected_message_id, int) and actual_message_id != expected_message_id:
+        await answer_callback_query_via_runtime(callback, "این انتخاب قدیمی است.", show_alert=True)
+        return
+    candidates = data.get("text_offer_inference_candidates")
+    draft = data.get("text_offer_inference_draft")
+    decision_key = str(data.get("text_offer_inference_decision_key") or "").strip()
+    if not isinstance(candidates, list) or not isinstance(draft, Mapping) or not decision_key:
+        await edit_callback_message_via_runtime(callback, user, "❌ این انتخاب دیگر معتبر نیست. لفظ را دوباره ثبت کنید.")
+        await state.clear()
+        await answer_callback_query_via_runtime(callback)
+        return
+    selected = None
+    for item in candidates:
+        if not isinstance(item, Mapping):
+            continue
+        try:
+            candidate_id = int(item.get("commodity_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if candidate_id == int(callback_data.commodity_id):
+            selected = item
+            break
+    if selected is None:
+        await answer_callback_query_via_runtime(callback, "این گزینه معتبر نیست.", show_alert=True)
+        return
+    result = SimpleNamespace(
+        **dict(draft),
+        commodity_id=int(selected["commodity_id"]),
+        commodity_name=str(selected["commodity_name"]),
+        commodity_resolution="INFERRED",
+    )
+    await _show_text_offer_preview(
+        callback.message,
+        state,
+        user,
+        result,
+        edit_response=True,
+        inference_selection={
+            "decision_key": decision_key,
+            "selected_commodity_id": int(selected["commodity_id"]),
+        },
+    )
+    await answer_callback_query_via_runtime(callback)
+
+
+@router.callback_query(
+    Trade.awaiting_text_inference_choice,
+    TextOfferActionCallback.filter(F.action == "cancel"),
+)
+async def handle_text_offer_inference_choice_cancel(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    user: Optional[User],
+):
+    if user:
+        await edit_callback_message_via_runtime(callback, user, "❌ لفظ لغو شد.")
+    await state.clear()
+    await answer_callback_query_via_runtime(callback)
 
 
 @router.callback_query(Trade.awaiting_text_confirm, TextOfferActionCallback.filter(F.action == "confirm"))

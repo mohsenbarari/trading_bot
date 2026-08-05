@@ -78,6 +78,12 @@ class TextOfferActionCallback(CallbackData, prefix="text_offer"):
     action: str
 
 
+class TextOfferInferenceCandidateCallback(CallbackData, prefix="text_offer_coin"):
+    """One catalog candidate shown for an ambiguous text-offer price."""
+
+    commodity_id: int
+
+
 class TradeWizardActionCallback(CallbackData, prefix="trade_wizard"):
     action: str
 

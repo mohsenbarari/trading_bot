@@ -8,7 +8,6 @@ from sqlalchemy import select
 from core.enums import SettlementType
 from models.commodity import Commodity, CommodityAlias
 from core.db import AsyncSessionLocal
-from core.commodity_defaults import IMAM_COMMODITY_NAME
 from core.services.trade_service import validate_price
 from core.trading_settings import get_trading_settings
 
@@ -17,14 +16,20 @@ from core.trading_settings import get_trading_settings
 class ParsedOffer:
     """نتیجه پارس شده لفظ"""
     trade_type: str  # "buy" or "sell"
-    commodity_id: int
-    commodity_name: str
+    commodity_id: Optional[int]
+    commodity_name: Optional[str]
     quantity: int
     price: int
     is_wholesale: bool
     lot_sizes: Optional[List[int]]
     notes: Optional[str]
     settlement_type: str = SettlementType.CASH.value
+    # Distinguishes an explicit catalog match from an omitted/unknown name.
+    # No parser path assigns Imam merely because the name was omitted.
+    commodity_resolution: str = "UNKNOWN"
+    # A standalone optional «پ» asks the inference layer to consider only
+    # low-date candidates. It does not itself select a catalog commodity.
+    low_date_hint: bool = False
 
 
 @dataclass 
@@ -39,7 +44,7 @@ ARABIC_DIGITS = '٠١٢٣٤٥٦٧٨٩'
 COMMODITY_BOUNDARY_CHARS = r'\u0600-\u06FF\u200C0-9'
 BAHAR_QUALIFIERS = {"ربع", "نیم"}
 INVALID_OFFER_CONTEXT_MESSAGE = (
-    "❌ نوع معامله و تسویه نامعتبر است. از «خ ن»، «ف ن»، «خ ن ف»، «ف ن ف» "
+    "❌ نوع معامله و تسویه نامعتبر است. از «خ»، «ف»، «خ ف»، «ف ف» "
     "یا معادل کامل آن‌ها به‌صورت یک بلوک استفاده کنید"
 )
 MULTIPLE_OFFER_CONTEXT_MESSAGE = "❌ نوع معامله و تسویه فقط یک بار در لفظ مجاز است"
@@ -50,18 +55,23 @@ RESIDUAL_SETTLEMENT_MARKER_MESSAGE = (
     "❌ نشانگر تسویه فقط داخل بلوک نوع معامله و تسویه مجاز است"
 )
 OFFER_CONTEXT_PATTERNS = (
-    (re.compile(r'(?<!\S)خرید\s+نقد\s+فردا(?=\s|$)'), "buy", SettlementType.TOMORROW.value),
-    (re.compile(r'(?<!\S)فروش\s+نقد\s+فردا(?=\s|$)'), "sell", SettlementType.TOMORROW.value),
-    (re.compile(r'(?<!\S)خ\s+ن\s+ف(?=\s|$)'), "buy", SettlementType.TOMORROW.value),
-    (re.compile(r'(?<!\S)ف\s+ن\s+ف(?=\s|$)'), "sell", SettlementType.TOMORROW.value),
-    (re.compile(r'(?<!\S)خرید\s+نقد(?=\s|$)'), "buy", SettlementType.CASH.value),
-    (re.compile(r'(?<!\S)فروش\s+نقد(?=\s|$)'), "sell", SettlementType.CASH.value),
-    (re.compile(r'(?<!\S)خ\s+ن(?=\s|$)'), "buy", SettlementType.CASH.value),
-    (re.compile(r'(?<!\S)ف\s+ن(?=\s|$)'), "sell", SettlementType.CASH.value),
+    # Full current forms.  «نقد» and the old standalone «ن» marker are not
+    # part of the grammar anymore: cash is implicit in خرید/فروش or خ/ف.
+    (re.compile(r'(?<![\u0600-\u06FF\u200c])خرید[\s\u200c]*(?:فردا|فردایی)(?![\u0600-\u06FF\u200c])'), "buy", SettlementType.TOMORROW.value),
+    (re.compile(r'(?<![\u0600-\u06FF\u200c])فروش[\s\u200c]*(?:فردا|فردایی)(?![\u0600-\u06FF\u200c])'), "sell", SettlementType.TOMORROW.value),
+    # Current compact forms accept normal space, zero-width non-joiner, or no
+    # separator: خ ف / خ‌ف / خف and ف ف / ف‌ف / فف.
+    (re.compile(r'(?<![\u0600-\u06FF\u200c])خ[\s\u200c]*ف(?![\u0600-\u06FF\u200c])'), "buy", SettlementType.TOMORROW.value),
+    (re.compile(r'(?<![\u0600-\u06FF\u200c])ف[\s\u200c]*ف(?![\u0600-\u06FF\u200c])'), "sell", SettlementType.TOMORROW.value),
+    (re.compile(r'(?<![\u0600-\u06FF\u200c])خرید(?![\u0600-\u06FF\u200c])'), "buy", SettlementType.CASH.value),
+    (re.compile(r'(?<![\u0600-\u06FF\u200c])فروش(?![\u0600-\u06FF\u200c])'), "sell", SettlementType.CASH.value),
+    (re.compile(r'(?<![\u0600-\u06FF\u200c])خ(?![\u0600-\u06FF\u200c])'), "buy", SettlementType.CASH.value),
+    (re.compile(r'(?<![\u0600-\u06FF\u200c])ف(?![\u0600-\u06FF\u200c])'), "sell", SettlementType.CASH.value),
 )
 RESIDUAL_SETTLEMENT_PATTERN = re.compile(
     r'(?<!\S)(?:نقد|فردا|فردایی|ن)(?=\s|$)'
 )
+LOW_DATE_MARKER_PATTERN = re.compile(r'(?<![\u0600-\u06FF])پ(?![\u0600-\u06FF])')
 
 
 def normalize_digits(text: str) -> str:
@@ -142,11 +152,17 @@ def _extract_residual_commodity_text(text: str) -> str:
     return _normalize_commodity_phrase(residual)
 
 
-def _resolve_implicit_default_commodity(name_to_commodity: dict) -> Tuple[Optional[int], str]:
-    commodity = name_to_commodity.get(IMAM_COMMODITY_NAME)
-    if commodity is not None:
-        return commodity
-    return None, "نامشخص"
+def extract_low_date_hint(text: str) -> tuple[str, bool, str | None]:
+    """Remove one standalone optional «پ» and expose its low-date intent."""
+
+    matches = list(LOW_DATE_MARKER_PATTERN.finditer(text))
+    if len(matches) > 1:
+        return text, False, "❌ نشانگر «پ» فقط یک بار در لفظ مجاز است"
+    if not matches:
+        return text, False, None
+    marker = matches[0]
+    stripped = f"{text[:marker.start()]} {text[marker.end():]}"
+    return _normalize_commodity_phrase(stripped), True, None
 
 
 def extract_trade_type(text: str) -> Tuple[Optional[str], Optional[str]]:
@@ -312,7 +328,11 @@ def extract_lot_sizes(text: str, quantity: int, price: int) -> Tuple[Optional[Li
     return lot_candidates, False, None
 
 
-async def find_commodity(text: str) -> Tuple[Optional[int], str]:
+async def find_commodity(
+    text: str,
+    *,
+    include_resolution: bool = False,
+) -> tuple[Optional[int], Optional[str]] | tuple[Optional[int], Optional[str], str]:
     """
     پیدا کردن کالا از متن
     Returns: (commodity_id, commodity_name)
@@ -363,18 +383,22 @@ async def find_commodity(text: str) -> Tuple[Optional[int], str]:
     # جستجو در متن (اولویت با نام/نام مستعار بلندتر و فقط به صورت عبارت مستقل)
     commodity_id, commodity_name = _match_commodity_name(text, name_to_commodity)
     if commodity_id is not None:
+        if include_resolution:
+            return commodity_id, commodity_name, "EXPLICIT"
         return commodity_id, commodity_name
 
     residual_commodity_text = _extract_residual_commodity_text(text)
-    if not residual_commodity_text:
-        implicit_commodity_id, implicit_commodity_name = _resolve_implicit_default_commodity(name_to_commodity)
-        if implicit_commodity_id is not None:
-            return implicit_commodity_id, implicit_commodity_name
 
-    return None, "نامشخص"
+    if include_resolution:
+        return None, None, "OMITTED" if not residual_commodity_text else "UNRESOLVED"
+    return None, None
 
 
-async def parse_offer_text(text: str) -> Tuple[Optional[ParsedOffer], Optional[ParseError]]:
+async def parse_offer_text(
+    text: str,
+    *,
+    capture_commodity_resolution: bool = False,
+) -> Tuple[Optional[ParsedOffer], Optional[ParseError]]:
     """
     پارس کامل متن لفظ
     Returns: (ParsedOffer, ParseError)
@@ -431,10 +455,44 @@ async def parse_offer_text(text: str) -> Tuple[Optional[ParsedOffer], Optional[P
     if error:
         return None, ParseError(error)
     
-    # پیدا کردن کالا
-    commodity_id, commodity_name = await find_commodity(clean_text)
-    if commodity_id is None:
-        return None, ParseError("❌ کالا یافت نشد")
+    # «پ» اختیاری است و فقط intent تاریخ پایین را به لایهٔ inference منتقل
+    # می‌کند. parser به‌خاطر نبود نام کالا هیچ کالایی، از جمله امام، انتخاب
+    # نمی‌کند.
+    commodity_text, low_date_hint, marker_error = extract_low_date_hint(clean_text)
+    if marker_error:
+        return None, ParseError(marker_error)
+
+    # Resolution metadata is always retained.  ``capture_commodity_resolution``
+    # remains in the public signature for callers from the earlier shadow
+    # rollout, but omission is never allowed to silently turn into Imam.
+    del capture_commodity_resolution
+    commodity_id, commodity_name, commodity_resolution = await find_commodity(
+        commodity_text,
+        include_resolution=True,
+    )
+    if low_date_hint:
+        # Preserve a pre-existing explicit low-date alias such as «ربع پ» or
+        # «ت پ».  If removing the marker changed the resolved commodity (or
+        # left it unresolved), the original phrase was a catalog-level choice
+        # and remains authoritative.  A bare marker beside an ordinary name
+        # such as «ربع پ» in a catalog without that alias stays an inference
+        # constraint instead of silently selecting the ordinary quarter.
+        raw_commodity_id, raw_commodity_name, raw_commodity_resolution = await find_commodity(
+            clean_text,
+            include_resolution=True,
+        )
+        if (
+            raw_commodity_resolution == "EXPLICIT"
+            and raw_commodity_id is not None
+            and raw_commodity_id != commodity_id
+        ):
+            commodity_id = raw_commodity_id
+            commodity_name = raw_commodity_name
+            commodity_resolution = "EXPLICIT"
+        else:
+            commodity_id = None
+            commodity_name = None
+            commodity_resolution = "LOW_DATE_HINT"
     
     return ParsedOffer(
         trade_type=trade_type,
@@ -446,4 +504,6 @@ async def parse_offer_text(text: str) -> Tuple[Optional[ParsedOffer], Optional[P
         lot_sizes=lot_sizes,
         notes=notes,
         settlement_type=settlement_type or SettlementType.CASH.value,
+        commodity_resolution=commodity_resolution,
+        low_date_hint=low_date_hint,
     ), None

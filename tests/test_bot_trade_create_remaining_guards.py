@@ -105,8 +105,8 @@ class BotTradeCreateSuggestionHelperTests(unittest.TestCase):
         self.assertIn("جای بلوک آزاد است", trade_indicator_hint)
 
         invalid_prefix_hint = _get_offer_suggestion("خ امام 30تا 75800", "نوع معامله و تسویه نامعتبر است")
-        self.assertIn("نقد حاضر: `خ ن` یا `ف ن`", invalid_prefix_hint)
-        self.assertIn("فردایی: `خ ن ف` یا `ف ن ف`", invalid_prefix_hint)
+        self.assertIn("نقد حاضر: `خ` یا `ف`", invalid_prefix_hint)
+        self.assertIn("فردایی: `خ ف` یا `ف ف`", invalid_prefix_hint)
 
         split_hint = _get_offer_suggestion("خ 30تا 75800 10 10 10 5", "جمع بخش‌ها نامعتبر است")
         self.assertIn("حداکثر 3 بخش", split_hint)
@@ -116,7 +116,7 @@ class BotTradeCreateSuggestionHelperTests(unittest.TestCase):
 
         default_hint = _get_offer_suggestion("something else", "خطای ناشناخته")
         self.assertIn("نمونه‌های صحیح", default_hint)
-        self.assertIn("خ ن ربع 30تا 75800", default_hint)
+        self.assertIn("خ ربع 30تا 75800", default_hint)
 
 
 if __name__ == "__main__":

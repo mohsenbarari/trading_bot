@@ -37,8 +37,8 @@ def offer_draft_prefix(offer_type: Any, settlement_type: Any) -> str:
     raw_offer_type = getattr(offer_type, "value", offer_type)
     trade_label = "خ" if str(raw_offer_type or "buy").strip().lower() == "buy" else "ف"
     if settlement_type_value(settlement_type) == SettlementType.TOMORROW.value:
-        return f"{trade_label} ن ف"
-    return f"{trade_label} ن"
+        return f"{trade_label} ف"
+    return trade_label
 
 
 def build_offer_draft_text(

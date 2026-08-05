@@ -17,6 +17,7 @@ docs/*
 # Environments
 frontend/node_modules/
 .idea/
+.cursor/settings.json
 # IDE specific files
 mini_app_dist/
 mini_app_dist_staging/
@@ -47,3 +48,4 @@ map_data/
 /.coverage.*
 .deploy_count
 deploy/production/online.env
+deploy/monitoring/.env.monitoring.local
