@@ -83,6 +83,7 @@ WIRED_FOREIGN_DRIVER_SCENARIOS = (
     "OT-REQ-CROSS-FORWARD",
     "OT-CHANNEL-MARKER",
     "OT-SYNC-RECOVERY",
+    "OT-TG-RETRY",
 )
 WIRED_DRIVER_SCENARIOS = WIRED_IRAN_DRIVER_SCENARIOS + WIRED_FOREIGN_DRIVER_SCENARIOS
 
@@ -781,6 +782,23 @@ def run_channel_marker_driver(
     )
 
 
+def run_tg_retry_driver(
+    args: argparse.Namespace, run_prefix: str
+) -> dict[str, Any]:
+    del args
+    return run_two_peer_foreign_driver(
+        scenario="OT-TG-RETRY",
+        run_prefix=run_prefix,
+        minutes=5,
+        foreign_extra_from_seed=lambda seed: (
+            "--phase run "
+            f"--owner-user-id {int(seed['owner_user_id'])} "
+            f"--requester-user-id {int(seed['requester_user_id'])} "
+            "--no-cleanup-after"
+        ),
+    )
+
+
 def _sync_worker_containers() -> tuple[str, str]:
     iran = (
         os.getenv("STAGING_IRAN_SYNC_CONTAINER")
@@ -1249,6 +1267,8 @@ def run_wired_drivers(args: argparse.Namespace) -> list[dict[str, Any]]:
             result = run_channel_marker_driver(args, run_prefix)
         elif scenario == "OT-SYNC-RECOVERY":
             result = run_sync_recovery_driver(args, run_prefix)
+        elif scenario == "OT-TG-RETRY":
+            result = run_tg_retry_driver(args, run_prefix)
         else:
             result = {
                 "id": scenario,

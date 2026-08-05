@@ -83,6 +83,7 @@ class StagingOfferOvertimeAcceptanceTests(unittest.TestCase):
         self.assertIn("OT-REQ-CROSS-FORWARD", runner.WIRED_FOREIGN_DRIVER_SCENARIOS)
         self.assertIn("OT-CHANNEL-MARKER", runner.WIRED_FOREIGN_DRIVER_SCENARIOS)
         self.assertIn("OT-SYNC-RECOVERY", runner.WIRED_FOREIGN_DRIVER_SCENARIOS)
+        self.assertIn("OT-TG-RETRY", runner.WIRED_FOREIGN_DRIVER_SCENARIOS)
 
     def test_execute_blocks_when_iran_driver_transport_unset(self):
         with tempfile.TemporaryDirectory() as tmp:

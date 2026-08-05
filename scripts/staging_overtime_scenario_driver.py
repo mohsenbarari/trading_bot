@@ -48,6 +48,7 @@ SCENARIOS = (
     "OT-REQ-CROSS-FORWARD",
     "OT-CHANNEL-MARKER",
     "OT-SYNC-RECOVERY",
+    "OT-TG-RETRY",
 )
 # Staging Iran currently carries a single commodity; keep the driver pinned to it.
 DEFAULT_COMMODITY_ID = 1
@@ -2858,6 +2859,476 @@ async def _scenario_final_tail(
     }
 
 
+async def _lease_telegram_delivery_job_by_id(
+    session,
+    *,
+    job_id: int,
+    worker_id: str,
+    request_timeout_seconds: float = 10.0,
+    lease_seconds: float = 30.0,
+) -> object:
+    """Lease one known job id without racing the shared staging claim lane."""
+    from core.services.telegram_delivery_queue_service import (
+        telegram_delivery_database_now,
+    )
+    from core.telegram_delivery_queue_contract import (
+        CLAIMABLE_DELIVERY_STATES,
+        MINIMUM_LEASE_MARGIN_SECONDS,
+        TelegramDeliveryState,
+    )
+    from models.telegram_delivery_job import TelegramDeliveryJobRecord
+
+    if float(lease_seconds) < float(request_timeout_seconds) + float(
+        MINIMUM_LEASE_MARGIN_SECONDS
+    ):
+        raise DriverRefusal("lease_must_cover_request_timeout_plus_margin")
+
+    now = await telegram_delivery_database_now(session)
+    record = (
+        await session.execute(
+            select(TelegramDeliveryJobRecord)
+            .where(TelegramDeliveryJobRecord.id == int(job_id))
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if record is None:
+        raise DriverRefusal(f"telegram delivery job {job_id} missing")
+
+    state = str(getattr(record.state, "value", record.state) or "")
+    claimable = {item.value for item in CLAIMABLE_DELIVERY_STATES}
+    if state not in claimable:
+        raise DriverRefusal(f"job {job_id} not claimable (state={state})")
+    if record.next_retry_at is not None and record.next_retry_at > now:
+        raise DriverRefusal(
+            f"job {job_id} next_retry_at still in the future ({record.next_retry_at})"
+        )
+    if record.bot_cooldown_until is not None and record.bot_cooldown_until > now:
+        raise DriverRefusal(
+            f"job {job_id} bot_cooldown_until still active ({record.bot_cooldown_until})"
+        )
+    if record.eligible_at is not None and record.eligible_at > now:
+        raise DriverRefusal(f"job {job_id} not yet eligible ({record.eligible_at})")
+
+    record.state = TelegramDeliveryState.LEASED
+    record.worker_id = str(worker_id)
+    record.lease_token = int(record.lease_token or 0) + 1
+    record.lease_until = now + timedelta(seconds=float(lease_seconds))
+    record.dispatch_started_at = None
+    record.attempt_count = int(record.attempt_count or 0) + 1
+    record.updated_at = now
+    await session.flush()
+    return record
+
+
+async def _await_job_retry_eligible(session, *, job_id: int) -> float:
+    """Sleep until the durable next_retry_at / bot cooldown window has passed."""
+    from core.services.telegram_delivery_queue_service import (
+        telegram_delivery_database_now,
+    )
+    from models.telegram_delivery_job import TelegramDeliveryJobRecord
+
+    waited = 0.0
+    deadline = time.monotonic() + 30.0
+    while time.monotonic() < deadline:
+        now = await telegram_delivery_database_now(session)
+        job = await session.get(TelegramDeliveryJobRecord, int(job_id))
+        if job is None:
+            raise DriverRefusal(f"telegram delivery job {job_id} missing while waiting")
+        gates = [
+            ts
+            for ts in (job.next_retry_at, job.bot_cooldown_until)
+            if ts is not None and ts > now
+        ]
+        if not gates:
+            return waited
+        sleep_for = min(1.0, max(0.05, (max(gates) - now).total_seconds() + 0.05))
+        await asyncio.sleep(sleep_for)
+        waited += sleep_for
+        await session.rollback()
+    raise DriverRefusal(f"job {job_id} did not become retry-eligible in time")
+
+
+async def _noop_telegram_dispatch_guard(_db, _job, _now) -> None:
+    return None
+
+
+async def _noop_telegram_delivery_feedback(_db, _job, _decision, _now) -> None:
+    return None
+
+
+async def _force_queue_retry_then_sent(
+    session,
+    *,
+    job_id: int,
+    worker_id: str,
+    synthetic_message_id: int,
+    feedback=None,
+    dispatch_guard=None,
+) -> dict[str, object]:
+    """Claim → synthetic 429 → pending_retry → reclaim → synthetic SENT."""
+    from core.services.telegram_delivery_queue_service import (
+        mark_telegram_delivery_dispatch_started,
+        resolve_telegram_delivery_result,
+        telegram_delivery_database_now,
+    )
+    from core.telegram_delivery_queue_contract import (
+        TelegramDeliveryOutcome,
+        TelegramDeliveryState,
+    )
+    from core.telegram_gateway import TelegramGatewayResult
+    from models.telegram_delivery_job import TelegramDeliveryJobRecord
+
+    retry_after_safety = float(
+        getattr(settings, "telegram_delivery_queue_retry_after_safety_seconds", 0.1)
+    )
+    retry_base = float(
+        getattr(settings, "telegram_delivery_queue_retry_base_seconds", 1.0)
+    )
+    retry_max = float(
+        getattr(settings, "telegram_delivery_queue_retry_max_seconds", 300.0)
+    )
+
+    leased = await _lease_telegram_delivery_job_by_id(
+        session, job_id=job_id, worker_id=worker_id
+    )
+    lease_token = int(leased.lease_token)
+    marked = await mark_telegram_delivery_dispatch_started(
+        session,
+        current_server=current_server(),
+        job_id=int(job_id),
+        worker_id=worker_id,
+        lease_token=lease_token,
+        dispatch_guard=dispatch_guard,
+    )
+    if not marked:
+        raise DriverRefusal(f"failed to mark dispatch started for job {job_id}")
+    now = await telegram_delivery_database_now(session)
+    retry_decision = await resolve_telegram_delivery_result(
+        session,
+        current_server=current_server(),
+        job_id=int(job_id),
+        worker_id=worker_id,
+        lease_token=lease_token,
+        result=TelegramGatewayResult(
+            ok=False,
+            method="sendMessage",
+            status_code=429,
+            response_json={
+                "ok": False,
+                "error_code": 429,
+                "description": "Too Many Requests: retry after 1",
+                "parameters": {"retry_after": 1},
+            },
+            transport_phase="response_received",
+        ),
+        retry_after_safety_seconds=retry_after_safety,
+        retry_base_seconds=retry_base,
+        retry_max_seconds=retry_max,
+        retry_jitter_ratio=0.0,
+        feedback=feedback,
+        now=now,
+    )
+    await session.commit()
+    job = await session.get(TelegramDeliveryJobRecord, int(job_id))
+    retry_state = str(getattr(job.state, "value", job.state) if job else "")
+    retry_outcome = str(
+        getattr(retry_decision.outcome, "value", retry_decision.outcome)
+    )
+    if (
+        retry_outcome != TelegramDeliveryOutcome.RETRY_PENDING.value
+        or retry_state != TelegramDeliveryState.PENDING_RETRY.value
+    ):
+        raise DriverRefusal(
+            f"expected pending_retry after 429; outcome={retry_outcome} state={retry_state}"
+        )
+
+    wait_seconds = await _await_job_retry_eligible(session, job_id=int(job_id))
+    reclaimed = await _lease_telegram_delivery_job_by_id(
+        session, job_id=job_id, worker_id=f"{worker_id}:retry"
+    )
+    reclaim_token = int(reclaimed.lease_token)
+    marked_retry = await mark_telegram_delivery_dispatch_started(
+        session,
+        current_server=current_server(),
+        job_id=int(job_id),
+        worker_id=f"{worker_id}:retry",
+        lease_token=reclaim_token,
+        dispatch_guard=dispatch_guard,
+    )
+    if not marked_retry:
+        raise DriverRefusal(f"failed to mark retry dispatch for job {job_id}")
+    now = await telegram_delivery_database_now(session)
+    sent_decision = await resolve_telegram_delivery_result(
+        session,
+        current_server=current_server(),
+        job_id=int(job_id),
+        worker_id=f"{worker_id}:retry",
+        lease_token=reclaim_token,
+        result=TelegramGatewayResult(
+            ok=True,
+            method="sendMessage",
+            status_code=200,
+            response_json={
+                "ok": True,
+                "result": {"message_id": int(synthetic_message_id)},
+            },
+            transport_phase="response_received",
+        ),
+        retry_after_safety_seconds=retry_after_safety,
+        retry_base_seconds=retry_base,
+        retry_max_seconds=retry_max,
+        retry_jitter_ratio=0.0,
+        feedback=feedback,
+        now=now,
+    )
+    await session.commit()
+    job = await session.get(TelegramDeliveryJobRecord, int(job_id))
+    sent_state = str(getattr(job.state, "value", job.state) if job else "")
+    sent_outcome = str(getattr(sent_decision.outcome, "value", sent_decision.outcome))
+    telegram_message_id = (
+        int(job.telegram_message_id)
+        if job is not None and job.telegram_message_id is not None
+        else None
+    )
+    if (
+        sent_outcome != TelegramDeliveryOutcome.SENT.value
+        or sent_state != TelegramDeliveryState.SENT.value
+        or telegram_message_id != int(synthetic_message_id)
+    ):
+        raise DriverRefusal(
+            f"expected SENT after retry; outcome={sent_outcome} state={sent_state} "
+            f"message_id={telegram_message_id}"
+        )
+    return {
+        "job_id": int(job_id),
+        "retry_outcome": retry_outcome,
+        "retry_state": retry_state,
+        "retry_wait_seconds": round(wait_seconds, 3),
+        "sent_outcome": sent_outcome,
+        "sent_state": sent_state,
+        "telegram_message_id": telegram_message_id,
+        "attempt_count": int(job.attempt_count or 0) if job is not None else 0,
+    }
+
+
+async def _scenario_tg_retry_seed(session, run_prefix: str) -> dict[str, object]:
+    """Seed foreign-home owner + requester (same topology as foreign request)."""
+    return await _scenario_req_foreign_to_foreign_seed(session, run_prefix)
+
+
+async def _scenario_tg_retry_run(
+    session,
+    run_prefix: str,
+    minutes: int,
+    *,
+    owner_user_id: int,
+    requester_user_id: int,
+) -> dict[str, object]:
+    """Owner approval + requester private status survive synthetic 429 via queue."""
+    from core.services.offer_overtime_request_service import (
+        OvertimeRequestCreateCommand,
+        create_overtime_request,
+    )
+    from core.services.telegram_delivery_queue_service import (
+        TELEGRAM_PRIMARY_BOT_IDENTITY,
+        enqueue_telegram_delivery_job,
+    )
+    from core.services.telegram_overtime_owner_approval_queue_feedback import (
+        TelegramOvertimeOwnerApprovalQueueLifecycleFeedback,
+    )
+    from core.telegram_delivery_overtime_owner_approval_contract import (
+        overtime_owner_approval_source_natural_id,
+    )
+    from core.telegram_delivery_queue_contract import (
+        TelegramDeliveryAction,
+        TelegramDestinationClass,
+        TelegramFeederKind,
+    )
+    from models.offer_request import OfferRequest, OfferRequestSourceSurface, OfferRequestStatus
+    from models.telegram_delivery_job import TelegramDeliveryJobRecord
+
+    if current_server() != "foreign":
+        raise DriverRefusal("OT-TG-RETRY run phase only runs on foreign")
+    if minutes <= 0:
+        raise DriverRefusal("OT-TG-RETRY requires a positive overtime preference")
+
+    owner = await _await_user_by_id(session, owner_user_id)
+    requester = await _await_user_by_id(session, requester_user_id)
+    if owner is None or requester is None:
+        raise DriverRefusal("Iran-seeded foreign-home users did not mirror to foreign")
+    owner_id = int(owner.id)
+    requester_id = int(requester.id)
+    requester_telegram_id = int(requester.telegram_id or 0)
+    if requester_telegram_id <= 0:
+        raise DriverRefusal("requester telegram_id missing for private status job")
+
+    await _save_bot_preference_with_user_sync_retry(session, owner, minutes)
+    mirrored, mirror_seconds = await _await_preference_minutes(
+        session, owner_id, minutes
+    )
+    if not mirrored:
+        raise DriverRefusal("foreign preference mirror did not converge before offer create")
+    owner = (
+        await session.execute(select(User).where(User.id == owner_id))
+    ).scalar_one()
+
+    offer, normal_minutes = await _create_bot_offer(
+        session,
+        owner,
+        notes=f"{run_prefix} tg retry",
+    )
+    offer_id = int(offer.id)
+    offer_public_id = str(offer.offer_public_id)
+    offer_home = str(offer.home_server)
+    snapshot = int(offer.overtime_minutes_snapshot)
+    await _backdate_offer_into_overtime(session, offer, normal_minutes=normal_minutes)
+    offer = await _reload_offer(session, offer_id)
+    receipt_at = datetime.utcnow()
+
+    create_result = await create_overtime_request(
+        session,
+        OvertimeRequestCreateCommand(
+            offer=offer,
+            requester_user_id=requester_id,
+            actor_user_id=requester_id,
+            requested_quantity=min(2, DEFAULT_OFFER_QUANTITY),
+            idempotency_key=f"{run_prefix}:ot-tg-retry",
+            request_source_surface=OfferRequestSourceSurface.TELEGRAM_BOT,
+            request_source_server="foreign",
+            receipt_at=receipt_at,
+            normal_lifetime_minutes=normal_minutes,
+            request_home_server="foreign",
+        ),
+        now=receipt_at,
+    )
+    await session.commit()
+    ledger = create_result.ledger
+    await session.refresh(ledger)
+    request_public_id = str(ledger.request_public_id)
+    request_id = int(ledger.id)
+    delivering_status = str(
+        getattr(ledger.result_status, "value", ledger.result_status)
+    )
+    if (
+        not create_result.promoted
+        or delivering_status != OfferRequestStatus.OVERTIME_DELIVERING.value
+    ):
+        raise DriverRefusal(
+            f"expected OVERTIME_DELIVERING after promote; status={delivering_status}"
+        )
+
+    owner_source = overtime_owner_approval_source_natural_id(request_public_id)
+    owner_job = (
+        await session.execute(
+            select(TelegramDeliveryJobRecord)
+            .where(TelegramDeliveryJobRecord.source_natural_id == owner_source)
+            .order_by(TelegramDeliveryJobRecord.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if owner_job is None:
+        raise DriverRefusal(
+            f"owner approval job missing for source {owner_source!r}"
+        )
+    owner_job_id = int(owner_job.id)
+
+    owner_feedback = TelegramOvertimeOwnerApprovalQueueLifecycleFeedback()
+    owner_cycle = await _force_queue_retry_then_sent(
+        session,
+        job_id=owner_job_id,
+        worker_id=f"otacc-tg-retry-owner:{run_prefix[-12:]}",
+        synthetic_message_id=710_000 + (request_id % 100_000),
+        feedback=owner_feedback.apply_delivery_result,
+    )
+
+    ledger = await session.get(OfferRequest, request_id)
+    if ledger is None:
+        raise DriverRefusal("ledger missing after owner approval SENT")
+    await session.refresh(ledger)
+    presented_status = str(
+        getattr(ledger.result_status, "value", ledger.result_status)
+    )
+    presented_message_id = (
+        int(ledger.telegram_message_id)
+        if ledger.telegram_message_id is not None
+        else None
+    )
+    if (
+        presented_status != OfferRequestStatus.OVERTIME_PRESENTED.value
+        or presented_message_id != int(owner_cycle["telegram_message_id"])
+    ):
+        raise DriverRefusal(
+            "owner approval SENT did not mark request presented "
+            f"(status={presented_status}, message_id={presented_message_id})"
+        )
+
+    # Staging foreign runs legacy telegram runtime (queue worker off), so requester
+    # status does not auto-enqueue; exercise the same private-queue retry path with
+    # a durable general_immediate job bound to this request.
+    requester_source = f"ot-tg-retry-requester-status:{request_public_id}"
+    requester_enqueue = await enqueue_telegram_delivery_job(
+        session,
+        current_server=current_server(),
+        feeder=TelegramFeederKind.DIRECT,
+        source_natural_id=requester_source,
+        source_version=1,
+        action=TelegramDeliveryAction.GENERAL_IMMEDIATE,
+        bot_identity=TELEGRAM_PRIMARY_BOT_IDENTITY,
+        destination_key=f"private:{requester_telegram_id}",
+        destination_class=TelegramDestinationClass.PRIVATE,
+        method="sendMessage",
+        payload={
+            "chat_id": requester_telegram_id,
+            "text": f"{run_prefix} requester overtime status retry",
+        },
+        template_version="ot-tg-retry-requester-v1",
+        run_id=run_prefix,
+    )
+    await session.commit()
+    requester_job_id = int(requester_enqueue.job.id)
+    requester_cycle = await _force_queue_retry_then_sent(
+        session,
+        job_id=requester_job_id,
+        worker_id=f"otacc-tg-retry-req:{run_prefix[-12:]}",
+        synthetic_message_id=720_000 + (request_id % 100_000),
+        dispatch_guard=_noop_telegram_dispatch_guard,
+        feedback=_noop_telegram_delivery_feedback,
+    )
+
+    passed = (
+        offer_home == "foreign"
+        and snapshot == minutes
+        and create_result.promoted is True
+        and delivering_status == OfferRequestStatus.OVERTIME_DELIVERING.value
+        and presented_status == OfferRequestStatus.OVERTIME_PRESENTED.value
+        and owner_cycle["retry_state"] == "pending_retry"
+        and owner_cycle["sent_state"] == "sent"
+        and requester_cycle["retry_state"] == "pending_retry"
+        and requester_cycle["sent_state"] == "sent"
+        and int(owner_cycle["attempt_count"]) >= 2
+        and int(requester_cycle["attempt_count"]) >= 2
+    )
+    return {
+        "phase": "run",
+        "owner_user_id": owner_id,
+        "requester_user_id": requester_id,
+        "preference_mirror_seconds": mirror_seconds,
+        "offer_id": offer_id,
+        "offer_public_id": offer_public_id,
+        "offer_home_server": offer_home,
+        "overtime_minutes_snapshot": snapshot,
+        "request_id": request_id,
+        "request_public_id": request_public_id,
+        "delivering_status": delivering_status,
+        "presented_status": presented_status,
+        "owner_approval_source_natural_id": owner_source,
+        "owner_retry": owner_cycle,
+        "requester_status_source_natural_id": requester_source,
+        "requester_retry": requester_cycle,
+        "passed": passed,
+    }
+
+
 async def main_async(args: argparse.Namespace) -> dict[str, object]:
     _guard_environment()
     run_prefix = _guard_run_prefix(args.run_prefix)
@@ -3046,6 +3517,25 @@ async def _main_async_with_session(
                 )
             else:
                 raise DriverRefusal(f"unsupported OT-SYNC-RECOVERY phase={phase!r}")
+        elif args.scenario == "OT-TG-RETRY":
+            phase = (args.phase or "run").strip().lower()
+            if phase == "seed":
+                outcome = await _scenario_tg_retry_seed(session, run_prefix)
+            elif phase == "run":
+                if args.owner_user_id is None or args.requester_user_id is None:
+                    raise DriverRefusal(
+                        "OT-TG-RETRY run phase requires "
+                        "--owner-user-id and --requester-user-id from Iran seed"
+                    )
+                outcome = await _scenario_tg_retry_run(
+                    session,
+                    run_prefix,
+                    args.minutes,
+                    owner_user_id=int(args.owner_user_id),
+                    requester_user_id=int(args.requester_user_id),
+                )
+            else:
+                raise DriverRefusal(f"unsupported OT-TG-RETRY phase={phase!r}")
         else:
             raise DriverRefusal(f"no driver implemented for {args.scenario}")
 
@@ -3059,6 +3549,7 @@ async def _main_async_with_session(
             "OT-REQ-CROSS-FORWARD",
             "OT-CHANNEL-MARKER",
             "OT-SYNC-RECOVERY",
+            "OT-TG-RETRY",
         }:
             allow_cleanup = False
         if allow_cleanup:
