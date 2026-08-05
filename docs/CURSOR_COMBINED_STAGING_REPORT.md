@@ -658,14 +658,33 @@ edge run, Iran re-pins the offer into overtime. On foreign:
 
 Evidence: `tmp/combined-staging-evidence/stage16-driver-OT-REQ-CROSS-FORWARD.json`.
 
+### 12.16 Channel overtime marker (`OT-CHANNEL-MARKER`)
+
+Iran seeds a foreign-home bot owner; foreign creates a published channel offer,
+then lifecycle handoffs enqueue `overtime_channel_edit` and
+`final_tail_channel_edit`. The channel text gains `⏳` in overtime/final-tail
+and trade buttons are stripped in final-tail. A timezone comparison bug in
+`project_offer_channel_lifecycle` (aware feeder clock vs naive deadlines) was
+fixed so the handoff path can run.
+
+| Assertion | Result |
+| --- | --- |
+| Channel publication message id present | yes |
+| Marker hidden in normal phase | yes |
+| `overtime_channel_edit` enqueued + delivery job | yes |
+| Marker visible in overtime / final-tail | yes |
+| `final_tail_channel_edit` enqueued; buttons stripped | yes |
+
+Evidence: `tmp/combined-staging-evidence/stage16-driver-OT-CHANNEL-MARKER.json`.
+
 ### 12.4 Remaining work before `main`
 
 | Item | State |
 | --- | --- |
-| Mutating Stage 16 scenario drivers | 11 of 15 wired and passing live; `execute` → `execute_partial` once transport env is set |
+| Mutating Stage 16 scenario drivers | 12 of 15 wired and passing live; `execute` → `execute_partial` once transport env is set |
 | Overtime preferences | staging users remain at `0` after driver cleanup |
 | Coin inference flags | off by default, untouched |
 | Arvan CDN origin for `staging.gold-trade.ir` | broken, needs panel fix |
 | Sync parity comparison | `comparison_status: missing` — no parity run yet on this pair |
 | coin-price vs coin-commodity comparison | still owed per the handoff prompt |
-| Next drivers | channel / Telegram / UI reconnect axes |
+| Next drivers | `OT-SYNC-RECOVERY`, `OT-TG-RETRY`, `OT-UI-RECONNECT` |

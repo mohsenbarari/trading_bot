@@ -1,0 +1,66 @@
+{
+  "scenario": "OT-CHANNEL-MARKER",
+  "passed": true,
+  "seed": {
+    "mode": "run",
+    "scenario": "OT-CHANNEL-MARKER",
+    "run_prefix": "OTACC_CHAN_20260805164037",
+    "server_mode": "iran",
+    "started_at": "2026-08-05T16:40:38.268183+00:00",
+    "finished_at": "2026-08-05T16:40:40.665299+00:00",
+    "cleanup": {
+      "users_retired": 0
+    },
+    "phase": "seed",
+    "owner_user_id": 1452,
+    "owner_account_name": "OTACC_CHAN_20260805164037_owner",
+    "owner_home_server": "foreign",
+    "user_change_log_rows": 1,
+    "passed": true
+  },
+  "run": {
+    "mode": "run",
+    "scenario": "OT-CHANNEL-MARKER",
+    "run_prefix": "OTACC_CHAN_20260805164037",
+    "server_mode": "foreign",
+    "started_at": "2026-08-05T16:40:42.851215+00:00",
+    "finished_at": "2026-08-05T16:40:56.492373+00:00",
+    "cleanup": {
+      "users_retired": 0
+    },
+    "phase": "run",
+    "owner_user_id": 1452,
+    "preference_mirror_seconds": 2.01,
+    "offer_id": 289,
+    "offer_public_id": "ofr_XVRAkCLt9JHdFeWAmLK2SK0s",
+    "overtime_minutes_snapshot": 5,
+    "normal_lifetime_minutes": 2,
+    "channel_id": -1003367566585,
+    "telegram_message_id": 1785,
+    "publication_seconds": 3.052,
+    "normal_phase": "normal",
+    "normal_marker_hidden": true,
+    "overtime_phase": "overtime",
+    "overtime_channel_edit_enqueued": true,
+    "overtime_metadata_phase": "overtime",
+    "overtime_marker_visible": true,
+    "overtime_delivery_jobs": 1,
+    "final_tail_phase": "final_tail",
+    "final_tail_channel_edit_enqueued": true,
+    "final_tail_metadata_phase": "final_tail",
+    "final_tail_marker_visible": true,
+    "final_tail_trade_buttons_stripped": true,
+    "final_tail_delivery_jobs": 1,
+    "passed": true
+  },
+  "cleanup": {
+    "mode": "cleanup",
+    "run_prefix": "OTACC_CHAN_20260805164037",
+    "server_mode": "iran",
+    "started_at": "2026-08-05T16:40:58.896102+00:00",
+    "removed": {
+      "users_retired": 1
+    },
+    "passed": true
+  }
+}
