@@ -1103,6 +1103,20 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 
 **Exit criteria:** a production incident can be diagnosed from durable records without exposing requester identity before trade.
 
+#### Stage 14 completion notes
+
+**Status:** complete in code on `candidate/offer-overtime` at `b24c82df`.
+
+**Scope delivered.** Admin audit payloads now include `decided_by_user_id`, `telegram_message_id`, and `telegram_delivery_job_id`. Owner detail redacts requester/customer identity for pre-trade overtime rows and restores it only after `completed_trade`. Bounded overtime observability (`core/overtime_observability.py` + metrics) logs create/cancel/reject/timeout/invalidate and emits stale-preference + silent-owner signals without requester identity. `offer_overtime_reconciliation_service` dry-runs by default, surfaces findings on sync `/health`, and repairs only through `expire_decision` / `invalidate_*`. The offer-expiry cycle sweeps overdue presented decisions. Ops CLI: `scripts/report_offer_overtime_reconciliation.py`. Money-path allowlist accepts `overtime_pending` so trade admission no longer maps that result to `error`.
+
+**Affected components:** `core/offer_request_policy.py`, `api/routers/offers.py`, `api/routers/sync.py`, `core/overtime_observability.py`, `core/metrics.py`, `core/trading_observability.py`, `core/services/offer_overtime_reconciliation_service.py`, `core/services/offer_overtime_request_service.py`, `core/services/offer_overtime_preference_service.py`, `core/offer_expiry.py`, CLI script, focused tests.
+
+**Tests and results.** Backend unit green via `python3 -m unittest` for policy privacy, reconciliation dry-run/apply/skip, sync health overtime block, preference service, and overtime request service.
+
+**Deviations and known gaps.** First, no new append-only transition history table; diagnosis uses current ledger row + structured logs. Second, delivery-ref mismatch findings are detect-only (no auto rewrite of job ids). Third, Stage 1 real-database migration gate remains open for merge/deploy.
+
+**Next stage prerequisites.** Stage 15 may begin (full automated regression matrix).
+
 ### Stage 15 — Full Automated Regression Matrix
 
 **Goal:** prove the feature across all covered combinations before staging activation.
