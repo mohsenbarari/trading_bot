@@ -20,6 +20,8 @@ export interface CurrentUserSummary {
   telegram_linked?: boolean
   can_connect_telegram?: boolean
   telegram_link_denial_reason?: string | null
+  /** Iran-authoritative overtime minutes for newly created offers (0 disables). */
+  offer_overtime_minutes?: number
 }
 
 const CURRENT_USER_STORAGE_KEY = 'current_user_summary'
@@ -66,7 +68,22 @@ function normalizeCurrentUserSummary(raw: unknown): CurrentUserSummary | null {
     can_connect_telegram: user.can_connect_telegram === true,
     telegram_link_denial_reason:
       typeof user.telegram_link_denial_reason === 'string' ? user.telegram_link_denial_reason : null,
+    offer_overtime_minutes: normalizeOvertimeMinutes(user.offer_overtime_minutes),
   }
+}
+
+function normalizeOvertimeMinutes(value: unknown): number {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 10) return 0
+  return parsed
+}
+
+/** Eligible offer owners: not accountants, not tier-2 customers. */
+export function canEditOfferOvertimePreference(user: CurrentUserSummary | null | undefined): boolean {
+  if (!user?.role) return false
+  if (user.is_accountant === true) return false
+  if (user.customer_tier === 'tier2') return false
+  return true
 }
 
 export function readCachedCurrentUserSummary(): CurrentUserSummary | null {

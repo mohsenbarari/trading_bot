@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import BottomNav from './BottomNav.vue'
 import SessionApprovalModal from './SessionApprovalModal.vue'
+import OvertimeApprovalModal from './OvertimeApprovalModal.vue'
 import AppToasts from './AppToasts.vue'
 import { setupExpiryTimer, apiFetch } from '../utils/auth'
 import { useWebSocket } from '../composables/useWebSocket'
@@ -94,5 +95,6 @@ useNotificationRuntime({ connect, on, off, ensureSessionValidation })
 <template>
   <BottomNav />
   <SessionApprovalModal />
+  <OvertimeApprovalModal />
   <AppToasts />
 </template>

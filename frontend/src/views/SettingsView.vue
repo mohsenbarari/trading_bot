@@ -10,8 +10,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { apiFetch, forceLogout } from '../utils/auth'
 import { openTelegramLink, requestTelegramLink } from '../services/telegramLink'
 import TelegramConnectPanel from '../components/account/TelegramConnectPanel.vue'
+import OfferOvertimePreferencePanel from '../components/OfferOvertimePreferencePanel.vue'
 import { useChatFileHandler } from '../composables/chat/useChatFileHandler'
-import { currentUserSummary, primeCurrentUserSummary } from '../utils/currentUser'
+import {
+  canEditOfferOvertimePreference,
+  currentUserSummary,
+  primeCurrentUserSummary,
+} from '../utils/currentUser'
 import {
   AppButton,
   AppCard,
@@ -38,6 +43,7 @@ const telegramLinkBusy = ref(false)
 const telegramLinkError = ref<string | null>(null)
 
 const isAccountant = computed(() => currentUserSummary.value?.is_accountant === true)
+const showOvertimePreference = computed(() => canEditOfferOvertimePreference(currentUserSummary.value))
 const telegramConnected = computed(() => currentUserSummary.value?.telegram_linked === true)
 const showTelegramConnectSection = computed(() => (
   !isAccountant.value
@@ -207,6 +213,8 @@ watch(
         message="نشست‌های حسابدار و خروج از حساب توسط سرگروه مدیریت می‌شود. در این صفحه فقط حافظه و داده‌های دستگاه در دسترس است."
       />
 
+      <OfferOvertimePreferencePanel v-if="showOvertimePreference" class="settings-overtime-panel" />
+
       <AppSectionCard
         v-if="showTelegramConnectSection"
         class="settings-section-card"
@@ -363,6 +371,7 @@ watch(
 }
 
 .settings-role-notice,
+.settings-overtime-panel,
 .settings-section-card + .settings-section-card {
   margin-top: 0.75rem;
 }

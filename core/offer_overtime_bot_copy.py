@@ -66,6 +66,9 @@ M9_WEBAPP_OVERTIME_HELPER = (
 )
 M21_WEBAPP_REQUESTER_QUEUED = "در حال ارسال درخواست..."
 M22_WEBAPP_REQUESTER_COUNTDOWN_START = "۰۰:۳۰"
+M35_WEBAPP_OWNER_TITLE = "درخواست معامله در وقت اضافه"
+M36_WEBAPP_OWNER_APPROVE_BUTTON = "تأیید معامله"
+M36_WEBAPP_OWNER_REJECT_BUTTON = "رد درخواست"
 
 # --- Requester status and errors (M10–M20b) ---
 

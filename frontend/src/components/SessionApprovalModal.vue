@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, watch } from 'vue'
 import { X, Check, Smartphone, ShieldAlert, Image } from 'lucide-vue-next'
+import { setSessionApprovalBlocking } from '../composables/authenticatedOverlayPriority'
 import { useSessionApprovalRuntime } from '../composables/useSessionApprovalRuntime'
 
 const {
@@ -19,6 +20,18 @@ const {
 
 const isRecoveryPrompt = computed(() => Boolean(pendingRecovery.value))
 const isIdentitySubmittedPrompt = computed(() => pendingRecovery.value?.prompt_type === 'identity_submitted')
+
+watch(
+  showModal,
+  (active) => {
+    setSessionApprovalBlocking(Boolean(active))
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(() => {
+  setSessionApprovalBlocking(false)
+})
 </script>
 
 <template>
