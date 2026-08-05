@@ -36,16 +36,64 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.market_intelligence.market_contracts import MarketObservation, derive_event_key, normalize_utc
-from core.market_intelligence.market_store import connect_market_store, initialize_market_store, upsert_observation
+from core.market_intelligence.market_store import (
+    _storage_values,
+    connect_market_store,
+    initialize_market_store,
+)
 
 
 BRIDGE_VERSION = "staging-market-input-bridge-v1"
 STATE_VERSION = 1
-BATCH_SIZE = 5000
+BATCH_SIZE = 2000
 _CONDITIONAL = re.compile(r"فیش|شرط|مهلت|واریز|تسویه|چک|شرکت|کدs*ملی|یکجا|فوری")
 _ALLOWED_LEGACY_SOURCES = frozenset({"MELTED_AGGREGATE", "MELTED_FLOW", "USD_HERAT", "XAUUSD"})
 _ALLOWED_EXTERNAL_INSTRUMENTS = frozenset({"USDT_IRT", "IME_GOLD_BAR", "IME_GOLD_COIN_IMAM"})
 _ALLOWED_EXTERNAL_QUOTES = frozenset({"MID", "LAST", "CLOSE", "BID", "ASK"})
+
+_UPSERT_SQL = """
+INSERT INTO market_observations(
+    event_key, source_code, source_family, event_time_utc,
+    available_at_utc, tehran_datetime, tehran_date, tehran_minute,
+    tehran_weekday, instrument, market_label, settlement_term,
+    trade_form, event_type, side, price_value, price_num, price_unit,
+    currency, quantity_value, quantity_num, quantity_unit,
+    parse_confidence, parser_version, quality_state,
+    quality_policy_version, is_conditional, attributes_json,
+    inserted_at_utc
+) VALUES (
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+)
+ON CONFLICT(event_key) DO UPDATE SET
+    source_code = excluded.source_code,
+    source_family = excluded.source_family,
+    event_time_utc = excluded.event_time_utc,
+    available_at_utc = excluded.available_at_utc,
+    tehran_datetime = excluded.tehran_datetime,
+    tehran_date = excluded.tehran_date,
+    tehran_minute = excluded.tehran_minute,
+    tehran_weekday = excluded.tehran_weekday,
+    instrument = excluded.instrument,
+    market_label = excluded.market_label,
+    settlement_term = excluded.settlement_term,
+    trade_form = excluded.trade_form,
+    event_type = excluded.event_type,
+    side = excluded.side,
+    price_value = excluded.price_value,
+    price_num = excluded.price_num,
+    price_unit = excluded.price_unit,
+    currency = excluded.currency,
+    quantity_value = excluded.quantity_value,
+    quantity_num = excluded.quantity_num,
+    quantity_unit = excluded.quantity_unit,
+    parse_confidence = excluded.parse_confidence,
+    parser_version = excluded.parser_version,
+    quality_state = excluded.quality_state,
+    quality_policy_version = excluded.quality_policy_version,
+    is_conditional = excluded.is_conditional,
+    attributes_json = excluded.attributes_json,
+    inserted_at_utc = excluded.inserted_at_utc
+"""
 
 
 class BridgeError(RuntimeError):
@@ -74,7 +122,7 @@ def _read_only(path: Path) -> sqlite3.Connection:
     if not path.is_file():
         raise BridgeError(f"source_database_unavailable:{path}")
     try:
-        connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True, timeout=5)
+        connection = sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True, timeout=60)
     except sqlite3.Error as exc:
         raise BridgeError("source_database_open_failed") from exc
     connection.row_factory = sqlite3.Row
@@ -384,14 +432,12 @@ def _save_state(path: Path, state: Mapping[str, Any]) -> None:
 
 
 def _write_batch(destination: sqlite3.Connection, observations: Iterable[MarketObservation]) -> int:
-    count = 0
-    for observation in observations:
-        upsert_observation(destination, observation)
-        count += 1
-        if count % BATCH_SIZE == 0:
-            destination.commit()
+    values = [_storage_values(observation.normalized()) for observation in observations]
+    if not values:
+        return 0
+    destination.executemany(_UPSERT_SQL, values)
     destination.commit()
-    return count
+    return len(values)
 
 
 def _write_source_rows(
@@ -404,7 +450,7 @@ def _write_source_rows(
 ) -> tuple[int, int]:
     """Write a source in bounded transactions and return count/max-id."""
 
-    count = 0
+    values: list[tuple[object, ...]] = []
     latest = 0
     for row in rows:
         latest = int(row["id"])
@@ -414,11 +460,11 @@ def _write_source_rows(
             if str(exc) in skip_errors:
                 continue
             raise
-        upsert_observation(destination, observation)
-        count += 1
-        if count % BATCH_SIZE == 0:
-            destination.commit()
-    destination.commit()
+        values.append(_storage_values(observation.normalized()))
+    if values:
+        destination.executemany(_UPSERT_SQL, values)
+        destination.commit()
+    count = len(values)
     return count, latest
 
 
@@ -490,7 +536,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             # The public/gold collectors are intentionally kept online.  A
             # bounded bridge write waits for their short WAL transaction
             # rather than dropping the whole backfill on a transient lock.
-            destination.execute("PRAGMA busy_timeout=60000")
+            destination.execute("PRAGMA busy_timeout=300000")
             if args.legacy_market_db:
                 while True:
                     # Close the source read transaction before touching the

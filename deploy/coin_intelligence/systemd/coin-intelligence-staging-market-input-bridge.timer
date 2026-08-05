@@ -3,7 +3,7 @@ Description=Refresh the staging Market Store input bridge every 30 seconds
 
 [Timer]
 OnBootSec=3min
-OnUnitActiveSec=30s
+OnUnitInactiveSec=30s
 AccuracySec=10s
 Persistent=true
 Unit=coin-intelligence-staging-market-input-bridge.service
