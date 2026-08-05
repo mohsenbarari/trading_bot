@@ -478,10 +478,15 @@ So the only `users` difference is production versus staging, and it is the expec
 consequence of staging having taken the combined migration. The two staging peers
 match each other exactly.
 
+The Iran production stack (`trading_bot_db` on the Iran host, `SERVER_MODE=iran`)
+was checked the same way and is equally clean: head `f2c7d8e9a0b1`, 6,864
+change-log rows with zero unsynced and zero quarantined, 42 `users` columns, no
+overtime column and no coin tables. Both production peers therefore agree with
+each other and neither was touched.
+
 Worth carrying into Stage 17: production is **23 revisions** behind the combined
 head, not five. Promoting this line to production is a much larger migration step
-than the overtime and coin chains alone, and needs its own plan. The Iran
-production deployment was not inspected; it runs a separate stack on the Iran host.
+than the overtime and coin chains alone, and needs its own plan.
 
 ### 12.4 Remaining work before `main`
 
