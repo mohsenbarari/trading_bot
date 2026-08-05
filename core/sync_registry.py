@@ -233,7 +233,8 @@ _SYNC_REGISTRY: dict[str, SyncRegistryEntry] = {
             "Durable request ledger; public offer-link views must apply field-level visibility policy. "
             "Overtime nonterminal rows may UPDATE many times under monotonic version_id; "
             "overtime terminal statuses are immutable once applied. "
-            "telegram_delivery_job_id is local-only and must not participate in parity."
+            "telegram_delivery_job_id and requester_status_outbox_id are local-only "
+            "and must not participate in parity."
         ),
     ),
     "offers": _entry(

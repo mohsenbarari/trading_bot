@@ -354,12 +354,14 @@ async def build_user_panel_navigation_keyboard(
     *,
     standard_actions: bool = False,
     show_support: bool = False,
+    show_overtime_preference: bool = False,
 ) -> ReplyKeyboardMarkup:
     return await decorate_navigation_keyboard(
         get_user_panel_keyboard(
             getattr(user, "role", None),
             standard_actions=standard_actions,
             show_support=show_support,
+            show_overtime_preference=show_overtime_preference,
         ),
         user,
     )

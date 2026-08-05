@@ -236,6 +236,9 @@ class OfferRequest(Base):
         nullable=True,
     )
     telegram_message_id = Column(BigInteger, nullable=True)
+    # Local-only receipt for the requester's private status message (queue mode).
+    # Used to edit M10→M11 and terminal texts without a second send.
+    requester_status_outbox_id = Column(Integer, nullable=True)
 
     received_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     decided_at = Column(DateTime(timezone=True), nullable=True)

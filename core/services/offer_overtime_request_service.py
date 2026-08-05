@@ -732,6 +732,11 @@ async def promote_next_for_owner(
                 load_offer=load_offer,
                 flush=flush,
             )
+        from core.services.telegram_overtime_requester_status_service import (
+            schedule_requester_status_presented_edit,
+        )
+
+        await schedule_requester_status_presented_edit(db, candidate)
         return candidate
 
     candidate.presented_at = current
@@ -742,6 +747,11 @@ async def promote_next_for_owner(
     )
     if flush:
         await db.flush()
+    from core.services.telegram_overtime_requester_status_service import (
+        schedule_requester_status_presented_edit,
+    )
+
+    await schedule_requester_status_presented_edit(db, candidate)
     return candidate
 
 
@@ -765,6 +775,11 @@ async def mark_presented(
     _apply_overtime_transition(ledger, new_status=OfferRequestStatus.OVERTIME_PRESENTED)
     if flush:
         await db.flush()
+    from core.services.telegram_overtime_requester_status_service import (
+        schedule_requester_status_presented_edit,
+    )
+
+    await schedule_requester_status_presented_edit(db, ledger)
     return ledger
 
 

@@ -62,6 +62,8 @@ from core.telegram_delivery_runtime_policy import (
 )
 from bot.utils.customer_display import attach_customer_management_names, user_display_name
 from bot.states import CustomerInvite
+from core.offer_overtime_bot_copy import M1_OVERTIME_PREFERENCE_BUTTON
+from core.services.offer_overtime_preference_service import evaluate_overtime_preference_eligibility
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -130,6 +132,12 @@ async def _reject_settings_message_if_not_authoritative(
     return True
 
 
+async def _user_panel_show_overtime_preference(user: User) -> bool:
+    async with AsyncSessionLocal() as session:
+        eligibility = await evaluate_overtime_preference_eligibility(session, user)
+    return eligibility.allowed
+
+
 async def handoff_navigation_button(message: types.Message, state: FSMContext, user: Optional[User]) -> bool:
     """Allow reply-keyboard navigation buttons to escape stale FSM states."""
     if not user:
@@ -157,6 +165,13 @@ async def handoff_navigation_button(message: types.Message, state: FSMContext, u
         start_search_user,
     )
     from bot.handlers.trade_history import show_my_trade_history
+
+    if text == M1_OVERTIME_PREFERENCE_BUTTON:
+        from bot.handlers.offer_overtime_preference import start_offer_overtime_preference
+
+        await state.clear()
+        await start_offer_overtime_preference(message, state, user)
+        return True
 
     navigation_actions = {
         "/panel": lambda: show_my_profile_and_change_keyboard(message, state, user),
@@ -220,6 +235,7 @@ async def show_my_profile_and_change_keyboard(message: types.Message, state: FSM
 
     async with AsyncSessionLocal() as session:
         can_use_customer_panel = await _can_use_customer_panel(session, user)
+        show_overtime_preference = await _user_panel_show_overtime_preference(user)
 
     if can_use_customer_panel:
         show_support = user.role == UserRole.STANDARD
@@ -233,6 +249,7 @@ async def show_my_profile_and_change_keyboard(message: types.Message, state: FSM
                 user,
                 standard_actions=True,
                 show_support=show_support,
+                show_overtime_preference=show_overtime_preference,
             ),
             set_persistent_anchor=True,
         )
@@ -244,6 +261,8 @@ async def show_my_profile_and_change_keyboard(message: types.Message, state: FSM
         await attach_customer_management_names(session, [user])
 
     profile_link = f"https://t.me/{settings.bot_username}?start=profile_{user.id}"
+
+    show_overtime_preference = await _user_panel_show_overtime_preference(user)
 
     profile_text = (
         f"👤 **پروفایل شما**\n\n"
@@ -261,7 +280,10 @@ async def show_my_profile_and_change_keyboard(message: types.Message, state: FSM
         profile_text,
         source_key="panel-user-profile-menu",
         parse_mode="Markdown",
-        reply_markup=await build_user_panel_navigation_keyboard(user),
+        reply_markup=await build_user_panel_navigation_keyboard(
+            user,
+            show_overtime_preference=show_overtime_preference,
+        ),
         set_persistent_anchor=True,
     )
     if not queue_mode:

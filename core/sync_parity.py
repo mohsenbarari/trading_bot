@@ -90,6 +90,7 @@ LOCAL_ONLY_FIELDS_BY_TABLE: dict[str, set[str]] = {
         "resulting_trade_id",
         "customer_relation_id",
         "telegram_delivery_job_id",
+        "requester_status_outbox_id",
     },
     "trades": {"offer_id", "commodity_id"},
     "offer_publication_states": {

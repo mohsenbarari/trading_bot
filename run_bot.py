@@ -20,6 +20,8 @@ from bot.handlers import (
     commodity_catalog,
     block_manage,
     link_account, # 👈 Added
+    offer_overtime_preference,
+    offer_overtime_callbacks,
     default
 )
 from core.db import init_db, AsyncSessionLocal
@@ -235,6 +237,8 @@ async def main():
     dp.include_router(admin_commodities.router)
     dp.include_router(admin_users.router)
     dp.include_router(block_manage.router)
+    dp.include_router(offer_overtime_preference.router)
+    dp.include_router(offer_overtime_callbacks.router)
     
     # Default router should be last
     dp.include_router(default.router)

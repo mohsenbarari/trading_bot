@@ -83,6 +83,7 @@ from core.services.offer_overtime_request_service import (
     OvertimeRequestError,
     OvertimeRequestErrorCode,
     OvertimeRequestResult,
+    cancel_by_requester,
     claim_owner_approval,
     create_overtime_request,
     invalidate_request,
@@ -4631,6 +4632,44 @@ async def reject_overtime_request(
             db,
             ledger,
             decided_by_user_id=int(context.owner_user.id),
+            now=datetime.utcnow(),
+            normal_lifetime_minutes=int(getattr(ts, "offer_expiry_minutes", 0) or 0),
+        )
+    except OvertimeRequestError as exc:
+        _raise_overtime_request_http_error(exc)
+    await db.commit()
+    return _overtime_request_public_payload(ledger, duplicate_replay=False)
+
+
+@router.post("/overtime-requests/{request_public_id}/cancel", status_code=status.HTTP_200_OK)
+async def cancel_overtime_request(
+    request_public_id: str,
+    db: AsyncSession = Depends(get_db),
+    context: EffectiveOwnerActor = Depends(get_effective_owner_actor_context),
+):
+    """Requester cancellation of a nonterminal overtime request (home only)."""
+    _ensure_accountant_market_access_allowed(context)
+    ledger = await load_overtime_request_by_public_id(
+        db,
+        request_public_id,
+        for_update=True,
+    )
+    if ledger is None or not _is_overtime_offer_request(ledger):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="درخواست وقت اضافه یافت نشد.")
+    home = normalize_server(getattr(ledger, "request_home_server", None), current_server())
+    if home != current_server():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="این درخواست فقط روی سرور مرجع لفظ قابل لغو است.",
+        )
+    from core.trading_settings import get_trading_settings_async
+
+    ts = await get_trading_settings_async()
+    try:
+        await cancel_by_requester(
+            db,
+            ledger,
+            requester_user_id=int(context.owner_user.id),
             now=datetime.utcnow(),
             normal_lifetime_minutes=int(getattr(ts, "offer_expiry_minutes", 0) or 0),
         )
