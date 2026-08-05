@@ -839,6 +839,20 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 
 **Exit criteria:** approved overtime requests produce the same authoritative trade result as an equivalent valid normal request.
 
+#### Stage 5 completion notes
+
+**Status:** complete in code on `candidate/offer-overtime` at `STAGE5_SHA`.
+
+**Scope delivered.** `_execute_trade_authoritatively` classifies intake after the offer row lock: `AUTOMATIC` keeps the DIRECT ledger + immediate commit path; `APPROVAL` calls `create_overtime_request` (no DIRECT ledger, shared idempotency key preserved) and returns HTTP `202` with the overtime request payload; `REJECTED` still rejects via the DIRECT ledger. `_is_offer_expired_for_trade` now means intake `REJECTED` only. Owner surfaces `POST /trades/overtime-requests/{request_public_id}/approve` and `/reject` were added on the offer home server: approve runs `claim_owner_approval` then re-enters the same authoritative validation/commit core with `overtime_approval_ledger`, finalizes via `record_completed_trade`, and sets `offer.overtime_trade_committed`. Approval-time business failures invalidate the overtime row and promote the next queued request instead of writing DIRECT reject statuses. Idempotent replay recognizes in-flight and terminal overtime rows for the same key.
+
+**Affected components:** `api/routers/trades.py`, tests `tests/test_trades_router_overtime_integration.py`, plus regression coverage in the existing authoritative trade suites.
+
+**Tests and results.** Targeted suites green via `make test-unit MODULES="tests.test_trades_router_overtime_integration tests.test_trades_router_authoritative_guards tests.test_trades_router_authoritative_success tests.test_offer_lifecycle"` (59 tests), including APPROVAL→202 create, idempotency required on overtime create, and REJECTED-only expiry helper semantics.
+
+**Deviations and known gaps.** First, WebApp/Bot UI for the approval prompt and requester status edits remain Stages 9–12; this stage ships the authoritative create/approve/reject contracts those surfaces will call. Second, Telegram delivery of bot-origin `OVERTIME_DELIVERING` rows remains Stage 8. Third, full customer/lot/tier-2 approval matrices beyond the routed integration tests stay available for follow-up under the same approve endpoint. Fourth, the Stage 1 real-database migration gate remains open for merge/deploy.
+
+**Next stage prerequisites.** Stage 6 may begin. It must invalidate nonterminal overtime rows from every terminal offer/account event and enforce final-tail acceptance rules using the occupying statuses Stage 4/5 already write.
+
 ### Stage 6 — Terminal Events, Final Tail, and Queue Release
 
 **Goal:** ensure no pending request survives an invalid offer or account.
