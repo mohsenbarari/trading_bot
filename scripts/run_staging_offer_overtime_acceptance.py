@@ -81,6 +81,7 @@ WIRED_FOREIGN_DRIVER_SCENARIOS = (
     "OT-OFFER-BOT-ORIGIN",
     "OT-REQ-FOREIGN-TO-FOREIGN",
     "OT-REQ-CROSS-FORWARD",
+    "OT-CHANNEL-MARKER",
 )
 WIRED_DRIVER_SCENARIOS = WIRED_IRAN_DRIVER_SCENARIOS + WIRED_FOREIGN_DRIVER_SCENARIOS
 
@@ -765,6 +766,20 @@ def run_req_foreign_to_foreign_driver(
     )
 
 
+def run_channel_marker_driver(
+    args: argparse.Namespace, run_prefix: str
+) -> dict[str, Any]:
+    del args
+    return run_two_peer_foreign_driver(
+        scenario="OT-CHANNEL-MARKER",
+        run_prefix=run_prefix,
+        minutes=5,
+        foreign_extra_from_seed=lambda seed: (
+            f"--phase run --owner-user-id {int(seed['owner_user_id'])} --no-cleanup-after"
+        ),
+    )
+
+
 def run_req_cross_forward_driver(
     args: argparse.Namespace, run_prefix: str
 ) -> dict[str, Any]:
@@ -938,6 +953,8 @@ def run_wired_drivers(args: argparse.Namespace) -> list[dict[str, Any]]:
             result = run_req_foreign_to_foreign_driver(args, run_prefix)
         elif scenario == "OT-REQ-CROSS-FORWARD":
             result = run_req_cross_forward_driver(args, run_prefix)
+        elif scenario == "OT-CHANNEL-MARKER":
+            result = run_channel_marker_driver(args, run_prefix)
         else:
             result = {
                 "id": scenario,

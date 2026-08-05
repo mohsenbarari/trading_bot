@@ -46,6 +46,7 @@ SCENARIOS = (
     "OT-REQ-FOREIGN-TO-FOREIGN",
     "OT-FINAL-TAIL",
     "OT-REQ-CROSS-FORWARD",
+    "OT-CHANNEL-MARKER",
 )
 # Staging Iran currently carries a single commodity; keep the driver pinned to it.
 DEFAULT_COMMODITY_ID = 1
@@ -57,6 +58,8 @@ BOT_FORWARD_RETRY_TIMEOUT_SECONDS = 60.0
 BOT_FORWARD_RETRY_POLL_SECONDS = 3.0
 OFFER_MIRROR_TIMEOUT_SECONDS = 60.0
 OFFER_MIRROR_POLL_SECONDS = 2.0
+CHANNEL_PUBLICATION_TIMEOUT_SECONDS = 90.0
+CHANNEL_PUBLICATION_POLL_SECONDS = 3.0
 
 
 class DriverRefusal(RuntimeError):
@@ -328,6 +331,41 @@ async def _await_user_by_id(
         await asyncio.sleep(PREFERENCE_MIRROR_POLL_SECONDS)
         session.expire_all()
     return None
+
+
+async def _await_channel_publication(
+    session,
+    offer_public_id: str,
+    *,
+    channel_id: int,
+    timeout_seconds: float = CHANNEL_PUBLICATION_TIMEOUT_SECONDS,
+):
+    """Wait until the foreign channel publication state carries a Telegram message id."""
+    from models.offer_publication_state import (
+        OfferPublicationState,
+        OfferPublicationSurface,
+    )
+
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        state = (
+            await session.execute(
+                select(OfferPublicationState).where(
+                    OfferPublicationState.offer_public_id == offer_public_id,
+                    OfferPublicationState.surface
+                    == OfferPublicationSurface.TELEGRAM_CHANNEL,
+                    OfferPublicationState.telegram_message_id.is_not(None),
+                    OfferPublicationState.telegram_chat_id == int(channel_id),
+                )
+            )
+        ).scalar_one_or_none()
+        if state is not None:
+            return state, round(
+                timeout_seconds - (deadline - time.monotonic()), 3
+            )
+        await asyncio.sleep(CHANNEL_PUBLICATION_POLL_SECONDS)
+        session.expire_all()
+    return None, timeout_seconds
 
 
 async def _save_bot_preference_with_user_sync_retry(
@@ -1912,6 +1950,295 @@ async def _scenario_req_cross_forward_run(
     }
 
 
+async def _scenario_channel_marker_seed(session, run_prefix: str) -> dict[str, object]:
+    """Iran seed: foreign-home bot owner for channel lifecycle marker coverage."""
+    return await _scenario_offer_bot_origin_seed(session, run_prefix)
+
+
+async def _scenario_channel_marker_run(
+    session,
+    run_prefix: str,
+    minutes: int,
+    *,
+    owner_user_id: int,
+) -> dict[str, object]:
+    """Foreign channel: overtime/final-tail edits enqueue with the ⏳ marker."""
+    from core.config import settings
+    from core.offer_lifecycle import OfferLifecyclePhase
+    from core.services.telegram_offer_channel_service import (
+        CHANNEL_LIFECYCLE_METADATA_KEY,
+        TELEGRAM_OFFER_OVERTIME_MARKER,
+        build_offer_channel_message,
+        build_offer_channel_reply_markup,
+        offer_channel_overtime_marker_visible,
+        project_offer_channel_lifecycle,
+    )
+    from core.services.telegram_offer_queue_service import (
+        enqueue_offer_lifecycle_channel_handoffs,
+    )
+    from core.telegram_delivery_queue_contract import TelegramDeliveryAction
+    from models.offer_publication_state import OfferPublicationState
+    from models.telegram_delivery_job import TelegramDeliveryJobRecord
+
+    if current_server() != "foreign":
+        raise DriverRefusal("OT-CHANNEL-MARKER run phase only runs on the foreign peer")
+    if minutes <= 0:
+        raise DriverRefusal("OT-CHANNEL-MARKER requires a positive overtime preference")
+
+    channel_id = int(getattr(settings, "channel_id", 0) or 0)
+    if channel_id == 0:
+        raise DriverRefusal("staging foreign channel_id is not configured")
+
+    owner = await _await_user_by_id(session, owner_user_id)
+    if owner is None:
+        raise DriverRefusal(
+            f"Iran-seeded owner_user_id={owner_user_id} did not mirror to foreign"
+        )
+    if str(owner.home_server) != "foreign":
+        raise DriverRefusal(
+            f"owner_user_id={owner_user_id} home_server={owner.home_server!r}, expected foreign"
+        )
+    owner_id = int(owner.id)
+
+    await _save_bot_preference_with_user_sync_retry(session, owner, minutes)
+    mirrored, mirror_seconds = await _await_preference_minutes(session, owner_id, minutes)
+    if not mirrored:
+        raise DriverRefusal(
+            f"foreign preference mirror for user {owner_id} did not converge to {minutes}"
+        )
+    await session.refresh(owner)
+
+    offer, normal_minutes = await _create_bot_offer(
+        session,
+        owner,
+        notes=f"{run_prefix} channel marker",
+    )
+    offer_id = int(offer.id)
+    offer_public_id = str(offer.offer_public_id)
+    snapshot = int(offer.overtime_minutes_snapshot)
+    if snapshot != minutes:
+        raise DriverRefusal(
+            f"offer snapshot {snapshot} did not match preference {minutes}"
+        )
+
+    pub_state, publication_seconds = await _await_channel_publication(
+        session,
+        offer_public_id,
+        channel_id=channel_id,
+    )
+    if pub_state is None:
+        raise DriverRefusal(
+            f"channel publication for {offer_public_id} did not receive a message id"
+        )
+    telegram_message_id = int(pub_state.telegram_message_id)
+    # Publication polling expires the session; reload before channel renderers.
+    offer = await _reload_offer(session, offer_id)
+
+    # Normal phase must not show the overtime marker on an active channel post.
+    normal_projection = project_offer_channel_lifecycle(
+        offer,
+        normal_lifetime_minutes=normal_minutes,
+    )
+    normal_message = build_offer_channel_message(
+        offer,
+        lifecycle_phase=normal_projection.phase.value,
+    )
+    normal_marker_hidden = (
+        normal_projection.phase == OfferLifecyclePhase.NORMAL
+        and TELEGRAM_OFFER_OVERTIME_MARKER not in normal_message
+    )
+
+    await _backdate_offer_into_overtime(session, offer, normal_minutes=normal_minutes)
+    offer = await _reload_offer(session, offer_id)
+    overtime_projection = project_offer_channel_lifecycle(
+        offer,
+        normal_lifetime_minutes=normal_minutes,
+    )
+    overtime_handoffs = await enqueue_offer_lifecycle_channel_handoffs(
+        session,
+        current_server=current_server(),
+        expected_channel_id=channel_id,
+        offer_expiry_minutes=normal_minutes,
+        limit=100,
+    )
+    await session.commit()
+    offer = await _reload_offer(session, offer_id)
+    overtime_projection = project_offer_channel_lifecycle(
+        offer,
+        normal_lifetime_minutes=normal_minutes,
+    )
+    overtime_ours = [
+        item
+        for item in overtime_handoffs
+        if str(item.offer_public_id) == offer_public_id
+    ]
+    overtime_handoff = overtime_ours[0] if overtime_ours else None
+    overtime_action = (
+        str(getattr(overtime_handoff.action, "value", overtime_handoff.action))
+        if overtime_handoff is not None and overtime_handoff.action is not None
+        else None
+    )
+    overtime_enqueued = bool(
+        overtime_handoff is not None
+        and overtime_handoff.queue_result is not None
+        and overtime_handoff.skipped_reason is None
+        and overtime_action == TelegramDeliveryAction.OVERTIME_CHANNEL_EDIT.value
+    )
+
+    pub_state = (
+        await session.execute(
+            select(OfferPublicationState).where(
+                OfferPublicationState.offer_public_id == offer_public_id
+            )
+        )
+    ).scalar_one()
+    overtime_metadata_phase = str(
+        (pub_state.state_metadata or {}).get(CHANNEL_LIFECYCLE_METADATA_KEY) or ""
+    )
+    overtime_message = build_offer_channel_message(
+        offer,
+        lifecycle_phase=overtime_projection.phase.value,
+    )
+    overtime_marker_visible = (
+        overtime_projection.phase == OfferLifecyclePhase.OVERTIME
+        and offer_channel_overtime_marker_visible(
+            offer,
+            lifecycle_phase=overtime_projection.phase.value,
+        )
+        and TELEGRAM_OFFER_OVERTIME_MARKER in overtime_message
+    )
+
+    overtime_jobs = (
+        await session.execute(
+            select(func.count())
+            .select_from(TelegramDeliveryJobRecord)
+            .where(
+                TelegramDeliveryJobRecord.source_natural_id == offer_public_id,
+                TelegramDeliveryJobRecord.action_kind
+                == TelegramDeliveryAction.OVERTIME_CHANNEL_EDIT,
+            )
+        )
+    ).scalar_one()
+
+    await _backdate_offer_past_final(
+        session,
+        offer,
+        normal_minutes=normal_minutes,
+        overtime_minutes=snapshot,
+    )
+    offer = await _reload_offer(session, offer_id)
+    final_projection = project_offer_channel_lifecycle(
+        offer,
+        normal_lifetime_minutes=normal_minutes,
+    )
+    final_handoffs = await enqueue_offer_lifecycle_channel_handoffs(
+        session,
+        current_server=current_server(),
+        expected_channel_id=channel_id,
+        offer_expiry_minutes=normal_minutes,
+        limit=100,
+    )
+    await session.commit()
+    offer = await _reload_offer(session, offer_id)
+    final_projection = project_offer_channel_lifecycle(
+        offer,
+        normal_lifetime_minutes=normal_minutes,
+    )
+    final_ours = [
+        item
+        for item in final_handoffs
+        if str(item.offer_public_id) == offer_public_id
+    ]
+    final_handoff = final_ours[0] if final_ours else None
+    final_action = (
+        str(getattr(final_handoff.action, "value", final_handoff.action))
+        if final_handoff is not None and final_handoff.action is not None
+        else None
+    )
+    final_enqueued = bool(
+        final_handoff is not None
+        and final_handoff.queue_result is not None
+        and final_handoff.skipped_reason is None
+        and final_action == TelegramDeliveryAction.FINAL_TAIL_CHANNEL_EDIT.value
+    )
+
+    pub_state = (
+        await session.execute(
+            select(OfferPublicationState).where(
+                OfferPublicationState.offer_public_id == offer_public_id
+            )
+        )
+    ).scalar_one()
+    final_metadata_phase = str(
+        (pub_state.state_metadata or {}).get(CHANNEL_LIFECYCLE_METADATA_KEY) or ""
+    )
+    final_message = build_offer_channel_message(
+        offer,
+        lifecycle_phase=final_projection.phase.value,
+    )
+    final_marker_visible = (
+        final_projection.phase == OfferLifecyclePhase.FINAL_TAIL
+        and TELEGRAM_OFFER_OVERTIME_MARKER in final_message
+    )
+    final_markup = build_offer_channel_reply_markup(
+        offer,
+        accepts_new_public_interaction=final_projection.accepts_new_public_interaction,
+    )
+    final_jobs = (
+        await session.execute(
+            select(func.count())
+            .select_from(TelegramDeliveryJobRecord)
+            .where(
+                TelegramDeliveryJobRecord.source_natural_id == offer_public_id,
+                TelegramDeliveryJobRecord.action_kind
+                == TelegramDeliveryAction.FINAL_TAIL_CHANNEL_EDIT,
+            )
+        )
+    ).scalar_one()
+
+    passed = (
+        snapshot == minutes
+        and telegram_message_id > 0
+        and normal_marker_hidden
+        and overtime_enqueued
+        and overtime_metadata_phase == OfferLifecyclePhase.OVERTIME.value
+        and overtime_marker_visible
+        and int(overtime_jobs) > 0
+        and final_enqueued
+        and final_metadata_phase == OfferLifecyclePhase.FINAL_TAIL.value
+        and final_marker_visible
+        and final_markup is None
+        and int(final_jobs) > 0
+    )
+
+    return {
+        "phase": "run",
+        "owner_user_id": owner_id,
+        "preference_mirror_seconds": mirror_seconds,
+        "offer_id": offer_id,
+        "offer_public_id": offer_public_id,
+        "overtime_minutes_snapshot": snapshot,
+        "normal_lifetime_minutes": normal_minutes,
+        "channel_id": channel_id,
+        "telegram_message_id": telegram_message_id,
+        "publication_seconds": publication_seconds,
+        "normal_phase": normal_projection.phase.value,
+        "normal_marker_hidden": normal_marker_hidden,
+        "overtime_phase": overtime_projection.phase.value,
+        "overtime_channel_edit_enqueued": overtime_enqueued,
+        "overtime_metadata_phase": overtime_metadata_phase,
+        "overtime_marker_visible": overtime_marker_visible,
+        "overtime_delivery_jobs": int(overtime_jobs),
+        "final_tail_phase": final_projection.phase.value,
+        "final_tail_channel_edit_enqueued": final_enqueued,
+        "final_tail_metadata_phase": final_metadata_phase,
+        "final_tail_marker_visible": final_marker_visible,
+        "final_tail_trade_buttons_stripped": final_markup is None,
+        "final_tail_delivery_jobs": int(final_jobs),
+        "passed": passed,
+    }
+
+
 async def _scenario_final_tail(
     session,
     run_prefix: str,
@@ -2263,6 +2590,24 @@ async def _main_async_with_session(
                 raise DriverRefusal(
                     f"unsupported OT-REQ-CROSS-FORWARD phase={phase!r}"
                 )
+        elif args.scenario == "OT-CHANNEL-MARKER":
+            phase = (args.phase or "run").strip().lower()
+            if phase == "seed":
+                outcome = await _scenario_channel_marker_seed(session, run_prefix)
+            elif phase == "run":
+                if args.owner_user_id is None:
+                    raise DriverRefusal(
+                        "OT-CHANNEL-MARKER run phase requires --owner-user-id "
+                        "from the Iran seed phase"
+                    )
+                outcome = await _scenario_channel_marker_run(
+                    session,
+                    run_prefix,
+                    args.minutes,
+                    owner_user_id=int(args.owner_user_id),
+                )
+            else:
+                raise DriverRefusal(f"unsupported OT-CHANNEL-MARKER phase={phase!r}")
         else:
             raise DriverRefusal(f"no driver implemented for {args.scenario}")
 
@@ -2274,6 +2619,7 @@ async def _main_async_with_session(
             "OT-OFFER-BOT-ORIGIN",
             "OT-REQ-FOREIGN-TO-FOREIGN",
             "OT-REQ-CROSS-FORWARD",
+            "OT-CHANNEL-MARKER",
         }:
             allow_cleanup = False
         if allow_cleanup:
