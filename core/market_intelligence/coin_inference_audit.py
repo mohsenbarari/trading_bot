@@ -25,7 +25,9 @@ from .market_contracts import normalize_utc
 
 _DECISION_KEY_PATTERN = re.compile(r"^[a-f0-9]{64}$")
 _REASON_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,95}$")
+_SOURCE_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 _SOURCE_SURFACES = frozenset({"WEBAPP", "TELEGRAM_BOT", "INTERNAL"})
+_MARKET_REGIMES = frozenset({"NORMAL", "UP", "DOWN", "VOLATILE", "UNKNOWN"})
 
 
 class CoinInferenceAuditConflictError(ValueError):
@@ -45,6 +47,10 @@ class CoinInferenceAuditCommand:
     submitted_project_price: int
     decision: CatalogCoinCommodityInference
     candidate_scope: str = "ALL"
+    # These are frozen from the exact local Snapshot used by the decision.
+    # They are source/model metadata only; never raw market text or identity.
+    dominant_underlying_source: str | None = None
+    market_regime: str = "UNKNOWN"
 
 
 def _normalized_key(value: str) -> str:
@@ -66,6 +72,18 @@ def _snapshot_time(value: str | None) -> datetime | None:
         return None
     normalized = normalize_utc(value, field_name="coin_inference_audit_snapshot_generated_at_utc")
     return datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+
+
+def _market_context(command: CoinInferenceAuditCommand) -> tuple[str | None, str]:
+    source = command.dominant_underlying_source
+    if source is not None:
+        source = str(source).strip().upper()
+        if not _SOURCE_CODE_PATTERN.fullmatch(source):
+            raise ValueError("coin_inference_audit_underlying_source_invalid")
+    regime = str(command.market_regime or "UNKNOWN").strip().upper()
+    if regime not in _MARKET_REGIMES:
+        raise ValueError("coin_inference_audit_market_regime_invalid")
+    return source, regime
 
 
 def _record_values(command: CoinInferenceAuditCommand) -> dict[str, object]:
@@ -110,6 +128,7 @@ def _record_values(command: CoinInferenceAuditCommand) -> dict[str, object]:
         raise ValueError("coin_inference_audit_abstain_shape_invalid")
     if decision.status in {"AUTO_SELECT", "CONFIRM"} and (receipt is None or decision.snapshot_generated_at_utc is None):
         raise ValueError("coin_inference_audit_snapshot_provenance_required")
+    dominant_underlying_source, market_regime = _market_context(command)
     return {
         "decision_key": _normalized_key(command.decision_key),
         "source_surface": _normalized_source_surface(command.source_surface),
@@ -126,6 +145,8 @@ def _record_values(command: CoinInferenceAuditCommand) -> dict[str, object]:
         "catalog_resolution_version": COIN_CATALOG_RESOLUTION_VERSION,
         "snapshot_receipt": str(receipt) if receipt is not None else None,
         "snapshot_generated_at_utc": _snapshot_time(decision.snapshot_generated_at_utc),
+        "dominant_underlying_source": dominant_underlying_source,
+        "market_regime": market_regime,
     }
 
 
@@ -145,8 +166,10 @@ def _same_record(record: CoinIntelligenceInferenceAudit, values: dict[str, objec
         "catalog_resolution_version",
         "snapshot_receipt",
         "snapshot_generated_at_utc",
+        "dominant_underlying_source",
+        "market_regime",
     )
-    return all(getattr(record, field) == values[field] for field in fields)
+    return all(getattr(record, field, None) == values[field] for field in fields)
 
 
 async def append_coin_inference_audit(

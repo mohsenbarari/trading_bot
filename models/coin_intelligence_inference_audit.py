@@ -1,6 +1,6 @@
 """Append-only, privacy-minimized audit records for product coin inference."""
 
-from sqlalchemy import CheckConstraint, Column, DateTime, Index, Integer, String
+from sqlalchemy import CheckConstraint, Column, DateTime, Index, Integer, String, text
 from sqlalchemy.sql import func
 
 from .database import Base
@@ -26,6 +26,10 @@ class CoinIntelligenceInferenceAudit(Base):
         CheckConstraint(
             "candidate_scope IN ('ALL', 'LOW_DATE_ONLY')",
             name="ck_coin_intelligence_inference_audit_candidate_scope",
+        ),
+        CheckConstraint(
+            "market_regime IN ('NORMAL', 'UP', 'DOWN', 'VOLATILE', 'UNKNOWN')",
+            name="ck_coin_infer_audit_market_regime",
         ),
         CheckConstraint(
             "submitted_project_price > 0",
@@ -77,4 +81,8 @@ class CoinIntelligenceInferenceAudit(Base):
     catalog_resolution_version = Column(String(64), nullable=False)
     snapshot_receipt = Column(String(64), nullable=True)
     snapshot_generated_at_utc = Column(DateTime(timezone=True), nullable=True)
+    dominant_underlying_source = Column(String(64), nullable=True)
+    market_regime = Column(
+        String(16), nullable=False, default="UNKNOWN", server_default=text("'UNKNOWN'")
+    )
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

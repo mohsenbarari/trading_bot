@@ -11,13 +11,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 import secrets
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .coin_catalog import CatalogCoinCommodityInference, resolve_coin_inference_against_catalog
-from .coin_inference import infer_coin_commodity_from_published_snapshot
+from .coin_inference import CoinCommodityInference, infer_coin_commodity
 from .coin_inference_audit import CoinInferenceAuditCommand, append_coin_inference_audit
+from .market_snapshot import AtomicMarketSnapshotProvider, MarketSnapshotUnavailable
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +32,47 @@ class CoinInferenceShadowObservation:
 
     decision_key: str
     decision: CatalogCoinCommodityInference
+
+
+_SAFE_SOURCE_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+
+
+def _snapshot_market_context(snapshot: object, ranker_result: object) -> tuple[str | None, str]:
+    """Freeze safe source/regime labels from the exact ranked Snapshot."""
+
+    if not isinstance(snapshot, dict):
+        return None, "UNKNOWN"
+    rate_item = None
+    candidates = getattr(ranker_result, "candidates", ()) or ()
+    if candidates:
+        code = str(getattr(candidates[0], "commodity_code", "")).upper()
+        settlement = str(getattr(ranker_result, "settlement_term", "")).upper()
+        rates = snapshot.get("rates")
+        if isinstance(rates, dict):
+            for item in rates.get("items") or ():
+                if (
+                    isinstance(item, dict)
+                    and str(item.get("commodity_code") or "").upper() == code
+                    and str(item.get("settlement_term") or "").upper() == settlement
+                ):
+                    rate_item = item
+                    break
+    source = None
+    regime = None
+    if rate_item is not None:
+        source = rate_item.get("underlying_source")
+        regime = rate_item.get("market_regime")
+    if regime is None:
+        market_regime = snapshot.get("market_regime")
+        if isinstance(market_regime, dict):
+            regime = market_regime.get("label")
+    normalized_regime = str(regime or "UNKNOWN").strip().upper()
+    if normalized_regime not in {"NORMAL", "UP", "DOWN", "VOLATILE"}:
+        normalized_regime = "UNKNOWN"
+    normalized_source = str(source or "").strip().upper() or None
+    if normalized_source is not None and not _SAFE_SOURCE_CODE_PATTERN.fullmatch(normalized_source):
+        normalized_source = None
+    return normalized_source, normalized_regime
 
 
 async def observe_coin_inference_shadow(
@@ -50,13 +93,30 @@ async def observe_coin_inference_shadow(
     """
 
     now = now_utc or datetime.now(timezone.utc)
-    ranker_result = infer_coin_commodity_from_published_snapshot(
-        snapshot_path,
-        price_project_thousand_toman=submitted_project_price,
-        settlement_term=settlement_term,
-        now_utc=now,
-        candidate_scope=candidate_scope,
-    )
+    try:
+        snapshot = AtomicMarketSnapshotProvider(snapshot_path).load()
+    except MarketSnapshotUnavailable:
+        # Preserve the established unavailable-Snapshot abstention contract
+        # without retrying the same unavailable path or accidentally loading a
+        # newer Snapshot for the same decision.
+        snapshot = None
+        ranker_result = CoinCommodityInference(
+            status="ABSTAIN",
+            settlement_term=str(settlement_term or "").upper(),
+            candidates=(),
+            snapshot_generated_at_utc=None,
+            snapshot_receipt=None,
+            reason="SNAPSHOT_UNAVAILABLE",
+        )
+    else:
+        ranker_result = infer_coin_commodity(
+            snapshot,
+            price_project_thousand_toman=submitted_project_price,
+            settlement_term=settlement_term,
+            now_utc=now,
+            candidate_scope=candidate_scope,
+        )
+    dominant_underlying_source, market_regime = _snapshot_market_context(snapshot, ranker_result)
     catalog_result = await resolve_coin_inference_against_catalog(db, ranker_result)
     decision_key = secrets.token_hex(32)
     await append_coin_inference_audit(
@@ -67,6 +127,8 @@ async def observe_coin_inference_shadow(
             submitted_project_price=submitted_project_price,
             decision=catalog_result,
             candidate_scope=candidate_scope,
+            dominant_underlying_source=dominant_underlying_source,
+            market_regime=market_regime,
         ),
     )
     return CoinInferenceShadowObservation(

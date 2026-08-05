@@ -2106,3 +2106,44 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
 - تصمیم مرحلهٔ بعد و تأیید لازم:
   - P7-B: ساخت گزارش privacy-minimized از decision/outcomeها و سپس فقط با
     تأیید owner اجرای migration و preview `CONFIRM` در staging.
+
+### P7-B — گزارش rollout با زمینهٔ فریز‌شدهٔ Snapshot — 2026-08-05 — COMPLETE (inactive by default)
+
+- Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
+- Promotion branch commit(s): commit این مرحله روی
+  `candidate/coin-commodity-inference-promotion`.
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - گزارش‌گر read-only
+    `scripts/report_coin_intelligence_rollout_metrics.py` افزوده شد. خروجی
+    JSON فقط شمارش‌های تصمیم و انتخابِ پذیرفته‌شده را ارائه می‌کند؛ شامل
+    auto/confirm/abstain، CASH/TOMORROW، ساعت تهران، age Snapshot، surface،
+    منشأ غالب نرخ و رژیم بازار است.
+  - دو label محدود و غیرحساس `dominant_underlying_source` و
+    `market_regime` از همان Snapshot محلیِ تصمیم به audit append-only افزوده
+    شدند؛ گزارش هیچ‌گاه آن‌ها را از Snapshot فعلی یا بازارِ بعدی بازسازی
+    نمی‌کند.
+  - migration `e5a1c4d7b2f9` صرفاً additive است. برای دادهٔ قدیمی regime
+    برابر `UNKNOWN` می‌ماند؛ downgrade وقتی context فریز‌شده وجود داشته باشد
+    fail-closed و نیازمند archive است.
+- مرز privacy و ایمنی:
+  - گزارش حاوی price، raw offer text، نام/شناسهٔ کاربر، Telegram/message،
+    offer id یا decision/outcome key نیست؛
+  - `auto_promotion_allowed` در همهٔ خروجی‌ها `false` است. گزارش فقط evidence
+    برای تصمیم owner است و flag یا مدل را تغییر نمی‌دهد؛
+  - تنها gap عمدی در این version، ثبت «تصحیح صریح اپراتور» است؛ انتخاب نهایی
+    پذیرفته‌شده اکنون ثبت می‌شود، اما علت تغییر کاربر عمداً ذخیره نمی‌شود.
+- Test commands و نتیجهٔ دقیق:
+  - `python3 -m unittest -v tests.test_coin_intelligence_rollout_metrics
+    tests.test_coin_intelligence_inference_audit
+    tests.test_coin_intelligence_shadow_observation
+    tests.test_coin_intelligence_inference_outcome
+    tests.test_coin_intelligence_inference_outcome_wiring
+    tests.test_migration_smoke` با environment ساختگی اجرا شد:
+    `Ran 30 tests ... OK`.
+- داده/fixture استفاده‌شده و محل امن آن:
+  - تنها fixtureهای synthetic؛ migration، reporter و flagها روی staging یا
+    production اجرا/فعال نشده‌اند.
+- گیت و تصمیم مرحلهٔ بعد:
+  - پیش از staging-visible rollout باید policy جداگانه‌ای وجود داشته باشد که
+    AUTO_SELECT را تا تأیید owner به CONFIRM تقلیل دهد؛ سپس owner می‌تواند
+    migration و preview/selection محدود staging را تأیید کند.

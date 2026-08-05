@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 import unittest
 
@@ -82,6 +83,7 @@ class CoinInferenceAuditTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((result.decision_status, result.selected_commodity_id, result.selected_commodity_name), ("AUTO_SELECT", 71, "امام"))
         self.assertEqual((result.inference_version, result.catalog_resolution_version, db.flushes), ("coin-inference-v2", "coin-catalog-resolution-v1", 1))
         self.assertEqual(result.candidate_scope, "ALL")
+        self.assertEqual((result.dominant_underlying_source, result.market_regime), (None, "UNKNOWN"))
         self.assertFalse(any(token in name for name in result.__table__.columns.keys() for token in ("raw", "text", "user", "telegram", "message", "note")))
 
     async def test_exact_idempotent_replay_returns_existing_row_without_write(self) -> None:
@@ -92,6 +94,7 @@ class CoinInferenceAuditTests(unittest.IsolatedAsyncioTestCase):
             selected_commodity_id=71, selected_commodity_code="IMAM", selected_commodity_name="امام",
             inference_version="coin-inference-v2", catalog_resolution_version="coin-catalog-resolution-v1",
             snapshot_receipt="b" * 64, snapshot_generated_at_utc=datetime(2026, 8, 4, 10, 0, tzinfo=timezone.utc),
+            dominant_underlying_source=None, market_regime="UNKNOWN",
         )
         db = _DB(existing)
         result = await append_coin_inference_audit(db, command(source))
@@ -105,6 +108,7 @@ class CoinInferenceAuditTests(unittest.IsolatedAsyncioTestCase):
             selected_commodity_id=71, selected_commodity_code="IMAM", selected_commodity_name="امام",
             inference_version="coin-inference-v2", catalog_resolution_version="coin-catalog-resolution-v1",
             snapshot_receipt="b" * 64, snapshot_generated_at_utc=datetime(2026, 8, 4, 10, 0, tzinfo=timezone.utc),
+            dominant_underlying_source=None, market_regime="UNKNOWN",
         )
         with self.assertRaises(CoinInferenceAuditConflictError):
             await append_coin_inference_audit(_DB(existing), command(price=186_900))
@@ -144,6 +148,23 @@ class CoinInferenceAuditTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "reason_invalid"):
             await append_coin_inference_audit(
                 _DB(), CoinInferenceAuditCommand("d" * 64, "INTERNAL", 186_800, private_reason)
+            )
+
+    async def test_audit_requires_safe_frozen_market_context(self) -> None:
+        with self.assertRaisesRegex(ValueError, "underlying_source_invalid"):
+            await append_coin_inference_audit(
+                _DB(),
+                CoinInferenceAuditCommand(
+                    "e" * 64, "WEBAPP", 186_800, auto(),
+                    dominant_underlying_source="private physical today",
+                ),
+            )
+        with self.assertRaisesRegex(ValueError, "market_regime_invalid"):
+            await append_coin_inference_audit(
+                _DB(),
+                CoinInferenceAuditCommand(
+                    "f" * 64, "WEBAPP", 186_800, auto(), market_regime="SHOCK"
+                ),
             )
 
 
@@ -188,6 +209,16 @@ class CoinInferenceAuditStorageTests(unittest.TestCase):
             session.rollback()
             session.close()
             engine.dispose()
+
+    def test_market_context_migration_is_additive_and_downgrade_fails_closed(self) -> None:
+        migration = (
+            Path(__file__).resolve().parents[1]
+            / "migrations/versions/e5a1c4d7b2f9_add_coin_inference_audit_market_context.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('down_revision: Union[str, Sequence[str], None] = "d4e8a2b6c1f0"', migration)
+        self.assertIn('op.add_column(\n        "coin_intelligence_inference_audits"', migration)
+        self.assertIn("ck_coin_infer_audit_market_regime", migration)
+        self.assertIn("must be archived before downgrade", migration)
 
 
 if __name__ == "__main__":
