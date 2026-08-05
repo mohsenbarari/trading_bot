@@ -899,7 +899,7 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 
 #### Stage 7 completion notes
 
-**Status:** complete in code on `candidate/offer-overtime` at `STAGE7_SHA`.
+**Status:** complete in code on `candidate/offer-overtime` at `eabd6014`.
 
 **Scope delivered.** OfferRequest sync payload now carries overtime workflow fields (`workflow_kind`, `request_public_id`, owner/queue/clock stamps, `terminal_reason`, `telegram_message_id`) while keeping `telegram_delivery_job_id` local-only. Sync's `TERMINAL_OFFER_REQUEST_STATUSES` includes overtime terminals so version-gated upserts cannot revive a finished overtime row; nonterminal overtime rows remain mutable under monotonic `version_id`. Forwarding-server ambiguous timeouts retain a Redis pending marker (`core/trade_forward_pending.py`), return HTTP `202` with inventory M18 (`⏳ در حال بررسی درخواست...`), and schedule a background reconcile that re-forwards the same signed payload without creating a local overtime ledger. Definite pre-send failures stay `503` with no retention (bot surfaces inventory M19). Bot remote-home handling no longer treats overtime/`forward_pending` `202` as a completed trade; it uses M10/M11/M18 as appropriate. User/Offer overtime sync from Stage 2 is unchanged. Approve/reject remain home-server-only.
 
