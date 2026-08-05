@@ -458,6 +458,31 @@ parity evidence. Overtime scenarios themselves write fresh, correctly-authored
 rows and are unaffected. Cleaning the four rows is an operator decision with
 audit implications and was deliberately left untouched.
 
+### 12.6 Production is untouched, and is 23 revisions behind
+
+Checked read-only on the foreign production database (`trading_bot_db`) to confirm
+the failing rows are staging-only:
+
+| Fact | Production | Foreign staging |
+| --- | --- | --- |
+| `change_log` rows | 17,058 | 352 |
+| unsynced | **0** | 4 |
+| quarantined | **0** | 1 (rest will follow) |
+| `users` columns | 42 | 43 |
+| `offer_overtime_minutes` | absent | present |
+| coin-intelligence tables | none | all three |
+| overtime columns on `offer_requests` | none | present |
+| Alembic head | `f2c7d8e9a0b1` | `f9b0c1d2e3a4` |
+
+So the only `users` difference is production versus staging, and it is the expected
+consequence of staging having taken the combined migration. The two staging peers
+match each other exactly.
+
+Worth carrying into Stage 17: production is **23 revisions** behind the combined
+head, not five. Promoting this line to production is a much larger migration step
+than the overtime and coin chains alone, and needs its own plan. The Iran
+production deployment was not inspected; it runs a separate stack on the Iran host.
+
 ### 12.4 Remaining work before `main`
 
 | Item | State |
