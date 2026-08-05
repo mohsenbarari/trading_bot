@@ -1,0 +1,26 @@
+{
+  "scenario": "OT-PREF-WEBAPP-SAVE",
+  "run_prefix": "OTACC_20260805153530",
+  "release_sha": "3c8b3e07",
+  "iran": {
+    "server_mode": "iran",
+    "owner_user_id": 1360,
+    "eligibility_allowed": true,
+    "requested_minutes": 4,
+    "persisted_minutes": 4,
+    "out_of_range_rejected": true,
+    "user_change_log_rows": 2,
+    "passed": true
+  },
+  "foreign_mirror": {
+    "user_id": 1360,
+    "offer_overtime_minutes": 4,
+    "home_server": "iran",
+    "observed_after_seconds": 20
+  },
+  "cleanup": {
+    "path": "core.services.user_deletion_service.delete_user_account",
+    "users_retired": 1,
+    "foreign_is_deleted": true
+  }
+}
