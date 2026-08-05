@@ -574,14 +574,32 @@ Evidence: `tmp/combined-staging-evidence/stage16-driver-OT-OFFER-BOT-ORIGIN.json
 This also exercises the real foreign bot preference path (signed forward + sync
 mirror) that the earlier Iran-local `OT-PREF-BOT-SAVE` run could not cover alone.
 
+### 12.10 Iran overtime request path (`OT-REQ-IRAN-TO-IRAN`)
+
+End-to-end request workflow on an Iran-home offer, without waiting real wall-clock
+lifetime: the driver backdates `created_at` into the overtime window, creates a
+WebApp overtime request (promotes straight to `overtime_presented`), then the
+owner rejects.
+
+| Assertion | Result |
+| --- | --- |
+| Offer snapshot 5 after preference freeze | yes |
+| Request `req_s7dN…` presented on Iran | yes |
+| Owner reject → `overtime_rejected_by_owner` | yes |
+| `offer_requests` change-log rows | 3 |
+| Foreign mirror of terminal request | id 271 within ~5s |
+| Cleanup retired owner + requester | 2 users |
+
+Evidence: `tmp/combined-staging-evidence/stage16-driver-OT-REQ-IRAN-TO-IRAN.json`.
+
 ### 12.4 Remaining work before `main`
 
 | Item | State |
 | --- | --- |
-| Mutating Stage 16 scenario drivers | 5 of 15 wired and passing live; `execute` → `execute_partial` once transport env is set |
+| Mutating Stage 16 scenario drivers | 6 of 15 wired and passing live; `execute` → `execute_partial` once transport env is set |
 | Overtime preferences | staging users remain at `0` after driver cleanup |
 | Coin inference flags | off by default, untouched |
 | Arvan CDN origin for `staging.gold-trade.ir` | broken, needs panel fix |
 | Sync parity comparison | `comparison_status: missing` — no parity run yet on this pair |
 | coin-price vs coin-commodity comparison | still owed per the handoff prompt |
-| Next drivers | request/queue axes (`OT-REQ-*`, `OT-QUEUE-ORDER`, …) |
+| Next drivers | `OT-REQ-FOREIGN-TO-FOREIGN`, `OT-QUEUE-ORDER`, `OT-CANCEL-REQUESTER` |

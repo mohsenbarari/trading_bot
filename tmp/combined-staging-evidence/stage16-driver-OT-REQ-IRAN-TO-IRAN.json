@@ -1,0 +1,32 @@
+{
+  "scenario": "OT-REQ-IRAN-TO-IRAN",
+  "run_prefix": "OTACC_20260805160327",
+  "release_sha": "3c8b3e07",
+  "iran": {
+    "owner_user_id": 1372,
+    "requester_user_id": 1374,
+    "offer_id": 484,
+    "offer_public_id": "ofr_kDhP4DupxEJa9aXvxjWkS-Vz",
+    "overtime_minutes_snapshot": 5,
+    "request_id": 310,
+    "request_public_id": "req_s7dNWvzrhbufRkiRFJS7I1jo",
+    "request_home_server": "iran",
+    "presented_status": "overtime_presented",
+    "promoted_on_create": true,
+    "decided_status": "overtime_rejected_by_owner",
+    "decision": "owner_rejected",
+    "request_change_log_rows": 3,
+    "passed": true
+  },
+  "foreign_mirror": {
+    "request_id": 271,
+    "result_status": "overtime_rejected_by_owner",
+    "request_home_server": "iran",
+    "offer_public_id": "ofr_kDhP4DupxEJa9aXvxjWkS-Vz",
+    "observed_after_seconds": 5
+  },
+  "cleanup": {
+    "path": "core.services.user_deletion_service.delete_user_account",
+    "users_retired": 2
+  }
+}
