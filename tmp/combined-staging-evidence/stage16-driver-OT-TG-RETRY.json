@@ -1,0 +1,80 @@
+{
+  "id": "OT-TG-RETRY",
+  "status": "passed",
+  "elapsed_seconds": 23.754,
+  "run_prefix": "OTACC_20260805170146_TGR",
+  "seed": {
+    "mode": "run",
+    "scenario": "OT-TG-RETRY",
+    "run_prefix": "OTACC_20260805170146_TGR",
+    "server_mode": "iran",
+    "started_at": "2026-08-05T17:01:47.334700+00:00",
+    "finished_at": "2026-08-05T17:01:49.683043+00:00",
+    "cleanup": {
+      "users_retired": 0
+    },
+    "phase": "seed",
+    "owner_user_id": 1466,
+    "requester_user_id": 1468,
+    "owner_home_server": "foreign",
+    "requester_home_server": "foreign",
+    "owner_telegram_id": 9365687790,
+    "passed": true
+  },
+  "run": {
+    "mode": "run",
+    "scenario": "OT-TG-RETRY",
+    "run_prefix": "OTACC_20260805170146_TGR",
+    "server_mode": "foreign",
+    "started_at": "2026-08-05T17:01:51.829545+00:00",
+    "finished_at": "2026-08-05T17:02:04.424356+00:00",
+    "cleanup": {
+      "users_retired": 0
+    },
+    "phase": "run",
+    "owner_user_id": 1466,
+    "requester_user_id": 1468,
+    "preference_mirror_seconds": 2.01,
+    "offer_id": 297,
+    "offer_public_id": "ofr_dloCRnonr2bDtHaHyNE4lDhb",
+    "offer_home_server": "foreign",
+    "overtime_minutes_snapshot": 5,
+    "request_id": 307,
+    "request_public_id": "req_SprWj_TMnAMPxfShLvf5HFSK",
+    "delivering_status": "overtime_delivering",
+    "presented_status": "overtime_presented",
+    "owner_approval_source_natural_id": "overtime-owner-approval:req_SprWj_TMnAMPxfShLvf5HFSK",
+    "owner_retry": {
+      "job_id": 9,
+      "retry_outcome": "retry_pending",
+      "retry_state": "pending_retry",
+      "retry_wait_seconds": 1.117,
+      "sent_outcome": "sent",
+      "sent_state": "sent",
+      "telegram_message_id": 710307,
+      "attempt_count": 2
+    },
+    "requester_status_source_natural_id": "ot-tg-retry-requester-status:req_SprWj_TMnAMPxfShLvf5HFSK",
+    "requester_retry": {
+      "job_id": 10,
+      "retry_outcome": "retry_pending",
+      "retry_state": "pending_retry",
+      "retry_wait_seconds": 1.129,
+      "sent_outcome": "sent",
+      "sent_state": "sent",
+      "telegram_message_id": 720307,
+      "attempt_count": 2
+    },
+    "passed": true
+  },
+  "cleanup": {
+    "mode": "cleanup",
+    "run_prefix": "OTACC_20260805170146_TGR",
+    "server_mode": "iran",
+    "started_at": "2026-08-05T17:02:06.932968+00:00",
+    "removed": {
+      "users_retired": 2
+    },
+    "passed": true
+  }
+}

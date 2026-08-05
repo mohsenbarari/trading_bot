@@ -694,14 +694,35 @@ A cancelled, B presented, exactly one nonterminal / owner-occupying seat.
 
 Evidence: `tmp/combined-staging-evidence/stage16-driver-OT-SYNC-RECOVERY.json`.
 
+### 12.18 Telegram private delivery retry (`OT-TG-RETRY`)
+
+Iran seeds foreign-home owner + requester. Foreign creates a bot overtime
+request (promote → `overtime_owner_approval` job). The driver leases that job by
+id, injects a synthetic Telegram 429, asserts `pending_retry`, waits for
+eligibility, reclaims, and resolves a synthetic SENT so owner feedback marks the
+ledger `overtime_presented`. A durable private `general_immediate` requester
+status job then takes the same 429 → retry → SENT path (staging foreign is
+legacy runtime with the queue worker off, so requester status is exercised
+through the shared queue resolve API rather than a live flake).
+
+| Assertion | Result |
+| --- | --- |
+| Owner approval job enqueued on promote | yes |
+| Owner 429 → `pending_retry` → SENT (attempt≥2) | yes |
+| Owner SENT marks request presented | yes |
+| Requester private status 429 → retry → SENT | yes |
+| Iran cleanup retires synthetic users | yes |
+
+Evidence: `tmp/combined-staging-evidence/stage16-driver-OT-TG-RETRY.json`.
+
 ### 12.4 Remaining work before `main`
 
 | Item | State |
 | --- | --- |
-| Mutating Stage 16 scenario drivers | 13 of 15 wired and passing live; `execute` → `execute_partial` once transport env is set |
+| Mutating Stage 16 scenario drivers | 14 of 15 wired and passing live; `execute` → `execute_partial` once transport env is set |
 | Overtime preferences | staging users remain at `0` after driver cleanup |
 | Coin inference flags | off by default, untouched |
 | Arvan CDN origin for `staging.gold-trade.ir` | broken, needs panel fix |
 | Sync parity comparison | `comparison_status: missing` — no parity run yet on this pair |
 | coin-price vs coin-commodity comparison | still owed per the handoff prompt |
-| Next drivers | `OT-TG-RETRY`, `OT-UI-RECONNECT` |
+| Next drivers | `OT-UI-RECONNECT` |
