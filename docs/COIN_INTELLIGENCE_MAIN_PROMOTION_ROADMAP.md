@@ -2250,3 +2250,32 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   - مشاهدهٔ evidence کافی از previewهای واقعی پیش از بررسی selection؛
   - selection و auto-selection فقط پس از تأیید جداگانهٔ owner و evidence
     کافی قابل بررسی هستند.
+
+### P7-F — خط‌پایهٔ evidence و سخت‌سازی secrets در staging — 2026-08-05 — COMPLETE (gates remain closed)
+
+- اصلاح امنیتی runtime انجام شد: compose تولیدشدهٔ staging دیگر مقدار resolved
+  هیچ password، token، API key یا signing secret را در بلوک‌های `environment`
+  نگه نمی‌دارد و برای هر سرویس به env-file جداگانه در مسیر root-only ارجاع
+  می‌دهد. جزئیات و guardrailها در
+  `docs/STAGING_RUNTIME_SECRET_HARDENING.md` ثبت شده است.
+- مجوز runtime جدید: directory با `0700` و فایل‌های env/compose با `0600`؛
+  environment resolved قبل و بعد از تغییر بدون چاپ مقدارها مقایسه شد و
+  `docker compose config --quiet` سبز بود. PostgreSQL staging healthy و Redis
+  running باقی ماندند؛ bot profile و production لمس نشدند.
+- گزارش read-only بیست‌وچهارساعته با
+  `scripts/report_coin_intelligence_rollout_metrics.py` اجرا و در volume
+  محافظت‌شده ذخیره شد. artifact فقط متادیتای privacy-minimized دارد و در
+  `staging/evidence/rollout-metrics-24h-20260805T110217Z.json` قرار گرفت.
+- نتیجهٔ خط‌پایه: `status=READY`، چهار تصمیم preview، صفر انتخاب پذیرفته‌شده،
+  `auto_promotion_allowed=false` و کنترل privacy/data-quality سالم. این
+  اعداد برای promotion کافی نیستند و نشان می‌دهند هنوز evidence واقعی کافی
+  جمع نشده است.
+- گیت‌های باقی‌مانده:
+  - اجرای Bot preview در runtime کاملاً جدا، بدون Telegram delivery و بدون
+    credential واقعیِ فعال؛
+  - چند چرخه evidence واقعی از Web و Bot با حداقل دادهٔ لازم؛
+  - چرخش credentialهای صرفاً staging در maintenance window بعدی، چون compose
+    قبلی مدتی plaintext resolved values داشت؛ credentialهای production در این
+    مرحله نباید rotate شوند؛
+  - تا تکمیل این موارد، `selection` و `auto-selection` و هرگونه production
+    rollout خاموش می‌مانند.
