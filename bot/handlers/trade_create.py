@@ -124,6 +124,10 @@ from core.market_intelligence.coin_inference_selection import (
     CoinInferenceSelectionRejected,
     revalidate_coin_inference_selection,
 )
+from core.market_intelligence.coin_inference_outcome import (
+    CoinInferenceAcceptedSelection,
+    append_coin_inference_accepted_selection,
+)
 from core.market_intelligence.coin_inference import COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY
 
 
@@ -1294,22 +1298,22 @@ async def handle_wizard_cancel(
     await answer_callback_query_via_runtime(callback)
 
 
-async def _revalidate_bot_inferred_commodity(data: Mapping[str, object]) -> str | None:
-    """Return a user-safe error when a bot inference receipt is no longer fresh."""
+async def _revalidate_bot_inferred_commodity(data: Mapping[str, object]) -> tuple[str | None, object | None]:
+    """Return a user-safe error and the revalidated candidate when available."""
 
     decision_key = str(data.get("coin_inference_decision_key") or "").strip()
     selected_commodity_id = data.get("coin_inference_selected_commodity_id")
     if not decision_key and selected_commodity_id is None:
-        return None
+        return None, None
     if not decision_key or selected_commodity_id is None:
-        return "رسید تشخیص کالا کامل نیست؛ لفظ را دوباره ثبت کنید."
+        return "رسید تشخیص کالا کامل نیست؛ لفظ را دوباره ثبت کنید.", None
     if not getattr(settings, "coin_intelligence_inference_selection_enabled", False):
-        return "تشخیص قیمت‌محور کالا در حال حاضر فعال نیست؛ نام کالا را در لفظ وارد کنید."
+        return "تشخیص قیمت‌محور کالا در حال حاضر فعال نیست؛ نام کالا را در لفظ وارد کنید.", None
     snapshot_path = str(
         getattr(settings, "coin_intelligence_inference_snapshot_path", "") or ""
     ).strip()
     if not snapshot_path:
-        return "دادهٔ لحظه‌ای تشخیص کالا آماده نیست؛ نام کالا را در لفظ وارد کنید."
+        return "دادهٔ لحظه‌ای تشخیص کالا آماده نیست؛ نام کالا را در لفظ وارد کنید.", None
     settlement_value = data.get("settlement_type", SettlementType.CASH.value)
     settlement_term = (
         "TOMORROW"
@@ -1318,7 +1322,7 @@ async def _revalidate_bot_inferred_commodity(data: Mapping[str, object]) -> str 
     )
     try:
         async with AsyncSessionLocal() as session:
-            await revalidate_coin_inference_selection(
+            revalidation = await revalidate_coin_inference_selection(
                 session,
                 snapshot_path=snapshot_path,
                 decision_key=decision_key,
@@ -1335,11 +1339,44 @@ async def _revalidate_bot_inferred_commodity(data: Mapping[str, object]) -> str 
                 "reason": exc.reason,
             },
         )
-        return "نتیجهٔ تشخیص کالا تغییر کرده یا دیگر معتبر نیست؛ لفظ را دوباره بررسی کنید."
+        return "نتیجهٔ تشخیص کالا تغییر کرده یا دیگر معتبر نیست؛ لفظ را دوباره بررسی کنید.", None
     except Exception:
         logger.warning("Could not revalidate bot commodity inference", exc_info=True)
-        return "امکان بررسی دوبارهٔ کالا نیست؛ نام کالا را در لفظ وارد کنید."
-    return None
+        return "امکان بررسی دوبارهٔ کالا نیست؛ نام کالا را در لفظ وارد کنید.", None
+    return None, revalidation
+
+
+async def _record_bot_inference_accepted_selection(
+    *,
+    data: Mapping[str, object],
+    revalidation: object | None,
+) -> None:
+    """Best-effort P7 telemetry after a Bot Offer is authoritatively accepted."""
+
+    if revalidation is None:
+        return
+    decision_key = str(data.get("coin_inference_decision_key") or "").strip()
+    if not decision_key:
+        return
+    try:
+        async with AsyncSessionLocal() as session:
+            await append_coin_inference_accepted_selection(
+                session,
+                CoinInferenceAcceptedSelection(
+                    decision_key=decision_key,
+                    source_surface="TELEGRAM_BOT",
+                    candidate=revalidation.candidate,
+                ),
+            )
+            await session.commit()
+    except Exception as exc:
+        logger.warning(
+            "Could not record accepted Bot commodity-inference outcome",
+            extra={
+                "event": "coin_inference_outcome.bot_unavailable",
+                "error_class": type(exc).__name__,
+            },
+        )
 
 
 async def _handle_trade_confirm_core(
@@ -1438,7 +1475,7 @@ async def _handle_trade_confirm_core(
     republish_source_local_id = data.get("republished_from_offer_id")
     republish_idempotency_key = str(data.get("republish_idempotency_key") or "").strip()
 
-    inference_error = await _revalidate_bot_inferred_commodity(data)
+    inference_error, inference_revalidation = await _revalidate_bot_inferred_commodity(data)
     if inference_error:
         await edit_callback_message_via_runtime(callback, user, f"❌ {inference_error}")
         await state.clear()
@@ -1594,6 +1631,12 @@ async def _handle_trade_confirm_core(
             offer_acceptance_committed = True
             offer_id = new_offer.id
             offer_public_id = getattr(new_offer, "offer_public_id", None)
+
+        if offer_acceptance_committed:
+            await _record_bot_inference_accepted_selection(
+                data=data,
+                revalidation=inference_revalidation,
+            )
 
         from bot.callbacks import ExpireOfferCallback
 

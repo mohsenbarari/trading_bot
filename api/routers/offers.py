@@ -117,6 +117,10 @@ from core.market_intelligence.coin_inference_selection import (
     CoinInferenceSelectionRejected,
     revalidate_coin_inference_selection,
 )
+from core.market_intelligence.coin_inference_outcome import (
+    CoinInferenceAcceptedSelection,
+    append_coin_inference_accepted_selection,
+)
 from core.market_intelligence.coin_inference import COIN_INFERENCE_CANDIDATE_SCOPE_LOW_DATE_ONLY
 from core import telegram_gateway
 from core.trade_forwarding import verify_internal_signature
@@ -482,12 +486,12 @@ async def _revalidate_webapp_commodity_inference(
     db: AsyncSession,
     *,
     offer_data: OfferCreate,
-) -> None:
+) -> object | None:
     """Reject an inferred commodity unless it is still valid at submit time."""
 
     selection = offer_data.commodity_inference
     if selection is None:
-        return
+        return None
     if int(selection.selected_commodity_id) != int(offer_data.commodity_id):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -496,7 +500,7 @@ async def _revalidate_webapp_commodity_inference(
     snapshot_path = _coin_inference_selection_path_or_error()
     settlement = "CASH" if offer_data.settlement_type == "cash" else "TOMORROW"
     try:
-        await revalidate_coin_inference_selection(
+        return await revalidate_coin_inference_selection(
             db,
             snapshot_path=snapshot_path,
             decision_key=selection.decision_key,
@@ -519,6 +523,41 @@ async def _revalidate_webapp_commodity_inference(
             status_code=status.HTTP_409_CONFLICT,
             detail="نتیجهٔ تشخیص کالا تغییر کرده یا دیگر معتبر نیست؛ متن آفر را دوباره بررسی کنید.",
         ) from exc
+
+
+async def _record_webapp_inference_accepted_selection(
+    db: AsyncSession,
+    *,
+    revalidation: object | None,
+    offer_data: OfferCreate,
+) -> None:
+    """Record post-acceptance telemetry without changing Offer success semantics."""
+
+    if revalidation is None or offer_data.commodity_inference is None:
+        return
+    try:
+        await append_coin_inference_accepted_selection(
+            db,
+            CoinInferenceAcceptedSelection(
+                decision_key=offer_data.commodity_inference.decision_key,
+                source_surface="WEBAPP",
+                candidate=revalidation.candidate,
+            ),
+        )
+        await db.commit()
+    except Exception as exc:
+        # The Offer has already been accepted.  P7 telemetry must never turn a
+        # successful user action into an error if its own append-only ledger is
+        # temporarily unavailable.
+        await db.rollback()
+        log_trading_event(
+            logger,
+            "coin_inference_outcome.webapp_unavailable",
+            level="warning",
+            action="coin_inference_outcome",
+            result="not_recorded",
+            error_class=type(exc).__name__,
+        )
 
 
 def _build_webapp_offer_creation_command(
@@ -1515,7 +1554,7 @@ async def create_offer(
             )
         )[0]
 
-    await _revalidate_webapp_commodity_inference(db, offer_data=offer_data)
+    inference_revalidation = await _revalidate_webapp_commodity_inference(db, offer_data=offer_data)
     
     # بررسی نقش
     if owner_user.role == UserRole.WATCH:
@@ -1841,6 +1880,12 @@ async def create_offer(
                 include_owner_identity=True,
             )
         )[0]
+
+    await _record_webapp_inference_accepted_selection(
+        db,
+        revalidation=inference_revalidation,
+        offer_data=offer_data,
+    )
 
     # بارگذاری روابط
     result = await db.execute(

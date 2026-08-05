@@ -93,6 +93,7 @@ from .sync_block import SyncBlock
 from .sync_apply_watermark import SyncApplyWatermark
 from .coin_intelligence_market_outbox import CoinIntelligenceMarketOutbox
 from .coin_intelligence_inference_audit import CoinIntelligenceInferenceAudit
+from .coin_intelligence_inference_outcome import CoinIntelligenceInferenceOutcome
 
 __all__ = [
     # User & Auth
@@ -194,4 +195,5 @@ __all__ = [
     "SyncApplyWatermark",
     "CoinIntelligenceMarketOutbox",
     "CoinIntelligenceInferenceAudit",
+    "CoinIntelligenceInferenceOutcome",
 ]

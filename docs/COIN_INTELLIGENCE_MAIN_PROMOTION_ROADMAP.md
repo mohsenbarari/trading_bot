@@ -2046,3 +2046,63 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
     از روشن‌کردن flag فراهم باشند؛ شروع با `CONFIRM` و telemetry shadow-first
     ضروری است. activation production، collectorها و معماری سه‌سروره خارج از
     این مرحله‌اند.
+
+### P7-A — ledger انتخاب پذیرفته‌شده برای سنجش rollout — 2026-08-05 — COMPLETE (inactive by default)
+
+- Base/main commit: `540b2c0c933406368866ffce17a58f5124bfbef8`.
+- Promotion branch commit(s): commit این مرحله روی
+  `candidate/coin-commodity-inference-promotion`.
+- Scope انجام‌شده و فایل‌های تغییرکرده:
+  - جدول مستقل و append-only
+    `coin_intelligence_inference_outcomes` به‌همراه migration افزوده شد؛
+    هر سطر فقط receipt مبهم تصمیم، surface، و کالای canonical انتخاب‌شده را
+    نگه می‌دارد؛
+  - outcome تنها پس از پذیرش authoritative آفر ثبت می‌شود؛ برای WebApp و
+    Bot رفتار یکسان دارد و retry همان انتخاب با کلید deterministic تکراری
+    تولید نمی‌کند؛
+  - telemetry پس از commit محصول best-effort است: unavailable بودن ledger
+    هرگز آفر پذیرفته‌شده را rollback یا به کاربر خطا گزارش نمی‌کند؛
+  - foreign key به audit decision، checkهای canonical/surface، و trigger
+    منع update/delete مانع outcome جعلی یا rewrite تاریخچه می‌شوند.
+- موارد عمداً انجام‌نشده:
+  - هیچ flag، publisher، collector، timer، migration runtime یا deployment
+    staging/production فعال نشد؛
+  - گزارش operator، threshold cell و auto-promotion هنوز P7-B هستند؛
+  - این ledger انتخاب‌های رهاشده یا درخواست‌های ردشده را دادهٔ آموزشی یا
+    «انتخاب نهایی» حساب نمی‌کند.
+- قرارداد/schema/versionهای افزوده یا تغییرکرده:
+  - `OFFER_ACCEPTED_SELECTION` تنها outcome kind مجاز است؛
+  - outcome فاقد متن، note، user، Telegram، message، offer-id و هر linkage
+    خصوصی است؛ mapping فقط با code/name canonical انجام می‌شود.
+- Migration و نتیجهٔ upgrade/downgrade:
+  - migration `d4e8a2b6c1f0` به‌صورت additive پس از audit migration
+    `d3f7a1c9e4b5` قرار گرفت؛ graph Alembic و compile سبز است؛
+  - downgrade فقط پس از archive خالی مجاز است و دادهٔ موجود را delete نمی‌کند؛
+  - migration روی هیچ PostgreSQL runtime یا staging اجرا نشده است.
+- Test commands و نتیجهٔ دقیق:
+  - `python3 -m unittest -v tests.test_coin_intelligence_inference_outcome
+    tests.test_coin_intelligence_inference_outcome_wiring
+    tests.test_coin_intelligence_selection_revalidation
+    tests.test_coin_intelligence_preview_api
+    tests.test_bot_trade_create_text_offer_parse_flow
+    tests.test_offers_router_create_success
+    tests.test_offers_router_create_guards tests.test_migration_smoke`
+    با environment ساختگی اجرا شد؛ `Ran 58 tests ... OK`.
+- داده/fixture استفاده‌شده و محل امن آن:
+  - تنها fixtureهای synthetic، SQLite in-memory و تنظیمات ساختگی؛ هیچ دادهٔ
+    بازار، متن آفر، credential، session یا endpoint واقعی استفاده نشد.
+- نتیجهٔ health/freshness/replay:
+  - replay انتخاب یکسان row جدید نمی‌سازد؛ انتخاب AUTO_SELECT نمی‌تواند به
+    کالای دیگر rewrite شود؛ failure خود ledger پس از قبول آفر non-fatal است.
+- رفتار rollback آزموده‌شده:
+  - هر دو feature flag همچنان `False` هستند؛ در این وضعیت code path جدید
+    اجرا نمی‌شود. rollback عملیاتی برابر خاموش نگه‌داشتن flagها و عدم اجرای
+    migration است.
+- ریسک‌های باقیمانده و مالک/تاریخ پیگیری:
+  - P7-B باید گزارش aggregation، thresholdهای cell و playbook freeze را
+    پیش از staging-visible rollout اضافه کند؛
+  - migration و publisher محلی هنوز در staging، با volume و permission
+    واقعی، نیازمند آزمون جداگانه‌اند.
+- تصمیم مرحلهٔ بعد و تأیید لازم:
+  - P7-B: ساخت گزارش privacy-minimized از decision/outcomeها و سپس فقط با
+    تأیید owner اجرای migration و preview `CONFIRM` در staging.
