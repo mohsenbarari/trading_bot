@@ -927,6 +927,20 @@ The next gate is not a question but an approval: the roadmap below may begin onl
 
 **Exit criteria:** Telegram approval is timely, durable, safe under retries, and isolated from normal channel publication behavior.
 
+#### Stage 8 completion notes
+
+**Status:** complete in code on `candidate/offer-overtime` at `STAGE8_SHA`.
+
+**Scope delivered.** Added durable `TelegramDeliveryAction.OVERTIME_OWNER_APPROVAL` at static priority `(M0, 1)` on the `DIRECT` feeder (no TRADE-matrix renumbering). Claim order is therefore callback/expiry `(M0, 0)` → overtime approval / overdue `TRADE_RESULT` `(M0, 1)` → `OFFER_PUBLISH` `(M0, 2)`. Rank-1 ties use existing `delivery_deadline_at` then `created_sequence`; every approval job carries a finite deadline equal to the offer’s final public lifetime end so an overdue trade result cannot be starved. Fail-closed freshness + lifecycle adapters are registered in the primary lane. Bot-origin `promote_next_for_owner` → `OVERTIME_DELIVERING` enqueues the private approval `sendMessage` (opaque `ota:{request_public_id}:approve|reject` callbacks, approved M23–M28 copy). Lifecycle `apply_delivery_result(SENT)` calls `mark_presented` only after a Telegram `message_id` is persisted (30s clock starts there). Soft delivery retries follow the shared queue; hard undeliverable owner / deadline expiry invalidates the DELIVERING row and promotes the next queued request. Alembic `c6e2d8f0a1b3` adds the enum value after `b5d1c7e93f04`. Relink policy is `SUPPRESS_ON_RELINK`.
+
+**Affected components:** `core/telegram_delivery_queue_contract.py`, `core/telegram_delivery_relink_policy.py`, `core/telegram_delivery_overtime_owner_approval_contract.py`, `core/telegram_delivery_overtime_owner_approval_freshness.py`, `core/services/telegram_overtime_owner_approval_queue_service.py`, `core/services/telegram_overtime_owner_approval_queue_feedback.py`, `core/telegram_delivery_runtime_composition.py`, `core/services/offer_overtime_request_service.py`, `migrations/versions/c6e2d8f0a1b3_add_overtime_owner_approval_action.py`, tests listed below.
+
+**Tests and results.** Targeted suites green via `make test-unit MODULES="tests.test_telegram_delivery_overtime_owner_approval_contract tests.test_telegram_overtime_owner_approval_queue_feedback tests.test_telegram_delivery_queue_contract tests.test_telegram_delivery_runtime_composition tests.test_telegram_delivery_relink_policy tests.test_offer_overtime_request_service tests.test_telegram_delivery_freshness_router tests.test_telegram_delivery_lifecycle_router tests.test_telegram_delivery_callback_contract tests.test_telegram_delivery_notification_action_contract"` (123 tests): M0 ordering, rank-1 deadline tie-break, primary-lane completeness, opaque callback identity, inventory copy, clock-on-message-id, bot promote→enqueue hook.
+
+**Deviations and known gaps.** First, bot click handlers that interpret `ota:` callbacks, requester status edits (M10→M11), and panel preference UI remain Stage 9. Second, Postgres claim-path integration for the new action was covered by in-memory contract ordering plus composition completeness; a dedicated postgres enqueue fixture was not added in this stage. Third, the Stage 1 real-database migration gate (including this enum migration) remains open for merge/deploy.
+
+**Next stage prerequisites.** Stage 9 may begin. It must wire bot preference entry, requester status messages, and owner approve/reject callback handling against the durable queue action shipped here.
+
 ### Stage 9 — Bot Overtime Interaction Flow
 
 **Goal:** expose the confirmed bot behavior without changing the persistent keyboard layout.
