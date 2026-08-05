@@ -2144,6 +2144,29 @@ bundle قبلی قابل انتخاب‌اند و Collectorها همچنان ف�
   - تنها fixtureهای synthetic؛ migration، reporter و flagها روی staging یا
     production اجرا/فعال نشده‌اند.
 - گیت و تصمیم مرحلهٔ بعد:
-  - پیش از staging-visible rollout باید policy جداگانه‌ای وجود داشته باشد که
-    AUTO_SELECT را تا تأیید owner به CONFIRM تقلیل دهد؛ سپس owner می‌تواند
-    migration و preview/selection محدود staging را تأیید کند.
+  - policy confirmation-only در P7-C افزوده شد؛ سپس owner می‌تواند migration
+    و preview/selection محدود staging را تأیید کند.
+
+### P7-C — confirmation-only برای rollout انتخابی — 2026-08-05 — COMPLETE (inactive by default)
+
+- Scope انجام‌شده:
+  - flag جدید و پیش‌فرض خاموش
+    `coin_intelligence_inference_auto_selection_enabled` اضافه شد؛ در حالی که
+    selection می‌تواند برای staging روشن باشد، نتیجهٔ یکتای AUTO_SELECT در
+    WebApp و Bot به گزینهٔ `CONFIRM` تبدیل می‌شود.
+  - audit تصمیم خام را پیش از projection ثبت می‌کند. بنابراین گزارش P7-B
+    هنوز نرخ واقعی AUTO_SELECT مدل و انتخاب نهایی کاربر را می‌سنجد، اما UX
+    بدون اقدام کاربر کالایی را وارد آفر نمی‌کند.
+  - receipt/revalidation تغییری نکرده است: در confirmation حاصل از یک
+    AUTO_SELECT، فقط همان candidate یکتای audit‌شده می‌تواند پذیرفته شود.
+- مرز قطعی و rollback:
+  - `preview` صرفاً مشاهده‌ای باقی می‌ماند و وضعیت خام مدل را نشان می‌دهد؛
+  - هر سه flag inference پیش‌فرض خاموش‌اند. rollback فوری برابر خاموش نگه
+    داشتن selection یا auto-selection است و نیازی به rewrite audit ندارد.
+- Test command و نتیجه:
+  - shadow observation، Web parse، Bot flow، revalidation و outcome wiring با
+    environment ساختگی اجرا شدند: `Ran 33 tests ... OK`.
+- گیت مرحلهٔ بعد:
+  - پیش از هر staging activation باید migrationهای audit/outcome/context روی
+    دیتابیس staging، publisher Snapshot محلی و permission مسیر مستقل آزموده
+    شوند. روشن‌کردن auto-selection نیازمند threshold cell مصوب owner است.

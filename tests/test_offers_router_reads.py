@@ -217,6 +217,7 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch("api.routers.offers.settings.coin_intelligence_inference_preview_enabled", False),
             patch("api.routers.offers.settings.coin_intelligence_inference_selection_enabled", True),
+            patch("api.routers.offers.settings.coin_intelligence_inference_auto_selection_enabled", True),
             patch("api.routers.offers.settings.coin_intelligence_inference_snapshot_path", "/safe/snapshot.json"),
             patch("bot.utils.offer_parser.parse_offer_text", new=AsyncMock(return_value=(parsed, None))) as parser,
             patch(
@@ -237,6 +238,52 @@ class OffersRouterReadTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result.data["commodity_inference"]["mode"], "SELECTABLE")
         self.assertEqual(observe.await_args.kwargs["candidate_scope"], "LOW_DATE_ONLY")
+        self.assertFalse(observe.await_args.kwargs["force_confirmation"])
+
+    async def test_parse_offer_default_rollout_requests_confirmation_for_unique_choice(self):
+        context = self.make_context(owner_id=5)
+        db = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
+        parsed = SimpleNamespace(
+            trade_type="buy",
+            settlement_type="cash",
+            commodity_id=None,
+            commodity_name=None,
+            commodity_resolution="OMITTED",
+            low_date_hint=False,
+            quantity=5,
+            price=186_800,
+            is_wholesale=True,
+            lot_sizes=None,
+            notes=None,
+        )
+        decision = CatalogCoinCommodityInference(
+            status="CONFIRM",
+            settlement_term="CASH",
+            candidates=(),
+            snapshot_generated_at_utc="2026-08-04T10:00:00Z",
+            snapshot_receipt="b" * 64,
+            reason="AUTO_SELECTION_REQUIRES_CONFIRMATION",
+        )
+        with (
+            patch("api.routers.offers.settings.coin_intelligence_inference_preview_enabled", False),
+            patch("api.routers.offers.settings.coin_intelligence_inference_selection_enabled", True),
+            patch("api.routers.offers.settings.coin_intelligence_inference_auto_selection_enabled", False),
+            patch("api.routers.offers.settings.coin_intelligence_inference_snapshot_path", "/safe/snapshot.json"),
+            patch("bot.utils.offer_parser.parse_offer_text", new=AsyncMock(return_value=(parsed, None))),
+            patch(
+                "api.routers.offers.observe_coin_inference_shadow",
+                new=AsyncMock(return_value=CoinInferenceShadowObservation("a" * 64, decision)),
+            ) as observe,
+        ):
+            result = await parse_offer_text(
+                ParseOfferRequest(text="خ 5تا 186800"),
+                context=context,
+                db=db,
+            )
+
+        self.assertEqual((result.data["commodity_id"], result.data["commodity_resolution"]), (None, "OMITTED"))
+        self.assertEqual(result.data["commodity_inference"]["status"], "CONFIRM")
+        self.assertTrue(observe.await_args.kwargs["force_confirmation"])
 
     async def test_offer_read_options_only_load_owner_when_identity_is_required(self):
         self.assertEqual(len(build_offer_read_options(include_owner_identity=False)), 1)

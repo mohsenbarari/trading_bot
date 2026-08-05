@@ -75,6 +75,29 @@ def _snapshot_market_context(snapshot: object, ranker_result: object) -> tuple[s
     return normalized_source, normalized_regime
 
 
+def _confirmation_only_projection(
+    decision: CatalogCoinCommodityInference,
+) -> CatalogCoinCommodityInference:
+    """Make a unique raw model result explicitly confirmable for rollout UX.
+
+    The append-only audit keeps the original ``AUTO_SELECT`` result for
+    measurement.  This projection affects only what the current caller may
+    apply to an offer, so turning the rollout switch off cannot rewrite history
+    or make the model appear less decisive than it was.
+    """
+
+    if decision.status != "AUTO_SELECT":
+        return decision
+    return CatalogCoinCommodityInference(
+        status="CONFIRM",
+        settlement_term=decision.settlement_term,
+        candidates=decision.candidates,
+        snapshot_generated_at_utc=decision.snapshot_generated_at_utc,
+        snapshot_receipt=decision.snapshot_receipt,
+        reason="AUTO_SELECTION_REQUIRES_CONFIRMATION",
+    )
+
+
 async def observe_coin_inference_shadow(
     db: AsyncSession,
     *,
@@ -84,6 +107,7 @@ async def observe_coin_inference_shadow(
     source_surface: str,
     now_utc: datetime | None = None,
     candidate_scope: str = "ALL",
+    force_confirmation: bool = False,
 ) -> CoinInferenceShadowObservation:
     """Rank, catalog-resolve, and append one shadow decision without commit.
 
@@ -131,9 +155,14 @@ async def observe_coin_inference_shadow(
             market_regime=market_regime,
         ),
     )
+    presentation_decision = (
+        _confirmation_only_projection(catalog_result)
+        if force_confirmation
+        else catalog_result
+    )
     return CoinInferenceShadowObservation(
         decision_key=decision_key,
-        decision=catalog_result,
+        decision=presentation_decision,
     )
 
 

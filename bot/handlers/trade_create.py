@@ -287,6 +287,9 @@ async def _text_offer_selection_observation(result: object):
                 settlement_term=settlement_term,
                 source_surface="TELEGRAM_BOT",
                 candidate_scope=candidate_scope,
+                force_confirmation=not bool(
+                    getattr(settings, "coin_intelligence_inference_auto_selection_enabled", False)
+                ),
             )
             await session.commit()
         return observation

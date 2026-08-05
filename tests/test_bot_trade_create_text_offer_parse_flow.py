@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 from bot.callbacks import TextOfferInferenceCandidateCallback
 from bot.handlers.trade_create import (
     Trade,
+    _text_offer_selection_observation,
     _text_offer_shadow_inference_summary,
     handle_text_offer,
     handle_text_offer_inference_choice,
@@ -204,6 +205,37 @@ class BotTradeCreateTextOfferParseFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.update_data.await_args.kwargs["coin_inference_selected_commodity_id"], 71)
         self.assertIn("امام", message.answer.await_args.args[0])
         state.set_state.assert_awaited_once_with(Trade.awaiting_text_confirm)
+
+    async def test_bot_selector_defaults_to_confirmation_only_rollout(self):
+        parsed = SimpleNamespace(
+            settlement_type="cash",
+            low_date_hint=False,
+            price=186_800,
+        )
+        session = SimpleNamespace(commit=AsyncMock())
+        observation = SimpleNamespace()
+        with (
+            patch(
+                "bot.handlers.trade_create.settings",
+                SimpleNamespace(
+                    coin_intelligence_inference_selection_enabled=True,
+                    coin_intelligence_inference_snapshot_path="/safe/snapshot.json",
+                ),
+            ),
+            patch(
+                "bot.handlers.trade_create.AsyncSessionLocal",
+                return_value=FakeSessionContext(session),
+            ),
+            patch(
+                "bot.handlers.trade_create.observe_coin_inference_shadow",
+                new=AsyncMock(return_value=observation),
+            ) as observe,
+        ):
+            result = await _text_offer_selection_observation(parsed)
+
+        self.assertIs(result, observation)
+        self.assertTrue(observe.await_args.kwargs["force_confirmation"])
+        session.commit.assert_awaited_once()
 
     async def test_ambiguous_selector_accepts_only_the_candidate_stored_in_fsm(self):
         state = SimpleNamespace(

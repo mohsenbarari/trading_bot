@@ -454,6 +454,9 @@ async def _selection_inference_for_missing_commodity(
             source_surface="WEBAPP",
             now_utc=datetime.now(timezone.utc),
             candidate_scope=candidate_scope,
+            force_confirmation=not bool(
+                getattr(settings, "coin_intelligence_inference_auto_selection_enabled", False)
+            ),
         )
         await db.commit()
         return _catalog_inference_shadow_payload(

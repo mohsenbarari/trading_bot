@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     # Separate from the passive preview switch.  This authorizes an inferred
     # commodity to enter a real offer only after final-submit revalidation.
     coin_intelligence_inference_selection_enabled: bool = False
+    # Even when selection is enabled for a constrained staging rollout, keep
+    # a unique model result as an explicit user confirmation until an owner
+    # promotes eligible cells.  This must never default to automatic choice.
+    coin_intelligence_inference_auto_selection_enabled: bool = False
     coin_intelligence_inference_snapshot_path: str | None = None
     log_level: str = "INFO"
     log_format: str = "json"
