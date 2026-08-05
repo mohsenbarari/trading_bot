@@ -592,14 +592,22 @@ owner rejects.
 
 Evidence: `tmp/combined-staging-evidence/stage16-driver-OT-REQ-IRAN-TO-IRAN.json`.
 
+### 12.11 Requester cancel (`OT-CANCEL-REQUESTER`)
+
+Iran WebApp overtime request is presented, then closed by `لغو درخواست`
+(`cancel_by_requester`). The offer seat becomes free (`get_active_request_for_offer`
+returns none) and the terminal row mirrors to foreign.
+
+Evidence: `tmp/combined-staging-evidence/stage16-driver-OT-CANCEL-REQUESTER.json`.
+
 ### 12.4 Remaining work before `main`
 
 | Item | State |
 | --- | --- |
-| Mutating Stage 16 scenario drivers | 6 of 15 wired and passing live; `execute` → `execute_partial` once transport env is set |
+| Mutating Stage 16 scenario drivers | 7 of 15 wired and passing live; `execute` → `execute_partial` once transport env is set |
 | Overtime preferences | staging users remain at `0` after driver cleanup |
 | Coin inference flags | off by default, untouched |
 | Arvan CDN origin for `staging.gold-trade.ir` | broken, needs panel fix |
 | Sync parity comparison | `comparison_status: missing` — no parity run yet on this pair |
 | coin-price vs coin-commodity comparison | still owed per the handoff prompt |
-| Next drivers | `OT-REQ-FOREIGN-TO-FOREIGN`, `OT-QUEUE-ORDER`, `OT-CANCEL-REQUESTER` |
+| Next drivers | `OT-REQ-FOREIGN-TO-FOREIGN`, `OT-QUEUE-ORDER`, then channel/UI axes |

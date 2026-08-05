@@ -1,0 +1,26 @@
+{
+  "scenario": "OT-CANCEL-REQUESTER",
+  "run_prefix": "OTACC_20260805160436",
+  "release_sha": "3c8b3e07",
+  "iran": {
+    "owner_user_id": 1376,
+    "requester_user_id": 1378,
+    "offer_id": 486,
+    "offer_public_id": "ofr_NZVwR70uesE_TiE642gU3aa9",
+    "request_id": 312,
+    "request_public_id": "req_Pv2sQDvTXWV1S8bZuxS_w3xD",
+    "presented_status": "overtime_presented",
+    "cancelled_status": "overtime_cancelled_by_requester",
+    "offer_seat_free_after_cancel": true,
+    "request_change_log_rows": 3,
+    "passed": true
+  },
+  "foreign_mirror": {
+    "result_status": "overtime_cancelled_by_requester",
+    "request_home_server": "iran",
+    "observed_after_seconds": 8
+  },
+  "cleanup": {
+    "users_retired": 2
+  }
+}
