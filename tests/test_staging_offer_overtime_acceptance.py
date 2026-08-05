@@ -75,6 +75,7 @@ class StagingOfferOvertimeAcceptanceTests(unittest.TestCase):
         self.assertIn("OT-OFFER-WEBAPP-ORIGIN", wired)
         self.assertIn("OT-OFFER-BOT-ORIGIN", wired)
         self.assertIn("OT-REQ-IRAN-TO-IRAN", wired)
+        self.assertIn("OT-CANCEL-REQUESTER", wired)
         self.assertIn("OT-OFFER-BOT-ORIGIN", runner.WIRED_FOREIGN_DRIVER_SCENARIOS)
 
     def test_execute_blocks_when_iran_driver_transport_unset(self):

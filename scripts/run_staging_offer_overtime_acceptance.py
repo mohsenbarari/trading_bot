@@ -73,6 +73,7 @@ WIRED_IRAN_DRIVER_SCENARIOS = (
     "OT-PREF-DISABLED-REGRESSION",
     "OT-OFFER-WEBAPP-ORIGIN",
     "OT-REQ-IRAN-TO-IRAN",
+    "OT-CANCEL-REQUESTER",
 )
 WIRED_FOREIGN_DRIVER_SCENARIOS = (
     "OT-OFFER-BOT-ORIGIN",
@@ -737,7 +738,12 @@ def run_wired_drivers(args: argparse.Namespace) -> list[dict[str, Any]]:
         run_prefix = f"OTACC_{stamp}_{index:02d}"
         minutes = (
             5
-            if scenario in {"OT-OFFER-WEBAPP-ORIGIN", "OT-REQ-IRAN-TO-IRAN"}
+            if scenario
+            in {
+                "OT-OFFER-WEBAPP-ORIGIN",
+                "OT-REQ-IRAN-TO-IRAN",
+                "OT-CANCEL-REQUESTER",
+            }
             else 4
         )
         argv = iran_driver_argv(scenario, run_prefix, minutes)

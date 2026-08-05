@@ -41,6 +41,7 @@ SCENARIOS = (
     "OT-OFFER-WEBAPP-ORIGIN",
     "OT-OFFER-BOT-ORIGIN",
     "OT-REQ-IRAN-TO-IRAN",
+    "OT-CANCEL-REQUESTER",
 )
 # Staging Iran currently carries a single commodity; keep the driver pinned to it.
 DEFAULT_COMMODITY_ID = 1
@@ -988,6 +989,130 @@ async def _scenario_req_iran_to_iran(
     }
 
 
+async def _scenario_cancel_requester(
+    session,
+    run_prefix: str,
+    minutes: int,
+) -> dict[str, object]:
+    """Requester cancel closes a nonterminal overtime row and frees the offer seat."""
+    from core.services.offer_overtime_preference_service import persist_overtime_preference
+    from core.services.offer_overtime_request_service import (
+        OvertimeRequestCreateCommand,
+        create_overtime_request,
+        cancel_by_requester,
+        get_active_request_for_offer,
+    )
+    from core.trading_settings import get_trading_settings
+    from models.offer_request import OfferRequestSourceSurface, OfferRequestStatus
+
+    if current_server() != "iran":
+        raise DriverRefusal("OT-CANCEL-REQUESTER driver currently runs on the Iran peer")
+    if minutes <= 0:
+        raise DriverRefusal("OT-CANCEL-REQUESTER requires a positive overtime preference")
+
+    await _cleanup(session, run_prefix)
+    owner = await _seed_owner(session, run_prefix)
+    requester = await _seed_user(session, run_prefix, "requester")
+    await session.commit()
+    await session.refresh(owner)
+    await session.refresh(requester)
+    owner_id = int(owner.id)
+    requester_id = int(requester.id)
+
+    await persist_overtime_preference(session, owner, minutes)
+    await session.commit()
+    await session.refresh(owner)
+
+    offer, normal_minutes = await _create_webapp_offer(
+        session,
+        owner,
+        notes=f"{run_prefix} cancel requester",
+    )
+    offer_id = int(offer.id)
+    offer_public_id = str(offer.offer_public_id)
+    await _backdate_offer_into_overtime(session, offer, normal_minutes=normal_minutes)
+    offer = await _reload_offer(session, offer_id)
+    receipt_at = datetime.utcnow()
+    ts = get_trading_settings()
+
+    create_result = await create_overtime_request(
+        session,
+        OvertimeRequestCreateCommand(
+            offer=offer,
+            requester_user_id=requester_id,
+            actor_user_id=requester_id,
+            requested_quantity=min(2, DEFAULT_OFFER_QUANTITY),
+            idempotency_key=f"{run_prefix}:ot-cancel",
+            request_source_surface=OfferRequestSourceSurface.WEBAPP,
+            request_source_server="iran",
+            receipt_at=receipt_at,
+            normal_lifetime_minutes=normal_minutes,
+            request_home_server="iran",
+        ),
+        now=receipt_at,
+    )
+    await session.commit()
+    ledger = create_result.ledger
+    await session.refresh(ledger)
+    request_id = int(ledger.id)
+    request_public_id = str(ledger.request_public_id)
+    presented_status = str(
+        getattr(ledger.result_status, "value", ledger.result_status)
+    )
+
+    await cancel_by_requester(
+        session,
+        ledger,
+        requester_user_id=requester_id,
+        now=datetime.utcnow(),
+        normal_lifetime_minutes=int(getattr(ts, "offer_expiry_minutes", 0) or 0),
+    )
+    await session.commit()
+    await session.refresh(ledger)
+    cancelled_status = str(
+        getattr(ledger.result_status, "value", ledger.result_status)
+    )
+
+    active_after = await get_active_request_for_offer(
+        session,
+        request_home_server="iran",
+        offer_public_id=offer_public_id,
+    )
+
+    request_change_log_rows = (
+        await session.execute(
+            select(func.count())
+            .select_from(ChangeLog)
+            .where(
+                ChangeLog.table_name == "offer_requests",
+                ChangeLog.record_id == request_id,
+            )
+        )
+    ).scalar_one()
+
+    passed = (
+        create_result.promoted is True
+        and presented_status == OfferRequestStatus.OVERTIME_PRESENTED.value
+        and cancelled_status == OfferRequestStatus.OVERTIME_CANCELLED_BY_REQUESTER.value
+        and active_after is None
+        and int(request_change_log_rows) > 0
+    )
+
+    return {
+        "owner_user_id": owner_id,
+        "requester_user_id": requester_id,
+        "offer_id": offer_id,
+        "offer_public_id": offer_public_id,
+        "request_id": request_id,
+        "request_public_id": request_public_id,
+        "presented_status": presented_status,
+        "cancelled_status": cancelled_status,
+        "offer_seat_free_after_cancel": active_after is None,
+        "request_change_log_rows": int(request_change_log_rows),
+        "passed": passed,
+    }
+
+
 async def main_async(args: argparse.Namespace) -> dict[str, object]:
     _guard_environment()
     run_prefix = _guard_run_prefix(args.run_prefix)
@@ -1045,6 +1170,8 @@ async def main_async(args: argparse.Namespace) -> dict[str, object]:
                 raise DriverRefusal(f"unsupported OT-OFFER-BOT-ORIGIN phase={phase!r}")
         elif args.scenario == "OT-REQ-IRAN-TO-IRAN":
             outcome = await _scenario_req_iran_to_iran(session, run_prefix, args.minutes)
+        elif args.scenario == "OT-CANCEL-REQUESTER":
+            outcome = await _scenario_cancel_requester(session, run_prefix, args.minutes)
         else:
             raise DriverRefusal(f"no driver implemented for {args.scenario}")
 
