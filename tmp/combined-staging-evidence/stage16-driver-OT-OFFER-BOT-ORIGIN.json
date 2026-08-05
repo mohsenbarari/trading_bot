@@ -1,0 +1,56 @@
+{
+  "scenario": "OT-OFFER-BOT-ORIGIN",
+  "run_prefix": "OTACC_20260805155628",
+  "release_sha": "3c8b3e07",
+  "note": "registration sync v2: user seeded on Iran with home_server=foreign; bot preference forwarded; offer created on foreign",
+  "iran_seed": {
+    "owner_user_id": 1370,
+    "owner_home_server": "foreign",
+    "user_change_log_rows": 1,
+    "passed": true
+  },
+  "foreign_run": {
+    "owner_user_id": 1370,
+    "offer_id": 239,
+    "offer_public_id": "ofr_7Gn2_1wbEWaiHhsCkoyQEfnj",
+    "offer_home_server": "foreign",
+    "preference_at_create": 5,
+    "preference_mirror_seconds": 2.009,
+    "overtime_minutes_snapshot": 5,
+    "snapshot_after_preference_cleared": 5,
+    "preference_after_clear": 0,
+    "lifecycle_fields": {
+      "lifecycle_phase": "normal",
+      "overtime_minutes_snapshot": 5,
+      "accepts_automatic_trade": true,
+      "accepts_overtime_request": false,
+      "normal_deadline_ts": 1785945535,
+      "final_deadline_ts": 1785945835
+    },
+    "overtime_phase": "overtime",
+    "accepts_automatic_in_overtime": false,
+    "accepts_overtime_in_overtime": true,
+    "public_safe": {
+      "safe_public_state_label": "active",
+      "overtime_minutes_snapshot": 5,
+      "private_identity_leaked": false
+    },
+    "offer_change_log_rows": 3,
+    "passed": true
+  },
+  "iran_mirror": {
+    "offer_id": 482,
+    "overtime_minutes_snapshot": 5,
+    "home_server": "foreign",
+    "status": "ACTIVE",
+    "user_preference_after_clear": 0,
+    "observed_after_seconds": 5
+  },
+  "cleanup": {
+    "path": "core.services.user_deletion_service.delete_user_account",
+    "peer": "iran",
+    "users_retired": 1,
+    "foreign_user_is_deleted": true,
+    "foreign_offer_status": "EXPIRED"
+  }
+}

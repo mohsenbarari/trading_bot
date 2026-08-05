@@ -547,14 +547,41 @@ Notes kept honest:
   until the remaining 11 scenarios are wired. Without transport env it stays
   fail-closed.
 
+### 12.9 Bot-origin offer driver (`OT-OFFER-BOT-ORIGIN`)
+
+Registration sync v2 refuses foreign `users` INSERT outbox rows, so this
+scenario is intentionally two-peer:
+
+1. **Iran seed** — create owner with `home_server=foreign` (change-log emitted)
+2. **Foreign run** — wait for user mirror → bot preference forward to Iran →
+   wait for preference mirror → create `TELEGRAM_BOT` offer with quota freeze →
+   clear preference and prove snapshot stays frozen → public lifecycle safe
+3. **Iran cleanup** — `delete_user_account` retires the owner; foreign soft-delete
+   and offer expiry converge
+
+| Assertion | Result |
+| --- | --- |
+| Seed owner 1370, `home_server=foreign` | yes |
+| Bot preference forward + foreign mirror to 5 | ~2s |
+| Offer `ofr_7Gn2_…` snapshot 5, home foreign | yes |
+| Preference cleared to 0; snapshot remains 5 | yes |
+| Overtime phase accepts approval only | yes |
+| Iran mirrored offer 482 snapshot 5 | ~5s |
+| Cleanup propagated (`is_deleted` / offer `EXPIRED`) | yes |
+
+Evidence: `tmp/combined-staging-evidence/stage16-driver-OT-OFFER-BOT-ORIGIN.json`.
+
+This also exercises the real foreign bot preference path (signed forward + sync
+mirror) that the earlier Iran-local `OT-PREF-BOT-SAVE` run could not cover alone.
+
 ### 12.4 Remaining work before `main`
 
 | Item | State |
 | --- | --- |
-| Mutating Stage 16 scenario drivers | 4 of 15 wired and passing live; `execute` → `execute_partial` once transport env is set |
+| Mutating Stage 16 scenario drivers | 5 of 15 wired and passing live; `execute` → `execute_partial` once transport env is set |
 | Overtime preferences | staging users remain at `0` after driver cleanup |
 | Coin inference flags | off by default, untouched |
 | Arvan CDN origin for `staging.gold-trade.ir` | broken, needs panel fix |
 | Sync parity comparison | `comparison_status: missing` — no parity run yet on this pair |
 | coin-price vs coin-commodity comparison | still owed per the handoff prompt |
-| Next drivers | `OT-OFFER-BOT-ORIGIN`, then request/queue axes |
+| Next drivers | request/queue axes (`OT-REQ-*`, `OT-QUEUE-ORDER`, …) |
