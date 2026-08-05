@@ -15,7 +15,7 @@
 - Rule: no implementation, database, deployment, or runtime changes are allowed until the plan is complete and explicitly approved.
 - Decision policy: only confirmed decisions are recorded as final. Unresolved items remain explicitly open.
 - Verification status: the technical review below was re-verified against the codebase at commit `540b2c0c`. Corrections from that verification are folded into the tables and stages.
-- Copy policy: every user-facing message and displayed text in this feature requires explicit product-owner approval of its exact wording before the stage that ships it may be implemented. The message inventory section is the single index of record. All strings call the object a `لفظ` to match existing product vocabulary, and the feature is labelled `وقت اضافه` wherever it is named. Only `M1` is approved, only `M20b` still has no text, and the rest are drafted and awaiting review.
+- Copy policy: every user-facing message and displayed text in this feature requires explicit product-owner approval of its exact wording before the stage that ships it may be implemented. The message inventory section is the single index of record. All strings call the object a `لفظ` to match existing product vocabulary, and the feature is labelled `وقت اضافه` wherever it is named. Forty-one of the forty-two entries are approved; only `M34` remains open, awaiting a choice between two candidate wordings.
 
 ## 1. Feature Naming
 
@@ -43,7 +43,7 @@ The discovery topics were not written as separate numbered sections. They are re
 - **Technical Compatibility and Challenge Review** — the codebase reality behind each rule, the components to reuse, the design work required, cross-cutting risks, the audit payload scope, and the test matrix.
 - **Stage-Based Implementation Roadmap** — the delivery order, with per-stage scope, locations, tests, and exit criteria.
 
-Abuse prevention and operational limits are the least developed topic: the per-offer lock, the per-owner presented-request limit, and the requester cooldown are all confirmed, but the per-requester concurrency cap across distinct offers is still an open question below.
+Abuse prevention and operational limits are now fully covered: the per-offer lock, the per-owner presented-request limit, the requester cooldown, a cap of three outstanding requests per requester, and a limit of one outstanding request per requester per economic owner.
 
 ## Decision Log
 
@@ -110,7 +110,7 @@ Abuse prevention and operational limits are the least developed topic: the per-o
 
 ## Draft Product Scenario
 
-> Status: draft; this scenario is not a final decision until explicitly approved.
+> Status: the behavior described here is confirmed and matches the Decision Log. The prose is a walkthrough, not a separate source of truth; where it and the Decision Log ever diverge, the Decision Log governs. Persian prose in this section still says `آفر` in places for historical reasons, which is harmless because it is internal documentation, while every string a user actually sees says `لفظ`.
 
 ### مثال پایه
 
@@ -356,13 +356,13 @@ The inventory is the single index of record. If implementation discovers a state
 | M38 | Channel | Overtime marker added to the public post, and removed or retained at terminal outcome | `⏳` | Confirmed |
 | M39 | Both | Standard trade messages to both parties after a successful overtime trade | Existing project text, content contract unchanged | Confirmed to stay unchanged |
 
-**Vocabulary rule.** Every user-facing string in this feature calls the object a `لفظ`, never an `آفر`. This matches every existing message in the product, such as `این لفظ دیگر فعال نیست.` and `شما حداکثر {تعداد} لفظ فعال دارید.`, and it avoids showing the user two different words for one thing on the same screen. `آفر` remains acceptable only in the technical prose of this document. Because of this rule the confirmed reachability warning was restated from `آفر` to `لفظ` and needs reconfirmation, and the Persian feature name recorded in Decision 1 no longer matches the strings; that is listed as an open question.
+**Vocabulary rule.** Every user-facing string in this feature calls the object a `لفظ`, never an `آفر`. This matches every existing message in the product, such as `این لفظ دیگر فعال نیست.` and `شما حداکثر {تعداد} لفظ فعال دارید.`, and it avoids showing the user two different words for one thing on the same screen. `آفر` remains acceptable only in the internal prose of this document. The reachability warning was restated under this rule and reconfirmed, and the feature-name question it raised is closed: users only ever see `وقت اضافه`, so the internal full name never reaches a screen.
 
-**Remaining gap.** Only `M20b` has no text yet: the response when a requester already holds a request against this same economic owner. It must convey that the requester should try a different lafz without revealing whose offers are involved, since owner identity is not otherwise exposed pre-trade.
+**Remaining gap.** Every entry now has text. One choice is still open: `M34` has two candidate wordings and needs one selected before Stage 9 can ship the bot approval callbacks.
 
 ## Draft Exact Product Copy
 
-> Status: copy draft; behavior requirements are confirmed, but every string below is subject to the approval gate above and none may be implemented before it is approved.
+> Status: behavior requirements are confirmed and every string reproduced below is approved in the inventory above. The inventory is the index of record; this section is the same text shown in context.
 
 ### بازخورد وضعیت به درخواست‌دهنده
 
@@ -616,7 +616,7 @@ All metadata belonging to the offer and its overtime requests is retained as dur
 16. **Cancellation access:** inline bot cancellation, delivered and failed/deleted status message, restart/reconnect, no secondary cancellation route, and no unintended main-menu or user-panel change.
 17. **Requester status transition:** queued bot request promotion edits the existing message, retains/removes cancellation at the correct point, shows the WebApp countdown only after promotion, and leaves the reply-keyboard anchor untouched.
 18. **Terminal message safety:** approve, reject, timeout, invalidation, cancellation, stale callback, and queue retry edit the existing bot status/approval message, remove inline buttons, preserve the reply-keyboard anchor, and emit normal trade messages only on successful approval.
-19. **Republish semantics:** source and replacement with different current overtime settings, customer/delegated creation, historical marker isolation, remaining lots, and two-server synchronization.
+19. **Republish semantics:** source and replacement with different current overtime settings, republish by an ordinary user and by a tier-1 customer, historical marker isolation, remaining lots, and two-server synchronization.
 20. **Final-tail visuals:** end of overtime with an active approval, completed green bar, static WebApp marker, retained channel marker, disabled public interaction, approval/rejection/timeout, and historical marker removal/retention.
 21. **Requester limits:** a requester holding one, two, and three outstanding requests and being refused the fourth; a second request against an owner they already hold one against being refused; three requests across three owners all being presented in parallel rather than queued behind each other; queued requests counting toward both limits; release on approval, rejection, timeout, cancellation, and hard invalidation; requests spread across both home servers, including behavior under synchronization lag where a transient overshoot of one is accepted rather than treated as a failure; interaction with the per-offer lock and the one-presented-per-owner-scope rule; and concurrent attempts racing each limit boundary.
 22. **Deadline agreement:** worker and request path evaluated at the same exact deadline instant, the in-flight allowance extended to the overtime phase and the tail, and no path where a worker-advanced status silently drops a validly received request.
@@ -626,11 +626,11 @@ All metadata belonging to the offer and its overtime requests is retained as dur
 
 ## Open Questions Requiring a Decision
 
-Detailed schema, migration, API, queue, and test design will be derived from the confirmed requirements above without changing the stated behavior. Three items remain open and must be answered before Stage 4.
+Detailed schema, migration, API, queue, and test design will be derived from the confirmed requirements above without changing the stated behavior. One item remains open.
 
-1. **Final copy approval.** Every user-facing string in this feature requires explicit product-owner approval before its stage may be implemented. See the message inventory section for the full list and its per-entry state. Only `M1` is approved so far, only `M20b` still has no text, and everything between the two is drafted and awaiting review.
+1. **Wording of `M34`.** The callback answer shown when someone other than the economic owner clicks an approval button. Two candidates are recorded in the inventory and one must be chosen before Stage 9 ships the bot approval callbacks. Nothing else depends on it.
 
-Resolved since the previous revision: the owner reachability warning has fixed wording, the requester limits are confirmed at three overall and one per owner, the limits are counted locally on the offer home server with accepted best-effort cross-server accuracy, and the feature name question is closed because the user-facing label is `وقت اضافه` while `وقت اضافه آفر` stays internal.
+Everything else that was previously open is now closed: the owner reachability warning has approved wording, the requester limits are set at three overall and one per economic owner, those limits are counted locally on the offer home server with best-effort cross-server accuracy accepted, the feature name is settled because users only ever see `وقت اضافه`, the bot control is a typed value with explicit confirmation rather than a stepper, and forty-one of the forty-two user-facing strings are approved.
 
 ## Stage-Based Implementation Roadmap
 
@@ -772,7 +772,7 @@ Resolved since the previous revision: the owner reachability warning has fixed w
 
 **Primary locations:** `core/trade_forwarding.py`, `api/routers/trades.py`, `api/routers/sync.py`, `core/events.py`, `core/sync_metadata.py`, `core/sync_field_policy.py`, `core/sync_parity.py`.
 
-**Tests:** both forwarding directions; before-send failure; ambiguous timeout with recovery; replay; temporary disconnect/reconnect; stale sync event; payload parity; customer/delegated requests; no foreign local decision.
+**Tests:** both forwarding directions; before-send failure; ambiguous timeout with recovery; replay; temporary disconnect/reconnect; stale sync event; payload parity; requests from tier-1 and tier-2 customers; no foreign local decision.
 
 **Exit criteria:** one logical request and one terminal result survive retries, outages, and sync reordering.
 
