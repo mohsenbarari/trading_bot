@@ -66,13 +66,15 @@ class StagingOfferOvertimeAcceptanceTests(unittest.TestCase):
             self.assertEqual(code, 2)
             self.assertEqual(summary["status"], "execute_blocked")
 
-    def test_wired_iran_driver_catalog_is_non_empty_subset(self):
+    def test_wired_driver_catalog_is_non_empty_subset(self):
         catalog = {item["id"] for item in runner.SCENARIOS}
-        wired = set(runner.WIRED_IRAN_DRIVER_SCENARIOS)
+        wired = set(runner.WIRED_DRIVER_SCENARIOS)
         self.assertTrue(wired)
         self.assertTrue(wired.issubset(catalog))
         self.assertIn("OT-PREF-DISABLED-REGRESSION", wired)
         self.assertIn("OT-OFFER-WEBAPP-ORIGIN", wired)
+        self.assertIn("OT-OFFER-BOT-ORIGIN", wired)
+        self.assertIn("OT-OFFER-BOT-ORIGIN", runner.WIRED_FOREIGN_DRIVER_SCENARIOS)
 
     def test_execute_blocks_when_iran_driver_transport_unset(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -101,7 +103,7 @@ class StagingOfferOvertimeAcceptanceTests(unittest.TestCase):
                 summary, code = runner.run_execute(args)
             self.assertEqual(code, 3)
             self.assertEqual(summary["status"], "execute_blocked")
-            self.assertIn("Iran driver transport", summary["detail"])
+            self.assertIn("driver transport env is incomplete", summary["detail"])
 
     def test_preflight_fails_on_wrong_branch(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -65,15 +65,18 @@ SCENARIOS = [
     {"id": "OT-UI-RECONNECT", "surface": "webapp", "requires": ["webapp_poll_reconnect"]},
 ]
 
-# Iran-container drivers implemented in scripts/staging_overtime_scenario_driver.py.
-# Foreign-forward M7 for bot-save and the remaining request/queue/channel axes are
-# still unwired; execute reports that gap instead of pretending the matrix is green.
+# Drivers implemented in scripts/staging_overtime_scenario_driver.py.
+# Remaining request/queue/channel axes stay unwired; execute reports that gap.
 WIRED_IRAN_DRIVER_SCENARIOS = (
     "OT-PREF-WEBAPP-SAVE",
     "OT-PREF-BOT-SAVE",
     "OT-PREF-DISABLED-REGRESSION",
     "OT-OFFER-WEBAPP-ORIGIN",
 )
+WIRED_FOREIGN_DRIVER_SCENARIOS = (
+    "OT-OFFER-BOT-ORIGIN",
+)
+WIRED_DRIVER_SCENARIOS = WIRED_IRAN_DRIVER_SCENARIOS + WIRED_FOREIGN_DRIVER_SCENARIOS
 
 
 @dataclass
@@ -512,7 +515,26 @@ def run_preflight(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     return summary, 0 if not failed else 1
 
 
-def iran_driver_argv(scenario: str, run_prefix: str, minutes: int) -> list[str] | None:
+def _parse_driver_stdout(stdout: str, stderr: str) -> dict[str, Any]:
+    text = (stdout or "").strip()
+    try:
+        return json.loads(text.splitlines()[-1]) if text else {}
+    except json.JSONDecodeError:
+        return {
+            "passed": False,
+            "error": "driver stdout was not JSON",
+            "stdout": text[-2000:],
+            "stderr": (stderr or "")[-2000:],
+        }
+
+
+def iran_driver_argv(
+    scenario: str,
+    run_prefix: str,
+    minutes: int,
+    *,
+    extra_args: str = "",
+) -> list[str] | None:
     """Build the remote Iran driver command, or None when topology env is unset."""
     explicit = (os.getenv("STAGING_IRAN_DRIVER_EXEC") or "").strip()
     if explicit:
@@ -520,6 +542,7 @@ def iran_driver_argv(scenario: str, run_prefix: str, minutes: int) -> list[str] 
             explicit.replace("{scenario}", scenario)
             .replace("{run_prefix}", run_prefix)
             .replace("{minutes}", str(minutes))
+            .replace("{extra_args}", extra_args)
         )
         return ["bash", "-lc", rendered]
 
@@ -532,8 +555,8 @@ def iran_driver_argv(scenario: str, run_prefix: str, minutes: int) -> list[str] 
     ).strip()
     remote = (
         f"docker exec {container} python scripts/staging_overtime_scenario_driver.py "
-        f"--scenario {scenario} --run-prefix {run_prefix} --minutes {minutes}"
-    )
+        f"--scenario {scenario} --run-prefix {run_prefix} --minutes {minutes} {extra_args}"
+    ).rstrip()
     return [
         "ssh",
         "-o",
@@ -547,8 +570,166 @@ def iran_driver_argv(scenario: str, run_prefix: str, minutes: int) -> list[str] 
     ]
 
 
-def run_wired_iran_drivers(args: argparse.Namespace) -> list[dict[str, Any]]:
-    """Execute the Iran-container drivers that are already implemented."""
+def foreign_driver_argv(
+    scenario: str,
+    run_prefix: str,
+    minutes: int,
+    *,
+    extra_args: str = "",
+) -> list[str] | None:
+    """Build the local/remote foreign driver command."""
+    explicit = (os.getenv("STAGING_FOREIGN_DRIVER_EXEC") or "").strip()
+    if explicit:
+        rendered = (
+            explicit.replace("{scenario}", scenario)
+            .replace("{run_prefix}", run_prefix)
+            .replace("{minutes}", str(minutes))
+            .replace("{extra_args}", extra_args)
+        )
+        return ["bash", "-lc", rendered]
+
+    # Default: foreign staging app is local on the foreign host.
+    if (os.getenv("STAGING_FOREIGN_DRIVER_DISABLE") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
+        return None
+    container = (
+        os.getenv("STAGING_FOREIGN_APP_CONTAINER") or "trading_bot_staging-foreign_app-1"
+    ).strip()
+    return [
+        "docker",
+        "exec",
+        container,
+        "python",
+        "scripts/staging_overtime_scenario_driver.py",
+        "--scenario",
+        scenario,
+        "--run-prefix",
+        run_prefix,
+        "--minutes",
+        str(minutes),
+        *extra_args.split(),
+    ]
+
+
+def _run_argv(argv: list[str]) -> tuple[subprocess.CompletedProcess[str], float]:
+    started = time.time()
+    completed = subprocess.run(
+        argv,
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return completed, round(time.time() - started, 3)
+
+
+def run_offer_bot_origin_driver(args: argparse.Namespace, run_prefix: str) -> dict[str, Any]:
+    """Seed on Iran, mutate on foreign, retire on Iran (registration sync v2)."""
+    seed_argv = iran_driver_argv(
+        "OT-OFFER-BOT-ORIGIN",
+        run_prefix,
+        5,
+        extra_args="--phase seed --no-cleanup-after",
+    )
+    foreign_probe = foreign_driver_argv(
+        "OT-OFFER-BOT-ORIGIN",
+        run_prefix,
+        5,
+        extra_args="--phase run --owner-user-id 0 --no-cleanup-after",
+    )
+    if seed_argv is None or foreign_probe is None:
+        return {
+            "id": "OT-OFFER-BOT-ORIGIN",
+            "status": "blocked",
+            "detail": (
+                "set STAGING_IRAN_SSH_HOST for seed/cleanup and ensure the foreign "
+                "app container is reachable (or set STAGING_FOREIGN_DRIVER_EXEC)"
+            ),
+            "run_prefix": run_prefix,
+        }
+
+    seed_completed, seed_elapsed = _run_argv(seed_argv)
+    seed_payload = _parse_driver_stdout(seed_completed.stdout, seed_completed.stderr)
+    if not (seed_payload.get("passed") and seed_completed.returncode == 0):
+        return {
+            "id": "OT-OFFER-BOT-ORIGIN",
+            "status": "failed",
+            "elapsed_seconds": seed_elapsed,
+            "run_prefix": run_prefix,
+            "phase": "seed",
+            "returncode": seed_completed.returncode,
+            "payload": seed_payload,
+        }
+
+    owner_user_id = int(seed_payload["owner_user_id"])
+    run_argv = foreign_driver_argv(
+        "OT-OFFER-BOT-ORIGIN",
+        run_prefix,
+        5,
+        extra_args=f"--phase run --owner-user-id {owner_user_id} --no-cleanup-after",
+    )
+    assert run_argv is not None
+    run_completed, run_elapsed = _run_argv(run_argv)
+    run_payload = _parse_driver_stdout(run_completed.stdout, run_completed.stderr)
+
+    cleanup_argv = iran_driver_argv(
+        "OT-OFFER-BOT-ORIGIN",
+        run_prefix,
+        5,
+        extra_args="",
+    )
+    # cleanup uses --mode cleanup, not scenario flags
+    if cleanup_argv is not None:
+        # Replace the scenario invocation with an explicit cleanup command.
+        host = (os.getenv("STAGING_IRAN_SSH_HOST") or "").strip()
+        port = (os.getenv("STAGING_IRAN_SSH_PORT") or "22").strip()
+        container = (
+            os.getenv("STAGING_IRAN_APP_CONTAINER") or "trading_bot_staging_iran-app-1"
+        ).strip()
+        cleanup_argv = [
+            "ssh",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=15",
+            "-p",
+            port,
+            f"root@{host}",
+            (
+                f"docker exec {container} python scripts/staging_overtime_scenario_driver.py "
+                f"--mode cleanup --run-prefix {run_prefix}"
+            ),
+        ]
+        cleanup_completed, cleanup_elapsed = _run_argv(cleanup_argv)
+        cleanup_payload = _parse_driver_stdout(
+            cleanup_completed.stdout, cleanup_completed.stderr
+        )
+    else:
+        cleanup_elapsed = 0.0
+        cleanup_payload = {"passed": False, "error": "cleanup transport unavailable"}
+
+    passed = (
+        bool(run_payload.get("passed"))
+        and run_completed.returncode == 0
+        and bool(cleanup_payload.get("passed"))
+    )
+    return {
+        "id": "OT-OFFER-BOT-ORIGIN",
+        "status": "passed" if passed else "failed",
+        "elapsed_seconds": round(seed_elapsed + run_elapsed + cleanup_elapsed, 3),
+        "run_prefix": run_prefix,
+        "owner_user_id": owner_user_id,
+        "seed": seed_payload,
+        "run": run_payload,
+        "cleanup": cleanup_payload,
+    }
+
+
+def run_wired_drivers(args: argparse.Namespace) -> list[dict[str, Any]]:
+    """Execute the wired Iran and foreign overtime drivers."""
     results: list[dict[str, Any]] = []
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     for index, scenario in enumerate(WIRED_IRAN_DRIVER_SCENARIOS):
@@ -567,26 +748,8 @@ def run_wired_iran_drivers(args: argparse.Namespace) -> list[dict[str, Any]]:
                 }
             )
             continue
-        started = time.time()
-        completed = subprocess.run(
-            argv,
-            cwd=REPO_ROOT,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        elapsed = round(time.time() - started, 3)
-        stdout = (completed.stdout or "").strip()
-        payload: dict[str, Any]
-        try:
-            payload = json.loads(stdout.splitlines()[-1]) if stdout else {}
-        except json.JSONDecodeError:
-            payload = {
-                "passed": False,
-                "error": "driver stdout was not JSON",
-                "stdout": stdout[-2000:],
-                "stderr": (completed.stderr or "")[-2000:],
-            }
+        completed, elapsed = _run_argv(argv)
+        payload = _parse_driver_stdout(completed.stdout, completed.stderr)
         passed = bool(payload.get("passed")) and completed.returncode == 0
         result = {
             "id": scenario,
@@ -596,6 +759,20 @@ def run_wired_iran_drivers(args: argparse.Namespace) -> list[dict[str, Any]]:
             "returncode": completed.returncode,
             "payload": payload,
         }
+        results.append(result)
+        write_json(args.artifact_dir / f"driver-{scenario}.json", result)
+
+    for index, scenario in enumerate(WIRED_FOREIGN_DRIVER_SCENARIOS):
+        run_prefix = f"OTACC_{stamp}_F{index:02d}"
+        if scenario == "OT-OFFER-BOT-ORIGIN":
+            result = run_offer_bot_origin_driver(args, run_prefix)
+        else:
+            result = {
+                "id": scenario,
+                "status": "blocked",
+                "detail": "no foreign orchestration implemented",
+                "run_prefix": run_prefix,
+            }
         results.append(result)
         write_json(args.artifact_dir / f"driver-{scenario}.json", result)
     return results
@@ -622,14 +799,14 @@ def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         return summary, 1
 
     args.artifact_dir.mkdir(parents=True, exist_ok=True)
-    driver_results = run_wired_iran_drivers(args)
+    driver_results = run_wired_drivers(args)
     write_json(args.artifact_dir / "driver-results.json", {"results": driver_results})
 
     wired_failed = [item for item in driver_results if item["status"] == "failed"]
     wired_blocked = [item for item in driver_results if item["status"] == "blocked"]
     wired_passed = [item for item in driver_results if item["status"] == "passed"]
     unwired = [
-        item["id"] for item in SCENARIOS if item["id"] not in WIRED_IRAN_DRIVER_SCENARIOS
+        item["id"] for item in SCENARIOS if item["id"] not in WIRED_DRIVER_SCENARIOS
     ]
 
     if wired_failed:
@@ -639,14 +816,14 @@ def run_execute(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     elif wired_blocked:
         status = "execute_blocked"
         detail = (
-            "topology preflight passed, but Iran driver transport env is unset; "
-            f"{len(WIRED_IRAN_DRIVER_SCENARIOS)} drivers are implemented"
+            "topology preflight passed, but driver transport env is incomplete; "
+            f"{len(WIRED_DRIVER_SCENARIOS)} drivers are implemented"
         )
         exit_code = 3
     elif unwired:
         status = "execute_partial"
         detail = (
-            f"{len(wired_passed)}/{len(SCENARIOS)} scenarios passed via Iran drivers; "
+            f"{len(wired_passed)}/{len(SCENARIOS)} scenarios passed via wired drivers; "
             f"{len(unwired)} remain unwired"
         )
         exit_code = 4

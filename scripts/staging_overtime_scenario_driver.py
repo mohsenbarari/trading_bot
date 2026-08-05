@@ -15,6 +15,7 @@ import asyncio
 import hashlib
 import json
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -38,11 +39,16 @@ SCENARIOS = (
     "OT-PREF-BOT-SAVE",
     "OT-PREF-DISABLED-REGRESSION",
     "OT-OFFER-WEBAPP-ORIGIN",
+    "OT-OFFER-BOT-ORIGIN",
 )
 # Staging Iran currently carries a single commodity; keep the driver pinned to it.
 DEFAULT_COMMODITY_ID = 1
 DEFAULT_OFFER_QUANTITY = 5
 DEFAULT_OFFER_PRICE = 100_000
+PREFERENCE_MIRROR_TIMEOUT_SECONDS = 60.0
+PREFERENCE_MIRROR_POLL_SECONDS = 2.0
+BOT_FORWARD_RETRY_TIMEOUT_SECONDS = 60.0
+BOT_FORWARD_RETRY_POLL_SECONDS = 3.0
 
 
 class DriverRefusal(RuntimeError):
@@ -74,8 +80,19 @@ def _synthetic_mobile(run_prefix: str, suffix: str) -> str:
     return "09" + str(int(digest[:12], 16)).zfill(9)[-9:]
 
 
-async def _seed_owner(session, run_prefix: str) -> User:
-    """Create an isolated owner that is neither an accountant nor a tier-2 customer."""
+async def _seed_owner(
+    session,
+    run_prefix: str,
+    *,
+    home_server: str | None = None,
+    has_bot_access: bool = False,
+) -> User:
+    """Create an isolated owner that is neither an accountant nor a tier-2 customer.
+
+    With registration sync v2, user INSERT outbox rows are emitted only on Iran.
+    Foreign-home bot owners must therefore be seeded on Iran with
+    ``home_server='foreign'`` and mirrored before the foreign peer mutates them.
+    """
     account_name = _account_name(run_prefix, "owner")
     owner = User(
         account_name=account_name,
@@ -83,9 +100,9 @@ async def _seed_owner(session, run_prefix: str) -> User:
         full_name=account_name,
         address="",
         role=UserRole.STANDARD,
-        has_bot_access=False,
+        has_bot_access=has_bot_access,
         must_change_password=False,
-        home_server=current_server(),
+        home_server=home_server or current_server(),
         offer_overtime_minutes=0,
     )
     session.add(owner)
@@ -135,14 +152,19 @@ async def _rejects_out_of_range(session, owner: User) -> bool:
     return False
 
 
-async def _create_webapp_offer(session, owner: User, *, notes: str):
-    """Create an Iran-home offer through the same quota path the WebApp uses.
+async def _create_offer(
+    session,
+    owner: User,
+    *,
+    notes: str,
+    source_surface,
+):
+    """Create an offer through the same quota path production surfaces use.
 
     ``quota_policy`` is required: without it the creation helper never freezes
     ``overtime_minutes_snapshot`` from the locked owner row. Market validation is
     skipped so staging competitive-price state cannot flake the overtime contract.
     """
-    from core.offer_source import OfferSourceSurface
     from core.services.offer_creation_service import (
         OfferCreationCommand,
         OfferCreationQuotaPolicy,
@@ -155,7 +177,7 @@ async def _create_webapp_offer(session, owner: User, *, notes: str):
     outcome = await create_authoritative_offer_with_outcome(
         session,
         OfferCreationCommand(
-            source_surface=OfferSourceSurface.WEBAPP,
+            source_surface=source_surface,
             owner_user_id=int(owner.id),
             actor_user_id=int(owner.id),
             offer_type=OfferType.SELL,
@@ -173,6 +195,78 @@ async def _create_webapp_offer(session, owner: User, *, notes: str):
         refresh=True,
     )
     return outcome.offer, int(getattr(ts, "offer_expiry_minutes", 2) or 2)
+
+
+async def _create_webapp_offer(session, owner: User, *, notes: str):
+    from core.offer_source import OfferSourceSurface
+
+    return await _create_offer(
+        session,
+        owner,
+        notes=notes,
+        source_surface=OfferSourceSurface.WEBAPP,
+    )
+
+
+async def _create_bot_offer(session, owner: User, *, notes: str):
+    from core.offer_source import OfferSourceSurface
+
+    return await _create_offer(
+        session,
+        owner,
+        notes=notes,
+        source_surface=OfferSourceSurface.TELEGRAM_BOT,
+    )
+
+
+async def _await_preference_minutes(
+    session,
+    owner_id: int,
+    minutes: int,
+    *,
+    timeout_seconds: float = PREFERENCE_MIRROR_TIMEOUT_SECONDS,
+) -> tuple[bool, float]:
+    """Wait until the local user row shows the Iran-authoritative preference."""
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        owner = (
+            await session.execute(select(User).where(User.id == owner_id))
+        ).scalar_one()
+        if int(owner.offer_overtime_minutes) == minutes:
+            return True, round(timeout_seconds - (deadline - time.monotonic()), 3)
+        await asyncio.sleep(PREFERENCE_MIRROR_POLL_SECONDS)
+        session.expire_all()
+    return False, timeout_seconds
+
+
+async def _save_bot_preference_with_user_sync_retry(
+    session,
+    owner: User,
+    minutes: int,
+):
+    """Forward the bot preference until the peer has the user, then succeed.
+
+    A freshly created foreign-home user is not yet on Iran. The signed internal
+    command must wait for that sync before Iran can persist the field.
+    """
+    from core.services.offer_overtime_preference_service import (
+        OfferOvertimePreferenceTransportError,
+        save_overtime_preference_from_bot,
+    )
+
+    deadline = time.monotonic() + BOT_FORWARD_RETRY_TIMEOUT_SECONDS
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
+        await session.refresh(owner)
+        try:
+            return await save_overtime_preference_from_bot(session, owner, minutes)
+        except OfferOvertimePreferenceTransportError as exc:
+            last_error = exc
+            await asyncio.sleep(BOT_FORWARD_RETRY_POLL_SECONDS)
+            session.expire_all()
+    if last_error is not None:
+        raise last_error
+    raise OfferOvertimePreferenceTransportError()
 
 
 async def _scenario_pref_webapp_save(session, run_prefix: str, minutes: int) -> dict[str, object]:
@@ -228,31 +322,68 @@ async def _scenario_pref_webapp_save(session, run_prefix: str, minutes: int) -> 
     }
 
 
-async def _scenario_pref_bot_save(session, run_prefix: str, minutes: int) -> dict[str, object]:
-    """Persist through the bot helper; on Iran that still writes Iran-authoritatively."""
+async def _scenario_pref_bot_save(
+    session,
+    run_prefix: str,
+    minutes: int,
+    *,
+    owner_user_id: int | None = None,
+) -> dict[str, object]:
+    """Persist through the bot helper.
+
+    On Iran the helper writes locally after seeding. On foreign, registration sync
+    v2 forbids local user INSERT, so the owner must already exist (seeded on Iran
+    with ``home_server=foreign``) and is selected via ``--owner-user-id``.
+    """
     from core.services.offer_overtime_preference_service import (
         evaluate_overtime_preference_eligibility,
         save_overtime_preference_from_bot,
     )
 
-    if current_server() != "iran":
-        raise DriverRefusal(
-            "OT-PREF-BOT-SAVE Iran-path driver only runs on the Iran peer; "
-            "foreign-forward coverage is a separate follow-up"
-        )
+    server = current_server()
+    if server not in {"iran", "foreign"}:
+        raise DriverRefusal(f"unexpected server_mode={server!r}")
 
-    await _cleanup(session, run_prefix)
-    owner = await _seed_owner(session, run_prefix)
-    await session.commit()
-    await session.refresh(owner)
+    if server == "foreign":
+        if owner_user_id is None:
+            raise DriverRefusal(
+                "OT-PREF-BOT-SAVE on foreign requires --owner-user-id from an "
+                "Iran-seeded foreign-home owner (registration sync v2)"
+            )
+        owner = (
+            await session.execute(select(User).where(User.id == int(owner_user_id)))
+        ).scalar_one_or_none()
+        if owner is None or bool(owner.is_deleted):
+            raise DriverRefusal(f"owner_user_id={owner_user_id} is not present on foreign")
+        if str(owner.home_server) != "foreign":
+            raise DriverRefusal(
+                f"owner_user_id={owner_user_id} home_server={owner.home_server!r}, expected foreign"
+            )
+    else:
+        await _cleanup(session, run_prefix)
+        owner = await _seed_owner(session, run_prefix)
+        await session.commit()
+        await session.refresh(owner)
+
     owner_id = int(owner.id)
     account_name = str(owner.account_name)
+    home_server = str(owner.home_server)
 
     eligibility = await evaluate_overtime_preference_eligibility(session, owner)
-    # save_overtime_preference_from_bot commits on Iran itself
-    result = await save_overtime_preference_from_bot(session, owner, minutes)
-    await session.refresh(owner)
-    persisted = int(owner.offer_overtime_minutes)
+    if server == "foreign":
+        result = await _save_bot_preference_with_user_sync_retry(session, owner, minutes)
+        mirrored, mirror_seconds = await _await_preference_minutes(
+            session, owner_id, minutes
+        )
+        await session.refresh(owner)
+        persisted = int(owner.offer_overtime_minutes)
+        path = "save_overtime_preference_from_bot+foreign_forward"
+    else:
+        result = await save_overtime_preference_from_bot(session, owner, minutes)
+        await session.refresh(owner)
+        persisted = int(owner.offer_overtime_minutes)
+        mirrored, mirror_seconds = True, 0.0
+        path = "save_overtime_preference_from_bot+iran_local"
 
     change_log_rows = (
         await session.execute(
@@ -265,17 +396,21 @@ async def _scenario_pref_bot_save(session, run_prefix: str, minutes: int) -> dic
     return {
         "owner_user_id": owner_id,
         "owner_account_name": account_name,
-        "path": "save_overtime_preference_from_bot",
+        "owner_home_server": home_server,
+        "path": path,
         "eligibility_allowed": bool(eligibility.allowed),
         "requested_minutes": minutes,
         "persisted_minutes": persisted,
         "save_detail": result.detail,
         "save_warning": result.warning,
+        "local_mirror_observed": mirrored,
+        "local_mirror_seconds": mirror_seconds,
         "user_change_log_rows": int(change_log_rows),
         "passed": (
             bool(eligibility.allowed)
             and persisted == minutes
-            and int(change_log_rows) > 0
+            and mirrored
+            and (server == "foreign" or int(change_log_rows) > 0)
         ),
     }
 
@@ -509,6 +644,193 @@ async def _scenario_offer_webapp_origin(
     }
 
 
+async def _scenario_offer_bot_origin_seed(session, run_prefix: str) -> dict[str, object]:
+    """Seed a foreign-home bot owner on Iran so the foreign peer can create offers."""
+    if current_server() != "iran":
+        raise DriverRefusal("OT-OFFER-BOT-ORIGIN seed phase only runs on the Iran peer")
+
+    await _cleanup(session, run_prefix)
+    owner = await _seed_owner(
+        session,
+        run_prefix,
+        home_server="foreign",
+        has_bot_access=True,
+    )
+    await session.commit()
+    await session.refresh(owner)
+    owner_id = int(owner.id)
+    change_log_rows = (
+        await session.execute(
+            select(func.count())
+            .select_from(ChangeLog)
+            .where(ChangeLog.table_name == "users", ChangeLog.record_id == owner_id)
+        )
+    ).scalar_one()
+    return {
+        "phase": "seed",
+        "owner_user_id": owner_id,
+        "owner_account_name": str(owner.account_name),
+        "owner_home_server": str(owner.home_server),
+        "user_change_log_rows": int(change_log_rows),
+        "passed": str(owner.home_server) == "foreign" and int(change_log_rows) > 0,
+    }
+
+
+async def _scenario_offer_bot_origin_run(
+    session,
+    run_prefix: str,
+    minutes: int,
+    *,
+    owner_user_id: int,
+) -> dict[str, object]:
+    """Freeze bot-creator preference onto a foreign-home offer; public fields stay safe."""
+    from api.routers import offers as offers_router
+    from core.offer_lifecycle import OfferLifecyclePhase, project_offer_lifecycle
+    from core.trading_settings import get_trading_settings
+
+    if current_server() != "foreign":
+        raise DriverRefusal("OT-OFFER-BOT-ORIGIN run phase only runs on the foreign peer")
+    if minutes <= 0:
+        raise DriverRefusal("OT-OFFER-BOT-ORIGIN requires a positive overtime preference")
+
+    # Wait briefly for the Iran-seeded user to mirror before refusing.
+    deadline = time.monotonic() + PREFERENCE_MIRROR_TIMEOUT_SECONDS
+    owner = None
+    while time.monotonic() < deadline:
+        owner = (
+            await session.execute(select(User).where(User.id == int(owner_user_id)))
+        ).scalar_one_or_none()
+        if owner is not None and not bool(owner.is_deleted):
+            break
+        await asyncio.sleep(PREFERENCE_MIRROR_POLL_SECONDS)
+        session.expire_all()
+        owner = None
+    if owner is None:
+        raise DriverRefusal(
+            f"Iran-seeded owner_user_id={owner_user_id} did not mirror to foreign"
+        )
+    if str(owner.home_server) != "foreign":
+        raise DriverRefusal(
+            f"owner_user_id={owner_user_id} home_server={owner.home_server!r}, expected foreign"
+        )
+
+    owner_id = int(owner.id)
+    home_server = str(owner.home_server)
+
+    await _save_bot_preference_with_user_sync_retry(session, owner, minutes)
+    mirrored, mirror_seconds = await _await_preference_minutes(session, owner_id, minutes)
+    if not mirrored:
+        raise DriverRefusal(
+            f"foreign preference mirror for user {owner_id} did not converge to {minutes}"
+        )
+    await session.refresh(owner)
+    preference_before_create = int(owner.offer_overtime_minutes)
+
+    offer, normal_minutes = await _create_bot_offer(
+        session,
+        owner,
+        notes=f"{run_prefix} bot origin",
+    )
+    offer_id = int(offer.id)
+    offer_public_id = str(offer.offer_public_id)
+    snapshot = int(offer.overtime_minutes_snapshot)
+    created_at = offer.created_at
+    offer_home_server = str(offer.home_server)
+
+    # Later preference edits must not rewrite an already-frozen offer.
+    await _save_bot_preference_with_user_sync_retry(session, owner, 0)
+    cleared_mirror, cleared_seconds = await _await_preference_minutes(session, owner_id, 0)
+    await session.refresh(owner)
+    preference_after_clear = int(owner.offer_overtime_minutes)
+
+    offer = await _reload_offer(session, offer_id)
+    snapshot_after_pref_clear = int(offer.overtime_minutes_snapshot)
+
+    ts = get_trading_settings()
+    lifecycle_fields = offers_router._offer_lifecycle_response_fields(
+        offer,
+        start_settings=ts,
+    )
+    public = offers_router._build_public_offer_response(offer, start_settings=ts)
+    public_payload = public.model_dump() if hasattr(public, "model_dump") else public.dict()
+
+    overtime_as_of = (created_at or datetime.utcnow()) + timedelta(
+        minutes=normal_minutes,
+        seconds=1,
+    )
+    overtime_projection = project_offer_lifecycle(
+        offer,
+        normal_lifetime_minutes=normal_minutes,
+        as_of=overtime_as_of,
+    )
+    private_identity_leaked = any(
+        key in public_payload for key in ("user_id", "user_account_name", "is_own_offer")
+    )
+
+    offer_change_log_rows = (
+        await session.execute(
+            select(func.count())
+            .select_from(ChangeLog)
+            .where(ChangeLog.table_name == "offers", ChangeLog.record_id == offer_id)
+        )
+    ).scalar_one()
+
+    passed = (
+        home_server == "foreign"
+        and offer_home_server == "foreign"
+        and preference_before_create == minutes
+        and snapshot == minutes
+        and snapshot_after_pref_clear == minutes
+        and preference_after_clear == 0
+        and cleared_mirror
+        and lifecycle_fields.get("overtime_minutes_snapshot") == minutes
+        and lifecycle_fields.get("lifecycle_phase") == OfferLifecyclePhase.NORMAL.value
+        and lifecycle_fields.get("accepts_automatic_trade") is True
+        and lifecycle_fields.get("accepts_overtime_request") is False
+        and overtime_projection.phase == OfferLifecyclePhase.OVERTIME
+        and overtime_projection.accepts_automatic_trade is False
+        and overtime_projection.accepts_overtime_request is True
+        and public_payload.get("overtime_minutes_snapshot") == minutes
+        and public_payload.get("safe_public_state_label") == "active"
+        and not private_identity_leaked
+        and int(offer_change_log_rows) > 0
+    )
+
+    return {
+        "phase": "run",
+        "owner_user_id": owner_id,
+        "owner_home_server": home_server,
+        "offer_id": offer_id,
+        "offer_public_id": offer_public_id,
+        "offer_home_server": offer_home_server,
+        "preference_at_create": preference_before_create,
+        "preference_mirror_seconds": mirror_seconds,
+        "overtime_minutes_snapshot": snapshot,
+        "snapshot_after_preference_cleared": snapshot_after_pref_clear,
+        "preference_after_clear": preference_after_clear,
+        "preference_clear_mirror_seconds": cleared_seconds,
+        "normal_lifetime_minutes": normal_minutes,
+        "lifecycle_fields": {
+            "lifecycle_phase": lifecycle_fields.get("lifecycle_phase"),
+            "overtime_minutes_snapshot": lifecycle_fields.get("overtime_minutes_snapshot"),
+            "accepts_automatic_trade": lifecycle_fields.get("accepts_automatic_trade"),
+            "accepts_overtime_request": lifecycle_fields.get("accepts_overtime_request"),
+            "normal_deadline_ts": lifecycle_fields.get("normal_deadline_ts"),
+            "final_deadline_ts": lifecycle_fields.get("final_deadline_ts"),
+        },
+        "overtime_phase": overtime_projection.phase.value,
+        "accepts_automatic_in_overtime": overtime_projection.accepts_automatic_trade,
+        "accepts_overtime_in_overtime": overtime_projection.accepts_overtime_request,
+        "public_safe": {
+            "safe_public_state_label": public_payload.get("safe_public_state_label"),
+            "overtime_minutes_snapshot": public_payload.get("overtime_minutes_snapshot"),
+            "private_identity_leaked": private_identity_leaked,
+        },
+        "offer_change_log_rows": int(offer_change_log_rows),
+        "passed": passed,
+    }
+
+
 async def main_async(args: argparse.Namespace) -> dict[str, object]:
     _guard_environment()
     run_prefix = _guard_run_prefix(args.run_prefix)
@@ -536,16 +858,44 @@ async def main_async(args: argparse.Namespace) -> dict[str, object]:
         if args.scenario == "OT-PREF-WEBAPP-SAVE":
             outcome = await _scenario_pref_webapp_save(session, run_prefix, args.minutes)
         elif args.scenario == "OT-PREF-BOT-SAVE":
-            outcome = await _scenario_pref_bot_save(session, run_prefix, args.minutes)
+            outcome = await _scenario_pref_bot_save(
+                session,
+                run_prefix,
+                args.minutes,
+                owner_user_id=args.owner_user_id,
+            )
         elif args.scenario == "OT-PREF-DISABLED-REGRESSION":
             outcome = await _scenario_pref_disabled_regression(session, run_prefix)
         elif args.scenario == "OT-OFFER-WEBAPP-ORIGIN":
             outcome = await _scenario_offer_webapp_origin(session, run_prefix, args.minutes)
+        elif args.scenario == "OT-OFFER-BOT-ORIGIN":
+            phase = (args.phase or "run").strip().lower()
+            if phase == "seed":
+                outcome = await _scenario_offer_bot_origin_seed(session, run_prefix)
+            elif phase == "run":
+                if args.owner_user_id is None:
+                    raise DriverRefusal(
+                        "OT-OFFER-BOT-ORIGIN run phase requires --owner-user-id "
+                        "from the Iran seed phase"
+                    )
+                outcome = await _scenario_offer_bot_origin_run(
+                    session,
+                    run_prefix,
+                    args.minutes,
+                    owner_user_id=int(args.owner_user_id),
+                )
+            else:
+                raise DriverRefusal(f"unsupported OT-OFFER-BOT-ORIGIN phase={phase!r}")
         else:
             raise DriverRefusal(f"no driver implemented for {args.scenario}")
 
         cleanup = {"users_retired": 0}
-        if args.cleanup_after and outcome.get("passed"):
+        # Foreign-home owners are Iran-authoritative under registration sync v2;
+        # never auto-retire them from the foreign peer after a bot-origin run.
+        allow_cleanup = args.cleanup_after and outcome.get("passed")
+        if args.scenario == "OT-OFFER-BOT-ORIGIN":
+            allow_cleanup = False
+        if allow_cleanup:
             cleanup = await _cleanup(session, run_prefix)
 
     return {
@@ -566,6 +916,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--scenario", choices=SCENARIOS, default=SCENARIOS[0])
     parser.add_argument("--run-prefix", required=True)
     parser.add_argument("--minutes", type=int, default=4)
+    parser.add_argument(
+        "--phase",
+        choices=("seed", "run"),
+        default="run",
+        help="for OT-OFFER-BOT-ORIGIN: seed on Iran, then run on foreign",
+    )
+    parser.add_argument(
+        "--owner-user-id",
+        type=int,
+        default=None,
+        help="existing user id for foreign-peer scenarios that cannot INSERT users",
+    )
     parser.add_argument(
         "--cleanup-after",
         action=argparse.BooleanOptionalAction,
